@@ -1,0 +1,5 @@
+# Isolated installs keep each workspace's node_modules limited to its declared
+# dependencies. It is Bun's default for new workspaces; pinned here so older
+# Bun setups behave the same.
+[install]
+linker = "isolated"

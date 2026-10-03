@@ -1,0 +1,15 @@
+{
+  "name": "@kelpie/ingress",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "types": "wrangler types src/worker-configuration.d.ts",
+    "typecheck": "wrangler types src/worker-configuration.d.ts > /dev/null && tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.3.6",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.147.0"
+  }
+}
