@@ -4,6 +4,11 @@
 
 Everything in this repository is written in English: code, comments, commit messages, docs, ADRs, issues, pull requests and labels.
 
+## Design rules
+
+- **Pluggable connectors.** Every external service (Postgres provider, Jev access path, model provider, channel, tool source) sits behind an interface and a config value. Ship one adapter first; adding another must be one new adapter plus configuration, with the provider's specific strengths still usable. Don't build extra adapters until they are asked for.
+- Decisions recorded in `docs/adr/` are binding; changing one takes a new ADR.
+
 ## Work tracking
 
 - Board: [Kelpie project](https://github.com/users/guedesdiogo/projects/1) (user project `guedesdiogo/1`, linked to this repository).
@@ -13,6 +18,7 @@ Everything in this repository is written in English: code, comments, commit mess
 - Issue body sections: Context, Goal, Out of scope, Plan, Acceptance criteria, Planned verification, Risks and rollback.
 - Pull requests: one `Closes #N` line per story and a **Verification** section: residuals first, then what ran with real numbers, then what did not run and why. The same verification goes as a comment on the issue.
 - Commits reference issues without closing keywords (`issue #N`).
+- The owner may merge a pull request from the GitHub UI at any time. Before pushing to a branch with an open PR, check that the PR is still open (`gh pr view N --json state`). If it was merged, push to a new branch and open a follow-up PR.
 - Never write bare `@handles` in issues, PRs or commits; put roles in backticks.
 
 ## Repository state
