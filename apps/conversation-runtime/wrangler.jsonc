@@ -1,0 +1,11 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "kelpie-conversation-runtime",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+  "durable_objects": {
+    "bindings": [{ "name": "DEBOUNCE_BUFFER", "class_name": "DebounceBuffer" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DebounceBuffer"] }]
+}
