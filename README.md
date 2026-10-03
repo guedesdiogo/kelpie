@@ -22,4 +22,4 @@ The Australian kelpie is a herding dog that works on its own, far from its handl
 
 ## License
 
-No license has been chosen yet. Until one is added, all rights are reserved.
+Kelpie is released under the [MIT License](LICENSE).
