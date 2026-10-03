@@ -1,0 +1,31 @@
+# Architecture decision records
+
+Each file records one decision: its context, the decision, its consequences and the alternatives considered. Decisions are binding; changing one takes a new ADR that supersedes it. The evidence behind the first set is the [viability study](../viability-study.md) and its [research notes](../research/).
+
+| ADR | Decision | Issue |
+|---|---|---|
+| [0001](0001-single-tenant-self-hosted.md) | Single-tenant, self-hosted, internal use | [#12](https://github.com/guedesdiogo/kelpie/issues/12) |
+| [0002](0002-runtime-foundation.md) | Agents SDK and a Durable Object per conversation | [#8](https://github.com/guedesdiogo/kelpie/issues/8) |
+| [0003](0003-channel-adapters.md) | Own channel adapters and the channel order | [#9](https://github.com/guedesdiogo/kelpie/issues/9) |
+| [0004](0004-access-control.md) | Allowlisted users, channel identities and grants | [#13](https://github.com/guedesdiogo/kelpie/issues/13) |
+| [0005](0005-context-store.md) | Context Store over a private GitHub repository | [#7](https://github.com/guedesdiogo/kelpie/issues/7) |
+| [0006](0006-personal-data-storage.md) | Personal data in a Durable Object per user | [#4](https://github.com/guedesdiogo/kelpie/issues/4) |
+| [0007](0007-system-of-record-database.md) | Postgres via Hyperdrive, provider by configuration | [#6](https://github.com/guedesdiogo/kelpie/issues/6) |
+| [0008](0008-llm-authentication.md) | API keys, plus an owner-only subscription opt-in | [#3](https://github.com/guedesdiogo/kelpie/issues/3) |
+| [0009](0009-qualifier-and-jev.md) | Jev preferred, never required | [#5](https://github.com/guedesdiogo/kelpie/issues/5) |
+
+## Format
+
+```markdown
+# ADR-NNNN: <decision as a short statement>
+
+- Status: Proposed | Accepted | Superseded by ADR-NNNN
+- Date: YYYY-MM-DD
+- Issue: <link>
+
+## Context
+## Decision
+## Consequences
+## Alternatives considered
+## References
+```
