@@ -319,7 +319,7 @@ For one instance, three agents and 2,000 inbound messages a day, excluding model
 | Stress: Discord gateway, a Workflow per turn, a commit per turn in Artifacts | About US$ 30–45 |
 | Code Mode on every turn | About US$ 78 more |
 
-The US$ 5 baseline assumes a scheduled alarm does not keep a Durable Object awake. The docs support that reading without stating it; dashboard metrics will settle it ([00 C2](research/00-cross-check.md)).
+The US$ 5 baseline assumes a scheduled alarm does not keep a Durable Object awake. A spike on 2026-10-03 confirmed it: an object waiting 20 minutes on an alarm accrued no duration until the alarm fired on schedule, while one waiting on `setTimeout` accrued duration for about 15 minutes and then was evicted with its timer lost ([spike](spikes/do-alarm-hibernation.md)).
 
 ## 11. Decisions
 
@@ -341,7 +341,7 @@ Each decision is closed by an ADR in `docs/adr/` once its pull request merges.
 
 ## 12. Spikes before committing to a design
 
-- Does a scheduled alarm let a Durable Object hibernate? This decides the US$ 5 vs US$ 18 baseline.
+- ~~Does a scheduled alarm let a Durable Object hibernate?~~ Yes: the US$ 5 baseline holds ([spike](spikes/do-alarm-hibernation.md)).
 - What are Jev's latency from Brazil and its accuracy on informal PT-BR end-of-turn detection?
 - Does `createCommitOnBranch` work from a Worker through a GitHub App?
 - Does OpenAI Responses streaming pass through AI Gateway passthrough?
