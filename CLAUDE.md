@@ -18,6 +18,7 @@ Everything in this repository is written in English: code, comments, commit mess
 - Issue body sections: Context, Goal, Out of scope, Plan, Acceptance criteria, Planned verification, Risks and rollback.
 - Pull requests: one `Closes #N` line per story and a **Verification** section: residuals first, then what ran with real numbers, then what did not run and why. The same verification goes as a comment on the issue.
 - Commits reference issues without closing keywords (`issue #N`).
+- The owner may merge a pull request from the GitHub UI at any time. Before pushing to a branch with an open PR, check that the PR is still open (`gh pr view N --json state`). If it was merged, push to a new branch and open a follow-up PR.
 - Never write bare `@handles` in issues, PRs or commits; put roles in backticks.
 
 ## Repository state
