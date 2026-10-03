@@ -44,6 +44,7 @@ The owner rejected it for a more basic reason: anyone can edit an issue by hand,
   - `AgentHost` is the single writer of task status and enforces the rules above;
   - people's actions reach it through the admin API;
   - tasks, comments and status changes are projected into Postgres for the board and for audit (ADR-0007).
+- **Comments are the task's history.** Every comment is stored on the task with its author, time and source: the board, or chat. When someone comments on a task in chat, the agent attaches that message to the task as a comment, linked to the conversation. The agent's own progress notes are comments too, so the task reads as a complete history.
 - **Stop requests:** the owner or an admin can *request* that the agent stop a running task. The agent honors the request and moves the task to Cancelled, so status stays agent-owned while people keep a way to halt work that went wrong. Members can only comment.
 - **Pluggable sources:** tasks enter through a `TaskSource` port, with the internal board first. External sources, such as GitHub Issues, may be added later as one-way imports into the board, never as the place where status is managed.
 - **Personal data:** tasks and comments can contain personal data, so they live in Postgres and Durable Objects, never in git (ADR-0006). The erasure workflow covers them.
