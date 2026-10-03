@@ -1,6 +1,6 @@
 # ADR-0010: Bun workspaces, strict TypeScript, Biome and Vitest with the Workers plugin
 
-- Status: Proposed
+- Status: Accepted (the owner merged #30 after the tooling question)
 - Date: 2026-10-03
 - Issue: [#23](https://github.com/guedesdiogo/kelpie/issues/23)
 

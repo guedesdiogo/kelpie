@@ -33,7 +33,7 @@ The Agents SDK's `Agent` class multiplexes schedules over that single alarm. It 
 - Ordering and cancellation live in one place and are testable without the network.
 - Eviction mid-turn is survivable: recovery resends only outbox entries still `pending`.
 - Each SDK upgrade gets contract tests and an ADR. `keepAlive` (experimental) sits behind an adapter.
-- Cost depends on Durable Objects hibernating. A spike confirmed that a scheduled alarm doesn't keep an object awake, which keeps the small scenario at about US$ 5 per month. It also showed that a pending `setTimeout` is billed for about 15 minutes and then lost on eviction ([spike](../spikes/do-alarm-hibernation.md)).
+- Cost depends on Durable Objects hibernating. A spike confirmed that a scheduled alarm doesn't keep an object awake, which keeps the small scenario at about US$ 5 per month. It also showed that a pending `setTimeout` accrues duration for about 15 minutes and then is lost on eviction ([spike](../spikes/do-alarm-hibernation.md)).
 
 ## Alternatives considered
 

@@ -13,7 +13,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0007](0007-system-of-record-database.md) | Postgres via Hyperdrive, provider by configuration | [#6](https://github.com/guedesdiogo/kelpie/issues/6) |
 | [0008](0008-llm-authentication.md) | API keys, plus an owner-only subscription opt-in | [#3](https://github.com/guedesdiogo/kelpie/issues/3) |
 | [0009](0009-qualifier-and-jev.md) | Jev preferred, never required | [#5](https://github.com/guedesdiogo/kelpie/issues/5) |
-| [0010](0010-monorepo-tooling.md) | Bun workspaces, strict TypeScript, Biome and Vitest with the Workers plugin (proposed) | [#23](https://github.com/guedesdiogo/kelpie/issues/23) |
+| [0010](0010-monorepo-tooling.md) | Bun workspaces, strict TypeScript, Biome and Vitest with the Workers plugin | [#23](https://github.com/guedesdiogo/kelpie/issues/23) |
 
 ## Format
 
