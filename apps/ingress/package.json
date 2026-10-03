@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "types": "wrangler types src/worker-configuration.d.ts",
-    "typecheck": "wrangler types src/worker-configuration.d.ts > /dev/null && tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json",
+    "typecheck": "bun run types > /dev/null && tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json",
     "test": "vitest run"
   },
   "devDependencies": {
