@@ -44,6 +44,7 @@ The owner rejected it for a more basic reason: anyone can edit an issue by hand,
   - `AgentHost` is the single writer of task status and enforces the rules above;
   - people's actions reach it through the admin API;
   - tasks, comments and status changes are projected into Postgres for the board and for audit (ADR-0007).
+- **Stop requests:** the owner or an admin can *request* that the agent stop a running task. The agent honors the request and moves the task to Cancelled, so status stays agent-owned while people keep a way to halt work that went wrong. Members can only comment.
 - **Pluggable sources:** tasks enter through a `TaskSource` port, with the internal board first. External sources, such as GitHub Issues, may be added later as one-way imports into the board, never as the place where status is managed.
 - **Personal data:** tasks and comments can contain personal data, so they live in Postgres and Durable Objects, never in git (ADR-0006). The erasure workflow covers them.
 
@@ -55,7 +56,6 @@ The owner rejected it for a more basic reason: anyone can edit an issue by hand,
 
 ## Open points
 
-- **Stopping a running task.** Proposed: an owner or admin can *request* that the agent stop. The agent honors the request and moves the task to Cancelled, so status remains agent-owned while people keep a way to halt work that went wrong. This needs the owner's confirmation.
 - Recurring tasks (routines, as in Hermes Bot Mode) as a later extension of scheduled starts.
 
 ## Alternatives considered
