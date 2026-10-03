@@ -9,12 +9,12 @@
 
 **Kelpie is viable on Cloudflare without containers.** Under the original multi-tenant brief, the cross-check rated 23 requirements: 8 viable as stated, 13 viable with changes, and 2 not viable as stated ([00 §3](research/00-cross-check.md#3-requirement-by-requirement-viability)). Narrowing to a single-tenant, internal-use harness removes most of the changes multi-tenancy demanded. It does not remove the two blockers:
 
-1. **Logging in with a ChatGPT or Claude subscription is against both providers' terms**, single-tenant or not, as soon as the subscription serves anyone other than its owner ([§8](#8-subscription-login)). The owner chose to offer it anyway as an opt-in restricted to the owner's own conversations, with the risk documented.
+1. **Logging in with a ChatGPT or Claude subscription is against both providers' terms on Cloudflare, even when only the owner uses it.** Serving colleagues breaks them a second time ([§8](#8-subscription-login)). The owner chose to offer it anyway as an opt-in restricted to the owner's own conversations, with the risk documented.
 2. **User profiles can't live as versioned Markdown in GitHub or Obsidian**, because immutable git history conflicts with the right to erasure under the LGPD (Brazil's data protection law) and the GDPR ([02](research/02-memory-and-learning.md), [08](research/08-database-and-context-storage.md)). Colleagues are still data subjects.
 
 The platform is not the hard part. The conversation engine (buffering, splitting, pacing, interruption) fits a Durable Object per conversation almost exactly. The hard parts are channel policies (WhatsApp's Business terms, Discord's gateway), the maturity of Jev, and keeping personal data where it can be erased.
 
-**Feasible is not the same as deliverable by one person.** The full scope is several months of work. [§13](#13-delivery-plan) proposes a vertical slice first: for a portfolio, a working slice beats a complete architecture document.
+**Feasible is not the same as deliverable by one person.** By our estimate, the full scope is several months of work. [§13](#13-delivery-plan) proposes a vertical slice first: for a portfolio, a working slice beats a complete architecture document.
 
 ## 2. Scope
 
@@ -25,12 +25,12 @@ The platform is not the hard part. The conversation engine (buffering, splitting
 - **Allowlist, always.** Only users configured in advance can talk to an agent, and only through channel identities enabled for them (a Telegram account, a WhatsApp number, a Slack user). Everyone else is ignored before any model is called.
 - **Permissions.** Each user has access to specific agents and specific content.
 - **Conversational mode is a toggle.** Merging fragmented messages and splitting replies into paced bubbles can be switched on or off per agent.
-- **Connectors are pluggable.** Each external service (Postgres provider, Jev access path, model providers, channels, tool sources) ships with one implementation first, behind an interface and a config value that make adding another one straightforward.
+- **Connectors are pluggable.** Each kind of external service (Postgres provider, Jev access path, model providers, channels, tool sources) starts with only the implementations the current phase needs, such as one Postgres provider and one Jev path, behind an interface and a config value that make adding another one straightforward.
 
 **What single-tenant removes** compared with the research brief:
 
 - tenant keys in every Durable Object name and every query;
-- per-tenant envelope encryption of secrets: Worker secrets and the Secrets Store (100 per account) are enough;
+- per-tenant envelope encryption of secrets: platform secrets (channel tokens, API keys) fit in Worker secrets and the Secrets Store (100 per account). Tokens stored per user, such as MCP OAuth tokens, are still encrypted at the application level ([§4.11](#411-tools));
 - vendor ceilings shared by many tenants (they still apply to the one instance);
 - Meta Tech Provider onboarding, which note 06 ties to serving other businesses' numbers ([06 §1.1](research/06-chat-channels.md)): a company running Kelpie on its own WhatsApp number should not need it (our inference; Meta's regular business verification may still apply);
 - tenant onboarding, billing and cross-tenant reporting;
@@ -78,7 +78,7 @@ The platform is not the hard part. The conversation engine (buffering, splitting
 | Subscription login | **Against both providers' terms** | Owner-only opt-in, off by default, risk documented ([§8](#8-subscription-login)) |
 | A database beyond D1 | Viable | Postgres via Hyperdrive alongside Durable Object SQLite |
 | Management UI inspired by Hermes Bot Mode | Viable with changes | Reuse the UX patterns; add users, permissions, audit and approvals |
-| Public open-source portfolio | Viable with changes | Runs with zero keys; demos on test numbers; synthetic fixtures only; the README states what is excluded and why |
+| Public open-source portfolio | Viable with changes | Installs and runs CI with no third-party keys (the qualifier falls back to heuristics; running agents still needs a model key and a database); demos on test numbers; synthetic fixtures only; the README states what is excluded and why |
 
 ### 4.2 The hot path: one Durable Object per conversation
 
@@ -164,11 +164,11 @@ New in this scope and not covered by the research notes. The owner approved this
 - **Users** are created by the owner or an admin. Each user has one or more **channel identities** (Telegram user id, WhatsApp number, Slack user id, webchat login), enabled one by one.
 - **Grants** say which agents a user may talk to and which content scopes (shared knowledge folders, an agent's private notes) they may read or edit.
 - **Enforcement points:**
-  - `ingress` drops any message whose identity is not enabled, before a Durable Object wakes or a model is called; this doubles as spam protection;
+  - `ingress` drops any message whose identity is not enabled, before a conversation wakes or a model is called; this doubles as spam protection. It reads a `Directory` Durable Object, not Postgres or KV: Neon scales to zero and KV can lag by up to 60 s ([05 R10](research/05-cloudflare-limits-and-architecture.md)), while the Directory is strongly consistent, so a revocation applies to the next message;
   - the `ConversationAgent` checks the user's grant for the agent;
   - the Context Store filters what goes into the context by the user's content scopes;
   - memory is per user.
-- **Groups** are the hard case: in a group chat, an agent may only use memories every participant is allowed to see; otherwise one colleague's facts leak to another ([02 §5.2](research/02-memory-and-learning.md)).
+- **Groups** are the hard case. Our rule: in a group chat, an agent may only use memories every participant is allowed to see, otherwise one colleague's facts leak to another. Note 02 also proposes a separate group scope for facts that belong to the group itself ([02 §5.2](research/02-memory-and-learning.md)).
 
 ### 4.7 Data
 
@@ -177,14 +177,14 @@ The owner chose Postgres as the system of record and a Durable Object per user f
 | Data | Where |
 |---|---|
 | Conversation state: recent messages, turns, outbox, schedules | Durable Object SQLite, one per conversation |
-| Users, channel identities, grants, agents, channels, audit, projections | Postgres via Hyperdrive (Neon first; other providers by configuration) |
+| Users, channel identities, grants, agents, channels, audit, projections | Postgres via Hyperdrive (Neon first; other providers by configuration). The hot path reads identities and grants from a `Directory` Durable Object kept in sync by the admin API |
 | User profile, facts and episodes (personal data) | A Durable Object per user, plus R2 for larger files; retrieval through FTS5 in that object and Vectorize |
 | Routing cache (channel identity → user and agent) | KV |
 | Media and archives | R2 |
 | Operational metrics | Analytics Engine |
 | Persona, skills, agent knowledge | Context Store ([§4.8](#48-context-the-context-store-worker)) |
 
-Erasing a user means deleting that user's Durable Object storage, their R2 objects and their vectors, and accepting that Durable Object point-in-time recovery keeps deleted data for 30 days ([08 "LGPD/GDPR"](research/08-database-and-context-storage.md), [02 §3.6](research/02-memory-and-learning.md)). Two Hyperdrive facts set the database rules: its query cache is on by default and is not invalidated by writes, and its pool runs in transaction mode. Data that changes per user goes through a cache-disabled binding ([00 C11](research/00-cross-check.md)).
+Erasing a user is a workflow across stores: the user's Durable Object storage, R2 objects and vectors; their messages in conversation Durable Objects and R2 archives; their identity, grant and projection rows in Postgres, with audit rows pseudonymized; and their KV routing entries. Some copies stay out of reach for a while: Durable Object point-in-time recovery keeps deleted data for 30 days, and model providers keep logs and backups under their own terms ([08 "LGPD/GDPR"](research/08-database-and-context-storage.md), [02 §3.6, §5.3](research/02-memory-and-learning.md)). This choice gives up the single transactional `DELETE` that keeping personal data in Postgres would have allowed, which the cross-check preferred once Postgres was in scope ([00 §1C item 1](research/00-cross-check.md)). Two Hyperdrive facts set the database rules: its query cache is on by default and is not invalidated by writes, and its pool runs in transaction mode. Data that changes per user goes through a cache-disabled binding ([00 C11](research/00-cross-check.md)).
 
 ### 4.8 Context: the Context Store worker
 
@@ -207,10 +207,11 @@ The field has converged on versioned Markdown files as the source of truth, a de
 | Semantic | Facts about users and the domain | User facts in the user's Durable Object; domain knowledge as Markdown in git |
 | Procedural | Skills, in the [Agent Skills](https://agentskills.io) `SKILL.md` format | Git, staged and merged by pull request |
 | Identity | Agent persona; user profiles | Persona in git; profiles in the user's Durable Object, never in git |
+| Group | Facts that belong to a group conversation | A group scope visible only to that group's members ([02 §3.2](research/02-memory-and-learning.md)) |
 
 Learning runs on three rhythms ([02 §6](research/02-memory-and-learning.md)): after a conversation goes idle (episode and user facts, automatic), on a schedule per agent (knowledge and skills, staged with evidence and a pull request), and weekly (a curator that archives stale skills and never deletes). Hermes's background review costs about 30k tokens per event ([01 TL;DR 4](research/01-hermes-agent-and-bot-mode.md)), so Kelpie runs it on a cheap model over a digest.
 
-Memory poisoning through prompt injection is designed against from day one: stored content is treated as untrusted, writes are scoped by blast radius, and only a human promotes anything into persona or rules ([02 §5.1](research/02-memory-and-learning.md)).
+Anything headed for git passes a personal-data gate before every commit, not at merge time, because a pull-request branch already writes git history ([02 §5.3](research/02-memory-and-learning.md)). Memory poisoning through prompt injection is designed against from day one: stored content is treated as untrusted, writes are scoped by blast radius, and only a human promotes anything into persona or rules ([02 §5.1](research/02-memory-and-learning.md)).
 
 ### 4.10 Models
 
@@ -289,9 +290,9 @@ All three Postgres providers sit behind Hyperdrive, so switching is mostly a con
 
 The owner asked whether Kelpie could use a ChatGPT or Claude subscription the way Hermes Agent does. The research and a check of Hermes's code (commit `5d3c059`) give this picture:
 
-- **Anthropic.** Its [legal page](https://code.claude.com/docs/en/legal-and-compliance) reserves subscription OAuth for Claude Code and Anthropic's own apps, says developers "may not collect, store, or intermediate Claude.ai credentials or session tokens", and forbids routing requests through Free, Pro or Max credentials on behalf of users. Hermes uses what its own code calls the "Claude Code OAuth identity": it reads Claude Code's stored credentials and sends Claude Code's headers ([anthropic_credentials.py](https://github.com/NousResearch/hermes-agent/blob/5d3c05977bb3c8b7cfd6b3e39d96f6e35a9e0662/agent/anthropic_credentials.py)). Hermes's docs say that path works only on Max with purchased "extra usage" credits and never draws on the plan's allowance ([providers.md](https://github.com/NousResearch/hermes-agent/blob/5d3c05977bb3c8b7cfd6b3e39d96f6e35a9e0662/website/docs/integrations/providers.md)), so it brings no cost advantage over an API key. Whether Anthropic has acted against Hermes is *(unverified)*; according to a secondary source (The Register), OpenCode removed the same feature in February 2026, citing a legal request ([07 §1.1](research/07-llm-providers-and-auth.md)).
-- **OpenAI.** The [Sign in with ChatGPT terms](https://openai.com/policies/sign-in-with-chatgpt-terms/) accept open-source projects that run locally, but require tokens to be stored locally under the user's control and forbid another user's activity from triggering requests on the subscriber's account ([07 §1.2](research/07-llm-providers-and-auth.md)). Hermes identifies itself honestly to the Codex backend ([codex_headers.py](https://github.com/NousResearch/hermes-agent/blob/5d3c05977bb3c8b7cfd6b3e39d96f6e35a9e0662/agent/codex_headers.py)) and stores the token in `~/.hermes/auth.json`. It stays within these terms only when it runs on the user's own machine and answers that user alone. On a VPS the token sits in the same kind of remote environment the terms exclude, and a gateway that answers other people breaks the second condition.
-- **Kelpie.** It runs on Cloudflare rather than the owner's machine, and its agents serve colleagues. Storing a refresh token in a Durable Object breaks OpenAI's local-storage condition, and serving colleagues breaks both providers' terms. The one reading that may fit OpenAI's terms is a local companion on the owner's machine that keeps the refresh token and hands short-lived access tokens to the owner's own instance, used only for the owner's own conversations. That is our reading, not legal advice.
+- **Anthropic.** Its [legal page](https://code.claude.com/docs/en/legal-and-compliance) reserves subscription OAuth for Claude Code and Anthropic's own apps, says developers "may not collect, store, or intermediate Claude.ai credentials or session tokens", and forbids routing requests through Free, Pro or Max credentials on behalf of users. Hermes uses what its own code calls the "Claude Code OAuth identity", and it can fall back to Claude Code's stored credentials ([anthropic_credentials.py](https://github.com/NousResearch/hermes-agent/blob/5d3c05977bb3c8b7cfd6b3e39d96f6e35a9e0662/agent/anthropic_credentials.py)). Hermes's docs say that path works only on Max with purchased "extra usage" credits and never draws on the plan's allowance ([providers.md](https://github.com/NousResearch/hermes-agent/blob/5d3c05977bb3c8b7cfd6b3e39d96f6e35a9e0662/website/docs/integrations/providers.md)). No note priced those credits against an API key. Whether Anthropic has acted against Hermes is *(unverified)*; according to a secondary source (The Register), OpenCode removed the same feature in February 2026, citing a legal request ([07 §1.1](research/07-llm-providers-and-auth.md)).
+- **OpenAI.** Its Sign in with ChatGPT developer docs open plan usage to open-source projects that run locally and ask paid or remotely hosted apps to join a waitlist. The [terms](https://openai.com/policies/sign-in-with-chatgpt-terms/) require tokens to be stored locally under the user's control, "not in a remote or managed environment", and forbid another user's activity from triggering requests on the subscriber's account ([07 §1.2](research/07-llm-providers-and-auth.md); the terms page refused automated access during the cross-check, so this reading rests on note 07). Hermes identifies itself honestly when it calls the official Codex endpoint ([codex_headers.py](https://github.com/NousResearch/hermes-agent/blob/5d3c05977bb3c8b7cfd6b3e39d96f6e35a9e0662/agent/codex_headers.py)), but it signs in through the Codex device-code login rather than the Sign in with ChatGPT flow, so whether those terms govern it is *(unverified)*.
+- **Kelpie.** It runs on Cloudflare rather than the owner's machine, which by itself puts subscription login outside both providers' terms, even when only the owner uses it: Anthropic reserves the OAuth for Claude Code, and storing a refresh token in a Durable Object breaks OpenAI's local-storage condition ([07 §1.4](research/07-llm-providers-and-auth.md)). Serving colleagues breaks both providers' terms a second time. The one reading that may fit OpenAI's terms is a local companion on the owner's machine that keeps the refresh token and hands short-lived access tokens to the owner's own instance, used only for the owner's own conversations; OpenAI's waitlist for remotely hosted apps may still apply. That is our reading, not legal advice.
 
 **Owner decision ([Decision 1.2](https://github.com/guedesdiogo/kelpie/issues/3)):** offer subscription login as a Hermes-style opt-in, restricted to the owner's own conversations, off by default, with the policy conflict and the risk of account suspension documented in the README. Colleagues always go through API keys. Version 1 ships API keys only; the opt-in comes in a later phase.
 
@@ -322,7 +323,7 @@ The US$ 5 baseline assumes a scheduled alarm does not keep a Durable Object awak
 
 ## 11. Decisions
 
-Each decision is closed by an ADR in `docs/adr/`.
+Each decision is closed by an ADR in `docs/adr/` once its pull request merges.
 
 | Decision | Status |
 |---|---|
