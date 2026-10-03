@@ -20,7 +20,7 @@ The plugin's `cloudflare:test` module provides what the conversation engine need
 
 ## Controlling time
 
-Code that schedules alarms takes the current time as a parameter that defaults to `Date.now()`; see `DebounceBuffer.ingest(fragment, now)` in `apps/conversation-runtime`. Tests pass timestamps a minute in the future (`Date.now() + 60_000` plus offsets), so:
+Code that schedules alarms takes the current time as a parameter that defaults to `Date.now()`; see `DebounceBuffer.ingest(fragment, now)` in `apps/conversation-runtime`. That parameter is a testing seam. Production callers omit it. Tests pass timestamps a minute in the future (`Date.now() + 60_000` plus offsets), so:
 
 - assertions compare exact alarm times;
 - no alarm lands in the past, where the runtime would fire it on its own during the test;

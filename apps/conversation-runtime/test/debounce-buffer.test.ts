@@ -29,7 +29,7 @@ describe("DebounceBuffer", () => {
     const stub = buffer("cap");
     const start = t0();
 
-    for (const [i, offset] of [0, 3_000, 6_000, 9_000].entries()) {
+    for (const [i, offset] of [0, 3_000, 6_000, 7_500].entries()) {
       await stub.ingest({ providerMessageId: `m${i}`, text: `part ${i}` }, start + offset);
     }
     await runInDurableObject(stub, async (_instance, state) => {
@@ -59,9 +59,31 @@ describe("DebounceBuffer", () => {
     expect(await runDurableObjectAlarm(stub)).toBe(true);
     expect(await stub.batches()).toEqual(["first\nsecond"]);
 
+    await runInDurableObject(stub, async (_instance, state) => {
+      expect(await state.storage.getAlarm()).toBeNull();
+    });
+    expect(await runDurableObjectAlarm(stub)).toBe(false);
+
     await stub.ingest({ providerMessageId: "c", text: "next turn" }, start + 20_000);
     expect(await runDurableObjectAlarm(stub)).toBe(true);
     expect(await stub.batches()).toEqual(["first\nsecond", "next turn"]);
+  });
+
+  it("ignores an id that was already flushed in an earlier batch", async () => {
+    const stub = buffer("dedupe-after-flush");
+    const start = t0();
+
+    await stub.ingest({ providerMessageId: "m1", text: "hi" }, start);
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+
+    expect(await stub.ingest({ providerMessageId: "m1", text: "hi" }, start + 30_000)).toEqual({
+      duplicate: true,
+      flushAt: null,
+    });
+    await runInDurableObject(stub, async (_instance, state) => {
+      expect(await state.storage.getAlarm()).toBeNull();
+    });
+    expect(await stub.batches()).toEqual(["hi"]);
   });
 
   it("keeps the pending batch and its alarm across an eviction", async () => {

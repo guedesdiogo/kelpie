@@ -36,14 +36,18 @@ export class DebounceBuffer extends DurableObject<Env> {
     `);
   }
 
+  /** `now` defaults to the current time; tests pass it explicitly to control alarm times. */
   async ingest(fragment: Fragment, now = Date.now()): Promise<IngestResult> {
-    const { rowsWritten } = this.ctx.storage.sql.exec(
-      "INSERT OR IGNORE INTO fragments (provider_message_id, text, received_at) VALUES (?, ?, ?)",
-      fragment.providerMessageId,
-      fragment.text,
-      now,
-    );
-    if (rowsWritten === 0) {
+    const inserted = this.ctx.storage.sql
+      .exec(
+        `INSERT INTO fragments (provider_message_id, text, received_at) VALUES (?, ?, ?)
+         ON CONFLICT (provider_message_id) DO NOTHING RETURNING provider_message_id`,
+        fragment.providerMessageId,
+        fragment.text,
+        now,
+      )
+      .toArray();
+    if (inserted.length === 0) {
       return { duplicate: true, flushAt: await this.ctx.storage.getAlarm() };
     }
 
@@ -59,14 +63,16 @@ export class DebounceBuffer extends DurableObject<Env> {
 
   override async alarm(): Promise<void> {
     const sql = this.ctx.storage.sql;
-    const pending = sql
-      .exec<{ text: string }>(
-        "SELECT text FROM fragments WHERE batch_id IS NULL ORDER BY received_at, rowid",
-      )
-      .toArray();
-    if (pending.length === 0) return;
-
+    // Read and claim the pending fragments in one transaction, so a fragment can never be marked
+    // flushed without being part of the batch text.
     this.ctx.storage.transactionSync(() => {
+      const pending = sql
+        .exec<{ rowid: number; text: string }>(
+          "SELECT rowid, text FROM fragments WHERE batch_id IS NULL ORDER BY received_at, rowid",
+        )
+        .toArray();
+      if (pending.length === 0) return;
+
       const { id } = sql
         .exec<{ id: number }>(
           "INSERT INTO batches (text, flushed_at) VALUES (?, ?) RETURNING id",
@@ -74,7 +80,9 @@ export class DebounceBuffer extends DurableObject<Env> {
           Date.now(),
         )
         .one();
-      sql.exec("UPDATE fragments SET batch_id = ? WHERE batch_id IS NULL", id);
+      for (const fragment of pending) {
+        sql.exec("UPDATE fragments SET batch_id = ? WHERE rowid = ?", id, fragment.rowid);
+      }
     });
   }
 
