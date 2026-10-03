@@ -9,6 +9,8 @@ export interface ChannelCapabilities {
   typing: { supported: boolean; ttlMs: number | null };
   /** The minimum gap between two messages to the same conversation. */
   minGapMs: number;
+  /** A stricter gap for group conversations, when the channel limits groups separately. */
+  groupMinGapMs?: number;
   /** The most bubbles one reply should become in conversational mode. */
   maxBubblesPerReply: number;
   formatting: Formatting;
@@ -27,15 +29,20 @@ export const CAPABILITIES = {
     maxMessageLength: 4_096,
     typing: { supported: true, ttlMs: 5_000 },
     minGapMs: 1_000,
+    // About 20 messages per minute in a group.
+    groupMinGapMs: 3_000,
     maxBubblesPerReply: 5,
     formatting: "telegram-html",
   },
 } as const satisfies Partial<Record<ChannelId, ChannelCapabilities>>;
+
+/** Re-send "typing" after this fraction of its lifetime, so it never lapses between renewals. */
+const TYPING_RENEW_FRACTION = 0.8;
 
 /** How often to re-send "typing" so it never lapses, or null when no renewal is needed. */
 export function typingRenewIntervalMs({
   typing,
 }: Pick<ChannelCapabilities, "typing">): number | null {
   if (!typing.supported || typing.ttlMs === null) return null;
-  return Math.floor(typing.ttlMs * 0.8);
+  return Math.floor(typing.ttlMs * TYPING_RENEW_FRACTION);
 }

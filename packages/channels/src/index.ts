@@ -1,4 +1,10 @@
-export type { ChannelAdapter, Destination, InboundWebhook, SendResult } from "./adapter.ts";
+export {
+  type ChannelAdapter,
+  type Destination,
+  type InboundWebhook,
+  InvalidWebhookError,
+  type SendResult,
+} from "./adapter.ts";
 export {
   CAPABILITIES,
   type ChannelCapabilities,
