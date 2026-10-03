@@ -25,5 +25,10 @@ export interface QualifyResult {
 export interface Qualifier {
   readonly id: QualifierId;
   readonly calibrated: boolean;
-  qualify(state: unknown, questions: Record<string, Question>): Promise<QualifyResult>;
+  /** Implementations stop the request when `signal` aborts (the decision timed out). */
+  qualify(
+    state: unknown,
+    questions: Record<string, Question>,
+    options?: { signal?: AbortSignal },
+  ): Promise<QualifyResult>;
 }

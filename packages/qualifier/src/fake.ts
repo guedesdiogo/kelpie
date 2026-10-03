@@ -8,6 +8,7 @@ export class FakeQualifier implements Qualifier {
   constructor(private readonly recorded: Record<string, Answer>) {}
 
   async qualify(_state: unknown, questions: Record<string, Question>): Promise<QualifyResult> {
+    // Answers come from memory, so there is nothing to abort.
     const answers: Record<string, Answer> = {};
     for (const key of Object.keys(questions)) {
       const answer = this.recorded[key];

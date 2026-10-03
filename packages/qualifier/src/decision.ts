@@ -30,21 +30,32 @@ export async function runDecision<Context, Outcome extends object>(
   hooks: RunHooks = {},
 ): Promise<Sourced<Outcome>> {
   const fallback = (): Sourced<Outcome> => ({ ...decision.fallback(context), source: "heuristic" });
+  const report = (error: unknown) => {
+    try {
+      hooks.onFallback?.(decision.id, error);
+    } catch {
+      // A failing logger must not break the turn; the fallback still runs.
+    }
+  };
   if (!qualifier) return fallback();
 
   const prefix = `${decision.id}::`;
-  const questions = Object.fromEntries(
-    Object.entries(decision.questions(context)).map(([key, question]) => [prefix + key, question]),
-  );
+  const controller = new AbortController();
   let timer: unknown;
   try {
+    const questions = Object.fromEntries(
+      Object.entries(decision.questions(context)).map(([key, question]) => [
+        prefix + key,
+        question,
+      ]),
+    );
     const result = await Promise.race([
-      qualifier.qualify(decision.state(context), questions),
+      qualifier.qualify(decision.state(context), questions, { signal: controller.signal }),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`${decision.id} timed out after ${decision.timeoutMs} ms`)),
-          decision.timeoutMs,
-        );
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error(`${decision.id} timed out after ${decision.timeoutMs} ms`));
+        }, decision.timeoutMs);
       }),
     ]);
     const answers = Object.fromEntries(
@@ -54,9 +65,9 @@ export async function runDecision<Context, Outcome extends object>(
     );
     const outcome = decision.policy({ ...result, answers }, context);
     if (outcome) return { ...outcome, source: result.provider };
-    hooks.onFallback?.(decision.id, new Error("policy declined the answers"));
+    report(new Error("the policy declined the answers"));
   } catch (error) {
-    hooks.onFallback?.(decision.id, error);
+    report(error);
   } finally {
     clearTimeout(timer);
   }
