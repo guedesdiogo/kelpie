@@ -68,7 +68,7 @@ const ACKNOWLEDGEMENTS = new Set([
   "thanks",
   "thank you",
 ]);
-const TRAILING_EMOJI = /[\p{Extended_Pictographic}\uFE0F\u200D\s]+$/u;
+const TRAILING_EMOJI = /(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\u{FE0F}|\u{200D}|\s)+$/u;
 
 /** A keyless estimate from the latest fragment (research note 04 §4.2). */
 export function heuristicFinished({ fragments }: EndOfTurnContext): number {
