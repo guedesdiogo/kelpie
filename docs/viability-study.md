@@ -1,7 +1,7 @@
 # Kelpie viability study
 
 - **Date:** 2026-10-03
-- **Status:** findings final. Each open question has a decision issue under [Epic 1](https://github.com/guedesdiogo/kelpie/issues/1); [§11](#11-decisions) lists what the owner has decided and what is still open.
+- **Status:** findings final. Each question had a decision issue under [Epic 1](https://github.com/guedesdiogo/kelpie/issues/1), and the owner decided all of them on 2026-10-03 ([§11](#11-decisions)).
 - **Scope:** a single-tenant, self-hosted harness for internal use (see [§2](#2-scope)). The research started from a multi-tenant brief; the owner narrowed the scope while reviewing it.
 - **Evidence:** eight research notes and one cross-check in [`docs/research/`](research/). Every claim below links to the note that sources it. The notes cite primary sources (official docs, source code pinned by commit, terms of service) and mark what could not be confirmed as *(unverified)*. They were written for the multi-tenant brief; where single-tenant changes a conclusion, this study says so.
 
@@ -32,7 +32,7 @@ The platform is not the hard part. The conversation engine (buffering, splitting
 - tenant keys in every Durable Object name and every query;
 - per-tenant envelope encryption of secrets: Worker secrets and the Secrets Store (100 per account) are enough;
 - vendor ceilings shared by many tenants (they still apply to the one instance);
-- Meta Tech Provider onboarding: a company using its own WhatsApp number doesn't need it;
+- Meta Tech Provider onboarding, which note 06 ties to serving other businesses' numbers ([06 §1.1](research/06-chat-channels.md)): a company running Kelpie on its own WhatsApp number should not need it (our inference; Meta's regular business verification may still apply);
 - tenant onboarding, billing and cross-tenant reporting;
 - one GitHub repository per tenant: one repository per instance.
 
@@ -159,7 +159,7 @@ For WhatsApp, §4.7 means an agent there should have a bounded business role (sc
 
 ### 4.6 Users and access control
 
-New in this scope and not covered by the research notes. The model is proposed in [Decision 1.12](https://github.com/guedesdiogo/kelpie/issues/13):
+New in this scope and not covered by the research notes. The owner approved this model in [Decision 1.12](https://github.com/guedesdiogo/kelpie/issues/13):
 
 - **Users** are created by the owner or an admin. Each user has one or more **channel identities** (Telegram user id, WhatsApp number, Slack user id, webchat login), enabled one by one.
 - **Grants** say which agents a user may talk to and which content scopes (shared knowledge folders, an agent's private notes) they may read or edit.
@@ -289,8 +289,8 @@ All three Postgres providers sit behind Hyperdrive, so switching is mostly a con
 
 The owner asked whether Kelpie could use a ChatGPT or Claude subscription the way Hermes Agent does. The research and a check of Hermes's code (commit `5d3c059`) give this picture:
 
-- **Anthropic.** Its [legal page](https://code.claude.com/docs/en/legal-and-compliance) reserves subscription OAuth for Claude Code and Anthropic's own apps, says developers "may not collect, store, or intermediate Claude.ai credentials or session tokens", and forbids routing requests through Free, Pro or Max credentials on behalf of users. Hermes uses what its own code calls the "Claude Code OAuth identity": it reads Claude Code's stored credentials and sends Claude Code's headers ([anthropic_credentials.py](https://github.com/NousResearch/hermes-agent/blob/5d3c05977bb3c8b7cfd6b3e39d96f6e35a9e0662/agent/anthropic_credentials.py)). Hermes's docs say that path works only on Max with purchased "extra usage" credits and never draws on the plan's allowance ([providers.md](https://github.com/NousResearch/hermes-agent/blob/5d3c05977bb3c8b7cfd6b3e39d96f6e35a9e0662/website/docs/integrations/providers.md)), so it brings no cost advantage over an API key. Whether Anthropic has acted against Hermes is *(unverified)*; OpenCode removed the same feature in February 2026, citing a legal request ([07 §1.1](research/07-llm-providers-and-auth.md)).
-- **OpenAI.** The [Sign in with ChatGPT terms](https://openai.com/policies/sign-in-with-chatgpt-terms/) accept open-source projects that run locally, but require tokens to be stored locally under the user's control and forbid another user's activity from triggering requests on the subscriber's account ([07 §1.2](research/07-llm-providers-and-auth.md)). Hermes runs on the user's machine and identifies itself honestly to the Codex backend ([codex_headers.py](https://github.com/NousResearch/hermes-agent/blob/5d3c05977bb3c8b7cfd6b3e39d96f6e35a9e0662/agent/codex_headers.py)); it crosses the line only when its gateway answers other people.
+- **Anthropic.** Its [legal page](https://code.claude.com/docs/en/legal-and-compliance) reserves subscription OAuth for Claude Code and Anthropic's own apps, says developers "may not collect, store, or intermediate Claude.ai credentials or session tokens", and forbids routing requests through Free, Pro or Max credentials on behalf of users. Hermes uses what its own code calls the "Claude Code OAuth identity": it reads Claude Code's stored credentials and sends Claude Code's headers ([anthropic_credentials.py](https://github.com/NousResearch/hermes-agent/blob/5d3c05977bb3c8b7cfd6b3e39d96f6e35a9e0662/agent/anthropic_credentials.py)). Hermes's docs say that path works only on Max with purchased "extra usage" credits and never draws on the plan's allowance ([providers.md](https://github.com/NousResearch/hermes-agent/blob/5d3c05977bb3c8b7cfd6b3e39d96f6e35a9e0662/website/docs/integrations/providers.md)), so it brings no cost advantage over an API key. Whether Anthropic has acted against Hermes is *(unverified)*; according to a secondary source (The Register), OpenCode removed the same feature in February 2026, citing a legal request ([07 §1.1](research/07-llm-providers-and-auth.md)).
+- **OpenAI.** The [Sign in with ChatGPT terms](https://openai.com/policies/sign-in-with-chatgpt-terms/) accept open-source projects that run locally, but require tokens to be stored locally under the user's control and forbid another user's activity from triggering requests on the subscriber's account ([07 §1.2](research/07-llm-providers-and-auth.md)). Hermes identifies itself honestly to the Codex backend ([codex_headers.py](https://github.com/NousResearch/hermes-agent/blob/5d3c05977bb3c8b7cfd6b3e39d96f6e35a9e0662/agent/codex_headers.py)) and stores the token in `~/.hermes/auth.json`. It stays within these terms only when it runs on the user's own machine and answers that user alone. On a VPS the token sits in the same kind of remote environment the terms exclude, and a gateway that answers other people breaks the second condition.
 - **Kelpie.** It runs on Cloudflare rather than the owner's machine, and its agents serve colleagues. Storing a refresh token in a Durable Object breaks OpenAI's local-storage condition, and serving colleagues breaks both providers' terms. The one reading that may fit OpenAI's terms is a local companion on the owner's machine that keeps the refresh token and hands short-lived access tokens to the owner's own instance, used only for the owner's own conversations. That is our reading, not legal advice.
 
 **Owner decision ([Decision 1.2](https://github.com/guedesdiogo/kelpie/issues/3)):** offer subscription login as a Hermes-style opt-in, restricted to the owner's own conversations, off by default, with the policy conflict and the risk of account suspension documented in the README. Colleagues always go through API keys. Version 1 ships API keys only; the opt-in comes in a later phase.
@@ -331,12 +331,12 @@ Each decision is closed by an ADR in `docs/adr/`.
 | [1.3 Personal data](https://github.com/guedesdiogo/kelpie/issues/4) | **Decided:** a Durable Object per user plus R2, outside git |
 | [1.4 Jev](https://github.com/guedesdiogo/kelpie/issues/5) | **Decided:** preferred, never required; Workers AI binding first, TypeSafe and OpenRouter ready |
 | [1.5 Database](https://github.com/guedesdiogo/kelpie/issues/6) | **Decided:** Neon via Hyperdrive first; other Postgres providers by configuration |
-| [1.6 Context Store](https://github.com/guedesdiogo/kelpie/issues/7) | Recommended default ([§4.8](#48-context-the-context-store-worker)), pending no objection |
-| [1.7 Runtime foundation](https://github.com/guedesdiogo/kelpie/issues/8) | Recommended default ([§4.2](#42-the-hot-path-one-durable-object-per-conversation)–[§4.4](#44-runtime-foundation-the-agents-sdk-agent-class)), pending no objection |
-| [1.8 Channels](https://github.com/guedesdiogo/kelpie/issues/9) | Recommended default ([§4.5](#45-channels)), pending no objection |
-| [1.9 License](https://github.com/guedesdiogo/kelpie/issues/10) | Open |
-| [1.10 MVP scope and phases](https://github.com/guedesdiogo/kelpie/issues/11) | Open ([§13](#13-delivery-plan)) |
-| [1.12 Access control](https://github.com/guedesdiogo/kelpie/issues/13) | Proposed ([§4.6](#46-users-and-access-control)) |
+| [1.6 Context Store](https://github.com/guedesdiogo/kelpie/issues/7) | **Decided:** the recommended default ([§4.8](#48-context-the-context-store-worker)) |
+| [1.7 Runtime foundation](https://github.com/guedesdiogo/kelpie/issues/8) | **Decided:** the recommended default ([§4.2](#42-the-hot-path-one-durable-object-per-conversation)–[§4.4](#44-runtime-foundation-the-agents-sdk-agent-class)) |
+| [1.8 Channels](https://github.com/guedesdiogo/kelpie/issues/9) | **Decided:** the recommended default ([§4.5](#45-channels)) |
+| [1.9 License](https://github.com/guedesdiogo/kelpie/issues/10) | **Decided:** MIT |
+| [1.10 MVP scope and phases](https://github.com/guedesdiogo/kelpie/issues/11) | **Decided:** approved as proposed ([§13](#13-delivery-plan)) |
+| [1.12 Access control](https://github.com/guedesdiogo/kelpie/issues/13) | **Decided:** approved as proposed ([§4.6](#46-users-and-access-control)) |
 
 ## 12. Spikes before committing to a design
 
@@ -349,7 +349,7 @@ Each decision is closed by an ADR in `docs/adr/`.
 
 ## 13. Delivery plan
 
-Scope and phasing are up for approval in [Decision 1.10](https://github.com/guedesdiogo/kelpie/issues/11).
+The owner approved this plan in [Decision 1.10](https://github.com/guedesdiogo/kelpie/issues/11).
 
 | Phase | Scope |
 |---|---|
