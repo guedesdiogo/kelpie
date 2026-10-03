@@ -69,6 +69,41 @@ describe("splitReply, conversational mode", () => {
   });
 });
 
+describe("splitReply, fences and edge cases", () => {
+  it("closes a fence only with the same character and at least as many marks", () => {
+    const outer = "````md\n```js\nx\n```\n````";
+    expect(splitReply(`a\n\n${outer}\n\nafter\n\nmore`, chat)).toEqual([
+      "a",
+      outer,
+      "after",
+      "more",
+    ]);
+  });
+
+  it("treats triple backticks inside a sentence as text, not as a fence", () => {
+    expect(splitReply("```x``` oi\n\nB\n\nC", chat)).toEqual(["```x``` oi", "B", "C"]);
+  });
+
+  it("recognizes tilde fences", () => {
+    const code = "~~~\na\n\nb\n~~~";
+    expect(splitReply(`${code}\n\nfim`, chat)).toEqual([code, "fim"]);
+  });
+
+  it("keeps the first line's indentation", () => {
+    expect(splitReply("  - a\n  - b", chat)).toEqual(["  - a\n  - b"]);
+  });
+
+  it("treats a bubble cap below 1 as 1", () => {
+    expect(splitReply("a\n\nb\n\nc", { ...chat, maxBubbles: 0 })).toEqual(["a\n\nb\n\nc"]);
+  });
+
+  it("drops the fence when the limit is too small to hold it, instead of exceeding the limit", () => {
+    for (const bubble of splitReply("```typescript\nabcdef\n```", { ...chat, maxLength: 8 })) {
+      expect(bubble.length).toBeLessThanOrEqual(8);
+    }
+  });
+});
+
 describe("splitReply, conversational mode off", () => {
   const single = { maxLength: 200, maxBubbles: 4, conversational: false };
 
