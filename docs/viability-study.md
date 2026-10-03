@@ -24,6 +24,7 @@ The platform is not the hard part. The conversation engine (buffering, splitting
 
 - **Allowlist, always.** Only users configured in advance can talk to an agent, and only through channel identities enabled for them (a Telegram account, a WhatsApp number, a Slack user). Everyone else is ignored before any model is called.
 - **Permissions.** Each user has access to specific agents and specific content.
+- **A task board for agents.** Agents log every piece of background work on Kelpie's own board, and people can queue tasks there and comment on them, but can't move a task once the agent has started it ([ADR-0011](adr/0011-agent-task-board.md)).
 - **Conversational mode is a toggle.** Merging fragmented messages and splitting replies into paced bubbles can be switched on or off per agent.
 - **Connectors are pluggable.** Each kind of external service (Postgres provider, Jev access path, model providers, channels, tool sources) starts with only the implementations the current phase needs, such as one Postgres provider and one Jev path, behind an interface and a config value that make adding another one straightforward.
 
@@ -338,6 +339,7 @@ Each decision is closed by an ADR in `docs/adr/` once its pull request merges.
 | [1.9 License](https://github.com/guedesdiogo/kelpie/issues/10) | **Decided:** MIT |
 | [1.10 MVP scope and phases](https://github.com/guedesdiogo/kelpie/issues/11) | **Decided:** approved as proposed ([§13](#13-delivery-plan)) |
 | [1.12 Access control](https://github.com/guedesdiogo/kelpie/issues/13) | **Decided:** approved as proposed ([§4.6](#46-users-and-access-control)) |
+| [4.1 Agent task board](https://github.com/guedesdiogo/kelpie/issues/44) | **Decided:** Kelpie's own board, not GitHub Issues ([ADR-0011](adr/0011-agent-task-board.md)) |
 
 ## 12. Spikes before committing to a design
 
