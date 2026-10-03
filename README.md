@@ -1,5 +1,7 @@
 # Kelpie
 
+[![CI](https://github.com/guedesdiogo/kelpie/actions/workflows/ci.yml/badge.svg)](https://github.com/guedesdiogo/kelpie/actions/workflows/ci.yml)
+
 > Herds your AI agents across every channel, at the edge.
 
 Kelpie is a self-hosted, multi-agent AI assistant harness that connects chat channels (WhatsApp, Telegram, Discord, Slack and a web chat) to large language models. Think of it as Hermes Agent without the VPS: it runs on Cloudflare's developer platform (Workers, Durable Objects, Queues and Workflows), event-driven and without containers, so it starts cheap and scales. One instance serves one owner, a person or a team; each agent works like an extra colleague.
