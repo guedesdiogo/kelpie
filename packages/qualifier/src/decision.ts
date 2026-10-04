@@ -70,7 +70,7 @@ export async function runDecision<Context, Outcome extends object>(
   } catch (error) {
     report(error);
   } finally {
-    clearTimeout(timer);
+    if (timer !== undefined) clearTimeout(timer);
   }
   return fallback();
 }
