@@ -84,6 +84,14 @@ function fakePorts() {
           : { ok: false, reason: "unknown_user" };
       },
     },
+    channels: {
+      async createTelegramForm(agentId) {
+        calls.push(`createTelegramForm ${agentId}`);
+        return agentId === "broken"
+          ? { ok: false, reason: "store_unavailable" }
+          : { ok: true, token: "form-token", expiresAt: 1_000 };
+      },
+    },
   };
   return { ports, calls };
 }
@@ -270,6 +278,46 @@ describe("configuration commands", () => {
     expect(await commands.setTimeZone(member, { timeZone: "UTC" })).toEqual({
       ok: false,
       reason: "forbidden",
+    });
+  });
+
+  it("starts connecting a Telegram bot with a one-time form, for an agent that exists", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+    await commands.createAgent(owner, { id: "sales", name: "Sales" });
+
+    expect(await commands.connectTelegram(owner, { agentId: "sales" })).toEqual({
+      ok: true,
+      value: { path: "/forms/form-token", expiresAt: 1_000 },
+    });
+    expect(calls).toContain("createTelegramForm sales");
+  });
+
+  it("refuses to connect a bot for an unknown or malformed agent, or for a non-owner", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+    expect(await commands.connectTelegram(owner, { agentId: "ghost" })).toEqual({
+      ok: false,
+      reason: "unknown_agent",
+    });
+    expect(await commands.connectTelegram(owner, { agentId: "Not An Id" })).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(await commands.connectTelegram(member, { agentId: "sales" })).toEqual({
+      ok: false,
+      reason: "forbidden",
+    });
+    expect(calls.filter((call) => call.startsWith("createTelegramForm"))).toEqual([]);
+  });
+
+  it("reports the secret store being unavailable", async () => {
+    const { ports } = fakePorts();
+    const commands = createConfigCommands(ports);
+    await commands.createAgent(owner, { id: "broken", name: "Broken" });
+    expect(await commands.connectTelegram(owner, { agentId: "broken" })).toEqual({
+      ok: false,
+      reason: "unavailable",
     });
   });
 });

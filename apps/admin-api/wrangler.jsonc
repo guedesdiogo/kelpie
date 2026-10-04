@@ -3,7 +3,8 @@
   "name": "kelpie-admin-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
-  "observability": { "enabled": true },
+  // Invocation logs record request URLs, and a form's URL carries its one-time token.
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
   // Reachable only through a custom domain behind a Cloudflare Access application, added at deploy.
   "workers_dev": false,
   "preview_urls": false,
@@ -14,6 +15,10 @@
   },
   // The first-run token (ADR-0013); `docs/admin-api.md` says how to make one.
   "secrets": { "required": ["BOOTSTRAP_TOKEN"] },
+  // Secure forms for channel secrets; channel-egress holds the secret store (docs/secrets.md).
+  "services": [
+    { "binding": "CHANNEL_FORMS", "service": "kelpie-channel-egress", "entrypoint": "ChannelForms" }
+  ],
   // The objects that hold configuration live in the Workers that run them.
   "durable_objects": {
     "bindings": [

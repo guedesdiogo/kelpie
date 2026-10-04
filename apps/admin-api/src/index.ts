@@ -1,4 +1,5 @@
 import { DIRECTORY_NAME, type DirectoryContract, type Remote } from "@kelpie/access";
+import type { ChannelFormsContract } from "@kelpie/channels";
 import {
   type AgentHostContract,
   createConfigCommands,
@@ -15,6 +16,8 @@ function depsFor(env: Env): AdminDeps {
   const registry = env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<RegistryContract>;
   const agentHost = (id: string) =>
     env.AGENT_HOST.getByName(id) as unknown as Remote<AgentHostContract>;
+  // A service binding to channel-egress's ChannelForms entrypoint, which returns values only.
+  const forms = env.CHANNEL_FORMS as unknown as ChannelFormsContract;
   // A trailing slash would never match the token's issuer.
   const config = {
     teamDomain: env.ACCESS_TEAM_DOMAIN.replace(/\/+$/, ""),
@@ -37,7 +40,9 @@ function depsFor(env: Env): AdminDeps {
         config: (id) => agentHost(id).config(),
       },
       directory,
+      channels: { createTelegramForm: (agentId) => forms.createTelegramForm(agentId) },
     }),
+    forms,
     bootstrapToken: env.BOOTSTRAP_TOKEN,
     now: () => Date.now(),
     newUserId: () => crypto.randomUUID(),

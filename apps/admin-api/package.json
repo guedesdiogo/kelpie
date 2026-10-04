@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@kelpie/access": "workspace:*",
+    "@kelpie/channels": "workspace:*",
     "@kelpie/config": "workspace:*"
   },
   "devDependencies": {

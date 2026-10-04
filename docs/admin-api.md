@@ -32,6 +32,7 @@ Every endpoint is a `POST` with a JSON body.
 | `/commands/enableIdentity` | same as `addIdentity` |
 | `/commands/disableIdentity` | same as `addIdentity` |
 | `/commands/setTimeZone` | `{ "timeZone": "America/Sao_Paulo" }`, an IANA name. Offsets like `+03:00` are refused; prefer a city name to `Etc/GMT±N`, whose sign is inverted (`Etc/GMT+3` is UTC-03:00) |
+| `/commands/connectTelegram` | `{ "agentId": "sales" }`; answers `{ "path": "/forms/<token>", "expiresAt": … }` |
 | `/bootstrap` | `{ "token": "…" }` |
 
 **Answers:**
@@ -45,15 +46,30 @@ Every endpoint is a `POST` with a JSON body.
 | 403 | `forbidden`, `no_owner`, `invalid_bootstrap_token` |
 | 404 | `unknown_agent`, `unknown_identity`, `unknown_user`, `not_found` |
 | 409 | `identity_taken` |
+| 503 | `unavailable` (the secret store can't be reached) |
 | 410 | `bootstrap_disabled` |
 | 413 | `too_large` |
 | 503 | `unavailable` (Access's keys couldn't be loaded) |
 
 Identity values in answers are masked.
 
+## Secure forms
+
+A channel's secret, such as a Telegram bot token, never goes through a command, a conversation or a log (ADR-0013).
+1. `connectTelegram` answers with the path of a one-time form, for example `/forms/<token>`.
+2. The owner opens `https://<admin hostname>/forms/<token>` in a browser. It is behind the same Access login and owner check as the commands.
+3. The owner pastes the token from BotFather. The admin API passes it straight to `channel-egress`'s `ChannelForms` entrypoint, which checks it with Telegram (`getMe`) and stores it encrypted (`docs/secrets.md`).
+
+The link expires after 15 minutes, works once, and closes after five refused tokens.
+
+Form pages are HTML:
+- they are sent with `Cache-Control: no-store`, `Referrer-Policy: same-origin` and a Content-Security-Policy that forbids framing and scripts;
+- a submission must come from the page itself (`Sec-Fetch-Site: same-origin`, or a matching `Origin`) and be form-encoded;
+- no page repeats the token.
+
 ## Setting it up
 
-1. **Deploy `ingress` and `conversation-runtime` first.** The admin API's bindings point at their objects.
+1. **Deploy `ingress`, `conversation-runtime` and `channel-egress` first.** The admin API's bindings point at their objects and at `channel-egress`'s forms. `channel-egress` needs its `SECRETS_KEY` (`docs/secrets.md`).
 2. **Create a self-hosted Access application** for the admin API's hostname, with a policy that allows only the owner. Do this before step 4: whoever passes Access and holds the token becomes the owner. Note the team domain (`https://<team>.cloudflareaccess.com`) and the application's AUD tag.
 3. **Keep the instance's values out of the repository.** The hostname and the Access values belong to one deployment, so they go in as flags when deploying (step 5), and `wrangler.jsonc` stays the same for every instance:
    - `--domain <admin hostname>`: a custom domain on one of the owner's zones. Wrangler creates its DNS record. `workers_dev` and preview URLs stay off.

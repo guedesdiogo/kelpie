@@ -7,6 +7,15 @@ import {
 } from "@kelpie/access";
 import type { Actor, CommandResult, ConfigCommands } from "@kelpie/config";
 import type { Verification } from "./access-jwt.ts";
+import {
+  closedPage,
+  type FormDeps,
+  formTokenOf,
+  page,
+  showForm,
+  submitForm,
+  unavailablePage,
+} from "./forms.ts";
 
 /** What the API needs from outside, so tests can replace it. */
 export interface AdminDeps {
@@ -18,6 +27,8 @@ export interface AdminDeps {
     bootstrapOwner(userId: string, accessSub: string): Promise<OwnerResult>;
   };
   commands: ConfigCommands;
+  /** The one-time secure forms in channel-egress. */
+  forms: FormDeps;
   /** The first-run token set at deploy (ADR-0013): `<expiry in epoch seconds>.<random>`. */
   bootstrapToken: string | undefined;
   now(): number;
@@ -37,6 +48,7 @@ const STATUS: Record<Failure, number> = {
   unknown_user: 404,
   unknown_identity: 404,
   identity_taken: 409,
+  unavailable: 503,
 };
 
 type Command = (
@@ -57,6 +69,7 @@ const COMMANDS: Record<string, Command> = {
   enableIdentity: (commands, actor, input) => commands.enableIdentity(actor, input),
   disableIdentity: (commands, actor, input) => commands.disableIdentity(actor, input),
   setTimeZone: (commands, actor, input) => commands.setTimeZone(actor, input),
+  connectTelegram: (commands, actor, input) => commands.connectTelegram(actor, input),
 };
 
 /**
@@ -65,6 +78,7 @@ const COMMANDS: Record<string, Command> = {
  */
 export async function handle(request: Request, deps: AdminDeps): Promise<Response> {
   const { pathname } = new URL(request.url);
+  if (pathname.startsWith("/forms/")) return handleForm(request, pathname, deps);
   const command = pathname.startsWith("/commands/") ? pathname.slice("/commands/".length) : null;
   if (request.method !== "POST" || (pathname !== "/bootstrap" && !command)) {
     return refuse(404, "not_found");
@@ -94,6 +108,53 @@ export async function handle(request: Request, deps: AdminDeps): Promise<Respons
     console.error("admin-api: request failed", errorName(error));
     return refuse(500, "internal");
   }
+}
+
+/**
+ * A secure form's page (`GET`) and its submission (`POST`), for the owner only: the same Access
+ * check and owner admission as the commands. Answers are pages, never JSON.
+ */
+async function handleForm(request: Request, pathname: string, deps: AdminDeps): Promise<Response> {
+  const token = formTokenOf(pathname);
+  if (!token || (request.method !== "GET" && request.method !== "POST")) return closedPage();
+  try {
+    const identity = await deps.authenticate(request);
+    if (!identity.ok)
+      return page(401, "Sign in first", "<p>Open this link in your browser again.</p>");
+    if (request.method === "POST" && !isSameOriginSubmission(request)) {
+      return page(403, "Not allowed", "<p>This form only accepts its own submissions.</p>");
+    }
+    const admission = await deps.directory.admit(
+      { channel: ACCESS_SOURCE, channelUserId: identity.sub },
+      ADMIN_AGENT_ID,
+    );
+    if (!admission.admitted || admission.role !== "owner") {
+      return page(403, "Not allowed", "<p>Only the owner can use this link.</p>");
+    }
+    if (request.method === "GET") return await showForm(token, deps.forms);
+    if (!request.headers.get("content-type")?.startsWith("application/x-www-form-urlencoded")) {
+      return page(415, "Not a form submission", "<p>Submit the token from the form page.</p>");
+    }
+    const body = await readBody(request);
+    if (!body.ok) return page(body.status, "Too large", "<p>That isn't a bot token.</p>");
+    const botToken = new URLSearchParams(body.text).get("botToken") ?? "";
+    return await submitForm(token, botToken, deps.forms);
+  } catch (error) {
+    console.error("admin-api: form failed", errorName(error));
+    return unavailablePage();
+  }
+}
+
+/**
+ * Whether a POST came from the form's own page. Browsers say so in `Sec-Fetch-Site`; without it,
+ * a foreign `Origin` is refused. (The page's referrer policy is `same-origin`, so the browser
+ * sends the real origin: under `no-referrer` it would send `null`.)
+ */
+function isSameOriginSubmission(request: Request): boolean {
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null) return site === "same-origin";
+  const origin = request.headers.get("origin");
+  return origin === null || origin === new URL(request.url).origin;
 }
 
 async function run(
@@ -158,10 +219,24 @@ async function digest(value: string): Promise<ArrayBuffer> {
   return crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
 }
 
-/** Reads the body up to the size cap, whatever its `Content-Length` says. */
+/** The body as JSON, or undefined when it is empty. */
 async function readJson(
   request: Request,
 ): Promise<{ ok: true; value: unknown } | { ok: false; status: number; reason: string }> {
+  const body = await readBody(request);
+  if (!body.ok) return body;
+  if (body.text.trim() === "") return { ok: true, value: undefined };
+  try {
+    return { ok: true, value: JSON.parse(body.text) };
+  } catch {
+    return { ok: false, status: 400, reason: "invalid_json" };
+  }
+}
+
+/** Reads the body up to the size cap, whatever its `Content-Length` says. */
+async function readBody(
+  request: Request,
+): Promise<{ ok: true; text: string } | { ok: false; status: number; reason: string }> {
   const chunks: Uint8Array[] = [];
   let size = 0;
   const reader = request.body?.getReader();
@@ -181,13 +256,7 @@ async function readJson(
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  const text = new TextDecoder().decode(bytes);
-  if (text.trim() === "") return { ok: true, value: undefined };
-  try {
-    return { ok: true, value: JSON.parse(text) };
-  } catch {
-    return { ok: false, status: 400, reason: "invalid_json" };
-  }
+  return { ok: true, text: new TextDecoder().decode(bytes) };
 }
 
 function refuse(status: number, reason: string): Response {

@@ -5,6 +5,7 @@ import type { Verification } from "../src/access-jwt.ts";
 import { type AdminDeps, handle } from "../src/api.ts";
 
 const OWNER_SUB = "sub-owner";
+const GOOD_BOT_TOKEN = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw-test";
 const NOW_MS = 1_791_000_000_000;
 const TOKEN = `${NOW_MS / 1_000 + 3_600}.${"c0ffee".repeat(6)}`;
 
@@ -68,8 +69,19 @@ function world({
         return { ok: true, timeZone };
       },
     },
+    channels: {
+      async createTelegramForm() {
+        return { ok: true, token: "form-token-1", expiresAt: NOW_MS + 900_000 };
+      },
+    },
   };
   const bootstraps: { userId: string; accessSub: string }[] = [];
+  /** Open forms by token; a redeemed or burned form disappears. */
+  const forms = new Map<string, { agentId: string; refusals: number }>([
+    ["form-token-1", { agentId: "sales", refusals: 0 }],
+    ["form-odd", { agentId: "<i>odd</i>", refusals: 0 }],
+  ]);
+  const redeemed: { token: string; botToken: string }[] = [];
   const deps: AdminDeps = {
     async authenticate(): Promise<Verification> {
       return authenticated ? { ok: true, sub: authenticated } : { ok: false, reason: "signature" };
@@ -94,11 +106,32 @@ function world({
       },
     },
     commands: createConfigCommands(ports),
+    forms: {
+      async describeForm(token) {
+        if (token === "form-down") return { ok: false, reason: "store_unavailable" };
+        const form = forms.get(token);
+        return form
+          ? { ok: true, agentId: form.agentId, kind: "telegram" }
+          : { ok: false, reason: "unknown_form" };
+      },
+      async redeemTelegramForm(token, botToken) {
+        const form = forms.get(token);
+        if (!form) return { ok: false, reason: "unknown_form" };
+        redeemed.push({ token, botToken });
+        if (botToken !== GOOD_BOT_TOKEN) {
+          form.refusals += 1;
+          if (form.refusals >= 2) forms.delete(token);
+          return { ok: false, reason: botToken.includes(":") ? "token_refused" : "invalid_token" };
+        }
+        forms.delete(token);
+        return { ok: true, agentId: form.agentId, bot: { id: 1, username: "kelpie_<b>bot" } };
+      },
+    },
     bootstrapToken: TOKEN,
     now: () => NOW_MS,
     newUserId: () => "u-new",
   };
-  return { deps, ran, bootstraps };
+  return { deps, ran, bootstraps, redeemed };
 }
 
 function post(path: string, body?: unknown) {
@@ -308,5 +341,156 @@ describe("admin API first-run bootstrap", () => {
     const { deps, bootstraps } = world({ owner: false, authenticated: null });
     expect((await call(deps, "/bootstrap", { token: TOKEN })).status).toBe(401);
     expect(bootstraps).toEqual([]);
+  });
+});
+
+describe("admin API secure forms", () => {
+  const formUrl = "https://admin.example/forms/form-token-1";
+  const submit = (botToken: string, headers: Record<string, string> = {}) =>
+    new Request(formUrl, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+      body: new URLSearchParams({ botToken }).toString(),
+    });
+
+  it("starts with a command that returns the form's path", async () => {
+    const { deps } = world();
+    await call(deps, "/commands/createAgent", { id: "sales", name: "Sales" });
+    expect(await call(deps, "/commands/connectTelegram", { agentId: "sales" })).toEqual({
+      status: 200,
+      body: { ok: true, value: { path: "/forms/form-token-1", expiresAt: NOW_MS + 900_000 } },
+    });
+  });
+
+  it("shows the owner a password field, with headers that keep the page private", async () => {
+    const { deps } = world();
+    const response = await handle(new Request(formUrl), deps);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('name="botToken"');
+    expect(html).toContain('type="password"');
+    expect(html).toContain('autocomplete="off"');
+    expect(html).toContain("<code>sales</code>");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("referrer-policy")).toBe("same-origin");
+    expect(response.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+  });
+
+  it("stores the token, says which bot connected, and escapes what Telegram returned", async () => {
+    const { deps, redeemed } = world();
+    const response = await handle(
+      submit(GOOD_BOT_TOKEN, { origin: "https://admin.example" }),
+      deps,
+    );
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("@kelpie_&lt;b&gt;bot");
+    expect(html).not.toContain(GOOD_BOT_TOKEN);
+    expect(redeemed).toEqual([{ token: "form-token-1", botToken: GOOD_BOT_TOKEN }]);
+
+    // The link works once.
+    expect((await handle(new Request(formUrl), deps)).status).toBe(404);
+  });
+
+  it("asks again after a refused token, and closes when the form does", async () => {
+    const { deps } = world();
+    const first = await handle(submit("not-a-token"), deps);
+    expect(first.status).toBe(400);
+    const html = await first.text();
+    expect(html).toContain("doesn&#39;t look like a bot token");
+    expect(html).not.toContain("not-a-token");
+
+    const second = await handle(submit("123:wrong"), deps);
+    expect(second.status).toBe(404);
+  });
+
+  it("refuses a submission from another site, before it reaches the store", async () => {
+    const { deps, redeemed } = world();
+    const response = await handle(submit(GOOD_BOT_TOKEN, { origin: "https://evil.example" }), deps);
+    expect(response.status).toBe(403);
+    expect(redeemed).toEqual([]);
+  });
+
+  it("serves the form to the owner only", async () => {
+    const stranger = world({ authenticated: null });
+    expect((await handle(new Request(formUrl), stranger.deps)).status).toBe(401);
+    const member = world({ role: "member" });
+    expect((await handle(new Request(formUrl), member.deps)).status).toBe(403);
+    expect((await handle(submit(GOOD_BOT_TOKEN), member.deps)).status).toBe(403);
+    expect(member.redeemed).toEqual([]);
+  });
+
+  it("answers 404 to a malformed link or another method, and 413 to a huge body", async () => {
+    const { deps, redeemed } = world();
+    expect(
+      (await handle(new Request("https://admin.example/forms/bad%20token"), deps)).status,
+    ).toBe(404);
+    expect((await handle(new Request(formUrl, { method: "PUT" }), deps)).status).toBe(404);
+    const huge = new Request(formUrl, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: `botToken=${"x".repeat(70_000)}`,
+    });
+    expect((await handle(huge, deps)).status).toBe(413);
+    expect(redeemed).toEqual([]);
+  });
+
+  it("accepts its own submission, which browsers may send with Origin: null", async () => {
+    const { deps, redeemed } = world();
+    const response = await handle(
+      submit(GOOD_BOT_TOKEN, { origin: "null", "sec-fetch-site": "same-origin" }),
+      deps,
+    );
+    expect(response.status).toBe(200);
+    expect(redeemed).toHaveLength(1);
+  });
+
+  it("refuses submissions the browser marks as coming from another site", async () => {
+    for (const site of ["cross-site", "same-site", "none"]) {
+      const { deps, redeemed } = world();
+      const response = await handle(
+        submit(GOOD_BOT_TOKEN, { origin: "https://admin.example", "sec-fetch-site": site }),
+        deps,
+      );
+      expect(response.status).toBe(403);
+      expect(redeemed).toEqual([]);
+    }
+  });
+
+  it("takes only form-encoded submissions, and doesn't count an empty one", async () => {
+    const { deps, redeemed } = world();
+    const json = new Request(formUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ botToken: GOOD_BOT_TOKEN }),
+    });
+    expect((await handle(json, deps)).status).toBe(415);
+
+    const empty = await handle(submit("   "), deps);
+    expect(empty.status).toBe(400);
+    expect(await empty.text()).toContain("Paste the bot token first.");
+    expect(redeemed).toEqual([]);
+  });
+
+  it("shows a try-again page when Access keys or the secret store can't be reached", async () => {
+    const down = world();
+    down.deps.authenticate = async () => {
+      throw new Error("Access keys returned 502");
+    };
+    expect((await handle(new Request(formUrl), down.deps)).status).toBe(503);
+
+    const { deps } = world();
+    expect((await handle(new Request("https://admin.example/forms/form-down"), deps)).status).toBe(
+      503,
+    );
+  });
+
+  it("escapes the agent id it shows", async () => {
+    const { deps } = world();
+    const html = await (
+      await handle(new Request("https://admin.example/forms/form-odd"), deps)
+    ).text();
+    expect(html).toContain("<code>&lt;i&gt;odd&lt;/i&gt;</code>");
+    expect(html).not.toContain("<i>odd</i>");
   });
 });

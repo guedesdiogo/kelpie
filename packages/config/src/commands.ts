@@ -8,6 +8,7 @@ import {
   type Role,
   type TimeZoneResult,
 } from "@kelpie/access";
+import type { ChannelFormsContract } from "@kelpie/channels";
 import { type AgentSettings, isAgentId, isAgentName, parseSettings } from "./settings.ts";
 
 /**
@@ -82,6 +83,8 @@ export interface ConfigPorts {
     listIdentities(): Promise<(ChannelIdentity & { status: IdentityStatus })[]>;
     setTimeZone(userId: string, timeZone: string): Promise<TimeZoneResult>;
   };
+  /** The secure forms that take a channel's secrets, in channel-egress (ADR-0013). */
+  channels: Pick<ChannelFormsContract, "createTelegramForm">;
 }
 
 export type CommandResult<T> =
@@ -92,6 +95,7 @@ export type CommandResult<T> =
         | "forbidden"
         | "invalid_input"
         | "unknown_agent"
+        | "unavailable"
         | Extract<IdentityResult, { ok: false }>["reason"];
     };
 
@@ -194,6 +198,27 @@ export function createConfigCommands(ports: ConfigPorts) {
       if (!identity) return invalid;
       const result = await ports.directory.disableIdentity(identity);
       return result.ok ? { ok: true, value: show(identity, result.status) } : result;
+    },
+
+    /**
+     * Starts connecting an agent's Telegram bot (Story 3.6): returns the path of a one-time secure
+     * form on the admin API, where the owner pastes the bot token. The token never passes through
+     * this command or a conversation (ADR-0013). From an agent's tool (Story 3.11) it needs the
+     * owner's confirmation first.
+     */
+    async connectTelegram(
+      actor: Actor,
+      input: unknown,
+    ): Promise<CommandResult<{ path: string; expiresAt: number }>> {
+      if (!isOwner(actor)) return forbidden;
+      const { agentId } = (input ?? {}) as { agentId?: unknown };
+      if (!isAgentId(agentId)) return invalid;
+      if (!(await ports.registry.get(agentId))) return { ok: false, reason: "unknown_agent" };
+      const form = await ports.channels.createTelegramForm(agentId);
+      if (!form.ok) {
+        return form.reason === "invalid_input" ? invalid : { ok: false, reason: "unavailable" };
+      }
+      return { ok: true, value: { path: `/forms/${form.token}`, expiresAt: form.expiresAt } };
     },
 
     /**
