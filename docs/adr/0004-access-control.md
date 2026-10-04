@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-03
 - Issue: [#13](https://github.com/guedesdiogo/kelpie/issues/13)
+- Amended by: [ADR-0015](0015-single-player-first.md) for phase 1 (single-player)
 
 ## Context
 

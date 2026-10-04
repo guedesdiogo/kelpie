@@ -23,6 +23,7 @@ The platform is not the hard part. The conversation engine (buffering, splitting
 **Requirements the owner added while reviewing the study:**
 
 - **Allowlist, always.** Only users configured in advance can talk to an agent, and only through channel identities enabled for them (a Telegram account, a WhatsApp number, a Slack user). Everyone else is ignored before any model is called.
+- **Single-player first.** In phase 1 only the owner talks to the agents, in direct conversations, and Postgres waits until a feature needs it. Colleagues, roles, grants and group chats return with multi-user, which has no date. Every record still carries a `userId`, so adding users doesn't mean a rewrite ([ADR-0015](adr/0015-single-player-first.md)).
 - **Permissions.** Each user has access to specific agents and specific content.
 - **A task board for agents.** Agents log every piece of background work on Kelpie's own board, and people can queue tasks there and comment on them, but can't move a task once the agent has started it ([ADR-0011](adr/0011-agent-task-board.md)).
 - **Conversational mode is a toggle.** Merging fragmented messages and splitting replies into paced bubbles can be switched on or off per agent.
@@ -340,6 +341,7 @@ Each decision is closed by an ADR in `docs/adr/` once its pull request merges.
 | [1.10 MVP scope and phases](https://github.com/guedesdiogo/kelpie/issues/11) | **Decided:** approved as proposed ([§13](#13-delivery-plan)) |
 | [1.12 Access control](https://github.com/guedesdiogo/kelpie/issues/13) | **Decided:** approved as proposed ([§4.6](#46-users-and-access-control)) |
 | [4.1 Agent task board](https://github.com/guedesdiogo/kelpie/issues/44) | **Decided:** Kelpie's own board, not GitHub Issues ([ADR-0011](adr/0011-agent-task-board.md)) |
+| [3.14 Single-player first](https://github.com/guedesdiogo/kelpie/issues/59) | **Decided:** phase 1 serves only the owner, with seams for multi-user ([ADR-0015](adr/0015-single-player-first.md)) |
 
 ## 12. Spikes before committing to a design
 
@@ -361,6 +363,8 @@ The owner approved this plan in [Decision 1.10](https://github.com/guedesdiogo/k
 | 2. Memory and tools | Per-user memory with supersession and Jev qualification; remote MCP and Composio; Slack; WhatsApp on a test number; per-agent and per-content grants |
 | 3. Agents and UI | Agents orchestrating agents; the management UI inspired by Bot Mode; skill staging by pull request and the curator; the subscription opt-in; Discord gateway |
 | 4. Hardening | Evals and golden sets, cross-worker tracing, the Artifacts backend |
+
+**Amended by [ADR-0015](adr/0015-single-player-first.md):** phase 1 is single-player. Its allowlist holds only the owner's identities, its channels ignore group chats, and Postgres is not part of it. Per-agent and per-content grants, colleagues, group chats and Postgres move to multi-user ([Epic 7](https://github.com/guedesdiogo/kelpie/issues/60)), which has no date.
 
 ## 14. Open questions no note answered
 
