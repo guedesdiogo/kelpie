@@ -15,7 +15,7 @@ The owner set a principle: once Kelpie is online with the minimum it needs (at l
   - one model key, as a secret the owner sets;
   - the owner's identity, registered through a bootstrap link.
 
-  The bootstrap link carries a one-time token that the owner generates and sets as a secret at deploy. The link expires, works once, and the bootstrap endpoint stays disabled after the owner registers. The owner then talks to a built-in setup agent in the webchat, which doubles as the setup console.
+  The bootstrap link carries a one-time token that the owner generates and sets as a secret at deploy. The token includes its own expiry time. It works once, and the bootstrap endpoint stays disabled after the owner registers. The owner then talks to a built-in setup agent in the webchat, which doubles as the setup console.
 - **One code path for every configuration change.**
   - Changes are typed configuration commands: create an agent, connect a channel, invite a user, grant access, connect a tool or MCP server, change a model or budget.
   - The admin API, the future management UI and the agents' own tools all call the same commands, with the same permission checks.

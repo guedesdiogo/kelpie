@@ -33,7 +33,7 @@ The platform is not the hard part. The conversation engine (buffering, splitting
 **What single-tenant removes** compared with the research brief:
 
 - tenant keys in every Durable Object name and every query;
-- per-tenant envelope encryption of secrets: platform secrets (channel tokens, API keys) fit in Worker secrets and the Secrets Store (100 per account). Tokens stored per user, such as MCP OAuth tokens, are still encrypted at the application level ([§4.11](#411-tools));
+- per-tenant envelope encryption of secrets: platform secrets (channel tokens, API keys) fit in Worker secrets and the Secrets Store (100 per account), and secrets added at runtime go to an encrypted store ([ADR-0013](adr/0013-self-configuration.md)). Tokens stored per user, such as MCP OAuth tokens, are still encrypted at the application level ([§4.11](#411-tools));
 - vendor ceilings shared by many tenants (they still apply to the one instance);
 - Meta Tech Provider onboarding, which note 06 ties to serving other businesses' numbers ([06 §1.1](research/06-chat-channels.md)): a company running Kelpie on its own WhatsApp number should not need it (our inference; Meta's regular business verification may still apply);
 - tenant onboarding, billing and cross-tenant reporting;

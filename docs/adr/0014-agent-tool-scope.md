@@ -12,13 +12,13 @@ Part of Hermes's reach comes from running on a machine: a shell, arbitrary binar
 
 Cloudflare Browser Run (formerly Browser Rendering) runs full Chrome sessions driven by code. Facts checked on 2026-10-03:
 - **Live View** lets a person watch or control a session in real time, for logins, MFA, CAPTCHA or sensitive input. A Live View URL carries a signed token, and whoever holds it can control the session. The URL must be opened within 5 minutes by default; that deadline can be raised to at most 1 hour. Once connected, the view lasts as long as the session.
-- **Sessions can be recorded.** A recording keeps the page's DOM and its network activity, with input fields masked. It stays at Cloudflare for 30 days. It is viewed in the dashboard, or fetched through the REST API with a Cloudflare API token.
+- **Sessions can be recorded.** A recording keeps the page's DOM and its network activity, including request headers and payloads; only input fields are masked in the page view. It stays at Cloudflare for 30 days. It is viewed in the dashboard, or fetched through the REST API with a Cloudflare API token.
 - **Pricing, on Workers Paid:**
   - 10 browser hours a month are included, then US$ 0.09 an hour;
   - up to 200 concurrent browsers per account;
   - with Workers bindings, US$ 2.00 per concurrent browser above 10, as a monthly average.
-- **Timeouts.** A session closes after 60 s of inactivity. `keep_alive` raises that inactivity timeout to at most 10 minutes; it isn't a limit on how long a session lasts.
-- **The Agents SDK's own browser tool** runs CDP code written by the model in Code Mode, on Dynamic Workers. That is a beta, paid surface, flagged as a cost risk in viability study §9 and §10.
+- **Timeouts.** A session closes after 60 s of inactivity. `keep_alive` raises that inactivity timeout to at most 10 minutes according to the limits page (the binding API reference allows 20); it isn't a limit on how long a session lasts. Story 4.2 measures what holds.
+- **The Agents SDK's own browser tool** runs CDP code written by the model in Code Mode, on Dynamic Workers. Dynamic Workers launched as an open beta in March 2026, need Workers Paid, and are flagged as a cost risk in viability study §9 and §10.
 
 ## Decision
 
@@ -33,7 +33,7 @@ Cloudflare Browser Run (formerly Browser Rendering) runs full Chrome sessions dr
   - The task moves to Waiting (ADR-0011), and the agent resumes after the person replies.
   - If the session or the link expired in the meantime, the agent starts the step again with a new link.
   - The agent never types credentials.
-- **Session recording is opt-in per agent,** for audit and debugging. Recordings are viewed in the Cloudflare dashboard, because agents hold no Cloudflare token (ADR-0013). They can contain personal data that Kelpie's erasure workflow (ADR-0006) can't reach before Cloudflare deletes them at 30 days, so the privacy notes must say so.
+- **Session recording is opt-in per agent,** for audit and debugging, and always off in a session that hands off to a person: a login submitted through Live View would land in the recorded network payloads. Recordings are viewed in the Cloudflare dashboard, because agents hold no Cloudflare token (ADR-0013). They can contain personal data that Kelpie's erasure workflow (ADR-0006) can't reach before Cloudflare deletes them at 30 days, so the privacy notes must say so.
 - **Executing shell commands, arbitrary binaries or files on a machine is out of the current scope.** If it is ever needed, it arrives as one more adapter behind the tool layer, such as a container sandbox or an external runner, without changing the core.
 
 ## Consequences
@@ -45,7 +45,7 @@ Cloudflare Browser Run (formerly Browser Rendering) runs full Chrome sessions dr
 ## Alternatives considered
 
 - **Containers for a shell and a filesystem now.** That would break the no-containers rule for a capability the current focus doesn't need.
-- **The Agents SDK's Code Mode browser tool.** It is flexible, but the model writes the code, and it runs on a beta, paid surface.
+- **The Agents SDK's Code Mode browser tool.** It is flexible, but the model writes the code, and it runs on Dynamic Workers (open beta since March 2026, Workers Paid).
 - **No browser.** It would leave out sites with no API, and every step that needs a person.
 
 ## References
