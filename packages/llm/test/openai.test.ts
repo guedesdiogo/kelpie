@@ -207,6 +207,20 @@ describe("OpenAIResponsesProvider", () => {
     });
   });
 
+  it("replays a reply kept without its native output as neutral text", async () => {
+    const { fetch, calls } = fakeFetch(sse(toolTurn));
+    const messages: ChatMessage[] = [
+      { role: "user", parts: [{ type: "text", text: "Tell me about Lisbon" }] },
+      { role: "assistant", parts: [{ type: "text", text: "Lisbon is the capital." }] },
+    ];
+    await collect(provider(fetch).stream(request({ messages })));
+
+    expect((requestAt(calls, 0).body.input as unknown[])[1]).toEqual({
+      role: "assistant",
+      content: "Lisbon is the capital.",
+    });
+  });
+
   it("rebuilds a reply from another provider without its reasoning", async () => {
     const { fetch, calls } = fakeFetch(sse(toolTurn));
     const messages: ChatMessage[] = [
@@ -255,7 +269,7 @@ describe("OpenAIResponsesProvider", () => {
     expect(finish.reason).toBe("length");
     expect(finish.message.parts).toEqual([{ type: "text", text: "Let me check the weather." }]);
     // A function call without its output in the next turn would be rejected.
-    expect(finish.message.native.content).toEqual([messageItem]);
+    expect(finish.message.native?.content).toEqual([messageItem]);
   });
 
   it.each([

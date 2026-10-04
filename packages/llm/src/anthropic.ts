@@ -124,7 +124,7 @@ function toMessageParam(message: ChatMessage): MessageParam {
       return {
         role: "assistant",
         content:
-          message.native.provider === "anthropic"
+          message.native?.provider === "anthropic"
             ? (message.native.content as ContentBlockParam[])
             : message.parts.flatMap(toForeignBlock),
       };

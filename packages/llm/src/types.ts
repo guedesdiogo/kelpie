@@ -32,11 +32,13 @@ export interface UserMessage {
  * - `parts` is provider-neutral. The runtime reads it, and it is what another provider receives.
  * - `native` is the provider's own output. It is replayed verbatim to the same provider, because
  *   thinking blocks and encrypted reasoning are only valid when every earlier turn is unchanged.
+ *   It is absent when only part of a reply was kept (a delivery cut short), and then every
+ *   provider receives the parts.
  */
 export interface AssistantMessage {
   role: "assistant";
   parts: (TextPart | ToolCallPart)[];
-  native: NativeOutput;
+  native?: NativeOutput;
 }
 
 export interface NativeOutput {
