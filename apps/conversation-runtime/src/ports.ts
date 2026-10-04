@@ -53,9 +53,28 @@ function productionPorts(env: Env): ConversationPorts {
   return {
     async generate(tier, request) {
       const generation = await gateway.generate(tier, request);
+      const dispose = () => (generation as Partial<Disposable>)[Symbol.dispose]?.();
       // Cancelling the stream doesn't cross RPC, so stopping early calls cancel() explicitly.
-      const cancel = () => void generation.cancel();
-      return { events: fromNdjsonStream(await generation.events(), cancel), cancel };
+      const cancel = () => {
+        generation.cancel().catch(() => {
+          // The call may already be over; there is nothing left to stop.
+        });
+      };
+      const stream = await generation.events();
+      async function* events() {
+        try {
+          yield* fromNdjsonStream(stream, cancel);
+        } finally {
+          dispose();
+        }
+      }
+      return {
+        events: events(),
+        cancel: () => {
+          cancel();
+          dispose();
+        },
+      };
     },
     // Channel egress arrives with the channel stories (3.6, 3.7).
     async send() {

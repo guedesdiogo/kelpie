@@ -9,13 +9,15 @@ CREATE TABLE `history` (
 );
 --> statement-breakpoint
 CREATE TABLE `inbound` (
-	`provider_message_id` text PRIMARY KEY NOT NULL,
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`provider_message_id` text NOT NULL,
 	`user_id` text NOT NULL,
 	`text` text NOT NULL,
 	`received_at` integer NOT NULL,
 	`turn_id` integer
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX `inbound_provider_message` ON `inbound` (`provider_message_id`);--> statement-breakpoint
 CREATE TABLE `outbox` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`turn_id` integer NOT NULL,
@@ -37,6 +39,8 @@ CREATE TABLE `turns` (
 	`generation` integer NOT NULL,
 	`status` text NOT NULL,
 	`attempts` integer NOT NULL,
+	`system_prompt` text NOT NULL,
+	`system_version` integer NOT NULL,
 	`reply` text,
 	`created_at` integer NOT NULL
 );

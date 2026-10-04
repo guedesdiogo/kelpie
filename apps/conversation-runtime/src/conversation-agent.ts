@@ -1,9 +1,15 @@
 import { CAPABILITIES, type ChannelCapabilities } from "@kelpie/channels";
 import { deliveredReply, planDelivery, planFlush } from "@kelpie/conversation";
-import type { AssistantMessage, ChatMessage, LlmEvent, ModelTier } from "@kelpie/llm";
+import {
+  type AssistantMessage,
+  type ChatMessage,
+  type LlmEvent,
+  MODEL_TIERS,
+  type ModelTier,
+} from "@kelpie/llm";
 import type { QuietWindowPolicy } from "@kelpie/qualifier";
 import { Agent, type FiberRecoveryContext } from "agents";
-import { and, asc, count, eq, isNull } from "drizzle-orm";
+import { and, asc, count, eq, inArray, isNull } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
@@ -31,6 +37,16 @@ export const DEFAULT_SETTINGS: ConversationSettings = {
   maxWaitMs: 10_000,
 };
 
+/** Bounds on what one conversation accepts. */
+export const LIMITS = {
+  /** Longer messages are refused; channels already cap theirs well below this. */
+  maxTextLength: 16_000,
+  /** With this many messages buffered, the turn starts at once. */
+  maxBuffered: 50,
+};
+
+const FIBER_RETENTION_MS = 24 * 60 * 60 * 1_000;
+
 /** One inbound message, already admitted by `ingress` (ADR-0004, ADR-0015). */
 export interface InboundMessage {
   providerMessageId: string;
@@ -40,14 +56,19 @@ export interface InboundMessage {
   destination: Destination;
 }
 
-export interface IngestResult {
-  duplicate: boolean;
-  /** When the buffered messages will be answered, or null if they already were. */
-  flushAt: number | null;
-}
+export type IngestResult =
+  | {
+      status: "accepted" | "duplicate";
+      /** When the buffered messages will be answered, or null if a turn already started. */
+      flushAt: number | null;
+    }
+  | { status: "rejected"; reason: "destination_mismatch" | "too_long" };
 
-interface ActiveTurn {
-  turnId: number;
+export type ConfigureResult =
+  | { ok: true; settings: ConversationSettings }
+  | { ok: false; reason: "invalid_settings" };
+
+interface TurnInFlight {
   controller: AbortController;
   call?: { cancel(): void };
 }
@@ -58,13 +79,19 @@ interface ActiveTurn {
  *   never `setTimeout`), with the quiet window from the end-of-turn decision;
  * - each turn runs as a durable fiber that calls the model, plans the bubbles and persists them in
  *   an outbox before sending them with pacing;
- * - a new message interrupts the turn in flight: the model call is cancelled, unsent bubbles are
- *   dropped, and history keeps only what the user saw, so the next turn knows what was said;
+ * - a new message interrupts the turn in flight: the turn is settled at once (unsent bubbles
+ *   dropped, history keeping only what the user saw) and its model call is cancelled, so the next
+ *   turn always starts from a settled history;
  * - after an eviction, recovery resends only bubbles still pending.
+ *
+ * The object trusts its caller, `ingress`, which admits senders before anything else. A
+ * conversation is bound to the destination of its first message.
  */
 export class ConversationAgent extends Agent<Env> {
   readonly #db: DrizzleSqliteDODatabase<typeof schema>;
-  #active: ActiveTurn | undefined;
+  readonly #inFlight = new Map<number, TurnInFlight>();
+  /** Serializes flush planning, so concurrent messages can't arm two schedules. */
+  #planning: Promise<void> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -74,7 +101,7 @@ export class ConversationAgent extends Agent<Env> {
       try {
         await migrate(this.#db, migrations);
       } catch (error) {
-        console.error("ConversationAgent migration failed", error);
+        console.error("ConversationAgent migration failed", errorName(error));
         throw error;
       }
     });
@@ -85,19 +112,30 @@ export class ConversationAgent extends Agent<Env> {
   }
 
   /** Overrides settings for this conversation. A new system prompt starts a new prompt version. */
-  configure(changes: Partial<ConversationSettings>): ConversationSettings {
+  configure(changes: unknown): ConfigureResult {
+    const parsed = parseSettings(changes);
+    if (!parsed) return { ok: false, reason: "invalid_settings" };
     const current = this.#settings();
-    const next = { ...current, ...changes };
+    const next = { ...current, ...parsed };
     if (next.systemPrompt !== current.systemPrompt) {
       this.#set("systemVersion", this.#systemVersion() + 1);
     }
     this.#set("settings", next);
-    return next;
+    return { ok: true, settings: next };
   }
 
-  /** Accepts one message. `now` defaults to the clock; tests pass it to control the schedule. */
-  async ingest(message: InboundMessage, now = this.#ports.now()): Promise<IngestResult> {
+  /** Accepts one message from `ingress`. */
+  async ingest(message: InboundMessage): Promise<IngestResult> {
+    const now = this.#ports.now();
+    if (message.text.length > LIMITS.maxTextLength)
+      return { status: "rejected", reason: "too_long" };
     capabilitiesFor(message.destination.channel);
+    const bound = this.#get<Destination | null>("destination", null);
+    if (!bound) this.#set("destination", message.destination);
+    else if (!sameDestination(bound, message.destination)) {
+      return { status: "rejected", reason: "destination_mismatch" };
+    }
+
     const inserted = this.#db
       .insert(schema.inbound)
       .values({
@@ -106,62 +144,72 @@ export class ConversationAgent extends Agent<Env> {
         text: message.text,
         receivedAt: now,
       })
-      .onConflictDoNothing()
-      .returning({ id: schema.inbound.providerMessageId })
+      .onConflictDoNothing({ target: schema.inbound.providerMessageId })
+      .returning({ id: schema.inbound.id })
       .all();
     if (inserted.length === 0) {
-      return { duplicate: true, flushAt: this.#get<number | null>("flushAt", null) };
+      return { status: "duplicate", flushAt: this.#get<number | null>("flushAt", null) };
     }
-    this.#set("destination", message.destination);
-    this.#interrupt();
 
-    const pending = this.#pendingInbound();
-    const flushAt = await planFlush(
-      pending.map((row) => ({ text: row.text, receivedAt: row.receivedAt })),
-      this.#settings(),
-      this.#ports.qualifier,
-    );
-    await this.#rearm(flushAt, now);
-    return { duplicate: false, flushAt: this.#get<number | null>("flushAt", null) };
+    this.#interrupt();
+    const epoch = this.#epoch() + 1;
+    this.#set("epoch", epoch);
+    await this.#serialized(() => this.#plan(epoch, now));
+    return { status: "accepted", flushAt: this.#get<number | null>("flushAt", null) };
   }
 
   /**
-   * Starts a turn with the buffered messages. The flush schedule calls it; calling it again, or
-   * with nothing buffered, does nothing.
+   * Starts a turn with the buffered messages. The flush schedule calls it with the buffer epoch it
+   * was armed for and is ignored once a newer message re-armed it; calling it again, or with
+   * nothing buffered, does nothing.
    */
-  async flush(): Promise<void> {
+  async flush(armed?: { epoch: number }): Promise<void> {
+    if (armed && armed.epoch !== this.#epoch()) return;
     await this.#cancelFlushSchedule();
+    this.#interrupt();
     const pending = this.#pendingInbound();
-    const first = pending[0];
-    if (!first) return;
+    if (pending.length === 0) return;
     const now = this.#ports.now();
+    const settings = this.#settings();
+    const systemVersion = this.#systemVersion();
     const turnId = this.#db.transaction((tx) => {
       const { id } = tx
         .insert(schema.turns)
-        .values({ generation: this.#generation(), status: "running", attempts: 0, createdAt: now })
-        .returning({ id: schema.turns.id })
-        .get();
-      for (const row of pending) {
-        tx.update(schema.inbound)
-          .set({ turnId: id })
-          .where(eq(schema.inbound.providerMessageId, row.providerMessageId))
-          .run();
-      }
-      tx.insert(schema.history)
         .values({
-          turnId: id,
-          role: "user",
-          userId: first.userId,
-          systemVersion: this.#systemVersion(),
-          message: {
-            role: "user",
-            parts: [{ type: "text", text: pending.map((row) => row.text).join("\n") }],
-          },
+          generation: this.#generation(),
+          status: "running",
+          attempts: 0,
+          systemPrompt: settings.systemPrompt,
+          systemVersion,
           createdAt: now,
         })
+        .returning({ id: schema.turns.id })
+        .get();
+      // The text moves into history; the inbound row keeps only what dedupe needs.
+      tx.update(schema.inbound)
+        .set({ turnId: id, text: "" })
+        .where(
+          inArray(
+            schema.inbound.id,
+            pending.map((row) => row.id),
+          ),
+        )
         .run();
+      for (const run of byAuthor(pending)) {
+        tx.insert(schema.history)
+          .values({
+            turnId: id,
+            role: "user",
+            userId: run.userId,
+            systemVersion,
+            message: { role: "user", parts: [{ type: "text", text: run.text }] },
+            createdAt: now,
+          })
+          .run();
+      }
       return id;
     });
+    await this.deleteFibers({ settledBefore: new Date(now - FIBER_RETENTION_MS) });
     await this.startFiber("turn", () => this.#runTurn(turnId), {
       idempotencyKey: `turn:${turnId}`,
       metadata: { turnId },
@@ -170,7 +218,7 @@ export class ConversationAgent extends Agent<Env> {
 
   /** The conversation as the model will see it next. */
   history(): ChatMessage[] {
-    return this.#messages();
+    return this.#messages(this.#systemVersion());
   }
 
   /** The bubbles of every turn, for inspection. */
@@ -187,31 +235,88 @@ export class ConversationAgent extends Agent<Env> {
       .all();
   }
 
+  /** The status of every turn, for inspection. */
+  turns(): { id: number; status: string; attempts: number }[] {
+    return this.#db
+      .select({ id: schema.turns.id, status: schema.turns.status, attempts: schema.turns.attempts })
+      .from(schema.turns)
+      .orderBy(asc(schema.turns.id))
+      .all();
+  }
+
   override async onFiberRecovered(ctx: FiberRecoveryContext) {
     if (ctx.name !== "turn") return;
-    const turnId = Number((ctx.metadata as { turnId?: number } | null)?.turnId);
-    const turn = this.#turn(turnId);
-    if (!turn || turn.status !== "running") return { status: "completed" as const };
-
-    if (turn.generation !== this.#generation()) {
-      this.#settle(turnId);
-    } else if (this.#outboxCount(turnId) > 0) {
-      // The reply was planned: resend only what is still pending.
-      this.#active = { turnId, controller: new AbortController() };
-      await this.#deliver(turnId);
-    } else if (turn.attempts < 2) {
-      await this.#runTurn(turnId);
-    } else {
-      this.#setStatus(turnId, "failed");
+    const turnId = (ctx.metadata as { turnId?: unknown } | null)?.turnId;
+    if (typeof turnId !== "number" || !Number.isInteger(turnId)) {
+      console.error("ConversationAgent: a turn fiber has no turn id", { fiberId: ctx.id });
+      return { status: "completed" as const };
+    }
+    try {
+      const turn = this.#turn(turnId);
+      if (turn?.status === "running") {
+        if (turn.generation !== this.#generation()) this.#settle(turnId, "interrupted");
+        // Continue in a new fiber: pacing must not run inside the recovery hook's time limit.
+        else {
+          await this.startFiber("turn", () => this.#resume(turnId), {
+            idempotencyKey: `turn:${turnId}:recovered:${ctx.id}`,
+            metadata: { turnId },
+          });
+        }
+      }
+    } catch (error) {
+      console.error("ConversationAgent: turn recovery failed", { turnId, error: errorName(error) });
+      this.#settle(turnId, "failed");
     }
     return { status: "completed" as const };
   }
 
   async #runTurn(turnId: number): Promise<void> {
+    await this.#guarded(turnId, (controller) => this.#call(turnId, controller));
+  }
+
+  /** Picks a recovered turn back up: resend pending bubbles, or call the model again once. */
+  async #resume(turnId: number): Promise<void> {
+    await this.#guarded(turnId, async (controller) => {
+      const turn = this.#turn(turnId);
+      if (turn?.status !== "running") return;
+      if (this.#outboxCount(turnId) > 0) {
+        // A bubble caught mid-send may or may not have arrived; it is sent again.
+        this.#db
+          .update(schema.outbox)
+          .set({ status: "pending" })
+          .where(and(eq(schema.outbox.turnId, turnId), eq(schema.outbox.status, "sending")))
+          .run();
+        await this.#deliver(turnId, controller.signal);
+      } else if (turn.attempts < 2) {
+        await this.#call(turnId, controller);
+      } else {
+        this.#settle(turnId, "failed");
+      }
+    });
+  }
+
+  /** Runs one step of a turn; any failure settles the turn instead of leaving it running. */
+  async #guarded(
+    turnId: number,
+    step: (controller: AbortController) => Promise<void>,
+  ): Promise<void> {
+    const flight: TurnInFlight = { controller: new AbortController() };
+    this.#inFlight.set(turnId, flight);
+    try {
+      await step(flight.controller);
+    } catch (error) {
+      console.error("ConversationAgent: turn failed", { turnId, error: errorName(error) });
+      this.#settle(turnId, "failed");
+    } finally {
+      if (this.#inFlight.get(turnId) === flight) this.#inFlight.delete(turnId);
+    }
+  }
+
+  async #call(turnId: number, controller: AbortController): Promise<void> {
     const turn = this.#turn(turnId);
-    if (!turn || turn.status !== "running") return;
+    if (turn?.status !== "running") return;
     if (turn.generation !== this.#generation()) {
-      this.#settle(turnId);
+      this.#settle(turnId, "interrupted");
       return;
     }
     this.#db
@@ -221,45 +326,43 @@ export class ConversationAgent extends Agent<Env> {
       .run();
 
     const settings = this.#settings();
-    const active: ActiveTurn = { turnId, controller: new AbortController() };
-    this.#active = active;
-    let finish: Extract<LlmEvent, { type: "finish" }> | undefined;
-    try {
-      const call = await this.#ports.generate(settings.tier, {
-        system: settings.systemPrompt,
-        messages: this.#messages(),
-        maxOutputTokens: settings.maxOutputTokens,
-      });
-      active.call = call;
-      if (active.controller.signal.aborted) call.cancel();
-      else {
-        for await (const event of call.events) {
-          if (event.type === "finish") finish = event;
-        }
-      }
-    } catch (error) {
-      if (this.#isStale(turn.generation)) {
-        this.#settle(turnId);
-        return;
-      }
-      console.error("ConversationAgent: the model call failed", error);
-      this.#setStatus(turnId, "failed");
-      return;
-    }
-    if (this.#isStale(turn.generation)) {
-      this.#settle(turnId);
-      return;
-    }
-    if (!finish || finish.reason === "refusal") {
-      this.#setStatus(turnId, "refused");
+    const call = await this.#ports.generate(settings.tier, {
+      system: turn.systemPrompt,
+      messages: this.#messages(turn.systemVersion),
+      maxOutputTokens: settings.maxOutputTokens,
+    });
+    const flight = this.#inFlight.get(turnId);
+    if (flight) flight.call = call;
+    if (controller.signal.aborted) {
+      call.cancel();
       return;
     }
 
-    const destination = this.#destination();
+    let finish: Extract<LlmEvent, { type: "finish" }> | undefined;
+    try {
+      for await (const event of call.events) {
+        if (event.type === "finish") finish = event;
+      }
+    } catch (error) {
+      // An interruption cancels the call; the turn is already settled.
+      if (controller.signal.aborted || !this.#isRunning(turnId)) return;
+      throw error;
+    }
+    if (!this.#isRunning(turnId)) return;
+    if (!finish) throw new Error("The model stream ended without a reply");
+    if (finish.reason === "refusal") {
+      this.#db
+        .update(schema.turns)
+        .set({ status: "refused" })
+        .where(eq(schema.turns.id, turnId))
+        .run();
+      return;
+    }
+
     const bubbles = planDelivery(
       textOf(finish.message),
       settings.conversational,
-      capabilitiesFor(destination.channel),
+      capabilitiesFor(this.#destination().channel),
     );
     const reply = finish.message;
     this.#db.transaction((tx) => {
@@ -270,17 +373,14 @@ export class ConversationAgent extends Agent<Env> {
           .run();
       });
     });
-    await this.#deliver(turnId);
+    await this.#deliver(turnId, controller.signal);
   }
 
-  /** Sends the turn's pending bubbles in order, stopping as soon as the turn is interrupted. */
-  async #deliver(turnId: number): Promise<void> {
-    const turn = this.#turn(turnId);
-    if (!turn) return;
-    const settings = this.#settings();
+  /** Sends the turn's pending bubbles in order, stopping as soon as the turn is settled. */
+  async #deliver(turnId: number, signal: AbortSignal): Promise<void> {
+    const conversational = this.#settings().conversational;
     const destination = this.#destination();
     const capabilities = capabilitiesFor(destination.channel);
-    const signal = this.#active?.turnId === turnId ? this.#active.controller.signal : undefined;
     const rows = this.#db
       .select()
       .from(schema.outbox)
@@ -289,37 +389,48 @@ export class ConversationAgent extends Agent<Env> {
       .all();
 
     for (const row of rows) {
-      if (this.#isStale(turn.generation)) break;
-      try {
-        if (settings.conversational && capabilities.typing.supported) {
+      if (signal.aborted || !this.#isRunning(turnId)) return;
+      if (conversational && capabilities.typing.supported) {
+        try {
           await this.#ports.typing(destination);
+        } catch (error) {
+          // "Typing" is a courtesy; failing to show it doesn't stop the reply.
+          console.error("ConversationAgent: typing failed", { turnId, error: errorName(error) });
         }
-        await this.#ports.sleep(row.delayMs, signal ?? new AbortController().signal);
-      } catch {
-        break;
       }
-      if (this.#isStale(turn.generation)) break;
-      await this.#ports.send(destination, row.text);
-      this.#db
-        .update(schema.outbox)
-        .set({ status: "sent", sentAt: this.#ports.now() })
-        .where(eq(schema.outbox.id, row.id))
-        .run();
+      try {
+        await this.#ports.sleep(row.delayMs, signal);
+      } catch {
+        return;
+      }
+      if (!this.#isRunning(turnId)) return;
+      this.#setBubble(row.id, "sending");
+      try {
+        await this.#ports.send(destination, row.text);
+      } catch (error) {
+        if (this.#isRunning(turnId)) this.#setBubble(row.id, "pending");
+        throw error;
+      }
+      // If the turn was settled during the send, settling already counted this bubble as sent.
+      if (this.#isRunning(turnId)) this.#setBubble(row.id, "sent");
     }
-    this.#settle(turnId);
+    this.#settle(turnId, "finished");
   }
 
-  /** Ends a turn: drops unsent bubbles and records in history what the user actually saw. */
-  #settle(turnId: number): void {
+  /**
+   * Ends a turn: unsent bubbles are dropped, a bubble mid-send counts as sent, and history records
+   * what the user saw, under the system prompt version the turn ran with.
+   */
+  #settle(turnId: number, outcome: "finished" | "interrupted" | "failed"): void {
     const turn = this.#turn(turnId);
-    if (!turn || turn.status !== "running") return;
+    if (turn?.status !== "running") return;
     const rows = this.#db
       .select({ text: schema.outbox.text, status: schema.outbox.status })
       .from(schema.outbox)
       .where(eq(schema.outbox.turnId, turnId))
       .orderBy(asc(schema.outbox.seq))
       .all();
-    const sent = rows.filter((row) => row.status === "sent").length;
+    const sent = rows.filter((row) => row.status === "sent" || row.status === "sending").length;
     const kept = turn.reply
       ? deliveredReply(
           turn.reply,
@@ -327,8 +438,18 @@ export class ConversationAgent extends Agent<Env> {
           sent,
         )
       : null;
+    const status =
+      outcome === "failed"
+        ? "failed"
+        : rows.length > 0 && sent === rows.length
+          ? "delivered"
+          : "interrupted";
     const now = this.#ports.now();
     this.#db.transaction((tx) => {
+      tx.update(schema.outbox)
+        .set({ status: "sent", sentAt: now })
+        .where(and(eq(schema.outbox.turnId, turnId), eq(schema.outbox.status, "sending")))
+        .run();
       tx.update(schema.outbox)
         .set({ status: "cancelled" })
         .where(and(eq(schema.outbox.turnId, turnId), eq(schema.outbox.status, "pending")))
@@ -339,61 +460,80 @@ export class ConversationAgent extends Agent<Env> {
             turnId,
             role: "assistant",
             userId: null,
-            systemVersion: this.#systemVersion(),
+            systemVersion: turn.systemVersion,
             message: kept,
             createdAt: now,
           })
           .run();
       }
-      tx.update(schema.turns)
-        .set({ status: rows.length > 0 && sent === rows.length ? "delivered" : "interrupted" })
-        .where(eq(schema.turns.id, turnId))
-        .run();
+      // History holds what was kept; the full reply isn't needed any more.
+      tx.update(schema.turns).set({ status, reply: null }).where(eq(schema.turns.id, turnId)).run();
     });
-    if (this.#active?.turnId === turnId) this.#active = undefined;
   }
 
-  /** A new message arrived: the turn in flight, if any, stops where it is. */
+  /** A new message arrived: every turn in flight is settled now and its work stopped. */
   #interrupt(): void {
     const running = this.#db
       .select({ id: schema.turns.id })
       .from(schema.turns)
       .where(eq(schema.turns.status, "running"))
-      .get();
-    if (!running) return;
+      .all();
+    if (running.length === 0) return;
     this.#set("generation", this.#generation() + 1);
-    this.#active?.controller.abort();
-    this.#active?.call?.cancel();
+    for (const { id } of running) {
+      this.#settle(id, "interrupted");
+      const flight = this.#inFlight.get(id);
+      flight?.controller.abort();
+      flight?.call?.cancel();
+    }
   }
 
-  async #rearm(flushAt: number, now: number): Promise<void> {
+  async #plan(epoch: number, now: number): Promise<void> {
+    if (epoch !== this.#epoch()) return;
+    const pending = this.#pendingInbound();
+    if (pending.length === 0) return;
+    const flushAt =
+      pending.length >= LIMITS.maxBuffered
+        ? now
+        : await planFlush(
+            pending.map((row) => ({ text: row.text, receivedAt: row.receivedAt })),
+            this.#settings(),
+            this.#ports.qualifier,
+          );
+    // A newer message arrived while the decision ran; it plans with the fuller buffer.
+    if (epoch !== this.#epoch()) return;
     await this.#cancelFlushSchedule();
     if (flushAt <= now) {
       await this.flush();
       return;
     }
-    const schedule = await this.schedule(new Date(flushAt), "flush");
+    const schedule = await this.schedule(new Date(flushAt), "flush", { epoch });
     this.#set("flushSchedule", schedule.id);
     this.#set("flushAt", flushAt);
   }
 
-  async #cancelFlushSchedule(): Promise<void> {
-    const id = this.#get<string | null>("flushSchedule", null);
-    if (id) await this.cancelSchedule(id);
-    this.#set("flushSchedule", null);
-    this.#set("flushAt", null);
+  #serialized(step: () => Promise<void>): Promise<void> {
+    const run = this.#planning.then(step);
+    this.#planning = run.catch(() => {});
+    return run;
   }
 
-  #messages(): ChatMessage[] {
-    const version = this.#systemVersion();
+  async #cancelFlushSchedule(): Promise<void> {
+    const id = this.#get<string | null>("flushSchedule", null);
+    this.#set("flushSchedule", null);
+    this.#set("flushAt", null);
+    if (id) await this.cancelSchedule(id);
+  }
+
+  /** History for a request under `systemVersion`: replies from other versions lose native output. */
+  #messages(systemVersion: number): ChatMessage[] {
     return this.#db
       .select({ message: schema.history.message, systemVersion: schema.history.systemVersion })
       .from(schema.history)
       .orderBy(asc(schema.history.id))
       .all()
-      .map(({ message, systemVersion }) => {
-        // Reasoning produced under an earlier system prompt is no longer valid to replay.
-        if (message.role !== "assistant" || systemVersion === version) return message;
+      .map(({ message, systemVersion: version }) => {
+        if (message.role !== "assistant" || version === systemVersion) return message;
         const { native: _native, ...neutral } = message;
         return neutral;
       });
@@ -404,12 +544,16 @@ export class ConversationAgent extends Agent<Env> {
       .select()
       .from(schema.inbound)
       .where(isNull(schema.inbound.turnId))
-      .orderBy(asc(schema.inbound.receivedAt), asc(schema.inbound.providerMessageId))
+      .orderBy(asc(schema.inbound.id))
       .all();
   }
 
   #turn(turnId: number) {
     return this.#db.select().from(schema.turns).where(eq(schema.turns.id, turnId)).get();
+  }
+
+  #isRunning(turnId: number): boolean {
+    return this.#turn(turnId)?.status === "running";
   }
 
   #outboxCount(turnId: number): number {
@@ -422,13 +566,12 @@ export class ConversationAgent extends Agent<Env> {
     );
   }
 
-  #setStatus(turnId: number, status: "refused" | "failed"): void {
-    this.#db.update(schema.turns).set({ status }).where(eq(schema.turns.id, turnId)).run();
-    if (this.#active?.turnId === turnId) this.#active = undefined;
-  }
-
-  #isStale(generation: number): boolean {
-    return generation !== this.#generation();
+  #setBubble(id: number, status: "pending" | "sending" | "sent"): void {
+    this.#db
+      .update(schema.outbox)
+      .set({ status, ...(status === "sent" ? { sentAt: this.#ports.now() } : {}) })
+      .where(eq(schema.outbox.id, id))
+      .run();
   }
 
   #settings(): ConversationSettings {
@@ -437,6 +580,10 @@ export class ConversationAgent extends Agent<Env> {
 
   #generation(): number {
     return this.#get("generation", 0);
+  }
+
+  #epoch(): number {
+    return this.#get("epoch", 0);
   }
 
   #systemVersion(): number {
@@ -475,9 +622,83 @@ function capabilitiesFor(channel: Destination["channel"]): ChannelCapabilities {
   return capabilities;
 }
 
+function sameDestination(a: Destination, b: Destination): boolean {
+  return a.channel === b.channel && a.threadId === b.threadId;
+}
+
+/** Consecutive messages from one author become one history message, each keeping its author. */
+function byAuthor(rows: readonly { userId: string; text: string }[]) {
+  const runs: { userId: string; text: string }[] = [];
+  for (const row of rows) {
+    const last = runs.at(-1);
+    if (last && last.userId === row.userId) last.text = `${last.text}\n${row.text}`;
+    else runs.push({ userId: row.userId, text: row.text });
+  }
+  return runs;
+}
+
 function textOf(message: AssistantMessage): string {
   return message.parts
     .filter((part) => part.type === "text")
     .map((part) => part.text)
     .join("\n\n");
+}
+
+/** Error names only: messages can quote conversation content, which is personal data. */
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
+}
+
+const isInteger = (value: unknown, min: number, max: number): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
+
+/** Accepts only known settings with sane values; anything else invalidates the whole change. */
+function parseSettings(input: unknown): Partial<ConversationSettings> | null {
+  if (typeof input !== "object" || input === null) return null;
+  const changes = input as Record<string, unknown>;
+  const parsed: Partial<ConversationSettings> = {};
+  for (const [key, value] of Object.entries(changes)) {
+    switch (key) {
+      case "conversational":
+        if (typeof value !== "boolean") return null;
+        parsed.conversational = value;
+        break;
+      case "tier":
+        if (!MODEL_TIERS.includes(value as ModelTier)) return null;
+        parsed.tier = value as ModelTier;
+        break;
+      case "systemPrompt":
+        if (typeof value !== "string" || value.trim() === "" || value.length > 20_000) return null;
+        parsed.systemPrompt = value;
+        break;
+      case "maxOutputTokens":
+        if (!isInteger(value, 1, 64_000)) return null;
+        parsed.maxOutputTokens = value;
+        break;
+      case "maxWaitMs":
+        if (!isInteger(value, 0, 120_000)) return null;
+        parsed.maxWaitMs = value;
+        break;
+      case "quietWindow": {
+        const window = value as Partial<QuietWindowPolicy> | null;
+        if (
+          !window ||
+          !isInteger(window.finishedMs, 0, 60_000) ||
+          !isInteger(window.defaultMs, 0, 60_000) ||
+          !isInteger(window.unfinishedMs, 0, 60_000)
+        ) {
+          return null;
+        }
+        parsed.quietWindow = {
+          finishedMs: window.finishedMs,
+          defaultMs: window.defaultMs,
+          unfinishedMs: window.unfinishedMs,
+        };
+        break;
+      }
+      default:
+        return null;
+    }
+  }
+  return parsed;
 }
