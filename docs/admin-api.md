@@ -31,6 +31,7 @@ Every endpoint is a `POST` with a JSON body.
 | `/commands/addIdentity` | `{ "channel": "telegram", "channelUserId": "…" }` |
 | `/commands/enableIdentity` | same as `addIdentity` |
 | `/commands/disableIdentity` | same as `addIdentity` |
+| `/commands/setTimeZone` | `{ "timeZone": "America/Sao_Paulo" }`, an IANA name. Offsets like `+03:00` are refused; prefer a city name to `Etc/GMT±N`, whose sign is inverted (`Etc/GMT+3` is UTC-03:00) |
 | `/bootstrap` | `{ "token": "…" }` |
 
 **Answers:**

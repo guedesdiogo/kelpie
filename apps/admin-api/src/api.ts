@@ -56,6 +56,7 @@ const COMMANDS: Record<string, Command> = {
   addIdentity: (commands, actor, input) => commands.addIdentity(actor, input),
   enableIdentity: (commands, actor, input) => commands.enableIdentity(actor, input),
   disableIdentity: (commands, actor, input) => commands.disableIdentity(actor, input),
+  setTimeZone: (commands, actor, input) => commands.setTimeZone(actor, input),
 };
 
 /**

@@ -4,10 +4,12 @@ import {
   type Admission,
   CHANNEL_IDS,
   type ChannelIdentity,
+  canonicalTimeZone,
   type DirectoryContract,
   type IdentityResult,
   type IdentityStatus,
   type OwnerResult,
+  type TimeZoneResult,
 } from "@kelpie/access";
 import { and, eq } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
@@ -154,7 +156,11 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
    */
   admit(identity: ChannelIdentity, _agentId: string): Admission {
     const user = this.#db
-      .select({ userId: schema.users.userId, role: schema.users.role })
+      .select({
+        userId: schema.users.userId,
+        role: schema.users.role,
+        timeZone: schema.users.timeZone,
+      })
       .from(schema.identities)
       .innerJoin(schema.users, eq(schema.users.userId, schema.identities.userId))
       .where(
@@ -167,7 +173,30 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
       .get();
     if (!user) return { admitted: false, reason: "unknown_identity" };
     if (user.role !== "owner") return { admitted: false, reason: "no_grant" };
-    return { admitted: true, userId: user.userId, role: user.role };
+    return { admitted: true, userId: user.userId, role: user.role, timeZone: user.timeZone };
+  }
+
+  /** Sets a user's time zone, stored in its canonical IANA spelling. */
+  setTimeZone(userId: string, timeZone: string): TimeZoneResult {
+    const canonical = canonicalTimeZone(timeZone);
+    if (!canonical) return { ok: false, reason: "invalid_time_zone" };
+    const user = this.#db
+      .select({ timeZone: schema.users.timeZone })
+      .from(schema.users)
+      .where(eq(schema.users.userId, userId))
+      .get();
+    if (!user) return { ok: false, reason: "unknown_user" };
+    if (user.timeZone === canonical) return { ok: true, timeZone: canonical };
+    this.#db.transaction((tx) => {
+      tx.update(schema.users)
+        .set({ timeZone: canonical })
+        .where(eq(schema.users.userId, userId))
+        .run();
+      tx.insert(schema.auditLog)
+        .values({ at: new Date(), action: "user.time_zone_changed", userId })
+        .run();
+    });
+    return { ok: true, timeZone: canonical };
   }
 
   #identity(identity: ChannelIdentity) {

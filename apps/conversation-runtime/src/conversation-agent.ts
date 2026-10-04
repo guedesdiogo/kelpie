@@ -1,6 +1,13 @@
+import { canonicalTimeZone } from "@kelpie/access";
 import { CAPABILITIES, type ChannelCapabilities } from "@kelpie/channels";
 import type { AgentConfig, AgentSettings } from "@kelpie/config";
-import { deliveredReply, planDelivery, planFlush } from "@kelpie/conversation";
+import {
+  deliveredReply,
+  planDelivery,
+  planFlush,
+  stampOf,
+  withoutTypedStamps,
+} from "@kelpie/conversation";
 import type { AssistantMessage, ChatMessage, LlmEvent } from "@kelpie/llm";
 import { Agent, type FiberRecoveryContext } from "agents";
 import { and, asc, count, eq, inArray, isNull } from "drizzle-orm";
@@ -29,6 +36,10 @@ export interface InboundMessage {
   userId: string;
   text: string;
   destination: Destination;
+  /** When the provider says the message was sent (epoch ms). */
+  sentAt: number;
+  /** The author's IANA time zone, from their admission, or null while they haven't set one. */
+  timeZone: string | null;
 }
 
 export type IngestResult =
@@ -37,7 +48,10 @@ export type IngestResult =
       /** When the buffered messages will be answered, or null if a turn already started. */
       flushAt: number | null;
     }
-  | { status: "rejected"; reason: "destination_mismatch" | "agent_mismatch" | "too_long" };
+  | {
+      status: "rejected";
+      reason: "destination_mismatch" | "agent_mismatch" | "too_long" | "empty";
+    };
 
 interface TurnInFlight {
   controller: AbortController;
@@ -91,6 +105,11 @@ export class ConversationAgent extends Agent<Env> {
     const now = this.#ports.now();
     if (message.text.length > LIMITS.maxTextLength)
       return { status: "rejected", reason: "too_long" };
+    // A stamp the user typed could fake when the message was sent.
+    const text = withoutTypedStamps(message.text);
+    if (text.trim() === "") return { status: "rejected", reason: "empty" };
+    const sentAt = plausibleSendTime(message.sentAt, now);
+    const stamp = stampOf(sentAt, canonicalTimeZone(message.timeZone));
     capabilitiesFor(message.destination.channel);
     const bound = this.#get<Destination | null>("destination", null);
     if (bound && !sameDestination(bound, message.destination)) {
@@ -108,8 +127,10 @@ export class ConversationAgent extends Agent<Env> {
       .values({
         providerMessageId: message.providerMessageId,
         userId: message.userId,
-        text: message.text,
+        text,
         receivedAt: now,
+        sentAt,
+        stamp,
       })
       .onConflictDoNothing({ target: schema.inbound.providerMessageId })
       .returning({ id: schema.inbound.id })
@@ -602,6 +623,20 @@ function settingsOf(turn: { settings: AgentSettings | null }): AgentSettings {
   return turn.settings;
 }
 
+/** Earlier send times are wrong: most likely seconds where milliseconds were meant. */
+const EARLIEST_SEND_TIME = Date.UTC(2020, 0, 1);
+
+/**
+ * The provider's send time, or the arrival time when that one is missing, implausibly early or in
+ * the future.
+ */
+function plausibleSendTime(sentAt: number, now: number): number {
+  const CLOCK_SKEW_MS = 5 * 60_000;
+  const plausible =
+    Number.isSafeInteger(sentAt) && sentAt >= EARLIEST_SEND_TIME && sentAt <= now + CLOCK_SKEW_MS;
+  return plausible ? sentAt : now;
+}
+
 function capabilitiesFor(channel: Destination["channel"]): ChannelCapabilities {
   const capabilities: ChannelCapabilities | undefined = (
     CAPABILITIES as Partial<Record<Destination["channel"], ChannelCapabilities>>
@@ -614,15 +649,24 @@ function sameDestination(a: Destination, b: Destination): boolean {
   return a.channel === b.channel && a.threadId === b.threadId;
 }
 
-/** Consecutive messages from one author become one history message, each keeping its author. */
-function byAuthor(rows: readonly { userId: string; text: string }[]) {
-  const runs: { userId: string; text: string }[] = [];
+/**
+ * Consecutive messages from one author become one history message, each keeping its author. Each
+ * message starts with its stamp, unless the message before it in the same run has the same one.
+ */
+function byAuthor(rows: readonly { userId: string; text: string; stamp: string | null }[]) {
+  const runs: { userId: string; lines: string[]; lastStamp: string | null }[] = [];
   for (const row of rows) {
-    const last = runs.at(-1);
-    if (last && last.userId === row.userId) last.text = `${last.text}\n${row.text}`;
-    else runs.push({ userId: row.userId, text: row.text });
+    let run = runs.at(-1);
+    if (!run || run.userId !== row.userId) {
+      run = { userId: row.userId, lines: [], lastStamp: null };
+      runs.push(run);
+    }
+    run.lines.push(
+      row.stamp && row.stamp !== run.lastStamp ? `${row.stamp} ${row.text}` : row.text,
+    );
+    run.lastStamp = row.stamp;
   }
-  return runs;
+  return runs.map((run) => ({ userId: run.userId, text: run.lines.join("\n") }));
 }
 
 function textOf(message: AssistantMessage): string {

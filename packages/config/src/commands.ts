@@ -1,10 +1,12 @@
 import {
   CHANNEL_IDS,
   type ChannelIdentity,
+  canonicalTimeZone,
   type IdentityResult,
   type IdentityStatus,
   maskIdentityValue,
   type Role,
+  type TimeZoneResult,
 } from "@kelpie/access";
 import { type AgentSettings, isAgentId, isAgentName, parseSettings } from "./settings.ts";
 
@@ -78,6 +80,7 @@ export interface ConfigPorts {
     enableIdentity(identity: ChannelIdentity): Promise<IdentityResult>;
     disableIdentity(identity: ChannelIdentity): Promise<IdentityResult>;
     listIdentities(): Promise<(ChannelIdentity & { status: IdentityStatus })[]>;
+    setTimeZone(userId: string, timeZone: string): Promise<TimeZoneResult>;
   };
 }
 
@@ -191,6 +194,20 @@ export function createConfigCommands(ports: ConfigPorts) {
       if (!identity) return invalid;
       const result = await ports.directory.disableIdentity(identity);
       return result.ok ? { ok: true, value: show(identity, result.status) } : result;
+    },
+
+    /**
+     * Sets the owner's own time zone (Story 3.12), an IANA name. Messages sent from then on are
+     * stamped in it; earlier stamps stay as written.
+     */
+    async setTimeZone(actor: Actor, input: unknown): Promise<CommandResult<{ timeZone: string }>> {
+      if (!isOwner(actor)) return forbidden;
+      const { timeZone } = (input ?? {}) as { timeZone?: unknown };
+      const canonical = canonicalTimeZone(timeZone);
+      if (!canonical) return invalid;
+      const result = await ports.directory.setTimeZone(actor.userId, canonical);
+      if (result.ok) return { ok: true, value: { timeZone: result.timeZone } };
+      return result.reason === "unknown_user" ? { ok: false, reason: "unknown_user" } : invalid;
     },
   };
 }

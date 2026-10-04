@@ -18,6 +18,8 @@ export const users = sqliteTable(
     userId: text("user_id").primaryKey(),
     role: text("role", { enum: ["owner", "admin", "member"] }).notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    /** The user's IANA time zone, in its canonical spelling; null until they set one. */
+    timeZone: text("time_zone"),
   },
   (table) => [uniqueIndex("users_one_owner").on(table.role).where(sql`role = 'owner'`)],
 );
@@ -45,7 +47,13 @@ export const auditLog = sqliteTable("audit_log", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   at: integer("at", { mode: "timestamp_ms" }).notNull(),
   action: text("action", {
-    enum: ["owner.registered", "identity.added", "identity.enabled", "identity.disabled"],
+    enum: [
+      "owner.registered",
+      "identity.added",
+      "identity.enabled",
+      "identity.disabled",
+      "user.time_zone_changed",
+    ],
   }).notNull(),
   userId: text("user_id"),
   /** The channel only: the identity value is personal data. */

@@ -15,6 +15,13 @@
       "when": 1791075201840,
       "tag": "0001_polite_bastion",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791084667351,
+      "tag": "0002_spicy_secret_warriors",
+      "breakpoints": true
     }
   ]
 }

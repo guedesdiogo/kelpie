@@ -77,6 +77,12 @@ function fakePorts() {
       async listIdentities() {
         return [...identities.values()].map(({ identity, status }) => ({ ...identity, status }));
       },
+      async setTimeZone(userId, timeZone) {
+        calls.push(`setTimeZone ${userId} ${timeZone}`);
+        return userId === "u-owner"
+          ? { ok: true, timeZone }
+          : { ok: false, reason: "unknown_user" };
+      },
     },
   };
   return { ports, calls };
@@ -231,6 +237,39 @@ describe("configuration commands", () => {
     expect(await commands.renameAgent(owner, { id: "ghost", name: "Nobody" })).toEqual({
       ok: false,
       reason: "unknown_agent",
+    });
+  });
+
+  it("sets the owner's own time zone, in its canonical spelling", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+
+    expect(await commands.setTimeZone(owner, { timeZone: "america/sao_paulo" })).toEqual({
+      ok: true,
+      value: { timeZone: "America/Sao_Paulo" },
+    });
+    expect(calls).toContain("setTimeZone u-owner America/Sao_Paulo");
+  });
+
+  it.each([
+    ["an unknown zone", { timeZone: "Mars/Phobos" }],
+    ["a UTC offset", { timeZone: "-03:00" }],
+    ["no zone", {}],
+  ])("refuses %s as a time zone", async (_label, input) => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+    expect(await commands.setTimeZone(owner, input)).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("lets only the owner set a time zone", async () => {
+    const commands = createConfigCommands(fakePorts().ports);
+    expect(await commands.setTimeZone(member, { timeZone: "UTC" })).toEqual({
+      ok: false,
+      reason: "forbidden",
     });
   });
 });

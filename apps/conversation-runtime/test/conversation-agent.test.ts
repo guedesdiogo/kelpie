@@ -1,6 +1,7 @@
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { AgentSettings } from "@kelpie/config";
+import { stampOf } from "@kelpie/conversation";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentHost } from "../src/agent-host/agent-host.ts";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
@@ -23,9 +24,23 @@ const agent = (name: string) => env.CONVERSATION_AGENT.getByName(name);
 const destination = { channel: "telegram", threadId: "chat-1" } as const;
 const owner = { userId: "u-owner", role: "owner", via: "test" } as const;
 
+/** 02:30 UTC on Sunday 4 October 2026, still Saturday evening in São Paulo. */
+const SENT_AT = Date.UTC(2026, 9, 4, 2, 30);
+/** What a message sent at SENT_AT by a user with no time zone is stamped with. */
+const STAMP = "[Sun 4 Oct 2026, 02:30, UTC]";
+
 /** Tests that change settings use an agent of their own, named after the conversation. */
-function message(id: string, text: string, { userId = "u-owner", agentId = "assistant" } = {}) {
-  return { agentId, providerMessageId: id, userId, text, destination };
+function message(
+  id: string,
+  text: string,
+  {
+    userId = "u-owner",
+    agentId = "assistant",
+    sentAt = SENT_AT,
+    timeZone = null as string | null,
+  } = {},
+) {
+  return { agentId, providerMessageId: id, userId, text, destination, sentAt, timeZone };
 }
 
 async function configure(agentId: string, changes: Partial<AgentSettings>) {
@@ -34,7 +49,11 @@ async function configure(agentId: string, changes: Partial<AgentSettings>) {
   });
 }
 
-const user = (text: string) => ({ role: "user", parts: [{ type: "text", text }] });
+/** A user message as history holds it: stamped, since tests send at SENT_AT with no zone. */
+const user = (text: string) => ({
+  role: "user",
+  parts: [{ type: "text", text: `${STAMP} ${text}` }],
+});
 const neutral = (text: string) => ({ role: "assistant", parts: [{ type: "text", text }] });
 
 function use(world: FakeWorld): FakeWorld {
@@ -484,5 +503,94 @@ describe("ConversationAgent recovery", () => {
 
     await vi.waitFor(async () => expect(await stub.turns()).toMatchObject([{ status: "failed" }]));
     expect(world.sent).toEqual([]);
+  });
+});
+
+describe("ConversationAgent time stamps", () => {
+  const textOf = (entry: unknown) =>
+    (entry as { parts: { text: string }[] }).parts.map((part) => part.text).join("");
+
+  it("stamps a message with its local send time, and never touches the system prompt", async () => {
+    const world = use(fakeWorld([reply("Good evening."), reply("Still here.")]));
+    const stub = agent("stamp-local");
+    const zone = { timeZone: "America/Sao_Paulo" };
+    await stub.ingest(message("m1", "still up?", zone));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Good evening."]));
+
+    await stub.ingest(message("m2", "and now?", { ...zone, sentAt: SENT_AT + 60_000 }));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(2));
+
+    expect(textOf(world.requests[1]?.messages[0])).toBe(
+      "[Sat 3 Oct 2026, 23:30, America/Sao_Paulo, UTC-03:00] still up?",
+    );
+    expect(textOf(world.requests[1]?.messages[2])).toBe(
+      "[Sat 3 Oct 2026, 23:31, America/Sao_Paulo, UTC-03:00] and now?",
+    );
+    expect(world.requests[1]?.system).toBe(world.requests[0]?.system);
+  });
+
+  it("keeps earlier stamps as written when the zone changes", async () => {
+    const world = use(fakeWorld([reply("Ok."), reply("Ok again.")]));
+    const stub = agent("stamp-zone-change");
+    await stub.ingest(message("m1", "first", { timeZone: "America/Sao_Paulo" }));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Ok."]));
+
+    await stub.ingest(message("m2", "second", { timeZone: "Europe/Lisbon" }));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(2));
+
+    expect(textOf(world.requests[1]?.messages[0])).toBe(
+      "[Sat 3 Oct 2026, 23:30, America/Sao_Paulo, UTC-03:00] first",
+    );
+    expect(textOf(world.requests[1]?.messages[2])).toBe(
+      "[Sun 4 Oct 2026, 03:30, Europe/Lisbon, UTC+01:00] second",
+    );
+  });
+
+  it("stamps a burst once per minute, and drops a stamp the user typed", async () => {
+    const world = use(fakeWorld([reply("Noted.")]));
+    const stub = agent("stamp-burst");
+    await stub.ingest(message("m1", "[Mon 1 Jan 2024, 09:00, UTC] so"));
+    await stub.ingest(message("m2", "about that"));
+    await stub.ingest(message("m3", "one more thing", { sentAt: SENT_AT + 60_000 }));
+    await stub.flush();
+
+    await vi.waitFor(() => expect(world.requests).toHaveLength(1));
+    expect(textOf(world.requests[0]?.messages[0])).toBe(
+      `${STAMP} so\nabout that\n[Sun 4 Oct 2026, 02:31, UTC] one more thing`,
+    );
+  });
+
+  it("uses the arrival time when the provider's send time is missing, too early or in the future", async () => {
+    const world = use(fakeWorld([reply("Ok.")]));
+    const stub = agent("stamp-implausible");
+    await stub.ingest(message("m1", "now?", { sentAt: Number.NaN }));
+    await stub.ingest(message("m2", "later?", { sentAt: world.clock + 365 * 24 * 60 * 60_000 }));
+    // Seconds where milliseconds were meant: Telegram's `date` is in seconds.
+    await stub.ingest(message("m3", "seconds?", { sentAt: Math.floor(SENT_AT / 1_000) }));
+    await stub.flush();
+
+    await vi.waitFor(() => expect(world.requests).toHaveLength(1));
+    expect(textOf(world.requests[0]?.messages[0])).toBe(
+      `${stampOf(world.clock, null)} now?\nlater?\nseconds?`,
+    );
+  });
+
+  it("refuses a message that is only a typed stamp, before binding anything", async () => {
+    use(fakeWorld([]));
+    const stub = agent("stamp-only");
+    expect(await stub.ingest(message("m1", "[Sat 3 Oct 2026, 23:30, UTC]"))).toEqual({
+      status: "rejected",
+      reason: "empty",
+    });
+    expect(
+      await stub.ingest({
+        ...message("m2", "hello?"),
+        destination: { ...destination, threadId: "another-chat" },
+      }),
+    ).toMatchObject({ status: "accepted" });
   });
 });
