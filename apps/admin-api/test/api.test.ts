@@ -64,6 +64,9 @@ function world({
       async listIdentities() {
         return [];
       },
+      async setTimeZone(_userId, timeZone) {
+        return { ok: true, timeZone };
+      },
     },
   };
   const bootstraps: { userId: string; accessSub: string }[] = [];
@@ -77,7 +80,7 @@ function world({
         if (found?.status !== "enabled") {
           return { admitted: false, reason: "unknown_identity" };
         }
-        return { admitted: true, userId: found.userId, role };
+        return { admitted: true, userId: found.userId, role, timeZone: null };
       },
       async ownerExists() {
         return ownerId !== null;
@@ -155,6 +158,15 @@ describe("admin API commands", () => {
       status: 403,
       body: { ok: false, reason: "no_owner" },
     });
+  });
+
+  it("sets the owner's time zone", async () => {
+    const { deps } = world();
+    expect(await call(deps, "/commands/setTimeZone", { timeZone: "America/Sao_Paulo" })).toEqual({
+      status: 200,
+      body: { ok: true, value: { timeZone: "America/Sao_Paulo" } },
+    });
+    expect((await call(deps, "/commands/setTimeZone", { timeZone: "+03:00" })).status).toBe(400);
   });
 
   it("lets the commands refuse an admitted caller who isn't the owner", async () => {

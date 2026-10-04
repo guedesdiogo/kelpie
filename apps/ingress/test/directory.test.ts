@@ -37,6 +37,7 @@ describe("Directory", () => {
         admitted: true,
         userId: OWNER,
         role: "owner",
+        timeZone: null,
       });
     }
   });
@@ -187,6 +188,7 @@ describe("Directory first-run bootstrap", () => {
       admitted: true,
       userId: OWNER,
       role: "owner",
+      timeZone: null,
     });
     const rows = await runInDurableObject(stub, (_instance: Directory, state) =>
       state.storage.sql.exec("SELECT action, channel FROM audit_log ORDER BY id").toArray(),
@@ -235,5 +237,32 @@ describe("Directory first-run bootstrap", () => {
     expect(await stub.disableIdentity(access)).toEqual(refused);
     expect(await stub.enableIdentity(access)).toEqual(refused);
     expect(await stub.admit(access, ADMIN_AGENT_ID)).toMatchObject({ admitted: true });
+  });
+});
+
+describe("Directory time zone", () => {
+  it("stores a user's zone in its canonical spelling, and admits with it", async () => {
+    const stub = await withEnabledOwner("tz");
+    expect(await stub.setTimeZone(OWNER, "america/sao_paulo")).toEqual({
+      ok: true,
+      timeZone: "America/Sao_Paulo",
+    });
+    expect(await stub.admit(telegram, "sales")).toMatchObject({ timeZone: "America/Sao_Paulo" });
+    expect(await auditActions(stub)).toContain("user.time_zone_changed");
+  });
+
+  it("refuses what isn't an IANA zone, and a user it doesn't know", async () => {
+    const stub = await withEnabledOwner("tz-refusals");
+    for (const zone of ["Mars/Phobos", "+03:00", ""]) {
+      expect(await stub.setTimeZone(OWNER, zone)).toEqual({
+        ok: false,
+        reason: "invalid_time_zone",
+      });
+    }
+    expect(await stub.setTimeZone("u-ghost", "UTC")).toEqual({
+      ok: false,
+      reason: "unknown_user",
+    });
+    expect(await stub.admit(telegram, "sales")).toMatchObject({ timeZone: null });
   });
 });

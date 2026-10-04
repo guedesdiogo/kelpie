@@ -40,10 +40,11 @@ export interface ChannelIdentity {
 
 /**
  * Whether a sender may reach an agent. A refusal is a normal outcome, not an error: the channel
- * route acknowledges the webhook and drops the message, so the provider doesn't retry it.
+ * route acknowledges the webhook and drops the message, so the provider doesn't retry it. An
+ * admission carries the user's IANA time zone, or null while they haven't set one.
  */
 export type Admission =
-  | { admitted: true; userId: string; role: Role }
+  | { admitted: true; userId: string; role: Role; timeZone: string | null }
   | { admitted: false; reason: "unknown_identity" | "no_grant" | "group_chat" };
 
 /**
@@ -55,6 +56,24 @@ export function maskIdentityValue(value: string): string {
   if (characters.length <= 4) return "•".repeat(characters.length);
   return `${characters.slice(0, 2).join("")}${"•".repeat(characters.length - 4)}${characters.slice(-2).join("")}`;
 }
+
+/**
+ * The canonical IANA name for a time zone (`america/sao_paulo` becomes `America/Sao_Paulo`), or
+ * null if it isn't one. UTC offsets such as `+03:00` are refused: a zone also knows its daylight
+ * saving rules.
+ */
+export function canonicalTimeZone(value: unknown): string | null {
+  if (typeof value !== "string" || !/^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$/.test(value)) return null;
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone: value }).resolvedOptions().timeZone;
+  } catch {
+    return null;
+  }
+}
+
+export type TimeZoneResult =
+  | { ok: true; timeZone: string }
+  | { ok: false; reason: "unknown_user" | "invalid_time_zone" };
 
 /** How another Worker sees an object's methods: every call returns a promise. */
 export type Remote<T> = {
@@ -87,4 +106,5 @@ export interface DirectoryContract {
   enableIdentity(identity: ChannelIdentity): IdentityResult;
   disableIdentity(identity: ChannelIdentity): IdentityResult;
   listIdentities(): (ChannelIdentity & { status: IdentityStatus })[];
+  setTimeZone(userId: string, timeZone: string): TimeZoneResult;
 }

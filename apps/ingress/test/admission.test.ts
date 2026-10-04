@@ -29,6 +29,7 @@ describe("admitSender", () => {
       admitted: true,
       userId: "u-owner",
       role: "owner",
+      timeZone: null,
     });
     expect(await admitSender(env, event("9999"))).toEqual({
       admitted: false,

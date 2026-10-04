@@ -17,6 +17,13 @@ export const inbound = sqliteTable(
     userId: text("user_id").notNull(),
     text: text("text").notNull(),
     receivedAt: integer("received_at").notNull(),
+    /** When the provider says the message was sent. */
+    sentAt: integer("sent_at"),
+    /**
+     * That time in the author's zone, rendered when the message arrived and never again, so a later
+     * zone change doesn't rewrite it (Story 3.12). History gets it in front of the text.
+     */
+    stamp: text("stamp"),
     turnId: integer("turn_id"),
   },
   (table) => [uniqueIndex("inbound_provider_message").on(table.providerMessageId)],

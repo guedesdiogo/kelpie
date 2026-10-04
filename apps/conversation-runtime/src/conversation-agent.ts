@@ -1,6 +1,12 @@
 import { CAPABILITIES, type ChannelCapabilities } from "@kelpie/channels";
 import type { AgentConfig, AgentSettings } from "@kelpie/config";
-import { deliveredReply, planDelivery, planFlush } from "@kelpie/conversation";
+import {
+  deliveredReply,
+  planDelivery,
+  planFlush,
+  stampOf,
+  withoutTypedStamps,
+} from "@kelpie/conversation";
 import type { AssistantMessage, ChatMessage, LlmEvent } from "@kelpie/llm";
 import { Agent, type FiberRecoveryContext } from "agents";
 import { and, asc, count, eq, inArray, isNull } from "drizzle-orm";
@@ -29,6 +35,10 @@ export interface InboundMessage {
   userId: string;
   text: string;
   destination: Destination;
+  /** When the provider says the message was sent (epoch ms). */
+  sentAt: number;
+  /** The author's IANA time zone, from their admission, or null while they haven't set one. */
+  timeZone: string | null;
 }
 
 export type IngestResult =
@@ -108,8 +118,11 @@ export class ConversationAgent extends Agent<Env> {
       .values({
         providerMessageId: message.providerMessageId,
         userId: message.userId,
-        text: message.text,
+        // A stamp the user typed could fake when the message was sent.
+        text: withoutTypedStamps(message.text),
         receivedAt: now,
+        sentAt: message.sentAt,
+        stamp: stampOf(message.sentAt, message.timeZone),
       })
       .onConflictDoNothing({ target: schema.inbound.providerMessageId })
       .returning({ id: schema.inbound.id })
@@ -614,15 +627,24 @@ function sameDestination(a: Destination, b: Destination): boolean {
   return a.channel === b.channel && a.threadId === b.threadId;
 }
 
-/** Consecutive messages from one author become one history message, each keeping its author. */
-function byAuthor(rows: readonly { userId: string; text: string }[]) {
-  const runs: { userId: string; text: string }[] = [];
+/**
+ * Consecutive messages from one author become one history message, each keeping its author. Each
+ * message starts with its stamp, unless the message before it in the same run has the same one.
+ */
+function byAuthor(rows: readonly { userId: string; text: string; stamp: string | null }[]) {
+  const runs: { userId: string; lines: string[]; lastStamp: string | null }[] = [];
   for (const row of rows) {
-    const last = runs.at(-1);
-    if (last && last.userId === row.userId) last.text = `${last.text}\n${row.text}`;
-    else runs.push({ userId: row.userId, text: row.text });
+    let run = runs.at(-1);
+    if (!run || run.userId !== row.userId) {
+      run = { userId: row.userId, lines: [], lastStamp: null };
+      runs.push(run);
+    }
+    run.lines.push(
+      row.stamp && row.stamp !== run.lastStamp ? `${row.stamp} ${row.text}` : row.text,
+    );
+    run.lastStamp = row.stamp;
   }
-  return runs;
+  return runs.map((run) => ({ userId: run.userId, text: run.lines.join("\n") }));
 }
 
 function textOf(message: AssistantMessage): string {

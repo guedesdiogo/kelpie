@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `time_zone` text;
