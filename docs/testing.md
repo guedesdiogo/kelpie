@@ -36,6 +36,8 @@ The `ConversationAgent` reaches the model, the channel, the clock and timers thr
 
 A promise created inside a Durable Object can't be resolved from the test's context ("Cannot perform I/O on behalf of a different Durable Object"). A fake that must wait for the test therefore polls a plain flag, or waits on a timer of its own.
 
+A `Response` created in a test can't have its body read inside a Worker call either, so a fake `fetch` builds each response when it is called, from a factory.
+
 Fiber recovery after an eviction runs when the fiber's heartbeat alarm fires on the new instance. To test it, call `evictDurableObject(stub)`, then `runDurableObjectAlarm(stub)`.
 
 `llm-gateway` is a service binding that doesn't exist in tests, so `vitest.config.ts` replaces it with a stub; the fake model port means it's never called.

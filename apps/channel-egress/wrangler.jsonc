@@ -1,0 +1,19 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "kelpie-channel-egress",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+  // Reached only through service bindings from Kelpie's other Workers.
+  "workers_dev": false,
+  "preview_urls": false,
+  // Drizzle's Durable Object migrations import .sql files as text.
+  "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
+  // The key that encrypts the secret store (ADR-0013): 32 random bytes, base64. `docs/secrets.md`
+  // says how to make it.
+  "secrets": { "required": ["SECRETS_KEY"] },
+  "durable_objects": {
+    "bindings": [{ "name": "SECRET_STORE", "class_name": "SecretStore" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SecretStore"] }]
+}
