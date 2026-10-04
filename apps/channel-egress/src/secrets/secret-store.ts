@@ -11,6 +11,8 @@ export const SECRET_STORE_NAME = "secrets";
 
 /** A secure-form link works for this long, and once. */
 const FORM_LIFETIME_MS = 15 * 60_000;
+/** A form closes after this many refused values. */
+const MAX_REFUSALS = 5;
 
 export type FormKind = "telegram";
 
@@ -51,20 +53,37 @@ export class SecretStore extends DurableObject<Env> {
     return { token, expiresAt };
   }
 
+  /** Whether the store can read and write: its key is present and well formed. */
+  async ready(): Promise<boolean> {
+    return (await this.#loadKey()) !== null;
+  }
+
   /** What a form is for, while it is still open. */
   async describeForm(token: string): Promise<{ agentId: string; kind: FormKind } | null> {
-    const tokenHash = await sha256(token);
-    const form = this.#db
-      .select({ agentId: schema.forms.agentId, kind: schema.forms.kind })
-      .from(schema.forms)
-      .where(and(eq(schema.forms.tokenHash, tokenHash), gt(schema.forms.expiresAt, Date.now())))
-      .get();
-    return form ?? null;
+    const form = await this.#openForm(token);
+    return form ? { agentId: form.agentId, kind: form.kind } : null;
+  }
+
+  /** Counts a refused value; after a few the form closes. Returns whether it is still open. */
+  async refuseValue(token: string): Promise<boolean> {
+    const form = await this.#openForm(token);
+    if (!form) return false;
+    if (form.refusals + 1 >= MAX_REFUSALS) {
+      this.#db.delete(schema.forms).where(eq(schema.forms.tokenHash, form.tokenHash)).run();
+      return false;
+    }
+    this.#db
+      .update(schema.forms)
+      .set({ refusals: form.refusals + 1 })
+      .where(eq(schema.forms.tokenHash, form.tokenHash))
+      .run();
+    return true;
   }
 
   /**
-   * Closes a form and stores its value, encrypted, in the form's slot. The form is claimed before
-   * anything is awaited, so two submissions of one link can't both store.
+   * Closes a form and stores its value, encrypted, in the form's slot. The value is sealed first;
+   * claiming the form and storing it then happen together, with nothing awaited between, so two
+   * submissions of one link can't both store and a failure can't spend the form for nothing.
    */
   async redeemForm(
     token: string,
@@ -74,22 +93,27 @@ export class SecretStore extends DurableObject<Env> {
   > {
     const key = await this.#loadKey();
     if (!key) return { ok: false, reason: "store_unavailable" };
-    const tokenHash = await sha256(token);
-    const form = this.#db
-      .delete(schema.forms)
-      .where(and(eq(schema.forms.tokenHash, tokenHash), gt(schema.forms.expiresAt, Date.now())))
-      .returning()
-      .get();
+    const form = await this.#openForm(token);
     if (!form) return { ok: false, reason: "unknown_form" };
     const slot = slotFor(form.kind, form.agentId);
     const sealed = await seal(key, slot, value);
-    const updatedAt = Date.now();
-    this.#db
-      .insert(schema.secrets)
-      .values({ slot, ...sealed, updatedAt })
-      .onConflictDoUpdate({ target: schema.secrets.slot, set: { ...sealed, updatedAt } })
-      .run();
-    return { ok: true, agentId: form.agentId };
+    const claimed = this.#db.transaction((tx) => {
+      const still = tx
+        .delete(schema.forms)
+        .where(
+          and(eq(schema.forms.tokenHash, form.tokenHash), gt(schema.forms.expiresAt, Date.now())),
+        )
+        .returning({ tokenHash: schema.forms.tokenHash })
+        .get();
+      if (!still) return false;
+      const updatedAt = Date.now();
+      tx.insert(schema.secrets)
+        .values({ slot, ...sealed, updatedAt })
+        .onConflictDoUpdate({ target: schema.secrets.slot, set: { ...sealed, updatedAt } })
+        .run();
+      return true;
+    });
+    return claimed ? { ok: true, agentId: form.agentId } : { ok: false, reason: "unknown_form" };
   }
 
   /** The plaintext of one slot. Only channel-egress calls this. */
@@ -103,14 +127,34 @@ export class SecretStore extends DurableObject<Env> {
     return value === null ? { ok: false, reason: "undecryptable" } : { ok: true, value };
   }
 
-  /** A missing or malformed key leaves the store closed: nothing is read or written. */
-  #loadKey(): Promise<CryptoKey | null> {
+  async #openForm(token: string) {
+    if (!isFormToken(token)) return undefined;
+    const tokenHash = await sha256(token);
+    return this.#db
+      .select()
+      .from(schema.forms)
+      .where(and(eq(schema.forms.tokenHash, tokenHash), gt(schema.forms.expiresAt, Date.now())))
+      .get();
+  }
+
+  /**
+   * A missing or malformed key leaves the store closed: nothing is read or written. A failed
+   * import isn't kept, so a corrected secret is picked up.
+   */
+  async #loadKey(): Promise<CryptoKey | null> {
     this.#key ??= importSecretsKey(this.env.SECRETS_KEY).catch(() => {
       console.error("SecretStore: SECRETS_KEY is missing or isn't 32 bytes of base64");
       return null;
     });
-    return this.#key;
+    const key = await this.#key;
+    if (!key) this.#key = undefined;
+    return key;
   }
+}
+
+/** Form tokens are 32 random bytes in base64url: 43 characters. */
+export function isFormToken(token: unknown): token is string {
+  return typeof token === "string" && token.length <= 64 && /^[A-Za-z0-9_-]+$/.test(token);
 }
 
 function slotFor(kind: FormKind, agentId: string): string {

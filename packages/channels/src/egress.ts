@@ -35,12 +35,14 @@ export interface ChannelFormsContract {
   createTelegramForm(
     agentId: string,
   ): Promise<
-    { ok: true; token: string; expiresAt: number } | { ok: false; reason: "invalid_input" }
+    | { ok: true; token: string; expiresAt: number }
+    | { ok: false; reason: "invalid_input" | "store_unavailable" }
   >;
   describeForm(
     token: string,
   ): Promise<
-    { ok: true; agentId: string; kind: "telegram" } | { ok: false; reason: "unknown_form" }
+    | { ok: true; agentId: string; kind: "telegram" }
+    | { ok: false; reason: "unknown_form" | "store_unavailable" }
   >;
   redeemTelegramForm(
     token: string,

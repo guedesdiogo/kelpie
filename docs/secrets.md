@@ -21,8 +21,10 @@ Kelpie keeps two kinds of secret (ADR-0013).
 - **Forms.**
   - A link carries a random 256-bit token. The store keeps only its SHA-256.
   - It expires after 15 minutes and works once.
-  - A Telegram bot token is checked with `getMe` before it is stored, so a refused token leaves the form open for another try.
-- **Failing closed.** A missing or malformed `SECRETS_KEY` keeps the store closed: nothing is read or written.
+  - A Telegram bot token is checked with `getMe` before it is stored, so a refused token leaves the form open for another try. Five refused values close it.
+  - The value is encrypted before the form is claimed, and claiming and storing happen in one transaction, so two submissions can't both store and a failure can't spend the form.
+- **Failing closed.** A missing or malformed `SECRETS_KEY` keeps the store closed: nothing is read or written, and no token is sent to Telegram to be checked.
+- **The trust boundary is the account.** A binding is the authorization: any Worker bound to an entrypoint can call it for any agent, so bindings stay minimal. Anyone who can deploy a Worker in the Cloudflare account could bind `SecretStore` directly and read it; that account is trusted.
 
 ## Making the key
 

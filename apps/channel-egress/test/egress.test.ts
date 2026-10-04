@@ -43,7 +43,10 @@ async function connect(agentId: string) {
   return exports.ChannelForms.redeemTelegramForm(form.token, BOT_TOKEN);
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe("ChannelForms", () => {
   it("takes a bot token once, checks it with Telegram, and never returns it", async () => {
@@ -207,5 +210,129 @@ describe("ChannelEgress", () => {
       reason: "not_connected",
     });
     expect(calls.filter((call) => call.method === "sendMessage")).toEqual([]);
+  });
+});
+
+describe("channel-egress under pressure", () => {
+  it("stores once when the same link is submitted twice at the same time", async () => {
+    botApi();
+    const form = await exports.ChannelForms.createTelegramForm("twice");
+    if (!form.ok) throw new Error("form refused");
+    const results = await Promise.all([
+      exports.ChannelForms.redeemTelegramForm(form.token, BOT_TOKEN),
+      exports.ChannelForms.redeemTelegramForm(form.token, BOT_TOKEN),
+    ]);
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(results).toContainEqual({ ok: false, reason: "unknown_form" });
+    const rows = await runInDurableObject(store(), (_instance, state) =>
+      state.storage.sql.exec("SELECT slot FROM secrets WHERE slot = 'telegram:twice'").toArray(),
+    );
+    expect(rows).toHaveLength(1);
+  });
+
+  it("refuses hostile tokens before calling Telegram, and closes the form after five", async () => {
+    const calls = botApi();
+    const form = await exports.ChannelForms.createTelegramForm("hostile");
+    if (!form.ok) throw new Error("form refused");
+    const secretPart = "a".repeat(30);
+    for (const hostile of [
+      `123456789:${secretPart}/../getUpdates`,
+      `123456789:${secretPart}?x=1`,
+      `123456789:${secretPart}#`,
+      `123456789@evil.example:${secretPart}`,
+      `123456789:${"b".repeat(10_000)}`,
+    ]) {
+      expect(await exports.ChannelForms.redeemTelegramForm(form.token, hostile)).toEqual({
+        ok: false,
+        reason: "invalid_token",
+      });
+    }
+    expect(calls).toEqual([]);
+    // Five refusals: the link no longer works, even with the right token.
+    expect(await exports.ChannelForms.describeForm(form.token)).toEqual({
+      ok: false,
+      reason: "unknown_form",
+    });
+  });
+
+  it("logs no token, form token or URL when Telegram refuses or a send fails", async () => {
+    const logged: unknown[][] = [];
+    for (const level of ["log", "warn", "error"] as const) {
+      vi.spyOn(console, level).mockImplementation((...args) => {
+        logged.push(args);
+      });
+    }
+    const answers: Record<string, () => Response> = {};
+    botApi((method) => answers[method]?.() ?? defaultAnswer(method));
+    await connect("quiet");
+
+    answers.sendMessage = () => Response.json({ ok: false, error_code: 500 }, { status: 500 });
+    await exports.ChannelEgress.send("quiet", destination, "hi");
+
+    answers.getMe = () => Response.json({ ok: false, error_code: 401 }, { status: 401 });
+    const form = await exports.ChannelForms.createTelegramForm("quiet-two");
+    if (!form.ok) throw new Error("form refused");
+    await exports.ChannelForms.redeemTelegramForm(form.token, BOT_TOKEN);
+
+    const text = JSON.stringify(logged);
+    expect(logged.length).toBeGreaterThan(0);
+    expect(text).not.toContain(BOT_TOKEN);
+    expect(text).not.toContain(form.token);
+    expect(text).not.toContain("api.telegram.org");
+  });
+
+  it("sends nothing when the stored ciphertext was altered", async () => {
+    const calls = botApi();
+    await connect("altered");
+    await runInDurableObject(store(), (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE secrets SET ciphertext = 'AAAA' || substr(ciphertext, 5) WHERE slot = 'telegram:altered'",
+      );
+    });
+    expect(await exports.ChannelEgress.send("altered", destination, "hi")).toEqual({
+      ok: false,
+      reason: "not_connected",
+    });
+    expect(calls.filter((call) => call.method === "sendMessage")).toEqual([]);
+  });
+
+  it("refuses text past Telegram's limit and malformed destinations without reading secrets", async () => {
+    const calls = botApi();
+    await connect("bounded");
+    const before = calls.length;
+    expect(await exports.ChannelEgress.send("bounded", destination, "x".repeat(4_097))).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+    expect(
+      await exports.ChannelEgress.send("bounded", { channel: "telegram", threadId: "" }, "hi"),
+    ).toEqual({ ok: false, reason: "failed" });
+    expect(calls.length).toBe(before);
+  });
+});
+
+describe("SecretStore without its key", () => {
+  it("stays closed while the key is missing, and opens once it is set", async () => {
+    const closed = env.SECRET_STORE.getByName("closed-store");
+    const results = await runInDurableObject(closed, async (instance) => {
+      const configurable = instance as unknown as { env: Env };
+      const goodKey = configurable.env.SECRETS_KEY;
+      configurable.env = { ...configurable.env, SECRETS_KEY: "" };
+      const form = await instance.createForm("closed", "telegram");
+      const whileClosed = {
+        ready: await instance.ready(),
+        read: await instance.read("telegram", "closed"),
+        redeem: await instance.redeemForm(form.token, "value"),
+      };
+      // The failed import isn't kept: a corrected key is picked up.
+      configurable.env = { ...configurable.env, SECRETS_KEY: goodKey };
+      return { whileClosed, readyAfter: await instance.ready() };
+    });
+    expect(results.whileClosed).toEqual({
+      ready: false,
+      read: { ok: false, reason: "store_unavailable" },
+      redeem: { ok: false, reason: "store_unavailable" },
+    });
+    expect(results.readyAfter).toBe(true);
   });
 });

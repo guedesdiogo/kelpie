@@ -21,4 +21,6 @@ export const forms = sqliteTable("forms", {
   agentId: text("agent_id").notNull(),
   kind: text("kind", { enum: ["telegram"] }).notNull(),
   expiresAt: integer("expires_at").notNull(),
+  /** Values refused so far; the form closes after a few, so a link can't probe tokens forever. */
+  refusals: integer("refusals").notNull().default(0),
 });
