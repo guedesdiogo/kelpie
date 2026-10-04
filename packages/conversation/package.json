@@ -11,5 +11,10 @@
   },
   "devDependencies": {
     "vitest": "^4.1.0"
+  },
+  "dependencies": {
+    "@kelpie/channels": "workspace:*",
+    "@kelpie/llm": "workspace:*",
+    "@kelpie/qualifier": "workspace:*"
   }
 }

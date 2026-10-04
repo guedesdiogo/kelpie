@@ -131,7 +131,7 @@ describe("AnthropicMessagesProvider", () => {
         { type: "tool_use", id: "toolu_01", name: "get_weather", input: { city: "Lisbon" } },
       ],
     });
-    expect(replayed?.content).toEqual(first.message.native.content);
+    expect(replayed?.content).toEqual(first.message.native?.content);
   });
 
   it("streams text and finishes with neutral parts, native content and usage", async () => {
@@ -203,6 +203,21 @@ describe("AnthropicMessagesProvider", () => {
     expect(requestAt(calls, 0).body).not.toHaveProperty("fallbacks");
     expect(requestAt(calls, 0).body).not.toHaveProperty("output_config");
     expect(requestAt(calls, 0).headers.has("anthropic-beta")).toBe(false);
+  });
+
+  it("replays a reply kept without its native output as neutral text", async () => {
+    const { fetch, calls } = fakeFetch(sse(toolTurn));
+    const messages: ChatMessage[] = [
+      { role: "user", parts: [{ type: "text", text: "Tell me about Lisbon" }] },
+      { role: "assistant", parts: [{ type: "text", text: "Lisbon is the capital." }] },
+      { role: "user", parts: [{ type: "text", text: "And Porto?" }] },
+    ];
+    await collect(provider(fetch).stream(request({ messages })));
+
+    expect((requestAt(calls, 0).body.messages as unknown[])[1]).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "Lisbon is the capital." }],
+    });
   });
 
   it("maps tool results and replies from another provider", async () => {
@@ -285,12 +300,9 @@ describe("AnthropicMessagesProvider", () => {
     const finish = finishOf(await collect(provider(fetch).stream(request())));
 
     expect(finish.reason).toBe("stop");
-    expect(finish.message.native.content.map((block) => (block as { type: string }).type)).toEqual([
-      "text",
-      "fallback",
-      "thinking",
-      "text",
-    ]);
+    expect(finish.message.native?.content.map((block) => (block as { type: string }).type)).toEqual(
+      ["text", "fallback", "thinking", "text"],
+    );
     expect(finish.message.parts).toEqual([
       { type: "text", text: "Partial answer. " },
       { type: "text", text: "Full answer." },

@@ -115,7 +115,7 @@ function toInputItems(message: ChatMessage): ResponseInputItem[] {
         output: result.output,
       }));
     case "assistant":
-      return message.native.provider === "openai"
+      return message.native?.provider === "openai"
         ? (message.native.content as ResponseInputItem[])
         : message.parts.flatMap(toForeignItem);
   }

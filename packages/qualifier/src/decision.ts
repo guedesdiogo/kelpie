@@ -41,7 +41,8 @@ export async function runDecision<Context, Outcome extends object>(
 
   const prefix = `${decision.id}::`;
   const controller = new AbortController();
-  let timer: unknown;
+  // Typed from the runtime in scope, so consumers compiling with Node or Workers typings agree.
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const questions = Object.fromEntries(
       Object.entries(decision.questions(context)).map(([key, question]) => [
