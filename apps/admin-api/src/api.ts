@@ -121,9 +121,7 @@ async function handleForm(request: Request, pathname: string, deps: AdminDeps): 
     const identity = await deps.authenticate(request);
     if (!identity.ok)
       return page(401, "Sign in first", "<p>Open this link in your browser again.</p>");
-    // A submission must come from this page, not from another site.
-    const origin = request.headers.get("origin");
-    if (request.method === "POST" && origin !== null && origin !== new URL(request.url).origin) {
+    if (request.method === "POST" && !isSameOriginSubmission(request)) {
       return page(403, "Not allowed", "<p>This form only accepts its own submissions.</p>");
     }
     const admission = await deps.directory.admit(
@@ -134,6 +132,9 @@ async function handleForm(request: Request, pathname: string, deps: AdminDeps): 
       return page(403, "Not allowed", "<p>Only the owner can use this link.</p>");
     }
     if (request.method === "GET") return await showForm(token, deps.forms);
+    if (!request.headers.get("content-type")?.startsWith("application/x-www-form-urlencoded")) {
+      return page(415, "Not a form submission", "<p>Submit the token from the form page.</p>");
+    }
     const body = await readBody(request);
     if (!body.ok) return page(body.status, "Too large", "<p>That isn't a bot token.</p>");
     const botToken = new URLSearchParams(body.text).get("botToken") ?? "";
@@ -142,6 +143,18 @@ async function handleForm(request: Request, pathname: string, deps: AdminDeps): 
     console.error("admin-api: form failed", errorName(error));
     return unavailablePage();
   }
+}
+
+/**
+ * Whether a POST came from the form's own page. Browsers say so in `Sec-Fetch-Site`; without it,
+ * a foreign `Origin` is refused. (The page's referrer policy is `same-origin`, so the browser
+ * sends the real origin: under `no-referrer` it would send `null`.)
+ */
+function isSameOriginSubmission(request: Request): boolean {
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null) return site === "same-origin";
+  const origin = request.headers.get("origin");
+  return origin === null || origin === new URL(request.url).origin;
 }
 
 async function run(

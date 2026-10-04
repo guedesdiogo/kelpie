@@ -3,7 +3,8 @@
   "name": "kelpie-admin-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
-  "observability": { "enabled": true },
+  // Invocation logs record request URLs, and a form's URL carries its one-time token.
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
   // Reachable only through a custom domain behind a Cloudflare Access application, added at deploy.
   "workers_dev": false,
   "preview_urls": false,

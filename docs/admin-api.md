@@ -63,8 +63,8 @@ A channel's secret, such as a Telegram bot token, never goes through a command, 
 The link expires after 15 minutes, works once, and closes after five refused tokens.
 
 Form pages are HTML:
-- they are sent with `Cache-Control: no-store`, `Referrer-Policy: no-referrer` and a Content-Security-Policy that forbids framing and scripts;
-- a submission from another origin is refused;
+- they are sent with `Cache-Control: no-store`, `Referrer-Policy: same-origin` and a Content-Security-Policy that forbids framing and scripts;
+- a submission must come from the page itself (`Sec-Fetch-Site: same-origin`, or a matching `Origin`) and be form-encoded;
 - no page repeats the token.
 
 ## Setting it up

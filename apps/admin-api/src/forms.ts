@@ -27,6 +27,12 @@ export async function submitForm(
   botToken: string,
   forms: FormDeps,
 ): Promise<Response> {
+  if (botToken.trim() === "") {
+    // Nothing to check: an empty submission doesn't count against the form's attempts.
+    const form = await forms.describeForm(token);
+    if (!form.ok) return form.reason === "unknown_form" ? closedPage() : unavailablePage();
+    return page(400, "Connect Telegram", tokenForm(form.agentId, "Paste the bot token first."));
+  }
   const result = await forms.redeemTelegramForm(token, botToken);
   if (result.ok) {
     return page(
@@ -91,8 +97,9 @@ export function page(status: number, title: string, body: string): Response {
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
-      // The URL carries the form token.
-      "referrer-policy": "no-referrer",
+      // The URL carries the form token: it never goes to another origin. Not `no-referrer`, which
+      // makes the browser send `Origin: null` with the form's own submission.
+      "referrer-policy": "same-origin",
       "x-content-type-options": "nosniff",
       "content-security-policy":
         "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
