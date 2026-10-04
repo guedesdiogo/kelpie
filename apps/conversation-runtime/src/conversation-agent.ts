@@ -1,5 +1,5 @@
 import { canonicalTimeZone } from "@kelpie/access";
-import { CAPABILITIES, type ChannelCapabilities } from "@kelpie/channels";
+import { CAPABILITIES, type ChannelCapabilities, type SendOutcome } from "@kelpie/channels";
 import type { AgentConfig, AgentSettings } from "@kelpie/config";
 import {
   deliveredReply,
@@ -10,7 +10,7 @@ import {
 } from "@kelpie/conversation";
 import type { AssistantMessage, ChatMessage, LlmEvent } from "@kelpie/llm";
 import { Agent, type FiberRecoveryContext } from "agents";
-import { and, asc, count, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, count, eq, inArray, isNull, max } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
@@ -26,6 +26,11 @@ export const LIMITS = {
 };
 
 const FIBER_RETENTION_MS = 24 * 60 * 60 * 1_000;
+
+/** A bubble the channel keeps rate-limiting is tried this many times before the turn fails. */
+const MAX_SEND_ATTEMPTS = 3;
+/** A rate limit asking for a longer wait than this fails the turn instead of stalling it. */
+const MAX_RATE_LIMIT_WAIT_MS = 30_000;
 
 /** One inbound message, already admitted by `ingress` (ADR-0004, ADR-0015). */
 export interface InboundMessage {
@@ -323,20 +328,33 @@ export class ConversationAgent extends Agent<Env> {
       .run();
 
     const settings = settingsOf(turn);
-    const call = await this.#ports.generate(settings.tier, {
-      system: settings.systemPrompt,
-      messages: this.#messages(turn.systemVersion),
-      maxOutputTokens: settings.maxOutputTokens,
-    });
-    const flight = this.#inFlight.get(turnId);
-    if (flight) flight.call = call;
-    if (controller.signal.aborted) {
-      call.cancel();
-      return;
-    }
+    const destination = this.#destination();
+    // "Typing" stays up while the model answers; delivery shows it again before each bubble.
+    const answered = new AbortController();
+    const typing =
+      settings.conversational && capabilitiesFor(destination.channel).typing.supported
+        ? this.#ports
+            .keepTyping(
+              this.#agentId(),
+              destination,
+              AbortSignal.any([answered.signal, controller.signal]),
+            )
+            .catch(() => undefined)
+        : Promise.resolve();
 
     let finish: Extract<LlmEvent, { type: "finish" }> | undefined;
     try {
+      const call = await this.#ports.generate(settings.tier, {
+        system: settings.systemPrompt,
+        messages: this.#messages(turn.systemVersion),
+        maxOutputTokens: settings.maxOutputTokens,
+      });
+      const flight = this.#inFlight.get(turnId);
+      if (flight) flight.call = call;
+      if (controller.signal.aborted) {
+        call.cancel();
+        return;
+      }
       for await (const event of call.events) {
         if (event.type === "finish") finish = event;
       }
@@ -344,6 +362,11 @@ export class ConversationAgent extends Agent<Env> {
       // An interruption cancels the call; the turn is already settled.
       if (controller.signal.aborted || !this.#isRunning(turnId)) return;
       throw error;
+    } finally {
+      // Not awaited: a hung typing call mustn't hold back a reply that is ready. The loop ends on
+      // its own once its current call returns.
+      answered.abort();
+      void typing;
     }
     if (!this.#isRunning(turnId)) return;
     if (!finish) throw new Error("The model stream ended without a reply");
@@ -359,7 +382,7 @@ export class ConversationAgent extends Agent<Env> {
     const bubbles = planDelivery(
       textOf(finish.message),
       settings.conversational,
-      capabilitiesFor(this.#destination().channel),
+      capabilitiesFor(destination.channel),
     );
     const reply = finish.message;
     this.#db.transaction((tx) => {
@@ -378,8 +401,16 @@ export class ConversationAgent extends Agent<Env> {
     const turn = this.#turn(turnId);
     if (turn?.status !== "running") return;
     const { conversational } = settingsOf(turn);
+    const agentId = this.#agentId();
     const destination = this.#destination();
     const capabilities = capabilitiesFor(destination.channel);
+    // Only the reply's last bubble notifies; the others arrive silently.
+    const lastSeq =
+      this.#db
+        .select({ value: max(schema.outbox.seq) })
+        .from(schema.outbox)
+        .where(eq(schema.outbox.turnId, turnId))
+        .get()?.value ?? 0;
     const rows = this.#db
       .select()
       .from(schema.outbox)
@@ -391,7 +422,7 @@ export class ConversationAgent extends Agent<Env> {
       if (signal.aborted || !this.#isRunning(turnId)) return;
       if (conversational && capabilities.typing.supported) {
         try {
-          await this.#ports.typing(destination);
+          await this.#ports.typing(agentId, destination);
         } catch (error) {
           // "Typing" is a courtesy; failing to show it doesn't stop the reply.
           console.error("ConversationAgent: typing failed", { turnId, error: errorName(error) });
@@ -403,17 +434,62 @@ export class ConversationAgent extends Agent<Env> {
         return;
       }
       if (!this.#isRunning(turnId)) return;
-      this.#setBubble(row.id, "sending");
-      try {
-        await this.#ports.send(destination, row.text);
-      } catch (error) {
-        if (this.#isRunning(turnId)) this.#setBubble(row.id, "pending");
-        throw error;
+      if (
+        !(await this.#sendBubble(turnId, agentId, destination, row, row.seq !== lastSeq, signal))
+      ) {
+        return;
       }
       // If the turn was settled during the send, settling already counted this bubble as sent.
       if (this.#isRunning(turnId)) this.#setBubble(row.id, "sent");
     }
     this.#settle(turnId, "finished");
+  }
+
+  /**
+   * Sends one bubble. It is marked `sending` only while a send is in flight: while it waits out a
+   * rate limit it is `pending` again, so an interruption then doesn't count it as seen. A
+   * rate-limited bubble is tried a few times; any other failure fails the turn. Returns false when
+   * the turn stopped while waiting.
+   */
+  async #sendBubble(
+    turnId: number,
+    agentId: string,
+    destination: Destination,
+    bubble: { id: number; text: string },
+    silent: boolean,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    for (let attempt = 1; ; attempt += 1) {
+      if (!this.#isRunning(turnId)) return false;
+      this.#setBubble(bubble.id, "sending");
+      let outcome: SendOutcome;
+      try {
+        outcome = await this.#ports.send(agentId, destination, bubble.text, { silent });
+      } catch (error) {
+        if (this.#isRunning(turnId)) this.#setBubble(bubble.id, "pending");
+        throw error;
+      }
+      if (outcome.ok) return true;
+      if (this.#isRunning(turnId)) this.#setBubble(bubble.id, "pending");
+      if (
+        outcome.reason !== "rate_limited" ||
+        attempt === MAX_SEND_ATTEMPTS ||
+        outcome.retryAfterMs > MAX_RATE_LIMIT_WAIT_MS
+      ) {
+        // The reason is an enum, so it is safe to log.
+        console.error("ConversationAgent: the channel didn't take a bubble", {
+          turnId,
+          reason: outcome.reason,
+          attempt,
+        });
+        throw new Error(`The channel didn't take the bubble: ${outcome.reason}`);
+      }
+      try {
+        await this.#ports.sleep(outcome.retryAfterMs, signal);
+      } catch {
+        return false;
+      }
+    }
   }
 
   /**
@@ -591,6 +667,12 @@ export class ConversationAgent extends Agent<Env> {
 
   #epoch(): number {
     return this.#get("epoch", 0);
+  }
+
+  #agentId(): string {
+    const agentId = this.#get<string | null>("agentId", null);
+    if (!agentId) throw new Error("The conversation has no agent yet");
+    return agentId;
   }
 
   #destination(): Destination {
