@@ -140,4 +140,56 @@ describe("remoteKeySet", () => {
     const keys = remoteKeySet(CERTS, async () => new Response("down", { status: 502 }));
     await expect(keys.key("any")).rejects.toThrow("Access keys returned 502");
   });
+
+  it("waits a minute after a failed load too, and shares one load between requests", async () => {
+    let fetches = 0;
+    const clock = 0;
+    const keys = remoteKeySet(
+      CERTS,
+      async () => {
+        fetches += 1;
+        return new Response("down", { status: 502 });
+      },
+      () => clock,
+    );
+
+    const concurrent = await Promise.allSettled([keys.key("a"), keys.key("b"), keys.key("c")]);
+    expect(concurrent.map((result) => result.status)).toEqual(["rejected", "rejected", "rejected"]);
+    expect(fetches).toBe(1);
+    // Within the minute, a failing certs URL isn't asked again.
+    expect(await keys.key("d")).toBeNull();
+    expect(fetches).toBe(1);
+  });
+
+  it("skips a key it can't use instead of dropping the whole set", async () => {
+    const good = await signingKey("good");
+    const keys = remoteKeySet(CERTS, async () =>
+      Response.json({
+        keys: [
+          { kty: "RSA", kid: "broken", n: "!!", e: "AQAB" },
+          { ...good.jwk, kid: "other-alg", alg: "RS512" },
+          good.jwk,
+        ],
+      }),
+    );
+    expect(await keys.key("good")).not.toBeNull();
+    expect(await keys.key("broken")).toBeNull();
+    expect(await keys.key("other-alg")).toBeNull();
+  });
+
+  it("loads the keys again after an hour, so a retired key stops being trusted", async () => {
+    const key = await signingKey("k");
+    let published: JsonWebKey[] = [key.jwk];
+    let clock = 0;
+    const keys = remoteKeySet(
+      CERTS,
+      async () => Response.json({ keys: published }),
+      () => clock,
+    );
+    expect(await keys.key("k")).not.toBeNull();
+
+    published = [];
+    clock = 60 * 60_000;
+    expect(await keys.key("k")).toBeNull();
+  });
 });

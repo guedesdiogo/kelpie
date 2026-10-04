@@ -5,6 +5,7 @@ import {
   type AgentSummary,
   isAgentId,
   isAgentName,
+  type RegistryContract,
   type RenameAgentResult,
 } from "@kelpie/config";
 import { asc, eq } from "drizzle-orm";
@@ -20,7 +21,7 @@ import * as schema from "./schema.ts";
  * The configuration commands are its only callers and authorize the actor (ADR-0013); this object
  * validates its input, because it is an RPC boundary.
  */
-export class Registry extends DurableObject<Env> {
+export class Registry extends DurableObject<Env> implements RegistryContract {
   readonly #db: DrizzleSqliteDODatabase<typeof schema>;
 
   constructor(ctx: DurableObjectState, env: Env) {

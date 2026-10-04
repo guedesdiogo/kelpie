@@ -6,10 +6,14 @@ import { type AdminDeps, handle } from "../src/api.ts";
 
 const OWNER_SUB = "sub-owner";
 const NOW_MS = 1_791_000_000_000;
-const TOKEN = `${NOW_MS / 1_000 + 3_600}.c0ffee`;
+const TOKEN = `${NOW_MS / 1_000 + 3_600}.${"c0ffee".repeat(6)}`;
 
 /** A world with a Directory that knows `subs` and an in-memory agent registry. */
-function world({ owner = true, authenticated = OWNER_SUB as string | null } = {}) {
+function world({
+  owner = true,
+  authenticated = OWNER_SUB as string | null,
+  role = "owner" as "owner" | "member",
+} = {}) {
   const identities = new Map<string, { userId: string; status: IdentityStatus }>();
   const key = (identity: ChannelIdentity) => `${identity.channel}:${identity.channelUserId}`;
   let ownerId: string | null = null;
@@ -73,7 +77,7 @@ function world({ owner = true, authenticated = OWNER_SUB as string | null } = {}
         if (found?.status !== "enabled") {
           return { admitted: false, reason: "unknown_identity" };
         }
-        return { admitted: true, userId: found.userId, role: "owner" };
+        return { admitted: true, userId: found.userId, role };
       },
       async ownerExists() {
         return ownerId !== null;
@@ -153,6 +157,15 @@ describe("admin API commands", () => {
     });
   });
 
+  it("lets the commands refuse an admitted caller who isn't the owner", async () => {
+    const { deps, ran } = world({ role: "member" });
+    expect(await call(deps, "/commands/listAgents")).toEqual({
+      status: 403,
+      body: { ok: false, reason: "forbidden" },
+    });
+    expect(ran).toEqual([]);
+  });
+
   it.each([
     ["an invalid input", "/commands/createAgent", { id: "Sales Team", name: "x" }, 400],
     ["an unknown agent", "/commands/renameAgent", { id: "ghost", name: "Nobody" }, 404],
@@ -171,11 +184,47 @@ describe("admin API commands", () => {
     ["an unknown command", "POST", "/commands/dropTables"],
     ["a prototype key as a command", "POST", "/commands/constructor"],
     ["another path", "POST", "/agents"],
+    ["an empty command", "POST", "/commands/"],
+    ["the bootstrap with a trailing slash", "POST", "/bootstrap/"],
     ["a GET", "GET", "/commands/listAgents"],
   ])("answers 404 to %s", async (_label, method, path) => {
     const { deps, ran } = world();
     const response = await handle(new Request(`https://admin.example${path}`, { method }), deps);
     expect(response.status).toBe(404);
+    expect(ran).toEqual([]);
+  });
+
+  it("answers 500 without details when an object fails", async () => {
+    const { deps } = world();
+    deps.directory.admit = async () => {
+      throw new Error("Durable Object reset: owner@example.com");
+    };
+    expect(await call(deps, "/commands/listAgents")).toEqual({
+      status: 500,
+      body: { ok: false, reason: "internal" },
+    });
+  });
+
+  it("stops reading a body past the cap, whatever its Content-Length says", async () => {
+    const { deps, ran } = world();
+    const chunk = new TextEncoder().encode("x".repeat(16 * 1024));
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        sent += 1;
+        controller.enqueue(chunk);
+      },
+    });
+    const response = await handle(
+      new Request("https://admin.example/commands/createAgent", {
+        method: "POST",
+        headers: { "content-length": "10" },
+        body,
+      }),
+      deps,
+    );
+    expect(response.status).toBe(413);
+    expect(sent).toBeLessThan(10);
     expect(ran).toEqual([]);
   });
 
@@ -210,7 +259,7 @@ describe("admin API first-run bootstrap", () => {
   });
 
   it.each([
-    ["a wrong token", { token: `${NOW_MS / 1_000 + 3_600}.decaf` }],
+    ["a wrong token", { token: `${NOW_MS / 1_000 + 3_600}.${"decaf0".repeat(6)}` }],
     ["no token", {}],
     ["a token that isn't a string", { token: 42 }],
   ])("refuses %s", async (_label, body) => {
@@ -230,6 +279,17 @@ describe("admin API first-run bootstrap", () => {
     const unset = world({ owner: false });
     unset.deps.bootstrapToken = undefined;
     expect((await call(unset.deps, "/bootstrap", { token: TOKEN })).status).toBe(403);
+  });
+
+  it.each([
+    ["without an expiry", "c0ffee".repeat(6)],
+    ["with a short secret", `${NOW_MS / 1_000 + 3_600}.c0ffee`],
+    ["with an expiry that isn't digits", `1e15.${"c0ffee".repeat(6)}`],
+  ])("never accepts a configured token %s", async (_label, configured) => {
+    const { deps, bootstraps } = world({ owner: false });
+    deps.bootstrapToken = configured;
+    expect((await call(deps, "/bootstrap", { token: configured })).status).toBe(403);
+    expect(bootstraps).toEqual([]);
   });
 
   it("needs a verified Access login, like every other request", async () => {

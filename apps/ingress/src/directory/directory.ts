@@ -4,6 +4,7 @@ import {
   type Admission,
   CHANNEL_IDS,
   type ChannelIdentity,
+  type DirectoryContract,
   type IdentityResult,
   type IdentityStatus,
   type OwnerResult,
@@ -22,7 +23,7 @@ import * as schema from "./schema.ts";
  * source of truth. Kelpie runs one instance, named "directory". Only `ingress` and `admin-api` bind
  * it: the methods trust their caller, so no route may proxy them.
  */
-export class Directory extends DurableObject<Env> {
+export class Directory extends DurableObject<Env> implements DirectoryContract {
   readonly #db: DrizzleSqliteDODatabase<typeof schema>;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -191,6 +192,8 @@ export class Directory extends DurableObject<Env> {
   }
 
   #setStatus(identity: ChannelIdentity, status: "enabled" | "disabled"): IdentityResult {
+    // The owner's Access login changes only through the bootstrap, so nothing can lock them out.
+    if (!isValidIdentity(identity)) return { ok: false, reason: "invalid_identity" };
     const existing = this.#identity(identity);
     if (!existing) return { ok: false, reason: "unknown_identity" };
     if (existing.status === status) return { ok: true, status };

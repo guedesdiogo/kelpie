@@ -44,6 +44,22 @@ export type RenameAgentResult =
   | { ok: true }
   | { ok: false; reason: "unknown_agent" | "invalid_input" };
 
+/**
+ * The `Registry` and `AgentHost` methods other Workers call. The objects implement them, and
+ * callers bind them as `Remote<…>`, so a change on either side fails the type check.
+ */
+export interface RegistryContract {
+  add(id: string, name: string, actor: Actor): AddAgentResult;
+  rename(id: string, name: string, actor: Actor): RenameAgentResult;
+  get(id: string): AgentSummary | null;
+  list(): AgentSummary[];
+}
+
+export interface AgentHostContract {
+  configure(changes: Partial<AgentSettings>, actor: Actor): ConfigureResult;
+  config(): AgentConfig;
+}
+
 /** What the commands need from the objects that hold configuration. */
 export interface ConfigPorts {
   registry: {

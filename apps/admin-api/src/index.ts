@@ -1,28 +1,25 @@
-import { DIRECTORY_NAME } from "@kelpie/access";
+import { DIRECTORY_NAME, type DirectoryContract, type Remote } from "@kelpie/access";
 import {
-  type Actor,
-  type AgentConfig,
-  type AgentSettings,
-  type ConfigPorts,
-  type ConfigureResult,
+  type AgentHostContract,
   createConfigCommands,
   REGISTRY_NAME,
+  type RegistryContract,
 } from "@kelpie/config";
 import { remoteKeySet, verifyAccessJwt } from "./access-jwt.ts";
 import { type AdminDeps, handle } from "./api.ts";
 
-// The bindings point at objects in other Workers, so their types come from the contracts here.
-type DirectoryStub = AdminDeps["directory"] & ConfigPorts["directory"];
-interface AgentHostStub {
-  configure(changes: Partial<AgentSettings>, actor: Actor): Promise<ConfigureResult>;
-  config(): Promise<AgentConfig>;
-}
-
 function depsFor(env: Env): AdminDeps {
-  const directory = env.DIRECTORY.getByName(DIRECTORY_NAME) as unknown as DirectoryStub;
-  const registry = env.REGISTRY.getByName(REGISTRY_NAME) as unknown as ConfigPorts["registry"];
-  const agentHost = (id: string) => env.AGENT_HOST.getByName(id) as unknown as AgentHostStub;
-  const config = { teamDomain: env.ACCESS_TEAM_DOMAIN, audience: env.ACCESS_AUD };
+  // The bindings point at objects in other Workers, which `wrangler types` can't type; the
+  // objects implement these contracts, so the casts can't drift from them.
+  const directory = env.DIRECTORY.getByName(DIRECTORY_NAME) as unknown as Remote<DirectoryContract>;
+  const registry = env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<RegistryContract>;
+  const agentHost = (id: string) =>
+    env.AGENT_HOST.getByName(id) as unknown as Remote<AgentHostContract>;
+  // A trailing slash would never match the token's issuer.
+  const config = {
+    teamDomain: env.ACCESS_TEAM_DOMAIN.replace(/\/+$/, ""),
+    audience: env.ACCESS_AUD,
+  };
   const keys = remoteKeySet(`${config.teamDomain}/cdn-cgi/access/certs`);
   return {
     authenticate: (request) =>

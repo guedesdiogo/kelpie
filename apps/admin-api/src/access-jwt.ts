@@ -80,31 +80,52 @@ export async function verifyAccessJwt(
 }
 
 interface CachedKeys {
-  keys: Map<string, CryptoKey>;
+  /** The last successful load; a failed one keeps the previous keys. */
+  keys: Map<string, CryptoKey> | null;
+  /** When the last load started, successful or not. */
   fetchedAt: number;
+  loading: Promise<Map<string, CryptoKey>> | null;
 }
 
-/** Refetching on an unknown key id waits this long, so made-up ids can't flood the certs URL. */
+/**
+ * A new load waits this long after the previous one, successful or not, so made-up key ids or a
+ * failing certs URL can't turn every request into a fetch.
+ */
 const REFETCH_INTERVAL_MS = 60_000;
+
+/** Keys older than this are loaded again, so a key Access retired stops being trusted. */
+const MAX_AGE_MS = 60 * 60_000;
 
 /** Lives as long as the isolate, so most requests reuse the keys. */
 const cache = new Map<string, CachedKeys>();
 
-/** Access's published keys, cached per isolate and refetched when a new key id shows up. */
+/**
+ * Access's published keys, cached per isolate. An unknown key id or keys older than an hour trigger
+ * a reload, at most once a minute; concurrent requests share one load.
+ */
 export function remoteKeySet(
   certsUrl: string,
-  fetchKeys: (url: string) => Promise<Response> = fetch,
+  fetchKeys: (url: string) => Promise<Response> = (url) =>
+    fetch(url, { signal: AbortSignal.timeout(5_000) }),
   now: () => number = Date.now,
 ): KeySet {
   return {
     async key(kid) {
-      const cached = cache.get(certsUrl);
-      const known = cached?.keys.get(kid);
-      if (known) return known;
-      if (cached && now() - cached.fetchedAt < REFETCH_INTERVAL_MS) return null;
-      const fresh = await loadKeys(certsUrl, fetchKeys);
-      cache.set(certsUrl, { keys: fresh, fetchedAt: now() });
-      return fresh.get(kid) ?? null;
+      const entry = cache.get(certsUrl) ?? { keys: null, fetchedAt: -Infinity, loading: null };
+      cache.set(certsUrl, entry);
+      const age = now() - entry.fetchedAt;
+      const known = entry.keys?.get(kid);
+      if (known && age < MAX_AGE_MS) return known;
+      if (!entry.loading && age >= REFETCH_INTERVAL_MS) {
+        entry.fetchedAt = now();
+        entry.loading = loadKeys(certsUrl, fetchKeys).finally(() => {
+          entry.loading = null;
+        });
+      }
+      if (!entry.loading) return known ?? null;
+      const keys = await entry.loading;
+      entry.keys = keys;
+      return keys.get(kid) ?? null;
     },
   };
 }
@@ -124,14 +145,19 @@ async function loadKeys(
   const keys = new Map<string, CryptoKey>();
   for (const jwk of body.keys ?? []) {
     if (jwk.kty !== "RSA" || typeof jwk.kid !== "string") continue;
-    const key = await crypto.subtle.importKey(
-      "jwk",
-      jwk,
-      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-      false,
-      ["verify"],
-    );
-    keys.set(jwk.kid, key);
+    if (jwk.alg !== undefined && jwk.alg !== "RS256") continue;
+    try {
+      const key = await crypto.subtle.importKey(
+        "jwk",
+        jwk,
+        { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+        false,
+        ["verify"],
+      );
+      keys.set(jwk.kid, key);
+    } catch {
+      // One unusable key doesn't take the others down.
+    }
   }
   return keys;
 }

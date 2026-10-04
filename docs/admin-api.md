@@ -53,7 +53,7 @@ Identity values in answers are masked.
 ## Setting it up
 
 1. **Deploy `ingress` and `conversation-runtime` first.** The admin API's bindings point at their objects.
-2. **Create a self-hosted Access application** for the admin API's hostname, with a policy that allows only the owner. Note the team domain (`https://<team>.cloudflareaccess.com`) and the application's AUD tag.
+2. **Create a self-hosted Access application** for the admin API's hostname, with a policy that allows only the owner. Do this before step 4: whoever passes Access and holds the token becomes the owner. Note the team domain (`https://<team>.cloudflareaccess.com`) and the application's AUD tag.
 3. **Set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`** in `apps/admin-api/wrangler.jsonc`, and give the Worker its hostname. `workers_dev` and preview URLs stay off.
 4. **Make the bootstrap token** and store it as a secret. It is `<expiry in epoch seconds>.<random>`, and here it is valid for 24 hours. Keep the shell open: step 6 uses the same variable.
    ```bash
@@ -67,9 +67,9 @@ Identity values in answers are masked.
    ```bash
    cloudflared access curl https://<admin hostname>/bootstrap -X POST -H 'content-type: application/json' -d "{\"token\":\"$BOOTSTRAP_TOKEN\"}"
    ```
-   The bootstrap works once. After it, the endpoint answers `410`, and the token can be deleted with `wrangler secret delete BOOTSTRAP_TOKEN`.
+   The bootstrap works once. After it, the endpoint answers `410`, and the token can be deleted with `wrangler secret delete BOOTSTRAP_TOKEN`. If the token expired first, make a new one and put it again (step 4).
 
 ## Known limits
 
-- **Lockout.** Access gives the owner a new `sub` if they are removed from the Zero Trust organization and added again. The bootstrap is then disabled, so the owner can't reach the admin API. Recovery is a follow-up.
+- **Lockout.** Access gives the owner a new `sub` if they are removed from the Zero Trust organization and added again. The bootstrap is then disabled, so the owner can't reach the admin API. Recovery is [#71](https://github.com/guedesdiogo/kelpie/issues/71).
 - **Pairing.** Until pairing arrives (Story 3.6), `enableIdentity` trusts the identity value the owner types.

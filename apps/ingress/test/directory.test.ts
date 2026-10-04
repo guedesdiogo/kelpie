@@ -226,4 +226,14 @@ describe("Directory first-run bootstrap", () => {
       reason: "invalid_identity",
     });
   });
+
+  it("never lets a status change touch the owner's Access login", async () => {
+    const stub = directory("bootstrap-status");
+    await stub.bootstrapOwner(OWNER, access.channelUserId);
+    const refused = { ok: false, reason: "invalid_identity" };
+
+    expect(await stub.disableIdentity(access)).toEqual(refused);
+    expect(await stub.enableIdentity(access)).toEqual(refused);
+    expect(await stub.admit(access, ADMIN_AGENT_ID)).toMatchObject({ admitted: true });
+  });
 });

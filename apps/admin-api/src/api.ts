@@ -85,10 +85,24 @@ export async function handle(request: Request, deps: AdminDeps): Promise<Respons
   const body = await readJson(request);
   if (!body.ok) return refuse(body.status, body.reason);
 
-  if (pathname === "/bootstrap") return bootstrap(identity.sub, body.value, deps);
+  try {
+    if (pathname === "/bootstrap") return await bootstrap(identity.sub, body.value, deps);
+    // `command` is a key of COMMANDS: checked above.
+    return await run(COMMANDS[command as string] as Command, identity.sub, body.value, deps);
+  } catch (error) {
+    console.error("admin-api: request failed", errorName(error));
+    return refuse(500, "internal");
+  }
+}
 
+async function run(
+  command: Command,
+  accessSub: string,
+  input: unknown,
+  deps: AdminDeps,
+): Promise<Response> {
   const admission = await deps.directory.admit(
-    { channel: ACCESS_SOURCE, channelUserId: identity.sub },
+    { channel: ACCESS_SOURCE, channelUserId: accessSub },
     ADMIN_AGENT_ID,
   );
   if (!admission.admitted) {
@@ -97,9 +111,8 @@ export async function handle(request: Request, deps: AdminDeps): Promise<Respons
       : refuse(403, "no_owner");
   }
   const actor: Actor = { userId: admission.userId, role: admission.role, via: "admin-api" };
-  // `command` is a key of COMMANDS: checked above.
-  const result = await (COMMANDS[command as string] as Command)(deps.commands, actor, body.value);
-  return result.ok ? Response.json(result) : refuse(STATUS[result.reason], result.reason);
+  const result = await command(deps.commands, actor, input);
+  return result.ok ? Response.json(result) : refuse(STATUS[result.reason] ?? 500, result.reason);
 }
 
 /**
@@ -121,16 +134,21 @@ async function bootstrap(accessSub: string, input: unknown, deps: AdminDeps): Pr
   return Response.json({ ok: true }, { status: 201 });
 }
 
-/** Compares in constant time, and honors the expiry the configured token carries. */
+/** `<expiry in epoch seconds>.<at least 128 random bits in hex>`, as `docs/admin-api.md` makes it. */
+const BOOTSTRAP_TOKEN_FORMAT = /^(\d{1,12})\.[0-9a-f]{32,}$/;
+
+/**
+ * Compares in constant time, and honors the expiry the configured token carries. A configured
+ * token in any other format is never accepted.
+ */
 async function isValidBootstrapToken(
   presented: unknown,
   configured: string | undefined,
   nowMs: number,
 ): Promise<boolean> {
-  if (!configured || typeof presented !== "string") return false;
-  const [expiresAt] = configured.split(".");
-  const expiry = Number(expiresAt);
-  if (!Number.isInteger(expiry) || nowMs / 1_000 > expiry) return false;
+  const format = configured?.match(BOOTSTRAP_TOKEN_FORMAT);
+  if (!configured || !format || typeof presented !== "string") return false;
+  if (nowMs / 1_000 > Number(format[1])) return false;
   const [a, b] = await Promise.all([digest(presented), digest(configured)]);
   return crypto.subtle.timingSafeEqual(a, b);
 }
@@ -139,16 +157,30 @@ async function digest(value: string): Promise<ArrayBuffer> {
   return crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
 }
 
+/** Reads the body up to the size cap, whatever its `Content-Length` says. */
 async function readJson(
   request: Request,
 ): Promise<{ ok: true; value: unknown } | { ok: false; status: number; reason: string }> {
-  if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) {
-    return { ok: false, status: 413, reason: "too_large" };
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  const reader = request.body?.getReader();
+  while (reader) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_BODY_BYTES) {
+      await reader.cancel();
+      return { ok: false, status: 413, reason: "too_large" };
+    }
+    chunks.push(value);
   }
-  const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES) {
-    return { ok: false, status: 413, reason: "too_large" };
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
   }
+  const text = new TextDecoder().decode(bytes);
   if (text.trim() === "") return { ok: true, value: undefined };
   try {
     return { ok: true, value: JSON.parse(text) };
