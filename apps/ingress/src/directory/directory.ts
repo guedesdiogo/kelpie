@@ -1,27 +1,17 @@
 import { DurableObject } from "cloudflare:workers";
-import { and, eq } from "drizzle-orm";
-import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
-import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import {
   type Admission,
   CHANNEL_IDS,
   type ChannelIdentity,
+  type IdentityResult,
   type IdentityStatus,
-} from "../access.ts";
+  type OwnerResult,
+} from "@kelpie/access";
+import { and, eq } from "drizzle-orm";
+import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
+import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
-
-/**
- * Outcomes of a configuration change. Refusals are values, not exceptions: the configuration
- * commands turn them into answers for the owner.
- */
-export type OwnerResult = { ok: true } | { ok: false; reason: "owner_exists" | "invalid_user" };
-export type IdentityResult =
-  | { ok: true; status: IdentityStatus }
-  | {
-      ok: false;
-      reason: "unknown_user" | "unknown_identity" | "identity_taken" | "invalid_identity";
-    };
 
 /**
  * Who may reach the agents (ADR-0004). Channel routes ask it before any conversation or model runs.

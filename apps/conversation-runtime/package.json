@@ -6,10 +6,12 @@
     "types": "wrangler types src/worker-configuration.d.ts",
     "typecheck": "bun run types > /dev/null && tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json",
     "test": "vitest run",
-    "db:generate": "drizzle-kit generate && bunx biome check --write src/migrations"
+    "db:generate": "drizzle-kit generate && drizzle-kit generate --config drizzle.agent-host.config.ts && drizzle-kit generate --config drizzle.registry.config.ts && bunx biome check --write src/migrations src/agent-host/migrations src/registry/migrations"
   },
   "dependencies": {
+    "@kelpie/access": "workspace:*",
     "@kelpie/channels": "workspace:*",
+    "@kelpie/config": "workspace:*",
     "@kelpie/conversation": "workspace:*",
     "@kelpie/llm": "workspace:*",
     "@kelpie/qualifier": "workspace:*",

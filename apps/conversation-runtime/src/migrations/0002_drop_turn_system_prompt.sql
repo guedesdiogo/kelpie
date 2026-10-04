@@ -1,0 +1,1 @@
+ALTER TABLE `turns` DROP COLUMN `system_prompt`;
