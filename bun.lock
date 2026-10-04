@@ -21,6 +21,20 @@
         "wrangler": "^4.147.0",
       },
     },
+    "apps/channel-egress": {
+      "name": "@kelpie/channel-egress",
+      "dependencies": {
+        "@kelpie/channels": "workspace:*",
+        "@kelpie/config": "workspace:*",
+        "drizzle-orm": "0.45.3",
+      },
+      "devDependencies": {
+        "@cloudflare/vitest-plugin": "^1.3.6",
+        "drizzle-kit": "0.31.11",
+        "vitest": "^4.1.0",
+        "wrangler": "^4.147.0",
+      },
+    },
     "apps/conversation-runtime": {
       "name": "@kelpie/conversation-runtime",
       "dependencies": {
@@ -338,6 +352,8 @@
     "@kelpie/access": ["@kelpie/access@workspace:packages/access"],
 
     "@kelpie/admin-api": ["@kelpie/admin-api@workspace:apps/admin-api"],
+
+    "@kelpie/channel-egress": ["@kelpie/channel-egress@workspace:apps/channel-egress"],
 
     "@kelpie/channels": ["@kelpie/channels@workspace:packages/channels"],
 

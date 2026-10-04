@@ -1,0 +1,1 @@
+ALTER TABLE `forms` ADD `refusals` integer DEFAULT 0 NOT NULL;

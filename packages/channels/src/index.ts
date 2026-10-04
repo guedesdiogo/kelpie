@@ -15,6 +15,14 @@ export {
   type Formatting,
   typingRenewIntervalMs,
 } from "./capabilities.ts";
+export type {
+  ChannelEgressContract,
+  ChannelFormsContract,
+  DeliveryFailure,
+  EgressDestination,
+  SendOutcome,
+  TypingOutcome,
+} from "./egress.ts";
 export { type CanonicalEvent, type ChannelId, dedupeKey, type MessagePart } from "./events.ts";
 
 // Adapters have their own entry points (`@kelpie/channels/telegram`): they need the runtime's fetch
