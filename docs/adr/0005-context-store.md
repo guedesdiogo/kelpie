@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-03
 - Issue: [#7](https://github.com/guedesdiogo/kelpie/issues/7)
+- Amended by: [ADR-0016](0016-vault-second-brain.md), the vault's layout, Hermes's memory files (merged per entry), the persona in `SOUL.md` and the owner's own profile
 
 ## Context
 
