@@ -222,7 +222,7 @@ Anything headed for git passes a personal-data gate before every commit, not at 
 
 ### 4.11 Tools
 
-`ToolProvider` has three adapters: remote MCP, Composio and native Workers tools ([03](research/03-tools-composio-mcp-invokta.md)).
+`ToolProvider` has three adapters: remote MCP, Composio and native Workers tools ([03](research/03-tools-composio-mcp-invokta.md)). The browser is a native tool on Browser Run, with a Live View handoff to a person, in phase 2 ([ADR-0014](adr/0014-agent-tool-scope.md)). Running shell commands or binaries is out of scope.
 
 - **MCP:** in the official MCP Registry on 2026-10-03, 62.7% of active entries had a remote endpoint and 36.1% were package-only, usually stdio. Remote servers connect through the Agents SDK client. That client stores OAuth tokens unencrypted, so tokens live in a Durable Object per user with application-level encryption ([00 C10](research/00-cross-check.md)).
 - **Composio:** used in "harness integration" mode, where Kelpie's loop decides and Composio authenticates and executes. Composio keeps custody of the OAuth tokens and does not export them.
@@ -344,7 +344,7 @@ Each decision is closed by an ADR in `docs/adr/` once its pull request merges.
 | [4.1 Agent task board](https://github.com/guedesdiogo/kelpie/issues/44) | **Decided:** Kelpie's own board, not GitHub Issues ([ADR-0011](adr/0011-agent-task-board.md)) |
 | [3.11 ORM](https://github.com/guedesdiogo/kelpie/issues/46) | **Decided:** Drizzle for Postgres and Durable Object SQLite ([ADR-0012](adr/0012-drizzle-data-layer.md)) |
 | [3.12 Self-configuration](https://github.com/guedesdiogo/kelpie/issues/47) | **Decided:** configuration through agents, after a minimal bootstrap ([ADR-0013](adr/0013-self-configuration.md)) |
-| [Agent tool scope](https://github.com/guedesdiogo/kelpie/issues/18) | **Decided:** browser with a human handoff in phase 2; no machine execution ([ADR-0014](adr/0014-agent-tool-scope.md)) |
+| Agent tool scope (owner decision in the phase 2 epic, [#18](https://github.com/guedesdiogo/kelpie/issues/18)) | **Decided:** browser with a human handoff in phase 2; no machine execution ([ADR-0014](adr/0014-agent-tool-scope.md)) |
 
 ## 12. Spikes before committing to a design
 
@@ -354,6 +354,7 @@ Each decision is closed by an ADR in `docs/adr/` once its pull request merges.
 - Does OpenAI Responses streaming pass through AI Gateway passthrough?
 - Before WhatsApp: does re-sending the typing indicator work between bubbles?
 - Before Discord free text: does a gateway Durable Object stay resident for 24 h with only the watchdog alarm (logging evictions)?
+- Before the browser tool: does a Browser Run session stay alive while a person completes a handoff through Live View ([#49](https://github.com/guedesdiogo/kelpie/issues/49))?
 
 ## 13. Delivery plan
 
@@ -362,8 +363,8 @@ The owner approved this plan in [Decision 1.10](https://github.com/guedesdiogo/k
 | Phase | Scope |
 |---|---|
 | 0. Foundations | Monorepo, CI, ADRs, a local workerd test harness for alarms and fibers |
-| 1. Vertical slice | Webchat and Telegram; allowlisted users with channel identities; `ConversationAgent` with buffer, splitter, outbox and interruption, conversational mode as a toggle; Anthropic and OpenAI by API key; Context Store with GitHub for persona and skills; heuristic qualifier with optional Jev; a minimal admin API |
-| 2. Memory and tools | Per-user memory with supersession and Jev qualification; remote MCP and Composio; Slack; WhatsApp on a test number; per-agent and per-content grants |
+| 1. Vertical slice | Webchat and Telegram; allowlisted users with channel identities; `ConversationAgent` with buffer, splitter, outbox and interruption, conversational mode as a toggle; Anthropic and OpenAI by API key; Context Store with GitHub for persona and skills; heuristic qualifier with optional Jev; a minimal admin API; configuration commands and a first-run bootstrap with a setup agent ([ADR-0013](adr/0013-self-configuration.md)) |
+| 2. Memory and tools | Per-user memory with supersession and Jev qualification; remote MCP and Composio; Slack; WhatsApp on a test number; per-agent and per-content grants; the agent task board's model, API and heartbeat ([ADR-0011](adr/0011-agent-task-board.md)); a browser tool with a Live View handoff ([ADR-0014](adr/0014-agent-tool-scope.md)) |
 | 3. Agents and UI | Agents orchestrating agents; the management UI inspired by Bot Mode; skill staging by pull request and the curator; the subscription opt-in; Discord gateway |
 | 4. Hardening | Evals and golden sets, cross-worker tracing, the Artifacts backend |
 
