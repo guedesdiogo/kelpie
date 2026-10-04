@@ -40,7 +40,7 @@ A `Response` created in a test can't have its body read inside a Worker call eit
 
 Fiber recovery after an eviction runs when the fiber's heartbeat alarm fires on the new instance. To test it, call `evictDurableObject(stub)`, then `runDurableObjectAlarm(stub)`.
 
-`llm-gateway` is a service binding that doesn't exist in tests, so `vitest.config.ts` replaces it with a stub; the fake model port means it's never called.
+`llm-gateway` and `channel-egress` are service bindings that don't exist in tests, so `vitest.config.ts` replaces them with stubs; the fake model and channel ports mean they're never called.
 
 `admin-api` binds Durable Objects that live in other Workers. Its `vitest.config.ts` adds stub Workers that only declare those classes, so the runtime starts; its tests pass fakes to `handle()` and never call the objects.
 

@@ -594,3 +594,71 @@ describe("ConversationAgent time stamps", () => {
     ).toMatchObject({ status: "accepted" });
   });
 });
+
+describe("ConversationAgent delivery through the channel", () => {
+  it("lets only the reply's last bubble notify", async () => {
+    const world = use(fakeWorld([reply("One.\n\nTwo.\n\nThree.")]));
+    const stub = agent("silent-bubbles");
+    await stub.ingest(message("m1", "three things?"));
+    await stub.flush();
+
+    await vi.waitFor(() => expect(world.sent).toEqual(["One.", "Two.", "Three."]));
+    expect(world.sends.map((send) => send.silent)).toEqual([true, true, false]);
+  });
+
+  it("waits when the channel rate-limits a bubble, then sends it", async () => {
+    const world = use(fakeWorld([reply("One.\n\nTwo.")]));
+    world.rateLimitSends.add(0);
+    const stub = agent("rate-limited");
+    await stub.ingest(message("m1", "two things?"));
+    await stub.flush();
+
+    await vi.waitFor(async () =>
+      expect(await stub.turns()).toMatchObject([{ status: "delivered" }]),
+    );
+    expect(world.sent).toEqual(["One.", "Two."]);
+  });
+
+  it("fails the turn when the channel keeps rate-limiting the same bubble", async () => {
+    const world = use(fakeWorld([reply("One.")]));
+    for (const call of [0, 1, 2]) world.rateLimitSends.add(call);
+    const stub = agent("rate-limited-thrice");
+    await stub.ingest(message("m1", "one thing?"));
+    await stub.flush();
+
+    await vi.waitFor(async () => expect(await stub.turns()).toMatchObject([{ status: "failed" }]));
+    expect(world.sent).toEqual([]);
+  });
+
+  it("keeps typing up while the model answers, and stops it once the reply is in", async () => {
+    const world = use(fakeWorld([reply("Done.")]));
+    const stub = agent("typing-kept");
+    await stub.ingest(message("m1", "anything?"));
+    await stub.flush();
+
+    await vi.waitFor(() => expect(world.sent).toEqual(["Done."]));
+    expect(world.typingKept).toBe(1);
+    expect(world.typingStopped).toBe(1);
+  });
+
+  it("stops typing when a new message interrupts the model", async () => {
+    const world = use(fakeWorld([hang(), reply("Both.")]));
+    const stub = agent("typing-interrupted");
+    await stub.ingest(message("m1", "first?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.typingKept).toBe(1));
+
+    await stub.ingest(message("m2", "actually, wait"));
+    await vi.waitFor(() => expect(world.typingStopped).toBe(1));
+  });
+
+  it("shows no typing when conversational mode is off", async () => {
+    const world = use(fakeWorld([reply("Plain.")]));
+    const stub = agent("typing-off");
+    await configure("typing-off", { conversational: false });
+    await stub.ingest(message("m1", "hello?", { agentId: "typing-off" }));
+
+    await vi.waitFor(() => expect(world.sent).toEqual(["Plain."]));
+    expect(world.typingKept).toBe(0);
+  });
+});

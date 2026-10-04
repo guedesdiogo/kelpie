@@ -1,3 +1,4 @@
+import type { SendOutcome } from "@kelpie/channels";
 import type { AssistantMessage, LlmEvent, RoutedRequest } from "@kelpie/llm";
 import type { Qualifier } from "@kelpie/qualifier";
 import type { ConversationPorts, Destination, ModelCall } from "../src/ports.ts";
@@ -41,15 +42,22 @@ export interface FakeWorld {
   requests: RoutedRequest[];
   cancelled: number;
   sent: string[];
+  /** Every bubble sent, with whether it went out silently. */
+  sends: { text: string; silent: boolean }[];
   typing: number;
+  /** How many times "typing" was kept up while the model answered, and how many times it stopped. */
+  typingKept: number;
+  typingStopped: number;
   /** Sleeps with these call numbers (0-based) wait until the turn is aborted. */
   blockSleeps: Set<number>;
   /** Sends with these call numbers wait until removed from the set. */
   blockSends: Set<number>;
   /** Sends with these call numbers never complete; only an eviction ends them. */
   hangSends: Set<number>;
-  /** Sends with these call numbers throw. */
+  /** Sends with these call numbers fail. */
   failSends: Set<number>;
+  /** Sends with these call numbers are rate-limited, asking for a short wait. */
+  rateLimitSends: Set<number>;
   /** Every "typing" call throws. */
   failTyping: boolean;
 }
@@ -62,11 +70,15 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
     requests: [],
     cancelled: 0,
     sent: [],
+    sends: [],
     typing: 0,
+    typingKept: 0,
+    typingStopped: 0,
     blockSleeps: new Set(),
     blockSends: new Set(),
     hangSends: new Set(),
     failSends: new Set(),
+    rateLimitSends: new Set(),
     failTyping: false,
     ports: {
       async generate(_tier, request): Promise<ModelCall> {
@@ -103,17 +115,33 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
           },
         };
       },
-      async send(_destination: Destination, text: string) {
+      async send(_agentId, _destination: Destination, text, options): Promise<SendOutcome> {
         const call = sends++;
-        if (world.failSends.has(call)) throw new Error("the channel refused the message");
+        if (world.failSends.has(call)) return { ok: false, reason: "failed" };
+        if (world.rateLimitSends.has(call)) {
+          return { ok: false, reason: "rate_limited", retryAfterMs: 50 };
+        }
         if (world.hangSends.has(call)) await new Promise(() => {});
         // Polls a plain flag: a promise created here can't be resolved from the test's context.
         while (world.blockSends.has(call)) await new Promise((resolve) => setTimeout(resolve, 5));
         world.sent.push(text);
+        world.sends.push({ text, silent: options.silent });
+        return { ok: true, providerMessageId: `m-${call}` };
       },
       async typing() {
         world.typing += 1;
         if (world.failTyping) throw new Error("typing failed");
+      },
+      keepTyping(_agentId, _destination, signal) {
+        world.typingKept += 1;
+        return new Promise<void>((resolve) => {
+          const stop = () => {
+            world.typingStopped += 1;
+            resolve();
+          };
+          if (signal.aborted) stop();
+          else signal.addEventListener("abort", stop, { once: true });
+        });
       },
       qualifier: null,
       now: () => world.clock,

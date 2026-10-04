@@ -1,4 +1,11 @@
-import type { ChannelId } from "@kelpie/channels";
+import {
+  CAPABILITIES,
+  type ChannelCapabilities,
+  type ChannelEgressContract,
+  type ChannelId,
+  type SendOutcome,
+  typingRenewIntervalMs,
+} from "@kelpie/channels";
 import { fromNdjsonStream, type LlmEvent, type ModelTier, type RoutedRequest } from "@kelpie/llm";
 import type { Qualifier } from "@kelpie/qualifier";
 
@@ -17,8 +24,20 @@ export interface ModelCall {
 /** Everything the ConversationAgent needs from outside, so tests can replace it (ADR-0002). */
 export interface ConversationPorts {
   generate(tier: ModelTier, request: RoutedRequest): Promise<ModelCall>;
-  send(destination: Destination, text: string): Promise<void>;
-  typing(destination: Destination): Promise<void>;
+  /**
+   * Sends one bubble through the agent's channel (channel-egress). A failure is a value: rate
+   * limited with the wait, recipient unavailable, not connected, or failed.
+   */
+  send(
+    agentId: string,
+    destination: Destination,
+    text: string,
+    options: { silent: boolean },
+  ): Promise<SendOutcome>;
+  /** Shows "typing" once. It is a courtesy, so callers ignore its failures. */
+  typing(agentId: string, destination: Destination): Promise<void>;
+  /** Keeps "typing" showing, renewed before it lapses, until `signal` aborts. */
+  keepTyping(agentId: string, destination: Destination, signal: AbortSignal): Promise<void>;
   /** The end-of-turn qualifier, or null for the keyless heuristic (ADR-0009). */
   qualifier: Qualifier | null;
   now(): number;
@@ -50,6 +69,8 @@ export function portsFor(env: Env): ConversationPorts {
 
 function productionPorts(env: Env): ConversationPorts {
   const gateway = env.LLM_GATEWAY as unknown as LlmGatewayBinding;
+  // A service binding to channel-egress's ChannelEgress entrypoint, which answers with values.
+  const egress = env.CHANNEL_EGRESS as unknown as ChannelEgressContract;
   return {
     async generate(tier, request) {
       const generation = await gateway.generate(tier, request);
@@ -76,30 +97,46 @@ function productionPorts(env: Env): ConversationPorts {
         },
       };
     },
-    // Channel egress arrives with the channel stories (3.6, 3.7).
-    async send() {
-      throw new Error("No channel egress is configured yet");
+    send: (agentId, destination, text, options) => egress.send(agentId, destination, text, options),
+    async typing(agentId, destination) {
+      await egress.typing(agentId, destination);
     },
-    async typing() {
-      throw new Error("No channel egress is configured yet");
+    async keepTyping(agentId, destination, signal) {
+      const capabilities = (CAPABILITIES as Partial<Record<ChannelId, ChannelCapabilities>>)[
+        destination.channel
+      ];
+      const interval = capabilities ? typingRenewIntervalMs(capabilities) : null;
+      while (!signal.aborted) {
+        await egress.typing(agentId, destination).catch(() => undefined);
+        if (interval === null) return;
+        try {
+          await sleep(interval, signal);
+        } catch {
+          return;
+        }
+      }
     },
     qualifier: null,
     now: () => Date.now(),
-    sleep: (ms, signal) =>
-      new Promise<void>((resolve, reject) => {
-        if (signal.aborted) {
-          reject(signal.reason);
-          return;
-        }
-        const timer = setTimeout(resolve, ms);
-        signal.addEventListener(
-          "abort",
-          () => {
-            clearTimeout(timer);
-            reject(signal.reason);
-          },
-          { once: true },
-        );
-      }),
+    sleep,
   };
+}
+
+/** Waits `ms`, or rejects as soon as `signal` aborts. */
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      },
+      { once: true },
+    );
+  });
 }
