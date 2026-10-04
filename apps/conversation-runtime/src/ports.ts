@@ -99,7 +99,7 @@ function productionPorts(env: Env): ConversationPorts {
     },
     send: (agentId, destination, text, options) => egress.send(agentId, destination, text, options),
     async typing(agentId, destination) {
-      await egress.typing(agentId, destination);
+      await bounded(egress.typing(agentId, destination));
     },
     async keepTyping(agentId, destination, signal) {
       const capabilities = (CAPABILITIES as Partial<Record<ChannelId, ChannelCapabilities>>)[
@@ -107,10 +107,22 @@ function productionPorts(env: Env): ConversationPorts {
       ];
       const interval = capabilities ? typingRenewIntervalMs(capabilities) : null;
       while (!signal.aborted) {
-        await egress.typing(agentId, destination).catch(() => undefined);
+        const outcome = await bounded(egress.typing(agentId, destination));
+        // No bot, or no reachable recipient: renewing would fail the same way.
+        if (
+          outcome?.ok === false &&
+          outcome.reason !== "rate_limited" &&
+          outcome.reason !== "failed"
+        ) {
+          return;
+        }
         if (interval === null) return;
+        const wait =
+          outcome?.ok === false && outcome.reason === "rate_limited"
+            ? Math.max(interval, outcome.retryAfterMs)
+            : interval;
         try {
-          await sleep(interval, signal);
+          await sleep(wait, signal);
         } catch {
           return;
         }
@@ -120,6 +132,21 @@ function productionPorts(env: Env): ConversationPorts {
     now: () => Date.now(),
     sleep,
   };
+}
+
+/** "Typing" is a courtesy: a call that hangs or fails is given up after a few seconds. */
+const TYPING_TIMEOUT_MS = 3_000;
+
+async function bounded<T>(call: Promise<T>): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), TYPING_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([call.catch(() => undefined), timeout]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 /** Waits `ms`, or rejects as soon as `signal` aborts. */

@@ -29,6 +29,8 @@ const FIBER_RETENTION_MS = 24 * 60 * 60 * 1_000;
 
 /** A bubble the channel keeps rate-limiting is tried this many times before the turn fails. */
 const MAX_SEND_ATTEMPTS = 3;
+/** A rate limit asking for a longer wait than this fails the turn instead of stalling it. */
+const MAX_RATE_LIMIT_WAIT_MS = 30_000;
 
 /** One inbound message, already admitted by `ingress` (ADR-0004, ADR-0015). */
 export interface InboundMessage {
@@ -361,8 +363,10 @@ export class ConversationAgent extends Agent<Env> {
       if (controller.signal.aborted || !this.#isRunning(turnId)) return;
       throw error;
     } finally {
+      // Not awaited: a hung typing call mustn't hold back a reply that is ready. The loop ends on
+      // its own once its current call returns.
       answered.abort();
-      await typing;
+      void typing;
     }
     if (!this.#isRunning(turnId)) return;
     if (!finish) throw new Error("The model stream ended without a reply");
@@ -430,19 +434,10 @@ export class ConversationAgent extends Agent<Env> {
         return;
       }
       if (!this.#isRunning(turnId)) return;
-      this.#setBubble(row.id, "sending");
-      try {
-        const outcome = await this.#sendBubble(
-          agentId,
-          destination,
-          row,
-          row.seq !== lastSeq,
-          signal,
-        );
-        if (!outcome.ok) throw new Error(`The channel didn't take the bubble: ${outcome.reason}`);
-      } catch (error) {
-        if (this.#isRunning(turnId)) this.#setBubble(row.id, "pending");
-        throw error;
+      if (
+        !(await this.#sendBubble(turnId, agentId, destination, row, row.seq !== lastSeq, signal))
+      ) {
+        return;
       }
       // If the turn was settled during the send, settling already counted this bubble as sent.
       if (this.#isRunning(turnId)) this.#setBubble(row.id, "sent");
@@ -450,20 +445,50 @@ export class ConversationAgent extends Agent<Env> {
     this.#settle(turnId, "finished");
   }
 
-  /** Sends one bubble, waiting as long as the channel asks when it rate-limits, a few times. */
+  /**
+   * Sends one bubble. It is marked `sending` only while a send is in flight: while it waits out a
+   * rate limit it is `pending` again, so an interruption then doesn't count it as seen. A
+   * rate-limited bubble is tried a few times; any other failure fails the turn. Returns false when
+   * the turn stopped while waiting.
+   */
   async #sendBubble(
+    turnId: number,
     agentId: string,
     destination: Destination,
-    bubble: { text: string },
+    bubble: { id: number; text: string },
     silent: boolean,
     signal: AbortSignal,
-  ): Promise<SendOutcome> {
+  ): Promise<boolean> {
     for (let attempt = 1; ; attempt += 1) {
-      const outcome = await this.#ports.send(agentId, destination, bubble.text, { silent });
-      if (outcome.ok || outcome.reason !== "rate_limited" || attempt === MAX_SEND_ATTEMPTS) {
-        return outcome;
+      if (!this.#isRunning(turnId)) return false;
+      this.#setBubble(bubble.id, "sending");
+      let outcome: SendOutcome;
+      try {
+        outcome = await this.#ports.send(agentId, destination, bubble.text, { silent });
+      } catch (error) {
+        if (this.#isRunning(turnId)) this.#setBubble(bubble.id, "pending");
+        throw error;
       }
-      await this.#ports.sleep(outcome.retryAfterMs, signal);
+      if (outcome.ok) return true;
+      if (this.#isRunning(turnId)) this.#setBubble(bubble.id, "pending");
+      if (
+        outcome.reason !== "rate_limited" ||
+        attempt === MAX_SEND_ATTEMPTS ||
+        outcome.retryAfterMs > MAX_RATE_LIMIT_WAIT_MS
+      ) {
+        // The reason is an enum, so it is safe to log.
+        console.error("ConversationAgent: the channel didn't take a bubble", {
+          turnId,
+          reason: outcome.reason,
+          attempt,
+        });
+        throw new Error(`The channel didn't take the bubble: ${outcome.reason}`);
+      }
+      try {
+        await this.#ports.sleep(outcome.retryAfterMs, signal);
+      } catch {
+        return false;
+      }
     }
   }
 

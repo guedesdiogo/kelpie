@@ -617,6 +617,9 @@ describe("ConversationAgent delivery through the channel", () => {
       expect(await stub.turns()).toMatchObject([{ status: "delivered" }]),
     );
     expect(world.sent).toEqual(["One.", "Two."]);
+    // The wait the channel asked for comes right after the first bubble's pacing.
+    expect(world.sleeps[1]).toBe(50);
+    expect(world.sends.map((send) => send.silent)).toEqual([true, false]);
   });
 
   it("fails the turn when the channel keeps rate-limiting the same bubble", async () => {
@@ -628,6 +631,21 @@ describe("ConversationAgent delivery through the channel", () => {
 
     await vi.waitFor(async () => expect(await stub.turns()).toMatchObject([{ status: "failed" }]));
     expect(world.sent).toEqual([]);
+    expect(world.sendAttempts).toBe(3);
+    expect(await statuses(stub)).toEqual(["cancelled"]);
+  });
+
+  it("fails the turn rather than stall when the channel asks for too long a wait", async () => {
+    const world = use(fakeWorld([reply("One.")]));
+    world.rateLimitSends.add(0);
+    world.rateLimitWaitMs = 120_000;
+    const stub = agent("rate-limited-long");
+    await stub.ingest(message("m1", "one thing?"));
+    await stub.flush();
+
+    await vi.waitFor(async () => expect(await stub.turns()).toMatchObject([{ status: "failed" }]));
+    expect(world.sendAttempts).toBe(1);
+    expect(world.sleeps).not.toContain(120_000);
   });
 
   it("keeps typing up while the model answers, and stops it once the reply is in", async () => {
@@ -660,5 +678,29 @@ describe("ConversationAgent delivery through the channel", () => {
 
     await vi.waitFor(() => expect(world.sent).toEqual(["Plain."]));
     expect(world.typingKept).toBe(0);
+  });
+});
+
+describe("ConversationAgent rate limits and interruption", () => {
+  it("doesn't count a bubble waiting out a rate limit as seen when a message interrupts", async () => {
+    const world = use(fakeWorld([reply("One.\n\nTwo."), reply("Fine.")]));
+    world.rateLimitSends.add(0);
+    // Sleep 0 is the first bubble's pacing; sleep 1 is the wait the rate limit asked for.
+    world.blockSleeps.add(1);
+    const stub = agent("rate-limit-interrupted");
+    await stub.ingest(message("m1", "two things?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.rateLimitSends.size).toBe(1));
+    await vi.waitFor(async () => expect(await statuses(stub)).toEqual(["pending", "pending"]));
+
+    await stub.ingest(message("m2", "never mind"));
+    await stub.flush();
+
+    await vi.waitFor(() => expect(world.sent).toEqual(["Fine."]));
+    expect(
+      (await stub.outbox()).filter((row) => row.turnId === 1).map((row) => row.status),
+    ).toEqual(["cancelled", "cancelled"]);
+    // History holds no reply for the first turn: nothing of it reached the user.
+    expect(JSON.stringify(world.requests[1]?.messages)).not.toContain("One.");
   });
 });

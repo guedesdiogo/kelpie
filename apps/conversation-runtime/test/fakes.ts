@@ -56,8 +56,13 @@ export interface FakeWorld {
   hangSends: Set<number>;
   /** Sends with these call numbers fail. */
   failSends: Set<number>;
-  /** Sends with these call numbers are rate-limited, asking for a short wait. */
+  /** Sends with these call numbers are rate-limited, asking for `rateLimitWaitMs`. */
   rateLimitSends: Set<number>;
+  rateLimitWaitMs: number;
+  /** How long each sleep was asked to wait, in call order. */
+  sleeps: number[];
+  /** Every send attempt, delivered or not. */
+  sendAttempts: number;
   /** Every "typing" call throws. */
   failTyping: boolean;
 }
@@ -79,6 +84,9 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
     hangSends: new Set(),
     failSends: new Set(),
     rateLimitSends: new Set(),
+    rateLimitWaitMs: 50,
+    sleeps: [],
+    sendAttempts: 0,
     failTyping: false,
     ports: {
       async generate(_tier, request): Promise<ModelCall> {
@@ -117,9 +125,10 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
       },
       async send(_agentId, _destination: Destination, text, options): Promise<SendOutcome> {
         const call = sends++;
+        world.sendAttempts += 1;
         if (world.failSends.has(call)) return { ok: false, reason: "failed" };
         if (world.rateLimitSends.has(call)) {
-          return { ok: false, reason: "rate_limited", retryAfterMs: 50 };
+          return { ok: false, reason: "rate_limited", retryAfterMs: world.rateLimitWaitMs };
         }
         if (world.hangSends.has(call)) await new Promise(() => {});
         // Polls a plain flag: a promise created here can't be resolved from the test's context.
@@ -145,8 +154,9 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
       },
       qualifier: null,
       now: () => world.clock,
-      sleep(_ms, signal) {
+      sleep(ms, signal) {
         const call = sleeps++;
+        world.sleeps.push(ms);
         if (!world.blockSleeps.has(call)) return Promise.resolve();
         return new Promise<void>((_resolve, reject) => {
           signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
