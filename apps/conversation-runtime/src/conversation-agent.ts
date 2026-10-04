@@ -1,3 +1,4 @@
+import { canonicalTimeZone } from "@kelpie/access";
 import { CAPABILITIES, type ChannelCapabilities } from "@kelpie/channels";
 import type { AgentConfig, AgentSettings } from "@kelpie/config";
 import {
@@ -47,7 +48,10 @@ export type IngestResult =
       /** When the buffered messages will be answered, or null if a turn already started. */
       flushAt: number | null;
     }
-  | { status: "rejected"; reason: "destination_mismatch" | "agent_mismatch" | "too_long" };
+  | {
+      status: "rejected";
+      reason: "destination_mismatch" | "agent_mismatch" | "too_long" | "empty";
+    };
 
 interface TurnInFlight {
   controller: AbortController;
@@ -101,6 +105,11 @@ export class ConversationAgent extends Agent<Env> {
     const now = this.#ports.now();
     if (message.text.length > LIMITS.maxTextLength)
       return { status: "rejected", reason: "too_long" };
+    // A stamp the user typed could fake when the message was sent.
+    const text = withoutTypedStamps(message.text);
+    if (text.trim() === "") return { status: "rejected", reason: "empty" };
+    const sentAt = plausibleSendTime(message.sentAt, now);
+    const stamp = stampOf(sentAt, canonicalTimeZone(message.timeZone));
     capabilitiesFor(message.destination.channel);
     const bound = this.#get<Destination | null>("destination", null);
     if (bound && !sameDestination(bound, message.destination)) {
@@ -118,11 +127,10 @@ export class ConversationAgent extends Agent<Env> {
       .values({
         providerMessageId: message.providerMessageId,
         userId: message.userId,
-        // A stamp the user typed could fake when the message was sent.
-        text: withoutTypedStamps(message.text),
+        text,
         receivedAt: now,
-        sentAt: message.sentAt,
-        stamp: stampOf(message.sentAt, message.timeZone),
+        sentAt,
+        stamp,
       })
       .onConflictDoNothing({ target: schema.inbound.providerMessageId })
       .returning({ id: schema.inbound.id })
@@ -613,6 +621,12 @@ export class ConversationAgent extends Agent<Env> {
 function settingsOf(turn: { settings: AgentSettings | null }): AgentSettings {
   if (!turn.settings) throw new Error("The turn has no settings");
   return turn.settings;
+}
+
+/** The provider's send time, or the arrival time when that one is missing or in the future. */
+function plausibleSendTime(sentAt: number, now: number): number {
+  const CLOCK_SKEW_MS = 5 * 60_000;
+  return Number.isSafeInteger(sentAt) && sentAt > 0 && sentAt <= now + CLOCK_SKEW_MS ? sentAt : now;
 }
 
 function capabilitiesFor(channel: Destination["channel"]): ChannelCapabilities {

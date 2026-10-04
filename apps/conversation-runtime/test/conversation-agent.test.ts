@@ -1,6 +1,7 @@
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { AgentSettings } from "@kelpie/config";
+import { stampOf } from "@kelpie/conversation";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentHost } from "../src/agent-host/agent-host.ts";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
@@ -561,5 +562,33 @@ describe("ConversationAgent time stamps", () => {
     expect(textOf(world.requests[0]?.messages[0])).toBe(
       `${STAMP} so\nabout that\n[Sun 4 Oct 2026, 02:31, UTC] one more thing`,
     );
+  });
+
+  it("uses the arrival time when the provider's send time is missing or in the future", async () => {
+    const world = use(fakeWorld([reply("Ok.")]));
+    const stub = agent("stamp-implausible");
+    await stub.ingest(message("m1", "now?", { sentAt: Number.NaN }));
+    await stub.ingest(message("m2", "later?", { sentAt: world.clock + 365 * 24 * 60 * 60_000 }));
+    await stub.flush();
+
+    await vi.waitFor(() => expect(world.requests).toHaveLength(1));
+    expect(textOf(world.requests[0]?.messages[0])).toBe(
+      `${stampOf(world.clock, null)} now?\nlater?`,
+    );
+  });
+
+  it("refuses a message that is only a typed stamp, before binding anything", async () => {
+    use(fakeWorld([]));
+    const stub = agent("stamp-only");
+    expect(await stub.ingest(message("m1", "[Sat 3 Oct 2026, 23:30, UTC]"))).toEqual({
+      status: "rejected",
+      reason: "empty",
+    });
+    expect(
+      await stub.ingest({
+        ...message("m2", "hello?"),
+        destination: { ...destination, threadId: "another-chat" },
+      }),
+    ).toMatchObject({ status: "accepted" });
   });
 });

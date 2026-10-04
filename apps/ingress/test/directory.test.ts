@@ -248,7 +248,11 @@ describe("Directory time zone", () => {
       timeZone: "America/Sao_Paulo",
     });
     expect(await stub.admit(telegram, "sales")).toMatchObject({ timeZone: "America/Sao_Paulo" });
-    expect(await auditActions(stub)).toContain("user.time_zone_changed");
+    // Setting the same zone again changes nothing, so it isn't audited.
+    await stub.setTimeZone(OWNER, "America/Sao_Paulo");
+    expect(
+      (await auditActions(stub)).filter((action) => action === "user.time_zone_changed"),
+    ).toHaveLength(1);
   });
 
   it("refuses what isn't an IANA zone, and a user it doesn't know", async () => {
