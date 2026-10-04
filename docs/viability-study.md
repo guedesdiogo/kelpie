@@ -25,6 +25,8 @@ The platform is not the hard part. The conversation engine (buffering, splitting
 - **Allowlist, always.** Only users configured in advance can talk to an agent, and only through channel identities enabled for them (a Telegram account, a WhatsApp number, a Slack user). Everyone else is ignored before any model is called.
 - **Permissions.** Each user has access to specific agents and specific content.
 - **A task board for agents.** Agents log every piece of background work on Kelpie's own board, and people can queue tasks there and comment on them, but can't move a task once the agent has started it ([ADR-0011](adr/0011-agent-task-board.md)).
+- **Self-configuration.** After a minimal bootstrap (the owner's identity and one model key), the rest of the setup happens by talking to a setup agent, through the same typed configuration commands the API and the UI use. Access, cost and external-account changes need an explicit yes, and secrets only go through a one-time secure form ([ADR-0013](adr/0013-self-configuration.md)).
+- **Assistants, not machine operators.** Agents get tools, MCP and a browser with a handoff to a person for steps such as logins. Running shell commands or arbitrary binaries is out of scope for now, as a possible future tool adapter ([ADR-0014](adr/0014-agent-tool-scope.md)).
 - **Conversational mode is a toggle.** Merging fragmented messages and splitting replies into paced bubbles can be switched on or off per agent.
 - **Connectors are pluggable.** Each kind of external service (Postgres provider, Jev access path, model providers, channels, tool sources) starts with only the implementations the current phase needs, such as one Postgres provider and one Jev path, behind an interface and a config value that make adding another one straightforward.
 
@@ -340,6 +342,9 @@ Each decision is closed by an ADR in `docs/adr/` once its pull request merges.
 | [1.10 MVP scope and phases](https://github.com/guedesdiogo/kelpie/issues/11) | **Decided:** approved as proposed ([§13](#13-delivery-plan)) |
 | [1.12 Access control](https://github.com/guedesdiogo/kelpie/issues/13) | **Decided:** approved as proposed ([§4.6](#46-users-and-access-control)) |
 | [4.1 Agent task board](https://github.com/guedesdiogo/kelpie/issues/44) | **Decided:** Kelpie's own board, not GitHub Issues ([ADR-0011](adr/0011-agent-task-board.md)) |
+| [3.11 ORM](https://github.com/guedesdiogo/kelpie/issues/46) | **Decided:** Drizzle for Postgres and Durable Object SQLite ([ADR-0012](adr/0012-drizzle-data-layer.md)) |
+| [3.12 Self-configuration](https://github.com/guedesdiogo/kelpie/issues/47) | **Decided:** configuration through agents, after a minimal bootstrap ([ADR-0013](adr/0013-self-configuration.md)) |
+| [Agent tool scope](https://github.com/guedesdiogo/kelpie/issues/18) | **Decided:** browser with a human handoff in phase 2; no machine execution ([ADR-0014](adr/0014-agent-tool-scope.md)) |
 
 ## 12. Spikes before committing to a design
 
