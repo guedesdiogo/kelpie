@@ -4,7 +4,8 @@ CREATE TABLE `audit_log` (
 	`action` text NOT NULL,
 	`user_id` text NOT NULL,
 	`via` text NOT NULL,
-	`fields` text NOT NULL
+	`fields` text NOT NULL,
+	`prompt_version` integer NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE `state` (

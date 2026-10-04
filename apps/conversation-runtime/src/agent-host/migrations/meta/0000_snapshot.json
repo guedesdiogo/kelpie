@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7faae3b2-be94-4e40-b01c-2ac3f6e7c615",
+  "id": "1902dcdc-6973-4f28-9b35-380703600b45",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "audit_log": {
@@ -45,6 +45,13 @@
         "fields": {
           "name": "fields",
           "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "prompt_version": {
+          "name": "prompt_version",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false

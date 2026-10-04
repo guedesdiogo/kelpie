@@ -1,5 +1,12 @@
 import { DurableObject } from "cloudflare:workers";
-import type { Actor, AgentSummary } from "@kelpie/config";
+import {
+  type Actor,
+  type AddAgentResult,
+  type AgentSummary,
+  isAgentId,
+  isAgentName,
+  type RenameAgentResult,
+} from "@kelpie/config";
 import { asc, eq } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
@@ -12,6 +19,9 @@ export const REGISTRY_NAME = "registry";
 /**
  * Which agents exist, so commands and the management UI can list them (ADR-0015 left this to
  * Story 3.10). Each agent's configuration lives in its own AgentHost.
+ *
+ * The configuration commands are its only callers and authorize the actor (ADR-0013); this object
+ * validates its input, because it is an RPC boundary.
  */
 export class Registry extends DurableObject<Env> {
   readonly #db: DrizzleSqliteDODatabase<typeof schema>;
@@ -30,8 +40,9 @@ export class Registry extends DurableObject<Env> {
   }
 
   /** Adds an agent. Adding one that exists changes nothing, so a retried create is safe. */
-  add(id: string, name: string, actor: Actor): { created: boolean } {
-    if (this.get(id)) return { created: false };
+  add(id: string, name: string, actor: Actor): AddAgentResult {
+    if (!isAgentId(id) || !isAgentName(name)) return { ok: false, reason: "invalid_input" };
+    if (this.get(id)) return { ok: true, created: false };
     const now = Date.now();
     this.#db.transaction((tx) => {
       tx.insert(schema.agents).values({ id, name, createdAt: now, updatedAt: now }).run();
@@ -45,11 +56,15 @@ export class Registry extends DurableObject<Env> {
         })
         .run();
     });
-    return { created: true };
+    return { ok: true, created: true };
   }
 
-  rename(id: string, name: string, actor: Actor): { found: boolean } {
-    if (!this.get(id)) return { found: false };
+  /** Renaming to the current name changes nothing, so it isn't audited. */
+  rename(id: string, name: string, actor: Actor): RenameAgentResult {
+    if (!isAgentId(id) || !isAgentName(name)) return { ok: false, reason: "invalid_input" };
+    const agent = this.get(id);
+    if (!agent) return { ok: false, reason: "unknown_agent" };
+    if (agent.name === name) return { ok: true };
     const now = Date.now();
     this.#db.transaction((tx) => {
       tx.update(schema.agents).set({ name, updatedAt: now }).where(eq(schema.agents.id, id)).run();
@@ -63,7 +78,7 @@ export class Registry extends DurableObject<Env> {
         })
         .run();
     });
-    return { found: true };
+    return { ok: true };
   }
 
   get(id: string): AgentSummary | null {

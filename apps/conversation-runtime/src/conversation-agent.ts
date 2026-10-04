@@ -115,6 +115,11 @@ export class ConversationAgent extends Agent<Env> {
       .returning({ id: schema.inbound.id })
       .all();
     if (inserted.length === 0) {
+      // A retry of a message whose flush was never planned (reading the settings failed) plans it
+      // now; otherwise it would wait for the next message.
+      await this.#serialized(async () => {
+        if (this.#get("plannedEpoch", 0) !== this.#epoch()) await this.#plan(this.#epoch(), now);
+      });
       return { status: "duplicate", flushAt: this.#get<number | null>("flushAt", null) };
     }
 
@@ -128,18 +133,19 @@ export class ConversationAgent extends Agent<Env> {
   /**
    * Starts a turn with the buffered messages. The flush schedule calls it with the buffer epoch it
    * was armed for and is ignored once a newer message re-armed it; calling it again, or with
-   * nothing buffered, does nothing.
+   * nothing buffered, does nothing. It never interrupts: every message already interrupted the
+   * turn in flight when it arrived, so a running turn here is one that answers everything.
    */
   async flush(armed?: { epoch: number }): Promise<void> {
     if (armed && armed.epoch !== this.#epoch()) return;
     if (this.#pendingInbound().length === 0) return;
-    // Other calls run while this waits; a message that re-armed the flush meanwhile wins.
     const { settings, promptVersion } = await this.#config();
+    // Other calls ran while this waited: a newer message may have re-armed the flush, or another
+    // flush may have claimed the buffer.
     if (armed && armed.epoch !== this.#epoch()) return;
+    if (this.#pendingInbound().length === 0) return;
     await this.#cancelFlushSchedule();
-    this.#interrupt();
     const pending = this.#pendingInbound();
-    if (pending.length === 0) return;
     const now = this.#ports.now();
     const turnId = this.#db.transaction((tx) => {
       const { id } = tx
@@ -438,8 +444,11 @@ export class ConversationAgent extends Agent<Env> {
           })
           .run();
       }
-      // History holds what was kept; the full reply isn't needed any more.
-      tx.update(schema.turns).set({ status, reply: null }).where(eq(schema.turns.id, turnId)).run();
+      // History holds what was kept; the full reply and the settings aren't needed any more.
+      tx.update(schema.turns)
+        .set({ status, reply: null, settings: null })
+        .where(eq(schema.turns.id, turnId))
+        .run();
     });
   }
 
@@ -478,11 +487,12 @@ export class ConversationAgent extends Agent<Env> {
     await this.#cancelFlushSchedule();
     if (flushAt <= now) {
       await this.flush();
-      return;
+    } else {
+      const schedule = await this.schedule(new Date(flushAt), "flush", { epoch });
+      this.#set("flushSchedule", schedule.id);
+      this.#set("flushAt", flushAt);
     }
-    const schedule = await this.schedule(new Date(flushAt), "flush", { epoch });
-    this.#set("flushSchedule", schedule.id);
-    this.#set("flushAt", flushAt);
+    this.#set("plannedEpoch", epoch);
   }
 
   #serialized(step: () => Promise<void>): Promise<void> {
@@ -586,7 +596,7 @@ export class ConversationAgent extends Agent<Env> {
   }
 }
 
-/** The settings a turn started with. */
+/** The settings a running turn started with. */
 function settingsOf(turn: { settings: AgentSettings | null }): AgentSettings {
   if (!turn.settings) throw new Error("The turn has no settings");
   return turn.settings;

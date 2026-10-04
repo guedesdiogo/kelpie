@@ -6,9 +6,13 @@ import {
   maskIdentityValue,
   type Role,
 } from "@kelpie/access";
-import { type AgentSettings, isAgentId, parseSettings } from "./settings.ts";
+import { type AgentSettings, isAgentId, isAgentName, parseSettings } from "./settings.ts";
 
-/** Who asked for a change, and through what: "admin-api", or "agent:<id>" for an agent's tool. */
+/**
+ * Who asked for a change, and through what: "admin-api", or "agent:<id>" for an agent's tool.
+ * Callers build it from the `Directory`'s `Admission` for the authenticated user, never from
+ * request input.
+ */
 export interface Actor {
   userId: string;
   role: Role;
@@ -26,17 +30,26 @@ export interface AgentConfig {
   promptVersion: number;
 }
 
-/** What an agent's host answers to a change it rejects on its own validation. */
+/**
+ * What the objects that hold configuration answer. They validate their input again, because they
+ * are an RPC boundary; authorizing the actor is the commands' job.
+ */
 export type ConfigureResult =
   | { ok: true; value: AgentConfig }
   | { ok: false; reason: "invalid_input" };
+export type AddAgentResult =
+  | { ok: true; created: boolean }
+  | { ok: false; reason: "invalid_input" };
+export type RenameAgentResult =
+  | { ok: true }
+  | { ok: false; reason: "unknown_agent" | "invalid_input" };
 
 /** What the commands need from the objects that hold configuration. */
 export interface ConfigPorts {
   registry: {
     /** Idempotent: adding an existing agent reports `created: false` and changes nothing. */
-    add(id: string, name: string, actor: Actor): Promise<{ created: boolean }>;
-    rename(id: string, name: string, actor: Actor): Promise<{ found: boolean }>;
+    add(id: string, name: string, actor: Actor): Promise<AddAgentResult>;
+    rename(id: string, name: string, actor: Actor): Promise<RenameAgentResult>;
     get(id: string): Promise<AgentSummary | null>;
     list(): Promise<AgentSummary[]>;
   };
@@ -97,17 +110,18 @@ export function createConfigCommands(ports: ConfigPorts) {
     ): Promise<CommandResult<AgentSummary & { created: boolean }>> {
       if (!isOwner(actor)) return forbidden;
       const { id, name } = (input ?? {}) as { id?: unknown; name?: unknown };
-      if (!isAgentId(id) || !isName(name)) return invalid;
-      const { created } = await ports.registry.add(id, name, actor);
-      return { ok: true, value: { id, name, created } };
+      if (!isAgentId(id) || !isAgentName(name)) return invalid;
+      const result = await ports.registry.add(id, name.trim(), actor);
+      if (!result.ok) return result;
+      return { ok: true, value: { id, name: name.trim(), created: result.created } };
     },
 
     async renameAgent(actor: Actor, input: unknown): Promise<CommandResult<AgentSummary>> {
       if (!isOwner(actor)) return forbidden;
       const { id, name } = (input ?? {}) as { id?: unknown; name?: unknown };
-      if (!isAgentId(id) || !isName(name)) return invalid;
-      const { found } = await ports.registry.rename(id, name, actor);
-      return found ? { ok: true, value: { id, name } } : { ok: false, reason: "unknown_agent" };
+      if (!isAgentId(id) || !isAgentName(name)) return invalid;
+      const result = await ports.registry.rename(id, name.trim(), actor);
+      return result.ok ? { ok: true, value: { id, name: name.trim() } } : result;
     },
 
     async getAgent(
@@ -167,13 +181,11 @@ export function createConfigCommands(ports: ConfigPorts) {
 
 export type ConfigCommands = ReturnType<typeof createConfigCommands>;
 
-function isName(value: unknown): value is string {
-  return typeof value === "string" && value.trim() !== "" && value.length <= 80;
-}
-
 function parseIdentity(input: unknown): ChannelIdentity | null {
   const { channel, channelUserId } = (input ?? {}) as Partial<Record<string, unknown>>;
   if (!CHANNEL_IDS.includes(channel as ChannelIdentity["channel"])) return null;
-  if (typeof channelUserId !== "string" || channelUserId.trim() === "") return null;
-  return { channel: channel as ChannelIdentity["channel"], channelUserId };
+  if (typeof channelUserId !== "string") return null;
+  const value = channelUserId.trim();
+  if (value === "" || value.length > 256) return null;
+  return { channel: channel as ChannelIdentity["channel"], channelUserId: value };
 }

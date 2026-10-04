@@ -38,13 +38,19 @@ export class AgentHost extends Agent<Env> {
   }
 
   /**
-   * Applies validated changes and audits them. The configuration commands validate first; this
-   * checks again because it is an RPC boundary. A new system prompt bumps the prompt version.
+   * Applies changes and audits them. The configuration commands are its only callers and authorize
+   * the actor (ADR-0013); this validates the changes again, because it is an RPC boundary. A new
+   * system prompt bumps the prompt version. Setting the current values changes nothing, so it
+   * isn't audited.
    */
   configure(changes: Partial<AgentSettings>, actor: Actor): ConfigureResult {
     const parsed = parseSettings(changes);
     if (!parsed) return { ok: false, reason: "invalid_input" };
     const current = this.config();
+    const fields = (Object.keys(parsed) as (keyof AgentSettings)[]).filter(
+      (key) => JSON.stringify(parsed[key]) !== JSON.stringify(current.settings[key]),
+    );
+    if (fields.length === 0) return { ok: true, value: current };
     const settings = { ...current.settings, ...parsed };
     const promptVersion =
       settings.systemPrompt === current.settings.systemPrompt
@@ -66,7 +72,8 @@ export class AgentHost extends Agent<Env> {
           action: "settings.changed",
           userId: actor.userId,
           via: actor.via,
-          fields: Object.keys(parsed),
+          fields,
+          promptVersion,
         })
         .run();
     });

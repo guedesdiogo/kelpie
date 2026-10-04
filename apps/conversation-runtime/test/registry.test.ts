@@ -9,8 +9,8 @@ const owner = { userId: "u-owner", role: "owner", via: "admin-api" } as const;
 describe("Registry", () => {
   it("adds agents and lists them by id", async () => {
     const stub = registry("list");
-    expect(await stub.add("sales", "Sales", owner)).toEqual({ created: true });
-    expect(await stub.add("assistant", "Assistant", owner)).toEqual({ created: true });
+    expect(await stub.add("sales", "Sales", owner)).toEqual({ ok: true, created: true });
+    expect(await stub.add("assistant", "Assistant", owner)).toEqual({ ok: true, created: true });
 
     expect(await stub.list()).toEqual([
       { id: "assistant", name: "Assistant" },
@@ -24,7 +24,7 @@ describe("Registry", () => {
     const stub = registry("idempotent");
     await stub.add("sales", "Sales", owner);
 
-    expect(await stub.add("sales", "Another name", owner)).toEqual({ created: false });
+    expect(await stub.add("sales", "Another name", owner)).toEqual({ ok: true, created: false });
     expect(await stub.list()).toEqual([{ id: "sales", name: "Sales" }]);
   });
 
@@ -32,16 +32,32 @@ describe("Registry", () => {
     const stub = registry("rename");
     await stub.add("sales", "Sales", owner);
 
-    expect(await stub.rename("sales", "Sales team", owner)).toEqual({ found: true });
-    expect(await stub.rename("ghost", "Nobody", owner)).toEqual({ found: false });
+    expect(await stub.rename("sales", "Sales team", owner)).toEqual({ ok: true });
+    expect(await stub.rename("ghost", "Nobody", owner)).toEqual({
+      ok: false,
+      reason: "unknown_agent",
+    });
     expect(await stub.get("sales")).toEqual({ id: "sales", name: "Sales team" });
   });
 
-  it("audits each creation and rename", async () => {
+  it("validates what it stores, because it is an RPC boundary", async () => {
+    const stub = registry("validates");
+    const invalid = { ok: false, reason: "invalid_input" };
+
+    expect(await stub.add("Sales Team", "Sales", owner)).toEqual(invalid);
+    expect(await stub.add("sales", "Sales\nteam", owner)).toEqual(invalid);
+    expect(await stub.add("sales", "x".repeat(81), owner)).toEqual(invalid);
+    await stub.add("sales", "Sales", owner);
+    expect(await stub.rename("sales", " ", owner)).toEqual(invalid);
+    expect(await stub.list()).toEqual([{ id: "sales", name: "Sales" }]);
+  });
+
+  it("audits each creation and rename, and nothing that changed nothing", async () => {
     const stub = registry("audited");
     await stub.add("sales", "Sales", owner);
     await stub.add("sales", "Sales", owner);
     await stub.rename("sales", "Sales team", { ...owner, via: "agent:setup" });
+    await stub.rename("sales", "Sales team", owner);
 
     const audit = await runInDurableObject(stub, (_instance, state) =>
       state.storage.sql

@@ -2,6 +2,7 @@ import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "c
 import { env } from "cloudflare:workers";
 import type { AgentSettings } from "@kelpie/config";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AgentHost } from "../src/agent-host/agent-host.ts";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import {
@@ -9,6 +10,7 @@ import {
   fail,
   fakeWorld,
   hang,
+  INJECTED_FAILURE,
   refuse,
   reply,
   slowQualifier,
@@ -44,7 +46,10 @@ async function statuses(stub: ReturnType<typeof agent>) {
   return (await stub.outbox()).map((row) => row.status);
 }
 
-afterEach(() => replacePortsForTesting(undefined));
+afterEach(() => {
+  replacePortsForTesting(undefined);
+  vi.restoreAllMocks();
+});
 
 describe("ConversationAgent buffering", () => {
   it("buffers messages and re-arms one flush on every new message", async () => {
@@ -165,8 +170,8 @@ describe("ConversationAgent buffering", () => {
     await vi.waitFor(() => expect(world.sent).toEqual(["On time."]));
   });
 
-  it("keeps a message that arrives while a flush reads the settings", async () => {
-    use(fakeWorld([reply("Both."), reply("The rest.")]));
+  it("answers a message that arrives while a flush reads the settings", async () => {
+    const world = use(fakeWorld([reply("Both."), reply("The rest.")]));
     const stub = agent("flush-race");
     await stub.ingest(message("m1", "first part"));
 
@@ -177,12 +182,55 @@ describe("ConversationAgent buffering", () => {
     expect(schedules.length).toBeLessThanOrEqual(1);
     await stub.flush();
 
-    // Whichever way the two calls interleaved, history holds each message exactly once.
-    await vi.waitFor(async () => {
-      const history = JSON.stringify(await stub.history());
-      expect(history.match(/first part/g)).toHaveLength(1);
-      expect(history.match(/second part/g)).toHaveLength(1);
+    // Whichever way the two calls interleaved, history holds each message once, and the last turn,
+    // which saw both, was delivered.
+    await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).toBe("delivered"));
+    const history = JSON.stringify(await stub.history());
+    expect(history.match(/first part/g)).toHaveLength(1);
+    expect(history.match(/second part/g)).toHaveLength(1);
+    const lastRequest = JSON.stringify(world.requests.at(-1)?.messages);
+    expect(lastRequest).toContain("first part");
+    expect(lastRequest).toContain("second part");
+  });
+
+  it("starts one turn when two flushes race, and doesn't interrupt it", async () => {
+    const world = use(fakeWorld([reply("Once."), reply("Twice.")]));
+    world.blockSends.add(0);
+    const stub = agent("double-flush");
+    await stub.ingest(message("m1", "anyone there?"));
+    // The second flush gets the settings only after the first one started its turn.
+    const config = AgentHost.prototype.config;
+    let calls = 0;
+    vi.spyOn(AgentHost.prototype, "config").mockImplementation(async function (this: AgentHost) {
+      calls += 1;
+      if (calls === 2) await new Promise((resolve) => setTimeout(resolve, 50));
+      return config.call(this);
+    } as unknown as typeof config);
+
+    await Promise.all([stub.flush(), stub.flush()]);
+    expect(await stub.turns()).toMatchObject([{ status: "running" }]);
+
+    world.blockSends.delete(0);
+    await vi.waitFor(async () =>
+      expect(await stub.turns()).toMatchObject([{ status: "delivered" }]),
+    );
+    expect(world.sent).toEqual(["Once."]);
+  });
+
+  it("plans the flush again when the provider retries a message whose planning failed", async () => {
+    const world = use(fakeWorld([reply("Got it.")]));
+    const stub = agent("plan-fails");
+    vi.spyOn(AgentHost.prototype, "config").mockImplementationOnce(() => {
+      throw new Error(INJECTED_FAILURE);
     });
+
+    await expect(stub.ingest(message("m1", "are you there?"))).rejects.toThrow();
+    // The provider retries the same message: without planning again, nothing would answer it.
+    const retried = await stub.ingest(message("m1", "are you there?"));
+    expect(retried).toMatchObject({ status: "duplicate", flushAt: expect.any(Number) });
+
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Got it."]));
   });
 });
 

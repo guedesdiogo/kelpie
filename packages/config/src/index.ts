@@ -1,5 +1,6 @@
 export {
   type Actor,
+  type AddAgentResult,
   type AgentConfig,
   type AgentSummary,
   type CommandResult,
@@ -7,6 +8,13 @@ export {
   type ConfigPorts,
   type ConfigureResult,
   createConfigCommands,
+  type RenameAgentResult,
   type ShownIdentity,
 } from "./commands.ts";
-export { type AgentSettings, DEFAULT_SETTINGS, isAgentId, parseSettings } from "./settings.ts";
+export {
+  type AgentSettings,
+  DEFAULT_SETTINGS,
+  isAgentId,
+  isAgentName,
+  parseSettings,
+} from "./settings.ts";

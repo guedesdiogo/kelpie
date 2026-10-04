@@ -34,7 +34,7 @@ export const turns = sqliteTable("turns", {
   systemVersion: integer("system_version").notNull(),
   /**
    * The agent's settings when the turn started, system prompt included, so a retry or a recovery
-   * runs with the same ones. Only turns from before migration 0001 have none.
+   * runs with the same ones. Cleared when the turn settles.
    */
   settings: text("settings", { mode: "json" }).$type<AgentSettings>(),
   /** The model's reply, kept only until delivery settles what history records. */

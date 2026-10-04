@@ -8,7 +8,10 @@ export const state = sqliteTable("state", {
   value: text("value", { mode: "json" }),
 });
 
-/** Every configuration change: who asked, through what, and which settings changed (ADR-0013). */
+/**
+ * Every configuration change: who asked, through what, which settings changed and the prompt
+ * version after it (ADR-0013). Values aren't copied here; the system prompt can be long.
+ */
 export const auditLog = sqliteTable("audit_log", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   at: integer("at").notNull(),
@@ -16,4 +19,5 @@ export const auditLog = sqliteTable("audit_log", {
   userId: text("user_id").notNull(),
   via: text("via").notNull(),
   fields: text("fields", { mode: "json" }).$type<string[]>().notNull(),
+  promptVersion: integer("prompt_version").notNull(),
 });

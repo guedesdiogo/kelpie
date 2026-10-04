@@ -9,9 +9,13 @@ const owner = { userId: "u-owner", role: "owner", via: "admin-api" } as const;
 async function auditOf(stub: ReturnType<typeof host>) {
   return runInDurableObject(stub, (_instance, state) =>
     state.storage.sql
-      .exec<{ action: string; user_id: string; via: string; fields: string }>(
-        "SELECT action, user_id, via, fields FROM audit_log ORDER BY id",
-      )
+      .exec<{
+        action: string;
+        user_id: string;
+        via: string;
+        fields: string;
+        prompt_version: number;
+      }>("SELECT action, user_id, via, fields, prompt_version FROM audit_log ORDER BY id")
       .toArray(),
   );
 }
@@ -53,10 +57,12 @@ describe("AgentHost", () => {
     expect(await auditOf(stub)).toEqual([]);
   });
 
-  it("audits who changed which settings, and through what", async () => {
+  it("audits who changed which settings, through what, and the prompt version after", async () => {
     const stub = host("audited");
     await stub.configure({ tier: "medium", conversational: false }, owner);
-    await stub.configure({ systemPrompt: "Hi." }, { ...owner, via: "agent:setup" });
+    await stub.configure({ systemPrompt: "Hi.", tier: "medium" }, { ...owner, via: "agent:setup" });
+    // Setting the current values changes nothing, so it isn't audited.
+    await stub.configure({ systemPrompt: "Hi.", conversational: false }, owner);
 
     expect(await auditOf(stub)).toEqual([
       {
@@ -64,12 +70,14 @@ describe("AgentHost", () => {
         user_id: "u-owner",
         via: "admin-api",
         fields: JSON.stringify(["tier", "conversational"]),
+        prompt_version: 0,
       },
       {
         action: "settings.changed",
         user_id: "u-owner",
         via: "agent:setup",
         fields: JSON.stringify(["systemPrompt"]),
+        prompt_version: 1,
       },
     ]);
   });

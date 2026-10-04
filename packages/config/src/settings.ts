@@ -27,6 +27,13 @@ export function isAgentId(value: unknown): value is string {
   return typeof value === "string" && /^[a-z][a-z0-9-]{1,39}$/.test(value);
 }
 
+/** Agent names appear in lists and in models' context: one line of printable text. */
+export function isAgentName(value: unknown): value is string {
+  return (
+    typeof value === "string" && value.trim() !== "" && value.length <= 80 && !/\p{C}/u.test(value)
+  );
+}
+
 const isInteger = (value: unknown, min: number, max: number): value is number =>
   typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
 
