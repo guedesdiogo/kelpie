@@ -71,6 +71,8 @@ describe("OpenAIResponsesProvider against recorded streams", () => {
     const { fetch, calls } = fakeFetch(recorded(turnOne), recorded(turnTwo));
     const llm = provider(fetch);
     const first = finishOf(await collect(llm.stream(request)));
+    const native = first.message.native;
+    if (!native) throw new Error("the recorded turn kept no native output");
     const history: ChatMessage[] = [
       ...request.messages,
       first.message,
@@ -88,7 +90,7 @@ describe("OpenAIResponsesProvider against recorded streams", () => {
         role: "user",
         content: [{ type: "input_text", text: "What's the weather in Lisbon?" }],
       },
-      ...(first.message.native?.content as unknown[]),
+      ...(native.content as unknown[]),
       {
         type: "function_call_output",
         call_id: "call_wBKOSbUjPSBA38m8jWknFaOc",
