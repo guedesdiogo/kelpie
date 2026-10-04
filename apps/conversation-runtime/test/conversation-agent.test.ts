@@ -564,16 +564,18 @@ describe("ConversationAgent time stamps", () => {
     );
   });
 
-  it("uses the arrival time when the provider's send time is missing or in the future", async () => {
+  it("uses the arrival time when the provider's send time is missing, too early or in the future", async () => {
     const world = use(fakeWorld([reply("Ok.")]));
     const stub = agent("stamp-implausible");
     await stub.ingest(message("m1", "now?", { sentAt: Number.NaN }));
     await stub.ingest(message("m2", "later?", { sentAt: world.clock + 365 * 24 * 60 * 60_000 }));
+    // Seconds where milliseconds were meant: Telegram's `date` is in seconds.
+    await stub.ingest(message("m3", "seconds?", { sentAt: Math.floor(SENT_AT / 1_000) }));
     await stub.flush();
 
     await vi.waitFor(() => expect(world.requests).toHaveLength(1));
     expect(textOf(world.requests[0]?.messages[0])).toBe(
-      `${stampOf(world.clock, null)} now?\nlater?`,
+      `${stampOf(world.clock, null)} now?\nlater?\nseconds?`,
     );
   });
 

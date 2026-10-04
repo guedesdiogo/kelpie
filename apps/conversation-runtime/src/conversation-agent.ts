@@ -623,10 +623,18 @@ function settingsOf(turn: { settings: AgentSettings | null }): AgentSettings {
   return turn.settings;
 }
 
-/** The provider's send time, or the arrival time when that one is missing or in the future. */
+/** Earlier send times are wrong: most likely seconds where milliseconds were meant. */
+const EARLIEST_SEND_TIME = Date.UTC(2020, 0, 1);
+
+/**
+ * The provider's send time, or the arrival time when that one is missing, implausibly early or in
+ * the future.
+ */
 function plausibleSendTime(sentAt: number, now: number): number {
   const CLOCK_SKEW_MS = 5 * 60_000;
-  return Number.isSafeInteger(sentAt) && sentAt > 0 && sentAt <= now + CLOCK_SKEW_MS ? sentAt : now;
+  const plausible =
+    Number.isSafeInteger(sentAt) && sentAt >= EARLIEST_SEND_TIME && sentAt <= now + CLOCK_SKEW_MS;
+  return plausible ? sentAt : now;
 }
 
 function capabilitiesFor(channel: Destination["channel"]): ChannelCapabilities {
