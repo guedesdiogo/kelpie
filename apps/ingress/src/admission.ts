@@ -1,5 +1,5 @@
+import type { Admission } from "@kelpie/access";
 import type { CanonicalEvent } from "@kelpie/channels";
-import type { Admission } from "./access.ts";
 
 /** Kelpie runs one Directory (ADR-0004). */
 export const DIRECTORY_NAME = "directory";

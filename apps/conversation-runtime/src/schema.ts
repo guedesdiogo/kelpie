@@ -1,3 +1,4 @@
+import type { AgentSettings } from "@kelpie/config";
 import type { AssistantMessage, ChatMessage } from "@kelpie/llm";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
@@ -29,9 +30,13 @@ export const turns = sqliteTable("turns", {
     enum: ["running", "delivered", "interrupted", "refused", "failed"],
   }).notNull(),
   attempts: integer("attempts").notNull(),
-  /** The system prompt the turn runs under, and its version, fixed when the turn starts. */
-  systemPrompt: text("system_prompt").notNull(),
+  /** The agent's prompt version when the turn started. */
   systemVersion: integer("system_version").notNull(),
+  /**
+   * The agent's settings when the turn started, system prompt included, so a retry or a recovery
+   * runs with the same ones. Cleared when the turn settles.
+   */
+  settings: text("settings", { mode: "json" }).$type<AgentSettings>(),
   /** The model's reply, kept only until delivery settles what history records. */
   reply: text("reply", { mode: "json" }).$type<AssistantMessage>(),
   createdAt: integer("created_at").notNull(),

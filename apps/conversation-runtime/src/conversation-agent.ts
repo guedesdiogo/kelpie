@@ -1,13 +1,7 @@
 import { CAPABILITIES, type ChannelCapabilities } from "@kelpie/channels";
+import type { AgentConfig, AgentSettings } from "@kelpie/config";
 import { deliveredReply, planDelivery, planFlush } from "@kelpie/conversation";
-import {
-  type AssistantMessage,
-  type ChatMessage,
-  type LlmEvent,
-  MODEL_TIERS,
-  type ModelTier,
-} from "@kelpie/llm";
-import type { QuietWindowPolicy } from "@kelpie/qualifier";
+import type { AssistantMessage, ChatMessage, LlmEvent } from "@kelpie/llm";
 import { Agent, type FiberRecoveryContext } from "agents";
 import { and, asc, count, eq, inArray, isNull } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
@@ -15,27 +9,6 @@ import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
 import { type ConversationPorts, type Destination, portsFor } from "./ports.ts";
 import * as schema from "./schema.ts";
-
-/** Per-conversation settings. They come from `AgentHost` once it exists; until then, defaults. */
-export interface ConversationSettings {
-  /** Merge fragments and split replies into paced bubbles; off answers each message at once. */
-  conversational: boolean;
-  tier: ModelTier;
-  /** Changing it starts a new prompt version: earlier replies replay without native output. */
-  systemPrompt: string;
-  maxOutputTokens: number;
-  quietWindow: QuietWindowPolicy;
-  maxWaitMs: number;
-}
-
-export const DEFAULT_SETTINGS: ConversationSettings = {
-  conversational: true,
-  tier: "cheap",
-  systemPrompt: "You are a helpful assistant. Reply in the language the user writes in.",
-  maxOutputTokens: 1_024,
-  quietWindow: { finishedMs: 1_500, defaultMs: 3_000, unfinishedMs: 6_000 },
-  maxWaitMs: 10_000,
-};
 
 /** Bounds on what one conversation accepts. */
 export const LIMITS = {
@@ -49,6 +22,8 @@ const FIBER_RETENTION_MS = 24 * 60 * 60 * 1_000;
 
 /** One inbound message, already admitted by `ingress` (ADR-0004, ADR-0015). */
 export interface InboundMessage {
+  /** The agent that answers; its `AgentHost` holds the settings. */
+  agentId: string;
   providerMessageId: string;
   /** The admitted author. */
   userId: string;
@@ -62,11 +37,7 @@ export type IngestResult =
       /** When the buffered messages will be answered, or null if a turn already started. */
       flushAt: number | null;
     }
-  | { status: "rejected"; reason: "destination_mismatch" | "too_long" };
-
-export type ConfigureResult =
-  | { ok: true; settings: ConversationSettings }
-  | { ok: false; reason: "invalid_settings" };
+  | { status: "rejected"; reason: "destination_mismatch" | "agent_mismatch" | "too_long" };
 
 interface TurnInFlight {
   controller: AbortController;
@@ -84,8 +55,9 @@ interface TurnInFlight {
  *   turn always starts from a settled history;
  * - after an eviction, recovery resends only bubbles still pending.
  *
- * The object trusts its caller, `ingress`, which admits senders before anything else. A
- * conversation is bound to the destination of its first message.
+ * Settings come from the agent's `AgentHost`: read when a flush is planned and when a turn starts,
+ * and kept with the turn. The object trusts its caller, `ingress`, which admits senders before
+ * anything else. A conversation is bound to the destination and the agent of its first message.
  */
 export class ConversationAgent extends Agent<Env> {
   readonly #db: DrizzleSqliteDODatabase<typeof schema>;
@@ -111,30 +83,25 @@ export class ConversationAgent extends Agent<Env> {
     return portsFor(this.env);
   }
 
-  /** Overrides settings for this conversation. A new system prompt starts a new prompt version. */
-  configure(changes: unknown): ConfigureResult {
-    const parsed = parseSettings(changes);
-    if (!parsed) return { ok: false, reason: "invalid_settings" };
-    const current = this.#settings();
-    const next = { ...current, ...parsed };
-    if (next.systemPrompt !== current.systemPrompt) {
-      this.#set("systemVersion", this.#systemVersion() + 1);
-    }
-    this.#set("settings", next);
-    return { ok: true, settings: next };
-  }
-
-  /** Accepts one message from `ingress`. */
+  /**
+   * Accepts one message from `ingress`. Nothing here waits on another object before the message is
+   * stored and the turn in flight interrupted, so concurrent messages can't interleave there.
+   */
   async ingest(message: InboundMessage): Promise<IngestResult> {
     const now = this.#ports.now();
     if (message.text.length > LIMITS.maxTextLength)
       return { status: "rejected", reason: "too_long" };
     capabilitiesFor(message.destination.channel);
     const bound = this.#get<Destination | null>("destination", null);
-    if (!bound) this.#set("destination", message.destination);
-    else if (!sameDestination(bound, message.destination)) {
+    if (bound && !sameDestination(bound, message.destination)) {
       return { status: "rejected", reason: "destination_mismatch" };
     }
+    const agentId = this.#get<string | null>("agentId", null);
+    if (agentId && agentId !== message.agentId) {
+      return { status: "rejected", reason: "agent_mismatch" };
+    }
+    if (!bound) this.#set("destination", message.destination);
+    if (!agentId) this.#set("agentId", message.agentId);
 
     const inserted = this.#db
       .insert(schema.inbound)
@@ -148,6 +115,11 @@ export class ConversationAgent extends Agent<Env> {
       .returning({ id: schema.inbound.id })
       .all();
     if (inserted.length === 0) {
+      // A retry of a message whose flush was never planned (reading the settings failed) plans it
+      // now; otherwise it would wait for the next message.
+      await this.#serialized(async () => {
+        if (this.#get("plannedEpoch", 0) !== this.#epoch()) await this.#plan(this.#epoch(), now);
+      });
       return { status: "duplicate", flushAt: this.#get<number | null>("flushAt", null) };
     }
 
@@ -161,17 +133,20 @@ export class ConversationAgent extends Agent<Env> {
   /**
    * Starts a turn with the buffered messages. The flush schedule calls it with the buffer epoch it
    * was armed for and is ignored once a newer message re-armed it; calling it again, or with
-   * nothing buffered, does nothing.
+   * nothing buffered, does nothing. It never interrupts: every message already interrupted the
+   * turn in flight when it arrived, so a running turn here is one that answers everything.
    */
   async flush(armed?: { epoch: number }): Promise<void> {
     if (armed && armed.epoch !== this.#epoch()) return;
+    if (this.#pendingInbound().length === 0) return;
+    const { settings, promptVersion } = await this.#config();
+    // Other calls ran while this waited: a newer message may have re-armed the flush, or another
+    // flush may have claimed the buffer.
+    if (armed && armed.epoch !== this.#epoch()) return;
+    if (this.#pendingInbound().length === 0) return;
     await this.#cancelFlushSchedule();
-    this.#interrupt();
     const pending = this.#pendingInbound();
-    if (pending.length === 0) return;
     const now = this.#ports.now();
-    const settings = this.#settings();
-    const systemVersion = this.#systemVersion();
     const turnId = this.#db.transaction((tx) => {
       const { id } = tx
         .insert(schema.turns)
@@ -179,8 +154,8 @@ export class ConversationAgent extends Agent<Env> {
           generation: this.#generation(),
           status: "running",
           attempts: 0,
-          systemPrompt: settings.systemPrompt,
-          systemVersion,
+          systemVersion: promptVersion,
+          settings,
           createdAt: now,
         })
         .returning({ id: schema.turns.id })
@@ -201,7 +176,7 @@ export class ConversationAgent extends Agent<Env> {
             turnId: id,
             role: "user",
             userId: run.userId,
-            systemVersion,
+            systemVersion: promptVersion,
             message: { role: "user", parts: [{ type: "text", text: run.text }] },
             createdAt: now,
           })
@@ -217,8 +192,9 @@ export class ConversationAgent extends Agent<Env> {
   }
 
   /** The conversation as the model will see it next. */
-  history(): ChatMessage[] {
-    return this.#messages(this.#systemVersion());
+  async history(): Promise<ChatMessage[]> {
+    if (!this.#get<string | null>("agentId", null)) return [];
+    return this.#messages((await this.#config()).promptVersion);
   }
 
   /** The bubbles of every turn, for inspection. */
@@ -325,9 +301,9 @@ export class ConversationAgent extends Agent<Env> {
       .where(eq(schema.turns.id, turnId))
       .run();
 
-    const settings = this.#settings();
+    const settings = settingsOf(turn);
     const call = await this.#ports.generate(settings.tier, {
-      system: turn.systemPrompt,
+      system: settings.systemPrompt,
       messages: this.#messages(turn.systemVersion),
       maxOutputTokens: settings.maxOutputTokens,
     });
@@ -378,7 +354,9 @@ export class ConversationAgent extends Agent<Env> {
 
   /** Sends the turn's pending bubbles in order, stopping as soon as the turn is settled. */
   async #deliver(turnId: number, signal: AbortSignal): Promise<void> {
-    const conversational = this.#settings().conversational;
+    const turn = this.#turn(turnId);
+    if (turn?.status !== "running") return;
+    const { conversational } = settingsOf(turn);
     const destination = this.#destination();
     const capabilities = capabilitiesFor(destination.channel);
     const rows = this.#db
@@ -466,8 +444,11 @@ export class ConversationAgent extends Agent<Env> {
           })
           .run();
       }
-      // History holds what was kept; the full reply isn't needed any more.
-      tx.update(schema.turns).set({ status, reply: null }).where(eq(schema.turns.id, turnId)).run();
+      // History holds what was kept; the full reply and the settings aren't needed any more.
+      tx.update(schema.turns)
+        .set({ status, reply: null, settings: null })
+        .where(eq(schema.turns.id, turnId))
+        .run();
     });
   }
 
@@ -497,19 +478,21 @@ export class ConversationAgent extends Agent<Env> {
         ? now
         : await planFlush(
             pending.map((row) => ({ text: row.text, receivedAt: row.receivedAt })),
-            this.#settings(),
+            (await this.#config()).settings,
             this.#ports.qualifier,
           );
-    // A newer message arrived while the decision ran; it plans with the fuller buffer.
-    if (epoch !== this.#epoch()) return;
+    // A newer message arrived while the settings or the decision were awaited, and plans with the
+    // fuller buffer; or a flush already claimed the buffer.
+    if (epoch !== this.#epoch() || this.#pendingInbound().length === 0) return;
     await this.#cancelFlushSchedule();
     if (flushAt <= now) {
       await this.flush();
-      return;
+    } else {
+      const schedule = await this.schedule(new Date(flushAt), "flush", { epoch });
+      this.#set("flushSchedule", schedule.id);
+      this.#set("flushAt", flushAt);
     }
-    const schedule = await this.schedule(new Date(flushAt), "flush", { epoch });
-    this.#set("flushSchedule", schedule.id);
-    this.#set("flushAt", flushAt);
+    this.#set("plannedEpoch", epoch);
   }
 
   #serialized(step: () => Promise<void>): Promise<void> {
@@ -574,8 +557,11 @@ export class ConversationAgent extends Agent<Env> {
       .run();
   }
 
-  #settings(): ConversationSettings {
-    return { ...DEFAULT_SETTINGS, ...this.#get<Partial<ConversationSettings>>("settings", {}) };
+  /** The agent's current settings, from its `AgentHost`. */
+  async #config(): Promise<AgentConfig> {
+    const agentId = this.#get<string | null>("agentId", null);
+    if (!agentId) throw new Error("The conversation has no agent yet");
+    return this.env.AGENT_HOST.getByName(agentId).config();
   }
 
   #generation(): number {
@@ -584,10 +570,6 @@ export class ConversationAgent extends Agent<Env> {
 
   #epoch(): number {
     return this.#get("epoch", 0);
-  }
-
-  #systemVersion(): number {
-    return this.#get("systemVersion", 0);
   }
 
   #destination(): Destination {
@@ -612,6 +594,12 @@ export class ConversationAgent extends Agent<Env> {
       .onConflictDoUpdate({ target: schema.state.key, set: { value } })
       .run();
   }
+}
+
+/** The settings a running turn started with. */
+function settingsOf(turn: { settings: AgentSettings | null }): AgentSettings {
+  if (!turn.settings) throw new Error("The turn has no settings");
+  return turn.settings;
 }
 
 function capabilitiesFor(channel: Destination["channel"]): ChannelCapabilities {
@@ -647,58 +635,4 @@ function textOf(message: AssistantMessage): string {
 /** Error names only: messages can quote conversation content, which is personal data. */
 function errorName(error: unknown): string {
   return error instanceof Error ? error.name : typeof error;
-}
-
-const isInteger = (value: unknown, min: number, max: number): value is number =>
-  typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
-
-/** Accepts only known settings with sane values; anything else invalidates the whole change. */
-function parseSettings(input: unknown): Partial<ConversationSettings> | null {
-  if (typeof input !== "object" || input === null) return null;
-  const changes = input as Record<string, unknown>;
-  const parsed: Partial<ConversationSettings> = {};
-  for (const [key, value] of Object.entries(changes)) {
-    switch (key) {
-      case "conversational":
-        if (typeof value !== "boolean") return null;
-        parsed.conversational = value;
-        break;
-      case "tier":
-        if (!MODEL_TIERS.includes(value as ModelTier)) return null;
-        parsed.tier = value as ModelTier;
-        break;
-      case "systemPrompt":
-        if (typeof value !== "string" || value.trim() === "" || value.length > 20_000) return null;
-        parsed.systemPrompt = value;
-        break;
-      case "maxOutputTokens":
-        if (!isInteger(value, 1, 64_000)) return null;
-        parsed.maxOutputTokens = value;
-        break;
-      case "maxWaitMs":
-        if (!isInteger(value, 0, 120_000)) return null;
-        parsed.maxWaitMs = value;
-        break;
-      case "quietWindow": {
-        const window = value as Partial<QuietWindowPolicy> | null;
-        if (
-          !window ||
-          !isInteger(window.finishedMs, 0, 60_000) ||
-          !isInteger(window.defaultMs, 0, 60_000) ||
-          !isInteger(window.unfinishedMs, 0, 60_000)
-        ) {
-          return null;
-        }
-        parsed.quietWindow = {
-          finishedMs: window.finishedMs,
-          defaultMs: window.defaultMs,
-          unfinishedMs: window.unfinishedMs,
-        };
-        break;
-      }
-      default:
-        return null;
-    }
-  }
-  return parsed;
 }

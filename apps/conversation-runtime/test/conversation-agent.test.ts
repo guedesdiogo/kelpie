@@ -1,6 +1,8 @@
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import type { AgentSettings } from "@kelpie/config";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AgentHost } from "../src/agent-host/agent-host.ts";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import {
@@ -8,6 +10,7 @@ import {
   fail,
   fakeWorld,
   hang,
+  INJECTED_FAILURE,
   refuse,
   reply,
   slowQualifier,
@@ -18,9 +21,17 @@ import {
 // flush() the way the schedule would, except the one that checks the schedule itself.
 const agent = (name: string) => env.CONVERSATION_AGENT.getByName(name);
 const destination = { channel: "telegram", threadId: "chat-1" } as const;
+const owner = { userId: "u-owner", role: "owner", via: "test" } as const;
 
-function message(id: string, text: string, userId = "u-owner") {
-  return { providerMessageId: id, userId, text, destination };
+/** Tests that change settings use an agent of their own, named after the conversation. */
+function message(id: string, text: string, { userId = "u-owner", agentId = "assistant" } = {}) {
+  return { agentId, providerMessageId: id, userId, text, destination };
+}
+
+async function configure(agentId: string, changes: Partial<AgentSettings>) {
+  expect(await env.AGENT_HOST.getByName(agentId).configure(changes, owner)).toMatchObject({
+    ok: true,
+  });
 }
 
 const user = (text: string) => ({ role: "user", parts: [{ type: "text", text }] });
@@ -35,7 +46,10 @@ async function statuses(stub: ReturnType<typeof agent>) {
   return (await stub.outbox()).map((row) => row.status);
 }
 
-afterEach(() => replacePortsForTesting(undefined));
+afterEach(() => {
+  replacePortsForTesting(undefined);
+  vi.restoreAllMocks();
+});
 
 describe("ConversationAgent buffering", () => {
   it("buffers messages and re-arms one flush on every new message", async () => {
@@ -114,15 +128,15 @@ describe("ConversationAgent buffering", () => {
   it("keeps each author's messages apart", async () => {
     const world = use(fakeWorld([reply("Ok.")]));
     const stub = agent("authors");
-    await stub.ingest(message("m1", "from one", "u-one"));
-    await stub.ingest(message("m2", "from another", "u-two"));
+    await stub.ingest(message("m1", "from one", { userId: "u-one" }));
+    await stub.ingest(message("m2", "from another", { userId: "u-two" }));
     await stub.flush();
 
     await vi.waitFor(() => expect(world.requests).toHaveLength(1));
     expect(world.requests[0]?.messages).toEqual([user("from one"), user("from another")]);
   });
 
-  it("refuses a message for another destination or one that is too long", async () => {
+  it("refuses a message for another destination, another agent, or one that is too long", async () => {
     use(fakeWorld([]));
     const stub = agent("refusals");
     await stub.ingest(message("m1", "hi?"));
@@ -133,36 +147,90 @@ describe("ConversationAgent buffering", () => {
         destination: { ...destination, threadId: "x" },
       }),
     ).toEqual({ status: "rejected", reason: "destination_mismatch" });
-    expect(await stub.ingest(message("m3", "x".repeat(16_001)))).toEqual({
+    expect(await stub.ingest(message("m3", "hi?", { agentId: "someone-else" }))).toEqual({
+      status: "rejected",
+      reason: "agent_mismatch",
+    });
+    expect(await stub.ingest(message("m4", "x".repeat(16_001)))).toEqual({
       status: "rejected",
       reason: "too_long",
     });
-  });
-
-  it("accepts only known settings with sane values", async () => {
-    use(fakeWorld([]));
-    const stub = agent("settings");
-
-    expect(await stub.configure({ tier: "frontier", maxOutputTokens: 2_000 })).toMatchObject({
-      ok: true,
-      settings: { tier: "frontier", maxOutputTokens: 2_000 },
-    });
-    for (const bad of [{ tier: "gpt-9" }, { maxOutputTokens: -1 }, { surprise: true }, null]) {
-      expect(await stub.configure(bad)).toEqual({ ok: false, reason: "invalid_settings" });
-    }
   });
 
   it("flushes through the alarm when the schedule comes due", async () => {
     const world = use(fakeWorld([reply("On time.")]));
     world.clock = Date.now();
     const stub = agent("alarm");
-    await stub.configure({ quietWindow: { finishedMs: 50, defaultMs: 50, unfinishedMs: 50 } });
-    await stub.ingest(message("m1", "ping?"));
+    await configure("alarm", { quietWindow: { finishedMs: 50, defaultMs: 50, unfinishedMs: 50 } });
+    await stub.ingest(message("m1", "ping?", { agentId: "alarm" }));
 
     await new Promise((resolve) => setTimeout(resolve, 1_100));
     world.clock = Date.now();
     await runDurableObjectAlarm(stub);
     await vi.waitFor(() => expect(world.sent).toEqual(["On time."]));
+  });
+
+  it("answers a message that arrives while a flush reads the settings", async () => {
+    const world = use(fakeWorld([reply("Both."), reply("The rest.")]));
+    const stub = agent("flush-race");
+    await stub.ingest(message("m1", "first part"));
+
+    await Promise.all([stub.flush(), stub.ingest(message("m2", "second part"))]);
+    const schedules = await runInDurableObject(stub, (instance: ConversationAgent) =>
+      instance.getSchedules(),
+    );
+    expect(schedules.length).toBeLessThanOrEqual(1);
+    await stub.flush();
+
+    // Whichever way the two calls interleaved, history holds each message once, and the last turn,
+    // which saw both, was delivered.
+    await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).toBe("delivered"));
+    const history = JSON.stringify(await stub.history());
+    expect(history.match(/first part/g)).toHaveLength(1);
+    expect(history.match(/second part/g)).toHaveLength(1);
+    const lastRequest = JSON.stringify(world.requests.at(-1)?.messages);
+    expect(lastRequest).toContain("first part");
+    expect(lastRequest).toContain("second part");
+  });
+
+  it("starts one turn when two flushes race, and doesn't interrupt it", async () => {
+    const world = use(fakeWorld([reply("Once."), reply("Twice.")]));
+    world.blockSends.add(0);
+    const stub = agent("double-flush");
+    await stub.ingest(message("m1", "anyone there?"));
+    // The second flush gets the settings only after the first one started its turn.
+    const config = AgentHost.prototype.config;
+    let calls = 0;
+    vi.spyOn(AgentHost.prototype, "config").mockImplementation(async function (this: AgentHost) {
+      calls += 1;
+      if (calls === 2) await new Promise((resolve) => setTimeout(resolve, 50));
+      return config.call(this);
+    } as unknown as typeof config);
+
+    await Promise.all([stub.flush(), stub.flush()]);
+    expect(await stub.turns()).toMatchObject([{ status: "running" }]);
+
+    world.blockSends.delete(0);
+    await vi.waitFor(async () =>
+      expect(await stub.turns()).toMatchObject([{ status: "delivered" }]),
+    );
+    expect(world.sent).toEqual(["Once."]);
+  });
+
+  it("plans the flush again when the provider retries a message whose planning failed", async () => {
+    const world = use(fakeWorld([reply("Got it.")]));
+    const stub = agent("plan-fails");
+    vi.spyOn(AgentHost.prototype, "config").mockImplementationOnce(() => {
+      throw new Error(INJECTED_FAILURE);
+    });
+
+    await expect(stub.ingest(message("m1", "are you there?"))).rejects.toThrow();
+    // The provider retries the same message: without planning again, nothing would answer it.
+    const retried = await stub.ingest(message("m1", "are you there?"));
+    expect(retried).toMatchObject({ status: "duplicate", flushAt: expect.any(Number) });
+
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Got it."]));
   });
 });
 
@@ -193,9 +261,9 @@ describe("ConversationAgent turns", () => {
   it("answers each message at once, in one message, when conversational mode is off", async () => {
     const world = use(fakeWorld([reply("One.\n\nTwo.")]));
     const stub = agent("plain");
-    await stub.configure({ conversational: false });
+    await configure("plain", { conversational: false });
 
-    expect(await stub.ingest(message("m1", "so I was thinking..."))).toEqual({
+    expect(await stub.ingest(message("m1", "so I was thinking...", { agentId: "plain" }))).toEqual({
       status: "accepted",
       flushAt: null,
     });
@@ -257,12 +325,12 @@ describe("ConversationAgent turns", () => {
   it("replays earlier replies without native output after the system prompt changes", async () => {
     const world = use(fakeWorld([reply("First."), reply("Second.")]));
     const stub = agent("prompt-change");
-    await stub.ingest(message("m1", "one?"));
+    await stub.ingest(message("m1", "one?", { agentId: "prompt-change" }));
     await stub.flush();
     await vi.waitFor(() => expect(world.sent).toEqual(["First."]));
 
-    await stub.configure({ systemPrompt: "You are terse." });
-    await stub.ingest(message("m2", "two?"));
+    await configure("prompt-change", { systemPrompt: "You are terse." });
+    await stub.ingest(message("m2", "two?", { agentId: "prompt-change" }));
     await stub.flush();
 
     await vi.waitFor(() => expect(world.requests).toHaveLength(2));
@@ -274,19 +342,31 @@ describe("ConversationAgent turns", () => {
     const world = use(fakeWorld([reply("Done."), reply("Next.")]));
     world.blockSleeps.add(0);
     const stub = agent("prompt-mid-turn");
-    await stub.ingest(message("m1", "anything?"));
+    await stub.ingest(message("m1", "anything?", { agentId: "prompt-mid-turn" }));
     await stub.flush();
     await vi.waitFor(() => expect(world.requests).toHaveLength(1));
 
     // The prompt changes while the first reply waits to be delivered; then it is delivered.
-    await stub.configure({ systemPrompt: "You are terse." });
+    await configure("prompt-mid-turn", { systemPrompt: "You are terse." });
     world.blockSleeps.clear();
-    await stub.ingest(message("m2", "and now?"));
+    await stub.ingest(message("m2", "and now?", { agentId: "prompt-mid-turn" }));
     await stub.flush();
 
     await vi.waitFor(() => expect(world.requests).toHaveLength(2));
     expect(world.requests[0]?.system).not.toBe("You are terse.");
     expect(world.requests[1]?.system).toBe("You are terse.");
+  });
+
+  it("starts a turn with the agent's settings as they are at the flush", async () => {
+    const world = use(fakeWorld([reply("Short.")]));
+    const stub = agent("flush-settings");
+    await stub.ingest(message("m1", "how long?", { agentId: "flush-settings" }));
+
+    await configure("flush-settings", { systemPrompt: "Be brief.", maxOutputTokens: 64 });
+    await stub.flush();
+
+    await vi.waitFor(() => expect(world.requests).toHaveLength(1));
+    expect(world.requests[0]).toMatchObject({ system: "Be brief.", maxOutputTokens: 64 });
   });
 });
 

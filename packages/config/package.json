@@ -1,0 +1,21 @@
+{
+  "name": "@kelpie/config",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@kelpie/access": "workspace:*",
+    "@kelpie/channels": "workspace:*",
+    "@kelpie/llm": "workspace:*",
+    "@kelpie/qualifier": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.0"
+  }
+}

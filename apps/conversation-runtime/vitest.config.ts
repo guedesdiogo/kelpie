@@ -1,5 +1,6 @@
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
+import { INJECTED_FAILURE } from "./test/fakes.ts";
 
 export default defineConfig({
   plugins: [
@@ -14,4 +15,8 @@ export default defineConfig({
       },
     }),
   ],
+  test: {
+    // Only failures a test injected on purpose; any other unhandled error still fails the run.
+    onUnhandledError: (error) => !error.message.includes(INJECTED_FAILURE),
+  },
 });

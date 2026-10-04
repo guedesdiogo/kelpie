@@ -4,6 +4,12 @@ import type { ConversationPorts, Destination, ModelCall } from "../src/ports.ts"
 
 // The Worker runs in the test's isolate, so these fakes replace the ConversationAgent's ports.
 
+/**
+ * The message of failures tests inject into a Durable Object. workerd reports a rejected RPC method
+ * as unhandled even when its caller handles it, so `vitest.config.ts` ignores errors with it.
+ */
+export const INJECTED_FAILURE = "injected test failure";
+
 type ModelScript =
   | { kind: "reply"; text: string }
   | { kind: "refuse" }

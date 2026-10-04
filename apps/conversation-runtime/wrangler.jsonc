@@ -12,8 +12,15 @@
     { "binding": "LLM_GATEWAY", "service": "kelpie-llm-gateway", "entrypoint": "LlmGateway" }
   ],
   "durable_objects": {
-    "bindings": [{ "name": "CONVERSATION_AGENT", "class_name": "ConversationAgent" }]
+    "bindings": [
+      { "name": "CONVERSATION_AGENT", "class_name": "ConversationAgent" },
+      { "name": "AGENT_HOST", "class_name": "AgentHost" },
+      { "name": "REGISTRY", "class_name": "Registry" }
+    ]
   },
   // Never deployed with DebounceBuffer, so the first migration names the real class.
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ConversationAgent"] }]
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ConversationAgent"] },
+    { "tag": "v2", "new_sqlite_classes": ["AgentHost", "Registry"] }
+  ]
 }

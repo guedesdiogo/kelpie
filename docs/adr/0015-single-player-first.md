@@ -25,7 +25,7 @@ The scope of this decision is the time **until multi-user lands** ([Epic 7](http
   - the `Directory` Durable Object holds the owner, the owner's identities and the audit log of access changes;
   - other configuration changes (ADR-0013) are audited where they apply, such as an agent's changes in that agent's `AgentHost`;
   - each agent's `AgentHost` holds that agent's configuration, its channels and its task board ([ADR-0011](0011-agent-task-board.md)), with no projection into Postgres;
-  - the registry of which agents exist is designed in Story 3.10;
+  - the registry of which agents exist is a `Registry` Durable Object in `conversation-runtime`, which audits creations and renames (Story 3.10);
   - the `projector` worker (ADR-0002) waits for Postgres.
 - **Postgres is added when a feature needs it,** such as multi-user or the task board's projections, and that feature's ADR says so. [ADR-0012](0012-drizzle-data-layer.md) already applies to Durable Object SQLite; its Postgres part applies when Postgres arrives.
 - **Groups.** Channels ignore group chats. A group event is acknowledged and dropped, like an unknown sender.
