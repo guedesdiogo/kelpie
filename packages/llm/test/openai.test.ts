@@ -254,6 +254,31 @@ describe("OpenAIResponsesProvider", () => {
 
     expect(finish.reason).toBe("length");
     expect(finish.message.parts).toEqual([{ type: "text", text: "Let me check the weather." }]);
+    // A function call without its output in the next turn would be rejected.
+    expect(finish.message.native.content).toEqual([messageItem]);
+  });
+
+  it.each([
+    ["server_error", "server_error", true],
+    ["invalid_prompt", "bad_request", false],
+  ])("classifies an in-stream %s error event", async (errorCode, code, retryable) => {
+    const { fetch } = fakeFetch(
+      sse([
+        toolTurn[0] as { type: string },
+        {
+          type: "error",
+          code: errorCode,
+          message: "stream failed",
+          param: null,
+          sequence_number: 1,
+        },
+      ]),
+    );
+
+    await expect(collect(provider(fetch).stream(request()))).rejects.toMatchObject({
+      code,
+      retryable,
+    });
   });
 
   it("reports a refusal and keeps its text out of the parts", async () => {

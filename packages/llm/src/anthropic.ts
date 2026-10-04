@@ -83,7 +83,11 @@ function toParams(request: LlmRequest): BetaMessageStreamParams {
     model: request.model,
     max_tokens: request.maxOutputTokens,
     system: request.system,
-    messages: request.messages.map(toMessageParam),
+    messages: request.messages.flatMap((message) => {
+      const param = toMessageParam(message);
+      // Anthropic rejects an empty turn, such as a refusal that returned nothing.
+      return param.content.length === 0 ? [] : [param];
+    }),
     cache_control: { type: "ephemeral" },
     ...(request.tools
       ? {
@@ -137,12 +141,14 @@ function toForeignBlock(part: TextPart | ToolCallPart): ContentBlockParam[] {
 }
 
 function toFinish(message: Anthropic.Beta.BetaMessage, requestedModel: string): LlmEvent {
-  const content = dropDeclinedPartial(message.content);
   const reason = toStopReason(message.stop_reason);
+  const kept = dropDeclinedPartial(message.content);
+  // A tool call cut off by the token limit never runs, so the replayed turn can't hold it either.
+  const content = reason === "length" ? kept.filter((block) => block.type !== "tool_use") : kept;
   const parts: AssistantMessage["parts"] = [];
   for (const block of content) {
     if (block.type === "text" && block.text) parts.push({ type: "text", text: block.text });
-    if (block.type === "tool_use" && reason !== "length") {
+    if (block.type === "tool_use") {
       parts.push({ type: "tool_call", id: block.id, name: block.name, input: block.input });
     }
   }
@@ -227,6 +233,8 @@ function toLlmError(error: unknown): unknown {
   if (error instanceof Anthropic.APIConnectionError) {
     return new LlmError(error.message, "connection", true);
   }
-  if (error instanceof Anthropic.APIError) return errorFromStatus(error.status, error.message);
+  if (error instanceof Anthropic.APIError) {
+    return errorFromStatus(error.status, error.message, error.type);
+  }
   return error;
 }

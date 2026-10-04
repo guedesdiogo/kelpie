@@ -43,13 +43,20 @@ export class ModelRouter {
     request: RoutedRequest,
     options: StreamOptions = {},
   ): AsyncIterable<LlmEvent> {
+    // RPC callers aren't type-checked, so the tier and the request fields are taken explicitly.
+    if (!MODEL_TIERS.includes(tier)) {
+      throw new LlmError(`Unknown tier: ${String(tier)}`, "bad_request", false);
+    }
     let lastError: LlmError | undefined;
     for (const candidate of this.#routes[tier]) {
       const provider = this.#providers[candidate.provider];
       if (!provider) continue;
       const routed: LlmRequest = {
-        ...request,
         model: candidate.model,
+        system: request.system,
+        messages: request.messages,
+        ...(request.tools ? { tools: request.tools } : {}),
+        maxOutputTokens: request.maxOutputTokens,
         ...(candidate.effort ? { effort: candidate.effort } : {}),
       };
       let started = false;
@@ -76,15 +83,20 @@ const EFFORTS: readonly string[] = ["low", "medium", "high", "xhigh", "max"] sat
 
 /** Checks a route table read from configuration. */
 export function parseRouteTable(value: unknown): RouteTable {
-  const table = value as Record<string, unknown> | null;
   const routes = {} as RouteTable;
   for (const tier of MODEL_TIERS) {
-    const candidates = table?.[tier];
+    const candidates =
+      typeof value === "object" && value !== null
+        ? (value as Record<string, unknown>)[tier]
+        : undefined;
     if (!Array.isArray(candidates) || candidates.length === 0) {
       throw new Error(`Route table: "${tier}" needs at least one candidate`);
     }
-    routes[tier] = candidates.map((entry: Partial<Record<keyof RouteCandidate, unknown>>) => {
-      const { provider, model, effort } = entry;
+    routes[tier] = candidates.map((entry: unknown) => {
+      if (typeof entry !== "object" || entry === null) {
+        throw new Error(`Route table: a "${tier}" candidate isn't an object`);
+      }
+      const { provider, model, effort } = entry as Partial<Record<keyof RouteCandidate, unknown>>;
       if (typeof provider !== "string" || !PROVIDERS.includes(provider)) {
         throw new Error(`Route table: unknown provider ${JSON.stringify(provider)} in "${tier}"`);
       }
@@ -94,7 +106,11 @@ export function parseRouteTable(value: unknown): RouteTable {
       if (effort !== undefined && (typeof effort !== "string" || !EFFORTS.includes(effort))) {
         throw new Error(`Route table: unknown effort ${JSON.stringify(effort)} in "${tier}"`);
       }
-      return { ...entry, provider, model } as RouteCandidate;
+      return {
+        provider: provider as RouteCandidate["provider"],
+        model,
+        ...(effort ? { effort: effort as Effort } : {}),
+      };
     });
   }
   return routes;

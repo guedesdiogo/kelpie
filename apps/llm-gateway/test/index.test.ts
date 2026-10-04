@@ -1,6 +1,7 @@
 import { exports } from "cloudflare:workers";
 import { fromNdjsonStream, type LlmEvent, type RoutedRequest } from "@kelpie/llm";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { providerConfig } from "../src/index.ts";
 
 // The Worker runs in the test's isolate, so stubbing the global fetch stands in for the provider.
 // The stream is built from Anthropic's documented event format, not recorded.
@@ -104,5 +105,29 @@ describe("llm-gateway", () => {
   it("answers 404 over HTTP", async () => {
     const response = await exports.default.fetch("https://llm-gateway.example/");
     expect(response.status).toBe(404);
+  });
+});
+
+describe("providerConfig", () => {
+  it("sends the gateway token only to AI Gateway", () => {
+    expect(
+      providerConfig(
+        "key",
+        "https://gateway.ai.cloudflare.com/v1/account/kelpie/anthropic",
+        "gateway-token",
+      ),
+    ).toEqual({
+      apiKey: "key",
+      baseURL: "https://gateway.ai.cloudflare.com/v1/account/kelpie/anthropic",
+      headers: { "cf-aig-authorization": "Bearer gateway-token" },
+    });
+    expect(providerConfig("key", "https://api.anthropic.com", "gateway-token")).toEqual({
+      apiKey: "key",
+      baseURL: "https://api.anthropic.com",
+    });
+  });
+
+  it("refuses a base URL without https", () => {
+    expect(() => providerConfig("key", "http://api.anthropic.com")).toThrow(/https/);
   });
 });

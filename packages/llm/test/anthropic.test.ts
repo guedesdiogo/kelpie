@@ -302,29 +302,76 @@ describe("AnthropicMessagesProvider", () => {
     ]);
   });
 
-  it("reports length and leaves out the truncated tool call", async () => {
-    const { fetch } = fakeFetch(
+  it("reports length and leaves the truncated tool call out of the replayed turn", async () => {
+    const { fetch, calls } = fakeFetch(
       sse([
         messageStart("claude-opus-5-5", { input_tokens: 10 }),
-        ...textBlock(0, "Checking."),
-        ...toolUseBlock(1, "toolu_02", '{"ci'),
+        ...thinkingBlock(0, "sig-abc"),
+        ...textBlock(1, "Checking."),
+        ...toolUseBlock(2, "toolu_02", '{"ci'),
         ...messageEnd("max_tokens"),
       ]),
+      sse(toolTurn),
     );
-    const finish = finishOf(await collect(provider(fetch).stream(request())));
+    const llm = provider(fetch);
+    const finish = finishOf(await collect(llm.stream(request())));
 
     expect(finish.reason).toBe("length");
     expect(finish.message.parts).toEqual([{ type: "text", text: "Checking." }]);
+
+    // A tool_use without a tool_result in the next turn would be rejected.
+    const history: ChatMessage[] = [
+      ...request().messages,
+      finish.message,
+      { role: "user", parts: [{ type: "text", text: "Go on" }] },
+    ];
+    await collect(llm.stream(request({ messages: history })));
+    expect((requestAt(calls, 1).body.messages as unknown[])[1]).toEqual({
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "", signature: "sig-abc" },
+        { type: "text", text: "Checking." },
+      ],
+    });
   });
 
-  it("reports a refusal", async () => {
-    const { fetch } = fakeFetch(
+  it("reports a refusal and leaves the empty turn out of the next request", async () => {
+    const { fetch, calls } = fakeFetch(
       sse([messageStart("claude-opus-5-5", { input_tokens: 10 }), ...messageEnd("refusal")]),
+      sse(toolTurn),
     );
-    const finish = finishOf(await collect(provider(fetch).stream(request())));
+    const llm = provider(fetch);
+    const finish = finishOf(await collect(llm.stream(request())));
 
     expect(finish.reason).toBe("refusal");
     expect(finish.message.parts).toEqual([]);
+
+    const history: ChatMessage[] = [
+      ...request().messages,
+      finish.message,
+      { role: "user", parts: [{ type: "text", text: "Another question" }] },
+    ];
+    await collect(llm.stream(request({ messages: history })));
+    expect(
+      (requestAt(calls, 1).body.messages as { role: string }[]).map((message) => message.role),
+    ).toEqual(["user", "user"]);
+  });
+
+  it.each([
+    ["overloaded_error", "server_error", true],
+    ["invalid_request_error", "bad_request", false],
+  ])("classifies an in-stream %s", async (kind, code, retryable) => {
+    const { fetch } = fakeFetch(
+      sse([
+        messageStart("claude-opus-5-5", { input_tokens: 10 }),
+        { type: "error", error: { type: kind, message: "stream failed" } },
+      ]),
+    );
+
+    await expect(collect(provider(fetch).stream(request()))).rejects.toMatchObject({
+      code,
+      retryable,
+    });
   });
 
   it("rejects a stop reason Kelpie never asks for", async () => {

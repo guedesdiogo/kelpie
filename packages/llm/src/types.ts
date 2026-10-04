@@ -93,7 +93,7 @@ export interface Usage {
 /**
  * - `stop`: the reply is complete.
  * - `tool_calls`: run the calls in `message.parts`, then send their results.
- * - `length`: cut off at `maxOutputTokens`. Incomplete tool calls are left out of `parts`.
+ * - `length`: cut off at `maxOutputTokens`. Incomplete tool calls are left out of the message.
  * - `refusal`: the model or a safety classifier declined. Discard any partial text.
  */
 export type StopReason = "stop" | "tool_calls" | "length" | "refusal";

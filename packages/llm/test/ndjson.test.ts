@@ -55,17 +55,27 @@ describe("NDJSON stream", () => {
     expect(stopped).toBe(false);
   });
 
-  it("carries a failure as an error frame", async () => {
-    const failure = new LlmError("overloaded", "server_error", true);
-    const stream = toNdjsonStream(events([{ type: "text", delta: "Hi" }], failure), () => {});
+  it("carries a failure as an error frame without the provider's message", async () => {
+    const failure = new LlmError("Incorrect API key provided: sk-****abcd", "auth", false);
+    const logged: unknown[] = [];
+    const stream = toNdjsonStream(
+      events([{ type: "text", delta: "Hi" }], failure),
+      () => {},
+      (error) => logged.push(error),
+    );
     const received: LlmEvent[] = [];
 
     await expect(
       (async () => {
         for await (const event of fromNdjsonStream(stream)) received.push(event);
       })(),
-    ).rejects.toMatchObject({ code: "server_error", retryable: true, message: "overloaded" });
+    ).rejects.toMatchObject({
+      code: "auth",
+      retryable: false,
+      message: "The provider rejected the credentials",
+    });
     expect(received).toEqual([{ type: "text", delta: "Hi" }]);
+    expect(logged).toEqual([failure]);
   });
 
   it("reports an unexpected error as internal", async () => {
@@ -109,5 +119,55 @@ describe("NDJSON stream", () => {
     expect(stopped).toBe(true);
     expect(cancelled).toBe(true);
     expect(producerClosed).toBe(true);
+  });
+
+  it("cancels the stream when the consumer stops right after finish", async () => {
+    let cancelled = false;
+    let stopped = false;
+    async function* finishThenHang(): AsyncIterable<LlmEvent> {
+      yield finish;
+      await new Promise(() => {});
+    }
+    const stream = toNdjsonStream(finishThenHang(), () => {
+      cancelled = true;
+    });
+
+    for await (const event of fromNdjsonStream(stream, () => {
+      stopped = true;
+    })) {
+      if (event.type === "finish") break;
+    }
+
+    expect(cancelled).toBe(true);
+    expect(stopped).toBe(false);
+  });
+
+  it("keeps the stream's error when onStop fails", async () => {
+    const stream = toNdjsonStream(
+      events([], new LlmError("overloaded", "server_error", true)),
+      () => {},
+    );
+
+    await expect(
+      collect(
+        fromNdjsonStream(stream, () => {
+          throw new Error("RPC session closed");
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "server_error", retryable: true });
+  });
+
+  it("reports a line that isn't JSON as a protocol error", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("<html>oops</html>\n"));
+        controller.close();
+      },
+    });
+
+    await expect(collect(fromNdjsonStream(stream))).rejects.toMatchObject({
+      code: "protocol",
+      retryable: false,
+    });
   });
 });

@@ -22,12 +22,31 @@ export class LlmError extends Error {
   }
 }
 
+// Error kinds, from the response body, that retrying elsewhere won't fix.
+const FATAL_KINDS = new Set([
+  "invalid_request_error",
+  "authentication_error",
+  "permission_error",
+  "not_found_error",
+  "request_too_large",
+  "invalid_prompt",
+]);
+
 /**
- * Classifies an HTTP failure. A missing status is an error event inside an open stream, which both
- * providers use for overload and server errors.
+ * Classifies a provider failure. A missing status means an error event inside an open stream, so
+ * the error body's kind (`overloaded_error`, `invalid_request_error`, …) decides instead.
  */
-export function errorFromStatus(status: number | undefined, message: string): LlmError {
-  if (status === undefined || status >= 500) return new LlmError(message, "server_error", true);
+export function errorFromStatus(
+  status: number | undefined,
+  message: string,
+  kind?: string | null,
+): LlmError {
+  if (status === undefined) {
+    return kind && FATAL_KINDS.has(kind)
+      ? new LlmError(message, "bad_request", false)
+      : new LlmError(message, "server_error", true);
+  }
+  if (status >= 500) return new LlmError(message, "server_error", true);
   if (status === 429) return new LlmError(message, "rate_limited", true);
   if (status === 401 || status === 403) return new LlmError(message, "auth", false);
   return new LlmError(message, "bad_request", false);

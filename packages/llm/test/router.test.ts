@@ -144,15 +144,37 @@ describe("ModelRouter", () => {
   });
 });
 
+describe("ModelRouter input from RPC", () => {
+  it("rejects an unknown tier", async () => {
+    const router = new ModelRouter(routes, { anthropic: scripted("anthropic", {}).provider });
+
+    await expect(collect(router.stream("constructor" as never, request))).rejects.toMatchObject({
+      code: "bad_request",
+      retryable: false,
+    });
+  });
+
+  it("takes only the request fields it knows", async () => {
+    const anthropic = scripted("anthropic", {});
+    const router = new ModelRouter(routes, { anthropic: anthropic.provider });
+    const sneaky = { ...request, model: "claude-fable-5-1", effort: "max", baseURL: "https://x" };
+
+    await collect(router.stream("medium", sneaky as never));
+    expect(anthropic.requests).toEqual([{ ...request, model: "claude-sonnet-5-5" }]);
+  });
+});
+
 describe("parseRouteTable", () => {
-  it("accepts a complete table", () => {
-    expect(parseRouteTable(routes)).toEqual(routes);
+  it("accepts a complete table and drops unknown keys", () => {
+    const withExtra = { ...routes, medium: [{ ...routes.medium[0], note: "x" }] };
+    expect(parseRouteTable(withExtra)).toEqual(routes);
   });
 
   it.each([
     ["a missing tier", { cheap: routes.cheap, medium: routes.medium }, /"frontier"/],
     ["an unknown provider", { ...routes, medium: [{ provider: "gemini", model: "x" }] }, /gemini/],
     ["a candidate without a model", { ...routes, medium: [{ provider: "openai" }] }, /no model/],
+    ["a candidate that isn't an object", { ...routes, medium: [null] }, /isn't an object/],
     [
       "an unknown effort",
       { ...routes, medium: [{ provider: "openai", model: "x", effort: "huge" }] },

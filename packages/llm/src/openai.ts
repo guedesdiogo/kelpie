@@ -138,8 +138,13 @@ function toForeignItem(part: TextPart | ToolCallPart): ResponseInputItem[] {
 
 function toFinish(response: OpenAIResponse): LlmEvent {
   const reason = toStopReason(response);
+  // A function call cut off by the token limit never runs, so the replayed turn can't hold it either.
+  const output =
+    reason === "length"
+      ? response.output.filter((item) => item.type !== "function_call")
+      : response.output;
   const parts: AssistantMessage["parts"] = [];
-  for (const item of response.output) {
+  for (const item of output) {
     if (item.type === "message") {
       for (const content of item.content) {
         if (content.type === "output_text" && content.text) {
@@ -147,7 +152,7 @@ function toFinish(response: OpenAIResponse): LlmEvent {
         }
       }
     }
-    if (item.type === "function_call" && reason !== "length") {
+    if (item.type === "function_call") {
       parts.push({
         type: "tool_call",
         id: item.call_id,
@@ -162,7 +167,7 @@ function toFinish(response: OpenAIResponse): LlmEvent {
     message: {
       role: "assistant",
       parts,
-      native: { provider: "openai", model: response.model, content: response.output },
+      native: { provider: "openai", model: response.model, content: output },
     },
     usage: [toUsage(response)],
   };
@@ -226,6 +231,8 @@ function toLlmError(error: unknown): unknown {
   if (error instanceof OpenAI.APIConnectionError) {
     return new LlmError(error.message, "connection", true);
   }
-  if (error instanceof OpenAI.APIError) return errorFromStatus(error.status, error.message);
+  if (error instanceof OpenAI.APIError) {
+    return errorFromStatus(error.status, error.message, error.code ?? error.type);
+  }
   return error;
 }

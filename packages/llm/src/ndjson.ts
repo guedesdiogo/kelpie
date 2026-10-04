@@ -6,14 +6,29 @@ export type WireFrame =
   | LlmEvent
   | { type: "error"; code: LlmErrorCode; retryable: boolean; message: string };
 
+// Provider error messages can quote request details or part of a key, so only these go out.
+const WIRE_MESSAGES: Record<LlmErrorCode, string> = {
+  rate_limited: "The provider is rate limiting requests",
+  server_error: "The provider failed",
+  connection: "The provider could not be reached",
+  auth: "The provider rejected the credentials",
+  bad_request: "The provider rejected the request",
+  aborted: "The request was aborted",
+  unavailable: "No provider is configured for this tier",
+  protocol: "The provider answered in an unexpected way",
+  internal: "llm-gateway failed",
+};
+
 /**
  * Encodes events as newline-delimited JSON in a byte stream, the only kind of stream Workers RPC
- * carries. A failure becomes a last `error` frame. Cancelling the stream calls `onCancel`, which
- * should abort the provider request.
+ * carries. A failure becomes a last `error` frame with a fixed message; `onError` receives the
+ * original error, for logging. Cancelling the stream calls `onCancel`, which should abort the
+ * provider request.
  */
 export function toNdjsonStream(
   events: AsyncIterable<LlmEvent>,
   onCancel: () => void,
+  onError?: (error: unknown) => void,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   const iterator = events[Symbol.asyncIterator]();
@@ -29,6 +44,7 @@ export function toNdjsonStream(
         else controller.enqueue(line(next.value));
       } catch (error) {
         if (cancelled) return;
+        onError?.(error);
         controller.enqueue(line(toErrorFrame(error)));
         controller.close();
       }
@@ -42,17 +58,15 @@ export function toNdjsonStream(
 }
 
 function toErrorFrame(error: unknown): WireFrame {
-  if (error instanceof LlmError) {
-    return { type: "error", code: error.code, retryable: error.retryable, message: error.message };
-  }
-  const message = error instanceof Error ? error.message : String(error);
-  return { type: "error", code: "internal", retryable: false, message };
+  const code = error instanceof LlmError ? error.code : "internal";
+  const retryable = error instanceof LlmError && error.retryable;
+  return { type: "error", code, retryable, message: WIRE_MESSAGES[code] };
 }
 
 /**
  * Decodes a stream made by `toNdjsonStream`. An `error` frame throws it as an `LlmError`, and so
- * does a stream that ends before the `finish` event. Stopping before `finish` cancels the stream
- * and calls `onStop`, which should cancel the call on the sending side.
+ * does a stream that ends before the `finish` event. Stopping before `finish` also calls `onStop`,
+ * which should cancel the call on the sending side.
  */
 export async function* fromNdjsonStream(
   stream: ReadableStream<Uint8Array>,
@@ -70,16 +84,28 @@ export async function* fromNdjsonStream(
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
       for (const text of lines) {
-        const frame = JSON.parse(text) as WireFrame;
+        const frame = parseFrame(text);
         if (frame.type === "error") throw new LlmError(frame.message, frame.code, frame.retryable);
         if (frame.type === "finish") finished = true;
         yield frame;
       }
     }
   } finally {
-    if (!finished) await Promise.all([onStop?.(), reader.cancel()]);
+    // Neither cleanup step may replace the error that ended the stream.
+    await Promise.allSettled([
+      reader.cancel(),
+      ...(finished || !onStop ? [] : [Promise.resolve().then(onStop)]),
+    ]);
   }
   if (!finished) {
     throw new LlmError("The stream ended before the reply finished", "connection", true);
+  }
+}
+
+function parseFrame(text: string): WireFrame {
+  try {
+    return JSON.parse(text) as WireFrame;
+  } catch {
+    throw new LlmError("llm-gateway sent a line that isn't JSON", "protocol", false);
   }
 }
