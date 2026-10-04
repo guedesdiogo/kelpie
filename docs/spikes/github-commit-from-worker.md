@@ -110,7 +110,7 @@ SPIKE_TOKEN="$(sed -n 's/^SPIKE_TOKEN="\(.*\)"$/\1/p' .dev.vars)"
 curl -sS -X POST -H "x-spike-token: $SPIKE_TOKEN" http://localhost:8787/run | jq .
 ```
 
-The `sed` reads only the `SPIKE_TOKEN` line. Run it once: every run makes three commits in the test repository. Paste the JSON into Results below.
+The `sed` reads only the `SPIKE_TOKEN` line. Drop `| jq .` if jq isn't installed. Run it once: every run makes two commits in the test repository (three if GitHub accepted the stale commit). Paste the JSON into Results below.
 
 **4. Clean up.** Run `rm .dev.vars`. The `spike-runs/` folders stay in the test repository, which the owner may delete together with the App.
 
