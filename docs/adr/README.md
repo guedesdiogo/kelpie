@@ -19,6 +19,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0013](0013-self-configuration.md) | Kelpie configures itself through its agents | [#47](https://github.com/guedesdiogo/kelpie/issues/47) |
 | [0014](0014-agent-tool-scope.md) | Assistants with a browser, no machine execution | [#18](https://github.com/guedesdiogo/kelpie/issues/18) |
 | [0015](0015-single-player-first.md) | Single-player until multi-user lands, with seams for it | [#59](https://github.com/guedesdiogo/kelpie/issues/59) |
+| [0016](0016-vault-second-brain.md) | The vault is the owner's second brain, usable without Kelpie and shared with Hermes | [#58](https://github.com/guedesdiogo/kelpie/issues/58) |
 
 ## Format
 
