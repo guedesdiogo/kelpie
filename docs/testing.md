@@ -40,6 +40,8 @@ Fiber recovery after an eviction runs when the fiber's heartbeat alarm fires on 
 
 `llm-gateway` is a service binding that doesn't exist in tests, so `vitest.config.ts` replaces it with a stub; the fake model port means it's never called.
 
+`admin-api` binds Durable Objects that live in other Workers. Its `vitest.config.ts` adds stub Workers that only declare those classes, so the runtime starts; its tests pass fakes to `handle()` and never call the objects.
+
 The `ConversationAgent` reads its settings from a real `AgentHost` in the same test Worker. A test that changes settings configures its own agent through `env.AGENT_HOST`, so settings don't leak between tests.
 
 ## Commands

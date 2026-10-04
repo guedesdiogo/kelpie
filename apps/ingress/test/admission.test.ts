@@ -1,7 +1,8 @@
 import { env } from "cloudflare:workers";
+import { DIRECTORY_NAME } from "@kelpie/access";
 import type { CanonicalEvent } from "@kelpie/channels";
 import { describe, expect, it } from "vitest";
-import { admitSender, DIRECTORY_NAME } from "../src/admission.ts";
+import { admitSender } from "../src/admission.ts";
 
 function event(channelUserId: string, chatType: string = "direct"): CanonicalEvent {
   return {

@@ -1,8 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
 import {
+  ACCESS_SOURCE,
   type Admission,
   CHANNEL_IDS,
   type ChannelIdentity,
+  type DirectoryContract,
   type IdentityResult,
   type IdentityStatus,
   type OwnerResult,
@@ -17,11 +19,11 @@ import * as schema from "./schema.ts";
  * Who may reach the agents (ADR-0004). Channel routes ask it before any conversation or model runs.
  * It is strongly consistent, so disabling an identity applies to the next message.
  *
- * Until multi-user lands (ADR-0015) it holds the owner and the owner's channel identities, and is
- * their source of truth. Kelpie runs one instance, named "directory". Only `ingress` binds it: the
- * methods trust their caller, so no route may proxy them.
+ * Until multi-user lands (ADR-0015) it holds the owner and the owner's identities, and is their
+ * source of truth. Kelpie runs one instance, named "directory". Only `ingress` and `admin-api` bind
+ * it: the methods trust their caller, so no route may proxy them.
  */
-export class Directory extends DurableObject<Env> {
+export class Directory extends DurableObject<Env> implements DirectoryContract {
   readonly #db: DrizzleSqliteDODatabase<typeof schema>;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -41,11 +43,7 @@ export class Directory extends DurableObject<Env> {
   /** Registers the owner. Repeating it with the same id is a no-op; a second owner is refused. */
   registerOwner(userId: string): OwnerResult {
     if (!isNonEmpty(userId)) return { ok: false, reason: "invalid_user" };
-    const owner = this.#db
-      .select({ userId: schema.users.userId })
-      .from(schema.users)
-      .where(eq(schema.users.role, "owner"))
-      .get();
+    const owner = this.#owner();
     if (owner) {
       return owner.userId === userId ? { ok: true } : { ok: false, reason: "owner_exists" };
     }
@@ -97,6 +95,47 @@ export class Directory extends DurableObject<Env> {
     return this.#setStatus(identity, "disabled");
   }
 
+  /** Whether the owner registered, so the admin API can tell "no owner yet" from a refusal. */
+  ownerExists(): boolean {
+    return this.#owner() !== undefined;
+  }
+
+  /**
+   * The first run (ADR-0013): registers the owner with their Cloudflare Access login as an enabled
+   * identity, in one step. The caller holds the proof, a valid bootstrap token from the deploy and an
+   * Access JWT for `accessSub`. It works only while no owner exists.
+   */
+  bootstrapOwner(userId: string, accessSub: string): OwnerResult {
+    if (!isNonEmpty(userId) || !isNonEmpty(accessSub)) {
+      return { ok: false, reason: "invalid_user" };
+    }
+    if (this.#owner()) return { ok: false, reason: "owner_exists" };
+    const at = new Date();
+    this.#db.transaction((tx) => {
+      tx.insert(schema.users).values({ userId, role: "owner", createdAt: at }).run();
+      tx.insert(schema.identities)
+        .values({
+          channel: ACCESS_SOURCE,
+          channelUserId: accessSub,
+          userId,
+          status: "enabled",
+          updatedAt: at,
+        })
+        .run();
+      for (const action of ["owner.registered", "identity.added", "identity.enabled"] as const) {
+        tx.insert(schema.auditLog)
+          .values({
+            at,
+            action,
+            userId,
+            channel: action === "owner.registered" ? null : ACCESS_SOURCE,
+          })
+          .run();
+      }
+    });
+    return { ok: true };
+  }
+
   /** Every identity with its status. The values are personal data: mask them in any output. */
   listIdentities(): (ChannelIdentity & { status: IdentityStatus })[] {
     return this.#db
@@ -144,7 +183,17 @@ export class Directory extends DurableObject<Env> {
       .get();
   }
 
+  #owner() {
+    return this.#db
+      .select({ userId: schema.users.userId })
+      .from(schema.users)
+      .where(eq(schema.users.role, "owner"))
+      .get();
+  }
+
   #setStatus(identity: ChannelIdentity, status: "enabled" | "disabled"): IdentityResult {
+    // The owner's Access login changes only through the bootstrap, so nothing can lock them out.
+    if (!isValidIdentity(identity)) return { ok: false, reason: "invalid_identity" };
     const existing = this.#identity(identity);
     if (!existing) return { ok: false, reason: "unknown_identity" };
     if (existing.status === status) return { ok: true, status };
@@ -176,6 +225,10 @@ function isNonEmpty(value: unknown): value is string {
 }
 
 // RPC callers aren't type-checked, so identities are checked where they enter storage.
+// An Access identity enters only through `bootstrapOwner`.
 function isValidIdentity(identity: ChannelIdentity): boolean {
-  return CHANNEL_IDS.includes(identity?.channel) && isNonEmpty(identity?.channelUserId);
+  return (
+    (CHANNEL_IDS as readonly string[]).includes(identity?.channel) &&
+    isNonEmpty(identity?.channelUserId)
+  );
 }

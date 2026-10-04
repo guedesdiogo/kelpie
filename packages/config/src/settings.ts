@@ -1,5 +1,9 @@
-import { MODEL_TIERS, type ModelTier } from "@kelpie/llm";
+// The router module only: the package root also loads the provider SDKs.
+import { MODEL_TIERS, type ModelTier } from "@kelpie/llm/router";
 import type { QuietWindowPolicy } from "@kelpie/qualifier";
+
+/** Kelpie runs one `Registry`, which lists the agents. */
+export const REGISTRY_NAME = "registry";
 
 /** One agent's settings, held by its `AgentHost` (ADR-0002) and read by its conversations. */
 export interface AgentSettings {

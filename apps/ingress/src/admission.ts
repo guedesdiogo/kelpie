@@ -1,8 +1,5 @@
-import type { Admission } from "@kelpie/access";
+import { type Admission, DIRECTORY_NAME } from "@kelpie/access";
 import type { CanonicalEvent } from "@kelpie/channels";
-
-/** Kelpie runs one Directory (ADR-0004). */
-export const DIRECTORY_NAME = "directory";
 
 /**
  * Decides whether an inbound event may reach its agent. Channel routes call this before any

@@ -1,4 +1,10 @@
-import type { Actor, AgentConfig, AgentSettings, ConfigureResult } from "@kelpie/config";
+import type {
+  Actor,
+  AgentConfig,
+  AgentHostContract,
+  AgentSettings,
+  ConfigureResult,
+} from "@kelpie/config";
 import { DEFAULT_SETTINGS, parseSettings } from "@kelpie/config";
 import { Agent } from "agents";
 import { eq } from "drizzle-orm";
@@ -12,7 +18,7 @@ import * as schema from "./schema.ts";
  * board (ADR-0011) as they arrive. It extends the Agents SDK's `Agent` for those. One instance per
  * agent, named by the agent's id.
  */
-export class AgentHost extends Agent<Env> {
+export class AgentHost extends Agent<Env> implements AgentHostContract {
   readonly #db: DrizzleSqliteDODatabase<typeof schema>;
 
   constructor(ctx: DurableObjectState, env: Env) {

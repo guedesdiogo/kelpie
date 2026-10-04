@@ -1,5 +1,6 @@
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import { ACCESS_SOURCE, ADMIN_AGENT_ID } from "@kelpie/access";
 import { describe, expect, it } from "vitest";
 import type { Directory } from "../src/directory/directory.ts";
 
@@ -169,5 +170,70 @@ describe("Directory", () => {
       "identity.disabled",
     ]);
     expect(JSON.stringify(rows)).not.toContain(phone.channelUserId);
+  });
+});
+
+describe("Directory first-run bootstrap", () => {
+  const access = { channel: ACCESS_SOURCE, channelUserId: "7335d417-access-sub" } as const;
+
+  it("registers the owner with their Access login enabled, in one step", async () => {
+    const stub = directory("bootstrap");
+    expect(await stub.ownerExists()).toBe(false);
+
+    expect(await stub.bootstrapOwner(OWNER, access.channelUserId)).toEqual({ ok: true });
+
+    expect(await stub.ownerExists()).toBe(true);
+    expect(await stub.admit(access, ADMIN_AGENT_ID)).toEqual({
+      admitted: true,
+      userId: OWNER,
+      role: "owner",
+    });
+    const rows = await runInDurableObject(stub, (_instance: Directory, state) =>
+      state.storage.sql.exec("SELECT action, channel FROM audit_log ORDER BY id").toArray(),
+    );
+    expect(rows).toEqual([
+      { action: "owner.registered", channel: null },
+      { action: "identity.added", channel: ACCESS_SOURCE },
+      { action: "identity.enabled", channel: ACCESS_SOURCE },
+    ]);
+    expect(JSON.stringify(rows)).not.toContain(access.channelUserId);
+  });
+
+  it("works once: an existing owner disables it, even under concurrent calls", async () => {
+    const stub = directory("bootstrap-once");
+    const results = await Promise.all([
+      stub.bootstrapOwner("u-a", "sub-a"),
+      stub.bootstrapOwner("u-b", "sub-b"),
+    ]);
+    expect(results).toContainEqual({ ok: true });
+    expect(results).toContainEqual({ ok: false, reason: "owner_exists" });
+
+    const later = directory("bootstrap-after-owner");
+    await later.registerOwner(OWNER);
+    expect(await later.bootstrapOwner("u-other", "sub-other")).toEqual({
+      ok: false,
+      reason: "owner_exists",
+    });
+  });
+
+  it("refuses empty ids, and lets no other method add an Access identity", async () => {
+    const stub = directory("bootstrap-input");
+    expect(await stub.bootstrapOwner(OWNER, " ")).toEqual({ ok: false, reason: "invalid_user" });
+    await stub.registerOwner(OWNER);
+
+    expect(await stub.addIdentity(OWNER, access)).toEqual({
+      ok: false,
+      reason: "invalid_identity",
+    });
+  });
+
+  it("never lets a status change touch the owner's Access login", async () => {
+    const stub = directory("bootstrap-status");
+    await stub.bootstrapOwner(OWNER, access.channelUserId);
+    const refused = { ok: false, reason: "invalid_identity" };
+
+    expect(await stub.disableIdentity(access)).toEqual(refused);
+    expect(await stub.enableIdentity(access)).toEqual(refused);
+    expect(await stub.admit(access, ADMIN_AGENT_ID)).toMatchObject({ admitted: true });
   });
 });

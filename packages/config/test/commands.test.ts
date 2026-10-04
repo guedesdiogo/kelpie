@@ -198,6 +198,21 @@ describe("configuration commands", () => {
     });
   });
 
+  it("refuses an Access identity: only the first-run bootstrap adds one", async () => {
+    const { ports } = fakePorts();
+    const commands = createConfigCommands(ports);
+    const access = { channel: "cloudflare-access", channelUserId: "sub-owner" };
+
+    for (const command of [
+      commands.addIdentity,
+      commands.enableIdentity,
+      commands.disableIdentity,
+    ]) {
+      expect(await command(owner, access)).toEqual({ ok: false, reason: "invalid_input" });
+    }
+    expect(await ports.directory.listIdentities()).toEqual([]);
+  });
+
   it("trims identity values and refuses oversized ones", async () => {
     const { ports } = fakePorts();
     const commands = createConfigCommands(ports);

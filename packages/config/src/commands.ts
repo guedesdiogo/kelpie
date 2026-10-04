@@ -44,6 +44,22 @@ export type RenameAgentResult =
   | { ok: true }
   | { ok: false; reason: "unknown_agent" | "invalid_input" };
 
+/**
+ * The `Registry` and `AgentHost` methods other Workers call. The objects implement them, and
+ * callers bind them as `Remote<…>`, so a change on either side fails the type check.
+ */
+export interface RegistryContract {
+  add(id: string, name: string, actor: Actor): AddAgentResult;
+  rename(id: string, name: string, actor: Actor): RenameAgentResult;
+  get(id: string): AgentSummary | null;
+  list(): AgentSummary[];
+}
+
+export interface AgentHostContract {
+  configure(changes: Partial<AgentSettings>, actor: Actor): ConfigureResult;
+  config(): AgentConfig;
+}
+
 /** What the commands need from the objects that hold configuration. */
 export interface ConfigPorts {
   registry: {
@@ -183,7 +199,8 @@ export type ConfigCommands = ReturnType<typeof createConfigCommands>;
 
 function parseIdentity(input: unknown): ChannelIdentity | null {
   const { channel, channelUserId } = (input ?? {}) as Partial<Record<string, unknown>>;
-  if (!CHANNEL_IDS.includes(channel as ChannelIdentity["channel"])) return null;
+  // Messaging channels only: an Access identity enters through the first-run bootstrap alone.
+  if (!(CHANNEL_IDS as readonly unknown[]).includes(channel)) return null;
   if (typeof channelUserId !== "string") return null;
   const value = channelUserId.trim();
   if (value === "" || value.length > 256) return null;

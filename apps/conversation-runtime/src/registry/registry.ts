@@ -5,6 +5,7 @@ import {
   type AgentSummary,
   isAgentId,
   isAgentName,
+  type RegistryContract,
   type RenameAgentResult,
 } from "@kelpie/config";
 import { asc, eq } from "drizzle-orm";
@@ -13,9 +14,6 @@ import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
 
-/** Kelpie runs one Registry. */
-export const REGISTRY_NAME = "registry";
-
 /**
  * Which agents exist, so commands and the management UI can list them (ADR-0015 left this to
  * Story 3.10). Each agent's configuration lives in its own AgentHost.
@@ -23,7 +21,7 @@ export const REGISTRY_NAME = "registry";
  * The configuration commands are its only callers and authorize the actor (ADR-0013); this object
  * validates its input, because it is an RPC boundary.
  */
-export class Registry extends DurableObject<Env> {
+export class Registry extends DurableObject<Env> implements RegistryContract {
   readonly #db: DrizzleSqliteDODatabase<typeof schema>;
 
   constructor(ctx: DurableObjectState, env: Env) {

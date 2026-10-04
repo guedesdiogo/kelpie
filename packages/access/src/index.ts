@@ -8,6 +8,9 @@ export type Role = "owner" | "admin" | "member";
 
 export type IdentityStatus = "pending" | "enabled" | "disabled";
 
+/** Kelpie runs one Directory (ADR-0004). */
+export const DIRECTORY_NAME = "directory";
+
 /** Every channel an identity can belong to. */
 export const CHANNEL_IDS: readonly ChannelId[] = [
   "webchat",
@@ -17,9 +20,21 @@ export const CHANNEL_IDS: readonly ChannelId[] = [
   "discord",
 ];
 
+/**
+ * The owner's Cloudflare Access login, which the admin API admits. It is an identity source, not a
+ * channel: only the first-run bootstrap adds one, and no configuration command can.
+ */
+export const ACCESS_SOURCE = "cloudflare-access";
+
+/**
+ * The agent id an admin API call is admitted for. It names no agent, because no agent id can equal
+ * it. Multi-user decides what admin admission means for each role (ADR-0015).
+ */
+export const ADMIN_AGENT_ID = "*";
+
 export interface ChannelIdentity {
-  channel: ChannelId;
-  /** The same string a `CanonicalEvent` carries in `sender.channelUserId`. */
+  channel: ChannelId | typeof ACCESS_SOURCE;
+  /** The same string a `CanonicalEvent` carries in `sender.channelUserId`, or an Access `sub`. */
   channelUserId: string;
 }
 
@@ -41,6 +56,13 @@ export function maskIdentityValue(value: string): string {
   return `${characters.slice(0, 2).join("")}${"•".repeat(characters.length - 4)}${characters.slice(-2).join("")}`;
 }
 
+/** How another Worker sees an object's methods: every call returns a promise. */
+export type Remote<T> = {
+  [K in keyof T]: T[K] extends (...args: infer A) => infer R
+    ? (...args: A) => Promise<Awaited<R>>
+    : never;
+};
+
 /**
  * Outcomes of a change to the Directory. Refusals are values, not exceptions: the configuration
  * commands turn them into answers for the owner.
@@ -52,3 +74,17 @@ export type IdentityResult =
       ok: false;
       reason: "unknown_user" | "unknown_identity" | "identity_taken" | "invalid_identity";
     };
+
+/**
+ * The `Directory` methods other Workers call. The object implements it, and callers bind it as
+ * `Remote<DirectoryContract>`, so a change on either side fails the type check.
+ */
+export interface DirectoryContract {
+  admit(identity: ChannelIdentity, agentId: string): Admission;
+  ownerExists(): boolean;
+  bootstrapOwner(userId: string, accessSub: string): OwnerResult;
+  addIdentity(userId: string, identity: ChannelIdentity): IdentityResult;
+  enableIdentity(identity: ChannelIdentity): IdentityResult;
+  disableIdentity(identity: ChannelIdentity): IdentityResult;
+  listIdentities(): (ChannelIdentity & { status: IdentityStatus })[];
+}
