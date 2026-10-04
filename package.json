@@ -8,7 +8,8 @@
   },
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "spikes/*"
   ],
   "scripts": {
     "check:workspaces": "node scripts/check-workspace-scripts.mjs",

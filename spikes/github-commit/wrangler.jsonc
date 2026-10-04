@@ -1,0 +1,21 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  // Throwaway Worker for the createCommitOnBranch spike (issue #28). Delete it after the run.
+  "name": "kelpie-spike-github-commit",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+  // If deployed, the only public surface is POST /run on workers.dev, behind x-spike-token.
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {
+    "GITHUB_APP_ID": "5181584",
+    "GITHUB_INSTALLATION_ID": "167691807",
+    "GITHUB_REPOSITORY": "guedesdiogo/kelpie-context-test"
+  },
+  "secrets": {
+    // GITHUB_APP_PRIVATE_KEY: the App's private key as PKCS#8 PEM (see the spike doc).
+    // SPIKE_TOKEN: the value callers send in x-spike-token.
+    "required": ["GITHUB_APP_PRIVATE_KEY", "SPIKE_TOKEN"]
+  }
+}
