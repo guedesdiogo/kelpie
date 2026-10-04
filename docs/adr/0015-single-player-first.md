@@ -23,6 +23,7 @@ The scope of this decision is the time **until multi-user lands** ([Epic 7](http
   - The owner reaches every agent and every content scope.
 - **Where state lives without Postgres:**
   - the `Directory` Durable Object holds the owner, the owner's identities and the audit log of access changes;
+  - other configuration changes (ADR-0013) are audited where they apply, such as an agent's changes in that agent's `AgentHost`;
   - each agent's `AgentHost` holds that agent's configuration, its channels and its task board ([ADR-0011](0011-agent-task-board.md)), with no projection into Postgres;
   - the registry of which agents exist is designed in Story 3.10;
   - the `projector` worker (ADR-0002) waits for Postgres.
@@ -31,12 +32,12 @@ The scope of this decision is the time **until multi-user lands** ([Epic 7](http
 - **Configuration** is done by the owner only. [ADR-0013](0013-self-configuration.md)'s commands that invite users or grant access wait for multi-user.
 - **Personal data.** It is the owner's own, plus whatever third parties appear in the owner's conversations.
   - The per-user Durable Object ([ADR-0006](0006-personal-data-storage.md)) stays, keyed by the owner's `userId`.
-  - Erasure covers two cases: the owner's data, and a third party's request about the owner's conversations, which deletes or pseudonymizes that content in conversation storage and archives.
+  - Erasure covers two cases: the owner's data, and a third party's request about the owner's conversations. That request deletes or pseudonymizes the content in conversation storage and archives, and the facts and episodes taken from it in the owner's per-user object, R2 and Vectorize.
   - Erasure for colleagues returns with multi-user.
 - **Seams.** These are binding, so that multi-user is an addition, not a rewrite:
   - every message and record carries the `userId` of its author, not one per conversation: memory, conversations, tasks, outbox and audit;
-  - access goes only through `admit(identity, agentId)`. Its result, `Admission`, is either `{ admitted: true, userId, role }` or `{ admitted: false, reason }`, where `reason` is `"unknown_identity"`, `"no_grant"` or `"group_chat"`;
-  - `ingress` calls `admit` before anything wakes, and the conversation passes the admitted `userId` and `role` along;
+  - access goes only through `admit(identity, agentId)`. Its result, `Admission`, is either `{ admitted: true, userId, role }` or `{ admitted: false, reason }`, where `reason` is `"unknown_identity"` or `"no_grant"`;
+  - `ingress` wraps it in `admitSender(event)`, which refuses group chats with the reason `"group_chat"` before asking the `Directory`. Channel routes call it before any conversation or model runs, and the conversation passes the admitted `userId` and `role` along;
   - owner-only checks, such as configuration commands, test `role === "owner"` from that result, never an id compared with a stored owner id;
   - the Context Store keeps its content-scope parameter, filled with every scope for the owner;
   - no code reads "the only user" from a global.
@@ -44,7 +45,7 @@ The scope of this decision is the time **until multi-user lands** ([Epic 7](http
 This changes the following earlier decisions until multi-user lands:
 - [ADR-0001](0001-single-tenant-self-hosted.md): one instance serves the owner alone, not internal users.
 - [ADR-0003](0003-channel-adapters.md): direct conversations only.
-- [ADR-0004](0004-access-control.md): the allowlist holds only the owner's identities. Roles, grants and content scopes wait.
+- [ADR-0004](0004-access-control.md): the allowlist holds only the owner's identities. Roles other than owner, grants and content scopes wait.
 - [ADR-0006](0006-personal-data-storage.md): erasure as described above.
 - [ADR-0007](0007-system-of-record-database.md): no Postgres until a feature needs it.
 - [ADR-0011](0011-agent-task-board.md): the people on the board are the owner, and the board has no Postgres projection.

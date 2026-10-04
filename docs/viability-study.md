@@ -40,7 +40,7 @@ The platform is not the hard part. The conversation engine (buffering, splitting
 - tenant onboarding, billing and cross-tenant reporting;
 - one GitHub repository per tenant: one repository per instance.
 
-**What stays:** many agents and agents orchestrating agents; many users with isolated personal memory, which colleagues must not read across; erasure rights for those users; and the Cloudflare constraints of [§4](#4-proposed-architecture).
+**What stays:** many agents and agents orchestrating agents; many users with isolated personal memory, which colleagues must not read across; erasure rights for those users; and the Cloudflare constraints of [§4](#4-proposed-architecture). Until multi-user lands, only the owner is a user ([ADR-0015](adr/0015-single-player-first.md)).
 
 ## 3. What was studied
 
@@ -138,7 +138,7 @@ About ten Workers, each with a narrow job ([05 "Decomposition into workers"](res
 | `tools-gateway` | Tool registry, remote MCP, Composio, credential injection |
 | `context-store` | Read and write the Markdown context, filtered by the user's permissions; the only component that talks to GitHub |
 | `memory-jobs` | Post-turn extraction, embeddings, consolidation |
-| `projector` | Event projections into Postgres for the UI and search |
+| `projector` | Event projections into Postgres for the UI and search. Deferred until a feature brings Postgres in ([ADR-0015](adr/0015-single-player-first.md)). |
 | `admin-api` / `admin-ui` | Management API and single-page app |
 
 Service-binding RPC carries synchronous calls, Queues carry side effects, and Workflows carry long work. The longest hot-path chain is three hops, far below the 32-invocation limit ([05 R7](research/05-cloudflare-limits-and-architecture.md)).
@@ -276,7 +276,7 @@ The owner asked for options beyond D1 and chose Neon first, with other Postgres 
 | **Neon + Hyperdrive** | 100 projects, scale-to-zero, no weekly pause, pgvector, branching | **First provider** |
 | Supabase + Hyperdrive | Pauses after a week without use | Second provider by configuration |
 | PlanetScale Postgres + Hyperdrive | None; from US$ 5/month, billed by Cloudflare | Production upgrade path by configuration |
-| Durable Object SQLite | 5 GB total | Hot state and per-user personal data, alongside Postgres |
+| Durable Object SQLite | 5 GB total | Hot state and per-user personal data, alongside Postgres once a feature needs it ([ADR-0015](adr/0015-single-player-first.md)) |
 | D1 | 10 databases, 500 MB each | Not used |
 | Turso (libSQL) | 100 databases | Not used: Durable Object SQLite gives the same pattern without another vendor |
 | Cloudflare-managed Postgres | — | Does not exist; the PlanetScale partnership is the closest |
