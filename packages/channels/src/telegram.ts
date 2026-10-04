@@ -83,47 +83,18 @@ export class TelegramAdapter implements ChannelAdapter {
     return constantTimeEqual(presented, expected);
   }
 
-  /**
-   * A new message from a person becomes one event. Edits, channel posts and the posts a linked
-   * channel relays, membership changes, messages from bots and message kinds Kelpie doesn't handle
-   * yet (stickers, locations) yield none. A field of the wrong type refuses the whole update.
-   */
+  /** See `normalizeTelegramUpdate`. */
   normalize(webhook: InboundWebhook, agentId: string): CanonicalEvent[] {
-    let update: { message?: unknown };
-    try {
-      update = JSON.parse(webhook.body);
-    } catch {
-      throw new InvalidWebhookError("The update isn't JSON");
-    }
-    if (typeof update !== "object" || update === null) {
-      throw new InvalidWebhookError("The update isn't an object");
-    }
-    if (update.message === undefined) return [];
-    const message = update.message as TelegramMessage;
-    if (!isWellFormed(message)) {
-      throw new InvalidWebhookError("The message has missing fields or fields of the wrong type");
-    }
-    if (!message.from || message.from.is_bot) return [];
-    if (message.from.id === TELEGRAM_SERVICE_ACCOUNT || message.is_automatic_forward) return [];
-    if (message.chat.type === "channel") return [];
-    const parts = partsOf(message);
-    if (parts.length === 0) return [];
+    return normalizeTelegramUpdate(webhook, agentId);
+  }
 
-    const event: CanonicalEvent = {
-      agentId,
-      channel: "telegram",
-      threadId: String(message.chat.id),
-      chatType: message.chat.type === "private" ? "direct" : "group",
-      sender: { channelUserId: String(message.from.id) },
-      providerMessageId: String(message.message_id),
-      providerTimestamp: message.date * 1_000,
-      parts,
-    };
-    if (message.from.first_name) event.sender.displayName = message.from.first_name;
-    if (message.reply_to_message) {
-      event.replyTo = { providerMessageId: String(message.reply_to_message.message_id) };
+  /** The bot behind the token (`getMe`): proof the token works, and the username for links. */
+  async me(): Promise<{ id: number; username: string }> {
+    const bot = await this.#call<{ id: number; username?: string }>("getMe", {});
+    if (typeof bot.id !== "number" || typeof bot.username !== "string") {
+      throw new ChannelRequestError("getMe", null);
     }
-    return [event];
+    return { id: bot.id, username: bot.username };
   }
 
   async send(
@@ -175,6 +146,53 @@ export class TelegramAdapter implements ChannelAdapter {
     if (status === 403) throw new RecipientUnavailableError(`${method} was refused with 403`);
     throw new ChannelRequestError(method, status);
   }
+}
+
+/**
+ * A new message from a person becomes one event. Edits, channel posts and the posts a linked
+ * channel relays, membership changes, messages from bots and message kinds Kelpie doesn't handle
+ * yet (stickers, locations) yield none. A field of the wrong type refuses the whole update. It needs
+ * no token, so ingress can normalize before anything else knows the bot.
+ */
+export function normalizeTelegramUpdate(
+  webhook: InboundWebhook,
+  agentId: string,
+): CanonicalEvent[] {
+  let update: { message?: unknown };
+  try {
+    update = JSON.parse(webhook.body);
+  } catch {
+    throw new InvalidWebhookError("The update isn't JSON");
+  }
+  if (typeof update !== "object" || update === null) {
+    throw new InvalidWebhookError("The update isn't an object");
+  }
+  if (update.message === undefined) return [];
+  const message = update.message as TelegramMessage;
+  if (!isWellFormed(message)) {
+    throw new InvalidWebhookError("The message has missing fields or fields of the wrong type");
+  }
+  if (!message.from || message.from.is_bot) return [];
+  if (message.from.id === TELEGRAM_SERVICE_ACCOUNT || message.is_automatic_forward) return [];
+  if (message.chat.type === "channel") return [];
+  const parts = partsOf(message);
+  if (parts.length === 0) return [];
+
+  const event: CanonicalEvent = {
+    agentId,
+    channel: "telegram",
+    threadId: String(message.chat.id),
+    chatType: message.chat.type === "private" ? "direct" : "group",
+    sender: { channelUserId: String(message.from.id) },
+    providerMessageId: String(message.message_id),
+    providerTimestamp: message.date * 1_000,
+    parts,
+  };
+  if (message.from.first_name) event.sender.displayName = message.from.first_name;
+  if (message.reply_to_message) {
+    event.replyTo = { providerMessageId: String(message.reply_to_message.message_id) };
+  }
+  return [event];
 }
 
 const isString = (value: unknown): value is string => typeof value === "string";

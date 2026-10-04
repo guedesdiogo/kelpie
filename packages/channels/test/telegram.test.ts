@@ -5,7 +5,7 @@ import {
   InvalidWebhookError,
   RecipientUnavailableError,
 } from "../src/index.ts";
-import { TelegramAdapter } from "../src/telegram.ts";
+import { normalizeTelegramUpdate, TelegramAdapter } from "../src/telegram.ts";
 import * as updates from "./telegram-updates.ts";
 
 const TOKEN = "123456:test-token-not-real";
@@ -79,6 +79,12 @@ describe("Telegram normalize", () => {
         parts: [{ type: "text", text: "where is my order?" }],
       },
     ]);
+  });
+
+  it("normalizes without a token, as ingress does before it knows the bot", () => {
+    expect(normalizeTelegramUpdate(webhook(updates.privateText), "assistant")).toEqual(
+      normalize(updates.privateText),
+    );
   });
 
   it("keeps what a message replies to, and marks group chats", () => {
@@ -178,6 +184,17 @@ describe("Telegram sending", () => {
       disable_notification: true,
       reply_parameters: { message_id: 41, allow_sending_without_reply: true },
     });
+  });
+
+  it("asks who the bot is, which also proves the token works", async () => {
+    const { adapter, calls } = botApi(() =>
+      okResult({ id: 555, is_bot: true, first_name: "Kelpie", username: "kelpie_bot" }),
+    );
+    expect(await adapter.me()).toEqual({ id: 555, username: "kelpie_bot" });
+    expect(calls[0]?.method).toBe("getMe");
+
+    const nameless = botApi(() => okResult({ id: 555, is_bot: true, first_name: "Kelpie" }));
+    await expect(nameless.adapter.me()).rejects.toBeInstanceOf(ChannelRequestError);
   });
 
   it("shows typing", async () => {
