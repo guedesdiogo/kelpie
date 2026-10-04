@@ -8,6 +8,9 @@ export type Role = "owner" | "admin" | "member";
 
 export type IdentityStatus = "pending" | "enabled" | "disabled";
 
+/** Kelpie runs one Directory (ADR-0004). */
+export const DIRECTORY_NAME = "directory";
+
 /** Every channel an identity can belong to. */
 export const CHANNEL_IDS: readonly ChannelId[] = [
   "webchat",
@@ -17,9 +20,21 @@ export const CHANNEL_IDS: readonly ChannelId[] = [
   "discord",
 ];
 
+/**
+ * The owner's Cloudflare Access login, which the admin API admits. It is an identity source, not a
+ * channel: only the first-run bootstrap adds one, and no configuration command can.
+ */
+export const ACCESS_SOURCE = "cloudflare-access";
+
+/**
+ * The agent id an admin API call is admitted for. It names no agent, because no agent id can equal
+ * it. Multi-user decides what admin admission means for each role (ADR-0015).
+ */
+export const ADMIN_AGENT_ID = "*";
+
 export interface ChannelIdentity {
-  channel: ChannelId;
-  /** The same string a `CanonicalEvent` carries in `sender.channelUserId`. */
+  channel: ChannelId | typeof ACCESS_SOURCE;
+  /** The same string a `CanonicalEvent` carries in `sender.channelUserId`, or an Access `sub`. */
   channelUserId: string;
 }
 

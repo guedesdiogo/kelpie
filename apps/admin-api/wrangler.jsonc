@@ -1,0 +1,33 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "kelpie-admin-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+  // Reachable only through a custom domain behind a Cloudflare Access application, added at deploy.
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    // Set from the Access application at deploy. While either is empty, every request is refused.
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": ""
+  },
+  // The first-run token (ADR-0013); `docs/admin-api.md` says how to make one.
+  "secrets": { "required": ["BOOTSTRAP_TOKEN"] },
+  // The objects that hold configuration live in the Workers that run them.
+  "durable_objects": {
+    "bindings": [
+      { "name": "DIRECTORY", "class_name": "Directory", "script_name": "kelpie-ingress" },
+      {
+        "name": "REGISTRY",
+        "class_name": "Registry",
+        "script_name": "kelpie-conversation-runtime"
+      },
+      {
+        "name": "AGENT_HOST",
+        "class_name": "AgentHost",
+        "script_name": "kelpie-conversation-runtime"
+      }
+    ]
+  }
+}

@@ -38,6 +38,7 @@ The scope of this decision is the time **until multi-user lands** ([Epic 7](http
   - every message and record carries the `userId` of its author, not one per conversation: memory, conversations, tasks, outbox and audit;
   - access goes only through `admit(identity, agentId)`. Its result, `Admission`, is either `{ admitted: true, userId, role }` or `{ admitted: false, reason }`, where `reason` is `"unknown_identity"` or `"no_grant"`;
   - `ingress` wraps it in `admitSender(event)`, which refuses group chats with the reason `"group_chat"` before asking the `Directory`. Channel routes call it before any conversation or model runs, and the conversation passes the admitted `userId` and `role` along;
+  - the admin API admits the owner's Cloudflare Access login the same way: an identity from the `cloudflare-access` source, with the agent id `*`, which names no agent. Only the first-run bootstrap (ADR-0013) adds that identity;
   - owner-only checks, such as configuration commands, test `role === "owner"` from that result, never an id compared with a stored owner id;
   - the Context Store keeps its content-scope parameter, filled with every scope for the owner;
   - no code reads "the only user" from a global.

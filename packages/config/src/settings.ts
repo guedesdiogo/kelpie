@@ -1,6 +1,9 @@
 import { MODEL_TIERS, type ModelTier } from "@kelpie/llm";
 import type { QuietWindowPolicy } from "@kelpie/qualifier";
 
+/** Kelpie runs one `Registry`, which lists the agents. */
+export const REGISTRY_NAME = "registry";
+
 /** One agent's settings, held by its `AgentHost` (ADR-0002) and read by its conversations. */
 export interface AgentSettings {
   /** Merge fragments and split replies into paced bubbles; off answers each message at once. */

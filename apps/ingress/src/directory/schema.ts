@@ -1,4 +1,4 @@
-import type { ChannelId } from "@kelpie/channels";
+import type { ChannelIdentity } from "@kelpie/access";
 import { sql } from "drizzle-orm";
 import {
   index,
@@ -25,7 +25,7 @@ export const users = sqliteTable(
 export const identities = sqliteTable(
   "identities",
   {
-    channel: text("channel").$type<ChannelId>().notNull(),
+    channel: text("channel").$type<ChannelIdentity["channel"]>().notNull(),
     /** Personal data (a phone number on WhatsApp), so it never goes into the audit log. */
     channelUserId: text("channel_user_id").notNull(),
     userId: text("user_id")

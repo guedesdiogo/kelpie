@@ -17,4 +17,5 @@ export {
   isAgentId,
   isAgentName,
   parseSettings,
+  REGISTRY_NAME,
 } from "./settings.ts";

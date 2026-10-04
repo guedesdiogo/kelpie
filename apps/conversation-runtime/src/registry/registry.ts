@@ -13,9 +13,6 @@ import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
 
-/** Kelpie runs one Registry. */
-export const REGISTRY_NAME = "registry";
-
 /**
  * Which agents exist, so commands and the management UI can list them (ADR-0015 left this to
  * Story 3.10). Each agent's configuration lives in its own AgentHost.
