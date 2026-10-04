@@ -8,6 +8,15 @@ export type Role = "owner" | "admin" | "member";
 
 export type IdentityStatus = "pending" | "enabled" | "disabled";
 
+/** Every channel an identity can belong to. */
+export const CHANNEL_IDS: readonly ChannelId[] = [
+  "webchat",
+  "telegram",
+  "whatsapp",
+  "slack",
+  "discord",
+];
+
 export interface ChannelIdentity {
   channel: ChannelId;
   /** The same string a `CanonicalEvent` carries in `sender.channelUserId`. */

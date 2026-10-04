@@ -2,7 +2,12 @@ import { DurableObject } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
-import type { Admission, ChannelIdentity, IdentityStatus } from "../access.ts";
+import {
+  type Admission,
+  CHANNEL_IDS,
+  type ChannelIdentity,
+  type IdentityStatus,
+} from "../access.ts";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
 
@@ -10,17 +15,21 @@ import * as schema from "./schema.ts";
  * Outcomes of a configuration change. Refusals are values, not exceptions: the configuration
  * commands turn them into answers for the owner.
  */
-export type OwnerResult = { ok: true } | { ok: false; reason: "owner_exists" };
+export type OwnerResult = { ok: true } | { ok: false; reason: "owner_exists" | "invalid_user" };
 export type IdentityResult =
   | { ok: true; status: IdentityStatus }
-  | { ok: false; reason: "no_owner" | "unknown_identity" };
+  | {
+      ok: false;
+      reason: "unknown_user" | "unknown_identity" | "identity_taken" | "invalid_identity";
+    };
 
 /**
- * Who may reach the agents (ADR-0004). `ingress` asks it before anything else wakes. It is
- * strongly consistent, so disabling an identity applies to the next message.
+ * Who may reach the agents (ADR-0004). Channel routes ask it before any conversation or model runs.
+ * It is strongly consistent, so disabling an identity applies to the next message.
  *
- * Phase 1 is single-player (ADR-0015): it holds the owner and the owner's channel identities, and
- * is their source of truth. Kelpie runs one instance, named "directory".
+ * Until multi-user lands (ADR-0015) it holds the owner and the owner's channel identities, and is
+ * their source of truth. Kelpie runs one instance, named "directory". Only `ingress` binds it: the
+ * methods trust their caller, so no route may proxy them.
  */
 export class Directory extends DurableObject<Env> {
   readonly #db: DrizzleSqliteDODatabase<typeof schema>;
@@ -28,15 +37,28 @@ export class Directory extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.#db = drizzle(ctx.storage, { schema });
-    // If a migration fails, the object resets and the next request retries it.
-    void ctx.blockConcurrencyWhile(() => migrate(this.#db, migrations));
+    // If a migration fails the object resets, and the next request retries it.
+    void ctx.blockConcurrencyWhile(async () => {
+      try {
+        await migrate(this.#db, migrations);
+      } catch (error) {
+        console.error("Directory migration failed", error);
+        throw error;
+      }
+    });
   }
 
   /** Registers the owner. Repeating it with the same id is a no-op; a second owner is refused. */
   registerOwner(userId: string): OwnerResult {
-    const owner = this.#owner();
-    if (owner)
+    if (!isNonEmpty(userId)) return { ok: false, reason: "invalid_user" };
+    const owner = this.#db
+      .select({ userId: schema.users.userId })
+      .from(schema.users)
+      .where(eq(schema.users.role, "owner"))
+      .get();
+    if (owner) {
       return owner.userId === userId ? { ok: true } : { ok: false, reason: "owner_exists" };
+    }
     this.#db.transaction((tx) => {
       tx.insert(schema.users).values({ userId, role: "owner", createdAt: new Date() }).run();
       tx.insert(schema.auditLog)
@@ -46,28 +68,37 @@ export class Directory extends DurableObject<Env> {
     return { ok: true };
   }
 
-  /** Adds one of the owner's identities as pending; pairing enables it. Returns its status. */
-  addIdentity(identity: ChannelIdentity): IdentityResult {
-    const owner = this.#owner();
-    if (!owner) return { ok: false, reason: "no_owner" };
+  /** Adds an identity to a user as pending; pairing enables it. Returns its status. */
+  addIdentity(userId: string, identity: ChannelIdentity): IdentityResult {
+    if (!isValidIdentity(identity)) return { ok: false, reason: "invalid_identity" };
+    const user = this.#db
+      .select({ userId: schema.users.userId })
+      .from(schema.users)
+      .where(eq(schema.users.userId, userId))
+      .get();
+    if (!user) return { ok: false, reason: "unknown_user" };
     const existing = this.#identity(identity);
-    if (existing) return { ok: true, status: existing.status };
+    if (existing) {
+      return existing.userId === userId
+        ? { ok: true, status: existing.status }
+        : { ok: false, reason: "identity_taken" };
+    }
     this.#db.transaction((tx) => {
       tx.insert(schema.identities)
-        .values({ ...identity, userId: owner.userId, status: "pending", updatedAt: new Date() })
+        .values({ ...identity, userId, status: "pending", updatedAt: new Date() })
         .run();
       tx.insert(schema.auditLog)
-        .values({
-          at: new Date(),
-          action: "identity.added",
-          userId: owner.userId,
-          channel: identity.channel,
-        })
+        .values({ at: new Date(), action: "identity.added", userId, channel: identity.channel })
         .run();
     });
     return { ok: true, status: "pending" };
   }
 
+  /**
+   * Enables an identity. This is the allowlist itself, so callers must hold proof: a completed
+   * pairing for a pending identity (the channel and bootstrap stories), or an owner-authenticated
+   * command to re-enable a disabled one (Story 3.10). Nothing here checks that proof.
+   */
   enableIdentity(identity: ChannelIdentity): IdentityResult {
     return this.#setStatus(identity, "enabled");
   }
@@ -76,6 +107,7 @@ export class Directory extends DurableObject<Env> {
     return this.#setStatus(identity, "disabled");
   }
 
+  /** Every identity with its status. The values are personal data: mask them in any output. */
   listIdentities(): (ChannelIdentity & { status: IdentityStatus })[] {
     return this.#db
       .select({
@@ -84,12 +116,12 @@ export class Directory extends DurableObject<Env> {
         status: schema.identities.status,
       })
       .from(schema.identities)
-      .all() as (ChannelIdentity & { status: IdentityStatus })[];
+      .all();
   }
 
   /**
    * Decides whether a sender may reach an agent. The owner reaches every agent. Other roles don't
-   * exist in phase 1; when they arrive they'll need a grant for `agentId` (ADR-0015).
+   * exist until multi-user lands; then they'll need a grant for `agentId` (ADR-0015).
    */
   admit(identity: ChannelIdentity, _agentId: string): Admission {
     const user = this.#db
@@ -107,14 +139,6 @@ export class Directory extends DurableObject<Env> {
     if (!user) return { admitted: false, reason: "unknown_identity" };
     if (user.role !== "owner") return { admitted: false, reason: "no_grant" };
     return { admitted: true, userId: user.userId, role: user.role };
-  }
-
-  #owner() {
-    return this.#db
-      .select({ userId: schema.users.userId })
-      .from(schema.users)
-      .where(eq(schema.users.role, "owner"))
-      .get();
   }
 
   #identity(identity: ChannelIdentity) {
@@ -155,4 +179,13 @@ export class Directory extends DurableObject<Env> {
     });
     return { ok: true, status };
   }
+}
+
+function isNonEmpty(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+// RPC callers aren't type-checked, so identities are checked where they enter storage.
+function isValidIdentity(identity: ChannelIdentity): boolean {
+  return CHANNEL_IDS.includes(identity?.channel) && isNonEmpty(identity?.channelUserId);
 }

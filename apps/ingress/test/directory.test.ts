@@ -6,15 +6,25 @@ import type { Directory } from "../src/directory/directory.ts";
 // Each test gets its own Directory object, so state doesn't leak between tests.
 const directory = (name: string) => env.DIRECTORY.getByName(name);
 
+const OWNER = "u-owner";
 const telegram = { channel: "telegram", channelUserId: "1001" } as const;
 const webchat = { channel: "webchat", channelUserId: "owner@example.com" } as const;
 
 async function withEnabledOwner(name: string) {
   const stub = directory(name);
-  await stub.registerOwner("u-owner");
-  await stub.addIdentity(telegram);
+  await stub.registerOwner(OWNER);
+  await stub.addIdentity(OWNER, telegram);
   await stub.enableIdentity(telegram);
   return stub;
+}
+
+function auditActions(stub: ReturnType<typeof directory>) {
+  return runInDurableObject(stub, (_instance: Directory, state) =>
+    state.storage.sql
+      .exec<{ action: string }>("SELECT action FROM audit_log ORDER BY id")
+      .toArray()
+      .map((row) => row.action),
+  );
 }
 
 describe("Directory", () => {
@@ -24,7 +34,7 @@ describe("Directory", () => {
     for (const agentId of ["sales", "finance"]) {
       expect(await stub.admit(telegram, agentId)).toEqual({
         admitted: true,
-        userId: "u-owner",
+        userId: OWNER,
         role: "owner",
       });
     }
@@ -37,7 +47,7 @@ describe("Directory", () => {
       admitted: false,
       reason: "unknown_identity",
     });
-    // Same id on another channel is another identity.
+    // The same id on another channel is another identity.
     expect(await stub.admit({ channel: "whatsapp", channelUserId: "1001" }, "sales")).toEqual({
       admitted: false,
       reason: "unknown_identity",
@@ -46,50 +56,91 @@ describe("Directory", () => {
 
   it("drops a pending identity until it is enabled", async () => {
     const stub = directory("pending");
-    await stub.registerOwner("u-owner");
+    await stub.registerOwner(OWNER);
 
-    expect(await stub.addIdentity(webchat)).toEqual({ ok: true, status: "pending" });
+    expect(await stub.addIdentity(OWNER, webchat)).toEqual({ ok: true, status: "pending" });
     expect(await stub.admit(webchat, "sales")).toMatchObject({ admitted: false });
 
     await stub.enableIdentity(webchat);
     expect(await stub.admit(webchat, "sales")).toMatchObject({ admitted: true });
   });
 
-  it("drops a disabled identity on the next message", async () => {
+  it("drops a disabled identity on the next message, and admits it again once re-enabled", async () => {
     const stub = await withEnabledOwner("disable");
-    await stub.disableIdentity(telegram);
 
+    expect(await stub.disableIdentity(telegram)).toEqual({ ok: true, status: "disabled" });
     expect(await stub.admit(telegram, "sales")).toEqual({
       admitted: false,
       reason: "unknown_identity",
     });
+
+    await stub.enableIdentity(telegram);
+    expect(await stub.admit(telegram, "sales")).toMatchObject({ admitted: true });
   });
 
-  it("accepts one owner only", async () => {
-    const stub = directory("one-owner");
-    expect(await stub.registerOwner("u-owner")).toEqual({ ok: true });
-    expect(await stub.registerOwner("u-owner")).toEqual({ ok: true });
-    expect(await stub.registerOwner("u-someone-else")).toEqual({
+  it("refuses a user who isn't the owner, since grants wait for multi-user", async () => {
+    const stub = await withEnabledOwner("member");
+    await runInDurableObject(stub, (_instance: Directory, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO users (user_id, role, created_at) VALUES ('u-member', 'member', 0)",
+      );
+      state.storage.sql.exec(
+        "INSERT INTO identities (channel, channel_user_id, user_id, status, updated_at) VALUES ('telegram', '3003', 'u-member', 'enabled', 0)",
+      );
+    });
+
+    expect(await stub.admit({ channel: "telegram", channelUserId: "3003" }, "sales")).toEqual({
+      admitted: false,
+      reason: "no_grant",
+    });
+    // An identity belongs to one user.
+    expect(await stub.addIdentity(OWNER, { channel: "telegram", channelUserId: "3003" })).toEqual({
       ok: false,
-      reason: "owner_exists",
+      reason: "identity_taken",
     });
   });
 
-  it("needs the owner before identities, and known identities to change status", async () => {
-    const stub = directory("order");
+  it("accepts one owner only, even under concurrent registrations", async () => {
+    const stub = directory("one-owner");
+    const results = await Promise.all([stub.registerOwner("u-a"), stub.registerOwner("u-b")]);
 
-    expect(await stub.addIdentity(telegram)).toEqual({ ok: false, reason: "no_owner" });
-    await stub.registerOwner("u-owner");
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(results.filter((result) => !result.ok)).toEqual([{ ok: false, reason: "owner_exists" }]);
+  });
+
+  it("refuses invalid input from callers", async () => {
+    const stub = directory("invalid");
+
+    expect(await stub.registerOwner("  ")).toEqual({ ok: false, reason: "invalid_user" });
+    await stub.registerOwner(OWNER);
+    expect(await stub.addIdentity(OWNER, { channel: "telegram", channelUserId: "" })).toEqual({
+      ok: false,
+      reason: "invalid_identity",
+    });
+    expect(
+      await stub.addIdentity(OWNER, { channel: "fax" as "telegram", channelUserId: "1" }),
+    ).toEqual({ ok: false, reason: "invalid_identity" });
+    expect(await stub.addIdentity("u-nobody", telegram)).toEqual({
+      ok: false,
+      reason: "unknown_user",
+    });
     expect(await stub.enableIdentity(telegram)).toEqual({
       ok: false,
       reason: "unknown_identity",
     });
   });
 
-  it("keeps an identity's status when it is added again", async () => {
-    const stub = await withEnabledOwner("re-add");
+  it("writes no audit entry for a change that changes nothing", async () => {
+    const stub = await withEnabledOwner("no-ops");
+    await stub.registerOwner(OWNER);
+    await stub.addIdentity(OWNER, telegram);
+    await stub.enableIdentity(telegram);
 
-    expect(await stub.addIdentity(telegram)).toEqual({ ok: true, status: "enabled" });
+    expect(await auditActions(stub)).toEqual([
+      "owner.registered",
+      "identity.added",
+      "identity.enabled",
+    ]);
     expect(await stub.listIdentities()).toEqual([{ ...telegram, status: "enabled" }]);
   });
 
@@ -101,8 +152,12 @@ describe("Directory", () => {
   });
 
   it("keeps identity values out of the audit log", async () => {
-    const stub = await withEnabledOwner("audit");
-    await stub.disableIdentity(telegram);
+    const stub = directory("audit");
+    const phone = { channel: "whatsapp", channelUserId: "+5511987654321" } as const;
+    await stub.registerOwner(OWNER);
+    await stub.addIdentity(OWNER, phone);
+    await stub.enableIdentity(phone);
+    await stub.disableIdentity(phone);
 
     const rows = await runInDurableObject(stub, (_instance: Directory, state) =>
       state.storage.sql.exec("SELECT * FROM audit_log ORDER BY id").toArray(),
@@ -113,6 +168,6 @@ describe("Directory", () => {
       "identity.enabled",
       "identity.disabled",
     ]);
-    expect(JSON.stringify(rows)).not.toContain(telegram.channelUserId);
+    expect(JSON.stringify(rows)).not.toContain(phone.channelUserId);
   });
 });

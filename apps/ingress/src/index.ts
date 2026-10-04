@@ -1,4 +1,3 @@
-export { admitSender, DIRECTORY_NAME } from "./admission.ts";
 export { Directory } from "./directory/directory.ts";
 
 export default {
