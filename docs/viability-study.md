@@ -23,6 +23,7 @@ The platform is not the hard part. The conversation engine (buffering, splitting
 **Requirements the owner added while reviewing the study:**
 
 - **Allowlist, always.** Only users configured in advance can talk to an agent, and only through channel identities enabled for them (a Telegram account, a WhatsApp number, a Slack user). Everyone else is ignored before any model is called.
+- **Single-player first.** Until multi-user lands, only the owner talks to the agents, in direct conversations, and Postgres waits until a feature needs it. Colleagues, roles, grants and group chats return with multi-user, which has no date. Every record still carries a `userId`, so adding users doesn't mean a rewrite ([ADR-0015](adr/0015-single-player-first.md)).
 - **Permissions.** Each user has access to specific agents and specific content.
 - **A task board for agents.** Agents log every piece of background work on Kelpie's own board, and people can queue tasks there and comment on them, but can't move a task once the agent has started it ([ADR-0011](adr/0011-agent-task-board.md)).
 - **Self-configuration.** After a minimal bootstrap (the owner's identity and one model key), the rest of the setup happens by talking to a setup agent, through the same typed configuration commands the API and the UI use. Access, cost and external-account changes need an explicit yes, and secrets only go through a one-time secure form ([ADR-0013](adr/0013-self-configuration.md)).
@@ -39,7 +40,7 @@ The platform is not the hard part. The conversation engine (buffering, splitting
 - tenant onboarding, billing and cross-tenant reporting;
 - one GitHub repository per tenant: one repository per instance.
 
-**What stays:** many agents and agents orchestrating agents; many users with isolated personal memory, which colleagues must not read across; erasure rights for those users; and the Cloudflare constraints of [§4](#4-proposed-architecture).
+**What stays:** many agents and agents orchestrating agents; many users with isolated personal memory, which colleagues must not read across; erasure rights for those users; and the Cloudflare constraints of [§4](#4-proposed-architecture). Until multi-user lands, only the owner is a user ([ADR-0015](adr/0015-single-player-first.md)).
 
 ## 3. What was studied
 
@@ -62,7 +63,7 @@ The platform is not the hard part. The conversation engine (buffering, splitting
 | Requirement | Verdict | What it takes |
 |---|---|---|
 | Single-tenant, many agents, agents orchestrating agents | Viable | Agents SDK sub-agents and agent tools; Workflows for long tasks |
-| Allowlisted users, channel identities, per-user permissions | Viable | Checked in `ingress` before the conversation wakes up ([§4.6](#46-users-and-access-control)) |
+| Allowlisted users, channel identities, per-user permissions | Viable | Checked in `ingress` before the conversation wakes up ([§4.6](#46-users-and-access-control)); only the owner's identities until multi-user lands ([ADR-0015](adr/0015-single-player-first.md)) |
 | Mostly Cloudflare, no containers | Viable with changes | Rules out stdio MCP servers, the git CLI, unofficial WhatsApp libraries, Obsidian Headless and local terminal tools |
 | Event-driven | Viable | Webhook → ingress → Durable Object for ordering and dedupe; Queues only for idempotent side effects |
 | Buffer fragmented messages (toggle) | Viable | A Durable Object alarm, re-armed on every fragment, with a hard cap |
@@ -81,7 +82,7 @@ The platform is not the hard part. The conversation engine (buffering, splitting
 | Subscription login | **Against both providers' terms** | Owner-only opt-in, off by default, risk documented ([§8](#8-subscription-login)) |
 | A database beyond D1 | Viable | Postgres via Hyperdrive alongside Durable Object SQLite |
 | Management UI inspired by Hermes Bot Mode | Viable with changes | Reuse the UX patterns; add users, permissions, audit and approvals |
-| Public open-source portfolio | Viable with changes | Installs and runs CI with no third-party keys (the qualifier falls back to heuristics; running agents still needs a model key and a database); demos on test numbers; synthetic fixtures only; the README states what is excluded and why |
+| Public open-source portfolio | Viable with changes | Installs and runs CI with no third-party keys (the qualifier falls back to heuristics; running agents still needs a model key); demos on test numbers; synthetic fixtures only; the README states what is excluded and why |
 
 ### 4.2 The hot path: one Durable Object per conversation
 
@@ -137,7 +138,7 @@ About ten Workers, each with a narrow job ([05 "Decomposition into workers"](res
 | `tools-gateway` | Tool registry, remote MCP, Composio, credential injection |
 | `context-store` | Read and write the Markdown context, filtered by the user's permissions; the only component that talks to GitHub |
 | `memory-jobs` | Post-turn extraction, embeddings, consolidation |
-| `projector` | Event projections into Postgres for the UI and search |
+| `projector` | Event projections into Postgres for the UI and search. Deferred until a feature brings Postgres in ([ADR-0015](adr/0015-single-player-first.md)). |
 | `admin-api` / `admin-ui` | Management API and single-page app |
 
 Service-binding RPC carries synchronous calls, Queues carry side effects, and Workflows carry long work. The longest hot-path chain is three hops, far below the 32-invocation limit ([05 R7](research/05-cloudflare-limits-and-architecture.md)).
@@ -162,6 +163,8 @@ For WhatsApp, §4.7 means an agent there should have a bounded business role (sc
 
 ### 4.6 Users and access control
 
+**Amended by [ADR-0015](adr/0015-single-player-first.md):** until multi-user lands, only the owner has identities, there are no roles or grants, and channels ignore group chats. The model below returns with multi-user.
+
 New in this scope and not covered by the research notes. The owner approved this model in [Decision 1.12](https://github.com/guedesdiogo/kelpie/issues/13):
 
 - **Users** are created by the owner or an admin. Each user has one or more **channel identities** (Telegram user id, WhatsApp number, Slack user id, webchat login), enabled one by one.
@@ -174,6 +177,8 @@ New in this scope and not covered by the research notes. The owner approved this
 - **Groups** are the hard case. Our rule: in a group chat, an agent may only use memories every participant is allowed to see, otherwise one colleague's facts leak to another. Note 02 also proposes a separate group scope for facts that belong to the group itself ([02 §5.2](research/02-memory-and-learning.md)).
 
 ### 4.7 Data
+
+**Amended by [ADR-0015](adr/0015-single-player-first.md):** until multi-user lands, there is no Postgres. The `Directory` Durable Object holds the owner, their identities and the access audit, and each agent's `AgentHost` holds its configuration and task board. The Postgres rows below return when a feature needs them.
 
 The owner chose Postgres as the system of record and a Durable Object per user for personal data ([Decision 1.5](https://github.com/guedesdiogo/kelpie/issues/6), [Decision 1.3](https://github.com/guedesdiogo/kelpie/issues/4)):
 
@@ -271,7 +276,7 @@ The owner asked for options beyond D1 and chose Neon first, with other Postgres 
 | **Neon + Hyperdrive** | 100 projects, scale-to-zero, no weekly pause, pgvector, branching | **First provider** |
 | Supabase + Hyperdrive | Pauses after a week without use | Second provider by configuration |
 | PlanetScale Postgres + Hyperdrive | None; from US$ 5/month, billed by Cloudflare | Production upgrade path by configuration |
-| Durable Object SQLite | 5 GB total | Hot state and per-user personal data, alongside Postgres |
+| Durable Object SQLite | 5 GB total | Hot state and per-user personal data, alongside Postgres once a feature needs it ([ADR-0015](adr/0015-single-player-first.md)) |
 | D1 | 10 databases, 500 MB each | Not used |
 | Turso (libSQL) | 100 databases | Not used: Durable Object SQLite gives the same pattern without another vendor |
 | Cloudflare-managed Postgres | — | Does not exist; the PlanetScale partnership is the closest |
@@ -345,6 +350,7 @@ Each decision is closed by an ADR in `docs/adr/` once its pull request merges.
 | [3.11 ORM](https://github.com/guedesdiogo/kelpie/issues/46) | **Decided:** Drizzle for Postgres and Durable Object SQLite ([ADR-0012](adr/0012-drizzle-data-layer.md)) |
 | [3.12 Self-configuration](https://github.com/guedesdiogo/kelpie/issues/47) | **Decided:** configuration through agents, after a minimal bootstrap ([ADR-0013](adr/0013-self-configuration.md)) |
 | Agent tool scope (owner decision in the phase 2 epic, [#18](https://github.com/guedesdiogo/kelpie/issues/18)) | **Decided:** browser with a human handoff in phase 2; no machine execution ([ADR-0014](adr/0014-agent-tool-scope.md)) |
+| [3.14 Single-player first](https://github.com/guedesdiogo/kelpie/issues/59) | **Decided:** only the owner until multi-user lands, with seams for it ([ADR-0015](adr/0015-single-player-first.md)) |
 
 ## 12. Spikes before committing to a design
 
@@ -364,9 +370,11 @@ The owner approved this plan in [Decision 1.10](https://github.com/guedesdiogo/k
 |---|---|
 | 0. Foundations | Monorepo, CI, ADRs, a local workerd test harness for alarms and fibers |
 | 1. Vertical slice | Webchat and Telegram; allowlisted users with channel identities; `ConversationAgent` with buffer, splitter, outbox and interruption, conversational mode as a toggle; Anthropic and OpenAI by API key; Context Store with GitHub for persona and skills; heuristic qualifier with optional Jev; a minimal admin API; configuration commands and a first-run bootstrap with a setup agent ([ADR-0013](adr/0013-self-configuration.md)) |
-| 2. Memory and tools | Per-user memory with supersession and Jev qualification; remote MCP and Composio; Slack; WhatsApp on a test number; per-agent and per-content grants; the agent task board's model, API and heartbeat ([ADR-0011](adr/0011-agent-task-board.md)); a browser tool with a Live View handoff ([ADR-0014](adr/0014-agent-tool-scope.md)) |
+| 2. Memory and tools | Per-user memory with supersession and Jev qualification; remote MCP and Composio; Slack; WhatsApp on a test number; the agent task board's model, API and heartbeat ([ADR-0011](adr/0011-agent-task-board.md)); a browser tool with a Live View handoff ([ADR-0014](adr/0014-agent-tool-scope.md)) |
 | 3. Agents and UI | Agents orchestrating agents; the management UI inspired by Bot Mode; skill staging by pull request and the curator; the subscription opt-in; Discord gateway |
 | 4. Hardening | Evals and golden sets, cross-worker tracing, the Artifacts backend |
+
+**Amended by [ADR-0015](adr/0015-single-player-first.md):** Kelpie is single-player until multi-user lands. The allowlist holds only the owner's identities, channels ignore group chats, and Postgres waits until a feature needs it. Per-agent and per-content grants, colleagues and group chats move to multi-user ([Epic 7](https://github.com/guedesdiogo/kelpie/issues/60)), which has no date.
 
 ## 14. Open questions no note answered
 

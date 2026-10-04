@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-03
 - Issue: [#44](https://github.com/guedesdiogo/kelpie/issues/44)
+- Amended by: [ADR-0015](0015-single-player-first.md), until multi-user lands (single-player)
 
 ## Context
 
