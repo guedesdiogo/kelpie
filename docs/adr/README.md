@@ -15,6 +15,9 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0009](0009-qualifier-and-jev.md) | Jev preferred, never required | [#5](https://github.com/guedesdiogo/kelpie/issues/5) |
 | [0010](0010-monorepo-tooling.md) | Bun workspaces, strict TypeScript, Biome and Vitest with the Workers plugin | [#23](https://github.com/guedesdiogo/kelpie/issues/23) |
 | [0011](0011-agent-task-board.md) | Agents run and report their work on Kelpie's own task board | [#44](https://github.com/guedesdiogo/kelpie/issues/44) |
+| [0012](0012-drizzle-data-layer.md) | Drizzle ORM (node-postgres over Hyperdrive) for Postgres and Durable Object SQLite | [#46](https://github.com/guedesdiogo/kelpie/issues/46) |
+| [0013](0013-self-configuration.md) | Kelpie configures itself through its agents | [#47](https://github.com/guedesdiogo/kelpie/issues/47) |
+| [0014](0014-agent-tool-scope.md) | Assistants with a browser, no machine execution | [#18](https://github.com/guedesdiogo/kelpie/issues/18) |
 
 ## Format
 
