@@ -66,3 +66,11 @@ export const blockedByUser = {
   update_id: 900_004,
   my_chat_member: { chat: privateChat, from: owner, date: SENT },
 };
+/** A post a linked channel relayed into its discussion group, sent by Telegram's service account. */
+export const relayedChannelPost = update({
+  chat: { id: -100_200, type: "supergroup", title: "Team" },
+  from: { id: 777_000, is_bot: false, first_name: "Telegram" },
+  is_automatic_forward: true,
+  text: "news from the channel",
+});
+export const withoutSender = update({ from: undefined, text: "who?" });

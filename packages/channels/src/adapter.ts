@@ -56,7 +56,9 @@ export class ChannelRequestError extends Error {
     readonly status: number | null,
   ) {
     super(
-      status === null ? `${method} didn't reach the channel` : `${method} failed with ${status}`,
+      status === null
+        ? `${method} got no usable answer from the channel`
+        : `${method} failed with ${status}`,
     );
   }
 }

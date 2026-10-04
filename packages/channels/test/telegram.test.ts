@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ChannelRateLimitedError,
   ChannelRequestError,
@@ -20,12 +20,25 @@ const webhook = (body: unknown, secret: string | null = SECRET) => ({
 /** A fake Bot API: records each call and answers with `answer`. */
 function botApi(answer: (method: string) => Response = () => okResult({ message_id: 77 })) {
   const calls: { url: string; method: string; body: Record<string, unknown> }[] = [];
+  const redirects: (RequestRedirect | undefined)[] = [];
   const fetch = (async (input: string, init?: RequestInit) => {
     const method = input.split("/").at(-1) ?? "";
     calls.push({ url: input, method, body: JSON.parse(String(init?.body)) });
+    redirects.push(init?.redirect);
     return answer(method);
   }) as typeof globalThis.fetch;
-  return { calls, adapter: new TelegramAdapter({ botToken: TOKEN, webhookSecret: SECRET, fetch }) };
+  return {
+    calls,
+    redirects,
+    adapter: new TelegramAdapter({ botToken: TOKEN, webhookSecret: SECRET, fetch }),
+  };
+}
+
+afterEach(() => vi.unstubAllGlobals());
+
+/** The private text update, with some message fields replaced. */
+function withMessage(fields: Record<string, unknown>) {
+  return { ...updates.privateText, message: { ...updates.privateText.message, ...fields } };
 }
 
 const okResult = (result: unknown) => Response.json({ ok: true, result });
@@ -39,6 +52,9 @@ describe("Telegram webhooks", () => {
     expect(await adapter.verify(webhook(updates.privateText, "wrong"))).toBe(false);
     expect(await adapter.verify(webhook(updates.privateText, ""))).toBe(false);
     expect(await adapter.verify(webhook(updates.privateText, null))).toBe(false);
+    for (const near of [`${SECRET}x`, SECRET.slice(0, -1), `${SECRET} `, SECRET.toUpperCase()]) {
+      expect(await adapter.verify(webhook(updates.privateText, near))).toBe(false);
+    }
   });
 
   it("matches nothing when the bot has no secret configured", async () => {
@@ -90,6 +106,8 @@ describe("Telegram normalize", () => {
     ["a channel post", updates.channelPost],
     ["a membership change", updates.blockedByUser],
     ["a message from a bot", updates.fromBot],
+    ["a post a linked channel relayed into a group", updates.relayedChannelPost],
+    ["a message without a sender", updates.withoutSender],
     ["a sticker, not handled yet", updates.sticker],
   ])("yields no event for %s", (_label, update) => {
     expect(normalize(update)).toEqual([]);
@@ -99,6 +117,11 @@ describe("Telegram normalize", () => {
     ["a body that isn't JSON", "{not json"],
     ["a body that isn't an object", "42"],
     ["a message without a chat", { update_id: 1, message: { message_id: 1, date: updates.SENT } }],
+    ["a sender id that isn't a number", withMessage({ from: { id: "1001", is_bot: false } })],
+    ["text that isn't a string", withMessage({ text: { bold: "hi" } })],
+    ["photos that aren't a list", withMessage({ text: undefined, photo: { file_id: "x" } })],
+    ["a chat type Telegram doesn't have", withMessage({ chat: { id: 1, type: "secret" } })],
+    ["a reply without a message id", withMessage({ reply_to_message: { message_id: "41" } })],
   ])("refuses %s", (_label, body) => {
     expect(() => normalize(body)).toThrow(InvalidWebhookError);
   });
@@ -124,6 +147,30 @@ describe("Telegram sending", () => {
     ]);
   });
 
+  it("escapes what already looks like an entity, and refuses to follow redirects", async () => {
+    const { adapter, calls, redirects } = botApi();
+    await adapter.send({ threadId: "1001" }, "&lt; is how you write <");
+    expect(calls[0]?.body.text).toBe("&amp;lt; is how you write &lt;");
+    expect(redirects).toEqual(["error"]);
+  });
+
+  it("sends a reply to an id Telegram can't have issued as a plain message", async () => {
+    const { adapter, calls } = botApi();
+    await adapter.send({ threadId: "1001", replyToMessageId: "not-a-number" }, "hi");
+    expect(calls[0]?.body).not.toHaveProperty("reply_parameters");
+  });
+
+  it("calls the runtime's fetch as a plain function, as Workers require", async () => {
+    const strictFetch = vi.fn(function (this: unknown) {
+      // Workers throw this when fetch is called as a method of another object.
+      if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+      return Promise.resolve(okResult({ message_id: 9 }));
+    });
+    vi.stubGlobal("fetch", strictFetch);
+    const adapter = new TelegramAdapter({ botToken: TOKEN, webhookSecret: SECRET });
+    expect(await adapter.send({ threadId: "1001" }, "hi")).toEqual({ providerMessageId: "9" });
+  });
+
   it("sends silently on request, and as a reply when asked", async () => {
     const { adapter, calls } = botApi();
     await adapter.send({ threadId: "1001", replyToMessageId: "41" }, "one", { silent: true });
@@ -147,6 +194,36 @@ describe("Telegram sending", () => {
     const error = await adapter.send({ threadId: "1001" }, "hi").catch((caught) => caught);
     expect(error).toBeInstanceOf(ChannelRateLimitedError);
     expect(error.retryAfterMs).toBe(7_000);
+  });
+
+  it("waits a second when Telegram gives no usable retry_after", async () => {
+    for (const parameters of [{}, { retry_after: 0 }, { retry_after: "soon" }]) {
+      const { adapter } = botApi(() => failure(429, { parameters }));
+      const error = await adapter.send({ threadId: "1001" }, "hi").catch((caught) => caught);
+      expect(error.retryAfterMs).toBe(1_000);
+    }
+  });
+
+  it("trusts Telegram's error_code over the HTTP status", async () => {
+    const { adapter } = botApi(() =>
+      Response.json(
+        { ok: false, error_code: 429, parameters: { retry_after: 2 } },
+        { status: 500 },
+      ),
+    );
+    await expect(adapter.send({ threadId: "1001" }, "hi")).rejects.toBeInstanceOf(
+      ChannelRateLimitedError,
+    );
+  });
+
+  it("treats a success without a result as no usable answer", async () => {
+    for (const body of [{ ok: true }, { ok: true, result: null }]) {
+      const { adapter } = botApi(() => Response.json(body));
+      await expect(adapter.send({ threadId: "1001" }, "hi")).rejects.toMatchObject({
+        name: "ChannelRequestError",
+        status: null,
+      });
+    }
   });
 
   it("tells a recipient who blocked the bot apart from other failures", async () => {

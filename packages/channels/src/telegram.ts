@@ -28,6 +28,9 @@ export interface TelegramConfig {
 const API = "https://api.telegram.org";
 /** Ingress lower-cases header names. */
 const SECRET_HEADER = "x-telegram-bot-api-secret-token";
+/** Telegram's service account, the sender of posts a linked channel relays into a group. */
+const TELEGRAM_SERVICE_ACCOUNT = 777_000;
+const CHAT_TYPES: readonly string[] = ["private", "group", "supergroup", "channel"];
 
 interface TelegramFile {
   file_id: string;
@@ -49,6 +52,8 @@ interface TelegramMessage {
   audio?: TelegramFile;
   video?: TelegramFile;
   reply_to_message?: { message_id: number };
+  /** Set on a post a linked channel relayed into its discussion group. */
+  is_automatic_forward?: boolean;
 }
 
 interface TelegramResponse<T> {
@@ -66,7 +71,8 @@ export class TelegramAdapter implements ChannelAdapter {
 
   constructor(config: TelegramConfig) {
     this.#config = config;
-    this.#fetch = config.fetch ?? fetch;
+    // Called through a wrapper: Workers' fetch throws "Illegal invocation" when `this` isn't global.
+    this.#fetch = config.fetch ?? ((input, init) => fetch(input, init));
   }
 
   /** The secret Telegram echoes, compared in constant time. A missing or empty one never matches. */
@@ -78,8 +84,9 @@ export class TelegramAdapter implements ChannelAdapter {
   }
 
   /**
-   * A new message from a person becomes one event. Edits, channel posts, membership changes,
-   * messages from bots and message kinds Kelpie doesn't handle yet (stickers, locations) yield none.
+   * A new message from a person becomes one event. Edits, channel posts and the posts a linked
+   * channel relays, membership changes, messages from bots and message kinds Kelpie doesn't handle
+   * yet (stickers, locations) yield none. A field of the wrong type refuses the whole update.
    */
   normalize(webhook: InboundWebhook, agentId: string): CanonicalEvent[] {
     let update: { message?: unknown };
@@ -93,16 +100,11 @@ export class TelegramAdapter implements ChannelAdapter {
     }
     if (update.message === undefined) return [];
     const message = update.message as TelegramMessage;
-    if (
-      typeof message !== "object" ||
-      message === null ||
-      typeof message.message_id !== "number" ||
-      typeof message.date !== "number" ||
-      typeof message.chat?.id !== "number"
-    ) {
-      throw new InvalidWebhookError("The message lacks its id, date or chat");
+    if (!isWellFormed(message)) {
+      throw new InvalidWebhookError("The message has missing fields or fields of the wrong type");
     }
     if (!message.from || message.from.is_bot) return [];
+    if (message.from.id === TELEGRAM_SERVICE_ACCOUNT || message.is_automatic_forward) return [];
     if (message.chat.type === "channel") return [];
     const parts = partsOf(message);
     if (parts.length === 0) return [];
@@ -135,14 +137,7 @@ export class TelegramAdapter implements ChannelAdapter {
       text: escapeHtml(text),
       parse_mode: "HTML",
       disable_notification: options.silent === true,
-      ...(destination.replyToMessageId
-        ? {
-            reply_parameters: {
-              message_id: Number(destination.replyToMessageId),
-              allow_sending_without_reply: true,
-            },
-          }
-        : {}),
+      ...replyParameters(destination.replyToMessageId),
     });
     return { providerMessageId: String(result.message_id) };
   }
@@ -158,20 +153,69 @@ export class TelegramAdapter implements ChannelAdapter {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
+        // The token is in the path; a redirect would carry it elsewhere.
+        redirect: "error",
       });
     } catch {
       // The runtime's error can quote the URL, and with it the token.
       throw new ChannelRequestError(method, null);
     }
     const payload = (await response.json().catch(() => null)) as TelegramResponse<T> | null;
-    if (response.ok && payload?.ok && payload.result !== undefined) return payload.result;
-    const status = payload?.error_code ?? response.status;
+    if (response.ok && payload?.ok) {
+      if (payload.result != null) return payload.result;
+      throw new ChannelRequestError(method, null);
+    }
+    const status = typeof payload?.error_code === "number" ? payload.error_code : response.status;
     if (status === 429) {
-      throw new ChannelRateLimitedError((payload?.parameters?.retry_after ?? 1) * 1_000);
+      const seconds = payload?.parameters?.retry_after;
+      const wait =
+        typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 ? seconds : 1;
+      throw new ChannelRateLimitedError(wait * 1_000);
     }
     if (status === 403) throw new RecipientUnavailableError(`${method} was refused with 403`);
     throw new ChannelRequestError(method, status);
   }
+}
+
+const isString = (value: unknown): value is string => typeof value === "string";
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+const isOptional = (value: unknown, check: (value: unknown) => boolean) =>
+  value === undefined || check(value);
+const isFile = (value: unknown) =>
+  isObject(value) && isString(value.file_id) && isOptional(value.mime_type, isString);
+
+/** Every field `normalize` reads, checked before any of it is trusted. */
+function isWellFormed(message: unknown): message is TelegramMessage {
+  if (!isObject(message) || !isObject(message.chat)) return false;
+  return (
+    typeof message.message_id === "number" &&
+    typeof message.date === "number" &&
+    typeof message.chat.id === "number" &&
+    CHAT_TYPES.includes(message.chat.type as string) &&
+    isOptional(
+      message.from,
+      (from) =>
+        isObject(from) && typeof from.id === "number" && isOptional(from.first_name, isString),
+    ) &&
+    isOptional(message.text, isString) &&
+    isOptional(message.caption, isString) &&
+    isOptional(message.photo, (photo) => Array.isArray(photo) && photo.every(isFile)) &&
+    [message.document, message.voice, message.audio, message.video].every((file) =>
+      isOptional(file, isFile),
+    ) &&
+    isOptional(
+      message.reply_to_message,
+      (reply) => isObject(reply) && typeof reply.message_id === "number",
+    )
+  );
+}
+
+/** A reply to an id Telegram can't have issued goes out as a plain message. */
+function replyParameters(replyToMessageId: string | undefined) {
+  const messageId = Number(replyToMessageId);
+  if (replyToMessageId === undefined || !Number.isSafeInteger(messageId)) return {};
+  return { reply_parameters: { message_id: messageId, allow_sending_without_reply: true } };
 }
 
 function partsOf(message: TelegramMessage): MessagePart[] {
