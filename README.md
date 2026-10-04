@@ -15,7 +15,7 @@ Kelpie is a self-hosted, multi-agent AI assistant harness that connects chat cha
 - **Tools from anywhere.** Remote MCP servers and Composio behind a single tool interface.
 - **A qualifier layer.** Typed decisions (which tool, which skill, which memories) go through Jev, TypeSafe AI's decision model, with a fallback that needs no API key.
 - **More than one model provider.** Anthropic and OpenAI first, behind a provider interface that leaves room for others.
-- **Many agents, closed doors.** Agents that orchestrate other agents and agents with no channel at all. Only users configured in advance, on channel identities enabled for them, can talk to the agents they have been granted. The first version is single-user: only the owner talks to the agents, and colleagues come later ([ADR-0015](docs/adr/0015-single-player-first.md)).
+- **Many agents, closed doors.** Agents that orchestrate other agents and agents with no channel at all. Only users configured in advance, on channel identities enabled for them, can talk to the agents they have been granted. For now Kelpie is single-user: only the owner talks to the agents, and multi-user has no date yet ([ADR-0015](docs/adr/0015-single-player-first.md)).
 - **Pluggable connectors.** Postgres providers, Jev access paths, model providers, channels and tool sources sit behind interfaces, so adding another provider is configuration plus one adapter.
 
 ## Why "Kelpie"

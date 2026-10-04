@@ -23,16 +23,18 @@ The platform is not the hard part. The conversation engine (buffering, splitting
 **Requirements the owner added while reviewing the study:**
 
 - **Allowlist, always.** Only users configured in advance can talk to an agent, and only through channel identities enabled for them (a Telegram account, a WhatsApp number, a Slack user). Everyone else is ignored before any model is called.
-- **Single-player first.** In phase 1 only the owner talks to the agents, in direct conversations, and Postgres waits until a feature needs it. Colleagues, roles, grants and group chats return with multi-user, which has no date. Every record still carries a `userId`, so adding users doesn't mean a rewrite ([ADR-0015](adr/0015-single-player-first.md)).
+- **Single-player first.** Until multi-user lands, only the owner talks to the agents, in direct conversations, and Postgres waits until a feature needs it. Colleagues, roles, grants and group chats return with multi-user, which has no date. Every record still carries a `userId`, so adding users doesn't mean a rewrite ([ADR-0015](adr/0015-single-player-first.md)).
 - **Permissions.** Each user has access to specific agents and specific content.
 - **A task board for agents.** Agents log every piece of background work on Kelpie's own board, and people can queue tasks there and comment on them, but can't move a task once the agent has started it ([ADR-0011](adr/0011-agent-task-board.md)).
+- **Self-configuration.** After a minimal bootstrap (the owner's identity and one model key), the rest of the setup happens by talking to a setup agent, through the same typed configuration commands the API and the UI use. Access, cost and external-account changes need an explicit yes, and secrets only go through a one-time secure form ([ADR-0013](adr/0013-self-configuration.md)).
+- **Assistants, not machine operators.** Agents get tools, MCP and a browser with a handoff to a person for steps such as logins. Running shell commands or arbitrary binaries is out of scope for now, as a possible future tool adapter ([ADR-0014](adr/0014-agent-tool-scope.md)).
 - **Conversational mode is a toggle.** Merging fragmented messages and splitting replies into paced bubbles can be switched on or off per agent.
 - **Connectors are pluggable.** Each kind of external service (Postgres provider, Jev access path, model providers, channels, tool sources) starts with only the implementations the current phase needs, such as one Postgres provider and one Jev path, behind an interface and a config value that make adding another one straightforward.
 
 **What single-tenant removes** compared with the research brief:
 
 - tenant keys in every Durable Object name and every query;
-- per-tenant envelope encryption of secrets: platform secrets (channel tokens, API keys) fit in Worker secrets and the Secrets Store (100 per account). Tokens stored per user, such as MCP OAuth tokens, are still encrypted at the application level ([§4.11](#411-tools));
+- per-tenant envelope encryption of secrets: platform secrets (channel tokens, API keys) fit in Worker secrets and the Secrets Store (100 per account), and secrets added at runtime go to an encrypted store ([ADR-0013](adr/0013-self-configuration.md)). Tokens stored per user, such as MCP OAuth tokens, are still encrypted at the application level ([§4.11](#411-tools));
 - vendor ceilings shared by many tenants (they still apply to the one instance);
 - Meta Tech Provider onboarding, which note 06 ties to serving other businesses' numbers ([06 §1.1](research/06-chat-channels.md)): a company running Kelpie on its own WhatsApp number should not need it (our inference; Meta's regular business verification may still apply);
 - tenant onboarding, billing and cross-tenant reporting;
@@ -61,7 +63,7 @@ The platform is not the hard part. The conversation engine (buffering, splitting
 | Requirement | Verdict | What it takes |
 |---|---|---|
 | Single-tenant, many agents, agents orchestrating agents | Viable | Agents SDK sub-agents and agent tools; Workflows for long tasks |
-| Allowlisted users, channel identities, per-user permissions | Viable | Checked in `ingress` before the conversation wakes up ([§4.6](#46-users-and-access-control)) |
+| Allowlisted users, channel identities, per-user permissions | Viable | Checked in `ingress` before the conversation wakes up ([§4.6](#46-users-and-access-control)); only the owner's identities until multi-user lands ([ADR-0015](adr/0015-single-player-first.md)) |
 | Mostly Cloudflare, no containers | Viable with changes | Rules out stdio MCP servers, the git CLI, unofficial WhatsApp libraries, Obsidian Headless and local terminal tools |
 | Event-driven | Viable | Webhook → ingress → Durable Object for ordering and dedupe; Queues only for idempotent side effects |
 | Buffer fragmented messages (toggle) | Viable | A Durable Object alarm, re-armed on every fragment, with a hard cap |
@@ -80,7 +82,7 @@ The platform is not the hard part. The conversation engine (buffering, splitting
 | Subscription login | **Against both providers' terms** | Owner-only opt-in, off by default, risk documented ([§8](#8-subscription-login)) |
 | A database beyond D1 | Viable | Postgres via Hyperdrive alongside Durable Object SQLite |
 | Management UI inspired by Hermes Bot Mode | Viable with changes | Reuse the UX patterns; add users, permissions, audit and approvals |
-| Public open-source portfolio | Viable with changes | Installs and runs CI with no third-party keys (the qualifier falls back to heuristics; running agents still needs a model key and a database); demos on test numbers; synthetic fixtures only; the README states what is excluded and why |
+| Public open-source portfolio | Viable with changes | Installs and runs CI with no third-party keys (the qualifier falls back to heuristics; running agents still needs a model key); demos on test numbers; synthetic fixtures only; the README states what is excluded and why |
 
 ### 4.2 The hot path: one Durable Object per conversation
 
@@ -161,6 +163,8 @@ For WhatsApp, §4.7 means an agent there should have a bounded business role (sc
 
 ### 4.6 Users and access control
 
+**Amended by [ADR-0015](adr/0015-single-player-first.md):** until multi-user lands, only the owner has identities, there are no roles or grants, and channels ignore group chats. The model below returns with multi-user.
+
 New in this scope and not covered by the research notes. The owner approved this model in [Decision 1.12](https://github.com/guedesdiogo/kelpie/issues/13):
 
 - **Users** are created by the owner or an admin. Each user has one or more **channel identities** (Telegram user id, WhatsApp number, Slack user id, webchat login), enabled one by one.
@@ -173,6 +177,8 @@ New in this scope and not covered by the research notes. The owner approved this
 - **Groups** are the hard case. Our rule: in a group chat, an agent may only use memories every participant is allowed to see, otherwise one colleague's facts leak to another. Note 02 also proposes a separate group scope for facts that belong to the group itself ([02 §5.2](research/02-memory-and-learning.md)).
 
 ### 4.7 Data
+
+**Amended by [ADR-0015](adr/0015-single-player-first.md):** until multi-user lands, there is no Postgres. The `Directory` Durable Object holds the owner, their identities and the access audit, and each agent's `AgentHost` holds its configuration and task board. The Postgres rows below return when a feature needs them.
 
 The owner chose Postgres as the system of record and a Durable Object per user for personal data ([Decision 1.5](https://github.com/guedesdiogo/kelpie/issues/6), [Decision 1.3](https://github.com/guedesdiogo/kelpie/issues/4)):
 
@@ -221,7 +227,7 @@ Anything headed for git passes a personal-data gate before every commit, not at 
 
 ### 4.11 Tools
 
-`ToolProvider` has three adapters: remote MCP, Composio and native Workers tools ([03](research/03-tools-composio-mcp-invokta.md)).
+`ToolProvider` has three adapters: remote MCP, Composio and native Workers tools ([03](research/03-tools-composio-mcp-invokta.md)). The browser is a native tool on Browser Run, with a Live View handoff to a person, in phase 2 ([ADR-0014](adr/0014-agent-tool-scope.md)). Running shell commands or binaries is out of scope.
 
 - **MCP:** in the official MCP Registry on 2026-10-03, 62.7% of active entries had a remote endpoint and 36.1% were package-only, usually stdio. Remote servers connect through the Agents SDK client. That client stores OAuth tokens unencrypted, so tokens live in a Durable Object per user with application-level encryption ([00 C10](research/00-cross-check.md)).
 - **Composio:** used in "harness integration" mode, where Kelpie's loop decides and Composio authenticates and executes. Composio keeps custody of the OAuth tokens and does not export them.
@@ -341,7 +347,10 @@ Each decision is closed by an ADR in `docs/adr/` once its pull request merges.
 | [1.10 MVP scope and phases](https://github.com/guedesdiogo/kelpie/issues/11) | **Decided:** approved as proposed ([§13](#13-delivery-plan)) |
 | [1.12 Access control](https://github.com/guedesdiogo/kelpie/issues/13) | **Decided:** approved as proposed ([§4.6](#46-users-and-access-control)) |
 | [4.1 Agent task board](https://github.com/guedesdiogo/kelpie/issues/44) | **Decided:** Kelpie's own board, not GitHub Issues ([ADR-0011](adr/0011-agent-task-board.md)) |
-| [3.14 Single-player first](https://github.com/guedesdiogo/kelpie/issues/59) | **Decided:** phase 1 serves only the owner, with seams for multi-user ([ADR-0015](adr/0015-single-player-first.md)) |
+| [3.11 ORM](https://github.com/guedesdiogo/kelpie/issues/46) | **Decided:** Drizzle for Postgres and Durable Object SQLite ([ADR-0012](adr/0012-drizzle-data-layer.md)) |
+| [3.12 Self-configuration](https://github.com/guedesdiogo/kelpie/issues/47) | **Decided:** configuration through agents, after a minimal bootstrap ([ADR-0013](adr/0013-self-configuration.md)) |
+| Agent tool scope (owner decision in the phase 2 epic, [#18](https://github.com/guedesdiogo/kelpie/issues/18)) | **Decided:** browser with a human handoff in phase 2; no machine execution ([ADR-0014](adr/0014-agent-tool-scope.md)) |
+| [3.14 Single-player first](https://github.com/guedesdiogo/kelpie/issues/59) | **Decided:** only the owner until multi-user lands, with seams for it ([ADR-0015](adr/0015-single-player-first.md)) |
 
 ## 12. Spikes before committing to a design
 
@@ -351,6 +360,7 @@ Each decision is closed by an ADR in `docs/adr/` once its pull request merges.
 - Does OpenAI Responses streaming pass through AI Gateway passthrough?
 - Before WhatsApp: does re-sending the typing indicator work between bubbles?
 - Before Discord free text: does a gateway Durable Object stay resident for 24 h with only the watchdog alarm (logging evictions)?
+- Before the browser tool: does a Browser Run session stay alive while a person completes a handoff through Live View ([#49](https://github.com/guedesdiogo/kelpie/issues/49))?
 
 ## 13. Delivery plan
 
@@ -359,12 +369,12 @@ The owner approved this plan in [Decision 1.10](https://github.com/guedesdiogo/k
 | Phase | Scope |
 |---|---|
 | 0. Foundations | Monorepo, CI, ADRs, a local workerd test harness for alarms and fibers |
-| 1. Vertical slice | Webchat and Telegram; allowlisted users with channel identities; `ConversationAgent` with buffer, splitter, outbox and interruption, conversational mode as a toggle; Anthropic and OpenAI by API key; Context Store with GitHub for persona and skills; heuristic qualifier with optional Jev; a minimal admin API |
-| 2. Memory and tools | Per-user memory with supersession and Jev qualification; remote MCP and Composio; Slack; WhatsApp on a test number; per-agent and per-content grants |
+| 1. Vertical slice | Webchat and Telegram; allowlisted users with channel identities; `ConversationAgent` with buffer, splitter, outbox and interruption, conversational mode as a toggle; Anthropic and OpenAI by API key; Context Store with GitHub for persona and skills; heuristic qualifier with optional Jev; a minimal admin API; configuration commands and a first-run bootstrap with a setup agent ([ADR-0013](adr/0013-self-configuration.md)) |
+| 2. Memory and tools | Per-user memory with supersession and Jev qualification; remote MCP and Composio; Slack; WhatsApp on a test number; the agent task board's model, API and heartbeat ([ADR-0011](adr/0011-agent-task-board.md)); a browser tool with a Live View handoff ([ADR-0014](adr/0014-agent-tool-scope.md)) |
 | 3. Agents and UI | Agents orchestrating agents; the management UI inspired by Bot Mode; skill staging by pull request and the curator; the subscription opt-in; Discord gateway |
 | 4. Hardening | Evals and golden sets, cross-worker tracing, the Artifacts backend |
 
-**Amended by [ADR-0015](adr/0015-single-player-first.md):** phase 1 is single-player. Its allowlist holds only the owner's identities, its channels ignore group chats, and Postgres is not part of it. Per-agent and per-content grants, colleagues, group chats and Postgres move to multi-user ([Epic 7](https://github.com/guedesdiogo/kelpie/issues/60)), which has no date.
+**Amended by [ADR-0015](adr/0015-single-player-first.md):** Kelpie is single-player until multi-user lands. The allowlist holds only the owner's identities, channels ignore group chats, and Postgres waits until a feature needs it. Per-agent and per-content grants, colleagues and group chats move to multi-user ([Epic 7](https://github.com/guedesdiogo/kelpie/issues/60)), which has no date.
 
 ## 14. Open questions no note answered
 

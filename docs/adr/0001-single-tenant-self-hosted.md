@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-03
 - Issue: [#12](https://github.com/guedesdiogo/kelpie/issues/12)
+- Amended by: [ADR-0015](0015-single-player-first.md), until multi-user lands (single-player)
 
 ## Context
 
@@ -22,7 +23,7 @@ One Kelpie instance belongs to one owner, a person or a company, and runs on the
 ## Consequences
 
 - Durable Object names, storage keys and queries carry no tenant identifier.
-- Platform secrets (channel tokens, API keys) live in Worker secrets and the Secrets Store. Tokens stored per user, such as MCP OAuth tokens, are still encrypted at the application level under a key kept as a secret.
+- Platform secrets (channel tokens, API keys) live in Worker secrets and the Secrets Store. Secrets added at runtime, through Kelpie's self-configuration, go to an encrypted store instead ([ADR-0013](0013-self-configuration.md)). Tokens stored per user, such as MCP OAuth tokens, are still encrypted at the application level under a key kept as a secret.
 - Vendor ceilings (Jev's 200 requests per minute per gateway, GitHub's 500 writes per hour, Composio's rate limit) apply to one instance, which suits internal use.
 - On WhatsApp, a company uses its own number. Tech Provider onboarding, which serves other businesses' numbers, is not expected to apply (inference; to confirm during the WhatsApp work).
 - Multi-agent orchestration, per-user memory isolation, erasure rights and access control stay in scope.
