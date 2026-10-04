@@ -9,6 +9,22 @@ Everything in this repository is written in English: code, comments, commit mess
 - **Pluggable connectors.** Every external service (Postgres provider, Jev access path, model provider, channel, tool source) sits behind an interface and a config value. Ship one adapter first; adding another must be one new adapter plus configuration, with the provider's specific strengths still usable. Don't build extra adapters until they are asked for.
 - Decisions recorded in `docs/adr/` are binding; changing one takes a new ADR.
 
+## Reference projects
+
+Kelpie learns from these projects. They are references, not dependencies:
+
+- [Hermes Agent](https://github.com/NousResearch/hermes-agent): the personal agent harness Kelpie is modeled on, and a client of the same vault (Decision 3.13).
+- [Hermes-Bot-Mode](https://github.com/NousResearch/Hermes-Bot-Mode): archived; it now lives in `hermes-agent` under `apps/desktop/src/plugins/hermes-bots/`. The reference for the bot roster and the management UI.
+- [ai-memory](https://github.com/akitaonrails/ai-memory): Markdown memory with a wiki, temporal versions and the OKF format.
+- [invokta](https://github.com/vinilana/invokta): tool and capability import, and an Obsidian context engine.
+
+At the start of every story, before writing its plan, check how these projects solve the same problem:
+
+- Read the source, not only the docs: their docs have drifted from the code before. Mark each claim `[code]` or `[doc]`.
+- Post the findings on the story's issue as **adopt**, **adapt** or **avoid**, with links pinned to a commit. If none of them covers the topic, say so in one line.
+- A finding that contradicts an ADR or an approved decision goes to the owner as a question; it never changes the design silently.
+- Earlier findings are in `docs/research/` (notes 01 to 03) and on the stories' issues. Re-check them against the current source instead of trusting them.
+
 ## Work tracking
 
 - Board: [Kelpie project](https://github.com/users/guedesdiogo/projects/1) (user project `guedesdiogo/1`, linked to this repository).
