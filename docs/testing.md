@@ -20,11 +20,19 @@ The plugin's `cloudflare:test` module provides what the conversation engine need
 
 ## Controlling time
 
-Code that schedules alarms takes the current time as a parameter that defaults to `Date.now()`; see `DebounceBuffer.ingest(fragment, now)` in `apps/conversation-runtime`. That parameter is a testing seam. Production callers omit it. Tests pass timestamps a minute in the future (`Date.now() + 60_000` plus offsets), so:
+`ConversationAgent.ingest(message, now)` in `apps/conversation-runtime` takes the current time as a parameter that defaults to the clock. That parameter is a testing seam; production callers omit it. Tests pass timestamps a minute in the future (`Date.now() + 60_000` plus offsets), so:
 
-- assertions compare exact alarm times;
-- no alarm lands in the past, where the runtime would fire it on its own during the test;
-- alarms fire only when a test calls `runDurableObjectAlarm`.
+- assertions compare exact flush times;
+- no flush schedule comes due during the test, because the Agents SDK runs only due schedules when its alarm fires;
+- turns start when a test calls `flush()`, the method the schedule calls. One test lets a short schedule come due and fires it with `runDurableObjectAlarm`.
+
+## Agents and their ports
+
+The `ConversationAgent` reaches the model, the channel, the clock and timers through ports (`src/ports.ts`). The Worker runs in the test's isolate, so a test swaps them with `replacePortsForTesting()` for fakes (`test/fakes.ts`): a scripted model that can reply, refuse or hang until cancelled, an egress that records bubbles and can block a send, and a sleep that returns at once or waits for an abort. Production never calls the override.
+
+Fiber recovery after an eviction runs when the fiber's heartbeat alarm fires on the new instance. To test it, call `evictDurableObject(stub)`, then `runDurableObjectAlarm(stub)`.
+
+`llm-gateway` is a service binding that doesn't exist in tests, so `vitest.config.ts` replaces it with a stub; the fake model port means it's never called.
 
 ## Commands
 

@@ -3,9 +3,17 @@
   "name": "kelpie-conversation-runtime",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
+  // The Agents SDK uses AsyncLocalStorage.
+  "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+  // Drizzle's Durable Object migrations import .sql files as text.
+  "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
+  "services": [
+    { "binding": "LLM_GATEWAY", "service": "kelpie-llm-gateway", "entrypoint": "LlmGateway" }
+  ],
   "durable_objects": {
-    "bindings": [{ "name": "DEBOUNCE_BUFFER", "class_name": "DebounceBuffer" }]
+    "bindings": [{ "name": "CONVERSATION_AGENT", "class_name": "ConversationAgent" }]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DebounceBuffer"] }]
+  // Never deployed with DebounceBuffer, so the first migration names the real class.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ConversationAgent"] }]
 }

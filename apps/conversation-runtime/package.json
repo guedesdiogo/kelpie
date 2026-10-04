@@ -5,13 +5,20 @@
   "scripts": {
     "types": "wrangler types src/worker-configuration.d.ts",
     "typecheck": "bun run types > /dev/null && tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate && bunx biome check --write src/migrations"
   },
   "dependencies": {
-    "@kelpie/conversation": "workspace:*"
+    "@kelpie/channels": "workspace:*",
+    "@kelpie/conversation": "workspace:*",
+    "@kelpie/llm": "workspace:*",
+    "@kelpie/qualifier": "workspace:*",
+    "agents": "0.26.0",
+    "drizzle-orm": "0.45.3"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.3.6",
+    "drizzle-kit": "0.31.11",
     "vitest": "^4.1.0",
     "wrangler": "^4.147.0"
   }
