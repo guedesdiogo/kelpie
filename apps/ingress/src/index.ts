@@ -1,3 +1,5 @@
+export { Directory } from "./directory/directory.ts";
+
 export default {
   async fetch(request): Promise<Response> {
     const { pathname } = new URL(request.url);

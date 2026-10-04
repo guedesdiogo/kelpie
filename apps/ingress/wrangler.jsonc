@@ -3,5 +3,11 @@
   "name": "kelpie-ingress",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  // Drizzle's Durable Object migrations import .sql files as text.
+  "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
+  "durable_objects": {
+    "bindings": [{ "name": "DIRECTORY", "class_name": "Directory" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Directory"] }]
 }
