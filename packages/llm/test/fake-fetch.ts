@@ -1,5 +1,5 @@
-// Fixtures are built from the providers' documented stream formats, not recorded from live calls.
-// The manual smoke test replaces them with real recordings.
+// Most fixtures are built from the providers' documented stream formats. OpenAI's recorded streams
+// from the manual smoke test (#57) are in test/recorded; Anthropic's wait for a key.
 
 export interface RecordedRequest {
   url: string;
