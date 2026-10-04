@@ -55,20 +55,29 @@ Identity values in answers are masked.
 
 1. **Deploy `ingress` and `conversation-runtime` first.** The admin API's bindings point at their objects.
 2. **Create a self-hosted Access application** for the admin API's hostname, with a policy that allows only the owner. Do this before step 4: whoever passes Access and holds the token becomes the owner. Note the team domain (`https://<team>.cloudflareaccess.com`) and the application's AUD tag.
-3. **Set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`** in `apps/admin-api/wrangler.jsonc`, and give the Worker its hostname. `workers_dev` and preview URLs stay off.
-4. **Make the bootstrap token** and store it as a secret. It is `<expiry in epoch seconds>.<random>`, and here it is valid for 24 hours. Keep the shell open: step 6 uses the same variable.
+3. **Keep the instance's values out of the repository.** The hostname and the Access values belong to one deployment, so they go in as flags when deploying (step 5), and `wrangler.jsonc` stays the same for every instance:
+   - `--domain <admin hostname>`: a custom domain on one of the owner's zones. Wrangler creates its DNS record. `workers_dev` and preview URLs stay off.
+   - `--var ACCESS_TEAM_DOMAIN:https://<team>.cloudflareaccess.com` and `--var ACCESS_AUD:<aud>`. Wrangler splits each value at its first colon, so the URL arrives whole.
+4. **Make the bootstrap token.** It is `<expiry in epoch seconds>.<random>`, and here it is valid for 24 hours. Keep the shell open: steps 5 and 6 use the same variable.
    ```bash
    BOOTSTRAP_TOKEN="$(( $(date +%s) + 86400 )).$(openssl rand -hex 32)"
    ```
+5. **Deploy, with the token as the Worker's required secret.** The token goes through a file only you can read, which is deleted right after:
    ```bash
-   printf %s "$BOOTSTRAP_TOKEN" | bunx wrangler secret put BOOTSTRAP_TOKEN -c apps/admin-api/wrangler.jsonc
+   ( umask 077; printf 'BOOTSTRAP_TOKEN=%s\n' "$BOOTSTRAP_TOKEN" > /tmp/kelpie-admin-api.secrets )
    ```
-5. **Deploy:** `bunx wrangler deploy -c apps/admin-api/wrangler.jsonc`.
+   ```bash
+   bunx wrangler deploy -c apps/admin-api/wrangler.jsonc --secrets-file /tmp/kelpie-admin-api.secrets --domain admin.example.com --var ACCESS_TEAM_DOMAIN:https://<team>.cloudflareaccess.com --var ACCESS_AUD:<aud>
+   ```
+   ```bash
+   rm /tmp/kelpie-admin-api.secrets
+   ```
+   Later deploys need the same `--domain` and `--var` flags. Without them, Wrangler removes the vars that aren't in `wrangler.jsonc`, and every request is refused again.
 6. **Register as the owner.** `cloudflared access curl` opens the Access login and sends its token:
    ```bash
    cloudflared access curl https://<admin hostname>/bootstrap -X POST -H 'content-type: application/json' -d "{\"token\":\"$BOOTSTRAP_TOKEN\"}"
    ```
-   The bootstrap works once. After it, the endpoint answers `410`, and the token can be deleted with `wrangler secret delete BOOTSTRAP_TOKEN`. If the token expired first, make a new one and put it again (step 4).
+   The bootstrap works once. After it, the endpoint answers `410`, and the token can be deleted with `wrangler secret delete BOOTSTRAP_TOKEN`. If the token expired first, make a new one (step 4) and replace the secret with `printf %s "$BOOTSTRAP_TOKEN" | bunx wrangler secret put BOOTSTRAP_TOKEN -c apps/admin-api/wrangler.jsonc`.
 
 ## Known limits
 
