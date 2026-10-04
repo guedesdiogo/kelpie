@@ -14,6 +14,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0008](0008-llm-authentication.md) | API keys, plus an owner-only subscription opt-in | [#3](https://github.com/guedesdiogo/kelpie/issues/3) |
 | [0009](0009-qualifier-and-jev.md) | Jev preferred, never required | [#5](https://github.com/guedesdiogo/kelpie/issues/5) |
 | [0010](0010-monorepo-tooling.md) | Bun workspaces, strict TypeScript, Biome and Vitest with the Workers plugin | [#23](https://github.com/guedesdiogo/kelpie/issues/23) |
+| [0011](0011-agent-task-board.md) | Agents run and report their work on Kelpie's own task board | [#44](https://github.com/guedesdiogo/kelpie/issues/44) |
 
 ## Format
 

@@ -39,6 +39,12 @@
         "wrangler": "^4.147.0",
       },
     },
+    "packages/channels": {
+      "name": "@kelpie/channels",
+      "devDependencies": {
+        "vitest": "^4.1.0",
+      },
+    },
     "packages/conversation": {
       "name": "@kelpie/conversation",
       "devDependencies": {
@@ -51,6 +57,12 @@
         "@anthropic-ai/sdk": "0.131.0",
         "openai": "7.27.0",
       },
+      "devDependencies": {
+        "vitest": "^4.1.0",
+      },
+    },
+    "packages/qualifier": {
+      "name": "@kelpie/qualifier",
       "devDependencies": {
         "vitest": "^4.1.0",
       },
@@ -211,6 +223,8 @@
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.9", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.0.3", "@jridgewell/sourcemap-codec": "^1.4.10" } }, "sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ=="],
 
+    "@kelpie/channels": ["@kelpie/channels@workspace:packages/channels"],
+
     "@kelpie/conversation": ["@kelpie/conversation@workspace:packages/conversation"],
 
     "@kelpie/conversation-runtime": ["@kelpie/conversation-runtime@workspace:apps/conversation-runtime"],
@@ -220,6 +234,8 @@
     "@kelpie/llm": ["@kelpie/llm@workspace:packages/llm"],
 
     "@kelpie/llm-gateway": ["@kelpie/llm-gateway@workspace:apps/llm-gateway"],
+
+    "@kelpie/qualifier": ["@kelpie/qualifier@workspace:packages/qualifier"],
 
     "@oxc-project/types": ["@oxc-project/types@0.152.0", "", {}, "sha512-oM/5rLBm2tPkg0iBgkH/FOeR3PCDpY19GTgAZjMFM8h9WI9VW7cLgzp6nwtarYKmovavIQZ+Fe/RKX/8C8O/Rw=="],
 
