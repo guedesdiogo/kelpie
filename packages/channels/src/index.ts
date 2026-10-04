@@ -16,4 +16,6 @@ export {
   typingRenewIntervalMs,
 } from "./capabilities.ts";
 export { type CanonicalEvent, type ChannelId, dedupeKey, type MessagePart } from "./events.ts";
-export { TelegramAdapter, type TelegramConfig } from "./telegram.ts";
+
+// Adapters have their own entry points (`@kelpie/channels/telegram`): they need the runtime's fetch
+// and crypto, which packages that only use the types above don't declare.

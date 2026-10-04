@@ -4,8 +4,8 @@ import {
   ChannelRequestError,
   InvalidWebhookError,
   RecipientUnavailableError,
-  TelegramAdapter,
 } from "../src/index.ts";
+import { TelegramAdapter } from "../src/telegram.ts";
 import * as updates from "./telegram-updates.ts";
 
 const TOKEN = "123456:test-token-not-real";
