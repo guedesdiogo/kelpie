@@ -1,0 +1,19 @@
+{
+  "name": "@kelpie/llm",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.131.0",
+    "openai": "7.27.0"
+  }
+}
