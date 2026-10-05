@@ -7,6 +7,7 @@ import { AgentHost } from "../src/agent-host/agent-host.ts";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import {
+  FAKE_USAGE,
   type FakeWorld,
   fail,
   fakeWorld,
@@ -288,6 +289,28 @@ describe("ConversationAgent turns", () => {
     });
     await vi.waitFor(() => expect(world.sent).toEqual(["One.\n\nTwo."]));
     expect(world.typing).toBe(0);
+  });
+
+  it("records each turn's token usage, and logs its totals without any text", async () => {
+    const logged: unknown[][] = [];
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logged.push(args);
+    });
+    use(fakeWorld([reply("a reply that stays private"), refuse()]));
+    const stub = agent("usage");
+    await stub.ingest(message("m1", "a question that stays private"));
+    await stub.flush();
+    await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).toBe("delivered"));
+    await stub.ingest(message("m2", "something it won't do"));
+    await stub.flush();
+    await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).toBe("refused"));
+
+    // A refusal still cost tokens, so it is recorded too.
+    expect((await stub.turns()).map((turn) => turn.usage)).toEqual([FAKE_USAGE, FAKE_USAGE]);
+    const usageLines = logged.filter((line) => String(line[0]).includes("turn usage"));
+    expect(usageLines).toHaveLength(2);
+    expect(usageLines[0]?.[1]).toEqual({ attempts: 1, input: 2_000, cacheRead: 800, output: 40 });
+    expect(JSON.stringify(logged)).not.toContain("private");
   });
 
   it("sends nothing when the model refuses", async () => {

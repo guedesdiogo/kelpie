@@ -1,5 +1,5 @@
 import type { AgentSettings } from "@kelpie/config";
-import type { AssistantMessage, ChatMessage } from "@kelpie/llm";
+import type { AssistantMessage, ChatMessage, Usage } from "@kelpie/llm";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 // One conversation's state, in its ConversationAgent's SQLite (ADR-0002, ADR-0012). The Agents SDK
@@ -46,6 +46,11 @@ export const turns = sqliteTable("turns", {
   settings: text("settings", { mode: "json" }).$type<AgentSettings>(),
   /** The model's reply, kept only until delivery settles what history records. */
   reply: text("reply", { mode: "json" }).$type<AssistantMessage>(),
+  /**
+   * The tokens the model call used, one entry per attempt, once it answered (#64): what bounding
+   * the history will be measured against.
+   */
+  usage: text("usage", { mode: "json" }).$type<Usage[]>(),
   createdAt: integer("created_at").notNull(),
 });
 
