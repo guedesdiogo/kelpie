@@ -16,7 +16,7 @@ import type {
 } from "@kelpie/conversation/contract";
 import type { AssistantMessage, ChatMessage, LlmEvent, Usage } from "@kelpie/llm";
 import { Agent, type FiberRecoveryContext } from "agents";
-import { and, asc, count, desc, eq, gte, inArray, isNull, max } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNull, lt, max } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
@@ -40,6 +40,10 @@ const CHECKPOINT_KEEP_ROWS = 6;
 /** A checkpoint summarizes at least this many new rows, so a long tail can't trigger one a turn. */
 const CHECKPOINT_MIN_ROWS = 4;
 const CHECKPOINT_SUMMARY_TOKENS = 2_000;
+/** After a failed summary, no new checkpoint is scheduled for this long. */
+const CHECKPOINT_RETRY_MS = 60 * 60_000;
+/** The summarizer's input keeps at most this much of the newest text (about 100K tokens). */
+const CHECKPOINT_MAX_INPUT_CHARS = 400_000;
 const CHECKPOINT_SUMMARIZER = `You summarize a conversation between a person and their assistant, so the assistant can continue it without the earlier messages.
 Write in the conversation's language, as short lists under these headings, leaving out any heading with nothing under it:
 - Goal and open threads
@@ -202,7 +206,6 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
             role: "user",
             userId: run.userId,
             systemVersion: promptVersion,
-            checkpointId,
             message: { role: "user", parts: [{ type: "text", text: run.text }] },
             createdAt: now,
           })
@@ -233,10 +236,33 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    * tried after the next turn that crosses the budget.
    */
   async compact(): Promise<void> {
-    await this.#cancelCheckpointSchedule();
+    // The schedule stays until the end: it dedupes meanwhile, and an eviction leaves it to rerun.
+    try {
+      await this.#writeCheckpoint();
+    } finally {
+      await this.#cancelCheckpointSchedule();
+    }
+  }
+
+  async #writeCheckpoint(): Promise<void> {
     const current = this.#latestCheckpoint();
     const plan = this.#checkpointPlan(current);
     if (!plan) return;
+    const rows = this.#db
+      .select({
+        role: schema.history.role,
+        userId: schema.history.userId,
+        message: schema.history.message,
+      })
+      .from(schema.history)
+      .where(
+        and(
+          gte(schema.history.id, current?.keptFromHistoryId ?? 0),
+          lt(schema.history.id, plan.keptFromHistoryId),
+        ),
+      )
+      .orderBy(asc(schema.history.id))
+      .all();
     let summary = "";
     let usage: Usage[] = [];
     try {
@@ -245,7 +271,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         messages: [
           {
             role: "user",
-            parts: [{ type: "text", text: summaryInput(current?.summary ?? null, plan.rows) }],
+            parts: [{ type: "text", text: summaryInput(current?.summary ?? null, rows) }],
           },
         ],
         maxOutputTokens: CHECKPOINT_SUMMARY_TOKENS,
@@ -257,10 +283,12 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       }
     } catch (error) {
       console.error("ConversationAgent: a checkpoint summary failed", errorName(error));
+      this.#set("checkpointFailedAt", this.#ports.now());
       return;
     }
     if (summary === "") {
-      console.warn("ConversationAgent: a checkpoint summary came back empty");
+      console.warn("ConversationAgent: a checkpoint summary came back empty or refused");
+      this.#set("checkpointFailedAt", this.#ports.now());
       return;
     }
     // The summary call awaited: another run may have written a checkpoint since.
@@ -274,7 +302,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         createdAt: this.#ports.now(),
       })
       .run();
-    console.log("conversation: checkpoint written", { summarizedRows: plan.rows.length });
+    this.#set("checkpointFailedAt", null);
+    console.log("conversation: checkpoint written", { summarizedRows: rows.length });
   }
 
   /** The bubbles of every turn, for inspection. */
@@ -430,7 +459,12 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (!this.#isRunning(turnId)) return;
     if (!finish) throw new Error("The model stream ended without a reply");
     if (this.#recordUsage(turnId, finish.usage) >= CHECKPOINT_BUDGET_TOKENS) {
-      await this.#scheduleCheckpoint();
+      // Housekeeping: a fault here must not cost the reply.
+      try {
+        await this.#scheduleCheckpoint();
+      } catch (error) {
+        console.error("ConversationAgent: scheduling a checkpoint failed", errorName(error));
+      }
     }
     if (finish.reason === "refusal") {
       this.#db
@@ -466,7 +500,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     this.#db.update(schema.turns).set({ usage }).where(eq(schema.turns.id, turnId)).run();
     const sum = (count: (attempt: Usage) => number) =>
       usage.reduce((total, attempt) => total + count(attempt), 0);
-    const input = sum((attempt) => attempt.inputUncached + attempt.cacheRead + attempt.cacheWrite);
+    // The prompt of the attempt that answered: the history's size, whatever retries came before.
+    const answered = usage.at(-1);
+    const input = answered ? answered.inputUncached + answered.cacheRead + answered.cacheWrite : 0;
     console.log("conversation: turn usage", {
       attempts: usage.length,
       input,
@@ -483,7 +519,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   async #scheduleCheckpoint(): Promise<void> {
     const pending = this.#get<string | null>("checkpointSchedule", null);
     // A schedule the SDK gave up on, or that an eviction lost, doesn't block a new one.
-    if (pending && this.getSchedules().some((schedule) => schedule.id === pending)) return;
+    if (pending && (await this.getScheduleById(pending))) return;
+    const failedAt = this.#get<number | null>("checkpointFailedAt", null);
+    if (failedAt !== null && this.#ports.now() - failedAt < CHECKPOINT_RETRY_MS) return;
     if (!this.#checkpointPlan(this.#latestCheckpoint())) return;
     const schedule = await this.schedule(new Date(this.#ports.now()), "compact");
     this.#set("checkpointSchedule", schedule.id);
@@ -510,12 +548,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    */
   #checkpointPlan(current: { keptFromHistoryId: number } | undefined) {
     const rows = this.#db
-      .select({
-        id: schema.history.id,
-        role: schema.history.role,
-        userId: schema.history.userId,
-        message: schema.history.message,
-      })
+      .select({ id: schema.history.id, role: schema.history.role })
       .from(schema.history)
       .where(gte(schema.history.id, current?.keptFromHistoryId ?? 0))
       .orderBy(asc(schema.history.id))
@@ -524,7 +557,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     while (cut < rows.length && rows[cut]?.role !== "user") cut += 1;
     const kept = rows[cut];
     if (!kept || cut < CHECKPOINT_MIN_ROWS) return null;
-    return { rows: rows.slice(0, cut), keptFromHistoryId: kept.id };
+    return { keptFromHistoryId: kept.id };
   }
 
   /** Sends the turn's pending bubbles in order, stopping as soon as the turn is settled. */
@@ -934,7 +967,8 @@ function summaryInput(
         : message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
     return role === "user" ? `user ${userId ?? ""}: ${text}` : `assistant: ${text}`;
   });
-  const conversation = lines.join("\n\n");
+  // The newest text matters most; past the cap, the oldest goes, so the call fits the model.
+  const conversation = lines.join("\n\n").slice(-CHECKPOINT_MAX_INPUT_CHARS);
   return previous === null
     ? `Conversation:\n\n${conversation}`
     : `Previous summary:\n\n${previous}\n\nConversation since:\n\n${conversation}`;

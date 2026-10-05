@@ -2,6 +2,7 @@ import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "c
 import { env } from "cloudflare:workers";
 import type { AgentSettings } from "@kelpie/config";
 import { stampOf } from "@kelpie/conversation";
+import type { Usage } from "@kelpie/llm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentHost } from "../src/agent-host/agent-host.ts";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
@@ -741,8 +742,15 @@ describe("ConversationAgent checkpoints", () => {
   }
 
   const pendingCheckpoints = (stub: ReturnType<typeof agent>) =>
-    runInDurableObject(stub, (instance: ConversationAgent) =>
-      instance.getSchedules().filter((schedule) => schedule.callback === "compact"),
+    runInDurableObject(stub, async (instance: ConversationAgent) =>
+      (await instance.listSchedules()).filter((schedule) => schedule.callback === "compact"),
+    );
+
+  const checkpointCount = (stub: ReturnType<typeof agent>) =>
+    runInDurableObject(
+      stub,
+      (_instance: ConversationAgent, state) =>
+        state.storage.sql.exec<{ n: number }>("SELECT count(*) AS n FROM checkpoints").one().n,
     );
 
   const replies = (count: number) => Array.from({ length: count }, (_, i) => reply(`r${i}`));
@@ -836,9 +844,17 @@ describe("ConversationAgent checkpoints", () => {
     expect(JSON.stringify((await stub.history())[0])).toContain("SECOND SUMMARY");
   });
 
-  it("writes nothing when the summary fails, and tries again after the next big turn", async () => {
+  it("writes nothing when the summary fails, and waits an hour before trying again", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    use(fakeWorld([...replies(5), reply("r5", OVER_BUDGET), fail(), reply("r6", OVER_BUDGET)]));
+    const world = use(
+      fakeWorld([
+        ...replies(5),
+        reply("r5", OVER_BUDGET),
+        fail(),
+        reply("r6", OVER_BUDGET),
+        reply("r7", OVER_BUDGET),
+      ]),
+    );
     const stub = agent("checkpoint-failure");
     await converse(stub, questions(6));
 
@@ -847,7 +863,35 @@ describe("ConversationAgent checkpoints", () => {
     expect(await pendingCheckpoints(stub)).toEqual([]);
 
     await converse(stub, ["q6"], 6);
+    expect(await pendingCheckpoints(stub)).toEqual([]);
+    world.clock += 61 * 60_000;
+    await converse(stub, ["q7"], 7);
     expect(await pendingCheckpoints(stub)).toHaveLength(1);
+  });
+
+  it("writes nothing when the summarizer refuses", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    use(fakeWorld([...replies(5), reply("r5", OVER_BUDGET), refuse()]));
+    const stub = agent("checkpoint-refusal");
+    await converse(stub, questions(6));
+    await stub.compact();
+    expect(await checkpointCount(stub)).toBe(0);
+  });
+
+  it("writes one checkpoint when two runs race", async () => {
+    use(fakeWorld([...replies(5), reply("r5", OVER_BUDGET), reply("S1"), reply("S2")]));
+    const stub = agent("checkpoint-race");
+    await converse(stub, questions(6));
+    await Promise.all([stub.compact(), stub.compact()]);
+    expect(await checkpointCount(stub)).toBe(1);
+  });
+
+  it("measures the budget on the prompt of the attempt that answered, not every attempt", async () => {
+    const attempt = { ...OVER_BUDGET[0], inputUncached: 0, cacheRead: 60_000 } as Usage;
+    use(fakeWorld([...replies(5), reply("r5", [attempt, attempt])]));
+    const stub = agent("checkpoint-attempts");
+    await converse(stub, questions(6));
+    expect(await pendingCheckpoints(stub)).toEqual([]);
   });
 
   it("waits for enough new rows before summarizing again", async () => {

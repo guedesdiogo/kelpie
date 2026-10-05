@@ -68,8 +68,9 @@ export const history = sqliteTable("history", {
   /** The system prompt version the message was produced under. */
   systemVersion: integer("system_version").notNull(),
   /**
-   * The checkpoint its turn ran under (ADR-0017). A reply is replayed with its native output only
-   * under the same one, because its reasoning is bound to the prompt that came before it.
+   * For a reply, the checkpoint its turn ran under (ADR-0017); null on user rows. A reply is
+   * replayed with its native output only under the same one, because its reasoning is bound to the
+   * prompt that came before it.
    */
   checkpointId: integer("checkpoint_id"),
   message: text("message", { mode: "json" }).$type<ChatMessage>().notNull(),
