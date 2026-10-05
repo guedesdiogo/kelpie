@@ -119,12 +119,12 @@ On average 310 input tokens per call; output is free. The 202 calls cost US$ 0.0
 - **End of turn should be hybrid,** as ADR-0009 already says. Confident heuristic rules (greetings, a trailing conjunction or `,` `:` `...`, a `?`, a command) decide first, and Jev decides the rest. This is a policy over both answers, calibrated against labels. The heuristic isn't trained on Jev's output, so the "no distillation" clause in TypeSafe's terms isn't touched.
 - **The production request needs no change for the direct API.** `JevHttpQualifier` can send `endOfTurn`'s questions as they are and map `noul` straight through.
 
-[ADR-0018](../adr/0018-jev-direct-api.md) records these changes.
+[ADR-0018](../adr/0018-jev-direct-api.md) records these changes, and [#96](https://github.com/guedesdiogo/kelpie/issues/96) implements them.
 
 ## Residuals
 
 - **The labels are mine,** written by the agent that also wrote the heuristic's rules. A few are arguable: whether "oi" alone waits for a reply or for more text is a matter of habit. The owner may spot-check a sample.
 - **The thresholds come from 101 synthetic sequences.** That can overfit, and real chats are messier.
 - **One afternoon and one colo:** São Paulo, around 16:00 local time. TypeSafe says its rate limits "are adjusting dynamically".
-- **The heuristic's "então" rule misreads "fechado então"** as unfinished. That is a pre-existing bug, filed as a follow-up.
+- **The heuristic's "então" rule misreads "fechado então"** as unfinished. That is a pre-existing bug, filed as [#97](https://github.com/guedesdiogo/kelpie/issues/97).
 - **Privacy.** On the direct API, TypeSafe offers zero data retention only on enterprise plans. Masking personal data before every call (ADR-0009) is therefore required on live traffic.
