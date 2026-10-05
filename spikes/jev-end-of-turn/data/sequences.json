@@ -1,0 +1,611 @@
+{
+  "description": "Synthetic PT-BR chat fragments for the Jev end-of-turn spike (issue #27). No real user data. Labels say whether the user has finished and is waiting for a reply; they were written and frozen before Jev or the heuristic ran.",
+  "items": [
+    {
+      "id": "f01",
+      "kind": "question",
+      "fragments": ["vocês entregam em Niterói?"],
+      "finished": true
+    },
+    {
+      "id": "f02",
+      "kind": "question-no-mark",
+      "fragments": ["qual o horário de vocês amanhã"],
+      "finished": true
+    },
+    {
+      "id": "f03",
+      "kind": "question-no-mark",
+      "fragments": ["qto custa o frete pra SP"],
+      "finished": true
+    },
+    {
+      "id": "f04",
+      "kind": "question-no-mark",
+      "fragments": ["vcs aceitam pix"],
+      "finished": true
+    },
+    {
+      "id": "f05",
+      "kind": "question-no-mark",
+      "fragments": ["qual é o prazo de garantia"],
+      "finished": true
+    },
+    {
+      "id": "f06",
+      "kind": "question-no-mark",
+      "fragments": ["tem desconto pra pagamento à vista"],
+      "finished": true
+    },
+    {
+      "id": "f07",
+      "kind": "question",
+      "fragments": ["dá pra parcelar em 3x?"],
+      "finished": true
+    },
+    {
+      "id": "f08",
+      "kind": "greeting-then-request",
+      "fragments": ["boa tarde", "consegue me mandar a segunda via do boleto?"],
+      "finished": true
+    },
+    {
+      "id": "f09",
+      "kind": "greeting-then-request",
+      "fragments": ["oi, tudo bem?", "queria saber o status do meu pedido 4821"],
+      "finished": true
+    },
+    {
+      "id": "f10",
+      "kind": "greeting-then-request",
+      "fragments": ["oi!", "vocês abrem domingo?"],
+      "finished": true
+    },
+    {
+      "id": "f11",
+      "kind": "greeting-then-request",
+      "fragments": ["opa, tudo certo", "só queria confirmar se o pagamento caiu"],
+      "finished": true
+    },
+    {
+      "id": "f12",
+      "kind": "statement-no-punct",
+      "fragments": ["preciso cancelar a assinatura"],
+      "finished": true
+    },
+    {
+      "id": "f13",
+      "kind": "statement-no-punct",
+      "fragments": ["o link nao abre aqui no celular"],
+      "finished": true
+    },
+    {
+      "id": "f14",
+      "kind": "statement-no-punct",
+      "fragments": ["nao recebi o codigo de verificação"],
+      "finished": true
+    },
+    {
+      "id": "f15",
+      "kind": "statement-no-punct",
+      "fragments": ["a fatura veio duplicada esse mês"],
+      "finished": true
+    },
+    {
+      "id": "f16",
+      "kind": "statement-no-punct",
+      "fragments": ["já tentei reiniciar e continua dando erro 503"],
+      "finished": true
+    },
+    {
+      "id": "f17",
+      "kind": "statement-no-punct",
+      "fragments": ["quero falar com um atendente humano"],
+      "finished": true
+    },
+    {
+      "id": "f18",
+      "kind": "statement-no-punct",
+      "fragments": ["não entendi a última parte"],
+      "finished": true
+    },
+    {
+      "id": "f19",
+      "kind": "statement-no-punct",
+      "fragments": ["vou querer o plano anual"],
+      "finished": true
+    },
+    {
+      "id": "f20",
+      "kind": "statement-no-punct",
+      "fragments": ["prefiro receber por email"],
+      "finished": true
+    },
+    {
+      "id": "f21",
+      "kind": "statement-no-punct",
+      "fragments": ["me manda o endereço da loja por favor"],
+      "finished": true
+    },
+    {
+      "id": "f22",
+      "kind": "statement-no-punct",
+      "fragments": ["me avisa quando chegar"],
+      "finished": true
+    },
+    {
+      "id": "f23",
+      "kind": "statement",
+      "fragments": ["Bom dia! Gostaria de agendar uma consulta para sexta-feira."],
+      "finished": true
+    },
+    {
+      "id": "f24",
+      "kind": "statement",
+      "fragments": ["o pedido chegou certinho, obrigada!"],
+      "finished": true
+    },
+    {
+      "id": "f25",
+      "kind": "ack",
+      "fragments": ["ok"],
+      "finished": true
+    },
+    {
+      "id": "f26",
+      "kind": "ack",
+      "fragments": ["sim"],
+      "finished": true
+    },
+    {
+      "id": "f27",
+      "kind": "ack",
+      "fragments": ["tá bom"],
+      "finished": true
+    },
+    {
+      "id": "f28",
+      "kind": "ack",
+      "fragments": ["obg!!"],
+      "finished": true
+    },
+    {
+      "id": "f29",
+      "kind": "ack",
+      "fragments": ["pode cancelar"],
+      "finished": true
+    },
+    {
+      "id": "f30",
+      "kind": "ack",
+      "fragments": ["pode ser às 15h"],
+      "finished": true
+    },
+    {
+      "id": "f31",
+      "kind": "ack",
+      "fragments": ["isso, o de 128gb"],
+      "finished": true
+    },
+    {
+      "id": "f32",
+      "kind": "ack",
+      "fragments": ["não, só isso por hoje"],
+      "finished": true
+    },
+    {
+      "id": "f33",
+      "kind": "ack",
+      "fragments": ["valeu, era isso mesmo"],
+      "finished": true
+    },
+    {
+      "id": "f34",
+      "kind": "ack",
+      "fragments": ["perfeito, pode confirmar a reserva"],
+      "finished": true
+    },
+    {
+      "id": "f35",
+      "kind": "ack",
+      "fragments": ["entendi, obrigado pela ajuda"],
+      "finished": true
+    },
+    {
+      "id": "f36",
+      "kind": "ack",
+      "fragments": ["blz entao, aguardo o retorno"],
+      "finished": true
+    },
+    {
+      "id": "f37",
+      "kind": "ack",
+      "fragments": ["consegui resolver aqui, pode fechar o chamado"],
+      "finished": true
+    },
+    {
+      "id": "f38",
+      "kind": "emoji",
+      "fragments": ["👍"],
+      "finished": true
+    },
+    {
+      "id": "f39",
+      "kind": "emoji",
+      "fragments": ["isso mesmo 😊"],
+      "finished": true
+    },
+    {
+      "id": "f40",
+      "kind": "emoji",
+      "fragments": ["fechado então 🤝"],
+      "finished": true
+    },
+    {
+      "id": "f41",
+      "kind": "command",
+      "fragments": ["/status"],
+      "finished": true
+    },
+    {
+      "id": "f42",
+      "kind": "laughter",
+      "fragments": ["kkkkkkk"],
+      "finished": true
+    },
+    {
+      "id": "f43",
+      "kind": "laughter",
+      "fragments": ["kkkkk", "verdade"],
+      "finished": true
+    },
+    {
+      "id": "f44",
+      "kind": "laughter",
+      "fragments": ["ah entendi kkk"],
+      "finished": true
+    },
+    {
+      "id": "f45",
+      "kind": "question-then-context",
+      "fragments": ["tem como trocar o tamanho?", "comprei M e ficou pequeno"],
+      "finished": true
+    },
+    {
+      "id": "f46",
+      "kind": "question-then-context",
+      "fragments": ["quanto tempo demora pra chegar?", "moro em Recife"],
+      "finished": true
+    },
+    {
+      "id": "f47",
+      "kind": "multi-fragment",
+      "fragments": ["esqueci minha senha", "como faço pra recuperar"],
+      "finished": true
+    },
+    {
+      "id": "f48",
+      "kind": "multi-fragment",
+      "fragments": ["recebi o produto com defeito", "a tela veio rachada", "quero devolver"],
+      "finished": true
+    },
+    {
+      "id": "f49",
+      "kind": "multi-fragment",
+      "fragments": ["segue o comprovante", "https://exemplo.com.br/comprovante/88231.pdf"],
+      "finished": true
+    },
+    {
+      "id": "f50",
+      "kind": "multi-fragment",
+      "fragments": ["mudei de endereço", "o novo é Rua das Flores, 120, apto 34"],
+      "finished": true
+    },
+    {
+      "id": "f51",
+      "kind": "multi-fragment",
+      "fragments": ["desculpa a demora", "pode seguir com a troca"],
+      "finished": true
+    },
+    {
+      "id": "u01",
+      "kind": "greeting",
+      "fragments": ["oi"],
+      "finished": false
+    },
+    {
+      "id": "u02",
+      "kind": "greeting",
+      "fragments": ["bom dia"],
+      "finished": false
+    },
+    {
+      "id": "u03",
+      "kind": "greeting",
+      "fragments": ["olá"],
+      "finished": false
+    },
+    {
+      "id": "u04",
+      "kind": "greeting",
+      "fragments": ["oi", "boa tarde"],
+      "finished": false
+    },
+    {
+      "id": "u05",
+      "kind": "greeting-then-preamble",
+      "fragments": ["oi", "então, é sobre aquela compra"],
+      "finished": false
+    },
+    {
+      "id": "u06",
+      "kind": "greeting-then-preamble",
+      "fragments": ["boa noite", "desculpa o horário"],
+      "finished": false
+    },
+    {
+      "id": "u07",
+      "kind": "greeting-then-preamble",
+      "fragments": ["ola boa tarde", "é a primeira vez que compro com vcs"],
+      "finished": false
+    },
+    {
+      "id": "u08",
+      "kind": "dangling",
+      "fragments": ["queria ver o meu pedido e"],
+      "finished": false
+    },
+    {
+      "id": "u09",
+      "kind": "dangling",
+      "fragments": ["comprei um tênis semana passada mas"],
+      "finished": false
+    },
+    {
+      "id": "u10",
+      "kind": "dangling",
+      "fragments": ["queria trocar o produto porque"],
+      "finished": false
+    },
+    {
+      "id": "u11",
+      "kind": "dangling",
+      "fragments": ["tipo"],
+      "finished": false
+    },
+    {
+      "id": "u12",
+      "kind": "dangling",
+      "fragments": ["ah e"],
+      "finished": false
+    },
+    {
+      "id": "u13",
+      "kind": "dangling",
+      "fragments": ["não sei se você pode me ajudar mas"],
+      "finished": false
+    },
+    {
+      "id": "u14",
+      "kind": "trailing-punct",
+      "fragments": ["então,"],
+      "finished": false
+    },
+    {
+      "id": "u15",
+      "kind": "trailing-punct",
+      "fragments": ["deixa eu te explicar:"],
+      "finished": false
+    },
+    {
+      "id": "u16",
+      "kind": "trailing-punct",
+      "fragments": ["olha só..."],
+      "finished": false
+    },
+    {
+      "id": "u17",
+      "kind": "trailing-punct",
+      "fragments": ["segue abaixo os dados:"],
+      "finished": false
+    },
+    {
+      "id": "u18",
+      "kind": "trailing-punct",
+      "fragments": ["mais uma coisa,"],
+      "finished": false
+    },
+    {
+      "id": "u19",
+      "kind": "trailing-punct",
+      "fragments": ["sobre a entrega,"],
+      "finished": false
+    },
+    {
+      "id": "u20",
+      "kind": "pause",
+      "fragments": ["pera"],
+      "finished": false
+    },
+    {
+      "id": "u21",
+      "kind": "pause",
+      "fragments": ["espera"],
+      "finished": false
+    },
+    {
+      "id": "u22",
+      "kind": "pause",
+      "fragments": ["um segundo"],
+      "finished": false
+    },
+    {
+      "id": "u23",
+      "kind": "pause",
+      "fragments": ["deixa eu ver aqui"],
+      "finished": false
+    },
+    {
+      "id": "u24",
+      "kind": "pause",
+      "fragments": ["perai que meu filho tá chamando"],
+      "finished": false
+    },
+    {
+      "id": "u25",
+      "kind": "pause",
+      "fragments": ["só um minuto que vou pegar o número do pedido"],
+      "finished": false
+    },
+    {
+      "id": "u26",
+      "kind": "announces-more",
+      "fragments": ["vou mandar o print"],
+      "finished": false
+    },
+    {
+      "id": "u27",
+      "kind": "announces-more",
+      "fragments": ["vou explicar melhor"],
+      "finished": false
+    },
+    {
+      "id": "u28",
+      "kind": "announces-more",
+      "fragments": ["a minha dúvida é a seguinte"],
+      "finished": false
+    },
+    {
+      "id": "u29",
+      "kind": "announces-more",
+      "fragments": ["preciso de ajuda com duas coisas"],
+      "finished": false
+    },
+    {
+      "id": "u30",
+      "kind": "announces-more",
+      "fragments": ["e outra coisa"],
+      "finished": false
+    },
+    {
+      "id": "u31",
+      "kind": "announces-more",
+      "fragments": ["primeiro"],
+      "finished": false
+    },
+    {
+      "id": "u32",
+      "kind": "announces-more",
+      "fragments": ["vou te mandar 3 coisas", "1. o boleto não chegou"],
+      "finished": false
+    },
+    {
+      "id": "u33",
+      "kind": "mid-sentence",
+      "fragments": ["meu pedido é o"],
+      "finished": false
+    },
+    {
+      "id": "u34",
+      "kind": "mid-sentence",
+      "fragments": ["queria saber se"],
+      "finished": false
+    },
+    {
+      "id": "u35",
+      "kind": "mid-sentence",
+      "fragments": ["eu queria"],
+      "finished": false
+    },
+    {
+      "id": "u36",
+      "kind": "mid-sentence",
+      "fragments": ["o problema é que quando eu abro o app"],
+      "finished": false
+    },
+    {
+      "id": "u37",
+      "kind": "mid-sentence",
+      "fragments": ["a senha que eu cadastrei foi"],
+      "finished": false
+    },
+    {
+      "id": "u38",
+      "kind": "mid-sentence",
+      "fragments": ["quando eu tento entrar na conta aparece"],
+      "finished": false
+    },
+    {
+      "id": "u39",
+      "kind": "mid-sentence",
+      "fragments": ["então o que aconteceu foi"],
+      "finished": false
+    },
+    {
+      "id": "u40",
+      "kind": "mid-sentence",
+      "fragments": ["o que eu queria saber é"],
+      "finished": false
+    },
+    {
+      "id": "u41",
+      "kind": "mid-sentence",
+      "fragments": ["estou tentando fazer o cadastro e na hora de colocar o cpf"],
+      "finished": false
+    },
+    {
+      "id": "u42",
+      "kind": "mid-sentence",
+      "fragments": ["eu tava vendo o site de vcs e vi que"],
+      "finished": false
+    },
+    {
+      "id": "u43",
+      "kind": "multi-fragment",
+      "fragments": ["tenho uma dúvida sobre a fatura", "é que"],
+      "finished": false
+    },
+    {
+      "id": "u44",
+      "kind": "multi-fragment",
+      "fragments": ["vocês entregam em Niterói?", "e também"],
+      "finished": false
+    },
+    {
+      "id": "u45",
+      "kind": "multi-fragment",
+      "fragments": ["qual o valor do plano", "e se eu"],
+      "finished": false
+    },
+    {
+      "id": "u46",
+      "kind": "multi-fragment",
+      "fragments": ["tentei pagar com cartão mas deu erro", "aí tentei de novo e"],
+      "finished": false
+    },
+    {
+      "id": "u47",
+      "kind": "multi-fragment",
+      "fragments": ["o número do pedido é 4821", "e o problema é"],
+      "finished": false
+    },
+    {
+      "id": "u48",
+      "kind": "multi-fragment",
+      "fragments": ["comprei dois itens", "um chegou", "o outro"],
+      "finished": false
+    },
+    {
+      "id": "u49",
+      "kind": "multi-fragment",
+      "fragments": ["eu fiz o pix às 14h", "mas até agora"],
+      "finished": false
+    },
+    {
+      "id": "u50",
+      "kind": "multi-fragment",
+      "fragments": ["vou te passar o código do rastreio", "BR"],
+      "finished": false
+    }
+  ]
+}

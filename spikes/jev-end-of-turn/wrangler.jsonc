@@ -1,0 +1,21 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  // Throwaway Worker for the Jev end-of-turn spike (issue #27). Delete it after the run.
+  "name": "kelpie-spike-jev",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  // Jev's answers are measured from the caller's side; the Worker writes no logs of its own.
+  "observability": { "enabled": false },
+  // The only public surface is POST /qualify on workers.dev, behind x-spike-token.
+  "workers_dev": true,
+  "preview_urls": false,
+  "ai": { "binding": "AI" },
+  "vars": {
+    // A gateway with "Require provider credentials" off: Jev is paid only through Unified Billing.
+    "GATEWAY_ID": "kelpie-qualifier"
+  },
+  "secrets": {
+    // SPIKE_TOKEN: the value callers send in x-spike-token. It guards the credit balance.
+    "required": ["SPIKE_TOKEN"]
+  }
+}
