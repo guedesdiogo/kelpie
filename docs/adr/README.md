@@ -21,6 +21,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0015](0015-single-player-first.md) | Single-player until multi-user lands, with seams for it | [#59](https://github.com/guedesdiogo/kelpie/issues/59) |
 | [0016](0016-vault-second-brain.md) | The vault is the owner's second brain, usable without Kelpie and shared with Hermes | [#58](https://github.com/guedesdiogo/kelpie/issues/58) |
 | [0017](0017-history-compaction.md) | Long conversations are bounded by Kelpie's own summary checkpoints | [#64](https://github.com/guedesdiogo/kelpie/issues/64) |
+| [0018](0018-jev-direct-api.md) | Jev goes through TypeSafe's API first, and end of turn uses thresholds per qualifier (proposed) | [#27](https://github.com/guedesdiogo/kelpie/issues/27) |
 
 ## Format
 
