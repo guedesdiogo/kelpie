@@ -26,8 +26,10 @@ export interface TelegramConfig {
 }
 
 const API = "https://api.telegram.org";
-/** Ingress lower-cases header names. */
-const SECRET_HEADER = "x-telegram-bot-api-secret-token";
+/** The header Telegram echoes the webhook secret in. Ingress lower-cases header names. */
+export const TELEGRAM_SECRET_HEADER = "x-telegram-bot-api-secret-token";
+/** Where ingress takes a bot's updates: this path, then the agent's id. */
+export const TELEGRAM_WEBHOOK_PATH = "/webhooks/telegram";
 /** Telegram's service account, the sender of posts a linked channel relays into a group. */
 const TELEGRAM_SERVICE_ACCOUNT = 777_000;
 const CHAT_TYPES: readonly string[] = ["private", "group", "supergroup", "channel"];
@@ -77,7 +79,7 @@ export class TelegramAdapter implements ChannelAdapter {
 
   /** The secret Telegram echoes, compared in constant time. A missing or empty one never matches. */
   async verify(webhook: InboundWebhook): Promise<boolean> {
-    const presented = webhook.headers[SECRET_HEADER];
+    const presented = webhook.headers[TELEGRAM_SECRET_HEADER];
     const expected = this.#config.webhookSecret;
     if (!presented || !expected) return false;
     return constantTimeEqual(presented, expected);
@@ -115,6 +117,18 @@ export class TelegramAdapter implements ChannelAdapter {
 
   async typing(destination: Destination): Promise<void> {
     await this.#call("sendChatAction", { chat_id: destination.threadId, action: "typing" });
+  }
+
+  /**
+   * Points the bot's updates at `url`, with this bot's secret to echo back. Only new messages are
+   * asked for, because edits and the rest yield no event. Registering again replaces the last one.
+   */
+  async setWebhook(url: string): Promise<void> {
+    await this.#call("setWebhook", {
+      url,
+      secret_token: this.#config.webhookSecret,
+      allowed_updates: ["message"],
+    });
   }
 
   async #call<T>(method: string, body: Record<string, unknown>): Promise<T> {

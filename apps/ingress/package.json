@@ -17,6 +17,8 @@
   "dependencies": {
     "@kelpie/access": "workspace:*",
     "@kelpie/channels": "workspace:*",
+    "@kelpie/config": "workspace:*",
+    "@kelpie/conversation": "workspace:*",
     "drizzle-orm": "0.45.3"
   }
 }

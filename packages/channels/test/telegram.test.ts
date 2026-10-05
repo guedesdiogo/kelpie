@@ -206,6 +206,27 @@ describe("Telegram sending", () => {
     });
   });
 
+  it("registers the webhook for new messages only, with the bot's own secret", async () => {
+    const { adapter, calls } = botApi(() => okResult(true));
+    await adapter.setWebhook("https://ingress.example/webhooks/telegram/assistant");
+    expect(calls).toEqual([
+      {
+        url: `https://api.telegram.org/bot${TOKEN}/setWebhook`,
+        method: "setWebhook",
+        body: {
+          url: "https://ingress.example/webhooks/telegram/assistant",
+          secret_token: SECRET,
+          allowed_updates: ["message"],
+        },
+      },
+    ]);
+
+    const refused = botApi(() => failure(400));
+    await expect(refused.adapter.setWebhook("https://ingress.example/x")).rejects.toBeInstanceOf(
+      ChannelRequestError,
+    );
+  });
+
   it("turns a 429 into a wait, in milliseconds", async () => {
     const { adapter } = botApi(() => failure(429, { parameters: { retry_after: 7 } }));
     const error = await adapter.send({ threadId: "1001" }, "hi").catch((caught) => caught);

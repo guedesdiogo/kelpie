@@ -6,8 +6,25 @@
   "observability": { "enabled": true },
   // Drizzle's Durable Object migrations import .sql files as text.
   "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
+  // Bots' webhooks are checked by channel-egress, which holds their secrets; this entrypoint can
+  // verify but not send.
+  "services": [
+    {
+      "binding": "CHANNEL_WEBHOOKS",
+      "service": "kelpie-channel-egress",
+      "entrypoint": "ChannelWebhooks"
+    }
+  ],
   "durable_objects": {
-    "bindings": [{ "name": "DIRECTORY", "class_name": "Directory" }]
+    "bindings": [
+      { "name": "DIRECTORY", "class_name": "Directory" },
+      // Each conversation's object lives in the Worker that runs it.
+      {
+        "name": "CONVERSATION_AGENT",
+        "class_name": "ConversationAgent",
+        "script_name": "kelpie-conversation-runtime"
+      }
+    ]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Directory"] }]
 }

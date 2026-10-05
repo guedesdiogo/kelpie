@@ -1,7 +1,8 @@
 import type { SendOutcome } from "@kelpie/channels";
+import type { Destination } from "@kelpie/conversation/contract";
 import type { AssistantMessage, LlmEvent, RoutedRequest } from "@kelpie/llm";
 import type { Qualifier } from "@kelpie/qualifier";
-import type { ConversationPorts, Destination, ModelCall } from "../src/ports.ts";
+import type { ConversationPorts, ModelCall } from "../src/ports.ts";
 
 // The Worker runs in the test's isolate, so these fakes replace the ConversationAgent's ports.
 

@@ -3,18 +3,20 @@ import {
   type ChannelEgressContract,
   type ChannelFormsContract,
   ChannelRateLimitedError,
+  type ChannelWebhooksContract,
   type DeliveryFailure,
   type EgressDestination,
   RecipientUnavailableError,
   type SendOptions,
   type SendOutcome,
   type TypingOutcome,
+  type WebhookRegistration,
 } from "@kelpie/channels";
-import { TelegramAdapter } from "@kelpie/channels/telegram";
+import { TELEGRAM_SECRET_HEADER, TelegramAdapter } from "@kelpie/channels/telegram";
 import { isAgentId } from "@kelpie/config";
 import { randomToken } from "./secrets/crypto.ts";
 import { type ReadResult, SECRET_STORE_NAME, SecretStore } from "./secrets/secret-store.ts";
-import { parseTelegramSecret, type TelegramSecret } from "./telegram-secret.ts";
+import { parseTelegramSecret, type TelegramSecret, telegramWebhookUrl } from "./telegram-secret.ts";
 
 export { SecretStore };
 
@@ -55,8 +57,9 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
   }
 
   /**
-   * Checks the token with Telegram (`getMe`), then stores it with a new random webhook secret.
-   * A refused token leaves the form open for another try, up to a few.
+   * Checks the token with Telegram (`getMe`), stores it with a new random webhook secret, then
+   * registers the webhook with that secret. A refused token leaves the form open for another try,
+   * up to a few.
    */
   async redeemTelegramForm(token: string, botToken: string) {
     try {
@@ -85,11 +88,55 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
         username: bot.username,
       };
       const stored = await forms.redeemForm(token, JSON.stringify(secret));
-      return stored.ok ? { ok: true as const, agentId: stored.agentId, bot } : stored;
+      if (!stored.ok) return stored;
+      // A new secret makes every update refused until Telegram has it, so it registers now.
+      const webhook = await this.#register(stored.agentId, secret);
+      return {
+        ok: true as const,
+        agentId: stored.agentId,
+        bot,
+        webhook: webhook.ok ? ("registered" as const) : webhook.reason,
+      };
     } catch (error) {
       console.error("channel-egress: redeeming a form failed", errorName(error));
       return unavailable;
     }
+  }
+
+  async registerTelegramWebhook(agentId: string): Promise<WebhookRegistration> {
+    if (!isAgentId(agentId)) return { ok: false, reason: "invalid_input" };
+    const found = await telegramSecret(this.env, agentId);
+    return found.ok ? this.#register(agentId, found.secret) : found;
+  }
+
+  async #register(agentId: string, secret: TelegramSecret): Promise<WebhookRegistration> {
+    const url = telegramWebhookUrl(this.env.INGRESS_ORIGIN, agentId);
+    if (!url) return { ok: false, reason: "not_configured" };
+    try {
+      await new TelegramAdapter(secret).setWebhook(url);
+      return { ok: true };
+    } catch (error) {
+      console.warn("channel-egress: Telegram refused a webhook", errorName(error));
+      return { ok: false, reason: "channel_refused" };
+    }
+  }
+}
+
+/**
+ * Checks webhooks for ingress. A separate entrypoint, so the Worker that takes public requests can
+ * verify them but can't send.
+ */
+export class ChannelWebhooks extends WorkerEntrypoint<Env> implements ChannelWebhooksContract {
+  async verifyTelegram(agentId: string, presentedSecret: string | null) {
+    const refused = { ok: false as const, reason: "refused" as const };
+    if (!isAgentId(agentId) || typeof presentedSecret !== "string") return refused;
+    const found = await telegramSecret(this.env, agentId);
+    if (!found.ok) return found.reason === "store_unavailable" ? unavailable : refused;
+    const verified = await new TelegramAdapter(found.secret).verify({
+      headers: { [TELEGRAM_SECRET_HEADER]: presentedSecret },
+      body: "",
+    });
+    return verified ? { ok: true as const } : refused;
   }
 }
 
@@ -131,23 +178,34 @@ export class ChannelEgress extends WorkerEntrypoint<Env> implements ChannelEgres
     destination: EgressDestination,
   ): Promise<TelegramAdapter | null> {
     if (destination?.channel !== "telegram" || !isAgentId(agentId)) return null;
-    let read: ReadResult;
-    try {
-      read = await store(this.env).read("telegram", agentId);
-    } catch (error) {
-      console.error("channel-egress: the secret store failed", errorName(error));
-      return null;
-    }
-    if (!read.ok) {
-      if (read.reason !== "missing")
-        console.error("channel-egress: secret unreadable", read.reason);
-      return null;
-    }
-    const secret = parseTelegramSecret(read.value);
-    return secret
-      ? new TelegramAdapter({ botToken: secret.botToken, webhookSecret: secret.webhookSecret })
-      : null;
+    const found = await telegramSecret(this.env, agentId);
+    return found.ok ? new TelegramAdapter(found.secret) : null;
   }
+}
+
+/** The agent's stored bot. A secret that doesn't decrypt or parse counts as no bot. */
+async function telegramSecret(
+  env: Env,
+  agentId: string,
+): Promise<
+  | { ok: true; secret: TelegramSecret }
+  | { ok: false; reason: "not_connected" | "store_unavailable" }
+> {
+  let read: ReadResult;
+  try {
+    read = await store(env).read("telegram", agentId);
+  } catch (error) {
+    console.error("channel-egress: the secret store failed", errorName(error));
+    return unavailable;
+  }
+  if (!read.ok) {
+    if (read.reason !== "missing") console.error("channel-egress: secret unreadable", read.reason);
+    return read.reason === "store_unavailable"
+      ? unavailable
+      : { ok: false, reason: "not_connected" };
+  }
+  const secret = parseTelegramSecret(read.value);
+  return secret ? { ok: true, secret } : { ok: false, reason: "not_connected" };
 }
 
 /** A thread id is a short string; so is a reply id, when there is one. */

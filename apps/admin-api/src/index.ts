@@ -40,7 +40,10 @@ function depsFor(env: Env): AdminDeps {
         config: (id) => agentHost(id).config(),
       },
       directory,
-      channels: { createTelegramForm: (agentId) => forms.createTelegramForm(agentId) },
+      channels: {
+        createTelegramForm: (agentId) => forms.createTelegramForm(agentId),
+        registerTelegramWebhook: (agentId) => forms.registerTelegramWebhook(agentId),
+      },
     }),
     forms,
     bootstrapToken: env.BOOTSTRAP_TOKEN,

@@ -33,6 +33,7 @@ Every endpoint is a `POST` with a JSON body.
 | `/commands/disableIdentity` | same as `addIdentity` |
 | `/commands/setTimeZone` | `{ "timeZone": "America/Sao_Paulo" }`, an IANA name. Offsets like `+03:00` are refused; prefer a city name to `Etc/GMT±N`, whose sign is inverted (`Etc/GMT+3` is UTC-03:00) |
 | `/commands/connectTelegram` | `{ "agentId": "sales" }`; answers `{ "path": "/forms/<token>", "expiresAt": … }` |
+| `/commands/registerTelegramWebhook` | `{ "agentId": "sales" }`; points the agent's bot at ingress again, after a failed registration or a new ingress hostname |
 | `/bootstrap` | `{ "token": "…" }` |
 
 **Answers:**
@@ -45,8 +46,9 @@ Every endpoint is a `POST` with a JSON body.
 | 401 | `unauthenticated` |
 | 403 | `forbidden`, `no_owner`, `invalid_bootstrap_token` |
 | 404 | `unknown_agent`, `unknown_identity`, `unknown_user`, `not_found` |
-| 409 | `identity_taken` |
-| 503 | `unavailable` (the secret store can't be reached) |
+| 409 | `identity_taken`, `not_connected` (the agent has no bot) |
+| 502 | `channel_refused` (Telegram refused, or couldn't be reached) |
+| 503 | `unavailable` (the secret store can't be reached), `not_configured` (`channel-egress` was deployed without ingress's origin) |
 | 410 | `bootstrap_disabled` |
 | 413 | `too_large` |
 | 503 | `unavailable` (Access's keys couldn't be loaded) |
@@ -59,6 +61,7 @@ A channel's secret, such as a Telegram bot token, never goes through a command, 
 1. `connectTelegram` answers with the path of a one-time form, for example `/forms/<token>`.
 2. The owner opens `https://<admin hostname>/forms/<token>` in a browser. It is behind the same Access login and owner check as the commands.
 3. The owner pastes the token from BotFather. The admin API passes it straight to `channel-egress`'s `ChannelForms` entrypoint, which checks it with Telegram (`getMe`) and stores it encrypted (`docs/secrets.md`).
+4. `channel-egress` then registers the bot's webhook, so Telegram sends the bot's messages to ingress. If that fails, the page says why. The token stays stored, and `registerTelegramWebhook` tries again.
 
 The link expires after 15 minutes, works once, and closes after five refused tokens.
 
@@ -69,7 +72,11 @@ Form pages are HTML:
 
 ## Setting it up
 
-1. **Deploy `ingress`, `conversation-runtime` and `channel-egress` first.** The admin API's bindings point at their objects and at `channel-egress`'s forms. `channel-egress` needs its `SECRETS_KEY` (`docs/secrets.md`).
+1. **Deploy the other Workers first, in this order.** Each one's bindings point only at Workers before it:
+   1. `llm-gateway`;
+   2. `channel-egress`, with its `SECRETS_KEY` and `--var INGRESS_ORIGIN:https://<ingress hostname>` (`docs/secrets.md`);
+   3. `conversation-runtime`;
+   4. `ingress`, with `--domain <ingress hostname>`. Telegram's webhooks reach it there, and its `workers.dev` URL turns off. Later deploys need the same flag.
 2. **Create a self-hosted Access application** for the admin API's hostname, with a policy that allows only the owner. Do this before step 4: whoever passes Access and holds the token becomes the owner. Note the team domain (`https://<team>.cloudflareaccess.com`) and the application's AUD tag.
 3. **Keep the instance's values out of the repository.** The hostname and the Access values belong to one deployment, so they go in as flags when deploying (step 5), and `wrangler.jsonc` stays the same for every instance:
    - `--domain <admin hostname>`: a custom domain on one of the owner's zones. Wrangler creates its DNS record. `workers_dev` and preview URLs stay off.

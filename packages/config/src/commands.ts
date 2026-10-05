@@ -84,7 +84,7 @@ export interface ConfigPorts {
     setTimeZone(userId: string, timeZone: string): Promise<TimeZoneResult>;
   };
   /** The secure forms that take a channel's secrets, in channel-egress (ADR-0013). */
-  channels: Pick<ChannelFormsContract, "createTelegramForm">;
+  channels: Pick<ChannelFormsContract, "createTelegramForm" | "registerTelegramWebhook">;
 }
 
 export type CommandResult<T> =
@@ -96,6 +96,9 @@ export type CommandResult<T> =
         | "invalid_input"
         | "unknown_agent"
         | "unavailable"
+        | "not_connected"
+        | "not_configured"
+        | "channel_refused"
         | Extract<IdentityResult, { ok: false }>["reason"];
     };
 
@@ -219,6 +222,29 @@ export function createConfigCommands(ports: ConfigPorts) {
         return form.reason === "invalid_input" ? invalid : { ok: false, reason: "unavailable" };
       }
       return { ok: true, value: { path: `/forms/${form.token}`, expiresAt: form.expiresAt } };
+    },
+
+    /**
+     * Points an agent's Telegram bot at ingress again. The secure form already does this; it is
+     * for a failed registration and for a new ingress hostname. Refusals: no bot connected
+     * (`not_connected`), ingress's origin not set at deploy (`not_configured`), or Telegram
+     * refused (`channel_refused`).
+     */
+    async registerTelegramWebhook(
+      actor: Actor,
+      input: unknown,
+    ): Promise<CommandResult<{ agentId: string; registered: true }>> {
+      if (!isOwner(actor)) return forbidden;
+      const { agentId } = (input ?? {}) as { agentId?: unknown };
+      if (!isAgentId(agentId)) return invalid;
+      if (!(await ports.registry.get(agentId))) return { ok: false, reason: "unknown_agent" };
+      const result = await ports.channels.registerTelegramWebhook(agentId);
+      if (result.ok) return { ok: true, value: { agentId, registered: true } };
+      if (result.reason === "invalid_input") return invalid;
+      return {
+        ok: false,
+        reason: result.reason === "store_unavailable" ? "unavailable" : result.reason,
+      };
     },
 
     /**

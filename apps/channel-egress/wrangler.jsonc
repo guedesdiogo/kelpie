@@ -12,6 +12,10 @@
   // The key that encrypts the secret store (ADR-0013): 32 random bytes, base64. `docs/secrets.md`
   // says how to make it.
   "secrets": { "required": ["SECRETS_KEY"] },
+  // Ingress's public origin (`https://<ingress hostname>`), where bots' webhooks point. It belongs to
+  // one deployment, so it goes in as a `--var` flag when deploying (docs/secrets.md); while it is
+  // empty, no webhook is registered.
+  "vars": { "INGRESS_ORIGIN": "" },
   "durable_objects": {
     "bindings": [{ "name": "SECRET_STORE", "class_name": "SecretStore" }]
   },

@@ -1,6 +1,7 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { telegramWebhookUrl } from "../src/telegram-secret.ts";
 
 // The Worker runs in the test's isolate, so a stubbed global fetch stands in for the Bot API.
 
@@ -64,9 +65,15 @@ describe("ChannelForms", () => {
       ok: true,
       agentId: "sales",
       bot: { id: 123456789, username: "kelpie_bot" },
+      webhook: "registered",
     });
     expect(JSON.stringify(redeemed)).not.toContain(BOT_TOKEN);
-    expect(calls.map((call) => call.method)).toEqual(["getMe"]);
+    expect(calls.map((call) => call.method)).toEqual(["getMe", "setWebhook"]);
+    expect(calls[1]?.body).toEqual({
+      url: "https://ingress.test/webhooks/telegram/sales",
+      secret_token: expect.stringMatching(/^[A-Za-z0-9_-]{32,256}$/),
+      allowed_updates: ["message"],
+    });
 
     // The link works once.
     expect(await exports.ChannelForms.redeemTelegramForm(form.token, BOT_TOKEN)).toEqual({
@@ -132,6 +139,107 @@ describe("ChannelForms", () => {
     }));
     expect(JSON.stringify(rows)).not.toContain(BOT_TOKEN);
     expect(JSON.stringify(rows)).not.toContain(form.token);
+  });
+});
+
+describe("Telegram webhooks", () => {
+  /** The secret the bot was registered with, as Telegram would echo it. */
+  const registeredSecret = (calls: Call[]) =>
+    String(calls.findLast((call) => call.method === "setWebhook")?.body.secret_token);
+
+  it("registers again on request, with the secret already stored", async () => {
+    const calls = botApi();
+    await connect("again");
+    const first = registeredSecret(calls);
+
+    expect(await exports.ChannelForms.registerTelegramWebhook("again")).toEqual({ ok: true });
+    expect(calls.filter((call) => call.method === "setWebhook")).toHaveLength(2);
+    expect(registeredSecret(calls)).toBe(first);
+  });
+
+  it("keeps the token when Telegram refuses the webhook, and says so", async () => {
+    const answers: Record<string, () => Response> = {};
+    botApi((method) => answers[method]?.() ?? defaultAnswer(method));
+    answers.setWebhook = () => Response.json({ ok: false, error_code: 400 }, { status: 400 });
+
+    expect(await connect("refused")).toMatchObject({ ok: true, webhook: "channel_refused" });
+    expect(await exports.ChannelForms.registerTelegramWebhook("refused")).toEqual({
+      ok: false,
+      reason: "channel_refused",
+    });
+    expect(await exports.ChannelEgress.send("refused", destination, "hi")).toMatchObject({
+      ok: true,
+    });
+  });
+
+  it("registers nothing for an agent without a bot, or an id that can't exist", async () => {
+    const calls = botApi();
+    expect(await exports.ChannelForms.registerTelegramWebhook("nobody")).toEqual({
+      ok: false,
+      reason: "not_connected",
+    });
+    expect(await exports.ChannelForms.registerTelegramWebhook("Not An Agent")).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("builds the webhook URL only from an https origin", () => {
+    expect(telegramWebhookUrl("https://ingress.example", "sales")).toBe(
+      "https://ingress.example/webhooks/telegram/sales",
+    );
+    expect(telegramWebhookUrl("https://ingress.example/", "sales")).toBe(
+      "https://ingress.example/webhooks/telegram/sales",
+    );
+    for (const origin of [
+      "",
+      "http://ingress.example",
+      "https://ingress.example/base",
+      "https://ingress.example?x=1",
+      "https://user:pass@ingress.example",
+      "not a url",
+    ]) {
+      expect(telegramWebhookUrl(origin, "sales")).toBeNull();
+    }
+  });
+
+  it("verifies a webhook only with the secret of that agent's own bot", async () => {
+    const calls = botApi();
+    await connect("verified");
+    const secret = registeredSecret(calls);
+    await connect("other");
+    const otherSecret = registeredSecret(calls);
+
+    expect(await exports.ChannelWebhooks.verifyTelegram("verified", secret)).toEqual({ ok: true });
+    for (const presented of [otherSecret, `${secret}x`, "", null]) {
+      expect(await exports.ChannelWebhooks.verifyTelegram("verified", presented)).toEqual({
+        ok: false,
+        reason: "refused",
+      });
+    }
+    expect(await exports.ChannelWebhooks.verifyTelegram("nobody", secret)).toEqual({
+      ok: false,
+      reason: "refused",
+    });
+    expect(await exports.ChannelWebhooks.verifyTelegram("Not An Agent", secret)).toEqual({
+      ok: false,
+      reason: "refused",
+    });
+  });
+
+  it("refuses every webhook after a new form replaces the secret, until it registers again", async () => {
+    const calls = botApi();
+    await connect("rotated");
+    const old = registeredSecret(calls);
+    await connect("rotated");
+    const current = registeredSecret(calls);
+
+    expect(current).not.toBe(old);
+    expect(await exports.ChannelWebhooks.verifyTelegram("rotated", old)).toMatchObject({
+      ok: false,
+    });
+    expect(await exports.ChannelWebhooks.verifyTelegram("rotated", current)).toEqual({ ok: true });
   });
 });
 
