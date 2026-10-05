@@ -38,4 +38,10 @@ export default defineConfig({
       },
     }),
   ],
+  // The first test of each file waits for the workerd runtime to start, which takes seconds on a
+  // busy machine (#88). These budgets cover that start, not slow tests.
+  test: {
+    testTimeout: 20_000,
+    hookTimeout: 30_000,
+  },
 });
