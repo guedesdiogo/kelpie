@@ -9,13 +9,13 @@
   // The only public surface is POST /qualify on workers.dev, behind x-spike-token.
   "workers_dev": true,
   "preview_urls": false,
-  "ai": { "binding": "AI" },
   "vars": {
-    // A gateway with "Require provider credentials" off: Jev is paid only through Unified Billing.
-    "GATEWAY_ID": "kelpie-qualifier"
+    // Pinned, as TypeSafe recommends when thresholds are tuned against a version.
+    "JEV_MODEL": "jev-1.13.0"
   },
   "secrets": {
-    // SPIKE_TOKEN: the value callers send in x-spike-token. It guards the credit balance.
-    "required": ["SPIKE_TOKEN"]
+    // TYPESAFE_API_KEY: the owner's key from console.typesafe.ai. Jev is called directly.
+    // SPIKE_TOKEN: the value callers send in x-spike-token. It guards the owner's TypeSafe credits.
+    "required": ["TYPESAFE_API_KEY", "SPIKE_TOKEN"]
   }
 }

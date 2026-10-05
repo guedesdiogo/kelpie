@@ -1,19 +1,15 @@
 import { endOfTurn, type QualifyResult } from "@kelpie/qualifier";
 
-/** The production request, or a variant that changes one thing, to find what the schema refuses. */
+/** The production request, or a variant that changes one thing, to find what the API refuses. */
 interface QualifyRequest {
   fragments: string[];
   /** `runDecision`'s `turn.end::` key prefix. Production sends it. */
   prefix?: boolean;
-  /** Adds `criteria: {true, false}` to the noul question, as Cloudflare's examples do. Production doesn't. */
+  /** Adds `criteria: {true, false}` to the noul question. Production doesn't. */
   criteria?: boolean;
 }
 
-type JevRun = (
-  model: string,
-  input: unknown,
-  options: { gateway: { id: string } },
-) => Promise<unknown>;
+const SYSTEM_ONE_URL = "https://api.typesafe.ai/v1/systemone";
 
 const NOUL_CRITERIA = {
   true: "The user has finished and is waiting for a reply",
@@ -44,18 +40,30 @@ export default {
           : question,
       ]),
     );
-    const run = env.AI.run.bind(env.AI) as unknown as JevRun;
     const colo = (request.cf as { colo?: string } | undefined)?.colo ?? null;
 
-    // Workers advance the clock on I/O, so this measures the binding call and nothing else.
+    // Workers advance the clock on I/O, so this measures the call to TypeSafe, body included.
     const started = Date.now();
     try {
-      const raw = await run(
-        "typesafe/jev",
-        { state: endOfTurn.state(context), questions },
-        { gateway: { id: env.GATEWAY_ID } },
-      );
+      const response = await fetch(SYSTEM_ONE_URL, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${env.TYPESAFE_API_KEY}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ model: env.JEV_MODEL, state: endOfTurn.state(context), questions }),
+      });
+      const text = await response.text();
       const ms = Date.now() - started;
+      if (!response.ok) {
+        return Response.json({
+          ok: false,
+          ms,
+          colo,
+          error: `${response.status}: ${text.slice(0, 500)}`,
+        });
+      }
+      const raw: unknown = JSON.parse(text);
       return Response.json({ ok: true, ms, colo, raw, policy: policyOnRaw(raw, prefix, context) });
     } catch (error) {
       const ms = Date.now() - started;
@@ -76,10 +84,7 @@ function policyOnRaw(raw: unknown, prefix: string, context: { fragments: string[
       .filter(([key]) => key.startsWith(prefix))
       .map(([key, answer]) => [key.slice(prefix.length), answer]),
   ) as QualifyResult["answers"];
-  return endOfTurn.policy(
-    { answers: stripped, provider: "jev-workers-ai", calibrated: true },
-    context,
-  );
+  return endOfTurn.policy({ answers: stripped, provider: "jev-http", calibrated: true }, context);
 }
 
 async function tokenMatches(presented: string | null, expected: string): Promise<boolean> {
