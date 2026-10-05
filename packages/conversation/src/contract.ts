@@ -1,0 +1,42 @@
+import type { ChannelId } from "@kelpie/channels";
+
+// The ConversationAgent's contract with ingress, which reaches it through a Durable Object binding
+// to another Worker. It has its own entry point (`@kelpie/conversation/contract`), so ingress
+// imports these types without the rest of the package.
+
+/** Where a conversation's replies go. */
+export interface Destination {
+  channel: ChannelId;
+  threadId: string;
+}
+
+/** One inbound message, already admitted by `ingress` (ADR-0004, ADR-0015). */
+export interface InboundMessage {
+  /** The agent that answers; its `AgentHost` holds the settings. */
+  agentId: string;
+  providerMessageId: string;
+  /** The admitted author. */
+  userId: string;
+  text: string;
+  destination: Destination;
+  /** When the provider says the message was sent (epoch ms). */
+  sentAt: number;
+  /** The author's IANA time zone, from their admission, or null while they haven't set one. */
+  timeZone: string | null;
+}
+
+export type IngestResult =
+  | {
+      status: "accepted" | "duplicate";
+      /** When the buffered messages will be answered, or null if a turn already started. */
+      flushAt: number | null;
+    }
+  | {
+      status: "rejected";
+      reason: "destination_mismatch" | "agent_mismatch" | "too_long" | "empty";
+    };
+
+/** What ingress calls on a conversation's object. */
+export interface ConversationContract {
+  ingest(message: InboundMessage): Promise<IngestResult>;
+}

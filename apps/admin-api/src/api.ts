@@ -48,7 +48,10 @@ const STATUS: Record<Failure, number> = {
   unknown_user: 404,
   unknown_identity: 404,
   identity_taken: 409,
+  not_connected: 409,
   unavailable: 503,
+  not_configured: 503,
+  channel_refused: 502,
 };
 
 type Command = (
@@ -70,6 +73,8 @@ const COMMANDS: Record<string, Command> = {
   disableIdentity: (commands, actor, input) => commands.disableIdentity(actor, input),
   setTimeZone: (commands, actor, input) => commands.setTimeZone(actor, input),
   connectTelegram: (commands, actor, input) => commands.connectTelegram(actor, input),
+  registerTelegramWebhook: (commands, actor, input) =>
+    commands.registerTelegramWebhook(actor, input),
 };
 
 /**

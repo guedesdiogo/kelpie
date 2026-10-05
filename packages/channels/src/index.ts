@@ -18,10 +18,13 @@ export {
 export type {
   ChannelEgressContract,
   ChannelFormsContract,
+  ChannelWebhooksContract,
   DeliveryFailure,
   EgressDestination,
   SendOutcome,
   TypingOutcome,
+  WebhookRegistration,
+  WebhookRegistrationFailure,
 } from "./egress.ts";
 export { type CanonicalEvent, type ChannelId, dedupeKey, type MessagePart } from "./events.ts";
 

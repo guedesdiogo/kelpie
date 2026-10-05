@@ -6,14 +6,9 @@ import {
   type SendOutcome,
   typingRenewIntervalMs,
 } from "@kelpie/channels";
+import type { Destination } from "@kelpie/conversation/contract";
 import { fromNdjsonStream, type LlmEvent, type ModelTier, type RoutedRequest } from "@kelpie/llm";
 import type { Qualifier } from "@kelpie/qualifier";
-
-/** Where a conversation's replies go. */
-export interface Destination {
-  channel: ChannelId;
-  threadId: string;
-}
 
 /** One model call: its events, and a way to stop it on the gateway's side. */
 export interface ModelCall {

@@ -35,11 +35,14 @@ export async function submitForm(
   }
   const result = await forms.redeemTelegramForm(token, botToken);
   if (result.ok) {
-    return page(
-      200,
-      "Telegram connected",
-      `<p>@${escapeHtml(result.bot.username)} now answers for <code>${escapeHtml(result.agentId)}</code>. You can close this page.</p>`,
-    );
+    const bot = `@${escapeHtml(result.bot.username)}`;
+    const agent = `<code>${escapeHtml(result.agentId)}</code>`;
+    // The token is stored either way; only the webhook needs another try.
+    const body =
+      result.webhook === "registered"
+        ? `<p>${bot} now answers for ${agent}. You can close this page.</p>`
+        : `<p>${bot} is connected to ${agent}, but Telegram couldn't be pointed at Kelpie (<code>${escapeHtml(result.webhook)}</code>). Until it is, messages to the bot do not reach Kelpie. Once that is fixed, run the <code>registerTelegramWebhook</code> command for ${agent}.</p>`;
+    return page(200, "Telegram connected", body);
   }
   if (result.reason === "invalid_token" || result.reason === "token_refused") {
     // A form closes after a few refused values; then the link is spent.

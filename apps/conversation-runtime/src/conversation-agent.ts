@@ -8,13 +8,19 @@ import {
   stampOf,
   withoutTypedStamps,
 } from "@kelpie/conversation";
+import type {
+  ConversationContract,
+  Destination,
+  InboundMessage,
+  IngestResult,
+} from "@kelpie/conversation/contract";
 import type { AssistantMessage, ChatMessage, LlmEvent } from "@kelpie/llm";
 import { Agent, type FiberRecoveryContext } from "agents";
 import { and, asc, count, eq, inArray, isNull, max } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
-import { type ConversationPorts, type Destination, portsFor } from "./ports.ts";
+import { type ConversationPorts, portsFor } from "./ports.ts";
 import * as schema from "./schema.ts";
 
 /** Bounds on what one conversation accepts. */
@@ -31,32 +37,6 @@ const FIBER_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const MAX_SEND_ATTEMPTS = 3;
 /** A rate limit asking for a longer wait than this fails the turn instead of stalling it. */
 const MAX_RATE_LIMIT_WAIT_MS = 30_000;
-
-/** One inbound message, already admitted by `ingress` (ADR-0004, ADR-0015). */
-export interface InboundMessage {
-  /** The agent that answers; its `AgentHost` holds the settings. */
-  agentId: string;
-  providerMessageId: string;
-  /** The admitted author. */
-  userId: string;
-  text: string;
-  destination: Destination;
-  /** When the provider says the message was sent (epoch ms). */
-  sentAt: number;
-  /** The author's IANA time zone, from their admission, or null while they haven't set one. */
-  timeZone: string | null;
-}
-
-export type IngestResult =
-  | {
-      status: "accepted" | "duplicate";
-      /** When the buffered messages will be answered, or null if a turn already started. */
-      flushAt: number | null;
-    }
-  | {
-      status: "rejected";
-      reason: "destination_mismatch" | "agent_mismatch" | "too_long" | "empty";
-    };
 
 interface TurnInFlight {
   controller: AbortController;
@@ -78,7 +58,7 @@ interface TurnInFlight {
  * and kept with the turn. The object trusts its caller, `ingress`, which admits senders before
  * anything else. A conversation is bound to the destination and the agent of its first message.
  */
-export class ConversationAgent extends Agent<Env> {
+export class ConversationAgent extends Agent<Env> implements ConversationContract {
   readonly #db: DrizzleSqliteDODatabase<typeof schema>;
   readonly #inFlight = new Map<number, TurnInFlight>();
   /** Serializes flush planning, so concurrent messages can't arm two schedules. */

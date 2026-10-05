@@ -1,4 +1,5 @@
 import type { ChannelIdentity, IdentityStatus } from "@kelpie/access";
+import type { WebhookRegistrationFailure } from "@kelpie/channels";
 import { describe, expect, it } from "vitest";
 import { type Actor, type ConfigPorts, createConfigCommands } from "../src/commands.ts";
 import { type AgentSettings, DEFAULT_SETTINGS } from "../src/settings.ts";
@@ -90,6 +91,17 @@ function fakePorts() {
         return agentId === "broken"
           ? { ok: false, reason: "store_unavailable" }
           : { ok: true, token: "form-token", expiresAt: 1_000 };
+      },
+      async registerTelegramWebhook(agentId) {
+        calls.push(`registerTelegramWebhook ${agentId}`);
+        const failures: Record<string, WebhookRegistrationFailure> = {
+          broken: "store_unavailable",
+          unwired: "not_connected",
+          unhosted: "not_configured",
+          refused: "channel_refused",
+        };
+        const reason = failures[agentId];
+        return reason ? { ok: false, reason } : { ok: true };
       },
     },
   };
@@ -309,6 +321,48 @@ describe("configuration commands", () => {
       reason: "forbidden",
     });
     expect(calls.filter((call) => call.startsWith("createTelegramForm"))).toEqual([]);
+  });
+
+  it("registers an agent's Telegram webhook again, for the owner and an agent that exists", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+    await commands.createAgent(owner, { id: "sales", name: "Sales" });
+
+    expect(await commands.registerTelegramWebhook(owner, { agentId: "sales" })).toEqual({
+      ok: true,
+      value: { agentId: "sales", registered: true },
+    });
+    expect(calls).toContain("registerTelegramWebhook sales");
+
+    expect(await commands.registerTelegramWebhook(owner, { agentId: "ghost" })).toEqual({
+      ok: false,
+      reason: "unknown_agent",
+    });
+    expect(await commands.registerTelegramWebhook(owner, { agentId: "Not An Id" })).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(await commands.registerTelegramWebhook(member, { agentId: "sales" })).toEqual({
+      ok: false,
+      reason: "forbidden",
+    });
+    expect(calls.filter((call) => call.startsWith("registerTelegramWebhook"))).toEqual([
+      "registerTelegramWebhook sales",
+    ]);
+  });
+
+  it.each([
+    ["unwired", "not_connected"],
+    ["unhosted", "not_configured"],
+    ["refused", "channel_refused"],
+    ["broken", "unavailable"],
+  ])("says why registering %s's webhook failed: %s", async (agentId, reason) => {
+    const commands = createConfigCommands(fakePorts().ports);
+    await commands.createAgent(owner, { id: agentId, name: agentId });
+    expect(await commands.registerTelegramWebhook(owner, { agentId })).toEqual({
+      ok: false,
+      reason,
+    });
   });
 
   it("reports the secret store being unavailable", async () => {

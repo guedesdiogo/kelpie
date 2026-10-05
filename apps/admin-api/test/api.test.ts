@@ -73,6 +73,9 @@ function world({
       async createTelegramForm() {
         return { ok: true, token: "form-token-1", expiresAt: NOW_MS + 900_000 };
       },
+      async registerTelegramWebhook(agentId) {
+        return agentId === "unwired" ? { ok: false, reason: "not_connected" } : { ok: true };
+      },
     },
   };
   const bootstraps: { userId: string; accessSub: string }[] = [];
@@ -80,6 +83,7 @@ function world({
   const forms = new Map<string, { agentId: string; refusals: number }>([
     ["form-token-1", { agentId: "sales", refusals: 0 }],
     ["form-odd", { agentId: "<i>odd</i>", refusals: 0 }],
+    ["form-unhooked", { agentId: "unhooked", refusals: 0 }],
   ]);
   const redeemed: { token: string; botToken: string }[] = [];
   const deps: AdminDeps = {
@@ -124,7 +128,12 @@ function world({
           return { ok: false, reason: botToken.includes(":") ? "token_refused" : "invalid_token" };
         }
         forms.delete(token);
-        return { ok: true, agentId: form.agentId, bot: { id: 1, username: "kelpie_<b>bot" } };
+        return {
+          ok: true,
+          agentId: form.agentId,
+          bot: { id: 1, username: "kelpie_<b>bot" },
+          webhook: form.agentId === "unhooked" ? "channel_refused" : "registered",
+        };
       },
     },
     bootstrapToken: TOKEN,
@@ -385,11 +394,47 @@ describe("admin API secure forms", () => {
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain("@kelpie_&lt;b&gt;bot");
+    expect(html).toContain("now answers");
     expect(html).not.toContain(GOOD_BOT_TOKEN);
     expect(redeemed).toEqual([{ token: "form-token-1", botToken: GOOD_BOT_TOKEN }]);
 
     // The link works once.
     expect((await handle(new Request(formUrl), deps)).status).toBe(404);
+  });
+
+  it("says when the token is stored but Telegram couldn't be pointed at Kelpie", async () => {
+    const { deps } = world();
+    const response = await handle(
+      new Request("https://admin.example/forms/form-unhooked", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://admin.example",
+        },
+        body: new URLSearchParams({ botToken: GOOD_BOT_TOKEN }).toString(),
+      }),
+      deps,
+    );
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).not.toContain("now answers");
+    expect(html).toContain("channel_refused");
+    expect(html).toContain("registerTelegramWebhook");
+    expect(html).toContain("do not reach Kelpie");
+  });
+
+  it("registers a bot's webhook again on command, and says why it couldn't", async () => {
+    const { deps } = world();
+    await call(deps, "/commands/createAgent", { id: "sales", name: "Sales" });
+    await call(deps, "/commands/createAgent", { id: "unwired", name: "Unwired" });
+    expect(await call(deps, "/commands/registerTelegramWebhook", { agentId: "sales" })).toEqual({
+      status: 200,
+      body: { ok: true, value: { agentId: "sales", registered: true } },
+    });
+    expect(await call(deps, "/commands/registerTelegramWebhook", { agentId: "unwired" })).toEqual({
+      status: 409,
+      body: { ok: false, reason: "not_connected" },
+    });
   });
 
   it("asks again after a refused token, and closes when the form does", async () => {
