@@ -3,7 +3,8 @@ import { env, exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { telegramWebhookUrl } from "../src/telegram-secret.ts";
 
-// The Worker runs in the test's isolate, so a stubbed global fetch stands in for the Bot API.
+// The Worker runs in the test's isolate, so a stubbed global fetch stands in for the Bot API. It
+// builds a Request from each call first, so the runtime checks the options production sends.
 
 const BOT_TOKEN = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw-test";
 const destination = { channel: "telegram", threadId: "1001" } as const;
@@ -19,6 +20,7 @@ interface Call {
 function botApi(answer: (method: string) => Response = defaultAnswer) {
   const calls: Call[] = [];
   vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+    new Request(input, init);
     const method = input.split("/").at(-1) ?? "";
     calls.push({ method, url: input, body: JSON.parse(String(init?.body ?? "{}")) });
     return answer(method);

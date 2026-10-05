@@ -138,8 +138,9 @@ export class TelegramAdapter implements ChannelAdapter {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-        // The token is in the path; a redirect would carry it elsewhere.
-        redirect: "error",
+        // The token is in the path; a redirect would carry it elsewhere. Workers' fetch only takes
+        // "follow" or "manual", so a redirect comes back as an answer and fails below.
+        redirect: "manual",
       });
     } catch {
       // The runtime's error can quote the URL, and with it the token.
