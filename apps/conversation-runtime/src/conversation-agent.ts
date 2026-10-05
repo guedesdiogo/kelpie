@@ -14,7 +14,7 @@ import type {
   InboundMessage,
   IngestResult,
 } from "@kelpie/conversation/contract";
-import type { AssistantMessage, ChatMessage, LlmEvent } from "@kelpie/llm";
+import type { AssistantMessage, ChatMessage, LlmEvent, Usage } from "@kelpie/llm";
 import { Agent, type FiberRecoveryContext } from "agents";
 import { and, asc, count, eq, inArray, isNull, max } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
@@ -218,9 +218,14 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   }
 
   /** The status of every turn, for inspection. */
-  turns(): { id: number; status: string; attempts: number }[] {
+  turns(): { id: number; status: string; attempts: number; usage: Usage[] | null }[] {
     return this.#db
-      .select({ id: schema.turns.id, status: schema.turns.status, attempts: schema.turns.attempts })
+      .select({
+        id: schema.turns.id,
+        status: schema.turns.status,
+        attempts: schema.turns.attempts,
+        usage: schema.turns.usage,
+      })
       .from(schema.turns)
       .orderBy(asc(schema.turns.id))
       .all();
@@ -350,6 +355,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     }
     if (!this.#isRunning(turnId)) return;
     if (!finish) throw new Error("The model stream ended without a reply");
+    this.#recordUsage(turnId, finish.usage);
     if (finish.reason === "refusal") {
       this.#db
         .update(schema.turns)
@@ -374,6 +380,22 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       });
     });
     await this.#deliver(turnId, controller.signal);
+  }
+
+  /**
+   * Keeps what the model call used on its turn, and logs the totals: counts only, never text
+   * (#64). `input` is the whole prompt, cached or not, so it shows the history's size.
+   */
+  #recordUsage(turnId: number, usage: Usage[]): void {
+    this.#db.update(schema.turns).set({ usage }).where(eq(schema.turns.id, turnId)).run();
+    const sum = (count: (attempt: Usage) => number) =>
+      usage.reduce((total, attempt) => total + count(attempt), 0);
+    console.log("conversation: turn usage", {
+      attempts: usage.length,
+      input: sum((attempt) => attempt.inputUncached + attempt.cacheRead + attempt.cacheWrite),
+      cacheRead: sum((attempt) => attempt.cacheRead),
+      output: sum((attempt) => attempt.output),
+    });
   }
 
   /** Sends the turn's pending bubbles in order, stopping as soon as the turn is settled. */

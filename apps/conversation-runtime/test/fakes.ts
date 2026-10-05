@@ -1,6 +1,6 @@
 import type { SendOutcome } from "@kelpie/channels";
 import type { Destination } from "@kelpie/conversation/contract";
-import type { AssistantMessage, LlmEvent, RoutedRequest } from "@kelpie/llm";
+import type { AssistantMessage, LlmEvent, RoutedRequest, Usage } from "@kelpie/llm";
 import type { Qualifier } from "@kelpie/qualifier";
 import type { ConversationPorts, ModelCall } from "../src/ports.ts";
 
@@ -27,6 +27,11 @@ export const refuse = (): ModelScript => ({ kind: "refuse" });
 export const hang = (): ModelScript => ({ kind: "hang" });
 export const fail = (): ModelScript => ({ kind: "fail" });
 export const truncate = (): ModelScript => ({ kind: "truncate" });
+
+/** What the fake model reports for every answer: one attempt, part of the prompt from cache. */
+export const FAKE_USAGE: Usage[] = [
+  { model: "claude-haiku-4-5", inputUncached: 1_200, cacheRead: 800, cacheWrite: 0, output: 40 },
+];
 
 function assistant(text: string): AssistantMessage {
   return {
@@ -109,11 +114,21 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
               yield { type: "text", delta: "partial" };
               return;
             case "refuse":
-              yield { type: "finish", reason: "refusal", message: assistant(""), usage: [] };
+              yield {
+                type: "finish",
+                reason: "refusal",
+                message: assistant(""),
+                usage: FAKE_USAGE,
+              };
               return;
             case "reply":
               yield { type: "text", delta: script.text };
-              yield { type: "finish", reason: "stop", message: assistant(script.text), usage: [] };
+              yield {
+                type: "finish",
+                reason: "stop",
+                message: assistant(script.text),
+                usage: FAKE_USAGE,
+              };
           }
         }
         return {
