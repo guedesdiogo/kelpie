@@ -87,7 +87,16 @@ export function heuristicFinished({ fragments }: EndOfTurnContext): number {
   if (/^\/\w+(\s|$)/.test(last)) return 0.9; // a command such as /status
   if (/\?[!?]*$/.test(last)) return 0.9;
   if (/(\.\.\.|…|[,:;])$/.test(last)) return 0.2;
-  if (DANGLING.has(bare.split(/\s+/).at(-1) ?? "")) return 0.15;
+  const words = bare.split(/\s+/);
+  // "fechado então", "beleza então": after an acknowledgement, "então" settles the matter.
+  const lastWord = words.at(-1) ?? "";
+  if (
+    (lastWord === "então" || lastWord === "entao") &&
+    ACKNOWLEDGEMENTS.has(words.slice(0, -1).join(" "))
+  ) {
+    return 0.85;
+  }
+  if (DANGLING.has(lastWord)) return 0.15;
   if (ACKNOWLEDGEMENTS.has(bare)) return 0.85;
   if (/[.!]$/.test(last) && last.length >= 10) return 0.85;
   return 0.5;

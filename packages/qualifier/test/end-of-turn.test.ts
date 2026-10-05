@@ -55,6 +55,23 @@ describe("heuristicFinished", () => {
     expect(finished).toBeLessThan(0.8);
   });
 
+  it.each([
+    ["fechado então", "an agreement closed with 'então'"],
+    ["fechado então 🤝", "the same, with an emoji"],
+    ["beleza então", "an acknowledgement closed with 'então'"],
+    ["ok então", "a short acknowledgement closed with 'então'"],
+    ["blz entao", "the same, written without the accent"],
+  ])("leans finished for %s (%s)", (text) => {
+    expect(heuristicFinished(ctx(text))).toBeGreaterThanOrEqual(0.8);
+  });
+
+  it.each([
+    ["e então", "'então' after a connective"],
+    ["eu queria saber então", "'então' after content that is still open"],
+  ])("still leans unfinished for %s (%s)", (text) => {
+    expect(heuristicFinished(ctx(text))).toBeLessThanOrEqual(0.3);
+  });
+
   it("treats a greeting with small talk as the start of a message", () => {
     expect(heuristicFinished(ctx("bom dia, tudo bem?"))).toBeLessThanOrEqual(0.3);
   });
