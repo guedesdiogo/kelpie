@@ -11,6 +11,7 @@ import {
   type OwnerResult,
   type PairingCodeResult,
   type PairingResult,
+  type RelinkResult,
   type StrangerNotice,
   type TimeZoneResult,
 } from "@kelpie/access";
@@ -340,6 +341,59 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
     return { ok: true };
   }
 
+  /**
+   * Recovery (#71): relinks the owner to a new Cloudflare Access login, for when Access gave them a
+   * new `sub`. The caller holds the proof, a valid recovery token set at deploy and an Access JWT
+   * for `accessSub`; the token's hash is recorded so it works once. The owner's `userId` and channel
+   * identities stay. Relinking to the login the owner already has changes nothing, but still spends
+   * the token, and is audited.
+   */
+  relinkOwnerAccess(accessSub: string, tokenHash: string): RelinkResult {
+    if (!isNonEmpty(accessSub) || !isNonEmpty(tokenHash)) {
+      return { ok: false, reason: "invalid_user" };
+    }
+    const owner = this.#owner();
+    if (!owner) return { ok: false, reason: "no_owner" };
+    const spent = this.#db
+      .select({ hash: schema.spentTokens.hash })
+      .from(schema.spentTokens)
+      .where(eq(schema.spentTokens.hash, tokenHash))
+      .get();
+    if (spent) return { ok: false, reason: "token_spent" };
+    const access: ChannelIdentity = { channel: ACCESS_SOURCE, channelUserId: accessSub };
+    const existing = this.#identity(access);
+    if (existing && existing.userId !== owner.userId) {
+      return { ok: false, reason: "identity_taken" };
+    }
+    const at = new Date();
+    this.#db.transaction((tx) => {
+      tx.insert(schema.spentTokens).values({ hash: tokenHash, spentAt: at }).run();
+      if (!existing) {
+        tx.delete(schema.identities)
+          .where(
+            and(
+              eq(schema.identities.userId, owner.userId),
+              eq(schema.identities.channel, ACCESS_SOURCE),
+            ),
+          )
+          .run();
+        tx.insert(schema.identities)
+          .values({ ...access, userId: owner.userId, status: "enabled", updatedAt: at })
+          .run();
+      }
+      // Audited either way: the log is the trace of every spent token.
+      tx.insert(schema.auditLog)
+        .values({
+          at,
+          action: "owner.access_relinked",
+          userId: owner.userId,
+          channel: ACCESS_SOURCE,
+        })
+        .run();
+    });
+    return { ok: true };
+  }
+
   /** Every identity with its status. The values are personal data: mask them in any output. */
   listIdentities(): (ChannelIdentity & { status: IdentityStatus })[] {
     return this.#db
@@ -475,7 +529,8 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
   }
 
   #setStatus(identity: ChannelIdentity, status: "enabled" | "disabled"): IdentityResult {
-    // The owner's Access login changes only through the bootstrap, so nothing can lock them out.
+    // The owner's Access login changes only through the bootstrap or a token-gated recovery, so no
+    // command can lock them out.
     if (!isValidIdentity(identity)) return { ok: false, reason: "invalid_identity" };
     const existing = this.#identity(identity);
     if (!existing) return { ok: false, reason: "unknown_identity" };
@@ -511,7 +566,7 @@ function isNonEmpty(value: unknown): value is string {
 }
 
 // RPC callers aren't type-checked, so identities are checked where they enter storage.
-// An Access identity enters only through `bootstrapOwner`.
+// An Access identity enters only through `bootstrapOwner` or `relinkOwnerAccess`, never here.
 function isValidIdentity(identity: ChannelIdentity): identity is MessagingIdentity {
   return (
     (CHANNEL_IDS as readonly string[]).includes(identity?.channel) &&

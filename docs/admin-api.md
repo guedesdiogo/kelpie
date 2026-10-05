@@ -14,7 +14,7 @@ The owner's JSON API for the configuration commands (ADR-0013, Story 3.10). It r
    If the team domain or the AUD tag isn't configured, every request is refused.
 3. **The `Directory`.** It admits the token's `sub` as an identity from the `cloudflare-access` source, for the agent id `*`, which names no agent. Owner-only commands check the admitted role (ADR-0015). Emails are never compared.
 
-No configuration command can add or enable an Access identity. Only the first-run bootstrap does.
+No configuration command can add, enable or replace an Access identity. The first-run bootstrap adds the owner's, and a token-gated recovery replaces it ("Recovering access").
 
 ## Endpoints
 
@@ -35,6 +35,7 @@ Every endpoint is a `POST` with a JSON body.
 | `/commands/pairTelegram` | `{ "agentId": "sales" }`; answers `{ "link": "https://t.me/<bot>?start=<code>", "expiresAt": … }` (see "Pairing") |
 | `/commands/registerTelegramWebhook` | `{ "agentId": "sales" }`; points the agent's bot at ingress again, after a failed registration or a new ingress hostname |
 | `/bootstrap` | `{ "token": "…" }` |
+| `/recover` | `{ "token": "…" }`, with the recovery token ("Recovering access") |
 
 **Answers:**
 - A success is `200 { "ok": true, "value": … }`; the bootstrap answers `201`.
@@ -42,14 +43,14 @@ Every endpoint is a `POST` with a JSON body.
 
 | Status | Reasons |
 |---|---|
-| 400 | `invalid_input`, `invalid_identity`, `invalid_json` |
+| 400 | `invalid_input`, `invalid_identity`, `invalid_json`, `invalid_user` |
 | 401 | `unauthenticated` |
-| 403 | `forbidden`, `no_owner`, `invalid_bootstrap_token` |
+| 403 | `forbidden`, `no_owner`, `invalid_bootstrap_token`, `invalid_recovery_token` |
 | 404 | `unknown_agent`, `unknown_identity`, `unknown_user`, `not_found` |
-| 409 | `not_paired` (a pending identity; pair it instead), `not_connected` (the agent has no bot) |
+| 409 | `not_paired` (a pending identity; pair it instead), `not_connected` (the agent has no bot), `identity_taken` (a recovery to a login another user holds) |
 | 502 | `channel_refused` (Telegram refused, or couldn't be reached) |
 | 503 | `unavailable` (the secret store can't be reached), `not_configured` (`channel-egress` was deployed without ingress's origin) |
-| 410 | `bootstrap_disabled` |
+| 410 | `bootstrap_disabled`, `recovery_token_spent` |
 | 413 | `too_large` |
 | 503 | `unavailable` (Access's keys couldn't be loaded) |
 
@@ -122,6 +123,31 @@ Form pages are HTML:
    - The Worker's `BOOTSTRAP_TOKEN` stays. `wrangler.jsonc` lists it in `secrets.required`, so `wrangler deploy` refuses to deploy without it, and deleting it would make every later deploy fail.
    - It is harmless where it is: `/bootstrap` answers `410` once an owner exists, and the token stops being accepted at the expiry it carries.
 
+## Recovering access
+
+Access gives the owner a new `sub` if they are removed from the Zero Trust organization and added again, or log in through another organization. The admin API then answers `403 forbidden`, and the bootstrap is disabled because an owner exists. A recovery token relinks the owner to the new login. Their `userId`, agents and paired accounts stay.
+
+1. **Make a recovery token,** in the bootstrap token's format, valid for an hour:
+   ```bash
+   RECOVERY_TOKEN="$(( $(date +%s) + 3600 )).$(openssl rand -hex 32)"
+   ```
+2. **Set it on the Worker.** It is an optional secret: `secrets.required` doesn't list it, so it can be deleted afterwards.
+   ```bash
+   printf %s "$RECOVERY_TOKEN" | bunx wrangler secret put RECOVERY_TOKEN -c apps/admin-api/wrangler.jsonc
+   ```
+3. **Relink,** logged into Access with the new login:
+   ```bash
+   cloudflared access curl https://<admin hostname>/recover -X POST -H 'content-type: application/json' -d "{\"token\":\"$RECOVERY_TOKEN\"}"
+   ```
+   It answers `200 { "ok": true }`. Each token works once (`410 recovery_token_spent`). An unset, wrong or expired token is refused (`403 invalid_recovery_token`), and so is one that would live more than a day or that equals the bootstrap token.
+4. **Delete it:**
+   ```bash
+   bunx wrangler secret delete RECOVERY_TOKEN -c apps/admin-api/wrangler.jsonc
+   ```
+   Also delete the shell variable.
+
+Whoever passes Access and holds a live recovery token becomes the owner's admin login, so keep the Access policy limited to the owner, and the token's life short.
+
 ## Known limits
 
-- **Lockout.** Access gives the owner a new `sub` if they are removed from the Zero Trust organization and added again. The bootstrap is then disabled, so the owner can't reach the admin API. Recovery is [#71](https://github.com/guedesdiogo/kelpie/issues/71).
+- **Access policy.** The admin API trusts whoever the Access application lets through, with the owner's admission on top. The policy must allow only the owner, especially while a recovery token is set.

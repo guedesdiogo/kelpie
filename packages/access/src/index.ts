@@ -22,7 +22,8 @@ export const CHANNEL_IDS: readonly ChannelId[] = [
 
 /**
  * The owner's Cloudflare Access login, which the admin API admits. It is an identity source, not a
- * channel: only the first-run bootstrap adds one, and no configuration command can.
+ * channel: the first-run bootstrap adds one, a token-gated recovery replaces it, and no
+ * configuration command can do either.
  */
 export const ACCESS_SOURCE = "cloudflare-access";
 
@@ -107,6 +108,14 @@ export type PairingResult =
   | { ok: true; userId: string }
   | { ok: false; reason: "invalid_code" | "locked" | "identity_taken" | "invalid_identity" };
 
+/**
+ * Recovery (#71): relinking the owner to a new Access login. A token works once; a first run uses
+ * the bootstrap instead.
+ */
+export type RelinkResult =
+  | { ok: true }
+  | { ok: false; reason: "no_owner" | "token_spent" | "identity_taken" | "invalid_user" };
+
 /** Whether to tell the owner about a dropped stranger, and where: the owner's own account there. */
 export type StrangerNotice = { notify: true; ownerChannelUserId: string } | { notify: false };
 
@@ -118,6 +127,7 @@ export interface DirectoryContract {
   admit(identity: ChannelIdentity, agentId: string): Admission;
   ownerExists(): boolean;
   bootstrapOwner(userId: string, accessSub: string): OwnerResult;
+  relinkOwnerAccess(accessSub: string, tokenHash: string): RelinkResult;
   issuePairingCode(userId: string, channel: ChannelId): Promise<PairingCodeResult>;
   redeemPairingCode(code: string, identity: ChannelIdentity): Promise<PairingResult>;
   noticeStranger(sender: ChannelIdentity): StrangerNotice;
