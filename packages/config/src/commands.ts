@@ -300,7 +300,8 @@ export type ConfigCommands = ReturnType<typeof createConfigCommands>;
 
 function parseIdentity(input: unknown): ChannelIdentity | null {
   const { channel, channelUserId } = (input ?? {}) as Partial<Record<string, unknown>>;
-  // Messaging channels only: an Access identity enters through the first-run bootstrap alone.
+  // Messaging channels only: no command adds or changes an Access identity. The first-run bootstrap
+  // adds the owner's, and a token-gated recovery replaces it.
   if (!(CHANNEL_IDS as readonly unknown[]).includes(channel)) return null;
   if (typeof channelUserId !== "string") return null;
   const value = channelUserId.trim();

@@ -5,6 +5,7 @@ Kelpie keeps two kinds of secret (ADR-0013).
 - **Deploy secrets.** The owner sets these with `wrangler secret put`:
   - the first model key, on `llm-gateway`;
   - the bootstrap token, on `admin-api` (`docs/admin-api.md`);
+  - the recovery token, on `admin-api`, only while the owner recovers a changed Access login, then deleted (`docs/admin-api.md`, "Recovering access");
   - the store's encryption key, `SECRETS_KEY` on `channel-egress`.
 - **Everything else** (a bot token, an API key) goes into Kelpie's secret store through a one-time secure form, never through chat.
 

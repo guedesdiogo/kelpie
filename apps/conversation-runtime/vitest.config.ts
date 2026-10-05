@@ -18,6 +18,10 @@ export default defineConfig({
     }),
   ],
   test: {
+    // The first test of each file waits for the workerd runtime to start, which takes seconds on a
+    // busy machine (#88). These budgets cover that start, not slow tests.
+    testTimeout: 20_000,
+    hookTimeout: 30_000,
     // Only failures a test injected on purpose; any other unhandled error still fails the run.
     onUnhandledError: (error) => !error.message.includes(INJECTED_FAILURE),
   },

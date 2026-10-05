@@ -4,6 +4,7 @@ import {
   type Admission,
   type ChannelIdentity,
   type OwnerResult,
+  type RelinkResult,
 } from "@kelpie/access";
 import type { Actor, CommandResult, ConfigCommands } from "@kelpie/config";
 import type { Verification } from "./access-jwt.ts";
@@ -25,12 +26,18 @@ export interface AdminDeps {
     admit(identity: ChannelIdentity, agentId: string): Promise<Admission>;
     ownerExists(): Promise<boolean>;
     bootstrapOwner(userId: string, accessSub: string): Promise<OwnerResult>;
+    relinkOwnerAccess(accessSub: string, tokenHash: string): Promise<RelinkResult>;
   };
   commands: ConfigCommands;
   /** The one-time secure forms in channel-egress. */
   forms: FormDeps;
   /** The first-run token set at deploy (ADR-0013): `<expiry in epoch seconds>.<random>`. */
   bootstrapToken: string | undefined;
+  /**
+   * The recovery token (#71), in the same format. Set only while the owner recovers their Access
+   * login, then deleted; while it is unset, recovery is refused.
+   */
+  recoveryToken: string | undefined;
   now(): number;
   newUserId(): string;
 }
@@ -85,7 +92,8 @@ export async function handle(request: Request, deps: AdminDeps): Promise<Respons
   const { pathname } = new URL(request.url);
   if (pathname.startsWith("/forms/")) return handleForm(request, pathname, deps);
   const command = pathname.startsWith("/commands/") ? pathname.slice("/commands/".length) : null;
-  if (request.method !== "POST" || (pathname !== "/bootstrap" && !command)) {
+  const tokenRoute = pathname === "/bootstrap" || pathname === "/recover";
+  if (request.method !== "POST" || (!tokenRoute && !command)) {
     return refuse(404, "not_found");
   }
   if (command !== null && !Object.hasOwn(COMMANDS, command)) return refuse(404, "not_found");
@@ -107,6 +115,7 @@ export async function handle(request: Request, deps: AdminDeps): Promise<Respons
 
   try {
     if (pathname === "/bootstrap") return await bootstrap(identity.sub, body.value, deps);
+    if (pathname === "/recover") return await recover(identity.sub, body.value, deps);
     // `command` is a key of COMMANDS: checked above.
     return await run(COMMANDS[command as string] as Command, identity.sub, body.value, deps);
   } catch (error) {
@@ -189,7 +198,7 @@ async function run(
 async function bootstrap(accessSub: string, input: unknown, deps: AdminDeps): Promise<Response> {
   if (await deps.directory.ownerExists()) return refuse(410, "bootstrap_disabled");
   const { token } = (input ?? {}) as { token?: unknown };
-  if (!(await isValidBootstrapToken(token, deps.bootstrapToken, deps.now()))) {
+  if (!(await isValidDeployToken(token, deps.bootstrapToken, deps.now()))) {
     return refuse(403, "invalid_bootstrap_token");
   }
   const result = await deps.directory.bootstrapOwner(deps.newUserId(), accessSub);
@@ -201,19 +210,56 @@ async function bootstrap(accessSub: string, input: unknown, deps: AdminDeps): Pr
   return Response.json({ ok: true }, { status: 201 });
 }
 
+/**
+ * Recovery (#71): with the recovery token set at deploy, the Access login making this request
+ * replaces the owner's, when Access gave the owner a new `sub`. The owner's data stays. The
+ * `Directory` gets the token's hash, so each token works once.
+ */
+async function recover(accessSub: string, input: unknown, deps: AdminDeps): Promise<Response> {
+  const { token } = (input ?? {}) as { token?: unknown };
+  const configured = deps.recoveryToken;
+  // A recovery token is short-lived and its own: one that lives past a day, or that is also the
+  // bootstrap token, is refused, so a forgotten secret can't serve as a standing credential.
+  const expiry = Number(configured?.match(DEPLOY_TOKEN_FORMAT)?.[1]);
+  if (
+    typeof token !== "string" ||
+    configured === deps.bootstrapToken ||
+    !(expiry * 1_000 <= deps.now() + MAX_RECOVERY_TOKEN_LIFETIME_MS) ||
+    !(await isValidDeployToken(token, configured, deps.now()))
+  ) {
+    return refused("invalid_recovery_token", 403);
+  }
+  const hash = [...new Uint8Array(await digest(token))]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  const result = await deps.directory.relinkOwnerAccess(accessSub, hash);
+  if (result.ok) return Response.json({ ok: true });
+  if (result.reason === "no_owner") return refused("no_owner", 403);
+  if (result.reason === "token_spent") return refused("recovery_token_spent", 410);
+  return refused(result.reason, result.reason === "identity_taken" ? 409 : 400);
+}
+
+/** A refused recovery is logged by its reason only: never the token, never the login. */
+function refused(reason: string, status: number): Response {
+  console.warn("admin-api: recovery refused", { reason });
+  return refuse(status, reason);
+}
+
+const MAX_RECOVERY_TOKEN_LIFETIME_MS = 24 * 60 * 60_000;
+
 /** `<expiry in epoch seconds>.<at least 128 random bits in hex>`, as `docs/admin-api.md` makes it. */
-const BOOTSTRAP_TOKEN_FORMAT = /^(\d{1,12})\.[0-9a-f]{32,}$/;
+const DEPLOY_TOKEN_FORMAT = /^(\d{1,12})\.[0-9a-f]{32,}$/;
 
 /**
  * Compares in constant time, and honors the expiry the configured token carries. A configured
  * token in any other format is never accepted.
  */
-async function isValidBootstrapToken(
+async function isValidDeployToken(
   presented: unknown,
   configured: string | undefined,
   nowMs: number,
 ): Promise<boolean> {
-  const format = configured?.match(BOOTSTRAP_TOKEN_FORMAT);
+  const format = configured?.match(DEPLOY_TOKEN_FORMAT);
   if (!configured || !format || typeof presented !== "string") return false;
   if (nowMs / 1_000 > Number(format[1])) return false;
   const [a, b] = await Promise.all([digest(presented), digest(configured)]);

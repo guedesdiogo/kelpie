@@ -233,7 +233,7 @@ describe("Directory first-run bootstrap", () => {
     });
   });
 
-  it("refuses empty ids, and lets no other method add an Access identity", async () => {
+  it("refuses empty ids, and lets no pairing add an Access identity", async () => {
     const stub = directory("bootstrap-input");
     expect(await stub.bootstrapOwner(OWNER, " ")).toEqual({ ok: false, reason: "invalid_user" });
     await stub.registerOwner(OWNER);
@@ -258,6 +258,94 @@ describe("Directory first-run bootstrap", () => {
     expect(await stub.disableIdentity(access)).toEqual(refused);
     expect(await stub.enableIdentity(access)).toEqual(refused);
     expect(await stub.admit(access, ADMIN_AGENT_ID)).toMatchObject({ admitted: true });
+  });
+});
+
+describe("Directory access recovery", () => {
+  const oldSub = { channel: ACCESS_SOURCE, channelUserId: "sub-old" } as const;
+  const newSub = { channel: ACCESS_SOURCE, channelUserId: "sub-new" } as const;
+
+  async function bootstrapped(name: string) {
+    const stub = directory(name);
+    await stub.bootstrapOwner(OWNER, oldSub.channelUserId);
+    await pair(stub, telegram);
+    return stub;
+  }
+
+  it("relinks the owner to a new Access login, and keeps their userId and channels", async () => {
+    const stub = await bootstrapped("relink");
+
+    expect(await stub.relinkOwnerAccess(newSub.channelUserId, "a".repeat(64))).toEqual({
+      ok: true,
+    });
+
+    expect(await stub.admit(newSub, ADMIN_AGENT_ID)).toMatchObject({
+      admitted: true,
+      userId: OWNER,
+    });
+    expect(await stub.admit(oldSub, ADMIN_AGENT_ID)).toEqual({
+      admitted: false,
+      reason: "unknown_identity",
+    });
+    expect(await stub.admit(telegram, "sales")).toMatchObject({ admitted: true, userId: OWNER });
+    const rows = await runInDurableObject(stub, (_instance: Directory, state) =>
+      state.storage.sql.exec("SELECT action, channel FROM audit_log ORDER BY id").toArray(),
+    );
+    expect(rows.at(-1)).toEqual({ action: "owner.access_relinked", channel: ACCESS_SOURCE });
+    expect(JSON.stringify(rows)).not.toContain("sub-");
+  });
+
+  it("takes each token once, even to relink to the login the owner already has", async () => {
+    const stub = await bootstrapped("relink-once");
+    expect(await stub.relinkOwnerAccess(oldSub.channelUserId, "b".repeat(64))).toEqual({
+      ok: true,
+    });
+    expect(await stub.admit(oldSub, ADMIN_AGENT_ID)).toMatchObject({ admitted: true });
+    // The spent token is still audited, though nothing else changed.
+    expect((await auditActions(stub)).at(-1)).toBe("owner.access_relinked");
+    expect(await stub.relinkOwnerAccess(newSub.channelUserId, "b".repeat(64))).toEqual({
+      ok: false,
+      reason: "token_spent",
+    });
+    expect(await stub.admit(newSub, ADMIN_AGENT_ID)).toMatchObject({ admitted: false });
+  });
+
+  it("refuses without an owner, with empty input, or for a login another user holds", async () => {
+    expect(await directory("relink-empty").relinkOwnerAccess("sub-x", "c".repeat(64))).toEqual({
+      ok: false,
+      reason: "no_owner",
+    });
+
+    const stub = await bootstrapped("relink-refusals");
+    for (const [sub, hash] of [
+      [" ", "d".repeat(64)],
+      ["sub-y", ""],
+    ] as const) {
+      expect(await stub.relinkOwnerAccess(sub, hash)).toEqual({
+        ok: false,
+        reason: "invalid_user",
+      });
+    }
+    await runInDurableObject(stub, (_instance: Directory, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO users (user_id, role, created_at) VALUES ('u-member', 'member', 0)",
+      );
+      state.storage.sql.exec(
+        "INSERT INTO identities (channel, channel_user_id, user_id, status, updated_at) VALUES ('cloudflare-access', 'sub-member', 'u-member', 'enabled', 0)",
+      );
+    });
+    expect(await stub.relinkOwnerAccess("sub-member", "e".repeat(64))).toEqual({
+      ok: false,
+      reason: "identity_taken",
+    });
+    expect(await stub.admit(oldSub, ADMIN_AGENT_ID)).toMatchObject({ admitted: true });
+    // A refusal spends nothing: the same token still works for a login nobody holds.
+    expect(
+      (await auditActions(stub)).filter((action) => action === "owner.access_relinked"),
+    ).toEqual([]);
+    expect(await stub.relinkOwnerAccess(newSub.channelUserId, "e".repeat(64))).toEqual({
+      ok: true,
+    });
   });
 });
 

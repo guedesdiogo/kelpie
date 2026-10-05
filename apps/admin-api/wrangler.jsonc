@@ -13,7 +13,8 @@
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": ""
   },
-  // The first-run token (ADR-0013); `docs/admin-api.md` says how to make one.
+  // The first-run token (ADR-0013); `docs/admin-api.md` says how to make one. A `RECOVERY_TOKEN`
+  // secret is set only while the owner recovers a changed Access login, so it isn't required here.
   "secrets": { "required": ["BOOTSTRAP_TOKEN"] },
   // Secure forms for channel secrets; channel-egress holds the secret store (docs/secrets.md).
   "services": [

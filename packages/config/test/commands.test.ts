@@ -246,7 +246,7 @@ describe("configuration commands", () => {
     });
   });
 
-  it("refuses an Access identity: only the first-run bootstrap adds one", async () => {
+  it("refuses an Access identity: no configuration command adds or changes one", async () => {
     const { ports } = fakePorts();
     const commands = createConfigCommands(ports);
     const access = { channel: "cloudflare-access", channelUserId: "sub-owner" };
