@@ -5,10 +5,11 @@ import {
   type IdentityResult,
   type IdentityStatus,
   maskIdentityValue,
+  type PairingCodeResult,
   type Role,
   type TimeZoneResult,
 } from "@kelpie/access";
-import type { ChannelFormsContract } from "@kelpie/channels";
+import type { ChannelFormsContract, ChannelId } from "@kelpie/channels";
 import { type AgentSettings, isAgentId, isAgentName, parseSettings } from "./settings.ts";
 
 /**
@@ -77,14 +78,17 @@ export interface ConfigPorts {
     config(id: string): Promise<AgentConfig>;
   };
   directory: {
-    addIdentity(userId: string, identity: ChannelIdentity): Promise<IdentityResult>;
+    issuePairingCode(userId: string, channel: ChannelId): Promise<PairingCodeResult>;
     enableIdentity(identity: ChannelIdentity): Promise<IdentityResult>;
     disableIdentity(identity: ChannelIdentity): Promise<IdentityResult>;
     listIdentities(): Promise<(ChannelIdentity & { status: IdentityStatus })[]>;
     setTimeZone(userId: string, timeZone: string): Promise<TimeZoneResult>;
   };
   /** The secure forms that take a channel's secrets, in channel-egress (ADR-0013). */
-  channels: Pick<ChannelFormsContract, "createTelegramForm" | "registerTelegramWebhook">;
+  channels: Pick<
+    ChannelFormsContract,
+    "createTelegramForm" | "registerTelegramWebhook" | "describeTelegramBot"
+  >;
 }
 
 export type CommandResult<T> =
@@ -95,6 +99,7 @@ export type CommandResult<T> =
         | "forbidden"
         | "invalid_input"
         | "unknown_agent"
+        | "unknown_user"
         | "unavailable"
         | "not_connected"
         | "not_configured"
@@ -178,15 +183,10 @@ export function createConfigCommands(ports: ConfigPorts) {
       return { ok: true, value: identities.map((identity) => show(identity, identity.status)) };
     },
 
-    /** Adds one of the owner's own identities, as pending until it is paired. */
-    async addIdentity(actor: Actor, input: unknown): Promise<CommandResult<ShownIdentity>> {
-      if (!isOwner(actor)) return forbidden;
-      const identity = parseIdentity(input);
-      if (!identity) return invalid;
-      const result = await ports.directory.addIdentity(actor.userId, identity);
-      return result.ok ? { ok: true, value: show(identity, result.status) } : result;
-    },
-
+    /**
+     * Re-enables one of the owner's identities that was disabled. Nothing enables an identity by its
+     * typed value: a new account is paired (`pairTelegram`), which proves it is the owner's.
+     */
     async enableIdentity(actor: Actor, input: unknown): Promise<CommandResult<ShownIdentity>> {
       if (!isOwner(actor)) return forbidden;
       const identity = parseIdentity(input);
@@ -222,6 +222,39 @@ export function createConfigCommands(ports: ConfigPorts) {
         return form.reason === "invalid_input" ? invalid : { ok: false, reason: "unavailable" };
       }
       return { ok: true, value: { path: `/forms/${form.token}`, expiresAt: form.expiresAt } };
+    },
+
+    /**
+     * Pairs the owner's Telegram account with an agent's bot (Story 3.6): returns a `t.me` link
+     * that sends the bot `/start <code>`. The account it comes from becomes the owner's, enabled.
+     * The code lasts an hour, and a new one replaces it.
+     */
+    async pairTelegram(
+      actor: Actor,
+      input: unknown,
+    ): Promise<CommandResult<{ link: string; expiresAt: number }>> {
+      if (!isOwner(actor)) return forbidden;
+      const { agentId } = (input ?? {}) as { agentId?: unknown };
+      if (!isAgentId(agentId)) return invalid;
+      if (!(await ports.registry.get(agentId))) return { ok: false, reason: "unknown_agent" };
+      const bot = await ports.channels.describeTelegramBot(agentId);
+      if (!bot.ok) {
+        if (bot.reason === "invalid_input") return invalid;
+        return {
+          ok: false,
+          reason: bot.reason === "not_connected" ? "not_connected" : "unavailable",
+        };
+      }
+      const issued = await ports.directory.issuePairingCode(actor.userId, "telegram");
+      if (!issued.ok)
+        return issued.reason === "unknown_user" ? { ok: false, reason: "unknown_user" } : invalid;
+      return {
+        ok: true,
+        value: {
+          link: `https://t.me/${encodeURIComponent(bot.username)}?start=${issued.code}`,
+          expiresAt: issued.expiresAt,
+        },
+      };
     },
 
     /**

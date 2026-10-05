@@ -1,4 +1,5 @@
 import type { ChannelIdentity } from "@kelpie/access";
+import type { ChannelId } from "@kelpie/channels";
 import { sql } from "drizzle-orm";
 import {
   index,
@@ -43,6 +44,55 @@ export const identities = sqliteTable(
   ],
 );
 
+/**
+ * One live pairing code per user and channel (Story 3.6), stored only as a salted SHA-256. The
+ * owner gets the code on the admin API and sends it to the bot with `/start <code>`.
+ */
+export const pairingCodes = sqliteTable(
+  "pairing_codes",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.userId),
+    channel: text("channel").$type<ChannelId>().notNull(),
+    salt: text("salt").notNull(),
+    hash: text("hash").notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.channel] })],
+);
+
+/**
+ * Wrong codes per sender. Redemption arrives through the public bot, so the lock is per sender: a
+ * stranger's guesses never lock the owner out. Senders' ids are personal data; a row goes once it
+ * is an hour stale.
+ */
+export const pairingFailures = sqliteTable(
+  "pairing_failures",
+  {
+    channel: text("channel").$type<ChannelId>().notNull(),
+    channelUserId: text("channel_user_id").notNull(),
+    count: integer("count").notNull(),
+    lastFailureAt: integer("last_failure_at", { mode: "timestamp_ms" }).notNull(),
+    lockedUntil: integer("locked_until", { mode: "timestamp_ms" }),
+  },
+  (table) => [primaryKey({ columns: [table.channel, table.channelUserId] })],
+);
+
+/** Strangers the owner was told about, so each is told once. A row goes after 30 days. */
+export const noticedSenders = sqliteTable(
+  "noticed_senders",
+  {
+    channel: text("channel").$type<ChannelId>().notNull(),
+    channelUserId: text("channel_user_id").notNull(),
+    noticedAt: integer("noticed_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.channel, table.channelUserId] }),
+    index("noticed_senders_noticed_at").on(table.channel, table.noticedAt),
+  ],
+);
+
 export const auditLog = sqliteTable("audit_log", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   at: integer("at", { mode: "timestamp_ms" }).notNull(),
@@ -52,6 +102,9 @@ export const auditLog = sqliteTable("audit_log", {
       "identity.added",
       "identity.enabled",
       "identity.disabled",
+      "identity.paired",
+      "pairing.code_issued",
+      "pairing.locked",
       "user.time_zone_changed",
     ],
   }).notNull(),

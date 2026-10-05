@@ -1,8 +1,10 @@
-import type { Admission } from "@kelpie/access";
+import type { Admission, ChannelIdentity, DirectoryContract, Remote } from "@kelpie/access";
 import {
   type CanonicalEvent,
   type ChannelWebhooksContract,
+  type EgressDestination,
   InvalidWebhookError,
+  type WebhookNotice,
 } from "@kelpie/channels";
 import { normalizeTelegramUpdate, TELEGRAM_SECRET_HEADER } from "@kelpie/channels/telegram";
 import { isAgentId } from "@kelpie/config";
@@ -18,10 +20,16 @@ const MAX_BODY_BYTES = 256 * 1024;
  * isn't asked: a flood of guesses never reaches the secret store.
  */
 const WEBHOOK_SECRET = /^[A-Za-z0-9_-]{1,256}$/;
+/** `/start`, as a deep link sends it: `t.me/<bot>?start=<payload>` arrives as `/start <payload>`. */
+const START_COMMAND = /^\/start(?:\s+(\S+))?\s*$/;
 
 export interface TelegramWebhookDeps {
   webhooks: ChannelWebhooksContract;
   admit(event: CanonicalEvent): Promise<Admission>;
+  directory: Pick<
+    Remote<DirectoryContract>,
+    "redeemPairingCode" | "noticeStranger" | "releaseStrangerNotice"
+  >;
   /** Hands a message to the conversation's object, named by `conversationName`. */
   ingest(name: string, message: InboundMessage): Promise<IngestResult>;
 }
@@ -35,6 +43,8 @@ export interface TelegramWebhookDeps {
  *   agent whose secret it doesn't hold.
  * - A verified update that can't be used is dropped with a 200, or Telegram would send it again:
  *   malformed, too large, from a group or a stranger (ADR-0004), or without text.
+ * - A stranger gets nothing. Their `/start <code>` may pair them, with a code the owner issued;
+ *   anything else is noticed to the owner once (Story 3.6). A `/start` never reaches the model.
  * - The answer comes once the conversation has stored the message. If egress, the Directory or the
  *   conversation fails, a 503 makes Telegram retry, and the conversation drops the duplicate. A
  *   message the conversation fails on every time holds the bot's later updates back until Telegram
@@ -73,13 +83,19 @@ export async function handleTelegramWebhook(
 }
 
 async function deliver(event: CanonicalEvent, deps: TelegramWebhookDeps): Promise<void> {
+  // Media isn't handled yet; a caption alone doesn't make a message.
+  const text = event.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
+  const start = START_COMMAND.exec(text.trim());
   const admission = await deps.admit(event);
   if (!admission.admitted) {
     console.warn("ingress: dropped a Telegram message", admission.reason);
+    if (admission.reason === "unknown_identity") await fromStranger(event, start?.[1], deps);
     return;
   }
-  // Media isn't handled yet; a caption alone doesn't make a message.
-  const text = event.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
+  if (start) {
+    console.warn("ingress: dropped a Telegram message", "start_command");
+    return;
+  }
   if (text === "") {
     console.warn("ingress: dropped a Telegram message", "no_text");
     return;
@@ -96,6 +112,72 @@ async function deliver(event: CanonicalEvent, deps: TelegramWebhookDeps): Promis
   });
   if (result.status === "rejected") {
     console.warn("ingress: the conversation refused a message", result.reason);
+  }
+}
+
+/**
+ * A direct message from someone not admitted. A `/start <code>` is tried as a pairing code, and a
+ * match is confirmed to the account that sent it. Anything else may be noticed to the owner, on
+ * the owner's own chat with the bot: in Telegram a private chat's id is the user's id.
+ */
+async function fromStranger(
+  event: CanonicalEvent,
+  code: string | undefined,
+  deps: TelegramWebhookDeps,
+): Promise<void> {
+  const sender: ChannelIdentity = {
+    channel: event.channel,
+    channelUserId: event.sender.channelUserId,
+  };
+  if (code) {
+    const paired = await deps.directory.redeemPairingCode(code, sender);
+    if (!paired.ok) {
+      console.warn("ingress: a pairing code was refused", paired.reason);
+      return;
+    }
+    await notify(
+      deps,
+      event.agentId,
+      { channel: event.channel, threadId: event.threadId },
+      {
+        kind: "paired",
+      },
+    );
+    return;
+  }
+  // A notice is optional: whatever fails on its way is logged, and the webhook answers 200.
+  try {
+    const notice = await deps.directory.noticeStranger(sender);
+    if (!notice.notify) return;
+    const stranger: WebhookNotice = { kind: "stranger", senderId: sender.channelUserId };
+    if (event.sender.displayName) stranger.displayName = event.sender.displayName;
+    const sent = await notify(
+      deps,
+      event.agentId,
+      { channel: event.channel, threadId: notice.ownerChannelUserId },
+      stranger,
+    );
+    // Unsent, it shouldn't count: the stranger's next message can try again.
+    if (!sent) await deps.directory.releaseStrangerNotice(sender);
+  } catch (error) {
+    console.warn("ingress: a stranger notice failed", errorName(error));
+  }
+}
+
+/** Best effort: a notice that can't be sent is logged, and the webhook still answers 200. */
+async function notify(
+  deps: TelegramWebhookDeps,
+  agentId: string,
+  destination: EgressDestination,
+  notice: WebhookNotice,
+): Promise<boolean> {
+  try {
+    const sent = await deps.webhooks.notice(agentId, destination, notice);
+    if (!sent.ok) console.warn("ingress: a notice wasn't sent", notice.kind, sent.reason);
+    return sent.ok;
+  } catch (error) {
+    console.warn("ingress: a notice wasn't sent", notice.kind, errorName(error));
+    return false;
   }
 }
 

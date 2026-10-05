@@ -91,8 +91,24 @@ export type IdentityResult =
   | { ok: true; status: IdentityStatus }
   | {
       ok: false;
-      reason: "unknown_user" | "unknown_identity" | "identity_taken" | "invalid_identity";
+      reason: "unknown_identity" | "invalid_identity" | "not_paired";
     };
+
+/** A one-time code the owner sends to a channel's bot to pair their account there (Story 3.6). */
+export type PairingCodeResult =
+  | { ok: true; code: string; expiresAt: number }
+  | { ok: false; reason: "unknown_user" | "invalid_channel" };
+
+/**
+ * A `/start <code>` from an unpaired sender. Five wrong codes from one sender, with no hour-long
+ * pause between them, lock that sender out for an hour; nobody else.
+ */
+export type PairingResult =
+  | { ok: true; userId: string }
+  | { ok: false; reason: "invalid_code" | "locked" | "identity_taken" | "invalid_identity" };
+
+/** Whether to tell the owner about a dropped stranger, and where: the owner's own account there. */
+export type StrangerNotice = { notify: true; ownerChannelUserId: string } | { notify: false };
 
 /**
  * The `Directory` methods other Workers call. The object implements it, and callers bind it as
@@ -102,7 +118,10 @@ export interface DirectoryContract {
   admit(identity: ChannelIdentity, agentId: string): Admission;
   ownerExists(): boolean;
   bootstrapOwner(userId: string, accessSub: string): OwnerResult;
-  addIdentity(userId: string, identity: ChannelIdentity): IdentityResult;
+  issuePairingCode(userId: string, channel: ChannelId): Promise<PairingCodeResult>;
+  redeemPairingCode(code: string, identity: ChannelIdentity): Promise<PairingResult>;
+  noticeStranger(sender: ChannelIdentity): StrangerNotice;
+  releaseStrangerNotice(sender: ChannelIdentity): void;
   enableIdentity(identity: ChannelIdentity): IdentityResult;
   disableIdentity(identity: ChannelIdentity): IdentityResult;
   listIdentities(): (ChannelIdentity & { status: IdentityStatus })[];

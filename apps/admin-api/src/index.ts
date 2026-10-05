@@ -43,6 +43,7 @@ function depsFor(env: Env): AdminDeps {
       channels: {
         createTelegramForm: (agentId) => forms.createTelegramForm(agentId),
         registerTelegramWebhook: (agentId) => forms.registerTelegramWebhook(agentId),
+        describeTelegramBot: (agentId) => forms.describeTelegramBot(agentId),
       },
     }),
     forms,

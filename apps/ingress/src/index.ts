@@ -1,4 +1,4 @@
-import type { Remote } from "@kelpie/access";
+import { DIRECTORY_NAME, type Remote } from "@kelpie/access";
 import type { ChannelWebhooksContract } from "@kelpie/channels";
 import { TELEGRAM_WEBHOOK_PATH } from "@kelpie/channels/telegram";
 import type { ConversationContract } from "@kelpie/conversation/contract";
@@ -12,6 +12,7 @@ function telegramDeps(env: Env): TelegramWebhookDeps {
     // A service binding to channel-egress's ChannelWebhooks entrypoint, which returns values only.
     webhooks: env.CHANNEL_WEBHOOKS as unknown as ChannelWebhooksContract,
     admit: (event) => admitSender(env, event),
+    directory: env.DIRECTORY.getByName(DIRECTORY_NAME),
     // Conversations live in conversation-runtime, which `wrangler types` can't type; its
     // ConversationAgent implements this contract.
     ingest: (name, message) =>

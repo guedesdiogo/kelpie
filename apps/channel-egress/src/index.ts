@@ -1,4 +1,5 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
+import { maskIdentityValue } from "@kelpie/access";
 import {
   type ChannelEgressContract,
   type ChannelFormsContract,
@@ -10,6 +11,7 @@ import {
   type SendOptions,
   type SendOutcome,
   type TypingOutcome,
+  type WebhookNotice,
   type WebhookRegistration,
 } from "@kelpie/channels";
 import { TELEGRAM_SECRET_HEADER, TelegramAdapter } from "@kelpie/channels/telegram";
@@ -24,6 +26,10 @@ export { SecretStore };
 const BOT_TOKEN = /^\d{5,12}:[A-Za-z0-9_-]{30,90}$/;
 /** Telegram's own limit on one message. */
 const MAX_TEXT_LENGTH = 4_096;
+/** A Telegram user id: digits, a few more than today's ten. */
+const TELEGRAM_USER_ID = /^\d{1,20}$/;
+/** A stranger's display name, as the owner sees it in a notice. */
+const MAX_DISPLAY_NAME_LENGTH = 64;
 
 const store = (env: Env) => env.SECRET_STORE.getByName(SECRET_STORE_NAME);
 
@@ -103,6 +109,12 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
     }
   }
 
+  async describeTelegramBot(agentId: string) {
+    if (!isAgentId(agentId)) return { ok: false as const, reason: "invalid_input" as const };
+    const found = await telegramSecret(this.env, agentId);
+    return found.ok ? { ok: true as const, username: found.secret.username } : found;
+  }
+
   async registerTelegramWebhook(agentId: string): Promise<WebhookRegistration> {
     if (!isAgentId(agentId)) return { ok: false, reason: "invalid_input" };
     const found = await telegramSecret(this.env, agentId);
@@ -123,8 +135,8 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
 }
 
 /**
- * Checks webhooks for ingress. A separate entrypoint, so the Worker that takes public requests can
- * verify them but can't send.
+ * Checks webhooks for ingress, and sends its fixed notices. A separate entrypoint, so the Worker
+ * that takes public requests can't send text of its own: only the two notices written here.
  */
 export class ChannelWebhooks extends WorkerEntrypoint<Env> implements ChannelWebhooksContract {
   async verifyTelegram(agentId: string, presentedSecret: string | null) {
@@ -138,6 +150,55 @@ export class ChannelWebhooks extends WorkerEntrypoint<Env> implements ChannelWeb
     });
     return verified ? { ok: true as const } : refused;
   }
+
+  async notice(
+    agentId: string,
+    destination: EgressDestination,
+    notice: WebhookNotice,
+  ): Promise<TypingOutcome> {
+    const text = noticeText(notice);
+    if (text === null || destination?.channel !== "telegram" || !isThread(destination)) {
+      return { ok: false, reason: "failed" };
+    }
+    if (!isAgentId(agentId)) return { ok: false, reason: "not_connected" };
+    const found = await telegramSecret(this.env, agentId);
+    if (!found.ok) return { ok: false, reason: "not_connected" };
+    try {
+      await new TelegramAdapter(found.secret).send(destination, text);
+      return { ok: true };
+    } catch (error) {
+      return failure(error);
+    }
+  }
+}
+
+/** The text of a notice, or null for one that isn't known or well formed. */
+function noticeText(notice: WebhookNotice): string | null {
+  if (notice?.kind === "paired") {
+    return "Paired. This Telegram account can now talk to this agent.";
+  }
+  if (notice?.kind !== "stranger" || !TELEGRAM_USER_ID.test(String(notice.senderId))) return null;
+  const name = displayName(notice.displayName);
+  const who = name
+    ? `${name} (${maskIdentityValue(notice.senderId)})`
+    : maskIdentityValue(notice.senderId);
+  return `Someone who isn't paired messaged this bot: ${who}. They got no answer.`;
+}
+
+/**
+ * A stranger's name, kept to letters, digits, spaces, apostrophes and hyphens, then cut short.
+ * Everything else becomes a space, so the name can't break the line, ping anyone, or read as a
+ * link, an address or a command, which Telegram would make tappable (`evil.example`, `t.me/x`,
+ * `/start`).
+ */
+function displayName(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const cleaned = value
+    .normalize("NFKC")
+    .replace(/[^\p{L}\p{M}\p{N}' -]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return [...cleaned].slice(0, MAX_DISPLAY_NAME_LENGTH).join("").trim();
 }
 
 /** Sends and shows typing for an agent, with that agent's channel secrets (ADR-0002). */

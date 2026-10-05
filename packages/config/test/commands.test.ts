@@ -12,8 +12,12 @@ function fakePorts() {
     string,
     { name: string; settings: AgentSettings; promptVersion: number }
   >();
-  const identities = new Map<string, { identity: ChannelIdentity; status: IdentityStatus }>();
   const key = (identity: ChannelIdentity) => `${identity.channel}:${identity.channelUserId}`;
+  const seeded: { identity: ChannelIdentity; status: IdentityStatus }[] = [
+    { identity: { channel: "whatsapp", channelUserId: "+5511987654321" }, status: "enabled" },
+    { identity: { channel: "telegram", channelUserId: "1001" }, status: "pending" },
+  ];
+  const identities = new Map(seeded.map((entry) => [key(entry.identity), entry]));
   const calls: string[] = [];
   const ports: ConfigPorts = {
     registry: {
@@ -57,15 +61,14 @@ function fakePorts() {
       },
     },
     directory: {
-      async addIdentity(_userId, identity) {
-        const found = identities.get(key(identity));
-        if (found) return { ok: true, status: found.status };
-        identities.set(key(identity), { identity, status: "pending" });
-        return { ok: true, status: "pending" };
+      async issuePairingCode(userId, channel) {
+        calls.push(`issuePairingCode ${userId} ${channel}`);
+        return { ok: true, code: "ABCD2345", expiresAt: 2_000 };
       },
       async enableIdentity(identity) {
         const found = identities.get(key(identity));
         if (!found) return { ok: false, reason: "unknown_identity" };
+        if (found.status === "pending") return { ok: false, reason: "not_paired" };
         found.status = "enabled";
         return { ok: true, status: "enabled" };
       },
@@ -91,6 +94,12 @@ function fakePorts() {
         return agentId === "broken"
           ? { ok: false, reason: "store_unavailable" }
           : { ok: true, token: "form-token", expiresAt: 1_000 };
+      },
+      async describeTelegramBot(agentId) {
+        calls.push(`describeTelegramBot ${agentId}`);
+        if (agentId === "unwired") return { ok: false, reason: "not_connected" };
+        if (agentId === "broken") return { ok: false, reason: "store_unavailable" };
+        return { ok: true, username: "kelpie_bot" };
       },
       async registerTelegramWebhook(agentId) {
         calls.push(`registerTelegramWebhook ${agentId}`);
@@ -158,6 +167,10 @@ describe("configuration commands", () => {
       reason: "forbidden",
     });
     expect(await commands.listIdentities(member)).toEqual({ ok: false, reason: "forbidden" });
+    expect(await commands.pairTelegram(member, { agentId: "sales" })).toEqual({
+      ok: false,
+      reason: "forbidden",
+    });
     expect(calls).toEqual([]);
   });
 
@@ -192,33 +205,42 @@ describe("configuration commands", () => {
     });
   });
 
-  it("manages the owner's identities and masks their values", async () => {
+  it("disables and re-enables the owner's identities, and masks their values", async () => {
     const commands = createConfigCommands(fakePorts().ports);
     const phone = { channel: "whatsapp", channelUserId: "+5511987654321" };
 
-    expect(await commands.addIdentity(owner, phone)).toEqual({
+    expect(await commands.disableIdentity(owner, phone)).toEqual({
       ok: true,
-      value: { channel: "whatsapp", value: "+5••••••••••21", status: "pending" },
+      value: { channel: "whatsapp", value: "+5••••••••••21", status: "disabled" },
     });
     expect(await commands.enableIdentity(owner, phone)).toMatchObject({
       ok: true,
       value: { status: "enabled" },
     });
     const listed = await commands.listIdentities(owner);
-    expect(listed).toEqual({
+    expect(listed).toMatchObject({
       ok: true,
-      value: [{ channel: "whatsapp", value: "+5••••••••••21", status: "enabled" }],
+      value: [{ channel: "whatsapp", value: "+5••••••••••21", status: "enabled" }, {}],
     });
     expect(JSON.stringify(listed)).not.toContain(phone.channelUserId);
+  });
+
+  it("has no command that adds or enables an identity by its typed value", async () => {
+    const commands = createConfigCommands(fakePorts().ports);
+    expect("addIdentity" in commands).toBe(false);
+    // A pending identity, from before pairing, becomes enabled only by pairing.
+    expect(
+      await commands.enableIdentity(owner, { channel: "telegram", channelUserId: "1001" }),
+    ).toEqual({ ok: false, reason: "not_paired" });
   });
 
   it("passes the Directory's refusals through", async () => {
     const commands = createConfigCommands(fakePorts().ports);
 
     expect(
-      await commands.enableIdentity(owner, { channel: "telegram", channelUserId: "1001" }),
+      await commands.enableIdentity(owner, { channel: "telegram", channelUserId: "9999" }),
     ).toEqual({ ok: false, reason: "unknown_identity" });
-    expect(await commands.addIdentity(owner, { channel: "fax", channelUserId: "1" })).toEqual({
+    expect(await commands.enableIdentity(owner, { channel: "fax", channelUserId: "1" })).toEqual({
       ok: false,
       reason: "invalid_input",
     });
@@ -229,26 +251,26 @@ describe("configuration commands", () => {
     const commands = createConfigCommands(ports);
     const access = { channel: "cloudflare-access", channelUserId: "sub-owner" };
 
-    for (const command of [
-      commands.addIdentity,
-      commands.enableIdentity,
-      commands.disableIdentity,
-    ]) {
+    for (const command of [commands.enableIdentity, commands.disableIdentity]) {
       expect(await command(owner, access)).toEqual({ ok: false, reason: "invalid_input" });
     }
-    expect(await ports.directory.listIdentities()).toEqual([]);
+    expect(JSON.stringify(await ports.directory.listIdentities())).not.toContain("sub-owner");
   });
 
   it("trims identity values and refuses oversized ones", async () => {
-    const { ports } = fakePorts();
-    const commands = createConfigCommands(ports);
+    const commands = createConfigCommands(fakePorts().ports);
 
-    await commands.addIdentity(owner, { channel: "telegram", channelUserId: "  1001 " });
-    expect(await ports.directory.listIdentities()).toEqual([
-      { channel: "telegram", channelUserId: "1001", status: "pending" },
-    ]);
     expect(
-      await commands.addIdentity(owner, { channel: "telegram", channelUserId: "9".repeat(257) }),
+      await commands.disableIdentity(owner, {
+        channel: "whatsapp",
+        channelUserId: " +5511987654321 ",
+      }),
+    ).toMatchObject({ ok: true, value: { status: "disabled" } });
+    expect(
+      await commands.disableIdentity(owner, {
+        channel: "telegram",
+        channelUserId: "9".repeat(257),
+      }),
     ).toEqual({ ok: false, reason: "invalid_input" });
   });
 
@@ -321,6 +343,43 @@ describe("configuration commands", () => {
       reason: "forbidden",
     });
     expect(calls.filter((call) => call.startsWith("createTelegramForm"))).toEqual([]);
+  });
+
+  it("gives the owner a link that pairs their Telegram account with the agent's bot", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+    await commands.createAgent(owner, { id: "sales", name: "Sales" });
+
+    expect(await commands.pairTelegram(owner, { agentId: "sales" })).toEqual({
+      ok: true,
+      value: { link: "https://t.me/kelpie_bot?start=ABCD2345", expiresAt: 2_000 },
+    });
+    expect(calls).toContain("issuePairingCode u-owner telegram");
+  });
+
+  it("issues no pairing code for an agent without a bot, an unknown agent or bad input", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+    for (const id of ["unwired", "broken"]) {
+      await commands.createAgent(owner, { id, name: id });
+    }
+    expect(await commands.pairTelegram(owner, { agentId: "unwired" })).toEqual({
+      ok: false,
+      reason: "not_connected",
+    });
+    expect(await commands.pairTelegram(owner, { agentId: "broken" })).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+    expect(await commands.pairTelegram(owner, { agentId: "ghost" })).toEqual({
+      ok: false,
+      reason: "unknown_agent",
+    });
+    expect(await commands.pairTelegram(owner, { agentId: "Not An Id" })).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(calls.filter((call) => call.startsWith("issuePairingCode"))).toEqual([]);
   });
 
   it("registers an agent's Telegram webhook again, for the owner and an agent that exists", async () => {

@@ -23,6 +23,7 @@ export type {
   EgressDestination,
   SendOutcome,
   TypingOutcome,
+  WebhookNotice,
   WebhookRegistration,
   WebhookRegistrationFailure,
 } from "./egress.ts";
