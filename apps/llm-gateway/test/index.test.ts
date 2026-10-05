@@ -1,7 +1,8 @@
-import { exports } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { fromNdjsonStream, type LlmEvent, type RoutedRequest } from "@kelpie/llm";
+import type { Question } from "@kelpie/qualifier";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { providerConfig } from "../src/index.ts";
+import { providerConfig, qualifyWith } from "../src/index.ts";
 
 // The Worker runs in the test's isolate, so stubbing the global fetch stands in for the provider.
 // The stream is built from Anthropic's documented event format, not recorded.
@@ -56,6 +57,16 @@ function sseResponse(events: { type: string }[], signal?: AbortSignal | null) {
   );
 }
 
+// Recorded from TypeSafe's API in the Jev spike (issue #27).
+const RECORDED_JEV = {
+  model: "jev-1.13.0",
+  answers: { "turn.end::user_finished": { type: "noul", noul: 0.87 } },
+  usage: { input_tokens: 312, output_tokens: 24 },
+};
+const questions: Record<string, Question> = {
+  "turn.end::user_finished": { type: "noul", instructions: "Has the user finished?" },
+};
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -100,6 +111,50 @@ describe("llm-gateway", () => {
     }
 
     await vi.waitFor(() => expect(providerSignal?.aborted).toBe(true));
+  });
+
+  it("asks Jev through TypeSafe's API with the pinned model and the key", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => Response.json(RECORDED_JEV));
+
+    const outcome = await exports.LlmGateway.qualify({ fragments: ["vocês entregam?"] }, questions);
+
+    expect(outcome).toEqual({
+      ok: true,
+      result: {
+        answers: { "turn.end::user_finished": { type: "noul", noul: 0.87 } },
+        provider: "jev-http",
+        calibrated: true,
+      },
+    });
+    const [url, init] = fetchSpy.mock.calls[0] ?? [];
+    expect(String(url)).toBe("https://api.typesafe.ai/v1/systemone");
+    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer ts-test");
+    expect(JSON.parse(String(init?.body))).toMatchObject({ model: "jev-1.13.0" });
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("answers failed when TypeSafe refuses, and logs the status without the key", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () => new Response("unauthorized ts-test", { status: 401 }),
+    );
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(await exports.LlmGateway.qualify({ fragments: ["oi"] }, questions)).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+    expect(String(logged.mock.calls[0]?.[0])).toContain("TypeSafe answered 401");
+    expect(JSON.stringify(logged.mock.calls)).not.toContain("ts-test");
+  });
+
+  it("answers not_configured at once when no Jev key is set", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const { TYPESAFE_API_KEY: _key, ...withoutJev } = env as Parameters<typeof qualifyWith>[0];
+    const outcome = await qualifyWith(withoutJev, { fragments: ["oi"] }, questions);
+    expect(outcome).toEqual({ ok: false, reason: "not_configured" });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("answers 404 over HTTP", async () => {

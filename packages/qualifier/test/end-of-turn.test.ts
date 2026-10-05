@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   type EndOfTurnContext,
   endOfTurn,
+  endOfTurnBands,
   FakeQualifier,
   heuristicFinished,
   type Qualifier,
@@ -10,6 +11,8 @@ import {
 } from "../src/index.ts";
 
 const ctx = (...fragments: string[]): EndOfTurnContext => ({ fragments });
+/** The heuristic can't tell (0.5), so the decision asks the qualifier. */
+const NEUTRAL = "o problema é que quando eu abro o app";
 
 describe("heuristicFinished", () => {
   it.each([
@@ -89,6 +92,23 @@ describe("quietWindowMs", () => {
     expect(quietWindowMs(0.5, policy)).toBe(2_500);
     expect(quietWindowMs(0.1, policy)).toBe(5_000);
   });
+
+  it("uses the bands of whoever answered", () => {
+    const jev = endOfTurnBands("jev-http");
+    expect(quietWindowMs(0.72, policy, jev)).toBe(1_000);
+    expect(quietWindowMs(0.72, policy)).toBe(2_500);
+    expect(quietWindowMs(0.38, policy, jev)).toBe(5_000);
+    expect(quietWindowMs(0.38, policy)).toBe(2_500);
+  });
+});
+
+describe("endOfTurnBands", () => {
+  it("gives Jev its measured PT-BR bands and everyone else the heuristic's", () => {
+    expect(endOfTurnBands("jev-http")).toEqual({ high: 0.7, low: 0.4 });
+    expect(endOfTurnBands("jev-workers-ai")).toEqual({ high: 0.7, low: 0.4 });
+    expect(endOfTurnBands("heuristic")).toEqual({ high: 0.8, low: 0.3 });
+    expect(endOfTurnBands("fake")).toEqual({ high: 0.8, low: 0.3 });
+  });
 });
 
 describe("runDecision with the end-of-turn decision", () => {
@@ -96,21 +116,18 @@ describe("runDecision with the end-of-turn decision", () => {
     const qualifier = new FakeQualifier({
       "turn.end::user_finished": { type: "noul", noul: 0.95 },
     });
-    const result = await runDecision(qualifier, endOfTurn, ctx("oi"));
+    const result = await runDecision(qualifier, endOfTurn, ctx(NEUTRAL));
     expect(result).toEqual({ finished: 0.95, source: "fake" });
   });
 
   it("falls back to the heuristic when the qualifier fails", async () => {
-    const failing: Qualifier = {
-      id: "jev-workers-ai",
-      calibrated: true,
-      qualify: async () => {
-        throw new Error("rate limited");
-      },
-    };
-    const result = await runDecision(failing, endOfTurn, ctx("então"));
-    expect(result.source).toBe("heuristic");
-    expect(result.finished).toBeLessThanOrEqual(0.3);
+    const qualify = vi.fn(async () => {
+      throw new Error("rate limited");
+    });
+    const failing: Qualifier = { id: "jev-workers-ai", calibrated: true, qualify };
+    const result = await runDecision(failing, endOfTurn, ctx(NEUTRAL));
+    expect(qualify).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ finished: heuristicFinished(ctx(NEUTRAL)), source: "heuristic" });
   });
 
   it("falls back to the heuristic when the qualifier is too slow", async () => {
@@ -119,9 +136,9 @@ describe("runDecision with the end-of-turn decision", () => {
       calibrated: true,
       qualify: () => new Promise<never>(() => {}),
     };
-    const result = await runDecision(slow, { ...endOfTurn, timeoutMs: 20 }, ctx("tudo certo?"));
+    const result = await runDecision(slow, { ...endOfTurn, timeoutMs: 20 }, ctx(NEUTRAL));
     expect(result).toEqual({
-      finished: heuristicFinished(ctx("tudo certo?")),
+      finished: heuristicFinished(ctx(NEUTRAL)),
       source: "heuristic",
     });
   });
@@ -134,8 +151,8 @@ describe("runDecision with the end-of-turn decision", () => {
       },
     };
     const qualifier = new FakeQualifier({});
-    expect(await runDecision(qualifier, broken, ctx("tudo certo?"))).toEqual({
-      finished: heuristicFinished(ctx("tudo certo?")),
+    expect(await runDecision(qualifier, broken, ctx(NEUTRAL))).toEqual({
+      finished: heuristicFinished(ctx(NEUTRAL)),
       source: "heuristic",
     });
   });
@@ -143,7 +160,7 @@ describe("runDecision with the end-of-turn decision", () => {
   it("rejects an answer outside 0 to 1 and falls back", async () => {
     const qualifier = new FakeQualifier({ "turn.end::user_finished": { type: "noul", noul: 7 } });
     const onFallback = vi.fn();
-    const result = await runDecision(qualifier, endOfTurn, ctx("oi"), { onFallback });
+    const result = await runDecision(qualifier, endOfTurn, ctx(NEUTRAL), { onFallback });
     expect(result.source).toBe("heuristic");
     expect(onFallback).toHaveBeenCalledTimes(1);
   });
@@ -151,7 +168,7 @@ describe("runDecision with the end-of-turn decision", () => {
   it("reports nothing when the qualifier answers", async () => {
     const qualifier = new FakeQualifier({ "turn.end::user_finished": { type: "noul", noul: 0.4 } });
     const onFallback = vi.fn();
-    await runDecision(qualifier, endOfTurn, ctx("oi"), { onFallback });
+    await runDecision(qualifier, endOfTurn, ctx(NEUTRAL), { onFallback });
     expect(onFallback).not.toHaveBeenCalled();
   });
 
@@ -166,7 +183,7 @@ describe("runDecision with the end-of-turn decision", () => {
       },
     };
     const onFallback = vi.fn();
-    await runDecision(slow, { ...endOfTurn, timeoutMs: 20 }, ctx("oi"), { onFallback });
+    await runDecision(slow, { ...endOfTurn, timeoutMs: 20 }, ctx(NEUTRAL), { onFallback });
     expect(onFallback).toHaveBeenCalledTimes(1);
     expect(String(onFallback.mock.calls[0]?.[1])).toContain("timed out");
     expect(signal?.aborted).toBe(true);
@@ -177,12 +194,30 @@ describe("runDecision with the end-of-turn decision", () => {
     const onFallback = () => {
       throw new Error("logger down");
     };
-    const result = await runDecision(qualifier, endOfTurn, ctx("oi"), { onFallback });
+    const result = await runDecision(qualifier, endOfTurn, ctx(NEUTRAL), { onFallback });
     expect(result.source).toBe("heuristic");
   });
 
+  it("doesn't ask the qualifier when the heuristic is confident", async () => {
+    const qualify = vi.fn(async () => ({
+      answers: {},
+      provider: "jev-http" as const,
+      calibrated: true,
+    }));
+    const qualifier: Qualifier = { id: "jev-http", calibrated: true, qualify };
+    expect(await runDecision(qualifier, endOfTurn, ctx("oi"))).toEqual({
+      finished: heuristicFinished(ctx("oi")),
+      source: "heuristic",
+    });
+    expect(await runDecision(qualifier, endOfTurn, ctx("tudo certo?"))).toEqual({
+      finished: heuristicFinished(ctx("tudo certo?")),
+      source: "heuristic",
+    });
+    expect(qualify).not.toHaveBeenCalled();
+  });
+
   it("works with no qualifier configured", async () => {
-    const result = await runDecision(null, endOfTurn, ctx("tudo certo?"));
+    const result = await runDecision(null, endOfTurn, ctx(NEUTRAL));
     expect(result.source).toBe("heuristic");
   });
 });

@@ -8,7 +8,12 @@ import {
 } from "@kelpie/channels";
 import type { Destination } from "@kelpie/conversation/contract";
 import { fromNdjsonStream, type LlmEvent, type ModelTier, type RoutedRequest } from "@kelpie/llm";
-import type { Qualifier } from "@kelpie/qualifier";
+import {
+  type GatewayQualifyOutcome,
+  type Qualifier,
+  type Question,
+  RemoteQualifier,
+} from "@kelpie/qualifier";
 
 /** One model call: its events, and a way to stop it on the gateway's side. */
 export interface ModelCall {
@@ -49,6 +54,7 @@ interface LlmGatewayBinding {
     events(): Promise<ReadableStream<Uint8Array>>;
     cancel(): Promise<void>;
   }>;
+  qualify(state: unknown, questions: Record<string, Question>): Promise<GatewayQualifyOutcome>;
 }
 
 let portsForTesting: ConversationPorts | undefined;
@@ -123,7 +129,8 @@ function productionPorts(env: Env): ConversationPorts {
         }
       }
     },
-    qualifier: null,
+    // Jev runs in llm-gateway, which holds its key; without one it answers not_configured at once.
+    qualifier: new RemoteQualifier((state, questions) => gateway.qualify(state, questions)),
     now: () => Date.now(),
     sleep,
   };

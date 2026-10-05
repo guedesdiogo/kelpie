@@ -11,6 +11,7 @@ import {
   type RoutedRequest,
   toNdjsonStream,
 } from "@kelpie/llm";
+import { type GatewayQualifyOutcome, JevHttpQualifier, type Question } from "@kelpie/qualifier";
 
 /** Set by the owner with `wrangler secret put`. A provider is used only when its key is set. */
 interface Secrets {
@@ -18,7 +19,12 @@ interface Secrets {
   OPENAI_API_KEY?: string;
   /** Token of an authenticated AI Gateway. */
   AI_GATEWAY_TOKEN?: string;
+  /** Jev through TypeSafe's API (ADR-0018). Without it, end of turn uses the heuristic. */
+  TYPESAFE_API_KEY?: string;
 }
+
+/** How long to wait for TypeSafe: just past the caller's 800 ms, whose abort doesn't cross RPC. */
+const QUALIFY_TIMEOUT_MS = 1_000;
 
 type GatewayEnv = Env & Secrets;
 
@@ -57,6 +63,32 @@ export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
       (error) => logFailure(error, this.env),
     );
     return new Generation(events, controller);
+  }
+
+  /** Typed decisions through Jev. Personal data in `state` is masked before it leaves. */
+  qualify(state: unknown, questions: Record<string, Question>): Promise<GatewayQualifyOutcome> {
+    return qualifyWith(this.env, state, questions);
+  }
+}
+
+/** Answers at once when no Jev key is set; a failure is logged here and answered as `failed`. */
+export async function qualifyWith(
+  env: GatewayEnv,
+  state: unknown,
+  questions: Record<string, Question>,
+): Promise<GatewayQualifyOutcome> {
+  if (!env.TYPESAFE_API_KEY) return { ok: false, reason: "not_configured" };
+  const jev = new JevHttpQualifier({
+    apiKey: env.TYPESAFE_API_KEY,
+    model: env.JEV_MODEL,
+    fetch: (url, init) => fetch(url, init),
+  });
+  try {
+    const signal = AbortSignal.timeout(QUALIFY_TIMEOUT_MS);
+    return { ok: true, result: await jev.qualify(state, questions, { signal }) };
+  } catch (error) {
+    logFailure(error, env);
+    return { ok: false, reason: "failed" };
   }
 }
 
@@ -98,7 +130,13 @@ export function providerConfig(apiKey: string, baseURL: string, gatewayToken?: s
 function logFailure(error: unknown, env: GatewayEnv): void {
   if (error instanceof LlmError && error.code === "aborted") return;
   let text = error instanceof LlmError ? `${error.code}: ${error.message}` : String(error);
-  for (const secret of [env.ANTHROPIC_API_KEY, env.OPENAI_API_KEY, env.AI_GATEWAY_TOKEN]) {
+  const secrets = [
+    env.ANTHROPIC_API_KEY,
+    env.OPENAI_API_KEY,
+    env.AI_GATEWAY_TOKEN,
+    env.TYPESAFE_API_KEY,
+  ];
+  for (const secret of secrets) {
     if (secret) text = text.replaceAll(secret, "[redacted]");
   }
   console.error(`llm-gateway: ${text}`);
