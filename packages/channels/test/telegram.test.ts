@@ -157,7 +157,18 @@ describe("Telegram sending", () => {
     const { adapter, calls, redirects } = botApi();
     await adapter.send({ threadId: "1001" }, "&lt; is how you write <");
     expect(calls[0]?.body.text).toBe("&amp;lt; is how you write &lt;");
-    expect(redirects).toEqual(["error"]);
+    // Workers' fetch can't refuse redirects itself, so the adapter takes them as answers.
+    expect(redirects).toEqual(["manual"]);
+  });
+
+  it("treats a redirect as a failure, so the token never follows it", async () => {
+    const { adapter, calls } = botApi(
+      () =>
+        new Response(null, { status: 302, headers: { location: "https://elsewhere.example/" } }),
+    );
+    const error = await adapter.send({ threadId: "1001" }, "hi").catch((caught) => caught);
+    expect(error).toBeInstanceOf(ChannelRequestError);
+    expect(calls).toHaveLength(1);
   });
 
   it("sends a reply to an id Telegram can't have issued as a plain message", async () => {
