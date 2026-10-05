@@ -1,8 +1,9 @@
 # ADR-0018: Jev goes through TypeSafe's API first, and end of turn uses thresholds per qualifier
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-05
 - Issue: [#27](https://github.com/guedesdiogo/kelpie/issues/27)
+- Accepted by the owner on 2026-10-05: «aceito a decisão de ligar direto»
 
 ## Context
 
