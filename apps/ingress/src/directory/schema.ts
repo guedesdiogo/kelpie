@@ -93,12 +93,19 @@ export const noticedSenders = sqliteTable(
   ],
 );
 
+/** Recovery tokens already used (#71), by SHA-256, so each works once. */
+export const spentTokens = sqliteTable("spent_tokens", {
+  hash: text("hash").primaryKey(),
+  spentAt: integer("spent_at", { mode: "timestamp_ms" }).notNull(),
+});
+
 export const auditLog = sqliteTable("audit_log", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   at: integer("at", { mode: "timestamp_ms" }).notNull(),
   action: text("action", {
     enum: [
       "owner.registered",
+      "owner.access_relinked",
       "identity.added",
       "identity.enabled",
       "identity.disabled",

@@ -8,6 +8,7 @@ const OWNER_SUB = "sub-owner";
 const GOOD_BOT_TOKEN = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw-test";
 const NOW_MS = 1_791_000_000_000;
 const TOKEN = `${NOW_MS / 1_000 + 3_600}.${"c0ffee".repeat(6)}`;
+const RECOVERY = `${NOW_MS / 1_000 + 3_600}.${"5eed".repeat(8)}`;
 
 /** A world with a Directory that knows `subs` and an in-memory agent registry. */
 function world({
@@ -84,6 +85,8 @@ function world({
     },
   };
   const bootstraps: { userId: string; accessSub: string }[] = [];
+  const relinks: { accessSub: string; tokenHash: string }[] = [];
+  const spentTokens = new Set<string>();
   /** Open forms by token; a redeemed or burned form disappears. */
   const forms = new Map<string, { agentId: string; refusals: number }>([
     ["form-token-1", { agentId: "sales", refusals: 0 }],
@@ -111,6 +114,19 @@ function world({
         ownerId = userId;
         bootstraps.push({ userId, accessSub });
         identities.set(`${ACCESS_SOURCE}:${accessSub}`, { userId, status: "enabled" });
+        return { ok: true };
+      },
+      async relinkOwnerAccess(accessSub, tokenHash) {
+        if (!ownerId) return { ok: false, reason: "no_owner" };
+        if (spentTokens.has(tokenHash)) return { ok: false, reason: "token_spent" };
+        spentTokens.add(tokenHash);
+        relinks.push({ accessSub, tokenHash });
+        for (const [entry, value] of identities) {
+          if (entry.startsWith(`${ACCESS_SOURCE}:`) && value.userId === ownerId) {
+            identities.delete(entry);
+          }
+        }
+        identities.set(`${ACCESS_SOURCE}:${accessSub}`, { userId: ownerId, status: "enabled" });
         return { ok: true };
       },
     },
@@ -142,10 +158,11 @@ function world({
       },
     },
     bootstrapToken: TOKEN,
+    recoveryToken: undefined,
     now: () => NOW_MS,
     newUserId: () => "u-new",
   };
-  return { deps, ran, bootstraps, redeemed };
+  return { deps, ran, bootstraps, redeemed, relinks };
 }
 
 function post(path: string, body?: unknown) {
@@ -356,6 +373,80 @@ describe("admin API first-run bootstrap", () => {
     const { deps, bootstraps } = world({ owner: false, authenticated: null });
     expect((await call(deps, "/bootstrap", { token: TOKEN })).status).toBe(401);
     expect(bootstraps).toEqual([]);
+  });
+});
+
+describe("admin API access recovery", () => {
+  /** The owner, back with a new Access `sub`, and a recovery token set for the occasion. */
+  function returning() {
+    const setup = world({ authenticated: "sub-new" });
+    setup.deps.recoveryToken = RECOVERY;
+    return setup;
+  }
+
+  it("relinks the owner to their new Access login, which then runs commands", async () => {
+    const { deps, relinks } = returning();
+    expect(await call(deps, "/commands/listAgents")).toEqual({
+      status: 403,
+      body: { ok: false, reason: "forbidden" },
+    });
+
+    expect(await call(deps, "/recover", { token: RECOVERY })).toEqual({
+      status: 200,
+      body: { ok: true },
+    });
+    expect((await call(deps, "/commands/listAgents")).status).toBe(200);
+    // The Directory gets the token's hash, never the token.
+    expect(relinks).toEqual([
+      { accessSub: "sub-new", tokenHash: expect.stringMatching(/^[0-9a-f]{64}$/) },
+    ]);
+    expect(JSON.stringify(relinks)).not.toContain(RECOVERY);
+  });
+
+  it("takes a recovery token once", async () => {
+    const { deps } = returning();
+    await call(deps, "/recover", { token: RECOVERY });
+    expect(await call(deps, "/recover", { token: RECOVERY })).toEqual({
+      status: 410,
+      body: { ok: false, reason: "recovery_token_spent" },
+    });
+  });
+
+  it.each([
+    ["a wrong token", { token: `${NOW_MS / 1_000 + 3_600}.${"decaf0".repeat(6)}` }],
+    ["no token", {}],
+    ["the bootstrap token", { token: TOKEN }],
+  ])("refuses %s", async (_label, body) => {
+    const { deps, relinks } = returning();
+    expect(await call(deps, "/recover", body)).toEqual({
+      status: 403,
+      body: { ok: false, reason: "invalid_recovery_token" },
+    });
+    expect(relinks).toEqual([]);
+  });
+
+  it("refuses while no recovery token is set, or once it has expired", async () => {
+    const unset = world({ authenticated: "sub-new" });
+    expect((await call(unset.deps, "/recover", { token: RECOVERY })).status).toBe(403);
+
+    const expired = returning();
+    expired.deps.now = () => NOW_MS + 3_601_000;
+    expect((await call(expired.deps, "/recover", { token: RECOVERY })).status).toBe(403);
+    expect([...unset.relinks, ...expired.relinks]).toEqual([]);
+  });
+
+  it("sends a first run to the bootstrap, and needs a verified Access login", async () => {
+    const fresh = world({ owner: false });
+    fresh.deps.recoveryToken = RECOVERY;
+    expect(await call(fresh.deps, "/recover", { token: RECOVERY })).toEqual({
+      status: 403,
+      body: { ok: false, reason: "no_owner" },
+    });
+
+    const stranger = world({ authenticated: null });
+    stranger.deps.recoveryToken = RECOVERY;
+    expect((await call(stranger.deps, "/recover", { token: RECOVERY })).status).toBe(401);
+    expect(stranger.relinks).toEqual([]);
   });
 });
 

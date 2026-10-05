@@ -48,6 +48,9 @@ function depsFor(env: Env): AdminDeps {
     }),
     forms,
     bootstrapToken: env.BOOTSTRAP_TOKEN,
+    // Optional: set only during a recovery and deleted after it, so `secrets.required` can't list
+    // it, and `wrangler types` leaves it out of `Env`.
+    recoveryToken: (env as Env & { RECOVERY_TOKEN?: string }).RECOVERY_TOKEN,
     now: () => Date.now(),
     newUserId: () => crypto.randomUUID(),
   };
