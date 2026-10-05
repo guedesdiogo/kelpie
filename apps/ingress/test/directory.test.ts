@@ -301,6 +301,8 @@ describe("Directory access recovery", () => {
       ok: true,
     });
     expect(await stub.admit(oldSub, ADMIN_AGENT_ID)).toMatchObject({ admitted: true });
+    // The spent token is still audited, though nothing else changed.
+    expect((await auditActions(stub)).at(-1)).toBe("owner.access_relinked");
     expect(await stub.relinkOwnerAccess(newSub.channelUserId, "b".repeat(64))).toEqual({
       ok: false,
       reason: "token_spent",
@@ -337,6 +339,13 @@ describe("Directory access recovery", () => {
       reason: "identity_taken",
     });
     expect(await stub.admit(oldSub, ADMIN_AGENT_ID)).toMatchObject({ admitted: true });
+    // A refusal spends nothing: the same token still works for a login nobody holds.
+    expect(
+      (await auditActions(stub)).filter((action) => action === "owner.access_relinked"),
+    ).toEqual([]);
+    expect(await stub.relinkOwnerAccess(newSub.channelUserId, "e".repeat(64))).toEqual({
+      ok: true,
+    });
   });
 });
 

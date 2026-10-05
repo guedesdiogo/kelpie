@@ -43,7 +43,7 @@ Every endpoint is a `POST` with a JSON body.
 
 | Status | Reasons |
 |---|---|
-| 400 | `invalid_input`, `invalid_identity`, `invalid_json` |
+| 400 | `invalid_input`, `invalid_identity`, `invalid_json`, `invalid_user` |
 | 401 | `unauthenticated` |
 | 403 | `forbidden`, `no_owner`, `invalid_bootstrap_token`, `invalid_recovery_token` |
 | 404 | `unknown_agent`, `unknown_identity`, `unknown_user`, `not_found` |
@@ -136,7 +136,7 @@ Access gives the owner a new `sub` if they are removed from the Zero Trust organ
    ```bash
    cloudflared access curl https://<admin hostname>/recover -X POST -H 'content-type: application/json' -d "{\"token\":\"$RECOVERY_TOKEN\"}"
    ```
-   It answers `200 { "ok": true }`. Each token works once (`410 recovery_token_spent`), and an unset, wrong or expired one is refused (`403 invalid_recovery_token`).
+   It answers `200 { "ok": true }`. Each token works once (`410 recovery_token_spent`). An unset, wrong or expired token is refused (`403 invalid_recovery_token`), and so is one that would live more than a day or that equals the bootstrap token.
 4. **Delete it:**
    ```bash
    bunx wrangler secret delete RECOVERY_TOKEN -c apps/admin-api/wrangler.jsonc

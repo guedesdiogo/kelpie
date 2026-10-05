@@ -217,21 +217,35 @@ async function bootstrap(accessSub: string, input: unknown, deps: AdminDeps): Pr
  */
 async function recover(accessSub: string, input: unknown, deps: AdminDeps): Promise<Response> {
   const { token } = (input ?? {}) as { token?: unknown };
+  const configured = deps.recoveryToken;
+  // A recovery token is short-lived and its own: one that lives past a day, or that is also the
+  // bootstrap token, is refused, so a forgotten secret can't serve as a standing credential.
+  const expiry = Number(configured?.match(DEPLOY_TOKEN_FORMAT)?.[1]);
   if (
     typeof token !== "string" ||
-    !(await isValidDeployToken(token, deps.recoveryToken, deps.now()))
+    configured === deps.bootstrapToken ||
+    !(expiry * 1_000 <= deps.now() + MAX_RECOVERY_TOKEN_LIFETIME_MS) ||
+    !(await isValidDeployToken(token, configured, deps.now()))
   ) {
-    return refuse(403, "invalid_recovery_token");
+    return refused("invalid_recovery_token", 403);
   }
   const hash = [...new Uint8Array(await digest(token))]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
   const result = await deps.directory.relinkOwnerAccess(accessSub, hash);
   if (result.ok) return Response.json({ ok: true });
-  if (result.reason === "no_owner") return refuse(403, "no_owner");
-  if (result.reason === "token_spent") return refuse(410, "recovery_token_spent");
-  return refuse(result.reason === "identity_taken" ? 409 : 400, result.reason);
+  if (result.reason === "no_owner") return refused("no_owner", 403);
+  if (result.reason === "token_spent") return refused("recovery_token_spent", 410);
+  return refused(result.reason, result.reason === "identity_taken" ? 409 : 400);
 }
+
+/** A refused recovery is logged by its reason only: never the token, never the login. */
+function refused(reason: string, status: number): Response {
+  console.warn("admin-api: recovery refused", { reason });
+  return refuse(status, reason);
+}
+
+const MAX_RECOVERY_TOKEN_LIFETIME_MS = 24 * 60 * 60_000;
 
 /** `<expiry in epoch seconds>.<at least 128 random bits in hex>`, as `docs/admin-api.md` makes it. */
 const DEPLOY_TOKEN_FORMAT = /^(\d{1,12})\.[0-9a-f]{32,}$/;

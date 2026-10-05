@@ -1,6 +1,6 @@
 import { ACCESS_SOURCE, type ChannelIdentity, type IdentityStatus } from "@kelpie/access";
 import { type ConfigPorts, createConfigCommands, DEFAULT_SETTINGS } from "@kelpie/config";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Verification } from "../src/access-jwt.ts";
 import { type AdminDeps, handle } from "../src/api.ts";
 
@@ -423,6 +423,44 @@ describe("admin API access recovery", () => {
       body: { ok: false, reason: "invalid_recovery_token" },
     });
     expect(relinks).toEqual([]);
+  });
+
+  it("refuses a recovery token that would live past a day, or that is the bootstrap token", async () => {
+    const lasting = world({ authenticated: "sub-new" });
+    lasting.deps.recoveryToken = `${NOW_MS / 1_000 + 25 * 3_600}.${"5eed".repeat(8)}`;
+    expect(
+      (await call(lasting.deps, "/recover", { token: lasting.deps.recoveryToken })).status,
+    ).toBe(403);
+
+    const shared = world({ authenticated: "sub-new" });
+    shared.deps.recoveryToken = TOKEN;
+    expect((await call(shared.deps, "/recover", { token: TOKEN })).status).toBe(403);
+    expect([...lasting.relinks, ...shared.relinks]).toEqual([]);
+  });
+
+  it.each([
+    ["identity_taken", 409],
+    ["invalid_user", 400],
+  ] as const)("answers the Directory's %s with %i", async (reason, status) => {
+    const { deps } = returning();
+    deps.directory.relinkOwnerAccess = async () => ({ ok: false, reason });
+    expect(await call(deps, "/recover", { token: RECOVERY })).toEqual({
+      status,
+      body: { ok: false, reason },
+    });
+  });
+
+  it("logs a refused recovery's reason, never the token or the login", async () => {
+    const logged: unknown[][] = [];
+    vi.spyOn(console, "warn").mockImplementation((...args) => {
+      logged.push(args);
+    });
+    const { deps } = returning();
+    await call(deps, "/recover", { token: `${NOW_MS / 1_000 + 3_600}.${"decaf0".repeat(6)}` });
+    expect(JSON.stringify(logged)).toContain("invalid_recovery_token");
+    expect(JSON.stringify(logged)).not.toContain("decaf0");
+    expect(JSON.stringify(logged)).not.toContain("sub-new");
+    vi.restoreAllMocks();
   });
 
   it("refuses while no recovery token is set, or once it has expired", async () => {

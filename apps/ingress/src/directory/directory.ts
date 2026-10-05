@@ -345,8 +345,8 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
    * Recovery (#71): relinks the owner to a new Cloudflare Access login, for when Access gave them a
    * new `sub`. The caller holds the proof, a valid recovery token set at deploy and an Access JWT
    * for `accessSub`; the token's hash is recorded so it works once. The owner's `userId` and channel
-   * identities stay. Relinking to the login the owner already has changes nothing, and still spends
-   * the token.
+   * identities stay. Relinking to the login the owner already has changes nothing, but still spends
+   * the token, and is audited.
    */
   relinkOwnerAccess(accessSub: string, tokenHash: string): RelinkResult {
     if (!isNonEmpty(accessSub) || !isNonEmpty(tokenHash)) {
@@ -368,18 +368,20 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
     const at = new Date();
     this.#db.transaction((tx) => {
       tx.insert(schema.spentTokens).values({ hash: tokenHash, spentAt: at }).run();
-      if (existing) return;
-      tx.delete(schema.identities)
-        .where(
-          and(
-            eq(schema.identities.userId, owner.userId),
-            eq(schema.identities.channel, ACCESS_SOURCE),
-          ),
-        )
-        .run();
-      tx.insert(schema.identities)
-        .values({ ...access, userId: owner.userId, status: "enabled", updatedAt: at })
-        .run();
+      if (!existing) {
+        tx.delete(schema.identities)
+          .where(
+            and(
+              eq(schema.identities.userId, owner.userId),
+              eq(schema.identities.channel, ACCESS_SOURCE),
+            ),
+          )
+          .run();
+        tx.insert(schema.identities)
+          .values({ ...access, userId: owner.userId, status: "enabled", updatedAt: at })
+          .run();
+      }
+      // Audited either way: the log is the trace of every spent token.
       tx.insert(schema.auditLog)
         .values({
           at,
