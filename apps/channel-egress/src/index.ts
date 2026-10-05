@@ -186,17 +186,16 @@ function noticeText(notice: WebhookNotice): string | null {
 }
 
 /**
- * A stranger's name, as Hermes shows it: control and format characters (bidi overrides included)
- * and mention, link and markup sigils removed, then cut short. It can't break the line, ping
- * anyone or look like a link.
+ * A stranger's name, kept to letters, digits, spaces, apostrophes and hyphens, then cut short.
+ * Everything else becomes a space, so the name can't break the line, ping anyone, or read as a
+ * link, an address or a command, which Telegram would make tappable (`evil.example`, `t.me/x`,
+ * `/start`).
  */
 function displayName(value: unknown): string {
   if (typeof value !== "string") return "";
   const cleaned = value
     .normalize("NFKC")
-    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ")
-    .replace(/[@<>[\]()`*_~#]/g, "")
-    .replace(/https?:\/\/\S*/gi, "")
+    .replace(/[^\p{L}\p{M}\p{N}' -]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
   return [...cleaned].slice(0, MAX_DISPLAY_NAME_LENGTH).join("").trim();

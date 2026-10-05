@@ -26,7 +26,10 @@ const START_COMMAND = /^\/start(?:\s+(\S+))?\s*$/;
 export interface TelegramWebhookDeps {
   webhooks: ChannelWebhooksContract;
   admit(event: CanonicalEvent): Promise<Admission>;
-  directory: Pick<Remote<DirectoryContract>, "redeemPairingCode" | "noticeStranger">;
+  directory: Pick<
+    Remote<DirectoryContract>,
+    "redeemPairingCode" | "noticeStranger" | "releaseStrangerNotice"
+  >;
   /** Hands a message to the conversation's object, named by `conversationName`. */
   ingest(name: string, message: InboundMessage): Promise<IngestResult>;
 }
@@ -142,16 +145,23 @@ async function fromStranger(
     );
     return;
   }
-  const notice = await deps.directory.noticeStranger(sender);
-  if (!notice.notify) return;
-  const stranger: WebhookNotice = { kind: "stranger", senderId: sender.channelUserId };
-  if (event.sender.displayName) stranger.displayName = event.sender.displayName;
-  await notify(
-    deps,
-    event.agentId,
-    { channel: event.channel, threadId: notice.ownerChannelUserId },
-    stranger,
-  );
+  // A notice is optional: whatever fails on its way is logged, and the webhook answers 200.
+  try {
+    const notice = await deps.directory.noticeStranger(sender);
+    if (!notice.notify) return;
+    const stranger: WebhookNotice = { kind: "stranger", senderId: sender.channelUserId };
+    if (event.sender.displayName) stranger.displayName = event.sender.displayName;
+    const sent = await notify(
+      deps,
+      event.agentId,
+      { channel: event.channel, threadId: notice.ownerChannelUserId },
+      stranger,
+    );
+    // Unsent, it shouldn't count: the stranger's next message can try again.
+    if (!sent) await deps.directory.releaseStrangerNotice(sender);
+  } catch (error) {
+    console.warn("ingress: a stranger notice failed", errorName(error));
+  }
 }
 
 /** Best effort: a notice that can't be sent is logged, and the webhook still answers 200. */
@@ -160,12 +170,14 @@ async function notify(
   agentId: string,
   destination: EgressDestination,
   notice: WebhookNotice,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const sent = await deps.webhooks.notice(agentId, destination, notice);
     if (!sent.ok) console.warn("ingress: a notice wasn't sent", notice.kind, sent.reason);
+    return sent.ok;
   } catch (error) {
     console.warn("ingress: a notice wasn't sent", notice.kind, errorName(error));
+    return false;
   }
 }
 

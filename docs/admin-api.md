@@ -65,10 +65,12 @@ No command takes an identity value to admit someone: the owner proves an account
 2. The owner opens the link in Telegram, which sends the bot `/start <code>`.
 3. A match makes that Telegram account the owner's, enabled, and the bot answers with a fixed "paired" notice. The `/start` never reaches the model.
 
+A code pairs an account with the owner, not with one agent: any of the owner's Telegram bots accepts it, and the paired account reaches every agent.
+
 What a sender who isn't paired gets:
 - **Nothing**, ever.
-- **A wrong code** counts against that sender only: the fifth within an hour locks that sender out of pairing for an hour, while the owner, on their own account, can still pair.
-- **The owner is told once** about each stranger, on the owner's own chat with the bot, at most ten times a day per channel. The notice has the stranger's name, cleaned up, and their id masked.
+- **A wrong code** counts against that sender only. Five wrong codes with no hour-long pause between them lock that sender out of pairing for an hour; there is no reset command. A stranger's guesses can't lock the owner's account. The owner can lock only the account they are pairing, by mistyping five times.
+- **The owner is told about each stranger once**, on the owner's own chat with the bot. That starts once the owner has paired a Telegram account. At most ten notices a day per channel; a stranger is remembered for 30 days. A notice that can't be sent, for example because the owner never opened that bot, doesn't count. The notice has the stranger's name, kept to letters and digits, and their id masked.
 
 ## Secure forms
 

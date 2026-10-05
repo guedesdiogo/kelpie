@@ -74,6 +74,9 @@ describe("Directory", () => {
     });
 
     expect(await stub.enableIdentity(webchat)).toEqual({ ok: false, reason: "not_paired" });
+    // Nor by way of disabling it first.
+    expect(await stub.disableIdentity(webchat)).toEqual({ ok: false, reason: "not_paired" });
+    expect(await stub.enableIdentity(webchat)).toEqual({ ok: false, reason: "not_paired" });
     expect(await stub.admit(webchat, "sales")).toMatchObject({ admitted: false });
 
     expect(await pair(stub, webchat)).toEqual({ ok: true, userId: OWNER });
@@ -378,6 +381,52 @@ describe("Directory pairing", () => {
     expect(await stub.redeemPairingCode(next.code, stranger)).toEqual({ ok: true, userId: OWNER });
   });
 
+  it("keeps a lock until it ends, and lets wrong codes an hour apart start over", async () => {
+    const stub = await owned("pair-window");
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await stub.redeemPairingCode("WRONGCD2", stranger);
+    }
+    await runInDurableObject(stub, (_instance: Directory, state) => {
+      state.storage.sql.exec(
+        `UPDATE pairing_failures SET locked_until = ${Date.now() + 60_000}, last_failure_at = 0`,
+      );
+    });
+    expect(await stub.redeemPairingCode((await issue(stub)).code, stranger)).toEqual({
+      ok: false,
+      reason: "locked",
+    });
+
+    const patient = { channel: "telegram", channelUserId: "7777" } as const;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await stub.redeemPairingCode("WRONGCD2", patient);
+    }
+    await runInDurableObject(stub, (_instance: Directory, state) => {
+      state.storage.sql.exec(
+        `UPDATE pairing_failures SET last_failure_at = ${Date.now() - 61 * 60_000} WHERE channel_user_id = '7777'`,
+      );
+    });
+    await stub.redeemPairingCode("WRONGCD2", patient);
+    expect(await stub.redeemPairingCode((await issue(stub)).code, patient)).toMatchObject({
+      ok: true,
+    });
+  });
+
+  it("pairs one account only when two redeem the same code at once", async () => {
+    const stub = await owned("pair-race");
+    const { code } = await issue(stub);
+    const other = { channel: "telegram", channelUserId: "8888" } as const;
+
+    const results = await Promise.all([
+      stub.redeemPairingCode(code, telegram),
+      stub.redeemPairingCode(code, other),
+    ]);
+
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(results).toContainEqual({ ok: false, reason: "invalid_code" });
+    const enabled = (await stub.listIdentities()).filter((row) => row.status === "enabled");
+    expect(enabled).toHaveLength(1);
+  });
+
   it("forgets earlier wrong codes once the sender pairs", async () => {
     const stub = await owned("pair-reset");
     for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -425,6 +474,13 @@ describe("Directory stranger notices", () => {
       ownerChannelUserId: telegram.channelUserId,
     });
     expect(await stub.noticeStranger(sender(7001))).toEqual({ notify: false });
+  });
+
+  it("can tell the owner again about a stranger whose notice couldn't be sent", async () => {
+    const stub = await withEnabledOwner("notice-release");
+    expect(await stub.noticeStranger(sender(7101))).toMatchObject({ notify: true });
+    await stub.releaseStrangerNotice(sender(7101));
+    expect(await stub.noticeStranger(sender(7101))).toMatchObject({ notify: true });
   });
 
   it("tells nobody while the owner has no account on that channel", async () => {

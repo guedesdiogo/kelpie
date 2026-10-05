@@ -309,7 +309,7 @@ describe("Telegram pairing and strangers", () => {
     expect(notices).toEqual([]);
   });
 
-  it("still answers 200 when a notice can't be sent, so Telegram doesn't repeat it", async () => {
+  it("still answers 200 when a notice can't be sent, and can tell the owner later", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const failures: TelegramWebhookDeps["webhooks"]["notice"][] = [
       async () => ({ ok: false, reason: "recipient_unavailable" }),
@@ -317,16 +317,86 @@ describe("Telegram pairing and strangers", () => {
         throw new Error("egress unreachable");
       },
     ];
-    for (const [index, notice] of failures.entries()) {
-      const { deps } = fakes();
-      deps.webhooks = { ...deps.webhooks, notice };
+    for (const [index, failing] of failures.entries()) {
+      const { deps, notices } = fakes();
+      const attempts: string[] = [];
+      deps.webhooks = {
+        ...deps.webhooks,
+        notice: async (...args) => {
+          attempts.push(args[2].kind);
+          return failing(...args);
+        },
+      };
       const stranger = update({
         message_id: 700 + index,
         from: { id: 4646 + index, is_bot: false },
         chat: { id: 4646 + index, type: "private" },
       });
       expect((await handleTelegramWebhook(webhook(stranger), "kelpie", deps)).status).toBe(200);
+      expect(attempts).toEqual(["stranger"]);
+
+      // The failed notice didn't count: the stranger's next message tries again.
+      const { deps: working, notices: sent } = fakes();
+      await handleTelegramWebhook(webhook(stranger), "kelpie", working);
+      expect(sent).toMatchObject([{ notice: { kind: "stranger" } }]);
+      expect(notices).toEqual([]);
     }
+  });
+
+  it("pairs even when the paired notice can't be sent, and still answers 200", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { deps } = fakes();
+    deps.webhooks = {
+      ...deps.webhooks,
+      notice: async () => ({ ok: false, reason: "recipient_unavailable" }),
+    };
+    const response = await handleTelegramWebhook(
+      webhook(start(4848, await issueCode())),
+      "kelpie",
+      deps,
+    );
+    expect(response.status).toBe(200);
+    expect(
+      await directory().admit({ channel: "telegram", channelUserId: "4848" }, "kelpie"),
+    ).toMatchObject({ admitted: true });
+  });
+
+  it("answers 200 when the Directory can't record a stranger, since a notice is optional", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { deps, notices } = fakes({
+      directory: {
+        redeemPairingCode: (code, identity) => directory().redeemPairingCode(code, identity),
+        noticeStranger: async () => {
+          throw new Error("Directory unreachable");
+        },
+        releaseStrangerNotice: async () => {},
+      },
+    });
+    const stranger = update({
+      message_id: 800,
+      from: { id: 4949, is_bot: false },
+      chat: { id: 4949, type: "private" },
+    });
+    expect((await handleTelegramWebhook(webhook(stranger), "kelpie", deps)).status).toBe(200);
+    expect(notices).toEqual([]);
+  });
+
+  it("never pairs or notices from a group, even with a valid code", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { deps, notices } = fakes();
+    const code = await issueCode();
+    const inGroup = update({
+      message_id: 900,
+      from: { id: 5050, is_bot: false },
+      chat: { id: -100123, type: "supergroup" },
+      text: `/start ${code}`,
+    });
+    expect((await handleTelegramWebhook(webhook(inGroup), "kelpie", deps)).status).toBe(200);
+    expect(notices).toEqual([]);
+    // The code is still unspent: the owner can use it in a direct chat.
+    expect(
+      await directory().redeemPairingCode(code, { channel: "telegram", channelUserId: "5051" }),
+    ).toMatchObject({ ok: true });
   });
 });
 

@@ -21,6 +21,9 @@ import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
 
+/** An identity on a messaging channel: what pairing and stranger notices deal in. */
+type MessagingIdentity = ChannelIdentity & { channel: ChannelId };
+
 /** Hermes's pairing code rules (Story 3.6): no 0/O or 1/I to mistake. */
 const PAIRING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const PAIRING_CODE_LENGTH = 8;
@@ -137,7 +140,7 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
           .from(schema.pairingCodes)
           .where(
             and(
-              eq(schema.pairingCodes.channel, identity.channel as ChannelId),
+              eq(schema.pairingCodes.channel, identity.channel),
               gt(schema.pairingCodes.expiresAt, new Date(now)),
             ),
           )
@@ -153,31 +156,45 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
       this.#recordFailure(identity, now);
       return { ok: false, reason: "invalid_code" };
     }
-    const existing = this.#identity(identity);
-    if (existing && existing.userId !== match.userId) {
-      return { ok: false, reason: "identity_taken" };
-    }
     const pairedUser = match.userId;
     const spentHash = match.hash;
-    // Hashing awaited, so another request may have spent or replaced the code since.
-    const paired = this.#db.transaction((tx) => {
+    // Hashing awaited, so another request may have spent or replaced the code, locked the sender
+    // or paired the account since: everything is checked again where the code is spent.
+    const outcome = this.#db.transaction((tx): PairingResult => {
+      const lock = tx
+        .select({ lockedUntil: schema.pairingFailures.lockedUntil })
+        .from(schema.pairingFailures)
+        .where(this.#failureKey(identity))
+        .get();
+      if (lock?.lockedUntil && lock.lockedUntil.getTime() > now) {
+        return { ok: false, reason: "locked" };
+      }
       const still = tx
         .select({ hash: schema.pairingCodes.hash })
         .from(schema.pairingCodes)
         .where(
           and(
             eq(schema.pairingCodes.userId, pairedUser),
-            eq(schema.pairingCodes.channel, identity.channel as ChannelId),
+            eq(schema.pairingCodes.channel, identity.channel),
             eq(schema.pairingCodes.hash, spentHash),
+            gt(schema.pairingCodes.expiresAt, new Date(now)),
           ),
         )
         .get();
-      if (!still) return false;
+      if (!still) return { ok: false, reason: "invalid_code" };
+      const existing = tx
+        .select({ userId: schema.identities.userId, status: schema.identities.status })
+        .from(schema.identities)
+        .where(this.#identityKey(identity))
+        .get();
+      if (existing && existing.userId !== pairedUser) {
+        return { ok: false, reason: "identity_taken" };
+      }
       tx.delete(schema.pairingCodes)
         .where(
           and(
             eq(schema.pairingCodes.userId, pairedUser),
-            eq(schema.pairingCodes.channel, identity.channel as ChannelId),
+            eq(schema.pairingCodes.channel, identity.channel),
           ),
         )
         .run();
@@ -196,9 +213,9 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
       tx.insert(schema.auditLog)
         .values({ at, action: "identity.paired", userId: pairedUser, channel: identity.channel })
         .run();
-      return true;
+      return { ok: true, userId: pairedUser };
     });
-    return paired ? { ok: true, userId: pairedUser } : { ok: false, reason: "invalid_code" };
+    return outcome;
   }
 
   /**
@@ -208,7 +225,7 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
   noticeStranger(sender: ChannelIdentity): StrangerNotice {
     if (!isValidIdentity(sender)) return { notify: false };
     const now = Date.now();
-    const channel = sender.channel as ChannelId;
+    const channel = sender.channel;
     this.#db
       .delete(schema.noticedSenders)
       .where(lt(schema.noticedSenders.noticedAt, new Date(now - NOTICED_SENDER_RETENTION_MS)))
@@ -256,14 +273,25 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
     return { notify: true, ownerChannelUserId: owner.channelUserId };
   }
 
+  /** Undoes `noticeStranger` when the notice couldn't be sent, so it is neither spent nor lost. */
+  releaseStrangerNotice(sender: ChannelIdentity): void {
+    if (!isValidIdentity(sender)) return;
+    this.#db
+      .delete(schema.noticedSenders)
+      .where(
+        and(
+          eq(schema.noticedSenders.channel, sender.channel),
+          eq(schema.noticedSenders.channelUserId, sender.channelUserId),
+        ),
+      )
+      .run();
+  }
+
   /**
    * Re-enables a disabled identity, on an owner-authenticated command (Story 3.10). A pending one
    * isn't enabled here: only pairing proves an account is the owner's.
    */
   enableIdentity(identity: ChannelIdentity): IdentityResult {
-    if (isValidIdentity(identity) && this.#identity(identity)?.status === "pending") {
-      return { ok: false, reason: "not_paired" };
-    }
     return this.#setStatus(identity, "enabled");
   }
 
@@ -396,19 +424,19 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
       .get();
   }
 
-  #failureKey(identity: ChannelIdentity) {
+  #failureKey(identity: MessagingIdentity) {
     return and(
-      eq(schema.pairingFailures.channel, identity.channel as ChannelId),
+      eq(schema.pairingFailures.channel, identity.channel),
       eq(schema.pairingFailures.channelUserId, identity.channelUserId),
     );
   }
 
-  #failures(identity: ChannelIdentity) {
+  #failures(identity: MessagingIdentity) {
     return this.#db.select().from(schema.pairingFailures).where(this.#failureKey(identity)).get();
   }
 
   /** Counts a wrong code; the fifth within the window locks the sender out for as long. */
-  #recordFailure(identity: ChannelIdentity, now: number): void {
+  #recordFailure(identity: MessagingIdentity, now: number): void {
     const previous = this.#failures(identity);
     const recent = previous && now - previous.lastFailureAt.getTime() < PAIRING_LOCK_MS;
     const failures = (recent ? previous.count : 0) + 1;
@@ -421,7 +449,7 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
     this.#db.transaction((tx) => {
       tx.insert(schema.pairingFailures)
         .values({
-          channel: identity.channel as ChannelId,
+          channel: identity.channel,
           channelUserId: identity.channelUserId,
           ...values,
         })
@@ -451,6 +479,9 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
     if (!isValidIdentity(identity)) return { ok: false, reason: "invalid_identity" };
     const existing = this.#identity(identity);
     if (!existing) return { ok: false, reason: "unknown_identity" };
+    // A pending identity, from before pairing, has no proof behind it: disabling it would let
+    // re-enabling admit it. Pairing is the only way out of pending.
+    if (existing.status === "pending") return { ok: false, reason: "not_paired" };
     if (existing.status === status) return { ok: true, status };
     this.#db.transaction((tx) => {
       tx.update(schema.identities)
@@ -481,7 +512,7 @@ function isNonEmpty(value: unknown): value is string {
 
 // RPC callers aren't type-checked, so identities are checked where they enter storage.
 // An Access identity enters only through `bootstrapOwner`.
-function isValidIdentity(identity: ChannelIdentity): boolean {
+function isValidIdentity(identity: ChannelIdentity): identity is MessagingIdentity {
   return (
     (CHANNEL_IDS as readonly string[]).includes(identity?.channel) &&
     isNonEmpty(identity?.channelUserId)

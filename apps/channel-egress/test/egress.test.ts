@@ -294,6 +294,30 @@ describe("Telegram bot facts and notices", () => {
     expect(text).toContain("They got no answer");
   });
 
+  it("keeps links, addresses and commands out of a stranger's name", async () => {
+    const calls = botApi();
+    await connect("linkless");
+    for (const displayName of [
+      "evil.example/verify",
+      "t.me/+AbCdEf",
+      "tg://resolve?domain=phish",
+      "me@evil.example",
+      "/start now",
+    ]) {
+      await exports.ChannelWebhooks.notice("linkless", owner, {
+        kind: "stranger",
+        senderId: "5550123456",
+        displayName,
+      });
+    }
+    const texts = sent(calls).map((call) => String(call.body.text));
+    expect(texts).toHaveLength(5);
+    for (const text of texts) {
+      const name = text.slice(text.indexOf(":") + 1, text.lastIndexOf("("));
+      expect(name).not.toMatch(/[./:@?+]/);
+    }
+  });
+
   it("sends nothing for a notice it doesn't know, or a sender id that isn't one", async () => {
     const calls = botApi();
     await connect("strict");

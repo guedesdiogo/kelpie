@@ -100,8 +100,8 @@ export type PairingCodeResult =
   | { ok: false; reason: "unknown_user" | "invalid_channel" };
 
 /**
- * A `/start <code>` from an unpaired sender. A sender's fifth wrong code within an hour locks that
- * sender out for an hour; nobody else.
+ * A `/start <code>` from an unpaired sender. Five wrong codes from one sender, with no hour-long
+ * pause between them, lock that sender out for an hour; nobody else.
  */
 export type PairingResult =
   | { ok: true; userId: string }
@@ -121,6 +121,7 @@ export interface DirectoryContract {
   issuePairingCode(userId: string, channel: ChannelId): Promise<PairingCodeResult>;
   redeemPairingCode(code: string, identity: ChannelIdentity): Promise<PairingResult>;
   noticeStranger(sender: ChannelIdentity): StrangerNotice;
+  releaseStrangerNotice(sender: ChannelIdentity): void;
   enableIdentity(identity: ChannelIdentity): IdentityResult;
   disableIdentity(identity: ChannelIdentity): IdentityResult;
   listIdentities(): (ChannelIdentity & { status: IdentityStatus })[];
