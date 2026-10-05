@@ -91,7 +91,10 @@ Form pages are HTML:
 ## Setting it up
 
 1. **Deploy the other Workers first, in this order.** Each one's bindings point only at Workers before it:
-   1. `llm-gateway`;
+   1. `llm-gateway`, with a model key (`docs/secrets.md`). To send its calls through AI Gateway:
+      - create a gateway with "Require provider credentials" (`byok_only`), so a missing key fails instead of billing Cloudflare credits;
+      - pass each provider's passthrough URL as a flag, for example `--var OPENAI_BASE_URL:https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/openai`. Later deploys need the same flag, or calls go straight to the provider without a warning;
+      - if the gateway requires authentication, set `AI_GATEWAY_TOKEN` to a Cloudflare API token with only `AI Gateway Run`. Such a token works on every gateway in the account. The Worker sends it only to `gateway.ai.cloudflare.com`.
    2. `channel-egress`, with its `SECRETS_KEY` and `--var INGRESS_ORIGIN:https://<ingress hostname>` (`docs/secrets.md`);
    3. `conversation-runtime`;
    4. `ingress`, with `--domain <ingress hostname>`. Telegram's webhooks reach it there; like the admin API, it has no `workers.dev` URL. Later deploys need the same flag.
