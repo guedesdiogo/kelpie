@@ -12,7 +12,9 @@ import {
   fail,
   fakeWorld,
   hang,
+  held,
   INJECTED_FAILURE,
+  OVER_BUDGET,
   refuse,
   reply,
   slowQualifier,
@@ -725,5 +727,144 @@ describe("ConversationAgent rate limits and interruption", () => {
     ).toEqual(["cancelled", "cancelled"]);
     // History holds no reply for the first turn: nothing of it reached the user.
     expect(JSON.stringify(world.requests[1]?.messages)).not.toContain("One.");
+  });
+});
+
+describe("ConversationAgent checkpoints", () => {
+  /** One turn per text, each delivered before the next. */
+  async function converse(stub: ReturnType<typeof agent>, texts: string[], first = 0) {
+    for (const [index, text] of texts.entries()) {
+      await stub.ingest(message(`m${first + index}`, text));
+      await stub.flush();
+      await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).toBe("delivered"));
+    }
+  }
+
+  const pendingCheckpoints = (stub: ReturnType<typeof agent>) =>
+    runInDurableObject(stub, (instance: ConversationAgent) =>
+      instance.getSchedules().filter((schedule) => schedule.callback === "compact"),
+    );
+
+  const replies = (count: number) => Array.from({ length: count }, (_, i) => reply(`r${i}`));
+  const questions = (count: number) => Array.from({ length: count }, (_, i) => `q${i}`);
+
+  it("summarizes all but the latest rows once a turn's prompt crosses the budget", async () => {
+    const world = use(
+      fakeWorld([...replies(5), reply("r5", OVER_BUDGET), reply("THE SUMMARY"), reply("r6")]),
+    );
+    const stub = agent("checkpoint");
+    await converse(stub, questions(5));
+    expect(await pendingCheckpoints(stub)).toEqual([]);
+    await converse(stub, ["q5"], 5);
+    expect(await pendingCheckpoints(stub)).toHaveLength(1);
+
+    await stub.compact();
+    expect(await pendingCheckpoints(stub)).toEqual([]);
+    expect(world.tiers.at(-1)).toBe("cheap");
+    const summarized = JSON.stringify(world.requests.at(-1)?.messages);
+    for (const text of ["q0", "r0", "q2", "r2"]) expect(summarized).toContain(text);
+    for (const text of ["q3", "r3", "q5", "r5"]) expect(summarized).not.toContain(text);
+
+    await converse(stub, ["q6"], 6);
+    const next = world.requests.at(-1);
+    expect(next?.system).toBe(world.requests[0]?.system);
+    // The summary leads the first kept message; rows from before the checkpoint lose native output.
+    expect(next?.messages).toEqual([
+      {
+        role: "user",
+        parts: [
+          { type: "text", text: expect.stringContaining("THE SUMMARY") },
+          { type: "text", text: `${STAMP} q3` },
+        ],
+      },
+      neutral("r3"),
+      user("q4"),
+      neutral("r4"),
+      user("q5"),
+      neutral("r5"),
+      user("q6"),
+    ]);
+  });
+
+  it("replays the reply of a turn that overlapped a checkpoint without native output", async () => {
+    const world = use(
+      fakeWorld([
+        ...replies(5),
+        reply("r5", OVER_BUDGET),
+        held("r6"),
+        reply("THE SUMMARY"),
+        reply("r7"),
+      ]),
+    );
+    const stub = agent("checkpoint-overlap");
+    await converse(stub, questions(6));
+
+    world.modelHeld = true;
+    await stub.ingest(message("m6", "q6"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(7));
+    await stub.compact();
+    world.modelHeld = false;
+    await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).toBe("delivered"));
+
+    await converse(stub, ["q7"], 7);
+    const next = world.requests.at(-1);
+    expect(JSON.stringify(next?.messages)).toContain("r6");
+    expect(next?.messages.some((m) => "native" in m)).toBe(false);
+  });
+
+  it("folds the previous summary into the next one", async () => {
+    const world = use(
+      fakeWorld([
+        ...replies(5),
+        reply("r5", OVER_BUDGET),
+        reply("THE SUMMARY"),
+        reply("r6"),
+        reply("r7"),
+        reply("r8", OVER_BUDGET),
+        reply("SECOND SUMMARY"),
+      ]),
+    );
+    const stub = agent("checkpoint-fold");
+    await converse(stub, questions(6));
+    await stub.compact();
+    await converse(stub, ["q6", "q7", "q8"], 6);
+    expect(await pendingCheckpoints(stub)).toHaveLength(1);
+
+    await stub.compact();
+    expect(JSON.stringify(world.requests.at(-1)?.messages)).toContain("THE SUMMARY");
+    expect(JSON.stringify((await stub.history())[0])).toContain("SECOND SUMMARY");
+  });
+
+  it("writes nothing when the summary fails, and tries again after the next big turn", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    use(fakeWorld([...replies(5), reply("r5", OVER_BUDGET), fail(), reply("r6", OVER_BUDGET)]));
+    const stub = agent("checkpoint-failure");
+    await converse(stub, questions(6));
+
+    await stub.compact();
+    expect((await stub.history())[0]).toEqual(user("q0"));
+    expect(await pendingCheckpoints(stub)).toEqual([]);
+
+    await converse(stub, ["q6"], 6);
+    expect(await pendingCheckpoints(stub)).toHaveLength(1);
+  });
+
+  it("waits for enough new rows before summarizing again", async () => {
+    use(
+      fakeWorld([
+        ...replies(5),
+        reply("r5", OVER_BUDGET),
+        reply("THE SUMMARY"),
+        reply("r6", OVER_BUDGET),
+      ]),
+    );
+    const stub = agent("checkpoint-tail");
+    await converse(stub, questions(6));
+    await stub.compact();
+
+    // The kept rows alone may stay over the budget; one more turn isn't enough to summarize.
+    await converse(stub, ["q6"], 6);
+    expect(await pendingCheckpoints(stub)).toEqual([]);
   });
 });
