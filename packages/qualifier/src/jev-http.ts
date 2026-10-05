@@ -46,7 +46,13 @@ export class JevHttpQualifier implements Qualifier {
     });
     // An error's body can echo the state, so only the status is reported.
     if (!response.ok) throw new Error(`TypeSafe answered ${response.status}`);
-    const body = (await response.json()) as { answers?: Record<string, unknown> } | null;
+    let body: { answers?: Record<string, unknown> } | null;
+    try {
+      body = (await response.json()) as typeof body;
+    } catch {
+      // The parser's message quotes the body, which can echo the state.
+      throw new Error("TypeSafe answered with a body that isn't JSON");
+    }
     const answers: Record<string, Answer> = {};
     for (const [key, question] of Object.entries(questions)) {
       const answer = toAnswer(question, body?.answers?.[key]);

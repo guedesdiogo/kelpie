@@ -104,14 +104,12 @@ describe("runDecision with the end-of-turn decision", () => {
   });
 
   it("falls back to the heuristic when the qualifier fails", async () => {
-    const failing: Qualifier = {
-      id: "jev-workers-ai",
-      calibrated: true,
-      qualify: async () => {
-        throw new Error("rate limited");
-      },
-    };
+    const qualify = vi.fn(async () => {
+      throw new Error("rate limited");
+    });
+    const failing: Qualifier = { id: "jev-workers-ai", calibrated: true, qualify };
     const result = await runDecision(failing, endOfTurn, ctx(NEUTRAL));
+    expect(qualify).toHaveBeenCalledTimes(1);
     expect(result).toEqual({ finished: heuristicFinished(ctx(NEUTRAL)), source: "heuristic" });
   });
 

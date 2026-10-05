@@ -77,6 +77,17 @@ describe("JevHttpQualifier", () => {
     await expect(call).rejects.not.toThrow(/cpf/);
   });
 
+  it("fails with a fixed message when the body isn't JSON", async () => {
+    const fetch = vi.fn<JevFetch>(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => JSON.parse("<html>meu cpf 12345678909</html>"),
+    }));
+    const call = jev(fetch).qualify({}, questions);
+    await expect(call).rejects.toThrow("TypeSafe answered with a body that isn't JSON");
+    await expect(call).rejects.not.toThrow(/cpf|html/);
+  });
+
   it("drops an answer whose shape doesn't match its question", async () => {
     const fetch = answering(200, {
       answers: {

@@ -23,8 +23,8 @@ interface Secrets {
   TYPESAFE_API_KEY?: string;
 }
 
-/** How long to wait for TypeSafe. The caller's own timeout doesn't cross RPC. */
-const QUALIFY_TIMEOUT_MS = 2_000;
+/** How long to wait for TypeSafe: just past the caller's 800 ms, whose abort doesn't cross RPC. */
+const QUALIFY_TIMEOUT_MS = 1_000;
 
 type GatewayEnv = Env & Secrets;
 
