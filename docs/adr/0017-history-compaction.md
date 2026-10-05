@@ -1,6 +1,6 @@
 # ADR-0017: Long conversations are bounded by Kelpie's own summary checkpoints
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-05
 - Issue: [#64](https://github.com/guedesdiogo/kelpie/issues/64)
 
@@ -57,7 +57,9 @@ Checked on 2026-10-05; the research is on [#64](https://github.com/guedesdiogo/k
 - A later compaction updates the previous summary.
 - Hermes uses OpenAI's native compaction only as an opt-in, for a few routes, and Anthropic's not at all.
 
-## Decision (proposed)
+## Decision
+
+The owner accepted the recommendation on 2026-10-05 («pode seguir o recomendado»): Kelpie's own checkpoints, a 100,000-token budget, and summaries on the cheap tier.
 
 Kelpie bounds long conversations with **summary checkpoints it writes itself**, the same way for every provider and model.
 
@@ -99,11 +101,11 @@ Kelpie bounds long conversations with **summary checkpoints it writes itself**, 
 - **A sliding window, or OpenAI `truncation: "auto"`.** Either changes the prefix and invalidates replayed reasoning.
 - **Doing nothing until memory (Epic 4).** Long conversations would hit the context window first.
 
-## Open questions for the owner
+## Questions the owner answered (2026-10-05)
 
-1. **The approach:** Kelpie's own checkpoints (proposed), or native compaction first, with checkpoints only where it is missing.
-2. **The budget:** 100,000 input tokens, or a share of each model's window.
-3. **The summary model:** the cheap tier (proposed), or the conversation's own tier.
+1. **The approach:** Kelpie's own checkpoints, not native compaction first.
+2. **The budget:** 100,000 input tokens, revisited with the measurement from #92.
+3. **The summary model:** the cheap tier.
 
 ## References
 
