@@ -39,6 +39,8 @@ export const turns = sqliteTable("turns", {
   attempts: integer("attempts").notNull(),
   /** The agent's prompt version when the turn started. */
   systemVersion: integer("system_version").notNull(),
+  /** The conversation's latest checkpoint when the turn started (ADR-0017), or null for none. */
+  checkpointId: integer("checkpoint_id"),
   /**
    * The agent's settings when the turn started, system prompt included, so a retry or a recovery
    * runs with the same ones. Cleared when the turn settles.
@@ -65,7 +67,28 @@ export const history = sqliteTable("history", {
   userId: text("user_id"),
   /** The system prompt version the message was produced under. */
   systemVersion: integer("system_version").notNull(),
+  /**
+   * For a reply, the checkpoint its turn ran under (ADR-0017); null on user rows. A reply is
+   * replayed with its native output only under the same one, because its reasoning is bound to the
+   * prompt that came before it.
+   */
+  checkpointId: integer("checkpoint_id"),
   message: text("message", { mode: "json" }).$type<ChatMessage>().notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
+/**
+ * Summaries that bound a long conversation (ADR-0017). History stays append-only: the model sees
+ * the system prompt, then the latest checkpoint's summary, then history from `keptFromHistoryId`
+ * on. Summaries hold conversation content, so the erasure workflow (ADR-0006) must cover them.
+ */
+export const checkpoints = sqliteTable("checkpoints", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  summary: text("summary").notNull(),
+  /** The first history row kept verbatim; every row before it is in the summary. */
+  keptFromHistoryId: integer("kept_from_history_id").notNull(),
+  /** What the summary call used. */
+  usage: text("usage", { mode: "json" }).$type<Usage[]>(),
   createdAt: integer("created_at").notNull(),
 });
 

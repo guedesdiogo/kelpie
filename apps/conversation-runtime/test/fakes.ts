@@ -13,7 +13,9 @@ import type { ConversationPorts, ModelCall } from "../src/ports.ts";
 export const INJECTED_FAILURE = "injected test failure";
 
 type ModelScript =
-  | { kind: "reply"; text: string }
+  | { kind: "reply"; text: string; usage?: Usage[] }
+  /** Replies once the test clears `world.modelHeld`. */
+  | { kind: "held"; text: string }
   | { kind: "refuse" }
   /** Never answers; ends when the call is cancelled. */
   | { kind: "hang" }
@@ -22,7 +24,9 @@ type ModelScript =
   /** The stream ends without a finish event. */
   | { kind: "truncate" };
 
-export const reply = (text: string): ModelScript => ({ kind: "reply", text });
+export const reply = (text: string, usage?: Usage[]): ModelScript =>
+  usage ? { kind: "reply", text, usage } : { kind: "reply", text };
+export const held = (text: string): ModelScript => ({ kind: "held", text });
 export const refuse = (): ModelScript => ({ kind: "refuse" });
 export const hang = (): ModelScript => ({ kind: "hang" });
 export const fail = (): ModelScript => ({ kind: "fail" });
@@ -31,6 +35,17 @@ export const truncate = (): ModelScript => ({ kind: "truncate" });
 /** What the fake model reports for every answer: one attempt, part of the prompt from cache. */
 export const FAKE_USAGE: Usage[] = [
   { model: "claude-haiku-4-5", inputUncached: 1_200, cacheRead: 800, cacheWrite: 0, output: 40 },
+];
+
+/** A prompt past the history budget (ADR-0017): 120,000 tokens in all. */
+export const OVER_BUDGET: Usage[] = [
+  {
+    model: "claude-haiku-4-5",
+    inputUncached: 20_000,
+    cacheRead: 100_000,
+    cacheWrite: 0,
+    output: 40,
+  },
 ];
 
 function assistant(text: string): AssistantMessage {
@@ -46,6 +61,10 @@ export interface FakeWorld {
   /** The time `now()` returns; tests move it. Starts a minute ahead so no schedule comes due. */
   clock: number;
   requests: RoutedRequest[];
+  /** The tier of each model call, in call order. */
+  tiers: string[];
+  /** While set, a `held` script waits before it replies. */
+  modelHeld: boolean;
   cancelled: number;
   sent: string[];
   /** Every bubble sent, with whether it went out silently. */
@@ -79,6 +98,8 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
   const world: FakeWorld = {
     clock: Date.now() + 60_000,
     requests: [],
+    tiers: [],
+    modelHeld: false,
     cancelled: 0,
     sent: [],
     sends: [],
@@ -95,8 +116,9 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
     sendAttempts: 0,
     failTyping: false,
     ports: {
-      async generate(_tier, request): Promise<ModelCall> {
+      async generate(tier, request): Promise<ModelCall> {
         world.requests.push(structuredClone(request));
+        world.tiers.push(tier);
         const script = scripts.shift() ?? reply("(no script left)");
         let release: (() => void) | undefined;
         const cancelledPromise = new Promise<void>((resolve) => {
@@ -121,13 +143,23 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
                 usage: FAKE_USAGE,
               };
               return;
+            case "held":
+              // Polls a plain flag: a promise created here can't be resolved from the test's context.
+              while (world.modelHeld) await new Promise((resolve) => setTimeout(resolve, 5));
+              yield {
+                type: "finish",
+                reason: "stop",
+                message: assistant(script.text),
+                usage: FAKE_USAGE,
+              };
+              return;
             case "reply":
               yield { type: "text", delta: script.text };
               yield {
                 type: "finish",
                 reason: "stop",
                 message: assistant(script.text),
-                usage: FAKE_USAGE,
+                usage: script.usage ?? FAKE_USAGE,
               };
           }
         }
