@@ -8,7 +8,8 @@
   "workers_dev": false,
   "preview_urls": false,
   "vars": {
-    // Point both at AI Gateway passthrough once the gateway exists:
+    // To go through AI Gateway, override these with --var when deploying (docs/admin-api.md),
+    // so the instance's account id stays out of the repository:
     // https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/anthropic and .../openai
     "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
