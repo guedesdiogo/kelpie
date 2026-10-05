@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-03
 - Issue: [#5](https://github.com/guedesdiogo/kelpie/issues/5)
+- Amended by: [ADR-0018](0018-jev-direct-api.md), Jev goes through TypeSafe's API first, end-of-turn thresholds are set per qualifier, and masking before every call is mandatory
 
 ## Context
 
