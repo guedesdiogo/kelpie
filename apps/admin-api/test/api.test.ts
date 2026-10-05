@@ -420,6 +420,7 @@ describe("admin API secure forms", () => {
     expect(html).not.toContain("now answers");
     expect(html).toContain("channel_refused");
     expect(html).toContain("registerTelegramWebhook");
+    expect(html).toContain("do not reach Kelpie");
   });
 
   it("registers a bot's webhook again on command, and says why it couldn't", async () => {

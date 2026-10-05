@@ -41,7 +41,7 @@ export async function submitForm(
     const body =
       result.webhook === "registered"
         ? `<p>${bot} now answers for ${agent}. You can close this page.</p>`
-        : `<p>${bot} is connected to ${agent}, but Telegram couldn't be pointed at Kelpie (<code>${escapeHtml(result.webhook)}</code>). Once that is fixed, run the <code>registerTelegramWebhook</code> command for ${agent}.</p>`;
+        : `<p>${bot} is connected to ${agent}, but Telegram couldn't be pointed at Kelpie (<code>${escapeHtml(result.webhook)}</code>). Until it is, messages to the bot do not reach Kelpie. Once that is fixed, run the <code>registerTelegramWebhook</code> command for ${agent}.</p>`;
     return page(200, "Telegram connected", body);
   }
   if (result.reason === "invalid_token" || result.reason === "token_refused") {

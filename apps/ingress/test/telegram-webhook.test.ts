@@ -6,6 +6,8 @@ import { admitSender } from "../src/admission.ts";
 import { handleTelegramWebhook, type TelegramWebhookDeps } from "../src/telegram-webhook.ts";
 
 const SECRET = "the-bot-webhook-secret";
+/** The one secret the stub egress in vitest.config.ts accepts. */
+const ROUTED_SECRET = "routed-secret";
 const OWNER_TELEGRAM_ID = 1001;
 const OWNER_CHAT_ID = 1001;
 
@@ -94,7 +96,7 @@ describe("Telegram webhook", () => {
   });
 
   it("refuses a request without the bot's secret, and never reads its body", async () => {
-    for (const secret of [null, "a-guess"]) {
+    for (const secret of [null, "a-well-formed-guess"]) {
       const { deps, ingested } = fakes();
       const request = webhook(update(), { secret });
 
@@ -103,6 +105,15 @@ describe("Telegram webhook", () => {
       expect(response.status).toBe(401);
       expect(request.bodyUsed).toBe(false);
       expect(ingested).toEqual([]);
+    }
+  });
+
+  it("refuses a missing or impossible secret without asking egress", async () => {
+    for (const secret of [null, "", "x".repeat(257), "has space", "ação"]) {
+      const { deps, verified } = fakes();
+      const response = await handleTelegramWebhook(webhook(update(), { secret }), "kelpie", deps);
+      expect(response.status).toBe(401);
+      expect(verified).toEqual([]);
     }
   });
 
@@ -177,17 +188,38 @@ describe("Telegram webhook", () => {
         },
       },
     ];
-    for (const overrides of failing) {
-      const { deps } = fakes(overrides);
-      const response = await handleTelegramWebhook(webhook(update()), "kelpie", deps);
+    for (const [index, overrides] of failing.entries()) {
+      const { deps, ingested } = fakes(overrides);
+      const request = webhook(update());
+      const response = await handleTelegramWebhook(request, "kelpie", deps);
       expect(response.status).toBe(503);
+      // An unverified update is neither read nor handed on.
+      if (index < 2) {
+        expect(request.bodyUsed).toBe(false);
+        expect(ingested).toEqual([]);
+      }
     }
   });
 });
 
 describe("ingress routing", () => {
-  it("routes POST /webhooks/telegram/<agent id> to the webhook, through egress", async () => {
-    // The stub egress in vitest.config.ts refuses every secret.
+  it("routes a verified update through egress and the Directory to its conversation", async () => {
+    const response = await exports.default.fetch(webhook(update(), { secret: ROUTED_SECRET }));
+    expect(response.status).toBe(200);
+
+    // The stub conversation in vitest.config.ts keeps the last message it was given.
+    const conversation = env.CONVERSATION_AGENT.getByName(
+      `kelpie:telegram:${OWNER_CHAT_ID}`,
+    ) as unknown as { received(): Promise<InboundMessage | null> };
+    expect(await conversation.received()).toMatchObject({
+      agentId: "kelpie",
+      userId: "u-owner",
+      text: "oi, tudo bem?",
+      destination: { channel: "telegram", threadId: String(OWNER_CHAT_ID) },
+    });
+  });
+
+  it("refuses a secret egress doesn't accept", async () => {
     const response = await exports.default.fetch(webhook(update()));
     expect(response.status).toBe(401);
   });

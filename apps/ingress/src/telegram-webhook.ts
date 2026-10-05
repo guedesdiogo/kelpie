@@ -13,6 +13,11 @@ import type { Destination, InboundMessage, IngestResult } from "@kelpie/conversa
  * replies to comes with it. A body past this is dropped unread.
  */
 const MAX_BODY_BYTES = 256 * 1024;
+/**
+ * Telegram's rule for a webhook's `secret_token`. A header that breaks it can't be one, so egress
+ * isn't asked: a flood of guesses never reaches the secret store.
+ */
+const WEBHOOK_SECRET = /^[A-Za-z0-9_-]{1,256}$/;
 
 export interface TelegramWebhookDeps {
   webhooks: ChannelWebhooksContract;
@@ -31,7 +36,9 @@ export interface TelegramWebhookDeps {
  * - A verified update that can't be used is dropped with a 200, or Telegram would send it again:
  *   malformed, too large, from a group or a stranger (ADR-0004), or without text.
  * - The answer comes once the conversation has stored the message. If egress, the Directory or the
- *   conversation fails, a 503 makes Telegram retry, and the conversation drops the duplicate.
+ *   conversation fails, a 503 makes Telegram retry, and the conversation drops the duplicate. A
+ *   message the conversation fails on every time holds the bot's later updates back until Telegram
+ *   gives up on it, after 24 hours.
  */
 export async function handleTelegramWebhook(
   request: Request,
@@ -39,11 +46,12 @@ export async function handleTelegramWebhook(
   deps: TelegramWebhookDeps,
 ): Promise<Response> {
   if (!isAgentId(agentId)) return new Response(null, { status: 404 });
+  const presented = request.headers.get(TELEGRAM_SECRET_HEADER);
+  if (presented === null || !WEBHOOK_SECRET.test(presented)) {
+    return new Response(null, { status: 401 });
+  }
   try {
-    const verdict = await deps.webhooks.verifyTelegram(
-      agentId,
-      request.headers.get(TELEGRAM_SECRET_HEADER),
-    );
+    const verdict = await deps.webhooks.verifyTelegram(agentId, presented);
     if (!verdict.ok) {
       return new Response(null, { status: verdict.reason === "refused" ? 401 : 503 });
     }
