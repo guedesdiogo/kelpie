@@ -4,6 +4,7 @@ Kelpie keeps two kinds of secret (ADR-0013).
 
 - **Deploy secrets.** The owner sets these with `wrangler secret put`:
   - the first model key, on `llm-gateway`, and `AI_GATEWAY_TOKEN` there when AI Gateway requires authentication (`docs/admin-api.md`);
+  - optionally `TYPESAFE_API_KEY`, also on `llm-gateway`, for Jev at the end of turn (ADR-0018). Without it the heuristic decides. ADR-0013 keeps only the first model key as a deploy secret. Further provider keys are deploy secrets too, because `llm-gateway` calls the providers and the secret store hands no value to another Worker;
   - the bootstrap token, on `admin-api` (`docs/admin-api.md`);
   - the recovery token, on `admin-api`, only while the owner recovers a changed Access login, then deleted (`docs/admin-api.md`, "Recovering access");
   - the store's encryption key, `SECRETS_KEY` on `channel-egress`.

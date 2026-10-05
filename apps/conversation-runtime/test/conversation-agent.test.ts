@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import type { AgentSettings } from "@kelpie/config";
 import { stampOf } from "@kelpie/conversation";
 import type { Usage } from "@kelpie/llm";
+import { RemoteQualifier } from "@kelpie/qualifier";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentHost } from "../src/agent-host/agent-host.ts";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
@@ -102,15 +103,43 @@ describe("ConversationAgent buffering", () => {
     use({ ...world, ports: { ...world.ports, qualifier: slowQualifier(50) } });
     const stub = agent("concurrent");
 
+    // Neither message is one the heuristic is sure about, so both decisions ask the qualifier.
     await Promise.all([
       stub.ingest(message("m1", "so")),
-      stub.ingest(message("m2", "is it done?")),
+      stub.ingest(message("m2", "it was the blue one")),
     ]);
 
     const schedules = await runInDurableObject(stub, (instance: ConversationAgent) =>
       instance.getSchedules(),
     );
     expect(schedules).toHaveLength(1);
+  });
+
+  it("logs who decided the end of turn, with no text", async () => {
+    use(fakeWorld([]));
+    const logged = vi.spyOn(console, "log").mockImplementation(() => {});
+    await agent("decision-log").ingest(message("m1", "can you check my order?"));
+
+    const call = logged.mock.calls.find(([line]) => line === "conversation: end of turn");
+    expect(call?.[1]).toEqual({ source: "heuristic", finished: 0.9, ms: expect.any(Number) });
+    expect(JSON.stringify(logged.mock.calls)).not.toContain("check my order");
+  });
+
+  it("warns when the qualifier fails, but not when none is configured", async () => {
+    const world = fakeWorld([]);
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const unavailable = (reason: "not_configured" | "failed") =>
+      new RemoteQualifier(async () => ({ ok: false, reason }));
+
+    use({ ...world, ports: { ...world.ports, qualifier: unavailable("not_configured") } });
+    await agent("jev-off").ingest(message("m1", "it was the blue one"));
+    expect(warned).not.toHaveBeenCalled();
+
+    use({ ...world, ports: { ...world.ports, qualifier: unavailable("failed") } });
+    await agent("jev-down").ingest(message("m1", "it was the blue one"));
+    expect(warned).toHaveBeenCalledWith("conversation: end-of-turn qualifier failed", {
+      error: "QualifierUnavailable",
+    });
   });
 
   it("ignores a flush from a schedule that a newer message replaced", async () => {

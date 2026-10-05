@@ -1,4 +1,5 @@
 import type { Decision } from "./decision.ts";
+import type { QualifierId } from "./types.ts";
 
 export interface EndOfTurnContext {
   /** The user's buffered fragments, oldest first. */
@@ -99,18 +100,47 @@ export interface QuietWindowPolicy {
   unfinishedMs: number;
 }
 
+/** At or above `high` the user looks done; at or below `low` they don't. */
+export interface Bands {
+  high: number;
+  low: number;
+}
+
+/** The heuristic's own values, and the default for a qualifier without measured bands. */
+export const HEURISTIC_BANDS: Bands = { high: 0.8, low: 0.3 };
+/** Jev 1.13.0 compresses its PT-BR probabilities (ADR-0018). Recalibrate on real conversations. */
+export const JEV_BANDS: Bands = { high: 0.7, low: 0.4 };
+
+/** The bands of whoever answered: Jev's ids get Jev's, everyone else the heuristic's. */
+export function endOfTurnBands(source: QualifierId | "heuristic"): Bands {
+  return source.startsWith("jev-") ? JEV_BANDS : HEURISTIC_BANDS;
+}
+
 /** How long to wait for more fragments, given how likely the user is done. */
-export function quietWindowMs(finished: number, policy: QuietWindowPolicy): number {
-  if (finished >= 0.8) return policy.finishedMs;
-  if (finished <= 0.3) return policy.unfinishedMs;
+export function quietWindowMs(
+  finished: number,
+  policy: QuietWindowPolicy,
+  bands: Bands = HEURISTIC_BANDS,
+): number {
+  if (finished >= bands.high) return policy.finishedMs;
+  if (finished <= bands.low) return policy.unfinishedMs;
   return policy.defaultMs;
 }
 
-/** "Has the user finished typing?" Jev answers when configured; the heuristic otherwise. */
+/**
+ * "Has the user finished typing?" A confident heuristic rule answers first; otherwise Jev when
+ * configured, and the heuristic again without it (the hybrid of ADR-0018).
+ */
 export const endOfTurn: Decision<EndOfTurnContext, EndOfTurn> = {
   id: "turn.end",
-  version: "1",
+  version: "2",
   timeoutMs: 800,
+  shortcut: (context) => {
+    const finished = heuristicFinished(context);
+    return finished >= HEURISTIC_BANDS.high || finished <= HEURISTIC_BANDS.low
+      ? { finished }
+      : null;
+  },
   state: ({ fragments }) => ({ fragments }),
   questions: () => ({
     user_finished: {

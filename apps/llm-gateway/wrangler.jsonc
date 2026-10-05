@@ -13,6 +13,8 @@
     // https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/anthropic and .../openai
     "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
+    // Jev's version for end of turn, pinned: its thresholds were measured on it (ADR-0018).
+    "JEV_MODEL": "jev-1.13.0",
     // For each tier, the models to try in order. Owner configuration; edit freely.
     "MODEL_ROUTES": {
       "cheap": [

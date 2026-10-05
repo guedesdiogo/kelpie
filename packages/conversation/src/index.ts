@@ -1,4 +1,9 @@
-export { type BufferedFragment, type BufferSettings, planFlush } from "./buffer.ts";
+export {
+  type BufferedFragment,
+  type BufferHooks,
+  type BufferSettings,
+  planFlush,
+} from "./buffer.ts";
 export { computeFlushAt, type DebouncePolicy, type PendingFragments } from "./debounce.ts";
 export { type PlannedBubble, planDelivery } from "./delivery.ts";
 export { deliveredReply } from "./history.ts";

@@ -8,7 +8,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@kelpie/llm": "workspace:*"
+    "@kelpie/llm": "workspace:*",
+    "@kelpie/qualifier": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.3.6",

@@ -5,8 +5,8 @@ export default defineConfig({
   plugins: [
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
-      // Only Anthropic has a key, so the OpenAI candidates are skipped.
-      miniflare: { bindings: { ANTHROPIC_API_KEY: "sk-ant-test" } },
+      // Only Anthropic has a model key, so the OpenAI candidates are skipped. Jev has its key.
+      miniflare: { bindings: { ANTHROPIC_API_KEY: "sk-ant-test", TYPESAFE_API_KEY: "ts-test" } },
     }),
   ],
   // The first test of each file waits for the workerd runtime to start, which takes seconds on a

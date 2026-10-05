@@ -9,6 +9,11 @@ export interface Decision<Context, Outcome extends object> {
   timeoutMs: number;
   state(context: Context): unknown;
   questions(context: Context): Record<string, Question>;
+  /**
+   * A deterministic outcome that makes asking unnecessary, or null to ask. It answers as the
+   * heuristic, before any call.
+   */
+  shortcut?(context: Context): Outcome | null;
   /** Maps the answers to an outcome, or null to use the fallback. */
   policy(result: QualifyResult, context: Context): Outcome | null;
   /** Never throws; this is what a clone with no qualifier configured runs. */
@@ -37,6 +42,8 @@ export async function runDecision<Context, Outcome extends object>(
       // A failing logger must not break the turn; the fallback still runs.
     }
   };
+  const settled = decision.shortcut?.(context);
+  if (settled) return { ...settled, source: "heuristic" };
   if (!qualifier) return fallback();
 
   const prefix = `${decision.id}::`;
