@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { DIRECTORY_NAME } from "@kelpie/access";
+import type { EgressDestination, WebhookNotice } from "@kelpie/channels";
 import type { InboundMessage, IngestResult } from "@kelpie/conversation/contract";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { admitSender } from "../src/admission.ts";
@@ -39,34 +40,58 @@ function webhook(
   });
 }
 
-/** Fakes for egress and the conversation; admission uses the real Directory. */
+const directory = () => env.DIRECTORY.getByName(DIRECTORY_NAME);
+
+/** Fakes for egress and the conversation; admission and pairing use the real Directory. */
 function fakes(overrides: Partial<TelegramWebhookDeps> = {}) {
   const verified: { agentId: string; secret: string | null }[] = [];
   const ingested: { name: string; message: InboundMessage }[] = [];
+  const notices: { agentId: string; destination: EgressDestination; notice: WebhookNotice }[] = [];
   const deps: TelegramWebhookDeps = {
     webhooks: {
       async verifyTelegram(agentId, secret) {
         verified.push({ agentId, secret });
         return secret === SECRET ? { ok: true } : { ok: false, reason: "refused" };
       },
+      async notice(agentId, destination, notice) {
+        notices.push({ agentId, destination, notice });
+        return { ok: true };
+      },
     },
     admit: (event) => admitSender(env, event),
+    directory: directory(),
     async ingest(name, message): Promise<IngestResult> {
       ingested.push({ name, message });
       return { status: "accepted", flushAt: 0 };
     },
     ...overrides,
   };
-  return { deps, verified, ingested };
+  return { deps, verified, ingested, notices };
+}
+
+/** A `/start` as Telegram sends it from a deep link: a bot command entity at the start. */
+function start(from: number, payload: string | null, firstName = "Someone") {
+  const text = payload === null ? "/start" : `/start ${payload}`;
+  return update({
+    message_id: 500 + from,
+    from: { id: from, is_bot: false, first_name: firstName },
+    chat: { id: from, type: "private" },
+    text,
+    entities: [{ offset: 0, length: 6, type: "bot_command" }],
+  });
+}
+
+async function issueCode() {
+  const issued = await directory().issuePairingCode("u-owner", "telegram");
+  if (!issued.ok) throw new Error("no code");
+  return issued.code;
 }
 
 beforeAll(async () => {
-  const directory = env.DIRECTORY.getByName(DIRECTORY_NAME);
-  await directory.registerOwner("u-owner");
+  await directory().registerOwner("u-owner");
   const owner = { channel: "telegram", channelUserId: String(OWNER_TELEGRAM_ID) } as const;
-  await directory.addIdentity("u-owner", owner);
-  await directory.enableIdentity(owner);
-  await directory.setTimeZone("u-owner", "America/Sao_Paulo");
+  await directory().redeemPairingCode(await issueCode(), owner);
+  await directory().setTimeZone("u-owner", "America/Sao_Paulo");
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -168,13 +193,20 @@ describe("Telegram webhook", () => {
 
   it("answers 503 when egress, the Directory or the conversation fails, so Telegram retries", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
+    const sendsNothing = async () => ({ ok: true }) as const;
     const failing: Partial<TelegramWebhookDeps>[] = [
-      { webhooks: { verifyTelegram: async () => ({ ok: false, reason: "store_unavailable" }) } },
+      {
+        webhooks: {
+          verifyTelegram: async () => ({ ok: false, reason: "store_unavailable" }),
+          notice: sendsNothing,
+        },
+      },
       {
         webhooks: {
           verifyTelegram: async () => {
             throw new Error("egress unreachable");
           },
+          notice: sendsNothing,
         },
       },
       {
@@ -198,6 +230,102 @@ describe("Telegram webhook", () => {
         expect(request.bodyUsed).toBe(false);
         expect(ingested).toEqual([]);
       }
+    }
+  });
+});
+
+describe("Telegram pairing and strangers", () => {
+  it("pairs a new account from /start <code>, tells it so, and keeps the code from the model", async () => {
+    const { deps, ingested, notices } = fakes();
+    const code = await issueCode();
+
+    const response = await handleTelegramWebhook(webhook(start(4242, code)), "kelpie", deps);
+
+    expect(response.status).toBe(200);
+    expect(ingested).toEqual([]);
+    expect(notices).toEqual([
+      {
+        agentId: "kelpie",
+        destination: { channel: "telegram", threadId: "4242" },
+        notice: { kind: "paired" },
+      },
+    ]);
+    expect(
+      await directory().admit({ channel: "telegram", channelUserId: "4242" }, "kelpie"),
+    ).toMatchObject({ admitted: true, userId: "u-owner" });
+  });
+
+  it("answers a wrong code with nothing at all", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { deps, ingested, notices } = fakes();
+    const response = await handleTelegramWebhook(webhook(start(4343, "WRONGCD2")), "kelpie", deps);
+    expect(response.status).toBe(200);
+    expect(ingested).toEqual([]);
+    expect(notices).toEqual([]);
+  });
+
+  it("tells the owner about a stranger once, on the owner's own chat, and the stranger nothing", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { deps, ingested, notices } = fakes();
+    const stranger = update({
+      message_id: 600,
+      from: { id: 4444, is_bot: false, first_name: "Mallory" },
+      chat: { id: 4444, type: "private" },
+    });
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await handleTelegramWebhook(webhook(stranger), "kelpie", deps);
+      expect(response.status).toBe(200);
+    }
+    expect(ingested).toEqual([]);
+    expect(notices).toEqual([
+      {
+        agentId: "kelpie",
+        destination: { channel: "telegram", threadId: String(OWNER_TELEGRAM_ID) },
+        notice: { kind: "stranger", senderId: "4444", displayName: "Mallory" },
+      },
+    ]);
+  });
+
+  it("treats a bare /start from a stranger as a stranger, not a wrong code", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { deps, notices } = fakes();
+    await handleTelegramWebhook(webhook(start(4545, null)), "kelpie", deps);
+    expect(notices).toMatchObject([{ notice: { kind: "stranger", senderId: "4545" } }]);
+  });
+
+  it("drops /start from an account already paired, so a code never reaches the model", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { deps, ingested, notices } = fakes();
+    for (const payload of ["ABCD2345", null]) {
+      const response = await handleTelegramWebhook(
+        webhook(start(OWNER_TELEGRAM_ID, payload)),
+        "kelpie",
+        deps,
+      );
+      expect(response.status).toBe(200);
+    }
+    expect(ingested).toEqual([]);
+    expect(notices).toEqual([]);
+  });
+
+  it("still answers 200 when a notice can't be sent, so Telegram doesn't repeat it", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const failures: TelegramWebhookDeps["webhooks"]["notice"][] = [
+      async () => ({ ok: false, reason: "recipient_unavailable" }),
+      async () => {
+        throw new Error("egress unreachable");
+      },
+    ];
+    for (const [index, notice] of failures.entries()) {
+      const { deps } = fakes();
+      deps.webhooks = { ...deps.webhooks, notice };
+      const stranger = update({
+        message_id: 700 + index,
+        from: { id: 4646 + index, is_bot: false },
+        chat: { id: 4646 + index, type: "private" },
+      });
+      expect((await handleTelegramWebhook(webhook(stranger), "kelpie", deps)).status).toBe(200);
     }
   });
 });

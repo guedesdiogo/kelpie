@@ -28,11 +28,11 @@ Every endpoint is a `POST` with a JSON body.
 | `/commands/getAgent` | `{ "id": "sales" }` |
 | `/commands/configureAgent` | `{ "id": "sales", "settings": { "systemPrompt": "…", "conversational": false } }` |
 | `/commands/listIdentities` | none |
-| `/commands/addIdentity` | `{ "channel": "telegram", "channelUserId": "…" }` |
-| `/commands/enableIdentity` | same as `addIdentity` |
-| `/commands/disableIdentity` | same as `addIdentity` |
+| `/commands/enableIdentity` | `{ "channel": "telegram", "channelUserId": "…" }`; re-enables a disabled identity, never a pending one |
+| `/commands/disableIdentity` | same as `enableIdentity` |
 | `/commands/setTimeZone` | `{ "timeZone": "America/Sao_Paulo" }`, an IANA name. Offsets like `+03:00` are refused; prefer a city name to `Etc/GMT±N`, whose sign is inverted (`Etc/GMT+3` is UTC-03:00) |
 | `/commands/connectTelegram` | `{ "agentId": "sales" }`; answers `{ "path": "/forms/<token>", "expiresAt": … }` |
+| `/commands/pairTelegram` | `{ "agentId": "sales" }`; answers `{ "link": "https://t.me/<bot>?start=<code>", "expiresAt": … }` (see "Pairing") |
 | `/commands/registerTelegramWebhook` | `{ "agentId": "sales" }`; points the agent's bot at ingress again, after a failed registration or a new ingress hostname |
 | `/bootstrap` | `{ "token": "…" }` |
 
@@ -46,7 +46,7 @@ Every endpoint is a `POST` with a JSON body.
 | 401 | `unauthenticated` |
 | 403 | `forbidden`, `no_owner`, `invalid_bootstrap_token` |
 | 404 | `unknown_agent`, `unknown_identity`, `unknown_user`, `not_found` |
-| 409 | `identity_taken`, `not_connected` (the agent has no bot) |
+| 409 | `not_paired` (a pending identity; pair it instead), `not_connected` (the agent has no bot) |
 | 502 | `channel_refused` (Telegram refused, or couldn't be reached) |
 | 503 | `unavailable` (the secret store can't be reached), `not_configured` (`channel-egress` was deployed without ingress's origin) |
 | 410 | `bootstrap_disabled` |
@@ -54,6 +54,21 @@ Every endpoint is a `POST` with a JSON body.
 | 503 | `unavailable` (Access's keys couldn't be loaded) |
 
 Identity values in answers are masked.
+
+## Pairing
+
+No command takes an identity value to admit someone: the owner proves an account is theirs by sending the bot a code from where they are already signed in (Story 3.6).
+
+1. `pairTelegram` answers with `https://t.me/<bot>?start=<code>`.
+   - The code is 8 characters from an alphabet without look-alikes, and lasts an hour.
+   - Only its salted SHA-256 is kept, and a new code replaces the last one.
+2. The owner opens the link in Telegram, which sends the bot `/start <code>`.
+3. A match makes that Telegram account the owner's, enabled, and the bot answers with a fixed "paired" notice. The `/start` never reaches the model.
+
+What a sender who isn't paired gets:
+- **Nothing**, ever.
+- **A wrong code** counts against that sender only: the fifth within an hour locks that sender out of pairing for an hour, while the owner, on their own account, can still pair.
+- **The owner is told once** about each stranger, on the owner's own chat with the bot, at most ten times a day per channel. The notice has the stranger's name, cleaned up, and their id masked.
 
 ## Secure forms
 
@@ -105,4 +120,3 @@ Form pages are HTML:
 ## Known limits
 
 - **Lockout.** Access gives the owner a new `sub` if they are removed from the Zero Trust organization and added again. The bootstrap is then disabled, so the owner can't reach the admin API. Recovery is [#71](https://github.com/guedesdiogo/kelpie/issues/71).
-- **Pairing.** Until pairing arrives (Story 3.6), `enableIdentity` trusts the identity value the owner types.

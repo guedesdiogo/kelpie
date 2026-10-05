@@ -43,12 +43,28 @@ export type WebhookRegistrationFailure =
 
 export type WebhookRegistration = { ok: true } | { ok: false; reason: WebhookRegistrationFailure };
 
-/** What ingress calls to check that a webhook came from the agent's own bot. It can't send. */
+/**
+ * A fixed notice ingress may have the bot send (Story 3.6): "paired" to an account that just paired,
+ * or "stranger" to the owner about a sender who was dropped. channel-egress writes the text.
+ */
+export type WebhookNotice =
+  | { kind: "paired" }
+  | { kind: "stranger"; senderId: string; displayName?: string };
+
+/**
+ * What ingress calls: check that a webhook came from the agent's own bot, and send one of the fixed
+ * notices. It can't send text of its own.
+ */
 export interface ChannelWebhooksContract {
   verifyTelegram(
     agentId: string,
     presentedSecret: string | null,
   ): Promise<{ ok: true } | { ok: false; reason: "refused" | "store_unavailable" }>;
+  notice(
+    agentId: string,
+    destination: EgressDestination,
+    notice: WebhookNotice,
+  ): Promise<TypingOutcome>;
 }
 
 /** What the admin API calls to take a channel's secrets through a one-time secure form (ADR-0013). */
@@ -83,4 +99,11 @@ export interface ChannelFormsContract {
   >;
   /** Points the agent's bot at ingress again: safe to repeat, as after a hostname change. */
   registerTelegramWebhook(agentId: string): Promise<WebhookRegistration>;
+  /** The agent's bot, for its `t.me` link. Never its token. */
+  describeTelegramBot(
+    agentId: string,
+  ): Promise<
+    | { ok: true; username: string }
+    | { ok: false; reason: "invalid_input" | "not_connected" | "store_unavailable" }
+  >;
 }

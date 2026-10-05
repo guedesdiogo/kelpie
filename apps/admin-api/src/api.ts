@@ -47,7 +47,7 @@ const STATUS: Record<Failure, number> = {
   unknown_agent: 404,
   unknown_user: 404,
   unknown_identity: 404,
-  identity_taken: 409,
+  not_paired: 409,
   not_connected: 409,
   unavailable: 503,
   not_configured: 503,
@@ -68,11 +68,11 @@ const COMMANDS: Record<string, Command> = {
   getAgent: (commands, actor, input) => commands.getAgent(actor, input),
   configureAgent: (commands, actor, input) => commands.configureAgent(actor, input),
   listIdentities: (commands, actor) => commands.listIdentities(actor),
-  addIdentity: (commands, actor, input) => commands.addIdentity(actor, input),
   enableIdentity: (commands, actor, input) => commands.enableIdentity(actor, input),
   disableIdentity: (commands, actor, input) => commands.disableIdentity(actor, input),
   setTimeZone: (commands, actor, input) => commands.setTimeZone(actor, input),
   connectTelegram: (commands, actor, input) => commands.connectTelegram(actor, input),
+  pairTelegram: (commands, actor, input) => commands.pairTelegram(actor, input),
   registerTelegramWebhook: (commands, actor, input) =>
     commands.registerTelegramWebhook(actor, input),
 };

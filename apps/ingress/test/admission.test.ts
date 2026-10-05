@@ -21,9 +21,9 @@ describe("admitSender", () => {
   it("admits the owner in a direct conversation and drops everything else", async () => {
     const stub = env.DIRECTORY.getByName(DIRECTORY_NAME);
     await stub.registerOwner("u-owner");
-    await stub.addIdentity("u-owner", { channel: "telegram", channelUserId: "1001" });
-    await stub.enableIdentity({ channel: "telegram", channelUserId: "1001" });
-    await stub.addIdentity("u-owner", { channel: "telegram", channelUserId: "1002" });
+    const issued = await stub.issuePairingCode("u-owner", "telegram");
+    if (!issued.ok) throw new Error("no code");
+    await stub.redeemPairingCode(issued.code, { channel: "telegram", channelUserId: "1001" });
 
     expect(await admitSender(env, event("1001"))).toEqual({
       admitted: true,
@@ -32,11 +32,6 @@ describe("admitSender", () => {
       timeZone: null,
     });
     expect(await admitSender(env, event("9999"))).toEqual({
-      admitted: false,
-      reason: "unknown_identity",
-    });
-    // A pending identity hasn't been paired yet.
-    expect(await admitSender(env, event("1002"))).toEqual({
       admitted: false,
       reason: "unknown_identity",
     });

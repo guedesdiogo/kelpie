@@ -18,7 +18,7 @@ Kelpie keeps two kinds of secret (ADR-0013).
 - **Who reads it.** Only `channel-egress` binds the store, because reading returns plaintext. Other Workers reach it through `channel-egress`'s entrypoints, which return no secret:
   - `ChannelForms`, for the admin API, creates, describes and redeems forms, and registers webhooks;
   - `ChannelEgress`, for the conversation runtime, sends and shows typing;
-  - `ChannelWebhooks`, for ingress, checks the secret a webhook presents. It can't send, so the Worker that takes public requests can't either.
+  - `ChannelWebhooks`, for ingress, checks the secret a webhook presents and sends two fixed notices: "paired", and a stranger notice to the owner (`docs/admin-api.md`, "Pairing"). The Worker that takes public requests can't send text of its own: `channel-egress` writes both notices, with a stranger's name cleaned up and cut to 64 characters.
 - **Forms.**
   - A link carries a random 256-bit token. The store keeps only its SHA-256.
   - It expires after 15 minutes and works once.

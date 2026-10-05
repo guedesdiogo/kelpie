@@ -53,11 +53,13 @@ function world({
       },
     },
     directory: {
-      async addIdentity() {
-        return { ok: false, reason: "identity_taken" };
+      async issuePairingCode() {
+        return { ok: true, code: "ABCD2345", expiresAt: NOW_MS + 3_600_000 };
       },
-      async enableIdentity() {
-        return { ok: false, reason: "unknown_identity" };
+      async enableIdentity(identity) {
+        return identity.channelUserId === "pending"
+          ? { ok: false, reason: "not_paired" }
+          : { ok: false, reason: "unknown_identity" };
       },
       async disableIdentity() {
         return { ok: true, status: "disabled" };
@@ -72,6 +74,9 @@ function world({
     channels: {
       async createTelegramForm() {
         return { ok: true, token: "form-token-1", expiresAt: NOW_MS + 900_000 };
+      },
+      async describeTelegramBot() {
+        return { ok: true, username: "kelpie_bot" };
       },
       async registerTelegramWebhook(agentId) {
         return agentId === "unwired" ? { ok: false, reason: "not_connected" } : { ok: true };
@@ -224,9 +229,9 @@ describe("admin API commands", () => {
     ["an invalid input", "/commands/createAgent", { id: "Sales Team", name: "x" }, 400],
     ["an unknown agent", "/commands/renameAgent", { id: "ghost", name: "Nobody" }, 404],
     [
-      "an identity someone else holds",
-      "/commands/addIdentity",
-      { channel: "telegram", channelUserId: "1" },
+      "an identity that isn't paired",
+      "/commands/enableIdentity",
+      { channel: "telegram", channelUserId: "pending" },
       409,
     ],
   ])("maps %s to its HTTP status", async (_label, path, body, status) => {
@@ -236,6 +241,7 @@ describe("admin API commands", () => {
 
   it.each([
     ["an unknown command", "POST", "/commands/dropTables"],
+    ["the removed addIdentity command", "POST", "/commands/addIdentity"],
     ["a prototype key as a command", "POST", "/commands/constructor"],
     ["another path", "POST", "/agents"],
     ["an empty command", "POST", "/commands/"],
@@ -421,6 +427,18 @@ describe("admin API secure forms", () => {
     expect(html).toContain("channel_refused");
     expect(html).toContain("registerTelegramWebhook");
     expect(html).toContain("do not reach Kelpie");
+  });
+
+  it("gives the owner a link that pairs their Telegram account", async () => {
+    const { deps } = world();
+    await call(deps, "/commands/createAgent", { id: "sales", name: "Sales" });
+    expect(await call(deps, "/commands/pairTelegram", { agentId: "sales" })).toEqual({
+      status: 200,
+      body: {
+        ok: true,
+        value: { link: "https://t.me/kelpie_bot?start=ABCD2345", expiresAt: NOW_MS + 3_600_000 },
+      },
+    });
   });
 
   it("registers a bot's webhook again on command, and says why it couldn't", async () => {

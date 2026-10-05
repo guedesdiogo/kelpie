@@ -1,6 +1,7 @@
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { ACCESS_SOURCE, ADMIN_AGENT_ID } from "@kelpie/access";
+import { ACCESS_SOURCE, ADMIN_AGENT_ID, type ChannelIdentity } from "@kelpie/access";
+import type { ChannelId } from "@kelpie/channels";
 import { describe, expect, it } from "vitest";
 import type { Directory } from "../src/directory/directory.ts";
 
@@ -11,11 +12,17 @@ const OWNER = "u-owner";
 const telegram = { channel: "telegram", channelUserId: "1001" } as const;
 const webchat = { channel: "webchat", channelUserId: "owner@example.com" } as const;
 
+/** Pairs `identity` with the owner the way the bot does: a code issued, then redeemed. */
+async function pair(stub: ReturnType<typeof directory>, identity: ChannelIdentity) {
+  const issued = await stub.issuePairingCode(OWNER, identity.channel as ChannelId);
+  if (!issued.ok) throw new Error(`no code: ${issued.reason}`);
+  return stub.redeemPairingCode(issued.code, identity);
+}
+
 async function withEnabledOwner(name: string) {
   const stub = directory(name);
   await stub.registerOwner(OWNER);
-  await stub.addIdentity(OWNER, telegram);
-  await stub.enableIdentity(telegram);
+  await pair(stub, telegram);
   return stub;
 }
 
@@ -56,14 +63,20 @@ describe("Directory", () => {
     });
   });
 
-  it("drops a pending identity until it is enabled", async () => {
+  it("never enables a pending identity on request: only pairing does", async () => {
     const stub = directory("pending");
     await stub.registerOwner(OWNER);
+    // Before pairing, identities were added as pending and enabled by a typed value.
+    await runInDurableObject(stub, (_instance: Directory, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO identities (channel, channel_user_id, user_id, status, updated_at) VALUES ('webchat', 'owner@example.com', 'u-owner', 'pending', 0)",
+      );
+    });
 
-    expect(await stub.addIdentity(OWNER, webchat)).toEqual({ ok: true, status: "pending" });
+    expect(await stub.enableIdentity(webchat)).toEqual({ ok: false, reason: "not_paired" });
     expect(await stub.admit(webchat, "sales")).toMatchObject({ admitted: false });
 
-    await stub.enableIdentity(webchat);
+    expect(await pair(stub, webchat)).toEqual({ ok: true, userId: OWNER });
     expect(await stub.admit(webchat, "sales")).toMatchObject({ admitted: true });
   });
 
@@ -96,7 +109,7 @@ describe("Directory", () => {
       reason: "no_grant",
     });
     // An identity belongs to one user.
-    expect(await stub.addIdentity(OWNER, { channel: "telegram", channelUserId: "3003" })).toEqual({
+    expect(await pair(stub, { channel: "telegram", channelUserId: "3003" })).toEqual({
       ok: false,
       reason: "identity_taken",
     });
@@ -115,14 +128,15 @@ describe("Directory", () => {
 
     expect(await stub.registerOwner("  ")).toEqual({ ok: false, reason: "invalid_user" });
     await stub.registerOwner(OWNER);
-    expect(await stub.addIdentity(OWNER, { channel: "telegram", channelUserId: "" })).toEqual({
+    expect(await pair(stub, { channel: "telegram", channelUserId: "" })).toEqual({
       ok: false,
       reason: "invalid_identity",
     });
-    expect(
-      await stub.addIdentity(OWNER, { channel: "fax" as "telegram", channelUserId: "1" }),
-    ).toEqual({ ok: false, reason: "invalid_identity" });
-    expect(await stub.addIdentity("u-nobody", telegram)).toEqual({
+    expect(await stub.issuePairingCode(OWNER, "fax" as ChannelId)).toEqual({
+      ok: false,
+      reason: "invalid_channel",
+    });
+    expect(await stub.issuePairingCode("u-nobody", "telegram")).toEqual({
       ok: false,
       reason: "unknown_user",
     });
@@ -135,13 +149,12 @@ describe("Directory", () => {
   it("writes no audit entry for a change that changes nothing", async () => {
     const stub = await withEnabledOwner("no-ops");
     await stub.registerOwner(OWNER);
-    await stub.addIdentity(OWNER, telegram);
     await stub.enableIdentity(telegram);
 
     expect(await auditActions(stub)).toEqual([
       "owner.registered",
-      "identity.added",
-      "identity.enabled",
+      "pairing.code_issued",
+      "identity.paired",
     ]);
     expect(await stub.listIdentities()).toEqual([{ ...telegram, status: "enabled" }]);
   });
@@ -157,8 +170,7 @@ describe("Directory", () => {
     const stub = directory("audit");
     const phone = { channel: "whatsapp", channelUserId: "+5511987654321" } as const;
     await stub.registerOwner(OWNER);
-    await stub.addIdentity(OWNER, phone);
-    await stub.enableIdentity(phone);
+    await pair(stub, phone);
     await stub.disableIdentity(phone);
 
     const rows = await runInDurableObject(stub, (_instance: Directory, state) =>
@@ -166,8 +178,8 @@ describe("Directory", () => {
     );
     expect(rows.map((row) => row.action)).toEqual([
       "owner.registered",
-      "identity.added",
-      "identity.enabled",
+      "pairing.code_issued",
+      "identity.paired",
       "identity.disabled",
     ]);
     expect(JSON.stringify(rows)).not.toContain(phone.channelUserId);
@@ -223,7 +235,13 @@ describe("Directory first-run bootstrap", () => {
     expect(await stub.bootstrapOwner(OWNER, " ")).toEqual({ ok: false, reason: "invalid_user" });
     await stub.registerOwner(OWNER);
 
-    expect(await stub.addIdentity(OWNER, access)).toEqual({
+    expect(await stub.issuePairingCode(OWNER, ACCESS_SOURCE as ChannelId)).toEqual({
+      ok: false,
+      reason: "invalid_channel",
+    });
+    const issued = await stub.issuePairingCode(OWNER, "telegram");
+    if (!issued.ok) throw new Error("no code");
+    expect(await stub.redeemPairingCode(issued.code, access)).toEqual({
       ok: false,
       reason: "invalid_identity",
     });
@@ -268,5 +286,170 @@ describe("Directory time zone", () => {
       reason: "unknown_user",
     });
     expect(await stub.admit(telegram, "sales")).toMatchObject({ timeZone: null });
+  });
+});
+
+describe("Directory pairing", () => {
+  const stranger = { channel: "telegram", channelUserId: "6666" } as const;
+
+  async function owned(name: string) {
+    const stub = directory(name);
+    await stub.registerOwner(OWNER);
+    return stub;
+  }
+
+  async function issue(stub: ReturnType<typeof directory>) {
+    const issued = await stub.issuePairingCode(OWNER, "telegram");
+    if (!issued.ok) throw new Error(`no code: ${issued.reason}`);
+    return issued;
+  }
+
+  it("issues an 8-character code for an hour, and keeps only its salted hash", async () => {
+    const stub = await owned("pair-issue");
+    const before = Date.now();
+    const issued = await issue(stub);
+
+    expect(issued.code).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/);
+    expect(issued.expiresAt).toBeGreaterThanOrEqual(before + 3_600_000);
+    expect(issued.expiresAt).toBeLessThanOrEqual(Date.now() + 3_600_000);
+    const rows = await runInDurableObject(stub, (_instance: Directory, state) =>
+      state.storage.sql.exec("SELECT * FROM pairing_codes").toArray(),
+    );
+    expect(rows).toHaveLength(1);
+    expect(JSON.stringify(rows)).not.toContain(issued.code);
+  });
+
+  it("pairs the sender with the code's owner, enabled, and spends the code", async () => {
+    const stub = await owned("pair-redeem");
+    const { code } = await issue(stub);
+
+    expect(await stub.redeemPairingCode(code, telegram)).toEqual({ ok: true, userId: OWNER });
+    expect(await stub.admit(telegram, "sales")).toMatchObject({ admitted: true, userId: OWNER });
+    expect(await stub.redeemPairingCode(code, stranger)).toEqual({
+      ok: false,
+      reason: "invalid_code",
+    });
+    expect(await stub.admit(stranger, "sales")).toMatchObject({ admitted: false });
+  });
+
+  it("ignores spacing and case, as chat apps may change them", async () => {
+    const stub = await owned("pair-spacing");
+    const { code } = await issue(stub);
+    const typed = ` ${code.slice(0, 4).toLowerCase()} ${code.slice(4)} `;
+    expect(await stub.redeemPairingCode(typed, telegram)).toEqual({ ok: true, userId: OWNER });
+  });
+
+  it("refuses an expired code, and an old code once a new one is issued", async () => {
+    const stub = await owned("pair-expiry");
+    const old = await issue(stub);
+    const current = await issue(stub);
+    expect(await stub.redeemPairingCode(old.code, telegram)).toMatchObject({
+      reason: "invalid_code",
+    });
+
+    await runInDurableObject(stub, (_instance: Directory, state) => {
+      state.storage.sql.exec("UPDATE pairing_codes SET expires_at = 0");
+    });
+    expect(await stub.redeemPairingCode(current.code, telegram)).toMatchObject({
+      reason: "invalid_code",
+    });
+  });
+
+  it("locks a sender out for an hour after five wrong codes, and nobody else", async () => {
+    const stub = await owned("pair-lockout");
+    const { code } = await issue(stub);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      expect(await stub.redeemPairingCode("WRONGCD2", stranger)).toMatchObject({
+        reason: "invalid_code",
+      });
+    }
+    // The lock is checked first, so even the right code fails for the locked sender.
+    expect(await stub.redeemPairingCode(code, stranger)).toEqual({ ok: false, reason: "locked" });
+    // The owner, on another account, can still pair.
+    expect(await stub.redeemPairingCode(code, telegram)).toEqual({ ok: true, userId: OWNER });
+    expect((await auditActions(stub)).filter((action) => action === "pairing.locked")).toHaveLength(
+      1,
+    );
+
+    await runInDurableObject(stub, (_instance: Directory, state) => {
+      state.storage.sql.exec("UPDATE pairing_failures SET locked_until = 0, last_failure_at = 0");
+    });
+    const next = await issue(stub);
+    expect(await stub.redeemPairingCode(next.code, stranger)).toEqual({ ok: true, userId: OWNER });
+  });
+
+  it("forgets earlier wrong codes once the sender pairs", async () => {
+    const stub = await owned("pair-reset");
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await stub.redeemPairingCode("WRONGCD2", telegram);
+    }
+    expect(await stub.redeemPairingCode((await issue(stub)).code, telegram)).toMatchObject({
+      ok: true,
+    });
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await stub.redeemPairingCode("WRONGCD2", telegram);
+    }
+    expect(await stub.redeemPairingCode((await issue(stub)).code, telegram)).toMatchObject({
+      ok: true,
+    });
+  });
+
+  it("re-enables a disabled identity with a fresh code, which the owner issued on purpose", async () => {
+    const stub = await withEnabledOwner("pair-disabled");
+    await stub.disableIdentity(telegram);
+    expect(await pair(stub, telegram)).toEqual({ ok: true, userId: OWNER });
+    expect(await stub.admit(telegram, "sales")).toMatchObject({ admitted: true });
+  });
+
+  it("keeps pairing codes and senders' ids out of the audit log", async () => {
+    const stub = await owned("pair-audit");
+    const { code } = await issue(stub);
+    await stub.redeemPairingCode("WRONGCD2", stranger);
+    await stub.redeemPairingCode(code, telegram);
+    const rows = await runInDurableObject(stub, (_instance: Directory, state) =>
+      state.storage.sql.exec("SELECT * FROM audit_log").toArray(),
+    );
+    expect(JSON.stringify(rows)).not.toContain(code);
+    expect(JSON.stringify(rows)).not.toContain(stranger.channelUserId);
+    expect(JSON.stringify(rows)).not.toContain(telegram.channelUserId);
+  });
+});
+
+describe("Directory stranger notices", () => {
+  const sender = (id: number) => ({ channel: "telegram", channelUserId: String(id) }) as const;
+
+  it("tells the owner about each stranger once, on the owner's own account there", async () => {
+    const stub = await withEnabledOwner("notice-once");
+    expect(await stub.noticeStranger(sender(7001))).toEqual({
+      notify: true,
+      ownerChannelUserId: telegram.channelUserId,
+    });
+    expect(await stub.noticeStranger(sender(7001))).toEqual({ notify: false });
+  });
+
+  it("tells nobody while the owner has no account on that channel", async () => {
+    const stub = directory("notice-unpaired");
+    await stub.registerOwner(OWNER);
+    expect(await stub.noticeStranger(sender(7002))).toEqual({ notify: false });
+    // Once the owner pairs, the same stranger is news.
+    await pair(stub, telegram);
+    expect(await stub.noticeStranger(sender(7002))).toMatchObject({ notify: true });
+  });
+
+  it("stops at ten notices a day, and forgets a stranger after thirty days", async () => {
+    const stub = await withEnabledOwner("notice-cap");
+    for (let id = 8000; id < 8010; id += 1) {
+      expect(await stub.noticeStranger(sender(id))).toMatchObject({ notify: true });
+    }
+    expect(await stub.noticeStranger(sender(8010))).toEqual({ notify: false });
+
+    await runInDurableObject(stub, (_instance: Directory, state) => {
+      state.storage.sql.exec("UPDATE noticed_senders SET noticed_at = 0");
+    });
+    expect(await stub.noticeStranger(sender(8000))).toMatchObject({ notify: true });
+    const kept = await runInDurableObject(stub, (_instance: Directory, state) =>
+      state.storage.sql.exec("SELECT channel_user_id FROM noticed_senders").toArray(),
+    );
+    expect(kept).toEqual([{ channel_user_id: "8000" }]);
   });
 });
