@@ -278,9 +278,14 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - the fused order stays when the judge fails, doesn't answer in 5 s, or gives any score that is missing or outside 0 to 1.
 
   Kelpie's judge is the agent's qualifier, asked one yes-or-no question per note in one call, with the notes marked as data, not instructions.
+- **In a turn:** the conversation runtime asks once per turn, when the person has finished, about every message since the last reply, without their time stamps. A bare acknowledgement skips it.
+  - It asks for all scopes, since ingress admits only the owner's direct chats ([ADR-0015](adr/0015-single-player-first.md)), within the slice's 1,000 tokens. The agent's qualifier reranks.
+  - The block leads the turn's last message in that request only. History, checkpoints and the system prompt never hold it, so what came before that message stays the same from one request to the next, as the prompt cache needs.
+  - The person waits for it while "typing" shows. The rerank takes 1.4 s at p50 and up to 2.5 s at p95 ([spike](spikes/memory-eval.md#with-models)).
+  - A Context Store that fails, or doesn't answer in 6 s, leaves the turn without memory. A message that arrives meanwhile interrupts the turn before its model call, and the next turn asks again.
+  - It logs the time, the number of notes and their tokens, never text.
 - **Not yet:**
   - the always-loaded core;
-  - the turn's assembly in the conversation runtime;
   - the agent's memory tools (#126).
 
 ## Credits

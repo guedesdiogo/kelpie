@@ -108,7 +108,7 @@ const EMOJI = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]|\u{FE0F}|
 
 /**
  * Whether a message is worth a memory lookup: not empty, not a command, not a bare acknowledgement
- * or greeting. Cheap and local; a model only decides what this can't.
+ * or greeting. Cheap and local, and the whole gate: no model is asked (#110).
  */
 export function needsMemory(text: string): boolean {
   const stripped = foldKey(text.slice(0, MAX_QUESTION_CHARS).replace(EMOJI, "")).trim();

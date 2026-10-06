@@ -231,6 +231,7 @@ At 1k, `bge-m3` with the rerank reaches hit@5 0.940 and MRR 0.849, against 0.827
   - It stopped all 20 bare acknowledgements, but also 16 of the 150 questions (11%), which would then get no memory.
   - The regex in `needsMemory` alone stopped all 20 acknowledgements and none of the 150 questions.
   - A Clef call took 0.50 s at p50 and 1.13 s at p95.
+  - The owner chose the regex alone, to save the qualifier's cost ([#110](https://github.com/guedesdiogo/kelpie/issues/110#issuecomment-6017364370)).
 - **Not run:** 100k memories, which would take tens of minutes to embed per model.
 
 ## How to re-run

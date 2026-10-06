@@ -18,7 +18,7 @@ import {
   type WebchatAdmission,
 } from "@kelpie/conversation/contract";
 import type { AssistantMessage, ChatMessage, LlmEvent, Usage } from "@kelpie/llm";
-import { type OpenKeys, sessionPage } from "@kelpie/memory";
+import { needsMemory, type OpenKeys, sessionPage } from "@kelpie/memory";
 import { QualifierUnavailable } from "@kelpie/qualifier";
 import {
   Agent,
@@ -86,6 +86,12 @@ const CHECKPOINT_HEADING =
 const SESSION_IDLE_MS = 30 * 60_000;
 /** A session that couldn't be written, or that a turn held open, is tried again after this long. */
 const SESSION_RETRY_MS = 10 * 60_000;
+
+/**
+ * The memories a turn may carry, in tokens: the retrieved slice's starting budget (ADR-0020), the
+ * one #110's evaluation measured.
+ */
+const RECALL_BUDGET_TOKENS = 1_000;
 
 /** A bubble the channel keeps rate-limiting is tried this many times before the turn fails. */
 const MAX_SEND_ATTEMPTS = 3;
@@ -537,9 +543,12 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
 
     let finish: Extract<LlmEvent, { type: "finish" }> | undefined;
     try {
+      // The person waits for this, with "typing" showing.
+      const memory = await this.#recall(settings);
+      if (controller.signal.aborted || !this.#isRunning(turnId)) return;
       const call = await this.#ports.generate(settings.tier, {
         system: settings.systemPrompt,
-        messages: this.#messages(turn.systemVersion, turn.checkpointId),
+        messages: withMemory(this.#messages(turn.systemVersion, turn.checkpointId), memory),
         maxOutputTokens: settings.maxOutputTokens,
       });
       const flight = this.#inFlight.get(turnId);
@@ -595,6 +604,55 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       });
     });
     await this.#deliver(turnId, controller.signal);
+  }
+
+  /**
+   * The vault's notes that answer the messages since the last reply, packed for this turn (#110),
+   * or null. One lookup per turn, on all of them; bare acknowledgements skip it. A failure, a slow
+   * store or nothing found leaves the turn without memory. Logs counts only, never text.
+   */
+  async #recall(settings: AgentSettings): Promise<string | null> {
+    const question = this.#unanswered();
+    if (!needsMemory(question)) return null;
+    const started = Date.now();
+    try {
+      const recalled = await this.#ports.recall(this.#agentId(), question, {
+        // Ingress admits only direct chats (ADR-0015): the owner's, who may see every scope.
+        scopes: "all",
+        budgetTokens: RECALL_BUDGET_TOKENS,
+        qualifier: settings.qualifier,
+      });
+      console.log("conversation: recall", {
+        ms: Date.now() - started,
+        notes: recalled.paths.length,
+        tokens: recalled.tokens,
+      });
+      return recalled.text === "" ? null : recalled.text;
+    } catch (error) {
+      console.warn("conversation: recall failed", {
+        ms: Date.now() - started,
+        error: errorName(error),
+      });
+      return null;
+    }
+  }
+
+  /** The user's messages since the last reply, without their stamps: what the next reply answers. */
+  #unanswered(): string {
+    const lastReply =
+      this.#db
+        .select({ id: max(schema.history.id) })
+        .from(schema.history)
+        .where(eq(schema.history.role, "assistant"))
+        .get()?.id ?? 0;
+    return this.#db
+      .select({ message: schema.history.message })
+      .from(schema.history)
+      .where(and(gt(schema.history.id, lastReply), eq(schema.history.role, "user")))
+      .orderBy(asc(schema.history.id))
+      .all()
+      .map(({ message }) => withoutTypedStamps(messageText(message)))
+      .join("\n");
   }
 
   /**
@@ -1250,6 +1308,16 @@ function byAuthor(rows: readonly { userId: string; text: string; stamp: string |
 }
 
 /** The text of any history message, without its tool calls or reasoning. */
+/** A turn's memory leads its last message, in that request only: history never keeps it. */
+function withMemory(messages: ChatMessage[], memory: string | null): ChatMessage[] {
+  const last = messages.at(-1);
+  if (memory === null || last?.role !== "user") return messages;
+  return [
+    ...messages.slice(0, -1),
+    { ...last, parts: [{ type: "text", text: memory }, ...last.parts] },
+  ];
+}
+
 function messageText(message: ChatMessage): string {
   if (!("parts" in message)) return "";
   return message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n\n");

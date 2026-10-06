@@ -1,4 +1,5 @@
 import type { SendOutcome } from "@kelpie/channels";
+import type { RecallOptions } from "@kelpie/context-store/contract";
 import type { Destination } from "@kelpie/conversation/contract";
 import type { AssistantMessage, LlmEvent, RoutedRequest, Usage } from "@kelpie/llm";
 import type { Qualifier } from "@kelpie/qualifier";
@@ -94,6 +95,14 @@ export interface FakeWorld {
   remembered: { agentId: string; changes: { path: string; content: string | null }[] }[];
   /** While set, memory writes throw, as an unreachable Context Store would. */
   failRemember: boolean;
+  /** Every recall, in order. */
+  recalls: { agentId: string; question: string; options: RecallOptions }[];
+  /** The block recall answers with; empty, as when nothing matches, by default. */
+  memory: string;
+  /** While set, recall throws, as an unreachable Context Store would. */
+  failRecall: boolean;
+  /** While set, recall waits before it answers. */
+  recallHeld: boolean;
 }
 
 export function fakeWorld(scripts: ModelScript[]): FakeWorld {
@@ -109,6 +118,10 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
     sends: [],
     remembered: [],
     failRemember: false,
+    recalls: [],
+    memory: "",
+    failRecall: false,
+    recallHeld: false,
     typing: 0,
     typingKept: 0,
     typingStopped: 0,
@@ -210,6 +223,17 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
         if (world.failRemember) throw new Error(INJECTED_FAILURE);
         world.remembered.push({ agentId, changes });
         return { ok: true };
+      },
+      async recall(agentId, question, options) {
+        world.recalls.push({ agentId, question, options: structuredClone(options) });
+        if (world.failRecall) throw new Error(INJECTED_FAILURE);
+        // Polls a plain flag: a promise created here can't be resolved from the test's context.
+        while (world.recallHeld) await new Promise((resolve) => setTimeout(resolve, 5));
+        return {
+          text: world.memory,
+          tokens: Math.ceil(world.memory.length / 4),
+          paths: world.memory === "" ? [] : ["people/ana.md"],
+        };
       },
       qualifierFor: () => null,
       now: () => world.clock,
