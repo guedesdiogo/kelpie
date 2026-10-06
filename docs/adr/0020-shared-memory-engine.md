@@ -32,7 +32,7 @@ The owner then decided how Kelpie builds its memory, and how far it goes with ot
   - decay and expiry;
   - lint, dedup and a contradiction band;
   - dream (consolidation);
-  - auto-improve proposals, staged and gated by confidence.
+  - auto-improve proposals, staged, with the approval rule of point 5.
 
   Code may be translated from ai-memory, keeping its MIT notice.
 - **What changes for a general personal assistant** (note 09, and the discussion on #105):
@@ -63,10 +63,10 @@ The owner then decided how Kelpie builds its memory, and how far it goes with ot
 
 **5. Approval is configurable, per item and per agent.**
 - **What it covers:** the persona (`SOUL.md`), the rules (`AGENTS.md`) and the skills. Only the owner configures it.
-- **The rule for a proposed change:**
-  - below the confidence floor, it isn't applied;
-  - above it, it is applied directly when that item's approval is off, or opened as a pull request for the owner when it is on.
-- **Default:** approval on for all three. An evaluation gate joins the rule once the memory evaluation exists.
+- **The rule for a proposed change**, in the owner's words: «se estiver ligada, usa a regra de confiança, caso contrário nem precisa de regra de confiança, aprova sempre».
+  - **Approval off:** the change is always applied, with no confidence check.
+  - **Approval on:** the confidence rule applies. At or above the floor, the change is applied directly. Below it, it is opened as a pull request for the owner. Only low-confidence changes wait for him.
+- **Default:** approval on for all three. An evaluation gate can join the confidence rule once the memory evaluation exists.
 - **Everything else** (facts, preferences, episodes, the conclusions about the owner and the agent, consolidation) is written autonomously, through the sanitizer and supersession. Git keeps every version.
 
 **6. Scope of the first version.**
@@ -87,7 +87,7 @@ This amends:
 - **[ADR-0006](0006-personal-data-storage.md):** profiles, facts and episodes about people move from the per-user Durable Objects into the vault. The erasure workflow and the personal-data gate before git are dropped.
 - **[ADR-0016](0016-vault-second-brain.md):**
   - Kelpie's writes may put third parties' data in the vault;
-  - an agent may change its own persona, rules or skills when that item's approval is off, still subject to the confidence floor;
+  - an agent may change its own persona, rules or skills without the owner's review: always when that item's approval is off, and at or above the confidence floor when it is on;
   - sharing with other agents goes through the single writer. The symlink-and-git-sync mechanism for Hermes is dropped, and Hermes is deferred.
 - **[ADR-0017](0017-history-compaction.md):** its reference to an erasure workflow (ADR-0006) no longer applies.
 
@@ -102,7 +102,7 @@ This amends:
   - The viability study's second blocker (user profiles can't live as versioned Markdown) no longer applies to Kelpie run for personal use.
 - **Model providers still receive conversation content under their own terms,** whatever the memory does. The privacy notes keep saying so.
 - **Following ai-memory costs a routine and some judgment.** Upstream moves fast: it was created in May 2026 and already has 71 migrations.
-- **Memory poisoning.** With approval off, the confidence floor and git's history are the only guards on persona, rules and skills. The default keeps approval on.
+- **Memory poisoning.** With approval off, only git's history guards persona, rules and skills. With it on, a high-confidence change still lands without review, so the floor must be calibrated against the memory evaluation. The default keeps approval on.
 - **Hermes and OpenClaw get no shared memory in the first version.** When they come, note 09 §8 describes the integration paths: a Hermes memory provider with per-turn prefetch, and OpenClaw through MCP and `extraPaths`.
 
 ## Alternatives considered
