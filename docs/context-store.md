@@ -88,7 +88,7 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - **Checks first:** it runs `writeMemory`'s checks, removes secrets, refuses session pages and conflict markers, and keeps a found note's kind and scope.
     - **A found note** keeps what the model left out ([memory-format.md](memory-format.md#retrieval)).
     - **Writes:** it queues the note like any write, under a headline that doesn't name it, and answers `written` or `unchanged`, with the path. The path is chosen and the write queued in one stretch, without a pause.
-    - **Provenance:** a commit whose answer was lost still counts as Kelpie's. A file the owner removes leaves no record.
+    - **Provenance:** a commit whose answer was lost still counts as Kelpie's. A file the owner removes, or a force-push takes away, leaves no record.
     - **Refusals:** `invalid` comes with the problems found, for the model to fix. A path the turn can't see is `not_found`, the same as a missing note. A scope the turn can't write to is `scope_not_allowed`.
   - **Access counts:** each recall counts the notes it packed, in one write, in a table outside the index. A rebuild keeps them, and they never reach git.
   - **The memory report** (#111): once a day, after the embeddings and the held files, the alarm writes what memory's index finds (cold notes, duplicates, possible contradictions) to `memory/_lint/report.md`, or removes the page when memory is clean ([memory-format.md](memory-format.md#the-daily-report)).

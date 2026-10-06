@@ -26,7 +26,7 @@ import type {
   ToolResult,
   Usage,
 } from "@kelpie/llm";
-import { needsMemory, type OpenKeys, sessionPage } from "@kelpie/memory";
+import { conversationSource, needsMemory, type OpenKeys, sessionPage } from "@kelpie/memory";
 import {
   Agent,
   type Connection,
@@ -1023,16 +1023,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .run();
   }
 
-  /**
-   * The vault's notes that answer the messages since the last reply, packed for this turn (#110),
-   * or null. One lookup per turn, on all of them, unless the gate skips every line. A failure, a
-   * slow store, an answer past the budget or nothing found leaves the turn without memory. Logs
-   * counts only, never text.
-   */
   /** The conversation as its session pages name it (#109), and today in its time zone. */
   #source(): string {
     const destination = this.#destination();
-    const conversation = `${destination.channel}:${destination.threadId}`.slice(0, 200);
+    const conversation = conversationSource(destination.channel, destination.threadId, 280);
     const timeZone = this.#get<string | null>("timeZone", null) ?? "UTC";
     const day = (zone: string) =>
       new Intl.DateTimeFormat("en-CA", {
@@ -1050,6 +1044,12 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     return `${conversation}, ${today}`;
   }
 
+  /**
+   * The vault's notes that answer the messages since the last reply, packed for this turn (#110),
+   * or null. One lookup per turn, on all of them, unless the gate skips every line. A failure, a
+   * slow store, an answer past the budget or nothing found leaves the turn without memory. Logs
+   * counts only, never text.
+   */
   async #recall(settings: AgentSettings): Promise<string | null> {
     const started = this.#ports.now();
     try {

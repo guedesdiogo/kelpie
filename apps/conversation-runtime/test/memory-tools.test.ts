@@ -182,6 +182,23 @@ describe("memory_write", () => {
     ]);
     // What the model sent beyond the memory's fields doesn't reach the store.
     expect(given).toEqual({ ...note, scope: "conversation/familia" });
+    // Nor do the fields it sent as null, meaning left out.
+    await write?.run({ ...note, entities: null, validFrom: null, path: null }, context());
+    expect(given).toEqual(note);
+  });
+
+  it("counts a turn's writes across its loop's providers, and apart from other conversations", async () => {
+    const shared = fakeStore();
+    const first = (await toolsOf(shared.store)).get("memory_write");
+    const second = (await toolsOf(shared.store)).get("memory_write");
+    for (let i = 0; i < 3; i += 1) await first?.run(note, context("resumed"));
+    for (let i = 0; i < 2; i += 1) await second?.run(note, context("resumed"));
+    expect((await second?.run(note, context("resumed")))?.isError).toBe(true);
+    // The same turn id in another conversation is another turn.
+    expect(
+      (await second?.run(note, { ...context("resumed"), source: "telegram:chat-2, 2026-10-06" }))
+        ?.isError,
+    ).toBeUndefined();
   });
 
   it("tells the model what happened, in words it can act on", async () => {
@@ -198,7 +215,7 @@ describe("memory_write", () => {
         { ok: false, reason: "scope_not_allowed" },
         {
           output:
-            "Not saved: this conversation can't write to that scope. Leave scope out to save it to the owner's global memory.",
+            "Not saved: this conversation can't save to that scope. Choose one it sees, or leave scope out for the owner's global memory.",
           isError: true,
         },
       ],

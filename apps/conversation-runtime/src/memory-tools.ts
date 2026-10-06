@@ -52,8 +52,15 @@ const READ: Tool["spec"] = {
 /** A turn saves at most this many memories, and stops trying after this many failures (hermes). */
 const MAX_WRITES = 5;
 const MAX_WRITE_FAILURES = 3;
-/** The turns whose counts are kept: far more than one isolate runs at once. */
-const KEPT_TURNS = 64;
+/** The turns whose counts are kept, per isolate: far more than run at once. */
+const KEPT_TURNS = 256;
+
+/**
+ * Each turn's writes and failures, by agent, conversation and turn. The host gives every call a
+ * signal of its own, and a fresh provider each loop, so the counts live with the isolate: a turn
+ * resumed elsewhere after an eviction starts them again.
+ */
+const turns = new Map<string, { writes: number; failures: number }>();
 
 const WRITE: Tool["spec"] = {
   name: "memory_write",
@@ -161,13 +168,11 @@ export function memoryTools(store: MemoryStore): ToolProvider {
       throw new Error(`readNote: ${page.reason}`);
     },
   };
-  // Each turn's writes and failures, by the turn: the host gives every call a signal of its own.
-  const turns = new Map<string, { writes: number; failures: number }>();
   const write: Tool = {
     spec: WRITE,
     label: "Saving to memory",
     async run(input: unknown, context: ToolContext): Promise<ToolOutcome> {
-      const key = `${context.agentId}\n${context.turn}`;
+      const key = `${context.agentId}\n${context.source}\n${context.turn}`;
       const turn = turns.get(key) ?? { writes: 0, failures: 0 };
       if (!turns.has(key)) {
         turns.set(key, turn);
@@ -206,7 +211,11 @@ export function memoryTools(store: MemoryStore): ToolProvider {
       return invalid("Not saved: title, body, kind and level are required, as text.");
     }
     const memory = Object.fromEntries(
-      WRITE_FIELDS.filter((key) => given[key] !== undefined).map((key) => [key, given[key]]),
+      // A field sent as null is one left out.
+      WRITE_FIELDS.filter((key) => given[key] !== undefined && given[key] !== null).map((key) => [
+        key,
+        given[key],
+      ]),
     ) as unknown as MemoryWriteInput;
     const result = await store.writeNote(context.agentId, memory, {
       scopes: context.scopes,
@@ -229,7 +238,7 @@ export function memoryTools(store: MemoryStore): ToolProvider {
         );
       case "scope_not_allowed":
         return invalid(
-          "Not saved: this conversation can't write to that scope. Leave scope out to save it to the owner's global memory.",
+          "Not saved: this conversation can't save to that scope. Choose one it sees, or leave scope out for the owner's global memory.",
         );
       case "too_large":
         return invalid("Not saved: the note is too large. Save less, or split it.");

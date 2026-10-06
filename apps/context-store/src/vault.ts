@@ -3,6 +3,8 @@ import { EMBEDDING_INPUT_CHARS, type EmbedOutcome } from "@kelpie/llm";
 import {
   bodyWithoutHeading,
   decideWrite,
+  foldKey,
+  instantOf,
   isScope,
   LIFECYCLE_REPORT_PATH,
   lifecycleFindings,
@@ -12,6 +14,7 @@ import {
   MemoryIndex,
   type MemoryInput,
   memoryPath,
+  type Note,
   pack,
   readNote as parseNote,
   qualifierJudge,
@@ -108,10 +111,36 @@ const SEARCH_K = 3;
 const MAX_SEARCH_K = 10;
 /** A memory the agent writes without a confidence. */
 const DEFAULT_CONFIDENCE = 0.8;
-/** Two versions of a note that differ only in when they were written. */
-function sameVersion(a: string | null, b: string): boolean {
-  const unstamped = (text: string) => text.replace(/^updated: .*\n/m, "");
-  return a !== null && unstamped(a) === unstamped(b);
+/** Two versions of a note that differ only in their frontmatter's `updated`. */
+function sameVersion(a: string, b: string): boolean {
+  const unstamped = (text: string) => {
+    const end = text.startsWith("---\n") ? text.indexOf("\n---\n", 3) : -1;
+    return end === -1
+      ? text
+      : `${text.slice(0, end).replace(/\nupdated: [^\n]*/, "")}${text.slice(end)}`;
+  };
+  return unstamped(a) === unstamped(b);
+}
+
+const words = (text: string) => text.trim().split(/\s+/u).join(" ");
+const instant = (value: string | null | undefined) =>
+  value === null || value === undefined ? null : instantOf(value);
+
+/** A note that already says this memory: its title, body and validity. */
+function saysTheSame(note: Note, memory: MemoryInput): boolean {
+  return (
+    foldKey(words(note.title)) === foldKey(words(memory.title)) &&
+    words(bodyWithoutHeading(note.title, note.body)) === words(memory.body) &&
+    instant(note.validFrom) === instant(memory.validFrom) &&
+    instant(note.invalidAt) === instant(memory.invalidAt)
+  );
+}
+
+/** What the writer takes as one line: printable, with no bidirectional overrides. */
+function writable(value: string, max: number): boolean {
+  return (
+    value.trim() !== "" && value.length <= max && !/[\p{Cc}\u202A-\u202E\u2066-\u2069]/u.test(value)
+  );
 }
 
 /** A new memory's file name is numbered up to this when its title's path is taken. */
@@ -1108,15 +1137,24 @@ export class Vault extends DurableObject<VaultEnv> {
     const sees = (scope: string) =>
       scopes === "all" || (scopes as readonly string[]).includes(scope);
     const clean = (text: unknown) => (typeof text === "string" ? sanitizeSecrets(text).text : text);
+    // A model often sends null for a field it leaves out.
+    const given = <T>(value: T | null | undefined): T | undefined =>
+      value === null ? undefined : value;
+    const path = given(input.path);
+    const entitiesGiven = given(input.entities);
     try {
       await this.#ready();
       await this.#catchUp();
-      const found = typeof input.path === "string" ? this.#memory.current(input.path) : null;
-      if (input.path !== undefined && (found === null || !sees(found.scope))) {
+      const found = typeof path === "string" ? this.#memory.current(path) : null;
+      if (path !== undefined && (found === null || !sees(found.scope))) {
         return { ok: false, reason: "not_found" };
       }
+      // Seen, but another agent's folder: not this agent's to write (`isWritable`).
+      if (found !== null && !isWritable(agentId, found.path)) {
+        return { ok: false, reason: "scope_not_allowed" };
+      }
       const problems: string[] = [];
-      if (found !== null && input.scope !== undefined && input.scope !== found.scope) {
+      if (found !== null && given(input.scope) !== undefined && input.scope !== found.scope) {
         problems.push(`\`scope\` must be the note's own, ${found.scope}`);
       }
       if (found !== null && input.kind !== found.kind) {
@@ -1128,54 +1166,78 @@ export class Vault extends DurableObject<VaultEnv> {
       if (typeof input.body === "string" && hasConflictMarkers(input.body)) {
         problems.push("`body` holds merge conflict markers");
       }
-      if (input.kind === "event" && input.validFrom === undefined && found === null) {
+      if (entitiesGiven !== undefined && !Array.isArray(entitiesGiven)) {
+        problems.push("`entities` must be a list of names");
+      }
+      if (input.kind === "event" && given(input.validFrom) === undefined && found === null) {
         problems.push("an event needs `validFrom`, its date");
       }
-      // The found note as the vault shows it now, queued writes included.
-      const before =
-        found === null
-          ? null
-          : (() => {
-              const text = this.#visible(found.path);
-              return text === null ? null : parseNote(found.path, text);
-            })();
-      const contradicts = (before?.links ?? [])
-        .filter((link) => link.kind === "contradicts" && !/[[\]|#]/.test(link.target))
-        .map((link) => link.target);
-      const allSources = [...new Set([...(before?.sources ?? []), ...sources])].slice(-MAX_SOURCES);
-      const entities =
-        input.entities === undefined
-          ? before?.entities.map((entity) => entity.name)
-          : input.entities.map((entity) => clean(entity) as string);
-      const abstract = input.abstract === undefined ? before?.abstract : clean(input.abstract);
-      const validFrom = input.validFrom ?? before?.validFrom ?? undefined;
-      const invalidAt = input.invalidAt ?? before?.invalidAt ?? undefined;
-      const memory = {
-        scope: found?.scope ?? input.scope ?? "global",
-        kind: input.kind,
-        title: clean(input.title),
-        body: clean(input.body),
-        level: input.level,
-        confidence: input.confidence ?? before?.confidence ?? DEFAULT_CONFIDENCE,
-        ...(before === null ? {} : { tier: before.tier }),
-        ...(allSources.length > 0 ? { sources: allSources } : {}),
-        ...(entities?.length ? { entities } : {}),
-        ...(validFrom === undefined ? {} : { validFrom }),
-        ...(invalidAt === undefined ? {} : { invalidAt }),
-        ...(abstract ? { abstract } : {}),
-        ...(contradicts.length > 0 ? { contradicts } : {}),
-        ...(found?.pinned ? { pinned: true } : {}),
-        ...(found?.evergreen ? { evergreen: true } : {}),
-      } as MemoryInput;
+      if (problems.length > 0) return { ok: false, reason: "invalid", problems };
+
+      /**
+       * The memory as it will be written: what the model gave, and for a found note, what the note
+       * holds and the model left out, as far as the writer can write it back.
+       */
+      const build = (before: Note | null): MemoryInput => {
+        const contradicts =
+          (before?.frontmatter.relations as { contradicts?: unknown } | undefined)?.contradicts ??
+          [];
+        const targets = (Array.isArray(contradicts) ? contradicts : [])
+          .map((link) =>
+            typeof link === "string" ? /^\[\[([^\]|#]+)/.exec(link)?.[1]?.trim() : undefined,
+          )
+          .filter((name): name is string => !!name && writable(name, 200));
+        const allSources = [
+          ...new Set([...(before?.sources ?? []).filter((one) => writable(one, 300)), ...sources]),
+        ].slice(-MAX_SOURCES);
+        const entities =
+          entitiesGiven === undefined
+            ? before?.entities.map((entity) => entity.name)
+            : (entitiesGiven as unknown[]).map((entity) => clean(entity) as string);
+        const abstract =
+          given(input.abstract) === undefined
+            ? before?.abstract && writable(before.abstract, 300)
+              ? before.abstract
+              : undefined
+            : clean(input.abstract);
+        const validFrom = given(input.validFrom) ?? before?.validFrom ?? undefined;
+        const invalidAt = given(input.invalidAt) ?? before?.invalidAt ?? undefined;
+        return {
+          scope: found?.scope ?? given(input.scope) ?? "global",
+          kind: input.kind,
+          title: clean(input.title),
+          body: clean(input.body),
+          level: input.level,
+          confidence: given(input.confidence) ?? before?.confidence ?? DEFAULT_CONFIDENCE,
+          ...(before === null ? {} : { tier: before.tier }),
+          ...(allSources.length > 0 ? { sources: allSources } : {}),
+          ...(entities?.length ? { entities } : {}),
+          ...(validFrom === undefined ? {} : { validFrom }),
+          ...(invalidAt === undefined ? {} : { invalidAt }),
+          ...(abstract ? { abstract } : {}),
+          ...(targets.length > 0 ? { contradicts: targets } : {}),
+          ...(found?.pinned ? { pinned: true } : {}),
+          ...(found?.evergreen ? { evergreen: true } : {}),
+        } as MemoryInput;
+      };
+      // A note as the vault shows it now, queued writes included; a removal waiting in the queue
+      // means it is gone.
+      const shownAt = (target: string) => {
+        const text = this.#visible(target);
+        return { text, note: text === null ? null : parseNote(target, text) };
+      };
+      const first = found === null ? null : shownAt(found.path);
+      let memory = build(first?.note ?? null);
       const at = new Date().toISOString();
       try {
         // Checks every field before anything reads them.
         await writeMemory(memory, { at });
       } catch (error) {
-        if (error instanceof MemoryFormatError) problems.push(...error.problems);
-        else throw error;
+        if (error instanceof MemoryFormatError) {
+          return { ok: false, reason: "invalid", problems: [...error.problems] };
+        }
+        throw error;
       }
-      if (problems.length > 0) return { ok: false, reason: "invalid", problems };
       const scope = memory.scope;
       if (
         found === null &&
@@ -1184,19 +1246,22 @@ export class Vault extends DurableObject<VaultEnv> {
         return { ok: false, reason: "scope_not_allowed" };
       }
 
-      let path: string | null = null;
+      let target: string | null = null;
       let text = "";
       if (found !== null) {
         // The note may change while its new version is rendered: render again from what it shows.
-        for (let attempt = 0; attempt < 3 && path === null; attempt += 1) {
-          const shown = this.#visible(found.path);
-          text = (await writeMemory(memory, { at, ...(shown === null ? {} : { existing: shown }) }))
-            .text;
-          if (this.#visible(found.path) !== shown) continue;
-          if (sameVersion(shown, text)) return { ok: true, action: "unchanged", path: found.path };
-          path = found.path;
+        for (let attempt = 0; attempt < 3 && target === null; attempt += 1) {
+          const shown = shownAt(found.path);
+          if (shown.text === null) return { ok: false, reason: "not_found" };
+          memory = build(shown.note);
+          text = (await writeMemory(memory, { at, existing: shown.text })).text;
+          if (this.#visible(found.path) !== shown.text) continue;
+          if (sameVersion(shown.text, text)) {
+            return { ok: true, action: "unchanged", path: found.path };
+          }
+          target = found.path;
         }
-        if (path === null) return { ok: false, reason: "unavailable" };
+        if (target === null) return { ok: false, reason: "unavailable" };
       } else {
         const date = memory.kind === "event" ? memory.validFrom?.slice(0, 10) : undefined;
         const own = memoryPath(memory.scope, memory.kind, memory.title, date);
@@ -1209,15 +1274,15 @@ export class Vault extends DurableObject<VaultEnv> {
           return { ok: true, action: "unchanged", path: decision.path };
         }
         // From here to the queue, nothing pauses: no other write can take the path meanwhile.
-        for (let n = 1; n <= MAX_PATH_NUMBER && path === null; n += 1) {
+        for (let n = 1; n <= MAX_PATH_NUMBER && target === null; n += 1) {
           const candidate = n === 1 ? own : own.replace(/\.md$/, `-${n}.md`);
-          const shown = this.#visible(candidate);
-          if (shown === null) path = candidate;
-          else if (sameVersion(shown, text)) {
+          const shown = shownAt(candidate);
+          if (shown.text === null) target = candidate;
+          else if (shown.note !== null && saysTheSame(shown.note, memory)) {
             return { ok: true, action: "unchanged", path: candidate };
           }
         }
-        if (path === null) {
+        if (target === null) {
           return {
             ok: false,
             reason: "invalid",
@@ -1226,8 +1291,8 @@ export class Vault extends DurableObject<VaultEnv> {
         }
       }
       // Never the title: a headline outlives a forget in git's history.
-      const written = await this.write(agentId, [{ path, content: text }], "Save a memory");
-      if (written.ok) return { ok: true, action: "written", path };
+      const written = await this.write(agentId, [{ path: target, content: text }], "Save a memory");
+      if (written.ok) return { ok: true, action: "written", path: target };
       return { ok: false, reason: written.reason === "too_large" ? "too_large" : "unavailable" };
     } catch (error) {
       if (error instanceof MemoryFormatError) {
@@ -1422,6 +1487,8 @@ export class Vault extends DurableObject<VaultEnv> {
       if (before.get(file.path) === file.blobSha) changed.delete(file.path);
       else changed.set(file.path, file.content);
     }
+    // A file the vault no longer has leaves no provenance behind.
+    this.#exec("DELETE FROM authored WHERE path NOT IN (SELECT path FROM files)");
     return changed;
   }
 

@@ -162,4 +162,21 @@ describe("Vault provenance", () => {
       ),
     ).toBe(0);
   });
+
+  it("forgets what Kelpie wrote when a force-push takes the file away", async () => {
+    const backend = vaultWith({});
+    replaceGatewayForTesting(null);
+    const stub = vault("provenance-force-push");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", [{ path: "memory/notes/a.md", content: "# A\n\nUm.\n" }], "x");
+    await runDurableObjectAlarm(stub);
+    backend.forcePush({ "README.md": "# Vault" });
+    await runDurableObjectAlarm(stub);
+    expect(
+      await runInDurableObject(
+        stub,
+        (_instance, state) => state.storage.sql.exec("SELECT count(*) AS n FROM authored").one().n,
+      ),
+    ).toBe(0);
+  });
 });

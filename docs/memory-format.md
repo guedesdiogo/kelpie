@@ -309,22 +309,24 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - **Scopes and the qualifier** come from the turn, never from the model. A note outside the scopes, or outside memory's index (persona, rules, skills, root files), gets the same "not found" as a missing one.
   - **`memory_write(title, body, kind, level, …)`:** saves one memory through the Context Store's single writer.
     - **A new memory** goes where its title puts it, an event under its `validFrom` date, which it needs. The path gets a number when another note holds it.
-    - **A found note's `path`** makes the memory that note's new version, of the same kind. It keeps what the model left out:
+    - **A found note's `path`** makes the memory that note's new version, of the same kind, unless it is another agent's or removed. It keeps what the model left out, as far as Kelpie can write it back:
       - the note's id and the owner's keys;
       - its tier, confidence, entities, validity and abstract;
-      - its `contradicts` links;
+      - its `contradicts` links, by note name (a heading or alias in the link is dropped);
       - its pin and evergreen flag.
 
-      The turn's source joins the note's sources, 20 at most.
+      The turn's source joins the note's sources, 20 at most. A carried value the writer can't take, such as a source with a tab, is dropped rather than refusing the update. A carried `invalid_at` can't be cleared, only replaced.
     - **Where it can write:** any note the turn sees, for a new version. A new memory goes to the owner's global memory by default, or to the agent's own scope, when the turn sees every scope. When the turn lists its scopes, a new memory goes only to those (#131 will revisit this).
-    - **The same version again,** queued or committed, changes nothing, so a retried call is safe:
-      - at its path or at a numbered one;
-      - or as an exact twin elsewhere in the index.
+    - **No news changes nothing,** so a retried call is safe:
+      - a new version that differs only in its `updated` stamp;
+      - a new memory whose title, body and validity a note at its path, or a numbered one, already holds, queued or committed;
+      - an exact twin elsewhere in the index.
 
       The path is chosen and the write queued without a pause, so concurrent writes can't share a path.
     - **What it carries:** secrets are removed from the title, body, abstract and entities. `sources` is the conversation, named as its session pages name it, and the day in its time zone, from the turn.
     - **What it refuses:** `session`, since conversation pages are written for it, and bodies with merge conflict markers. The commit's headline never names the memory, since a headline outlives a `forget` in git.
-    - **Bounds:** a turn, across its rounds, saves 5 memories at most and stops after 3 failures. A store that fails or times out counts as a failure.
+    - **Bounds:** a turn, across its rounds, saves 5 memories at most and stops after 3 failures. A store that fails or times out counts as a failure. The counts live in the Worker's isolate, so a turn resumed elsewhere after an eviction starts them again.
+    - **Fields sent as null** count as left out.
   - **A note written in this turn** shows up only after the vault's next commit.
 - **Not yet:**
   - the always-loaded core.

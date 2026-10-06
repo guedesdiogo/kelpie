@@ -1,6 +1,7 @@
 import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { MemoryWriteInput } from "@kelpie/context-store/contract";
+import { writeMemory } from "@kelpie/memory";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
 import { afterEach, describe, expect, it } from "vitest";
 import { replaceBackendForTesting, replaceGatewayForTesting } from "../src/index.ts";
@@ -314,5 +315,104 @@ describe("writeNote", () => {
     expect(backend.commitRequests.map((request) => request.headline).join("\n")).not.toContain(
       "Chave",
     );
+  });
+
+  it("answers what the model can act on: another agent's note, odd fields, a removed note", async () => {
+    const other = "agents/outro/memory/notes/segredo.md";
+    vaultWith({ [other]: "# Segredo\n\nDo outro.\n", "memory/notes/velha.md": "# Velha\n\nX.\n" });
+    const stub = vault("write-act-on");
+    expect(await stub.writeNote("kelpie", memory("Segredo", "Meu.", { path: other }), ALL)).toEqual(
+      { ok: false, reason: "scope_not_allowed" },
+    );
+    expect(
+      await stub.writeNote(
+        "kelpie",
+        memory("Com nomes", "Algo.", { entities: "Ana" as never }),
+        ALL,
+      ),
+    ).toMatchObject({ ok: false, reason: "invalid" });
+    expect(
+      await stub.writeNote(
+        "kelpie",
+        memory("Sem nomes", "Algo.", { entities: null as never }),
+        ALL,
+      ),
+    ).toMatchObject({ ok: true, action: "written" });
+    // A removal still waiting in the queue: the note is gone, not to be written back.
+    await stub.write("kelpie", [{ path: "memory/notes/velha.md", content: null }], "x");
+    expect(
+      await stub.writeNote("kelpie", memory("Velha", "Y.", { path: "memory/notes/velha.md" }), ALL),
+    ).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("carries only what it can write back, and the owner's link names as written", async () => {
+    const casa = "memory/notes/casa.md";
+    const backend = vaultWith({
+      [casa]: [
+        "---",
+        "sources:",
+        '  - "uma\tfonte"',
+        '  - "[[boa-fonte]]"',
+        'abstract: "com\ttab"',
+        "relations:",
+        '  contradicts: ["[[Casa Antiga#Seção|a casa]]"]',
+        "---",
+        "",
+        "# Casa",
+        "",
+        "Lisboa.",
+        "",
+      ].join("\n"),
+    });
+    const stub = vault("write-carry-clean");
+    expect(
+      await stub.writeNote("kelpie", memory("Casa", "Porto.", { path: casa }), ALL),
+    ).toMatchObject({ ok: true, action: "written" });
+    await runDurableObjectAlarm(stub);
+    const file = backend.files()[casa] ?? "";
+    expect(file).toContain("[[boa-fonte]]");
+    expect(file).not.toContain("uma\tfonte");
+    expect(file).not.toContain("abstract");
+    expect(file).toContain("[[Casa Antiga]]");
+  });
+
+  it("knows the same memory saved again before the commit, whatever its confidence", async () => {
+    const backend = vaultWith();
+    const stub = vault("write-same-before-commit");
+    expect(await stub.writeNote("kelpie", memory("Chá", "Verde."), ALL)).toMatchObject({
+      action: "written",
+    });
+    expect(
+      await stub.writeNote("kelpie", memory("Chá", "Verde.", { confidence: 0.5 }), ALL),
+    ).toEqual({ ok: true, action: "unchanged", path: "memory/notes/cha.md" });
+    await runDurableObjectAlarm(stub);
+    expect(Object.keys(backend.files()).filter((path) => path.startsWith("memory/"))).toEqual([
+      "memory/notes/cha.md",
+    ]);
+  });
+
+  it("compares versions by their frontmatter's stamp only", async () => {
+    const { text } = await writeMemory(
+      {
+        scope: "global",
+        kind: "note",
+        title: "Diário",
+        body: "Texto.",
+        level: "explicit",
+        confidence: 0.8,
+      },
+      { at: "2026-10-01T00:00:00Z" },
+    );
+    const owner = `${text.replace(/^updated: .*\n/m, "")}updated: ontem\n`;
+    vaultWith({ "memory/notes/diario.md": owner });
+    const stub = vault("write-stamp");
+    // The model drops the body's own "updated:" line: that is a change.
+    expect(
+      await stub.writeNote(
+        "kelpie",
+        memory("Diário", "Texto.", { path: "memory/notes/diario.md", confidence: 0.8 }),
+        { scopes: "all", sources: [] },
+      ),
+    ).toMatchObject({ action: "written" });
   });
 });
