@@ -16,9 +16,19 @@
   // The first-run token (ADR-0013); `docs/admin-api.md` says how to make one. A `RECOVERY_TOKEN`
   // secret is set only while the owner recovers a changed Access login, so it isn't required here.
   "secrets": { "required": ["BOOTSTRAP_TOKEN"] },
-  // Secure forms for channel secrets; channel-egress holds the secret store (docs/secrets.md).
+  // Secure forms for channel secrets, in channel-egress, which holds the secret store
+  // (docs/secrets.md); and the vault's Context Store, for held files and forgetting (#114).
   "services": [
-    { "binding": "CHANNEL_FORMS", "service": "kelpie-channel-egress", "entrypoint": "ChannelForms" }
+    {
+      "binding": "CHANNEL_FORMS",
+      "service": "kelpie-channel-egress",
+      "entrypoint": "ChannelForms"
+    },
+    {
+      "binding": "CONTEXT_STORE_ADMIN",
+      "service": "kelpie-context-store",
+      "entrypoint": "ContextStoreAdmin"
+    }
   ],
   // The objects that hold configuration live in the Workers that run them.
   "durable_objects": {

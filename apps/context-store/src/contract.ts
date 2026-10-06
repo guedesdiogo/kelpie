@@ -34,6 +34,25 @@ export type ProposeResult =
     };
 
 /** What a turn asks memory for (#110). */
+/**
+ * A file pushed with conflict markers, kept out of Kelpie's writes (#114): waiting on the model
+ * (`held`, with how many tries it has had) or on a pull request with its resolution (`proposed`).
+ */
+export interface HeldFile {
+  path: string;
+  state: "held" | "proposed";
+  attempts: number;
+  at: number;
+}
+
+/**
+ * What `forget` did: how many of the Context Store's rows named the paths, now gone, and which of
+ * the paths the vault still has, as when the rewritten history wasn't pushed.
+ */
+export type ForgetResult =
+  | { ok: true; forgotten: number; stillInVault: string[] }
+  | { ok: false; reason: "vault_off" | "invalid_input" | "unavailable" };
+
 export interface RecallOptions {
   /**
    * The scopes the turn may see, such as `["global", "conversation/telegram-123"]`, or `"all"` for
@@ -85,4 +104,19 @@ export interface ContextStoreContract {
    * vector, reranked by the qualifier, within the budget. An empty block when the vault is off.
    */
   recall(agentId: string, question: string, options: RecallOptions): Promise<RecallResult>;
+}
+
+/**
+ * The owner's actions on the vault (#114), on an entrypoint of their own that only admin-api binds:
+ * the Workers that run conversations, where prompt injection lands, can't reach them.
+ */
+export interface ContextStoreAdminContract {
+  /** Files pushed with conflict markers that still wait, for the owner to see. */
+  held(): Promise<HeldFile[]>;
+  /**
+   * After the owner rewrote the vault's history to erase content: Kelpie forgets its own copies.
+   * Memory's index is rebuilt from the vault as it is now, and the rows that name `paths` go; a
+   * path ending in `/` names a folder. Git is never touched.
+   */
+  forget(paths: string[]): Promise<ForgetResult>;
 }

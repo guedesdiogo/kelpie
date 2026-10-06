@@ -2,12 +2,19 @@ import { createExecutionContext, runDurableObjectAlarm, runInDurableObject } fro
 import { env } from "cloudflare:workers";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
 import { afterEach, describe, expect, it } from "vitest";
-import { GitHubWebhooks, replaceBackendForTesting } from "../src/index.ts";
+import {
+  GitHubWebhooks,
+  replaceBackendForTesting,
+  replaceGatewayForTesting,
+} from "../src/index.ts";
 import { VAULT_README } from "../src/vault-readme.ts";
 
 const SECRET = "webhook-secret-for-tests";
 
-afterEach(() => replaceBackendForTesting(undefined));
+afterEach(() => {
+  replaceBackendForTesting(undefined);
+  replaceGatewayForTesting(undefined);
+});
 
 /** A vault with a README already, so the first sync doesn't queue one. */
 function vaultWith(files: Record<string, string>): FakeVaultBackend {
@@ -206,6 +213,147 @@ describe("Vault", () => {
         state.storage.sql.exec("SELECT agent, path, content FROM conflicts").toArray(),
       ).toEqual([{ agent: "kelpie", path: "knowledge/shared.md", content: "# Kelpie's version" }]);
     });
+  });
+
+  it("merges a queued write with the owner's edit, line by line, the owner winning overlaps", async () => {
+    const base = "# Ana\n\nMora em Lisboa.\n\nGosta de café.\n\nTem um gato.\n";
+    const backend = vaultWith({ "memory/people/ana.md": base, "memory/people/bia.md": base });
+    const stub = vault("three-way");
+    await stub.compile("kelpie");
+    // Two writes to one file: the second builds on the first, as a read shows it.
+    const first = base.replace("um gato", "dois gatos");
+    await stub.write("kelpie", [{ path: "memory/people/ana.md", content: first }], "x");
+    expect(await stub.read("memory/people/ana.md")).toBe(first);
+    await stub.write(
+      "kelpie",
+      [{ path: "memory/people/ana.md", content: first.replace("café", "chá") }],
+      "y",
+    );
+    await stub.write(
+      "kelpie",
+      [{ path: "memory/people/bia.md", content: base.replace("Lisboa", "Braga") }],
+      "z",
+    );
+    backend.push({
+      "memory/people/ana.md": base.replace("Lisboa", "Porto"),
+      "memory/people/bia.md": base.replace("Lisboa", "Faro"),
+    });
+
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()).toMatchObject({
+      // Nothing overlaps: both sides' changes stay.
+      "memory/people/ana.md": base
+        .replace("Lisboa", "Porto")
+        .replace("café", "chá")
+        .replace("um gato", "dois gatos"),
+      // The same line: the owner's side wins.
+      "memory/people/bia.md": base.replace("Lisboa", "Faro"),
+    });
+    // The owner's file is left as it is, without a commit of its own.
+    const committed = backend.commitRequests.flatMap((request) => request.writes);
+    expect(committed.map((write) => write.path)).toEqual(["memory/people/ana.md"]);
+    await runInDurableObject(stub, async (_instance, state) => {
+      expect(state.storage.sql.exec("SELECT count(*) AS n FROM queue").one()).toEqual({ n: 0 });
+      // Only what lost to the owner is set aside.
+      expect(
+        state.storage.sql.exec("SELECT agent, path, content, reason FROM conflicts").toArray(),
+      ).toEqual([
+        {
+          agent: "kelpie",
+          path: "memory/people/bia.md",
+          content: base.replace("Lisboa", "Braga"),
+          reason: "owner_won",
+        },
+      ]);
+    });
+  });
+
+  it("lets the owner win a file without a common version, or one either side removed", async () => {
+    const base = "# Ana\n\nMora em Lisboa.\n";
+    const backend = vaultWith({ "memory/people/ana.md": base, "memory/people/bia.md": base });
+    const stub = vault("three-way-none");
+    await stub.compile("kelpie");
+    await stub.write(
+      "kelpie",
+      [
+        { path: "memory/people/ana.md", content: `${base}\nTem um gato.\n` },
+        { path: "memory/people/bia.md", content: null },
+        { path: "memory/people/caio.md", content: "# Caio\n" },
+      ],
+      "x",
+    );
+    backend.push({
+      "memory/people/ana.md": null,
+      "memory/people/bia.md": `${base}\nTem um cão.\n`,
+      "memory/people/caio.md": "# Caio, by the owner\n",
+    });
+
+    await runDurableObjectAlarm(stub);
+    const files = backend.files();
+    expect(files["memory/people/ana.md"]).toBeUndefined();
+    expect(files["memory/people/bia.md"]).toBe(`${base}\nTem um cão.\n`);
+    expect(files["memory/people/caio.md"]).toBe("# Caio, by the owner\n");
+    await runInDurableObject(stub, async (_instance, state) => {
+      expect(
+        state.storage.sql.exec("SELECT path, reason FROM conflicts ORDER BY path").toArray(),
+      ).toEqual([
+        { path: "memory/people/ana.md", reason: "owner_won" },
+        { path: "memory/people/bia.md", reason: "owner_won" },
+        { path: "memory/people/caio.md", reason: "owner_won" },
+      ]);
+    });
+  });
+
+  it("holds a file pushed with conflict markers, and keeps queued writes off it until it is clean", async () => {
+    const base = "# Ana\n\nMora em Lisboa.\n\nGosta de café.\n";
+    const backend = vaultWith({ "memory/people/ana.md": base });
+    // Without models, the file waits for the owner (resolve.test.ts covers the model).
+    replaceGatewayForTesting(null);
+    const stub = vault("markers");
+    await stub.compile("kelpie");
+    const kelpie = base.replace("café", "chá");
+    await stub.write("kelpie", [{ path: "memory/people/ana.md", content: kelpie }], "x");
+    const marked = [
+      "# Ana",
+      "",
+      "<<<<<<< HEAD",
+      "Mora no Porto.",
+      "=======",
+      "Mora em Braga.",
+      ">>>>>>> origin/main",
+      "",
+      "Gosta de café.",
+      "",
+    ].join("\n");
+    // A line of equals signs under text is a Markdown heading, not a conflict.
+    const heading = "Planos\n=======\n\nViajar em maio.\n";
+    backend.push({ "memory/people/ana.md": marked, "memory/notes/planos.md": heading });
+    // A later write to another file commits, and leaves the held file's write queued.
+    await stub.write("kelpie", [{ path: "memory/notes/outra.md", content: "# Outra\n" }], "y");
+
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()["memory/people/ana.md"]).toBe(marked);
+    expect(
+      backend.commitRequests.flatMap((request) => request.writes.map((write) => write.path)),
+    ).toEqual(["memory/notes/outra.md"]);
+    const rows = (sql: string) =>
+      runInDurableObject(stub, (_instance, state) => state.storage.sql.exec(sql).toArray());
+    expect(await rows("SELECT path, content FROM held")).toEqual([
+      { path: "memory/people/ana.md", content: marked },
+    ]);
+    expect(await rows("SELECT path, content FROM queue")).toEqual([
+      { path: "memory/people/ana.md", content: kelpie },
+    ]);
+    // A held write doesn't keep the alarm flushing every few seconds.
+    const alarm = await runInDurableObject(stub, (_instance, state) => state.storage.getAlarm());
+    expect(alarm).toBeGreaterThan(Date.now() + 60_000);
+
+    // The owner cleans it up: the hold ends, and the queued write merges into the clean file.
+    const clean = base.replace("Lisboa", "Porto");
+    backend.push({ "memory/people/ana.md": clean });
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()["memory/people/ana.md"]).toBe(clean.replace("café", "chá"));
+    expect(await rows("SELECT path FROM held")).toEqual([]);
   });
 
   it("opens a pull request for a skill, and leaves the main branch alone", async () => {

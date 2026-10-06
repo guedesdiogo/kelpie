@@ -22,6 +22,9 @@ export class LlmGateway extends WorkerEntrypoint {
   qualify() {
     return { ok: false, reason: "not_configured" };
   }
+  async generate() {
+    throw new Error("no models in tests");
+  }
 }
 export default { fetch: () => new Response(null, { status: 404 }) };`,
           },

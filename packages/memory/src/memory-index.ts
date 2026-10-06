@@ -609,17 +609,22 @@ export class MemoryIndex {
     }));
   }
 
-  /** Keeps vectors by content and model; they survive a rebuild, as embeddings are a cache. */
+  /**
+   * Keeps vectors by content and model; they survive a rebuild, as embeddings are a cache. A vector
+   * for content no version holds is dropped: its note was erased while it was being embedded.
+   */
   putEmbeddings(model: string, items: readonly { blobSha: string; vector: readonly number[] }[]) {
     this.#storage.transactionSync(() => {
       for (const { blobSha, vector } of items) {
         if (vector.length === 0) continue;
         this.#exec(
-          "INSERT OR REPLACE INTO embeddings (blob_sha, model, dims, vector) VALUES (?, ?, ?, ?)",
+          `INSERT OR REPLACE INTO embeddings (blob_sha, model, dims, vector)
+           SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM versions WHERE blob_sha = ?)`,
           blobSha,
           model,
           vector.length,
           new Float32Array(vector).buffer,
+          blobSha,
         );
       }
     });

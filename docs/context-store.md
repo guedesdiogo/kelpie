@@ -24,7 +24,31 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
 - **Edits made elsewhere.** GitHub, Obsidian through obsidian-git, or any editor:
   - **How they arrive:** through GitHub's push webhook, a second after it, and through a reconcile every 15 minutes, because GitHub doesn't redeliver a failed webhook.
   - **Kelpie's own commits** come back the same way and change nothing. That includes a commit that landed although GitHub's answer was lost: the queued writes it holds count as done.
-  - **A file both changed:** if the owner changed a file Kelpie had queued, the owner's version wins. Kelpie's writes are kept in the object's `conflicts` table, marked `owner_won`, and the log says how many; merging the two is #114's.
+  - **A file both changed** (#114): when the owner changed a file Kelpie has queued writes for, the two merge line by line from the version both started from (diff3).
+    - Kelpie's lines that don't overlap the owner's stay. Lines both added at the same place both stay, the owner's first. Where both changed the same lines, the owner's side wins.
+    - The result keeps the owner's line endings.
+    - Kelpie's writes that lost lines are kept in the object's `conflicts` table, marked `owner_won`, and the log says how many.
+    - **The owner's version wins whole when:**
+      - there is no common version: a file both created, or one that was empty;
+      - either side removed the file;
+      - a version runs past 500 lines, since the merge runs inside the sync;
+      - the merge would hold conflict markers.
+  - **A file pushed with conflict markers** (#114): git's `<<<<<<<`, `=======` and `>>>>>>>` lines, committed unresolved, found in one pass over each line.
+    - These don't count: a line of `=======` alone under text, which is a heading's underline, and markers quoted in a fenced code block that closes. A fence left open protects nothing.
+    - **Held:** the file is kept as pushed in the object's `held` table.
+      - Reads, the agent's prompt (persona, rules and skills) and memory see its version from before the conflict, never the markers. A file stays held while the vault still has it as pushed, even through `forget`.
+      - Kelpie's queued writes to it stay out of commits.
+    - **Resolved by the model,** one held file at a time, after GitHub's work.
+      - **What it sees,** through llm-gateway's `generate`: the vault's layout, its `AGENTS.md`, the file as the vault had it before the push, and the file as pushed.
+      - **The answer:** it must leave no markers, keep every line outside the conflicts verbatim and in order, take each conflict's lines only from its sides or its base, and keep its frontmatter parseable. The model resolves; it can't rewrite. The answer ends as the file ends, with or without a final newline.
+      - **Limits:** tries come at least 5 minutes apart. Files over 48,000 characters aren't tried.
+      - **The owner wins a race:** before the resolution is applied, the object syncs. If the owner fixed the file meanwhile, the resolution is dropped.
+    - **Applied** until per-item approval exists (#113):
+      - a file an agent may write is written as the owner's clean edit would be, and queued writes merge on top of it;
+      - a persona, rules or an agent's skill becomes a pull request that says the model wrote it. The file stays held until a clean version is pushed, as when the pull request merges. A pull request closed unmerged leaves it held and listed;
+      - any other file stays held.
+    - **Waiting:** after three failed tries, the file waits for the owner. `/commands/listHeldFiles` lists what waits ([admin-api.md](admin-api.md)), and a clean push of the file ends its hold.
+    - **Audit:** a resolved file stays in `held`, as pushed, alongside git's history.
 - **When GitHub fails.**
   - **A call fails** (GitHub down, a timeout, a rate limit): the object retries after a minute, then twice as long each time, up to an hour. Queued writes wait and stay readable; new writes and pushes wait for the retry too.
   - **GitHub refuses a commit:**
@@ -55,6 +79,8 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
 ## Setting it up
 
 `context-store` reaches llm-gateway through its `LLM_GATEWAY` service binding, for memory's embeddings and rerank, so llm-gateway deploys first. Without llm-gateway's models, recall works on full text, entities and links alone.
+
+Its `ContextStore` entrypoint serves the Workers that run conversations. `ContextStoreAdmin` holds the owner's actions, listing held files and forgetting erased content, and only admin-api binds it, so nothing a conversation reaches can call them.
 
 The vault needs a GitHub App with access to the vault repository alone. Spike #28's App works, or a new one.
 
@@ -108,6 +134,52 @@ The secrets are Worker secrets on `context-store` ([ADR-0021](adr/0021-vault-app
 
 **Without the three values or the private key, the vault is off.** `compile` returns nothing, writes and proposals answer `vault_off`, and agents run on their configured prompts.
 
+## Obsidian
+
+The owner edits the vault in Obsidian through [obsidian-git](https://github.com/Vinzent03/obsidian-git), which commits and pushes to GitHub. These settings keep its pushes and Kelpie's writes from undoing each other:
+
+- **Sync method: Merge.** obsidian-git always merges on mobile.
+- **Merge strategy: None.**
+  - With `theirs`, Kelpie's commits would win over the owner's edits on the device.
+  - With None, a conflict stops obsidian-git's auto-commit and blocks its push until the owner resolves it on the device.
+  - If one is pushed unresolved anyway, the Context Store resolves it, as above.
+- **An auto commit-and-sync interval.** It is off by default. It decides how soon an edit reaches the agent: a few minutes is enough.
+- **Never "Other sync service".** It moves the branch without updating the files. The next commit then silently reverts Kelpie's writes, and nothing lands in `conflicts`.
+
+## Export
+
+The vault is the export: clone the repository. Every memory, person, conversation page and rule is a Markdown file in it ([memory-format.md](memory-format.md)).
+
+The Context Store's tables hold mostly copies of it: the working copy, memory's index, writes still queued, and counts. Two tables hold what git may not:
+- `conflicts`: Kelpie's writes that lost to the owner's edits, or that GitHub refused;
+- `held`: files pushed with conflict markers, as pushed.
+
+## Erasing content
+
+Git keeps every version, so erasing content means rewriting the vault's history. Kelpie never rewrites it. These steps are the owner's.
+
+1. **Rewrite the history** on a fresh clone, with [`git filter-repo`](https://github.com/newren/git-filter-repo):
+   - `--path <file> --invert-paths` removes a file from every commit;
+   - `--replace-text` removes a passage.
+
+   Then push the result with `--force` to every branch that held the content.
+2. **Make Kelpie forget its copies, right away:** `/commands/forgetVaultPaths` with the erased paths ([admin-api.md](admin-api.md)). Doing it at once keeps Kelpie's queued writes from committing the content back onto the rewritten branch.
+   - **What it does:**
+     - it syncs to the rewritten head;
+     - it rebuilds memory's index from the vault as it is now, which drops every old version, of every file, with the vectors of content no version holds anymore;
+     - it deletes the rows that name the paths in `queue`, `conflicts`, `held`, `proposals` and `recall_counts`.
+
+     It never touches git.
+   - **Paths:** a path ending in `/` names a whole folder. Rows are matched by path, so a passage removed with `--replace-text` needs every file that held it named, or its folder.
+   - **The answer** lists, in `stillInVault`, the named files the vault still has. After removing whole files, a path in that list means the rewrite didn't reach the default branch. After removing a passage, the file stays, as expected.
+3. **Re-clone every device.** A device that still has the old history would push the content back: obsidian-git's pull doesn't notice a rewritten branch. Delete the vault's folder on each device and clone it again, or reset the device's branch to the rewritten one. Then run step 2 again, in case a device pushed before it was re-cloned.
+4. **Ask GitHub to drop its copies.** Pull requests (Kelpie's proposals included) and GitHub's cached views keep the old commits. GitHub removes them only through its support, as its guide to [removing sensitive data from a repository](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository) explains. Close Kelpie's open proposals that touched the content, and delete their branches.
+
+**Not covered:**
+- **Conversations:** each conversation's raw history, kept in its Durable Object in `conversation-runtime` (#109), and the checkpoints that summarize it. Neither is pruned today. A conversation that mentioned the content can also bring it back into a new session page.
+- **Model logs:** the model calls that resolved held files sent the files to the model's provider, through Cloudflare's AI Gateway. Their logs follow the provider's and the gateway's retention.
+- **Durable Object storage:** Cloudflare's point-in-time recovery can restore a Durable Object's storage to an earlier moment, within the window Cloudflare documents.
+
 ## Checking it
 
 - **The webhook:** GitHub's App settings show its deliveries.
@@ -115,7 +187,9 @@ The secrets are Worker secrets on `context-store` ([ADR-0021](adr/0021-vault-app
   - 401: the secret doesn't match.
   - 200: a ping.
 - **Persona:** an edit to `agents/<agent>/SOUL.md` on GitHub reaches the agent's next turn.
+- **Held files:** `/commands/listHeldFiles` lists the files pushed with conflict markers that still wait, with their tries.
 - **Logs:**
   - `Vault: a GitHub call failed; retrying` gives the number of failures in a row.
+  - `Vault: resolving a conflict failed` or `a conflict's resolution failed its check`: a try that didn't resolve a held file.
   - `GitHub refused a write; it was set aside` gives GitHub's reason; the write is in `conflicts`.
 - **The vault's branch:** it needs at least one commit. A renamed default branch is picked up at the next sync.

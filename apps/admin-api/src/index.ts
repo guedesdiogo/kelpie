@@ -12,6 +12,7 @@ import {
   REGISTRY_NAME,
   type RegistryContract,
 } from "@kelpie/config";
+import type { ContextStoreAdminContract } from "@kelpie/context-store/contract";
 import { type AdminDeps, handle } from "./api.ts";
 
 function depsFor(env: Env): AdminDeps {
@@ -23,6 +24,8 @@ function depsFor(env: Env): AdminDeps {
     env.AGENT_HOST.getByName(id) as unknown as Remote<AgentHostContract>;
   // A service binding to channel-egress's ChannelForms entrypoint, which returns values only.
   const forms = env.CHANNEL_FORMS as unknown as ChannelFormsContract;
+  // A service binding to context-store's ContextStoreAdmin entrypoint, which only admin-api binds.
+  const vault = env.CONTEXT_STORE_ADMIN as unknown as ContextStoreAdminContract;
   // A trailing slash would never match the token's issuer.
   const config = {
     teamDomain: env.ACCESS_TEAM_DOMAIN.replace(/\/+$/, ""),
@@ -49,6 +52,10 @@ function depsFor(env: Env): AdminDeps {
         createTelegramForm: (agentId) => forms.createTelegramForm(agentId),
         registerTelegramWebhook: (agentId) => forms.registerTelegramWebhook(agentId),
         describeTelegramBot: (agentId) => forms.describeTelegramBot(agentId),
+      },
+      vault: {
+        held: () => vault.held(),
+        forget: (paths) => vault.forget(paths),
       },
     }),
     forms,

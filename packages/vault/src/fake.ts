@@ -60,6 +60,16 @@ export class FakeVaultBackend implements VaultBackend {
     return sha;
   }
 
+  /**
+   * A rewritten history, as `git filter-repo` and a force-push leave it: the branch moves to a new
+   * root commit with these files, which descends from nothing Kelpie has seen.
+   */
+  forcePush(files: Record<string, string>, branch = "main"): string {
+    const sha = this.#add(null, new Map(Object.entries(files)));
+    this.#branches.set(branch, sha);
+    return sha;
+  }
+
   /** The branches, in creation order. */
   branches(): string[] {
     return [...this.#branches.keys()];

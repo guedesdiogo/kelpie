@@ -64,6 +64,22 @@ export interface AgentHostContract {
   config(): AgentConfig;
 }
 
+/** A vault file pushed with conflict markers that still waits: on the model, or on a pull request. */
+export interface HeldVaultFile {
+  path: string;
+  state: "held" | "proposed";
+  attempts: number;
+  at: number;
+}
+
+export type ForgetVaultResult =
+  | { ok: true; forgotten: number; stillInVault: string[] }
+  | { ok: false; reason: "vault_off" | "invalid_input" | "unavailable" };
+
+/** The most paths one `forgetVaultPaths` names, and the longest path the vault takes. */
+const MAX_FORGET_PATHS = 1_000;
+const MAX_PATH_LENGTH = 300;
+
 /** What the commands need from the objects that hold configuration. */
 export interface ConfigPorts {
   registry: {
@@ -89,6 +105,11 @@ export interface ConfigPorts {
     ChannelFormsContract,
     "createTelegramForm" | "registerTelegramWebhook" | "describeTelegramBot"
   >;
+  /** The vault's Context Store (#114). */
+  vault: {
+    held(): Promise<HeldVaultFile[]>;
+    forget(paths: string[]): Promise<ForgetVaultResult>;
+  };
 }
 
 export type CommandResult<T> =
@@ -292,6 +313,47 @@ export function createConfigCommands(ports: ConfigPorts) {
       const result = await ports.directory.setTimeZone(actor.userId, canonical);
       if (result.ok) return { ok: true, value: { timeZone: result.timeZone } };
       return result.reason === "unknown_user" ? { ok: false, reason: "unknown_user" } : invalid;
+    },
+
+    /**
+     * The vault's files pushed with conflict markers that still wait (#114): on the model, on a
+     * pull request with its resolution, or, after the model's tries, on the owner.
+     */
+    async listHeldFiles(actor: Actor): Promise<CommandResult<HeldVaultFile[]>> {
+      if (!isOwner(actor)) return forbidden;
+      return { ok: true, value: await ports.vault.held() };
+    },
+
+    /**
+     * After the owner rewrote the vault's history to erase content (#114): Kelpie forgets its own
+     * copies of `paths` (a path ending in `/` names a folder), and memory's index drops every old
+     * version. It answers which of them the vault still has. Git is never touched.
+     */
+    async forgetVaultPaths(
+      actor: Actor,
+      input: unknown,
+    ): Promise<CommandResult<{ forgotten: number; stillInVault: string[] }>> {
+      if (!isOwner(actor)) return forbidden;
+      const { paths } = (input ?? {}) as { paths?: unknown };
+      if (
+        !Array.isArray(paths) ||
+        paths.length === 0 ||
+        paths.length > MAX_FORGET_PATHS ||
+        !paths.every(
+          (path) => typeof path === "string" && path !== "" && path.length <= MAX_PATH_LENGTH,
+        )
+      ) {
+        return invalid;
+      }
+      const result = await ports.vault.forget(paths);
+      if (result.ok) {
+        return {
+          ok: true,
+          value: { forgotten: result.forgotten, stillInVault: result.stillInVault },
+        };
+      }
+      if (result.reason === "vault_off") return { ok: false, reason: "not_configured" };
+      return result.reason === "unavailable" ? { ok: false, reason: "unavailable" } : invalid;
     },
   };
 }

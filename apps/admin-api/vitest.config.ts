@@ -24,7 +24,8 @@ export default defineConfig({
   plugins: [
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
-      // The bindings point at objects in ingress and conversation-runtime. Tests never call them:
+      // The bindings point at objects in ingress and conversation-runtime, and at entrypoints in
+      // channel-egress and context-store. Tests never call them:
       // they pass fakes to `handle()`, so these stubs only let the runtime start.
       miniflare: {
         workers: [
@@ -34,6 +35,7 @@ export default defineConfig({
             AGENT_HOST: "AgentHost",
           }),
           stubWorker("kelpie-channel-egress", {}, ["ChannelForms"]),
+          stubWorker("kelpie-context-store", {}, ["ContextStoreAdmin"]),
         ],
       },
     }),

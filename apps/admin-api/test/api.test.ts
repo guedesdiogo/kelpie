@@ -83,6 +83,14 @@ function world({
         return agentId === "unwired" ? { ok: false, reason: "not_connected" } : { ok: true };
       },
     },
+    vault: {
+      async held() {
+        return [{ path: "memory/people/ana.md", state: "proposed", attempts: 1, at: NOW_MS }];
+      },
+      async forget(paths) {
+        return { ok: true, forgotten: paths.length, stillInVault: [] };
+      },
+    },
   };
   const bootstraps: { userId: string; accessSub: string }[] = [];
   const relinks: { accessSub: string; tokenHash: string }[] = [];
@@ -222,6 +230,22 @@ describe("admin API commands", () => {
       status: 403,
       body: { ok: false, reason: "no_owner" },
     });
+  });
+
+  it("lists the vault's held files, and forgets erased paths", async () => {
+    const { deps } = world();
+    expect(await call(deps, "/commands/listHeldFiles")).toEqual({
+      status: 200,
+      body: {
+        ok: true,
+        value: [{ path: "memory/people/ana.md", state: "proposed", attempts: 1, at: NOW_MS }],
+      },
+    });
+    expect(await call(deps, "/commands/forgetVaultPaths", { paths: ["memory/a.md"] })).toEqual({
+      status: 200,
+      body: { ok: true, value: { forgotten: 1, stillInVault: [] } },
+    });
+    expect((await call(deps, "/commands/forgetVaultPaths", { paths: [] })).status).toBe(400);
   });
 
   it("sets the owner's time zone", async () => {
