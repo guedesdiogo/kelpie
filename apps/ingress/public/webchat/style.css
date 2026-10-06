@@ -74,6 +74,11 @@ textarea {
   font: inherit;
   resize: vertical;
 }
+footer {
+  padding: 0 1rem 0.75rem;
+  font-size: 0.75rem;
+  opacity: 0.5;
+}
 .visually-hidden {
   position: absolute;
   width: 1px;

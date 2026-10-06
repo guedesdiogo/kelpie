@@ -207,6 +207,13 @@ Access gives the owner a new `sub` if they are removed from the Zero Trust organ
 
 Whoever passes Access and holds a live recovery token becomes the owner's admin login, so keep the Access policy limited to the owner, and the token's life short.
 
+## Versions
+
+`GET https://<ingress hostname>/version` answers `{ version, commit, deployment, deployedAt }`, and the webchat shows the version and the commit in its footer (#148). Like `/health`, it needs no login.
+- **`version`** is `KELPIE_VERSION` in `packages/config/src/version.ts`. Its minor number is the delivery phase. It changes by decision, with a phase or a notable release, not with each PR.
+- **`commit`** is the deploy's tag. Deploy from a clean checkout of the commit, and pass `--tag "$(git rev-parse --short HEAD)"` to every `wrangler deploy`. Without the tag, `commit` is null.
+- **`deployment` and `deployedAt`** are the Worker's own Cloudflare version and when it was made, from the `version_metadata` binding.
+
 ## Known limits
 
 - **Access policy.** The admin API trusts whoever the Access application lets through, with the owner's admission on top. The policy must allow only the owner, especially while a recovery token is set.
