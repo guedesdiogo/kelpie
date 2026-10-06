@@ -29,6 +29,11 @@ This amends ADR-0009, ADR-0018 and ADR-0022 for end of turn:
    - The agent's `qualifier` setting keeps choosing Clef or Jev for them, by the owner's decision on #110: «a ideia é usar um ou outro como qualificador, não ter cenários que usam os dois».
    - These stay as ADR-0018 and ADR-0022 set them: `llm-gateway`'s `qualify`, the Clef and Jev adapters, the masking, and the renaming of question ids for Clef.
 4. **The webchat's typing hold stays.** While the owner types for longer than the wait, a planned answer moves on, within the cap.
+5. **Nothing starts before the wait ends.** Owner, 2026-10-06:
+   > «Acredito que o ideal é esperar essas mensagens antes de começar qualquer outro processamento.»
+   - The turn and all its work start only when the buffer is flushed: the model call, the memory recall and any other vault work. They run once, over everything that arrived within the wait.
+   - When documents, audio or images arrive (not handled yet), preparing them may start during the wait: a transcription, a text extraction. The answer still considers everything sent within the wait.
+   - `quietMs: 0` removes the wait, and each message is processed at once.
 
 ## Consequences
 

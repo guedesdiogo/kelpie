@@ -56,7 +56,7 @@ Every endpoint is a `POST` with a JSON body.
 
 Identity values in answers are masked.
 
-**Waiting for the rest of a message.** An agent answers `quietMs` after the owner's latest message, 10 s by default, and each new message starts the wait again. Its `maxWaitMs`, 60 s by default, caps the wait from the first buffered message; a `quietMs` above it is cut to the cap. No end-of-turn decision is asked of a qualifier (ADR-0024). `conversational: false` answers each message at once.
+**Waiting for the rest of a message.** An agent answers `quietMs` after the owner's latest message, 10 s by default, and each new message starts the wait again. Its `maxWaitMs`, 60 s by default, caps the wait from the first buffered message; a `quietMs` above it is cut to the cap. `quietMs: 0` removes the wait: each message is processed at once. Nothing else starts before the wait ends, the memory recall included (ADR-0024). No end-of-turn decision is asked of a qualifier (ADR-0024). `conversational: false` answers each message at once.
 
 **Pausing.** `/pause` on Telegram (also `/pause@<bot>`), or the webchat's Pause button, holds every answer until the owner's next message (#134). A pause while paused changes nothing, and Telegram's redelivery of the same `/pause` is ignored.
 - A turn in flight is interrupted, and the planned answer is cancelled.

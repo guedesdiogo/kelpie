@@ -95,6 +95,18 @@ describe("ConversationAgent buffering", () => {
     expect(schedules).toHaveLength(1);
   });
 
+  it("answers at once when the owner removes the wait", async () => {
+    const world = use(fakeWorld([reply("Right away.")]));
+    const stub = agent("no-wait");
+    await configure("no-wait", { quietMs: 0 });
+
+    expect(await stub.ingest(message("m1", "so", { agentId: "no-wait" }))).toEqual({
+      status: "accepted",
+      flushAt: null,
+    });
+    await vi.waitFor(() => expect(world.sent).toEqual(["Right away."]));
+  });
+
   it("arms one schedule when messages arrive while the settings are read", async () => {
     use(fakeWorld([]));
     const stub = agent("concurrent");
