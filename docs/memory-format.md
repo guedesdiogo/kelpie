@@ -309,8 +309,10 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - **Scopes and the qualifier** come from the turn, never from the model. A note outside the scopes, or outside memory's index (persona, rules, skills, root files), gets the same "not found" as a missing one.
   - **`memory_write(title, body, kind, level, …)`:** saves one memory through the Context Store's single writer.
     - **A new memory** goes where its title puts it, an event under its `validFrom` date, which it needs. The path gets a number when another note holds it.
-    - **A found note's `path`** makes the memory that note's new version, of the same kind, unless it is another agent's or removed.
-    - **The owner's word stays** (#149): a `deduced` or `inferred` memory can't change a note the person stated, one with `level: explicit` or, without a level, one Kelpie didn't write. The tool asks the model to save it as a new note. Only an `explicit` memory, what the person says now, changes it. It keeps what the model left out, as far as Kelpie can write it back:
+    - **The owner's word stays** (#149): a `deduced` or `inferred` memory can't change a note the person stated, one with `level: explicit` or, without a level, one Kelpie didn't write. The tool asks the model to save it as a new note.
+      - **What the rule guards against:** an honest model labelling its own conclusion as such.
+      - **What it doesn't guard against:** the label is the model's own. An instruction injected into what the model reads could have it claim `explicit` and overwrite the note. Git keeps the old version, and the owner decides whether more is needed (#149).
+    - **A found note's `path`** makes the memory that note's new version, of the same kind, unless it is another agent's or removed. It keeps what the model left out, as far as Kelpie can write it back:
       - the note's id and the owner's keys;
       - its tier, confidence, entities, validity and abstract;
       - its `contradicts` links, by note name (a heading or alias in the link is dropped);

@@ -54,6 +54,8 @@ export interface DecideWriteOptions {
    * or refines it. `level: explicit` when left out; a writer that knows who wrote a note says more.
    */
   ownersWord?: (note: IndexedVersion) => boolean;
+  /** Paths that are never candidates, such as the note the writer just wrote. */
+  exclude?: readonly string[];
 }
 
 /** The qualifier is asked about this many notes at most: `choice` scales with fewer options. */
@@ -137,9 +139,10 @@ export async function decideWrite(
   const invalidAt = instant(input.invalidAt);
   // Its exact twin, among every note with its title, expired ones too: a fact written again is no
   // news, whenever it was true.
+  const excluded = new Set(options.exclude ?? []);
   const twin = index
     .titled(input.title, { scopes: [input.scope], limit: LOOKUP })
-    .filter((hit) => hit.kind === input.kind)
+    .filter((hit) => hit.kind === input.kind && !excluded.has(hit.path))
     .find((hit) => {
       const version = index.current(hit.path);
       return (
@@ -157,7 +160,7 @@ export async function decideWrite(
     index.titled(input.title, scoped),
     keys.length > 0 ? index.entityHits(keys, scoped) : [],
     options.vector === undefined ? [] : close(index, scoped, options.vector, options.bands),
-  ].map((hits) => hits.filter((hit) => hit.kind === input.kind));
+  ].map((hits) => hits.filter((hit) => hit.kind === input.kind && !excluded.has(hit.path)));
   // In turn, so a lookup with many hits doesn't crowd out the others.
   const candidates = new Map<string, SearchHit>();
   for (let i = 0; i < LOOKUP && candidates.size < MAX_CANDIDATES; i += 1) {
@@ -193,7 +196,9 @@ export async function decideWrite(
   }
   // The owner's word stays: a conclusion can't replace or refine what the person said.
   const ownersWord = options.ownersWord ?? ((note: IndexedVersion) => note.level === "explicit");
-  const relations = answered.map((relation, i): Relation => {
+  const relations = answered.map((answer, i): Relation => {
+    // A duplicate judged on text cut to fit counts as refining, so a new tail isn't dropped.
+    const relation = answer === "duplicate" && (memory.cut || shown[i]?.cut) ? "refines" : answer;
     const version = notes[i]?.version;
     if (
       input.level !== "explicit" &&
@@ -203,7 +208,7 @@ export async function decideWrite(
     ) {
       return "unrelated";
     }
-    return relation === "duplicate" && (memory.cut || shown[i]?.cut) ? "refines" : relation;
+    return relation;
   });
   const first = (relation: Relation) => notes[relations.indexOf(relation)]?.path;
   const duplicate = first("duplicate");

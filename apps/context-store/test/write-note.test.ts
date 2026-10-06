@@ -463,6 +463,20 @@ describe("writeNote", () => {
         await stub.writeNote("kelpie", memory(title, "Outro.", { path, level: "explicit" }), ALL),
       ).toMatchObject({ ok: true, action: "written" });
     }
+    // A note Kelpie wrote without a level isn't the owner's word.
+    await stub.write(
+      "kelpie",
+      [{ path: "memory/notes/pao.md", content: "# Pão\n\nIntegral.\n" }],
+      "x",
+    );
+    await runDurableObjectAlarm(stub);
+    expect(
+      await stub.writeNote(
+        "kelpie",
+        memory("Pão", "Sem glúten.", { path: "memory/notes/pao.md", level: "inferred" }),
+        ALL,
+      ),
+    ).toMatchObject({ ok: true, action: "written" });
     // A conclusion can revise a conclusion.
     expect(
       await stub.writeNote(
@@ -476,15 +490,25 @@ describe("writeNote", () => {
   it("asks the qualifier in the shadow, logs what it would do, and writes by the rules", async () => {
     vaultWith({ "memory/notes/cafe.md": "# Café\n\nCoado, sem açúcar.\n" });
     const asked: string[] = [];
+    let hold = false;
+    let holdNext = false;
+    let failing = false;
     const gateway: MemoryGateway = {
       async generate() {
         throw new Error("no model call here");
       },
       async embed() {
+        // Only the shadow's call waits, not the alarm's own embedding. It polls a plain flag: a
+        // promise made here can't be settled from the test's context.
+        if (holdNext) {
+          holdNext = false;
+          while (hold) await new Promise((resolve) => setTimeout(resolve, 5));
+        }
         return { ok: false, reason: "failed" };
       },
       async qualify(_state, questions, backend) {
         asked.push(String(backend));
+        if (failing) throw new Error("qualifier down");
         return {
           ok: true,
           result: {
@@ -504,20 +528,41 @@ describe("writeNote", () => {
     const log = vi.spyOn(console, "log");
     try {
       const stub = vault("write-shadow");
+      // The shadow waits on its embedding while the vault commits the note: it must not find itself.
+      hold = true;
+      holdNext = true;
       expect(
         await stub.writeNote("kelpie", memory("Café", "Coado, sem açúcar, de manhã."), {
           ...ALL,
           qualifier: "jev",
         }),
       ).toEqual({ ok: true, action: "written", path: "memory/notes/cafe-2.md" });
+      await runDurableObjectAlarm(stub);
+      hold = false;
       await vi.waitFor(() =>
         expect(log).toHaveBeenCalledWith("Vault: write decision, in the shadow", {
           rules: "ADD",
           qualifier: "NOOP",
           source: "qualifier",
+          backend: "jev",
+          answered: true,
         }),
       );
       expect(asked).toEqual(["jev"]);
+      // A qualifier that fails is told apart from one that found nothing to compare.
+      failing = true;
+      expect(
+        await stub.writeNote("kelpie", memory("Café", "Com leite, à tarde."), ALL),
+      ).toMatchObject({ ok: true, action: "written" });
+      await vi.waitFor(() =>
+        expect(log).toHaveBeenCalledWith("Vault: write decision, in the shadow", {
+          rules: "ADD",
+          qualifier: "ADD",
+          source: "heuristic",
+          backend: "clef",
+          answered: false,
+        }),
+      );
     } finally {
       log.mockRestore();
     }

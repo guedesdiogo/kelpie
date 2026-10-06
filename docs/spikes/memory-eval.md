@@ -265,7 +265,11 @@ ADR-0009 wants a labeled PT-BR set before a qualifier's decision acts. `decideWr
 - **Accuracy:** 0.925. 80 calls, none failed; p50 442 ms, p95 1,057 ms.
 - **The one costly error:** w029, a dose added to a standing errand, read as a duplicate. As a `NOOP`, it would lose the memory. Its probability was 0.48. Every right duplicate scored 0.715 or more, so on this set a floor of 0.6 keeps every right `NOOP` and drops the wrong one.
 - **`SUPERSEDE`** was never wrong. The right ones scored from 0.48 up.
-- **The other errors** mix refines and unrelated. As an `ADD`, they lose nothing.
+- **The other errors** mix refines and unrelated:
+  - 2 refines read as unrelated would be an `ADD`, which loses nothing;
+  - 3 unrelated read as refines would be an `UPDATE` proposed for a note about something else.
+- **The 0.6 floor rests on a single wrong `NOOP`** (w029). A larger set would firm it up.
+- **The set's hash** (`WRITE_SET_SHA256`) also covers the question and its answers, so changing either needs a new measurement.
 - **Caveats:** the pairs are synthetic, each asks about one note, and the labels are the author's. Jev wasn't measured: its key isn't available locally.
 
 ## Contradiction band (#111)

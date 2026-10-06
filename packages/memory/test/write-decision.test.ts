@@ -470,4 +470,50 @@ describe("decideWrite", () => {
       },
     );
   });
+
+  it("keeps a protected duplicate a NOOP, and never lets a cut one become an UPDATE", async () => {
+    const long = `Ana mora em Lisboa. ${"Detalhes da casa. ".repeat(80)}`;
+    await withNotes(
+      "decide-owners-word-cut",
+      [
+        memory("Casa da Ana", { entities: ["Ana Souza"], level: "explicit", body: long }),
+        memory("Café da Ana", { entities: ["Bruno Lima"], level: "explicit" }),
+      ],
+      async (index) => {
+        const { qualifier } = fakeQualifier({
+          "Casa da Ana": "duplicate",
+          "Café da Ana": "duplicate",
+        });
+        // Cut to fit: a duplicate would count as refining, which a conclusion can't do here.
+        expect(
+          await decide(
+            index,
+            memory("A casa da Ana", {
+              entities: ["Ana Souza"],
+              level: "deduced",
+              body: `${long} Tem jardim.`,
+            }),
+            { qualifier },
+          ),
+        ).toEqual({ action: "ADD", source: "qualifier" });
+        // Whole: nothing new, nothing lost.
+        expect(
+          await decide(index, memory("Café", { entities: ["Bruno Lima"], level: "deduced" }), {
+            qualifier,
+          }),
+        ).toEqual({
+          action: "NOOP",
+          path: memoryPath("global", "note", "Café da Ana"),
+          source: "qualifier",
+        });
+        // A path the writer excludes, such as the note it just wrote, is never a candidate.
+        expect(
+          await decide(index, memory("Café", { entities: ["Bruno Lima"], level: "deduced" }), {
+            qualifier,
+            exclude: [memoryPath("global", "note", "Café da Ana")],
+          }),
+        ).toEqual({ action: "ADD", source: "heuristic" });
+      },
+    );
+  });
 });
