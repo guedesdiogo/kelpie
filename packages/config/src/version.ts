@@ -1,9 +1,9 @@
 /**
- * Kelpie's version (#148). The minor number is the delivery phase, and the version changes by
- * decision, with a phase or a notable release, not with each PR. A deploy is told apart by its
- * commit, which deploys pass as `--tag`, and by its Worker version and time.
+ * Kelpie's release (#148): the delivery phase, changed by decision with a phase or a notable
+ * release. The version adds the deploy's build (#153): main's first-parent commit count at the
+ * deployed commit, so every merged PR moves it by one and nobody edits a file to bump it.
  */
-export const KELPIE_VERSION = "0.2.0";
+export const KELPIE_RELEASE = "0.2";
 
 /** What Cloudflare's `version_metadata` binding tells a Worker about its own version. */
 export interface WorkerVersionMetadata {
@@ -13,18 +13,28 @@ export interface WorkerVersionMetadata {
 }
 
 export interface VersionReport {
+  /** `<release>.<build>`, or the release alone for a deploy whose tag carries no build. */
   version: string;
-  /** The commit the deploy was tagged with, or null for a deploy without a tag. */
+  build: number | null;
+  /** The deployed commit, or null for a deploy without a tag. */
   commit: string | null;
   /** The Worker's Cloudflare version id. */
   deployment: string | null;
   deployedAt: string | null;
 }
 
+/** A deploy's tag: `<build>-<short commit>` (docs/admin-api.md, "Versions"). */
+const BUILD_TAG = /^(\d+)-([0-9a-f]{7,40})$/;
+
 export function versionReport(metadata: WorkerVersionMetadata | undefined): VersionReport {
+  const tag = metadata?.tag ?? "";
+  const tagged = BUILD_TAG.exec(tag);
+  const build = tagged ? Number(tagged[1]) : null;
   return {
-    version: KELPIE_VERSION,
-    commit: metadata?.tag || null,
+    version: build === null ? KELPIE_RELEASE : `${KELPIE_RELEASE}.${build}`,
+    build,
+    // Deploys before the build number were tagged with the commit alone.
+    commit: tagged?.[2] ?? (tag || null),
     deployment: metadata?.id || null,
     deployedAt: metadata?.timestamp || null,
   };
