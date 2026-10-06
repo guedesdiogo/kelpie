@@ -1,4 +1,4 @@
-import { runDurableObjectAlarm } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { MemoryWriteInput } from "@kelpie/context-store/contract";
 import { writeMemory } from "@kelpie/memory";
@@ -420,6 +420,79 @@ describe("writeNote", () => {
     ).toMatchObject({ action: "written" });
   });
 
+  it("keeps the owner's word in a version Kelpie merged into the owner's edit", async () => {
+    const ana = "memory/people/ana.md";
+    const bia = "memory/people/bia.md";
+    const base = (name: string) => `# ${name}\n\nMora em Lisboa.\n\nGosta de café.\n`;
+    const backend = vaultWith({ [ana]: base("Ana"), [bia]: base("Bia") });
+    const stub = vault("write-owners-merge");
+    await stub.compile("kelpie");
+    // Kelpie's writes wait in the queue while the owner edits the same notes elsewhere.
+    await stub.write(
+      "kelpie",
+      [
+        { path: ana, content: base("Ana").replace("café", "chá") },
+        { path: bia, content: base("Bia").replace("café", "chá") },
+      ],
+      "x",
+    );
+    backend.push({
+      [ana]: base("Ana").replace("Lisboa", "Braga"),
+      [bia]: base("Bia").replace("Lisboa", "Braga"),
+    });
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()[ana]).toBe(
+      base("Ana").replace("Lisboa", "Braga").replace("café", "chá"),
+    );
+    const changes = (path: string) =>
+      runInDurableObject(
+        stub,
+        (_instance, state) =>
+          state.storage.sql
+            .exec("SELECT count(*) AS n FROM owner_changes WHERE path = ?", path)
+            .one().n,
+      );
+    expect(await changes(ana)).toBe(1);
+    // Kelpie's commit, but it holds the owner's lines: a conclusion can't replace them.
+    expect(
+      await stub.writeNote(
+        "kelpie",
+        memory("Ana", "Outro.", { path: ana, kind: "person", level: "deduced" }),
+        ALL,
+      ),
+    ).toEqual({ ok: false, reason: "owners_word" });
+    // What Kelpie writes over it is listed again, when its commit answers...
+    expect(
+      await stub.writeNote(
+        "kelpie",
+        memory("Ana", "Mora no Porto.", { path: ana, kind: "person" }),
+        ALL,
+      ),
+    ).toMatchObject({ ok: true, action: "written" });
+    await runDurableObjectAlarm(stub);
+    expect(await changes(ana)).toBe(2);
+    // ...and when its answer is lost, once the next sync finds it landed.
+    const commit = backend.commit.bind(backend);
+    let lose = true;
+    backend.commit = async (request) => {
+      const outcome = await commit(request);
+      if (lose) {
+        lose = false;
+        throw new Error("GitHub commit answered 502");
+      }
+      return outcome;
+    };
+    await stub.write(
+      "kelpie",
+      [{ path: bia, content: base("Bia").replace("Lisboa", "Porto") }],
+      "x",
+    );
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()[bia]).toBe(base("Bia").replace("Lisboa", "Porto"));
+    expect(await changes(bia)).toBe(2);
+  });
+
   it("keeps the owner's word: only what the person said changes what the person said", async () => {
     const stated = "memory/notes/cafe.md";
     const owners = "memory/notes/cha.md";
@@ -477,7 +550,7 @@ describe("writeNote", () => {
         ALL,
       ),
     ).toMatchObject({ ok: true, action: "written" });
-    // A conclusion the owner wrote, or edited, is his word too: Kelpie didn't write this version.
+    // A conclusion the owner wrote, or edited, is the owner's word too: Kelpie didn't write this version.
     expect(
       await stub.writeNote(
         "kelpie",

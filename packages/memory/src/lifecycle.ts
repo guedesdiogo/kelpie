@@ -297,7 +297,7 @@ export function lifecycleReport(findings: LifecycleFindings): string | null {
       [
         "## Your notes Kelpie changed",
         "",
-        "Notes you wrote or edited that Kelpie changed in the last week, newest first. Git keeps every earlier version.",
+        "Notes whose version Kelpie hadn't written, such as yours, that it changed in the last week. Newest first, with the last day it changed each. Git keeps every earlier version.",
         "",
         ...capped(
           findings.changed.map((note) =>

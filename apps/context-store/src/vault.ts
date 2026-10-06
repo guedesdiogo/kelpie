@@ -184,6 +184,7 @@ const PATH_TABLES = [
   "recall_counts",
   "authored",
   "owner_changes",
+  "owner_merges",
 ] as const;
 /** A held file's resolution, queued as the owner's text with a conflict settled (#114). */
 const RESOLVE_SUMMARY = "Resolve a pushed merge conflict, with the model";
@@ -233,6 +234,10 @@ CREATE TABLE IF NOT EXISTS owner_changes (
 CREATE TABLE IF NOT EXISTS authored (
   path TEXT PRIMARY KEY NOT NULL,
   blob_sha TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS owner_merges (
+  path TEXT PRIMARY KEY NOT NULL,
+  content TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS proposals (
   id INTEGER PRIMARY KEY,
@@ -1448,22 +1453,33 @@ export class Vault extends DurableObject<VaultEnv> {
 
   /**
    * Whether a note holds what the person said (#149): `level: explicit`, or a version Kelpie didn't
-   * write, whatever its level, since the owner wrote or edited it. A conclusion never changes it.
+   * write, whatever its level, since the owner wrote or edited it, or one where Kelpie merged its
+   * write into the owner's edit (#160). A conclusion never changes it.
    */
   #ownersWord(note: { path: string; level: string | null }): boolean {
-    return note.level === "explicit" || !this.#byKelpie([note.path]).has(note.path);
+    return (
+      note.level === "explicit" ||
+      !this.#byKelpie([note.path]).has(note.path) ||
+      this.#exec(
+        `SELECT 1 FROM files f JOIN owner_merges m ON m.path = f.path AND m.content = f.content
+         WHERE f.path = ?`,
+        note.path,
+      ).length > 0
+    );
   }
 
   /**
-   * Records that Kelpie replaced or removed a version it hadn't written (#160), for the report: read
-   * before the `files` row changes. Kelpie's own report isn't listed.
+   * Records that Kelpie replaced or removed a version it hadn't written, or one that merged its
+   * write into the owner's edit (#160), for the report: read before the `files` row changes.
+   * Kelpie's own report isn't listed.
    */
   #recordOwnerChange(path: string, removed: boolean, at: number): void {
     if (path === LIFECYCLE_REPORT_PATH) return;
     this.#exec(
       `INSERT INTO owner_changes (path, at, removed)
        SELECT f.path, ?, ? FROM files f LEFT JOIN authored a ON a.path = f.path
-       WHERE f.path = ? AND (a.blob_sha IS NULL OR a.blob_sha != f.blob_sha)`,
+       WHERE f.path = ? AND (a.blob_sha IS NULL OR a.blob_sha != f.blob_sha
+         OR EXISTS (SELECT 1 FROM owner_merges m WHERE m.path = f.path AND m.content = f.content))`,
       at,
       removed ? 1 : 0,
       path,
@@ -1525,13 +1541,15 @@ export class Vault extends DurableObject<VaultEnv> {
             .filter((file) => file.content !== null && hasConflictMarkers(file.content))
             .map((file) => [file.path, this.#fileContent(file.path)] as const),
         );
-        // Queued writes over a version Kelpie didn't write: if a commit of theirs landed with its
-        // answer lost, the record of the owner's change is taken here, before the files change.
+        // Queued writes over a version Kelpie didn't write, or merged into the owner's edit: if a
+        // commit of theirs landed with its answer lost, the record of the owner's change is taken
+        // here, before the files change.
         const owners = new Set(
           this.#exec<{ path: string }>(
             `SELECT DISTINCT q.path FROM queue q JOIN files f ON f.path = q.path
              LEFT JOIN authored a ON a.path = f.path
-             WHERE a.blob_sha IS NULL OR a.blob_sha != f.blob_sha`,
+             WHERE a.blob_sha IS NULL OR a.blob_sha != f.blob_sha
+               OR EXISTS (SELECT 1 FROM owner_merges m WHERE m.path = f.path AND m.content = f.content)`,
           ).map((row) => row.path),
         );
         const changed = snapshot
@@ -1699,6 +1717,7 @@ export class Vault extends DurableObject<VaultEnv> {
     // A merge that still holds conflict markers is never committed: the owner's edit wins whole.
     const merged = result !== null && !hasConflictMarkers(result.content) ? result : null;
     this.#exec("DELETE FROM queue WHERE path = ?", path);
+    this.#exec("DELETE FROM owner_merges WHERE path = ?", path);
     if (merged !== null && merged.content !== incoming) {
       // One write, on top of the owner's edit.
       this.#exec(
@@ -1709,6 +1728,8 @@ export class Vault extends DurableObject<VaultEnv> {
         last.summary,
         last.queued_at,
       );
+      // Once committed it is Kelpie's version (#126), but it holds the owner's lines (#160).
+      this.#exec("INSERT INTO owner_merges (path, content) VALUES (?, ?)", path, merged.content);
     }
     if (merged !== null && !merged.overlapped) return;
     for (const { agent, content } of queued) {
@@ -1862,6 +1883,11 @@ export class Vault extends DurableObject<VaultEnv> {
         for (const path of deletions) {
           this.#exec("DELETE FROM files WHERE path = ?", path);
           this.#exec("DELETE FROM authored WHERE path = ?", path);
+          this.#exec("DELETE FROM owner_merges WHERE path = ?", path);
+        }
+        // A merge's mark lasts while its version does.
+        for (const { path, content } of writes) {
+          this.#exec("DELETE FROM owner_merges WHERE path = ? AND content != ?", path, content);
         }
         // Writes queued while the commit was in flight have larger ids, and stay.
         done();
