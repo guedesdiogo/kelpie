@@ -251,6 +251,7 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
 - **Streams:**
   - **full text:** the question's words, folded, with function words kept, since bm25 already weighs them down. When the question's date was already resolved into `asOf` or `validAt`, month and weekday names and years are dropped;
   - **entities:** runs of one to four words, at most 64, that don't end in a function word, looked up as entity keys. A name may start with one ("São Paulo", "Will Smith");
+    - **vectors:** when the question's vector is given, the notes nearest it by cosine, among the current ones. Vectors are kept per content and model in the index's embeddings table, which survives a rebuild. The search reads them row by row;
   - **graph:** the three best hits of each stream above, then their neighbours. A seed ranks above its own neighbours, so a neighbour can't pass it.
 
   Each stream fetches max(4 × limit, 20) hits, as ai-memory does, up to the index's 100. A question about the past (`asOf`) searches the versions memory held then, by text and entities only. Only the first 2,000 characters of a question are read.
@@ -271,11 +272,16 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - a heading is one line, without controls.
 
   The budget holds by construction; the evaluation checks it on every question. The slice's starting budget is 1,000 tokens.
+- **Rerank,** on ai-memory's contract:
+  - a judge scores the 30 best hits at most, from each note's title, abstract and body start, 600 characters;
+  - only those are reordered, and the caller keeps its limit after, so notes can rise from below it;
+  - the fused order stays when the judge fails, doesn't answer in 5 s, or gives any score that is missing or outside 0 to 1.
+
+  Kelpie's judge is the agent's qualifier, asked one yes-or-no question per note in one call, with the notes marked as data, not instructions.
 - **Not yet:**
-  - vectors, which wait for the choice of an embedding model;
-  - the rerank, which needs a model call per turn;
   - the always-loaded core;
-  - the agent's memory tools.
+  - the turn's assembly in the conversation runtime;
+  - the agent's memory tools (#126).
 
 ## Credits
 

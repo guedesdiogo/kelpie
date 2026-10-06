@@ -1,0 +1,13 @@
+// The evaluation with models (#110): the test Worker plus Workers AI, reached remotely with the
+// developer's own Cloudflare login, for bge-m3 and Clef. `eval:models` uses it; tests never do.
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "kelpie-memory-eval-models",
+  "main": "../test/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "ai": { "binding": "AI", "remote": true },
+  "durable_objects": {
+    "bindings": [{ "name": "INDEX_HOST", "class_name": "IndexHost" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["IndexHost"] }]
+}

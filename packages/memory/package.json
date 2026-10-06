@@ -11,13 +11,17 @@
     "typecheck": "bun run types > /dev/null && tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json",
     "test": "vitest run",
     "eval": "vitest run --config vitest.eval.config.ts",
-    "eval:baseline": "node eval/baseline.mjs"
+    "eval:baseline": "node eval/baseline.mjs",
+    "eval:models": "sh -c 'OPENAI_API_KEY=\"${OPENAI_API_KEY:-$(node eval/openai-key.mjs)}\" EVAL_MODELS=1 exec vitest run --config vitest.eval.config.ts eval/models.eval.ts'",
+    "eval:models:report": "node eval/models-report.mjs"
   },
   "dependencies": {
     "yaml": "2.9.1"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.3.6",
+    "@kelpie/llm": "workspace:*",
+    "@kelpie/qualifier": "workspace:*",
     "vitest": "^4.1.0",
     "wrangler": "^4.147.0"
   }
