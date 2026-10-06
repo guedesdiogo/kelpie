@@ -85,6 +85,8 @@ export interface ApplyResult {
 
 export interface SearchOptions {
   limit?: number;
+  /** Only memories in these scopes; all of them when left out. */
+  scopes?: readonly Scope[];
   /** Ingestion time: search the versions the vault held then, instead of the current ones. */
   asOf?: number;
   /** World time: keep only memories valid at this instant. */
@@ -97,6 +99,9 @@ export interface SearchHit {
   title: string;
   abstract: string | null;
   current: boolean;
+  kind: Kind;
+  tier: Tier;
+  pinned: boolean;
 }
 
 export interface ResolvedLink {
@@ -115,7 +120,7 @@ export interface IndexDump {
   links: { path: string; commit: string; kind: string; by: string; target: string }[];
 }
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const DERIVED_SCHEMA = `
 CREATE TABLE commits (
@@ -151,6 +156,7 @@ CREATE TABLE versions (
   path_search TEXT NOT NULL,
   link_path TEXT NOT NULL,
   link_name TEXT NOT NULL,
+  title_key TEXT NOT NULL,
   frontmatter TEXT NOT NULL,
   warnings TEXT NOT NULL,
   UNIQUE (path, commit_sha)
@@ -159,6 +165,7 @@ CREATE UNIQUE INDEX versions_current_path ON versions (path) WHERE is_current = 
 CREATE INDEX versions_path_seq ON versions (path, commit_seq);
 CREATE INDEX versions_link_path ON versions (link_path) WHERE is_current = 1;
 CREATE INDEX versions_link_name ON versions (link_name) WHERE is_current = 1;
+CREATE INDEX versions_title_key ON versions (title_key) WHERE is_current = 1;
 CREATE INDEX versions_memory_id ON versions (memory_id) WHERE memory_id IS NOT NULL;
 CREATE VIRTUAL TABLE versions_fts USING fts5(
   title, abstract, body, path_search,
@@ -228,6 +235,78 @@ function pathSearch(path: string): string {
 function linkKeys(path: string): { linkPath: string; linkName: string } {
   const linkPath = path.slice(0, -3).normalize("NFC").toLowerCase();
   return { linkPath, linkName: linkPath.slice(linkPath.lastIndexOf("/") + 1) };
+}
+
+/** A title as entity keys are: whitespace collapsed, lowercase, diacritics folded. */
+function titleKey(title: string): string {
+  return foldKey(title.trim().split(/\s+/u).join(" "));
+}
+
+/** At most this many entity keys are looked up at once. */
+const MAX_KEYS = 64;
+/**
+ * A name on more versions than this singles nothing out: its notes would all weigh the same and come
+ * in path order. It is left out of entity lookups, as a function word is left out of names.
+ */
+const MAX_ENTITY_VERSIONS = 50;
+
+/** 1 to 100 results, 10 when the limit isn't a number. */
+function limitOf(options: { limit?: number }): number {
+  const limit = Math.trunc(options.limit ?? 10);
+  return Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 100) : 10;
+}
+
+/**
+ * The versions a lookup sees, as SQL over `v`: current ones, or those of `asOf`, valid at
+ * `validAt`, in `scopes`.
+ */
+function versionFilter(options: SearchOptions): [string, SqlValue[]] {
+  const filters: string[] = [];
+  const bindings: SqlValue[] = [];
+  if (options.scopes !== undefined) {
+    const scopes = [...new Set(options.scopes)].slice(0, MAX_KEYS);
+    filters.push(scopes.length === 0 ? "0" : `v.scope IN (${scopes.map(() => "?").join(", ")})`);
+    bindings.push(...scopes);
+  }
+  if (options.asOf === undefined) {
+    filters.push("v.is_current = 1");
+  } else {
+    filters.push("v.recorded_at <= ? AND (v.replaced_at IS NULL OR v.replaced_at > ?)");
+    bindings.push(options.asOf, options.asOf);
+  }
+  if (options.validAt !== undefined) {
+    filters.push("(v.valid_from IS NULL OR v.valid_from <= ?)");
+    filters.push("(v.invalid_at IS NULL OR v.invalid_at > ?)");
+    bindings.push(options.validAt, options.validAt);
+  }
+  return [filters.join(" AND "), bindings];
+}
+
+type HitRow = {
+  path: string;
+  commit_sha: string;
+  title: string;
+  abstract: string | null;
+  is_current: number;
+  kind: string;
+  tier: string;
+  pinned: number;
+};
+
+const HIT_COLUMNS =
+  "v.path, v.commit_sha, v.title, v.abstract, v.is_current, v.kind, v.tier, v.pinned";
+
+function toHit(row: HitRow): SearchHit {
+  return {
+    path: row.path,
+    commit: row.commit_sha,
+    title: row.title,
+    abstract: row.abstract,
+    current: row.is_current === 1,
+    kind: row.kind as Kind,
+    tier: row.tier as Tier,
+    pinned: row.pinned === 1,
+  };
 }
 
 /** Words of a query, each quoted, so no user text is read as FTS5 syntax. */
@@ -405,8 +484,8 @@ export class MemoryIndex {
           `INSERT INTO versions (path, commit_sha, commit_seq, blob_sha, supersedes_commit, is_current,
              recorded_at, memory_id, scope, kind, tier, level, confidence, evergreen, pinned,
              valid_from, invalid_at, title, abstract, body, path_search, link_path, link_name,
-             frontmatter, warnings)
-           VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             title_key, frontmatter, warnings)
+           VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            RETURNING rowid`,
           change.path,
           commit.sha,
@@ -430,6 +509,7 @@ export class MemoryIndex {
           pathSearch(change.path),
           linkPath,
           linkName,
+          titleKey(note.title),
           JSON.stringify(note.frontmatter),
           JSON.stringify(note.warnings),
         )[0]?.rowid;
@@ -510,44 +590,126 @@ export class MemoryIndex {
     return row === undefined ? null : toVersion(row);
   }
 
+  /** One version, by its path and the commit that wrote it. */
+  versionOf(path: string, commit: string): IndexedVersion | null {
+    const row = this.#exec<VersionRow>(
+      `SELECT ${VERSION_COLUMNS} FROM versions v WHERE v.path = ? AND v.commit_sha = ?`,
+      path,
+      commit,
+    )[0];
+    return row === undefined ? null : toVersion(row);
+  }
+
   /** Full-text search, best first. Current versions only, unless `asOf` asks for the past. */
   search(text: string, options: SearchOptions = {}): SearchHit[] {
     const query = ftsQuery(text);
     if (query === null) return [];
-    const filters: string[] = [];
-    const bindings: SqlValue[] = [query];
-    if (options.asOf === undefined) {
-      filters.push("v.is_current = 1");
-    } else {
-      filters.push("v.recorded_at <= ? AND (v.replaced_at IS NULL OR v.replaced_at > ?)");
-      bindings.push(options.asOf, options.asOf);
-    }
-    if (options.validAt !== undefined) {
-      filters.push("(v.valid_from IS NULL OR v.valid_from <= ?)");
-      filters.push("(v.invalid_at IS NULL OR v.invalid_at > ?)");
-      bindings.push(options.validAt, options.validAt);
-    }
-    bindings.push(Math.min(Math.max(Math.trunc(options.limit ?? 10), 1), 100));
-    return this.#exec<{
-      path: string;
-      commit_sha: string;
-      title: string;
-      abstract: string | null;
-      is_current: number;
-    }>(
-      `SELECT v.path, v.commit_sha, v.title, v.abstract, v.is_current
+    const [filter, bindings] = versionFilter(options);
+    return this.#exec<HitRow>(
+      `SELECT ${HIT_COLUMNS}
        FROM versions_fts JOIN versions v ON v.rowid = versions_fts.rowid
-       WHERE versions_fts MATCH ? AND ${filters.join(" AND ")}
+       WHERE versions_fts MATCH ? AND ${filter}
        ORDER BY bm25(versions_fts, 4.0, 2.0, 1.0, 2.0), v.path
        LIMIT ?`,
+      query,
       ...bindings,
-    ).map((row) => ({
-      path: row.path,
-      commit: row.commit_sha,
-      title: row.title,
-      abstract: row.abstract,
-      current: row.is_current === 1,
-    }));
+      limitOf(options),
+    ).map(toHit);
+  }
+
+  /**
+   * The notes that name any of these entity keys, best first. An entity's own page, the note titled
+   * with its name, comes before the notes that mention it, and a global page before a scoped one.
+   * A name on fewer notes says more, so each key weighs one over the number of notes that name it,
+   * as ai-memory weighs its entity stream. Current versions only, unless `asOf` asks for the past.
+   */
+  entityHits(keys: readonly string[], options: SearchOptions = {}): SearchHit[] {
+    const asked = [...new Set(keys)].slice(0, MAX_KEYS);
+    if (asked.length === 0) return [];
+    const wanted = this.#exec<{ key: string; n: number }>(
+      `SELECT key, count(*) AS n FROM entities WHERE key IN (${asked.map(() => "?").join(", ")})
+       GROUP BY key`,
+      ...asked,
+    )
+      .filter((row) => row.n <= MAX_ENTITY_VERSIONS)
+      .map((row) => row.key);
+    if (wanted.length === 0) return [];
+    const [filter, bindings] = versionFilter(options);
+    const marks = wanted.map(() => "?").join(", ");
+    return this.#exec<HitRow>(
+      `WITH named AS (
+         SELECT e.version, e.key FROM entities e JOIN versions v ON v.rowid = e.version
+         WHERE e.key IN (${marks}) AND ${filter}
+       ),
+       pages AS (SELECT key, count(*) AS n FROM named GROUP BY key)
+       SELECT ${HIT_COLUMNS}
+       FROM named JOIN pages ON pages.key = named.key JOIN versions v ON v.rowid = named.version
+       GROUP BY v.rowid
+       ORDER BY max(CASE WHEN v.title_key <> named.key THEN 0 WHEN v.scope = 'global' THEN 2 ELSE 1 END) DESC,
+         sum(1.0 / pages.n) DESC, v.path
+       LIMIT ?`,
+      ...wanted,
+      ...bindings,
+      limitOf(options),
+    ).map(toHit);
+  }
+
+  /**
+   * Current notes one step from this one: the notes it links to, then the pages of the entities it
+   * names, notes titled with that name, as if it linked to them, global ones first. Only notes in
+   * `scopes`, when given.
+   */
+  neighbours(
+    path: string,
+    options: { limit?: number; validAt?: number; scopes?: readonly Scope[] } = {},
+  ): SearchHit[] {
+    const exists = this.#exec(
+      "SELECT 1 AS one FROM versions WHERE path = ? AND is_current = 1",
+      path,
+    ).length;
+    if (exists === 0) return [];
+    const limit = limitOf(options);
+    const [filter, bindings] = versionFilter({
+      ...(options.validAt === undefined ? {} : { validAt: options.validAt }),
+      ...(options.scopes === undefined ? {} : { scopes: options.scopes }),
+    });
+    const hits: SearchHit[] = [];
+    const seen = new Set([path]);
+    const take = (other: string | null) => {
+      if (other === null || seen.has(other) || hits.length >= limit) return;
+      seen.add(other);
+      const row = this.#exec<HitRow>(
+        `SELECT ${HIT_COLUMNS} FROM versions v WHERE v.path = ? AND ${filter}`,
+        other,
+        ...bindings,
+      )[0];
+      if (row !== undefined) hits.push(toHit(row));
+    };
+    // Links are resolved one at a time, so a note with many costs only what is taken. A note it
+    // contradicts is what it replaced, not a neighbour.
+    const links = this.#exec<{ by: string; target: string }>(
+      `SELECT l.by, l.target FROM links l JOIN versions v ON v.rowid = l.version
+       WHERE v.path = ? AND v.is_current = 1 AND l.kind <> 'contradicts'
+       ORDER BY l.kind, l.by, l.target`,
+      path,
+    );
+    for (const link of links) {
+      if (hits.length >= limit) return hits;
+      take(this.resolve(path, link.by as LinkBy, link.target));
+    }
+    const keys = this.#exec<{ key: string }>(
+      `SELECT e.key FROM entities e JOIN versions v ON v.rowid = e.version
+       WHERE v.path = ? AND v.is_current = 1`,
+      path,
+    ).map((row) => row.key);
+    if (keys.length === 0) return hits;
+    const named = this.#exec<{ path: string }>(
+      `SELECT path FROM versions WHERE is_current = 1 AND title_key IN (${keys.map(() => "?").join(", ")})
+       ORDER BY scope <> 'global', path`,
+      ...keys,
+    );
+    for (const row of named) take(row.path);
+    return hits;
   }
 
   /**

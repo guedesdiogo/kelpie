@@ -117,7 +117,16 @@ describe("versions", () => {
       // "Current only" by default; "as of" reaches the superseded version.
       expect(index.search("Lisboa")).toEqual([]);
       expect(index.search("Lisboa", { asOf: c1.committedAt + 1 })).toEqual([
-        { path: ANA_PATH, commit: c1.sha, title: "Ana Souza", abstract: null, current: false },
+        {
+          path: ANA_PATH,
+          commit: c1.sha,
+          title: "Ana Souza",
+          abstract: null,
+          current: false,
+          kind: "person",
+          tier: "semantic",
+          pinned: false,
+        },
       ]);
       expect(index.search("Porto").map((hit) => hit.commit)).toEqual([c2.sha]);
       expect(index.versionAt(ANA_PATH, c1.committedAt)?.commit).toBe(c1.sha);

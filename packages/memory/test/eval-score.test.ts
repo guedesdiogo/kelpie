@@ -24,6 +24,9 @@ const hit = (path: string, commit: string): SearchHit => ({
   title: path,
   abstract: null,
   current: true,
+  kind: "note",
+  tier: "semantic",
+  pinned: false,
 });
 const question = (gold: string[], extra: Partial<Question> = {}): Question => ({
   id: "q",
