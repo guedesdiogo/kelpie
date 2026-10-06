@@ -17,13 +17,32 @@ import type {
 } from "@kelpie/conversation/contract";
 import type { AssistantMessage, ChatMessage, LlmEvent, Usage } from "@kelpie/llm";
 import { QualifierUnavailable } from "@kelpie/qualifier";
-import { Agent, type FiberRecoveryContext } from "agents";
+import {
+  Agent,
+  type Connection,
+  type ConnectionContext,
+  type FiberRecoveryContext,
+  type WSMessage,
+} from "agents";
 import { and, asc, count, desc, eq, gte, inArray, isNull, lt, max } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
 import { type ConversationPorts, portsFor } from "./ports.ts";
 import * as schema from "./schema.ts";
+import {
+  ADMISSION_HEADER,
+  parseAdmission,
+  parseClientFrame,
+  type ServerFrame,
+  type ShownMessage,
+  shownText,
+  type WebchatAdmission,
+  webchatEgress,
+} from "./webchat.ts";
+
+/** The most history rows a webchat socket is shown when it opens. */
+const WEBCHAT_REPLAY_ROWS = 50;
 
 /** Bounds on what one conversation accepts. */
 export const LIMITS = {
@@ -103,6 +122,58 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
 
   get #ports(): ConversationPorts {
     return portsFor(this.env);
+  }
+
+  /** Where replies go: the webchat's sockets on this object, or channel-egress for the others. */
+  get #channel(): Pick<ConversationPorts, "send" | "typing" | "keepTyping"> {
+    return this.#get<Destination | null>("destination", null)?.channel === "webchat"
+      ? webchatEgress(() => this.getConnections())
+      : this.#ports;
+  }
+
+  // The webchat's socket (issue #40). Browsers see only Kelpie's frames: no SDK identity or state
+  // sync, and they can't write the SDK's state.
+  static override options = { sendIdentityOnConnect: false };
+
+  override shouldSendProtocolMessages(): boolean {
+    return false;
+  }
+
+  override shouldConnectionBeReadonly(): boolean {
+    return true;
+  }
+
+  /** Ingress has admitted the owner; the socket gets the conversation so far. */
+  override onConnect(connection: Connection, { request }: ConnectionContext): void {
+    const admission = parseAdmission(request.headers.get(ADMISSION_HEADER));
+    if (!admission) {
+      connection.close(1008, "not admitted");
+      return;
+    }
+    connection.setState(admission);
+    send(connection, { type: "history", messages: this.#transcript() });
+  }
+
+  override async onMessage(connection: Connection, message: WSMessage): Promise<void> {
+    const admission = connection.state as WebchatAdmission | null;
+    const frame = parseClientFrame(message);
+    if (!admission || frame?.type !== "message") return;
+    const result = await this.ingest({
+      agentId: admission.agentId,
+      // The page picks the id, so a resend after a reconnect is deduplicated like any retry.
+      providerMessageId: `webchat:${frame.id}`,
+      userId: admission.userId,
+      text: frame.text,
+      destination: { channel: "webchat", threadId: admission.userId },
+      sentAt: this.#ports.now(),
+      timeZone: admission.timeZone,
+    });
+    send(
+      connection,
+      result.status === "rejected"
+        ? { type: "rejected", id: frame.id, reason: result.reason }
+        : { type: "accepted", id: frame.id },
+    );
   }
 
   /**
@@ -423,7 +494,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const answered = new AbortController();
     const typing =
       settings.conversational && capabilitiesFor(destination.channel).typing.supported
-        ? this.#ports
+        ? this.#channel
             .keepTyping(
               this.#agentId(),
               destination,
@@ -588,7 +659,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       if (signal.aborted || !this.#isRunning(turnId)) return;
       if (conversational && capabilities.typing.supported) {
         try {
-          await this.#ports.typing(agentId, destination);
+          await this.#channel.typing(agentId, destination);
         } catch (error) {
           // "Typing" is a courtesy; failing to show it doesn't stop the reply.
           console.error("ConversationAgent: typing failed", { turnId, error: errorName(error) });
@@ -630,7 +701,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       this.#setBubble(bubble.id, "sending");
       let outcome: SendOutcome;
       try {
-        outcome = await this.#ports.send(agentId, destination, bubble.text, { silent });
+        outcome = await this.#channel.send(agentId, destination, bubble.text, { silent });
       } catch (error) {
         if (this.#isRunning(turnId)) this.#setBubble(bubble.id, "pending");
         throw error;
@@ -870,6 +941,45 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     return this.#get("epoch", 0);
   }
 
+  /**
+   * The conversation as the webchat shows it: the latest history, then what a running turn has
+   * already sent, then messages no turn has claimed yet. History is written when a turn settles.
+   */
+  #transcript(): ShownMessage[] {
+    const rows = this.#db
+      .select({
+        role: schema.history.role,
+        message: schema.history.message,
+        at: schema.history.createdAt,
+      })
+      .from(schema.history)
+      .orderBy(desc(schema.history.id))
+      .limit(WEBCHAT_REPLAY_ROWS)
+      .all()
+      .reverse()
+      .map(({ role, message, at }) => ({
+        role,
+        text: role === "user" ? withoutTypedStamps(shownText(message)) : shownText(message),
+        at,
+      }));
+    const sent = this.#db
+      .select({ text: schema.outbox.text, at: schema.outbox.sentAt })
+      .from(schema.outbox)
+      .innerJoin(schema.turns, eq(schema.turns.id, schema.outbox.turnId))
+      .where(
+        and(eq(schema.turns.status, "running"), inArray(schema.outbox.status, ["sent", "sending"])),
+      )
+      .orderBy(asc(schema.outbox.seq))
+      .all()
+      .map(({ text, at }) => ({ role: "assistant" as const, text, at: at ?? 0 }));
+    const waiting = this.#pendingInbound().map((row) => ({
+      role: "user" as const,
+      text: row.text,
+      at: row.receivedAt,
+    }));
+    return [...rows, ...sent, ...waiting].filter((message) => message.text !== "");
+  }
+
   #agentId(): string {
     const agentId = this.#get<string | null>("agentId", null);
     if (!agentId) throw new Error("The conversation has no agent yet");
@@ -992,4 +1102,8 @@ function summaryInput(
   return previous === null
     ? `Conversation:\n\n${conversation}`
     : `Previous summary:\n\n${previous}\n\nConversation since:\n\n${conversation}`;
+}
+
+function send(connection: Connection, frame: ServerFrame): void {
+  connection.send(JSON.stringify(frame));
 }
