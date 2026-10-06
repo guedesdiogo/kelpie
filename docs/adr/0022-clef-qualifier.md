@@ -1,8 +1,9 @@
 # ADR-0022: Each agent chooses its end-of-turn qualifier, Clef on Workers AI by default, Jev as the option
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-06
 - Issue: [#117](https://github.com/guedesdiogo/kelpie/issues/117)
+- Accepted by the owner on 2026-10-06: «Sim»
 
 ## Context
 

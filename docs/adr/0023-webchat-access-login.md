@@ -1,8 +1,9 @@
 # ADR-0023: The webchat logs in with the owner's Cloudflare Access identity
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-06
 - Issue: [#40](https://github.com/guedesdiogo/kelpie/issues/40)
+- Accepted by the owner on 2026-10-06: «Sim»
 
 ## Context
 
