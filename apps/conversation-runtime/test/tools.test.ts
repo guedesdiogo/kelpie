@@ -167,6 +167,7 @@ describe("a turn's tools", () => {
           actor: { userId: "u-owner", role: "owner", via: "agent:assistant" },
           agentId: "assistant",
           scopes: "all",
+          qualifier: "clef",
         },
       },
       expect.objectContaining({ input: { q: "bruno" } }),

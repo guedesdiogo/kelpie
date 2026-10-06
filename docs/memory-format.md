@@ -298,9 +298,18 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - **Waiting:** the person waits for it while "typing" shows. Embedding the question takes up to 2 s, and the rerank 1.4 s at p50 and up to 2.5 s at p95 ([spike](spikes/memory-eval.md#with-models)), with its own 3.5 s cap.
   - **Failure:** a Context Store that fails, or doesn't answer in 6 s, leaves the turn without memory. A message that arrives meanwhile interrupts the turn before its model call, and the next turn asks again.
   - It logs the time, the number of notes and their tokens, never text.
+- **The agent's tools** (#126): beyond the turn's block, the agent can search memory and read a note, inside the turn's tool loop (#141).
+  - **`memory_search(query, k)`:** the same retrieval as a turn's, with the vector and the agent's qualifier's rerank.
+    - It lists the hits in #110's fence: title and path, then kind, scope, validity and who wrote the note, then its abstract or its body's first 240 characters.
+    - It returns 3 hits by default and 10 at most, best first, with no score.
+  - **`memory_read(path, offset)`:** a note of memory's index, a page at a time, each page under 9,500 characters, fence included.
+    - A page is never cut inside an emoji, and says where the next one starts.
+    - The first page also lists the note's links that the scopes allow, up to 50 within 2,000 characters, and counts as one access.
+  - **Scopes and the qualifier** come from the turn, never from the model. A note outside the scopes, or outside memory's index (persona, rules, skills, root files), gets the same "not found" as a missing one.
+  - **A note written in this turn** shows up only after the vault's next commit.
 - **Not yet:**
   - the always-loaded core;
-  - the agent's memory tools (#126).
+  - the agent's `memory_write` (#126).
 
 ## Lifecycle
 

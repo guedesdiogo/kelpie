@@ -874,6 +874,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           // Ingress admits only direct chats, and `Directory.admit` only the owner (ADR-0015), who
           // may see every scope; #131 brings the turn's role and chat type.
           scopes: "all",
+          qualifier: settings.qualifier,
           signal: controller.signal,
         };
         step("tool", tools.get(toolCall.name)?.label);

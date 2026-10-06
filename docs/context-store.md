@@ -76,6 +76,13 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - It returns each note's provenance beside its path (#126). A note is Kelpie's while the vault holds a version Kelpie's own commit wrote, including its lines merged into an owner's edit. An edit made elsewhere, or a conflict the model resolved from the file's own lines, makes it the owner's.
       - The record is a table of the blobs Kelpie committed (`authored`), outside memory's index, so a rebuild keeps it.
     - With the vault off, or on any failure, it answers an empty block, and the turn goes on without memory.
+  - **`search(agent, query, {scopes, k?, asOf?, validAt?, qualifier?})`,** for the agent's `memory_search` (#126).
+    - It is recall's retrieval and rerank, answered as hits instead of a packed block, in #110's fence: 3 by default, 10 at most.
+    - It returns each hit's scope, validity and provenance too, and counts no access.
+  - **`readNote(agent, path, {scopes, offset?})`,** for the agent's `memory_read` (#126).
+    - **What opens:** only a current note of memory's index within the scopes. Anything else is "not found", the same answer whether the file exists or not.
+    - **A page:** under 9,500 characters, fence included, with `nextOffset`.
+    - **The first page** lists the links the scopes allow, and counts as one access.
   - **Access counts:** each recall counts the notes it packed, in one write, in a table outside the index. A rebuild keeps them, and they never reach git.
   - **The memory report** (#111): once a day, after the embeddings and the held files, the alarm writes what memory's index finds (cold notes, duplicates, possible contradictions) to `memory/_lint/report.md`, or removes the page when memory is clean ([memory-format.md](memory-format.md#the-daily-report)).
     - The page is queued only when it changed, so a quiet day makes no commit.

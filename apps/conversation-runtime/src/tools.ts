@@ -44,6 +44,8 @@ export interface ToolContext {
   agentId: string;
   /** The memory scopes the turn may read, as its recall uses them. */
   scopes: RecallOptions["scopes"];
+  /** The agent's qualifier, for tools that rank as recall does: Clef unless the agent chose Jev. */
+  qualifier: NonNullable<RecallOptions["qualifier"]>;
   /** Aborts when the turn stops: a new message, a pause or an eviction. */
   signal: AbortSignal;
 }

@@ -14,6 +14,7 @@ import type {
 } from "@kelpie/context-store/contract";
 import type { Destination } from "@kelpie/conversation/contract";
 import { fromNdjsonStream, type LlmEvent, type ModelTier, type RoutedRequest } from "@kelpie/llm";
+import { memoryTools } from "./memory-tools.ts";
 import type { ToolProvider } from "./tools.ts";
 
 /** One model call: its events, and a way to stop it on the gateway's side. */
@@ -131,8 +132,15 @@ function productionPorts(env: Env): ConversationPorts {
         },
       };
     },
-    // None yet: the setup agent's (#48) and the memory tools (#126) arrive as providers.
-    tools: [],
+    // The setup agent's (#48) arrive as providers too.
+    tools: [
+      memoryTools({
+        search: (agentId, query, options) =>
+          withTimeout(contextStore.search(agentId, query, options), SEARCH_TIMEOUT_MS),
+        readNote: (agentId, path, options) =>
+          withTimeout(contextStore.readNote(agentId, path, options), READ_TIMEOUT_MS),
+      }),
+    ],
     send: (agentId, destination, text, options) => egress.send(agentId, destination, text, options),
     remember: (agentId, changes, summary) =>
       withTimeout(contextStore.write(agentId, changes, summary), REMEMBER_TIMEOUT_MS),
@@ -203,6 +211,9 @@ const REMEMBER_TIMEOUT_MS = 10_000;
  * without memory. The store bounds its own calls: 2 s to embed the question, 3.5 s for the rerank.
  */
 const RECALL_TIMEOUT_MS = 6_000;
+/** The memory tools (#126): a search embeds and reranks as recall does; a read is one lookup. */
+const SEARCH_TIMEOUT_MS = 8_000;
+const READ_TIMEOUT_MS = 5_000;
 
 async function withTimeout<T>(call: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
