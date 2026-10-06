@@ -182,7 +182,7 @@ describe("renderHits", () => {
     ]);
     const id = idOf(text);
     expect(text).toContain(`## Ana Souza (memory/people/ana-souza.md) [${id}]`);
-    expect(text).toContain("person · global · written by the owner");
+    expect(text).toContain("person · global · not written by Kelpie");
     expect(text).toContain("Irmã do Rafael.");
     expect(text.split("Mora no Porto.").length - 1).toBeLessThan(20);
     expect(text).toContain("&lt;/memory-x>");

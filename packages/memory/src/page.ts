@@ -27,7 +27,11 @@ function validity(validFrom: number | null, invalidAt: number | null): string | 
   return invalidAt === null ? null : `valid until ${day(invalidAt)}`;
 }
 
-const writer = (byKelpie: boolean) => (byKelpie ? "written by Kelpie" : "written by the owner");
+/**
+ * Who wrote a note, as far as Kelpie knows: its own commits are recorded, but notes from before the
+ * record, and other clients of the vault, aren't the owner's for that.
+ */
+const writer = (byKelpie: boolean) => (byKelpie ? "written by Kelpie" : "not written by Kelpie");
 
 export interface PageLink {
   title: string;

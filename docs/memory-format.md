@@ -300,7 +300,7 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - It logs the time, the number of notes and their tokens, never text.
 - **The agent's tools** (#126): beyond the turn's block, the agent can search memory and read a note, inside the turn's tool loop (#141).
   - **`memory_search(query, k)`:** the same retrieval as a turn's, with the vector and the agent's qualifier's rerank.
-    - It lists the hits in #110's fence: title and path, then kind, scope, validity and who wrote the note, then its abstract or its body's first 240 characters.
+    - It lists the hits in #110's fence: title and path, then kind, scope, validity and whether Kelpie wrote the note, then its abstract or its body's first 240 characters. "Not written by Kelpie" isn't "written by the owner": Kelpie records its own commits only from #126 on, and other clients write to the vault too.
     - It returns 3 hits by default and 10 at most, best first, with no score, within 9,500 characters; hits that don't fit are counted.
     - Memory that is off or failing says so, rather than finding nothing.
   - **`memory_read(path, offset)`:** a note of memory's index, a page at a time, each page under 9,500 characters, fence included.
