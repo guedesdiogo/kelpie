@@ -1151,6 +1151,43 @@ describe("ConversationAgent memory", () => {
     expect(JSON.stringify(logged.mock.calls)).not.toMatch(/Lisboa|Ana/);
   });
 
+  it("sends again the block of the attempt that answered, and never a blank one", async () => {
+    const world = use(fakeWorld([hang(), reply("Em Lisboa."), reply("Ok.")]));
+    world.memory = MEMORY;
+    const stub = agent("memory-retry");
+    await stub.ingest(message("m1", "onde a Ana mora?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(1));
+    // The retry after an eviction finds nothing, so nothing was sent with the reply.
+    await evictDurableObject(stub);
+    world.memory = "  \n";
+    await runDurableObjectAlarm(stub);
+    await vi.waitFor(() => expect(world.sent).toEqual(["Em Lisboa."]));
+    expect(world.requests[1]).not.toHaveProperty("context");
+
+    await stub.ingest(message("m2", "e o Bruno?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(3));
+    expect(world.requests[2]?.messages[0]).toEqual(user("onde a Ana mora?"));
+  });
+
+  it("puts a turn's block after its last user message, whoever wrote it", async () => {
+    const world = use(fakeWorld([reply("Ok."), reply("Ok de novo.")]));
+    world.memory = MEMORY;
+    const stub = agent("memory-authors");
+    await stub.ingest(message("m1", "onde a Ana mora?", { userId: "u-one" }));
+    await stub.ingest(message("m2", "e o Bruno?", { userId: "u-two" }));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Ok."]));
+    await stub.ingest(message("m3", "e a Patrícia?", { userId: "u-one" }));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(2));
+    expect(world.requests[1]?.messages.slice(0, 2)).toEqual([
+      user("onde a Ana mora?"),
+      { role: "user", parts: [...user("e o Bruno?").parts, { type: "text", text: MEMORY }] },
+    ]);
+  });
+
   it("sends no block again for a turn that got no reply", async () => {
     const world = use(fakeWorld([fail(), reply("Em Lisboa.")]));
     world.memory = MEMORY;
@@ -1162,6 +1199,11 @@ describe("ConversationAgent memory", () => {
     await stub.flush();
     await vi.waitFor(() => expect(world.requests).toHaveLength(2));
     expect(world.requests[1]?.messages).toEqual([user("onde a Ana mora?"), user("e o Bruno?")]);
+    // Nor is it kept.
+    const kept = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql.exec("SELECT context FROM turns ORDER BY id").toArray(),
+    );
+    expect(kept[0]).toEqual({ context: null });
   });
 
   it("asks once about every message still unanswered, with the agent's qualifier", async () => {

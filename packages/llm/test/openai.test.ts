@@ -233,6 +233,49 @@ describe("OpenAIResponsesProvider", () => {
     ]);
   });
 
+  it("sends a context again, as part of its message, exactly as it first went", async () => {
+    const { fetch, calls } = fakeFetch(sse(toolTurn), sse(toolTurn));
+    const context = "<memory>Ana mora em Lisboa.</memory>";
+    await collect(provider(fetch).stream(request({ context })));
+    const later: ChatMessage[] = [
+      {
+        role: "user",
+        parts: [
+          { type: "text", text: "Weather in Lisbon?" },
+          { type: "text", text: context },
+        ],
+      },
+    ];
+    await collect(provider(fetch).stream(request({ messages: later })));
+    expect(requestAt(calls, 1).body.input).toEqual(requestAt(calls, 0).body.input);
+  });
+
+  it("sends a context after its own reply as a message of its own", async () => {
+    const { fetch, calls } = fakeFetch(sse(toolTurn));
+    const messages: ChatMessage[] = [
+      ...request().messages,
+      {
+        role: "assistant",
+        parts: [{ type: "text", text: "Sunny." }],
+        native: {
+          provider: "openai",
+          model: "gpt-6.1-sol",
+          content: [
+            {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: "Sunny.", annotations: [] }],
+            },
+          ],
+        },
+      },
+    ];
+    await collect(provider(fetch).stream(request({ messages, context: "<memory/>" })));
+    expect((requestAt(calls, 0).body.input as unknown[]).slice(-1)).toEqual([
+      { type: "message", role: "user", content: [{ type: "input_text", text: "<memory/>" }] },
+    ]);
+  });
+
   it("sends a blank context as no context", async () => {
     const { fetch, calls } = fakeFetch(sse(toolTurn), sse(toolTurn));
     await collect(provider(fetch).stream(request()));
