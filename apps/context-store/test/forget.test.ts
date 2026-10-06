@@ -163,6 +163,23 @@ describe("Vault forget", () => {
     for (const paths of [[], "memory/a.md", [42], ["x".repeat(301)], Array(1_001).fill("a.md")]) {
       expect(await stub.forget(paths as string[])).toEqual({ ok: false, reason: "invalid_input" });
     }
+    // At the limits, it goes through.
+    const edge = await stub.forget([
+      ...Array(999).fill("memory/a.md"),
+      `memory/${"a".repeat(290)}.md`,
+    ]);
+    expect(edge).toMatchObject({ ok: true });
+
+    const failing = new FakeVaultBackend({ "README.md": "# Vault" });
+    failing.branchHead = async () => {
+      throw new Error("GitHub answered 502");
+    };
+    replaceBackendForTesting(failing);
+    expect(await vault("forget-down").forget(["memory/a.md"])).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+
     replaceBackendForTesting(null);
     expect(await vault("forget-off").forget(["memory/a.md"])).toEqual({
       ok: false,

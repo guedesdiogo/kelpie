@@ -97,8 +97,13 @@ const HELD = "SELECT path FROM held WHERE state != 'resolved'";
 /** A held file the model couldn't resolve this many times waits for the owner. */
 const MAX_RESOLVE_ATTEMPTS = 3;
 const RESOLVE_TIMEOUT_MS = 60_000;
-/** The most paths one `forget` names. */
+/** The wait between two tries at held files, so a short outage can't spend all of a file's. */
+const RESOLVE_RETRY_MS = 5 * 60_000;
+/** How much of the vault's `AGENTS.md` the model sees with a conflict. */
+const RESOLVE_RULES_CHARS = 8_000;
+/** The most paths one `forget` names, and the longest path it takes. */
 const MAX_FORGET_PATHS = 1_000;
+const MAX_PATH_CHARS = 300;
 /** The Context Store's own rows that can name a vault path, and so hold a copy of what it was. */
 const PATH_TABLES = ["queue", "conflicts", "held", "proposals", "recall_counts"] as const;
 
@@ -290,12 +295,35 @@ export class Vault extends DurableObject<VaultEnv> {
 
   /** The index brought to `head` from the working copy; unchanged notes are skipped. */
   async #reindex(head: string): Promise<void> {
-    const files = this.#exec<{ path: string; content: string }>("SELECT path, content FROM files");
     const changes = new Map<string, string | null>(
       this.#memory.currentPaths().map((path) => [path, null]),
     );
-    for (const { path, content } of files) changes.set(path, content);
+    for (const { path, content } of this.#indexable()) changes.set(path, content);
     await this.#applyToIndex(head, changes);
+  }
+
+  /** The working copy as memory indexes it: a held file as it was before its conflict (#114). */
+  #indexable(): { path: string; content: string }[] {
+    return this.#exec<{ path: string; content: string | null }>(
+      `SELECT files.path AS path,
+              CASE WHEN held.path IS NULL THEN files.content ELSE held.previous END AS content
+       FROM files LEFT JOIN held ON held.path = files.path AND held.state != 'resolved'`,
+    ).filter((file): file is { path: string; content: string } => file.content !== null);
+  }
+
+  /** Changes as memory indexes them: a held file as it was before its conflict (#114). */
+  #indexed(changes: ReadonlyMap<string, string | null>): Map<string, string | null> {
+    const held = new Map(
+      this.#exec<{ path: string; previous: string | null }>(
+        "SELECT path, previous FROM held WHERE state != 'resolved'",
+      ).map((row) => [row.path, row.previous]),
+    );
+    return new Map(
+      [...changes].map(([path, content]) => [
+        path,
+        held.has(path) ? (held.get(path) ?? null) : content,
+      ]),
+    );
   }
 
   /**
@@ -341,6 +369,12 @@ export class Vault extends DurableObject<VaultEnv> {
       path,
     )[0];
     if (queued !== undefined) return queued.content;
+    // A held file shows its version from before the conflict, never the markers (#114).
+    const held = this.#exec<{ previous: string | null }>(
+      "SELECT previous FROM held WHERE path = ? AND state != 'resolved'",
+      path,
+    )[0];
+    if (held !== undefined) return held.previous;
     return (
       this.#exec<{ content: string }>("SELECT content FROM files WHERE path = ?", path)[0]
         ?.content ?? null
@@ -429,83 +463,96 @@ export class Vault extends DurableObject<VaultEnv> {
       return { ok: false, reason: "invalid_target" };
     }
     const contentSha = await gitBlobSha(content);
-    return this.#serialize(async (): Promise<ProposeResult> => {
-      const earlier = this.#exec<{ url: string }>(
-        "SELECT url FROM proposals WHERE agent = ? AND path = ? AND content_sha = ?",
+    return this.#serialize(() =>
+      this.#propose(backend, agentId, target, path, content, contentSha, reason),
+    );
+  }
+
+  /** A proposal's branch, commit and pull request. Runs inside `#serialize`. */
+  async #propose(
+    backend: VaultBackend,
+    agentId: string,
+    target: ProposalTarget,
+    path: string,
+    content: string,
+    contentSha: string,
+    reason: string,
+  ): Promise<ProposeResult> {
+    const earlier = this.#exec<{ url: string }>(
+      "SELECT url FROM proposals WHERE agent = ? AND path = ? AND content_sha = ?",
+      agentId,
+      path,
+      contentSha,
+    )[0];
+    if (earlier) return { ok: true, url: earlier.url };
+    // Attempts count, failed ones included: each costs GitHub requests.
+    const hourAgo = Date.now() - 3_600_000;
+    this.#exec("DELETE FROM proposal_attempts WHERE at <= ?", hourAgo);
+    const recent =
+      this.#exec<{ n: number }>("SELECT count(*) AS n FROM proposal_attempts")[0]?.n ?? 0;
+    if (recent >= MAX_PROPOSALS_PER_HOUR) return { ok: false, reason: "rate_limited" };
+
+    let branch: string | null = null;
+    try {
+      await this.#sync();
+      const head = this.#get("head") ?? "";
+      const base = this.#exec<{ content: string; blob_sha: string }>(
+        "SELECT content, blob_sha FROM files WHERE path = ?",
+        path,
+      )[0];
+      if (base?.content === content) return { ok: false, reason: "unchanged" };
+      this.#exec("INSERT INTO proposal_attempts (at) VALUES (?)", Date.now());
+      const what = target.kind === "skill" ? `skill ${target.name}` : target.kind;
+      const headline = `Propose ${what} for ${agentId}`;
+      // The agent's words go in a code block, so they render as text: no links, images or
+      // mentions in the owner's pull request list.
+      const why = oneLine(reason, "No reason given.").replaceAll("`", "'");
+      branch = `kelpie/${agentId}/${target.kind === "skill" ? target.name : target.kind}-${Date.now().toString(36)}`;
+      await backend.createBranch(branch, head);
+      const outcome = await backend.commit({
+        branch,
+        expectedHead: head,
+        headline,
+        body: `${why}\n\nKelpie-Agent: ${agentId}`,
+        writes: [{ path, content }],
+        deletions: [],
+      });
+      if (outcome.kind !== "committed") {
+        throw new Error(`the proposal's commit wasn't made (${outcome.kind})`);
+      }
+      const pull = await backend.openPullRequest({
+        branch,
+        base: await this.#branch(backend),
+        title: headline,
+        body: [
+          `Proposed by \`${agentId}\` for the owner's approval (ADR-0020 §5).`,
+          `It changes \`${path}\`${base ? `, from blob ${base.blob_sha}` : ", a new file"}.`,
+          "The agent's reason:",
+          `\`\`\`text\n${why}\n\`\`\``,
+        ].join("\n\n"),
+      });
+      this.#exec(
+        `INSERT INTO proposals (agent, path, content_sha, base_blob_sha, branch, pull_request, url, at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         agentId,
         path,
         contentSha,
-      )[0];
-      if (earlier) return { ok: true, url: earlier.url };
-      // Attempts count, failed ones included: each costs GitHub requests.
-      const hourAgo = Date.now() - 3_600_000;
-      this.#exec("DELETE FROM proposal_attempts WHERE at <= ?", hourAgo);
-      const recent =
-        this.#exec<{ n: number }>("SELECT count(*) AS n FROM proposal_attempts")[0]?.n ?? 0;
-      if (recent >= MAX_PROPOSALS_PER_HOUR) return { ok: false, reason: "rate_limited" };
-
-      let branch: string | null = null;
-      try {
-        await this.#sync();
-        const head = this.#get("head") ?? "";
-        const base = this.#exec<{ content: string; blob_sha: string }>(
-          "SELECT content, blob_sha FROM files WHERE path = ?",
-          path,
-        )[0];
-        if (base?.content === content) return { ok: false, reason: "unchanged" };
-        this.#exec("INSERT INTO proposal_attempts (at) VALUES (?)", Date.now());
-        const what = target.kind === "skill" ? `skill ${target.name}` : target.kind;
-        const headline = `Propose ${what} for ${agentId}`;
-        // The agent's words go in a code block, so they render as text: no links, images or
-        // mentions in the owner's pull request list.
-        const why = oneLine(reason, "No reason given.").replaceAll("`", "'");
-        branch = `kelpie/${agentId}/${target.kind === "skill" ? target.name : target.kind}-${Date.now().toString(36)}`;
-        await backend.createBranch(branch, head);
-        const outcome = await backend.commit({
-          branch,
-          expectedHead: head,
-          headline,
-          body: `${why}\n\nKelpie-Agent: ${agentId}`,
-          writes: [{ path, content }],
-          deletions: [],
+        base?.blob_sha ?? null,
+        branch,
+        pull.number,
+        pull.url,
+        Date.now(),
+      );
+      return { ok: true, url: pull.url };
+    } catch (error) {
+      console.error("Vault: a proposal failed", errorName(error));
+      if (branch !== null) {
+        await backend.deleteBranch(branch).catch((cleanup: unknown) => {
+          console.error("Vault: a failed proposal's branch stayed", errorName(cleanup));
         });
-        if (outcome.kind !== "committed") {
-          throw new Error(`the proposal's commit wasn't made (${outcome.kind})`);
-        }
-        const pull = await backend.openPullRequest({
-          branch,
-          base: await this.#branch(backend),
-          title: headline,
-          body: [
-            `Proposed by \`${agentId}\` for the owner's approval (ADR-0020 §5).`,
-            `It changes \`${path}\`${base ? `, from blob ${base.blob_sha}` : ", a new file"}.`,
-            "The agent's reason:",
-            `\`\`\`text\n${why}\n\`\`\``,
-          ].join("\n\n"),
-        });
-        this.#exec(
-          `INSERT INTO proposals (agent, path, content_sha, base_blob_sha, branch, pull_request, url, at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          agentId,
-          path,
-          contentSha,
-          base?.blob_sha ?? null,
-          branch,
-          pull.number,
-          pull.url,
-          Date.now(),
-        );
-        return { ok: true, url: pull.url };
-      } catch (error) {
-        console.error("Vault: a proposal failed", errorName(error));
-        if (branch !== null) {
-          await backend.deleteBranch(branch).catch((cleanup: unknown) => {
-            console.error("Vault: a failed proposal's branch stayed", errorName(cleanup));
-          });
-        }
-        return { ok: false, reason: "failed" };
       }
-    });
+      return { ok: false, reason: "failed" };
+    }
   }
 
   /** The webhook's call: a push reached `ref`. The alarm syncs a moment later, once per burst. */
@@ -543,6 +590,14 @@ export class Vault extends DurableObject<VaultEnv> {
     await this.#alarmBy(
       Date.now() + (queued > 0 ? FLUSH_DELAY_MS : moreToEmbed ? EMBED_AGAIN_MS : RECONCILE_MS),
     );
+    // A held file still to try wakes the alarm when its next try is due.
+    const untried = this.#exec<{ n: number }>(
+      "SELECT count(*) AS n FROM held WHERE state = 'held' AND attempts < ?",
+      MAX_RESOLVE_ATTEMPTS,
+    )[0]?.n;
+    if (untried && this.#gateway() !== null) {
+      await this.#alarmBy(Number(this.#get("resolve_after") ?? "0"));
+    }
   }
 
   /**
@@ -558,7 +613,9 @@ export class Vault extends DurableObject<VaultEnv> {
    */
   async #resolveHeld(): Promise<void> {
     const gateway = this.#gateway();
-    if (gateway === null) return;
+    const backend = this.#backend();
+    if (gateway === null || backend === null) return;
+    if (Date.now() < Number(this.#get("resolve_after") ?? "0")) return;
     const row = this.#exec<{ path: string; content: string; previous: string | null }>(
       `SELECT path, content, previous FROM held
        WHERE state = 'held' AND attempts < ? AND length(content) <= ? ORDER BY at`,
@@ -567,7 +624,10 @@ export class Vault extends DurableObject<VaultEnv> {
     ).find((held) => resolution(held.path) !== null);
     const route = row === undefined ? null : resolution(row.path);
     if (row === undefined || route === null) return;
+    // Tries are spaced, whatever wakes the alarm meanwhile, so a short outage can't spend them.
+    this.#set("resolve_after", `${Date.now() + RESOLVE_RETRY_MS}`);
     this.#exec("UPDATE held SET attempts = attempts + 1 WHERE path = ?", row.path);
+    const rules = (this.#visible("AGENTS.md") ?? "").slice(0, RESOLVE_RULES_CHARS);
     let resolved: string | null;
     try {
       resolved = await resolveConflict(
@@ -578,7 +638,7 @@ export class Vault extends DurableObject<VaultEnv> {
           // A previous version too large to send is left out; the conflict's sides remain.
           previous:
             row.previous !== null && row.previous.length <= RESOLVE_MAX_CHARS ? row.previous : null,
-          rules: VAULT_README,
+          rules: rules === "" ? VAULT_README : `${VAULT_README}\n\n${rules}`,
         },
         RESOLVE_TIMEOUT_MS,
       );
@@ -590,37 +650,61 @@ export class Vault extends DurableObject<VaultEnv> {
       console.warn("Vault: a conflict's resolution failed its check");
       return;
     }
-    // A push may have changed the file while the model answered.
-    const still = this.#exec<{ content: string }>(
-      "SELECT content FROM held WHERE path = ? AND state = 'held'",
-      row.path,
-    )[0];
-    if (still?.content !== row.content) return;
-    if (route.kind === "propose") {
-      const proposed = await this.propose(
-        route.agentId,
-        route.target,
-        resolved,
-        "Kelpie's model resolved a merge conflict that was pushed unresolved. Check it before merging.",
-      );
-      if (proposed.ok) this.#exec("UPDATE held SET state = 'proposed' WHERE path = ?", row.path);
-      return;
-    }
     const content = resolved;
-    this.ctx.storage.transactionSync(() => {
-      this.#settleQueued(row.path, content, row.previous);
-      if (this.#exec("SELECT 1 AS one FROM queue WHERE path = ?", row.path).length === 0) {
-        this.#exec(
-          "INSERT INTO queue (agent, path, content, summary, queued_at) VALUES (?, ?, ?, ?, ?)",
-          route.agentId,
-          row.path,
-          content,
-          "Resolve a pushed merge conflict, with the model",
-          Date.now(),
-        );
-      }
-      this.#exec("UPDATE held SET state = 'resolved' WHERE path = ?", row.path);
-    });
+    const contentSha = await gitBlobSha(content);
+    try {
+      await this.#serialize(async () => {
+        // The owner may have fixed the file while the model answered: check after a sync.
+        await this.#sync();
+        const still = () =>
+          this.#exec(
+            "SELECT 1 AS one FROM held WHERE path = ? AND state = 'held' AND content = ?",
+            row.path,
+            row.content,
+          ).length > 0;
+        if (!still()) return;
+        if (route.kind === "propose") {
+          const proposed = await this.#propose(
+            backend,
+            route.agentId,
+            route.target,
+            row.path,
+            content,
+            contentSha,
+            "Kelpie's model resolved a merge conflict that was pushed unresolved. Check it before merging.",
+          );
+          if (proposed.ok) {
+            this.#exec(
+              "UPDATE held SET state = 'proposed' WHERE path = ? AND content = ?",
+              row.path,
+              row.content,
+            );
+          }
+          return;
+        }
+        this.ctx.storage.transactionSync(() => {
+          this.#settleQueued(row.path, content, row.previous);
+          if (this.#exec("SELECT 1 AS one FROM queue WHERE path = ?", row.path).length === 0) {
+            this.#exec(
+              "INSERT INTO queue (agent, path, content, summary, queued_at) VALUES (?, ?, ?, ?, ?)",
+              route.agentId,
+              row.path,
+              content,
+              "Resolve a pushed merge conflict, with the model",
+              Date.now(),
+            );
+          }
+          this.#exec(
+            "UPDATE held SET state = 'resolved' WHERE path = ? AND content = ?",
+            row.path,
+            row.content,
+          );
+        });
+      });
+    } catch (error) {
+      // GitHub failed during the sync or the proposal; the next alarm's sync retries with backoff.
+      console.warn("Vault: applying a conflict's resolution failed", errorName(error));
+    }
   }
 
   /**
@@ -636,7 +720,9 @@ export class Vault extends DurableObject<VaultEnv> {
       Array.isArray(paths) &&
       paths.length > 0 &&
       paths.length <= MAX_FORGET_PATHS &&
-      paths.every((path) => typeof path === "string" && path.length > 0 && path.length <= 300);
+      paths.every(
+        (path) => typeof path === "string" && path.length > 0 && path.length <= MAX_PATH_CHARS,
+      );
     if (!valid) return { ok: false, reason: "invalid_input" };
     const named = JSON.stringify(paths);
     // A path, or a folder's whole content when it ends in `/`. The table's column is named in full:
@@ -645,7 +731,12 @@ export class Vault extends DurableObject<VaultEnv> {
       WHERE ${table}.path = named.value
         OR (substr(named.value, -1) = '/' AND substr(${table}.path, 1, length(named.value)) = named.value))`;
     return this.#serialize(async (): Promise<ForgetResult> => {
-      await this.#sync();
+      try {
+        await this.#sync();
+      } catch (error) {
+        console.error("Vault: forgetting couldn't sync", errorName(error));
+        return { ok: false, reason: "unavailable" };
+      }
       const forgotten = this.ctx.storage.transactionSync(() => {
         let rows = 0;
         for (const table of PATH_TABLES) {
@@ -660,9 +751,7 @@ export class Vault extends DurableObject<VaultEnv> {
         named,
       ).map((row) => row.path);
       const head = this.#get("head") ?? "";
-      const files = this.#exec<{ path: string; content: string }>(
-        "SELECT path, content FROM files",
-      );
+      const files = this.#indexable();
       const seq = Number(this.#get("index_seq") ?? "0") + 1;
       this.#set("index_seq", `${seq}`);
       const id = `${head}#${seq}`;
@@ -792,10 +881,12 @@ export class Vault extends DurableObject<VaultEnv> {
         this.ctx.storage.transactionSync(() => {
           for (const path of packed.paths) {
             this.#exec(
-              `INSERT INTO recall_counts (path, count, last_at) VALUES (?, 1, ?)
+              `INSERT INTO recall_counts (path, count, last_at)
+               SELECT ?, 1, ? WHERE EXISTS (SELECT 1 FROM files WHERE path = ?)
                ON CONFLICT (path) DO UPDATE SET count = count + 1, last_at = excluded.last_at`,
               path,
               now,
+              path,
             );
           }
         });
@@ -865,7 +956,7 @@ export class Vault extends DurableObject<VaultEnv> {
         this.#set("head", remote);
         return changed;
       });
-      await this.#index(previous, remote, changed);
+      await this.#index(previous, remote, this.#indexed(changed));
       if (head === null && this.#visible("README.md") === null) {
         this.#exec(
           "INSERT INTO queue (agent, path, content, summary, queued_at) VALUES (?, ?, ?, ?, ?)",
@@ -930,10 +1021,7 @@ export class Vault extends DurableObject<VaultEnv> {
       path,
     )[0];
     const previous =
-      earlier !== undefined &&
-      earlier.state !== "resolved" &&
-      before !== null &&
-      hasConflictMarkers(before)
+      earlier !== undefined && before !== null && hasConflictMarkers(before)
         ? earlier.previous
         : before;
     this.#exec(
@@ -950,10 +1038,13 @@ export class Vault extends DurableObject<VaultEnv> {
    * The working copy of every path with queued writes, read before a sync replaces it: what those
    * writes were built on, since a write is made on what a read shows, queued writes included.
    */
-  #queuedBases(): Map<string, string> {
+  #queuedBases(): Map<string, string | null> {
     return new Map(
-      this.#exec<{ path: string; content: string }>(
-        "SELECT path, content FROM files WHERE path IN (SELECT path FROM queue)",
+      this.#exec<{ path: string; content: string | null }>(
+        `SELECT files.path AS path,
+                CASE WHEN held.path IS NULL THEN files.content ELSE held.previous END AS content
+         FROM files LEFT JOIN held ON held.path = files.path AND held.state != 'resolved'
+         WHERE files.path IN (SELECT path FROM queue)`,
       ).map((row) => [row.path, row.content]),
     );
   }
@@ -980,10 +1071,12 @@ export class Vault extends DurableObject<VaultEnv> {
       this.#exec("DELETE FROM queue WHERE path = ? AND id <= ?", path, queued[landed]?.id ?? 0);
       return;
     }
-    const merged =
+    const result =
       incoming !== null && base !== null && last.content !== null
         ? mergeOwnerWins(base, incoming, last.content)
         : null;
+    // A merge that still holds conflict markers is never committed: the owner's edit wins whole.
+    const merged = result !== null && !hasConflictMarkers(result.content) ? result : null;
     this.#exec("DELETE FROM queue WHERE path = ?", path);
     if (merged !== null && merged.content !== incoming) {
       // One write, on top of the owner's edit.

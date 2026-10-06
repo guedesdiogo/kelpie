@@ -8,6 +8,7 @@ import {
   replaceBackendForTesting,
   replaceGatewayForTesting,
 } from "../src/index.ts";
+import { resolveConflict } from "../src/resolve.ts";
 
 afterEach(() => {
   replaceBackendForTesting(undefined);
@@ -38,8 +39,11 @@ function marked(mine: string, theirs: string, frontmatter = ""): string {
   ].join("\n");
 }
 
-/** A gateway whose model answers each resolution with the next of `answers`, or fails. */
-function fakeModel(answers: (string | Error)[]) {
+/**
+ * A gateway whose model answers each resolution with the next of `answers`, or fails. `meanwhile`
+ * runs while it answers, as an owner's push could.
+ */
+function fakeModel(answers: (string | Error)[], meanwhile?: () => void) {
   const requests: { tier: string; request: RoutedRequest }[] = [];
   const gateway: MemoryGateway = {
     async embed() {
@@ -50,6 +54,7 @@ function fakeModel(answers: (string | Error)[]) {
     },
     async generate(tier, request) {
       requests.push({ tier, request });
+      meanwhile?.();
       const answer = answers.shift() ?? new Error("no answer left");
       async function* events(): AsyncIterable<LlmEvent> {
         if (answer instanceof Error) throw answer;
@@ -69,6 +74,13 @@ function fakeModel(answers: (string | Error)[]) {
   };
   replaceGatewayForTesting(gateway);
   return requests;
+}
+
+/** Lets the next try at a held file come, as if its wait had passed. */
+async function later(stub: ReturnType<typeof vault>) {
+  await runInDurableObject(stub, (_instance, state) => {
+    state.storage.sql.exec("UPDATE state SET value = '0' WHERE key = 'resolve_after'");
+  });
 }
 
 async function rows(stub: ReturnType<typeof vault>, sql: string) {
@@ -129,7 +141,14 @@ describe("Vault conflict resolution", () => {
     ]);
     backend.push({ "memory/people/ana.md": pushed });
 
-    for (let run = 0; run < 5; run += 1) await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    // Tries are spaced: another wake-up right away doesn't try again.
+    await runDurableObjectAlarm(stub);
+    expect(requests).toHaveLength(1);
+    for (let run = 0; run < 4; run += 1) {
+      await later(stub);
+      await runDurableObjectAlarm(stub);
+    }
     // Three tries, then it waits for the owner, who sees it in the list.
     expect(requests).toHaveLength(3);
     expect(backend.files()["memory/people/ana.md"]).toBe(pushed);
@@ -170,5 +189,219 @@ describe("Vault conflict resolution", () => {
       { path: "memory/notes/diario.md", state: "held", attempts: 0 },
       { path: "skills/recipes/SKILL.md", state: "held", attempts: 0 },
     ]);
+  });
+
+  it("shows a held note as it was before, and never commits the markers", async () => {
+    const backend = vaultWith({ "memory/people/ana.md": base });
+    const stub = vault("resolve-visible");
+    await stub.compile("kelpie");
+    const pushed = marked("Mora no Porto.", "Mora em Braga.");
+    // The model keeps the side the vault already had.
+    const requests = fakeModel(["# Ana\n\nMora em Lisboa.\n\nGosta de café.\n"]);
+    replaceGatewayForTesting(null);
+    backend.push({ "memory/people/ana.md": pushed });
+    await runDurableObjectAlarm(stub);
+
+    // Reads and recall see the version before the conflict.
+    expect(await stub.read("memory/people/ana.md")).toBe(base);
+    const recalled = await stub.recall("kelpie", "Onde a Ana mora?", {
+      scopes: "all",
+      budgetTokens: 1_000,
+    });
+    expect(recalled.text).not.toContain("<<<<<<<");
+    // An agent's write, made on what it read.
+    const added = `${base}\nTem um gato.\n`;
+    await stub.write("kelpie", [{ path: "memory/people/ana.md", content: added }], "x");
+
+    fakeModel(["# Ana\n\nMora no Porto.\n\nGosta de café.\n"]);
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    const committed = backend.files()["memory/people/ana.md"] ?? "";
+    expect(committed).toBe("# Ana\n\nMora no Porto.\n\nGosta de café.\n\nTem um gato.\n");
+    expect(requests).toHaveLength(0);
+  });
+
+  it("keeps the version from before the first conflict when another one is pushed", async () => {
+    const backend = vaultWith({ "memory/people/ana.md": base });
+    const stub = vault("resolve-again");
+    await stub.compile("kelpie");
+    fakeModel(["# Ana\n\nMora no Porto.\n\nGosta de café.\n"]);
+    backend.push({ "memory/people/ana.md": marked("Mora no Porto.", "Mora em Braga.") });
+    // The resolution is queued in this run, and commits in the next.
+    await runDurableObjectAlarm(stub);
+    backend.push({ "memory/people/ana.md": marked("Mora em Faro.", "Mora em Braga.") });
+    await runDurableObjectAlarm(stub);
+    expect(await rows(stub, "SELECT previous, state FROM held")).toEqual([
+      { previous: base, state: "held" },
+    ]);
+  });
+
+  it("merges a write queued before a hold against the version from before it", async () => {
+    const backend = vaultWith({ "memory/people/ana.md": base });
+    const stub = vault("resolve-base");
+    await stub.compile("kelpie");
+    replaceGatewayForTesting(null);
+    const kelpie = base.replace("Mora em Lisboa.", "Mora em Lisboa, perto do rio.");
+    await stub.write("kelpie", [{ path: "memory/people/ana.md", content: kelpie }], "x");
+    backend.push({ "memory/people/ana.md": marked("Mora em Lisboa.", "Mora em Braga.") });
+    await runDurableObjectAlarm(stub);
+    // The owner keeps the line as it was, and changes another.
+    backend.push({ "memory/people/ana.md": base.replace("café", "chá") });
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()["memory/people/ana.md"]).toBe(kelpie.replace("café", "chá"));
+  });
+
+  it("never commits a write that would put markers back", async () => {
+    const backend = vaultWith({ "memory/people/ana.md": base });
+    const stub = vault("resolve-no-markers");
+    await stub.compile("kelpie");
+    // A write that holds a conflict block of its own.
+    const block = "<<<<<<< HEAD\nMora no Porto.\n=======\nMora em Braga.\n>>>>>>> main\n";
+    await stub.write(
+      "kelpie",
+      [{ path: "memory/people/ana.md", content: `${base}\n${block}` }],
+      "x",
+    );
+    // The owner's edit is far from it, so the two would merge cleanly.
+    backend.push({ "memory/people/ana.md": base.replace("Lisboa", "Porto") });
+    replaceGatewayForTesting(null);
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()["memory/people/ana.md"]).toBe(base.replace("Lisboa", "Porto"));
+    expect(await rows(stub, "SELECT path, reason FROM conflicts")).toEqual([
+      { path: "memory/people/ana.md", reason: "owner_won" },
+    ]);
+  });
+
+  it("applies nothing when the owner fixed the file while the model answered", async () => {
+    const persona = "# Kelpie\n\nFala português.\n";
+    const backend = vaultWith({
+      "agents/kelpie/SOUL.md": persona,
+      "memory/people/ana.md": base,
+    });
+    const stub = vault("resolve-stale");
+    await stub.compile("kelpie");
+    const conflict = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> main\n";
+    backend.push({
+      "agents/kelpie/SOUL.md": `${persona}${conflict}`,
+      "memory/people/ana.md": marked("Mora no Porto.", "Mora em Braga."),
+    });
+    // Each answer arrives after the owner pushed a clean version of every file, other than it.
+    const fixed = { "agents/kelpie/SOUL.md": `${persona}b\n`, "memory/people/ana.md": base };
+    fakeModel([`${persona}a\n`, "# Ana\n\nMora no Porto.\n\nGosta de café.\n"], () => {
+      backend.push(fixed);
+    });
+    await runDurableObjectAlarm(stub);
+    await later(stub);
+    await runDurableObjectAlarm(stub);
+
+    expect(backend.pullRequests).toEqual([]);
+    expect(backend.files()).toMatchObject(fixed);
+    expect(await stub.held()).toEqual([]);
+  });
+
+  it("writes a held note in an agent's own folder as that agent, and proposes its rules", async () => {
+    const backend = vaultWith({
+      "agents/kelpie/memory/diario.md": "# Diário\n",
+      "agents/kelpie/AGENTS.md": "# Regras\n",
+      "AGENTS.md": "# Regras do vault\n\nEscreva em português.\n",
+    });
+    const stub = vault("resolve-routes");
+    await stub.compile("kelpie");
+    const conflict = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> main\n";
+    // The rules file sorts first, so it is tried first.
+    const requests = fakeModel(["# Regras\nb\n", "# Diário\na\n"]);
+    backend.push({
+      "agents/kelpie/memory/diario.md": `# Diário\n${conflict}`,
+      "agents/kelpie/AGENTS.md": `# Regras\n${conflict}`,
+    });
+    await runDurableObjectAlarm(stub);
+    await later(stub);
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+
+    expect(backend.files()["agents/kelpie/memory/diario.md"]).toBe("# Diário\na\n");
+    const commit = backend.commitRequests.find((request) =>
+      request.writes.some((write) => write.path === "agents/kelpie/memory/diario.md"),
+    );
+    expect(commit?.body).toContain("Kelpie-Agent: kelpie");
+    const [pull] = backend.pullRequests;
+    expect(pull?.title).toBe("Propose rules for kelpie");
+    expect(backend.files(pull?.branch)["agents/kelpie/AGENTS.md"]).toBe("# Regras\nb\n");
+    // The vault's own rules go to the model with the conflict.
+    expect(JSON.stringify(requests[0]?.request.messages)).toContain("Escreva em português.");
+  });
+});
+
+describe("resolveConflict", () => {
+  const conflicted =
+    "# Ana\n\n<<<<<<< HEAD\nMora no Porto.\n=======\nMora em Braga.\n>>>>>>> main\n";
+  const file = { path: "memory/people/ana.md", marked: conflicted, previous: null, rules: "" };
+
+  /** A gateway answering once, with `answer` and the finish reason given. */
+  function answering(answer: string, reason: "stop" | "length" = "stop") {
+    let cancelled = 0;
+    const gateway: Pick<MemoryGateway, "generate"> = {
+      async generate() {
+        async function* events(): AsyncIterable<LlmEvent> {
+          yield {
+            type: "finish",
+            reason,
+            message: { role: "assistant", parts: [{ type: "text", text: answer }] },
+            usage: [],
+          };
+        }
+        return {
+          events: async () => toNdjsonStream(events(), () => {}),
+          cancel: async () => {
+            cancelled += 1;
+          },
+        };
+      },
+    };
+    return { gateway, cancelled: () => cancelled };
+  }
+
+  it("takes a resolution, even inside a code fence", async () => {
+    const resolved = "# Ana\n\nMora no Porto.\n";
+    expect(await resolveConflict(answering(resolved).gateway, file, 1_000)).toBe(resolved);
+    expect(
+      await resolveConflict(
+        answering(`\`\`\`markdown\n# Ana\n\nMora no Porto.\n\`\`\``).gateway,
+        file,
+        1_000,
+      ),
+    ).toBe(resolved);
+  });
+
+  it.each([
+    ["an empty answer", " \n"],
+    ["a marker line left", "# Ana\n\n>>>>>>> main\nMora no Porto.\n"],
+    ["dropped frontmatter", "# Ana\n\nMora no Porto.\n", "---\nkind: person\n---\n"],
+  ])("refuses %s", async (_name, answer, frontmatter = "") => {
+    const withFrontmatter = { ...file, marked: `${frontmatter}${conflicted}` };
+    expect(await resolveConflict(answering(answer).gateway, withFrontmatter, 1_000)).toBeNull();
+  });
+
+  it("refuses an answer cut short by its token limit", async () => {
+    const cut = answering("# Ana\n\nMora no Porto.\n", "length");
+    await expect(resolveConflict(cut.gateway, file, 1_000)).rejects.toThrow("no complete answer");
+  });
+
+  it("stops a model that doesn't answer in time", async () => {
+    let cancelled = 0;
+    const gateway: Pick<MemoryGateway, "generate"> = {
+      async generate() {
+        return {
+          events: async () => new ReadableStream<Uint8Array>(),
+          cancel: async () => {
+            cancelled += 1;
+          },
+        };
+      },
+    };
+    await expect(resolveConflict(gateway, file, 20)).rejects.toThrow("no answer after 20 ms");
+    expect(cancelled).toBe(1);
   });
 });

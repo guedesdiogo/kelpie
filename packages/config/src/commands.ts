@@ -74,7 +74,7 @@ export interface HeldVaultFile {
 
 export type ForgetVaultResult =
   | { ok: true; forgotten: number; stillInVault: string[] }
-  | { ok: false; reason: "vault_off" | "invalid_input" };
+  | { ok: false; reason: "vault_off" | "invalid_input" | "unavailable" };
 
 /** The most paths one `forgetVaultPaths` names, and the longest path the vault takes. */
 const MAX_FORGET_PATHS = 1_000;
@@ -352,7 +352,8 @@ export function createConfigCommands(ports: ConfigPorts) {
           value: { forgotten: result.forgotten, stillInVault: result.stillInVault },
         };
       }
-      return result.reason === "vault_off" ? { ok: false, reason: "not_configured" } : invalid;
+      if (result.reason === "vault_off") return { ok: false, reason: "not_configured" };
+      return result.reason === "unavailable" ? { ok: false, reason: "unavailable" } : invalid;
     },
   };
 }

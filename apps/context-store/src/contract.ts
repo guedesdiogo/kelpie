@@ -51,7 +51,7 @@ export interface HeldFile {
  */
 export type ForgetResult =
   | { ok: true; forgotten: number; stillInVault: string[] }
-  | { ok: false; reason: "vault_off" | "invalid_input" };
+  | { ok: false; reason: "vault_off" | "invalid_input" | "unavailable" };
 
 export interface RecallOptions {
   /**

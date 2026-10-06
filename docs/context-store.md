@@ -25,17 +25,27 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
   - **How they arrive:** through GitHub's push webhook, a second after it, and through a reconcile every 15 minutes, because GitHub doesn't redeliver a failed webhook.
   - **Kelpie's own commits** come back the same way and change nothing. That includes a commit that landed although GitHub's answer was lost: the queued writes it holds count as done.
   - **A file both changed** (#114): when the owner changed a file Kelpie has queued writes for, the two merge line by line from the version both started from (diff3).
-    - Kelpie's lines that don't overlap the owner's stay. Where they overlap, the owner's side wins.
+    - Kelpie's lines that don't overlap the owner's stay. Lines both added at the same place both stay, the owner's first. Where both changed the same lines, the owner's side wins.
+    - The result keeps the owner's line endings.
     - Kelpie's writes that lost lines are kept in the object's `conflicts` table, marked `owner_won`, and the log says how many.
-    - Without a common version (a file both created), or when either side removed the file, the owner's version wins whole.
-  - **A file pushed with conflict markers** (#114): git's `<<<<<<<`, `=======` and `>>>>>>>` lines, committed unresolved. A line of `=======` alone under text is a heading, not a conflict.
-    - **Held:** the file is kept as pushed in the object's `held` table. Kelpie's queued writes to it stay out of commits, since merging into it would commit the markers.
-    - **Resolved by the model:** one held file a run, after GitHub's work. Through llm-gateway's `generate`, it sees the vault's layout, the file as the vault had it before the push, and the file as pushed.
-      - The answer must leave no markers and keep its frontmatter parseable.
-      - Files over 48,000 characters aren't tried.
+    - **The owner's version wins whole when:**
+      - there is no common version (a file both created);
+      - either side removed the file;
+      - a version runs past 1,000 lines;
+      - the merge would hold conflict markers.
+  - **A file pushed with conflict markers** (#114): git's `<<<<<<<`, `=======` and `>>>>>>>` lines, committed unresolved, found in one pass over each line.
+    - These don't count: a line of `=======` alone under text, which is a heading's underline, and markers quoted in a fenced code block.
+    - **Held:** the file is kept as pushed in the object's `held` table.
+      - Reads, the agent's prompt and memory see its version from before the conflict, never the markers.
+      - Kelpie's queued writes to it stay out of commits.
+    - **Resolved by the model,** one held file at a time, after GitHub's work.
+      - **What it sees,** through llm-gateway's `generate`: the vault's layout, its `AGENTS.md`, the file as the vault had it before the push, and the file as pushed.
+      - **The answer:** it must leave no markers, keep every line outside the conflicts verbatim and in order, take each conflict's lines only from its sides or its base, and keep its frontmatter parseable. The model resolves; it can't rewrite.
+      - **Limits:** tries come at least 5 minutes apart. Files over 48,000 characters aren't tried.
+      - **The owner wins a race:** before the resolution is applied, the object syncs. If the owner fixed the file meanwhile, the resolution is dropped.
     - **Applied** until per-item approval exists (#113):
       - a file an agent may write is written as the owner's clean edit would be, and queued writes merge on top of it;
-      - a persona, rules or an agent's skill becomes a pull request. The file stays held until a clean version is pushed, as when the pull request merges; a pull request closed unmerged leaves it held and listed;
+      - a persona, rules or an agent's skill becomes a pull request that says the model wrote it. The file stays held until a clean version is pushed, as when the pull request merges. A pull request closed unmerged leaves it held and listed;
       - any other file stays held.
     - **Waiting:** after three failed tries, the file waits for the owner. `/commands/listHeldFiles` lists what waits ([admin-api.md](admin-api.md)), and a clean push of the file ends its hold.
     - **Audit:** a resolved file stays in `held`, as pushed, alongside git's history.

@@ -46,4 +46,31 @@ describe("mergeOwnerWins", () => {
       overlapped: false,
     });
   });
+
+  it("follows the owner's line endings, and a file without a final newline", () => {
+    const crlf = (text: string) => text.replaceAll("\n", "\r\n");
+    const owner = crlf(base.replace("café", "café forte"));
+    const kelpie = base.replace("um gato", "dois gatos");
+    expect(mergeOwnerWins(base, owner, kelpie)).toEqual({
+      content: crlf(base.replace("café", "café forte").replace("um gato", "dois gatos")),
+      overlapped: false,
+    });
+    const trimmed = base.trimEnd();
+    expect(mergeOwnerWins(base, trimmed, `${base}Faz anos em maio.\n`)).toEqual({
+      content: `${trimmed}\nFaz anos em maio.`,
+      overlapped: false,
+    });
+  });
+
+  it("keeps lines both sides added at the same place, the owner's first", () => {
+    expect(mergeOwnerWins(base, `${base}Do dono.\n`, `${base}Do Kelpie.\n`)).toEqual({
+      content: `${base}Do dono.\nDo Kelpie.\n`,
+      overlapped: false,
+    });
+  });
+
+  it("leaves a file too long to merge to the owner", () => {
+    const long = `${"linha\n".repeat(1_001)}`;
+    expect(mergeOwnerWins(long, `${long}a\n`, `${long}b\n`)).toBeNull();
+  });
 });
