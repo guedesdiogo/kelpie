@@ -1243,13 +1243,15 @@ describe("ConversationAgent memory", () => {
   const narrow = { ...options, scopes: ["conversation/telegram-chat-1"] };
 
   it("asks for every scope only for the owner in a direct chat, and fails closed", async () => {
-    const world = use(fakeWorld(Array.from({ length: 6 }, () => reply("Ok."))));
+    const world = use(fakeWorld(Array.from({ length: 8 }, () => reply("Ok."))));
     const cases: [Record<string, unknown>, unknown][] = [
       [{}, options],
       [{ chatType: "group" }, narrow],
       [{ role: "member" }, narrow],
       [{ role: "admin" }, narrow],
       // As an ingress from before #131 sends it, and values no ingress sends.
+      [{ chatType: undefined }, narrow],
+      [{ chatType: "dm" }, narrow],
       [{ role: undefined, chatType: undefined }, narrow],
       [{ role: "root", chatType: "dm" }, narrow],
     ];
@@ -1262,20 +1264,20 @@ describe("ConversationAgent memory", () => {
     }
   });
 
-  it("takes a turn's least-privileged author, and each turn on its own", async () => {
-    const world = use(fakeWorld([reply("Ok."), reply("Ok.")]));
+  it("takes a turn's least-privileged author, whoever wrote last, and each turn on its own", async () => {
+    const world = use(fakeWorld([reply("Ok."), reply("Ok."), reply("Ok.")]));
     const stub = agent("memory-scopes-mixed");
-    await stub.ingest(message("m1", "onde a Ana mora?"));
-    await stub.ingest({ ...message("m2", "e o Bruno?", { userId: "u-guest" }), role: "member" });
-    await stub.flush();
-    await vi.waitFor(() => expect(world.recalls).toHaveLength(1));
-    expect(world.recalls[0]?.options).toEqual(narrow);
-
-    await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).toBe("delivered"));
-    await stub.ingest(message("m3", "e a Patrícia?"));
-    await stub.flush();
-    await vi.waitFor(() => expect(world.recalls).toHaveLength(2));
-    expect(world.recalls[1]?.options).toEqual(options);
+    const turn = async (...messages: Record<string, unknown>[]) => {
+      for (const sent of messages) await stub.ingest(sent as ReturnType<typeof message>);
+      await stub.flush();
+      await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).toBe("delivered"));
+      return world.recalls.at(-1)?.options;
+    };
+    const guest = { ...message("m1", "e o Bruno?", { userId: "u-guest" }), role: "member" };
+    expect(await turn(guest, message("m2", "onde a Ana mora?"))).toEqual(narrow);
+    const unknown = { ...message("m3", "e a Patrícia?"), role: undefined };
+    expect(await turn(unknown, message("m4", "e o Theo?"))).toEqual(narrow);
+    expect(await turn(message("m5", "e a Carla?"))).toEqual(options);
   });
 
   it("sends a turn's memories with its request, and again in place on later ones", async () => {

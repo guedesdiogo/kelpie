@@ -84,7 +84,7 @@ describe("webchat sockets", () => {
   it("keeps a socket whose admission has no role, and gives its turns only their own scope (#131)", async () => {
     const world = use(fakeWorld([reply("Oi."), reply("Oi de novo.")]));
     const name = "assistant:webchat:no-role";
-    // As ingress sent it before #131, and as a socket from then still holds it.
+    // As an ingress from before #131 sends it, while the runtime is deployed ahead of it.
     const before = await open(name, { agentId: "assistant", userId: "u-owner", timeZone: null });
     before.send({ type: "message", id: "c1", text: "onde a Ana mora?" });
     await vi.waitFor(() => expect(ofType(before.frames, "accepted")).toHaveLength(1));
