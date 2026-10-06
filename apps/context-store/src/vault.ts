@@ -1668,7 +1668,9 @@ export class Vault extends DurableObject<VaultEnv> {
     if (landed !== -1) {
       // Kelpie's own commit, whose answer was lost: those writes are done, later ones still wait.
       this.#exec("DELETE FROM queue WHERE path = ? AND id <= ?", path, queued[landed]?.id ?? 0);
-      // It replaced the owner's version (#160): listed, as a flush would have.
+      // It replaced the owner's version (#160): listed, as a flush would have. An owner's own
+      // deletion, or an edit equal to the queued one, made before the flush matches too: rare,
+      // and the report errs toward listing.
       if (
         overOwners &&
         queued[landed]?.summary !== RESOLVE_SUMMARY &&

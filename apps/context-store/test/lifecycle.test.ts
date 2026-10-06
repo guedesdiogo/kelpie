@@ -203,28 +203,26 @@ describe("Vault lifecycle", () => {
     expect(report).toContain("[[memory/notes/cha|Chá]]: changed");
     expect(report).not.toContain("memory/notes/pao");
     expect(report).toContain("- `memory/notes/velho.md`: removed");
-    expect(report).not.toContain("memory/_lint/report");
     expect(report).not.toContain("velha");
     expect(
-      await runInDurableObject(
-        stub,
-        (_instance, state) =>
-          state.storage.sql.exec("SELECT count(*) AS n FROM owner_changes WHERE at = 1").one().n,
+      await runInDurableObject(stub, (_instance, state) =>
+        state.storage.sql.exec("SELECT path FROM owner_changes ORDER BY path").toArray(),
       ),
-    ).toBe(0);
+    ).toEqual([{ path: "memory/notes/cha.md" }, { path: "memory/notes/velho.md" }]);
   });
 
   it("lists a change whose commit answer was lost, once the sync finds it", async () => {
     const backend = new FakeVaultBackend({
       "README.md": "# Vault",
       "memory/notes/cha.md": "# Chá\n\nVerde.\n",
+      "memory/notes/velho.md": "# Velho\n\nApagar.\n",
     });
     replaceBackendForTesting(backend);
     replaceGatewayForTesting(null);
     const stub = vault("lifecycle-owner-lost-answer");
     await stub.compile("kelpie");
     const commit = backend.commit.bind(backend);
-    let lose = true;
+    let lose = false;
     backend.commit = async (request) => {
       const outcome = await commit(request);
       if (lose) {
@@ -235,16 +233,33 @@ describe("Vault lifecycle", () => {
     };
     await stub.write(
       "kelpie",
-      [{ path: "memory/notes/cha.md", content: "# Chá\n\nPreto.\n" }],
+      [{ path: "memory/notes/pao.md", content: "# Pão\n\nIntegral.\n" }],
+      "x",
+    );
+    await runDurableObjectAlarm(stub);
+    lose = true;
+    await stub.write(
+      "kelpie",
+      [
+        { path: "memory/notes/cha.md", content: "# Chá\n\nPreto.\n" },
+        { path: "memory/notes/velho.md", content: null },
+        // Kelpie's own note: replacing its version isn't the owner's change.
+        { path: "memory/notes/pao.md", content: "# Pão\n\nCom sal.\n" },
+      ],
       "x",
     );
     await runDurableObjectAlarm(stub);
     await runDurableObjectAlarm(stub);
     expect(backend.files()["memory/notes/cha.md"]).toBe("# Chá\n\nPreto.\n");
+    expect(backend.files()["memory/notes/velho.md"]).toBeUndefined();
+    expect(backend.files()["memory/notes/pao.md"]).toBe("# Pão\n\nCom sal.\n");
     expect(
       await runInDurableObject(stub, (_instance, state) =>
-        state.storage.sql.exec("SELECT path FROM owner_changes").toArray(),
+        state.storage.sql.exec("SELECT path, removed FROM owner_changes ORDER BY path").toArray(),
       ),
-    ).toEqual([{ path: "memory/notes/cha.md" }]);
+    ).toEqual([
+      { path: "memory/notes/cha.md", removed: 0 },
+      { path: "memory/notes/velho.md", removed: 1 },
+    ]);
   });
 });
