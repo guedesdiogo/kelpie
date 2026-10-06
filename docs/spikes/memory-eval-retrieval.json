@@ -1275,7 +1275,1280 @@
           "staleFirst": null,
           "tokens": 631
         }
-      ]
+      ],
+      "expiry": {
+        "now": "2026-10-06T12:00:00Z",
+        "slices": {
+          "overall": {
+            "n": 150,
+            "hit": {
+              "1": 0.613,
+              "3": 0.773,
+              "5": 0.827,
+              "10": 0.867
+            },
+            "mrr": 0.705,
+            "staleFirst": {
+              "n": 11,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 548,
+              "p95": 658
+            }
+          },
+          "entity": {
+            "n": 35,
+            "hit": {
+              "1": 0.6,
+              "3": 0.8,
+              "5": 0.886,
+              "10": 0.943
+            },
+            "mrr": 0.72,
+            "staleFirst": {
+              "n": 0,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 563,
+              "p95": 674
+            }
+          },
+          "preference": {
+            "n": 25,
+            "hit": {
+              "1": 0.76,
+              "3": 0.88,
+              "5": 0.88,
+              "10": 0.92
+            },
+            "mrr": 0.818,
+            "staleFirst": {
+              "n": 0,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 517,
+              "p95": 651
+            }
+          },
+          "commitment": {
+            "n": 19,
+            "hit": {
+              "1": 0.737,
+              "3": 0.737,
+              "5": 0.737,
+              "10": 0.789
+            },
+            "mrr": 0.746,
+            "staleFirst": {
+              "n": 0,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 532,
+              "p95": 653
+            }
+          },
+          "update": {
+            "n": 25,
+            "hit": {
+              "1": 0.76,
+              "3": 0.8,
+              "5": 0.8,
+              "10": 0.84
+            },
+            "mrr": 0.786,
+            "staleFirst": {
+              "n": 11,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 536,
+              "p95": 668
+            }
+          },
+          "as-of": {
+            "n": 15,
+            "hit": {
+              "1": 0.533,
+              "3": 0.733,
+              "5": 0.8,
+              "10": 0.8
+            },
+            "mrr": 0.636,
+            "staleFirst": {
+              "n": 0,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 536,
+              "p95": 565
+            }
+          },
+          "multi-hop": {
+            "n": 20,
+            "hit": {
+              "1": 0,
+              "3": 0.5,
+              "5": 0.7,
+              "10": 0.75
+            },
+            "mrr": 0.287,
+            "staleFirst": {
+              "n": 0,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 573,
+              "p95": 654
+            }
+          },
+          "procedure": {
+            "n": 11,
+            "hit": {
+              "1": 1,
+              "3": 1,
+              "5": 1,
+              "10": 1
+            },
+            "mrr": 1,
+            "staleFirst": {
+              "n": 0,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 599,
+              "p95": 663
+            }
+          },
+          "names a shared first name": {
+            "n": 34,
+            "hit": {
+              "1": 0.5,
+              "3": 0.765,
+              "5": 0.794,
+              "10": 0.912
+            },
+            "mrr": 0.642,
+            "staleFirst": {
+              "n": 5,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 561,
+              "p95": 649
+            }
+          },
+          "names nobody by first name": {
+            "n": 116,
+            "hit": {
+              "1": 0.647,
+              "3": 0.776,
+              "5": 0.836,
+              "10": 0.853
+            },
+            "mrr": 0.723,
+            "staleFirst": {
+              "n": 6,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 544,
+              "p95": 663
+            }
+          },
+          "even half": {
+            "n": 75,
+            "hit": {
+              "1": 0.627,
+              "3": 0.787,
+              "5": 0.867,
+              "10": 0.907
+            },
+            "mrr": 0.722,
+            "staleFirst": {
+              "n": 4,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 541,
+              "p95": 649
+            }
+          },
+          "odd half": {
+            "n": 75,
+            "hit": {
+              "1": 0.6,
+              "3": 0.76,
+              "5": 0.787,
+              "10": 0.827
+            },
+            "mrr": 0.687,
+            "staleFirst": {
+              "n": 7,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 555,
+              "p95": 668
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "q001",
+            "category": "entity",
+            "answerRank": 4,
+            "staleFirst": null,
+            "tokens": 538
+          },
+          {
+            "id": "q002",
+            "category": "entity",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 594
+          },
+          {
+            "id": "q003",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 532
+          },
+          {
+            "id": "q004",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 542
+          },
+          {
+            "id": "q005",
+            "category": "entity",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 518
+          },
+          {
+            "id": "q006",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 649
+          },
+          {
+            "id": "q007",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 521
+          },
+          {
+            "id": "q008",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 555
+          },
+          {
+            "id": "q009",
+            "category": "entity",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 543
+          },
+          {
+            "id": "q010",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 541
+          },
+          {
+            "id": "q011",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 634
+          },
+          {
+            "id": "q012",
+            "category": "entity",
+            "answerRank": 4,
+            "staleFirst": null,
+            "tokens": 537
+          },
+          {
+            "id": "q013",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 545
+          },
+          {
+            "id": "q014",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 569
+          },
+          {
+            "id": "q015",
+            "category": "entity",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 544
+          },
+          {
+            "id": "q016",
+            "category": "entity",
+            "answerRank": 8,
+            "staleFirst": null,
+            "tokens": 559
+          },
+          {
+            "id": "q017",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 575
+          },
+          {
+            "id": "q018",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 615
+          },
+          {
+            "id": "q019",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 674
+          },
+          {
+            "id": "q020",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 559
+          },
+          {
+            "id": "q021",
+            "category": "entity",
+            "answerRank": 7,
+            "staleFirst": null,
+            "tokens": 560
+          },
+          {
+            "id": "q022",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 115
+          },
+          {
+            "id": "q023",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 541
+          },
+          {
+            "id": "q024",
+            "category": "entity",
+            "answerRank": 3,
+            "staleFirst": null,
+            "tokens": 567
+          },
+          {
+            "id": "q025",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 645
+          },
+          {
+            "id": "q026",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 561
+          },
+          {
+            "id": "q027",
+            "category": "entity",
+            "answerRank": 3,
+            "staleFirst": null,
+            "tokens": 594
+          },
+          {
+            "id": "q028",
+            "category": "entity",
+            "answerRank": 4,
+            "staleFirst": null,
+            "tokens": 575
+          },
+          {
+            "id": "q029",
+            "category": "entity",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 689
+          },
+          {
+            "id": "q030",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 627
+          },
+          {
+            "id": "q031",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 589
+          },
+          {
+            "id": "q032",
+            "category": "entity",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 533
+          },
+          {
+            "id": "q033",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 621
+          },
+          {
+            "id": "q034",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 555
+          },
+          {
+            "id": "q035",
+            "category": "entity",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 577
+          },
+          {
+            "id": "q036",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 624
+          },
+          {
+            "id": "q037",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 576
+          },
+          {
+            "id": "q038",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 590
+          },
+          {
+            "id": "q039",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 113
+          },
+          {
+            "id": "q040",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 651
+          },
+          {
+            "id": "q041",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 581
+          },
+          {
+            "id": "q042",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 614
+          },
+          {
+            "id": "q043",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 661
+          },
+          {
+            "id": "q044",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 167
+          },
+          {
+            "id": "q045",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 529
+          },
+          {
+            "id": "q046",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 598
+          },
+          {
+            "id": "q047",
+            "category": "preference",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 512
+          },
+          {
+            "id": "q048",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 563
+          },
+          {
+            "id": "q049",
+            "category": "preference",
+            "answerRank": 8,
+            "staleFirst": null,
+            "tokens": 596
+          },
+          {
+            "id": "q050",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 538
+          },
+          {
+            "id": "q051",
+            "category": "preference",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 550
+          },
+          {
+            "id": "q052",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 109
+          },
+          {
+            "id": "q053",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 568
+          },
+          {
+            "id": "q054",
+            "category": "preference",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 597
+          },
+          {
+            "id": "q055",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 541
+          },
+          {
+            "id": "q056",
+            "category": "preference",
+            "answerRank": 3,
+            "staleFirst": null,
+            "tokens": 638
+          },
+          {
+            "id": "q057",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 649
+          },
+          {
+            "id": "q058",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 628
+          },
+          {
+            "id": "q059",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 179
+          },
+          {
+            "id": "q060",
+            "category": "preference",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 555
+          },
+          {
+            "id": "q061",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 556
+          },
+          {
+            "id": "q062",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 547
+          },
+          {
+            "id": "q063",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 653
+          },
+          {
+            "id": "q064",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 308
+          },
+          {
+            "id": "q065",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 348
+          },
+          {
+            "id": "q066",
+            "category": "commitment",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 538
+          },
+          {
+            "id": "q067",
+            "category": "commitment",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 538
+          },
+          {
+            "id": "q068",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 561
+          },
+          {
+            "id": "q069",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 628
+          },
+          {
+            "id": "q070",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 556
+          },
+          {
+            "id": "q071",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 644
+          },
+          {
+            "id": "q072",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 611
+          },
+          {
+            "id": "q073",
+            "category": "commitment",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 569
+          },
+          {
+            "id": "q074",
+            "category": "commitment",
+            "answerRank": 6,
+            "staleFirst": null,
+            "tokens": 541
+          },
+          {
+            "id": "q075",
+            "category": "commitment",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 569
+          },
+          {
+            "id": "q076",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 110
+          },
+          {
+            "id": "q077",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 607
+          },
+          {
+            "id": "q078",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 598
+          },
+          {
+            "id": "q079",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 601
+          },
+          {
+            "id": "q080",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 624
+          },
+          {
+            "id": "q081",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 555
+          },
+          {
+            "id": "q082",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 564
+          },
+          {
+            "id": "q083",
+            "category": "update",
+            "answerRank": null,
+            "staleFirst": false,
+            "tokens": 585
+          },
+          {
+            "id": "q084",
+            "category": "update",
+            "answerRank": null,
+            "staleFirst": false,
+            "tokens": 0
+          },
+          {
+            "id": "q085",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 122
+          },
+          {
+            "id": "q086",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 611
+          },
+          {
+            "id": "q087",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 605
+          },
+          {
+            "id": "q088",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 586
+          },
+          {
+            "id": "q089",
+            "category": "update",
+            "answerRank": null,
+            "staleFirst": false,
+            "tokens": 541
+          },
+          {
+            "id": "q090",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 574
+          },
+          {
+            "id": "q091",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 602
+          },
+          {
+            "id": "q092",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 658
+          },
+          {
+            "id": "q093",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 651
+          },
+          {
+            "id": "q094",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 589
+          },
+          {
+            "id": "q095",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 668
+          },
+          {
+            "id": "q096",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 560
+          },
+          {
+            "id": "q097",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 575
+          },
+          {
+            "id": "q098",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 575
+          },
+          {
+            "id": "q099",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 104
+          },
+          {
+            "id": "q100",
+            "category": "update",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 628
+          },
+          {
+            "id": "q101",
+            "category": "update",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 670
+          },
+          {
+            "id": "q102",
+            "category": "update",
+            "answerRank": 7,
+            "staleFirst": false,
+            "tokens": 594
+          },
+          {
+            "id": "q103",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 646
+          },
+          {
+            "id": "q104",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 572
+          },
+          {
+            "id": "q105",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 570
+          },
+          {
+            "id": "q106",
+            "category": "as-of",
+            "answerRank": 3,
+            "staleFirst": null,
+            "tokens": 538
+          },
+          {
+            "id": "q107",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 564
+          },
+          {
+            "id": "q108",
+            "category": "as-of",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 519
+          },
+          {
+            "id": "q109",
+            "category": "as-of",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 524
+          },
+          {
+            "id": "q110",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 560
+          },
+          {
+            "id": "q111",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 552
+          },
+          {
+            "id": "q112",
+            "category": "as-of",
+            "answerRank": 5,
+            "staleFirst": null,
+            "tokens": 562
+          },
+          {
+            "id": "q113",
+            "category": "as-of",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 497
+          },
+          {
+            "id": "q114",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 496
+          },
+          {
+            "id": "q115",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 539
+          },
+          {
+            "id": "q116",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 538
+          },
+          {
+            "id": "q117",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 565
+          },
+          {
+            "id": "q118",
+            "category": "as-of",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 526
+          },
+          {
+            "id": "q119",
+            "category": "as-of",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 530
+          },
+          {
+            "id": "q120",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 529
+          },
+          {
+            "id": "q121",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 513
+          },
+          {
+            "id": "q122",
+            "category": "multi-hop",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 611
+          },
+          {
+            "id": "q123",
+            "category": "multi-hop",
+            "answerRank": 3,
+            "staleFirst": null,
+            "tokens": 525
+          },
+          {
+            "id": "q124",
+            "category": "multi-hop",
+            "answerRank": 4,
+            "staleFirst": null,
+            "tokens": 673
+          },
+          {
+            "id": "q125",
+            "category": "multi-hop",
+            "answerRank": 6,
+            "staleFirst": null,
+            "tokens": 577
+          },
+          {
+            "id": "q126",
+            "category": "multi-hop",
+            "answerRank": 3,
+            "staleFirst": null,
+            "tokens": 548
+          },
+          {
+            "id": "q127",
+            "category": "multi-hop",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 633
+          },
+          {
+            "id": "q128",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 546
+          },
+          {
+            "id": "q129",
+            "category": "multi-hop",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 654
+          },
+          {
+            "id": "q130",
+            "category": "multi-hop",
+            "answerRank": 5,
+            "staleFirst": null,
+            "tokens": 584
+          },
+          {
+            "id": "q131",
+            "category": "multi-hop",
+            "answerRank": 5,
+            "staleFirst": null,
+            "tokens": 561
+          },
+          {
+            "id": "q132",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 501
+          },
+          {
+            "id": "q133",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 627
+          },
+          {
+            "id": "q134",
+            "category": "multi-hop",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 581
+          },
+          {
+            "id": "q135",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 541
+          },
+          {
+            "id": "q136",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 605
+          },
+          {
+            "id": "q137",
+            "category": "multi-hop",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 465
+          },
+          {
+            "id": "q138",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 619
+          },
+          {
+            "id": "q139",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 546
+          },
+          {
+            "id": "q140",
+            "category": "multi-hop",
+            "answerRank": 4,
+            "staleFirst": null,
+            "tokens": 558
+          },
+          {
+            "id": "q141",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 663
+          },
+          {
+            "id": "q142",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 508
+          },
+          {
+            "id": "q143",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 642
+          },
+          {
+            "id": "q144",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 575
+          },
+          {
+            "id": "q145",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 626
+          },
+          {
+            "id": "q146",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 602
+          },
+          {
+            "id": "q147",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 563
+          },
+          {
+            "id": "q148",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 560
+          },
+          {
+            "id": "q149",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 617
+          },
+          {
+            "id": "q150",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 631
+          }
+        ]
+      }
     },
     {
       "size": 10000,
@@ -2548,7 +3821,1280 @@
           "staleFirst": null,
           "tokens": 621
         }
-      ]
+      ],
+      "expiry": {
+        "now": "2026-10-06T12:00:00Z",
+        "slices": {
+          "overall": {
+            "n": 150,
+            "hit": {
+              "1": 0.6,
+              "3": 0.713,
+              "5": 0.78,
+              "10": 0.787
+            },
+            "mrr": 0.669,
+            "staleFirst": {
+              "n": 11,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 538,
+              "p95": 675
+            }
+          },
+          "entity": {
+            "n": 35,
+            "hit": {
+              "1": 0.571,
+              "3": 0.686,
+              "5": 0.829,
+              "10": 0.829
+            },
+            "mrr": 0.652,
+            "staleFirst": {
+              "n": 0,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 552,
+              "p95": 691
+            }
+          },
+          "preference": {
+            "n": 25,
+            "hit": {
+              "1": 0.76,
+              "3": 0.84,
+              "5": 0.84,
+              "10": 0.84
+            },
+            "mrr": 0.793,
+            "staleFirst": {
+              "n": 0,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 500,
+              "p95": 647
+            }
+          },
+          "commitment": {
+            "n": 19,
+            "hit": {
+              "1": 0.737,
+              "3": 0.737,
+              "5": 0.737,
+              "10": 0.737
+            },
+            "mrr": 0.737,
+            "staleFirst": {
+              "n": 0,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 528,
+              "p95": 720
+            }
+          },
+          "update": {
+            "n": 25,
+            "hit": {
+              "1": 0.76,
+              "3": 0.8,
+              "5": 0.8,
+              "10": 0.8
+            },
+            "mrr": 0.78,
+            "staleFirst": {
+              "n": 11,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 518,
+              "p95": 647
+            }
+          },
+          "as-of": {
+            "n": 15,
+            "hit": {
+              "1": 0.533,
+              "3": 0.6,
+              "5": 0.6,
+              "10": 0.6
+            },
+            "mrr": 0.567,
+            "staleFirst": {
+              "n": 0,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 500,
+              "p95": 555
+            }
+          },
+          "multi-hop": {
+            "n": 20,
+            "hit": {
+              "1": 0,
+              "3": 0.4,
+              "5": 0.65,
+              "10": 0.7
+            },
+            "mrr": 0.258,
+            "staleFirst": {
+              "n": 0,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 593,
+              "p95": 703
+            }
+          },
+          "procedure": {
+            "n": 11,
+            "hit": {
+              "1": 0.909,
+              "3": 1,
+              "5": 1,
+              "10": 1
+            },
+            "mrr": 0.955,
+            "staleFirst": {
+              "n": 0,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 594,
+              "p95": 666
+            }
+          },
+          "names a shared first name": {
+            "n": 34,
+            "hit": {
+              "1": 0.441,
+              "3": 0.529,
+              "5": 0.676,
+              "10": 0.676
+            },
+            "mrr": 0.514,
+            "staleFirst": {
+              "n": 5,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 546,
+              "p95": 652
+            }
+          },
+          "names nobody by first name": {
+            "n": 116,
+            "hit": {
+              "1": 0.647,
+              "3": 0.767,
+              "5": 0.81,
+              "10": 0.819
+            },
+            "mrr": 0.714,
+            "staleFirst": {
+              "n": 6,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 536,
+              "p95": 682
+            }
+          },
+          "even half": {
+            "n": 75,
+            "hit": {
+              "1": 0.573,
+              "3": 0.68,
+              "5": 0.747,
+              "10": 0.76
+            },
+            "mrr": 0.638,
+            "staleFirst": {
+              "n": 4,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 530,
+              "p95": 666
+            }
+          },
+          "odd half": {
+            "n": 75,
+            "hit": {
+              "1": 0.627,
+              "3": 0.747,
+              "5": 0.813,
+              "10": 0.813
+            },
+            "mrr": 0.699,
+            "staleFirst": {
+              "n": 7,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 546,
+              "p95": 678
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "q001",
+            "category": "entity",
+            "answerRank": 4,
+            "staleFirst": null,
+            "tokens": 496
+          },
+          {
+            "id": "q002",
+            "category": "entity",
+            "answerRank": 4,
+            "staleFirst": null,
+            "tokens": 578
+          },
+          {
+            "id": "q003",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 532
+          },
+          {
+            "id": "q004",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 539
+          },
+          {
+            "id": "q005",
+            "category": "entity",
+            "answerRank": 3,
+            "staleFirst": null,
+            "tokens": 478
+          },
+          {
+            "id": "q006",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 664
+          },
+          {
+            "id": "q007",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 517
+          },
+          {
+            "id": "q008",
+            "category": "entity",
+            "answerRank": 5,
+            "staleFirst": null,
+            "tokens": 529
+          },
+          {
+            "id": "q009",
+            "category": "entity",
+            "answerRank": 5,
+            "staleFirst": null,
+            "tokens": 498
+          },
+          {
+            "id": "q010",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 508
+          },
+          {
+            "id": "q011",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 529
+          },
+          {
+            "id": "q012",
+            "category": "entity",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 476
+          },
+          {
+            "id": "q013",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 510
+          },
+          {
+            "id": "q014",
+            "category": "entity",
+            "answerRank": 3,
+            "staleFirst": null,
+            "tokens": 609
+          },
+          {
+            "id": "q015",
+            "category": "entity",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 558
+          },
+          {
+            "id": "q016",
+            "category": "entity",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 488
+          },
+          {
+            "id": "q017",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 563
+          },
+          {
+            "id": "q018",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 607
+          },
+          {
+            "id": "q019",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 752
+          },
+          {
+            "id": "q020",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 492
+          },
+          {
+            "id": "q021",
+            "category": "entity",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 515
+          },
+          {
+            "id": "q022",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 115
+          },
+          {
+            "id": "q023",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 602
+          },
+          {
+            "id": "q024",
+            "category": "entity",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 531
+          },
+          {
+            "id": "q025",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 646
+          },
+          {
+            "id": "q026",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 567
+          },
+          {
+            "id": "q027",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 600
+          },
+          {
+            "id": "q028",
+            "category": "entity",
+            "answerRank": 4,
+            "staleFirst": null,
+            "tokens": 627
+          },
+          {
+            "id": "q029",
+            "category": "entity",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 691
+          },
+          {
+            "id": "q030",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 600
+          },
+          {
+            "id": "q031",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 588
+          },
+          {
+            "id": "q032",
+            "category": "entity",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 509
+          },
+          {
+            "id": "q033",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 675
+          },
+          {
+            "id": "q034",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 534
+          },
+          {
+            "id": "q035",
+            "category": "entity",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 606
+          },
+          {
+            "id": "q036",
+            "category": "preference",
+            "answerRank": 3,
+            "staleFirst": null,
+            "tokens": 577
+          },
+          {
+            "id": "q037",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 543
+          },
+          {
+            "id": "q038",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 564
+          },
+          {
+            "id": "q039",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 113
+          },
+          {
+            "id": "q040",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 637
+          },
+          {
+            "id": "q041",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 579
+          },
+          {
+            "id": "q042",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 566
+          },
+          {
+            "id": "q043",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 647
+          },
+          {
+            "id": "q044",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 167
+          },
+          {
+            "id": "q045",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 470
+          },
+          {
+            "id": "q046",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 556
+          },
+          {
+            "id": "q047",
+            "category": "preference",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 491
+          },
+          {
+            "id": "q048",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 561
+          },
+          {
+            "id": "q049",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 546
+          },
+          {
+            "id": "q050",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 548
+          },
+          {
+            "id": "q051",
+            "category": "preference",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 528
+          },
+          {
+            "id": "q052",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 109
+          },
+          {
+            "id": "q053",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 566
+          },
+          {
+            "id": "q054",
+            "category": "preference",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 539
+          },
+          {
+            "id": "q055",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 573
+          },
+          {
+            "id": "q056",
+            "category": "preference",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 652
+          },
+          {
+            "id": "q057",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 615
+          },
+          {
+            "id": "q058",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 600
+          },
+          {
+            "id": "q059",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 179
+          },
+          {
+            "id": "q060",
+            "category": "preference",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 566
+          },
+          {
+            "id": "q061",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 501
+          },
+          {
+            "id": "q062",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 496
+          },
+          {
+            "id": "q063",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 720
+          },
+          {
+            "id": "q064",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 308
+          },
+          {
+            "id": "q065",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 348
+          },
+          {
+            "id": "q066",
+            "category": "commitment",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 517
+          },
+          {
+            "id": "q067",
+            "category": "commitment",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 571
+          },
+          {
+            "id": "q068",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 542
+          },
+          {
+            "id": "q069",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 622
+          },
+          {
+            "id": "q070",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 541
+          },
+          {
+            "id": "q071",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 634
+          },
+          {
+            "id": "q072",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 638
+          },
+          {
+            "id": "q073",
+            "category": "commitment",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 562
+          },
+          {
+            "id": "q074",
+            "category": "commitment",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 565
+          },
+          {
+            "id": "q075",
+            "category": "commitment",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 562
+          },
+          {
+            "id": "q076",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 110
+          },
+          {
+            "id": "q077",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 578
+          },
+          {
+            "id": "q078",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 598
+          },
+          {
+            "id": "q079",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 618
+          },
+          {
+            "id": "q080",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 623
+          },
+          {
+            "id": "q081",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 537
+          },
+          {
+            "id": "q082",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 552
+          },
+          {
+            "id": "q083",
+            "category": "update",
+            "answerRank": null,
+            "staleFirst": false,
+            "tokens": 585
+          },
+          {
+            "id": "q084",
+            "category": "update",
+            "answerRank": null,
+            "staleFirst": false,
+            "tokens": 0
+          },
+          {
+            "id": "q085",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 122
+          },
+          {
+            "id": "q086",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 567
+          },
+          {
+            "id": "q087",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 566
+          },
+          {
+            "id": "q088",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 586
+          },
+          {
+            "id": "q089",
+            "category": "update",
+            "answerRank": null,
+            "staleFirst": false,
+            "tokens": 501
+          },
+          {
+            "id": "q090",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 547
+          },
+          {
+            "id": "q091",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 615
+          },
+          {
+            "id": "q092",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 637
+          },
+          {
+            "id": "q093",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 637
+          },
+          {
+            "id": "q094",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 547
+          },
+          {
+            "id": "q095",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 647
+          },
+          {
+            "id": "q096",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 502
+          },
+          {
+            "id": "q097",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 568
+          },
+          {
+            "id": "q098",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 548
+          },
+          {
+            "id": "q099",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 104
+          },
+          {
+            "id": "q100",
+            "category": "update",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 628
+          },
+          {
+            "id": "q101",
+            "category": "update",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 668
+          },
+          {
+            "id": "q102",
+            "category": "update",
+            "answerRank": null,
+            "staleFirst": false,
+            "tokens": 559
+          },
+          {
+            "id": "q103",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 617
+          },
+          {
+            "id": "q104",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 571
+          },
+          {
+            "id": "q105",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 546
+          },
+          {
+            "id": "q106",
+            "category": "as-of",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 498
+          },
+          {
+            "id": "q107",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 506
+          },
+          {
+            "id": "q108",
+            "category": "as-of",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 457
+          },
+          {
+            "id": "q109",
+            "category": "as-of",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 504
+          },
+          {
+            "id": "q110",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 547
+          },
+          {
+            "id": "q111",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 527
+          },
+          {
+            "id": "q112",
+            "category": "as-of",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 454
+          },
+          {
+            "id": "q113",
+            "category": "as-of",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 449
+          },
+          {
+            "id": "q114",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 497
+          },
+          {
+            "id": "q115",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 497
+          },
+          {
+            "id": "q116",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 490
+          },
+          {
+            "id": "q117",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 555
+          },
+          {
+            "id": "q118",
+            "category": "as-of",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 495
+          },
+          {
+            "id": "q119",
+            "category": "as-of",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 522
+          },
+          {
+            "id": "q120",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 509
+          },
+          {
+            "id": "q121",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 526
+          },
+          {
+            "id": "q122",
+            "category": "multi-hop",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 611
+          },
+          {
+            "id": "q123",
+            "category": "multi-hop",
+            "answerRank": 4,
+            "staleFirst": null,
+            "tokens": 491
+          },
+          {
+            "id": "q124",
+            "category": "multi-hop",
+            "answerRank": 4,
+            "staleFirst": null,
+            "tokens": 739
+          },
+          {
+            "id": "q125",
+            "category": "multi-hop",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 521
+          },
+          {
+            "id": "q126",
+            "category": "multi-hop",
+            "answerRank": 3,
+            "staleFirst": null,
+            "tokens": 534
+          },
+          {
+            "id": "q127",
+            "category": "multi-hop",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 678
+          },
+          {
+            "id": "q128",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 555
+          },
+          {
+            "id": "q129",
+            "category": "multi-hop",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 643
+          },
+          {
+            "id": "q130",
+            "category": "multi-hop",
+            "answerRank": 6,
+            "staleFirst": null,
+            "tokens": 622
+          },
+          {
+            "id": "q131",
+            "category": "multi-hop",
+            "answerRank": 5,
+            "staleFirst": null,
+            "tokens": 606
+          },
+          {
+            "id": "q132",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 503
+          },
+          {
+            "id": "q133",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 617
+          },
+          {
+            "id": "q134",
+            "category": "multi-hop",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 682
+          },
+          {
+            "id": "q135",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 542
+          },
+          {
+            "id": "q136",
+            "category": "multi-hop",
+            "answerRank": 4,
+            "staleFirst": null,
+            "tokens": 598
+          },
+          {
+            "id": "q137",
+            "category": "multi-hop",
+            "answerRank": 5,
+            "staleFirst": null,
+            "tokens": 514
+          },
+          {
+            "id": "q138",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 619
+          },
+          {
+            "id": "q139",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 552
+          },
+          {
+            "id": "q140",
+            "category": "multi-hop",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 703
+          },
+          {
+            "id": "q141",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 652
+          },
+          {
+            "id": "q142",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 472
+          },
+          {
+            "id": "q143",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 647
+          },
+          {
+            "id": "q144",
+            "category": "procedure",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 572
+          },
+          {
+            "id": "q145",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 596
+          },
+          {
+            "id": "q146",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 666
+          },
+          {
+            "id": "q147",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 561
+          },
+          {
+            "id": "q148",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 541
+          },
+          {
+            "id": "q149",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 587
+          },
+          {
+            "id": "q150",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 621
+          }
+        ]
+      }
     },
     {
       "size": 100000,
@@ -3821,7 +6367,1280 @@
           "staleFirst": null,
           "tokens": 621
         }
-      ]
+      ],
+      "expiry": {
+        "now": "2026-10-06T12:00:00Z",
+        "slices": {
+          "overall": {
+            "n": 150,
+            "hit": {
+              "1": 0.593,
+              "3": 0.713,
+              "5": 0.767,
+              "10": 0.773
+            },
+            "mrr": 0.661,
+            "staleFirst": {
+              "n": 11,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 544,
+              "p95": 670
+            }
+          },
+          "entity": {
+            "n": 35,
+            "hit": {
+              "1": 0.514,
+              "3": 0.657,
+              "5": 0.771,
+              "10": 0.771
+            },
+            "mrr": 0.605,
+            "staleFirst": {
+              "n": 0,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 574,
+              "p95": 741
+            }
+          },
+          "preference": {
+            "n": 25,
+            "hit": {
+              "1": 0.8,
+              "3": 0.84,
+              "5": 0.84,
+              "10": 0.84
+            },
+            "mrr": 0.813,
+            "staleFirst": {
+              "n": 0,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 503,
+              "p95": 649
+            }
+          },
+          "commitment": {
+            "n": 19,
+            "hit": {
+              "1": 0.737,
+              "3": 0.737,
+              "5": 0.737,
+              "10": 0.737
+            },
+            "mrr": 0.737,
+            "staleFirst": {
+              "n": 0,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 529,
+              "p95": 688
+            }
+          },
+          "update": {
+            "n": 25,
+            "hit": {
+              "1": 0.76,
+              "3": 0.8,
+              "5": 0.8,
+              "10": 0.8
+            },
+            "mrr": 0.78,
+            "staleFirst": {
+              "n": 11,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 519,
+              "p95": 646
+            }
+          },
+          "as-of": {
+            "n": 15,
+            "hit": {
+              "1": 0.533,
+              "3": 0.6,
+              "5": 0.6,
+              "10": 0.6
+            },
+            "mrr": 0.567,
+            "staleFirst": {
+              "n": 0,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 499,
+              "p95": 561
+            }
+          },
+          "multi-hop": {
+            "n": 20,
+            "hit": {
+              "1": 0,
+              "3": 0.45,
+              "5": 0.65,
+              "10": 0.7
+            },
+            "mrr": 0.259,
+            "staleFirst": {
+              "n": 0,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 596,
+              "p95": 754
+            }
+          },
+          "procedure": {
+            "n": 11,
+            "hit": {
+              "1": 0.909,
+              "3": 1,
+              "5": 1,
+              "10": 1
+            },
+            "mrr": 0.955,
+            "staleFirst": {
+              "n": 0,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 596,
+              "p95": 670
+            }
+          },
+          "names a shared first name": {
+            "n": 34,
+            "hit": {
+              "1": 0.412,
+              "3": 0.5,
+              "5": 0.588,
+              "10": 0.618
+            },
+            "mrr": 0.478,
+            "staleFirst": {
+              "n": 5,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 568,
+              "p95": 668
+            }
+          },
+          "names nobody by first name": {
+            "n": 116,
+            "hit": {
+              "1": 0.647,
+              "3": 0.776,
+              "5": 0.819,
+              "10": 0.819
+            },
+            "mrr": 0.715,
+            "staleFirst": {
+              "n": 6,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 537,
+              "p95": 675
+            }
+          },
+          "even half": {
+            "n": 75,
+            "hit": {
+              "1": 0.573,
+              "3": 0.68,
+              "5": 0.733,
+              "10": 0.733
+            },
+            "mrr": 0.631,
+            "staleFirst": {
+              "n": 4,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 538,
+              "p95": 670
+            }
+          },
+          "odd half": {
+            "n": 75,
+            "hit": {
+              "1": 0.613,
+              "3": 0.747,
+              "5": 0.8,
+              "10": 0.813
+            },
+            "mrr": 0.691,
+            "staleFirst": {
+              "n": 7,
+              "rate": 0
+            },
+            "tokens": {
+              "mean": 550,
+              "p95": 675
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "q001",
+            "category": "entity",
+            "answerRank": 4,
+            "staleFirst": null,
+            "tokens": 498
+          },
+          {
+            "id": "q002",
+            "category": "entity",
+            "answerRank": 5,
+            "staleFirst": null,
+            "tokens": 673
+          },
+          {
+            "id": "q003",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 532
+          },
+          {
+            "id": "q004",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 538
+          },
+          {
+            "id": "q005",
+            "category": "entity",
+            "answerRank": 3,
+            "staleFirst": null,
+            "tokens": 467
+          },
+          {
+            "id": "q006",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 663
+          },
+          {
+            "id": "q007",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 529
+          },
+          {
+            "id": "q008",
+            "category": "entity",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 651
+          },
+          {
+            "id": "q009",
+            "category": "entity",
+            "answerRank": 5,
+            "staleFirst": null,
+            "tokens": 542
+          },
+          {
+            "id": "q010",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 537
+          },
+          {
+            "id": "q011",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 530
+          },
+          {
+            "id": "q012",
+            "category": "entity",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 496
+          },
+          {
+            "id": "q013",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 536
+          },
+          {
+            "id": "q014",
+            "category": "entity",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 593
+          },
+          {
+            "id": "q015",
+            "category": "entity",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 556
+          },
+          {
+            "id": "q016",
+            "category": "entity",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 493
+          },
+          {
+            "id": "q017",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 587
+          },
+          {
+            "id": "q018",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 606
+          },
+          {
+            "id": "q019",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 781
+          },
+          {
+            "id": "q020",
+            "category": "entity",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 497
+          },
+          {
+            "id": "q021",
+            "category": "entity",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 517
+          },
+          {
+            "id": "q022",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 115
+          },
+          {
+            "id": "q023",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 572
+          },
+          {
+            "id": "q024",
+            "category": "entity",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 533
+          },
+          {
+            "id": "q025",
+            "category": "entity",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 655
+          },
+          {
+            "id": "q026",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 592
+          },
+          {
+            "id": "q027",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 608
+          },
+          {
+            "id": "q028",
+            "category": "entity",
+            "answerRank": 5,
+            "staleFirst": null,
+            "tokens": 668
+          },
+          {
+            "id": "q029",
+            "category": "entity",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 741
+          },
+          {
+            "id": "q030",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 652
+          },
+          {
+            "id": "q031",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 588
+          },
+          {
+            "id": "q032",
+            "category": "entity",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 606
+          },
+          {
+            "id": "q033",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 675
+          },
+          {
+            "id": "q034",
+            "category": "entity",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 618
+          },
+          {
+            "id": "q035",
+            "category": "entity",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 632
+          },
+          {
+            "id": "q036",
+            "category": "preference",
+            "answerRank": 3,
+            "staleFirst": null,
+            "tokens": 525
+          },
+          {
+            "id": "q037",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 584
+          },
+          {
+            "id": "q038",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 477
+          },
+          {
+            "id": "q039",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 113
+          },
+          {
+            "id": "q040",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 638
+          },
+          {
+            "id": "q041",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 577
+          },
+          {
+            "id": "q042",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 598
+          },
+          {
+            "id": "q043",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 648
+          },
+          {
+            "id": "q044",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 167
+          },
+          {
+            "id": "q045",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 455
+          },
+          {
+            "id": "q046",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 550
+          },
+          {
+            "id": "q047",
+            "category": "preference",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 516
+          },
+          {
+            "id": "q048",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 559
+          },
+          {
+            "id": "q049",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 556
+          },
+          {
+            "id": "q050",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 527
+          },
+          {
+            "id": "q051",
+            "category": "preference",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 638
+          },
+          {
+            "id": "q052",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 109
+          },
+          {
+            "id": "q053",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 564
+          },
+          {
+            "id": "q054",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 551
+          },
+          {
+            "id": "q055",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 573
+          },
+          {
+            "id": "q056",
+            "category": "preference",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 649
+          },
+          {
+            "id": "q057",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 668
+          },
+          {
+            "id": "q058",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 604
+          },
+          {
+            "id": "q059",
+            "category": "preference",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 179
+          },
+          {
+            "id": "q060",
+            "category": "preference",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 544
+          },
+          {
+            "id": "q061",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 486
+          },
+          {
+            "id": "q062",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 515
+          },
+          {
+            "id": "q063",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 688
+          },
+          {
+            "id": "q064",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 308
+          },
+          {
+            "id": "q065",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 348
+          },
+          {
+            "id": "q066",
+            "category": "commitment",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 538
+          },
+          {
+            "id": "q067",
+            "category": "commitment",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 570
+          },
+          {
+            "id": "q068",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 561
+          },
+          {
+            "id": "q069",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 621
+          },
+          {
+            "id": "q070",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 535
+          },
+          {
+            "id": "q071",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 634
+          },
+          {
+            "id": "q072",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 635
+          },
+          {
+            "id": "q073",
+            "category": "commitment",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 561
+          },
+          {
+            "id": "q074",
+            "category": "commitment",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 610
+          },
+          {
+            "id": "q075",
+            "category": "commitment",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 561
+          },
+          {
+            "id": "q076",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 110
+          },
+          {
+            "id": "q077",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 579
+          },
+          {
+            "id": "q078",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 574
+          },
+          {
+            "id": "q079",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 614
+          },
+          {
+            "id": "q080",
+            "category": "commitment",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 624
+          },
+          {
+            "id": "q081",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 531
+          },
+          {
+            "id": "q082",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 654
+          },
+          {
+            "id": "q083",
+            "category": "update",
+            "answerRank": null,
+            "staleFirst": false,
+            "tokens": 585
+          },
+          {
+            "id": "q084",
+            "category": "update",
+            "answerRank": null,
+            "staleFirst": false,
+            "tokens": 0
+          },
+          {
+            "id": "q085",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 122
+          },
+          {
+            "id": "q086",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 526
+          },
+          {
+            "id": "q087",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 537
+          },
+          {
+            "id": "q088",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 586
+          },
+          {
+            "id": "q089",
+            "category": "update",
+            "answerRank": null,
+            "staleFirst": false,
+            "tokens": 554
+          },
+          {
+            "id": "q090",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 598
+          },
+          {
+            "id": "q091",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 644
+          },
+          {
+            "id": "q092",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 592
+          },
+          {
+            "id": "q093",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 638
+          },
+          {
+            "id": "q094",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 541
+          },
+          {
+            "id": "q095",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 646
+          },
+          {
+            "id": "q096",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 500
+          },
+          {
+            "id": "q097",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 571
+          },
+          {
+            "id": "q098",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 533
+          },
+          {
+            "id": "q099",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 104
+          },
+          {
+            "id": "q100",
+            "category": "update",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 629
+          },
+          {
+            "id": "q101",
+            "category": "update",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 604
+          },
+          {
+            "id": "q102",
+            "category": "update",
+            "answerRank": null,
+            "staleFirst": false,
+            "tokens": 565
+          },
+          {
+            "id": "q103",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 571
+          },
+          {
+            "id": "q104",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 571
+          },
+          {
+            "id": "q105",
+            "category": "update",
+            "answerRank": 1,
+            "staleFirst": false,
+            "tokens": 567
+          },
+          {
+            "id": "q106",
+            "category": "as-of",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 505
+          },
+          {
+            "id": "q107",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 521
+          },
+          {
+            "id": "q108",
+            "category": "as-of",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 440
+          },
+          {
+            "id": "q109",
+            "category": "as-of",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 499
+          },
+          {
+            "id": "q110",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 546
+          },
+          {
+            "id": "q111",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 526
+          },
+          {
+            "id": "q112",
+            "category": "as-of",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 447
+          },
+          {
+            "id": "q113",
+            "category": "as-of",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 427
+          },
+          {
+            "id": "q114",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 496
+          },
+          {
+            "id": "q115",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 509
+          },
+          {
+            "id": "q116",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 481
+          },
+          {
+            "id": "q117",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 561
+          },
+          {
+            "id": "q118",
+            "category": "as-of",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 487
+          },
+          {
+            "id": "q119",
+            "category": "as-of",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 527
+          },
+          {
+            "id": "q120",
+            "category": "as-of",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 507
+          },
+          {
+            "id": "q121",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 513
+          },
+          {
+            "id": "q122",
+            "category": "multi-hop",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 611
+          },
+          {
+            "id": "q123",
+            "category": "multi-hop",
+            "answerRank": 6,
+            "staleFirst": null,
+            "tokens": 502
+          },
+          {
+            "id": "q124",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 754
+          },
+          {
+            "id": "q125",
+            "category": "multi-hop",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 497
+          },
+          {
+            "id": "q126",
+            "category": "multi-hop",
+            "answerRank": 3,
+            "staleFirst": null,
+            "tokens": 534
+          },
+          {
+            "id": "q127",
+            "category": "multi-hop",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 655
+          },
+          {
+            "id": "q128",
+            "category": "multi-hop",
+            "answerRank": 3,
+            "staleFirst": null,
+            "tokens": 597
+          },
+          {
+            "id": "q129",
+            "category": "multi-hop",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 644
+          },
+          {
+            "id": "q130",
+            "category": "multi-hop",
+            "answerRank": 5,
+            "staleFirst": null,
+            "tokens": 668
+          },
+          {
+            "id": "q131",
+            "category": "multi-hop",
+            "answerRank": 5,
+            "staleFirst": null,
+            "tokens": 607
+          },
+          {
+            "id": "q132",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 499
+          },
+          {
+            "id": "q133",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 595
+          },
+          {
+            "id": "q134",
+            "category": "multi-hop",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 754
+          },
+          {
+            "id": "q135",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 542
+          },
+          {
+            "id": "q136",
+            "category": "multi-hop",
+            "answerRank": 4,
+            "staleFirst": null,
+            "tokens": 592
+          },
+          {
+            "id": "q137",
+            "category": "multi-hop",
+            "answerRank": 5,
+            "staleFirst": null,
+            "tokens": 566
+          },
+          {
+            "id": "q138",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 619
+          },
+          {
+            "id": "q139",
+            "category": "multi-hop",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 548
+          },
+          {
+            "id": "q140",
+            "category": "multi-hop",
+            "answerRank": null,
+            "staleFirst": null,
+            "tokens": 624
+          },
+          {
+            "id": "q141",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 653
+          },
+          {
+            "id": "q142",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 466
+          },
+          {
+            "id": "q143",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 648
+          },
+          {
+            "id": "q144",
+            "category": "procedure",
+            "answerRank": 2,
+            "staleFirst": null,
+            "tokens": 571
+          },
+          {
+            "id": "q145",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 627
+          },
+          {
+            "id": "q146",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 670
+          },
+          {
+            "id": "q147",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 560
+          },
+          {
+            "id": "q148",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 540
+          },
+          {
+            "id": "q149",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 582
+          },
+          {
+            "id": "q150",
+            "category": "procedure",
+            "answerRank": 1,
+            "staleFirst": null,
+            "tokens": 621
+          }
+        ]
+      }
     }
   ]
 }

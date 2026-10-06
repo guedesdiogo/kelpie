@@ -234,6 +234,37 @@ At 1k, `bge-m3` with the rerank reaches hit@5 0.940 and MRR 0.849, against 0.827
   - The owner chose the regex alone, to save the qualifier's cost ([#110](https://github.com/guedesdiogo/kelpie/issues/110#issuecomment-6017364370)).
 - **Not run:** 100k memories, which would take tens of minutes to embed per model.
 
+## Expiry in recall (#111)
+
+A turn's recall leaves out notes whose `invalid_at` has passed. The evaluation runs retrieval again with that filter, at a fixed now of 2026-10-06 noon UTC: inside the vault's year, after some deadlines and before others. The numbers are in `memory-eval-retrieval.json`, under each run's `expiry`.
+
+| Vault | hit@1 | hit@5 | hit@10 | MRR | stale first (n = 11) |
+|---|---|---|---|---|---|
+| 1k | 0.600 → 0.613 | 0.827 → 0.827 | 0.860 → 0.867 | 0.694 → 0.705 | 0 → 0 |
+| 10k | 0.600 → 0.600 | 0.773 → 0.780 | 0.787 → 0.787 | 0.666 → 0.669 | 0 → 0 |
+| 100k | 0.593 → 0.593 | 0.767 → 0.767 | 0.773 → 0.773 | 0.660 → 0.661 | 0 → 0 |
+
+What the numbers show:
+- **No question loses its answer.** Questions with a date bypass the filter, and so do questions about the past; the rest only move up, as expired distractors (past deadlines) drop out. At 1k, six questions move up, and one answered outside the top 10 comes in at 7.
+- **Stale first is already 0,** since outdated versions are superseded, not current. The filter acts on expired facts, which the labels don't mark as stale.
+- **Retrieval without the filter is unchanged** from #110's numbers.
+
+## Contradiction band (#111)
+
+The lifecycle report (#111) flags notes about one entity whose vectors are close but not the same. The band was measured with `eval:models` on the 1k vault (2026-10-06):
+- **Pairs that disagree:** 16. Each question's answer against the memories labelled as outdated for it, and each gold fact's consecutive versions.
+- **Pairs that don't:** 54. Every other pair of gold notes sharing an entity.
+
+| Model | Disagreeing pairs | Other pairs (p10 / p50 / p90) | [0.70, 0.95) catches | and flags |
+|---|---|---|---|---|
+| `@cf/baai/bge-m3` | 0.39 to 0.95 | 0.39 / 0.51 / 0.69 | 56% | 6% |
+| `text-embedding-3-small` | 0.41 to 0.97 | 0.38 / 0.51 / 0.70 | 63% | 13% |
+
+What the numbers show:
+- **Updates sit high,** unlike ai-memory's [0.4, 0.75) band: a fact's new version reads close to its old one.
+- **Wider bands cost a lot:** [0.55, 0.95) catches 81% with bge-m3 but flags 43% of the other pairs.
+- **Small sample:** the pairs are few and synthetic, so the band is a starting value. The findings only go into the report, for Dream to look at.
+
 ## How to re-run
 
 ```bash

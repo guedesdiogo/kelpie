@@ -45,6 +45,7 @@ Rules for paths:
   - root files (`README.md`, `AGENTS.md`, `USER.md`, `index.md`, `log.md`);
   - skills (`skills/`) and each agent's `SOUL.md`, `AGENTS.md` and `skills/`, which the Context Store loads separately;
   - hidden folders (`.obsidian/`, `.trash/`);
+  - folders under `memory/` whose name starts with `_`, which hold Kelpie's own files, such as the [lifecycle report](#lifecycle) at `memory/_lint/report.md`. No agent may write there. A file directly under `memory/`, such as `memory/_inbox.md`, is still a note;
   - anything that isn't `.md`.
 
 ## A memory file
@@ -281,6 +282,10 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
 - **In a turn:** the conversation runtime asks once per turn, when the person has finished.
   - **The question** is the lines of every message since the last reply, even a partial one, without their time stamps. Lines the gate skips, such as a bare acknowledgement, are left out, and a turn with nothing else left skips the lookup. Only the newest 2,000 characters go.
   - **Scopes and budget:** it asks for all scopes, since ingress admits only the owner's direct chats ([ADR-0015](adr/0015-single-player-first.md)). The budget is the slice's 1,000 tokens, and the agent's qualifier reranks.
+  - **Expired notes** (#111) are left out: those whose `invalid_at` has passed.
+    - A note without `invalid_at` never expires, and one that becomes valid later stays, so future plans are still found.
+    - A question that gives a date (`asOf`, `validAt`) or asks how things were brings them back. The cues are whole words, in Portuguese and English: "antes", "costumava", "morava", "ex", "used to", "back then", and the past-conversation cues above.
+    - Nothing is written: no note is marked expired.
   - **Where the block goes:** in that request's context, after the turn's last user message. An answer longer than the budget is refused.
     - **Afterwards:** once the turn is answered, its block is kept with the turn, and every later request sends it again, unchanged and in the same place.
       - Claude Opus 5.5, Sonnet 5.5 and Fable 5.1 bind a reply's thinking to everything sent before it, and reject a request whose earlier turns changed ([preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking), #137).
@@ -297,6 +302,59 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - the always-loaded core;
   - the agent's memory tools (#126).
 
+## Lifecycle
+
+What keeps memory clean as it grows (#111), without touching how notes rank.
+
+### The daily report
+
+Once a day, the Context Store's alarm looks at the index, after GitHub's work and the held files. It writes what it finds to one page, `memory/_lint/report.md`, as links to the notes.
+- **Cold notes:** sessions and events nobody recalls any more. Facts don't decay, and pinned or evergreen notes are exempt.
+  - A note's retention is e^(−0.02 × days old), plus 0.6 × ln(1 + recalls) × e^(−0.04 × days since the last recall). A note is cold below 0.2: about 80 days after it was written, if nobody recalled it.
+  - **When it was written:** its `updated`, never later than its commit; else the date its file name starts with (`2026-03-04-standup.md`, `2026-03-04.md`); else when the index first saw it. So a vault synced for the first time, or an index rebuilt, doesn't look new.
+  - An event ages from its end (`invalid_at`), then its start, then when it was written, so one still ahead isn't cold.
+  - A recall is a turn that packed the note: the Context Store's access counts.
+- **Duplicates:** the same content at several paths, and the same title on several notes of one scope, compared as titles are. Projects' READMEs share a title, and that is no duplicate.
+- **Possible contradictions:** pairs of notes that share an entity and whose vectors are close, but not the same note.
+  - It reads the 60 newest semantic and procedural notes that haven't expired, and lists 25 pairs at most.
+  - A pair a `contradicts` link already joins has been seen to, and isn't listed.
+  - "Close" is a band per embedding model: [0.70, 0.95) for bge-m3 and OpenAI's `text-embedding-3-small`, measured on the evaluation's outdated memories ([spike](spikes/memory-eval.md#contradiction-band-111)). A model without a band has the check off.
+  - Dream (#112) is the one to look at them.
+
+How the page behaves:
+- **Report only.** In v1 it is the lifecycle's only write: nothing listed is changed, merged or removed. The retention score never reaches retrieval.
+- **The same findings write the same page,** sorted and without a time stamp, so a day without news makes no commit. The page is removed when every list is empty.
+- **Notes can't write Markdown into the page:**
+  - Titles can't break out of their links. Controls, invisible and bidirectional characters are dropped, and so are brackets, pipes, angle brackets, exclamation marks, backticks, backslashes and percent signs. The joiners that hold emoji and some scripts together stay.
+  - A path is linked as it is, `!` included. A path that holds any of those characters, or `#` or `^`, or is longer than 200 characters, is shown as code instead.
+  - An entity, outside any link, goes in a code span.
+  - Titles are cut to 120 characters, paths to 200, and a line lists 10 notes, then how many more.
+- **Never memory.** `placeOf` leaves `memory/_…/` out of the index, so recall, the jobs and link previews never read it.
+- **A failed run** waits for the next day.
+
+### The write decision
+
+Before a new memory is written, `decideWrite` says whether it is news (#111). The memory tools (#126) call it; nothing else does yet.
+- **The outcome:**
+  - `ADD`: a new note, at `memoryPath`; the writer resolves a collision with an existing file;
+  - `UPDATE`: the note at `path` stays true and the memory adds detail, so its new version holds both;
+  - `SUPERSEDE`: the memory says the note at `path` is no longer true, so the memory becomes its new version, and the index keeps the old one for "as of";
+  - `NOOP`: the note at `path` already says it.
+- **Candidates, without a model:** current notes in the memory's scope and of its kind that haven't expired at the `now` the writer gives, so a decision never points at another scope's note. Three lookups find them, taken in turn, five at most:
+  1. the same title;
+  2. a shared entity;
+  3. a vector at or above the low end of the model's contradiction band, when the writer embedded the memory.
+- **Its exact twin is a `NOOP` with no question:** a note of its scope and kind with the same title, body and validity, looked for first among every note with its title, expired ones too.
+- **Otherwise the agent's qualifier** (Clef, or Jev) answers one `choice` per candidate in one call: duplicate, refines, replaces or unrelated. The memory and the notes are in its state, marked as data, not instructions, at 1,200 characters each.
+  - A duplicate anywhere is a `NOOP`. A duplicate judged on text cut to fit counts as refining the note, so a new tail isn't dropped.
+  - Then the first note the memory replaces is superseded.
+  - Then the first note it refines is updated.
+- **It adds** when there is no candidate, no qualifier, a failure, no answer within 5 s, or an answer off the list. Nothing is lost, and the daily report lists duplicates.
+- **What the writer owes it:**
+  - an input that passed `writeMemory`'s checks;
+  - a scope that is the turn's, never a model's choice;
+  - on `UPDATE` and `SUPERSEDE`, the note's `pinned` and `evergreen` carried over. The rule's `NOOP` compares title, body and validity only.
+
 ## Credits
 
-The design follows [ai-memory](https://github.com/akitaonrails/ai-memory) at [`fc4da03`](https://github.com/akitaonrails/ai-memory/tree/fc4da03) (MIT, © 2026 Fabio Akita): versioned pages, FTS5 with diacritics folded, entity normalization, typed edges with a closed vocabulary, link extraction that skips code, and hybrid retrieval. Files translated from it carry its notice. The reference checks are on [#107](https://github.com/guedesdiogo/kelpie/issues/107#issuecomment-6010168197) and [#110](https://github.com/guedesdiogo/kelpie/issues/110#issuecomment-6012868696). The retrieval gate follows [hermes-agent](https://github.com/NousResearch/hermes-agent) at `86bdb75` (MIT).
+The design follows [ai-memory](https://github.com/akitaonrails/ai-memory) at [`fc4da03`](https://github.com/akitaonrails/ai-memory/tree/fc4da03) (MIT, © 2026 Fabio Akita): versioned pages, FTS5 with diacritics folded, entity normalization, typed edges with a closed vocabulary, link extraction that skips code, and hybrid retrieval. Files translated from it carry its notice. The reference checks are on [#107](https://github.com/guedesdiogo/kelpie/issues/107#issuecomment-6010168197) and [#110](https://github.com/guedesdiogo/kelpie/issues/110#issuecomment-6012868696). The retrieval gate follows [hermes-agent](https://github.com/NousResearch/hermes-agent) at `86bdb75` (MIT). The lifecycle's retention score follows ai-memory's decay at [`b8e839f`](https://github.com/akitaonrails/ai-memory/blob/b8e839f6a9aee3e58f49dbc588e9107f8820e695/crates/ai-memory-store/src/decay.rs); its reference check is on [#111](https://github.com/guedesdiogo/kelpie/issues/111#issuecomment-6022538685).

@@ -2,6 +2,9 @@ import { DurableObject } from "cloudflare:workers";
 import { EMBEDDING_INPUT_CHARS, type EmbedOutcome } from "@kelpie/llm";
 import {
   isScope,
+  LIFECYCLE_REPORT_PATH,
+  lifecycleFindings,
+  lifecycleReport,
   MemoryIndex,
   pack,
   qualifierJudge,
@@ -99,6 +102,8 @@ const MAX_RESOLVE_ATTEMPTS = 3;
 const RESOLVE_TIMEOUT_MS = 60_000;
 /** The wait between two tries at held files, so a short outage can't spend all of a file's. */
 const RESOLVE_RETRY_MS = 5 * 60_000;
+/** How often the lifecycle report is written (#111). */
+const LIFECYCLE_EVERY_MS = 24 * 60 * 60_000;
 /** The soonest the alarm wakes for a held file's next try. */
 const RESOLVE_WAKE_MS = 1_000;
 /** How much of the vault's `AGENTS.md` the model sees with a conflict. */
@@ -593,6 +598,7 @@ export class Vault extends DurableObject<VaultEnv> {
     // delays the vault's writes.
     const moreToEmbed = await this.#embedPending();
     await this.#resolveHeld();
+    await this.#lifecycle();
     const queued =
       this.#exec<{ n: number }>(`SELECT count(*) AS n FROM queue WHERE path NOT IN (${HELD})`)[0]
         ?.n ?? 0;
@@ -750,6 +756,11 @@ export class Vault extends DurableObject<VaultEnv> {
           rows += this.#exec<{ n: number }>(`SELECT count(*) AS n ${where}`, named)[0]?.n ?? 0;
           this.#exec(`DELETE ${where}`, named);
         }
+        // A memory report waiting in the queue, or set aside, may name what is being erased: it
+        // goes, and the next alarm writes the report again from what is left.
+        this.#exec("DELETE FROM queue WHERE path = ?", LIFECYCLE_REPORT_PATH);
+        this.#exec("DELETE FROM conflicts WHERE path = ?", LIFECYCLE_REPORT_PATH);
+        this.#set("lifecycle_after", "0");
         return rows;
       });
       const stillInVault = this.#exec<{ path: string }>(
@@ -772,6 +783,46 @@ export class Vault extends DurableObject<VaultEnv> {
       });
       return { ok: true, forgotten, stillInVault };
     });
+  }
+
+  /**
+   * Once a day, after GitHub's work: what memory's index finds (#111), written as one report page
+   * in the vault, or the page removed when memory is clean. A day without news changes nothing,
+   * since the page is queued only when it differs. It reads the index at the head: if it can't bring
+   * it there, it tries again at the next alarm. Any other failure waits for the next day.
+   */
+  async #lifecycle(): Promise<void> {
+    const now = Date.now();
+    if (now < Number(this.#get("lifecycle_after") ?? "0")) return;
+    try {
+      await this.#catchUp();
+    } catch (error) {
+      console.error("Vault: the memory report waits for the index", errorName(error));
+      return;
+    }
+    this.#set("lifecycle_after", `${now + LIFECYCLE_EVERY_MS}`);
+    try {
+      const uses = new Map(
+        this.#exec<{ path: string; count: number; last_at: number }>(
+          "SELECT path, count, last_at FROM recall_counts",
+        ).map((row) => [row.path, { count: row.count, lastAt: row.last_at }]),
+      );
+      const model = this.#get("embedding_model");
+      const report = lifecycleReport(
+        lifecycleFindings(this.#memory, { now, uses, ...(model === null ? {} : { model }) }),
+      );
+      if (report === this.#visible(LIFECYCLE_REPORT_PATH)) return;
+      this.#exec(
+        "INSERT INTO queue (agent, path, content, summary, queued_at) VALUES (?, ?, ?, ?, ?)",
+        SYSTEM_AGENT,
+        LIFECYCLE_REPORT_PATH,
+        report,
+        "Update the memory report",
+        now,
+      );
+    } catch (error) {
+      console.error("Vault: the memory report failed", errorName(error));
+    }
   }
 
   /** The held file the model can try next: routable, small enough, with tries left. */
@@ -868,6 +919,8 @@ export class Vault extends DurableObject<VaultEnv> {
       }
       const retrieveOptions: RetrieveOptions = {
         limit: gateway === null ? RECALL_LIMIT : RERANK_CANDIDATES,
+        // Expired notes stay out, unless the question asks how things were (#111).
+        notExpiredAt: Date.now(),
         ...(scopes === "all" ? {} : { scopes: scopes as readonly Scope[] }),
         ...(typeof options.asOf === "number" ? { asOf: options.asOf } : {}),
         ...(typeof options.validAt === "number" ? { validAt: options.validAt } : {}),

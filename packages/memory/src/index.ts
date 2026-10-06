@@ -2,6 +2,7 @@ export { type Entity, foldKey, MAX_ENTITIES, normalizeEntities } from "./entitie
 export { gitBlobSha } from "./hash.ts";
 export {
   defaultTier,
+  isReservedPath,
   isScope,
   KIND_FOLDERS,
   KINDS,
@@ -17,6 +18,15 @@ export {
   TIERS,
   type Tier,
 } from "./layout.ts";
+export {
+  CONTRADICTION_BANDS,
+  LIFECYCLE_REPORT_PATH,
+  type LifecycleFindings,
+  type LifecycleOptions,
+  lifecycleFindings,
+  lifecycleReport,
+  type NoteRef,
+} from "./lifecycle.ts";
 export {
   extractLinks,
   type LinkBy,
@@ -48,6 +58,7 @@ export {
   rerank,
 } from "./rerank.ts";
 export {
+  asksAboutThePast,
   isSessionRecall,
   needsMemory,
   type Packed,
@@ -75,3 +86,9 @@ export {
   type WrittenMemory,
   writeMemory,
 } from "./write.ts";
+export {
+  type ChoiceQualifier,
+  type DecideWriteOptions,
+  decideWrite,
+  type WriteDecision,
+} from "./write-decision.ts";

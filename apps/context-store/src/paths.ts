@@ -1,3 +1,4 @@
+import { isReservedPath } from "@kelpie/memory";
 import { isVaultText } from "@kelpie/vault";
 
 /** Agent ids are slugs (`@kelpie/config`'s `isAgentId`); they become folder names here. */
@@ -45,7 +46,8 @@ const SHARED_ROOTS = ["memory/", "knowledge/", "areas/", "projects/", "conversat
  * and skills change only through a proposal; root files and other agents' folders not at all.
  */
 export function isWritable(agentId: string, path: string): boolean {
-  if (!isCleanPath(path) || !isVaultText(path)) return false;
+  // `memory/_…/` holds Kelpie's own files, such as the memory report, which no agent may forge.
+  if (!isCleanPath(path) || !isVaultText(path) || isReservedPath(path)) return false;
   return (
     SHARED_ROOTS.some((root) => path.startsWith(root)) ||
     path.startsWith(`agents/${agentId}/memory/`)

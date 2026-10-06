@@ -169,6 +169,20 @@ describe("recall", () => {
     expect(next.text).not.toContain("Lisboa");
   });
 
+  it("leaves out a note that has expired, unless the question asks how things were", async () => {
+    const expired = {
+      ...person("Ana Souza", "Irmã do Rafael. Mora em Lisboa."),
+      invalidAt: "2020-01-01",
+    } satisfies MemoryInput;
+    await vaultOf([expired, person("Bruno Lima", "Sócio do Rafael. Mora no Porto.")]);
+    fakeGateway();
+    const stub = vault("recall-expired");
+    const now = await stub.recall("kelpie", "Onde a Ana Souza mora?", ALL);
+    expect(now.text).not.toContain("Lisboa");
+    const before = await stub.recall("kelpie", "Onde a Ana Souza morava antes?", ALL);
+    expect(before.text).toContain("Lisboa");
+  });
+
   it("finds synced notes and Kelpie's own writes, and forgets removed ones", async () => {
     const backend = await vaultOf([person("Ana Souza", "Irmã do Rafael. Mora em Lisboa.")]);
     fakeGateway();

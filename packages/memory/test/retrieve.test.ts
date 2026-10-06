@@ -2,6 +2,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import {
+  asksAboutThePast,
   MemoryIndex,
   type MemoryInput,
   memoryPath,
@@ -279,6 +280,68 @@ describe("retrieve", () => {
       expect(titles("2026-01-15T12:00:00Z")).toEqual(["Bruno Lima", "Viagem a Recife"]);
       expect(titles("2026-03-15T12:00:00Z")).toEqual(["Bruno Lima"]);
     });
+  });
+
+  it("leaves out an expired note, unless the question asks how things were", async () => {
+    const note = (title: string, extra: Partial<MemoryInput>): MemoryInput => ({
+      scope: "global",
+      kind: "note",
+      title,
+      body: `${title}.`,
+      level: "explicit",
+      confidence: 0.9,
+      entities: ["Ana Souza"],
+      ...extra,
+    });
+    const lisboa = note("Ana mora em Lisboa", { invalidAt: "2026-03-01" });
+    const porto = note("Ana mora no Porto", { validFrom: "2026-03-01" });
+    // A plan that starts later is not expired: it stays.
+    const trip = note("Ana vai a Recife em dezembro", {
+      kind: "commitment",
+      validFrom: "2026-12-01",
+    });
+    const ana = person(
+      "Ana Souza",
+      "Irmã do Rafael. Ver [[ana-mora-em-lisboa]] e [[ana-mora-no-porto]].",
+      ["Ana Souza"],
+    );
+    await withMemories("expired", [lisboa, porto, trip, ana], (index) => {
+      const now = Date.parse("2026-10-06T12:00:00Z");
+      const titles = (question: string, options: Parameters<typeof retrieve>[2]) =>
+        retrieve(index, question, options).map((hit) => hit.title);
+      const current = titles("onde a Ana mora?", { notExpiredAt: now });
+      expect(current).toContain("Ana mora no Porto");
+      expect(current).not.toContain("Ana mora em Lisboa");
+      expect(titles("e a viagem da Ana?", { notExpiredAt: now })).toContain(
+        "Ana vai a Recife em dezembro",
+      );
+      // Through the graph too: Ana's page links both.
+      const linked = titles("Rafael", { notExpiredAt: now });
+      expect(linked).toContain("Ana mora no Porto");
+      expect(linked).not.toContain("Ana mora em Lisboa");
+      // A question about the past, or an explicit date, sees it again.
+      expect(titles("onde a Ana morava antes?", { notExpiredAt: now })).toContain(
+        "Ana mora em Lisboa",
+      );
+      expect(
+        titles("onde a Ana mora?", {
+          notExpiredAt: now,
+          validAt: Date.parse("2026-02-01T00:00:00Z"),
+        }),
+      ).toContain("Ana mora em Lisboa");
+      expect(titles("onde a Ana mora?", {})).toContain("Ana mora em Lisboa");
+    });
+  });
+
+  it.each([
+    ["onde a Ana morava antes?", true],
+    ["como era antigamente?", true],
+    ["o que a gente falou ontem?", true],
+    ["what did she use to do?", true],
+    ["onde a Ana mora?", false],
+    ["qual era o nome dela?", false],
+  ])("tells whether %s asks about the past", (question, past) => {
+    expect(asksAboutThePast(question)).toBe(past);
   });
 
   it("doesn't search a resolved date's words", async () => {
