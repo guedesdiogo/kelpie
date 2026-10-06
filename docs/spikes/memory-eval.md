@@ -172,9 +172,9 @@ The retrieval column is after the arrow. Everything is deterministic, and is in 
 
 | Size | hit@1 | hit@3 | hit@10 | Packed tokens, mean / p95 | Stale first |
 |---|---|---|---|---|---|
-| 1,000 | 0.600 → 0.600 | 0.733 → 0.767 | 0.807 → 0.860 | 612 / 759 | 1 → 0 of 11 |
-| 10,000 | 0.593 → 0.600 | 0.680 → 0.707 | 0.740 → 0.787 | 605 / 761 | 0 → 0 of 11 |
-| 100,000 | 0.580 → 0.593 | 0.687 → 0.713 | 0.713 → 0.773 | 616 / 774 | 0 → 0 of 11 |
+| 1,000 | 0.600 → 0.600 | 0.733 → 0.767 | 0.807 → 0.860 | 540 / 651 | 1 → 0 of 11 |
+| 10,000 | 0.593 → 0.600 | 0.680 → 0.707 | 0.740 → 0.787 | 534 / 666 | 0 → 0 of 11 |
+| 100,000 | 0.580 → 0.593 | 0.687 → 0.713 | 0.713 → 0.773 | 542 / 668 | 0 → 0 of 11 |
 
 ### Reading the numbers
 
@@ -185,7 +185,7 @@ The retrieval column is after the arrow. Everything is deterministic, and is in 
 - **What got worse:**
   - **At 100k:** 14 questions rank better, 135 the same, and 1 worse. That one, q101 (update), drops from 1st to 2nd, so update hit@1 goes from 0.800 to 0.760 and its MRR from 0.800 to 0.780. No other slice falls at 100k.
   - **At 1k and 10k:** five and four questions drop. The worst is q074 (commitment): from 1st to 6th at 1k, and from 9th to out of the top 10 at 10k.
-- **The budget holds** for every question at every size, and the evaluation asserts it. The largest packed slice takes 910 of the 1,000 tokens allowed, and the mean is about 610. The baseline's five excerpts took about 205.
+- **The budget holds** for every question at every size, and the evaluation asserts it. The largest packed slice takes 781 of the 1,000 tokens allowed, and the mean is about 540, since a note no longer repeats its title as a heading. The baseline's five excerpts took about 205.
 - **Cost:** retrieval takes about the same time as the plain search, 23 ms on average at 100k, because the full-text stream dominates. Timings come from the run, in `eval/last-run.json`, which isn't committed. The folded-title column adds about 6% to the database: 154 MiB at 100k.
 - **The comparison runs were scratch experiments**, on the even half only. Their numbers are quoted above, and their code isn't kept.
 - **A name on many notes in a real vault** is likely the owner's family, the reverse of the evaluation, where only distractors are common. Leaving such names out of the entity stream then costs their pages that stream, though full-text search still finds them. A later fix could keep a common name's own page, through its title.
