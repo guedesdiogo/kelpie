@@ -1,0 +1,17 @@
+{
+  "name": "@kelpie/spike-clef-end-of-turn",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "types": "wrangler types src/worker-configuration.d.ts",
+    "typecheck": "bun run types > /dev/null && tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@kelpie/qualifier": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.0",
+    "wrangler": "^4.147.0"
+  }
+}
