@@ -1,13 +1,16 @@
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ConversationAgent } from "../src/conversation-agent.ts";
+import { type ConversationAgent, TOOLS_NOTE } from "../src/conversation-agent.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import {
   TOOL_BOUND_RESULT,
   TOOL_FAILED_RESULT,
   TOOL_LIMIT_TEXT,
+  TOOL_NOT_RUN_RESULT,
+  TOOL_OUTPUT_MAX_CHARS,
   TOOL_STOPPED_RESULT,
+  TOOL_TIMED_OUT_RESULT,
   type ToolContext,
   type ToolOutcome,
 } from "../src/tools.ts";
@@ -136,6 +139,7 @@ describe("a turn's tools", () => {
     };
     expect(world.requests.map((request) => request.tools)).toEqual([[spec], [spec], [spec]]);
     expect(world.requests[0]?.context).toBe(MEMORY);
+    expect(world.requests[0]?.system.endsWith(`\n\n${TOOLS_NOTE}`)).toBe(true);
     expect(world.requests[1]).not.toHaveProperty("context");
     expect(world.requests[2]).not.toHaveProperty("context");
 
@@ -182,6 +186,30 @@ describe("a turn's tools", () => {
     ]);
   });
 
+  it("replays earlier replies without native output once the agent's tools change", async () => {
+    const world = use(
+      fakeWorld([reply("Hi!"), toolCalls({ name: "lookup", input: { q: "a" } }), reply("Found.")]),
+    );
+    const stub = agent("tools-arrive");
+    await stub.ingest(message("m1", "hello"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Hi!"]));
+
+    // A provider arrives: the reply produced without tools is bound to a prefix without them.
+    provide(world, { lookup: answer });
+    await stub.ingest(message("m2", "look up a"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Hi!", "Found."]));
+    expect(world.requests[1]?.messages[1]).toEqual({
+      role: "assistant",
+      parts: [{ type: "text", text: "Hi!" }],
+    });
+    // The turn's own calls keep theirs from round to round.
+    expect(world.requests[2]?.messages[3]).toEqual(
+      toolUse([{ id: "call-0", name: "lookup", input: { q: "a" } }]),
+    );
+  });
+
   it("sends requests as before when the agent has no tools", async () => {
     const world = use(fakeWorld([reply("Hi!")]));
     provide(world, {});
@@ -190,6 +218,7 @@ describe("a turn's tools", () => {
     await stub.flush();
     await vi.waitFor(() => expect(world.sent).toEqual(["Hi!"]));
     expect(world.requests[0]).not.toHaveProperty("tools");
+    expect(world.requests[0]?.system).not.toContain(TOOLS_NOTE);
   });
 
   it("answers a failing tool or an unknown one with an error, never with its message", async () => {
@@ -214,6 +243,30 @@ describe("a turn's tools", () => {
       ),
     );
     expect(JSON.stringify(logged.mock.calls)).not.toContain("Lisboa");
+  });
+});
+
+describe("a turn's tools and odd replies", () => {
+  it("takes a reply that asks for tools without naming any as the answer", async () => {
+    const world = use(fakeWorld([sayThenCall("Here it is.")]));
+    provide(world, { lookup: answer });
+    const stub = agent("tools-no-calls");
+    await stub.ingest(message("m1", "go"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Here it is."]));
+    expect(world.requests).toHaveLength(1);
+  });
+
+  it("cuts a long tool output, which every later request would send again", async () => {
+    const world = use(fakeWorld([toolCalls({ name: "big" }), reply("Summed up.")]));
+    provide(world, { big: () => ({ output: "x".repeat(TOOL_OUTPUT_MAX_CHARS * 2) }) });
+    const stub = agent("tools-big-output");
+    await stub.ingest(message("m1", "go"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Summed up."]));
+    const last = world.requests[1]?.messages.at(-1);
+    const output = last?.role === "tool" ? (last.results[0]?.output ?? "") : "";
+    expect(output).toBe(`${"x".repeat(TOOL_OUTPUT_MAX_CHARS)}\n[Cut: the result was longer.]`);
   });
 });
 
@@ -292,6 +345,44 @@ describe("a turn's tool bounds", () => {
   });
 });
 
+describe("a turn's time bound on a running tool", () => {
+  it("stops waiting for a tool that hangs once the turn's time is up", async () => {
+    const world = use(
+      fakeWorld([toolCalls({ name: "stuck" }, { name: "lookup" }), reply("Without it, then.")]),
+    );
+    world.expireDeadlines = true;
+    let aborted: AbortSignal | undefined;
+    world.tools = [
+      {
+        async tools() {
+          return [
+            {
+              spec: { name: "stuck", description: "Hangs.", inputSchema: { type: "object" } },
+              label: "Waiting",
+              run: (_input: unknown, { signal }: ToolContext) => {
+                aborted = signal;
+                return new Promise<ToolOutcome>(() => {});
+              },
+            },
+          ];
+        },
+      },
+    ];
+    const stub = agent("tools-hung");
+    await stub.ingest(message("m1", "go"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Without it, then."]));
+
+    expect(aborted?.aborted).toBe(true);
+    expect(world.requests[1]?.messages.at(-1)).toEqual(
+      results(
+        { callId: "call-0", output: TOOL_TIMED_OUT_RESULT, isError: true },
+        { callId: "call-1", output: TOOL_BOUND_RESULT, isError: true },
+      ),
+    );
+  });
+});
+
 describe("a turn's tools and interruption", () => {
   it("ends the turn on a new message: finished calls keep their results, the rest get stubs", async () => {
     let release = false;
@@ -333,14 +424,17 @@ describe("a turn's tools and interruption", () => {
         { id: "call-1", name: "slow", input: { q: "b" } },
         { id: "call-2", name: "fast", input: { q: "c" } },
       ]),
+      // The call that was running may have done its work; the next one never started.
       results(
         { callId: "call-0", output: "found a" },
         { callId: "call-1", output: TOOL_STOPPED_RESULT, isError: true },
-        { callId: "call-2", output: TOOL_STOPPED_RESULT, isError: true },
+        { callId: "call-2", output: TOOL_NOT_RUN_RESULT, isError: true },
       ),
       user("and also d"),
     ]);
     expect(runs).toHaveLength(2);
+    // The interrupted turn answered nothing, so the next recall asks about both messages.
+    expect(world.recalls[1]?.question).toBe("check a, b and c\nand also d");
   });
 
   it("closes the calls an eviction left open before calling the model again", async () => {
@@ -404,7 +498,7 @@ describe("a turn's tools in history", () => {
     const world = use(
       fakeWorld([
         reply("r0"),
-        toolCalls({ name: "lookup", input: { q: "a" } }),
+        sayThenCall("SAID BEFORE", { name: "lookup", input: { q: "a" } }),
         reply("r1"),
         reply("r2"),
         reply("r3", OVER_BUDGET),
@@ -425,8 +519,10 @@ describe("a turn's tools in history", () => {
     const summarized = world.requests.at(-1)?.messages[0];
     const input = summarized?.role === "user" ? (summarized.parts[0]?.text ?? "") : "";
     for (const text of ["q0", "r0", "q1", "r1"]) expect(input).toContain(text);
-    // Rows without text of their own leave no blank line.
+    // Rows without text of their own leave no blank line, and what the model said before its calls
+    // never reached the person, so it stays out.
     expect(input).not.toMatch(/assistant: (\n|$)/);
+    expect(input).not.toContain("SAID BEFORE");
 
     await stub.ingest(message("m4", "q4"));
     await stub.flush();

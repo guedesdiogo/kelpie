@@ -1,0 +1,1 @@
+ALTER TABLE `turns` ADD `tools_key` text;

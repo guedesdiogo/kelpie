@@ -70,6 +70,11 @@ export interface ConversationPorts {
   now(): number;
   /** Waits `ms`, or rejects as soon as `signal` aborts. */
   sleep(ms: number, signal: AbortSignal): Promise<void>;
+  /**
+   * Resolves once `ms` pass, for the turn's time bound on a running tool (ADR-0025); never once
+   * `signal` aborts, which also clears its timer.
+   */
+  deadline(ms: number, signal: AbortSignal): Promise<void>;
 }
 
 /** The part of llm-gateway's RPC surface this Worker uses. */
@@ -167,6 +172,7 @@ function productionPorts(env: Env): ConversationPorts {
     async status() {},
     now: () => Date.now(),
     sleep,
+    deadline: (ms, signal) => sleep(ms, signal).catch(() => new Promise<void>(() => {})),
   };
 }
 

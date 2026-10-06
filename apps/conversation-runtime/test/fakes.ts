@@ -91,6 +91,8 @@ export interface FakeWorld {
   tools: ToolProvider[];
   /** Every step shown, as `step` or `step:label`. */
   steps: string[];
+  /** While set, a tool started meanwhile has its deadline pass at once; otherwise it never does. */
+  expireDeadlines: boolean;
   /** The time `now()` returns; tests move it. Starts a minute ahead so no schedule comes due. */
   clock: number;
   requests: RoutedRequest[];
@@ -144,6 +146,7 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
   const world: FakeWorld = {
     tools: [],
     steps: [],
+    expireDeadlines: false,
     clock: Date.now() + 60_000,
     requests: [],
     tiers: [],
@@ -288,6 +291,8 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
         };
       },
       now: () => world.clock,
+      // No timer: a pending one would hold off an eviction.
+      deadline: () => (world.expireDeadlines ? Promise.resolve() : new Promise<void>(() => {})),
       sleep(ms, signal) {
         const call = sleeps++;
         world.sleeps.push(ms);

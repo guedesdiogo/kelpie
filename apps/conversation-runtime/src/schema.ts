@@ -59,6 +59,11 @@ export const turns = sqliteTable("turns", {
    * stays what the model saw (#137). History rows never hold them.
    */
   context: text("context"),
+  /**
+   * A digest of the tools the turn's requests sent, null for none (ADR-0025). A reply is replayed
+   * with its native output only to a turn with the same tools: its reasoning is bound to them.
+   */
+  toolsKey: text("tools_key"),
   createdAt: integer("created_at").notNull(),
 });
 
