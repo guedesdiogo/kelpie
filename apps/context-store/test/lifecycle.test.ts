@@ -211,6 +211,52 @@ describe("Vault lifecycle", () => {
     ).toEqual([{ path: "memory/notes/cha.md" }, { path: "memory/notes/velho.md" }]);
   });
 
+  it("drops a merge's mark once its version is gone, and keeps one still waiting to commit", async () => {
+    const cha = "memory/notes/cha.md";
+    const pao = "memory/notes/pao.md";
+    const sal = "memory/notes/sal.md";
+    const backend = new FakeVaultBackend({
+      "README.md": "# Vault",
+      [cha]: "# Chá\n\nVerde.\n",
+      [pao]: "# Pão\n\nIntegral.\n",
+      [sal]: "# Sal\n\nPouco.\n",
+    });
+    replaceBackendForTesting(backend);
+    replaceGatewayForTesting(null);
+    const stub = vault("lifecycle-owner-merges");
+    await stub.compile("kelpie");
+    // A conflict pushed into Sal holds it, so Kelpie's write to it waits in the queue.
+    backend.push({
+      [sal]: "# Sal\n\n<<<<<<< HEAD\nPouco.\n=======\nNada.\n>>>>>>> origin/main\n",
+    });
+    await runDurableObjectAlarm(stub);
+    await stub.write("kelpie", [{ path: sal, content: "# Sal\n\nPouco, e fino.\n" }], "x");
+    await runInDurableObject(stub, (_instance, state) => {
+      for (const [path, content] of [
+        // The vault's version: kept.
+        [cha, "# Chá\n\nVerde.\n"],
+        // A version replaced since, and a removed note: their text goes.
+        [pao, "# Pão\n\nCom sal.\n"],
+        ["memory/notes/velho.md", "# Velho\n"],
+        // Still waiting to commit: kept.
+        [sal, "# Sal\n\nPouco, e fino.\n"],
+      ]) {
+        state.storage.sql.exec(
+          "INSERT INTO owner_merges (path, content) VALUES (?, ?)",
+          path,
+          content,
+        );
+      }
+    });
+    await aDayLater(stub);
+    await runDurableObjectAlarm(stub);
+    expect(
+      await runInDurableObject(stub, (_instance, state) =>
+        state.storage.sql.exec("SELECT path FROM owner_merges ORDER BY path").toArray(),
+      ),
+    ).toEqual([{ path: cha }, { path: sal }]);
+  });
+
   it("lists a change whose commit answer was lost, once the sync finds it", async () => {
     const backend = new FakeVaultBackend({
       "README.md": "# Vault",

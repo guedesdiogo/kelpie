@@ -898,6 +898,11 @@ export class Vault extends DurableObject<VaultEnv> {
       const model = this.#get("embedding_model");
       // The owner's notes Kelpie changed in the last week; older records go.
       this.#exec("DELETE FROM owner_changes WHERE at < ?", now - OWNER_CHANGES_MS);
+      // A merge's mark, and the note text it keeps, go with its version, unless it waits to commit.
+      this.#exec(
+        `DELETE FROM owner_merges WHERE path NOT IN (SELECT path FROM queue) AND NOT EXISTS
+           (SELECT 1 FROM files f WHERE f.path = owner_merges.path AND f.content = owner_merges.content)`,
+      );
       const changed = this.#exec<{ path: string; at: number; removed: number }>(
         "SELECT path, at, removed FROM owner_changes ORDER BY path, at",
       ).map((row) => ({ path: row.path, at: row.at, removed: row.removed === 1 }));
