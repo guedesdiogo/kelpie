@@ -785,7 +785,11 @@ export class MemoryIndex {
     return row === undefined ? null : toVersion(row);
   }
 
-  /** Full-text search, best first. Current versions only, unless `asOf` asks for the past. */
+  /**
+   * Full-text search, best first. Current versions only, unless `asOf` asks for the past. bm25 takes
+   * its statistics from the whole table, other scopes and past versions included, so they can
+   * reorder the hits in `scopes`: a residual the owner accepted until #131 (#152).
+   */
   search(text: string, options: SearchOptions = {}): SearchHit[] {
     const query = ftsQuery(text);
     if (query === null) return [];
@@ -848,8 +852,8 @@ export class MemoryIndex {
 
   /**
    * Current notes one step from this one: the notes it links to, then the pages of the entities it
-   * names, notes titled with that name, as if it linked to them, global ones first. Only notes in
-   * `scopes`, when given.
+   * names, notes titled with that name, as if it linked to them, global ones first. With `scopes`,
+   * only notes in them, its links resolve among them, and a note outside them has no neighbours.
    */
   neighbours(
     path: string,
@@ -860,16 +864,19 @@ export class MemoryIndex {
       scopes?: readonly Scope[];
     } = {},
   ): SearchHit[] {
+    const scoped = options.scopes === undefined ? {} : { scopes: options.scopes };
+    const [inScopes, scopeBindings] = versionFilter(scoped);
     const exists = this.#exec(
-      "SELECT 1 AS one FROM versions WHERE path = ? AND is_current = 1",
+      `SELECT 1 AS one FROM versions v WHERE v.path = ? AND ${inScopes}`,
       path,
+      ...scopeBindings,
     ).length;
     if (exists === 0) return [];
     const limit = limitOf(options);
     const [filter, bindings] = versionFilter({
       ...(options.validAt === undefined ? {} : { validAt: options.validAt }),
       ...(options.notExpiredAt === undefined ? {} : { notExpiredAt: options.notExpiredAt }),
-      ...(options.scopes === undefined ? {} : { scopes: options.scopes }),
+      ...scoped,
     });
     const hits: SearchHit[] = [];
     const seen = new Set([path]);
@@ -893,7 +900,7 @@ export class MemoryIndex {
     );
     for (const link of links) {
       if (hits.length >= limit) return hits;
-      take(this.resolve(path, link.by as LinkBy, link.target));
+      take(this.resolve(path, link.by as LinkBy, link.target, scoped));
     }
     const keys = this.#exec<{ key: string }>(
       `SELECT e.key FROM entities e JOIN versions v ON v.rowid = e.version
@@ -912,12 +919,22 @@ export class MemoryIndex {
 
   /**
    * Resolves a link as Obsidian does: a path names one note; a file name is searched vault-wide,
-   * preferring the linking note's folder, then the shortest path.
+   * preferring the linking note's folder, then the shortest path. With `scopes`, only notes in them
+   * are candidates, so a note in another scope can't take the link from one in them.
    */
-  resolve(from: string, by: LinkBy, target: string): string | null {
+  resolve(
+    from: string,
+    by: LinkBy,
+    target: string,
+    options: { scopes?: readonly Scope[] } = {},
+  ): string | null {
+    const [filter, bindings] = versionFilter(
+      options.scopes === undefined ? {} : { scopes: options.scopes },
+    );
     const candidates = this.#exec<{ path: string }>(
-      `SELECT path FROM versions WHERE is_current = 1 AND ${by === "path" ? "link_path" : "link_name"} = ?`,
+      `SELECT v.path FROM versions v WHERE v.${by === "path" ? "link_path" : "link_name"} = ? AND ${filter}`,
       target,
+      ...bindings,
     ).map((row) => row.path);
     if (candidates.length <= 1) return candidates[0] ?? null;
     const folder = from.slice(0, from.lastIndexOf("/") + 1);
@@ -938,8 +955,11 @@ export class MemoryIndex {
     );
   }
 
-  /** The current version's links, each resolved against the current vault. */
-  links(path: string): ResolvedLink[] {
+  /**
+   * The current version's links, each resolved against the current vault, or among the notes in
+   * `scopes` when given.
+   */
+  links(path: string, options: { scopes?: readonly Scope[] } = {}): ResolvedLink[] {
     return this.#exec<{ kind: string; by: string; target: string }>(
       `SELECT l.kind, l.by, l.target FROM links l JOIN versions v ON v.rowid = l.version
        WHERE v.path = ? AND v.is_current = 1 ORDER BY l.kind, l.by, l.target`,
@@ -948,7 +968,7 @@ export class MemoryIndex {
       kind: row.kind as LinkKind,
       by: row.by as LinkBy,
       target: row.target,
-      path: this.resolve(path, row.by as LinkBy, row.target),
+      path: this.resolve(path, row.by as LinkBy, row.target, options),
     }));
   }
 
