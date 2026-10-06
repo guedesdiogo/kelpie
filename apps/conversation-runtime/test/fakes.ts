@@ -1,7 +1,6 @@
 import type { SendOutcome } from "@kelpie/channels";
 import type { Destination } from "@kelpie/conversation/contract";
 import type { AssistantMessage, LlmEvent, RoutedRequest, Usage } from "@kelpie/llm";
-import type { Qualifier } from "@kelpie/qualifier";
 import type { ConversationPorts, ModelCall } from "../src/ports.ts";
 
 // The Worker runs in the test's isolate, so these fakes replace the ConversationAgent's ports.
@@ -211,7 +210,6 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
         world.remembered.push({ agentId, changes });
         return { ok: true };
       },
-      qualifierFor: () => null,
       now: () => world.clock,
       sleep(ms, signal) {
         const call = sleeps++;
@@ -224,19 +222,4 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
     },
   };
   return world;
-}
-
-/** A qualifier that takes `ms` to answer "finished", to hold a flush plan mid-decision. */
-export function slowQualifier(ms: number): Qualifier {
-  return {
-    id: "fake",
-    calibrated: false,
-    async qualify(_state, questions) {
-      await new Promise((resolve) => setTimeout(resolve, ms));
-      const answers = Object.fromEntries(
-        Object.keys(questions).map((key) => [key, { type: "noul" as const, noul: 0.95 }]),
-      );
-      return { answers, provider: "fake", calibrated: false };
-    },
-  };
 }

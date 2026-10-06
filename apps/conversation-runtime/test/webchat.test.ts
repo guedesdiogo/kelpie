@@ -248,24 +248,24 @@ describe("the owner's typing in the webchat", () => {
     const name = "assistant:webchat:typing-hold";
     const start = world.clock;
     const chat = await open(name);
-    // A trailing "então" looks unfinished: the flush waits the long window, 6 s.
+    // The flush waits the agent's fixed wait, 10 s (ADR-0024).
     chat.send({ type: "message", id: "c1", text: "então" });
     await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
-    expect(await flushTimes(name)).toEqual([seconds(start + 6_000)]);
+    expect(await flushTimes(name)).toEqual([seconds(start + 10_000)]);
 
     // Typing pushes the flush to 4 s from now...
-    world.clock = start + 5_000;
-    chat.send({ type: "typing", active: true });
-    await vi.waitFor(async () => expect(await flushTimes(name)).toEqual([seconds(start + 9_000)]));
-
-    // ...but never past 10 s from the first message, and there is only ever one schedule.
     world.clock = start + 8_000;
     chat.send({ type: "typing", active: true });
-    await vi.waitFor(async () => expect(await flushTimes(name)).toEqual([seconds(start + 10_000)]));
+    await vi.waitFor(async () => expect(await flushTimes(name)).toEqual([seconds(start + 12_000)]));
+
+    // ...but never past the 60 s cap from the first message, and there is only ever one schedule.
+    world.clock = start + 58_000;
+    chat.send({ type: "typing", active: true });
+    await vi.waitFor(async () => expect(await flushTimes(name)).toEqual([seconds(start + 60_000)]));
 
     // Stopping doesn't bring the flush forward.
     chat.send({ type: "typing", active: false });
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(await flushTimes(name)).toEqual([seconds(start + 10_000)]);
+    expect(await flushTimes(name)).toEqual([seconds(start + 60_000)]);
   });
 });

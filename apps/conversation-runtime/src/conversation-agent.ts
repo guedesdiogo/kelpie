@@ -2,7 +2,6 @@ import { canonicalTimeZone } from "@kelpie/access";
 import { CAPABILITIES, type ChannelCapabilities, type SendOutcome } from "@kelpie/channels";
 import type { AgentConfig, AgentSettings } from "@kelpie/config";
 import {
-  type BufferHooks,
   deliveredReply,
   planDelivery,
   planFlush,
@@ -19,7 +18,6 @@ import {
 } from "@kelpie/conversation/contract";
 import type { AssistantMessage, ChatMessage, LlmEvent, Usage } from "@kelpie/llm";
 import { type OpenKeys, sessionPage } from "@kelpie/memory";
-import { QualifierUnavailable } from "@kelpie/qualifier";
 import {
   Agent,
   type Connection,
@@ -953,8 +951,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const pending = this.#pendingInbound();
     if (pending.length === 0) return;
     const flushAt = pending.length >= LIMITS.maxBuffered ? now : await this.#planFlush(pending);
-    // A newer message arrived while the settings or the decision were awaited, and plans with the
-    // fuller buffer; or a flush already claimed the buffer.
+    // A newer message arrived while the settings were awaited, and plans with the fuller buffer;
+    // or a flush already claimed the buffer.
     if (epoch !== this.#epoch() || this.#pendingInbound().length === 0) return;
     await this.#cancelFlushSchedule();
     if (flushAt <= now) {
@@ -967,14 +965,12 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     this.#set("plannedEpoch", epoch);
   }
 
-  /** When to flush, decided by the qualifier the agent's settings choose. */
+  /** When to flush: the agent's fixed wait after the latest message, within its cap (ADR-0024). */
   async #planFlush(pending: { text: string; receivedAt: number }[]): Promise<number> {
     const { settings } = await this.#config();
     return planFlush(
       pending.map((row) => ({ text: row.text, receivedAt: row.receivedAt })),
       settings,
-      this.#ports.qualifierFor(settings.qualifier),
-      END_OF_TURN_LOGS,
     );
   }
 
@@ -1263,16 +1259,6 @@ function textOf(message: AssistantMessage): string {
 }
 
 /** Error names only: messages can quote conversation content, which is personal data. */
-/** Counts only, never text: who decided the end of turn, and qualifier failures. */
-const END_OF_TURN_LOGS: BufferHooks = {
-  onDecided: (decision) => console.log("conversation: end of turn", decision),
-  onFallback: (_decisionId, error) => {
-    // No Jev key is the default install, not a failure.
-    if (error instanceof QualifierUnavailable && error.reason === "not_configured") return;
-    console.warn("conversation: end-of-turn qualifier failed", { error: errorName(error) });
-  },
-};
-
 function errorName(error: unknown): string {
   return error instanceof Error ? error.name : typeof error;
 }

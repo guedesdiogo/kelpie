@@ -1,10 +1,6 @@
 // The router module only: the package root also loads the provider SDKs.
 import { MODEL_TIERS, type ModelTier } from "@kelpie/llm/router";
-import {
-  QUALIFIER_BACKENDS,
-  type QualifierBackend,
-  type QuietWindowPolicy,
-} from "@kelpie/qualifier";
+import { QUALIFIER_BACKENDS, type QualifierBackend } from "@kelpie/qualifier";
 
 /** Kelpie runs one `Registry`, which lists the agents. */
 export const REGISTRY_NAME = "registry";
@@ -17,9 +13,11 @@ export interface AgentSettings {
   /** Changing it starts a new prompt version: earlier replies replay without native output. */
   systemPrompt: string;
   maxOutputTokens: number;
-  quietWindow: QuietWindowPolicy;
+  /** How long to wait after the user's latest message before answering (ADR-0024). */
+  quietMs: number;
+  /** The longest a message waits for an answer, counted from the first one buffered. */
   maxWaitMs: number;
-  /** Who decides the end of turn when the heuristic isn't sure: Clef on Workers AI, or Jev. */
+  /** The qualifier the agent's typed decisions use, such as the memory rerank: Clef or Jev. */
   qualifier: QualifierBackend;
 }
 
@@ -28,8 +26,8 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   tier: "cheap",
   systemPrompt: "You are a helpful assistant. Reply in the language the user writes in.",
   maxOutputTokens: 1_024,
-  quietWindow: { finishedMs: 1_500, defaultMs: 3_000, unfinishedMs: 6_000 },
-  maxWaitMs: 10_000,
+  quietMs: 10_000,
+  maxWaitMs: 60_000,
   qualifier: "clef",
 };
 
@@ -78,23 +76,10 @@ export function parseSettings(input: unknown): Partial<AgentSettings> | null {
         if (!QUALIFIER_BACKENDS.includes(value as QualifierBackend)) return null;
         parsed.qualifier = value as QualifierBackend;
         break;
-      case "quietWindow": {
-        const window = value as Partial<QuietWindowPolicy> | null;
-        if (
-          !window ||
-          !isInteger(window.finishedMs, 0, 60_000) ||
-          !isInteger(window.defaultMs, 0, 60_000) ||
-          !isInteger(window.unfinishedMs, 0, 60_000)
-        ) {
-          return null;
-        }
-        parsed.quietWindow = {
-          finishedMs: window.finishedMs,
-          defaultMs: window.defaultMs,
-          unfinishedMs: window.unfinishedMs,
-        };
+      case "quietMs":
+        if (!isInteger(value, 0, 120_000)) return null;
+        parsed.quietMs = value;
         break;
-      }
       default:
         return null;
     }

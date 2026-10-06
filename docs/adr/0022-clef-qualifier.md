@@ -4,6 +4,7 @@
 - Date: 2026-10-06
 - Issue: [#117](https://github.com/guedesdiogo/kelpie/issues/117)
 - Accepted by the owner on 2026-10-06: «Sim»
+- Amended by: [ADR-0024](0024-fixed-wait-end-of-turn.md), end of turn uses no qualifier: Kelpie answers after a fixed, configurable wait
 
 ## Context
 

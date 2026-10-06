@@ -59,7 +59,6 @@
         "@kelpie/conversation": "workspace:*",
         "@kelpie/llm": "workspace:*",
         "@kelpie/memory": "workspace:*",
-        "@kelpie/qualifier": "workspace:*",
         "agents": "0.26.0",
         "drizzle-orm": "0.45.3",
       },
@@ -130,7 +129,6 @@
       "dependencies": {
         "@kelpie/channels": "workspace:*",
         "@kelpie/llm": "workspace:*",
-        "@kelpie/qualifier": "workspace:*",
       },
       "devDependencies": {
         "vitest": "^4.1.0",

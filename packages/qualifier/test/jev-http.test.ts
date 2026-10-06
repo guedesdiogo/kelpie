@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { endOfTurn, type JevFetch, JevHttpQualifier, type Question } from "../src/index.ts";
+import { type JevFetch, JevHttpQualifier, type Question } from "../src/index.ts";
 
 // Recorded from TypeSafe's API in the Jev spike (issue #27), with jev-1.13.0.
 const RECORDED = {
@@ -9,7 +9,7 @@ const RECORDED = {
 };
 
 const questions: Record<string, Question> = {
-  "turn.end::user_finished": endOfTurn.questions({ fragments: [] }).user_finished as Question,
+  "turn.end::user_finished": { type: "noul", instructions: "Has the user finished their message?" },
 };
 
 const answering = (status: number, body: unknown) =>
