@@ -677,7 +677,6 @@ export class MemoryIndex {
     return best.map(({ row }) => toHit(row));
   }
 
-  /** The paths of every current note, in order. */
   /** Every current note, with what the lifecycle jobs (#111) score and group them by. */
   lifecycleNotes(): {
     path: string;
@@ -755,6 +754,7 @@ export class MemoryIndex {
     return found;
   }
 
+  /** The paths of every current note, in order. */
   currentPaths(): string[] {
     return this.#exec<{ path: string }>(
       "SELECT path FROM versions WHERE is_current = 1 ORDER BY path",
@@ -783,6 +783,17 @@ export class MemoryIndex {
        ORDER BY bm25(versions_fts, 4.0, 2.0, 1.0, 2.0), v.path
        LIMIT ?`,
       query,
+      ...bindings,
+      limitOf(options),
+    ).map(toHit);
+  }
+
+  /** The notes with this title, in path order: titles compare without case, diacritics or extra spaces. */
+  titled(title: string, options: SearchOptions = {}): SearchHit[] {
+    const [filter, bindings] = versionFilter(options);
+    return this.#exec<HitRow>(
+      `SELECT ${HIT_COLUMNS} FROM versions v WHERE v.title_key = ? AND ${filter} ORDER BY v.path LIMIT ?`,
+      titleKey(title),
       ...bindings,
       limitOf(options),
     ).map(toHit);

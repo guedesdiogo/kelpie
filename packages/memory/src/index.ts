@@ -85,3 +85,9 @@ export {
   type WrittenMemory,
   writeMemory,
 } from "./write.ts";
+export {
+  type ChoiceQualifier,
+  type DecideWriteOptions,
+  decideWrite,
+  type WriteDecision,
+} from "./write-decision.ts";
