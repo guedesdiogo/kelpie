@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-03
 - Issue: [#7](https://github.com/guedesdiogo/kelpie/issues/7)
-- Amended by: [ADR-0016](0016-vault-second-brain.md), the vault's layout, Hermes's memory files (merged per entry), the persona in `SOUL.md` and the owner's own profile
+- Amended by: [ADR-0016](0016-vault-second-brain.md), the vault's layout, Hermes's memory files (merged per entry), the persona in `SOUL.md` and the owner's own profile; [ADR-0020](0020-shared-memory-engine.md), personal data may enter the repository, and approval of persona, rules and skills is configurable per item
 
 ## Context
 

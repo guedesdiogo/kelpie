@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-04
 - Issue: [#58](https://github.com/guedesdiogo/kelpie/issues/58)
+- Amended by: [ADR-0020](0020-shared-memory-engine.md), third parties' data may enter the vault, an agent may change its own persona, rules or skills without review when that item's approval is off, or at or above the confidence floor when it is on, and sharing goes through the single writer instead of symlinks and git sync
 
 ## Context
 

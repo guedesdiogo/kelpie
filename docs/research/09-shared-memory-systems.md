@@ -1,5 +1,13 @@
 > Research note written on 2026-10-05 for the shared second brain ([#103](https://github.com/guedesdiogo/kelpie/issues/103)). It extends [02-memory-and-learning.md](02-memory-and-learning.md) and [08-database-and-context-storage.md](08-database-and-context-storage.md).
 
+> **Outcome (2026-10-06).** The owner's decisions are recorded in [ADR-0020](../adr/0020-shared-memory-engine.md). They depart from this note in four places:
+> - Kelpie builds its own engine modelled on ai-memory, in **its own human-readable format**. Option E's UUID scopes and compatible HTTP endpoints are dropped (§7.1, §8).
+> - Other people's data **lives in the vault** (option b, personal use). The ADR-0006 split and the export of per-user Durable Objects in §8 no longer apply.
+> - Approval of persona, rules and skills is **configurable per item**, with the confidence floor.
+> - The first version serves Kelpie, GitHub and Obsidian. Hermes, OpenClaw and external engines come later.
+>
+> The analysis below is kept as the historical record.
+
 # 09 — One memory shared by every agent: Supermemory, Honcho, Mem0 and the alternatives
 
 > **Read-only research, done on 2026-10-05.** Nothing was created in any service. Five research passes ran in parallel, and the claims the recommendation rests on were then re-read from the primary sources.

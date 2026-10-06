@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-03
 - Issue: [#4](https://github.com/guedesdiogo/kelpie/issues/4)
-- Amended by: [ADR-0015](0015-single-player-first.md), until multi-user lands (single-player); [ADR-0016](0016-vault-second-brain.md), the owner's own profile may live in the vault as an opt-in
+- Amended by: [ADR-0015](0015-single-player-first.md), until multi-user lands (single-player); [ADR-0016](0016-vault-second-brain.md), the owner's own profile may live in the vault as an opt-in; [ADR-0020](0020-shared-memory-engine.md), memory about people lives in the vault, with no erasure workflow or personal-data gate
 
 ## Context
 
