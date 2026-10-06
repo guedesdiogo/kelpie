@@ -102,8 +102,8 @@ export interface FakeWorld {
   modelHeld: boolean;
   cancelled: number;
   sent: string[];
-  /** Every bubble sent, with whether it went out silently. */
-  sends: { text: string; silent: boolean }[];
+  /** Every bubble sent, with whether it went out silently and the link it may preview, if any. */
+  sends: { text: string; silent: boolean; previewUrl?: string }[];
   typing: number;
   /** How many times "typing" was kept up while the model answered, and how many times it stopped. */
   typingKept: number;
@@ -133,6 +133,8 @@ export interface FakeWorld {
   recalls: { agentId: string; question: string; options: RecallOptions }[];
   /** The block recall answers with; empty, as when nothing matches, by default. */
   memory: string;
+  /** The notes recall says the block holds, with their provenance; one owner's note by default. */
+  memoryNotes: { path: string; byKelpie: boolean }[] | null;
   /** While set, recall throws, as an unreachable Context Store would. */
   failRecall: boolean;
   /** While set, recall waits before it answers. */
@@ -158,6 +160,7 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
     failRemember: false,
     recalls: [],
     memory: "",
+    memoryNotes: null,
     failRecall: false,
     recallHeld: false,
     typing: 0,
@@ -253,7 +256,11 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
         // Polls a plain flag: a promise created here can't be resolved from the test's context.
         while (world.blockSends.has(call)) await new Promise((resolve) => setTimeout(resolve, 5));
         world.sent.push(text);
-        world.sends.push({ text, silent: options.silent });
+        world.sends.push({
+          text,
+          silent: options.silent,
+          ...(options.previewUrl === undefined ? {} : { previewUrl: options.previewUrl }),
+        });
         return { ok: true, providerMessageId: `m-${call}` };
       },
       async typing() {
@@ -287,8 +294,12 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
         return {
           text: world.memory,
           tokens: Math.ceil(world.memory.length / 4),
-          paths: world.memory === "" ? [] : ["people/ana.md"],
-          notes: world.memory === "" ? [] : [{ path: "people/ana.md", byKelpie: false }],
+          paths:
+            world.memoryNotes?.map((note) => note.path) ??
+            (world.memory === "" ? [] : ["people/ana.md"]),
+          notes:
+            world.memoryNotes ??
+            (world.memory === "" ? [] : [{ path: "people/ana.md", byKelpie: false }]),
         };
       },
       now: () => world.clock,

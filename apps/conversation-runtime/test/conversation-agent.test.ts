@@ -733,6 +733,138 @@ describe("ConversationAgent delivery through the channel", () => {
   });
 });
 
+// Telegram's servers fetch a link to preview it, so a link the model built could carry the vault's
+// notes out in its path or query (#130). Only a link from the turn's inputs may be previewed.
+describe("ConversationAgent link previews", () => {
+  const MENU = "https://food.example/menu";
+  const NOTE_LINK = "https://notes.example/ana";
+  const MEMORY = [
+    `<memory-abc note="Notes from the owner's vault, for reference.">`,
+    "## Ana (memory/people/ana.md) [abc]",
+    `Mora em Lisboa. Perfil: ${NOTE_LINK}`,
+    "</memory-abc>",
+  ].join("\n");
+
+  it("previews a link the person sent, and none the model built", async () => {
+    const leak = "https://evil.example/?q=Mora%20em%20Lisboa";
+    const world = use(fakeWorld([reply(`Here: ${MENU}\n\nAnd ${leak}\n\nNo link here.`)]));
+    const stub = agent("preview-person");
+    await stub.ingest(message("m1", `what about ${MENU}?`));
+    await stub.flush();
+
+    await vi.waitFor(() => expect(world.sends).toHaveLength(3));
+    expect(world.sends).toEqual([
+      { text: `Here: ${MENU}`, silent: true, previewUrl: MENU },
+      { text: `And ${leak}`, silent: true },
+      { text: "No link here.", silent: false },
+    ]);
+  });
+
+  it("previews a link from the turn's memory block, even after an eviction mid-delivery", async () => {
+    const world = use(fakeWorld([reply(`One.\n\nO perfil: ${NOTE_LINK}\n\nThree.`)]));
+    world.memory = MEMORY;
+    world.hangSends.add(1);
+    const stub = agent("preview-memory");
+    await stub.ingest(message("m1", "onde a Ana mora?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["One."]));
+
+    // The resend reads the turn's block back from storage.
+    await evictDurableObject(stub);
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+
+    await vi.waitFor(() => expect(world.sends).toHaveLength(3));
+    expect(world.sends.map((send) => send.previewUrl)).toEqual([undefined, NOTE_LINK, undefined]);
+  });
+
+  it("previews no link from a session page in the memory block: the model may have written it", async () => {
+    const SESSION_LINK = "https://evil.example/?q=Lisboa";
+    const world = use(fakeWorld([reply(`${SESSION_LINK}\n\n${NOTE_LINK}`)]));
+    world.memory = [
+      `<memory-abc note="Notes from the owner's vault, for reference.">`,
+      "## Ana (memory/people/ana.md) [abc]",
+      `Perfil: ${NOTE_LINK}`,
+      "",
+      "## Session (conversations/telegram-chat-1/sessions/2026/2026-10-04-session-12.md) [abc]",
+      `assistant: veja ${SESSION_LINK}`,
+      "",
+      // A path the vault's layout doesn't place, such as one cut short, counts as unknown.
+      "## Cut (conversations/telegram-chat-1/sessions/2026/2026-10-04-sess…) [abc]",
+      `assistant: ${SESSION_LINK}`,
+      "</memory-abc>",
+    ].join("\n");
+    const stub = agent("preview-session-page");
+    await stub.ingest(message("m1", "onde a Ana mora?"));
+    await stub.flush();
+
+    await vi.waitFor(() => expect(world.sends).toHaveLength(2));
+    expect(world.sends.map((send) => send.previewUrl)).toEqual([undefined, NOTE_LINK]);
+  });
+
+  it("previews no link from a note Kelpie wrote itself: the model may have written it", async () => {
+    const MODEL_LINK = "https://evil.example/?q=Lisboa";
+    const world = use(fakeWorld([reply(`${MODEL_LINK}\n\n${NOTE_LINK}`)]));
+    world.memory = [
+      `<memory-abc note="Notes from the owner's vault, for reference.">`,
+      "## Ana (memory/people/ana.md) [abc]",
+      `Perfil: ${NOTE_LINK}`,
+      "",
+      "## Bruno (memory/people/bruno.md) [abc]",
+      `Site: ${MODEL_LINK}`,
+      "</memory-abc>",
+    ].join("\n");
+    world.memoryNotes = [
+      { path: "memory/people/ana.md", byKelpie: false },
+      { path: "memory/people/bruno.md", byKelpie: true },
+    ];
+    const stub = agent("preview-kelpie-note");
+    await stub.ingest(message("m1", "onde a Ana e o Bruno moram?"));
+    await stub.flush();
+
+    await vi.waitFor(() => expect(world.sends).toHaveLength(2));
+    expect(world.sends.map((send) => send.previewUrl)).toEqual([undefined, NOTE_LINK]);
+  });
+
+  it("previews no link the model changed, by a query or a fragment", async () => {
+    const world = use(fakeWorld([reply(`${MENU}?ref=Lisboa\n\n${MENU}#Lisboa\n\n${MENU}/Lisboa`)]));
+    const stub = agent("preview-changed");
+    await stub.ingest(message("m1", `see ${MENU}`));
+    await stub.flush();
+
+    await vi.waitFor(() => expect(world.sends).toHaveLength(3));
+    for (const send of world.sends) expect(send).not.toHaveProperty("previewUrl");
+  });
+
+  it("previews the bubble's first allowed link, past one the model built", async () => {
+    const other = "https://drinks.example/list";
+    const world = use(
+      fakeWorld([reply(`Try https://evil.example/x, then ${other} (or ${MENU}).`)]),
+    );
+    const stub = agent("preview-first");
+    await stub.ingest(message("m1", `${MENU} or ${other}, which one?`));
+    await stub.flush();
+
+    await vi.waitFor(() => expect(world.sends).toHaveLength(1));
+    expect(world.sends[0]?.previewUrl).toBe(other);
+  });
+
+  it("keeps the preview of a link from an earlier message the request still sends", async () => {
+    const world = use(fakeWorld([reply("Ok."), reply(`It's all on ${MENU}.`)]));
+    const stub = agent("preview-earlier");
+    await stub.ingest(message("m1", `bookmark ${MENU}`));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Ok."]));
+    await stub.ingest(message("m2", "and the prices?"));
+    await stub.flush();
+
+    await vi.waitFor(() => expect(world.sends).toHaveLength(2));
+    expect(world.sends).toEqual([
+      { text: "Ok.", silent: false },
+      { text: `It's all on ${MENU}.`, silent: false, previewUrl: MENU },
+    ]);
+  });
+});
+
 describe("ConversationAgent rate limits and interruption", () => {
   it("doesn't count a bubble waiting out a rate limit as seen when a message interrupts", async () => {
     const world = use(fakeWorld([reply("One.\n\nTwo."), reply("Fine.")]));

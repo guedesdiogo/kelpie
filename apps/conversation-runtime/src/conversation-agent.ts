@@ -26,7 +26,13 @@ import type {
   ToolResult,
   Usage,
 } from "@kelpie/llm";
-import { conversationSource, needsMemory, type OpenKeys, sessionPage } from "@kelpie/memory";
+import {
+  conversationSource,
+  needsMemory,
+  type OpenKeys,
+  placeOf,
+  sessionPage,
+} from "@kelpie/memory";
 import {
   Agent,
   type Connection,
@@ -697,12 +703,13 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       } else {
         // The person waits for this.
         if (this.#question() !== "") step("memory");
-        memory = await this.#recall(settings);
+        const recalled = await this.#recall(settings);
+        memory = recalled?.text ?? null;
         if (controller.signal.aborted || !this.#isRunning(turnId)) return;
         // Kept with the turn, to be sent again unchanged on later requests (#137).
         this.#db
           .update(schema.turns)
-          .set({ context: memory })
+          .set({ context: memory, kelpieNotes: recalled?.kelpieNotes ?? null })
           .where(eq(schema.turns.id, turnId))
           .run();
       }
@@ -1050,7 +1057,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    * slow store, an answer past the budget or nothing found leaves the turn without memory. Logs
    * counts only, never text.
    */
-  async #recall(settings: AgentSettings): Promise<string | null> {
+  async #recall(settings: AgentSettings): Promise<{ text: string; kelpieNotes: string[] } | null> {
     const started = this.#ports.now();
     try {
       const question = this.#question();
@@ -1071,7 +1078,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         tokens: recalled.tokens,
       });
       // A blank block would be sent again on later requests, and Anthropic refuses blank text.
-      return recalled.text.trim() === "" ? null : recalled.text;
+      if (recalled.text.trim() === "") return null;
+      const kelpieNotes = recalled.notes.filter((note) => note.byKelpie).map((note) => note.path);
+      return { text: recalled.text, kelpieNotes };
     } catch (error) {
       console.warn("conversation: recall failed", {
         ms: this.#ports.now() - started,
@@ -1298,6 +1307,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const agentId = this.#agentId();
     const destination = this.#destination();
     const capabilities = capabilitiesFor(destination.channel);
+    const previewable = this.#previewable(turn);
     // Only the reply's last bubble notifies; the others arrive silently.
     const lastSeq =
       this.#db
@@ -1328,15 +1338,48 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         return;
       }
       if (!this.#isRunning(turnId)) return;
-      if (
-        !(await this.#sendBubble(turnId, agentId, destination, row, row.seq !== lastSeq, signal))
-      ) {
-        return;
-      }
+      // The bubble's first link that the turn's inputs hold exactly as written.
+      const previewUrl = linksIn(row.text).find((link) => previewable.has(link));
+      const options = {
+        silent: row.seq !== lastSeq,
+        ...(previewUrl === undefined ? {} : { previewUrl }),
+      };
+      if (!(await this.#sendBubble(turnId, agentId, destination, row, options, signal))) return;
       // If the turn was settled during the send, settling already counted this bubble as sent.
       if (this.#isRunning(turnId)) this.#setBubble(row.id, "sent");
     }
     this.#settle(turnId, "finished");
+  }
+
+  /**
+   * The links a turn's reply may preview (#130). Telegram's servers fetch a previewed link, and one
+   * the model built could carry the vault's notes out in its path or query, so only the links in
+   * the turn's inputs count: the person's messages its request sent, and the memory block recalled
+   * for it. The checkpoint's summary and the replies don't: the model wrote them.
+   */
+  #previewable(turn: {
+    checkpointId: number | null;
+    context: string | null;
+    kelpieNotes: string[] | null;
+  }): Set<string> {
+    const keptFrom =
+      turn.checkpointId === null
+        ? 0
+        : (this.#db
+            .select({ id: schema.checkpoints.keptFromHistoryId })
+            .from(schema.checkpoints)
+            .where(eq(schema.checkpoints.id, turn.checkpointId))
+            .get()?.id ?? 0);
+    const inputs = this.#db
+      .select({ message: schema.history.message })
+      .from(schema.history)
+      .where(and(eq(schema.history.role, "user"), gte(schema.history.id, keptFrom)))
+      .all()
+      .map(({ message }) => messageText(message));
+    if (turn.context !== null) {
+      inputs.push(...ownersNotes(turn.context, new Set(turn.kelpieNotes ?? [])));
+    }
+    return new Set(inputs.flatMap(linksIn));
   }
 
   /**
@@ -1350,7 +1393,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     agentId: string,
     destination: Destination,
     bubble: { id: number; text: string },
-    silent: boolean,
+    options: { silent: boolean; previewUrl?: string },
     signal: AbortSignal,
   ): Promise<boolean> {
     for (let attempt = 1; ; attempt += 1) {
@@ -1358,7 +1401,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       this.#setBubble(bubble.id, "sending");
       let outcome: SendOutcome;
       try {
-        outcome = await this.#channel.send(agentId, destination, bubble.text, { silent });
+        outcome = await this.#channel.send(agentId, destination, bubble.text, options);
       } catch (error) {
         if (this.#isRunning(turnId)) this.#setBubble(bubble.id, "pending");
         throw error;
@@ -1822,6 +1865,51 @@ function newest(text: string, max: number): string {
   const tail = text.slice(-max);
   const first = tail.charCodeAt(0);
   return first >= 0xdc00 && first <= 0xdfff ? tail.slice(1) : tail;
+}
+
+const LINK = /https?:\/\/[^\s<>"]+/giu;
+/** Punctuation after a link belongs to the sentence. */
+const AFTER_LINK = /[.,:;!?'"]+$/u;
+
+/**
+ * The http and https links in `text`, in order, about as Telegram finds them: punctuation after a
+ * link stays out, and a closing parenthesis is the link's own only when it closes one the link
+ * opened (`/wiki/Foo_(bar)`). Links without a scheme (`t.me/x`, `example.com`) aren't found, so
+ * they never get a preview, which is the safe side.
+ */
+function linksIn(text: string): string[] {
+  return [...text.matchAll(LINK)].map(([found]) => {
+    let link = found.replace(AFTER_LINK, "");
+    while (link.endsWith(")") && link.split(")").length > link.split("(").length) {
+      link = link.slice(0, -1).replace(AFTER_LINK, "");
+    }
+    return link;
+  });
+}
+
+/**
+ * The lines of the memory block's notes that the model can't have written (#130). A note Kelpie
+ * wrote (`byKelpie`), or a session page, which records the agent's replies, may hold a link the
+ * model built. A path the vault's layout doesn't place, such as one the block cut short, is treated
+ * the same way. Each note starts with a heading that ends in the block's random id, which no note
+ * can forge.
+ */
+function ownersNotes(block: string, byKelpie: ReadonlySet<string>): string[] {
+  const id = /^<memory-([0-9a-f]+) /.exec(block)?.[1];
+  if (!id) return [];
+  const heading = new RegExp(`^## .* \\((.+)\\) \\[${id}\\]$`);
+  const lines: string[] = [];
+  let kept = false;
+  for (const line of block.split("\n")) {
+    const path = heading.exec(line)?.[1];
+    if (path !== undefined) {
+      const place = placeOf(path);
+      kept = place !== null && place.kind !== "session" && !byKelpie.has(path);
+    } else if (kept) {
+      lines.push(line);
+    }
+  }
+  return lines;
 }
 
 /** The text of any history message, without its tool calls or reasoning. */

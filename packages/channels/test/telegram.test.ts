@@ -148,8 +148,39 @@ describe("Telegram sending", () => {
           text: "a &lt; b &amp; c &lt;script&gt;",
           parse_mode: "HTML",
           disable_notification: false,
+          link_preview_options: { is_disabled: true },
         },
       },
+    ]);
+  });
+
+  it("previews only the link it is given, and only when the text holds it (#130)", async () => {
+    const { adapter, calls } = botApi();
+    const menu = "https://food.example/menu?a=1&b=2";
+    await adapter.send({ threadId: "1001" }, `See ${menu} or https://evil.example/x`, {
+      previewUrl: menu,
+    });
+    // The link goes as typed; only the text is escaped.
+    expect(calls[0]?.body).toMatchObject({
+      text: "See https://food.example/menu?a=1&amp;b=2 or https://evil.example/x",
+      link_preview_options: { url: menu },
+    });
+
+    // The Bot API doesn't tie the given link to the text, and an empty one means the text's first.
+    for (const previewUrl of ["https://elsewhere.example/", ""]) {
+      await adapter.send({ threadId: "1001" }, "See https://evil.example/x", { previewUrl });
+    }
+    await adapter.send({ threadId: "1001" }, "See https://evil.example/x");
+    // Only a web link with a host is previewed, even when the text holds what was given.
+    for (const previewUrl of ["ftp://files.example/x", "https://"]) {
+      await adapter.send({ threadId: "1001" }, `See ${previewUrl} now`, { previewUrl });
+    }
+    expect(calls.slice(1).map((call) => call.body.link_preview_options)).toEqual([
+      { is_disabled: true },
+      { is_disabled: true },
+      { is_disabled: true },
+      { is_disabled: true },
+      { is_disabled: true },
     ]);
   });
 
