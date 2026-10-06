@@ -171,7 +171,13 @@ describe("Telegram sending", () => {
       await adapter.send({ threadId: "1001" }, "See https://evil.example/x", { previewUrl });
     }
     await adapter.send({ threadId: "1001" }, "See https://evil.example/x");
+    // Only a web link with a host is previewed, even when the text holds what was given.
+    for (const previewUrl of ["ftp://files.example/x", "https://"]) {
+      await adapter.send({ threadId: "1001" }, `See ${previewUrl} now`, { previewUrl });
+    }
     expect(calls.slice(1).map((call) => call.body.link_preview_options)).toEqual([
+      { is_disabled: true },
+      { is_disabled: true },
       { is_disabled: true },
       { is_disabled: true },
       { is_disabled: true },

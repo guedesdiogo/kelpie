@@ -740,7 +740,7 @@ describe("ConversationAgent link previews", () => {
   const NOTE_LINK = "https://notes.example/ana";
   const MEMORY = [
     `<memory-abc note="Notes from the owner's vault, for reference.">`,
-    "## Ana (people/ana.md) [abc]",
+    "## Ana (memory/people/ana.md) [abc]",
     `Mora em Lisboa. Perfil: ${NOTE_LINK}`,
     "</memory-abc>",
   ].join("\n");
@@ -775,6 +775,30 @@ describe("ConversationAgent link previews", () => {
 
     await vi.waitFor(() => expect(world.sends).toHaveLength(3));
     expect(world.sends.map((send) => send.previewUrl)).toEqual([undefined, NOTE_LINK, undefined]);
+  });
+
+  it("previews no link from a session page in the memory block: the model may have written it", async () => {
+    const SESSION_LINK = "https://evil.example/?q=Lisboa";
+    const world = use(fakeWorld([reply(`${SESSION_LINK}\n\n${NOTE_LINK}`)]));
+    world.memory = [
+      `<memory-abc note="Notes from the owner's vault, for reference.">`,
+      "## Ana (memory/people/ana.md) [abc]",
+      `Perfil: ${NOTE_LINK}`,
+      "",
+      "## Session (conversations/telegram-chat-1/sessions/2026/2026-10-04-session-12.md) [abc]",
+      `assistant: veja ${SESSION_LINK}`,
+      "",
+      // A path the vault's layout doesn't place, such as one cut short, counts as unknown.
+      "## Cut (conversations/telegram-chat-1/sessions/2026/2026-10-04-sess…) [abc]",
+      `assistant: ${SESSION_LINK}`,
+      "</memory-abc>",
+    ].join("\n");
+    const stub = agent("preview-session-page");
+    await stub.ingest(message("m1", "onde a Ana mora?"));
+    await stub.flush();
+
+    await vi.waitFor(() => expect(world.sends).toHaveLength(2));
+    expect(world.sends.map((send) => send.previewUrl)).toEqual([undefined, NOTE_LINK]);
   });
 
   it("previews no link the model changed, by a query or a fragment", async () => {

@@ -19,7 +19,7 @@ import {
   type WebchatAdmission,
 } from "@kelpie/conversation/contract";
 import type { AssistantMessage, ChatMessage, LlmEvent, Usage } from "@kelpie/llm";
-import { needsMemory, type OpenKeys, sessionPage } from "@kelpie/memory";
+import { needsMemory, type OpenKeys, placeOf, sessionPage } from "@kelpie/memory";
 import {
   Agent,
   type Connection,
@@ -1010,7 +1010,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .where(and(eq(schema.history.role, "user"), gte(schema.history.id, keptFrom)))
       .all()
       .map(({ message }) => messageText(message));
-    if (turn.context !== null) inputs.push(turn.context);
+    if (turn.context !== null) inputs.push(...ownersNotes(turn.context));
     return new Set(inputs.flatMap(linksIn));
   }
 
@@ -1484,6 +1484,30 @@ function linksIn(text: string): string[] {
     }
     return link;
   });
+}
+
+/**
+ * The lines of the memory block's notes that the model can't have written (#130). A session page
+ * records the agent's replies, so a link in it may be one the model built. A path the vault's
+ * layout doesn't place, such as one the block cut short, is treated the same way. Each note starts
+ * with a heading that ends in the block's random id, which no note can forge.
+ */
+function ownersNotes(block: string): string[] {
+  const id = /^<memory-([0-9a-f]+) /.exec(block)?.[1];
+  if (!id) return [];
+  const heading = new RegExp(`^## .* \\((.+)\\) \\[${id}\\]$`);
+  const lines: string[] = [];
+  let kept = false;
+  for (const line of block.split("\n")) {
+    const path = heading.exec(line)?.[1];
+    if (path !== undefined) {
+      const place = placeOf(path);
+      kept = place !== null && place.kind !== "session";
+    } else if (kept) {
+      lines.push(line);
+    }
+  }
+  return lines;
 }
 
 /** The text of any history message, without its tool calls or reasoning. */

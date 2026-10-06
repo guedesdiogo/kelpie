@@ -249,13 +249,18 @@ function isWellFormed(message: unknown): message is TelegramMessage {
  * Telegram's servers fetch the link they preview, so a link the model built could carry what it
  * read out in its path or query (#130). Only the link the caller vouches for is previewed, and
  * only when the text holds it: the Bot API doesn't tie that link to the text, and an empty one
- * means the text's first link. Everything else goes out with previews off.
+ * means the text's first link. Everything else goes out with previews off. The caller is the
+ * conversation runtime, the only Worker bound to channel-egress's sending entrypoint, which picks
+ * the link from the turn's inputs.
  */
 function linkPreview(text: string, previewUrl: string | undefined) {
-  return typeof previewUrl === "string" && previewUrl !== "" && text.includes(previewUrl)
+  return typeof previewUrl === "string" && WEB_LINK.test(previewUrl) && text.includes(previewUrl)
     ? { url: previewUrl }
     : { is_disabled: true };
 }
+
+/** An http or https link with at least the start of a host. */
+const WEB_LINK = /^https?:\/\/[^\s/?#]/i;
 
 /** A reply to an id Telegram can't have issued goes out as a plain message. */
 function replyParameters(replyToMessageId: string | undefined) {
