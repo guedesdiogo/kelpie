@@ -1,7 +1,9 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { DEFAULT_SETTINGS } from "@kelpie/config";
-import { describe, expect, it } from "vitest";
+import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
+import { afterEach, describe, expect, it } from "vitest";
+import { replaceContextStoreForTesting } from "../src/agent-host/agent-host.ts";
 
 const host = (id: string) => env.AGENT_HOST.getByName(id);
 const owner = { userId: "u-owner", role: "owner", via: "admin-api" } as const;
@@ -80,5 +82,87 @@ describe("AgentHost", () => {
         prompt_version: 1,
       },
     ]);
+  });
+});
+
+describe("AgentHost with a vault", () => {
+  const vaultOf = (context: Partial<CompiledContext>): ContextStoreContract => ({
+    compile: async () => ({ persona: null, rules: [], skills: [], ...context }),
+    read: async () => null,
+    write: async () => ({ ok: false, reason: "vault_off" }),
+    propose: async () => ({ ok: false, reason: "vault_off" }),
+  });
+
+  afterEach(() => replaceContextStoreForTesting(undefined));
+
+  it("runs on the configured prompt while the vault has nothing for the agent", async () => {
+    expect(await host("empty-vault").turnConfig()).toEqual({
+      settings: DEFAULT_SETTINGS,
+      promptVersion: 0,
+    });
+  });
+
+  it("composes the persona, rules and skills, and bumps the prompt version when they change", async () => {
+    const stub = host("vault-agent");
+    replaceContextStoreForTesting(
+      vaultOf({
+        persona: "# Kelpie\n\nWarm and brief.",
+        rules: [{ path: "AGENTS.md", content: "Reply in PT-BR." }],
+        skills: [
+          { name: "recipes", description: "Finds recipes.", path: "skills/recipes/SKILL.md" },
+        ],
+      }),
+    );
+    const first = await stub.turnConfig();
+    expect(first.settings.systemPrompt).toBe(
+      "# Kelpie\n\nWarm and brief.\n\n# Rules (AGENTS.md)\n\nReply in PT-BR.\n\n# Skills in your vault\n\n- recipes: Finds recipes.",
+    );
+    expect(first.promptVersion).toBe(1);
+    expect((await stub.turnConfig()).promptVersion).toBe(1);
+    // The owner's settings still show the configured prompt.
+    expect((await stub.config()).settings.systemPrompt).toBe(DEFAULT_SETTINGS.systemPrompt);
+
+    // An edit to the persona, made outside Kelpie, reaches the next turn with a new version.
+    replaceContextStoreForTesting(vaultOf({ persona: "# Kelpie\n\nNow playful." }));
+    expect(await stub.turnConfig()).toMatchObject({
+      settings: { systemPrompt: "# Kelpie\n\nNow playful." },
+      promptVersion: 2,
+    });
+  });
+
+  it("keeps the last vault when the Context Store fails", async () => {
+    const stub = host("vault-outage");
+    replaceContextStoreForTesting(vaultOf({ persona: "# Steady" }));
+    await stub.turnConfig();
+    replaceContextStoreForTesting({
+      ...vaultOf({}),
+      compile: async () => {
+        throw new Error("context-store is down");
+      },
+    });
+    expect(await stub.turnConfig()).toMatchObject({
+      settings: { systemPrompt: "# Steady" },
+      promptVersion: 1,
+    });
+  });
+
+  it("gives concurrent turns one version, and doesn't lose a configured change made meanwhile", async () => {
+    const slow = (persona: string): ContextStoreContract => ({
+      ...vaultOf({}),
+      compile: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return { persona, rules: [], skills: [] };
+      },
+    });
+    const stub = host("vault-race");
+    replaceContextStoreForTesting(slow("# V1"));
+    const [a, b] = await Promise.all([stub.turnConfig(), stub.turnConfig()]);
+    expect([a.promptVersion, b.promptVersion]).toEqual([1, 1]);
+
+    replaceContextStoreForTesting(slow("# V2"));
+    const pending = stub.turnConfig();
+    await stub.configure({ systemPrompt: "Configured meanwhile." }, owner);
+    expect((await pending).promptVersion).toBe(3);
+    expect((await stub.config()).promptVersion).toBe(3);
   });
 });

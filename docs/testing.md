@@ -5,9 +5,12 @@
 | Code | Runner | Runtime |
 |---|---|---|
 | `packages/*` (domain modules, no Cloudflare imports) | Vitest | Node |
+| `packages/memory` | Vitest with `@cloudflare/vitest-plugin` | workerd, from a test-only Worker in `test/wrangler.jsonc` |
 | `apps/*` (Workers and Durable Objects) | Vitest with `@cloudflare/vitest-plugin` | workerd, configured from each Worker's `wrangler.jsonc` |
 
 Domain modules stay runtime-agnostic (ADR-0002), so Node is enough for them. Anything that touches bindings, Durable Object storage or alarms runs inside workerd. No Cloudflare account or key is needed for either.
+
+`packages/memory` imports nothing from Cloudflare, but its index runs on a Durable Object's SQLite, with FTS5. Its tests run in workerd so the index is tested on that SQLite. The test Worker's only Durable Object hosts the storage that each test hands to the index through `runInDurableObject`.
 
 ## Durable Objects and alarms
 

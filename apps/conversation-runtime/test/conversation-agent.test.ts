@@ -270,13 +270,15 @@ describe("ConversationAgent buffering", () => {
     const stub = agent("double-flush");
     await stub.ingest(message("m1", "anyone there?"));
     // The second flush gets the settings only after the first one started its turn.
-    const config = AgentHost.prototype.config;
+    const turnConfig = AgentHost.prototype.turnConfig;
     let calls = 0;
-    vi.spyOn(AgentHost.prototype, "config").mockImplementation(async function (this: AgentHost) {
+    vi.spyOn(AgentHost.prototype, "turnConfig").mockImplementation(async function (
+      this: AgentHost,
+    ) {
       calls += 1;
       if (calls === 2) await new Promise((resolve) => setTimeout(resolve, 50));
-      return config.call(this);
-    } as unknown as typeof config);
+      return turnConfig.call(this);
+    });
 
     await Promise.all([stub.flush(), stub.flush()]);
     expect(await stub.turns()).toMatchObject([{ status: "running" }]);
@@ -286,6 +288,18 @@ describe("ConversationAgent buffering", () => {
       expect(await stub.turns()).toMatchObject([{ status: "delivered" }]),
     );
     expect(world.sent).toEqual(["Once."]);
+  });
+
+  it("asks the vault for the system prompt when a turn starts, not for every message", async () => {
+    const world = use(fakeWorld([reply("Hi.")]));
+    const stub = agent("vault-calls");
+    const turnConfig = vi.spyOn(AgentHost.prototype, "turnConfig");
+    await stub.ingest(message("m1", "oi"));
+    await stub.ingest(message("m2", "tudo bem?"));
+    expect(turnConfig).not.toHaveBeenCalled();
+    await stub.flush();
+    expect(turnConfig).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(world.sent).toEqual(["Hi."]));
   });
 
   it("plans the flush again when the provider retries a message whose planning failed", async () => {

@@ -108,8 +108,9 @@ Form pages are HTML:
 
       Either way, `llm-gateway` masks emails, long numbers, link query strings and token-like strings in the fragments first. Names, addresses and numbers written in words still go out.
    2. `channel-egress`, with its `SECRETS_KEY` and `--var INGRESS_ORIGIN:https://<ingress hostname>` (`docs/secrets.md`);
-   3. `conversation-runtime`;
-   4. `ingress`, with `--domain <ingress hostname>`. Telegram's webhooks reach it there; like the admin API, it has no `workers.dev` URL. Later deploys need the same flag.
+   3. `context-store`, with the vault's GitHub App values and secrets (`docs/context-store.md`). Without them it runs with the vault off;
+   4. `conversation-runtime`;
+   5. `ingress`, with `--domain <ingress hostname>`. Telegram's and GitHub's webhooks reach it there; like the admin API, it has no `workers.dev` URL. Later deploys need the same flag.
 2. **Create a self-hosted Access application** for the admin API's hostname, with a policy that allows only the owner. Do this before step 4: whoever passes Access and holds the token becomes the owner. Note the team domain (`https://<team>.cloudflareaccess.com`) and the application's AUD tag.
 3. **Keep the instance's values out of the repository.** The hostname and the Access values belong to one deployment, so they go in as flags when deploying (step 5), and `wrangler.jsonc` stays the same for every instance:
    - `--domain <admin hostname>`: a custom domain on one of the owner's zones. Wrangler creates its DNS record. `workers_dev` and preview URLs stay off.

@@ -16,6 +16,12 @@
       "binding": "CHANNEL_WEBHOOKS",
       "service": "kelpie-channel-egress",
       "entrypoint": "ChannelWebhooks"
+    },
+    // GitHub's webhook for the vault: context-store holds its secret and checks the signature.
+    {
+      "binding": "GITHUB_WEBHOOKS",
+      "service": "kelpie-context-store",
+      "entrypoint": "GitHubWebhooks"
     }
   ],
   "durable_objects": {

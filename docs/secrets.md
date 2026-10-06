@@ -9,7 +9,8 @@ Kelpie keeps two kinds of secret (ADR-0013).
     - optionally `TYPESAFE_API_KEY`, for agents whose end-of-turn qualifier is Jev (ADR-0018). Without it those agents fall back to the heuristic. Clef, the default qualifier, needs no secret: it runs through `llm-gateway`'s `AI` binding;
   - the bootstrap token, on `admin-api` (`docs/admin-api.md`);
   - the recovery token, on `admin-api`, only while the owner recovers a changed Access login, then deleted (`docs/admin-api.md`, "Recovering access");
-  - the store's encryption key, `SECRETS_KEY` on `channel-egress`.
+  - the store's encryption key, `SECRETS_KEY` on `channel-egress`;
+  - on `context-store`, the vault's GitHub App private key and webhook secret (ADR-0021, `docs/context-store.md`). Without them the vault is off.
 - **Everything else** (a bot token, a tool's API key) goes into Kelpie's secret store through a one-time secure form, never through chat.
 
 ## The secret store

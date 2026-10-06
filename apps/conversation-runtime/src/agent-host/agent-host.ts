@@ -6,12 +6,24 @@ import type {
   ConfigureResult,
 } from "@kelpie/config";
 import { DEFAULT_SETTINGS, parseSettings } from "@kelpie/config";
+import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
 import { Agent } from "agents";
 import { eq } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
+import { composeSystemPrompt, hasVaultContext } from "./system-prompt.ts";
+
+let contextStoreForTesting: ContextStoreContract | undefined;
+
+/** Tests run in the Worker's isolate and swap the Context Store with this. Production never calls it. */
+export function replaceContextStoreForTesting(store: ContextStoreContract | undefined): void {
+  contextStoreForTesting = store;
+}
+
+/** A vault the Context Store can't read in time is replaced by the last one it compiled. */
+const COMPILE_TIMEOUT_MS = 3_000;
 
 /**
  * One agent (ADR-0002): its configuration now; its MCP connections, schedules, budget and task
@@ -41,6 +53,63 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       settings: { ...DEFAULT_SETTINGS, ...this.#get<Partial<AgentSettings>>("settings", {}) },
       promptVersion: this.#get("promptVersion", 0),
     };
+  }
+
+  /**
+   * What a turn runs with: the settings, with the system prompt composed from the vault's persona,
+   * rules and skills (ADR-0016). A change in the vault bumps the prompt version, as a configured
+   * prompt change does. When the Context Store can't answer, the last vault it compiled is used.
+   */
+  async turnConfig(): Promise<AgentConfig> {
+    const vault = await this.#vaultContext();
+    // Read after the await: another call or a configure may have run meanwhile, and the compare,
+    // the bump and the write below are one synchronous step.
+    const config = this.config();
+    const key = hasVaultContext(vault) ? JSON.stringify(vault) : "";
+    let promptVersion = config.promptVersion;
+    if (key !== this.#get("vaultContext", "")) {
+      promptVersion += 1;
+      this.#db.transaction((tx) => {
+        for (const [stateKey, value] of [
+          ["vaultContext", key],
+          ["promptVersion", promptVersion],
+        ] as const) {
+          tx.insert(schema.state)
+            .values({ key: stateKey, value })
+            .onConflictDoUpdate({ target: schema.state.key, set: { value } })
+            .run();
+        }
+      });
+    }
+    return {
+      settings: {
+        ...config.settings,
+        systemPrompt: composeSystemPrompt(config.settings.systemPrompt, vault),
+      },
+      promptVersion,
+    };
+  }
+
+  async #vaultContext(): Promise<CompiledContext | null> {
+    const agentId = this.ctx.id.name;
+    const store =
+      contextStoreForTesting ?? (this.env.CONTEXT_STORE as unknown as ContextStoreContract);
+    if (!agentId) return null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        store.compile(agentId),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("timed out")), COMPILE_TIMEOUT_MS);
+        }),
+      ]);
+    } catch (error) {
+      console.error("AgentHost: the Context Store failed; using the last vault", errorName(error));
+      const last = this.#get("vaultContext", "");
+      return last === "" ? null : (JSON.parse(last) as CompiledContext);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   /**
@@ -94,4 +163,8 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       .get();
     return row ? (row.value as T) : fallback;
   }
+}
+
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : "unknown error";
 }
