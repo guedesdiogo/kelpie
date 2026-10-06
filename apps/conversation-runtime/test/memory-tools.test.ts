@@ -224,7 +224,7 @@ describe("memory_write", () => {
         { ok: false, reason: "owners_word" },
         {
           output:
-            "Not saved: the owner stated that note, and a deduced or inferred memory can't change it. Save it as a new note that says what changed.",
+            "Not saved: that note holds the owner's word (he stated it, or wrote or edited it), and a deduced or inferred memory can't change it. Save it as a new note that says what changed.",
           isError: true,
         },
       ],

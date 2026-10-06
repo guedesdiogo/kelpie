@@ -227,7 +227,8 @@ CREATE TABLE IF NOT EXISTS recall_counts (
 );
 CREATE TABLE IF NOT EXISTS owner_changes (
   path TEXT NOT NULL,
-  at INTEGER NOT NULL
+  at INTEGER NOT NULL,
+  removed INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS authored (
   path TEXT PRIMARY KEY NOT NULL,
@@ -892,9 +893,9 @@ export class Vault extends DurableObject<VaultEnv> {
       const model = this.#get("embedding_model");
       // The owner's notes Kelpie changed in the last week; older records go.
       this.#exec("DELETE FROM owner_changes WHERE at < ?", now - OWNER_CHANGES_MS);
-      const changed = this.#exec<{ path: string; at: number }>(
-        "SELECT path, at FROM owner_changes ORDER BY path, at",
-      );
+      const changed = this.#exec<{ path: string; at: number; removed: number }>(
+        "SELECT path, at, removed FROM owner_changes ORDER BY path, at",
+      ).map((row) => ({ path: row.path, at: row.at, removed: row.removed === 1 }));
       const report = lifecycleReport(
         lifecycleFindings(this.#memory, {
           now,
@@ -1451,6 +1452,22 @@ export class Vault extends DurableObject<VaultEnv> {
     return note.level === "explicit" || !this.#byKelpie([note.path]).has(note.path);
   }
 
+  /**
+   * Records that Kelpie replaced or removed a version it hadn't written (#160), for the report: read
+   * before the `files` row changes. Kelpie's own report isn't listed.
+   */
+  #recordOwnerChange(path: string, removed: boolean, at: number): void {
+    if (path === LIFECYCLE_REPORT_PATH) return;
+    this.#exec(
+      `INSERT INTO owner_changes (path, at, removed)
+       SELECT f.path, ?, ? FROM files f LEFT JOIN authored a ON a.path = f.path
+       WHERE f.path = ? AND (a.blob_sha IS NULL OR a.blob_sha != f.blob_sha)`,
+      at,
+      removed ? 1 : 0,
+      path,
+    );
+  }
+
   /** The paths whose version in the vault is one Kelpie's own commit wrote. */
   #byKelpie(paths: readonly string[]): Set<string> {
     if (paths.length === 0) return new Set();
@@ -1506,6 +1523,15 @@ export class Vault extends DurableObject<VaultEnv> {
             .filter((file) => file.content !== null && hasConflictMarkers(file.content))
             .map((file) => [file.path, this.#fileContent(file.path)] as const),
         );
+        // Queued writes over a version Kelpie didn't write: if a commit of theirs landed with its
+        // answer lost, the record of the owner's change is taken here, before the files change.
+        const owners = new Set(
+          this.#exec<{ path: string }>(
+            `SELECT DISTINCT q.path FROM queue q JOIN files f ON f.path = q.path
+             LEFT JOIN authored a ON a.path = f.path
+             WHERE a.blob_sha IS NULL OR a.blob_sha != f.blob_sha`,
+          ).map((row) => row.path),
+        );
         const changed = snapshot
           ? this.#replaceFiles(snapshot.files)
           : this.#apply(diff?.changes ?? []);
@@ -1516,7 +1542,7 @@ export class Vault extends DurableObject<VaultEnv> {
             continue;
           }
           this.#exec("DELETE FROM held WHERE path = ? AND state != 'resolved'", path);
-          this.#settleQueued(path, content, bases.get(path) ?? null);
+          this.#settleQueued(path, content, bases.get(path) ?? null, owners.has(path));
         }
         this.#set("head", remote);
         return changed;
@@ -1621,7 +1647,12 @@ export class Vault extends DurableObject<VaultEnv> {
    * they overlap. Without a common version, or when either side removed the file, the owner's edit
    * wins whole. Kelpie's writes that lost lines are set aside in `conflicts`.
    */
-  #settleQueued(path: string, incoming: string | null, base: string | null): void {
+  #settleQueued(
+    path: string,
+    incoming: string | null,
+    base: string | null,
+    overOwners = false,
+  ): void {
     const queued = this.#exec<{
       id: number;
       agent: string;
@@ -1635,6 +1666,19 @@ export class Vault extends DurableObject<VaultEnv> {
     if (landed !== -1) {
       // Kelpie's own commit, whose answer was lost: those writes are done, later ones still wait.
       this.#exec("DELETE FROM queue WHERE path = ? AND id <= ?", path, queued[landed]?.id ?? 0);
+      // It replaced the owner's version (#160): listed, as a flush would have.
+      if (
+        overOwners &&
+        queued[landed]?.summary !== RESOLVE_SUMMARY &&
+        path !== LIFECYCLE_REPORT_PATH
+      ) {
+        this.#exec(
+          "INSERT INTO owner_changes (path, at, removed) VALUES (?, ?, ?)",
+          path,
+          Date.now(),
+          incoming === null ? 1 : 0,
+        );
+      }
       // And the version is Kelpie's (#126), unless it only settled the owner's conflict.
       if (incoming !== null && queued[landed]?.summary !== RESOLVE_SUMMARY) {
         this.#exec(
@@ -1787,17 +1831,11 @@ export class Vault extends DurableObject<VaultEnv> {
       }
       const commit = outcome.commit;
       this.ctx.storage.transactionSync(() => {
-        // A version Kelpie didn't write, now replaced or removed by Kelpie: the report lists it (#149).
+        // A version Kelpie didn't write, now replaced or removed by Kelpie: the report lists it (#160).
         const now = Date.now();
         for (const path of [...writes.map((write) => write.path), ...deletions]) {
           if (lastRows.get(path)?.summary === RESOLVE_SUMMARY) continue;
-          this.#exec(
-            `INSERT INTO owner_changes (path, at)
-             SELECT f.path, ? FROM files f LEFT JOIN authored a ON a.path = f.path
-             WHERE f.path = ? AND (a.blob_sha IS NULL OR a.blob_sha != f.blob_sha)`,
-            now,
-            path,
-          );
+          this.#recordOwnerChange(path, latest.get(path) === null, now);
         }
         writes.forEach(({ path, content }, i) => {
           this.#exec(

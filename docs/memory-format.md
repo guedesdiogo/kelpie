@@ -341,7 +341,9 @@ What keeps memory clean as it grows (#111), without touching how notes rank.
 ### The daily report
 
 Once a day, the Context Store's alarm looks at the index, after GitHub's work and the held files. It writes what it finds to one page, `memory/_lint/report.md`, as links to the notes.
-- **Your notes Kelpie changed** (#149): every note whose version Kelpie's commit replaced or removed, when Kelpie hadn't written that version, in the last 7 days. Each line links the note and gives the day of its latest change, and git keeps every earlier version.
+- **Your notes Kelpie changed** (#149): every note whose version Kelpie's commit replaced or removed in the last week, when Kelpie hadn't written that version. Git keeps every earlier version.
+  - Each line gives the day of the note's latest change, newest first. A changed note is a link; a removed one is shown by its path.
+  - A commit whose answer was lost counts too, once the next sync finds it landed. Resolving a held file doesn't count, and neither does the report page itself.
 - **Cold notes:** sessions and events nobody recalls any more. Facts don't decay, and pinned or evergreen notes are exempt.
   - A note's retention is e^(−0.02 × days old), plus 0.6 × ln(1 + recalls) × e^(−0.04 × days since the last recall). A note is cold below 0.2: about 80 days after it was written, if nobody recalled it.
   - **When it was written:** its `updated`, never later than its commit; else the date its file name starts with (`2026-03-04-standup.md`, `2026-03-04.md`); else when the index first saw it. So a vault synced for the first time, or an index rebuilt, doesn't look new.

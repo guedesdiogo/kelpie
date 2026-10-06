@@ -53,8 +53,8 @@ export interface LifecycleFindings {
   duplicates: { kind: "content" | "title"; notes: NoteRef[] }[];
   /** Pairs of notes about one entity, close enough to be about the same thing, not the same. */
   contradictions: { notes: [NoteRef, NoteRef]; entity: string }[];
-  /** The owner's notes Kelpie changed lately (#149), each with its latest change. */
-  changed: (NoteRef & { changedAt: number })[];
+  /** The owner's notes Kelpie changed lately (#160): each one's latest change, newest first. */
+  changed: (NoteRef & { changedAt: number; removed: boolean })[];
 }
 
 export interface LifecycleOptions {
@@ -65,7 +65,7 @@ export interface LifecycleOptions {
   model?: string;
   bands?: Readonly<Record<string, readonly [number, number]>>;
   /** When Kelpie changed a note it hadn't written (the Context Store's record), in the window shown. */
-  changed?: readonly { path: string; at: number }[];
+  changed?: readonly { path: string; at: number; removed?: boolean }[];
 }
 
 type LifecycleNote = ReturnType<MemoryIndex["lifecycleNotes"]>[number] & { writtenAt: number };
@@ -146,18 +146,20 @@ export function lifecycleFindings(
     ...sameTitle.map((list) => ({ kind: "title" as const, notes: list })),
   ].sort((a, b) => (a.kind === b.kind ? firstPath(a, b) : a.kind === "content" ? -1 : 1));
 
-  const latest = new Map<string, number>();
-  for (const { path, at } of options.changed ?? []) {
-    latest.set(path, Math.max(at, latest.get(path) ?? 0));
+  const latest = new Map<string, { at: number; removed: boolean }>();
+  for (const { path, at, removed } of options.changed ?? []) {
+    if (at >= (latest.get(path)?.at ?? -Infinity)) latest.set(path, { at, removed: !!removed });
   }
+  // Newest first, so a long list keeps the latest changes.
   const changed = [...latest]
-    .map(([path, changedAt]) => ({
+    .map(([path, { at, removed }]) => ({
       path,
       title:
         index.current(path)?.title ?? path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/, ""),
-      changedAt,
+      changedAt: at,
+      removed,
     }))
-    .sort(byPath);
+    .sort((a, b) => b.changedAt - a.changedAt || byPath(a, b));
 
   return { cold, duplicates, contradictions: contradictions(index, notes, options), changed };
 }
@@ -295,10 +297,14 @@ export function lifecycleReport(findings: LifecycleFindings): string | null {
       [
         "## Your notes Kelpie changed",
         "",
-        "Notes you wrote or edited that Kelpie changed in the last 7 days. Git keeps every earlier version.",
+        "Notes you wrote or edited that Kelpie changed in the last week, newest first. Git keeps every earlier version.",
         "",
         ...capped(
-          findings.changed.map((note) => `- ${link(note)}: changed ${day(note.changedAt)}`),
+          findings.changed.map((note) =>
+            note.removed
+              ? `- \`${plain(note.path, PATH_CHARS, UNSAFE_CODE)}\`: removed ${day(note.changedAt)}`
+              : `- ${link(note)}: changed ${day(note.changedAt)}`,
+          ),
         ),
       ].join("\n"),
     );
@@ -350,5 +356,5 @@ export function lifecycleReport(findings: LifecycleFindings): string | null {
     );
   }
   if (sections.length === 0) return null;
-  return `# Memory report\n\nKelpie writes this page every day from memory's index; nothing listed here was changed. It goes away when every list is empty.\n\n${sections.join("\n\n")}\n`;
+  return `# Memory report\n\nKelpie writes this page every day from memory's index. Nothing listed under cold notes, duplicates or possible contradictions was changed. It goes away when every list is empty.\n\n${sections.join("\n\n")}\n`;
 }
