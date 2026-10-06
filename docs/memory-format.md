@@ -269,13 +269,13 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   The block is fenced as reference, not instructions: a conversation's page is what someone said, whoever said it. A note can't step out of it or pass for another note:
   - the block's tags and every note's heading carry a random id, new for each block;
   - anything in a note that reads like the block's tags (`<memory`, `</memory`) is escaped;
-  - a heading is one line, without controls.
+  - a heading is one line, without controls, with at most 120 characters of the title and 300 of the path.
 
   The budget holds by construction; the evaluation checks it on every question. The slice's starting budget is 1,000 tokens.
 - **Rerank,** on ai-memory's contract:
   - a judge scores the 30 best hits at most, from each note's title, abstract and body start, 600 characters;
   - only those are reordered, and the caller keeps its limit after, so notes can rise from below it;
-  - the fused order stays when the judge fails, doesn't answer in 5 s, or gives any score that is missing or outside 0 to 1.
+  - the fused order stays when the judge fails, doesn't answer in time (5 s by default; a turn's recall allows 3.5 s), or gives any score that is missing or outside 0 to 1.
 
   Kelpie's judge is the agent's qualifier, asked one yes-or-no question per note in one call, with the notes marked as data, not instructions.
 - **In a turn:** the conversation runtime asks once per turn, when the person has finished.

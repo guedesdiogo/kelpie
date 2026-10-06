@@ -1217,20 +1217,22 @@ describe("ConversationAgent memory", () => {
     expect(world.recalls.map(({ question }) => question)).toEqual(["onde a Ana mora?"]);
   });
 
-  it("asks about the newest text when the messages run long", async () => {
+  it("asks about the newest 2,000 characters, never from half of an emoji", async () => {
     const world = use(fakeWorld([reply("Em Lisboa.")]));
     const stub = agent("memory-long");
-    await stub.ingest(message("m1", "um texto colado ".repeat(300)));
+    // 4 + 3,000 + 17 characters: the newest 2,000 start on the second half of an emoji.
+    await stub.ingest(message("m1", `Ana ${"😀".repeat(1_500)}`));
     await stub.ingest(message("m2", "onde a Ana mora?"));
     await stub.flush();
     await vi.waitFor(() => expect(world.recalls).toHaveLength(1));
     const question = world.recalls[0]?.question ?? "";
-    expect(question.length).toBeLessThanOrEqual(2_000);
+    expect(question.length).toBe(1_999);
+    expect(question.startsWith("😀")).toBe(true);
     expect(question.endsWith("\nonde a Ana mora?")).toBe(true);
   });
 
   it("answers without memory when recall fails, answers past its budget or finds nothing", async () => {
-    const world = use(fakeWorld([reply("Não lembro."), reply("Nem eu."), reply("Também não.")]));
+    const world = use(fakeWorld([]));
     const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
     const logged = vi.spyOn(console, "log").mockImplementation(() => {});
     const stub = agent("memory-failed");
@@ -1245,14 +1247,23 @@ describe("ConversationAgent memory", () => {
     world.failRecall = false;
     world.memory = "a".repeat(4_001);
     await turn("m2", "e o Bruno?");
+    world.memory = { length: 1 } as unknown as string;
+    await turn("m3", "e o Caio?");
     world.memory = "";
-    await turn("m3", "e a Patrícia?");
+    await turn("m4", "e a Patrícia?");
+    // Exactly the budget is fine.
+    world.memory = "a".repeat(4_000);
+    await turn("m5", "e a Dora?");
 
-    expect(world.recalls).toHaveLength(3);
-    for (const request of world.requests) expect(request).not.toHaveProperty("context");
+    expect(world.recalls).toHaveLength(5);
+    for (const request of world.requests.slice(0, 4)) {
+      expect(request).not.toHaveProperty("context");
+    }
+    expect(world.requests[4]?.context).toHaveLength(4_000);
     const failures = warned.mock.calls.filter(([line]) => line === "conversation: recall failed");
     expect(failures.map(([, fields]) => fields)).toEqual([
       { ms: 0, error: "Error" },
+      { ms: 0, error: "TypeError" },
       { ms: 0, error: "TypeError" },
     ]);
     const recall = logged.mock.calls.find(([line]) => line === "conversation: recall");

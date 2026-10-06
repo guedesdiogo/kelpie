@@ -214,17 +214,68 @@ describe("AnthropicMessagesProvider", () => {
       },
     ]);
 
-    // After a reply, there is no user turn to join: the context comes as one.
+    // After a reply, there is no user turn to join: the context comes as one, and the breakpoint
+    // goes on the reply's last block that can carry one.
     const messages: ChatMessage[] = [
       ...request().messages,
       { role: "assistant", parts: [{ type: "text", text: "Sunny." }] },
     ];
     await collect(provider(fetch).stream(request({ messages, context })));
-    expect(requestAt(calls, 1).body).toMatchObject({ cache_control: { type: "ephemeral" } });
+    expect(requestAt(calls, 1).body).not.toHaveProperty("cache_control");
     expect((requestAt(calls, 1).body.messages as unknown[]).slice(1)).toEqual([
-      { role: "assistant", content: [{ type: "text", text: "Sunny." }] },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Sunny.", cache_control: { type: "ephemeral" } }],
+      },
       { role: "user", content: [{ type: "text", text: context }] },
     ]);
+  });
+
+  it("puts the breakpoint on the last tool result, and leaves the turns before it alone", async () => {
+    const { fetch, calls } = fakeFetch(sse(toolTurn), sse(toolTurn));
+    const messages: ChatMessage[] = [
+      ...request().messages,
+      {
+        role: "assistant",
+        parts: [
+          { type: "tool_call", id: "toolu_01", name: "get_weather", input: { city: "Lisbon" } },
+          { type: "tool_call", id: "toolu_02", name: "get_weather", input: { city: "Porto" } },
+        ],
+      },
+      {
+        role: "tool",
+        results: [
+          { callId: "toolu_01", output: "18°C" },
+          { callId: "toolu_02", output: "16°C" },
+        ],
+      },
+    ];
+    await collect(provider(fetch).stream(request({ messages })));
+    await collect(provider(fetch).stream(request({ messages, context: "<memory/>" })));
+
+    const plain = requestAt(calls, 0).body.messages as unknown[];
+    const sent = requestAt(calls, 1).body.messages as unknown[];
+    expect(sent.slice(0, 2)).toEqual(plain.slice(0, 2));
+    expect(sent[2]).toEqual({
+      role: "user",
+      content: [
+        { type: "tool_result", tool_use_id: "toolu_01", content: "18°C" },
+        {
+          type: "tool_result",
+          tool_use_id: "toolu_02",
+          content: "16°C",
+          cache_control: { type: "ephemeral" },
+        },
+        { type: "text", text: "<memory/>" },
+      ],
+    });
+  });
+
+  it("sends a blank context as no context", async () => {
+    const { fetch, calls } = fakeFetch(sse(toolTurn), sse(toolTurn));
+    await collect(provider(fetch).stream(request()));
+    await collect(provider(fetch).stream(request({ context: " \n" })));
+    expect(requestAt(calls, 1).body).toEqual(requestAt(calls, 0).body);
   });
 
   it("sends neither effort nor refusal fallback to Claude Haiku 4.5", async () => {

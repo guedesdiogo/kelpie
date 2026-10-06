@@ -59,7 +59,7 @@ export class OpenAIResponsesProvider implements LlmProvider {
           input: [
             ...request.messages.flatMap(toInputItems),
             // OpenAI caches the longest prefix it saw, so the context goes last.
-            ...(request.context
+            ...(request.context?.trim()
               ? [
                   {
                     type: "message" as const,

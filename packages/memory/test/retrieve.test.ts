@@ -488,8 +488,34 @@ describe("pack", () => {
         expect(text.match(/<\s*\/?\s*memory/gi)).toHaveLength(2);
         // A long heading doesn't crowd the other note out of a small budget.
         expect(paths).toHaveLength(2);
-        const headings = text.split("\n").filter((line) => line.startsWith("## "));
-        expect(Math.max(...headings.map((line) => line.length))).toBeLessThan(300);
+        // The title is cut to 120 characters; the path stays whole, so it can be cited.
+        const path = memoryPath(long.scope, long.kind, long.title);
+        expect(text).toContain(`## ${long.title.slice(0, 119)}… (${path}) [`);
+      },
+    );
+  });
+
+  it("keeps a long path whole in a heading, up to 300 characters", async () => {
+    const memory: MemoryInput = {
+      scope: "global",
+      kind: "note",
+      title: "Viagem",
+      abstract: "Planos da viagem.",
+      body: "Planos da viagem.",
+      level: "explicit",
+      confidence: 0.6,
+    };
+    // A folder tree made in Obsidian, deeper than Kelpie's own paths.
+    const path = `memory/notes/${"viagens/".repeat(20)}planos.md`;
+    await runInDurableObject(
+      env.INDEX_HOST.getByName("pack-long-path"),
+      async (_instance, state) => {
+        const index = new MemoryIndex(state.storage);
+        const { text } = await writeMemory(memory, { at: "2026-10-01T00:00:00Z" });
+        await index.applyCommit(new FakeVault().commit({ [path]: text }));
+        const packed = pack(index, retrieve(index, "planos viagem"), { budgetTokens: 1_000 });
+        expect(packed.paths).toEqual([path]);
+        expect(packed.text).toContain(`(${path})`);
       },
     );
   });
