@@ -460,6 +460,27 @@ describe("a turn's tools and interruption", () => {
     ]);
   });
 
+  it("drops a recovered turn's native output when its tools changed during the eviction", async () => {
+    const world = use(fakeWorld([toolCalls({ name: "stuck" }), reply("Recovered.")]));
+    provide(world, { stuck: () => new Promise<ToolOutcome>(() => {}) });
+    const stub = agent("tools-evicted-changed");
+    await stub.ingest(message("m1", "try the stuck one"));
+    await stub.flush();
+    await vi.waitFor(async () => expect(await history(stub)).toHaveLength(2));
+
+    // A provider arrives while the object is away.
+    provide(world, { stuck: () => new Promise<ToolOutcome>(() => {}), lookup: answer });
+    await evictDurableObject(stub);
+    await runDurableObjectAlarm(stub);
+    await vi.waitFor(() => expect(world.sent).toEqual(["Recovered."]));
+
+    expect(world.requests[1]?.tools).toHaveLength(2);
+    expect(world.requests[1]?.messages[1]).toEqual({
+      role: "assistant",
+      parts: [{ type: "tool_call", id: "call-0", name: "stuck", input: {} }],
+    });
+  });
+
   it("keeps a refused turn's memory block once its calls are in history", async () => {
     const world = use(fakeWorld([toolCalls({ name: "lookup", input: { q: "a" } })]));
     world.memory = MEMORY;

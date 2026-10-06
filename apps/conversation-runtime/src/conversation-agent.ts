@@ -773,9 +773,13 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const tools = await this.#tools(agentId);
     if (controller.signal.aborted || !this.#isRunning(turn.id)) return null;
     const specs = [...tools.values()].map((tool) => tool.spec);
-    // Earlier replies are replayed with their native output only under the same tools.
+    // Earlier replies are replayed with their native output only under the same tools. A turn
+    // picked up after an eviction keeps the key its earlier rounds ran under: if the tools changed
+    // since, its own calls go without their native output too.
     const toolsKey = specs.length === 0 ? null : await digest(JSON.stringify(specs));
-    this.#db.update(schema.turns).set({ toolsKey }).where(eq(schema.turns.id, turn.id)).run();
+    if (this.#toolRounds(turn.id) === 0) {
+      this.#db.update(schema.turns).set({ toolsKey }).where(eq(schema.turns.id, turn.id)).run();
+    }
     const system =
       specs.length === 0
         ? `${settings.systemPrompt}\n\n${MEMORY_NOTE}`
@@ -1389,8 +1393,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     try {
       this.#closeOpenCalls(turnId, this.#inFlight.get(turnId)?.tools);
     } catch (error) {
-      // The turn must settle anyway; a recovered or later turn finds the calls still open.
+      // A call left without a result would fail every later request: short stubs instead.
       console.error("ConversationAgent: closing a turn's calls failed", errorName(error));
+      this.#closeOpenCalls(turnId);
     }
     const ranTools = this.#toolRounds(turnId) > 0;
     const now = this.#ports.now();
