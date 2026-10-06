@@ -235,6 +235,33 @@ describe("llm-gateway", () => {
     expect(logged).toHaveBeenCalledOnce();
   });
 
+  it("waits longer for Clef when the caller asks, but never past 3 s", async () => {
+    // Clef answers after 1.5 s, unless the gateway gives up first.
+    const run = vi.fn(
+      (_model: string, _input: unknown, options: { signal?: AbortSignal }) =>
+        new Promise((resolve, reject) => {
+          const timer = setTimeout(() => resolve(RECORDED_CLEF), 1_500);
+          options.signal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            reject(options.signal?.reason);
+          });
+        }),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const withClef = {
+      ...(env as Parameters<typeof qualifyWith>[0]),
+      AI: { run } as unknown as Ai,
+    };
+    const state = { fragments: ["oi"] };
+    expect(await qualifyWith(withClef, state, questions, "clef")).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+    expect((await qualifyWith(withClef, state, questions, "clef", { timeoutMs: 2_000 })).ok).toBe(
+      true,
+    );
+  });
+
   it("refuses a backend it doesn't know instead of falling back to Jev", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     vi.spyOn(console, "error").mockImplementation(() => {});

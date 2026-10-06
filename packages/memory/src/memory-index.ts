@@ -663,6 +663,13 @@ export class MemoryIndex {
     return best.map(({ row }) => toHit(row));
   }
 
+  /** The paths of every current note, in order. */
+  currentPaths(): string[] {
+    return this.#exec<{ path: string }>(
+      "SELECT path FROM versions WHERE is_current = 1 ORDER BY path",
+    ).map((row) => row.path);
+  }
+
   /** One version, by its path and the commit that wrote it. */
   versionOf(path: string, commit: string): IndexedVersion | null {
     const row = this.#exec<VersionRow>(

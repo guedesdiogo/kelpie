@@ -33,8 +33,26 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - if GitHub refuses that one too, it is refusing everything (a branch rule, a revoked permission), and nothing is set aside: the writes wait for the retry.
   - **A commit fails on a large batch:** the next try commits half as many writes, and the batch grows back after a flush that commits everything.
 - **A README.** A vault without one gets a `README.md` that describes the layout, so people and other agents can find their way.
+- **Memory** (#110). The same object keeps memory's index ([memory-format.md](memory-format.md#the-index)) next to the working copy:
+  - **Indexing:** every move of the head, a sync or one of its own commits, is applied to the index as one step.
+    - "As of" therefore means as of when the Context Store synced, not when the owner's device committed.
+    - When the index is behind the head, after a crash or a new schema, the next recall or alarm reindexes from the working copy. Notes that haven't changed are skipped.
+  - **Embeddings:** the alarm embeds the notes that have no vector yet, through llm-gateway's `embed`, four batches of 64 a run, until none is left.
+    - The model is the one `EMBEDDING_PROVIDER` chooses on llm-gateway; a new model means every note is embedded again.
+    - This runs after GitHub's work and fails on its own, so an llm-gateway outage never delays the vault's writes.
+  - **`recall(agent, question, {scopes, budgetTokens})`:** the memories that answer a question, packed for one turn.
+    - The question is read up to 2,000 characters.
+    - Its vector joins the retrieval if llm-gateway answers within 2 s.
+    - The agent's qualifier (Clef, or Jev if the agent chose it) reranks the 30 best hits if it answers within 2 s. Otherwise the fused order stays.
+    - The block holds at most 8,000 tokens.
+    - `scopes` is required: `"all"` for a private chat with the owner, or the scopes a turn may see.
+    - It only reads, so it never waits behind a commit to GitHub.
+    - With the vault off it answers an empty block.
+  - **Access counts:** each recall counts the notes it packed, in one write, in a table outside the index. A rebuild keeps them, and they never reach git.
 
 ## Setting it up
+
+`context-store` reaches llm-gateway through its `LLM_GATEWAY` service binding, for memory's embeddings and rerank, so llm-gateway deploys first. Without llm-gateway's models, recall works on full text, entities and links alone.
 
 The vault needs a GitHub App with access to the vault repository alone. Spike #28's App works, or a new one.
 

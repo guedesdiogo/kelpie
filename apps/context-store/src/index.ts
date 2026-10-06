@@ -5,11 +5,18 @@ import type {
   ContextStoreContract,
   ProposalTarget,
   ProposeResult,
+  RecallOptions,
+  RecallResult,
   WriteResult,
 } from "./contract.ts";
 import { VAULT_NAME, type VaultEnv } from "./vault.ts";
 
-export { replaceBackendForTesting, Vault } from "./vault.ts";
+export {
+  type MemoryGateway,
+  replaceBackendForTesting,
+  replaceGatewayForTesting,
+  Vault,
+} from "./vault.ts";
 
 /** The vault for Kelpie's other Workers, through a service binding (ADR-0005). */
 export class ContextStore extends WorkerEntrypoint<VaultEnv> implements ContextStoreContract {
@@ -40,6 +47,10 @@ export class ContextStore extends WorkerEntrypoint<VaultEnv> implements ContextS
     reason: string,
   ): Promise<ProposeResult> {
     return this.#vault().propose(agentId, target, content, reason);
+  }
+
+  recall(agentId: string, question: string, options: RecallOptions): Promise<RecallResult> {
+    return this.#vault().recall(agentId, question, options);
   }
 }
 

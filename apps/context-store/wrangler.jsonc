@@ -13,6 +13,10 @@
   // off and agents run on their settings alone. The secrets are GITHUB_APP_PRIVATE_KEY (PKCS#8)
   // and GITHUB_WEBHOOK_SECRET.
   "vars": { "GITHUB_APP_ID": "", "GITHUB_INSTALLATION_ID": "", "VAULT_REPOSITORY": "" },
+  // Memory's embeddings and its rerank (#110), so llm-gateway deploys first.
+  "services": [
+    { "binding": "LLM_GATEWAY", "service": "kelpie-llm-gateway", "entrypoint": "LlmGateway" }
+  ],
   "durable_objects": {
     "bindings": [{ "name": "VAULT", "class_name": "Vault" }]
   },
