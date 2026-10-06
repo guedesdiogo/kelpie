@@ -825,11 +825,12 @@ export class MemoryIndex {
     const asked = [...new Set(keys)].slice(0, MAX_KEYS);
     if (asked.length === 0) return [];
     const [filter, bindings] = versionFilter(options);
-    const marks = asked.map(() => "?").join(", ");
+    // The keys go as one JSON array: 64 keys and 64 scopes as placeholders would pass the 100
+    // parameters a Durable Object's SQL statement may bind.
     return this.#exec<HitRow>(
       `WITH named AS (
          SELECT e.version, e.key FROM entities e JOIN versions v ON v.rowid = e.version
-         WHERE e.key IN (${marks}) AND ${filter}
+         WHERE e.key IN (SELECT value FROM json_each(?)) AND ${filter}
        ),
        pages AS (SELECT key, count(*) AS n FROM named GROUP BY key HAVING count(*) <= ?)
        SELECT ${HIT_COLUMNS}
@@ -838,7 +839,7 @@ export class MemoryIndex {
        ORDER BY max(CASE WHEN v.title_key <> named.key THEN 0 WHEN v.scope = 'global' THEN 2 ELSE 1 END) DESC,
          sum(1.0 / pages.n) DESC, v.path
        LIMIT ?`,
-      ...asked,
+      JSON.stringify(asked),
       ...bindings,
       MAX_ENTITY_VERSIONS,
       limitOf(options),
