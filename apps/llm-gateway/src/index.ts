@@ -13,9 +13,9 @@ import {
 } from "@kelpie/llm";
 import {
   ClefQualifier,
-  type ClefRun,
   type GatewayQualifyOutcome,
   JevHttpQualifier,
+  QUALIFIER_BACKENDS,
   type Qualifier,
   type QualifierBackend,
   type Question,
@@ -94,9 +94,13 @@ export async function qualifyWith(
   questions: Record<string, Question>,
   backend: QualifierBackend = "jev",
 ): Promise<GatewayQualifyOutcome> {
-  const qualifier = qualifierFor(env, backend);
-  if (!qualifier) return { ok: false, reason: "not_configured" };
+  if (!QUALIFIER_BACKENDS.includes(backend)) {
+    console.error("llm-gateway: unknown qualifier backend");
+    return { ok: false, reason: "failed" };
+  }
   try {
+    const qualifier = qualifierFor(env, backend);
+    if (!qualifier) return { ok: false, reason: "not_configured" };
     const signal = AbortSignal.timeout(QUALIFY_TIMEOUT_MS);
     return { ok: true, result: await qualifier.qualify(state, questions, { signal }) };
   } catch (error) {
@@ -107,9 +111,17 @@ export async function qualifyWith(
 
 function qualifierFor(env: GatewayEnv, backend: QualifierBackend): Qualifier | null {
   if (backend === "clef") {
-    // The binding's types list known models only; Clef's selector is a plain string here.
-    const run = env.AI.run.bind(env.AI) as unknown as ClefRun;
-    return new ClefQualifier({ model: env.CLEF_MODEL, run });
+    // The binding's types list known models only, so Clef's name goes through a plain signature;
+    // the options are still checked against AiOptions.
+    const run = env.AI.run.bind(env.AI) as unknown as (
+      model: string,
+      input: unknown,
+      options: AiOptions,
+    ) => Promise<unknown>;
+    return new ClefQualifier({
+      model: env.CLEF_MODEL,
+      run: (model, input, options) => run(model, input, options),
+    });
   }
   if (!env.TYPESAFE_API_KEY) return null;
   return new JevHttpQualifier({

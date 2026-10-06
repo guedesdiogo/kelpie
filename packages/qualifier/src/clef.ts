@@ -39,10 +39,13 @@ export class ClefQualifier implements Qualifier {
     const { model, run } = this.#options;
     let body: unknown;
     try {
-      body = await run(
-        `@cf/cloudflare/${model}`,
-        { model, state: maskPersonalData(state), questions },
-        options.signal ? { signal: options.signal } : {},
+      body = await untilAborted(
+        run(
+          `@cf/cloudflare/${model}`,
+          { model, state: maskPersonalData(state), questions },
+          options.signal ? { signal: options.signal } : {},
+        ),
+        options.signal,
       );
     } catch (error) {
       // A Workers AI error message can quote the input, so only the error's name is reported.
@@ -50,4 +53,15 @@ export class ClefQualifier implements Qualifier {
     }
     return { answers: systemOneAnswers(questions, body), provider: this.id, calibrated: true };
   }
+}
+
+/** The binding may not honor the signal, so the call also stops waiting when it aborts. */
+function untilAborted<T>(call: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return call;
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    if (signal.aborted) abort();
+    signal.addEventListener("abort", abort, { once: true });
+    call.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }

@@ -214,6 +214,40 @@ describe("llm-gateway", () => {
     expect(JSON.stringify(logged.mock.calls)).not.toContain("cpf");
   });
 
+  it("answers not_configured when Jev is asked for by name without its key", async () => {
+    const { TYPESAFE_API_KEY: _key, ...withoutJev } = env as Parameters<typeof qualifyWith>[0];
+    expect(await qualifyWith(withoutJev, { fragments: ["oi"] }, questions, "jev")).toEqual({
+      ok: false,
+      reason: "not_configured",
+    });
+  });
+
+  it("answers failed, and logs it, when the AI binding is missing", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { AI: _ai, ...withoutAi } = env as Parameters<typeof qualifyWith>[0];
+    const outcome = await qualifyWith(
+      withoutAi as Parameters<typeof qualifyWith>[0],
+      { fragments: ["oi"] },
+      questions,
+      "clef",
+    );
+    expect(outcome).toEqual({ ok: false, reason: "failed" });
+    expect(logged).toHaveBeenCalledOnce();
+  });
+
+  it("refuses a backend it doesn't know instead of falling back to Jev", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const outcome = await qualifyWith(
+      env as Parameters<typeof qualifyWith>[0],
+      { fragments: ["oi"] },
+      questions,
+      "openrouter" as "jev",
+    );
+    expect(outcome).toEqual({ ok: false, reason: "failed" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("answers 404 over HTTP", async () => {
     const response = await exports.default.fetch("https://llm-gateway.example/");
     expect(response.status).toBe(404);

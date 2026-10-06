@@ -59,6 +59,14 @@ describe("ClefQualifier", () => {
     expect(run.mock.calls[0]?.[2]).toEqual({ signal: controller.signal });
   });
 
+  it("stops waiting when the caller aborts, even if the run ignores the signal", async () => {
+    const run = vi.fn<ClefRun>(() => new Promise(() => {}));
+    const controller = new AbortController();
+    const call = clef(run).qualify({}, questions, { signal: controller.signal });
+    controller.abort();
+    await expect(call).rejects.toThrow("Workers AI failed: AbortError");
+  });
+
   it("fails with the error's name only, because its message can quote the state", async () => {
     const run = vi.fn<ClefRun>(async () => {
       const error = new Error("InferenceUpstreamError: bad input: meu cpf é 12345678909");
