@@ -48,8 +48,12 @@ export type ScopeType = (typeof SCOPE_TYPES)[number];
 /** `global`, or a scope type and a name: `agent/kelpie`, `area/work`, `conversation/family`. */
 export type Scope = "global" | `${Exclude<ScopeType, "global">}/${string}`;
 
-/** A segment that names an agent, area, project or conversation in a path. */
-const SCOPE_NAME = /^[^/\s.][^/]{0,79}$/;
+/**
+ * A segment that names an agent, area, project or conversation in a path: any folder name the owner
+ * might use, but no slash, backslash, control or bidirectional character, and no leading or
+ * trailing dot or space.
+ */
+const SCOPE_NAME = /^(?![.\s])[^/\\\p{Cc}\p{Cf}]{1,80}(?<![.\s])$/u;
 
 export function isScope(value: unknown): value is Scope {
   if (value === "global") return true;

@@ -458,8 +458,8 @@ export class MemoryIndex {
   }
 
   /**
-   * Drops every derived row and replays the vault's history, oldest commit first. Embeddings are
-   * kept: they are keyed by content, so they stay valid.
+   * Drops every derived row and replays the vault's history, oldest commit first. Embeddings of
+   * content still in the history are kept: they are keyed by content, so they stay valid.
    */
   rebuild(history: Iterable<VaultCommit> | AsyncIterable<VaultCommit>): Promise<void> {
     return this.#serialize(async () => {
@@ -468,6 +468,8 @@ export class MemoryIndex {
         this.#exec(DERIVED_SCHEMA);
       });
       for await (const commit of history) await this.#apply(commit);
+      // A vector of content no version holds, such as text erased from git's history, goes too.
+      this.#exec("DELETE FROM embeddings WHERE blob_sha NOT IN (SELECT blob_sha FROM versions)");
     });
   }
 

@@ -36,6 +36,7 @@ Under a scope's folder, the first folder may name a kind:
 | `session` | `sessions/` | episodic |
 
 Rules for paths:
+- **A scope's name is its folder's name,** such as `areas/Saúde & Bem-estar/`. It can't hold a slash, a backslash, or a control or bidirectional character, and can't start or end with a dot or a space; notes in such a folder are outside the index.
 - **Under `knowledge/`, folders are the owner's own** and never name a kind. A note there takes its kind from its frontmatter, or is a `note`.
 - **A note outside a kind folder** takes its kind from the frontmatter, or is a `note`. Examples: `areas/work/meeting-notes.md`, `memory/loose-note.md`.
 - **Kind folders may have subfolders.** Kelpie files dated memories (sessions, events) under their year, date first: `sessions/2026/2026-10-06-family-chat.md`.
@@ -131,7 +132,8 @@ Every key is optional when reading. When Kelpie writes, it always sets `id`, `ki
 | `title` | a string | Overrides the heading; Kelpie keeps it in step with the title when it is present | the first `# ` heading, else the file name |
 
 How a file is read:
-- **YAML 1.2.** Dates stay strings, and `yes`/`no` are strings, not booleans. Duplicate keys and aliases (`&a`/`*a`) make the frontmatter invalid. A frontmatter block longer than 16 KB is ignored.
+- **YAML 1.2.** Dates stay strings, and `yes`/`no` are strings, not booleans. Duplicate keys and aliases (`&a`/`*a`) make the frontmatter invalid. A frontmatter block longer than 16 KB is ignored, and so are the keys `__proto__`, `constructor` and `prototype`.
+- **What one note may cost the index:** the first 262,144 characters of its body and its first 500 links are indexed, with a warning past either.
 - **A BOM before the fence is dropped, and CRLF fences are accepted.**
 - **Leniency.** An invalid value is ignored and noted as a warning, which the index keeps for lint. Invalid YAML leaves the note indexed with no frontmatter. A note is never dropped.
 - **The path wins.** If `kind` disagrees with the kind folder, or `scope` with the path, the folder and the path win, with a warning: moving a file in Obsidian is how the owner reclassifies it.
@@ -139,7 +141,8 @@ How a file is read:
 
 How Kelpie writes a new version:
 - **The input is the whole version.** A field Kelpie manages and the input leaves out is removed, and the body is replaced. A writer that keeps a field, such as a `pinned` the owner set in Obsidian, reads the note first and carries it over.
-- **A file whose frontmatter can't be read is refused,** rather than rewritten without the owner's keys. Examples: a half-saved edit or a duplicate key. The owner fixes it first.
+- **A file whose frontmatter can't be read is refused,** rather than rewritten without the owner's keys. Examples: a half-saved edit, a duplicate key, aliases, or more than 16 KB. The owner fixes it first.
+- **Text fields are one line,** with no control characters and no bidirectional overrides, which can make a title read differently from what it holds.
 
 ### Identity and versions
 
@@ -200,7 +203,8 @@ The index is one SQLite database inside the Context Store's Durable Object ([ADR
   A commit applied twice is skipped, so a repeated webhook is harmless. Commits apply one at a time, in the order they arrive, and a rebuild runs alone: a commit that arrives during a rebuild waits for it. That holds within one index instance, so a Durable Object keeps one.
 - **Rebuild:** dropping every derived table and replaying the vault's history gives the same index, row for row. That is tested.
   - Rebuilding from the head alone gives the same current notes, without their history.
-  - Embeddings survive a rebuild: they are keyed by content, so they stay valid, and recomputing them costs model calls.
+  - Embeddings of content still in the history survive a rebuild: they are keyed by content, so they stay valid, and recomputing them costs model calls. Embeddings of content no longer in the history are deleted.
+- **Erasure** is the operator's job (ADR-0020 §4): rewrite the vault's git history, then rebuild the index. The rebuild drops every version, link and embedding of the erased text.
 - **Search:** current versions only by default. With `asOf`, it searches the versions the vault held at that instant. With `validAt`, it keeps only memories valid in the world at that instant. It returns 1 to 100 results, 10 by default.
 - **A new schema version** drops the derived tables and starts empty, keeping the embeddings. The index then reports no last commit, which tells the sync to replay the vault from the start.
 

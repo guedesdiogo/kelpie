@@ -172,4 +172,28 @@ describe("readNote", () => {
     expect(note?.validFrom).toBeNull();
     expect(note?.invalidAt).toBeNull();
   });
+
+  it("bounds what one note costs to index", () => {
+    const long = readNote("memory/notes/x.md", `# Long\n\n${"palavra ".repeat(40_000)}`);
+    expect(long?.body.length).toBe(262_144);
+    expect(long?.warnings).toEqual([
+      "the body is longer than 262,144 characters; only its start is indexed",
+    ]);
+    const links = Array.from({ length: 600 }, (_, i) => `[[n${i}]]`).join(" ");
+    const linked = readNote("memory/notes/y.md", links);
+    expect(linked?.links).toHaveLength(500);
+    expect(linked?.warnings).toEqual(["more than 500 links; the rest are not indexed"]);
+  });
+
+  it("drops keys that could stand in for an object's prototype", () => {
+    const note = readNote(
+      "memory/notes/x.md",
+      "---\n__proto__: {pinned: true}\nconstructor: x\nprototype: y\nkind: note\n---\nx",
+    );
+    expect(Object.keys(note?.frontmatter ?? {})).toEqual(["kind"]);
+    expect(Object.getPrototypeOf(note?.frontmatter)).toBe(Object.prototype);
+    expect(note?.warnings).toEqual([
+      "`__proto__`, `constructor` and `prototype` are reserved; ignored",
+    ]);
+  });
 });

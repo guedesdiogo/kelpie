@@ -163,4 +163,34 @@ Sister. Lives in [[Lisboa]].
       "`validFrom` must be a date or a date-time with an offset",
     ]);
   });
+
+  it("refuses an existing frontmatter that is too long or uses aliases", async () => {
+    const huge = `---\n${Array.from({ length: 2_000 }, (_, i) => `k${i}: value`).join("\n")}\n---\nx`;
+    const aliased = "---\nx: &a [1, 2]\ny: *a\n---\nx";
+    for (const existing of [huge, aliased]) {
+      const error = await writeMemory(ANA, { at: AT, existing }).catch((caught: unknown) => caught);
+      expect((error as MemoryFormatError).problems).toEqual([
+        "the existing file's frontmatter can't be read; fix it before writing a new version",
+      ]);
+    }
+  });
+
+  it("refuses wrong types and bidirectional controls from a caller that isn't typed", async () => {
+    const error = await writeMemory(
+      {
+        ...ANA,
+        title: 123,
+        confidence: "0.5",
+        pinned: "false",
+        abstract: "safe\u202Etxt.exe",
+      } as never,
+      { at: AT },
+    ).catch((caught: unknown) => caught);
+    expect((error as MemoryFormatError).problems).toEqual([
+      "`title` must be one line of 1-200 characters",
+      "`confidence` must be 0-1",
+      "`abstract` must be one line of 1-300 characters",
+      "`evergreen` and `pinned` must be true or false",
+    ]);
+  });
 });

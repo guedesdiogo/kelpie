@@ -80,5 +80,10 @@ describe("paths Kelpie writes", () => {
     expect(isScope("area/")).toBe(false);
     expect(isScope("area/a/b")).toBe(false);
     expect(isScope("area/.hidden")).toBe(false);
+    expect(isScope("area/x\ny")).toBe(false);
+    expect(isScope("area/a\\b")).toBe(false);
+    expect(isScope("area/trailing.")).toBe(false);
+    expect(isScope("area/\u202Eevil")).toBe(false);
+    expect(isScope("area/Saúde & Bem-estar")).toBe(true);
   });
 });

@@ -423,7 +423,7 @@ describe("rebuild", () => {
     });
   });
 
-  it("rebuilding in place gives the same index and keeps cached embeddings", async () => {
+  it("rebuilding in place gives the same index and keeps only the embeddings still in use", async () => {
     await withIndex("rebuild-in-place", async (index, storage) => {
       const vault = await live(index);
       const before = index.dump();
@@ -434,8 +434,16 @@ describe("rebuild", () => {
         3,
         new Float32Array([0.5, -1, 2]).buffer,
       );
+      // A vector of content no version holds any more, such as text erased from git's history.
+      storage.sql.exec(
+        "INSERT INTO embeddings (blob_sha, model, dims, vector) VALUES ('gone', 'bge-m3', 1, ?)",
+        new ArrayBuffer(4),
+      );
       await index.rebuild(vault.history);
       expect(index.dump()).toEqual(before);
+      expect(
+        storage.sql.exec<{ blob_sha: string }>("SELECT blob_sha FROM embeddings").toArray(),
+      ).toEqual([{ blob_sha: before.versions[0]?.blobSha }]);
       const vector = storage.sql
         .exec<{ vector: ArrayBuffer }>("SELECT vector FROM embeddings")
         .one().vector;

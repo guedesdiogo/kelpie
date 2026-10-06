@@ -28,6 +28,11 @@ export const MAX_FRONTMATTER_LENGTH = 16_384;
 export const MAX_SOURCES = 20;
 const MAX_SOURCE_LENGTH = 300;
 const MAX_ABSTRACT_LENGTH = 300;
+/** What one note may cost the index: a larger body is indexed in part, and extra links dropped. */
+export const MAX_BODY_LENGTH = 262_144;
+export const MAX_LINKS = 500;
+/** Keys that would stand in for an object's prototype when a caller copies the frontmatter. */
+const RESERVED_KEYS = ["__proto__", "constructor", "prototype"];
 
 const MEMORY_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 
@@ -93,7 +98,12 @@ function parseFrontmatter(yaml: string | null, warnings: string[]): Frontmatter 
     warnings.push("frontmatter isn't a map of keys; ignored");
     return {};
   }
-  return value as Frontmatter;
+  const frontmatter = value as Frontmatter;
+  if (RESERVED_KEYS.some((key) => Object.hasOwn(frontmatter, key))) {
+    for (const key of RESERVED_KEYS) delete frontmatter[key];
+    warnings.push("`__proto__`, `constructor` and `prototype` are reserved; ignored");
+  }
+  return frontmatter;
 }
 
 /** Reads one field: missing is null, invalid is null plus a warning. */
@@ -134,8 +144,14 @@ export function readNote(path: string, text: string): Note | null {
   const place = placeOf(path);
   if (place === null) return null;
   const warnings: string[] = [];
-  const { yaml, body } = splitFrontmatter(text);
+  const split = splitFrontmatter(text);
+  let body = split.body;
+  const yaml = split.yaml;
   const frontmatter = parseFrontmatter(yaml, warnings);
+  if (body.length > MAX_BODY_LENGTH) {
+    body = body.slice(0, MAX_BODY_LENGTH);
+    warnings.push("the body is longer than 262,144 characters; only its start is indexed");
+  }
 
   const declaredKind = field(frontmatter, "kind", warnings, oneOf(KINDS));
   if (place.kind !== null && declaredKind !== null && declaredKind !== place.kind) {
@@ -187,13 +203,17 @@ export function readNote(path: string, text: string): Note | null {
     return stringList(MAX_SOURCES, MAX_SOURCE_LENGTH)((value as Frontmatter).contradicts ?? []);
   });
 
-  const links = extractLinks(body, path);
+  let links = extractLinks(body, path);
   for (const source of sources ?? []) {
     for (const target of valueLinks(source, path)) links.push({ kind: "source", ...target });
   }
   for (const contradicted of relations ?? []) {
     for (const target of valueLinks(contradicted, path))
       links.push({ kind: "contradicts", ...target });
+  }
+  if (links.length > MAX_LINKS) {
+    links = links.slice(0, MAX_LINKS);
+    warnings.push(`more than ${MAX_LINKS} links; the rest are not indexed`);
   }
 
   const flag = (key: string) =>
