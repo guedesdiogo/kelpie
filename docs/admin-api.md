@@ -209,10 +209,17 @@ Whoever passes Access and holds a live recovery token becomes the owner's admin 
 
 ## Versions
 
-`GET https://<ingress hostname>/version` answers `{ version, commit, deployment, deployedAt }`, and the webchat shows the version and the commit in its footer (#148). Like `/health`, it needs no login.
-- **`version`** is `KELPIE_VERSION` in `packages/config/src/version.ts`. Its minor number is the delivery phase. It changes by decision, with a phase or a notable release, not with each PR.
-- **`commit`** is the deploy's tag. Deploy from a clean checkout of the commit, and pass `--tag "$(git rev-parse --short HEAD)"` to every `wrangler deploy`. Without the tag, `commit` is null.
-- **`deployment` and `deployedAt`** are the Worker's own Cloudflare version and when it was made, from the `version_metadata` binding.
+`GET https://<ingress hostname>/version` answers `{ version, build, commit, deployment, deployedAt }`, and the webchat shows the version and the commit in its footer, for example `Kelpie 0.2.66 · 0c620f4` (#148, #153). Like `/health`, it needs no login.
+- **`version` is `<release>.<build>`.**
+  - The release is `KELPIE_RELEASE` in `packages/config/src/version.ts`. It is the delivery phase and changes by decision, with a phase or a notable release.
+  - The build is main's first-parent commit count at the deployed commit. Every merged PR adds one, so a deploy with any change shows a new number.
+- **The build and `commit` come from the deploy's tag.** Deploy from a clean checkout of a commit on main, and give every `wrangler deploy` the same tag:
+  ```bash
+  --tag "$(git rev-list --count --first-parent HEAD)-$(git rev-parse --short HEAD)"
+  ```
+  Without a tag, or with a tag that holds only the commit, `version` is the release alone and `build` is null.
+- **Deploy all six Workers each time, with the same tag.** Only `ingress` answers `/version`, so it names the live build only if it went out with every deploy.
+- **`deployment` and `deployedAt`** are `ingress`'s own Cloudflare version and when it was made, from the `version_metadata` binding.
 
 ## Known limits
 

@@ -22,7 +22,7 @@ export {
   REGISTRY_NAME,
 } from "./settings.ts";
 export {
-  KELPIE_VERSION,
+  KELPIE_RELEASE,
   type VersionReport,
   versionReport,
   type WorkerVersionMetadata,

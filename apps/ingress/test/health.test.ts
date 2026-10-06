@@ -1,5 +1,5 @@
 import { exports } from "cloudflare:workers";
-import { KELPIE_VERSION } from "@kelpie/config";
+import { KELPIE_RELEASE } from "@kelpie/config";
 import { describe, expect, it } from "vitest";
 
 describe("ingress", () => {
@@ -17,8 +17,15 @@ describe("ingress", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body.version).toBe(KELPIE_VERSION);
-    expect(Object.keys(body).sort()).toEqual(["commit", "deployedAt", "deployment", "version"]);
+    // Tests deploy nothing, so there is no tag and no build: the release alone.
+    expect(body.version).toBe(KELPIE_RELEASE);
+    expect(Object.keys(body).sort()).toEqual([
+      "build",
+      "commit",
+      "deployedAt",
+      "deployment",
+      "version",
+    ]);
   });
 
   it("answers any other route with 404", async () => {
