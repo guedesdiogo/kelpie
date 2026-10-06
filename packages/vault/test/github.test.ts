@@ -198,8 +198,9 @@ describe("GitHubVaultBackend", () => {
       deletions: ["memory/old.md"],
     });
     expect(outcome).toEqual({ kind: "committed", commit: "c".repeat(40) });
-    const input = (github.calls.at(-1)?.body as { variables: { input: Record<string, unknown> } })
-      .variables.input;
+    const last = github.calls.at(-1);
+    if (!last) throw new Error("no request was made");
+    const input = (last.body as { variables: { input: Record<string, unknown> } }).variables.input;
     expect(input).toEqual({
       branch: { repositoryNameWithOwner: "owner/vault", branchName: "main" },
       message: { headline: "Remember Ana's new city", body: "Kelpie-Agent: kelpie" },
