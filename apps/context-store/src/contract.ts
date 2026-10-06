@@ -131,6 +131,47 @@ export type ReadNoteResult =
   | { ok: true; path: string; text: string; nextOffset: number | null }
   | { ok: false; reason: "not_found" | "vault_off" | "unavailable" };
 
+/** A memory as the agent's `memory_write` gives it (#126). */
+export interface MemoryWriteInput {
+  title: string;
+  /** Markdown, without the title heading. */
+  body: string;
+  /** One of memory's kinds: `note`, `person`, `preference`… */
+  kind: string;
+  /** `explicit` when the person said it, `deduced` or `inferred` when Kelpie concluded it. */
+  level: string;
+  /** 0 to 1; 0.8 when left out. */
+  confidence?: number;
+  /** `global` when left out; it must be one the turn may write. */
+  scope?: string;
+  entities?: string[];
+  validFrom?: string;
+  invalidAt?: string;
+  abstract?: string;
+  /** A note found with search or read: the memory becomes its new version. */
+  path?: string;
+}
+
+export interface WriteNoteOptions {
+  /** The scopes the turn may see, as for recall. */
+  scopes: readonly string[] | "all";
+  /** Where the memory came from, given by the runtime, never by the model. */
+  sources: readonly string[];
+}
+
+/**
+ * What `writeNote` did. `unchanged` names the note that already says it. `invalid` lists what the
+ * memory gets wrong, for the model to fix; a path the turn can't see, outside memory, or missing
+ * is `not_found`.
+ */
+export type WriteNoteResult =
+  | { ok: true; action: "written" | "unchanged"; path: string }
+  | { ok: false; reason: "invalid"; problems: string[] }
+  | {
+      ok: false;
+      reason: "not_found" | "scope_not_allowed" | "too_large" | "vault_off" | "unavailable";
+    };
+
 export interface ContextStoreContract {
   /** Empty when the vault is off. */
   compile(agentId: string): Promise<CompiledContext>;
@@ -169,6 +210,15 @@ export interface ContextStoreContract {
    * the scopes, with the links they allow on the first page, which counts as one access.
    */
   readNote(agentId: string, path: string, options: ReadNoteOptions): Promise<ReadNoteResult>;
+  /**
+   * The single writer behind the agent's `memory_write` (#126): a new memory, or a found note's new
+   * version, checked, sanitized and queued like any write. The same memory again changes nothing.
+   */
+  writeNote(
+    agentId: string,
+    input: MemoryWriteInput,
+    options: WriteNoteOptions,
+  ): Promise<WriteNoteResult>;
 }
 
 /**

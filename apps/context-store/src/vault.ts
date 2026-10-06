@@ -2,12 +2,19 @@ import { DurableObject } from "cloudflare:workers";
 import { EMBEDDING_INPUT_CHARS, type EmbedOutcome } from "@kelpie/llm";
 import {
   bodyWithoutHeading,
+  decideWrite,
+  foldKey,
+  instantOf,
   isScope,
   LIFECYCLE_REPORT_PATH,
   lifecycleFindings,
   lifecycleReport,
+  MemoryFormatError,
   MemoryIndex,
+  type MemoryInput,
+  memoryPath,
   pack,
+  readNote as parseNote,
   qualifierJudge,
   type RetrieveOptions,
   readPage,
@@ -16,6 +23,8 @@ import {
   retrieve,
   type Scope,
   type SearchHit,
+  sanitizeSecrets,
+  writeMemory,
 } from "@kelpie/memory";
 import type { GatewayQualifyOutcome, QualifierBackend, Question } from "@kelpie/qualifier";
 import {
@@ -34,6 +43,7 @@ import type {
   MemoryHit,
   MemorySearchOptions,
   MemorySearchResult,
+  MemoryWriteInput,
   ProposalTarget,
   ProposeResult,
   ReadNoteOptions,
@@ -41,6 +51,8 @@ import type {
   RecallOptions,
   RecallResult,
   SkillEntry,
+  WriteNoteOptions,
+  WriteNoteResult,
   WriteResult,
 } from "./contract.ts";
 import { mergeOwnerWins } from "./merge.ts";
@@ -95,6 +107,10 @@ const MAX_RECALL_SCOPES = 64;
 /** The agent's `memory_search` (#126): a few notes, as hermes's `session_search` returns. */
 const SEARCH_K = 3;
 const MAX_SEARCH_K = 10;
+/** A memory the agent writes without a confidence. */
+const DEFAULT_CONFIDENCE = 0.8;
+/** A new memory's file name is numbered up to this when its title's path is taken. */
+const MAX_PATH_NUMBER = 50;
 /** The question's vector waits this long, the rerank this long, then recall goes on without them. */
 const EMBED_QUESTION_TIMEOUT_MS = 2_000;
 const RERANK_TIMEOUT_MS = 3_000;
@@ -1047,6 +1063,150 @@ export class Vault extends DurableObject<VaultEnv> {
       console.error("Vault: reading a note failed", errorName(error));
       return { ok: false, reason: "unavailable" };
     }
+  }
+
+  /**
+   * The single writer behind the agent's `memory_write` (#126).
+   * - **Where:** a found note's `path` takes the memory as its new version, keeping its id, the
+   *   owner's keys, its pin and its evergreen flag. Otherwise the memory goes where its title puts
+   *   it, numbered when another note holds that path.
+   * - **Scopes:** the note must be one the turn sees; a new memory goes to `global`, the agent's own
+   *   scope, or one the turn lists.
+   * - **No news:** the same title, body and validity at its path, queued or committed, or a twin
+   *   `decideWrite` finds, is `unchanged`, so a retry writes nothing.
+   * - **The qualifier isn't asked yet:** ADR-0009 wants its answers measured first (#111), so the
+   *   rules decide alone.
+   * Titles, bodies and abstracts lose their secrets first; sources come from the runtime.
+   */
+  async writeNote(
+    agentId: string,
+    input: MemoryWriteInput,
+    options: WriteNoteOptions,
+  ): Promise<WriteNoteResult> {
+    const scopes = options?.scopes;
+    const scopesValid =
+      scopes === "all" ||
+      (Array.isArray(scopes) &&
+        scopes.length <= MAX_RECALL_SCOPES &&
+        scopes.every((scope) => isScope(scope)));
+    const sources = Array.isArray(options?.sources) ? options.sources : [];
+    if (!isAgentId(agentId) || !scopesValid || typeof input !== "object" || input === null) {
+      return { ok: false, reason: "invalid", problems: ["the request isn't valid"] };
+    }
+    if (this.#backend() === null) return { ok: false, reason: "vault_off" };
+    const sees = (scope: string) =>
+      scopes === "all" || (scopes as readonly string[]).includes(scope);
+    const writable = (scope: string) =>
+      scope === "global" ||
+      scope === `agent/${agentId}` ||
+      (scopes !== "all" && (scopes as readonly string[]).includes(scope));
+    const clean = (text: unknown) => (typeof text === "string" ? sanitizeSecrets(text).text : text);
+    try {
+      await this.#ready();
+      await this.#catchUp();
+      const found =
+        input.path === undefined
+          ? null
+          : typeof input.path === "string"
+            ? this.#memory.current(input.path)
+            : null;
+      if (input.path !== undefined && (found === null || !sees(found.scope))) {
+        return { ok: false, reason: "not_found" };
+      }
+      const scope = found?.scope ?? input.scope ?? "global";
+      const problems: string[] = [];
+      if (found !== null && input.scope !== undefined && input.scope !== found.scope) {
+        problems.push(`\`scope\` must be the note's own, ${found.scope}`);
+      }
+      if (found !== null && input.kind !== found.kind) {
+        problems.push(`\`kind\` must be the note's own, ${found.kind}`);
+      }
+      const memory = {
+        scope,
+        kind: input.kind,
+        title: clean(input.title),
+        body: clean(input.body),
+        level: input.level,
+        confidence: input.confidence ?? DEFAULT_CONFIDENCE,
+        ...(sources.length > 0 ? { sources: [...sources] } : {}),
+        ...(input.entities === undefined ? {} : { entities: input.entities }),
+        ...(input.validFrom === undefined ? {} : { validFrom: input.validFrom }),
+        ...(input.invalidAt === undefined ? {} : { invalidAt: input.invalidAt }),
+        ...(input.abstract === undefined ? {} : { abstract: clean(input.abstract) }),
+        ...(found?.pinned ? { pinned: true } : {}),
+        ...(found?.evergreen ? { evergreen: true } : {}),
+      } as MemoryInput;
+      const at = new Date().toISOString();
+      try {
+        // Checks every field before anything reads them.
+        await writeMemory(memory, { at });
+      } catch (error) {
+        if (error instanceof MemoryFormatError) problems.push(...error.problems);
+        else throw error;
+      }
+      if (problems.length > 0) return { ok: false, reason: "invalid", problems };
+      if (!writable(scope)) return { ok: false, reason: "scope_not_allowed" };
+
+      let path: string;
+      if (found !== null) {
+        path = found.path;
+        if (this.#twin(path, memory)) return { ok: true, action: "unchanged", path };
+      } else {
+        const own = memoryPath(memory.scope, memory.kind, memory.title);
+        if (this.#twin(own, memory)) return { ok: true, action: "unchanged", path: own };
+        const decision = await decideWrite(this.#memory, memory, {
+          now: Date.now(),
+          qualifier: null,
+        });
+        if (decision.action === "NOOP") {
+          return { ok: true, action: "unchanged", path: decision.path };
+        }
+        path = own;
+        for (let n = 2; this.#visible(path) !== null; n += 1) {
+          if (n > MAX_PATH_NUMBER)
+            return {
+              ok: false,
+              reason: "invalid",
+              problems: ["too many notes share this title; choose another"],
+            };
+          path = own.replace(/\.md$/, `-${n}.md`);
+        }
+      }
+      const existing = this.#visible(path);
+      const { text } = await writeMemory(memory, {
+        at,
+        ...(existing === null ? {} : { existing }),
+      });
+      const written = await this.write(
+        agentId,
+        [{ path, content: text }],
+        `Remember ${memory.title}`,
+      );
+      if (written.ok) return { ok: true, action: "written", path };
+      return { ok: false, reason: written.reason === "too_large" ? "too_large" : "unavailable" };
+    } catch (error) {
+      if (error instanceof MemoryFormatError) {
+        return { ok: false, reason: "invalid", problems: [...error.problems] };
+      }
+      console.error("Vault: writing a memory failed", errorName(error));
+      return { ok: false, reason: "unavailable" };
+    }
+  }
+
+  /** Whether the visible note at `path`, queued or committed, already says this memory. */
+  #twin(path: string, memory: MemoryInput): boolean {
+    const text = this.#visible(path);
+    const note = text === null ? null : parseNote(path, text);
+    if (note === null) return false;
+    const words = (value: string) => value.trim().split(/\s+/u).join(" ");
+    const instant = (value: string | null | undefined) =>
+      value === null || value === undefined ? null : instantOf(value);
+    return (
+      foldKey(words(note.title)) === foldKey(words(memory.title)) &&
+      words(bodyWithoutHeading(note.title, note.body)) === words(memory.body) &&
+      instant(note.validFrom) === instant(memory.validFrom) &&
+      instant(note.invalidAt) === instant(memory.invalidAt)
+    );
   }
 
   /**

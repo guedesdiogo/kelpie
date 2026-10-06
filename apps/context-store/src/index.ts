@@ -8,12 +8,15 @@ import type {
   HeldFile,
   MemorySearchOptions,
   MemorySearchResult,
+  MemoryWriteInput,
   ProposalTarget,
   ProposeResult,
   ReadNoteOptions,
   ReadNoteResult,
   RecallOptions,
   RecallResult,
+  WriteNoteOptions,
+  WriteNoteResult,
   WriteResult,
 } from "./contract.ts";
 import { VAULT_NAME, type VaultEnv } from "./vault.ts";
@@ -70,6 +73,14 @@ export class ContextStore extends WorkerEntrypoint<VaultEnv> implements ContextS
 
   readNote(agentId: string, path: string, options: ReadNoteOptions): Promise<ReadNoteResult> {
     return this.#vault().readNote(agentId, path, options);
+  }
+
+  writeNote(
+    agentId: string,
+    input: MemoryWriteInput,
+    options: WriteNoteOptions,
+  ): Promise<WriteNoteResult> {
+    return this.#vault().writeNote(agentId, input, options);
   }
 }
 
