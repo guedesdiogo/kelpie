@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAgentId, parseSettings } from "../src/settings.ts";
+import { DEFAULT_SETTINGS, isAgentId, parseSettings } from "../src/settings.ts";
 
 describe("parseSettings", () => {
   it("keeps only the given, known settings", () => {
@@ -10,12 +10,19 @@ describe("parseSettings", () => {
     expect(parseSettings({})).toEqual({});
   });
 
+  it("lets the owner choose the end-of-turn qualifier, Clef by default", () => {
+    expect(DEFAULT_SETTINGS.qualifier).toBe("clef");
+    expect(parseSettings({ qualifier: "jev" })).toEqual({ qualifier: "jev" });
+    expect(parseSettings({ qualifier: "clef" })).toEqual({ qualifier: "clef" });
+  });
+
   it.each([
     [{ tier: "gpt-9" }],
     [{ maxOutputTokens: 0 }],
     [{ maxOutputTokens: 1.5 }],
     [{ systemPrompt: "   " }],
     [{ quietWindow: { finishedMs: 1 } }],
+    [{ qualifier: "openrouter" }],
     [{ surprise: true }],
     [null],
     ["settings"],

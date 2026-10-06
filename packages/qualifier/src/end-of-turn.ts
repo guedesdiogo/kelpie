@@ -120,9 +120,21 @@ export const HEURISTIC_BANDS: Bands = { high: 0.8, low: 0.3 };
 /** Jev 1.13.0 compresses its PT-BR probabilities (ADR-0018). Recalibrate on real conversations. */
 export const JEV_BANDS: Bands = { high: 0.7, low: 0.4 };
 
-/** The bands of whoever answered: Jev's ids get Jev's, everyone else the heuristic's. */
+/**
+ * Each Clef model's bands, measured on the PT-BR sequences the heuristic leaves (spike #117,
+ * ADR-0022). Recalibrate on real conversations, and when the pinned model changes.
+ */
+export const CLEF_BANDS: Record<"clef" | "clef-flash", Bands> = {
+  clef: { high: 0.95, low: 0.46 },
+  "clef-flash": { high: 0.87, low: 0.37 },
+};
+
+/** The bands of whoever answered: Jev and each Clef model get their own, everyone else the heuristic's. */
 export function endOfTurnBands(source: QualifierId | "heuristic"): Bands {
-  return source.startsWith("jev-") ? JEV_BANDS : HEURISTIC_BANDS;
+  if (source.startsWith("jev-")) return JEV_BANDS;
+  if (source === "clef-flash-workers-ai") return CLEF_BANDS["clef-flash"];
+  if (source === "clef-workers-ai") return CLEF_BANDS.clef;
+  return HEURISTIC_BANDS;
 }
 
 /** How long to wait for more fragments, given how likely the user is done. */

@@ -5,6 +5,8 @@ export default defineConfig({
   plugins: [
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
+      // The AI binding is remote-only; tests pass a fake one, so no Cloudflare session is opened.
+      remoteBindings: false,
       // Only Anthropic has a model key, so the OpenAI candidates are skipped. Jev has its key.
       miniflare: { bindings: { ANTHROPIC_API_KEY: "sk-ant-test", TYPESAFE_API_KEY: "ts-test" } },
     }),
