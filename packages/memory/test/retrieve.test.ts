@@ -169,6 +169,43 @@ describe("the index's entity and graph lookups", () => {
     });
   });
 
+  it("counts a name's notes only in the scopes the lookup asks for", async () => {
+    const note = (scope: MemoryInput["scope"], title: string): MemoryInput => ({
+      ...person(title, "Uma nota qualquer.", ["Rafael Souza"]),
+      scope,
+      kind: "note",
+    });
+    // One note over the cap in one scope, and a single note in another.
+    const work = Array.from({ length: 51 }, (_, i) =>
+      note("conversation/work", `Assunto ${String(i).padStart(3, "0")}`),
+    );
+    await withMemories(
+      "hot-key-scoped",
+      [...work, note("conversation/family", "Almoço")],
+      (index) => {
+        expect(
+          index
+            .entityHits(["rafael souza"], { scopes: ["conversation/family"] })
+            .map((hit) => hit.path),
+        ).toEqual([memoryPath("conversation/family", "note", "Almoço")]);
+        expect(index.entityHits(["rafael souza"], { scopes: ["conversation/work"] })).toEqual([]);
+        expect(index.entityHits(["rafael souza"])).toEqual([]);
+      },
+    );
+  });
+
+  it("counts a note once, not once per version it had", async () => {
+    const versions = Array.from({ length: 51 }, (_, i) => ({
+      ...person("Agenda", `Versão ${i}.`, ["Rafael Souza"]),
+      kind: "note" as const,
+    }));
+    const path = memoryPath("global", "note", "Agenda");
+    await withMemories("hot-key-history", versions, (index) => {
+      expect(index.history(path)).toHaveLength(51);
+      expect(index.entityHits(["rafael souza"]).map((hit) => hit.path)).toEqual([path]);
+    });
+  });
+
   it("reaches a note's neighbours: the notes it links to, and the pages of its entities", async () => {
     await withMemories(
       "neighbours",

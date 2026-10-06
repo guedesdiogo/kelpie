@@ -251,8 +251,9 @@ function titleKey(title: string): string {
 /** At most this many entity keys are looked up at once. */
 const MAX_KEYS = 64;
 /**
- * A name on more versions than this singles nothing out: its notes would all weigh the same and come
- * in path order. It is left out of entity lookups, as a function word is left out of names.
+ * A name on more of the versions a lookup sees than this singles nothing out: its notes would all
+ * weigh the same and come in path order. It is left out of that lookup, as a function word is left
+ * out of names.
  */
 const MAX_ENTITY_VERSIONS = 50;
 
@@ -644,7 +645,10 @@ export class MemoryIndex {
    * selects. The vectors are read row by row, so memory stays flat as the vault grows.
    */
   vectorHits(model: string, query: readonly number[], options: SearchOptions = {}): SearchHit[] {
-    const norm = Math.hypot(...query);
+    // A loop, not Math.hypot(...query): a long vector spread into arguments overflows the stack.
+    let squaredNorm = 0;
+    for (const value of query) squaredNorm += value * value;
+    const norm = Math.sqrt(squaredNorm);
     if (query.length === 0 || !(norm > 0)) return [];
     const limit = limitOf(options);
     const [filter, bindings] = versionFilter(options);
@@ -813,35 +817,30 @@ export class MemoryIndex {
    * The notes that name any of these entity keys, best first. An entity's own page, the note titled
    * with its name, comes before the notes that mention it, and a global page before a scoped one.
    * A name on fewer notes says more, so each key weighs one over the number of notes that name it,
-   * as ai-memory weighs its entity stream. Current versions only, unless `asOf` asks for the past.
+   * as ai-memory weighs its entity stream, and a key on more than `MAX_ENTITY_VERSIONS` is left out.
+   * Both count only the versions this lookup sees, so notes in other scopes, and a note's past
+   * versions, don't switch a name off. Current versions only, unless `asOf` asks for the past.
    */
   entityHits(keys: readonly string[], options: SearchOptions = {}): SearchHit[] {
     const asked = [...new Set(keys)].slice(0, MAX_KEYS);
     if (asked.length === 0) return [];
-    const wanted = this.#exec<{ key: string; n: number }>(
-      `SELECT key, count(*) AS n FROM entities WHERE key IN (${asked.map(() => "?").join(", ")})
-       GROUP BY key`,
-      ...asked,
-    )
-      .filter((row) => row.n <= MAX_ENTITY_VERSIONS)
-      .map((row) => row.key);
-    if (wanted.length === 0) return [];
     const [filter, bindings] = versionFilter(options);
-    const marks = wanted.map(() => "?").join(", ");
+    const marks = asked.map(() => "?").join(", ");
     return this.#exec<HitRow>(
       `WITH named AS (
          SELECT e.version, e.key FROM entities e JOIN versions v ON v.rowid = e.version
          WHERE e.key IN (${marks}) AND ${filter}
        ),
-       pages AS (SELECT key, count(*) AS n FROM named GROUP BY key)
+       pages AS (SELECT key, count(*) AS n FROM named GROUP BY key HAVING count(*) <= ?)
        SELECT ${HIT_COLUMNS}
        FROM named JOIN pages ON pages.key = named.key JOIN versions v ON v.rowid = named.version
        GROUP BY v.rowid
        ORDER BY max(CASE WHEN v.title_key <> named.key THEN 0 WHEN v.scope = 'global' THEN 2 ELSE 1 END) DESC,
          sum(1.0 / pages.n) DESC, v.path
        LIMIT ?`,
-      ...wanted,
+      ...asked,
       ...bindings,
+      MAX_ENTITY_VERSIONS,
       limitOf(options),
     ).map(toHit);
   }
