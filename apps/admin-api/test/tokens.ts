@@ -1,4 +1,4 @@
-import type { KeySet } from "../src/access-jwt.ts";
+import type { KeySet } from "@kelpie/access";
 
 // Tokens shaped like Cloudflare Access's, signed with a key pair made in the test.
 

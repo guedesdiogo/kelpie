@@ -1,7 +1,7 @@
+import type { Verification } from "@kelpie/access";
 import { ACCESS_SOURCE, type ChannelIdentity, type IdentityStatus } from "@kelpie/access";
 import { type ConfigPorts, createConfigCommands, DEFAULT_SETTINGS } from "@kelpie/config";
 import { describe, expect, it, vi } from "vitest";
-import type { Verification } from "../src/access-jwt.ts";
 import { type AdminDeps, handle } from "../src/api.ts";
 
 const OWNER_SUB = "sub-owner";

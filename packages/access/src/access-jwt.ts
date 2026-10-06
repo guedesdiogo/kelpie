@@ -162,7 +162,7 @@ async function loadKeys(
   return keys;
 }
 
-function decodeBase64Url(value: string): Uint8Array | null {
+function decodeBase64Url(value: string): Uint8Array<ArrayBuffer> | null {
   if (!/^[A-Za-z0-9_-]*$/.test(value)) return null;
   const base64 = value.replaceAll("-", "+").replaceAll("_", "/");
   try {
