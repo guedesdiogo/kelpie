@@ -433,4 +433,41 @@ describe("decideWrite", () => {
       },
     );
   });
+
+  it("never lets a conclusion replace or refine what the person said", async () => {
+    await withNotes(
+      "decide-owners-word",
+      [
+        memory("Ana mora em Lisboa", { entities: ["Ana Souza"], level: "explicit" }),
+        memory("Ana gosta de café", { entities: ["Ana Souza"], level: "deduced" }),
+      ],
+      async (index) => {
+        const { qualifier } = fakeQualifier({
+          "Ana mora em Lisboa": "replaces",
+          "Ana gosta de café": "refines",
+        });
+        const inferred = memory("Ana mudou para o Porto", {
+          entities: ["Ana Souza"],
+          level: "inferred",
+        });
+        expect(await decide(index, inferred, { qualifier })).toEqual({
+          action: "UPDATE",
+          path: memoryPath("global", "note", "Ana gosta de café"),
+          source: "qualifier",
+        });
+        // Said by the person: it may replace what the person said before.
+        expect(
+          await decide(index, { ...inferred, level: "explicit" }, { qualifier }),
+        ).toMatchObject({
+          action: "SUPERSEDE",
+          path: memoryPath("global", "note", "Ana mora em Lisboa"),
+        });
+        // A writer that knows more marks the owner's word itself.
+        expect(await decide(index, inferred, { qualifier, ownersWord: () => true })).toEqual({
+          action: "ADD",
+          source: "qualifier",
+        });
+      },
+    );
+  });
 });

@@ -1253,6 +1253,13 @@ export class Vault extends DurableObject<VaultEnv> {
         for (let attempt = 0; attempt < 3 && target === null; attempt += 1) {
           const shown = shownAt(found.path);
           if (shown.text === null) return { ok: false, reason: "not_found" };
+          if (
+            shown.note &&
+            memory.level !== "explicit" &&
+            this.#ownersWord(found.path, shown.note)
+          ) {
+            return { ok: false, reason: "owners_word" };
+          }
           memory = build(shown.note);
           text = (await writeMemory(memory, { at, existing: shown.text })).text;
           if (this.#visible(found.path) !== shown.text) continue;
@@ -1362,6 +1369,14 @@ export class Vault extends DurableObject<VaultEnv> {
       });
     }
     return hits;
+  }
+
+  /**
+   * Whether a note holds what the person said (#149): `level: explicit`, or no level on a note
+   * Kelpie didn't write. A conclusion never changes it.
+   */
+  #ownersWord(path: string, note: Note): boolean {
+    return note.level === "explicit" || (note.level === null && !this.#byKelpie([path]).has(path));
   }
 
   /** The paths whose version in the vault is one Kelpie's own commit wrote. */

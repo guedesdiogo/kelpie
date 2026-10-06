@@ -251,10 +251,10 @@ describe("writeNote", () => {
     ]) {
       expect(file, kept).toContain(kept);
     }
-    // Only a level change is still a change; the same version again isn't.
+    // Only a change is a change; the same version again isn't.
     const again = memory("Casa da Ana", "Porto.", { path: ana, level: "explicit" });
     expect(await stub.writeNote("kelpie", again, ALL)).toMatchObject({ action: "unchanged" });
-    expect(await stub.writeNote("kelpie", { ...again, level: "inferred" }, ALL)).toMatchObject({
+    expect(await stub.writeNote("kelpie", { ...again, confidence: 0.5 }, ALL)).toMatchObject({
       action: "written",
     });
   });
@@ -414,5 +414,58 @@ describe("writeNote", () => {
         { scopes: "all", sources: [] },
       ),
     ).toMatchObject({ action: "written" });
+  });
+
+  it("keeps the owner's word: only what the person said changes what the person said", async () => {
+    const stated = "memory/notes/cafe.md";
+    const owners = "memory/notes/cha.md";
+    const concluded = "memory/notes/agua.md";
+    const { text: explicitNote } = await writeMemory(
+      {
+        scope: "global",
+        kind: "note",
+        title: "Café",
+        body: "Sem açúcar.",
+        level: "explicit",
+        confidence: 0.9,
+      },
+      { at: "2026-10-01T00:00:00Z" },
+    );
+    const { text: deducedNote } = await writeMemory(
+      {
+        scope: "global",
+        kind: "note",
+        title: "Água",
+        body: "Dois litros.",
+        level: "deduced",
+        confidence: 0.7,
+      },
+      { at: "2026-10-01T00:00:00Z" },
+    );
+    vaultWith({ [stated]: explicitNote, [owners]: "# Chá\n\nVerde.\n", [concluded]: deducedNote });
+    const stub = vault("write-owners-word");
+    for (const [path, title] of [
+      [stated, "Café"],
+      [owners, "Chá"],
+    ] as const) {
+      for (const level of ["deduced", "inferred"]) {
+        expect(
+          await stub.writeNote("kelpie", memory(title, "Outro.", { path, level }), ALL),
+          `${path} ${level}`,
+        ).toEqual({ ok: false, reason: "owners_word" });
+      }
+      // What the person says now does change it.
+      expect(
+        await stub.writeNote("kelpie", memory(title, "Outro.", { path, level: "explicit" }), ALL),
+      ).toMatchObject({ ok: true, action: "written" });
+    }
+    // A conclusion can revise a conclusion.
+    expect(
+      await stub.writeNote(
+        "kelpie",
+        memory("Água", "Três litros.", { path: concluded, level: "inferred" }),
+        ALL,
+      ),
+    ).toMatchObject({ ok: true, action: "written" });
   });
 });

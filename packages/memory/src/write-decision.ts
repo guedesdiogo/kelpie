@@ -4,7 +4,7 @@
 // looks for close notes without a model first, and asks the agent's qualifier only about those.
 import { normalizeEntities } from "./entities.ts";
 import { CONTRADICTION_BANDS } from "./lifecycle.ts";
-import type { MemoryIndex, SearchHit, SearchOptions } from "./memory-index.ts";
+import type { IndexedVersion, MemoryIndex, SearchHit, SearchOptions } from "./memory-index.ts";
 import { bodyWithoutHeading } from "./retrieve.ts";
 import { instantOf } from "./time.ts";
 import type { MemoryInput } from "./write.ts";
@@ -49,6 +49,11 @@ export interface DecideWriteOptions {
    */
   bands?: Readonly<Record<string, readonly [number, number]>>;
   timeoutMs?: number;
+  /**
+   * Whether a note holds what the person said: a conclusion (`deduced`, `inferred`) never replaces
+   * or refines it. `level: explicit` when left out; a writer that knows who wrote a note says more.
+   */
+  ownersWord?: (note: IndexedVersion) => boolean;
 }
 
 /** The qualifier is asked about this many notes at most: `choice` scales with fewer options. */
@@ -181,9 +186,20 @@ export async function decideWrite(
   if (!answered.every((relation): relation is Relation => RELATION_NAMES.has(relation ?? ""))) {
     return add;
   }
-  const relations = answered.map((relation, i) =>
-    relation === "duplicate" && (memory.cut || shown[i]?.cut) ? "refines" : relation,
-  );
+  // The owner's word stays: a conclusion can't replace or refine what the person said.
+  const ownersWord = options.ownersWord ?? ((note: IndexedVersion) => note.level === "explicit");
+  const relations = answered.map((relation, i): Relation => {
+    const version = notes[i]?.version;
+    if (
+      input.level !== "explicit" &&
+      (relation === "replaces" || relation === "refines") &&
+      version !== undefined &&
+      ownersWord(version)
+    ) {
+      return "unrelated";
+    }
+    return relation === "duplicate" && (memory.cut || shown[i]?.cut) ? "refines" : relation;
+  });
   const first = (relation: Relation) => notes[relations.indexOf(relation)]?.path;
   const duplicate = first("duplicate");
   if (duplicate !== undefined) return { action: "NOOP", path: duplicate, source: "qualifier" };

@@ -173,7 +173,14 @@ export type WriteNoteResult =
   | { ok: false; reason: "invalid"; problems: string[] }
   | {
       ok: false;
-      reason: "not_found" | "scope_not_allowed" | "too_large" | "vault_off" | "unavailable";
+      /** `owners_word`: a deduced or inferred memory can't change a note the person stated. */
+      reason:
+        | "not_found"
+        | "scope_not_allowed"
+        | "owners_word"
+        | "too_large"
+        | "vault_off"
+        | "unavailable";
     };
 
 export interface ContextStoreContract {

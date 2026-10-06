@@ -240,6 +240,10 @@ export function memoryTools(store: MemoryStore): ToolProvider {
         return invalid(
           "Not saved: this conversation can't save to that scope. Choose one it sees, or leave scope out for the owner's global memory.",
         );
+      case "owners_word":
+        return invalid(
+          "Not saved: the owner stated that note, and a deduced or inferred memory can't change it. Save it as a new note that says what changed.",
+        );
       case "too_large":
         return invalid("Not saved: the note is too large. Save less, or split it.");
       case "vault_off":
