@@ -20,6 +20,12 @@ describe("planFlush", () => {
     expect(planFlush(fragments, settings)).toBe(60_000);
   });
 
+  it("counts the cap from a resume, when the owner paused the conversation", () => {
+    const fragments = [at("so", 0), at("and the rest", 100_000)];
+    expect(planFlush(fragments, settings, 100_000)).toBe(110_000);
+    expect(planFlush(fragments, settings)).toBe(60_000);
+  });
+
   it("flushes at once when conversational mode is off", () => {
     expect(
       planFlush([at("so I was thinking...", 100)], { ...settings, conversational: false }),

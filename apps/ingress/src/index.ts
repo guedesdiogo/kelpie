@@ -14,18 +14,22 @@ import { connectWebchat, handleWebchat, WEBCHAT_PATH, type WebchatDeps } from ".
 
 export { Directory } from "./directory/directory.ts";
 
+/**
+ * Conversations live in conversation-runtime, which `wrangler types` can't type; its
+ * ConversationAgent implements this contract.
+ */
+function conversation(env: Env, name: string): Remote<ConversationContract> {
+  return env.CONVERSATION_AGENT.getByName(name) as unknown as Remote<ConversationContract>;
+}
+
 function telegramDeps(env: Env): TelegramWebhookDeps {
   return {
     // A service binding to channel-egress's ChannelWebhooks entrypoint, which returns values only.
     webhooks: env.CHANNEL_WEBHOOKS as unknown as ChannelWebhooksContract,
     admit: (event) => admitSender(env, event),
     directory: env.DIRECTORY.getByName(DIRECTORY_NAME),
-    // Conversations live in conversation-runtime, which `wrangler types` can't type; its
-    // ConversationAgent implements this contract.
-    ingest: (name, message) =>
-      (env.CONVERSATION_AGENT.getByName(name) as unknown as Remote<ConversationContract>).ingest(
-        message,
-      ),
+    ingest: (name, message) => conversation(env, name).ingest(message),
+    pause: (name, target) => conversation(env, name).pause(target),
   };
 }
 

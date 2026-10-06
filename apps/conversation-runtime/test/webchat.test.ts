@@ -64,7 +64,12 @@ describe("webchat sockets", () => {
     const chat = await open("assistant:webchat:quiet");
 
     await vi.waitFor(() =>
-      expect(chat.frames[0]).toEqual({ type: "history", messages: [], received: [] }),
+      expect(chat.frames[0]).toEqual({
+        type: "history",
+        messages: [],
+        received: [],
+        paused: false,
+      }),
     );
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(chat.frames.map((frame) => frame.type)).toEqual(["history"]);
@@ -267,5 +272,35 @@ describe("the owner's typing in the webchat", () => {
     chat.send({ type: "typing", active: false });
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(await flushTimes(name)).toEqual([seconds(start + 60_000)]);
+  });
+});
+
+describe("pausing from the webchat", () => {
+  it("pauses on the Pause frame, tells every socket, and resumes with the next message", async () => {
+    use(fakeWorld([]));
+    const name = "assistant:webchat:pause";
+    const chat = await open(name);
+    chat.send({ type: "message", id: "c1", text: "so" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
+    expect(await flushTimes(name)).toHaveLength(1);
+
+    chat.send({ type: "pause" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "paused")).toEqual([{ type: "paused" }]));
+    expect(await flushTimes(name)).toEqual([]);
+    // No bubble: the page shows the pause itself.
+    expect(ofType(chat.frames, "bubble")).toEqual([]);
+
+    const later = await open(name);
+    await vi.waitFor(() =>
+      expect(later.frames[0]).toMatchObject({ type: "history", paused: true }),
+    );
+
+    later.send({ type: "message", id: "c2", text: "and the rest" });
+    await vi.waitFor(() => expect(ofType(later.frames, "accepted")).toHaveLength(1));
+    expect(await flushTimes(name)).toHaveLength(1);
+    const again = await open(name);
+    await vi.waitFor(() =>
+      expect(again.frames[0]).toMatchObject({ type: "history", paused: false }),
+    );
   });
 });

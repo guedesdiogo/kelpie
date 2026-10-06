@@ -36,9 +36,21 @@ export type IngestResult =
       reason: "destination_mismatch" | "agent_mismatch" | "too_long" | "empty";
     };
 
+/** Which conversation a pause is for: the same binding a message carries. */
+export interface PauseTarget {
+  agentId: string;
+  destination: Destination;
+}
+
+export type PauseResult =
+  | { status: "paused" }
+  | { status: "rejected"; reason: "destination_mismatch" | "agent_mismatch" };
+
 /** What ingress calls on a conversation's object. */
 export interface ConversationContract {
   ingest(message: InboundMessage): Promise<IngestResult>;
+  /** Holds every answer until the owner's next message (issue #134). */
+  pause(target: PauseTarget): Promise<PauseResult>;
 }
 
 /**

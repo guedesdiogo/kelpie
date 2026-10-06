@@ -58,6 +58,11 @@ Identity values in answers are masked.
 
 **Waiting for the rest of a message.** An agent answers `quietMs` after the owner's latest message, 10 s by default, and each new message starts the wait again. Its `maxWaitMs`, 60 s by default, caps the wait from the first buffered message. No end-of-turn decision is asked of a qualifier (ADR-0024). `conversational: false` answers each message at once.
 
+**Pausing.** `/pause` on Telegram, or the webchat's Pause button, holds every answer until the owner's next message (#134).
+- A turn in flight is interrupted, and the planned answer is cancelled.
+- Telegram confirms with a short fixed message, not from the model. The webchat shows the pause.
+- The next message is answered together with the buffered ones, after the usual wait. The cap counts from that message.
+
 ## Pairing
 
 No command takes an identity value to admit someone: the owner proves an account is theirs by sending the bot a code from where they are already signed in (Story 3.6).
@@ -170,6 +175,7 @@ To set it up:
 3. **Open `https://<ingress hostname>/webchat/?agent=<agent id>`.**
    - Replies come as paced bubbles, and the page shows when the agent is typing.
    - While the owner types, buffered messages wait for the rest, up to the agent's `maxWaitMs`.
+   - Pause holds the answer until the next message ("Pausing").
    - A reply that arrives with the page closed shows when it opens again.
 
 ## Recovering access

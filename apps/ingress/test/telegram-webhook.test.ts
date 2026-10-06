@@ -1,7 +1,12 @@
 import { env, exports } from "cloudflare:workers";
 import { DIRECTORY_NAME } from "@kelpie/access";
 import type { EgressDestination, WebhookNotice } from "@kelpie/channels";
-import type { InboundMessage, IngestResult } from "@kelpie/conversation/contract";
+import type {
+  InboundMessage,
+  IngestResult,
+  PauseResult,
+  PauseTarget,
+} from "@kelpie/conversation/contract";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { admitSender } from "../src/admission.ts";
 import { handleTelegramWebhook, type TelegramWebhookDeps } from "../src/telegram-webhook.ts";
@@ -46,6 +51,7 @@ const directory = () => env.DIRECTORY.getByName(DIRECTORY_NAME);
 function fakes(overrides: Partial<TelegramWebhookDeps> = {}) {
   const verified: { agentId: string; secret: string | null }[] = [];
   const ingested: { name: string; message: InboundMessage }[] = [];
+  const paused: { name: string; target: PauseTarget }[] = [];
   const notices: { agentId: string; destination: EgressDestination; notice: WebhookNotice }[] = [];
   const deps: TelegramWebhookDeps = {
     webhooks: {
@@ -64,9 +70,13 @@ function fakes(overrides: Partial<TelegramWebhookDeps> = {}) {
       ingested.push({ name, message });
       return { status: "accepted", flushAt: 0 };
     },
+    async pause(name, target): Promise<PauseResult> {
+      paused.push({ name, target });
+      return { status: "paused" };
+    },
     ...overrides,
   };
-  return { deps, verified, ingested, notices };
+  return { deps, verified, ingested, notices, paused };
 }
 
 /** A `/start` as Telegram sends it from a deep link: a bot command entity at the start. */
@@ -231,6 +241,44 @@ describe("Telegram webhook", () => {
         expect(ingested).toEqual([]);
       }
     }
+  });
+});
+
+describe("Telegram /pause", () => {
+  const command = (text: string, from = OWNER_TELEGRAM_ID) =>
+    update({
+      from: { id: from, is_bot: false, first_name: "Someone" },
+      chat: { id: from, type: "private" },
+      text,
+      entities: [{ offset: 0, length: text.length, type: "bot_command" }],
+    });
+  const ownerChat = {
+    name: `kelpie:telegram:${OWNER_CHAT_ID}`,
+    target: {
+      agentId: "kelpie",
+      destination: { channel: "telegram", threadId: String(OWNER_CHAT_ID) },
+    },
+  };
+
+  it("pauses the owner's conversation, and never hands the command to the model", async () => {
+    const { deps, ingested, paused } = fakes();
+    const response = await handleTelegramWebhook(webhook(command("/pause")), "kelpie", deps);
+    expect(response.status).toBe(200);
+    expect(paused).toEqual([ownerChat]);
+    expect(ingested).toEqual([]);
+  });
+
+  it("accepts /pause addressed to the bot by name", async () => {
+    const { deps, paused } = fakes();
+    await handleTelegramWebhook(webhook(command("/pause@Kelpie_dg_bot")), "kelpie", deps);
+    expect(paused).toEqual([ownerChat]);
+  });
+
+  it("pauses nothing for a stranger", async () => {
+    const { deps, paused, ingested } = fakes();
+    await handleTelegramWebhook(webhook(command("/pause", 777)), "kelpie", deps);
+    expect(paused).toEqual([]);
+    expect(ingested).toEqual([]);
   });
 });
 

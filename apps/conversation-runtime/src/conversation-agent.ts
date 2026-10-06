@@ -13,6 +13,8 @@ import {
   type Destination,
   type InboundMessage,
   type IngestResult,
+  type PauseResult,
+  type PauseTarget,
   WEBCHAT_ADMISSION_HEADER,
   type WebchatAdmission,
 } from "@kelpie/conversation/contract";
@@ -48,6 +50,8 @@ const WEBCHAT_ID_PREFIX = "webchat:";
 const WEBCHAT_RECEIVED_IDS = 100;
 /** While the owner types in the webchat, buffered messages wait at least this long for the rest. */
 const TYPING_HOLD_MS = 4_000;
+/** What the owner is told on a channel when they pause a conversation (issue #134). */
+export const PAUSED_TEXT = "Paused. I'll answer after your next message.";
 
 /** Bounds on what one conversation accepts. */
 export const LIMITS = {
@@ -167,6 +171,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       type: "history",
       messages: this.#transcript(),
       received: this.#receivedWebchatIds(),
+      paused: this.#get("paused", false),
     });
   }
 
@@ -176,6 +181,13 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (!admission || !frame) return;
     if (frame.type === "typing") {
       if (frame.active) await this.#serialized(() => this.#holdForTyping());
+      return;
+    }
+    if (frame.type === "pause") {
+      await this.pause({
+        agentId: admission.agentId,
+        destination: { channel: "webchat", threadId: admission.userId },
+      });
       return;
     }
     const result = await this.ingest({
@@ -210,16 +222,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const sentAt = plausibleSendTime(message.sentAt, now);
     const stamp = stampOf(sentAt, canonicalTimeZone(message.timeZone));
     capabilitiesFor(message.destination.channel);
-    const bound = this.#get<Destination | null>("destination", null);
-    if (bound && !sameDestination(bound, message.destination)) {
-      return { status: "rejected", reason: "destination_mismatch" };
-    }
-    const agentId = this.#get<string | null>("agentId", null);
-    if (agentId && agentId !== message.agentId) {
-      return { status: "rejected", reason: "agent_mismatch" };
-    }
-    if (!bound) this.#set("destination", message.destination);
-    if (!agentId) this.#set("agentId", message.agentId);
+    const mismatch = this.#bind(message);
+    if (mismatch) return { status: "rejected", reason: mismatch };
 
     const inserted = this.#db
       .insert(schema.inbound)
@@ -247,11 +251,61 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     // message is older news.
     const zone = canonicalTimeZone(message.timeZone);
     if (zone) this.#set("timeZone", zone);
+    // The owner's next message ends a pause: the wait and the cap count from it.
+    if (this.#get("paused", false)) {
+      this.#set("paused", false);
+      this.#set("resumedAt", now);
+    }
     this.#interrupt();
     const epoch = this.#epoch() + 1;
     this.#set("epoch", epoch);
     await this.#serialized(() => this.#plan(epoch, now));
     return { status: "accepted", flushAt: this.#get<number | null>("flushAt", null) };
+  }
+
+  /**
+   * The owner paused the conversation (issue #134): the turn in flight is interrupted, as a new
+   * message would interrupt it, and the planned answer is cancelled. Nothing is answered until the
+   * owner's next message, which `ingest` answers together with what was buffered.
+   */
+  async pause(target: PauseTarget): Promise<PauseResult> {
+    const mismatch = this.#bind(target);
+    if (mismatch) return { status: "rejected", reason: mismatch };
+    this.#interrupt();
+    this.#set("epoch", this.#epoch() + 1);
+    this.#set("paused", true);
+    await this.#serialized(() => this.#cancelFlushSchedule());
+    await this.#confirmPause(target);
+    return { status: "paused" };
+  }
+
+  /** Best effort: the webchat's sockets are told, and other channels get a short fixed message. */
+  async #confirmPause({ agentId, destination }: PauseTarget): Promise<void> {
+    if (destination.channel === "webchat") {
+      for (const connection of this.getConnections()) send(connection, { type: "paused" });
+      return;
+    }
+    try {
+      const sent = await this.#ports.send(agentId, destination, PAUSED_TEXT, { silent: false });
+      if (!sent.ok)
+        console.warn("conversation: the pause wasn't confirmed", { reason: sent.reason });
+    } catch (error) {
+      console.warn("conversation: the pause wasn't confirmed", { error: errorName(error) });
+    }
+  }
+
+  /**
+   * Binds the conversation to the agent and destination of its first message or pause, or says
+   * which one doesn't match.
+   */
+  #bind({ agentId, destination }: PauseTarget): "destination_mismatch" | "agent_mismatch" | null {
+    const bound = this.#get<Destination | null>("destination", null);
+    if (bound && !sameDestination(bound, destination)) return "destination_mismatch";
+    const boundAgent = this.#get<string | null>("agentId", null);
+    if (boundAgent && boundAgent !== agentId) return "agent_mismatch";
+    if (!bound) this.#set("destination", destination);
+    if (!boundAgent) this.#set("agentId", agentId);
+    return null;
   }
 
   /**
@@ -262,6 +316,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    */
   async flush(armed?: { epoch: number }): Promise<void> {
     if (armed && armed.epoch !== this.#epoch()) return;
+    if (this.#get("paused", false)) return;
     if (this.#pendingInbound().length === 0) return;
     const { settings, promptVersion } = await this.#turnConfig();
     // Other calls ran while this waited: a newer message may have re-armed the flush, or another
@@ -947,7 +1002,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   }
 
   async #plan(epoch: number, now: number): Promise<void> {
-    if (epoch !== this.#epoch()) return;
+    if (epoch !== this.#epoch() || this.#get("paused", false)) return;
     const pending = this.#pendingInbound();
     if (pending.length === 0) return;
     const flushAt = pending.length >= LIMITS.maxBuffered ? now : await this.#planFlush(pending);
@@ -971,6 +1026,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     return planFlush(
       pending.map((row) => ({ text: row.text, receivedAt: row.receivedAt })),
       settings,
+      this.#get<number | null>("resumedAt", null) ?? undefined,
     );
   }
 
