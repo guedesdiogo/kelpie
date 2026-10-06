@@ -193,37 +193,44 @@ The retrieval column is after the arrow. Everything is deterministic, and is in 
 
 ### With models
 
-`bun run --filter @kelpie/memory eval:models` answers the same questions with real models, at 1k and 10k memories ([`models.eval.ts`](../../packages/memory/eval/models.eval.ts)). The results are in [`memory-eval-models.json`](memory-eval-models.json). Model answers can vary from run to run, so that file is a record, not a regression check. Two runs on 2026-10-06 gave the same slices but for a few hundredths.
+`bun run --filter @kelpie/memory eval:models` answers the same questions with real models, at 1k and 10k memories ([`models.eval.ts`](../../packages/memory/eval/models.eval.ts)). The results are in [`memory-eval-models.json`](memory-eval-models.json). Model answers can vary from run to run, so that file is a record of one run, not a regression check.
 
 - **Vectors:** every current note is embedded, as are the questions.
-  - `bge-m3` on Workers AI took 60 s for the 10k vault.
-  - OpenAI's `text-embedding-3-small` took 94 s.
+  - `bge-m3` on Workers AI took 61 s for the 10k vault.
+  - OpenAI's `text-embedding-3-small` took 91 s.
   - Vectors are one more stream of equal weight in the fusion, skipped for "as of" questions.
-- **The rerank:** Clef judges the 30 best hits of each question in one call, from each note's title and first 600 characters, as ai-memory's contract has it. One of 150 calls per configuration failed at 10k and kept the fused order. Calls took 0.6 to 0.75 s at p50 and 1.1 to 1.3 s at p95.
+- **The rerank** follows ai-memory's contract:
+  - retrieval fetches the 30 best hits;
+  - Clef judges them in one call, from each note's title, abstract and body start, 600 characters at most;
+  - the 10 best are kept, so notes can rise from below the limit;
+  - the notes are marked as data, not instructions.
+  - Clef masks long numbers before judging, dates included, so it can't see when a note was written.
 - **No constant was tuned on these runs.** Both embedders run with the same constants, and the rerank takes ai-memory's.
 
 At 10k memories, against retrieval without vectors:
 
-| Configuration | hit@1 | hit@5 | MRR | Names a shared first name, hit@5 | Multi-hop, hit@5 | Odd half, MRR | Stale first |
-|---|---|---|---|---|---|---|---|
-| Retrieval | 0.600 | 0.773 | 0.666 | 0.647 | 0.650 | 0.699 | 0 of 11 |
-| + bge-m3 | 0.627 | 0.793 | 0.700 | 0.500 | 0.600 | 0.736 | 0 of 11 |
-| + bge-m3 + rerank | 0.720 | 0.840 | 0.781 | 0.676 | 0.750 | 0.822 | 1 of 11 |
-| + OpenAI | 0.613 | 0.807 | 0.694 | 0.559 | 0.650 | 0.724 | 0 of 11 |
-| + OpenAI + rerank | 0.733 | 0.833 | 0.784 | 0.618 | 0.700 | 0.820 | 2 of 11 |
-| Retrieval + rerank | 0.687 | 0.787 | 0.734 | 0.676 | 0.700 | 0.762 | 1 of 11 |
+| Configuration | hit@1 | hit@5 | MRR | Names a shared first name, hit@5 | Multi-hop, hit@5 | As of, hit@5 | Odd half, MRR | Stale first |
+|---|---|---|---|---|---|---|---|---|
+| Retrieval | 0.600 | 0.773 | 0.666 | 0.647 | 0.650 | 0.600 | 0.699 | 0 of 11 |
+| + bge-m3 | 0.627 | 0.793 | 0.700 | 0.500 | 0.600 | 0.600 | 0.736 | 0 of 11 |
+| + bge-m3 + rerank | 0.720 | 0.893 | 0.798 | 0.912 | 0.850 | 0.733 | 0.811 | 2 of 11 |
+| + OpenAI | 0.613 | 0.807 | 0.694 | 0.559 | 0.650 | 0.600 | 0.724 | 0 of 11 |
+| + OpenAI + rerank | 0.740 | 0.880 | 0.803 | 0.794 | 0.800 | 0.733 | 0.807 | 2 of 11 |
+| Retrieval + rerank | 0.680 | 0.813 | 0.743 | 0.765 | 0.750 | 0.733 | 0.749 | 2 of 11 |
 
-At 1k, `bge-m3` with the rerank reaches hit@5 0.947 and MRR 0.863, against 0.827 and 0.694.
+At 1k, `bge-m3` with the rerank reaches hit@5 0.940 and MRR 0.849, against 0.827 and 0.694.
 
-- **The rerank gains most:** MRR goes from 0.700 to 0.781 with `bge-m3`, and hit@1 from 0.627 to 0.720.
-- **The two embedders are about even.** `bge-m3` is ahead after the rerank on hit@5 and on first names, OpenAI slightly on hit@1 and MRR. `bge-m3` needs no key and embeds faster.
-- **Vectors alone hurt first names:** 0.647 → 0.500. They bring in the other Anas by meaning. The rerank brings the slice back above where it started.
-- **The rerank brings outdated memories first:** 1 or 2 of the 11 questions that label outdated memories, against none without it. Clef judges relevance, not which note is current. The update slice's MRR still rises, from 0.780 to 0.840 with `bge-m3`.
-- **"As of" questions score the same,** 0.600 at hit@5. They skip vectors.
+- **The rerank gains most,** because it can bring notes up from below the first 10. With `bge-m3`, hit@5 goes from 0.793 to 0.893, and first names from 0.500 to 0.912.
+- **The two embedders are about even.** `bge-m3` is ahead after the rerank on hit@5 and on first names; OpenAI is slightly ahead on hit@1 and MRR. `bge-m3` needs no key and embeds faster.
+- **Vectors alone hurt first names,** 0.647 → 0.500: they bring in the other Anas by meaning. The rerank more than makes up for it.
+- **The rerank brings outdated memories first** in 2 of the 11 questions that label outdated memories, against none without it. Clef judges relevance, not which note is current, and it can't see dates. The update slice's MRR still rises, from 0.780 to 0.823 with `bge-m3`.
+- **The rerank's cost:** with 30 notes, a call took 1.4 s at p50 and 2.2 to 2.5 s at p95 at 10k.
+  - 3 to 6 of 150 calls per configuration failed or left notes unscored, and kept the fused order.
+  - A 2 s cap would also cut the slowest 5 to 10%.
 - **The gate:** Clef was asked whether each message needs the owner's notes, at a threshold of 0.5.
   - It stopped all 20 bare acknowledgements, but also 16 of the 150 questions (11%), which would then get no memory.
   - The regex in `needsMemory` alone stopped all 20 acknowledgements and none of the 150 questions.
-  - A Clef call took 0.52 s at p50 and 1.04 s at p95.
+  - A Clef call took 0.50 s at p50 and 1.13 s at p95.
 - **Not run:** 100k memories, which would take tens of minutes to embed per model.
 
 ## How to re-run
