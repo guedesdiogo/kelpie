@@ -10,6 +10,7 @@ import {
   pack,
   queryWords,
   retrieve,
+  type Scope,
   writeMemory,
 } from "../src/index.ts";
 import { FakeVault } from "./vault.ts";
@@ -166,6 +167,64 @@ describe("the index's entity and graph lookups", () => {
       expect(index.entityHits(["rafael souza", "bruno lima"]).map((hit) => hit.path)).toEqual([
         BRUNO_PATH,
       ]);
+    });
+  });
+
+  it("counts a name's notes only in the scopes the lookup asks for", async () => {
+    const note = (scope: MemoryInput["scope"], title: string): MemoryInput => ({
+      ...person(title, "Uma nota qualquer.", ["Rafael Souza"]),
+      scope,
+      kind: "note",
+    });
+    const notes = (scope: MemoryInput["scope"], count: number) =>
+      Array.from({ length: count }, (_, i) => note(scope, `Assunto ${String(i).padStart(3, "0")}`));
+    // One note over the cap in one scope, and exactly the cap in another.
+    await withMemories(
+      "hot-key-scoped",
+      [...notes("conversation/work", 51), ...notes("conversation/family", 50)],
+      (index) => {
+        const family = index.entityHits(["rafael souza"], {
+          scopes: ["conversation/family"],
+          limit: 100,
+        });
+        expect(family.map((hit) => hit.path).sort()).toEqual(
+          notes("conversation/family", 50).map((n) => memoryPath(n.scope, n.kind, n.title)),
+        );
+        expect(index.entityHits(["rafael souza"], { scopes: ["conversation/work"] })).toEqual([]);
+        expect(index.entityHits(["rafael souza"])).toEqual([]);
+      },
+    );
+  });
+
+  it("looks up as many keys in as many scopes as it takes", async () => {
+    // 64 keys and 64 scopes, with every filter: more than a statement's 100 bound parameters.
+    const keys = [
+      "bruno lima",
+      ...Array.from({ length: 63 }, (_, i) => `nome ${String(i).padStart(2, "0")}`),
+    ];
+    const scopes: Scope[] = [
+      "global",
+      ...Array.from({ length: 63 }, (_, i): Scope => `area/a${String(i).padStart(2, "0")}`),
+    ];
+    const at = Date.parse("2026-12-01T00:00:00Z");
+    await withMemories("many-keys", [BRUNO], (index) => {
+      expect(
+        index
+          .entityHits(keys, { scopes, asOf: at, validAt: at, notExpiredAt: at })
+          .map((hit) => hit.path),
+      ).toEqual([BRUNO_PATH]);
+    });
+  });
+
+  it("counts a note once, not once per version it had", async () => {
+    const versions = Array.from({ length: 51 }, (_, i) => ({
+      ...person("Agenda", `Versão ${i}.`, ["Rafael Souza"]),
+      kind: "note" as const,
+    }));
+    const path = memoryPath("global", "note", "Agenda");
+    await withMemories("hot-key-history", versions, (index) => {
+      expect(index.history(path)).toHaveLength(51);
+      expect(index.entityHits(["rafael souza"]).map((hit) => hit.path)).toEqual([path]);
     });
   });
 

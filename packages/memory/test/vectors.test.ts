@@ -163,6 +163,15 @@ describe("the vector index, closely", () => {
     });
   });
 
+  it("takes a query too long to spread into a call's arguments", async () => {
+    await withMemories("vector-long", [note("A", "um")], async (index) => {
+      const [a] = index.embeddingTexts(MODEL);
+      const long = Array.from({ length: 200_000 }, (_, i) => (i === 0 ? 1 : 0));
+      index.putEmbeddings(MODEL, [{ blobSha: a?.blobSha ?? "", vector: long }]);
+      expect(index.vectorHits(MODEL, long).map((hit) => hit.title)).toEqual(["A"]);
+    });
+  });
+
   it("keeps no vector for content no version holds", async () => {
     await withMemories("vector-erased", [note("A", "um")], async (index) => {
       const [a] = index.embeddingTexts(MODEL);
