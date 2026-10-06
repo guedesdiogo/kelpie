@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-03
 - Issue: [#13](https://github.com/guedesdiogo/kelpie/issues/13)
-- Amended by: [ADR-0015](0015-single-player-first.md), until multi-user lands (single-player)
+- Amended by: [ADR-0015](0015-single-player-first.md), until multi-user lands (single-player); [ADR-0023](0023-webchat-access-login.md), the webchat logs in with the owner's Access identity, with no pairing of its own
 
 ## Context
 

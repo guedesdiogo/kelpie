@@ -7,6 +7,15 @@
   // Reachable only through the custom domain given with `--domain` at deploy (docs/admin-api.md).
   "workers_dev": false,
   "preview_urls": false,
+  // The webchat's page (issue #40). Every request reaches the Worker first, which checks the
+  // owner's Access login before serving it.
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
+  "vars": {
+    // The webchat's Access application, set at deploy (docs/admin-api.md). While either is empty,
+    // the webchat answers 404; Telegram and GitHub's webhooks don't use them.
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": ""
+  },
   // Drizzle's Durable Object migrations import .sql files as text.
   "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
   // Bots' webhooks are checked by channel-egress, which holds their secrets; this entrypoint can
@@ -32,7 +41,9 @@
         "name": "CONVERSATION_AGENT",
         "class_name": "ConversationAgent",
         "script_name": "kelpie-conversation-runtime"
-      }
+      },
+      // The webchat opens only agents the registry lists.
+      { "name": "REGISTRY", "class_name": "Registry", "script_name": "kelpie-conversation-runtime" }
     ]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Directory"] }]

@@ -110,7 +110,7 @@ Form pages are HTML:
    2. `channel-egress`, with its `SECRETS_KEY` and `--var INGRESS_ORIGIN:https://<ingress hostname>` (`docs/secrets.md`);
    3. `context-store`, with the vault's GitHub App values and secrets (`docs/context-store.md`). Without them it runs with the vault off;
    4. `conversation-runtime`;
-   5. `ingress`, with `--domain <ingress hostname>`. Telegram's and GitHub's webhooks reach it there; like the admin API, it has no `workers.dev` URL. Later deploys need the same flag.
+   5. `ingress`, with `--domain <ingress hostname>`. Telegram's and GitHub's webhooks reach it there; like the admin API, it has no `workers.dev` URL. Later deploys need the same flag, and the webchat's Access flags once it is set up ("Webchat").
 2. **Create a self-hosted Access application** for the admin API's hostname, with a policy that allows only the owner. Do this before step 4: whoever passes Access and holds the token becomes the owner. Note the team domain (`https://<team>.cloudflareaccess.com`) and the application's AUD tag.
 3. **Keep the instance's values out of the repository.** The hostname and the Access values belong to one deployment, so they go in as flags when deploying (step 5), and `wrangler.jsonc` stays the same for every instance:
    - `--domain <admin hostname>`: a custom domain on one of the owner's zones. Wrangler creates its DNS record. `workers_dev` and preview URLs stay off.
@@ -138,6 +138,31 @@ Form pages are HTML:
 7. **Keep the secret; delete the local copy.** Delete the file or shell variable that holds the token.
    - The Worker's `BOOTSTRAP_TOKEN` stays. `wrangler.jsonc` lists it in `secrets.required`, so `wrangler deploy` refuses to deploy without it, and deleting it would make every later deploy fail.
    - It is harmless where it is: `/bootstrap` answers `410` once an owner exists, and the token stops being accepted at the expiry it carries.
+
+## Webchat
+
+The webchat is a page on `ingress` where the owner chats with an agent, at `https://<ingress hostname>/webchat/?agent=<agent id>` (ADR-0023).
+- It logs in the same way as the admin API: Cloudflare Access, then the owner's Access identity in the Directory. It has no pairing of its own.
+- The agent must be in the registry.
+- `ingress` checks the Access token again on every request: the page, and the socket's upgrade.
+- The socket's upgrade must come from the page's own origin.
+- Until it is set up, every `/webchat` request answers 404, and Telegram and GitHub's webhooks are unaffected.
+
+To set it up:
+1. **Put `/webchat` behind Access.** Either:
+   - add `<ingress hostname>/webchat` as another destination of the admin API's Access application, which keeps its AUD tag; or
+   - create a self-hosted application for that path, allowing only the owner. Its AUD tag then goes in `ACCESS_AUD` below.
+
+   The path covers what is under it: the page's files and the socket at `/webchat/ws`. Leave the rest of the hostname outside Access: Telegram and GitHub can't log in.
+2. **Deploy `ingress` with the Access values,** as for the admin API:
+   ```bash
+   bunx wrangler deploy -c apps/ingress/wrangler.jsonc --domain <ingress hostname> --var ACCESS_TEAM_DOMAIN:https://<team>.cloudflareaccess.com --var ACCESS_AUD:<aud>
+   ```
+   Later deploys need the same flags. Without them, the webchat answers 404 again.
+3. **Open `https://<ingress hostname>/webchat/?agent=<agent id>`.**
+   - Replies come as paced bubbles, and the page shows when the agent is typing.
+   - While the owner types, buffered messages wait for the rest, up to the agent's `maxWaitMs`.
+   - A reply that arrives with the page closed shows when it opens again.
 
 ## Recovering access
 

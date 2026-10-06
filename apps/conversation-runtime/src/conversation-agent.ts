@@ -9,22 +9,47 @@ import {
   stampOf,
   withoutTypedStamps,
 } from "@kelpie/conversation";
-import type {
-  ConversationContract,
-  Destination,
-  InboundMessage,
-  IngestResult,
+import {
+  type ConversationContract,
+  type Destination,
+  type InboundMessage,
+  type IngestResult,
+  WEBCHAT_ADMISSION_HEADER,
+  type WebchatAdmission,
 } from "@kelpie/conversation/contract";
 import type { AssistantMessage, ChatMessage, LlmEvent, Usage } from "@kelpie/llm";
 import { type OpenKeys, sessionPage } from "@kelpie/memory";
 import { QualifierUnavailable } from "@kelpie/qualifier";
-import { Agent, type FiberRecoveryContext } from "agents";
-import { and, asc, count, desc, eq, gt, gte, inArray, isNull, lt, max } from "drizzle-orm";
+import {
+  Agent,
+  type Connection,
+  type ConnectionContext,
+  type FiberRecoveryContext,
+  type WSMessage,
+} from "agents";
+import { and, asc, count, desc, eq, gt, gte, inArray, isNull, like, lt, max } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
 import { type ConversationPorts, portsFor } from "./ports.ts";
 import * as schema from "./schema.ts";
+import {
+  parseAdmission,
+  parseClientFrame,
+  type ServerFrame,
+  type ShownMessage,
+  shownText,
+  webchatEgress,
+} from "./webchat.ts";
+
+/** The most history rows a webchat socket is shown when it opens. */
+const WEBCHAT_REPLAY_ROWS = 50;
+/** The page's message ids prefixed so they can't collide with another channel's. */
+const WEBCHAT_ID_PREFIX = "webchat:";
+/** How many of the page's latest message ids a socket is told the conversation has. */
+const WEBCHAT_RECEIVED_IDS = 100;
+/** While the owner types in the webchat, buffered messages wait at least this long for the rest. */
+const TYPING_HOLD_MS = 4_000;
 
 /** Bounds on what one conversation accepts. */
 export const LIMITS = {
@@ -111,6 +136,66 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
 
   get #ports(): ConversationPorts {
     return portsFor(this.env);
+  }
+
+  /** Where replies go: the webchat's sockets on this object, or channel-egress for the others. */
+  get #channel(): Pick<ConversationPorts, "send" | "typing" | "keepTyping"> {
+    return this.#get<Destination | null>("destination", null)?.channel === "webchat"
+      ? webchatEgress(() => this.getConnections())
+      : this.#ports;
+  }
+
+  // The webchat's socket (issue #40). Browsers see only Kelpie's frames: no SDK identity or state
+  // sync, and they can't write the SDK's state.
+  static override options = { sendIdentityOnConnect: false };
+
+  override shouldSendProtocolMessages(): boolean {
+    return false;
+  }
+
+  override shouldConnectionBeReadonly(): boolean {
+    return true;
+  }
+
+  /** Ingress has admitted the owner; the socket gets the conversation so far. */
+  override onConnect(connection: Connection, { request }: ConnectionContext): void {
+    const admission = parseAdmission(request.headers.get(WEBCHAT_ADMISSION_HEADER));
+    if (!admission) {
+      connection.close(1008, "not admitted");
+      return;
+    }
+    connection.setState(admission);
+    send(connection, {
+      type: "history",
+      messages: this.#transcript(),
+      received: this.#receivedWebchatIds(),
+    });
+  }
+
+  override async onMessage(connection: Connection, message: WSMessage): Promise<void> {
+    const admission = connection.state as WebchatAdmission | null;
+    const frame = parseClientFrame(message);
+    if (!admission || !frame) return;
+    if (frame.type === "typing") {
+      if (frame.active) await this.#serialized(() => this.#holdForTyping());
+      return;
+    }
+    const result = await this.ingest({
+      agentId: admission.agentId,
+      // The page picks the id, so a resend after a reconnect is deduplicated like any retry.
+      providerMessageId: `${WEBCHAT_ID_PREFIX}${frame.id}`,
+      userId: admission.userId,
+      text: frame.text,
+      destination: { channel: "webchat", threadId: admission.userId },
+      sentAt: this.#ports.now(),
+      timeZone: admission.timeZone,
+    });
+    send(
+      connection,
+      result.status === "rejected"
+        ? { type: "rejected", id: frame.id, reason: result.reason }
+        : { type: "accepted", id: frame.id },
+    );
   }
 
   /**
@@ -441,7 +526,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const answered = new AbortController();
     const typing =
       settings.conversational && capabilitiesFor(destination.channel).typing.supported
-        ? this.#ports
+        ? this.#channel
             .keepTyping(
               this.#agentId(),
               destination,
@@ -718,7 +803,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       if (signal.aborted || !this.#isRunning(turnId)) return;
       if (conversational && capabilities.typing.supported) {
         try {
-          await this.#ports.typing(agentId, destination);
+          await this.#channel.typing(agentId, destination);
         } catch (error) {
           // "Typing" is a courtesy; failing to show it doesn't stop the reply.
           console.error("ConversationAgent: typing failed", { turnId, error: errorName(error) });
@@ -760,7 +845,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       this.#setBubble(bubble.id, "sending");
       let outcome: SendOutcome;
       try {
-        outcome = await this.#ports.send(agentId, destination, bubble.text, { silent });
+        outcome = await this.#channel.send(agentId, destination, bubble.text, { silent });
       } catch (error) {
         if (this.#isRunning(turnId)) this.#setBubble(bubble.id, "pending");
         throw error;
@@ -893,6 +978,33 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     );
   }
 
+  /**
+   * The owner is typing in the webchat: a planned flush moves to at least `TYPING_HOLD_MS` from
+   * now, never past the cap counted from the first buffered message. Typing never plans a flush of
+   * its own, or brings one forward.
+   */
+  async #holdForTyping(): Promise<void> {
+    const flushAt = this.#get<number | null>("flushAt", null);
+    const first = this.#pendingInbound()[0];
+    if (flushAt === null || !first) return;
+    const epoch = this.#epoch();
+    const { settings } = await this.#config();
+    const target = Math.min(
+      Math.max(flushAt, this.#ports.now() + TYPING_HOLD_MS),
+      first.receivedAt + settings.maxWaitMs,
+    );
+    // A message or a flush may have changed the plan while the settings were read.
+    if (target <= flushAt || epoch !== this.#epoch() || this.#get("flushAt", null) !== flushAt) {
+      return;
+    }
+    await this.#cancelFlushSchedule();
+    // A flush the old schedule fired may have claimed the buffer while it was cancelled.
+    if (this.#pendingInbound().length === 0) return;
+    const schedule = await this.schedule(new Date(target), "flush", { epoch });
+    this.#set("flushSchedule", schedule.id);
+    this.#set("flushAt", target);
+  }
+
   #serialized(step: () => Promise<void>): Promise<void> {
     const run = this.#planning.then(step);
     this.#planning = run.catch(() => {});
@@ -1001,6 +1113,58 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
 
   #epoch(): number {
     return this.#get("epoch", 0);
+  }
+
+  /**
+   * The conversation as the webchat shows it: the latest history, then what a running turn has
+   * already sent, then messages no turn has claimed yet. History is written when a turn settles.
+   */
+  #transcript(): ShownMessage[] {
+    const rows = this.#db
+      .select({
+        role: schema.history.role,
+        message: schema.history.message,
+        at: schema.history.createdAt,
+      })
+      .from(schema.history)
+      .orderBy(desc(schema.history.id))
+      .limit(WEBCHAT_REPLAY_ROWS)
+      .all()
+      .reverse()
+      .map(({ role, message, at }) => ({
+        role,
+        text: role === "user" ? withoutTypedStamps(shownText(message)) : shownText(message),
+        at,
+      }));
+    const sent = this.#db
+      .select({ text: schema.outbox.text, at: schema.outbox.sentAt })
+      .from(schema.outbox)
+      .innerJoin(schema.turns, eq(schema.turns.id, schema.outbox.turnId))
+      .where(
+        and(eq(schema.turns.status, "running"), inArray(schema.outbox.status, ["sent", "sending"])),
+      )
+      .orderBy(asc(schema.outbox.seq))
+      .all()
+      .map(({ text, at }) => ({ role: "assistant" as const, text, at: at ?? 0 }));
+    const waiting = this.#pendingInbound().map((row) => ({
+      role: "user" as const,
+      text: row.text,
+      at: row.receivedAt,
+    }));
+    return [...rows, ...sent, ...waiting].filter((message) => message.text !== "");
+  }
+
+  /** The page's latest message ids this conversation has, oldest first. */
+  #receivedWebchatIds(): string[] {
+    return this.#db
+      .select({ id: schema.inbound.providerMessageId })
+      .from(schema.inbound)
+      .where(like(schema.inbound.providerMessageId, `${WEBCHAT_ID_PREFIX}%`))
+      .orderBy(desc(schema.inbound.id))
+      .limit(WEBCHAT_RECEIVED_IDS)
+      .all()
+      .reverse()
+      .map(({ id }) => id.slice(WEBCHAT_ID_PREFIX.length));
   }
 
   #agentId(): string {
@@ -1131,4 +1295,8 @@ function summaryInput(
   return previous === null
     ? `Conversation:\n\n${conversation}`
     : `Previous summary:\n\n${previous}\n\nConversation since:\n\n${conversation}`;
+}
+
+function send(connection: Connection, frame: ServerFrame): void {
+  connection.send(JSON.stringify(frame));
 }

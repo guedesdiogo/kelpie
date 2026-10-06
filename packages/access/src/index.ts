@@ -137,3 +137,12 @@ export interface DirectoryContract {
   listIdentities(): (ChannelIdentity & { status: IdentityStatus })[];
   setTimeZone(userId: string, timeZone: string): TimeZoneResult;
 }
+
+export {
+  type AccessConfig,
+  clearKeyCacheForTesting,
+  type KeySet,
+  remoteKeySet,
+  type Verification,
+  verifyAccessJwt,
+} from "./access-jwt.ts";

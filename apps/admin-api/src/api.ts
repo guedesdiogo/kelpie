@@ -1,3 +1,4 @@
+import type { Verification } from "@kelpie/access";
 import {
   ACCESS_SOURCE,
   ADMIN_AGENT_ID,
@@ -7,7 +8,6 @@ import {
   type RelinkResult,
 } from "@kelpie/access";
 import type { Actor, CommandResult, ConfigCommands } from "@kelpie/config";
-import type { Verification } from "./access-jwt.ts";
 import {
   closedPage,
   type FormDeps,

@@ -40,3 +40,16 @@ export type IngestResult =
 export interface ConversationContract {
   ingest(message: InboundMessage): Promise<IngestResult>;
 }
+
+/**
+ * The webchat's socket is opened by ingress on the conversation's object, after it verified the
+ * owner's Access login. This header carries who it admitted; ingress builds the request, so the
+ * browser can't set it.
+ */
+export const WEBCHAT_ADMISSION_HEADER = "x-kelpie-webchat-admission";
+
+export interface WebchatAdmission {
+  agentId: string;
+  userId: string;
+  timeZone: string | null;
+}

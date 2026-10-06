@@ -1,4 +1,10 @@
-import { DIRECTORY_NAME, type DirectoryContract, type Remote } from "@kelpie/access";
+import {
+  DIRECTORY_NAME,
+  type DirectoryContract,
+  type Remote,
+  remoteKeySet,
+  verifyAccessJwt,
+} from "@kelpie/access";
 import type { ChannelFormsContract } from "@kelpie/channels";
 import {
   type AgentHostContract,
@@ -6,7 +12,6 @@ import {
   REGISTRY_NAME,
   type RegistryContract,
 } from "@kelpie/config";
-import { remoteKeySet, verifyAccessJwt } from "./access-jwt.ts";
 import { type AdminDeps, handle } from "./api.ts";
 
 function depsFor(env: Env): AdminDeps {
