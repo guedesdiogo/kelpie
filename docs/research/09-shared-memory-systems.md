@@ -42,7 +42,13 @@
     - context tiers (Letta);
     - hybrid retrieval with a bounded rerank (ai-memory, Hindsight, Cloudflare Agent Memory);
     - a token-budgeted `context()` (Honcho).
-- **The fastest alternative is to adopt [ai-memory](https://github.com/akitaonrails/ai-memory).** It is MIT, its canonical store is Markdown in git, and it already integrates with Hermes and OpenClaw. The price is a 24/7 server outside Cloudflare.
+- **Build it as a port of [ai-memory](https://github.com/akitaonrails/ai-memory) to Workers (option E, added on 2026-10-06 at the owner's request).** ai-memory is MIT, keeps Markdown in git as its truth, and already integrates with Hermes and OpenClaw. Running its Rust binary would mean a 24/7 server outside Cloudflare, but its design maps onto Workers (§7.1):
+  - one SQLite Durable Object as its single writer, with FTS5;
+  - GitHub commits and the push webhook in place of git2 and the file watcher;
+  - alarms and Workflows for background jobs;
+  - a stateless MCP handler.
+
+  A full port isn't advisable (about 122k lines of non-test Rust). A v1 subset is, with six of its HTTP endpoints, so that **its existing OpenClaw plugin and Hermes provider work against Kelpie unchanged**. Its on-disk format kept in a subtree of the vault gives a one-way escape hatch to the real binary.
 - **Decisions left to the owner:** see §10.
 
 ---
@@ -256,6 +262,7 @@ Legend: ✅ meets the criterion, ⚠️ partly or with a condition, ❌ doesn't 
 | **Letta MemFS** | ⚠️ shared repos on Letta Cloud only | ✅ git Markdown | ✅ Apache-2.0 | ✅ dreaming | ✅ tiers | ❌ its own harness; a design to borrow |
 | **Kelpie, as accepted** | ❌ symlinks and git sync; no OpenClaw | ✅ | ✅ | ⚠️ designed | ⚠️ designed | ✅ |
 | **Kelpie, improved (§8)** | ✅ MCP plus adapters, single writer | ✅ | ✅ | ✅ borrowed techniques | ✅ tiers, RRF, Jev rerank, budget | ✅ on Workers; personal data per ADR-0006 |
+| **ai-memory ported to Workers (E)** | ✅ its own OpenClaw plugin and Hermes provider, pointed at Kelpie | ✅ Markdown in git, plus a one-way escape hatch to the real binary | ✅ MIT (attribution kept) | ✅ its supersession, decay and evidence (v1 subset first) | ✅ its RRF, authority weights and bounded rerank | ✅ on Workers; tracks a moving upstream |
 
 ---
 
@@ -275,11 +282,90 @@ Legend: ✅ meets the criterion, ⚠️ partly or with a condition, ❌ doesn't 
   - its multi-user model doesn't filter reads by author ([note 02](02-memory-and-learning.md)). That is fine while Kelpie is single-player ([ADR-0015](../adr/0015-single-player-first.md)), but colleagues' personal data still can't go into it (ADR-0006).
 - **D. Improve Kelpie's own plan.** Keep the vault, and build the shared access layer on Workers with borrowed techniques. It fits every criterion and the architecture, but it is the most work, starting with Story 3.8.
 
-**The deciding question between C and D:** is the owner willing to run, and keep running, a server outside Cloudflare for memory? If yes, C gets him there sooner. If no, D.
+- **E. Replicate ai-memory on Workers.** This is option D, but built as a compatible port rather than a design of our own; it was added on 2026-10-06 at the owner's request. §7.1 has the details.
+
+**The deciding questions:**
+- **C or a Workers build (D/E):** is the owner willing to run, and keep running, a server outside Cloudflare for memory?
+- **D or E:** is staying compatible with ai-memory, its integrations and its binary, worth following its format and API?
+
+### 7.1 Replicating ai-memory on Workers (option E)
+
+Read from ai-memory `main` at `fc4da03` (release [v2.5.2](https://github.com/akitaonrails/ai-memory/releases/tag/v2.5.2)) on 2026-10-06.
+
+**How it works**
+- **One binary, one data directory.** `wiki/` is a git repo and the truth; `db/memory.sqlite` is a derived index ([README](https://github.com/akitaonrails/ai-memory/blob/fc4da03/README.md#architecture)).
+- **One writer.** Every write goes through a single-writer actor, and indexes commit in the same transaction as the data ([architecture](https://github.com/akitaonrails/ai-memory/blob/fc4da03/docs/ARCHITECTURE.md)).
+- **The schema** has 71 migrations:
+  - versioned pages (`is_latest`, a `supersedes` chain, access counters, salience, `expires_at`);
+  - FTS5 over pages and observations;
+  - entities and cross-project links;
+  - embeddings, searched by brute-force cosine;
+  - evidence and feedback tables;
+  - sessions, observations, handoffs, proposals and an audit log.
+- **On disk:** `<workspace-uuid>/<project-uuid>/` scopes, with page families `concepts`, `decisions`, `gotchas`, `procedures`, `notes`, `sessions`, `_rules`, `_slots`, `_pending` and others. Each scope also holds `_meta.md` and OKF frontmatter ([layout](https://github.com/akitaonrails/ai-memory/blob/fc4da03/docs/lifecycle-ops.md), [OKF](https://github.com/akitaonrails/ai-memory/blob/fc4da03/docs/okf.md)). Directories that aren't UUIDs are skipped, and human names never appear in paths.
+- **Writes and retrieval.**
+  - Capture, session summaries, decay, TTL and lint need no LLM.
+  - Consolidation, auto-improve proposals (staged in `_pending/`, with a 0.75 confidence floor) and "dream" do ([auto-improve](https://github.com/akitaonrails/ai-memory/blob/fc4da03/docs/auto-improvement-loop.md)).
+  - Retrieval fuses FTS5, entity, graph and vector streams with RRF (k=60), then applies an authority multiplier clamped to [0.55, 1.50]. An optional rerank takes up to 30 candidates and keeps the local order on failure ([retrieval tuning](https://github.com/akitaonrails/ai-memory/blob/fc4da03/crates/ai-memory-store/src/retrieval_tuning.rs)).
+- **Integrations talk HTTP, so they can point at another server:**
+  - **OpenClaw:** the plugin ai-memory generates is TypeScript. It `fetch`es `POST /hook` and `GET /handoff` with a configured URL and bearer token, and needs no binary at runtime ([openclaw_plugin.rs](https://github.com/akitaonrails/ai-memory/blob/fc4da03/crates/ai-memory-cli/src/commands/openclaw_plugin.rs)).
+  - **Hermes:** a community `MemoryProvider` plugin calls `GET /admin/search`, `POST /admin/write-page`, `GET /admin/status`, `POST /hook` and `GET /handoff` ([client.py](https://github.com/MrLuciano/ai-memory-hermes-plugin/blob/4f2028a/plugins/memory/ai-memory/client.py)). It declares no license, so Kelpie interoperates with it over HTTP and doesn't vendor it.
+  - **MCP:** 23 tools at `/mcp`, stateless streamable HTTP by default.
+
+**Mapping to Workers**
+
+| ai-memory | On Workers | Fit |
+|---|---|---|
+| SQLite and the single-writer actor | One SQLite Durable Object. DO SQLite supports FTS5 ([docs](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/)) | Direct. Each object holds at most 10 GB ([limits](https://developers.cloudflare.com/durable-objects/platform/limits/)), so raw observations need bounded retention or R2 |
+| Embeddings | BLOBs in DO SQLite, with Vectorize as an accelerator (1536 dimensions, topK ≤ 50 with metadata) | Change: dedup, contradiction and dream jobs load vectors in bulk |
+| git2 | GitHub's Git Data API (tree → commit → ref), through the Context Store (ADR-0005) | Change: batch commits per session end, and don't commit the per-event log |
+| Watcher and reconcile | The push webhook plus the compare API, and a tree diff on an alarm, ignoring the writer's own blob SHAs | Change |
+| Scheduler, sweeps, dream | Durable Object alarms, Queues, Workflows | Direct |
+| MCP server | The Agents SDK's stateless `createMcpHandler` | Direct |
+| CPU-heavy clustering | Workers CPU limits (30 s by default, up to 5 min) | Bound the batches |
+| System info, tarballs, workstreams | — | Dropped |
+
+Running the real binary in Cloudflare Containers is weak: the disk is ephemeral and snapshots are in beta.
+
+**Compatibility**
+- **Format: yes.** The port can write ai-memory's scopes, `_meta.md`, path families and OKF `type`. The real binary can then take over through a clone, `ai-memory reindex` and `embed`. The handover is **one-way**: reindex loses sessions, handoffs and counters, and the two can't write the same repo live.
+- **API: yes, for a small surface.**
+  - The six endpoints: `/hook`, `/handoff`, `/mcp`, and `/admin/search`, `/admin/write-page`, `/admin/status`.
+  - Copy too: scope from query parameters, the event-name aliases, 202/429 answers, idempotency keys, plain-text handoffs, and the response shapes the Hermes plugin parses.
+- **What changes for Kelpie:**
+  - **Auth.** These clients send only a bearer token, so the machine routes skip Cloudflare Access and the Worker checks the token.
+  - **Scope.** Projects default to the agent's working directory, which Kelpie doesn't have, so the workspace and project are pinned.
+  - **The Hermes plugin's routes** are root-only in ai-memory's multi-user mode.
+- **License.** ai-memory is MIT, © 2026 Fabio Akita ([LICENSE](https://github.com/akitaonrails/ai-memory/blob/fc4da03/LICENSE)). A Rust → TypeScript translation is a derivative work, so it keeps the notice.
+
+**Size and a sensible v1**
+- About 122k lines of non-test Rust, 78k of them in the engine. A full port isn't advisable.
+- **v1:**
+  - the wiki writer, with `_meta.md` and OKF;
+  - a subset of the schema in one Durable Object;
+  - hook and handoff, with the sanitizer and rule-based session summaries;
+  - MCP query, read, write and delete page, recent, status, briefing and handoffs;
+  - RRF with the authority multiplier;
+  - decay and TTL on alarms;
+  - GitHub commits and the webhook.
+- **Deferred:** auto-improve, dream, dedup and the contradiction band, agent messages, workstreams, multi-user and the rerank. Jev can take the rerank later.
+
+**How its layout meets ADR-0016's vault**
+- They can share one repo: ai-memory skips directories that aren't UUIDs.
+- Memory pages would live in ai-memory's UUID scopes, machine-managed and compatible.
+- Persona, rules, skills and the owner's own `knowledge/` keep ADR-0016's human-named paths. Kelpie indexes both; the real binary would see only its scopes.
+- **`log.md`:** ai-memory uses `log-YYYY-MM.md`, because git is the log. Kelpie's `log.md` stays at the root.
+- **Hermes's files:** `MEMORY.md` maps to pinned `_slots/`, and `USER.md` to `_global` or an invariant slot. Kelpie renders both within their caps.
+- **Obsidian:** UUID folders are harder to browse than human-named ones. Page titles help; the paths don't.
 
 ---
 
-## 8. Recommendation: option D, in three phases
+## 8. Recommendation: option D, built as an ai-memory-compatible port (E), in three phases
+
+**Revised 2026-10-06.** Option E doesn't replace the architecture below; it says how to build it.
+- **The retrieval and lifecycle code** follows ai-memory's design.
+- **The memory pages** use its format.
+- **Its six HTTP endpoints,** next to Kelpie's own MCP tools, let the integrations that already exist for Hermes and OpenClaw work unchanged.
 
 **Architecture**
 
@@ -307,11 +393,9 @@ Legend: ✅ meets the criterion, ⚠️ partly or with a condition, ❌ doesn't 
   - **Hermes:** `MEMORY.md` and `USER.md` are re-rendered within 2,200 and 1,375 characters.
   - **OpenClaw:** its bootstrap files.
   - **For both:** a write to these files, mirrored back (Hermes's `on_memory_write`), becomes a vault write that goes through the gates.
-- **Adapters per platform**
-  - **Hermes:** a small Python `MemoryProvider` plugin. `prefetch` calls `memory_context`, `sync_turn` and `on_session_end` capture, and `on_memory_write` mirrors. Without the plugin, Hermes gets MCP tools only, with no automatic recall or capture.
-  - **OpenClaw:**
-    - **Reading:** `memory.search.extraPaths` over a clone of the vault.
-    - **Writing:** MCP tools. Automatic capture would need a plugin that runs alongside memory-core, the way Honcho's does. One that takes the slot would keep OpenClaw's writes in its own store.
+- **Adapters per platform.** With option E, most already exist:
+  - **Hermes:** ai-memory's community `MemoryProvider` plugin, pointed at Kelpie. If its missing license or its root-only routes get in the way, write a small Python provider of our own: `prefetch` calls `memory_context`, `sync_turn` and `on_session_end` capture, and `on_memory_write` mirrors. Without any provider, Hermes gets MCP tools only, with no automatic recall or capture.
+  - **OpenClaw:** the TypeScript plugin ai-memory generates, pointed at Kelpie, for capture and handoff. Add `memory.search.extraPaths` over a clone of the vault for search. A plugin that took the exclusive slot would keep OpenClaw's writes in its own store.
   - **Manual editing:** Obsidian on a clone, with obsidian-git. Edits arrive through the push webhook and the three-way merge (ADR-0005).
 - **Trust.** Writes from Hermes and OpenClaw count as untrusted agent writes, exposed to the memory poisoning described in [note 02](02-memory-and-learning.md) (MINJA). They pass the same gates as Kelpie's own. Rules and skills still go through a pull request.
 
@@ -342,10 +426,11 @@ Legend: ✅ meets the criterion, ⚠️ partly or with a condition, ❌ doesn't 
 
 **Phases**
 1. **Context Store v1 and shared access.**
-   - Story 3.8, with the fact format and supersession.
-   - The MCP endpoint with authentication.
-   - OpenClaw reads through MCP and `extraPaths`; Obsidian through obsidian-git.
-2. **The Hermes provider plugin,** plus the rendered `MEMORY.md` and `USER.md` digests.
+   - Story 3.8, with ai-memory's page format and supersession.
+   - The port's v1 subset (§7.1).
+   - The MCP endpoint and the six compatible HTTP endpoints, with bearer authentication.
+   - Access: OpenClaw through its ai-memory plugin and `extraPaths`, Obsidian through obsidian-git.
+2. **Hermes,** through the ai-memory provider or one of our own, plus the rendered `MEMORY.md` and `USER.md` digests.
 3. **Consolidation,** the profile digest, decay, contradiction flags, and the token-budgeted context.
 4. **Optional, later:** an external engine (option B) behind the same interface, only if retrieval quality calls for it.
 
@@ -376,7 +461,7 @@ Legend: ✅ meets the criterion, ⚠️ partly or with a condition, ❌ doesn't 
 ## 10. Decisions for the owner
 
 1. **Canonical store.** Keep the Markdown vault in git as the single truth (ADR-0016)? Recommended: yes.
-2. **Build or adopt.** Option D, built on Workers, or option C, ai-memory on a host he runs? Recommended: D, unless he wants shared memory sooner and accepts a 24/7 server.
+2. **Build or adopt.** Build on Workers (D/E), or run ai-memory on a host he runs (C)? Recommended: build on Workers, as an ai-memory-compatible port (E).
 3. **ADR-0016's sharing mechanism.** Replace symlinks and git sync with the Context Store as single writer, MCP access, and Hermes's and OpenClaw's files as rendered digests? This amends ADR-0016. Recommended: yes.
 4. **Integration depth.**
    - **Hermes:** a provider plugin, for automatic recall and capture, or MCP tools only?
@@ -385,12 +470,17 @@ Legend: ✅ meets the criterion, ⚠️ partly or with a condition, ❌ doesn't 
    Recommended: the Hermes plugin in phase 2; for OpenClaw, MCP plus `extraPaths` first.
 5. **Export scope.** The vault plus the per-user data rendered as Markdown, with third parties' data only in the owner's own export? Recommended: yes.
 6. **External engines.** Kept as an optional derived index behind the interface, and not adopted now? Recommended: yes.
+7. **Layout of memory pages (option E).** ai-memory's UUID scopes, for compatibility and the escape hatch, next to ADR-0016's human-named paths for persona, skills and his own notes? Or a human-named layout of our own, which reads better in Obsidian but loses compatibility? Recommended: ai-memory's scopes for machine-managed memory.
 
 ## 11. Risks
 
 - **Memory poisoning from another agent's writes.** Each platform is one more writer. The gates in §8 apply to all of them, and rules and skills stay behind a pull request.
 - **Hermes's caps.** The digests must stay within 2,200 and 1,375 characters, so the always-loaded tier must be curated.
 - **Moving targets.** Hermes's providers, OpenClaw's plugins and these products changed packaging within weeks of this note. The adapters should stay thin.
+- **Upstream drift (option E).** ai-memory has 71 migrations, a newer-format guard and undocumented query parameters.
+  - Pin a version.
+  - Run the real binary's `reindex` against the port's output in CI.
+  - Port its sanitizer faithfully.
 - **Effort.** Phase 1 contains Story 3.8, sized L, plus the MCP endpoint. Option D is months of work, not weeks.
 - **LGPD.** Any engine outside the stack (options A and B) receives personal data, and needs the same masking reasoning as Jev ([ADR-0018](../adr/0018-jev-direct-api.md)).
 
@@ -405,5 +495,7 @@ Legend: ✅ meets the criterion, ⚠️ partly or with a condition, ❌ doesn't 
 **Mem0:** [site](https://mem0.ai/) · [repo](https://github.com/mem0ai/mem0) · [platform vs OSS](https://docs.mem0.ai/platform/platform-vs-oss) · [v2→v3](https://docs.mem0.ai/migration/oss-v2-to-v3) · [export](https://docs.mem0.ai/platform/features/memory-export) · [MCP](https://docs.mem0.ai/platform/mem0-mcp) · [#6530 OpenMemory removed](https://github.com/mem0ai/mem0/pull/6530) · [OpenClaw](https://docs.mem0.ai/integrations/openclaw) · [Hermes](https://docs.mem0.ai/integrations/hermes) · [pricing](https://mem0.ai/pricing) · [paper](https://arxiv.org/abs/2504.19413)
 
 **Platforms:** Hermes [memory](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory) · [providers](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory-providers) · [provider plugin](https://hermes-agent.nousresearch.com/docs/developer-guide/memory-provider-plugin) · [profiles](https://hermes-agent.nousresearch.com/docs/user-guide/profiles) · [MCP](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp) · OpenClaw [memory](https://docs.openclaw.ai/concepts/memory) · [memory search](https://docs.openclaw.ai/concepts/memory-search) · [memory config](https://docs.openclaw.ai/reference/memory-config) · [plugins](https://docs.openclaw.ai/tools/plugin) · [memory-wiki](https://docs.openclaw.ai/plugins/memory-wiki) · [MCP](https://docs.openclaw.ai/cli/mcp)
+
+**ai-memory internals (fc4da03):** [architecture](https://github.com/akitaonrails/ai-memory/blob/fc4da03/docs/ARCHITECTURE.md) · [lifecycle and layout](https://github.com/akitaonrails/ai-memory/blob/fc4da03/docs/lifecycle-ops.md) · [OKF](https://github.com/akitaonrails/ai-memory/blob/fc4da03/docs/okf.md) · [security boundaries](https://github.com/akitaonrails/ai-memory/blob/fc4da03/docs/security-boundaries.md) · [OpenClaw plugin generator](https://github.com/akitaonrails/ai-memory/blob/fc4da03/crates/ai-memory-cli/src/commands/openclaw_plugin.rs) · [Hermes provider client](https://github.com/MrLuciano/ai-memory-hermes-plugin/blob/4f2028a/plugins/memory/ai-memory/client.py) · [Jev reranker](https://github.com/akitaonrails/ai-memory/blob/fc4da03/docs/jev-reranker-adapter.md) · Cloudflare [DO SQLite](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/) · [DO limits](https://developers.cloudflare.com/durable-objects/platform/limits/) · [MCP transport](https://developers.cloudflare.com/agents/model-context-protocol/protocol/transport/)
 
 **Others:** [ai-memory](https://github.com/akitaonrails/ai-memory) · [Letta MemFS](https://docs.letta.com/concepts/memfs) · [Basic Memory](https://github.com/basicmachines-co/basic-memory) · [Hindsight](https://github.com/vectorize-io/hindsight) · [Graphiti](https://github.com/getzep/graphiti) · [Cognee](https://github.com/topoteretes/cognee) · [MemOS](https://github.com/MemTensor/MemOS) · [Anthropic memory tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool) · [Cloudflare Agent Memory](https://blog.cloudflare.com/introducing-agent-memory/) · [OKF](https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/main/SPEC.md) · [Agent Skills](https://agentskills.io/specification) · [W3C memory interop CG](https://www.w3.org/community/ai-agent-memory-interop/)
