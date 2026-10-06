@@ -316,4 +316,124 @@ describe.skipIf(!enabled)("memory evaluation with models", () => {
       );
     });
   }
+
+  it("measures where outdated memories sit, for the contradiction band (#111)", async ({
+    task,
+  }) => {
+    const vault = await buildVault(1_000);
+    const band = await runInDurableObject(
+      env.INDEX_HOST.getByName("models-band"),
+      async (_instance, state) => {
+        const index = new MemoryIndex(state.storage);
+        for (const commit of vault.commits) await index.applyCommit(commit);
+        const textOf = (path: string) => {
+          const note = index.current(path);
+          return note === null
+            ? null
+            : [note.title, note.abstract, note.body].filter((part) => part).join("\n\n");
+        };
+        const key = (a: string, b: string) => (a < b ? `${a}\n${b}` : `${b}\n${a}`);
+        // Same topic, disagreeing: each question's answer against what would answer it wrongly,
+        // and each fact's consecutive versions, which say what changed.
+        const positives = new Map<string, [string, string]>();
+        const paths = new Set<string>();
+        for (const question of QUESTIONS) {
+          for (const stale of question.stale ?? []) {
+            for (const gold of question.gold) {
+              const a = vault.labels.get(gold)?.path;
+              const b = vault.labels.get(stale)?.path;
+              const ta = a === undefined ? null : textOf(a);
+              const tb = b === undefined ? null : textOf(b);
+              if (a && b && a !== b && ta && tb) {
+                positives.set(key(a, b), [ta, tb]);
+                paths.add(a).add(b);
+              }
+            }
+          }
+        }
+        for (const memory of GOLD_MEMORIES) {
+          memory.versions.slice(1).forEach((version, i) => {
+            const before = memory.versions[i];
+            if (before === undefined) return;
+            const text = (v: typeof version) =>
+              [memory.title, v.abstract, v.body].filter((part) => part).join("\n\n");
+            positives.set(`${memory.key}@${i + 1}`, [text(before), text(version)]);
+          });
+        }
+        // Same entity, not disagreeing: every other pair of gold notes that share one.
+        const gold = [...new Set([...vault.labels.values()].map((target) => target.path))].filter(
+          (path) => index.current(path) !== null,
+        );
+        const entities = index.entitiesOf(gold);
+        const negatives: [string, string][] = [];
+        for (let i = 0; i < gold.length; i += 1) {
+          for (let j = i + 1; j < gold.length; j += 1) {
+            const a = gold[i] as string;
+            const b = gold[j] as string;
+            const shared = [...(entities.get(a)?.keys() ?? [])].some((k) =>
+              entities.get(b)?.has(k),
+            );
+            const ta = textOf(a);
+            const tb = textOf(b);
+            if (shared && !positives.has(key(a, b)) && ta && tb) negatives.push([ta, tb]);
+          }
+        }
+        const cosine = (x: readonly number[], y: readonly number[]) => {
+          let dot = 0;
+          let xx = 0;
+          let yy = 0;
+          for (let i = 0; i < x.length; i += 1) {
+            dot += (x[i] ?? 0) * (y[i] ?? 0);
+            xx += (x[i] ?? 0) ** 2;
+            yy += (y[i] ?? 0) ** 2;
+          }
+          return dot / Math.sqrt(xx * yy);
+        };
+        const round = (value: number) => Math.round(value * 1000) / 1000;
+        const out: Record<string, unknown> = {};
+        for (const embedder of embedders()) {
+          const pairs = [...positives.values(), ...negatives];
+          const texts = [...new Set(pairs.flat())];
+          const vectors = await embedder.embed(texts);
+          const vectorOf = new Map(texts.map((text, i) => [text, vectors[i] ?? []]));
+          const scores = (list: [string, string][]) =>
+            list.map(([a, b]) => cosine(vectorOf.get(a) ?? [], vectorOf.get(b) ?? []));
+          const pos = scores([...positives.values()]).sort((a, b) => a - b);
+          const neg = scores(negatives).sort((a, b) => a - b);
+          const within = (list: number[], low: number, high: number) =>
+            list.filter((value) => value >= low && value < high).length / (list.length || 1);
+          const bands = [];
+          for (let low = 0.3; low <= 0.71; low += 0.05) {
+            for (let high = low + 0.1; high <= 0.96; high += 0.05) {
+              bands.push({
+                band: [round(low), round(high)],
+                caught: round(within(pos, low, high)),
+                flaggedNegatives: round(within(neg, low, high)),
+              });
+            }
+          }
+          out[embedder.model] = {
+            positives: pos.map(round),
+            negatives: {
+              n: neg.length,
+              p10: round(percentile(neg, 10)),
+              p50: round(percentile(neg, 50)),
+              p90: round(percentile(neg, 90)),
+            },
+            bestBands: bands
+              .sort(
+                (a, b) =>
+                  b.caught - b.flaggedNegatives - (a.caught - a.flaggedNegatives) ||
+                  a.flaggedNegatives - b.flaggedNegatives,
+              )
+              .slice(0, 5),
+          };
+        }
+        return out;
+      },
+    );
+    task.meta.memoryEvalModels = { band };
+    console.log(JSON.stringify({ band }, null, 1));
+    expect(Object.keys(band).length).toBeGreaterThan(0);
+  });
 });

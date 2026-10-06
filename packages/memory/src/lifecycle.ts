@@ -23,10 +23,18 @@ const REPORT_ENTRIES = 200;
 
 /**
  * The cosine band in which two notes about one entity may contradict each other, per embedding
- * model: the same topic, not the same note. Calibrated on #108's outdated-memory labels; a model
- * without a band has the check off.
+ * model: close, but not the same note. A model without a band has the check off.
+ *
+ * Measured on #108's vault (`eval:models`, #111): pairs that disagree (a question's answer against
+ * the memories that would answer it wrongly, and each fact's consecutive versions, 16 pairs)
+ * against other pairs of notes sharing an entity (54). Unlike ai-memory's [0.4, 0.75), these
+ * updates sit high: [0.70, 0.95) caught 56% of them with bge-m3, flagging 6% of the other pairs,
+ * and 63% with OpenAI's model, flagging 13%. Above 0.95 a pair is close to a duplicate.
  */
-export const CONTRADICTION_BANDS: Readonly<Record<string, readonly [number, number]>> = {};
+export const CONTRADICTION_BANDS: Readonly<Record<string, readonly [number, number]>> = {
+  "@cf/baai/bge-m3": [0.7, 0.95],
+  "text-embedding-3-small": [0.7, 0.95],
+};
 
 export interface NoteRef {
   path: string;
