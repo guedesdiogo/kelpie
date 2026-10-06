@@ -1,4 +1,5 @@
 import { exports } from "cloudflare:workers";
+import { KELPIE_VERSION } from "@kelpie/config";
 import { describe, expect, it } from "vitest";
 
 describe("ingress", () => {
@@ -8,6 +9,16 @@ describe("ingress", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("application/json");
     expect(await response.json()).toEqual({ status: "ok" });
+  });
+
+  it("answers GET /version with Kelpie's version and what the deploy says about itself", async () => {
+    const response = await exports.default.fetch("https://ingress.test/version");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.version).toBe(KELPIE_VERSION);
+    expect(Object.keys(body).sort()).toEqual(["commit", "deployedAt", "deployment", "version"]);
   });
 
   it("answers any other route with 404", async () => {
