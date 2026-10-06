@@ -99,7 +99,7 @@ Form pages are HTML:
       **End of turn.** When the heuristic isn't sure whether the user has finished, the agent's `qualifier` setting picks who decides. Change it with `configureAgent`.
       - **`clef`, the default:** Cloudflare's Clef model on Workers AI, through `llm-gateway`'s `AI` binding.
         - It needs no key and is billed as Workers AI usage on the account.
-        - `CLEF_MODEL` pins the model.
+        - `CLEF_MODEL` pins the model: `clef` by default, or `clef-flash`, which is faster but decides fewer turns. Each has its own bands (ADR-0022).
         - Cloudflare doesn't use the inputs to train or improve models.
       - **`jev`:** Jev on TypeSafe's API (ADR-0018).
         - Set the optional `TYPESAFE_API_KEY` to a key from TypeSafe's console.

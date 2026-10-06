@@ -111,8 +111,10 @@ describe("endOfTurnBands", () => {
     expect(endOfTurnBands("fake")).toEqual({ high: 0.8, low: 0.3 });
   });
 
-  it("gives Clef its own bands", () => {
-    expect(endOfTurnBands("clef-workers-ai")).toBe(CLEF_BANDS);
+  it("gives each Clef model the bands spike #117 measured", () => {
+    expect(endOfTurnBands("clef-workers-ai")).toEqual({ high: 0.95, low: 0.46 });
+    expect(endOfTurnBands("clef-flash-workers-ai")).toEqual({ high: 0.87, low: 0.37 });
+    expect(CLEF_BANDS["clef-flash"]).toEqual({ high: 0.87, low: 0.37 });
   });
 });
 

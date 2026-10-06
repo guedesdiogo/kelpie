@@ -13,7 +13,7 @@ export type ClefRun = (
 ) => Promise<unknown>;
 
 export interface ClefOptions {
-  /** The model selector, "clef" or "clef-flash": thresholds are tuned against one. */
+  /** The model selector, "clef" or "clef-flash": each has its own bands (ADR-0022). */
   model: string;
   run: ClefRun;
 }
@@ -23,12 +23,14 @@ export interface ClefOptions {
  * the request is the one Jev gets. Personal data in the state is masked before it leaves.
  */
 export class ClefQualifier implements Qualifier {
-  readonly id: QualifierId = "clef-workers-ai";
+  /** Each model answers under its own id, because each has its own bands. */
+  readonly id: QualifierId;
   readonly calibrated = true;
   readonly #options: ClefOptions;
 
   constructor(options: ClefOptions) {
     this.#options = options;
+    this.id = options.model === "clef-flash" ? "clef-flash-workers-ai" : "clef-workers-ai";
   }
 
   async qualify(

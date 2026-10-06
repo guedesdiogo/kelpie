@@ -17,8 +17,9 @@
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
     // Jev's version for end of turn, pinned: its thresholds were measured on it (ADR-0018).
     "JEV_MODEL": "jev-1.13.0",
-    // Clef's model for end of turn, "clef" or "clef-flash", pinned like Jev's (issue #118).
-    "CLEF_MODEL": "clef-flash",
+    // Clef's model for end of turn, "clef" or "clef-flash", pinned like Jev's: each has its own
+    // bands (ADR-0022).
+    "CLEF_MODEL": "clef",
     // For each tier, the models to try in order. Owner configuration; edit freely.
     "MODEL_ROUTES": {
       "cheap": [

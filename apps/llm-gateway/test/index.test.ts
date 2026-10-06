@@ -187,8 +187,8 @@ describe("llm-gateway", () => {
       Record<string, unknown>,
       { signal?: AbortSignal },
     ];
-    expect(model).toBe("@cf/cloudflare/clef-flash");
-    expect(input).toMatchObject({ model: "clef-flash", state: { fragments: ["vocês entregam?"] } });
+    expect(model).toBe("@cf/cloudflare/clef");
+    expect(input).toMatchObject({ model: "clef", state: { fragments: ["vocês entregam?"] } });
     expect(options.signal).toBeInstanceOf(AbortSignal);
     expect(fetchSpy).not.toHaveBeenCalled();
   });

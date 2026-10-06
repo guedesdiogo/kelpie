@@ -25,7 +25,7 @@ describe("ClefQualifier", () => {
 
     expect(result).toEqual({
       answers: { "turn.end::user_finished": { type: "noul", noul: 0.9323 } },
-      provider: "clef-workers-ai",
+      provider: "clef-flash-workers-ai",
       calibrated: true,
     });
     const [model, input] = run.mock.calls[0] ?? [];
@@ -36,6 +36,13 @@ describe("ClefQualifier", () => {
       state: { fragments: ["vocês entregam em Niterói?"] },
       questions: { "turn.end__user_finished": question },
     });
+  });
+
+  it("names each model as its own provider, because their bands differ", async () => {
+    const run = answering(RECORDED);
+    const full = new ClefQualifier({ model: "clef", run });
+    expect((await full.qualify({}, questions)).provider).toBe("clef-workers-ai");
+    expect(run.mock.calls[0]?.[0]).toBe("@cf/cloudflare/clef");
   });
 
   it("masks personal data in the state before it leaves, and keeps the instructions", async () => {

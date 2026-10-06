@@ -14,6 +14,7 @@ export type Answer =
 
 export type QualifierId =
   | "clef-workers-ai"
+  | "clef-flash-workers-ai"
   | "jev-workers-ai"
   | "jev-http"
   | "jev-openrouter"
