@@ -82,6 +82,37 @@ export interface RecallResult {
   notes: { path: string; byKelpie: boolean }[];
 }
 
+/** What the agent's `memory_search` asks (#126): retrieval as recall does, without the packing. */
+export interface MemorySearchOptions {
+  /** The scopes the turn may see, as for recall. */
+  scopes: readonly string[] | "all";
+  /** How many notes: 3 when left out, 10 at most. */
+  k?: number;
+  asOf?: number;
+  validAt?: number;
+  qualifier?: "clef" | "jev";
+}
+
+/** A note `search` found, best first. There is no score: the order is the answer. */
+export interface MemoryHit {
+  path: string;
+  title: string;
+  abstract: string | null;
+  kind: string;
+  scope: string;
+  /** World time, in epoch milliseconds. */
+  validFrom: number | null;
+  invalidAt: number | null;
+  /** False for a version an "as of" search found that the vault has replaced since. */
+  current: boolean;
+  /** As in `RecallResult.notes`. */
+  byKelpie: boolean;
+}
+
+export interface MemorySearchResult {
+  notes: MemoryHit[];
+}
+
 export interface ContextStoreContract {
   /** Empty when the vault is off. */
   compile(agentId: string): Promise<CompiledContext>;
@@ -110,6 +141,11 @@ export interface ContextStoreContract {
    * vector, reranked by the qualifier, within the budget. An empty block when the vault is off.
    */
   recall(agentId: string, question: string, options: RecallOptions): Promise<RecallResult>;
+  /**
+   * The notes that answer a query, for the agent's `memory_search` (#126): the same retrieval as
+   * recall, returned as hits. Nothing when the vault is off or the input isn't valid.
+   */
+  search(agentId: string, query: string, options: MemorySearchOptions): Promise<MemorySearchResult>;
 }
 
 /**

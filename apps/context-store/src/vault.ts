@@ -12,6 +12,7 @@ import {
   rerank,
   retrieve,
   type Scope,
+  type SearchHit,
 } from "@kelpie/memory";
 import type { GatewayQualifyOutcome, QualifierBackend, Question } from "@kelpie/qualifier";
 import {
@@ -27,6 +28,8 @@ import type {
   CompiledContext,
   ForgetResult,
   HeldFile,
+  MemorySearchOptions,
+  MemorySearchResult,
   ProposalTarget,
   ProposeResult,
   RecallOptions,
@@ -83,6 +86,9 @@ const RECALL_LIMIT = 10;
 /** As ai-memory: the rerank judges 3 × the limit, up to 30, then the limit is kept. */
 const RERANK_CANDIDATES = 30;
 const MAX_RECALL_SCOPES = 64;
+/** The agent's `memory_search` (#126): a few notes, as hermes's `session_search` returns. */
+const SEARCH_K = 3;
+const MAX_SEARCH_K = 10;
 /** The question's vector waits this long, the rerank this long, then recall goes on without them. */
 const EMBED_QUESTION_TIMEOUT_MS = 2_000;
 const RERANK_TIMEOUT_MS = 3_000;
@@ -908,55 +914,10 @@ export class Vault extends DurableObject<VaultEnv> {
       Math.max(Math.floor(Number(options?.budgetTokens)) || 0, 0),
       MAX_RECALL_TOKENS,
     );
-    const text = typeof question === "string" ? question.slice(0, MAX_QUESTION_CHARS).trim() : "";
-    const scopes = options?.scopes;
-    const scopesValid =
-      scopes === "all" ||
-      (Array.isArray(scopes) &&
-        scopes.length <= MAX_RECALL_SCOPES &&
-        scopes.every((scope) => isScope(scope)));
-    if (!isAgentId(agentId) || text === "" || budget === 0 || !scopesValid) return empty;
-    if (this.#backend() === null) return empty;
+    if (budget === 0) return empty;
     try {
-      await this.#ready();
-      await this.#catchUp();
-      const gateway = this.#gateway();
-      const embedded =
-        gateway === null ? null : await within(gateway.embed([text]), EMBED_QUESTION_TIMEOUT_MS);
-      const query = embedded?.ok ? embedded.vectors[0] : undefined;
-      if (embedded?.ok && embedded.model !== this.#get("embedding_model")) {
-        // A new model on llm-gateway: the notes are embedded again, and until then this stream
-        // finds what it can.
-        this.#set("embedding_model", embedded.model);
-        await this.#alarmBy(Date.now() + EMBED_AGAIN_MS);
-      }
-      const retrieveOptions: RetrieveOptions = {
-        limit: gateway === null ? RECALL_LIMIT : RERANK_CANDIDATES,
-        // Expired notes stay out, unless the question asks how things were (#111).
-        notExpiredAt: Date.now(),
-        ...(scopes === "all" ? {} : { scopes: scopes as readonly Scope[] }),
-        ...(typeof options.asOf === "number" ? { asOf: options.asOf } : {}),
-        ...(typeof options.validAt === "number" ? { validAt: options.validAt } : {}),
-        ...(embedded?.ok && query ? { vector: { model: embedded.model, query } } : {}),
-      };
-      let hits = retrieve(this.#memory, text, retrieveOptions);
-      if (gateway !== null) {
-        const backend: QualifierBackend = options.qualifier === "jev" ? "jev" : "clef";
-        const judge = qualifierJudge({
-          async qualify(state, questions) {
-            const outcome = await gateway.qualify(state, questions, backend, {
-              timeoutMs: RERANK_TIMEOUT_MS,
-            });
-            if (!outcome.ok) throw new Error(outcome.reason);
-            return outcome.result;
-          },
-        });
-        // A little past the gateway's own limit, for the call's way back.
-        hits = await rerank(this.#memory, text, hits, judge, {
-          candidates: RERANK_CANDIDATES,
-          timeoutMs: RERANK_TIMEOUT_MS + 500,
-        });
-      }
+      const hits = await this.#hits(agentId, question, options);
+      if (hits === null) return empty;
       const packed = pack(this.#memory, hits.slice(0, RECALL_LIMIT), { budgetTokens: budget });
       if (packed.paths.length > 0) {
         const now = Date.now();
@@ -982,6 +943,108 @@ export class Vault extends DurableObject<VaultEnv> {
       console.error("Vault: recall failed", errorName(error));
       return empty;
     }
+  }
+
+  /**
+   * The notes that answer a query, as hits, for the agent's `memory_search` (#126): recall's
+   * retrieval and rerank, without the packing or the access count.
+   */
+  async search(
+    agentId: string,
+    query: string,
+    options: MemorySearchOptions,
+  ): Promise<MemorySearchResult> {
+    const k = Math.min(
+      Math.max(Math.floor(Number(options?.k ?? SEARCH_K)) || SEARCH_K, 1),
+      MAX_SEARCH_K,
+    );
+    try {
+      const hits = (await this.#hits(agentId, query, options))?.slice(0, k) ?? [];
+      const kelpie = this.#byKelpie(hits.map((hit) => hit.path));
+      return {
+        notes: hits.flatMap((hit) => {
+          const version = this.#memory.versionOf(hit.path, hit.commit);
+          if (version === null) return [];
+          return [
+            {
+              path: hit.path,
+              title: hit.title,
+              abstract: hit.abstract,
+              kind: hit.kind,
+              scope: version.scope,
+              validFrom: version.validFrom,
+              invalidAt: version.invalidAt,
+              current: hit.current,
+              byKelpie: hit.current && kelpie.has(hit.path),
+            },
+          ];
+        }),
+      };
+    } catch (error) {
+      console.error("Vault: search failed", errorName(error));
+      return { notes: [] };
+    }
+  }
+
+  /**
+   * Retrieval for recall and search (#110): the question's vector if llm-gateway answers in time,
+   * the fused streams, and the agent's qualifier's rerank. Null when the input isn't valid or the
+   * vault is off.
+   */
+  async #hits(
+    agentId: string,
+    question: string,
+    options: Pick<RecallOptions, "scopes" | "asOf" | "validAt" | "qualifier">,
+  ): Promise<SearchHit[] | null> {
+    const text = typeof question === "string" ? question.slice(0, MAX_QUESTION_CHARS).trim() : "";
+    const scopes = options?.scopes;
+    const scopesValid =
+      scopes === "all" ||
+      (Array.isArray(scopes) &&
+        scopes.length <= MAX_RECALL_SCOPES &&
+        scopes.every((scope) => isScope(scope)));
+    if (!isAgentId(agentId) || text === "" || !scopesValid) return null;
+    if (this.#backend() === null) return null;
+    await this.#ready();
+    await this.#catchUp();
+    const gateway = this.#gateway();
+    const embedded =
+      gateway === null ? null : await within(gateway.embed([text]), EMBED_QUESTION_TIMEOUT_MS);
+    const query = embedded?.ok ? embedded.vectors[0] : undefined;
+    if (embedded?.ok && embedded.model !== this.#get("embedding_model")) {
+      // A new model on llm-gateway: the notes are embedded again, and until then this stream
+      // finds what it can.
+      this.#set("embedding_model", embedded.model);
+      await this.#alarmBy(Date.now() + EMBED_AGAIN_MS);
+    }
+    const retrieveOptions: RetrieveOptions = {
+      limit: gateway === null ? RECALL_LIMIT : RERANK_CANDIDATES,
+      // Expired notes stay out, unless the question asks how things were (#111).
+      notExpiredAt: Date.now(),
+      ...(scopes === "all" ? {} : { scopes: scopes as readonly Scope[] }),
+      ...(typeof options.asOf === "number" ? { asOf: options.asOf } : {}),
+      ...(typeof options.validAt === "number" ? { validAt: options.validAt } : {}),
+      ...(embedded?.ok && query ? { vector: { model: embedded.model, query } } : {}),
+    };
+    let hits = retrieve(this.#memory, text, retrieveOptions);
+    if (gateway !== null) {
+      const backend: QualifierBackend = options.qualifier === "jev" ? "jev" : "clef";
+      const judge = qualifierJudge({
+        async qualify(state, questions) {
+          const outcome = await gateway.qualify(state, questions, backend, {
+            timeoutMs: RERANK_TIMEOUT_MS,
+          });
+          if (!outcome.ok) throw new Error(outcome.reason);
+          return outcome.result;
+        },
+      });
+      // A little past the gateway's own limit, for the call's way back.
+      hits = await rerank(this.#memory, text, hits, judge, {
+        candidates: RERANK_CANDIDATES,
+        timeoutMs: RERANK_TIMEOUT_MS + 500,
+      });
+    }
+    return hits;
   }
 
   /** The paths whose version in the vault is one Kelpie's own commit wrote. */

@@ -459,3 +459,64 @@ describe("recall", () => {
     expect(long.paths).toHaveLength(1);
   });
 });
+
+describe("search", () => {
+  const family = [
+    person("Ana Souza", "Irmã do Rafael. Mudou para o Porto."),
+    person("Bia Souza", "Prima da Ana."),
+    person("Dani Souza", "Tia da Ana."),
+    person("Edu Souza", "Tio da Ana."),
+    person("Caio Souza", "Primo da Ana.", "conversation/familia"),
+  ];
+
+  it("finds notes as hits, k of them, within the scopes, and counts nothing", async () => {
+    await vaultOf(family);
+    fakeGateway();
+    const stub = vault("search-hits");
+    const found = await stub.search("kelpie", "Ana Souza", { scopes: "all" });
+    expect(found.notes).toHaveLength(3);
+    expect(found.notes[0]).toEqual({
+      path: memoryPath("global", "person", "Ana Souza"),
+      title: "Ana Souza",
+      abstract: null,
+      kind: "person",
+      scope: "global",
+      validFrom: null,
+      invalidAt: null,
+      current: true,
+      byKelpie: false,
+    });
+    expect((await stub.search("kelpie", "Souza", { scopes: "all", k: 50 })).notes).toHaveLength(5);
+    expect((await stub.search("kelpie", "Souza", { scopes: "all", k: 4 })).notes).toHaveLength(4);
+    const global = await stub.search("kelpie", "Caio Souza", { scopes: ["global"], k: 10 });
+    expect(global.notes.map((note) => note.scope)).not.toContain("conversation/familia");
+    expect(global.notes.length).toBeGreaterThan(0);
+    expect(
+      await runInDurableObject(
+        stub,
+        (_instance, state) =>
+          state.storage.sql.exec("SELECT count(*) AS n FROM recall_counts").one().n,
+      ),
+    ).toBe(0);
+  });
+
+  it("refuses what recall refuses", async () => {
+    await vaultOf(family);
+    fakeGateway();
+    const stub = vault("search-refusals");
+    for (const [agent, query, options] of [
+      ["Not An Agent", "Ana", { scopes: "all" }],
+      ["kelpie", "   ", { scopes: "all" }],
+      ["kelpie", "Ana", { scopes: ["not a scope"] }],
+      ["kelpie", "Ana", { scopes: undefined }],
+    ] as const) {
+      expect(await stub.search(agent, query, options as unknown as { scopes: "all" })).toEqual({
+        notes: [],
+      });
+    }
+    replaceBackendForTesting(null);
+    expect(await vault("search-off").search("kelpie", "Ana", { scopes: "all" })).toEqual({
+      notes: [],
+    });
+  });
+});
