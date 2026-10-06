@@ -159,6 +159,20 @@ How Kelpie writes a new version:
 - **Ingestion time** is when the vault started and stopped holding a version: the commit that wrote it and the commit that replaced it. "As of" questions use ingestion time. They answer what memory said then, not what was true then.
   - Committer times can go backwards, after a rebase or with a skewed clock, and two commits can share a millisecond. The index records each commit at least a millisecond after the one before, so every version's window has a start and an end in order.
 
+## Session pages
+
+Every conversation's history becomes session pages (#109), with no model call:
+- **When:** a session ends when the conversation stays quiet for 30 minutes, or when a summary checkpoint is written ([ADR-0017](adr/0017-history-compaction.md)). The next message starts a new session.
+- **Where:** `conversations/<channel>-<chat>/sessions/<year>/<date>-<time>-<first words>.md`. A group's chat id, which starts with `-`, becomes `g`.
+- **What:**
+  - a title, from the time and the first message;
+  - a line with the channel, the date, the times (in the owner's time zone when known) and the number of messages;
+  - each message as one line, with its time and speaker;
+  - a session of more than 60 messages keeps the first 30 and the last 30.
+- **Secrets:** every message's secrets are replaced with `[REDACTED:<kind>]` before anything is cut. That covers API keys and tokens, Telegram bot tokens, JWTs, private keys, credentials in URLs, auth headers and secret environment assignments. Then each message is cut to 280 characters. Nothing else is filtered: other people's data stays (ADR-0020 §4).
+- **Trust:** `level: explicit`, since it is what was said, and `confidence: 0.9` for a private chat, `0.6` when more than one person spoke.
+- **History:** once in a page, behind the latest checkpoint and older than 90 days, a conversation's history rows are deleted from its Durable Object.
+
 ## Links
 
 - **Wikilinks:** `[[Ana Souza]]`, `[[Ana Souza|Ana]]`, `[[Ana Souza#Contact]]`, `[[Ana Souza#^block]]`, with `\|` inside tables.

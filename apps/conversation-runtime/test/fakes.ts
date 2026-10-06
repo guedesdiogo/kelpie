@@ -90,6 +90,10 @@ export interface FakeWorld {
   sendAttempts: number;
   /** Every "typing" call throws. */
   failTyping: boolean;
+  /** Every memory write, in order. */
+  remembered: { agentId: string; changes: { path: string; content: string | null }[] }[];
+  /** While set, memory writes throw, as an unreachable Context Store would. */
+  failRemember: boolean;
 }
 
 export function fakeWorld(scripts: ModelScript[]): FakeWorld {
@@ -103,6 +107,8 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
     cancelled: 0,
     sent: [],
     sends: [],
+    remembered: [],
+    failRemember: false,
     typing: 0,
     typingKept: 0,
     typingStopped: 0,
@@ -199,6 +205,11 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
           if (signal.aborted) stop();
           else signal.addEventListener("abort", stop, { once: true });
         });
+      },
+      async remember(agentId, changes) {
+        if (world.failRemember) throw new Error(INJECTED_FAILURE);
+        world.remembered.push({ agentId, changes });
+        return { ok: true };
       },
       qualifier: null,
       now: () => world.clock,

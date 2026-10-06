@@ -955,3 +955,58 @@ describe("ConversationAgent checkpoints", () => {
     expect(await pendingCheckpoints(stub)).toEqual([]);
   });
 });
+
+describe("ConversationAgent sessions", () => {
+  // A bot token, assembled at run time so no key-shaped literal sits in the repository.
+  const botToken = ["123456789", ":", "AA", "x".repeat(33)].join("");
+
+  async function deliveredTurn(stub: ReturnType<typeof agent>, world: FakeWorld, text: string) {
+    await stub.ingest(message("m1", text));
+    await stub.flush();
+    await vi.waitFor(async () =>
+      expect(await stub.turns()).toMatchObject([{ status: "delivered" }]),
+    );
+    expect(world.sent.length).toBeGreaterThan(0);
+  }
+
+  it("turns a Telegram conversation into a session page, with its secrets replaced", async () => {
+    const world = use(fakeWorld([reply("Anotado, não vou repetir o token.")]));
+    const stub = agent("session-page");
+    await deliveredTurn(stub, world, `guarda o token do bot: ${botToken}`);
+    // The turn armed the session's close for when the conversation goes quiet.
+    const armed = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql
+        .exec<{ value: string }>("SELECT value FROM state WHERE key = 'sessionSchedule'")
+        .toArray(),
+    );
+    expect(armed).toHaveLength(1);
+
+    await stub.closeSession();
+    expect(world.remembered).toHaveLength(1);
+    const [{ agentId, changes } = { agentId: "", changes: [] }] = world.remembered;
+    expect(agentId).toBe("assistant");
+    const [page] = changes;
+    expect(page?.path).toMatch(/^conversations\/telegram-chat-1\/sessions\/2026\//);
+    expect(page?.content).toContain("guarda o token do bot: [REDACTED:telegram_token]");
+    expect(page?.content).toContain("Anotado, não vou repetir o token.");
+    expect(page?.content).not.toContain(botToken);
+    expect(page?.content).not.toContain("[Sun 4 Oct 2026");
+
+    // Captured history isn't written twice.
+    await stub.closeSession();
+    expect(world.remembered).toHaveLength(1);
+  });
+
+  it("keeps the session for later when the Context Store can't be reached", async () => {
+    const world = use(fakeWorld([reply("Ok.")]));
+    const stub = agent("session-retry");
+    await deliveredTurn(stub, world, "lembra de comprar café");
+    world.failRemember = true;
+    await stub.closeSession();
+    expect(world.remembered).toEqual([]);
+    world.failRemember = false;
+    await stub.closeSession();
+    expect(world.remembered).toHaveLength(1);
+    expect(world.remembered[0]?.changes[0]?.content).toContain("lembra de comprar café");
+  });
+});

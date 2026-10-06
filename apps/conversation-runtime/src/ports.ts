@@ -6,6 +6,7 @@ import {
   type SendOutcome,
   typingRenewIntervalMs,
 } from "@kelpie/channels";
+import type { ContextStoreContract, WriteResult } from "@kelpie/context-store/contract";
 import type { Destination } from "@kelpie/conversation/contract";
 import { fromNdjsonStream, type LlmEvent, type ModelTier, type RoutedRequest } from "@kelpie/llm";
 import {
@@ -38,6 +39,15 @@ export interface ConversationPorts {
   typing(agentId: string, destination: Destination): Promise<void>;
   /** Keeps "typing" showing, renewed before it lapses, until `signal` aborts. */
   keepTyping(agentId: string, destination: Destination, signal: AbortSignal): Promise<void>;
+  /**
+   * Writes memory files to the vault through the Context Store (ADR-0020 §3). A refusal is a value;
+   * an unreachable store throws.
+   */
+  remember(
+    agentId: string,
+    changes: { path: string; content: string | null }[],
+    summary: string,
+  ): Promise<WriteResult>;
   /** The end-of-turn qualifier, or null for the keyless heuristic (ADR-0009). */
   qualifier: Qualifier | null;
   now(): number;
@@ -72,6 +82,8 @@ function productionPorts(env: Env): ConversationPorts {
   const gateway = env.LLM_GATEWAY as unknown as LlmGatewayBinding;
   // A service binding to channel-egress's ChannelEgress entrypoint, which answers with values.
   const egress = env.CHANNEL_EGRESS as unknown as ChannelEgressContract;
+  // A service binding to context-store's ContextStore entrypoint.
+  const contextStore = env.CONTEXT_STORE as unknown as ContextStoreContract;
   return {
     async generate(tier, request) {
       const generation = await gateway.generate(tier, request);
@@ -99,6 +111,7 @@ function productionPorts(env: Env): ConversationPorts {
       };
     },
     send: (agentId, destination, text, options) => egress.send(agentId, destination, text, options),
+    remember: (agentId, changes, summary) => contextStore.write(agentId, changes, summary),
     async typing(agentId, destination) {
       await bounded(egress.typing(agentId, destination));
     },
