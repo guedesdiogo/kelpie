@@ -34,7 +34,9 @@ export default {
     }
 
     const context = { fragments: body.fragments };
-    const prefix = `${endOfTurn.id}::`;
+    // Clef refuses `runDecision`'s `::` in question ids (only [A-Za-z0-9_.-]), so the adapter
+    // sends `turn.end__user_finished` and maps the answer back, as this does.
+    const prefix = clefId(`${endOfTurn.id}::`);
     const questions = Object.fromEntries(
       Object.entries(endOfTurn.questions(context)).map(([key, question]) => [
         prefix + key,
@@ -74,6 +76,11 @@ function policyOnRaw(raw: unknown, prefix: string, context: { fragments: string[
       .map(([key, answer]) => [key.slice(prefix.length), answer]),
   ) as QualifyResult["answers"];
   return endOfTurn.policy({ answers: stripped, provider: "fake", calibrated: true }, context);
+}
+
+/** A question id Clef accepts: anything outside [A-Za-z0-9_.-] becomes "_". */
+function clefId(key: string): string {
+  return key.replace(/[^A-Za-z0-9_.-]/g, "_");
 }
 
 async function tokenMatches(presented: string | null, expected: string): Promise<boolean> {

@@ -1,0 +1,134 @@
+{
+  "model": "clef-flash",
+  "leftToTheQualifier": 71,
+  "bands": {
+    "high": 0.87,
+    "low": 0.37
+  },
+  "hybrid": [
+    {
+      "decided": 65,
+      "wrong": 0
+    },
+    {
+      "decided": 65,
+      "wrong": 0
+    }
+  ],
+  "byKind": {
+    "question | finished": {
+      "n": 2,
+      "heuristic": "2 (0)",
+      "qualifier": "2 (0)",
+      "hybrid": "2 (0)"
+    },
+    "question-no-mark | finished": {
+      "n": 5,
+      "heuristic": "0",
+      "qualifier": "2 (0)",
+      "hybrid": "2 (0)"
+    },
+    "greeting-then-request | finished": {
+      "n": 4,
+      "heuristic": "2 (0)",
+      "qualifier": "2 (0)",
+      "hybrid": "3 (0)"
+    },
+    "statement-no-punct | finished": {
+      "n": 11,
+      "heuristic": "0",
+      "qualifier": "6 (0)",
+      "hybrid": "6 (0)"
+    },
+    "statement | finished": {
+      "n": 2,
+      "heuristic": "2 (0)",
+      "qualifier": "1 (0)",
+      "hybrid": "2 (0)"
+    },
+    "ack | finished": {
+      "n": 13,
+      "heuristic": "3 (0)",
+      "qualifier": "2 (0)",
+      "hybrid": "4 (0)"
+    },
+    "emoji | finished": {
+      "n": 3,
+      "heuristic": "2 (0)",
+      "qualifier": "2 (0)",
+      "hybrid": "3 (0)"
+    },
+    "command | finished": {
+      "n": 1,
+      "heuristic": "1 (0)",
+      "qualifier": "0",
+      "hybrid": "1 (0)"
+    },
+    "laughter | finished": {
+      "n": 3,
+      "heuristic": "0",
+      "qualifier": "1 (0)",
+      "hybrid": "1 (0)"
+    },
+    "question-then-context | finished": {
+      "n": 2,
+      "heuristic": "0",
+      "qualifier": "0",
+      "hybrid": "0"
+    },
+    "multi-fragment | finished": {
+      "n": 5,
+      "heuristic": "0",
+      "qualifier": "0",
+      "hybrid": "0"
+    },
+    "greeting | unfinished": {
+      "n": 4,
+      "heuristic": "4 (0)",
+      "qualifier": "2 (2)",
+      "hybrid": "4 (0)"
+    },
+    "greeting-then-preamble | unfinished": {
+      "n": 3,
+      "heuristic": "0",
+      "qualifier": "1 (0)",
+      "hybrid": "1 (0)"
+    },
+    "dangling | unfinished": {
+      "n": 6,
+      "heuristic": "6 (0)",
+      "qualifier": "5 (1)",
+      "hybrid": "6 (0)"
+    },
+    "trailing-punct | unfinished": {
+      "n": 6,
+      "heuristic": "6 (0)",
+      "qualifier": "4 (0)",
+      "hybrid": "6 (0)"
+    },
+    "pause | unfinished": {
+      "n": 6,
+      "heuristic": "1 (0)",
+      "qualifier": "2 (1)",
+      "hybrid": "2 (0)"
+    },
+    "announces-more | unfinished": {
+      "n": 7,
+      "heuristic": "0",
+      "qualifier": "5 (0)",
+      "hybrid": "5 (0)"
+    },
+    "mid-sentence | unfinished": {
+      "n": 10,
+      "heuristic": "0",
+      "qualifier": "10 (0)",
+      "hybrid": "10 (0)"
+    },
+    "multi-fragment | unfinished": {
+      "n": 8,
+      "heuristic": "1 (0)",
+      "qualifier": "7 (0)",
+      "hybrid": "7 (0)"
+    }
+  }
+}

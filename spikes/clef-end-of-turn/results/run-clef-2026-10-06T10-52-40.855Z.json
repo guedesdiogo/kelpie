@@ -1,0 +1,5348 @@
+{
+  "summary": {
+    "model": "clef",
+    "decision": {
+      "id": "turn.end",
+      "version": "2",
+      "timeoutMs": 800
+    },
+    "calls": 202,
+    "failed": 0,
+    "policyDeclined": 0,
+    "coldMs": 773,
+    "warm": {
+      "n": 202,
+      "p50": 455,
+      "p95": 835,
+      "max": 1346,
+      "overBudget": 0.06435643564356436
+    },
+    "colos": {
+      "GRU": 202
+    },
+    "inputTokensPerCall": 179.46534653465346,
+    "outputTokensPerCall": 0,
+    "costUsd": 0.00870048,
+    "clef": {
+      "n": 101,
+      "accuracy": 0.8415841584158416,
+      "finishedRecall": 0.9803921568627451,
+      "unfinishedRecall": 0.7,
+      "bands": {
+        "fast": {
+          "n": 56,
+          "wrong": 9
+        },
+        "slow": {
+          "n": 30,
+          "wrong": 0
+        },
+        "middle": 15
+      },
+      "brier": 0.11625137495049506,
+      "ece": 0.1312504950495049,
+      "distribution": {
+        "finished": {
+          "min": 0.4666,
+          "median": 0.9634,
+          "max": 0.9837
+        },
+        "unfinished": {
+          "min": 0.0151,
+          "median": 0.171,
+          "max": 0.943
+        }
+      },
+      "zeroErrorBands": {
+        "high": 0.95,
+        "low": 0.46
+      },
+      "atOwnBands": [
+        {
+          "fast": {
+            "n": 34,
+            "wrong": 0
+          },
+          "slow": {
+            "n": 35,
+            "wrong": 0
+          },
+          "middle": 32
+        },
+        {
+          "fast": {
+            "n": 34,
+            "wrong": 0
+          },
+          "slow": {
+            "n": 35,
+            "wrong": 0
+          },
+          "middle": 32
+        }
+      ],
+      "atJevBands": [
+        {
+          "fast": {
+            "n": 63,
+            "wrong": 13
+          },
+          "slow": {
+            "n": 32,
+            "wrong": 0
+          },
+          "middle": 6
+        },
+        {
+          "fast": {
+            "n": 63,
+            "wrong": 13
+          },
+          "slow": {
+            "n": 32,
+            "wrong": 0
+          },
+          "middle": 6
+        }
+      ]
+    },
+    "hybrid": {
+      "atOwnBands": [
+        {
+          "decided": 81,
+          "wrong": 0
+        },
+        {
+          "decided": 81,
+          "wrong": 0
+        }
+      ],
+      "atJevBands": [
+        {
+          "decided": 96,
+          "wrong": 7
+        },
+        {
+          "decided": 96,
+          "wrong": 7
+        }
+      ]
+    },
+    "heuristic": {
+      "n": 101,
+      "accuracy": 0.6831683168316832,
+      "finishedRecall": 1,
+      "unfinishedRecall": 0.36,
+      "bands": {
+        "fast": {
+          "n": 12,
+          "wrong": 0
+        },
+        "slow": {
+          "n": 18,
+          "wrong": 0
+        },
+        "middle": 71
+      },
+      "brier": 0.183539603960396,
+      "ece": 0.08168316831683173
+    },
+    "maxSpreadAcrossPasses": 0,
+    "byKind": {
+      "question (finished)": {
+        "heuristic": {
+          "n": 2,
+          "decided": 2,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 2,
+          "decided": 2,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 2,
+          "decided": 2,
+          "wrong": 0
+        }
+      },
+      "question-no-mark (finished)": {
+        "heuristic": {
+          "n": 5,
+          "decided": 0,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 5,
+          "decided": 3,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 5,
+          "decided": 3,
+          "wrong": 0
+        }
+      },
+      "greeting-then-request (finished)": {
+        "heuristic": {
+          "n": 4,
+          "decided": 2,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 4,
+          "decided": 4,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 4,
+          "decided": 4,
+          "wrong": 0
+        }
+      },
+      "statement-no-punct (finished)": {
+        "heuristic": {
+          "n": 11,
+          "decided": 0,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 11,
+          "decided": 9,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 11,
+          "decided": 9,
+          "wrong": 0
+        }
+      },
+      "statement (finished)": {
+        "heuristic": {
+          "n": 2,
+          "decided": 2,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 2,
+          "decided": 2,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 2,
+          "decided": 2,
+          "wrong": 0
+        }
+      },
+      "ack (finished)": {
+        "heuristic": {
+          "n": 13,
+          "decided": 3,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 13,
+          "decided": 5,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 13,
+          "decided": 7,
+          "wrong": 0
+        }
+      },
+      "emoji (finished)": {
+        "heuristic": {
+          "n": 3,
+          "decided": 2,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 3,
+          "decided": 1,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 3,
+          "decided": 3,
+          "wrong": 0
+        }
+      },
+      "command (finished)": {
+        "heuristic": {
+          "n": 1,
+          "decided": 1,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 1,
+          "decided": 0,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 1,
+          "decided": 1,
+          "wrong": 0
+        }
+      },
+      "laughter (finished)": {
+        "heuristic": {
+          "n": 3,
+          "decided": 0,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 3,
+          "decided": 1,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 3,
+          "decided": 1,
+          "wrong": 0
+        }
+      },
+      "question-then-context (finished)": {
+        "heuristic": {
+          "n": 2,
+          "decided": 0,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 2,
+          "decided": 2,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 2,
+          "decided": 2,
+          "wrong": 0
+        }
+      },
+      "multi-fragment (finished)": {
+        "heuristic": {
+          "n": 5,
+          "decided": 0,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 5,
+          "decided": 5,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 5,
+          "decided": 5,
+          "wrong": 0
+        }
+      },
+      "greeting (unfinished)": {
+        "heuristic": {
+          "n": 4,
+          "decided": 4,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 4,
+          "decided": 1,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 4,
+          "decided": 4,
+          "wrong": 0
+        }
+      },
+      "greeting-then-preamble (unfinished)": {
+        "heuristic": {
+          "n": 3,
+          "decided": 0,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 3,
+          "decided": 1,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 3,
+          "decided": 1,
+          "wrong": 0
+        }
+      },
+      "dangling (unfinished)": {
+        "heuristic": {
+          "n": 6,
+          "decided": 6,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 6,
+          "decided": 5,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 6,
+          "decided": 6,
+          "wrong": 0
+        }
+      },
+      "trailing-punct (unfinished)": {
+        "heuristic": {
+          "n": 6,
+          "decided": 6,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 6,
+          "decided": 4,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 6,
+          "decided": 6,
+          "wrong": 0
+        }
+      },
+      "pause (unfinished)": {
+        "heuristic": {
+          "n": 6,
+          "decided": 1,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 6,
+          "decided": 3,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 6,
+          "decided": 4,
+          "wrong": 0
+        }
+      },
+      "announces-more (unfinished)": {
+        "heuristic": {
+          "n": 7,
+          "decided": 0,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 7,
+          "decided": 5,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 7,
+          "decided": 5,
+          "wrong": 0
+        }
+      },
+      "mid-sentence (unfinished)": {
+        "heuristic": {
+          "n": 10,
+          "decided": 0,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 10,
+          "decided": 10,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 10,
+          "decided": 10,
+          "wrong": 0
+        }
+      },
+      "multi-fragment (unfinished)": {
+        "heuristic": {
+          "n": 8,
+          "decided": 1,
+          "wrong": 0
+        },
+        "clef": {
+          "n": 8,
+          "decided": 6,
+          "wrong": 0
+        },
+        "hybrid": {
+          "n": 8,
+          "decided": 6,
+          "wrong": 0
+        }
+      }
+    }
+  },
+  "cold": {
+    "ok": true,
+    "ms": 773,
+    "colo": "GRU",
+    "raw": {
+      "model": "clef",
+      "answers": {
+        "turn.end__user_finished": {
+          "type": "noul",
+          "noul": 0.9837
+        }
+      },
+      "usage": {
+        "input_tokens": 181,
+        "output_tokens": 0
+      }
+    },
+    "policy": {
+      "finished": 0.9837
+    }
+  },
+  "calls": [
+    {
+      "id": "f01",
+      "pass": 1,
+      "ok": true,
+      "ms": 548,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9837
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9837
+      },
+      "finished": 0.9837
+    },
+    {
+      "id": "f02",
+      "pass": 1,
+      "ok": true,
+      "ms": 637,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9694
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9694
+      },
+      "finished": 0.9694
+    },
+    {
+      "id": "f03",
+      "pass": 1,
+      "ok": true,
+      "ms": 284,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9682
+          }
+        },
+        "usage": {
+          "input_tokens": 179,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9682
+      },
+      "finished": 0.9682
+    },
+    {
+      "id": "f04",
+      "pass": 1,
+      "ok": true,
+      "ms": 901,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9423
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9423
+      },
+      "finished": 0.9423
+    },
+    {
+      "id": "f05",
+      "pass": 1,
+      "ok": true,
+      "ms": 500,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9673
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9673
+      },
+      "finished": 0.9673
+    },
+    {
+      "id": "f06",
+      "pass": 1,
+      "ok": true,
+      "ms": 473,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.8697
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.8697
+      },
+      "finished": 0.8697
+    },
+    {
+      "id": "f07",
+      "pass": 1,
+      "ok": true,
+      "ms": 519,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9752
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9752
+      },
+      "finished": 0.9752
+    },
+    {
+      "id": "f08",
+      "pass": 1,
+      "ok": true,
+      "ms": 334,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9793
+          }
+        },
+        "usage": {
+          "input_tokens": 185,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9793
+      },
+      "finished": 0.9793
+    },
+    {
+      "id": "f09",
+      "pass": 1,
+      "ok": true,
+      "ms": 254,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.977
+          }
+        },
+        "usage": {
+          "input_tokens": 191,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.977
+      },
+      "finished": 0.977
+    },
+    {
+      "id": "f10",
+      "pass": 1,
+      "ok": true,
+      "ms": 555,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9679
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9679
+      },
+      "finished": 0.9679
+    },
+    {
+      "id": "f11",
+      "pass": 1,
+      "ok": true,
+      "ms": 327,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9666
+          }
+        },
+        "usage": {
+          "input_tokens": 184,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9666
+      },
+      "finished": 0.9666
+    },
+    {
+      "id": "f12",
+      "pass": 1,
+      "ok": true,
+      "ms": 306,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9724
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9724
+      },
+      "finished": 0.9724
+    },
+    {
+      "id": "f13",
+      "pass": 1,
+      "ok": true,
+      "ms": 625,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9644
+          }
+        },
+        "usage": {
+          "input_tokens": 179,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9644
+      },
+      "finished": 0.9644
+    },
+    {
+      "id": "f14",
+      "pass": 1,
+      "ok": true,
+      "ms": 328,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9648
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9648
+      },
+      "finished": 0.9648
+    },
+    {
+      "id": "f15",
+      "pass": 1,
+      "ok": true,
+      "ms": 603,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9538
+          }
+        },
+        "usage": {
+          "input_tokens": 180,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9538
+      },
+      "finished": 0.9538
+    },
+    {
+      "id": "f16",
+      "pass": 1,
+      "ok": true,
+      "ms": 329,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9752
+          }
+        },
+        "usage": {
+          "input_tokens": 185,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9752
+      },
+      "finished": 0.9752
+    },
+    {
+      "id": "f17",
+      "pass": 1,
+      "ok": true,
+      "ms": 492,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9807
+          }
+        },
+        "usage": {
+          "input_tokens": 180,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9807
+      },
+      "finished": 0.9807
+    },
+    {
+      "id": "f18",
+      "pass": 1,
+      "ok": true,
+      "ms": 781,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9634
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9634
+      },
+      "finished": 0.9634
+    },
+    {
+      "id": "f19",
+      "pass": 1,
+      "ok": true,
+      "ms": 303,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.8215
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.8215
+      },
+      "finished": 0.8215
+    },
+    {
+      "id": "f20",
+      "pass": 1,
+      "ok": true,
+      "ms": 350,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.955
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.955
+      },
+      "finished": 0.955
+    },
+    {
+      "id": "f21",
+      "pass": 1,
+      "ok": true,
+      "ms": 745,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9783
+          }
+        },
+        "usage": {
+          "input_tokens": 180,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9783
+      },
+      "finished": 0.9783
+    },
+    {
+      "id": "f22",
+      "pass": 1,
+      "ok": true,
+      "ms": 703,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9223
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9223
+      },
+      "finished": 0.9223
+    },
+    {
+      "id": "f23",
+      "pass": 1,
+      "ok": true,
+      "ms": 293,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9755
+          }
+        },
+        "usage": {
+          "input_tokens": 188,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9755
+      },
+      "finished": 0.9755
+    },
+    {
+      "id": "f24",
+      "pass": 1,
+      "ok": true,
+      "ms": 327,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9725
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9725
+      },
+      "finished": 0.9725
+    },
+    {
+      "id": "f25",
+      "pass": 1,
+      "ok": true,
+      "ms": 477,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.959
+          }
+        },
+        "usage": {
+          "input_tokens": 173,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.959
+      },
+      "finished": 0.959
+    },
+    {
+      "id": "f26",
+      "pass": 1,
+      "ok": true,
+      "ms": 523,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.91
+          }
+        },
+        "usage": {
+          "input_tokens": 173,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.91
+      },
+      "finished": 0.91
+    },
+    {
+      "id": "f27",
+      "pass": 1,
+      "ok": true,
+      "ms": 567,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9346
+          }
+        },
+        "usage": {
+          "input_tokens": 175,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9346
+      },
+      "finished": 0.9346
+    },
+    {
+      "id": "f28",
+      "pass": 1,
+      "ok": true,
+      "ms": 263,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.7255
+          }
+        },
+        "usage": {
+          "input_tokens": 175,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.7255
+      },
+      "finished": 0.7255
+    },
+    {
+      "id": "f29",
+      "pass": 1,
+      "ok": true,
+      "ms": 411,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9414
+          }
+        },
+        "usage": {
+          "input_tokens": 175,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9414
+      },
+      "finished": 0.9414
+    },
+    {
+      "id": "f30",
+      "pass": 1,
+      "ok": true,
+      "ms": 592,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.8728
+          }
+        },
+        "usage": {
+          "input_tokens": 180,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.8728
+      },
+      "finished": 0.8728
+    },
+    {
+      "id": "f31",
+      "pass": 1,
+      "ok": true,
+      "ms": 436,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.7909
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.7909
+      },
+      "finished": 0.7909
+    },
+    {
+      "id": "f32",
+      "pass": 1,
+      "ok": true,
+      "ms": 961,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9613
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9613
+      },
+      "finished": 0.9613
+    },
+    {
+      "id": "f33",
+      "pass": 1,
+      "ok": true,
+      "ms": 279,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9204
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9204
+      },
+      "finished": 0.9204
+    },
+    {
+      "id": "f34",
+      "pass": 1,
+      "ok": true,
+      "ms": 449,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9697
+          }
+        },
+        "usage": {
+          "input_tokens": 179,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9697
+      },
+      "finished": 0.9697
+    },
+    {
+      "id": "f35",
+      "pass": 1,
+      "ok": true,
+      "ms": 732,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9384
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9384
+      },
+      "finished": 0.9384
+    },
+    {
+      "id": "f36",
+      "pass": 1,
+      "ok": true,
+      "ms": 258,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9827
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9827
+      },
+      "finished": 0.9827
+    },
+    {
+      "id": "f37",
+      "pass": 1,
+      "ok": true,
+      "ms": 633,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9544
+          }
+        },
+        "usage": {
+          "input_tokens": 182,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9544
+      },
+      "finished": 0.9544
+    },
+    {
+      "id": "f38",
+      "pass": 1,
+      "ok": true,
+      "ms": 620,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.8948
+          }
+        },
+        "usage": {
+          "input_tokens": 175,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.8948
+      },
+      "finished": 0.8948
+    },
+    {
+      "id": "f39",
+      "pass": 1,
+      "ok": true,
+      "ms": 435,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9682
+          }
+        },
+        "usage": {
+          "input_tokens": 176,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9682
+      },
+      "finished": 0.9682
+    },
+    {
+      "id": "f40",
+      "pass": 1,
+      "ok": true,
+      "ms": 559,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9487
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9487
+      },
+      "finished": 0.9487
+    },
+    {
+      "id": "f41",
+      "pass": 1,
+      "ok": true,
+      "ms": 360,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9031
+          }
+        },
+        "usage": {
+          "input_tokens": 174,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9031
+      },
+      "finished": 0.9031
+    },
+    {
+      "id": "f42",
+      "pass": 1,
+      "ok": true,
+      "ms": 874,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.7087
+          }
+        },
+        "usage": {
+          "input_tokens": 176,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.7087
+      },
+      "finished": 0.7087
+    },
+    {
+      "id": "f43",
+      "pass": 1,
+      "ok": true,
+      "ms": 634,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.4666
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.4666
+      },
+      "finished": 0.4666
+    },
+    {
+      "id": "f44",
+      "pass": 1,
+      "ok": true,
+      "ms": 469,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9516
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9516
+      },
+      "finished": 0.9516
+    },
+    {
+      "id": "f45",
+      "pass": 1,
+      "ok": true,
+      "ms": 755,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.976
+          }
+        },
+        "usage": {
+          "input_tokens": 186,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.976
+      },
+      "finished": 0.976
+    },
+    {
+      "id": "f46",
+      "pass": 1,
+      "ok": true,
+      "ms": 280,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9639
+          }
+        },
+        "usage": {
+          "input_tokens": 184,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9639
+      },
+      "finished": 0.9639
+    },
+    {
+      "id": "f47",
+      "pass": 1,
+      "ok": true,
+      "ms": 520,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9601
+          }
+        },
+        "usage": {
+          "input_tokens": 182,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9601
+      },
+      "finished": 0.9601
+    },
+    {
+      "id": "f48",
+      "pass": 1,
+      "ok": true,
+      "ms": 277,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9766
+          }
+        },
+        "usage": {
+          "input_tokens": 189,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9766
+      },
+      "finished": 0.9766
+    },
+    {
+      "id": "f49",
+      "pass": 1,
+      "ok": true,
+      "ms": 692,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9548
+          }
+        },
+        "usage": {
+          "input_tokens": 193,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9548
+      },
+      "finished": 0.9548
+    },
+    {
+      "id": "f50",
+      "pass": 1,
+      "ok": true,
+      "ms": 526,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9664
+          }
+        },
+        "usage": {
+          "input_tokens": 195,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9664
+      },
+      "finished": 0.9664
+    },
+    {
+      "id": "f51",
+      "pass": 1,
+      "ok": true,
+      "ms": 471,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9785
+          }
+        },
+        "usage": {
+          "input_tokens": 185,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9785
+      },
+      "finished": 0.9785
+    },
+    {
+      "id": "u01",
+      "pass": 1,
+      "ok": true,
+      "ms": 385,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.2744
+          }
+        },
+        "usage": {
+          "input_tokens": 173,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.2744
+      },
+      "finished": 0.2744
+    },
+    {
+      "id": "u02",
+      "pass": 1,
+      "ok": true,
+      "ms": 657,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9077
+          }
+        },
+        "usage": {
+          "input_tokens": 175,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9077
+      },
+      "finished": 0.9077
+    },
+    {
+      "id": "u03",
+      "pass": 1,
+      "ok": true,
+      "ms": 689,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.7197
+          }
+        },
+        "usage": {
+          "input_tokens": 174,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.7197
+      },
+      "finished": 0.7197
+    },
+    {
+      "id": "u04",
+      "pass": 1,
+      "ok": true,
+      "ms": 522,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.7096
+          }
+        },
+        "usage": {
+          "input_tokens": 176,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.7096
+      },
+      "finished": 0.7096
+    },
+    {
+      "id": "u05",
+      "pass": 1,
+      "ok": true,
+      "ms": 244,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.1882
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.1882
+      },
+      "finished": 0.1882
+    },
+    {
+      "id": "u06",
+      "pass": 1,
+      "ok": true,
+      "ms": 758,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.943
+          }
+        },
+        "usage": {
+          "input_tokens": 180,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.943
+      },
+      "finished": 0.943
+    },
+    {
+      "id": "u07",
+      "pass": 1,
+      "ok": true,
+      "ms": 501,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9091
+          }
+        },
+        "usage": {
+          "input_tokens": 185,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9091
+      },
+      "finished": 0.9091
+    },
+    {
+      "id": "u08",
+      "pass": 1,
+      "ok": true,
+      "ms": 615,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0763
+          }
+        },
+        "usage": {
+          "input_tokens": 179,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0763
+      },
+      "finished": 0.0763
+    },
+    {
+      "id": "u09",
+      "pass": 1,
+      "ok": true,
+      "ms": 568,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0248
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0248
+      },
+      "finished": 0.0248
+    },
+    {
+      "id": "u10",
+      "pass": 1,
+      "ok": true,
+      "ms": 448,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0219
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0219
+      },
+      "finished": 0.0219
+    },
+    {
+      "id": "u11",
+      "pass": 1,
+      "ok": true,
+      "ms": 318,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.7
+          }
+        },
+        "usage": {
+          "input_tokens": 173,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.7
+      },
+      "finished": 0.7
+    },
+    {
+      "id": "u12",
+      "pass": 1,
+      "ok": true,
+      "ms": 317,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.1635
+          }
+        },
+        "usage": {
+          "input_tokens": 174,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.1635
+      },
+      "finished": 0.1635
+    },
+    {
+      "id": "u13",
+      "pass": 1,
+      "ok": true,
+      "ms": 455,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0402
+          }
+        },
+        "usage": {
+          "input_tokens": 180,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0402
+      },
+      "finished": 0.0402
+    },
+    {
+      "id": "u14",
+      "pass": 1,
+      "ok": true,
+      "ms": 442,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.1291
+          }
+        },
+        "usage": {
+          "input_tokens": 175,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.1291
+      },
+      "finished": 0.1291
+    },
+    {
+      "id": "u15",
+      "pass": 1,
+      "ok": true,
+      "ms": 663,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.1352
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.1352
+      },
+      "finished": 0.1352
+    },
+    {
+      "id": "u16",
+      "pass": 1,
+      "ok": true,
+      "ms": 635,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.5782
+          }
+        },
+        "usage": {
+          "input_tokens": 176,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.5782
+      },
+      "finished": 0.5782
+    },
+    {
+      "id": "u17",
+      "pass": 1,
+      "ok": true,
+      "ms": 505,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.8952
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.8952
+      },
+      "finished": 0.8952
+    },
+    {
+      "id": "u18",
+      "pass": 1,
+      "ok": true,
+      "ms": 603,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0901
+          }
+        },
+        "usage": {
+          "input_tokens": 176,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0901
+      },
+      "finished": 0.0901
+    },
+    {
+      "id": "u19",
+      "pass": 1,
+      "ok": true,
+      "ms": 779,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.2096
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.2096
+      },
+      "finished": 0.2096
+    },
+    {
+      "id": "u20",
+      "pass": 1,
+      "ok": true,
+      "ms": 425,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.8499
+          }
+        },
+        "usage": {
+          "input_tokens": 173,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.8499
+      },
+      "finished": 0.8499
+    },
+    {
+      "id": "u21",
+      "pass": 1,
+      "ok": true,
+      "ms": 436,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.839
+          }
+        },
+        "usage": {
+          "input_tokens": 174,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.839
+      },
+      "finished": 0.839
+    },
+    {
+      "id": "u22",
+      "pass": 1,
+      "ok": true,
+      "ms": 802,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.4152
+          }
+        },
+        "usage": {
+          "input_tokens": 174,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.4152
+      },
+      "finished": 0.4152
+    },
+    {
+      "id": "u23",
+      "pass": 1,
+      "ok": true,
+      "ms": 503,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.4215
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.4215
+      },
+      "finished": 0.4215
+    },
+    {
+      "id": "u24",
+      "pass": 1,
+      "ok": true,
+      "ms": 684,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.7102
+          }
+        },
+        "usage": {
+          "input_tokens": 180,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.7102
+      },
+      "finished": 0.7102
+    },
+    {
+      "id": "u25",
+      "pass": 1,
+      "ok": true,
+      "ms": 345,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.2513
+          }
+        },
+        "usage": {
+          "input_tokens": 182,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.2513
+      },
+      "finished": 0.2513
+    },
+    {
+      "id": "u26",
+      "pass": 1,
+      "ok": true,
+      "ms": 397,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.8637
+          }
+        },
+        "usage": {
+          "input_tokens": 176,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.8637
+      },
+      "finished": 0.8637
+    },
+    {
+      "id": "u27",
+      "pass": 1,
+      "ok": true,
+      "ms": 411,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.1564
+          }
+        },
+        "usage": {
+          "input_tokens": 175,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.1564
+      },
+      "finished": 0.1564
+    },
+    {
+      "id": "u28",
+      "pass": 1,
+      "ok": true,
+      "ms": 835,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.3757
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.3757
+      },
+      "finished": 0.3757
+    },
+    {
+      "id": "u29",
+      "pass": 1,
+      "ok": true,
+      "ms": 374,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.8326
+          }
+        },
+        "usage": {
+          "input_tokens": 179,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.8326
+      },
+      "finished": 0.8326
+    },
+    {
+      "id": "u30",
+      "pass": 1,
+      "ok": true,
+      "ms": 1346,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.06
+          }
+        },
+        "usage": {
+          "input_tokens": 175,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.06
+      },
+      "finished": 0.06
+    },
+    {
+      "id": "u31",
+      "pass": 1,
+      "ok": true,
+      "ms": 330,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.3338
+          }
+        },
+        "usage": {
+          "input_tokens": 174,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.3338
+      },
+      "finished": 0.3338
+    },
+    {
+      "id": "u32",
+      "pass": 1,
+      "ok": true,
+      "ms": 427,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.4179
+          }
+        },
+        "usage": {
+          "input_tokens": 185,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.4179
+      },
+      "finished": 0.4179
+    },
+    {
+      "id": "u33",
+      "pass": 1,
+      "ok": true,
+      "ms": 521,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0324
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0324
+      },
+      "finished": 0.0324
+    },
+    {
+      "id": "u34",
+      "pass": 1,
+      "ok": true,
+      "ms": 524,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0532
+          }
+        },
+        "usage": {
+          "input_tokens": 176,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0532
+      },
+      "finished": 0.0532
+    },
+    {
+      "id": "u35",
+      "pass": 1,
+      "ok": true,
+      "ms": 233,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0758
+          }
+        },
+        "usage": {
+          "input_tokens": 174,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0758
+      },
+      "finished": 0.0758
+    },
+    {
+      "id": "u36",
+      "pass": 1,
+      "ok": true,
+      "ms": 253,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0604
+          }
+        },
+        "usage": {
+          "input_tokens": 182,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0604
+      },
+      "finished": 0.0604
+    },
+    {
+      "id": "u37",
+      "pass": 1,
+      "ok": true,
+      "ms": 617,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0295
+          }
+        },
+        "usage": {
+          "input_tokens": 180,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0295
+      },
+      "finished": 0.0295
+    },
+    {
+      "id": "u38",
+      "pass": 1,
+      "ok": true,
+      "ms": 384,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.267
+          }
+        },
+        "usage": {
+          "input_tokens": 179,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.267
+      },
+      "finished": 0.267
+    },
+    {
+      "id": "u39",
+      "pass": 1,
+      "ok": true,
+      "ms": 290,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0924
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0924
+      },
+      "finished": 0.0924
+    },
+    {
+      "id": "u40",
+      "pass": 1,
+      "ok": true,
+      "ms": 786,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0485
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0485
+      },
+      "finished": 0.0485
+    },
+    {
+      "id": "u41",
+      "pass": 1,
+      "ok": true,
+      "ms": 452,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0292
+          }
+        },
+        "usage": {
+          "input_tokens": 185,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0292
+      },
+      "finished": 0.0292
+    },
+    {
+      "id": "u42",
+      "pass": 1,
+      "ok": true,
+      "ms": 466,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0202
+          }
+        },
+        "usage": {
+          "input_tokens": 184,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0202
+      },
+      "finished": 0.0202
+    },
+    {
+      "id": "u43",
+      "pass": 1,
+      "ok": true,
+      "ms": 364,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0156
+          }
+        },
+        "usage": {
+          "input_tokens": 183,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0156
+      },
+      "finished": 0.0156
+    },
+    {
+      "id": "u44",
+      "pass": 1,
+      "ok": true,
+      "ms": 301,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.6593
+          }
+        },
+        "usage": {
+          "input_tokens": 184,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.6593
+      },
+      "finished": 0.6593
+    },
+    {
+      "id": "u45",
+      "pass": 1,
+      "ok": true,
+      "ms": 673,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0205
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0205
+      },
+      "finished": 0.0205
+    },
+    {
+      "id": "u46",
+      "pass": 1,
+      "ok": true,
+      "ms": 860,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0206
+          }
+        },
+        "usage": {
+          "input_tokens": 189,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0206
+      },
+      "finished": 0.0206
+    },
+    {
+      "id": "u47",
+      "pass": 1,
+      "ok": true,
+      "ms": 436,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0151
+          }
+        },
+        "usage": {
+          "input_tokens": 187,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0151
+      },
+      "finished": 0.0151
+    },
+    {
+      "id": "u48",
+      "pass": 1,
+      "ok": true,
+      "ms": 459,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0233
+          }
+        },
+        "usage": {
+          "input_tokens": 183,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0233
+      },
+      "finished": 0.0233
+    },
+    {
+      "id": "u49",
+      "pass": 1,
+      "ok": true,
+      "ms": 470,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.171
+          }
+        },
+        "usage": {
+          "input_tokens": 185,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.171
+      },
+      "finished": 0.171
+    },
+    {
+      "id": "u50",
+      "pass": 1,
+      "ok": true,
+      "ms": 236,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9338
+          }
+        },
+        "usage": {
+          "input_tokens": 182,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9338
+      },
+      "finished": 0.9338
+    },
+    {
+      "id": "f01",
+      "pass": 2,
+      "ok": true,
+      "ms": 405,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9837
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9837
+      },
+      "finished": 0.9837
+    },
+    {
+      "id": "f02",
+      "pass": 2,
+      "ok": true,
+      "ms": 513,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9694
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9694
+      },
+      "finished": 0.9694
+    },
+    {
+      "id": "f03",
+      "pass": 2,
+      "ok": true,
+      "ms": 493,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9682
+          }
+        },
+        "usage": {
+          "input_tokens": 179,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9682
+      },
+      "finished": 0.9682
+    },
+    {
+      "id": "f04",
+      "pass": 2,
+      "ok": true,
+      "ms": 406,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9423
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9423
+      },
+      "finished": 0.9423
+    },
+    {
+      "id": "f05",
+      "pass": 2,
+      "ok": true,
+      "ms": 335,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9673
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9673
+      },
+      "finished": 0.9673
+    },
+    {
+      "id": "f06",
+      "pass": 2,
+      "ok": true,
+      "ms": 634,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.8697
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.8697
+      },
+      "finished": 0.8697
+    },
+    {
+      "id": "f07",
+      "pass": 2,
+      "ok": true,
+      "ms": 274,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9752
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9752
+      },
+      "finished": 0.9752
+    },
+    {
+      "id": "f08",
+      "pass": 2,
+      "ok": true,
+      "ms": 455,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9793
+          }
+        },
+        "usage": {
+          "input_tokens": 185,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9793
+      },
+      "finished": 0.9793
+    },
+    {
+      "id": "f09",
+      "pass": 2,
+      "ok": true,
+      "ms": 429,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.977
+          }
+        },
+        "usage": {
+          "input_tokens": 191,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.977
+      },
+      "finished": 0.977
+    },
+    {
+      "id": "f10",
+      "pass": 2,
+      "ok": true,
+      "ms": 317,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9679
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9679
+      },
+      "finished": 0.9679
+    },
+    {
+      "id": "f11",
+      "pass": 2,
+      "ok": true,
+      "ms": 301,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9666
+          }
+        },
+        "usage": {
+          "input_tokens": 184,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9666
+      },
+      "finished": 0.9666
+    },
+    {
+      "id": "f12",
+      "pass": 2,
+      "ok": true,
+      "ms": 798,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9724
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9724
+      },
+      "finished": 0.9724
+    },
+    {
+      "id": "f13",
+      "pass": 2,
+      "ok": true,
+      "ms": 599,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9644
+          }
+        },
+        "usage": {
+          "input_tokens": 179,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9644
+      },
+      "finished": 0.9644
+    },
+    {
+      "id": "f14",
+      "pass": 2,
+      "ok": true,
+      "ms": 396,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9648
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9648
+      },
+      "finished": 0.9648
+    },
+    {
+      "id": "f15",
+      "pass": 2,
+      "ok": true,
+      "ms": 533,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9538
+          }
+        },
+        "usage": {
+          "input_tokens": 180,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9538
+      },
+      "finished": 0.9538
+    },
+    {
+      "id": "f16",
+      "pass": 2,
+      "ok": true,
+      "ms": 406,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9752
+          }
+        },
+        "usage": {
+          "input_tokens": 185,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9752
+      },
+      "finished": 0.9752
+    },
+    {
+      "id": "f17",
+      "pass": 2,
+      "ok": true,
+      "ms": 253,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9807
+          }
+        },
+        "usage": {
+          "input_tokens": 180,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9807
+      },
+      "finished": 0.9807
+    },
+    {
+      "id": "f18",
+      "pass": 2,
+      "ok": true,
+      "ms": 471,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9634
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9634
+      },
+      "finished": 0.9634
+    },
+    {
+      "id": "f19",
+      "pass": 2,
+      "ok": true,
+      "ms": 399,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.8215
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.8215
+      },
+      "finished": 0.8215
+    },
+    {
+      "id": "f20",
+      "pass": 2,
+      "ok": true,
+      "ms": 238,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.955
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.955
+      },
+      "finished": 0.955
+    },
+    {
+      "id": "f21",
+      "pass": 2,
+      "ok": true,
+      "ms": 834,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9783
+          }
+        },
+        "usage": {
+          "input_tokens": 180,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9783
+      },
+      "finished": 0.9783
+    },
+    {
+      "id": "f22",
+      "pass": 2,
+      "ok": true,
+      "ms": 566,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9223
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9223
+      },
+      "finished": 0.9223
+    },
+    {
+      "id": "f23",
+      "pass": 2,
+      "ok": true,
+      "ms": 414,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9755
+          }
+        },
+        "usage": {
+          "input_tokens": 188,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9755
+      },
+      "finished": 0.9755
+    },
+    {
+      "id": "f24",
+      "pass": 2,
+      "ok": true,
+      "ms": 274,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9725
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9725
+      },
+      "finished": 0.9725
+    },
+    {
+      "id": "f25",
+      "pass": 2,
+      "ok": true,
+      "ms": 535,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.959
+          }
+        },
+        "usage": {
+          "input_tokens": 173,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.959
+      },
+      "finished": 0.959
+    },
+    {
+      "id": "f26",
+      "pass": 2,
+      "ok": true,
+      "ms": 754,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.91
+          }
+        },
+        "usage": {
+          "input_tokens": 173,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.91
+      },
+      "finished": 0.91
+    },
+    {
+      "id": "f27",
+      "pass": 2,
+      "ok": true,
+      "ms": 318,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9346
+          }
+        },
+        "usage": {
+          "input_tokens": 175,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9346
+      },
+      "finished": 0.9346
+    },
+    {
+      "id": "f28",
+      "pass": 2,
+      "ok": true,
+      "ms": 394,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.7255
+          }
+        },
+        "usage": {
+          "input_tokens": 175,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.7255
+      },
+      "finished": 0.7255
+    },
+    {
+      "id": "f29",
+      "pass": 2,
+      "ok": true,
+      "ms": 771,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9414
+          }
+        },
+        "usage": {
+          "input_tokens": 175,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9414
+      },
+      "finished": 0.9414
+    },
+    {
+      "id": "f30",
+      "pass": 2,
+      "ok": true,
+      "ms": 848,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.8728
+          }
+        },
+        "usage": {
+          "input_tokens": 180,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.8728
+      },
+      "finished": 0.8728
+    },
+    {
+      "id": "f31",
+      "pass": 2,
+      "ok": true,
+      "ms": 305,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.7909
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.7909
+      },
+      "finished": 0.7909
+    },
+    {
+      "id": "f32",
+      "pass": 2,
+      "ok": true,
+      "ms": 863,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9613
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9613
+      },
+      "finished": 0.9613
+    },
+    {
+      "id": "f33",
+      "pass": 2,
+      "ok": true,
+      "ms": 473,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9204
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9204
+      },
+      "finished": 0.9204
+    },
+    {
+      "id": "f34",
+      "pass": 2,
+      "ok": true,
+      "ms": 366,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9697
+          }
+        },
+        "usage": {
+          "input_tokens": 179,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9697
+      },
+      "finished": 0.9697
+    },
+    {
+      "id": "f35",
+      "pass": 2,
+      "ok": true,
+      "ms": 607,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9384
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9384
+      },
+      "finished": 0.9384
+    },
+    {
+      "id": "f36",
+      "pass": 2,
+      "ok": true,
+      "ms": 676,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9827
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9827
+      },
+      "finished": 0.9827
+    },
+    {
+      "id": "f37",
+      "pass": 2,
+      "ok": true,
+      "ms": 997,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9544
+          }
+        },
+        "usage": {
+          "input_tokens": 182,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9544
+      },
+      "finished": 0.9544
+    },
+    {
+      "id": "f38",
+      "pass": 2,
+      "ok": true,
+      "ms": 594,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.8948
+          }
+        },
+        "usage": {
+          "input_tokens": 175,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.8948
+      },
+      "finished": 0.8948
+    },
+    {
+      "id": "f39",
+      "pass": 2,
+      "ok": true,
+      "ms": 746,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9682
+          }
+        },
+        "usage": {
+          "input_tokens": 176,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9682
+      },
+      "finished": 0.9682
+    },
+    {
+      "id": "f40",
+      "pass": 2,
+      "ok": true,
+      "ms": 799,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9487
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9487
+      },
+      "finished": 0.9487
+    },
+    {
+      "id": "f41",
+      "pass": 2,
+      "ok": true,
+      "ms": 580,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9031
+          }
+        },
+        "usage": {
+          "input_tokens": 174,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9031
+      },
+      "finished": 0.9031
+    },
+    {
+      "id": "f42",
+      "pass": 2,
+      "ok": true,
+      "ms": 622,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.7087
+          }
+        },
+        "usage": {
+          "input_tokens": 176,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.7087
+      },
+      "finished": 0.7087
+    },
+    {
+      "id": "f43",
+      "pass": 2,
+      "ok": true,
+      "ms": 424,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.4666
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.4666
+      },
+      "finished": 0.4666
+    },
+    {
+      "id": "f44",
+      "pass": 2,
+      "ok": true,
+      "ms": 326,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9516
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9516
+      },
+      "finished": 0.9516
+    },
+    {
+      "id": "f45",
+      "pass": 2,
+      "ok": true,
+      "ms": 1222,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.976
+          }
+        },
+        "usage": {
+          "input_tokens": 186,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.976
+      },
+      "finished": 0.976
+    },
+    {
+      "id": "f46",
+      "pass": 2,
+      "ok": true,
+      "ms": 523,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9639
+          }
+        },
+        "usage": {
+          "input_tokens": 184,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9639
+      },
+      "finished": 0.9639
+    },
+    {
+      "id": "f47",
+      "pass": 2,
+      "ok": true,
+      "ms": 517,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9601
+          }
+        },
+        "usage": {
+          "input_tokens": 182,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9601
+      },
+      "finished": 0.9601
+    },
+    {
+      "id": "f48",
+      "pass": 2,
+      "ok": true,
+      "ms": 349,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9766
+          }
+        },
+        "usage": {
+          "input_tokens": 189,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9766
+      },
+      "finished": 0.9766
+    },
+    {
+      "id": "f49",
+      "pass": 2,
+      "ok": true,
+      "ms": 325,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9548
+          }
+        },
+        "usage": {
+          "input_tokens": 193,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9548
+      },
+      "finished": 0.9548
+    },
+    {
+      "id": "f50",
+      "pass": 2,
+      "ok": true,
+      "ms": 304,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9664
+          }
+        },
+        "usage": {
+          "input_tokens": 195,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9664
+      },
+      "finished": 0.9664
+    },
+    {
+      "id": "f51",
+      "pass": 2,
+      "ok": true,
+      "ms": 315,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9785
+          }
+        },
+        "usage": {
+          "input_tokens": 185,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9785
+      },
+      "finished": 0.9785
+    },
+    {
+      "id": "u01",
+      "pass": 2,
+      "ok": true,
+      "ms": 479,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.2744
+          }
+        },
+        "usage": {
+          "input_tokens": 173,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.2744
+      },
+      "finished": 0.2744
+    },
+    {
+      "id": "u02",
+      "pass": 2,
+      "ok": true,
+      "ms": 501,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9077
+          }
+        },
+        "usage": {
+          "input_tokens": 175,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9077
+      },
+      "finished": 0.9077
+    },
+    {
+      "id": "u03",
+      "pass": 2,
+      "ok": true,
+      "ms": 776,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.7197
+          }
+        },
+        "usage": {
+          "input_tokens": 174,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.7197
+      },
+      "finished": 0.7197
+    },
+    {
+      "id": "u04",
+      "pass": 2,
+      "ok": true,
+      "ms": 369,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.7096
+          }
+        },
+        "usage": {
+          "input_tokens": 176,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.7096
+      },
+      "finished": 0.7096
+    },
+    {
+      "id": "u05",
+      "pass": 2,
+      "ok": true,
+      "ms": 226,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.1882
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.1882
+      },
+      "finished": 0.1882
+    },
+    {
+      "id": "u06",
+      "pass": 2,
+      "ok": true,
+      "ms": 364,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.943
+          }
+        },
+        "usage": {
+          "input_tokens": 180,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.943
+      },
+      "finished": 0.943
+    },
+    {
+      "id": "u07",
+      "pass": 2,
+      "ok": true,
+      "ms": 293,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9091
+          }
+        },
+        "usage": {
+          "input_tokens": 185,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9091
+      },
+      "finished": 0.9091
+    },
+    {
+      "id": "u08",
+      "pass": 2,
+      "ok": true,
+      "ms": 654,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0763
+          }
+        },
+        "usage": {
+          "input_tokens": 179,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0763
+      },
+      "finished": 0.0763
+    },
+    {
+      "id": "u09",
+      "pass": 2,
+      "ok": true,
+      "ms": 374,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0248
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0248
+      },
+      "finished": 0.0248
+    },
+    {
+      "id": "u10",
+      "pass": 2,
+      "ok": true,
+      "ms": 665,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0219
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0219
+      },
+      "finished": 0.0219
+    },
+    {
+      "id": "u11",
+      "pass": 2,
+      "ok": true,
+      "ms": 496,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.7
+          }
+        },
+        "usage": {
+          "input_tokens": 173,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.7
+      },
+      "finished": 0.7
+    },
+    {
+      "id": "u12",
+      "pass": 2,
+      "ok": true,
+      "ms": 310,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.1635
+          }
+        },
+        "usage": {
+          "input_tokens": 174,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.1635
+      },
+      "finished": 0.1635
+    },
+    {
+      "id": "u13",
+      "pass": 2,
+      "ok": true,
+      "ms": 592,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0402
+          }
+        },
+        "usage": {
+          "input_tokens": 180,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0402
+      },
+      "finished": 0.0402
+    },
+    {
+      "id": "u14",
+      "pass": 2,
+      "ok": true,
+      "ms": 357,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.1291
+          }
+        },
+        "usage": {
+          "input_tokens": 175,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.1291
+      },
+      "finished": 0.1291
+    },
+    {
+      "id": "u15",
+      "pass": 2,
+      "ok": true,
+      "ms": 386,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.1352
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.1352
+      },
+      "finished": 0.1352
+    },
+    {
+      "id": "u16",
+      "pass": 2,
+      "ok": true,
+      "ms": 641,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.5782
+          }
+        },
+        "usage": {
+          "input_tokens": 176,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.5782
+      },
+      "finished": 0.5782
+    },
+    {
+      "id": "u17",
+      "pass": 2,
+      "ok": true,
+      "ms": 251,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.8952
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.8952
+      },
+      "finished": 0.8952
+    },
+    {
+      "id": "u18",
+      "pass": 2,
+      "ok": true,
+      "ms": 448,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0901
+          }
+        },
+        "usage": {
+          "input_tokens": 176,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0901
+      },
+      "finished": 0.0901
+    },
+    {
+      "id": "u19",
+      "pass": 2,
+      "ok": true,
+      "ms": 374,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.2096
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.2096
+      },
+      "finished": 0.2096
+    },
+    {
+      "id": "u20",
+      "pass": 2,
+      "ok": true,
+      "ms": 252,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.8499
+          }
+        },
+        "usage": {
+          "input_tokens": 173,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.8499
+      },
+      "finished": 0.8499
+    },
+    {
+      "id": "u21",
+      "pass": 2,
+      "ok": true,
+      "ms": 311,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.839
+          }
+        },
+        "usage": {
+          "input_tokens": 174,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.839
+      },
+      "finished": 0.839
+    },
+    {
+      "id": "u22",
+      "pass": 2,
+      "ok": true,
+      "ms": 545,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.4152
+          }
+        },
+        "usage": {
+          "input_tokens": 174,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.4152
+      },
+      "finished": 0.4152
+    },
+    {
+      "id": "u23",
+      "pass": 2,
+      "ok": true,
+      "ms": 517,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.4215
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.4215
+      },
+      "finished": 0.4215
+    },
+    {
+      "id": "u24",
+      "pass": 2,
+      "ok": true,
+      "ms": 632,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.7102
+          }
+        },
+        "usage": {
+          "input_tokens": 180,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.7102
+      },
+      "finished": 0.7102
+    },
+    {
+      "id": "u25",
+      "pass": 2,
+      "ok": true,
+      "ms": 449,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.2513
+          }
+        },
+        "usage": {
+          "input_tokens": 182,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.2513
+      },
+      "finished": 0.2513
+    },
+    {
+      "id": "u26",
+      "pass": 2,
+      "ok": true,
+      "ms": 337,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.8637
+          }
+        },
+        "usage": {
+          "input_tokens": 176,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.8637
+      },
+      "finished": 0.8637
+    },
+    {
+      "id": "u27",
+      "pass": 2,
+      "ok": true,
+      "ms": 472,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.1564
+          }
+        },
+        "usage": {
+          "input_tokens": 175,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.1564
+      },
+      "finished": 0.1564
+    },
+    {
+      "id": "u28",
+      "pass": 2,
+      "ok": true,
+      "ms": 230,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.3757
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.3757
+      },
+      "finished": 0.3757
+    },
+    {
+      "id": "u29",
+      "pass": 2,
+      "ok": true,
+      "ms": 439,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.8326
+          }
+        },
+        "usage": {
+          "input_tokens": 179,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.8326
+      },
+      "finished": 0.8326
+    },
+    {
+      "id": "u30",
+      "pass": 2,
+      "ok": true,
+      "ms": 943,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.06
+          }
+        },
+        "usage": {
+          "input_tokens": 175,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.06
+      },
+      "finished": 0.06
+    },
+    {
+      "id": "u31",
+      "pass": 2,
+      "ok": true,
+      "ms": 588,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.3338
+          }
+        },
+        "usage": {
+          "input_tokens": 174,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.3338
+      },
+      "finished": 0.3338
+    },
+    {
+      "id": "u32",
+      "pass": 2,
+      "ok": true,
+      "ms": 375,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.4179
+          }
+        },
+        "usage": {
+          "input_tokens": 185,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.4179
+      },
+      "finished": 0.4179
+    },
+    {
+      "id": "u33",
+      "pass": 2,
+      "ok": true,
+      "ms": 392,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0324
+          }
+        },
+        "usage": {
+          "input_tokens": 177,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0324
+      },
+      "finished": 0.0324
+    },
+    {
+      "id": "u34",
+      "pass": 2,
+      "ok": true,
+      "ms": 332,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0532
+          }
+        },
+        "usage": {
+          "input_tokens": 176,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0532
+      },
+      "finished": 0.0532
+    },
+    {
+      "id": "u35",
+      "pass": 2,
+      "ok": true,
+      "ms": 384,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0758
+          }
+        },
+        "usage": {
+          "input_tokens": 174,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0758
+      },
+      "finished": 0.0758
+    },
+    {
+      "id": "u36",
+      "pass": 2,
+      "ok": true,
+      "ms": 495,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0604
+          }
+        },
+        "usage": {
+          "input_tokens": 182,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0604
+      },
+      "finished": 0.0604
+    },
+    {
+      "id": "u37",
+      "pass": 2,
+      "ok": true,
+      "ms": 422,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0295
+          }
+        },
+        "usage": {
+          "input_tokens": 180,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0295
+      },
+      "finished": 0.0295
+    },
+    {
+      "id": "u38",
+      "pass": 2,
+      "ok": true,
+      "ms": 651,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.267
+          }
+        },
+        "usage": {
+          "input_tokens": 179,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.267
+      },
+      "finished": 0.267
+    },
+    {
+      "id": "u39",
+      "pass": 2,
+      "ok": true,
+      "ms": 245,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0924
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0924
+      },
+      "finished": 0.0924
+    },
+    {
+      "id": "u40",
+      "pass": 2,
+      "ok": true,
+      "ms": 561,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0485
+          }
+        },
+        "usage": {
+          "input_tokens": 178,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0485
+      },
+      "finished": 0.0485
+    },
+    {
+      "id": "u41",
+      "pass": 2,
+      "ok": true,
+      "ms": 447,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0292
+          }
+        },
+        "usage": {
+          "input_tokens": 185,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0292
+      },
+      "finished": 0.0292
+    },
+    {
+      "id": "u42",
+      "pass": 2,
+      "ok": true,
+      "ms": 340,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0202
+          }
+        },
+        "usage": {
+          "input_tokens": 184,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0202
+      },
+      "finished": 0.0202
+    },
+    {
+      "id": "u43",
+      "pass": 2,
+      "ok": true,
+      "ms": 256,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0156
+          }
+        },
+        "usage": {
+          "input_tokens": 183,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0156
+      },
+      "finished": 0.0156
+    },
+    {
+      "id": "u44",
+      "pass": 2,
+      "ok": true,
+      "ms": 716,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.6593
+          }
+        },
+        "usage": {
+          "input_tokens": 184,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.6593
+      },
+      "finished": 0.6593
+    },
+    {
+      "id": "u45",
+      "pass": 2,
+      "ok": true,
+      "ms": 535,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0205
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0205
+      },
+      "finished": 0.0205
+    },
+    {
+      "id": "u46",
+      "pass": 2,
+      "ok": true,
+      "ms": 272,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0206
+          }
+        },
+        "usage": {
+          "input_tokens": 189,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0206
+      },
+      "finished": 0.0206
+    },
+    {
+      "id": "u47",
+      "pass": 2,
+      "ok": true,
+      "ms": 355,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0151
+          }
+        },
+        "usage": {
+          "input_tokens": 187,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0151
+      },
+      "finished": 0.0151
+    },
+    {
+      "id": "u48",
+      "pass": 2,
+      "ok": true,
+      "ms": 347,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.0233
+          }
+        },
+        "usage": {
+          "input_tokens": 183,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.0233
+      },
+      "finished": 0.0233
+    },
+    {
+      "id": "u49",
+      "pass": 2,
+      "ok": true,
+      "ms": 426,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.171
+          }
+        },
+        "usage": {
+          "input_tokens": 185,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.171
+      },
+      "finished": 0.171
+    },
+    {
+      "id": "u50",
+      "pass": 2,
+      "ok": true,
+      "ms": 304,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9338
+          }
+        },
+        "usage": {
+          "input_tokens": 182,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9338
+      },
+      "finished": 0.9338
+    }
+  ]
+}

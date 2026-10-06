@@ -1,0 +1,50 @@
+[
+  {
+    "model": "clef",
+    "reply": {
+      "ok": true,
+      "ms": 823,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9837
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9837
+      }
+    }
+  },
+  {
+    "model": "clef-flash",
+    "reply": {
+      "ok": true,
+      "ms": 828,
+      "colo": "GRU",
+      "raw": {
+        "model": "clef-flash",
+        "answers": {
+          "turn.end__user_finished": {
+            "type": "noul",
+            "noul": 0.9323
+          }
+        },
+        "usage": {
+          "input_tokens": 181,
+          "output_tokens": 0
+        }
+      },
+      "policy": {
+        "finished": 0.9323
+      }
+    }
+  }
+]
