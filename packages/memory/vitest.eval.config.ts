@@ -4,7 +4,7 @@ import { defineConfig } from "vitest/config";
 /**
  * `eval:models` reaches real models: bge-m3 and Clef on Workers AI with the developer's Cloudflare
  * login (set CLOUDFLARE_ACCOUNT_ID when it has several accounts), and OpenAI with OPENAI_API_KEY,
- * which the script loads from `~/.kelpie/.env` when that file exists. The key stays in this
+ * which the script takes from the environment or, that one key only, from `~/.kelpie/.env`. The key stays in this
  * process and the test Worker. This file runs in Node, but the package compiles without Node's
  * types, so the environment is read through `globalThis`.
  */

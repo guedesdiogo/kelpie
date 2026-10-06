@@ -12,7 +12,7 @@
     "test": "vitest run",
     "eval": "vitest run --config vitest.eval.config.ts",
     "eval:baseline": "node eval/baseline.mjs",
-    "eval:models": "sh -c 'set -a; [ -f \"$HOME/.kelpie/.env\" ] && . \"$HOME/.kelpie/.env\"; set +a; EVAL_MODELS=1 exec vitest run --config vitest.eval.config.ts eval/models.eval.ts'",
+    "eval:models": "sh -c 'OPENAI_API_KEY=\"${OPENAI_API_KEY:-$(sed -n \"s/^OPENAI_API_KEY=//p\" \"$HOME/.kelpie/.env\" 2>/dev/null)}\" EVAL_MODELS=1 exec vitest run --config vitest.eval.config.ts eval/models.eval.ts'",
     "eval:models:report": "node eval/models-report.mjs"
   },
   "dependencies": {
