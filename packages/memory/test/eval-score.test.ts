@@ -92,7 +92,7 @@ describe("aggregate", () => {
       mrr: 0.358,
       staleFirst: { n: 2, rate: 0.5 },
       tokens: { mean: 160, p95: 400 },
-      latencyMs: { p50: 1, p95: 9 },
+      latencyMs: { mean: 3.25, p50: 1, p95: 9 },
     });
   });
 

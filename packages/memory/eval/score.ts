@@ -69,7 +69,8 @@ export interface Metrics {
   mrr: number;
   staleFirst: { n: number; rate: number };
   tokens: { mean: number; p95: number };
-  latencyMs: { p50: number; p95: number };
+  /** workerd's clock ticks in whole milliseconds, so the mean over many questions says more. */
+  latencyMs: { mean: number; p50: number; p95: number };
 }
 
 /** Nearest-rank percentile. */
@@ -108,6 +109,7 @@ export function aggregate(results: readonly QuestionResult[]): Metrics {
       ),
     },
     latencyMs: {
+      mean: round(results.reduce((sum, r) => sum + r.latencyMs, 0) / (n || 1)),
       p50: round(
         percentile(
           results.map((r) => r.latencyMs),
