@@ -213,7 +213,7 @@ The index is one SQLite database inside the Context Store's Durable Object ([ADR
 
 ## Retrieval
 
-What a turn sees of memory (#110), built on the index. It follows ai-memory's hybrid search, with four changes measured on half of the evaluation's questions ([spike](spikes/memory-eval.md#retrieval-110)).
+What a turn sees of memory (#110), built on the index. It follows ai-memory's hybrid search, with four changes compared on half of the evaluation's questions ([spike](spikes/memory-eval.md#retrieval-110)).
 - **The gate:** a message that is empty, a command (`/start`), only emoji, or a bare acknowledgement or greeting skips retrieval. Examples: "ok", "valeu!", "obrigado :)", "kkkk", "bom dia", "thanks". The list is in Portuguese and English. No model is called.
 - **Streams:**
   - **full text:** the question's words, folded, with function words kept, since bm25 already weighs them down. When the question's date was already resolved into `asOf` or `validAt`, month and weekday names and years are dropped;

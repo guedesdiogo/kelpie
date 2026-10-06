@@ -3,7 +3,7 @@
 // (https://github.com/akitaonrails/ai-memory/blob/fc4da03/crates/ai-memory-store/src/reader.rs):
 // streams fused by reciprocal rank with k = 60, each fetching max(4 × limit, 20) up to limit + 300,
 // then a bounded authority multiplier, with sessions lifted back when the question asks about a
-// past conversation (`retrieval_tuning.rs`). Measured on half of the evaluation's questions
+// past conversation (`retrieval_tuning.rs`). Compared on half of the evaluation's questions
 // (docs/spikes/memory-eval.md), four things differ from ai-memory:
 // - only sessions are weighed down: its boosts for decisions and procedures suit an agent's rules,
 //   not a person's life, and cost answers here;

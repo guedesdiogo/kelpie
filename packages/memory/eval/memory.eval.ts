@@ -39,17 +39,17 @@ const NAMED = new Set(
 const UNNAMED = new Set(QUESTIONS.map((q) => q.id).filter((id) => !NAMED.has(id)));
 
 /**
- * Retrieval's choices that departed from ai-memory were measured on the questions with an even
- * number only; the odd ones are held out, and reported apart, to show whether those choices
- * generalize (docs/spikes/memory-eval.md).
+ * Retrieval's variants were compared on the questions with an even number only, and the two halves
+ * are reported apart. The odd half isn't a clean hold-out: runs over every question came first
+ * (docs/spikes/memory-eval.md).
  */
-const TUNING = new Set(QUESTIONS.map((q) => q.id).filter((id) => Number(id.slice(1)) % 2 === 0));
-const HELD_OUT = new Set(QUESTIONS.map((q) => q.id).filter((id) => !TUNING.has(id)));
+const EVEN = new Set(QUESTIONS.map((q) => q.id).filter((id) => Number(id.slice(1)) % 2 === 0));
+const ODD = new Set(QUESTIONS.map((q) => q.id).filter((id) => !EVEN.has(id)));
 const SLICES = {
   "names a shared first name": NAMED,
   "names nobody by first name": UNNAMED,
-  "tuning half": TUNING,
-  "held-out half": HELD_OUT,
+  "even half": EVEN,
+  "odd half": ODD,
 };
 
 declare module "vitest" {

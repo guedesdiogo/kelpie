@@ -5,7 +5,7 @@
 - **Status:** baseline and first retrieval recorded.
   - Plain full-text search answers 70% of the questions within five results at 100k memories.
   - Most of the drop with size comes from people named by a first name that other notes share.
-  - Retrieval without vectors or a rerank raises that to 77%, and holds on the questions it wasn't tuned on ([Retrieval (#110)](#retrieval-110)).
+  - Retrieval without vectors or a rerank raises that to 77%, about as much on the half of the questions its variants weren't compared on ([Retrieval (#110)](#retrieval-110)).
 - **Source:** [`packages/memory/eval/`](../../packages/memory/eval), run with `bun run --filter @kelpie/memory eval`. Unlike the earlier spikes, it is merged, because later stories re-run it as a regression check.
 
 ## Question
@@ -132,12 +132,19 @@ A revision of the labels would fix these with a new hash and a new baseline. It 
 
 Retrieval ([`retrieve.ts`](../../packages/memory/src/retrieve.ts), described in [memory-format.md](../memory-format.md#retrieval)) runs on the same vaults, questions and options as the baseline. It returns 10 results, and packs them within 1,000 tokens.
 
-### How it was tuned without fitting the labels
+### How it was tuned, and what the odd half means
 
 - **The starting point** was ai-memory's hybrid search with its constants: RRF with k = 60, its authority weights, a stopword list, and a graph from the best hits.
-- **Only the even-numbered questions** were looked at while choosing. The odd ones were held out and are reported apart. The labels, the gold and the questions didn't change.
-- **Four choices** came out of that half:
-  - **Authority:** ai-memory's boosts for decisions and procedures cost answers here, so only its session penalty stays. On the tuning half at 10k, without the graph and with function words removed, MRR went from 0.557 to 0.610.
+- **What was seen before any split:**
+  - The first run, with ai-memory's constants, reported every slice for all 150 questions.
+  - A diagnostic listed the entity questions it lost at 1k, from both halves; the Bruno example below comes from it.
+  - A later full run showed the drops in update and entity questions that led to ranking seeds first.
+  - Those runs set the direction of the changes.
+- **Then each variant was compared on the even-numbered questions only.**
+  - The odd half never chose between variants, but it isn't a clean hold-out: it had shaped which variants were tried. Both halves are reported apart.
+  - The labels, the gold and the questions didn't change.
+- **Four choices** came out of the comparisons:
+  - **Authority:** ai-memory's boosts for decisions and procedures cost answers here, so only its session penalty stays. On the even half at 10k, without the graph and with function words removed, MRR went from 0.557 to 0.610.
   - **Function words:** removing them made the full-text stream slightly worse (MRR 0.632 → 0.610), since bm25 already weighs them down. They stay.
   - **The graph:** it follows only a note's links and the pages of the entities it names, from three seeds per stream. It ranks the seeds above their neighbours, with the same weight as the other streams.
     - Neighbours that also matched the text weakly used to pass their seed: "Pra que time o Bruno torce?" put Patrícia and Theo above Bruno.
@@ -160,8 +167,8 @@ The retrieval column is after the arrow. Everything is deterministic, and is in 
 | procedure | 11 | 1.000 → 1.000 | 1.000 → 1.000 | 1.000 → 1.000 | 1.000 → 1.000 | 0.955 → 0.955 | 0.955 → 0.955 |
 | names a shared first name | 34 | 0.735 → 0.794 | 0.529 → 0.647 | 0.500 → 0.588 | 0.594 → 0.623 | 0.474 → 0.509 | 0.441 → 0.478 |
 | names nobody by first name | 116 | 0.784 → 0.836 | 0.759 → 0.810 | 0.759 → 0.819 | 0.697 → 0.715 | 0.695 → 0.713 | 0.691 → 0.714 |
-| tuning half | 75 | 0.760 → 0.867 | 0.667 → 0.733 | 0.667 → 0.733 | 0.669 → 0.702 | 0.617 → 0.633 | 0.605 → 0.629 |
-| held-out half | 75 | 0.787 → 0.787 | 0.747 → 0.813 | 0.733 → 0.800 | 0.679 → 0.685 | 0.673 → 0.699 | 0.663 → 0.691 |
+| even half | 75 | 0.760 → 0.867 | 0.667 → 0.733 | 0.667 → 0.733 | 0.669 → 0.702 | 0.617 → 0.633 | 0.605 → 0.629 |
+| odd half | 75 | 0.787 → 0.787 | 0.747 → 0.813 | 0.733 → 0.800 | 0.679 → 0.685 | 0.673 → 0.699 | 0.663 → 0.691 |
 
 | Size | hit@1 | hit@3 | hit@10 | Packed tokens, mean / p95 | Stale first |
 |---|---|---|---|---|---|
@@ -171,7 +178,7 @@ The retrieval column is after the arrow. Everything is deterministic, and is in 
 
 ### Reading the numbers
 
-- **It generalizes.** On the held-out half at 100k, hit@5 goes from 0.733 to 0.800 and MRR from 0.663 to 0.691, as much as on the tuning half.
+- **The odd half gains as much as the even half.** At 100k its hit@5 goes from 0.733 to 0.800 and its MRR from 0.663 to 0.691. It is only partly unseen, so this is weaker evidence than a clean hold-out: a new label set would test it properly.
 - **Multi-hop gains most:** hit@5 goes from 0.45 to 0.65 at 100k. The second memory comes in through the graph, from the first one's entities.
 - **First names gain, but stay the weakest slice:** 0.500 → 0.588 at 100k. Telling the owner's Ana from the others still needs an owner signal (#112).
 - **Names on many notes are left out of the entity stream.** A city that hundreds of distractors name only listed them in path order. Names on more than 50 versions are now left out. Together with the other fixes from review, entity MRR at 100k went from 0.591 to 0.605. These were fixes, not choices made on the tuning half.
@@ -180,7 +187,8 @@ The retrieval column is after the arrow. Everything is deterministic, and is in 
   - **At 1k and 10k:** five and four questions drop. The worst is q074 (commitment): from 1st to 6th at 1k, and from 9th to out of the top 10 at 10k.
 - **The budget holds** for every question at every size, and the evaluation asserts it. The largest packed slice takes 910 of the 1,000 tokens allowed, and the mean is about 610. The baseline's five excerpts took about 205.
 - **Cost:** retrieval takes about the same time as the plain search, 23 ms on average at 100k, because the full-text stream dominates. Timings come from the run, in `eval/last-run.json`, which isn't committed. The folded-title column adds about 6% to the database: 154 MiB at 100k.
-- **The tuning runs were scratch experiments**, run on the tuning half only. Their numbers are quoted above, and their code isn't kept.
+- **The comparison runs were scratch experiments**, on the even half only. Their numbers are quoted above, and their code isn't kept.
+- **A name on many notes in a real vault** is likely the owner's family, the reverse of the evaluation, where only distractors are common. Leaving such names out of the entity stream then costs their pages that stream, though full-text search still finds them. A later fix could keep a common name's own page, through its title.
 - **Not measured yet:** vectors and the rerank. Both need a model, and the eval has none yet. "hit@k before and after the rerank" waits for that.
 
 ## How to re-run
