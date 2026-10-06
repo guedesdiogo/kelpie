@@ -145,4 +145,24 @@ describe("AgentHost with a vault", () => {
       promptVersion: 1,
     });
   });
+
+  it("gives concurrent turns one version, and doesn't lose a configured change made meanwhile", async () => {
+    const slow = (persona: string): ContextStoreContract => ({
+      ...vaultOf({}),
+      compile: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return { persona, rules: [], skills: [] };
+      },
+    });
+    const stub = host("vault-race");
+    replaceContextStoreForTesting(slow("# V1"));
+    const [a, b] = await Promise.all([stub.turnConfig(), stub.turnConfig()]);
+    expect([a.promptVersion, b.promptVersion]).toEqual([1, 1]);
+
+    replaceContextStoreForTesting(slow("# V2"));
+    const pending = stub.turnConfig();
+    await stub.configure({ systemPrompt: "Configured meanwhile." }, owner);
+    expect((await pending).promptVersion).toBe(3);
+    expect((await stub.config()).promptVersion).toBe(3);
+  });
 });

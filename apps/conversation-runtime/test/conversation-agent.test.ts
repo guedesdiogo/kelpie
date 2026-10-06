@@ -271,10 +271,22 @@ describe("ConversationAgent buffering", () => {
     expect(world.sent).toEqual(["Once."]);
   });
 
+  it("asks the vault for the system prompt when a turn starts, not for every message", async () => {
+    const world = use(fakeWorld([reply("Hi.")]));
+    const stub = agent("vault-calls");
+    const turnConfig = vi.spyOn(AgentHost.prototype, "turnConfig");
+    await stub.ingest(message("m1", "oi"));
+    await stub.ingest(message("m2", "tudo bem?"));
+    expect(turnConfig).not.toHaveBeenCalled();
+    await stub.flush();
+    expect(turnConfig).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(world.sent).toEqual(["Hi."]));
+  });
+
   it("plans the flush again when the provider retries a message whose planning failed", async () => {
     const world = use(fakeWorld([reply("Got it.")]));
     const stub = agent("plan-fails");
-    vi.spyOn(AgentHost.prototype, "turnConfig").mockImplementationOnce(() => {
+    vi.spyOn(AgentHost.prototype, "config").mockImplementationOnce(() => {
       throw new Error(INJECTED_FAILURE);
     });
 

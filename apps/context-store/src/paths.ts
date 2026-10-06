@@ -10,14 +10,26 @@ export function isSkillName(value: unknown): value is string {
   return typeof value === "string" && /^[a-z0-9][a-z0-9-]{0,63}$/.test(value);
 }
 
-/** A relative vault path with no `.`/`..` segments, no backslash and no control characters. */
+/** Names Windows reserves, which would break the owner's checkout there. */
+const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i;
+
+/**
+ * A relative vault path with no `.`/`..` segments, and nothing that breaks a checkout or spoofs a
+ * name: no backslash or colon, no control or format characters (bidirectional overrides,
+ * zero-width spaces) and no reserved Windows names.
+ */
 function isCleanPath(path: string): boolean {
   return (
     path.length > 0 &&
     path.length <= 300 &&
     !path.startsWith("/") &&
-    !/[\\\p{Cc}]/u.test(path) &&
-    path.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..")
+    !/[\\:\p{Cc}\p{Cf}]/u.test(path) &&
+    path
+      .split("/")
+      .every(
+        (segment) =>
+          segment !== "" && segment !== "." && segment !== ".." && !RESERVED.test(segment),
+      )
   );
 }
 

@@ -30,7 +30,7 @@ export default { fetch: () => new Response(null, { status: 404 }) };`,
             script: `import { WorkerEntrypoint } from "cloudflare:workers";
 export class GitHubWebhooks extends WorkerEntrypoint {
   receive(delivery) {
-    if (delivery.signature !== "sha256=routed") return { status: 401 };
+    if (delivery.signature !== "sha256=${"a".repeat(64)}") return { status: 401 };
     return { status: delivery.event === "push" && delivery.body === "{}" ? 202 : 400 };
   }
 }

@@ -65,6 +65,7 @@ function fakeGitHub(files: Record<string, string>, options: { stale?: boolean } 
             previous_filename: "memory/notes/b-old.md",
           },
           { filename: "photo.png", status: "added", sha: "y" },
+          { filename: "knowledge/huge.md", status: "added", sha: "sha-knowledge/huge.md" },
         ],
       });
     }
@@ -97,8 +98,13 @@ function fakeGitHub(files: Record<string, string>, options: { stale?: boolean } 
           text === undefined
             ? null
             : filePath === "long.md"
-              ? { text: "cut", isTruncated: true }
-              : { text, isTruncated: false };
+              ? { text: "cut", isTruncated: true, byteSize: 10 }
+              : {
+                  text,
+                  isTruncated: false,
+                  // A file reported as larger than the vault keeps.
+                  byteSize: filePath === "knowledge/huge.md" ? 2_000_000 : text.length,
+                };
       }
       return json(200, { data: { repository } });
     }
@@ -136,7 +142,10 @@ describe("GitHubVaultBackend", () => {
     expect(await vault.branchHead("gone")).toBeNull();
     expect(github.tokens()).toBe(1);
     const [tokenCall, ...rest] = github.calls;
-    expect(tokenCall?.body).toEqual({ repositories: ["vault"] });
+    expect(tokenCall?.body).toEqual({
+      repositories: ["vault"],
+      permissions: { contents: "write", pull_requests: "write", metadata: "read" },
+    });
     const jwt = tokenCall?.authorization?.replace("Bearer ", "") ?? "";
     expect(JSON.parse(decodeBase64Text(jwt.split(".")[1] ?? ""))).toMatchObject({ iss: "123" });
     for (const call of rest) expect(call.authorization).toBe(`Bearer ${TOKEN}`);
@@ -172,7 +181,13 @@ describe("GitHubVaultBackend", () => {
   });
 
   it("diffs two commits: changes with their content, removals and renames", async () => {
-    const vault = backend(fakeGitHub({ "memory/notes/a.md": "# A2", "memory/notes/b.md": "# B" }));
+    const vault = backend(
+      fakeGitHub({
+        "memory/notes/a.md": "# A2",
+        "memory/notes/b.md": "# B",
+        "knowledge/huge.md": "past the size limit",
+      }),
+    );
     expect(await vault.diff(BASE, HEAD)).toEqual({
       from: BASE,
       to: HEAD,

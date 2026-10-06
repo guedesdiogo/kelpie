@@ -61,8 +61,10 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
    * prompt change does. When the Context Store can't answer, the last vault it compiled is used.
    */
   async turnConfig(): Promise<AgentConfig> {
-    const config = this.config();
     const vault = await this.#vaultContext();
+    // Read after the await: another call or a configure may have run meanwhile, and the compare,
+    // the bump and the write below are one synchronous step.
+    const config = this.config();
     const key = hasVaultContext(vault) ? JSON.stringify(vault) : "";
     let promptVersion = config.promptVersion;
     if (key !== this.#get("vaultContext", "")) {

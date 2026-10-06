@@ -81,7 +81,11 @@ export class GitHubVaultBackend implements VaultBackend {
       {
         method: "POST",
         headers: { ...HEADERS, authorization: `Bearer ${jwt}`, "content-type": "application/json" },
-        body: JSON.stringify({ repositories: [this.#name] }),
+        // Narrowed to the vault and to what the Context Store does, whatever else the App may do.
+        body: JSON.stringify({
+          repositories: [this.#name],
+          permissions: { contents: "write", pull_requests: "write", metadata: "read" },
+        }),
       },
     );
     const body = (await readJson(response)) as { token?: string; expires_at?: string } | null;
@@ -180,15 +184,20 @@ export class GitHubVaultBackend implements VaultBackend {
         variables[`e${i}`] = `${commit}:${entry.path}`;
       });
       const { data, errors } = await this.#graphql<{
-        repository: Record<string, { text: string | null; isTruncated: boolean } | null>;
+        repository: Record<
+          string,
+          { text: string | null; isTruncated: boolean; byteSize: number } | null
+        >;
       }>("read files", readFilesQuery(batch.length), variables);
       if (errors.length > 0 || !data) {
         throw new GitHubError("read files", 200, errors[0]?.type ?? "no data");
       }
       for (const [i, entry] of batch.entries()) {
         const blob = data.repository[`f${i}`];
-        let text = blob?.text ?? null;
-        if (blob?.isTruncated) text = await this.#blobText(entry.sha);
+        // A file past the size the vault keeps is skipped, whichever way it was found.
+        if (!blob || blob.byteSize > MAX_FILE_BYTES) continue;
+        let text = blob.text;
+        if (blob.isTruncated) text = await this.#blobText(entry.sha);
         if (text !== null) files.push({ path: entry.path, content: text, blobSha: entry.sha });
       }
     }
@@ -238,7 +247,11 @@ export class GitHubVaultBackend implements VaultBackend {
       else reads.push({ path: file.filename, sha: file.sha });
     }
     for (const file of await this.#read(to, reads)) changes.push(file);
-    return { from, to, changes: changes.sort((a, b) => (a.path < b.path ? -1 : 1)) };
+    return {
+      from,
+      to,
+      changes: changes.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+    };
   }
 
   async commit(request: CommitRequest): Promise<CommitOutcome> {
@@ -278,6 +291,15 @@ export class GitHubVaultBackend implements VaultBackend {
     if (status !== 201) throw new GitHubError("create branch", status);
   }
 
+  async deleteBranch(name: string): Promise<void> {
+    const { status } = await this.#rest(
+      "delete branch",
+      "DELETE",
+      `/git/refs/heads/${encodeURIComponent(name).replaceAll("%2F", "/")}`,
+    );
+    if (status !== 204 && status !== 404) throw new GitHubError("delete branch", status);
+  }
+
   async openPullRequest(request: {
     branch: string;
     base: string;
@@ -312,7 +334,7 @@ function readFilesQuery(count: number): string {
   const variables = Array.from({ length: count }, (_, i) => `$e${i}: String!`).join(", ");
   const fields = Array.from(
     { length: count },
-    (_, i) => `f${i}: object(expression: $e${i}) { ... on Blob { text isTruncated } }`,
+    (_, i) => `f${i}: object(expression: $e${i}) { ... on Blob { text isTruncated byteSize } }`,
   ).join("\n    ");
   return `query ($owner: String!, $name: String!, ${variables}) {
   repository(owner: $owner, name: $name) {

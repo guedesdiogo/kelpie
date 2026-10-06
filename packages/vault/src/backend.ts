@@ -58,6 +58,7 @@ export interface VaultBackend {
   diff(from: string, to: string): Promise<VaultDiff | null>;
   commit(request: CommitRequest): Promise<CommitOutcome>;
   createBranch(name: string, from: string): Promise<void>;
+  deleteBranch(name: string): Promise<void>;
   openPullRequest(request: {
     branch: string;
     base: string;

@@ -13,18 +13,49 @@ export interface GitHubWebhookDeps {
   }): Promise<{ status: number }>;
 }
 
-/** Hands GitHub's webhook to context-store; ingress is public and holds no secret. */
+/** The body as text, or null past the limit. It counts bytes as they arrive, chunked or not. */
+async function readCapped(request: Request): Promise<string | null> {
+  if (Number(request.headers.get("content-length") ?? "0") > MAX_BODY_BYTES) return null;
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_BODY_BYTES) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+/**
+ * Hands GitHub's webhook to context-store; ingress is public and holds no secret. A request without
+ * a well-formed signature is refused before its body is read.
+ */
 export async function handleGitHubWebhook(
   request: Request,
   deps: GitHubWebhookDeps,
 ): Promise<Response> {
-  const length = Number(request.headers.get("content-length") ?? "0");
-  if (length > MAX_BODY_BYTES) return new Response(null, { status: 413 });
-  const body = await request.text();
-  if (body.length > MAX_BODY_BYTES) return new Response(null, { status: 413 });
+  const signature = request.headers.get("x-hub-signature-256");
+  if (signature === null || !/^sha256=[0-9a-f]{64}$/i.test(signature)) {
+    return new Response(null, { status: 401 });
+  }
+  const body = await readCapped(request);
+  if (body === null) return new Response(null, { status: 413 });
   const { status } = await deps.receive({
     event: request.headers.get("x-github-event"),
-    signature: request.headers.get("x-hub-signature-256"),
+    signature,
     body,
   });
   return new Response(null, { status });

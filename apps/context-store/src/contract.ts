@@ -22,11 +22,16 @@ export type ProposalTarget =
   | { kind: "rules" }
   | { kind: "skill"; name: string };
 
-export type WriteResult = { ok: true } | { ok: false; reason: "vault_off" | "invalid_path" };
+export type WriteResult =
+  | { ok: true }
+  | { ok: false; reason: "vault_off" | "invalid_path" | "too_large" };
 
 export type ProposeResult =
   | { ok: true; url: string }
-  | { ok: false; reason: "vault_off" | "invalid_target" | "unchanged" };
+  | {
+      ok: false;
+      reason: "vault_off" | "invalid_target" | "unchanged" | "rate_limited" | "failed";
+    };
 
 export interface ContextStoreContract {
   /** Empty when the vault is off. */
@@ -41,7 +46,10 @@ export interface ContextStoreContract {
     changes: { path: string; content: string | null }[],
     summary: string,
   ): Promise<WriteResult>;
-  /** Opens a pull request for the owner to approve (ADR-0020 §5: approval on, the default). */
+  /**
+   * Opens a pull request for the owner to approve (ADR-0020 §5: approval on, the default). The same
+   * change proposed again returns the first pull request; at most 10 are opened an hour.
+   */
   propose(
     agentId: string,
     target: ProposalTarget,

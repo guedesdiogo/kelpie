@@ -60,6 +60,11 @@ export class FakeVaultBackend implements VaultBackend {
     return sha;
   }
 
+  /** The branches, in creation order. */
+  branches(): string[] {
+    return [...this.#branches.keys()];
+  }
+
   /** The files at a branch's head. */
   files(branch = "main"): Record<string, string> {
     return Object.fromEntries(this.#commit(this.#branches.get(branch) ?? "").files);
@@ -98,7 +103,11 @@ export class FakeVaultBackend implements VaultBackend {
           : { path, content, blobSha: await gitBlobSha(content) },
       );
     }
-    return { from, to, changes: changes.sort((a, b) => (a.path < b.path ? -1 : 1)) };
+    return {
+      from,
+      to,
+      changes: changes.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+    };
   }
 
   async commit(request: CommitRequest): Promise<CommitOutcome> {
@@ -107,7 +116,11 @@ export class FakeVaultBackend implements VaultBackend {
     if (head !== request.expectedHead) return { kind: "stale" };
     const files = new Map(this.#commit(head).files);
     for (const { path, content } of request.writes) files.set(path, content);
-    for (const path of request.deletions) files.delete(path);
+    for (const path of request.deletions) {
+      // As GitHub does, a commit that removes a missing file fails.
+      if (!files.has(path)) throw new Error(`GitHub commit refused: no file ${path} to delete`);
+      files.delete(path);
+    }
     const sha = this.#add(head, files);
     this.#branches.set(request.branch, sha);
     return { kind: "committed", commit: sha };
@@ -117,6 +130,10 @@ export class FakeVaultBackend implements VaultBackend {
     if (this.#branches.has(name)) throw new Error(`branch ${name} exists`);
     this.#commit(from);
     this.#branches.set(name, from);
+  }
+
+  async deleteBranch(name: string): Promise<void> {
+    this.#branches.delete(name);
   }
 
   async openPullRequest(request: {
