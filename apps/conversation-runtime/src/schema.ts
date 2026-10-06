@@ -60,6 +60,11 @@ export const turns = sqliteTable("turns", {
    */
   context: text("context"),
   /**
+   * The notes in `context` that Kelpie wrote itself, by path (#126): their text may be the model's,
+   * so their links never count as the turn's inputs for a preview (#130).
+   */
+  kelpieNotes: text("kelpie_notes", { mode: "json" }).$type<string[]>(),
+  /**
    * A digest of the tools the turn's requests sent, null for none (ADR-0025). A reply is replayed
    * with its native output only to a turn with the same tools: its reasoning is bound to them.
    */

@@ -363,6 +363,30 @@ describe("ChannelEgress", () => {
     expect(await exports.ChannelEgress.typing("assistant", destination)).toEqual({ ok: true });
   });
 
+  it("previews only the link the runtime passes, and no link in anything else (#130)", async () => {
+    const calls = botApi();
+    await connect("previews");
+    const text = "See https://food.example/menu and https://evil.example/?q=notes";
+
+    await exports.ChannelEgress.send("previews", destination, text, {
+      silent: false,
+      previewUrl: "https://food.example/menu",
+    });
+    await exports.ChannelEgress.send("previews", destination, text, { silent: false });
+    await exports.ChannelEgress.send("previews", destination, "No link here.");
+    await exports.ChannelWebhooks.notice("previews", destination, { kind: "paired" });
+    expect(
+      calls
+        .filter((call) => call.method === "sendMessage")
+        .map((call) => call.body.link_preview_options),
+    ).toEqual([
+      { url: "https://food.example/menu" },
+      { is_disabled: true },
+      { is_disabled: true },
+      { is_disabled: true },
+    ]);
+  });
+
   it("says when an agent has no channel connected", async () => {
     botApi();
     expect(await exports.ChannelEgress.send("nobody", destination, "hi")).toEqual({
