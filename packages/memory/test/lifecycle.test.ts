@@ -345,6 +345,7 @@ describe("lifecycle report", () => {
     const plainNote = { path: "knowledge/Wow!.md", title: "Família 👨‍👩‍👧" };
     const page =
       lifecycleReport({
+        changed: [],
         cold: [],
         duplicates: [{ kind: "title", notes: [hostile, plainNote] }],
         contradictions: [
@@ -367,6 +368,7 @@ describe("lifecycle report", () => {
     expect(
       lifecycleReport({
         cold: [],
+        changed: [],
         duplicates: [
           { kind: "title", notes: [hostile, { path: "memory/notes/b.md", title: hostile.title }] },
         ],
@@ -376,6 +378,7 @@ describe("lifecycle report", () => {
     expect(
       lifecycleReport({
         cold: [],
+        changed: [],
         duplicates: [
           {
             kind: "title",
@@ -391,7 +394,33 @@ describe("lifecycle report", () => {
   });
 
   it("is nothing when memory is clean", () => {
-    expect(lifecycleReport({ cold: [], duplicates: [], contradictions: [] })).toBeNull();
+    expect(
+      lifecycleReport({ cold: [], duplicates: [], contradictions: [], changed: [] }),
+    ).toBeNull();
+  });
+
+  it("lists the owner's notes Kelpie changed, newest change per note", () => {
+    const page =
+      lifecycleReport({
+        cold: [],
+        duplicates: [],
+        contradictions: [],
+        changed: [
+          {
+            path: "memory/notes/cha.md",
+            title: "Chá",
+            changedAt: Date.parse("2026-10-05T10:00:00Z"),
+          },
+          {
+            path: "knowledge/casa.md",
+            title: "Casa",
+            changedAt: Date.parse("2026-10-06T09:00:00Z"),
+          },
+        ],
+      }) ?? "";
+    expect(page).toContain("## Your notes Kelpie changed");
+    expect(page).toContain("- [[knowledge/casa|Casa]]: changed 2026-10-06");
+    expect(page).toContain("- [[memory/notes/cha|Chá]]: changed 2026-10-05");
   });
 
   it("lives where memory never reads it", () => {

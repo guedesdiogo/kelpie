@@ -159,4 +159,52 @@ describe("Vault lifecycle", () => {
     await runDurableObjectAlarm(stub);
     expect(backend.files()[LIFECYCLE_REPORT_PATH]).toBe(report);
   });
+
+  it("lists the owner's notes Kelpie changed, and not its own", async () => {
+    const backend = new FakeVaultBackend({
+      "README.md": "# Vault",
+      "memory/notes/cha.md": "# Chá\n\nVerde.\n",
+    });
+    replaceBackendForTesting(backend);
+    replaceGatewayForTesting(null);
+    const stub = vault("lifecycle-owner-changes");
+    await stub.compile("kelpie");
+    await stub.write(
+      "kelpie",
+      [{ path: "memory/notes/cha.md", content: "# Chá\n\nPreto.\n" }],
+      "x",
+    );
+    await stub.write(
+      "kelpie",
+      [{ path: "memory/notes/pao.md", content: "# Pão\n\nIntegral.\n" }],
+      "x",
+    );
+    await runDurableObjectAlarm(stub);
+    await stub.write(
+      "kelpie",
+      [{ path: "memory/notes/pao.md", content: "# Pão\n\nCom sal.\n" }],
+      "x",
+    );
+    await aDayLater(stub);
+    // A change older than a week is no longer listed, nor kept.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO owner_changes (path, at) VALUES ('memory/notes/velha.md', 1)",
+      );
+    });
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    const report = backend.files()[LIFECYCLE_REPORT_PATH] ?? "";
+    expect(report).toContain("## Your notes Kelpie changed");
+    expect(report).toContain("[[memory/notes/cha|Chá]]: changed");
+    expect(report).not.toContain("memory/notes/pao");
+    expect(report).not.toContain("velha");
+    expect(
+      await runInDurableObject(
+        stub,
+        (_instance, state) =>
+          state.storage.sql.exec("SELECT count(*) AS n FROM owner_changes WHERE at = 1").one().n,
+      ),
+    ).toBe(0);
+  });
 });

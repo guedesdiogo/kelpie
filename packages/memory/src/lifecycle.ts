@@ -53,6 +53,8 @@ export interface LifecycleFindings {
   duplicates: { kind: "content" | "title"; notes: NoteRef[] }[];
   /** Pairs of notes about one entity, close enough to be about the same thing, not the same. */
   contradictions: { notes: [NoteRef, NoteRef]; entity: string }[];
+  /** The owner's notes Kelpie changed lately (#149), each with its latest change. */
+  changed: (NoteRef & { changedAt: number })[];
 }
 
 export interface LifecycleOptions {
@@ -62,6 +64,8 @@ export interface LifecycleOptions {
   /** The embedding model whose vectors the index holds. */
   model?: string;
   bands?: Readonly<Record<string, readonly [number, number]>>;
+  /** When Kelpie changed a note it hadn't written (the Context Store's record), in the window shown. */
+  changed?: readonly { path: string; at: number }[];
 }
 
 type LifecycleNote = ReturnType<MemoryIndex["lifecycleNotes"]>[number] & { writtenAt: number };
@@ -142,7 +146,20 @@ export function lifecycleFindings(
     ...sameTitle.map((list) => ({ kind: "title" as const, notes: list })),
   ].sort((a, b) => (a.kind === b.kind ? firstPath(a, b) : a.kind === "content" ? -1 : 1));
 
-  return { cold, duplicates, contradictions: contradictions(index, notes, options) };
+  const latest = new Map<string, number>();
+  for (const { path, at } of options.changed ?? []) {
+    latest.set(path, Math.max(at, latest.get(path) ?? 0));
+  }
+  const changed = [...latest]
+    .map(([path, changedAt]) => ({
+      path,
+      title:
+        index.current(path)?.title ?? path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/, ""),
+      changedAt,
+    }))
+    .sort(byPath);
+
+  return { cold, duplicates, contradictions: contradictions(index, notes, options), changed };
 }
 
 /**
@@ -273,6 +290,19 @@ const day = (at: number) => new Date(at).toISOString().slice(0, 10);
  */
 export function lifecycleReport(findings: LifecycleFindings): string | null {
   const sections: string[] = [];
+  if (findings.changed.length > 0) {
+    sections.push(
+      [
+        "## Your notes Kelpie changed",
+        "",
+        "Notes you wrote or edited that Kelpie changed in the last 7 days. Git keeps every earlier version.",
+        "",
+        ...capped(
+          findings.changed.map((note) => `- ${link(note)}: changed ${day(note.changedAt)}`),
+        ),
+      ].join("\n"),
+    );
+  }
   if (findings.cold.length > 0) {
     sections.push(
       [

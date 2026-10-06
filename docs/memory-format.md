@@ -309,9 +309,9 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - **Scopes and the qualifier** come from the turn, never from the model. A note outside the scopes, or outside memory's index (persona, rules, skills, root files), gets the same "not found" as a missing one.
   - **`memory_write(title, body, kind, level, …)`:** saves one memory through the Context Store's single writer.
     - **A new memory** goes where its title puts it, an event under its `validFrom` date, which it needs. The path gets a number when another note holds it.
-    - **The owner's word stays** (#149): a `deduced` or `inferred` memory can't change a note the person stated, one with `level: explicit` or, without a level, one Kelpie didn't write. The tool asks the model to save it as a new note.
+    - **The owner's word stays** (#149): a `deduced` or `inferred` memory can't change a note the person stated: one with `level: explicit`, or one whose current version Kelpie didn't write, whatever its level, since the owner wrote or edited it. The tool asks the model to save it as a new note.
       - **What the rule guards against:** an honest model labelling its own conclusion as such.
-      - **What it doesn't guard against:** the label is the model's own. An instruction injected into what the model reads could have it claim `explicit` and overwrite the note. Git keeps the old version, and the owner decides whether more is needed (#149).
+      - **What it doesn't guard against:** the label is the model's own. An instruction injected into what the model reads could have it claim `explicit` and overwrite the note. The owner accepted that for v1 (#149): git keeps the old version, and the daily report lists every note of his that Kelpie changed.
     - **A found note's `path`** makes the memory that note's new version, of the same kind, unless it is another agent's or removed. It keeps what the model left out, as far as Kelpie can write it back:
       - the note's id and the owner's keys;
       - its tier, confidence, entities, validity and abstract;
@@ -341,6 +341,7 @@ What keeps memory clean as it grows (#111), without touching how notes rank.
 ### The daily report
 
 Once a day, the Context Store's alarm looks at the index, after GitHub's work and the held files. It writes what it finds to one page, `memory/_lint/report.md`, as links to the notes.
+- **Your notes Kelpie changed** (#149): every note whose version Kelpie's commit replaced or removed, when Kelpie hadn't written that version, in the last 7 days. Each line links the note and gives the day of its latest change, and git keeps every earlier version.
 - **Cold notes:** sessions and events nobody recalls any more. Facts don't decay, and pinned or evergreen notes are exempt.
   - A note's retention is e^(−0.02 × days old), plus 0.6 × ln(1 + recalls) × e^(−0.04 × days since the last recall). A note is cold below 0.2: about 80 days after it was written, if nobody recalled it.
   - **When it was written:** its `updated`, never later than its commit; else the date its file name starts with (`2026-03-04-standup.md`, `2026-03-04.md`); else when the index first saw it. So a vault synced for the first time, or an index rebuilt, doesn't look new.

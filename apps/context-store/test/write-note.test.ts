@@ -477,11 +477,30 @@ describe("writeNote", () => {
         ALL,
       ),
     ).toMatchObject({ ok: true, action: "written" });
-    // A conclusion can revise a conclusion.
+    // A conclusion the owner wrote, or edited, is his word too: Kelpie didn't write this version.
     expect(
       await stub.writeNote(
         "kelpie",
         memory("Água", "Três litros.", { path: concluded, level: "inferred" }),
+        ALL,
+      ),
+    ).toEqual({ ok: false, reason: "owners_word" });
+    // Kelpie's own conclusion can be revised by another.
+    await stub.write(
+      "kelpie",
+      [
+        {
+          path: "memory/notes/sal.md",
+          content: deducedNote.replace(/Água/g, "Sal").replace("Dois litros.", "Pouco."),
+        },
+      ],
+      "x",
+    );
+    await runDurableObjectAlarm(stub);
+    expect(
+      await stub.writeNote(
+        "kelpie",
+        memory("Sal", "Quase nenhum.", { path: "memory/notes/sal.md", level: "inferred" }),
         ALL,
       ),
     ).toMatchObject({ ok: true, action: "written" });

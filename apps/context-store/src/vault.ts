@@ -164,6 +164,8 @@ const MAX_RESOLVE_ATTEMPTS = 3;
 const RESOLVE_TIMEOUT_MS = 60_000;
 /** The wait between two tries at held files, so a short outage can't spend all of a file's. */
 const RESOLVE_RETRY_MS = 5 * 60_000;
+/** The report lists the owner's notes Kelpie changed this long ago at most (#149). */
+const OWNER_CHANGES_MS = 7 * 24 * 60 * 60_000;
 /** How often the lifecycle report is written (#111). */
 const LIFECYCLE_EVERY_MS = 24 * 60 * 60_000;
 /** The soonest the alarm wakes for a held file's next try. */
@@ -181,6 +183,7 @@ const PATH_TABLES = [
   "proposals",
   "recall_counts",
   "authored",
+  "owner_changes",
 ] as const;
 /** A held file's resolution, queued as the owner's text with a conflict settled (#114). */
 const RESOLVE_SUMMARY = "Resolve a pushed merge conflict, with the model";
@@ -221,6 +224,10 @@ CREATE TABLE IF NOT EXISTS recall_counts (
   path TEXT PRIMARY KEY NOT NULL,
   count INTEGER NOT NULL,
   last_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS owner_changes (
+  path TEXT NOT NULL,
+  at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS authored (
   path TEXT PRIMARY KEY NOT NULL,
@@ -883,8 +890,18 @@ export class Vault extends DurableObject<VaultEnv> {
         ).map((row) => [row.path, { count: row.count, lastAt: row.last_at }]),
       );
       const model = this.#get("embedding_model");
+      // The owner's notes Kelpie changed in the last week; older records go.
+      this.#exec("DELETE FROM owner_changes WHERE at < ?", now - OWNER_CHANGES_MS);
+      const changed = this.#exec<{ path: string; at: number }>(
+        "SELECT path, at FROM owner_changes ORDER BY path, at",
+      );
       const report = lifecycleReport(
-        lifecycleFindings(this.#memory, { now, uses, ...(model === null ? {} : { model }) }),
+        lifecycleFindings(this.#memory, {
+          now,
+          uses,
+          changed,
+          ...(model === null ? {} : { model }),
+        }),
       );
       if (report === this.#visible(LIFECYCLE_REPORT_PATH)) return;
       this.#exec(
@@ -1427,14 +1444,11 @@ export class Vault extends DurableObject<VaultEnv> {
   }
 
   /**
-   * Whether a note holds what the person said (#149): `level: explicit`, or no level on a note
-   * Kelpie didn't write. A conclusion never changes it.
+   * Whether a note holds what the person said (#149): `level: explicit`, or a version Kelpie didn't
+   * write, whatever its level, since the owner wrote or edited it. A conclusion never changes it.
    */
   #ownersWord(note: { path: string; level: string | null }): boolean {
-    return (
-      note.level === "explicit" ||
-      (note.level === null && !this.#byKelpie([note.path]).has(note.path))
-    );
+    return note.level === "explicit" || !this.#byKelpie([note.path]).has(note.path);
   }
 
   /** The paths whose version in the vault is one Kelpie's own commit wrote. */
@@ -1773,6 +1787,18 @@ export class Vault extends DurableObject<VaultEnv> {
       }
       const commit = outcome.commit;
       this.ctx.storage.transactionSync(() => {
+        // A version Kelpie didn't write, now replaced or removed by Kelpie: the report lists it (#149).
+        const now = Date.now();
+        for (const path of [...writes.map((write) => write.path), ...deletions]) {
+          if (lastRows.get(path)?.summary === RESOLVE_SUMMARY) continue;
+          this.#exec(
+            `INSERT INTO owner_changes (path, at)
+             SELECT f.path, ? FROM files f LEFT JOIN authored a ON a.path = f.path
+             WHERE f.path = ? AND (a.blob_sha IS NULL OR a.blob_sha != f.blob_sha)`,
+            now,
+            path,
+          );
+        }
         writes.forEach(({ path, content }, i) => {
           this.#exec(
             "INSERT OR REPLACE INTO files (path, content, blob_sha) VALUES (?, ?, ?)",
