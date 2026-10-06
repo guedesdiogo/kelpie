@@ -80,4 +80,75 @@ describe("Vault lifecycle", () => {
     await runDurableObjectAlarm(stub);
     expect(backend.files()).not.toHaveProperty(LIFECYCLE_REPORT_PATH);
   });
+
+  it("drops a queued report when content is forgotten, and writes it again from what is left", async () => {
+    const backend = new FakeVaultBackend({
+      "README.md": "# Vault",
+      "memory/notes/receita-de-bolo.md": recipe,
+      "knowledge/cozinha/receita-de-bolo.md": recipe,
+    });
+    replaceBackendForTesting(backend);
+    replaceGatewayForTesting(null);
+    const stub = vault("lifecycle-forget");
+    await stub.compile("kelpie");
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()).toHaveProperty(LIFECYCLE_REPORT_PATH);
+
+    // A report still waiting in the queue names the note the owner is erasing.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO queue (agent, path, content, summary, queued_at) VALUES ('kelpie', ?, ?, 'x', 1)",
+        LIFECYCLE_REPORT_PATH,
+        "[[knowledge/cozinha/receita-de-bolo|Receita de bolo]]",
+      );
+      state.storage.sql.exec(
+        "UPDATE state SET value = '9999999999999' WHERE key = 'lifecycle_after'",
+      );
+    });
+    backend.forcePush({
+      "README.md": "# Vault",
+      "memory/notes/receita-de-bolo.md": recipe,
+      [LIFECYCLE_REPORT_PATH]: backend.files()[LIFECYCLE_REPORT_PATH] ?? "",
+    });
+    expect(await stub.forget(["knowledge/cozinha/receita-de-bolo.md"])).toMatchObject({ ok: true });
+    await runInDurableObject(stub, (_instance, state) => {
+      expect(
+        state.storage.sql
+          .exec("SELECT count(*) AS n FROM queue WHERE path = ?", LIFECYCLE_REPORT_PATH)
+          .one().n,
+      ).toBe(0);
+    });
+
+    // The next run is due at once, and memory is clean now.
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()).not.toHaveProperty(LIFECYCLE_REPORT_PATH);
+  });
+
+  it("brings the index to the head before it reports", async () => {
+    const backend = new FakeVaultBackend({
+      "README.md": "# Vault",
+      "memory/notes/receita-de-bolo.md": recipe,
+      "knowledge/cozinha/receita-de-bolo.md": recipe,
+    });
+    replaceBackendForTesting(backend);
+    replaceGatewayForTesting(null);
+    const stub = vault("lifecycle-stale-index");
+    await stub.compile("kelpie");
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    const report = backend.files()[LIFECYCLE_REPORT_PATH];
+    expect(report).toContain("## Duplicates");
+
+    // As after a new schema: the index starts over empty.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec("DELETE FROM versions");
+      state.storage.sql.exec("UPDATE state SET value = 'stale' WHERE key = 'index_commit'");
+    });
+    await aDayLater(stub);
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()[LIFECYCLE_REPORT_PATH]).toBe(report);
+  });
 });

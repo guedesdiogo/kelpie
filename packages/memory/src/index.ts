@@ -2,6 +2,7 @@ export { type Entity, foldKey, MAX_ENTITIES, normalizeEntities } from "./entitie
 export { gitBlobSha } from "./hash.ts";
 export {
   defaultTier,
+  isReservedPath,
   isScope,
   KIND_FOLDERS,
   KINDS,

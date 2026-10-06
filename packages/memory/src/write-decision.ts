@@ -4,7 +4,7 @@
 // looks for close notes without a model first, and asks the agent's qualifier only about those.
 import { foldKey, normalizeEntities } from "./entities.ts";
 import { CONTRADICTION_BANDS } from "./lifecycle.ts";
-import type { MemoryIndex, SearchHit } from "./memory-index.ts";
+import type { MemoryIndex, SearchHit, SearchOptions } from "./memory-index.ts";
 import { bodyWithoutHeading } from "./retrieve.ts";
 import { instantOf } from "./time.ts";
 import type { MemoryInput } from "./write.ts";
@@ -37,6 +37,8 @@ export interface ChoiceQualifier {
 }
 
 export interface DecideWriteOptions {
+  /** Now, in epoch milliseconds: a note whose `invalid_at` has passed is history, not a candidate. */
+  now: number;
   /** The agent's qualifier, or null when it has none: the rules decide alone. */
   qualifier: ChoiceQualifier | null;
   /** The new memory's vector, when the caller embedded it, and the model that did. */
@@ -69,23 +71,40 @@ const RELATION_NAMES: ReadonlySet<string> = new Set(Object.keys(RELATIONS));
 
 const words = (text: string) => text.trim().split(/\s+/u).join(" ");
 
-function snippet(title: string, abstract: string | null | undefined, body: string): string {
+/** A note or the memory as the qualifier sees it, and whether it was cut to fit. */
+function snippet(
+  title: string,
+  abstract: string | null | undefined,
+  body: string,
+): { text: string; cut: boolean } {
   const text = [title, abstract, body].filter((part) => part).join("\n");
-  return text.length <= SNIPPET_CHARS ? text : text.slice(0, SNIPPET_CHARS);
+  return text.length <= SNIPPET_CHARS
+    ? { text, cut: false }
+    : // Never half of a surrogate pair.
+      { text: text.slice(0, SNIPPET_CHARS).replace(/[\uD800-\uDBFF]$/, ""), cut: true };
 }
+
+/** A date the memory gives, or NaN for one that isn't a date, which matches nothing. */
+const instant = (value: string | undefined) =>
+  value === undefined ? null : (instantOf(value) ?? Number.NaN);
 
 /**
  * Decides whether a new memory is news, before it is written. It reads the index and asks the
  * qualifier; it writes nothing and reads no clock.
  *
- * Only current notes in the memory's scope and of its kind are candidates, so a decision never
- * points at another scope's note: those with the same title, then those naming one of its
- * entities, then those whose vector is in or above the model's contradiction band. A candidate
- * with the same title, body and validity is a NOOP with no question. Otherwise the qualifier
- * answers one `choice` per candidate, at most five; a duplicate anywhere is a NOOP, then the first
- * note the memory replaces is superseded, then the first it refines is updated. No candidate, no
- * qualifier, a failure, a late answer or an answer off the list adds the memory: nothing is lost,
- * and the daily report lists duplicates.
+ * Only current, unexpired notes in the memory's scope and of its kind are candidates, so a
+ * decision never points at another scope's note. Three lookups find them, taken in turn up to five:
+ * the same title, a shared entity, and a vector at or above the low end of the model's contradiction
+ * band. A candidate with the same title, body and validity is a NOOP with no question.
+ *
+ * Otherwise the qualifier answers one `choice` per candidate. A duplicate anywhere is a NOOP, then
+ * the first note the memory replaces is superseded, then the first it refines is updated. A
+ * duplicate judged on text cut to fit counts as refining it, so a new tail isn't dropped. No
+ * candidate, no qualifier, a failure, a late answer or an answer off the list adds the memory:
+ * nothing is lost, and the daily report lists duplicates.
+ *
+ * The input is trusted to have passed `writeMemory`'s checks, and its scope to be the writer's,
+ * never a model's choice.
  */
 export async function decideWrite(
   index: MemoryIndex,
@@ -93,20 +112,23 @@ export async function decideWrite(
   options: DecideWriteOptions,
 ): Promise<WriteDecision> {
   const add: WriteDecision = { action: "ADD", source: "heuristic" };
-  const scoped = { scopes: [input.scope], limit: LOOKUP };
-  const ofKind = (hits: SearchHit[]) => hits.filter((hit) => hit.kind === input.kind);
+  const scoped = { scopes: [input.scope], limit: LOOKUP, notExpiredAt: options.now };
+  const keys = normalizeEntities(input.entities ?? []).map((entity) => entity.key);
+  const lookups = [
+    index.titled(input.title, scoped),
+    keys.length > 0 ? index.entityHits(keys, scoped) : [],
+    options.vector === undefined ? [] : close(index, scoped, options.vector, options.bands),
+  ].map((hits) => hits.filter((hit) => hit.kind === input.kind));
+  // In turn, so a lookup with many hits doesn't crowd out the others.
   const candidates = new Map<string, SearchHit>();
-  const offer = (hits: SearchHit[]) => {
-    for (const hit of ofKind(hits)) {
-      if (candidates.size < MAX_CANDIDATES && !candidates.has(hit.path)) {
+  for (let i = 0; i < LOOKUP && candidates.size < MAX_CANDIDATES; i += 1) {
+    for (const hits of lookups) {
+      const hit = hits[i];
+      if (hit !== undefined && candidates.size < MAX_CANDIDATES && !candidates.has(hit.path)) {
         candidates.set(hit.path, hit);
       }
     }
-  };
-  offer(index.titled(input.title, scoped));
-  const keys = normalizeEntities(input.entities ?? []).map((entity) => entity.key);
-  if (keys.length > 0) offer(index.entityHits(keys, scoped));
-  if (options.vector !== undefined) offer(close(index, input, options.vector, options.bands));
+  }
   if (candidates.size === 0) return add;
 
   const notes = [...candidates.values()].flatMap((hit) => {
@@ -114,8 +136,8 @@ export async function decideWrite(
     return version === null ? [] : [{ path: hit.path, version }];
   });
   const body = words(input.body);
-  const validFrom = input.validFrom === undefined ? null : instantOf(input.validFrom);
-  const invalidAt = input.invalidAt === undefined ? null : instantOf(input.invalidAt);
+  const validFrom = instant(input.validFrom);
+  const invalidAt = instant(input.invalidAt);
   const same = notes.find(
     ({ version }) =>
       foldKey(words(version.title)) === foldKey(words(input.title)) &&
@@ -127,14 +149,13 @@ export async function decideWrite(
   if (options.qualifier === null || notes.length === 0) return add;
 
   const ids = notes.map((_note, i) => `c${i}`);
+  const memory = snippet(input.title, input.abstract, input.body);
+  const shown = notes.map(({ version }) =>
+    snippet(version.title, version.abstract, bodyWithoutHeading(version.title, version.body)),
+  );
   const state = {
-    memory: snippet(input.title, input.abstract, input.body),
-    notes: Object.fromEntries(
-      notes.map(({ version }, i) => [
-        ids[i],
-        snippet(version.title, version.abstract, bodyWithoutHeading(version.title, version.body)),
-      ]),
-    ),
+    memory: memory.text,
+    notes: Object.fromEntries(shown.map((note, i) => [ids[i], note.text])),
   };
   const questions = Object.fromEntries(
     ids.map((id) => [
@@ -147,10 +168,13 @@ export async function decideWrite(
     ]),
   );
   const answers = await asked(options.qualifier, state, questions, options.timeoutMs ?? TIMEOUT_MS);
-  const relations = ids.map((id) => answers?.[id]?.choice);
-  if (!relations.every((relation): relation is Relation => RELATION_NAMES.has(relation ?? ""))) {
+  const answered = ids.map((id) => answers?.[id]?.choice);
+  if (!answered.every((relation): relation is Relation => RELATION_NAMES.has(relation ?? ""))) {
     return add;
   }
+  const relations = answered.map((relation, i) =>
+    relation === "duplicate" && (memory.cut || shown[i]?.cut) ? "refines" : relation,
+  );
   const first = (relation: Relation) => notes[relations.indexOf(relation)]?.path;
   const duplicate = first("duplicate");
   if (duplicate !== undefined) return { action: "NOOP", path: duplicate, source: "qualifier" };
@@ -164,17 +188,17 @@ export async function decideWrite(
 /** The notes whose vector is at least the low end of the model's band; none for other models. */
 function close(
   index: MemoryIndex,
-  input: MemoryInput,
+  scoped: SearchOptions,
   vector: { model: string; values: readonly number[] },
   bands: Readonly<Record<string, readonly [number, number]>> = CONTRADICTION_BANDS,
 ): SearchHit[] {
-  const band = bands[vector.model];
-  const norm = Math.hypot(...vector.values);
-  if (band === undefined || !(norm > 0)) return [];
-  const hits = index.vectorHits(vector.model, vector.values, {
-    scopes: [input.scope],
-    limit: LOOKUP,
-  });
+  if (!Object.hasOwn(bands, vector.model)) return [];
+  const [low] = bands[vector.model] as readonly [number, number];
+  let squares = 0;
+  for (const value of vector.values) squares += value * value;
+  const norm = Math.sqrt(squares);
+  if (!(norm > 0)) return [];
+  const hits = index.vectorHits(vector.model, vector.values, scoped);
   const shas = new Map(
     hits.flatMap((hit) => {
       const version = index.current(hit.path);
@@ -192,7 +216,7 @@ function close(
       dot += value * (vector.values[i] ?? 0);
       squares += value * value;
     }
-    return squares > 0 && dot / (Math.sqrt(squares) * norm) >= band[0];
+    return squares > 0 && dot / (Math.sqrt(squares) * norm) >= low;
   });
 }
 

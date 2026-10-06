@@ -598,7 +598,7 @@ export class Vault extends DurableObject<VaultEnv> {
     // delays the vault's writes.
     const moreToEmbed = await this.#embedPending();
     await this.#resolveHeld();
-    this.#lifecycle();
+    await this.#lifecycle();
     const queued =
       this.#exec<{ n: number }>(`SELECT count(*) AS n FROM queue WHERE path NOT IN (${HELD})`)[0]
         ?.n ?? 0;
@@ -756,6 +756,10 @@ export class Vault extends DurableObject<VaultEnv> {
           rows += this.#exec<{ n: number }>(`SELECT count(*) AS n ${where}`, named)[0]?.n ?? 0;
           this.#exec(`DELETE ${where}`, named);
         }
+        // A queued memory report may name what is being erased: it goes, and the next alarm writes
+        // the report again from what is left.
+        this.#exec("DELETE FROM queue WHERE path = ?", LIFECYCLE_REPORT_PATH);
+        this.#set("lifecycle_after", "0");
         return rows;
       });
       const stillInVault = this.#exec<{ path: string }>(
@@ -783,11 +787,18 @@ export class Vault extends DurableObject<VaultEnv> {
   /**
    * Once a day, after GitHub's work: what memory's index finds (#111), written as one report page
    * in the vault, or the page removed when memory is clean. A day without news changes nothing,
-   * since the page is queued only when it differs. A failure waits for the next day.
+   * since the page is queued only when it differs. It reads the index at the head: if it can't bring
+   * it there, it tries again at the next alarm. Any other failure waits for the next day.
    */
-  #lifecycle(): void {
+  async #lifecycle(): Promise<void> {
     const now = Date.now();
     if (now < Number(this.#get("lifecycle_after") ?? "0")) return;
+    try {
+      await this.#catchUp();
+    } catch (error) {
+      console.error("Vault: the memory report waits for the index", errorName(error));
+      return;
+    }
     this.#set("lifecycle_after", `${now + LIFECYCLE_EVERY_MS}`);
     try {
       const uses = new Map(

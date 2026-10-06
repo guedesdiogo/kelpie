@@ -680,6 +680,7 @@ export class MemoryIndex {
   /** Every current note, with what the lifecycle jobs (#111) score and group them by. */
   lifecycleNotes(): {
     path: string;
+    scope: string;
     title: string;
     titleKey: string;
     kind: string;
@@ -689,10 +690,13 @@ export class MemoryIndex {
     recordedAt: number;
     validFrom: number | null;
     invalidAt: number | null;
+    /** The frontmatter's `updated`, as written: Kelpie's last write, when it wrote the note. */
+    updated: unknown;
     blobSha: string;
   }[] {
     return this.#exec<{
       path: string;
+      scope: string;
       title: string;
       title_key: string;
       kind: string;
@@ -702,13 +706,15 @@ export class MemoryIndex {
       recorded_at: number;
       valid_from: number | null;
       invalid_at: number | null;
+      updated: SqlValue;
       blob_sha: string;
     }>(
-      `SELECT path, title, title_key, kind, tier, pinned, evergreen, recorded_at, valid_from,
-              invalid_at, blob_sha
+      `SELECT path, scope, title, title_key, kind, tier, pinned, evergreen, recorded_at, valid_from,
+              invalid_at, json_extract(frontmatter, '$.updated') AS updated, blob_sha
        FROM versions WHERE is_current = 1 ORDER BY path`,
     ).map((row) => ({
       path: row.path,
+      scope: row.scope,
       title: row.title,
       titleKey: row.title_key,
       kind: row.kind,
@@ -718,6 +724,7 @@ export class MemoryIndex {
       recordedAt: row.recorded_at,
       validFrom: row.valid_from,
       invalidAt: row.invalid_at,
+      updated: row.updated,
       blobSha: row.blob_sha,
     }));
   }

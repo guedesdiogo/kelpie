@@ -173,6 +173,8 @@ describe("Vault", () => {
       "memory/notes/trailing./a.md",
       "memory/notes/\u202Eevil.md",
       "memory/notes/CON.md",
+      // Kelpie's own files, such as the memory report.
+      "memory/_lint/report.md",
     ]) {
       expect(await stub.write("kelpie", [{ path, content: "x" }], "x"), path).toEqual({
         ok: false,

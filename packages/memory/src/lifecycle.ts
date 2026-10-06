@@ -3,6 +3,7 @@
 // akitaonrails/ai-memory `b8e839f`, MIT, © 2026 Fabio Akita): it decides what to report, never how
 // notes rank.
 import type { MemoryIndex } from "./memory-index.ts";
+import { instantOf, isDate } from "./time.ts";
 
 /** Where the report lives: a `memory/_` folder, which memory never indexes (`placeOf`). */
 export const LIFECYCLE_REPORT_PATH = "memory/_lint/report.md";
@@ -18,8 +19,12 @@ const DAY = 86_400_000;
 const BAND_NOTES = 60;
 /** And reports this many pairs at most. */
 const BAND_PAIRS = 25;
-/** Each list in the report shows this many entries at most. */
+/** Each list in the report shows this many entries at most, and each entry this many notes. */
 const REPORT_ENTRIES = 200;
+const GROUP_NOTES = 10;
+/** A link's title and path are cut to these many characters. */
+const TITLE_CHARS = 120;
+const PATH_CHARS = 200;
 
 /**
  * The cosine band in which two notes about one entity may contradict each other, per embedding
@@ -44,7 +49,7 @@ export interface NoteRef {
 export interface LifecycleFindings {
   /** Sessions and events nobody recalls any more, with when they were written and how often read. */
   cold: (NoteRef & { writtenAt: number; recalled: number })[];
-  /** The same content at several paths, or the same title on several notes. */
+  /** The same content at several paths, or the same title on several notes of one scope. */
   duplicates: { kind: "content" | "title"; notes: NoteRef[] }[];
   /** Pairs of notes about one entity, close enough to be about the same thing, not the same. */
   contradictions: { notes: [NoteRef, NoteRef]; entity: string }[];
@@ -59,12 +64,30 @@ export interface LifecycleOptions {
   bands?: Readonly<Record<string, readonly [number, number]>>;
 }
 
+type LifecycleNote = ReturnType<MemoryIndex["lifecycleNotes"]>[number] & { writtenAt: number };
+
+/**
+ * When a note was written: Kelpie's `updated`, else the date its file name starts with (a session's,
+ * an event's), else when the index first saw it. The index's time alone would make a vault synced
+ * for the first time, or rebuilt, look new.
+ */
+function writtenAt(note: ReturnType<MemoryIndex["lifecycleNotes"]>[number]): number {
+  const updated = typeof note.updated === "string" ? instantOf(note.updated) : null;
+  if (updated !== null) return updated;
+  const dated = /^(\d{4}-\d{2}-\d{2})-/.exec(note.path.slice(note.path.lastIndexOf("/") + 1))?.[1];
+  return dated !== undefined && isDate(dated)
+    ? (instantOf(dated) ?? note.recordedAt)
+    : note.recordedAt;
+}
+
 /** What a daily look at the index finds. It reads only; nothing changes. */
 export function lifecycleFindings(
   index: MemoryIndex,
   options: LifecycleOptions,
 ): LifecycleFindings {
-  const notes = index.lifecycleNotes();
+  const notes: LifecycleNote[] = index
+    .lifecycleNotes()
+    .map((note) => ({ ...note, writtenAt: writtenAt(note) }));
   const byPath = (a: NoteRef, b: NoteRef) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
 
   const cold = notes
@@ -74,8 +97,8 @@ export function lifecycleFindings(
       // An event ages from its own date, so one that is still ahead isn't cold.
       const from =
         note.kind === "event"
-          ? (note.invalidAt ?? note.validFrom ?? note.recordedAt)
-          : note.recordedAt;
+          ? (note.invalidAt ?? note.validFrom ?? note.writtenAt)
+          : note.writtenAt;
       const age = Math.max(0, (options.now - from) / DAY);
       const sinceRead = use ? Math.max(0, (options.now - use.lastAt) / DAY) : 0;
       const retention =
@@ -86,7 +109,7 @@ export function lifecycleFindings(
             {
               path: note.path,
               title: note.title,
-              writtenAt: note.recordedAt,
+              writtenAt: note.writtenAt,
               recalled: use?.count ?? 0,
             },
           ]
@@ -105,7 +128,8 @@ export function lifecycleFindings(
   };
   const sameContent = groups((note) => note.blobSha);
   const listed = new Set(sameContent.map((list) => list.map((note) => note.path).join("\n")));
-  const sameTitle = groups((note) => note.titleKey).filter(
+  // Within a scope: projects' READMEs share a title, and that is no duplicate.
+  const sameTitle = groups((note) => `${note.scope}\n${note.titleKey}`).filter(
     (list) => !listed.has(list.map((note) => note.path).join("\n")),
   );
   const firstPath = (a: { notes: NoteRef[] }, b: { notes: NoteRef[] }) =>
@@ -118,20 +142,34 @@ export function lifecycleFindings(
   return { cold, duplicates, contradictions: contradictions(index, notes, options) };
 }
 
+/**
+ * Pairs of notes about one entity inside the model's band. An expired note is history, not a
+ * contradiction, and a pair a `contradicts` link already joins has been seen to.
+ */
 function contradictions(
   index: MemoryIndex,
-  notes: ReturnType<MemoryIndex["lifecycleNotes"]>,
+  notes: readonly LifecycleNote[],
   options: LifecycleOptions,
 ): LifecycleFindings["contradictions"] {
-  const band =
-    options.model === undefined ? undefined : (options.bands ?? CONTRADICTION_BANDS)[options.model];
-  if (options.model === undefined || band === undefined) return [];
-  const [low, high] = band;
+  const bands = options.bands ?? CONTRADICTION_BANDS;
+  if (options.model === undefined || !Object.hasOwn(bands, options.model)) return [];
+  const [low, high] = bands[options.model] as readonly [number, number];
   const candidates = notes
-    .filter((note) => note.tier !== "episodic")
-    .sort((a, b) => b.recordedAt - a.recordedAt || (a.path < b.path ? -1 : 1))
+    .filter(
+      (note) =>
+        note.tier !== "episodic" && (note.invalidAt === null || note.invalidAt > options.now),
+    )
+    .sort((a, b) => b.writtenAt - a.writtenAt || (a.path < b.path ? -1 : 1))
     .slice(0, BAND_NOTES)
     .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const joined = new Set(
+    candidates.flatMap((note) =>
+      index
+        .links(note.path)
+        .filter((link) => link.kind === "contradicts" && link.path !== null)
+        .flatMap((link) => [`${note.path}\n${link.path}`, `${link.path}\n${note.path}`]),
+    ),
+  );
   const vectors = index.vectorsOf(
     options.model,
     candidates.map((note) => note.blobSha),
@@ -148,6 +186,7 @@ function contradictions(
       const vb = vectors.get(b.blobSha);
       const shared = [...ea].find(([key]) => entities.get(b.path)?.has(key));
       if (vb === undefined || shared === undefined || a.blobSha === b.blobSha) continue;
+      if (joined.has(`${a.path}\n${b.path}`)) continue;
       const similarity = cosine(va, vb);
       if (similarity >= low && similarity < high) {
         found.push({
@@ -178,13 +217,32 @@ function cosine(a: Float32Array, b: Float32Array): number {
   return aa > 0 && bb > 0 ? dot / Math.sqrt(aa * bb) : Number.NaN;
 }
 
-/** A wikilink to a note, from the vault's root, with a title that can't break it. */
-function link(note: NoteRef): string {
-  const title = note.title
-    .replace(/[[\]|\r\n]/g, " ")
-    .replace(/\s+/g, " ")
+/**
+ * Text from a note, safe inside a link or a line: no controls, no invisible or bidirectional
+ * characters, nothing Markdown or HTML reads as syntax, cut to `max` characters.
+ */
+function plain(text: string, max: number): string {
+  return Array.from(
+    text
+      .replace(/[\p{Cc}\p{Cf}[\]|<>!`]/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim(),
+  )
+    .slice(0, max)
+    .join("")
     .trim();
-  return `[[${note.path.replace(/\.md$/, "")}|${title || note.path}]]`;
+}
+
+/** A wikilink to a note, from the vault's root, that a title or a path can't break out of. */
+function link(note: NoteRef): string {
+  const path = plain(note.path.replace(/\.md$/, "").replace(/[#^]/g, " "), PATH_CHARS);
+  return `[[${path}|${plain(note.title, TITLE_CHARS) || path}]]`;
+}
+
+/** A group's notes as links, the first GROUP_NOTES of them. */
+function links(notes: readonly NoteRef[]): string {
+  const shown = notes.slice(0, GROUP_NOTES).map(link).join(", ");
+  return notes.length > GROUP_NOTES ? `${shown}, and ${notes.length - GROUP_NOTES} more` : shown;
 }
 
 function capped(lines: string[]): string[] {
@@ -225,7 +283,7 @@ export function lifecycleReport(findings: LifecycleFindings): string | null {
         ...capped(
           findings.duplicates.map(
             (group) =>
-              `- ${group.kind === "content" ? "The same content" : "The same title"}: ${group.notes.map(link).join(", ")}`,
+              `- ${group.kind === "content" ? "The same content" : "The same title"}: ${links(group.notes)}`,
           ),
         ),
       ].join("\n"),
@@ -241,7 +299,7 @@ export function lifecycleReport(findings: LifecycleFindings): string | null {
         ...capped(
           findings.contradictions.map(
             (pair) =>
-              `- ${link(pair.notes[0])} and ${link(pair.notes[1])}, both about ${pair.entity}`,
+              `- ${link(pair.notes[0])} and ${link(pair.notes[1])}, both about ${plain(pair.entity, TITLE_CHARS)}`,
           ),
         ),
       ].join("\n"),

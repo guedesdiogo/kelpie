@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import {
   type ChoiceQualifier,
+  type DecideWriteOptions,
   decideWrite,
   MemoryIndex,
   type MemoryInput,
@@ -61,6 +62,15 @@ function fakeQualifier(choices: Record<string, string>) {
   return { qualifier, calls };
 }
 
+/** The notes are written on 2026-10-01; decisions run a month later. */
+const NOW = Date.parse("2026-11-01T12:00:00Z");
+
+const decide = (
+  index: MemoryIndex,
+  input: MemoryInput,
+  options: Omit<DecideWriteOptions, "now"> & { now?: number },
+) => decideWrite(index, input, { now: NOW, ...options });
+
 const failing: ChoiceQualifier = {
   qualify: () => Promise.reject(new Error("qualifier down")),
 };
@@ -72,11 +82,9 @@ describe("decideWrite", () => {
       [memory("Bruno gosta de chá", { entities: ["Bruno"] })],
       async (index) => {
         const { qualifier, calls } = fakeQualifier({});
-        const decision = await decideWrite(
-          index,
-          memory("Ana mora no Porto", { entities: ["Ana"] }),
-          { qualifier },
-        );
+        const decision = await decide(index, memory("Ana mora no Porto", { entities: ["Ana"] }), {
+          qualifier,
+        });
         expect(decision).toEqual({ action: "ADD", source: "heuristic" });
         expect(calls).toHaveLength(0);
       },
@@ -88,7 +96,7 @@ describe("decideWrite", () => {
       "decide-noop",
       [memory("Ana mora no Porto", { body: "Ana  mora no Porto\ndesde 2025." })],
       async (index) => {
-        const decision = await decideWrite(
+        const decision = await decide(
           index,
           memory("ana mora no porto", { body: "Ana mora no Porto desde 2025.", level: "inferred" }),
           { qualifier: failing },
@@ -100,11 +108,22 @@ describe("decideWrite", () => {
         });
         // A different validity is news.
         expect(
-          await decideWrite(
+          await decide(
             index,
             memory("Ana mora no Porto", {
               body: "Ana mora no Porto desde 2025.",
               invalidAt: "2027-01-01",
+            }),
+            { qualifier: null },
+          ),
+        ).toEqual({ action: "ADD", source: "heuristic" });
+        // A date that isn't one never matches a note without validity.
+        expect(
+          await decide(
+            index,
+            memory("Ana mora no Porto", {
+              body: "Ana mora no Porto desde 2025.",
+              validFrom: "2026-02-30",
             }),
             { qualifier: null },
           ),
@@ -125,7 +144,7 @@ describe("decideWrite", () => {
           "Ana gosta de café": "unrelated",
           "Ana mora em Lisboa": "replaces",
         });
-        const decision = await decideWrite(
+        const decision = await decide(
           index,
           memory("Ana mudou para o Porto", { entities: ["ana souza"] }),
           { qualifier },
@@ -166,7 +185,7 @@ describe("decideWrite", () => {
           entities: ["Ana Souza"],
         });
         const refines = fakeQualifier({ "Ana trabalha no hospital": "refines" });
-        expect(await decideWrite(index, input, { qualifier: refines.qualifier })).toEqual({
+        expect(await decide(index, input, { qualifier: refines.qualifier })).toEqual({
           action: "UPDATE",
           path: memoryPath("global", "note", "Ana trabalha no hospital"),
           source: "qualifier",
@@ -176,14 +195,14 @@ describe("decideWrite", () => {
           "Ana mora em Lisboa": "replaces",
           "Ana trabalha no hospital": "duplicate",
         });
-        expect(await decideWrite(index, input, { qualifier: both.qualifier })).toEqual({
+        expect(await decide(index, input, { qualifier: both.qualifier })).toEqual({
           action: "NOOP",
           path: memoryPath("global", "note", "Ana trabalha no hospital"),
           source: "qualifier",
         });
 
         const none = fakeQualifier({});
-        expect(await decideWrite(index, input, { qualifier: none.qualifier })).toEqual({
+        expect(await decide(index, input, { qualifier: none.qualifier })).toEqual({
           action: "ADD",
           source: "qualifier",
         });
@@ -198,10 +217,10 @@ describe("decideWrite", () => {
       async (index) => {
         const input = memory("Ana mudou para o Porto", { entities: ["Ana Souza"] });
         const add = { action: "ADD", source: "heuristic" };
-        expect(await decideWrite(index, input, { qualifier: failing })).toEqual(add);
-        expect(await decideWrite(index, input, { qualifier: null })).toEqual(add);
+        expect(await decide(index, input, { qualifier: failing })).toEqual(add);
+        expect(await decide(index, input, { qualifier: null })).toEqual(add);
         expect(
-          await decideWrite(index, input, {
+          await decide(index, input, {
             qualifier: fakeQualifier({ "Ana mora em Lisboa": "delete" }).qualifier,
           }),
         ).toEqual(add);
@@ -216,7 +235,7 @@ describe("decideWrite", () => {
               });
             }),
         };
-        expect(await decideWrite(index, input, { qualifier: late, timeoutMs: 20 })).toEqual(add);
+        expect(await decide(index, input, { qualifier: late, timeoutMs: 20 })).toEqual(add);
         expect(aborted).toBe(true);
       },
     );
@@ -233,7 +252,7 @@ describe("decideWrite", () => {
       async (index) => {
         const { qualifier, calls } = fakeQualifier({});
         expect(
-          await decideWrite(index, memory("Ana mudou para o Porto", { entities: ["Ana Souza"] }), {
+          await decide(index, memory("Ana mudou para o Porto", { entities: ["Ana Souza"] }), {
             qualifier,
           }),
         ).toEqual({ action: "ADD", source: "heuristic" });
@@ -264,7 +283,7 @@ describe("decideWrite", () => {
         const { qualifier, calls } = fakeQualifier({ "Endereço da Ana": "replaces" });
         // cos 0.8 with the address, 0 with the recipe.
         expect(
-          await decideWrite(index, input, {
+          await decide(index, input, {
             ...options,
             qualifier,
             vector: { model: "fake-model", values: [1, 0, 0] },
@@ -282,11 +301,90 @@ describe("decideWrite", () => {
           // cos 0.48 with the address, below the band.
           { model: "fake-model", values: [0.6, 0, -0.8] },
         ]) {
-          expect(await decideWrite(index, input, { ...options, qualifier, vector })).toEqual({
+          expect(await decide(index, input, { ...options, qualifier, vector })).toEqual({
             action: "ADD",
             source: "heuristic",
           });
         }
+      },
+    );
+  });
+  it("never offers a note that has expired", async () => {
+    await withNotes(
+      "decide-expired",
+      [memory("Ana mora em Lisboa", { entities: ["Ana Souza"], invalidAt: "2026-10-15" })],
+      async (index) => {
+        const { qualifier, calls } = fakeQualifier({ "Ana mora em Lisboa": "duplicate" });
+        expect(
+          await decide(index, memory("Ana voltou a morar em Lisboa", { entities: ["Ana Souza"] }), {
+            qualifier,
+          }),
+        ).toEqual({ action: "ADD", source: "heuristic" });
+        expect(calls).toHaveLength(0);
+        // Before it expired, it was a candidate.
+        expect(
+          await decide(index, memory("Ana voltou a morar em Lisboa", { entities: ["Ana Souza"] }), {
+            qualifier,
+            now: Date.parse("2026-10-10T12:00:00Z"),
+          }),
+        ).toMatchObject({ action: "NOOP" });
+      },
+    );
+  });
+
+  it("takes candidates from each lookup in turn, so a close vector isn't crowded out", async () => {
+    const titles = ["Ana A", "Ana B", "Ana C", "Ana D", "Ana E", "Ana F"];
+    await withNotes(
+      "decide-turns",
+      titles.map((title) => memory(title, { entities: ["Ana Souza"] })),
+      async (index) => {
+        index.putEmbeddings(
+          "fake-model",
+          index.embeddingTexts("fake-model").map((item) => ({
+            blobSha: item.blobSha,
+            vector: item.text.startsWith("Ana F") ? [1, 0] : [0, 1],
+          })),
+        );
+        const { qualifier, calls } = fakeQualifier({ "Ana F": "replaces" });
+        expect(
+          await decide(index, memory("Ana mudou de casa", { entities: ["Ana Souza"] }), {
+            qualifier,
+            vector: { model: "fake-model", values: [1, 0] },
+            bands: { "fake-model": [0.7, 0.95] },
+          }),
+        ).toEqual({
+          action: "SUPERSEDE",
+          path: memoryPath("global", "note", "Ana F"),
+          source: "qualifier",
+        });
+        expect(Object.keys(calls[0]?.questions ?? {})).toHaveLength(5);
+      },
+    );
+  });
+
+  it("updates rather than drops a memory when the texts compared were cut", async () => {
+    const long = `Ana mora em Lisboa. ${"Detalhes da casa. ".repeat(80)}`;
+    await withNotes(
+      "decide-cut",
+      [memory("Casa da Ana", { entities: ["Ana Souza"], body: long })],
+      async (index) => {
+        const { qualifier, calls } = fakeQualifier({ "Casa da Ana": "duplicate" });
+        expect(
+          await decide(
+            index,
+            memory("Casa da Ana em Lisboa", {
+              entities: ["Ana Souza"],
+              body: `${long} E agora tem jardim.`,
+            }),
+            { qualifier },
+          ),
+        ).toEqual({
+          action: "UPDATE",
+          path: memoryPath("global", "note", "Casa da Ana"),
+          source: "qualifier",
+        });
+        const note = String((calls[0]?.state.notes as Record<string, string>).c0);
+        expect(note.length).toBeLessThanOrEqual(1_200);
       },
     );
   });
