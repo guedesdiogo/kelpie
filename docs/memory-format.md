@@ -206,8 +206,9 @@ The index is one SQLite database inside the Context Store's Durable Object ([ADR
   - Embeddings of content still in the history survive a rebuild: they are keyed by content, so they stay valid, and recomputing them costs model calls. Embeddings of content no longer in the history are deleted.
 - **Erasure** is the operator's job (ADR-0020 §4): rewrite the vault's git history, then rebuild the index. The rebuild drops every version, link and embedding of the erased text.
 - **Search:** current versions only by default. With `asOf`, it searches the versions the vault held at that instant. With `validAt`, it keeps only memories valid in the world at that instant. It returns 1 to 100 results, 10 by default.
-- **Entity lookup:** the notes that name any of a set of entity keys, current or as of an instant. An entity's own page comes first. Each key weighs one over the number of notes that name it, so a rarer name says more.
-- **Neighbours:** the current notes one step from a note: the notes it links to, then the pages of the entities it names.
+- **Entity lookup:** the notes that name any of a set of entity keys, current or as of an instant. An entity's own page, a note titled with the name that lists it, comes first, a global one before a scoped one. Each key weighs one over the number of notes that name it, so a rarer name says more. A name on more than 50 versions is left out: it singles nothing out.
+- **Neighbours:** the current notes one step from a note: the notes it links to, then the pages of the entities it names, global ones first. A note it contradicts is what it replaced, so it isn't a neighbour.
+- **Scopes:** search, entity lookup and neighbours can be limited to a set of scopes. Without one they see every scope.
 - **A new schema version** drops the derived tables and starts empty, keeping the embeddings. The index then reports no last commit, which tells the sync to replay the vault from the start. Version 2 added the folded title.
 
 ## Retrieval
@@ -216,10 +217,11 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
 - **The gate:** a message that is empty, a command (`/start`), only emoji, or a bare acknowledgement or greeting skips retrieval. Examples: "ok", "valeu!", "obrigado :)", "kkkk", "bom dia", "thanks". The list is in Portuguese and English. No model is called.
 - **Streams:**
   - **full text:** the question's words, folded, with function words kept, since bm25 already weighs them down. When the question's date was already resolved into `asOf` or `validAt`, month and weekday names and years are dropped;
-  - **entities:** runs of one to four words that neither start nor end with a function word, looked up as entity keys;
+  - **entities:** runs of one to four words, at most 64, that don't end in a function word, looked up as entity keys. A name may start with one ("São Paulo", "Will Smith");
   - **graph:** the three best hits of each stream above, then their neighbours. A seed ranks above its own neighbours, so a neighbour can't pass it.
 
-  Each stream fetches max(4 × limit, 20) hits, at most limit + 300. A question about the past (`asOf`) searches the versions memory held then, by text and entities only.
+  Each stream fetches max(4 × limit, 20) hits, as ai-memory does, up to the index's 100. A question about the past (`asOf`) searches the versions memory held then, by text and entities only. Only the first 2,000 characters of a question are read.
+- **Scopes:** given a set of scopes, every stream stays inside it, the graph included, so a link in one conversation's page can't bring in a note from elsewhere. Which scopes a turn may see is the caller's decision. A turn in a group must pass its own.
 - **Fusion:** reciprocal rank fusion with k = 60, every stream weighing the same. Then an authority factor, between 0.55 and 1.5:
   - a conversation's page ×0.77, below curated notes: ai-memory's session and episodic penalties together;
   - a pinned note ×1.08.
@@ -230,7 +232,12 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - each shows its abstract first, or the first 400 characters of its body;
   - the budget left over then goes to the best notes' bodies.
 
-  The block is fenced as reference, not instructions: a conversation's page is what someone said, whoever said it. The budget holds by construction; the evaluation checks it on every question. The slice's starting budget is 1,000 tokens.
+  The block is fenced as reference, not instructions: a conversation's page is what someone said, whoever said it. A note can't step out of it or pass for another note:
+  - the block's tags and every note's heading carry a random id, new for each block;
+  - anything in a note that reads like the block's tags (`<memory`, `</memory`) is escaped;
+  - a heading is one line, without controls.
+
+  The budget holds by construction; the evaluation checks it on every question. The slice's starting budget is 1,000 tokens.
 - **Not yet:**
   - vectors, which wait for the choice of an embedding model;
   - the rerank, which needs a model call per turn;

@@ -5,6 +5,7 @@ declare class TextEncoder {
   encode(input?: string): Uint8Array;
 }
 declare const crypto: {
+  getRandomValues<T extends Uint8Array>(array: T): T;
   readonly subtle: {
     digest(algorithm: "SHA-1" | "SHA-256", data: Uint8Array): Promise<ArrayBuffer>;
   };

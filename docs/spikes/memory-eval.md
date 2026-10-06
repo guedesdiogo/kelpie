@@ -150,33 +150,37 @@ The retrieval column is after the arrow. Everything is deterministic, and is in 
 
 | Slice | n | hit@5 1k | hit@5 10k | hit@5 100k | MRR 1k | MRR 10k | MRR 100k |
 |---|---|---|---|---|---|---|---|
-| overall | 150 | 0.773 → 0.827 | 0.707 → 0.780 | 0.700 → 0.767 | 0.674 → 0.694 | 0.645 → 0.665 | 0.634 → 0.657 |
-| entity | 35 | 0.829 → 0.886 | 0.714 → 0.800 | 0.657 → 0.771 | 0.698 → 0.701 | 0.627 → 0.632 | 0.579 → 0.591 |
+| overall | 150 | 0.773 → 0.827 | 0.707 → 0.773 | 0.700 → 0.767 | 0.674 → 0.694 | 0.645 → 0.666 | 0.634 → 0.660 |
+| entity | 35 | 0.829 → 0.886 | 0.714 → 0.800 | 0.657 → 0.771 | 0.698 → 0.701 | 0.627 → 0.646 | 0.579 → 0.605 |
 | preference | 25 | 0.800 → 0.880 | 0.760 → 0.840 | 0.760 → 0.840 | 0.700 → 0.786 | 0.740 → 0.793 | 0.740 → 0.813 |
 | commitment | 19 | 0.789 → 0.737 | 0.737 → 0.737 | 0.737 → 0.737 | 0.763 → 0.746 | 0.716 → 0.737 | 0.711 → 0.737 |
 | update | 25 | 0.800 → 0.800 | 0.800 → 0.800 | 0.800 → 0.800 | 0.800 → 0.786 | 0.800 → 0.780 | 0.800 → 0.780 |
 | as-of | 15 | 0.733 → 0.800 | 0.600 → 0.600 | 0.600 → 0.600 | 0.615 → 0.636 | 0.550 → 0.567 | 0.567 → 0.567 |
-| multi-hop | 20 | 0.500 → 0.700 | 0.400 → 0.700 | 0.450 → 0.650 | 0.221 → 0.278 | 0.197 → 0.262 | 0.193 → 0.251 |
+| multi-hop | 20 | 0.500 → 0.700 | 0.400 → 0.650 | 0.450 → 0.650 | 0.221 → 0.278 | 0.197 → 0.249 | 0.193 → 0.251 |
 | procedure | 11 | 1.000 → 1.000 | 1.000 → 1.000 | 1.000 → 1.000 | 1.000 → 1.000 | 0.955 → 0.955 | 0.955 → 0.955 |
 | names a shared first name | 34 | 0.735 → 0.794 | 0.529 → 0.647 | 0.500 → 0.588 | 0.594 → 0.623 | 0.474 → 0.509 | 0.441 → 0.478 |
-| names nobody by first name | 116 | 0.784 → 0.836 | 0.759 → 0.819 | 0.759 → 0.819 | 0.697 → 0.715 | 0.695 → 0.710 | 0.691 → 0.709 |
-| tuning half | 75 | 0.760 → 0.867 | 0.667 → 0.747 | 0.667 → 0.733 | 0.669 → 0.702 | 0.617 → 0.637 | 0.605 → 0.629 |
-| held-out half | 75 | 0.787 → 0.787 | 0.747 → 0.813 | 0.733 → 0.800 | 0.679 → 0.685 | 0.673 → 0.692 | 0.663 → 0.685 |
+| names nobody by first name | 116 | 0.784 → 0.836 | 0.759 → 0.810 | 0.759 → 0.819 | 0.697 → 0.715 | 0.695 → 0.713 | 0.691 → 0.714 |
+| tuning half | 75 | 0.760 → 0.867 | 0.667 → 0.733 | 0.667 → 0.733 | 0.669 → 0.702 | 0.617 → 0.633 | 0.605 → 0.629 |
+| held-out half | 75 | 0.787 → 0.787 | 0.747 → 0.813 | 0.733 → 0.800 | 0.679 → 0.685 | 0.673 → 0.699 | 0.663 → 0.691 |
 
 | Size | hit@1 | hit@3 | hit@10 | Packed tokens, mean / p95 | Stale first |
 |---|---|---|---|---|---|
-| 1,000 | 0.600 → 0.600 | 0.733 → 0.767 | 0.807 → 0.860 | 542 / 687 | 1 → 0 of 11 |
-| 10,000 | 0.593 → 0.593 | 0.680 → 0.707 | 0.740 → 0.793 | 536 / 688 | 0 → 0 of 11 |
-| 100,000 | 0.580 → 0.587 | 0.687 → 0.713 | 0.713 → 0.773 | 546 / 701 | 0 → 0 of 11 |
+| 1,000 | 0.600 → 0.600 | 0.733 → 0.767 | 0.807 → 0.860 | 612 / 759 | 1 → 0 of 11 |
+| 10,000 | 0.593 → 0.600 | 0.680 → 0.707 | 0.740 → 0.787 | 605 / 761 | 0 → 0 of 11 |
+| 100,000 | 0.580 → 0.593 | 0.687 → 0.713 | 0.713 → 0.773 | 616 / 774 | 0 → 0 of 11 |
 
 ### Reading the numbers
 
-- **It generalizes.** On the held-out half at 100k, hit@5 goes from 0.733 to 0.800 and MRR from 0.663 to 0.685, about as much as on the tuning half.
+- **It generalizes.** On the held-out half at 100k, hit@5 goes from 0.733 to 0.800 and MRR from 0.663 to 0.691, as much as on the tuning half.
 - **Multi-hop gains most:** hit@5 goes from 0.45 to 0.65 at 100k. The second memory comes in through the graph, from the first one's entities.
 - **First names gain, but stay the weakest slice:** 0.500 → 0.588 at 100k. Telling the owner's Ana from the others still needs an owner signal (#112).
-- **What got worse:** at 100k, 14 questions rank better, 134 the same and 2 worse. Both worse ones, q027 (entity) and q101 (update), drop from first to second. At 1k and 10k five questions drop. The worst is q074 (commitment): from 1st to 6th at 1k, and from 9th to out of the top 10 at 10k. No slice falls at 100k except those two first places: update MRR 0.800 → 0.780 and entity hit@1 0.514 → 0.486.
-- **The budget holds** for every question at every size, and the evaluation asserts it. The packed slice averages about 540 tokens against the 1,000 allowed; the baseline's five excerpts took about 205.
-- **Cost:** retrieval takes about the same time as the plain search, 23 ms on average at 100k, because the full-text stream dominates. The new folded-title column adds about 6% to the database: 154 MiB at 100k.
+- **Names on many notes are left out of the entity stream.** A city that hundreds of distractors name only listed them in path order. Names on more than 50 versions are now left out. Together with the other fixes from review, entity MRR at 100k went from 0.591 to 0.605. These were fixes, not choices made on the tuning half.
+- **What got worse:**
+  - **At 100k:** 14 questions rank better, 135 the same, and 1 worse. That one, q101 (update), drops from 1st to 2nd, so update hit@1 goes from 0.800 to 0.760 and its MRR from 0.800 to 0.780. No other slice falls at 100k.
+  - **At 1k and 10k:** five and four questions drop. The worst is q074 (commitment): from 1st to 6th at 1k, and from 9th to out of the top 10 at 10k.
+- **The budget holds** for every question at every size, and the evaluation asserts it. The largest packed slice takes 910 of the 1,000 tokens allowed, and the mean is about 610. The baseline's five excerpts took about 205.
+- **Cost:** retrieval takes about the same time as the plain search, 23 ms on average at 100k, because the full-text stream dominates. Timings come from the run, in `eval/last-run.json`, which isn't committed. The folded-title column adds about 6% to the database: 154 MiB at 100k.
+- **The tuning runs were scratch experiments**, run on the tuning half only. Their numbers are quoted above, and their code isn't kept.
 - **Not measured yet:** vectors and the rerank. Both need a model, and the eval has none yet. "hit@k before and after the rerank" waits for that.
 
 ## How to re-run
