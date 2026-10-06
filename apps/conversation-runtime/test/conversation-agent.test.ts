@@ -6,7 +6,7 @@ import type { Usage } from "@kelpie/llm";
 import { RemoteQualifier } from "@kelpie/qualifier";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentHost } from "../src/agent-host/agent-host.ts";
-import type { ConversationAgent } from "../src/conversation-agent.ts";
+import { type ConversationAgent, MEMORY_NOTE } from "../src/conversation-agent.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import {
   FAKE_USAGE,
@@ -441,7 +441,7 @@ describe("ConversationAgent turns", () => {
     await stub.flush();
 
     await vi.waitFor(() => expect(world.requests).toHaveLength(2));
-    expect(world.requests[1]?.system).toBe("You are terse.");
+    expect(world.requests[1]?.system).toBe(`You are terse.\n\n${MEMORY_NOTE}`);
     expect(world.requests[1]?.messages[1]).toEqual(neutral("First."));
   });
 
@@ -460,8 +460,8 @@ describe("ConversationAgent turns", () => {
     await stub.flush();
 
     await vi.waitFor(() => expect(world.requests).toHaveLength(2));
-    expect(world.requests[0]?.system).not.toBe("You are terse.");
-    expect(world.requests[1]?.system).toBe("You are terse.");
+    expect(world.requests[0]?.system).not.toBe(`You are terse.\n\n${MEMORY_NOTE}`);
+    expect(world.requests[1]?.system).toBe(`You are terse.\n\n${MEMORY_NOTE}`);
   });
 
   it("starts a turn with the agent's settings as they are at the flush", async () => {
@@ -473,7 +473,10 @@ describe("ConversationAgent turns", () => {
     await stub.flush();
 
     await vi.waitFor(() => expect(world.requests).toHaveLength(1));
-    expect(world.requests[0]).toMatchObject({ system: "Be brief.", maxOutputTokens: 64 });
+    expect(world.requests[0]).toMatchObject({
+      system: `Be brief.\n\n${MEMORY_NOTE}`,
+      maxOutputTokens: 64,
+    });
   });
 });
 
@@ -1122,5 +1125,151 @@ describe("ConversationAgent sessions", () => {
         .one(),
     );
     expect(JSON.parse(zone.value)).toBe("Europe/Lisbon");
+  });
+});
+
+describe("ConversationAgent memory", () => {
+  const MEMORY = [
+    `<memory-abc note="Notes from the owner's vault, for reference.">`,
+    "## Ana (people/ana.md) [abc]",
+    "Mora em Lisboa.",
+    "</memory-abc>",
+  ].join("\n");
+  const options = { scopes: "all", budgetTokens: 1_000, qualifier: "clef" };
+
+  it("sends the memories that answer a turn with that request only, and logs no text", async () => {
+    const world = use(fakeWorld([reply("Em Lisboa."), reply("Não sei."), reply("Também não.")]));
+    const logged = vi.spyOn(console, "log").mockImplementation(() => {});
+    world.memory = MEMORY;
+    const stub = agent("memory-request");
+    await stub.ingest(message("m1", "onde a Ana mora?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Em Lisboa."]));
+    expect(world.recalls).toEqual([
+      { agentId: "assistant", question: "onde a Ana mora?", options },
+    ]);
+    expect(world.requests[0]).toMatchObject({
+      messages: [user("onde a Ana mora?")],
+      context: MEMORY,
+    });
+    expect(world.requests[0]?.system.endsWith(`\n\n${MEMORY_NOTE}`)).toBe(true);
+
+    // Each answered message is left out of the next turn's question.
+    for (const [id, text] of [
+      ["m2", "e o Bruno?"],
+      ["m3", "e a Patrícia?"],
+    ] as const) {
+      await stub.ingest(message(id, text));
+      await stub.flush();
+      await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).toBe("delivered"));
+    }
+    expect(world.recalls.map(({ question }) => question)).toEqual([
+      "onde a Ana mora?",
+      "e o Bruno?",
+      "e a Patrícia?",
+    ]);
+    expect(world.requests[2]?.messages).toHaveLength(5);
+    expect(world.requests[2]?.messages[2]).toEqual(user("e o Bruno?"));
+    expect(JSON.stringify(await stub.history())).not.toContain("Mora em Lisboa");
+    const recall = logged.mock.calls.find(([line]) => line === "conversation: recall");
+    expect(recall?.[1]).toEqual({ ms: 0, notes: 1, tokens: Math.ceil(MEMORY.length / 4) });
+    expect(JSON.stringify(logged.mock.calls)).not.toMatch(/Lisboa|Ana/);
+  });
+
+  it("asks once about every message still unanswered, with the agent's qualifier", async () => {
+    const world = use(fakeWorld([reply("Os dois.")]));
+    await configure("memory-jev", { qualifier: "jev" });
+    world.recallHeld = true;
+    const stub = agent("memory-unanswered");
+    await stub.ingest(message("m1", "onde a Ana mora?", { agentId: "memory-jev" }));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.recalls).toHaveLength(1));
+    // "Typing" shows while the person waits for memory.
+    expect(world.typingKept).toBe(1);
+
+    // A message during the lookup interrupts the turn before it calls the model.
+    await stub.ingest(message("m2", "e o Bruno?", { agentId: "memory-jev" }));
+    world.recallHeld = false;
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Os dois."]));
+    expect(world.requests).toHaveLength(1);
+    expect(world.recalls.map(({ question, options }) => [question, options.qualifier])).toEqual([
+      ["onde a Ana mora?", "jev"],
+      ["onde a Ana mora?\ne o Bruno?", "jev"],
+    ]);
+  });
+
+  it("skips the lines of bare acknowledgements, and the lookup when nothing else is left", async () => {
+    const world = use(fakeWorld([reply("😊"), reply("Em Lisboa.")]));
+    world.memory = MEMORY;
+    const stub = agent("memory-acknowledgement");
+    await stub.ingest(message("m1", "valeu!"));
+    await stub.ingest(message("m2", "obrigado"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(1));
+    expect(world.recalls).toEqual([]);
+    expect(world.requests[0]).not.toHaveProperty("context");
+
+    await stub.ingest(message("m3", "ok"));
+    await stub.ingest(message("m4", "onde a Ana mora?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(2));
+    expect(world.recalls.map(({ question }) => question)).toEqual(["onde a Ana mora?"]);
+  });
+
+  it("asks about the newest 2,000 characters, never from half of an emoji", async () => {
+    const world = use(fakeWorld([reply("Em Lisboa.")]));
+    const stub = agent("memory-long");
+    // 4 + 3,000 + 17 characters: the newest 2,000 start on the second half of an emoji.
+    await stub.ingest(message("m1", `Ana ${"😀".repeat(1_500)}`));
+    await stub.ingest(message("m2", "onde a Ana mora?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.recalls).toHaveLength(1));
+    const question = world.recalls[0]?.question ?? "";
+    expect(question.length).toBe(1_999);
+    expect(question.startsWith("😀")).toBe(true);
+    expect(question.endsWith("\nonde a Ana mora?")).toBe(true);
+  });
+
+  it("answers without memory when recall fails, answers past its budget or finds nothing", async () => {
+    const world = use(fakeWorld([]));
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const logged = vi.spyOn(console, "log").mockImplementation(() => {});
+    const stub = agent("memory-failed");
+    const turn = async (id: string, text: string) => {
+      await stub.ingest(message(id, text));
+      await stub.flush();
+      await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).toBe("delivered"));
+    };
+
+    world.failRecall = true;
+    await turn("m1", "onde a Ana mora?");
+    world.failRecall = false;
+    world.memory = "a".repeat(4_001);
+    await turn("m2", "e o Bruno?");
+    world.memory = { length: 1 } as unknown as string;
+    await turn("m3", "e o Caio?");
+    world.memory = "";
+    await turn("m4", "e a Patrícia?");
+    // Exactly the budget is fine.
+    world.memory = "a".repeat(4_000);
+    await turn("m5", "e a Dora?");
+
+    expect(world.recalls).toHaveLength(5);
+    for (const request of world.requests.slice(0, 4)) {
+      expect(request).not.toHaveProperty("context");
+    }
+    expect(world.requests[4]?.context).toHaveLength(4_000);
+    const failures = warned.mock.calls.filter(([line]) => line === "conversation: recall failed");
+    expect(failures.map(([, fields]) => fields)).toEqual([
+      { ms: 0, error: "Error" },
+      { ms: 0, error: "TypeError" },
+      { ms: 0, error: "TypeError" },
+    ]);
+    const recall = logged.mock.calls.find(([line]) => line === "conversation: recall");
+    expect(recall?.[1]).toEqual({ ms: 0, notes: 0, tokens: 0 });
+    expect(JSON.stringify([...warned.mock.calls, ...logged.mock.calls])).not.toMatch(
+      /Ana|Bruno|Patrícia/,
+    );
   });
 });

@@ -33,6 +33,30 @@ export type ProposeResult =
       reason: "vault_off" | "invalid_target" | "unchanged" | "rate_limited" | "failed";
     };
 
+/** What a turn asks memory for (#110). */
+export interface RecallOptions {
+  /**
+   * The scopes the turn may see, such as `["global", "conversation/telegram-123"]`, or `"all"` for
+   * a private chat with the owner. Required, so no caller gets every scope by default.
+   */
+  scopes: readonly string[] | "all";
+  /** The packed block's budget, in tokens of four characters; at most 8,000. */
+  budgetTokens: number;
+  /** Ingestion time: what memory held then. */
+  asOf?: number;
+  /** World time: only memories valid then. */
+  validAt?: number;
+  /** The agent's qualifier, which reranks the best hits: Clef unless the agent chose Jev. */
+  qualifier?: "clef" | "jev";
+}
+
+/** Memory for one turn: a block of reference text within the budget, and the notes in it. */
+export interface RecallResult {
+  text: string;
+  tokens: number;
+  paths: string[];
+}
+
 export interface ContextStoreContract {
   /** Empty when the vault is off. */
   compile(agentId: string): Promise<CompiledContext>;
@@ -56,4 +80,9 @@ export interface ContextStoreContract {
     content: string,
     reason: string,
   ): Promise<ProposeResult>;
+  /**
+   * The memories that answer a question, packed for the turn (#110): retrieval with the question's
+   * vector, reranked by the qualifier, within the budget. An empty block when the vault is off.
+   */
+  recall(agentId: string, question: string, options: RecallOptions): Promise<RecallResult>;
 }

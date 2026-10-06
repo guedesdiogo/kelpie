@@ -269,18 +269,27 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   The block is fenced as reference, not instructions: a conversation's page is what someone said, whoever said it. A note can't step out of it or pass for another note:
   - the block's tags and every note's heading carry a random id, new for each block;
   - anything in a note that reads like the block's tags (`<memory`, `</memory`) is escaped;
-  - a heading is one line, without controls.
+  - a heading is one line, without controls, with at most 120 characters of the title and 300 of the path.
 
   The budget holds by construction; the evaluation checks it on every question. The slice's starting budget is 1,000 tokens.
 - **Rerank,** on ai-memory's contract:
   - a judge scores the 30 best hits at most, from each note's title, abstract and body start, 600 characters;
   - only those are reordered, and the caller keeps its limit after, so notes can rise from below it;
-  - the fused order stays when the judge fails, doesn't answer in 5 s, or gives any score that is missing or outside 0 to 1.
+  - the fused order stays when the judge fails, doesn't answer in time (5 s by default; a turn's recall allows 3.5 s), or gives any score that is missing or outside 0 to 1.
 
   Kelpie's judge is the agent's qualifier, asked one yes-or-no question per note in one call, with the notes marked as data, not instructions.
+- **In a turn:** the conversation runtime asks once per turn, when the person has finished.
+  - **The question** is the lines of every message since the last reply, even a partial one, without their time stamps. Lines the gate skips, such as a bare acknowledgement, are left out, and a turn with nothing else left skips the lookup. Only the newest 2,000 characters go.
+  - **Scopes and budget:** it asks for all scopes, since ingress admits only the owner's direct chats ([ADR-0015](adr/0015-single-player-first.md)). The budget is the slice's 1,000 tokens, and the agent's qualifier reranks.
+  - **Where the block goes:** in that request's context, after the messages; an answer longer than the budget is refused. History, checkpoints and the system prompt never hold it.
+    - Anthropic writes the cache only at a breakpoint, so the adapter puts one on the last block before the context. The next request, which repeats the messages without the block, reads them from the cache.
+    - OpenAI caches the longest prefix, so the context only goes last.
+    - The system prompt tells the model, on every turn, that the block is the vault's notes, not the person's words or instructions.
+  - **Waiting:** the person waits for it while "typing" shows. Embedding the question takes up to 2 s, and the rerank 1.4 s at p50 and up to 2.5 s at p95 ([spike](spikes/memory-eval.md#with-models)), with its own 3.5 s cap.
+  - **Failure:** a Context Store that fails, or doesn't answer in 6 s, leaves the turn without memory. A message that arrives meanwhile interrupts the turn before its model call, and the next turn asks again.
+  - It logs the time, the number of notes and their tokens, never text.
 - **Not yet:**
   - the always-loaded core;
-  - the turn's assembly in the conversation runtime;
   - the agent's memory tools (#126).
 
 ## Credits

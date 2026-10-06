@@ -61,6 +61,20 @@ describe("ModelRouter", () => {
     expect(anthropic.requests).toEqual([{ ...request, model: "claude-opus-5-5", effort: "high" }]);
   });
 
+  it("passes a request's context on, and drops one that isn't text", async () => {
+    const anthropic = scripted("anthropic", {});
+    const router = new ModelRouter(routes, { anthropic: anthropic.provider });
+
+    await collect(router.stream("medium", { ...request, context: "<memory/>" }));
+    await collect(
+      router.stream("medium", { ...request, context: 42 } as unknown as typeof request),
+    );
+    expect(anthropic.requests).toEqual([
+      { ...request, model: "claude-sonnet-5-5", context: "<memory/>" },
+      { ...request, model: "claude-sonnet-5-5" },
+    ]);
+  });
+
   it("falls back to the next candidate on a retryable error before any event", async () => {
     const anthropic = scripted("anthropic", {
       "claude-haiku-4-5": { events: [], error: overloaded },
