@@ -626,6 +626,12 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       // The person waits for this, with "typing" showing.
       const memory = await this.#recall(settings);
       if (controller.signal.aborted || !this.#isRunning(turnId)) return;
+      // Kept with the turn, to be sent again unchanged on later requests (#137).
+      this.#db
+        .update(schema.turns)
+        .set({ context: memory })
+        .where(eq(schema.turns.id, turnId))
+        .run();
       const call = await this.#ports.generate(settings.tier, {
         system: `${settings.systemPrompt}\n\n${MEMORY_NOTE}`,
         messages: this.#messages(turn.systemVersion, turn.checkpointId),
@@ -1180,22 +1186,40 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
             .from(schema.checkpoints)
             .where(eq(schema.checkpoints.id, checkpointId))
             .get();
-    const messages = this.#db
+    const rows = this.#db
       .select({
+        turnId: schema.history.turnId,
         message: schema.history.message,
         systemVersion: schema.history.systemVersion,
         checkpointId: schema.history.checkpointId,
+        context: schema.turns.context,
       })
       .from(schema.history)
+      .leftJoin(schema.turns, eq(schema.turns.id, schema.history.turnId))
       .where(gte(schema.history.id, checkpoint?.keptFromHistoryId ?? 0))
       .orderBy(asc(schema.history.id))
-      .all()
-      .map(({ message, systemVersion: version, checkpointId: produced }): ChatMessage => {
-        if (message.role !== "assistant") return message;
-        if (version === systemVersion && produced === checkpointId) return message;
-        const { native: _native, ...neutral } = message;
-        return neutral;
-      });
+      .all();
+    // An answered turn's memories go back where its request sent them, after its last user
+    // message: Anthropic binds a reply's thinking to everything sent before it (#137).
+    const answered = new Set(
+      rows.filter((row) => row.message.role === "assistant").map((row) => row.turnId),
+    );
+    const lastUser = new Map<number, number>();
+    rows.forEach((row, at) => {
+      if (row.message.role === "user") lastUser.set(row.turnId, at);
+    });
+    const messages = rows.map((row, at): ChatMessage => {
+      const { message, systemVersion: version, checkpointId: produced, context } = row;
+      if (message.role === "user") {
+        return context !== null && answered.has(row.turnId) && lastUser.get(row.turnId) === at
+          ? { ...message, parts: [...message.parts, { type: "text", text: context }] }
+          : message;
+      }
+      if (message.role !== "assistant") return message;
+      if (version === systemVersion && produced === checkpointId) return message;
+      const { native: _native, ...neutral } = message;
+      return neutral;
+    });
     if (!checkpoint) return messages;
     // The summary leads the first kept message, so roles still alternate.
     const summary = {

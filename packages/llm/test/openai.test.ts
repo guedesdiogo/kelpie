@@ -207,17 +207,28 @@ describe("OpenAIResponsesProvider", () => {
     });
   });
 
-  it("sends a request's context as a last user message, after the conversation", async () => {
-    const { fetch, calls } = fakeFetch(sse(toolTurn));
+  it("sends a request's context after the conversation, in its last user message", async () => {
+    const { fetch, calls } = fakeFetch(sse(toolTurn), sse(toolTurn));
     const context = "<memory>Ana mora em Lisboa.</memory>";
     await collect(provider(fetch).stream(request({ context })));
-
     expect(requestAt(calls, 0).body.input).toEqual([
       {
         type: "message",
         role: "user",
-        content: [{ type: "input_text", text: "Weather in Lisbon?" }],
+        content: [
+          { type: "input_text", text: "Weather in Lisbon?" },
+          { type: "input_text", text: context },
+        ],
       },
+    ]);
+
+    // After a reply, the context comes as a message of its own.
+    const messages: ChatMessage[] = [
+      ...request().messages,
+      { role: "assistant", parts: [{ type: "text", text: "Sunny." }] },
+    ];
+    await collect(provider(fetch).stream(request({ messages, context })));
+    expect((requestAt(calls, 1).body.input as unknown[]).slice(-1)).toEqual([
       { type: "message", role: "user", content: [{ type: "input_text", text: context }] },
     ]);
   });
