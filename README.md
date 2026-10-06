@@ -11,7 +11,7 @@ Kelpie is a self-hosted, multi-agent AI assistant harness that connects chat cha
 ## Goals
 
 - **Human-paced conversations, when you want them.** Buffer fragmented user messages before calling the model, and deliver one model reply as several paced messages with a typing indicator where the channel supports it. Each agent can switch this mode on or off.
-- **Memory that compounds.** Agent persona, skills and learnings live as versioned Markdown files that people and other agents can read and edit. Personal data such as user profiles must stay erasable, so where it lives is an [open decision](https://github.com/guedesdiogo/kelpie/issues/4).
+- **Memory that compounds.** Agent persona, skills, learnings and memories live as versioned Markdown files in the owner's own git repository, which people and other agents can read and edit ([ADR-0020](docs/adr/0020-shared-memory-engine.md)). That includes what agents learn about other people. Kelpie is meant for personal use. Erasing someone's data means rewriting git history, and that, like compliance with privacy law, is the responsibility of whoever runs the instance.
 - **Tools from anywhere.** Remote MCP servers and Composio behind a single tool interface.
 - **A qualifier layer.** Typed decisions (which tool, which skill, which memories) go through Jev, TypeSafe AI's decision model, with a fallback that needs no API key.
 - **More than one model provider.** Anthropic and OpenAI first, behind a provider interface that leaves room for others.

@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-05
 - Issue: [#64](https://github.com/guedesdiogo/kelpie/issues/64)
+- Amended by: [ADR-0020](0020-shared-memory-engine.md), the reference to an erasure workflow no longer applies
 
 ## Context
 
