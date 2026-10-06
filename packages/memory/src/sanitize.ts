@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noControlCharactersInRegex: this file matches control characters on purpose
 // The secrets sanitizer for captured conversations (ADR-0020 §4: secrets only, no personal-data
 // gate). Translated from ai-memory's `sanitize.rs` at fc4da03
 // (https://github.com/akitaonrails/ai-memory/blob/fc4da03/crates/ai-memory-core/src/sanitize.rs),
@@ -23,7 +24,7 @@
 const ESCAPES =
   /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[@-Z\\-_]/g;
 /** C0 and C1 controls but tab, newline and carriage return; DEL; bidirectional overrides. */
-const CONTROLS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f‪-‮⁦-⁩]/g;
+const CONTROLS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g;
 
 interface Rule {
   kind: string;

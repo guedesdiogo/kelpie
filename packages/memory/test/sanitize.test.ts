@@ -52,7 +52,7 @@ describe("sanitizeSecrets", () => {
 
   it("strips terminal escapes, controls and bidirectional overrides before matching", () => {
     const split = join("gh", "p_", tail(18), "\u001b[31m", tail(18));
-    const { text } = sanitizeSecrets(`x ${split} ‮evil\u0007`);
+    const { text } = sanitizeSecrets(`x ${split} \u202eevil\u0007`);
     expect(text).toBe("x [REDACTED:github_token] evil");
   });
 
