@@ -253,7 +253,12 @@ describe("Vault", () => {
     const committed = backend.commitRequests.flatMap((request) => request.writes);
     expect(committed.map((write) => write.path)).toEqual(["memory/people/ana.md"]);
     await runInDurableObject(stub, async (_instance, state) => {
-      expect(state.storage.sql.exec("SELECT count(*) AS n FROM queue").one()).toEqual({ n: 0 });
+      // Both notes are titled "Ana", so the daily report has queued itself; nothing else waits.
+      expect(
+        state.storage.sql
+          .exec("SELECT count(*) AS n FROM queue WHERE path != 'memory/_lint/report.md'")
+          .one(),
+      ).toEqual({ n: 0 });
       // Only what lost to the owner is set aside.
       expect(
         state.storage.sql.exec("SELECT agent, path, content, reason FROM conflicts").toArray(),
