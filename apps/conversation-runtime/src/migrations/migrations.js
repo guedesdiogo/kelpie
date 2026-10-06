@@ -6,6 +6,7 @@ import m0004 from "./0004_turn_usage.sql";
 import m0005 from "./0005_history_checkpoints.sql";
 import m0006 from "./0006_turn_context.sql";
 import m0007 from "./0007_turn_tools_key.sql";
+import m0008 from "./0008_turn_kelpie_notes.sql";
 import journal from "./meta/_journal.json";
 
 export default {
@@ -19,5 +20,6 @@ export default {
     m0005,
     m0006,
     m0007,
+    m0008,
   },
 };

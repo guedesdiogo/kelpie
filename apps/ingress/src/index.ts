@@ -1,7 +1,7 @@
 import { DIRECTORY_NAME, type Remote, remoteKeySet, verifyAccessJwt } from "@kelpie/access";
 import type { ChannelWebhooksContract } from "@kelpie/channels";
 import { TELEGRAM_WEBHOOK_PATH } from "@kelpie/channels/telegram";
-import { REGISTRY_NAME, type RegistryContract } from "@kelpie/config";
+import { REGISTRY_NAME, type RegistryContract, versionReport } from "@kelpie/config";
 import type { ConversationContract } from "@kelpie/conversation/contract";
 import { admitSender } from "./admission.ts";
 import {
@@ -65,6 +65,13 @@ export default {
 
     if (request.method === "GET" && pathname === "/health") {
       return Response.json({ status: "ok" });
+    }
+
+    // Public like /health: the repository is public, and the webchat's footer reads it (#148).
+    if (request.method === "GET" && pathname === "/version") {
+      return Response.json(versionReport(env.CF_VERSION_METADATA), {
+        headers: { "cache-control": "no-store" },
+      });
     }
 
     if (request.method === "POST" && pathname === GITHUB_WEBHOOK_PATH) {

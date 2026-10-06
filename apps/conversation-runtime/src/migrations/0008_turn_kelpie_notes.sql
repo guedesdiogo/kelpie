@@ -1,0 +1,1 @@
+ALTER TABLE `turns` ADD `kelpie_notes` text;
