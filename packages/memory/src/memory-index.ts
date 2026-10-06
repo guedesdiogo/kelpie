@@ -13,10 +13,11 @@ export type SqlValue = ArrayBuffer | string | number | null;
 /** The part of a SQLite Durable Object's storage the index uses; `ctx.storage` satisfies it. */
 export interface IndexStorage {
   sql: {
+    /** A cursor: read whole, or row by row so a large result isn't held at once. */
     exec<T extends Record<string, SqlValue>>(
       query: string,
       ...bindings: SqlValue[]
-    ): { toArray(): T[] };
+    ): { toArray(): T[] } & Iterable<T>;
   };
   transactionSync<T>(closure: () => T): T;
 }
@@ -588,6 +589,78 @@ export class MemoryIndex {
       at,
     )[0];
     return row === undefined ? null : toVersion(row);
+  }
+
+  /**
+   * Current notes with no vector from `model` yet, once per content: what to embed next. A
+   * note's text is its title, abstract and body.
+   */
+  embeddingTexts(model: string, limit = 256): { blobSha: string; text: string }[] {
+    return this.#exec<{ blob_sha: string; title: string; abstract: string | null; body: string }>(
+      `SELECT v.blob_sha, v.title, v.abstract, v.body FROM versions v
+       WHERE v.is_current = 1
+         AND NOT EXISTS (SELECT 1 FROM embeddings e WHERE e.blob_sha = v.blob_sha AND e.model = ?)
+       GROUP BY v.blob_sha ORDER BY v.blob_sha LIMIT ?`,
+      model,
+      Math.min(Math.max(Math.trunc(limit) || 1, 1), 1_000),
+    ).map((row) => ({
+      blobSha: row.blob_sha,
+      text: [row.title, row.abstract, row.body].filter((part) => part).join("\n\n"),
+    }));
+  }
+
+  /** Keeps vectors by content and model; they survive a rebuild, as embeddings are a cache. */
+  putEmbeddings(model: string, items: readonly { blobSha: string; vector: readonly number[] }[]) {
+    this.#storage.transactionSync(() => {
+      for (const { blobSha, vector } of items) {
+        if (vector.length === 0) continue;
+        this.#exec(
+          "INSERT OR REPLACE INTO embeddings (blob_sha, model, dims, vector) VALUES (?, ?, ?, ?)",
+          blobSha,
+          model,
+          vector.length,
+          new Float32Array(vector).buffer,
+        );
+      }
+    });
+  }
+
+  /**
+   * Notes nearest a query vector by cosine similarity, best first, among the versions `options`
+   * selects. The vectors are read row by row, so memory stays flat as the vault grows.
+   */
+  vectorHits(model: string, query: readonly number[], options: SearchOptions = {}): SearchHit[] {
+    const norm = Math.hypot(...query);
+    if (query.length === 0 || !(norm > 0)) return [];
+    const limit = limitOf(options);
+    const [filter, bindings] = versionFilter(options);
+    const best: { score: number; row: HitRow }[] = [];
+    const rows = this.#storage.sql.exec<HitRow & { vector: ArrayBuffer; dims: number }>(
+      `SELECT ${HIT_COLUMNS}, e.vector, e.dims
+       FROM versions v JOIN embeddings e ON e.blob_sha = v.blob_sha AND e.model = ?
+       WHERE ${filter}`,
+      model,
+      ...bindings,
+    );
+    for (const row of rows) {
+      // A vector of another length, or a blob that isn't whole floats, can't be compared.
+      if (row.dims !== query.length || row.vector.byteLength !== query.length * 4) continue;
+      const vector = new Float32Array(row.vector);
+      let dot = 0;
+      let squares = 0;
+      for (let i = 0; i < vector.length; i += 1) {
+        const value = vector[i] ?? 0;
+        dot += value * (query[i] ?? 0);
+        squares += value * value;
+      }
+      const score = squares > 0 ? dot / (Math.sqrt(squares) * norm) : 0;
+      if (!Number.isFinite(score)) continue;
+      if (best.length === limit && score <= (best.at(-1)?.score ?? -Infinity)) continue;
+      const at = best.findIndex((entry) => score > entry.score);
+      best.splice(at === -1 ? best.length : at, 0, { score, row });
+      if (best.length > limit) best.pop();
+    }
+    return best.map(({ row }) => toHit(row));
   }
 
   /** One version, by its path and the commit that wrote it. */

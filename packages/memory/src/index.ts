@@ -41,6 +41,13 @@ export {
 } from "./memory-index.ts";
 export { isMemoryId, LEVELS, type Level, type Note, readNote } from "./note.ts";
 export {
+  type Judge,
+  type NoulQualifier,
+  qualifierJudge,
+  type RerankCandidate,
+  rerank,
+} from "./rerank.ts";
+export {
   isSessionRecall,
   needsMemory,
   type Packed,
@@ -48,6 +55,7 @@ export {
   pack,
   queryWords,
   type Retrieved,
+  type RetrieveOptions,
   retrieve,
   type StreamName,
 } from "./retrieve.ts";
