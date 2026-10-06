@@ -146,6 +146,8 @@ describe("Vault forget", () => {
     );
     // The rewrite dropped the people folder, but it wasn't pushed for Caio.
     backend.forcePush({ "README.md": "# Vault", "memory/notes/caio.md": "# Caio\n" });
+    // A path names that file only, not every path it begins.
+    expect(await stub.forget(["memory/notes/cai"])).toMatchObject({ forgotten: 0 });
     expect(await stub.forget(["memory/people/", "memory/notes/caio.md"])).toEqual({
       ok: true,
       forgotten: 2,
@@ -155,6 +157,23 @@ describe("Vault forget", () => {
       state.storage.sql.exec("SELECT path FROM queue").toArray(),
     );
     expect(left).toEqual([]);
+  });
+
+  it("keeps the hold of a file the vault still has with markers", async () => {
+    const base = "# Ana\n\nMora em Lisboa.\n";
+    const backend = new FakeVaultBackend({ "README.md": "# Vault", "memory/people/ana.md": base });
+    replaceBackendForTesting(backend);
+    replaceGatewayForTesting(null);
+    const stub = vault("forget-held");
+    await stub.compile("kelpie");
+    backend.push({
+      "memory/people/ana.md":
+        "# Ana\n\n<<<<<<< HEAD\nMora no Porto.\n=======\nMora em Braga.\n>>>>>>> main\n",
+    });
+    await runDurableObjectAlarm(stub);
+    expect(await stub.forget(["memory/people/ana.md"])).toMatchObject({ ok: true });
+    expect(await stub.read("memory/people/ana.md")).toBe(base);
+    expect(await stub.held()).toHaveLength(1);
   });
 
   it("refuses paths it can't name, and does nothing with the vault off", async () => {

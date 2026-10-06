@@ -16,8 +16,19 @@ describe("hasConflictMarkers", () => {
     ["markers out of order", ">>>>>>> main\n=======\n<<<<<<< HEAD\n"],
     ["markers inside a line", "see <<<<<<< HEAD and ======= and >>>>>>> main"],
     ["markers quoted in a code fence", "```\n<<<<<<< HEAD\na\n=======\nb\n>>>>>>> main\n```\n"],
+    ["markers quoted in a tilde fence", "~~~\n<<<<<<< HEAD\na\n=======\nb\n>>>>>>> main\n~~~\n"],
   ])("ignores %s", (_name, text) => {
     expect(hasConflictMarkers(text)).toBe(false);
+  });
+
+  it.each([
+    ["after a fence left open", "```\ncode\n<<<<<<< HEAD\na\n=======\nb\n>>>>>>> main\n"],
+    [
+      "inside a fence a shorter one can't close",
+      "````\n```\n<<<<<<< HEAD\na\n=======\nb\n>>>>>>> main\n```\n",
+    ],
+  ])("finds a conflict %s", (_name, text) => {
+    expect(hasConflictMarkers(text)).toBe(true);
   });
 
   it("reads a file in one pass, however its markers repeat", () => {
@@ -28,6 +39,8 @@ describe("hasConflictMarkers", () => {
     expect(hasConflictMarkers(opened)).toBe(false);
     // A backtracking regex took tens of seconds on these 512 KB.
     expect(performance.now() - started).toBeLessThan(1_000);
+    // An unfinished block over a long file: its lines are kept one at a time.
+    expect(hasConflictMarkers(`<<<<<<< HEAD\n${"\n".repeat(600_000)}`)).toBe(false);
   });
 });
 
@@ -62,6 +75,20 @@ describe("keepsProvenance", () => {
     ["new frontmatter", "---\npinned: true\n---\n# Ana\n\nMora no Porto.\n\nGosta de café.\n"],
   ])("refuses %s", (_name, text) => {
     expect(keeps(text)).toBe(false);
+  });
+
+  it("tries every way to split the answer, not only the first", () => {
+    const paragraphs = conflictsOf(
+      "a\n<<<<<<< A\nx1\n\nx2\n=======\ny\n>>>>>>> B\n\n<<<<<<< A\np\n=======\nq\n>>>>>>> B\nz\n",
+    );
+    // A blank line inside the first conflict, before the blank line between the two.
+    expect(paragraphs !== null && keepsProvenance(paragraphs, "a\nx1\n\nx2\n\np\nz\n")).toBe(true);
+    const adjacent = conflictsOf(
+      "a\n<<<<<<< A\n1\n=======\n2\n>>>>>>> B\n<<<<<<< A\n3\n=======\n4\n>>>>>>> B\nb",
+    );
+    expect(adjacent !== null && keepsProvenance(adjacent, "a\n1\n4\nb")).toBe(true);
+    expect(adjacent !== null && keepsProvenance(adjacent, "a\nb")).toBe(true);
+    expect(adjacent !== null && keepsProvenance(adjacent, "a\n3\n1\nb")).toBe(false);
   });
 
   it("takes a conflict's base lines, and checks each conflict between its neighbours", () => {

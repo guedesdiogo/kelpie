@@ -1,7 +1,7 @@
 import { fromNdjsonStream, type LlmEvent, type ModelTier, type RoutedRequest } from "@kelpie/llm";
 import { splitFrontmatter } from "@kelpie/memory";
 import { parseDocument } from "yaml";
-import { type ConflictedFile, conflictsOf, keepsProvenance } from "./conflicts.ts";
+import { type ConflictedFile, conflictsOf, hasStrayMarkers, keepsProvenance } from "./conflicts.ts";
 
 /** A model call through llm-gateway's `generate`, as its RPC stub answers it. */
 export interface Generation {
@@ -100,9 +100,12 @@ function unfenced(answer: string): string {
   return fenced ? `${fenced[1]}\n` : answer;
 }
 
-function checked(resolved: string, conflicted: ConflictedFile, marked: string): string | null {
-  if (resolved.trim() === "") return null;
-  if (/^(<{7}|>{7})/m.test(resolved) || conflictsOf(resolved) !== null) return null;
+function checked(answer: string, conflicted: ConflictedFile, marked: string): string | null {
+  if (answer.trim() === "") return null;
+  // The file's own final newline, whatever the model ended with.
+  const ending = /\r?\n$/.exec(marked)?.[0] ?? "";
+  const resolved = answer.replace(/(\r?\n)+$/, "") + ending;
+  if (hasStrayMarkers(resolved) || conflictsOf(resolved) !== null) return null;
   if (!keepsProvenance(conflicted, resolved)) return null;
   const before = splitFrontmatter(marked).yaml;
   const after = splitFrontmatter(resolved).yaml;

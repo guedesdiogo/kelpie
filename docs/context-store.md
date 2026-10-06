@@ -29,18 +29,18 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - The result keeps the owner's line endings.
     - Kelpie's writes that lost lines are kept in the object's `conflicts` table, marked `owner_won`, and the log says how many.
     - **The owner's version wins whole when:**
-      - there is no common version (a file both created);
+      - there is no common version: a file both created, or one that was empty;
       - either side removed the file;
-      - a version runs past 1,000 lines;
+      - a version runs past 500 lines, since the merge runs inside the sync;
       - the merge would hold conflict markers.
   - **A file pushed with conflict markers** (#114): git's `<<<<<<<`, `=======` and `>>>>>>>` lines, committed unresolved, found in one pass over each line.
-    - These don't count: a line of `=======` alone under text, which is a heading's underline, and markers quoted in a fenced code block.
+    - These don't count: a line of `=======` alone under text, which is a heading's underline, and markers quoted in a fenced code block that closes. A fence left open protects nothing.
     - **Held:** the file is kept as pushed in the object's `held` table.
-      - Reads, the agent's prompt and memory see its version from before the conflict, never the markers.
+      - Reads, the agent's prompt (persona, rules and skills) and memory see its version from before the conflict, never the markers. A file stays held while the vault still has it as pushed, even through `forget`.
       - Kelpie's queued writes to it stay out of commits.
     - **Resolved by the model,** one held file at a time, after GitHub's work.
       - **What it sees,** through llm-gateway's `generate`: the vault's layout, its `AGENTS.md`, the file as the vault had it before the push, and the file as pushed.
-      - **The answer:** it must leave no markers, keep every line outside the conflicts verbatim and in order, take each conflict's lines only from its sides or its base, and keep its frontmatter parseable. The model resolves; it can't rewrite.
+      - **The answer:** it must leave no markers, keep every line outside the conflicts verbatim and in order, take each conflict's lines only from its sides or its base, and keep its frontmatter parseable. The model resolves; it can't rewrite. The answer ends as the file ends, with or without a final newline.
       - **Limits:** tries come at least 5 minutes apart. Files over 48,000 characters aren't tried.
       - **The owner wins a race:** before the resolution is applied, the object syncs. If the owner fixed the file meanwhile, the resolution is dropped.
     - **Applied** until per-item approval exists (#113):

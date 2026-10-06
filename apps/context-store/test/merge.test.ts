@@ -69,8 +69,24 @@ describe("mergeOwnerWins", () => {
     });
   });
 
-  it("leaves a file too long to merge to the owner", () => {
-    const long = `${"linha\n".repeat(1_001)}`;
+  it("leaves a file too long to merge, or one without a common start, to the owner", () => {
+    const most = "linha\n".repeat(499);
+    expect(mergeOwnerWins(most, `${most}a\n`, `${most}b\n`)).not.toBeNull();
+    const long = "linha\n".repeat(501);
     expect(mergeOwnerWins(long, `${long}a\n`, `${long}b\n`)).toBeNull();
+    // Both wrote a whole document over an empty file: two documents aren't one.
+    expect(
+      mergeOwnerWins("", "---\nkind: note\n---\n# A\n", "---\nkind: person\n---\n# B\n"),
+    ).toBeNull();
+  });
+
+  it("takes the owner's first line ending for the whole file", () => {
+    const owner = "# Ana\r\n\r\nMora no Porto.\n";
+    const merged = mergeOwnerWins(
+      "# Ana\n\nMora em Lisboa.\n",
+      owner,
+      "# Ana\n\nMora em Lisboa.\nTem um gato.\n",
+    );
+    expect(merged?.content.startsWith("# Ana\r\n")).toBe(true);
   });
 });

@@ -99,6 +99,8 @@ const MAX_RESOLVE_ATTEMPTS = 3;
 const RESOLVE_TIMEOUT_MS = 60_000;
 /** The wait between two tries at held files, so a short outage can't spend all of a file's. */
 const RESOLVE_RETRY_MS = 5 * 60_000;
+/** The soonest the alarm wakes for a held file's next try. */
+const RESOLVE_WAKE_MS = 1_000;
 /** How much of the vault's `AGENTS.md` the model sees with a conflict. */
 const RESOLVE_RULES_CHARS = 8_000;
 /** The most paths one `forget` names, and the longest path it takes. */
@@ -307,7 +309,7 @@ export class Vault extends DurableObject<VaultEnv> {
     return this.#exec<{ path: string; content: string | null }>(
       `SELECT files.path AS path,
               CASE WHEN held.path IS NULL THEN files.content ELSE held.previous END AS content
-       FROM files LEFT JOIN held ON held.path = files.path AND held.state != 'resolved'`,
+       FROM files LEFT JOIN held ON held.path = files.path AND held.content = files.content`,
     ).filter((file): file is { path: string; content: string } => file.content !== null);
   }
 
@@ -315,7 +317,8 @@ export class Vault extends DurableObject<VaultEnv> {
   #indexed(changes: ReadonlyMap<string, string | null>): Map<string, string | null> {
     const held = new Map(
       this.#exec<{ path: string; previous: string | null }>(
-        "SELECT path, previous FROM held WHERE state != 'resolved'",
+        `SELECT held.path AS path, held.previous AS previous FROM held
+         JOIN files ON files.path = held.path AND files.content = held.content`,
       ).map((row) => [row.path, row.previous]),
     );
     return new Map(
@@ -371,7 +374,9 @@ export class Vault extends DurableObject<VaultEnv> {
     if (queued !== undefined) return queued.content;
     // A held file shows its version from before the conflict, never the markers (#114).
     const held = this.#exec<{ previous: string | null }>(
-      "SELECT previous FROM held WHERE path = ? AND state != 'resolved'",
+      `SELECT held.previous AS previous FROM held
+       JOIN files ON files.path = held.path AND files.content = held.content
+       WHERE held.path = ?`,
       path,
     )[0];
     if (held !== undefined) return held.previous;
@@ -395,11 +400,15 @@ export class Vault extends DurableObject<VaultEnv> {
       const content = this.#visible(path);
       return content === null ? [] : [{ path, content }];
     });
-    const skills = this.#exec<{ path: string; content: string }>(
-      "SELECT path, content FROM files WHERE path LIKE '%/SKILL.md' ORDER BY path",
+    const skills = this.#exec<{ path: string }>(
+      "SELECT path FROM files WHERE path LIKE '%/SKILL.md' ORDER BY path",
     )
       .filter(({ path }) => isSkillFile(agentId, path))
-      .map(({ path, content }) => skillEntry(path, content));
+      .flatMap(({ path }) => {
+        // As the agent sees it: a held skill as it was before its conflict.
+        const content = this.#visible(path);
+        return content === null ? [] : [skillEntry(path, content)];
+      });
     return { persona: this.#visible(personaPath(agentId)), rules, skills };
   }
 
@@ -590,13 +599,10 @@ export class Vault extends DurableObject<VaultEnv> {
     await this.#alarmBy(
       Date.now() + (queued > 0 ? FLUSH_DELAY_MS : moreToEmbed ? EMBED_AGAIN_MS : RECONCILE_MS),
     );
-    // A held file still to try wakes the alarm when its next try is due.
-    const untried = this.#exec<{ n: number }>(
-      "SELECT count(*) AS n FROM held WHERE state = 'held' AND attempts < ?",
-      MAX_RESOLVE_ATTEMPTS,
-    )[0]?.n;
-    if (untried && this.#gateway() !== null) {
-      await this.#alarmBy(Number(this.#get("resolve_after") ?? "0"));
+    // A held file the model can still try wakes the alarm when its next try is due.
+    if (this.#gateway() !== null && this.#nextHeld() !== undefined) {
+      const due = Number(this.#get("resolve_after") ?? "0");
+      await this.#alarmBy(Math.max(due, Date.now() + RESOLVE_WAKE_MS));
     }
   }
 
@@ -616,12 +622,7 @@ export class Vault extends DurableObject<VaultEnv> {
     const backend = this.#backend();
     if (gateway === null || backend === null) return;
     if (Date.now() < Number(this.#get("resolve_after") ?? "0")) return;
-    const row = this.#exec<{ path: string; content: string; previous: string | null }>(
-      `SELECT path, content, previous FROM held
-       WHERE state = 'held' AND attempts < ? AND length(content) <= ? ORDER BY at`,
-      MAX_RESOLVE_ATTEMPTS,
-      RESOLVE_MAX_CHARS,
-    ).find((held) => resolution(held.path) !== null);
+    const row = this.#nextHeld();
     const route = row === undefined ? null : resolution(row.path);
     if (row === undefined || route === null) return;
     // Tries are spaced, whatever wakes the alarm meanwhile, so a short outage can't spend them.
@@ -740,7 +741,12 @@ export class Vault extends DurableObject<VaultEnv> {
       const forgotten = this.ctx.storage.transactionSync(() => {
         let rows = 0;
         for (const table of PATH_TABLES) {
-          const where = `FROM ${table} WHERE ${matches(table)}`;
+          // A file the vault still holds with markers keeps its hold, or reads would show them.
+          const keep =
+            table === "held"
+              ? " AND NOT EXISTS (SELECT 1 FROM files WHERE files.path = held.path AND files.content = held.content)"
+              : "";
+          const where = `FROM ${table} WHERE ${matches(table)}${keep}`;
           rows += this.#exec<{ n: number }>(`SELECT count(*) AS n ${where}`, named)[0]?.n ?? 0;
           this.#exec(`DELETE ${where}`, named);
         }
@@ -766,6 +772,16 @@ export class Vault extends DurableObject<VaultEnv> {
       });
       return { ok: true, forgotten, stillInVault };
     });
+  }
+
+  /** The held file the model can try next: routable, small enough, with tries left. */
+  #nextHeld(): { path: string; content: string; previous: string | null } | undefined {
+    return this.#exec<{ path: string; content: string; previous: string | null }>(
+      `SELECT path, content, previous FROM held
+       WHERE state = 'held' AND attempts < ? AND length(content) <= ? ORDER BY at`,
+      MAX_RESOLVE_ATTEMPTS,
+      RESOLVE_MAX_CHARS,
+    ).find((held) => resolution(held.path) !== null);
   }
 
   /** Files held with conflict markers that wait: on the model, on a pull request, or on the owner. */
@@ -1021,9 +1037,7 @@ export class Vault extends DurableObject<VaultEnv> {
       path,
     )[0];
     const previous =
-      earlier !== undefined && before !== null && hasConflictMarkers(before)
-        ? earlier.previous
-        : before;
+      before !== null && hasConflictMarkers(before) ? (earlier?.previous ?? null) : before;
     this.#exec(
       `INSERT OR REPLACE INTO held (path, content, previous, state, attempts, at)
        VALUES (?, ?, ?, 'held', 0, ?)`,
@@ -1043,7 +1057,7 @@ export class Vault extends DurableObject<VaultEnv> {
       this.#exec<{ path: string; content: string | null }>(
         `SELECT files.path AS path,
                 CASE WHEN held.path IS NULL THEN files.content ELSE held.previous END AS content
-         FROM files LEFT JOIN held ON held.path = files.path AND held.state != 'resolved'
+         FROM files LEFT JOIN held ON held.path = files.path AND held.content = files.content
          WHERE files.path IN (SELECT path FROM queue)`,
       ).map((row) => [row.path, row.content]),
     );

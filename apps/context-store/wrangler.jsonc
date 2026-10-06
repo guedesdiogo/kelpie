@@ -4,8 +4,9 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "observability": { "enabled": true },
-  // Reached only through service bindings: conversation-runtime reads context, and ingress hands
-  // over GitHub's webhook.
+  // Reached only through service bindings: conversation-runtime reads context (ContextStore),
+  // ingress hands over GitHub's webhook (GitHubWebhooks), and admin-api runs the owner's vault
+  // actions (ContextStoreAdmin).
   "workers_dev": false,
   "preview_urls": false,
   // The vault's GitHub App and repository belong to one deployment, so they go in as `--var` flags

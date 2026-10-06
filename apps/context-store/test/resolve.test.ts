@@ -252,6 +252,74 @@ describe("Vault conflict resolution", () => {
     expect(backend.files()["memory/people/ana.md"]).toBe(kelpie.replace("café", "chá"));
   });
 
+  it("wakes for a file it can try, and doesn't spin for one it can't", async () => {
+    const backend = vaultWith({ "notes/x.md": "# X\n", "memory/people/ana.md": base });
+    const stub = vault("resolve-wake");
+    await stub.compile("kelpie");
+    const requests = fakeModel([new Error("the model is down")]);
+    // `notes/` is no agent's to write, so the model never gets it.
+    backend.push({ "notes/x.md": "# X\n<<<<<<< HEAD\na\n=======\nb\n>>>>>>> main\n" });
+    await runDurableObjectAlarm(stub);
+    const alarm = () => runInDurableObject(stub, (_instance, state) => state.storage.getAlarm());
+    expect(requests).toHaveLength(0);
+    expect(await alarm()).toBeGreaterThan(Date.now() + 60_000);
+
+    backend.push({ "memory/people/ana.md": marked("Mora no Porto.", "Mora em Braga.") });
+    await runDurableObjectAlarm(stub);
+    expect(requests).toHaveLength(1);
+    // The next try is a few minutes away, and the alarm wakes for it.
+    const next = (await alarm()) ?? 0;
+    expect(next).toBeGreaterThan(Date.now() + 60_000);
+    expect(next).toBeLessThan(Date.now() + 6 * 60_000);
+  });
+
+  it("shows a held skill as it was before, and takes no marked file as the version before", async () => {
+    const skill = "---\nname: recipes\ndescription: Finds recipes.\n---\n# Recipes\n";
+    const backend = vaultWith({ "agents/kelpie/skills/recipes/SKILL.md": skill });
+    const stub = vault("resolve-skill");
+    replaceGatewayForTesting(null);
+    await stub.compile("kelpie");
+    backend.push({
+      "agents/kelpie/skills/recipes/SKILL.md":
+        "---\nname: recipes\n<<<<<<< HEAD\ndescription: Finds recipes fast.\n=======\ndescription: Cooks.\n>>>>>>> main\n---\n# Recipes\n",
+    });
+    await runDurableObjectAlarm(stub);
+    expect((await stub.compile("kelpie")).skills).toEqual([
+      {
+        name: "recipes",
+        description: "Finds recipes.",
+        path: "agents/kelpie/skills/recipes/SKILL.md",
+      },
+    ]);
+
+    // A file Kelpie itself left marked, then pushed marked again: no version before is known.
+    await stub.write("kelpie", [{ path: "memory/people/bia.md", content: marked("a", "b") }], "x");
+    await runDurableObjectAlarm(stub);
+    backend.push({ "memory/people/bia.md": marked("c", "d") });
+    await runDurableObjectAlarm(stub);
+    expect(
+      await rows(stub, "SELECT previous FROM held WHERE path = 'memory/people/bia.md'"),
+    ).toEqual([{ previous: null }]);
+  });
+
+  it("gives the model the vault's rules up to their limit, and a previous version that fits", async () => {
+    const huge = `# Ana\n\n${"Mora em Lisboa. ".repeat(4_000)}\n`;
+    const backend = vaultWith({
+      "AGENTS.md": `# Regras\n\nComeço das regras.\n${"x".repeat(9_000)}\nFim das regras.\n`,
+      "memory/people/ana.md": huge,
+    });
+    const stub = vault("resolve-limits");
+    await stub.compile("kelpie");
+    const requests = fakeModel([new Error("the model is down")]);
+    backend.push({ "memory/people/ana.md": marked("Mora no Porto.", "Mora em Braga.") });
+    await runDurableObjectAlarm(stub);
+    const asked = JSON.stringify(requests[0]?.request.messages);
+    expect(asked).toContain("Começo das regras.");
+    expect(asked).not.toContain("Fim das regras.");
+    // The version before is too large to send; the conflict's own sides remain.
+    expect(asked).not.toContain("Mora em Lisboa. Mora em Lisboa.");
+  });
+
   it("never commits a write that would put markers back", async () => {
     const backend = vaultWith({ "memory/people/ana.md": base });
     const stub = vault("resolve-no-markers");
@@ -382,6 +450,16 @@ describe("resolveConflict", () => {
   ])("refuses %s", async (_name, answer, frontmatter = "") => {
     const withFrontmatter = { ...file, marked: `${frontmatter}${conflicted}` };
     expect(await resolveConflict(answering(answer).gateway, withFrontmatter, 1_000)).toBeNull();
+  });
+
+  it("ends a resolution as the file ends, whatever the model ended with", async () => {
+    expect(await resolveConflict(answering("# Ana\n\nMora no Porto.").gateway, file, 1_000)).toBe(
+      "# Ana\n\nMora no Porto.\n",
+    );
+    const open = { ...file, marked: conflicted.trimEnd() };
+    expect(
+      await resolveConflict(answering("# Ana\n\nMora no Porto.\n\n").gateway, open, 1_000),
+    ).toBe("# Ana\n\nMora no Porto.");
   });
 
   it("refuses an answer cut short by its token limit", async () => {
