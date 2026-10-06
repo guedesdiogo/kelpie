@@ -162,6 +162,10 @@ describe("Vault", () => {
       "memory/notes/photo.png",
       ".obsidian/workspace.md",
       "/memory/a.md",
+      "memory/notes/what?.md",
+      "memory/notes/trailing./a.md",
+      "memory/notes/\u202Eevil.md",
+      "memory/notes/CON.md",
     ]) {
       expect(await stub.write("kelpie", [{ path, content: "x" }], "x"), path).toEqual({
         ok: false,
@@ -365,5 +369,117 @@ describe("Vault", () => {
     await stub.requestSync("refs/heads/trunk");
     await runDurableObjectAlarm(stub);
     expect((await stub.compile("kelpie")).rules[0]?.content).toBe("# Rules, renamed branch");
+  });
+
+  it("commits a long queue in batches", async () => {
+    const backend = vaultWith({});
+    const stub = vault("batches");
+    await stub.compile("kelpie");
+    for (let start = 0; start < 250; start += 50) {
+      const changes = Array.from({ length: 50 }, (_, i) => ({
+        path: `memory/notes/n${start + i}.md`,
+        content: `# ${start + i}`,
+      }));
+      expect(await stub.write("kelpie", changes, "x")).toEqual({ ok: true });
+    }
+    await runDurableObjectAlarm(stub);
+    expect(backend.commitRequests.map((request) => request.writes.length)).toEqual([100, 100, 50]);
+    expect(Object.keys(backend.files())).toHaveLength(251);
+  });
+
+  it("sets aside only the write GitHub refuses, and keeps writes through transient failures", async () => {
+    const backend = vaultWith({});
+    const stub = vault("refusals-only");
+    await stub.compile("kelpie");
+    const commit = backend.commit.bind(backend);
+    let transient = 3;
+    backend.commit = async (request) => {
+      if (transient > 0) {
+        transient -= 1;
+        throw new Error("GitHub commit answered 502");
+      }
+      if (request.writes.some((write) => write.path.endsWith("bad.md"))) {
+        return { kind: "refused", reason: "UNPROCESSABLE" };
+      }
+      return commit(request);
+    };
+    const notes = ["a", "b", "bad", "c"].map((name) => ({
+      path: `memory/notes/${name}.md`,
+      content: `# ${name}`,
+    }));
+    await stub.write("kelpie", notes, "x");
+    for (let run = 0; run < 3; run += 1) await runDurableObjectAlarm(stub);
+    // Transient failures set nothing aside: the writes are all still there.
+    expect(await stub.read("memory/notes/bad.md")).toBe("# bad");
+    for (let run = 0; run < 12; run += 1) await runDurableObjectAlarm(stub);
+    expect(backend.files()).toMatchObject({
+      "memory/notes/a.md": "# a",
+      "memory/notes/b.md": "# b",
+      "memory/notes/c.md": "# c",
+    });
+    expect(backend.files()).not.toHaveProperty("memory/notes/bad.md");
+    await runInDurableObject(stub, async (_instance, state) => {
+      expect(state.storage.sql.exec("SELECT path, reason FROM conflicts").toArray()).toEqual([
+        { path: "memory/notes/bad.md", reason: "refused" },
+      ]);
+    });
+  });
+
+  it("backs off while GitHub fails, and new writes wait for the retry", async () => {
+    const backend = vaultWith({});
+    const stub = vault("backoff");
+    await stub.compile("kelpie");
+    backend.commit = async () => {
+      throw new Error("GitHub commit answered 503");
+    };
+    await stub.write("kelpie", [{ path: "memory/notes/a.md", content: "a" }], "x");
+    const delays: number[] = [];
+    for (let run = 0; run < 3; run += 1) {
+      await runDurableObjectAlarm(stub);
+      await stub.write("kelpie", [{ path: "memory/notes/a.md", content: `a${run}` }], "x");
+      const at = await runInDurableObject(stub, (_i, state) => state.storage.getAlarm());
+      delays.push(Math.round(((at ?? 0) - Date.now()) / 60_000));
+    }
+    expect(delays).toEqual([1, 2, 4]);
+  });
+
+  it("counts failed proposals against the hourly cap", async () => {
+    const backend = vaultWith({});
+    const stub = vault("propose-cap");
+    backend.openPullRequest = async () => {
+      throw new Error("GitHub open pull request answered 422");
+    };
+    for (let i = 0; i < 10; i += 1) {
+      expect((await stub.propose("kelpie", { kind: "rules" }, `# Rules ${i}`, "why")).ok).toBe(
+        false,
+      );
+    }
+    expect(await stub.propose("kelpie", { kind: "rules" }, "# Rules 10", "why")).toEqual({
+      ok: false,
+      reason: "rate_limited",
+    });
+  });
+
+  it("drops a file the owner grew past the size the vault keeps", async () => {
+    const backend = vaultWith({ "knowledge/growing.md": "# Small" });
+    const stub = vault("grown");
+    await stub.compile("kelpie");
+    const diff = backend.diff.bind(backend);
+    backend.diff = async (from, to) => {
+      const result = await diff(from, to);
+      // As GitHub's adapter does for a file past 1 MiB: it reports the file gone.
+      return (
+        result && {
+          ...result,
+          changes: result.changes.map((change) =>
+            change.path === "knowledge/growing.md" ? { path: change.path, content: null } : change,
+          ),
+        }
+      );
+    };
+    backend.push({ "knowledge/growing.md": "# Now huge" });
+    await stub.requestSync("refs/heads/main");
+    await runDurableObjectAlarm(stub);
+    expect(await stub.read("knowledge/growing.md")).toBeNull();
   });
 });

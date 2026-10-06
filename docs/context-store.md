@@ -4,7 +4,7 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
 
 ## What it does
 
-- **A working copy.** Its one `Vault` Durable Object keeps the Markdown of the vault's default branch in SQLite. It skips hidden folders such as `.obsidian/` and files over 1 MiB, whether they arrive in a full read or in a push.
+- **A working copy.** Its one `Vault` Durable Object keeps the Markdown of the vault's default branch in SQLite. It skips hidden folders such as `.obsidian/` and files over 1 MiB or not UTF-8, whether they arrive in a full read or in a push; a file that grows past the limit leaves the working copy.
 - **Reads for a turn.** `compile(agent)` returns the agent's persona (`agents/<agent>/SOUL.md`), the shared `AGENTS.md`, the agent's own `AGENTS.md`, and the skills it can see:
   - `skills/**/SKILL.md` and `agents/<agent>/skills/**/SKILL.md`;
   - each named and described by its frontmatter.
@@ -15,10 +15,10 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - Reads see a write at once.
     - The object commits the writes made within about five seconds in one commit, up to 100 writes or 2 MB per commit.
     - Each commit names its agents in its trailer: `Kelpie-Agent: <agent-id>`.
-    - One call holds up to 50 changes and 1 MB, with no file over 1 MiB; more answers `too_large`.
-    - Removing a file the vault doesn't have does nothing.
+    - One call holds up to 50 changes and 2 MB, with no file over 1 MiB; more answers `too_large`.
+    - Writing what a file already holds, or removing a file the vault doesn't have, does nothing.
   - **Persona, rules and skills:** `propose` puts the change on a new branch and opens a pull request for the owner, because approval is on, the default (ADR-0020 §5). The setting per item and the confidence floor come with #113.
-    - The same change proposed again returns the first pull request, and at most 10 proposals are opened an hour.
+    - The same change proposed again returns the first pull request, whether or not it is still open. At most 10 proposals are attempted an hour, failed ones included.
     - The agent's reason goes into the pull request as a code block, so it renders as text.
     - If GitHub fails midway, the branch it left is removed and the call answers `failed`.
 - **Edits made elsewhere.** GitHub, Obsidian through obsidian-git, or any editor:
@@ -26,8 +26,8 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
   - **Kelpie's own commits** come back the same way and change nothing. That includes a commit that landed although GitHub's answer was lost: the queued writes it holds count as done.
   - **A file both changed:** if the owner changed a file Kelpie had queued, the owner's version wins. Kelpie's writes are kept in the object's `conflicts` table, marked `owner_won`, and the log says how many; merging the two is #114's.
 - **When GitHub fails.**
-  - The object retries after a minute, then twice as long each time, up to an hour. Queued writes wait.
-  - A batch GitHub refuses five times in a row is set aside in `conflicts`, marked `refused`, so later writes go through.
+  - **A call fails** (GitHub down, a timeout, a rate limit): the object retries after a minute, then twice as long each time, up to an hour. Queued writes wait and stay readable; new writes and pushes wait for the retry too.
+  - **GitHub refuses a commit:** the batch is split in half until the refused write is alone. That write is set aside in `conflicts`, marked `refused`, and the others go through.
 - **A README.** A vault without one gets a `README.md` that describes the layout, so people and other agents can find their way.
 
 ## Setting it up
@@ -93,5 +93,5 @@ The secrets are Worker secrets on `context-store` ([ADR-0021](adr/0021-vault-app
 - **Persona:** an edit to `agents/<agent>/SOUL.md` on GitHub reaches the agent's next turn.
 - **Logs:**
   - `Vault: a GitHub call failed; retrying` gives the number of failures in a row.
-  - `GitHub kept refusing a batch` means writes were set aside in `conflicts`.
+  - `GitHub refused a write; it was set aside` gives GitHub's reason; the write is in `conflicts`.
 - **The vault's branch:** it needs at least one commit. A renamed default branch is picked up at the next sync.

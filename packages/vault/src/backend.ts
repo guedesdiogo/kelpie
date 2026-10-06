@@ -38,7 +38,14 @@ export interface CommitRequest {
   deletions: readonly string[];
 }
 
-export type CommitOutcome = { kind: "committed"; commit: string } | { kind: "stale" };
+/**
+ * A commit landed, or the branch moved (`stale`: sync and try again), or GitHub refused this change
+ * itself (`refused`: trying it again would fail the same way). Transport failures throw.
+ */
+export type CommitOutcome =
+  | { kind: "committed"; commit: string }
+  | { kind: "stale" }
+  | { kind: "refused"; reason: string };
 
 export interface PullRequest {
   number: number;

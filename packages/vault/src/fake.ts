@@ -117,8 +117,8 @@ export class FakeVaultBackend implements VaultBackend {
     const files = new Map(this.#commit(head).files);
     for (const { path, content } of request.writes) files.set(path, content);
     for (const path of request.deletions) {
-      // As GitHub does, a commit that removes a missing file fails.
-      if (!files.has(path)) throw new Error(`GitHub commit refused: no file ${path} to delete`);
+      // As GitHub does, a commit that removes a missing file is refused.
+      if (!files.has(path)) return { kind: "refused", reason: "UNPROCESSABLE" };
       files.delete(path);
     }
     const sha = this.#add(head, files);

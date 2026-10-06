@@ -16,7 +16,10 @@ interface Call {
 }
 
 /** GitHub's API as the adapter uses it, answering from fixed data and recording each call. */
-function fakeGitHub(files: Record<string, string>, options: { stale?: boolean } = {}) {
+function fakeGitHub(
+  files: Record<string, string>,
+  options: { stale?: boolean; refuse?: boolean } = {},
+) {
   const calls: Call[] = [];
   let tokens = 0;
   const json = (status: number, body: unknown) => Response.json(body, { status });
@@ -81,6 +84,12 @@ function fakeGitHub(files: Record<string, string>, options: { stale?: boolean } 
     if (path === "/graphql") {
       const { query, variables } = body as { query: string; variables: Record<string, unknown> };
       if (query.includes("createCommitOnBranch")) {
+        if (options.refuse) {
+          return json(200, {
+            data: null,
+            errors: [{ type: "UNPROCESSABLE", message: "A path was requested for deletion…" }],
+          });
+        }
         if (options.stale) {
           return json(200, {
             data: null,
@@ -192,6 +201,8 @@ describe("GitHubVaultBackend", () => {
       from: BASE,
       to: HEAD,
       changes: [
+        // Past the size the vault keeps: it leaves the working copy, as a snapshot would leave it.
+        { path: "knowledge/huge.md", content: null },
         { path: "knowledge/old.md", content: null },
         { path: "memory/notes/a.md", content: "# A2", blobSha: "sha-memory/notes/a.md" },
         { path: "memory/notes/b-old.md", content: null },
@@ -238,6 +249,18 @@ describe("GitHubVaultBackend", () => {
       deletions: [],
     });
     expect(outcome).toEqual({ kind: "stale" });
+  });
+
+  it("reports a commit GitHub refuses as refused, and a transport failure as an error", async () => {
+    const github = fakeGitHub({}, { refuse: true });
+    const outcome = await backend(github).commit({
+      branch: "main",
+      expectedHead: HEAD,
+      headline: "x",
+      writes: [],
+      deletions: ["missing.md"],
+    });
+    expect(outcome).toEqual({ kind: "refused", reason: "UNPROCESSABLE" });
   });
 
   it("opens a pull request from a new branch", async () => {

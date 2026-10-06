@@ -246,7 +246,12 @@ export class GitHubVaultBackend implements VaultBackend {
       if (file.status === "removed") changes.push({ path: file.filename, content: null });
       else reads.push({ path: file.filename, sha: file.sha });
     }
-    for (const file of await this.#read(to, reads)) changes.push(file);
+    const read = await this.#read(to, reads);
+    for (const file of read) changes.push(file);
+    // A file past the size the vault keeps, or no longer text, leaves the working copy, as a
+    // snapshot would leave it out.
+    const kept = new Set(read.map((file) => file.path));
+    for (const { path } of reads) if (!kept.has(path)) changes.push({ path, content: null });
     return {
       from,
       to,
@@ -277,10 +282,11 @@ export class GitHubVaultBackend implements VaultBackend {
     // A stale head answers 200 with STALE_DATA, and the branch doesn't move (spike #28).
     if (errors.some((error) => error.type === "STALE_DATA")) return { kind: "stale" };
     const oid = data?.createCommitOnBranch?.commit?.oid;
-    if (errors.length > 0 || typeof oid !== "string") {
-      throw new GitHubError("commit", 200, errors[0]?.type ?? "no commit");
-    }
-    return { kind: "committed", commit: oid };
+    if (typeof oid === "string" && errors.length === 0) return { kind: "committed", commit: oid };
+    const type = errors[0]?.type;
+    // GitHub answered, and refused this change; a rate limit passes, so it isn't a refusal.
+    if (type !== undefined && type !== "RATE_LIMITED") return { kind: "refused", reason: type };
+    throw new GitHubError("commit", 200, type ?? "no commit");
   }
 
   async createBranch(name: string, from: string): Promise<void> {
