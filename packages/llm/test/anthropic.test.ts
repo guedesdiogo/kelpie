@@ -202,7 +202,7 @@ describe("AnthropicMessagesProvider", () => {
     await collect(provider(fetch).stream(request({ context })));
 
     const body = requestAt(calls, 0).body;
-    // The breakpoint sits before the context, which the next request won't repeat.
+    // The breakpoint sits before the context, so the cache covers what came before it.
     expect(body).not.toHaveProperty("cache_control");
     expect(body.messages).toEqual([
       {
@@ -229,6 +229,33 @@ describe("AnthropicMessagesProvider", () => {
       },
       { role: "user", content: [{ type: "text", text: context }] },
     ]);
+  });
+
+  it("sends a context again, as part of its message, exactly as it first went", async () => {
+    const { fetch, calls } = fakeFetch(sse(toolTurn), sse(toolTurn));
+    const context = "<memory>Ana mora em Lisboa.</memory>";
+    await collect(provider(fetch).stream(request({ context })));
+    const later: ChatMessage[] = [
+      {
+        role: "user",
+        parts: [
+          { type: "text", text: "Weather in Lisbon?" },
+          { type: "text", text: context },
+        ],
+      },
+      { role: "assistant", parts: [{ type: "text", text: "Sunny." }] },
+      { role: "user", parts: [{ type: "text", text: "And Porto?" }] },
+    ];
+    await collect(provider(fetch).stream(request({ messages: later })));
+    // Breakpoints aside, the first turn is the same in both requests.
+    const plain = (body: Record<string, unknown>) =>
+      JSON.parse(
+        JSON.stringify((body.messages as unknown[])[0]).replaceAll(
+          ',"cache_control":{"type":"ephemeral"}',
+          "",
+        ),
+      );
+    expect(plain(requestAt(calls, 1).body)).toEqual(plain(requestAt(calls, 0).body));
   });
 
   it("puts the breakpoint on the last tool result, and leaves the turns before it alone", async () => {

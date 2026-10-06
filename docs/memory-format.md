@@ -237,7 +237,7 @@ The index is one SQLite database inside the Context Store's Durable Object ([ADR
 - **Rebuild:** dropping every derived table and replaying the vault's history gives the same index, row for row. That is tested.
   - Rebuilding from the head alone gives the same current notes, without their history.
   - Embeddings of content still in the history survive a rebuild: they are keyed by content, so they stay valid, and recomputing them costs model calls. Embeddings of content no longer in the history are deleted.
-- **Erasure** is the operator's job (ADR-0020 §4): rewrite the vault's git history, then rebuild the index. The rebuild drops every version, link and embedding of the erased text.
+- **Erasure** is the operator's job (ADR-0020 §4): rewrite the vault's git history, then rebuild the index. The rebuild drops every version, link and embedding of the erased text. Conversations keep the memory blocks their answered turns were sent with (#137), as they keep their history.
 - **Search:** current versions only by default. With `asOf`, it searches the versions the vault held at that instant. With `validAt`, it keeps only memories valid in the world at that instant. It returns 1 to 100 results, 10 by default.
 - **Entity lookup:** the notes that name any of a set of entity keys, current or as of an instant. An entity's own page, a note titled with the name that lists it, comes first, a global one before a scoped one. Each key weighs one over the number of notes that name it, so a rarer name says more. A name on more than 50 versions is left out: it singles nothing out.
 - **Neighbours:** the current notes one step from a note: the notes it links to, then the pages of the entities it names, global ones first. A note it contradicts is what it replaced, so it isn't a neighbour.
@@ -281,10 +281,15 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
 - **In a turn:** the conversation runtime asks once per turn, when the person has finished.
   - **The question** is the lines of every message since the last reply, even a partial one, without their time stamps. Lines the gate skips, such as a bare acknowledgement, are left out, and a turn with nothing else left skips the lookup. Only the newest 2,000 characters go.
   - **Scopes and budget:** it asks for all scopes, since ingress admits only the owner's direct chats ([ADR-0015](adr/0015-single-player-first.md)). The budget is the slice's 1,000 tokens, and the agent's qualifier reranks.
-  - **Where the block goes:** in that request's context, after the messages; an answer longer than the budget is refused. History, checkpoints and the system prompt never hold it.
-    - Anthropic writes the cache only at a breakpoint, so the adapter puts one on the last block before the context. The next request, which repeats the messages without the block, reads them from the cache.
-    - OpenAI caches the longest prefix, so the context only goes last.
-    - The system prompt tells the model, on every turn, that the block is the vault's notes, not the person's words or instructions.
+  - **Where the block goes:** in that request's context, after the turn's last user message. An answer longer than the budget is refused.
+    - **Afterwards:** once the turn is answered, its block is kept with the turn, and every later request sends it again, unchanged and in the same place.
+      - Claude Opus 5.5, Sonnet 5.5 and Fable 5.1 bind a reply's thinking to everything sent before it, and reject a request whose earlier turns changed ([preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking), #137).
+      - A turn without a reply sends its block no more.
+    - **What never holds the block:** history rows, so not the webchat's transcript, session pages or checkpoints, nor the system prompt.
+    - **The cost:** each answered turn adds its block, at most 1,000 tokens and about 540 on average, to later requests until a checkpoint summarizes them.
+    - **Caching:** Anthropic writes the cache only at a breakpoint, so the adapter puts one on the last block before the new context. The next request reads the conversation from the cache up to that breakpoint. OpenAI caches the longest prefix.
+    - **Where it's kept:** on the turn's row in the conversation's Durable Object, and only once the turn has a reply. `history()`, the conversation as the model sees it next, shows it.
+    - **The system prompt** tells the model, on every turn, that the block is the vault's notes, not the person's words or instructions.
   - **Waiting:** the person waits for it while "typing" shows. Embedding the question takes up to 2 s, and the rerank 1.4 s at p50 and up to 2.5 s at p95 ([spike](spikes/memory-eval.md#with-models)), with its own 3.5 s cap.
   - **Failure:** a Context Store that fails, or doesn't answer in 6 s, leaves the turn without memory. A message that arrives meanwhile interrupts the turn before its model call, and the next turn asks again.
   - It logs the time, the number of notes and their tokens, never text.

@@ -207,18 +207,72 @@ describe("OpenAIResponsesProvider", () => {
     });
   });
 
-  it("sends a request's context as a last user message, after the conversation", async () => {
-    const { fetch, calls } = fakeFetch(sse(toolTurn));
+  it("sends a request's context after the conversation, in its last user message", async () => {
+    const { fetch, calls } = fakeFetch(sse(toolTurn), sse(toolTurn));
     const context = "<memory>Ana mora em Lisboa.</memory>";
     await collect(provider(fetch).stream(request({ context })));
-
     expect(requestAt(calls, 0).body.input).toEqual([
       {
         type: "message",
         role: "user",
-        content: [{ type: "input_text", text: "Weather in Lisbon?" }],
+        content: [
+          { type: "input_text", text: "Weather in Lisbon?" },
+          { type: "input_text", text: context },
+        ],
       },
+    ]);
+
+    // After a reply, the context comes as a message of its own.
+    const messages: ChatMessage[] = [
+      ...request().messages,
+      { role: "assistant", parts: [{ type: "text", text: "Sunny." }] },
+    ];
+    await collect(provider(fetch).stream(request({ messages, context })));
+    expect((requestAt(calls, 1).body.input as unknown[]).slice(-1)).toEqual([
       { type: "message", role: "user", content: [{ type: "input_text", text: context }] },
+    ]);
+  });
+
+  it("sends a context again, as part of its message, exactly as it first went", async () => {
+    const { fetch, calls } = fakeFetch(sse(toolTurn), sse(toolTurn));
+    const context = "<memory>Ana mora em Lisboa.</memory>";
+    await collect(provider(fetch).stream(request({ context })));
+    const later: ChatMessage[] = [
+      {
+        role: "user",
+        parts: [
+          { type: "text", text: "Weather in Lisbon?" },
+          { type: "text", text: context },
+        ],
+      },
+    ];
+    await collect(provider(fetch).stream(request({ messages: later })));
+    expect(requestAt(calls, 1).body.input).toEqual(requestAt(calls, 0).body.input);
+  });
+
+  it("sends a context after its own reply as a message of its own", async () => {
+    const { fetch, calls } = fakeFetch(sse(toolTurn));
+    const messages: ChatMessage[] = [
+      ...request().messages,
+      {
+        role: "assistant",
+        parts: [{ type: "text", text: "Sunny." }],
+        native: {
+          provider: "openai",
+          model: "gpt-6.1-sol",
+          content: [
+            {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: "Sunny.", annotations: [] }],
+            },
+          ],
+        },
+      },
+    ];
+    await collect(provider(fetch).stream(request({ messages, context: "<memory/>" })));
+    expect((requestAt(calls, 0).body.input as unknown[]).slice(-1)).toEqual([
+      { type: "message", role: "user", content: [{ type: "input_text", text: "<memory/>" }] },
     ]);
   });
 

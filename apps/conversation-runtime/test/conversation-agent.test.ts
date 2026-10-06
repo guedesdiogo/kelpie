@@ -1098,7 +1098,7 @@ describe("ConversationAgent memory", () => {
   ].join("\n");
   const options = { scopes: "all", budgetTokens: 1_000, qualifier: "clef" };
 
-  it("sends the memories that answer a turn with that request only, and logs no text", async () => {
+  it("sends a turn's memories with its request, and again in place on later ones", async () => {
     const world = use(fakeWorld([reply("Em Lisboa."), reply("Não sei."), reply("Também não.")]));
     const logged = vi.spyOn(console, "log").mockImplementation(() => {});
     world.memory = MEMORY;
@@ -1129,12 +1129,81 @@ describe("ConversationAgent memory", () => {
       "e o Bruno?",
       "e a Patrícia?",
     ]);
-    expect(world.requests[2]?.messages).toHaveLength(5);
-    expect(world.requests[2]?.messages[2]).toEqual(user("e o Bruno?"));
-    expect(JSON.stringify(await stub.history())).not.toContain("Mora em Lisboa");
+    // An answered turn's block stays where it was sent, so the prefix before each reply is
+    // unchanged (#137): Anthropic binds a reply's thinking to everything sent before it.
+    const withMemory = (text: string) => ({
+      role: "user",
+      parts: [...user(text).parts, { type: "text", text: MEMORY }],
+    });
+    const third = world.requests[2]?.messages ?? [];
+    expect(third).toHaveLength(5);
+    expect(third[0]).toEqual(withMemory("onde a Ana mora?"));
+    expect(third[2]).toEqual(withMemory("e o Bruno?"));
+    expect(third[4]).toEqual(user("e a Patrícia?"));
+    expect(world.requests[1]?.messages[0]).toEqual(third[0]);
+    // History itself never holds a block: transcripts, session pages and checkpoints read it.
+    const stored = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql.exec("SELECT message FROM history").toArray(),
+    );
+    expect(JSON.stringify(stored)).not.toContain("Mora em Lisboa");
     const recall = logged.mock.calls.find(([line]) => line === "conversation: recall");
     expect(recall?.[1]).toEqual({ ms: 0, notes: 1, tokens: Math.ceil(MEMORY.length / 4) });
     expect(JSON.stringify(logged.mock.calls)).not.toMatch(/Lisboa|Ana/);
+  });
+
+  it("sends again the block of the attempt that answered, and never a blank one", async () => {
+    const world = use(fakeWorld([hang(), reply("Em Lisboa."), reply("Ok.")]));
+    world.memory = MEMORY;
+    const stub = agent("memory-retry");
+    await stub.ingest(message("m1", "onde a Ana mora?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(1));
+    // The retry after an eviction finds nothing, so nothing was sent with the reply.
+    await evictDurableObject(stub);
+    world.memory = "  \n";
+    await runDurableObjectAlarm(stub);
+    await vi.waitFor(() => expect(world.sent).toEqual(["Em Lisboa."]));
+    expect(world.requests[1]).not.toHaveProperty("context");
+
+    await stub.ingest(message("m2", "e o Bruno?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(3));
+    expect(world.requests[2]?.messages[0]).toEqual(user("onde a Ana mora?"));
+  });
+
+  it("puts a turn's block after its last user message, whoever wrote it", async () => {
+    const world = use(fakeWorld([reply("Ok."), reply("Ok de novo.")]));
+    world.memory = MEMORY;
+    const stub = agent("memory-authors");
+    await stub.ingest(message("m1", "onde a Ana mora?", { userId: "u-one" }));
+    await stub.ingest(message("m2", "e o Bruno?", { userId: "u-two" }));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Ok."]));
+    await stub.ingest(message("m3", "e a Patrícia?", { userId: "u-one" }));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(2));
+    expect(world.requests[1]?.messages.slice(0, 2)).toEqual([
+      user("onde a Ana mora?"),
+      { role: "user", parts: [...user("e o Bruno?").parts, { type: "text", text: MEMORY }] },
+    ]);
+  });
+
+  it("sends no block again for a turn that got no reply", async () => {
+    const world = use(fakeWorld([fail(), reply("Em Lisboa.")]));
+    world.memory = MEMORY;
+    const stub = agent("memory-unanswered-turn");
+    await stub.ingest(message("m1", "onde a Ana mora?"));
+    await stub.flush();
+    await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).toBe("failed"));
+    await stub.ingest(message("m2", "e o Bruno?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(2));
+    expect(world.requests[1]?.messages).toEqual([user("onde a Ana mora?"), user("e o Bruno?")]);
+    // Nor is it kept.
+    const kept = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql.exec("SELECT context FROM turns ORDER BY id").toArray(),
+    );
+    expect(kept[0]).toEqual({ context: null });
   });
 
   it("asks once about every message still unanswered, with the agent's qualifier", async () => {

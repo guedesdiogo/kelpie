@@ -78,8 +78,10 @@ export interface LlmRequest {
   /** Only for models that accept it. Claude Haiku 4.5 rejects it. */
   effort?: Effort;
   /**
-   * Text for this request only, such as the memories a turn retrieved. It follows the messages,
-   * which stay cacheable without it: the next request repeats them, but not this.
+   * Text this request adds, such as the memories a turn retrieved. Every adapter places it the same
+   * way: as a last text part of the last user message, or after a reply as a user message of its
+   * own. A caller that sends it again on later requests puts it back there, as a text part of that
+   * message, so the prefix stays what the model saw (#137). The messages before it stay cacheable.
    */
   context?: string;
 }

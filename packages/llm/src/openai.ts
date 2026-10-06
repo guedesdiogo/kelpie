@@ -56,19 +56,7 @@ export class OpenAIResponsesProvider implements LlmProvider {
         {
           model: request.model,
           instructions: request.system,
-          input: [
-            ...request.messages.flatMap(toInputItems),
-            // OpenAI caches the longest prefix it saw, so the context goes last.
-            ...(request.context?.trim()
-              ? [
-                  {
-                    type: "message" as const,
-                    role: "user" as const,
-                    content: [{ type: "input_text" as const, text: request.context }],
-                  },
-                ]
-              : []),
-          ],
+          input: withContext(request.messages.flatMap(toInputItems), request.context),
           max_output_tokens: request.maxOutputTokens,
           store: false,
           include: ["reasoning.encrypted_content"],
@@ -108,6 +96,21 @@ export class OpenAIResponsesProvider implements LlmProvider {
     if (!final) throw new LlmError("The stream ended without a final response", "connection", true);
     yield toFinish(final);
   }
+}
+
+/**
+ * A request's context follows the conversation, in its last user message as Anthropic's adapter
+ * places it, so a later request that sends it there again repeats the same input. After a reply it
+ * comes as a message of its own. OpenAI caches the longest prefix, so it goes last either way.
+ */
+function withContext(items: ResponseInputItem[], context: string | undefined): ResponseInputItem[] {
+  if (!context?.trim()) return items;
+  const part = { type: "input_text" as const, text: context };
+  const last = items.at(-1);
+  if (last?.type === "message" && last.role === "user" && Array.isArray(last.content)) {
+    return [...items.slice(0, -1), { ...last, content: [...last.content, part] }];
+  }
+  return [...items, { type: "message", role: "user", content: [part] }];
 }
 
 function toInputItems(message: ChatMessage): ResponseInputItem[] {

@@ -53,6 +53,12 @@ export const turns = sqliteTable("turns", {
    * the history will be measured against.
    */
   usage: text("usage", { mode: "json" }).$type<Usage[]>(),
+  /**
+   * The memories the turn's request carried (#110), as the attempt that answered sent them. Later
+   * requests send them again after the turn's last user message, so the prefix before its reply
+   * stays what the model saw (#137). History rows never hold them.
+   */
+  context: text("context"),
   createdAt: integer("created_at").notNull(),
 });
 

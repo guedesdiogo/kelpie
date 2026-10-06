@@ -109,8 +109,8 @@ function toParams(request: LlmRequest): BetaMessageStreamParams {
 
 /**
  * A request's context follows the conversation: in the last user turn, or as a turn of its own
- * after a reply. A breakpoint on the last block before it that can carry one caches the
- * conversation without it, since the next request repeats the conversation but not the context.
+ * after a reply. A breakpoint on the last block before it that can carry one caches what came
+ * before, and the next request, which sends the context again as part of that turn, reads it.
  */
 function addContext(
   messages: MessageParam[],
