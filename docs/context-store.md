@@ -27,7 +27,11 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
   - **A file both changed:** if the owner changed a file Kelpie had queued, the owner's version wins. Kelpie's writes are kept in the object's `conflicts` table, marked `owner_won`, and the log says how many; merging the two is #114's.
 - **When GitHub fails.**
   - **A call fails** (GitHub down, a timeout, a rate limit): the object retries after a minute, then twice as long each time, up to an hour. Queued writes wait and stay readable; new writes and pushes wait for the retry too.
-  - **GitHub refuses a commit:** the batch is split in half until the refused write is alone. That write is set aside in `conflicts`, marked `refused`, and the others go through.
+  - **GitHub refuses a commit:**
+    - the batch is split in half until one write is refused alone;
+    - that write is set aside in `conflicts`, marked `refused`, only once the next write, also alone, goes through;
+    - if GitHub refuses that one too, it is refusing everything (a branch rule, a revoked permission), and nothing is set aside: the writes wait for the retry.
+  - **A commit fails on a large batch:** the next try commits half as many writes, and the batch grows back after a flush that commits everything.
 - **A README.** A vault without one gets a `README.md` that describes the layout, so people and other agents can find their way.
 
 ## Setting it up

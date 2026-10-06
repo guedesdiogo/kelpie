@@ -194,8 +194,11 @@ export class GitHubVaultBackend implements VaultBackend {
       }
       for (const [i, entry] of batch.entries()) {
         const blob = data.repository[`f${i}`];
+        // GitHub listed this file at this commit, so a missing object is a failed read, not a
+        // removal.
+        if (!blob) throw new GitHubError("read files", 200, "a listed file has no object");
         // A file past the size the vault keeps is skipped, whichever way it was found.
-        if (!blob || blob.byteSize > MAX_FILE_BYTES) continue;
+        if (blob.byteSize > MAX_FILE_BYTES) continue;
         let text = blob.text;
         if (blob.isTruncated) text = await this.#blobText(entry.sha);
         if (text !== null) files.push({ path: entry.path, content: text, blobSha: entry.sha });

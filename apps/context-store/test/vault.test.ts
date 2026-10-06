@@ -482,4 +482,75 @@ describe("Vault", () => {
     await runDurableObjectAlarm(stub);
     expect(await stub.read("knowledge/growing.md")).toBeNull();
   });
+
+  it("sets nothing aside when GitHub refuses every commit", async () => {
+    const backend = vaultWith({});
+    const stub = vault("refuse-all");
+    await stub.compile("kelpie");
+    backend.commit = async () => ({ kind: "refused", reason: "FORBIDDEN" });
+    const notes = Array.from({ length: 6 }, (_, i) => ({
+      path: `memory/notes/${i}.md`,
+      content: `# ${i}`,
+    }));
+    await stub.write("kelpie", notes, "x");
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(await stub.read("memory/notes/0.md")).toBe("# 0");
+    await runInDurableObject(stub, async (_instance, state) => {
+      expect(state.storage.sql.exec("SELECT * FROM conflicts").toArray()).toEqual([]);
+      expect(state.storage.sql.exec<{ n: number }>("SELECT count(*) AS n FROM queue").one().n).toBe(
+        6,
+      );
+    });
+  });
+
+  it("isolates several refused writes anywhere in the queue", async () => {
+    const backend = vaultWith({});
+    const stub = vault("refuse-some");
+    await stub.compile("kelpie");
+    const commit = backend.commit.bind(backend);
+    backend.commit = async (request) =>
+      request.writes.some((write) => write.path.includes("bad"))
+        ? { kind: "refused", reason: "UNPROCESSABLE" }
+        : commit(request);
+    const names = ["a", "bad1", "b", "bad2", "c", "d", "e", "bad3", "f"];
+    await stub.write(
+      "kelpie",
+      names.map((name) => ({ path: `memory/notes/${name}.md`, content: `# ${name}` })),
+      "x",
+    );
+    await runDurableObjectAlarm(stub);
+    expect(Object.keys(backend.files()).sort()).toEqual(
+      [
+        "README.md",
+        ...["a", "b", "c", "d", "e", "f"].map((name) => `memory/notes/${name}.md`),
+      ].sort(),
+    );
+    await runInDurableObject(stub, async (_instance, state) => {
+      expect(
+        state.storage.sql
+          .exec<{ path: string }>("SELECT path FROM conflicts ORDER BY path")
+          .toArray()
+          .map((row) => row.path),
+      ).toEqual(["memory/notes/bad1.md", "memory/notes/bad2.md", "memory/notes/bad3.md"]);
+    });
+  });
+
+  it("splits a batch whose commit keeps failing, so a smaller one can go through", async () => {
+    const backend = vaultWith({});
+    const stub = vault("too-big");
+    await stub.compile("kelpie");
+    const commit = backend.commit.bind(backend);
+    backend.commit = async (request) => {
+      if (request.writes.length > 2) throw new Error("GitHub commit answered 502");
+      return commit(request);
+    };
+    const notes = Array.from({ length: 8 }, (_, i) => ({
+      path: `memory/notes/${i}.md`,
+      content: `# ${i}`,
+    }));
+    await stub.write("kelpie", notes, "x");
+    for (let run = 0; run < 4; run += 1) await runDurableObjectAlarm(stub);
+    expect(Object.keys(backend.files())).toHaveLength(9);
+  });
 });

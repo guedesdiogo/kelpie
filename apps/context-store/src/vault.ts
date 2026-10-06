@@ -289,7 +289,6 @@ export class Vault extends DurableObject<VaultEnv> {
       const recent =
         this.#exec<{ n: number }>("SELECT count(*) AS n FROM proposal_attempts")[0]?.n ?? 0;
       if (recent >= MAX_PROPOSALS_PER_HOUR) return { ok: false, reason: "rate_limited" };
-      this.#exec("INSERT INTO proposal_attempts (at) VALUES (?)", Date.now());
 
       let branch: string | null = null;
       try {
@@ -300,6 +299,7 @@ export class Vault extends DurableObject<VaultEnv> {
           path,
         )[0];
         if (base?.content === content) return { ok: false, reason: "unchanged" };
+        this.#exec("INSERT INTO proposal_attempts (at) VALUES (?)", Date.now());
         const what = target.kind === "skill" ? `skill ${target.name}` : target.kind;
         const headline = `Propose ${what} for ${agentId}`;
         // The agent's words go in a code block, so they render as text: no links, images or
@@ -315,7 +315,9 @@ export class Vault extends DurableObject<VaultEnv> {
           writes: [{ path, content }],
           deletions: [],
         });
-        if (outcome.kind !== "committed") throw new Error("the proposal's branch moved");
+        if (outcome.kind !== "committed") {
+          throw new Error(`the proposal's commit wasn't made (${outcome.kind})`);
+        }
         const pull = await backend.openPullRequest({
           branch,
           base: await this.#branch(backend),
@@ -501,10 +503,11 @@ export class Vault extends DurableObject<VaultEnv> {
     console.warn("Vault: the owner's edit won over queued writes", { writes: queued.length });
   }
 
-  /** The oldest queued writes that fit in one commit, at most `limit` of them. */
-  #nextBatch(limit: number): QueuedRow[] {
+  /** The oldest queued writes that fit in one commit, at most `limit`, without `skip`. */
+  #nextBatch(limit: number, skip: number | null): QueuedRow[] {
     const rows = this.#exec<QueuedRow>(
-      "SELECT id, agent, path, content, summary FROM queue ORDER BY id LIMIT ?",
+      "SELECT id, agent, path, content, summary FROM queue WHERE id != ? ORDER BY id LIMIT ?",
+      skip ?? -1,
       limit,
     );
     const batch: QueuedRow[] = [];
@@ -518,20 +521,35 @@ export class Vault extends DurableObject<VaultEnv> {
   }
 
   /**
-   * Commits the queued writes, a batch per commit. Runs inside `#serialize`. A batch GitHub refuses
-   * is split in half until the refused write is alone; that write is set aside in `conflicts`, and
-   * the rest go through. A transport failure throws, and the alarm retries later.
+   * Commits the queued writes, a batch per commit. Runs inside `#serialize`.
+   * - A batch GitHub refuses is split in half until one write is refused alone. That write is set
+   *   aside in `conflicts` only once the next write, also alone, goes through: then the refusal was
+   *   its own. If that one is refused too, GitHub is refusing everything, and nothing is set aside.
+   * - A batch whose commit fails is retried at half its size next time, in case it was too large;
+   *   the size grows back after a flush that commits everything.
+   * - A failed call throws, and the alarm retries later. Writes wait, and stay readable.
    */
   async #flush(): Promise<void> {
     const backend = this.#backend();
     if (backend === null) return;
-    let limit = MAX_BATCH_ROWS;
+    const base = Number(this.#get("batch_rows") ?? `${MAX_BATCH_ROWS}`);
+    let limit = base;
     let stale = 0;
+    let needsSync = true;
+    /** A write refused alone, waiting for proof that the refusal was its own. */
+    let suspect: QueuedRow | null = null;
     for (;;) {
-      await this.#sync();
-      const rows = this.#nextBatch(limit);
+      if (needsSync) await this.#sync();
+      needsSync = false;
+      // A sync may have settled the suspect: an owner's edit, or Kelpie's own lost commit.
+      if (suspect && !this.#queued(suspect.id)) suspect = null;
+      const rows = this.#nextBatch(suspect ? 1 : limit, suspect?.id ?? null);
       const last = rows.at(-1);
-      if (last === undefined) return;
+      if (last === undefined) {
+        if (suspect) throw new Error("GitHub refused a write, and no other write can show why");
+        this.#set("batch_rows", `${Math.min(base * 2, MAX_BATCH_ROWS)}`);
+        return;
+      }
       const latest = new Map(rows.map((row) => [row.path, row.content]));
       // A write equal to the vault's file, or the removal of a file it doesn't have, is nothing to
       // commit; GitHub would refuse such a removal.
@@ -542,8 +560,10 @@ export class Vault extends DurableObject<VaultEnv> {
       const deletions = [...latest]
         .filter(([path, content]) => content === null && this.#fileContent(path) !== null)
         .map(([path]) => path);
+      const done = () =>
+        this.#exec("DELETE FROM queue WHERE id <= ? AND id != ?", last.id, suspect?.id ?? -1);
       if (writes.length === 0 && deletions.length === 0) {
-        this.#exec("DELETE FROM queue WHERE id <= ?", last.id);
+        done();
         continue;
       }
       const agents = [...new Set(rows.map((row) => row.agent))].sort();
@@ -553,24 +573,34 @@ export class Vault extends DurableObject<VaultEnv> {
           ? (summaries[0] ?? "")
           : `Update ${latest.size} files from ${agents.join(", ")}`;
       const shas = await Promise.all(writes.map(({ content }) => gitBlobSha(content)));
-      const outcome = await backend.commit({
-        branch: await this.#branch(backend),
-        expectedHead: this.#get("head") ?? "",
-        headline,
-        body: agents.map((agent) => `Kelpie-Agent: ${agent}`).join("\n"),
-        writes,
-        deletions,
-      });
+      let outcome: Awaited<ReturnType<VaultBackend["commit"]>>;
+      try {
+        outcome = await backend.commit({
+          branch: await this.#branch(backend),
+          expectedHead: this.#get("head") ?? "",
+          headline,
+          body: agents.map((agent) => `Kelpie-Agent: ${agent}`).join("\n"),
+          writes,
+          deletions,
+        });
+      } catch (error) {
+        if (rows.length > 1) this.#set("batch_rows", `${Math.floor(rows.length / 2)}`);
+        throw error;
+      }
       if (outcome.kind === "stale") {
         stale += 1;
         if (stale >= MAX_COMMIT_ATTEMPTS) throw new Error("the vault kept moving while committing");
+        needsSync = true;
         continue;
       }
+      stale = 0;
       if (outcome.kind === "refused") {
         if (rows.length > 1) {
           limit = Math.max(1, Math.floor(rows.length / 2));
+        } else if (suspect === null) {
+          suspect = last;
         } else {
-          this.#setAside(last, outcome.reason);
+          throw new Error(`GitHub refuses every commit (${outcome.reason})`);
         }
         continue;
       }
@@ -586,12 +616,19 @@ export class Vault extends DurableObject<VaultEnv> {
         });
         for (const path of deletions) this.#exec("DELETE FROM files WHERE path = ?", path);
         // Writes queued while the commit was in flight have larger ids, and stay.
-        this.#exec("DELETE FROM queue WHERE id <= ?", last.id);
+        done();
         this.#set("head", commit);
       });
-      limit = MAX_BATCH_ROWS;
-      stale = 0;
+      if (suspect) {
+        this.#setAside(suspect);
+        suspect = null;
+      }
+      limit = base;
     }
+  }
+
+  #queued(id: number): boolean {
+    return this.#exec("SELECT 1 AS one FROM queue WHERE id = ?", id).length > 0;
   }
 
   #fileContent(path: string): string | null {
@@ -601,8 +638,8 @@ export class Vault extends DurableObject<VaultEnv> {
     );
   }
 
-  /** Sets aside one write GitHub refuses on its own, so the writes after it go through. */
-  #setAside(row: QueuedRow, reason: string): void {
+  /** Sets aside one write GitHub refused on its own, so the writes after it go through. */
+  #setAside(row: QueuedRow): void {
     this.ctx.storage.transactionSync(() => {
       this.#exec(
         "INSERT INTO conflicts (agent, path, content, reason, at) VALUES (?, ?, ?, 'refused', ?)",
@@ -613,7 +650,7 @@ export class Vault extends DurableObject<VaultEnv> {
       );
       this.#exec("DELETE FROM queue WHERE id = ?", row.id);
     });
-    console.error("Vault: GitHub refused a write; it was set aside", { reason });
+    console.error("Vault: GitHub refused a write; it was set aside");
   }
 }
 
