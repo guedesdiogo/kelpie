@@ -139,6 +139,8 @@ function productionPorts(env: Env): ConversationPorts {
           withTimeout(contextStore.search(agentId, query, options), SEARCH_TIMEOUT_MS),
         readNote: (agentId, path, options) =>
           withTimeout(contextStore.readNote(agentId, path, options), READ_TIMEOUT_MS),
+        writeNote: (agentId, input, options) =>
+          withTimeout(contextStore.writeNote(agentId, input, options), REMEMBER_TIMEOUT_MS),
       }),
     ],
     send: (agentId, destination, text, options) => egress.send(agentId, destination, text, options),

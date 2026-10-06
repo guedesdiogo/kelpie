@@ -83,6 +83,10 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - **What opens:** only a current note of memory's index within the scopes. Anything else is "not found", the same answer whether the file exists or not.
     - **A page:** under 9,500 characters, fence included, with `nextOffset`.
     - **The first page** lists the links the scopes allow, and counts as one access.
+  - **`writeNote(agent, input, {scopes, sources})`,** the single writer behind the agent's `memory_write` (#126).
+    - **Checks first:** it runs `writeMemory`'s checks, removes secrets, and keeps a found note's kind and scope.
+    - **Writes:** it queues the note like any write, and answers `written` or `unchanged`, with the path.
+    - **Refusals:** `invalid` comes with the problems found, for the model to fix. A path the turn can't see is `not_found`, the same as a missing note. A scope the turn can't write to is `scope_not_allowed`.
   - **Access counts:** each recall counts the notes it packed, in one write, in a table outside the index. A rebuild keeps them, and they never reach git.
   - **The memory report** (#111): once a day, after the embeddings and the held files, the alarm writes what memory's index finds (cold notes, duplicates, possible contradictions) to `memory/_lint/report.md`, or removes the page when memory is clean ([memory-format.md](memory-format.md#the-daily-report)).
     - The page is queued only when it changed, so a quiet day makes no commit.

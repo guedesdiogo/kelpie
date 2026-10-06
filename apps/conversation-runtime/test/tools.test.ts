@@ -168,6 +168,7 @@ describe("a turn's tools", () => {
           agentId: "assistant",
           scopes: "all",
           qualifier: "clef",
+          source: expect.stringMatching(/^telegram\/chat-1, \d{4}-\d{2}-\d{2}$/),
         },
       },
       expect.objectContaining({ input: { q: "bruno" } }),

@@ -306,10 +306,16 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
     - A page is never cut inside an emoji, and says where the next one starts.
     - The first page also lists the note's links that the scopes allow, up to 50 within 2,000 characters, and counts as one access.
   - **Scopes and the qualifier** come from the turn, never from the model. A note outside the scopes, or outside memory's index (persona, rules, skills, root files), gets the same "not found" as a missing one.
+  - **`memory_write(title, body, kind, level, …)`:** saves one memory through the Context Store's single writer.
+    - **A new memory** goes where its title puts it. The path gets a number when another note holds it.
+    - **A found note's `path`** makes the memory that note's new version. It keeps the note's id, the owner's keys, its pin and its evergreen flag, and must keep its kind.
+    - **Where it can write:** the owner's global memory, by default, or the agent's own scope. When the turn lists its scopes, those too (#131 will revisit this).
+    - **The same memory again,** at its path or as an exact twin elsewhere, queued or committed, changes nothing, so a retried call is safe.
+    - **What it carries:** secrets are removed from the title, body and abstract, and `sources` is the conversation and the day, from the turn.
+    - **Bounds:** a turn saves 5 memories at most and stops after 3 failures.
   - **A note written in this turn** shows up only after the vault's next commit.
 - **Not yet:**
-  - the always-loaded core;
-  - the agent's `memory_write` (#126).
+  - the always-loaded core.
 
 ## Lifecycle
 
@@ -343,7 +349,7 @@ How the page behaves:
 
 ### The write decision
 
-Before a new memory is written, `decideWrite` says whether it is news (#111). The memory tools (#126) call it; nothing else does yet.
+Before a new memory is written, `decideWrite` says whether it is news (#111). `memory_write` (#126) calls it without the qualifier for now: ADR-0009 wants the qualifier's answers measured on a labeled set before they act, a question open on #111. So only the rules decide: an exact twin is a `NOOP`, and anything else is an `ADD`.
 - **The outcome:**
   - `ADD`: a new note, at `memoryPath`; the writer resolves a collision with an existing file;
   - `UPDATE`: the note at `path` stays true and the memory adds detail, so its new version holds both;

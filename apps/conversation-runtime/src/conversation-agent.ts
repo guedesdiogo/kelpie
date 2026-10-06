@@ -875,6 +875,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           // may see every scope; #131 brings the turn's role and chat type.
           scopes: "all",
           qualifier: settings.qualifier,
+          source: `${this.#destination().channel}/${this.#destination().threadId}, ${new Date(this.#ports.now()).toISOString().slice(0, 10)}`,
           signal: controller.signal,
         };
         step("tool", tools.get(toolCall.name)?.label);

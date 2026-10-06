@@ -1,8 +1,11 @@
 import { env } from "cloudflare:workers";
 import type {
   MemorySearchOptions,
+  MemoryWriteInput,
   ReadNoteOptions,
   ReadNoteResult,
+  WriteNoteOptions,
+  WriteNoteResult,
 } from "@kelpie/context-store/contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type MemoryStore, memoryTools } from "../src/memory-tools.ts";
@@ -18,8 +21,15 @@ const PAGE =
 const HITS =
   '<memory-2 note="Notes that match.">\n## Ana (memory/people/ana.md) [2]\nperson · global\n</memory-2>';
 
-/** A Context Store that answers from `read`, and logs what it was asked. */
-function fakeStore(read: (path: string, offset: number) => ReadNoteResult = () => notFound) {
+/** A Context Store that answers from `read` and `write`, and logs what it was asked. */
+function fakeStore(
+  read: (path: string, offset: number) => ReadNoteResult = () => notFound,
+  write: (input: MemoryWriteInput) => WriteNoteResult = () => ({
+    ok: true,
+    action: "written",
+    path: "memory/notes/x.md",
+  }),
+) {
   const calls: { method: string; agentId: string; arg: string; options: unknown }[] = [];
   const store: MemoryStore = {
     async search(agentId: string, query: string, options: MemorySearchOptions) {
@@ -29,6 +39,10 @@ function fakeStore(read: (path: string, offset: number) => ReadNoteResult = () =
     async readNote(agentId: string, path: string, options: ReadNoteOptions) {
       calls.push({ method: "readNote", agentId, arg: path, options });
       return read(path, options.offset ?? 0);
+    },
+    async writeNote(agentId: string, input: MemoryWriteInput, options: WriteNoteOptions) {
+      calls.push({ method: "writeNote", agentId, arg: input.title, options });
+      return write(input);
     },
   };
   return { store, calls };
@@ -41,6 +55,7 @@ const context = (): ToolContext => ({
   agentId: "assistant",
   scopes: ["global", "conversation/familia"],
   qualifier: "jev",
+  source: "telegram/chat-1, 2026-10-06",
   signal: new AbortController().signal,
 });
 
@@ -52,7 +67,8 @@ async function toolsOf(store: MemoryStore): Promise<Map<string, Tool>> {
 describe("memory tools", () => {
   it("offers search and read, with stable specs and plain labels", async () => {
     const tools = await toolsOf(fakeStore().store);
-    expect([...tools.keys()]).toEqual(["memory_search", "memory_read"]);
+    expect([...tools.keys()]).toEqual(["memory_search", "memory_read", "memory_write"]);
+    expect(tools.get("memory_write")?.label).toBe("Saving to memory");
     expect(tools.get("memory_search")?.label).toBe("Searching memory");
     expect(tools.get("memory_read")?.label).toBe("Reading a note");
     // The same specs every time: a turn keys its tools by them.
@@ -124,6 +140,111 @@ describe("memory tools", () => {
     expect(
       await (await toolsOf(off.store)).get("memory_read")?.run({ path: "memory/a.md" }, context()),
     ).toEqual({ output: "Memory is off: the vault isn't connected.", isError: true });
+  });
+});
+
+describe("memory_write", () => {
+  const note = { title: "Café da Ana", body: "Sem açúcar.", kind: "preference", level: "explicit" };
+
+  it("saves with the turn's scopes and source, never the model's", async () => {
+    let given: MemoryWriteInput | undefined;
+    const { store, calls } = fakeStore(undefined, (input) => {
+      given = input;
+      return { ok: true, action: "written", path: "memory/notes/x.md" };
+    });
+    const write = (await toolsOf(store)).get("memory_write");
+    expect(
+      await write?.run({ ...note, scope: "conversation/familia", sources: ["fake"] }, context()),
+    ).toEqual({ output: "Saved to memory/notes/x.md. This is done; don't save it again." });
+    expect(calls).toEqual([
+      {
+        method: "writeNote",
+        agentId: "assistant",
+        arg: "Café da Ana",
+        options: {
+          scopes: ["global", "conversation/familia"],
+          sources: ["telegram/chat-1, 2026-10-06"],
+        },
+      },
+    ]);
+    // What the model sent beyond the memory's fields doesn't reach the store.
+    expect(given).toEqual({ ...note, scope: "conversation/familia" });
+  });
+
+  it("tells the model what happened, in words it can act on", async () => {
+    const cases: [WriteNoteResult, { output: string; isError?: boolean }][] = [
+      [
+        { ok: true, action: "unchanged", path: "memory/notes/cafe.md" },
+        { output: "Already in memory, at memory/notes/cafe.md. Nothing was saved." },
+      ],
+      [
+        { ok: false, reason: "invalid", problems: ["`kind` is invalid", "`body` is empty"] },
+        { output: "Not saved: `kind` is invalid; `body` is empty.", isError: true },
+      ],
+      [
+        { ok: false, reason: "scope_not_allowed" },
+        {
+          output:
+            "Not saved: this conversation can't write to that scope. Leave scope out to save it to the owner's global memory.",
+          isError: true,
+        },
+      ],
+      [
+        { ok: false, reason: "not_found" },
+        {
+          output:
+            "Not saved: there is no note at that path in the memory this conversation can see.",
+          isError: true,
+        },
+      ],
+    ];
+    for (const [result, outcome] of cases) {
+      const write = (await toolsOf(fakeStore(undefined, () => result).store)).get("memory_write");
+      expect(await write?.run(note, context())).toEqual(outcome);
+    }
+    const failing = fakeStore(undefined, () => ({ ok: false, reason: "unavailable" }));
+    await expect(
+      (await toolsOf(failing.store)).get("memory_write")?.run(note, context()),
+    ).rejects.toThrow();
+  });
+
+  it("saves 5 memories a turn, and stops a model that keeps failing", async () => {
+    const { store, calls } = fakeStore();
+    const write = (await toolsOf(store)).get("memory_write");
+    const turn = context();
+    for (let i = 0; i < 5; i += 1) {
+      expect((await write?.run({ ...note, title: `Nota ${i}` }, turn))?.isError).toBeUndefined();
+    }
+    expect(await write?.run({ ...note, title: "Nota 5" }, turn)).toEqual({
+      output: "Not saved: this turn already saved 5 memories. Finish with what you have.",
+      isError: true,
+    });
+    expect(calls).toHaveLength(5);
+    // Another turn starts over.
+    expect((await write?.run(note, context()))?.isError).toBeUndefined();
+
+    const refusing = fakeStore(undefined, () => ({
+      ok: false,
+      reason: "invalid",
+      problems: ["`kind` is invalid"],
+    }));
+    const stubborn = (await toolsOf(refusing.store)).get("memory_write");
+    const another = context();
+    for (let i = 0; i < 3; i += 1) await stubborn?.run(note, another);
+    expect(await stubborn?.run(note, another)).toEqual({
+      output: "Not saved: memory writes failed 3 times in this turn. Stop retrying them.",
+      isError: true,
+    });
+    expect(refusing.calls).toHaveLength(3);
+  });
+
+  it("checks its input before asking the store", async () => {
+    const { store, calls } = fakeStore();
+    const write = (await toolsOf(store)).get("memory_write");
+    for (const input of [{}, { ...note, title: 3 }, { ...note, body: "" }, null]) {
+      expect((await write?.run(input, context()))?.isError, JSON.stringify(input)).toBe(true);
+    }
+    expect(calls).toHaveLength(0);
   });
 });
 
