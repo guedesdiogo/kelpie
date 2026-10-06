@@ -251,13 +251,15 @@ describe("ConversationAgent buffering", () => {
     const stub = agent("double-flush");
     await stub.ingest(message("m1", "anyone there?"));
     // The second flush gets the settings only after the first one started its turn.
-    const config = AgentHost.prototype.config;
+    const turnConfig = AgentHost.prototype.turnConfig;
     let calls = 0;
-    vi.spyOn(AgentHost.prototype, "config").mockImplementation(async function (this: AgentHost) {
+    vi.spyOn(AgentHost.prototype, "turnConfig").mockImplementation(async function (
+      this: AgentHost,
+    ) {
       calls += 1;
       if (calls === 2) await new Promise((resolve) => setTimeout(resolve, 50));
-      return config.call(this);
-    } as unknown as typeof config);
+      return turnConfig.call(this);
+    });
 
     await Promise.all([stub.flush(), stub.flush()]);
     expect(await stub.turns()).toMatchObject([{ status: "running" }]);
@@ -272,7 +274,7 @@ describe("ConversationAgent buffering", () => {
   it("plans the flush again when the provider retries a message whose planning failed", async () => {
     const world = use(fakeWorld([reply("Got it.")]));
     const stub = agent("plan-fails");
-    vi.spyOn(AgentHost.prototype, "config").mockImplementationOnce(() => {
+    vi.spyOn(AgentHost.prototype, "turnConfig").mockImplementationOnce(() => {
       throw new Error(INJECTED_FAILURE);
     });
 

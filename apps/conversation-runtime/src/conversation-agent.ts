@@ -848,11 +848,11 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .run();
   }
 
-  /** The agent's current settings, from its `AgentHost`. */
+  /** The agent's current settings, from its `AgentHost`, with the system prompt from its vault. */
   async #config(): Promise<AgentConfig> {
     const agentId = this.#get<string | null>("agentId", null);
     if (!agentId) throw new Error("The conversation has no agent yet");
-    return this.env.AGENT_HOST.getByName(agentId).config();
+    return this.env.AGENT_HOST.getByName(agentId).turnConfig();
   }
 
   #generation(): number {

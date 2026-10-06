@@ -14,6 +14,21 @@ export default defineConfig({
           CHANNEL_EGRESS: () =>
             new Response("channel-egress is not available in tests", { status: 503 }),
         },
+        // An empty vault: agents run on their settings unless a test swaps in a Context Store.
+        workers: [
+          {
+            name: "kelpie-context-store",
+            modules: true,
+            compatibilityDate: "2026-10-01",
+            script: `import { WorkerEntrypoint } from "cloudflare:workers";
+export class ContextStore extends WorkerEntrypoint {
+  compile() {
+    return { persona: null, rules: [], skills: [] };
+  }
+}
+export default { fetch: () => new Response(null, { status: 404 }) };`,
+          },
+        ],
       },
     }),
   ],

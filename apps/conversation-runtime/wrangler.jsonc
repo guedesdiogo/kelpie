@@ -14,7 +14,9 @@
       "binding": "CHANNEL_EGRESS",
       "service": "kelpie-channel-egress",
       "entrypoint": "ChannelEgress"
-    }
+    },
+    // The vault's persona, rules and skills (ADR-0005).
+    { "binding": "CONTEXT_STORE", "service": "kelpie-context-store", "entrypoint": "ContextStore" }
   ],
   "durable_objects": {
     "bindings": [
