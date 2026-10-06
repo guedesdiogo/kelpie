@@ -383,7 +383,8 @@ describe("decideWrite", () => {
           path: memoryPath("global", "note", "Casa da Ana"),
           source: "qualifier",
         });
-        const note = String((calls[0]?.state.notes as Record<string, string>).c0);
+        const note = (calls[0]?.state.notes as Record<string, string> | undefined)?.c0 ?? "";
+        expect(note.length).toBeGreaterThan(1_000);
         expect(note.length).toBeLessThanOrEqual(1_200);
       },
     );
