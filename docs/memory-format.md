@@ -208,7 +208,8 @@ Every conversation's history becomes session pages (#109), with no model call:
   - a path names one note;
   - a file name matches case-insensitively;
   - when two notes share a name, the one in the linking note's folder wins, then the shorter path;
-  - a link that matches nothing stays unresolved until a note with that name appears.
+  - a link that matches nothing stays unresolved until a note with that name appears;
+  - a lookup limited to a set of scopes resolves a link among the notes in them only, so a note in another scope can't take the link from one in them (#150).
 
 ## Entities
 
@@ -242,7 +243,9 @@ The index is one SQLite database inside the Context Store's Durable Object ([ADR
 - **Search:** current versions only by default. With `asOf`, it searches the versions the vault held at that instant. With `validAt`, it keeps only memories valid in the world at that instant. It returns 1 to 100 results, 10 by default.
 - **Entity lookup:** the notes that name any of a set of entity keys, current or as of an instant. An entity's own page, a note titled with the name that lists it, comes first, a global one before a scoped one. Each key weighs one over the number of notes that name it, so a rarer name says more. A name on more than 50 of the versions the lookup sees is left out: it singles nothing out. The weight and the cap count those versions only, so notes in other scopes, and a note's past versions, don't switch a name off (#146).
 - **Neighbours:** the current notes one step from a note: the notes it links to, then the pages of the entities it names, global ones first. A note it contradicts is what it replaced, so it isn't a neighbour.
-- **Scopes:** search, entity lookup and neighbours can be limited to a set of scopes. Without one they see every scope.
+- **Scopes:** search, entity lookup, neighbours and a note's links can be limited to a set of scopes. Without one they see every scope. With one, links resolve among the notes in it, and a note outside it has no neighbours (#150).
+  - **Residual, full-text ranking:** search ranks with bm25 statistics from the whole index, other scopes and past versions included, so notes outside the scopes can reorder the hits inside them. Revisit when scoped recall (#131) separates people who don't trust each other, such as a group with outsiders ([#152](https://github.com/guedesdiogo/kelpie/issues/152)).
+  - **Residual, unscoped reads:** backlinks, history, a path's current version, a version by commit and a note's entities take no scopes. Their callers pass only notes they already found within the scopes.
 - **A new schema version** drops the derived tables and starts empty, keeping the embeddings. The index then reports no last commit, which tells the sync to replay the vault from the start. Version 2 added the folded title.
 
 ## Retrieval
@@ -305,7 +308,7 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
     - Memory that is off or failing says so, rather than finding nothing.
   - **`memory_read(path, offset)`:** a note of memory's index, a page at a time, each page under 9,500 characters, fence included.
     - A page is never cut inside an emoji, and says where the next one starts.
-    - The first page also lists the note's links that the scopes allow, up to 50 within 2,000 characters, and counts as one access.
+    - The first page also lists the note's links, resolved among the notes the scopes allow, up to 50 within 2,000 characters, and counts as one access.
   - **Scopes and the qualifier** come from the turn, never from the model. A note outside the scopes, or outside memory's index (persona, rules, skills, root files), gets the same "not found" as a missing one.
   - **`memory_write(title, body, kind, level, …)`:** saves one memory through the Context Store's single writer.
     - **A new memory** goes where its title puts it, an event under its `validFrom` date, which it needs. The path gets a number when another note holds it.
