@@ -22,14 +22,3 @@ export function mergeOwnerWins(
   );
   return { content: lines.join("\n"), overlapped };
 }
-
-/**
- * Git's conflict markers as a whole block, at line starts and in order: `<<<<<<<`, `=======`, then
- * `>>>>>>>`. A line of equals signs alone is a Markdown heading's underline.
- */
-const CONFLICT_BLOCK = /^<{7}(?: .*)?\r?\n[\s\S]*?^={7}\r?\n[\s\S]*?^>{7}(?: .*)?$/m;
-
-/** Whether a file still holds a merge conflict that someone committed unresolved. */
-export function hasConflictMarkers(text: string): boolean {
-  return CONFLICT_BLOCK.test(text);
-}

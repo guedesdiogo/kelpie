@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasConflictMarkers, mergeOwnerWins } from "../src/merge.ts";
+import { mergeOwnerWins } from "../src/merge.ts";
 
 const lines = (...text: string[]) => `${text.join("\n")}\n`;
 
@@ -45,24 +45,5 @@ describe("mergeOwnerWins", () => {
       content: `${owner}\nFaz anos em maio.\n`,
       overlapped: false,
     });
-  });
-});
-
-describe("hasConflictMarkers", () => {
-  it.each([
-    ["git's markers", "a\n<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> main\nb\n"],
-    ["diff3's, with the base", "<<<<<<< ours\nx\n||||||| base\ny\n=======\nz\n>>>>>>> theirs"],
-    ["Windows line ends", "<<<<<<< HEAD\r\nmine\r\n=======\r\ntheirs\r\n>>>>>>> main\r\n"],
-  ])("finds %s", (_name, text) => {
-    expect(hasConflictMarkers(text)).toBe(true);
-  });
-
-  it.each([
-    ["a heading's underline", "Planos\n=======\n\nViajar.\n"],
-    ["an unfinished block", "<<<<<<< HEAD\nmine\n=======\ntheirs\n"],
-    ["markers out of order", ">>>>>>> main\n=======\n<<<<<<< HEAD\n"],
-    ["markers inside a line", "see <<<<<<< HEAD and ======= and >>>>>>> main"],
-  ])("ignores %s", (_name, text) => {
-    expect(hasConflictMarkers(text)).toBe(false);
   });
 });

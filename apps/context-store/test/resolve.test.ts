@@ -87,7 +87,7 @@ describe("Vault conflict resolution", () => {
       [{ path: "memory/people/ana.md", content: base.replace("café", "chá") }],
       "x",
     );
-    const resolved = "# Ana\n\nMora no Porto, antes em Braga.\n\nGosta de café.\n";
+    const resolved = "# Ana\n\nMora no Porto.\nMora em Braga.\n\nGosta de café.\n";
     const requests = fakeModel([resolved]);
     const pushed = marked("Mora no Porto.", "Mora em Braga.");
     backend.push({ "memory/people/ana.md": pushed });
@@ -106,16 +106,26 @@ describe("Vault conflict resolution", () => {
     ]);
   });
 
-  it("keeps a note held when the model fails, leaves markers or breaks the frontmatter", async () => {
-    const frontmatter = "---\nkind: person\n---\n";
-    const backend = vaultWith({ "memory/people/ana.md": `${frontmatter}${base}` });
+  it("keeps a note held when the model fails, writes its own lines or breaks the frontmatter", async () => {
+    const backend = vaultWith({ "memory/people/ana.md": `---\nkind: person\n---\n${base}` });
     const stub = vault("resolve-fails");
     await stub.compile("kelpie");
-    const pushed = marked("Mora no Porto.", "Mora em Braga.", frontmatter);
+    const pushed = [
+      "---",
+      "<<<<<<< HEAD",
+      "kind: person",
+      "=======",
+      "kind: note",
+      ">>>>>>> main",
+      "---",
+      base,
+    ].join("\n");
     const requests = fakeModel([
       new Error("the model is down"),
-      pushed,
-      "---\nkind: [person\n---\n# Ana\n",
+      // A line of its own: it could pin the note, or say anything.
+      `---\nkind: person\npinned: true\n---\n${base}`,
+      // Both sides' lines: the key twice.
+      `---\nkind: person\nkind: note\n---\n${base}`,
     ]);
     backend.push({ "memory/people/ana.md": pushed });
 
@@ -138,7 +148,7 @@ describe("Vault conflict resolution", () => {
     });
     const stub = vault("resolve-persona");
     await stub.compile("kelpie");
-    const resolved = "# Kelpie\n\nFala português e inglês.\n";
+    const resolved = `${persona}a\n`;
     const requests = fakeModel([resolved]);
     const conflict = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> main\n";
     backend.push({

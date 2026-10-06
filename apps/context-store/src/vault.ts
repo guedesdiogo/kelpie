@@ -19,6 +19,7 @@ import {
   type VaultFile,
 } from "@kelpie/vault";
 import { parseDocument } from "yaml";
+import { hasConflictMarkers } from "./conflicts.ts";
 import type {
   CompiledContext,
   ForgetResult,
@@ -30,7 +31,7 @@ import type {
   SkillEntry,
   WriteResult,
 } from "./contract.ts";
-import { hasConflictMarkers, mergeOwnerWins } from "./merge.ts";
+import { mergeOwnerWins } from "./merge.ts";
 import {
   agentRulesPath,
   isAgentId,
