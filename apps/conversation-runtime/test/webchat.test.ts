@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
+import { WEBCHAT_ADMISSION_HEADER } from "@kelpie/conversation/contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { replacePortsForTesting } from "../src/ports.ts";
-import { ADMISSION_HEADER } from "../src/webchat.ts";
 import { type FakeWorld, fakeWorld, reply } from "./fakes.ts";
 
 // The webchat's socket lives on the conversation's object (issue #40). Ingress admits the owner
@@ -15,7 +15,7 @@ type Frame = { type: string } & Record<string, unknown>;
 
 async function open(name: string, admission: unknown = owner) {
   const headers: Record<string, string> = { Upgrade: "websocket" };
-  if (admission !== null) headers[ADMISSION_HEADER] = JSON.stringify(admission);
+  if (admission !== null) headers[WEBCHAT_ADMISSION_HEADER] = JSON.stringify(admission);
   const response = await agent(name).fetch("https://conversation/webchat", { headers });
   const socket = response.webSocket;
   if (!socket) throw new Error(`no socket: ${response.status}`);

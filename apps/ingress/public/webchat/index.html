@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kelpie</title>
+    <link rel="stylesheet" href="/webchat/style.css" />
+    <script type="module" src="/webchat/app.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>Kelpie</h1>
+      <p id="status" role="status">Connecting…</p>
+    </header>
+    <main>
+      <ol id="messages" aria-live="polite" aria-label="Conversation"></ol>
+      <p id="typing" hidden>Typing…</p>
+    </main>
+    <form id="composer" autocomplete="off">
+      <label for="text" class="visually-hidden">Message</label>
+      <textarea id="text" rows="2" maxlength="16000" required></textarea>
+      <button type="submit">Send</button>
+    </form>
+  </body>
+</html>

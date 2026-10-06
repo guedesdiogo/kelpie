@@ -1,4 +1,4 @@
-import { DIRECTORY_NAME, type Remote } from "@kelpie/access";
+import { DIRECTORY_NAME, type Remote, remoteKeySet, verifyAccessJwt } from "@kelpie/access";
 import type { ChannelWebhooksContract } from "@kelpie/channels";
 import { TELEGRAM_WEBHOOK_PATH } from "@kelpie/channels/telegram";
 import type { ConversationContract } from "@kelpie/conversation/contract";
@@ -9,6 +9,7 @@ import {
   handleGitHubWebhook,
 } from "./github-webhook.ts";
 import { handleTelegramWebhook, type TelegramWebhookDeps } from "./telegram-webhook.ts";
+import { connectWebchat, handleWebchat, WEBCHAT_PATH, type WebchatDeps } from "./webchat.ts";
 
 export { Directory } from "./directory/directory.ts";
 
@@ -27,6 +28,27 @@ function telegramDeps(env: Env): TelegramWebhookDeps {
   };
 }
 
+function webchatDeps(env: Env): WebchatDeps {
+  // A trailing slash would never match the token's issuer.
+  const config = {
+    teamDomain: env.ACCESS_TEAM_DOMAIN.replace(/\/+$/, ""),
+    audience: env.ACCESS_AUD,
+  };
+  const keys = remoteKeySet(`${config.teamDomain}/cdn-cgi/access/certs`);
+  return {
+    authenticate: (request) =>
+      verifyAccessJwt(
+        request.headers.get("cf-access-jwt-assertion"),
+        config,
+        keys,
+        Math.floor(Date.now() / 1_000),
+      ),
+    admit: (identity, agentId) => env.DIRECTORY.getByName(DIRECTORY_NAME).admit(identity, agentId),
+    page: (request) => env.ASSETS.fetch(request),
+    connect: (name, admission) => connectWebchat(env, name, admission),
+  };
+}
+
 export default {
   async fetch(request, env): Promise<Response> {
     const { pathname } = new URL(request.url);
@@ -38,6 +60,13 @@ export default {
     if (request.method === "POST" && pathname === GITHUB_WEBHOOK_PATH) {
       // A service binding to context-store's GitHubWebhooks entrypoint, which answers with a status.
       return handleGitHubWebhook(request, env.GITHUB_WEBHOOKS as unknown as GitHubWebhookDeps);
+    }
+
+    if (
+      request.method === "GET" &&
+      (pathname === WEBCHAT_PATH || pathname.startsWith(`${WEBCHAT_PATH}/`))
+    ) {
+      return handleWebchat(request, webchatDeps(env));
     }
 
     const prefix = `${TELEGRAM_WEBHOOK_PATH}/`;

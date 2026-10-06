@@ -8,7 +8,8 @@ export default defineConfig({
       // Ingress binds channel-egress's webhook checks, context-store's GitHub webhook and
       // conversation-runtime's conversations.
       // Most tests pass fakes to `handleTelegramWebhook()`. These stubs let the routing tests run
-      // the production wiring: egress accepts one secret, and a conversation keeps what it gets.
+      // the production wiring: egress accepts one secret, and a conversation keeps what it gets and
+      // echoes the headers of a webchat upgrade.
       miniflare: {
         workers: [
           {
@@ -42,6 +43,13 @@ export default { fetch: () => new Response(null, { status: 404 }) };`,
             compatibilityDate: "2026-10-01",
             script: `import { DurableObject } from "cloudflare:workers";
 export class ConversationAgent extends DurableObject {
+  // The webchat's upgrade: the socket's first frame echoes the headers this object received.
+  async fetch(request) {
+    const pair = new WebSocketPair();
+    pair[1].accept();
+    pair[1].send(JSON.stringify(Object.fromEntries(request.headers)));
+    return new Response(null, { status: 101, webSocket: pair[0] });
+  }
   async ingest(message) {
     await this.ctx.storage.put("received", message);
     return { status: "accepted", flushAt: null };

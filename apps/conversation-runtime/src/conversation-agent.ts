@@ -9,11 +9,13 @@ import {
   stampOf,
   withoutTypedStamps,
 } from "@kelpie/conversation";
-import type {
-  ConversationContract,
-  Destination,
-  InboundMessage,
-  IngestResult,
+import {
+  type ConversationContract,
+  type Destination,
+  type InboundMessage,
+  type IngestResult,
+  WEBCHAT_ADMISSION_HEADER,
+  type WebchatAdmission,
 } from "@kelpie/conversation/contract";
 import type { AssistantMessage, ChatMessage, LlmEvent, Usage } from "@kelpie/llm";
 import { QualifierUnavailable } from "@kelpie/qualifier";
@@ -31,13 +33,11 @@ import migrations from "./migrations/migrations.js";
 import { type ConversationPorts, portsFor } from "./ports.ts";
 import * as schema from "./schema.ts";
 import {
-  ADMISSION_HEADER,
   parseAdmission,
   parseClientFrame,
   type ServerFrame,
   type ShownMessage,
   shownText,
-  type WebchatAdmission,
   webchatEgress,
 } from "./webchat.ts";
 
@@ -145,7 +145,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
 
   /** Ingress has admitted the owner; the socket gets the conversation so far. */
   override onConnect(connection: Connection, { request }: ConnectionContext): void {
-    const admission = parseAdmission(request.headers.get(ADMISSION_HEADER));
+    const admission = parseAdmission(request.headers.get(WEBCHAT_ADMISSION_HEADER));
     if (!admission) {
       connection.close(1008, "not admitted");
       return;

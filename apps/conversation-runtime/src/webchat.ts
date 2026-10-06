@@ -1,17 +1,9 @@
+import type { WebchatAdmission } from "@kelpie/conversation/contract";
 import type { ChatMessage } from "@kelpie/llm";
 import type { ConversationPorts } from "./ports.ts";
 
 // The webchat's socket protocol (issue #40). The socket lives on the conversation's object;
 // ingress verifies the owner's Cloudflare Access login and admits them before the upgrade.
-
-/** Who ingress admitted. Ingress sets it on the request it builds; the browser's never reaches here. */
-export const ADMISSION_HEADER = "x-kelpie-webchat-admission";
-
-export interface WebchatAdmission {
-  agentId: string;
-  userId: string;
-  timeZone: string | null;
-}
 
 /** What the browser sends: a message with an id of its own choosing, or whether it is typing. */
 export type ClientFrame =
