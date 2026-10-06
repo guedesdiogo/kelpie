@@ -102,7 +102,8 @@ interface TurnInFlight {
 /**
  * The hot path of one conversation (ADR-0002):
  * - messages are deduplicated, then buffered until the user goes quiet (a re-armed schedule,
- *   never `setTimeout`), with the quiet window from the end-of-turn decision;
+ *   never `setTimeout`), for the agent's fixed wait (ADR-0024), or until the owner's next message
+ *   after a pause;
  * - each turn runs as a durable fiber that calls the model, plans the bubbles and persists them in
  *   an outbox before sending them with pacing;
  * - a new message interrupts the turn in flight: the turn is settled at once (unsent bubbles
@@ -255,6 +256,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (this.#get("paused", false)) {
       this.#set("paused", false);
       this.#set("resumedAt", now);
+      if (message.destination.channel === "webchat") this.#broadcast({ type: "resumed" });
     }
     this.#interrupt();
     const epoch = this.#epoch() + 1;
@@ -269,20 +271,28 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    * owner's next message, which `ingest` answers together with what was buffered.
    */
   async pause(target: PauseTarget): Promise<PauseResult> {
+    capabilitiesFor(target.destination.channel);
     const mismatch = this.#bind(target);
     if (mismatch) return { status: "rejected", reason: mismatch };
+    // Telegram delivers an update again after a failed answer, even after the next message.
+    if (target.providerMessageId && target.providerMessageId === this.#get("lastPauseId", null)) {
+      return { status: "duplicate" };
+    }
+    if (target.providerMessageId) this.#set("lastPauseId", target.providerMessageId);
+    if (this.#get("paused", false)) return { status: "paused" };
     this.#interrupt();
     this.#set("epoch", this.#epoch() + 1);
     this.#set("paused", true);
     await this.#serialized(() => this.#cancelFlushSchedule());
-    await this.#confirmPause(target);
+    // A message may have resumed the conversation meanwhile; then there is nothing to confirm.
+    if (this.#get("paused", false)) await this.#confirmPause(target);
     return { status: "paused" };
   }
 
   /** Best effort: the webchat's sockets are told, and other channels get a short fixed message. */
   async #confirmPause({ agentId, destination }: PauseTarget): Promise<void> {
     if (destination.channel === "webchat") {
-      for (const connection of this.getConnections()) send(connection, { type: "paused" });
+      this.#broadcast({ type: "paused" });
       return;
     }
     try {
@@ -292,6 +302,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     } catch (error) {
       console.warn("conversation: the pause wasn't confirmed", { error: errorName(error) });
     }
+  }
+
+  #broadcast(frame: ServerFrame): void {
+    for (const connection of this.getConnections()) send(connection, frame);
   }
 
   /**
@@ -319,11 +333,13 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (this.#get("paused", false)) return;
     if (this.#pendingInbound().length === 0) return;
     const { settings, promptVersion } = await this.#turnConfig();
-    // Other calls ran while this waited: a newer message may have re-armed the flush, or another
-    // flush may have claimed the buffer.
+    // Other calls ran while this waited: a newer message may have re-armed the flush, another
+    // flush may have claimed the buffer, or the owner may have paused.
     if (armed && armed.epoch !== this.#epoch()) return;
+    if (this.#get("paused", false)) return;
     if (this.#pendingInbound().length === 0) return;
     await this.#cancelFlushSchedule();
+    this.#set("resumedAt", null);
     const pending = this.#pendingInbound();
     const now = this.#ports.now();
     const checkpointId = this.#latestCheckpoint()?.id ?? null;
@@ -1011,7 +1027,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (epoch !== this.#epoch() || this.#pendingInbound().length === 0) return;
     await this.#cancelFlushSchedule();
     if (flushAt <= now) {
-      await this.flush();
+      await this.flush({ epoch });
     } else {
       const schedule = await this.schedule(new Date(flushAt), "flush", { epoch });
       this.#set("flushSchedule", schedule.id);

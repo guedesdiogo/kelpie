@@ -117,6 +117,7 @@ async function deliver(event: CanonicalEvent, deps: TelegramWebhookDeps): Promis
     const paused = await deps.pause(conversationName(event.agentId, destination), {
       agentId: event.agentId,
       destination,
+      providerMessageId: event.providerMessageId,
     });
     if (paused.status === "rejected") {
       console.warn("ingress: the conversation refused a pause", paused.reason);

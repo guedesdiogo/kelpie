@@ -31,6 +31,7 @@ export type ServerFrame =
   | { type: "bubble"; text: string }
   | { type: "typing"; active: boolean }
   | { type: "paused" }
+  | { type: "resumed" }
   | { type: "accepted"; id: string }
   | { type: "rejected"; id: string; reason: string };
 

@@ -37,7 +37,7 @@ This amends ADR-0009, ADR-0018 and ADR-0022 for end of turn:
   - A shorter `quietMs` per agent trades speed for more interruptions.
 - **No qualifier call, cost or latency risk per message.** The decision's timeout and its fallbacks are gone from the hot path.
 - **Behavior is predictable.** The same message always waits the same time.
-- **Agents with the old `quietWindow` stored keep it as an unused value.** The configuration commands no longer accept it.
+- **Settings stored before this change give way.** A configured agent stores its whole settings, so it holds the old windows and the old 10 s cap; both are ignored when read, and the new defaults apply. The configuration commands no longer accept `quietWindow`.
 - **A pause command (#134)** lets the owner hold an answer until their next message, which a fixed wait alone can't do.
 
 ## Alternatives considered

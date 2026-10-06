@@ -252,11 +252,13 @@ describe("Telegram /pause", () => {
       text,
       entities: [{ offset: 0, length: text.length, type: "bot_command" }],
     });
+  // The update's id lets the conversation drop a pause Telegram delivers again.
   const ownerChat = {
     name: `kelpie:telegram:${OWNER_CHAT_ID}`,
     target: {
       agentId: "kelpie",
       destination: { channel: "telegram", threadId: String(OWNER_CHAT_ID) },
+      providerMessageId: "42",
     },
   };
 

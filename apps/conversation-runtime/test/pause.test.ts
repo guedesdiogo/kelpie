@@ -98,6 +98,40 @@ describe("pausing a conversation", () => {
     });
   });
 
+  it("starts no turn when a pause lands while a flush reads the settings", async () => {
+    const world = use(fakeWorld([reply("Too late.")]));
+    const stub = agent("pause-race");
+    await stub.ingest(message("m1", "so"));
+
+    await Promise.all([stub.flush(), stub.pause(target)]);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(world.sent).toEqual([PAUSED_TEXT]);
+    expect(await stub.turns()).toEqual([]);
+  });
+
+  it("changes nothing, and confirms nothing, when already paused", async () => {
+    const world = use(fakeWorld([]));
+    const stub = agent("pause-twice");
+    await stub.ingest(message("m1", "so"));
+    await stub.pause(target);
+    expect(await stub.pause(target)).toEqual({ status: "paused" });
+    expect(world.sent).toEqual([PAUSED_TEXT]);
+  });
+
+  it("ignores a redelivered /pause after the next message resumed the conversation", async () => {
+    const world = use(fakeWorld([]));
+    const stub = agent("pause-redelivered");
+    await stub.ingest(message("m1", "so"));
+    await stub.pause({ ...target, providerMessageId: "77" });
+    await stub.ingest(message("m2", "and the rest"));
+
+    expect(await stub.pause({ ...target, providerMessageId: "77" })).toEqual({
+      status: "duplicate",
+    });
+    expect(await flushes("pause-redelivered")).toHaveLength(1);
+    expect(world.sent).toEqual([PAUSED_TEXT]);
+  });
+
   it("refuses a pause for another conversation", async () => {
     use(fakeWorld([]));
     const stub = agent("pause-other");

@@ -297,6 +297,8 @@ describe("pausing from the webchat", () => {
 
     later.send({ type: "message", id: "c2", text: "and the rest" });
     await vi.waitFor(() => expect(ofType(later.frames, "accepted")).toHaveLength(1));
+    // Every open socket learns the conversation is live again.
+    await vi.waitFor(() => expect(ofType(chat.frames, "resumed")).toEqual([{ type: "resumed" }]));
     expect(await flushTimes(name)).toHaveLength(1);
     const again = await open(name);
     await vi.waitFor(() =>

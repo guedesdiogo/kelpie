@@ -24,7 +24,7 @@ const PAUSED_STATUS = "Paused: Kelpie answers after your next message";
 
 function setPaused(value) {
   paused = value;
-  pause.disabled = value;
+  pause.disabled = value || socket?.readyState !== WebSocket.OPEN;
   status.textContent = value ? PAUSED_STATUS : "Connected";
 }
 
@@ -81,6 +81,9 @@ function receive(frame) {
       setTyping(false);
       setPaused(true);
       break;
+    case "resumed":
+      setPaused(false);
+      break;
     case "accepted":
     case "rejected": {
       const text = unconfirmed.get(frame.id);
@@ -106,7 +109,7 @@ function connect() {
   socket.addEventListener("open", () => {
     wasOpen = true;
     refused = 0;
-    status.textContent = paused ? PAUSED_STATUS : "Connected";
+    setPaused(paused);
   });
   socket.addEventListener("message", (event) => {
     try {
@@ -116,6 +119,7 @@ function connect() {
     }
   });
   socket.addEventListener("close", () => {
+    pause.disabled = true;
     refused = wasOpen ? 0 : refused + 1;
     status.textContent =
       refused >= 3 ? "Can't connect. If your login expired, reload the page." : "Reconnecting…";

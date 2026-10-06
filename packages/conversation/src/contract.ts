@@ -40,10 +40,12 @@ export type IngestResult =
 export interface PauseTarget {
   agentId: string;
   destination: Destination;
+  /** The command's own message id, when the channel retries deliveries. */
+  providerMessageId?: string;
 }
 
 export type PauseResult =
-  | { status: "paused" }
+  | { status: "paused" | "duplicate" }
   | { status: "rejected"; reason: "destination_mismatch" | "agent_mismatch" };
 
 /** What ingress calls on a conversation's object. */

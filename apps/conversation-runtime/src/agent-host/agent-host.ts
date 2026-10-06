@@ -50,7 +50,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   /** The agent's settings, defaults filled in, and its prompt version. */
   config(): AgentConfig {
     return {
-      settings: { ...DEFAULT_SETTINGS, ...this.#get<Partial<AgentSettings>>("settings", {}) },
+      settings: { ...DEFAULT_SETTINGS, ...current(this.#get<StoredSettings>("settings", {})) },
       promptVersion: this.#get("promptVersion", 0),
     };
   }
@@ -167,4 +167,17 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
 
 function errorName(error: unknown): string {
   return error instanceof Error ? error.name : "unknown error";
+}
+
+/** Settings as stored; those saved before ADR-0024 also carry the end-of-turn windows. */
+type StoredSettings = Partial<AgentSettings> & { quietWindow?: unknown };
+
+/**
+ * A change stores the whole settings, so settings saved before ADR-0024 hold the old windows and
+ * the old 10 s cap, which would cut the new fixed wait short: both give way to the defaults.
+ */
+function current(stored: StoredSettings): Partial<AgentSettings> {
+  if (!("quietWindow" in stored)) return stored;
+  const { quietWindow: _windows, maxWaitMs: _cap, ...rest } = stored;
+  return rest;
 }
