@@ -92,6 +92,11 @@ export interface SearchOptions {
   asOf?: number;
   /** World time: keep only memories valid at this instant. */
   validAt?: number;
+  /**
+   * World time now: leave out memories whose `invalid_at` has passed (#111). A memory without one
+   * never expires, and one that becomes valid later stays.
+   */
+  notExpiredAt?: number;
 }
 
 export interface SearchHit {
@@ -279,6 +284,10 @@ function versionFilter(options: SearchOptions): [string, SqlValue[]] {
     filters.push("(v.valid_from IS NULL OR v.valid_from <= ?)");
     filters.push("(v.invalid_at IS NULL OR v.invalid_at > ?)");
     bindings.push(options.validAt, options.validAt);
+  }
+  if (options.notExpiredAt !== undefined) {
+    filters.push("(v.invalid_at IS NULL OR v.invalid_at > ?)");
+    bindings.push(options.notExpiredAt);
   }
   return [filters.join(" AND "), bindings];
 }
@@ -746,7 +755,12 @@ export class MemoryIndex {
    */
   neighbours(
     path: string,
-    options: { limit?: number; validAt?: number; scopes?: readonly Scope[] } = {},
+    options: {
+      limit?: number;
+      validAt?: number;
+      notExpiredAt?: number;
+      scopes?: readonly Scope[];
+    } = {},
   ): SearchHit[] {
     const exists = this.#exec(
       "SELECT 1 AS one FROM versions WHERE path = ? AND is_current = 1",
@@ -756,6 +770,7 @@ export class MemoryIndex {
     const limit = limitOf(options);
     const [filter, bindings] = versionFilter({
       ...(options.validAt === undefined ? {} : { validAt: options.validAt }),
+      ...(options.notExpiredAt === undefined ? {} : { notExpiredAt: options.notExpiredAt }),
       ...(options.scopes === undefined ? {} : { scopes: options.scopes }),
     });
     const hits: SearchHit[] = [];

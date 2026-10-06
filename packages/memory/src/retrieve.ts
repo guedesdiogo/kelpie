@@ -194,6 +194,48 @@ const SESSION_RECALL = [
   "previously",
 ];
 
+/** Phrases that ask how things were, folded: an expired memory can answer them (#111). */
+const PAST = [
+  "antes",
+  "antigamente",
+  "na epoca",
+  "naquela epoca",
+  "naquele tempo",
+  "costumava",
+  "costumavam",
+  "morava",
+  "moravam",
+  "trabalhava",
+  "trabalhavam",
+  "estudava",
+  "antigo",
+  "antiga",
+  "antigos",
+  "antigas",
+  "anterior",
+  "ex",
+  "used to",
+  "use to",
+  "before",
+  "formerly",
+  "former",
+  "at the time",
+  "back then",
+];
+
+/**
+ * Whether a question asks how things were, or about a past conversation: then an expired memory
+ * is an answer, not noise.
+ */
+export function asksAboutThePast(text: string): boolean {
+  return pastOf(tokens(text));
+}
+
+function pastOf(words: readonly string[]): boolean {
+  const padded = ` ${words.join(" ")} `;
+  return recalls(words) || PAST.some((marker) => padded.includes(` ${marker} `));
+}
+
 /** Whether a question asks about a past conversation, so sessions aren't ranked down. */
 export function isSessionRecall(text: string): boolean {
   return recalls(tokens(text));
@@ -256,10 +298,13 @@ export function retrieve(
   const asked = Math.trunc(options.limit ?? 10);
   const limit = Number.isFinite(asked) ? Math.min(Math.max(asked, 1), 100) : 10;
   // ai-memory fetches max(4 × limit, 20) per stream, up to limit + 300; the index returns 100 at most.
-  const { vector, ...searchOptions } = options;
-  const fetched = { ...searchOptions, limit: Math.min(Math.max(4 * limit, 20), 100) };
+  const { vector, notExpiredAt, ...given } = options;
   const dated = options.asOf !== undefined || options.validAt !== undefined;
   const all = tokens(text);
+  // An expired memory answers only a question about how things were, or one at a date of its own.
+  const expiredAt = dated || pastOf(all) ? undefined : notExpiredAt;
+  const searchOptions = expiredAt === undefined ? given : { ...given, notExpiredAt: expiredAt };
+  const fetched = { ...searchOptions, limit: Math.min(Math.max(4 * limit, 20), 100) };
   const words = searchWords(all, dated);
   const fts = words.length === 0 ? [] : index.search(words.join(" "), fetched);
   const entity = index.entityHits(entityKeys(all), fetched);
@@ -290,6 +335,7 @@ export function retrieve(
       for (const hit of index.neighbours(seed.path, {
         limit: NEIGHBOURS_PER_SEED,
         ...(options.validAt === undefined ? {} : { validAt: options.validAt }),
+        ...(expiredAt === undefined ? {} : { notExpiredAt: expiredAt }),
         ...(options.scopes === undefined ? {} : { scopes: options.scopes }),
       })) {
         if (seen.has(hit.path)) continue;

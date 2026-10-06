@@ -868,6 +868,8 @@ export class Vault extends DurableObject<VaultEnv> {
       }
       const retrieveOptions: RetrieveOptions = {
         limit: gateway === null ? RECALL_LIMIT : RERANK_CANDIDATES,
+        // Expired notes stay out, unless the question asks how things were (#111).
+        notExpiredAt: Date.now(),
         ...(scopes === "all" ? {} : { scopes: scopes as readonly Scope[] }),
         ...(typeof options.asOf === "number" ? { asOf: options.asOf } : {}),
         ...(typeof options.validAt === "number" ? { validAt: options.validAt } : {}),

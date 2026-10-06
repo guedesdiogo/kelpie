@@ -48,6 +48,7 @@ export {
   rerank,
 } from "./rerank.ts";
 export {
+  asksAboutThePast,
   isSessionRecall,
   needsMemory,
   type Packed,
