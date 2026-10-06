@@ -1,15 +1,20 @@
 import { RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
 import {
   AnthropicMessagesProvider,
+  EMBEDDING_PROVIDERS,
+  type Embedder,
+  type EmbedOutcome,
   LlmError,
   type LlmProvider,
   ModelRouter,
   type ModelTier,
+  OpenAIEmbedder,
   OpenAIResponsesProvider,
   type ProviderId,
   parseRouteTable,
   type RoutedRequest,
   toNdjsonStream,
+  WorkersAiEmbedder,
 } from "@kelpie/llm";
 import {
   ClefQualifier,
@@ -33,8 +38,12 @@ interface Secrets {
 
 /** How long to wait for the qualifier: just past the caller's 800 ms, whose abort doesn't cross RPC. */
 const QUALIFY_TIMEOUT_MS = 1_000;
+/** One `embed` call takes at most this many texts, and this long. */
+const MAX_EMBED_TEXTS = 256;
+const EMBED_TIMEOUT_MS = 30_000;
 
-type GatewayEnv = Env & Secrets;
+/** `EMBEDDING_PROVIDER` is a var: any string at deploy time, whatever the generated types say. */
+type GatewayEnv = Omit<Env, "EMBEDDING_PROVIDER"> & Secrets & { EMBEDDING_PROVIDER: string };
 
 /**
  * One model call. Read `events()` once, as newline-delimited JSON (decode it with
@@ -85,6 +94,56 @@ export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
   ): Promise<GatewayQualifyOutcome> {
     return qualifyWith(this.env, state, questions, backend);
   }
+
+  /**
+   * Vectors for up to 256 texts, one each, in order, from the instance's embedding model:
+   * `EMBEDDING_PROVIDER` chooses bge-m3 on Workers AI or OpenAI (issue #110).
+   */
+  embed(texts: string[]): Promise<EmbedOutcome> {
+    return embedWith(this.env, texts);
+  }
+}
+
+/** A failure is logged here, without the texts, and answered as `failed`. */
+export async function embedWith(env: GatewayEnv, texts: string[]): Promise<EmbedOutcome> {
+  if (
+    !Array.isArray(texts) ||
+    texts.length === 0 ||
+    texts.length > MAX_EMBED_TEXTS ||
+    !texts.every((text) => typeof text === "string")
+  ) {
+    return { ok: false, reason: "invalid" };
+  }
+  try {
+    const embedder = embedderFor(env);
+    if (!embedder) return { ok: false, reason: "not_configured" };
+    const vectors = await embedder.embed(texts, { signal: AbortSignal.timeout(EMBED_TIMEOUT_MS) });
+    return { ok: true, model: embedder.model, vectors };
+  } catch (error) {
+    logFailure(error, env);
+    return { ok: false, reason: "failed" };
+  }
+}
+
+function embedderFor(env: GatewayEnv): Embedder | null {
+  const provider = env.EMBEDDING_PROVIDER;
+  if (!(EMBEDDING_PROVIDERS as readonly string[]).includes(provider)) {
+    throw new Error(`unknown EMBEDDING_PROVIDER: ${provider}`);
+  }
+  if (provider === "openai") {
+    if (!env.OPENAI_API_KEY) return null;
+    return new OpenAIEmbedder(
+      providerConfig(env.OPENAI_API_KEY, env.OPENAI_BASE_URL, env.AI_GATEWAY_TOKEN),
+    );
+  }
+  // The binding's types list known models with their own inputs, so bge-m3 goes through a plain
+  // signature.
+  const run = env.AI.run.bind(env.AI) as unknown as (
+    model: string,
+    input: { text: string[] },
+    options: AiOptions,
+  ) => Promise<unknown>;
+  return new WorkersAiEmbedder({ run: (model, input, options) => run(model, input, options) });
 }
 
 /** Answers at once when Jev is asked without its key; a failure is logged here and answered as `failed`. */

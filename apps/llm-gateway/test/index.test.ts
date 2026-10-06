@@ -2,7 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { fromNdjsonStream, type LlmEvent, type RoutedRequest } from "@kelpie/llm";
 import type { Question } from "@kelpie/qualifier";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { providerConfig, qualifyWith } from "../src/index.ts";
+import { embedWith, providerConfig, qualifyWith } from "../src/index.ts";
 
 // The Worker runs in the test's isolate, so stubbing the global fetch stands in for the provider.
 // The stream is built from Anthropic's documented event format, not recorded.
@@ -251,6 +251,75 @@ describe("llm-gateway", () => {
   it("answers 404 over HTTP", async () => {
     const response = await exports.default.fetch("https://llm-gateway.example/");
     expect(response.status).toBe(404);
+  });
+});
+
+describe("embed", () => {
+  type GatewayEnv = Parameters<typeof embedWith>[0];
+
+  it("embeds with bge-m3 on the AI binding by default, and needs no key", async () => {
+    const run = vi.fn(async (_model: string, input: { text: string[] }) => ({
+      shape: [input.text.length, 3],
+      data: input.text.map((_, i) => [i, 0.5, 1]),
+    }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const outcome = await embedWith({ ...(env as GatewayEnv), AI: { run } as unknown as Ai }, [
+      "Onde a Ana mora?",
+      "Ana mora no Porto.",
+    ]);
+    expect(outcome).toEqual({
+      ok: true,
+      model: "@cf/baai/bge-m3",
+      vectors: [
+        [0, 0.5, 1],
+        [1, 0.5, 1],
+      ],
+    });
+    expect(run.mock.calls[0]?.[0]).toBe("@cf/baai/bge-m3");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("embeds through OpenAI when the instance chooses it", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () =>
+        Response.json({ data: [{ index: 0, embedding: [0.25, 0.75] }] }),
+      );
+    const outcome = await embedWith(
+      { ...(env as GatewayEnv), EMBEDDING_PROVIDER: "openai", OPENAI_API_KEY: "test-key" },
+      ["oi"],
+    );
+    expect(outcome).toEqual({ ok: true, model: "text-embedding-3-small", vectors: [[0.25, 0.75]] });
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe("https://api.openai.com/v1/embeddings");
+  });
+
+  it("answers not_configured for OpenAI without its key, and invalid for bad input", async () => {
+    const { OPENAI_API_KEY: _key, ...withoutKey } = env as GatewayEnv;
+    expect(await embedWith({ ...withoutKey, EMBEDDING_PROVIDER: "openai" }, ["oi"])).toEqual({
+      ok: false,
+      reason: "not_configured",
+    });
+    for (const texts of [[], [1], Array.from({ length: 257 }, () => "x")]) {
+      expect(await embedWith(env as GatewayEnv, texts as string[])).toEqual({
+        ok: false,
+        reason: "invalid",
+      });
+    }
+  });
+
+  it("answers failed when Workers AI fails, and logs only the error's name", async () => {
+    const run = vi.fn(async () => {
+      const error = new Error("bad input: a senha é hunter2hunter2");
+      error.name = "InferenceUpstreamError";
+      throw error;
+    });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const outcome = await embedWith({ ...(env as GatewayEnv), AI: { run } as unknown as Ai }, [
+      "oi",
+    ]);
+    expect(outcome).toEqual({ ok: false, reason: "failed" });
+    expect(JSON.stringify(logged.mock.calls)).toContain("InferenceUpstreamError");
+    expect(JSON.stringify(logged.mock.calls)).not.toContain("hunter2");
   });
 });
 

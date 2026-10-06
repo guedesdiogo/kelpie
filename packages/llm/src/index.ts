@@ -1,4 +1,15 @@
 export { type AnthropicConfig, AnthropicMessagesProvider } from "./anthropic.ts";
+export {
+  EMBEDDING_INPUT_CHARS,
+  EMBEDDING_PROVIDERS,
+  type Embedder,
+  type EmbeddingProviderId,
+  type EmbedOutcome,
+  OpenAIEmbedder,
+  type OpenAIEmbedderConfig,
+  WorkersAiEmbedder,
+  type WorkersAiRun,
+} from "./embeddings.ts";
 export { errorFromStatus, LlmError, type LlmErrorCode } from "./errors.ts";
 export { fromNdjsonStream, toNdjsonStream, type WireFrame } from "./ndjson.ts";
 export { type OpenAIConfig, OpenAIResponsesProvider } from "./openai.ts";
