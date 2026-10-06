@@ -583,6 +583,31 @@ describe("readNote", () => {
     });
   });
 
+  it("lists a link's target in the scopes, though another scope holds a note of its name", async () => {
+    const plan = memoryPath("conversation/familia", "note", "Viagem");
+    const bia = memoryPath("conversation/familia", "person", "Bia Souza");
+    await vaultOf([
+      {
+        scope: "conversation/familia",
+        kind: "note",
+        title: "Viagem",
+        body: "Com a [[bia-souza]].",
+        level: "explicit",
+        confidence: 0.9,
+      },
+      person("Bia Souza", "Prima da Ana.", "conversation/familia"),
+      // Its path is shorter, so it takes the link when every scope is seen.
+      person("Bia Souza", "Outra Bia."),
+    ]);
+    fakeGateway();
+    const stub = vault("read-note-scoped-links");
+    const page = await stub.readNote("kelpie", plan, { scopes: ["conversation/familia"] });
+    if (!page.ok) throw new Error(page.reason);
+    expect(page.text).toContain(`- Bia Souza (${bia})`);
+    const all = await stub.readNote("kelpie", plan, { scopes: "all" });
+    expect(all.ok && all.text).toContain("- Bia Souza (memory/people/bia-souza.md)");
+  });
+
   it("counts a read once, on its first page", async () => {
     const long = `Começo. ${"Uma linha longa sobre a família. ".repeat(600)}`;
     await vaultOf([person("Ana Souza", long)]);

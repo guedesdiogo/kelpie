@@ -1075,7 +1075,9 @@ export class Vault extends DurableObject<VaultEnv> {
       const links: { title: string; path: string }[] = [];
       if (offset === 0) {
         const seen = new Set([path]);
-        for (const link of this.#memory.links(path)) {
+        // Resolved among the notes the scopes allow, so another scope's note can't take a link.
+        const scoped = scopes === "all" ? {} : { scopes: scopes as readonly Scope[] };
+        for (const link of this.#memory.links(path, scoped)) {
           if (link.path === null || seen.has(link.path)) continue;
           seen.add(link.path);
           const target = this.#memory.current(link.path);

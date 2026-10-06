@@ -246,6 +246,85 @@ describe("the index's entity and graph lookups", () => {
       },
     );
   });
+
+  it("resolves a link among the notes in its scopes, so another scope's note can't hide it", async () => {
+    const place = (scope: Scope): MemoryInput => ({
+      scope,
+      kind: "place",
+      title: "Lisboa",
+      body: "Uma cidade.",
+      level: "explicit",
+      confidence: 0.9,
+    });
+    const picnic: MemoryInput = {
+      scope: "conversation/family",
+      kind: "note",
+      title: "Piquenique",
+      body: "Piquenique no domingo. Veja [[lisboa]].",
+      level: "explicit",
+      confidence: 0.6,
+    };
+    const source = memoryPath("conversation/family", "note", "Piquenique");
+    const family = memoryPath("conversation/family", "place", "Lisboa");
+    // The global note has the shorter path, so it wins the link when every scope is seen.
+    const global = memoryPath("global", "place", "Lisboa");
+    await withMemories(
+      "scoped-links",
+      [picnic, place("conversation/family"), place("global")],
+      (index) => {
+        const neighbours = (scopes?: Scope[]) =>
+          index.neighbours(source, scopes === undefined ? {} : { scopes }).map((hit) => hit.path);
+        expect(neighbours(["conversation/family"])).toEqual([family]);
+        expect(index.resolve(source, "name", "lisboa", { scopes: ["conversation/family"] })).toBe(
+          family,
+        );
+        // Without scopes, or with the winner's scope among them, Obsidian's resolution stands.
+        expect(neighbours()).toEqual([global]);
+        expect(neighbours(["conversation/family", "global"])).toEqual([global]);
+        expect(index.resolve(source, "name", "lisboa")).toBe(global);
+        // A link to another scope's note by its path resolves to nothing in this one.
+        expect(index.resolve(source, "path", global.slice(0, -3))).toBe(global);
+        expect(
+          index.resolve(source, "path", global.slice(0, -3), { scopes: ["conversation/family"] }),
+        ).toBeNull();
+        // A note out of the scopes has no neighbours in them.
+        expect(neighbours(["global"])).toEqual([]);
+        expect(
+          index.links(source, { scopes: ["conversation/family"] }).map((link) => link.path),
+        ).toEqual([family]);
+        expect(index.links(source).map((link) => link.path)).toEqual([global]);
+      },
+    );
+  });
+
+  it("follows a scoped link in as many scopes as it takes", async () => {
+    // 64 scopes and every filter, in the statements that resolve a link and take its note.
+    const scopes: Scope[] = [
+      "conversation/family",
+      ...Array.from({ length: 63 }, (_, i): Scope => `area/a${String(i).padStart(2, "0")}`),
+    ];
+    const picnic: MemoryInput = {
+      scope: "conversation/family",
+      kind: "note",
+      title: "Piquenique",
+      body: "Veja [[lisboa]].",
+      level: "explicit",
+      confidence: 0.6,
+    };
+    const lisboa: MemoryInput = { ...picnic, kind: "place", title: "Lisboa", body: "Uma cidade." };
+    const at = Date.parse("2026-12-01T00:00:00Z");
+    await withMemories("scoped-links-many", [picnic, lisboa], (index) => {
+      expect(
+        index
+          .neighbours(memoryPath("conversation/family", "note", "Piquenique"), {
+            scopes,
+            validAt: at,
+            notExpiredAt: at,
+          })
+          .map((hit) => hit.path),
+      ).toEqual([memoryPath("conversation/family", "place", "Lisboa")]);
+    });
+  });
 });
 
 describe("retrieve", () => {
