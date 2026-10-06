@@ -10,7 +10,8 @@
   "dependencies": {
     "@kelpie/access": "workspace:*",
     "@kelpie/channels": "workspace:*",
-    "@kelpie/config": "workspace:*"
+    "@kelpie/config": "workspace:*",
+    "@kelpie/context-store": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.3.6",

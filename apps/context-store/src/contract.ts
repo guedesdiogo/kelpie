@@ -45,6 +45,11 @@ export interface HeldFile {
   at: number;
 }
 
+/** What `forget` did: how many of the Context Store's rows named the paths, now gone. */
+export type ForgetResult =
+  | { ok: true; forgotten: number }
+  | { ok: false; reason: "vault_off" | "invalid_input" };
+
 export interface RecallOptions {
   /**
    * The scopes the turn may see, such as `["global", "conversation/telegram-123"]`, or `"all"` for
@@ -98,4 +103,10 @@ export interface ContextStoreContract {
   recall(agentId: string, question: string, options: RecallOptions): Promise<RecallResult>;
   /** Files pushed with conflict markers that still wait (#114), for the owner to see. */
   held(): Promise<HeldFile[]>;
+  /**
+   * After the owner rewrote the vault's history to erase content (#114): Kelpie forgets its own
+   * copies. Memory's index is rebuilt from the vault as it is now, and the rows that name `paths`
+   * go. Git is never touched.
+   */
+  forget(paths: string[]): Promise<ForgetResult>;
 }

@@ -3,6 +3,7 @@ import { parsePushEvent, verifyWebhookSignature } from "@kelpie/vault";
 import type {
   CompiledContext,
   ContextStoreContract,
+  ForgetResult,
   HeldFile,
   ProposalTarget,
   ProposeResult,
@@ -56,6 +57,10 @@ export class ContextStore extends WorkerEntrypoint<VaultEnv> implements ContextS
 
   held(): Promise<HeldFile[]> {
     return this.#vault().held();
+  }
+
+  forget(paths: string[]): Promise<ForgetResult> {
+    return this.#vault().forget(paths);
   }
 }
 

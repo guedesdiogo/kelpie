@@ -34,6 +34,8 @@ Every endpoint is a `POST` with a JSON body.
 | `/commands/connectTelegram` | `{ "agentId": "sales" }`; answers `{ "path": "/forms/<token>", "expiresAt": … }` |
 | `/commands/pairTelegram` | `{ "agentId": "sales" }`; answers `{ "link": "https://t.me/<bot>?start=<code>", "expiresAt": … }` (see "Pairing") |
 | `/commands/registerTelegramWebhook` | `{ "agentId": "sales" }`; points the agent's bot at ingress again, after a failed registration or a new ingress hostname |
+| `/commands/listHeldFiles` | none; the vault's files pushed with conflict markers that still wait, as `{ "path", "state": "held" \| "proposed", "attempts", "at" }` ([context-store.md](context-store.md)) |
+| `/commands/forgetVaultPaths` | `{ "paths": ["memory/people/ana.md"] }`, at most 1,000. After you rewrote the vault's history, Kelpie forgets its copies of them; answers `{ "forgotten": <rows> }` (see "Erasing content" in [context-store.md](context-store.md#erasing-content)) |
 | `/bootstrap` | `{ "token": "…" }` |
 | `/recover` | `{ "token": "…" }`, with the recovery token ("Recovering access") |
 
@@ -49,7 +51,7 @@ Every endpoint is a `POST` with a JSON body.
 | 404 | `unknown_agent`, `unknown_identity`, `unknown_user`, `not_found` |
 | 409 | `not_paired` (a pending identity; pair it instead), `not_connected` (the agent has no bot), `identity_taken` (a recovery to a login another user holds) |
 | 502 | `channel_refused` (Telegram refused, or couldn't be reached) |
-| 503 | `unavailable` (the secret store can't be reached), `not_configured` (`channel-egress` was deployed without ingress's origin) |
+| 503 | `unavailable` (the secret store can't be reached), `not_configured` (`channel-egress` was deployed without ingress's origin, or the vault is off) |
 | 410 | `bootstrap_disabled`, `recovery_token_spent` |
 | 413 | `too_large` |
 | 503 | `unavailable` (Access's keys couldn't be loaded) |

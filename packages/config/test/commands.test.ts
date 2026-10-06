@@ -113,6 +113,18 @@ function fakePorts() {
         return reason ? { ok: false, reason } : { ok: true };
       },
     },
+    vault: {
+      async held() {
+        calls.push("held");
+        return [{ path: "memory/people/ana.md", state: "held", attempts: 3, at: 1_000 }];
+      },
+      async forget(paths) {
+        calls.push(`forget ${paths.join(",")}`);
+        return paths.includes("off.md")
+          ? { ok: false, reason: "vault_off" }
+          : { ok: true, forgotten: 2 };
+      },
+    },
   };
   return { ports, calls };
 }
@@ -168,6 +180,11 @@ describe("configuration commands", () => {
     });
     expect(await commands.listIdentities(member)).toEqual({ ok: false, reason: "forbidden" });
     expect(await commands.pairTelegram(member, { agentId: "sales" })).toEqual({
+      ok: false,
+      reason: "forbidden",
+    });
+    expect(await commands.listHeldFiles(member)).toEqual({ ok: false, reason: "forbidden" });
+    expect(await commands.forgetVaultPaths(member, { paths: ["memory/a.md"] })).toEqual({
       ok: false,
       reason: "forbidden",
     });
@@ -432,5 +449,41 @@ describe("configuration commands", () => {
       ok: false,
       reason: "unavailable",
     });
+  });
+
+  it("lists the vault's files held with conflict markers", async () => {
+    const commands = createConfigCommands(fakePorts().ports);
+    expect(await commands.listHeldFiles(owner)).toEqual({
+      ok: true,
+      value: [{ path: "memory/people/ana.md", state: "held", attempts: 3, at: 1_000 }],
+    });
+  });
+
+  it("makes the Context Store forget erased paths, and refuses anything but a list of paths", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+    expect(await commands.forgetVaultPaths(owner, { paths: ["memory/people/ana.md"] })).toEqual({
+      ok: true,
+      value: { forgotten: 2 },
+    });
+    expect(await commands.forgetVaultPaths(owner, { paths: ["off.md"] })).toEqual({
+      ok: false,
+      reason: "not_configured",
+    });
+    for (const input of [
+      undefined,
+      { paths: [] },
+      { paths: "memory/a.md" },
+      { paths: [42] },
+      { paths: [""] },
+      { paths: ["x".repeat(301)] },
+      { paths: Array(1_001).fill("memory/a.md") },
+    ]) {
+      expect(await commands.forgetVaultPaths(owner, input)).toEqual({
+        ok: false,
+        reason: "invalid_input",
+      });
+    }
+    expect(calls).toEqual(["forget memory/people/ana.md", "forget off.md"]);
   });
 });

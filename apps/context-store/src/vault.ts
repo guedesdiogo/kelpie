@@ -21,6 +21,7 @@ import {
 import { parseDocument } from "yaml";
 import type {
   CompiledContext,
+  ForgetResult,
   HeldFile,
   ProposalTarget,
   ProposeResult,
@@ -95,6 +96,10 @@ const HELD = "SELECT path FROM held WHERE state != 'resolved'";
 /** A held file the model couldn't resolve this many times waits for the owner. */
 const MAX_RESOLVE_ATTEMPTS = 3;
 const RESOLVE_TIMEOUT_MS = 60_000;
+/** The most paths one `forget` names. */
+const MAX_FORGET_PATHS = 1_000;
+/** The Context Store's own rows that can name a vault path, and so hold a copy of what it was. */
+const PATH_TABLES = ["queue", "conflicts", "held", "proposals", "recall_counts"] as const;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
@@ -605,6 +610,48 @@ export class Vault extends DurableObject<VaultEnv> {
         );
       }
       this.#exec("UPDATE held SET state = 'resolved' WHERE path = ?", row.path);
+    });
+  }
+
+  /**
+   * Forgets erased content (#114), once the owner rewrote the vault's history: it syncs to the
+   * rewritten head, rebuilds memory's index from the working copy alone, which drops every old
+   * version and the vectors of content no version holds, and deletes the rows that name `paths`.
+   * Git is never touched.
+   */
+  async forget(paths: unknown): Promise<ForgetResult> {
+    if (this.#backend() === null) return { ok: false, reason: "vault_off" };
+    const valid =
+      Array.isArray(paths) &&
+      paths.length > 0 &&
+      paths.length <= MAX_FORGET_PATHS &&
+      paths.every((path) => typeof path === "string" && path.length > 0 && path.length <= 300);
+    if (!valid) return { ok: false, reason: "invalid_input" };
+    const named = JSON.stringify(paths);
+    return this.#serialize(async (): Promise<ForgetResult> => {
+      await this.#sync();
+      const forgotten = this.ctx.storage.transactionSync(() => {
+        let rows = 0;
+        for (const table of PATH_TABLES) {
+          const where = `FROM ${table} WHERE path IN (SELECT value FROM json_each(?))`;
+          rows += this.#exec<{ n: number }>(`SELECT count(*) AS n ${where}`, named)[0]?.n ?? 0;
+          this.#exec(`DELETE ${where}`, named);
+        }
+        return rows;
+      });
+      const head = this.#get("head") ?? "";
+      const files = this.#exec<{ path: string; content: string }>(
+        "SELECT path, content FROM files",
+      );
+      const seq = Number(this.#get("index_seq") ?? "0") + 1;
+      this.#set("index_seq", `${seq}`);
+      const id = `${head}#${seq}`;
+      await this.#memory.rebuild([{ sha: id, committedAt: Date.now(), changes: files }]);
+      this.#set("index_head", head);
+      this.#set("index_commit", id);
+      // The paths may name people, so the log holds only counts.
+      console.log("Vault: forgot erased content", { paths: paths.length, rows: forgotten });
+      return { ok: true, forgotten };
     });
   }
 

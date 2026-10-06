@@ -82,6 +82,8 @@ const COMMANDS: Record<string, Command> = {
   pairTelegram: (commands, actor, input) => commands.pairTelegram(actor, input),
   registerTelegramWebhook: (commands, actor, input) =>
     commands.registerTelegramWebhook(actor, input),
+  listHeldFiles: (commands, actor) => commands.listHeldFiles(actor),
+  forgetVaultPaths: (commands, actor, input) => commands.forgetVaultPaths(actor, input),
 };
 
 /**
