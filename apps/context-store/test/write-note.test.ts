@@ -3,8 +3,12 @@ import { env } from "cloudflare:workers";
 import type { MemoryWriteInput } from "@kelpie/context-store/contract";
 import { writeMemory } from "@kelpie/memory";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
-import { afterEach, describe, expect, it } from "vitest";
-import { replaceBackendForTesting, replaceGatewayForTesting } from "../src/index.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  type MemoryGateway,
+  replaceBackendForTesting,
+  replaceGatewayForTesting,
+} from "../src/index.ts";
 
 afterEach(() => {
   replaceBackendForTesting(undefined);
@@ -467,5 +471,55 @@ describe("writeNote", () => {
         ALL,
       ),
     ).toMatchObject({ ok: true, action: "written" });
+  });
+
+  it("asks the qualifier in the shadow, logs what it would do, and writes by the rules", async () => {
+    vaultWith({ "memory/notes/cafe.md": "# Café\n\nCoado, sem açúcar.\n" });
+    const asked: string[] = [];
+    const gateway: MemoryGateway = {
+      async generate() {
+        throw new Error("no model call here");
+      },
+      async embed() {
+        return { ok: false, reason: "failed" };
+      },
+      async qualify(_state, questions, backend) {
+        asked.push(String(backend));
+        return {
+          ok: true,
+          result: {
+            provider: "fake",
+            calibrated: false,
+            answers: Object.fromEntries(
+              Object.keys(questions).map((id) => [
+                id,
+                { type: "choice", choice: "duplicate", probabilities: { duplicate: 0.9 } },
+              ]),
+            ),
+          },
+        };
+      },
+    };
+    replaceGatewayForTesting(gateway);
+    const log = vi.spyOn(console, "log");
+    try {
+      const stub = vault("write-shadow");
+      expect(
+        await stub.writeNote("kelpie", memory("Café", "Coado, sem açúcar, de manhã."), {
+          ...ALL,
+          qualifier: "jev",
+        }),
+      ).toEqual({ ok: true, action: "written", path: "memory/notes/cafe-2.md" });
+      await vi.waitFor(() =>
+        expect(log).toHaveBeenCalledWith("Vault: write decision, in the shadow", {
+          rules: "ADD",
+          qualifier: "NOOP",
+          source: "qualifier",
+        }),
+      );
+      expect(asked).toEqual(["jev"]);
+    } finally {
+      log.mockRestore();
+    }
   });
 });

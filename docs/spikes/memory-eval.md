@@ -249,6 +249,25 @@ What the numbers show:
 - **Stale first is already 0,** since outdated versions are superseded, not current. The filter acts on expired facts, which the labels don't mark as stale.
 - **Retrieval without the filter is unchanged** from #110's numbers.
 
+## Write decision (#149)
+
+ADR-0009 wants a labeled PT-BR set before a qualifier's decision acts. `decideWrite` asks one `choice` per candidate note: is the new memory a duplicate, does it refine the note, replace it, or is it unrelated?
+
+**The set** is `eval/write-decision-set.ts`: 80 pairs, 20 per answer, built on the gold vault's people, places, preferences and plans, labeled by hand and frozen by hash (`WRITE_SET_SHA256`). `eval:models` asks Clef each pair as `decideWrite` does: the memory and the note in the state, and one question. Two runs (2026-10-06) gave the same numbers.
+
+| | Precision | Recall |
+|---|---|---|
+| duplicate (a `NOOP`) | 0.95 | 1.00 |
+| refines (an `UPDATE`) | 0.85 | 0.85 |
+| replaces (a `SUPERSEDE`) | 1.00 | 1.00 |
+| unrelated | 0.89 | 0.85 |
+
+- **Accuracy:** 0.925. 80 calls, none failed; p50 442 ms, p95 1,057 ms.
+- **The one costly error:** w029, a dose added to a standing errand, read as a duplicate. As a `NOOP`, it would lose the memory. Its probability was 0.48. Every right duplicate scored 0.715 or more, so on this set a floor of 0.6 keeps every right `NOOP` and drops the wrong one.
+- **`SUPERSEDE`** was never wrong. The right ones scored from 0.48 up.
+- **The other errors** mix refines and unrelated. As an `ADD`, they lose nothing.
+- **Caveats:** the pairs are synthetic, each asks about one note, and the labels are the author's. Jev wasn't measured: its key isn't available locally.
+
 ## Contradiction band (#111)
 
 The lifecycle report (#111) flags notes about one entity whose vectors are close but not the same. The band was measured with `eval:models` on the 1k vault (2026-10-06):

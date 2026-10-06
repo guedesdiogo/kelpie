@@ -177,6 +177,7 @@ describe("memory_write", () => {
         options: {
           scopes: ["global", "conversation/familia"],
           sources: ["telegram:chat-1, 2026-10-06"],
+          qualifier: "jev",
         },
       },
     ]);

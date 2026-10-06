@@ -1299,6 +1299,12 @@ export class Vault extends DurableObject<VaultEnv> {
       }
       // Never the title: a headline outlives a forget in git's history.
       const written = await this.write(agentId, [{ path: target, content: text }], "Save a memory");
+      if (written.ok && found === null) {
+        // The rules wrote it; the qualifier is only measured, in the shadow, until it can decide.
+        this.ctx.waitUntil(
+          this.#shadowDecision(memory, options.qualifier === "jev" ? "jev" : "clef"),
+        );
+      }
       if (written.ok) return { ok: true, action: "written", path: target };
       return { ok: false, reason: written.reason === "too_large" ? "too_large" : "unavailable" };
     } catch (error) {
@@ -1369,6 +1375,44 @@ export class Vault extends DurableObject<VaultEnv> {
       });
     }
     return hits;
+  }
+
+  /**
+   * The qualifier's write decision for a memory the rules added (#149, ADR-0009): logged next to
+   * the rules' ADD, actions only, never acted on. Until a labeled set shows it can decide, this is
+   * how its answers are measured in use.
+   */
+  async #shadowDecision(memory: MemoryInput, backend: QualifierBackend): Promise<void> {
+    const gateway = this.#gateway();
+    if (gateway === null) return;
+    try {
+      const text = `${memory.title}\n${memory.body}`.slice(0, EMBEDDING_INPUT_CHARS);
+      const embedded = await within(gateway.embed([text]), EMBED_QUESTION_TIMEOUT_MS);
+      const values = embedded?.ok ? embedded.vectors[0] : undefined;
+      const decision = await decideWrite(this.#memory, memory, {
+        now: Date.now(),
+        qualifier: {
+          async qualify(state, questions) {
+            const outcome = await gateway.qualify(state, questions, backend, {
+              timeoutMs: RERANK_TIMEOUT_MS,
+            });
+            if (!outcome.ok) throw new Error(outcome.reason);
+            return outcome.result;
+          },
+        },
+        ...(embedded?.ok && values ? { vector: { model: embedded.model, values } } : {}),
+        ownersWord: (note) =>
+          note.level === "explicit" ||
+          (note.level === null && !this.#byKelpie([note.path]).has(note.path)),
+      });
+      console.log("Vault: write decision, in the shadow", {
+        rules: "ADD",
+        qualifier: decision.action,
+        source: decision.source,
+      });
+    } catch (error) {
+      console.error("Vault: the shadow write decision failed", errorName(error));
+    }
   }
 
   /**

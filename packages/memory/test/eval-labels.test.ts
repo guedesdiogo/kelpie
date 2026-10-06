@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { GOLD_MEMORIES } from "../eval/gold-vault.ts";
-import { LABELS_SHA256, labelsHash } from "../eval/labels.ts";
+import { LABELS_SHA256, labelsHash, WRITE_SET_SHA256, writeSetHash } from "../eval/labels.ts";
 import { CATEGORIES, QUESTIONS } from "../eval/questions.ts";
+import { WRITE_PAIRS } from "../eval/write-decision-set.ts";
 import { isDate, memoryPath, writeMemory } from "../src/index.ts";
 
 const byKey = new Map(GOLD_MEMORIES.map((memory) => [memory.key, memory]));
@@ -87,6 +88,30 @@ describe("the evaluation's labels", () => {
         const v = version(label);
         expect(v?.validFrom === undefined || (v.validFrom ?? "") <= at, question.id).toBe(true);
         expect(v?.invalidAt === undefined || (v.invalidAt ?? "") > at, question.id).toBe(true);
+      }
+    }
+  });
+});
+
+describe("the write decision's labeled set (#149)", () => {
+  it("is frozen: a change needs a new hash and a new measurement", async () => {
+    expect(await writeSetHash()).toBe(WRITE_SET_SHA256);
+  });
+
+  it("holds 20 pairs of each relation, each a memory and a note Kelpie could write", async () => {
+    expect(new Set(WRITE_PAIRS.map((pair) => pair.id)).size).toBe(WRITE_PAIRS.length);
+    for (const label of ["duplicate", "refines", "replaces", "unrelated"]) {
+      expect(
+        WRITE_PAIRS.filter((pair) => pair.label === label),
+        label,
+      ).toHaveLength(20);
+    }
+    for (const pair of WRITE_PAIRS) {
+      for (const side of [pair.memory, pair.note]) {
+        await writeMemory(
+          { scope: "global", kind: "note", ...side, level: "explicit", confidence: 0.9 },
+          { at: "2026-10-01T00:00:00Z" },
+        );
       }
     }
   });

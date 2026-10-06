@@ -364,7 +364,9 @@ How the page behaves:
 
 ### The write decision
 
-Before a new memory is written, `decideWrite` says whether it is news (#111). A conclusion (`deduced`, `inferred`) never replaces or refines what the person said: the qualifier's answer about such a note counts as unrelated (#149). `memory_write` (#126) calls it without the qualifier for now: ADR-0009 wants the qualifier's answers measured on a labeled set before they act, a question open on #111. So only the rules decide: an exact twin is a `NOOP`, and anything else is an `ADD`.
+Before a new memory is written, `decideWrite` says whether it is news (#111). A conclusion (`deduced`, `inferred`) never replaces or refines what the person said: the qualifier's answer about such a note counts as unrelated (#149). `memory_write` (#126) calls it without the qualifier: ADR-0009 wants the qualifier's answers measured on a labeled PT-BR set before they act. So only the rules decide: an exact twin is a `NOOP`, and anything else is an `ADD`.
+- **In the shadow** (#149): after the rules add a memory, the agent's qualifier makes the same decision, unawaited. Its action is logged next to the rules' `ADD`, actions only, never text or paths, and nothing acts on it.
+- **Measured:** on #149's set of 80 pairs, Clef chose right 92.5% of the time, with no wrong `SUPERSEDE` and one wrong `NOOP` ([spike](spikes/memory-eval.md#write-decision-149)). Whether and above which probability it may act is the owner's call.
 - **The outcome:**
   - `ADD`: a new note, at `memoryPath`; the writer resolves a collision with an existing file;
   - `UPDATE`: the note at `path` stays true and the memory adds detail, so its new version holds both;

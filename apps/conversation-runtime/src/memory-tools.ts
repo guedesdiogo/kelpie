@@ -220,6 +220,7 @@ export function memoryTools(store: MemoryStore): ToolProvider {
     const result = await store.writeNote(context.agentId, memory, {
       scopes: context.scopes,
       sources: [context.source],
+      qualifier: context.qualifier,
     });
     if (result.ok) {
       return {

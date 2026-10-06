@@ -161,6 +161,8 @@ export interface WriteNoteOptions {
   scopes: readonly string[] | "all";
   /** Where the memory came from, given by the runtime, never by the model. */
   sources: readonly string[];
+  /** The agent's qualifier, asked in the shadow (#149): Clef unless the agent chose Jev. */
+  qualifier?: "clef" | "jev";
 }
 
 /**

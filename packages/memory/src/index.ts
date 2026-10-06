@@ -101,5 +101,7 @@ export {
   type ChoiceQualifier,
   type DecideWriteOptions,
   decideWrite,
+  RELATIONS,
+  relationQuestion,
   type WriteDecision,
 } from "./write-decision.ts";
