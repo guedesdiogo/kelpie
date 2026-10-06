@@ -229,7 +229,12 @@ function authority(hit: SearchHit, sessionRecall: boolean): number {
   return Math.min(Math.max(factor, MIN_AUTHORITY), MAX_AUTHORITY);
 }
 
-export type StreamName = "fts" | "entity" | "graph";
+export type StreamName = "fts" | "vector" | "entity" | "graph";
+
+export interface RetrieveOptions extends SearchOptions {
+  /** The question's vector from `model`, which adds a stream of the notes nearest it. */
+  vector?: { model: string; query: readonly number[] };
+}
 
 export interface Retrieved extends SearchHit {
   score: number;
@@ -238,33 +243,45 @@ export interface Retrieved extends SearchHit {
 }
 
 /**
- * The memories that answer a question, best first: full-text search, entity names and the notes
- * one step from the best of those, fused by reciprocal rank and weighed by authority. A question
+ * The memories that answer a question, best first: full-text search, the nearest vectors when the
+ * question's is given, entity names and the notes one step from the best of those, fused by
+ * reciprocal rank and weighed by authority. A question
  * about the past (`asOf`) searches the versions memory held then, by text and entities only.
  */
 export function retrieve(
   index: MemoryIndex,
   text: string,
-  options: SearchOptions = {},
+  options: RetrieveOptions = {},
 ): Retrieved[] {
   const asked = Math.trunc(options.limit ?? 10);
   const limit = Number.isFinite(asked) ? Math.min(Math.max(asked, 1), 100) : 10;
   // ai-memory fetches max(4 × limit, 20) per stream, up to limit + 300; the index returns 100 at most.
-  const fetched = { ...options, limit: Math.min(Math.max(4 * limit, 20), 100) };
+  const { vector, ...searchOptions } = options;
+  const fetched = { ...searchOptions, limit: Math.min(Math.max(4 * limit, 20), 100) };
   const dated = options.asOf !== undefined || options.validAt !== undefined;
   const all = tokens(text);
   const words = searchWords(all, dated);
   const fts = words.length === 0 ? [] : index.search(words.join(" "), fetched);
   const entity = index.entityHits(entityKeys(all), fetched);
+  // Vectors stand for the current text only: a question about the past skips them, as in ai-memory.
+  const near =
+    vector === undefined || options.asOf !== undefined
+      ? []
+      : index.vectorHits(vector.model, vector.query, fetched);
   const streams: [StreamName, SearchHit[]][] = [
     ["fts", fts],
+    ["vector", near],
     ["entity", entity],
   ];
   if (options.asOf === undefined) {
     // The seeds come first, then their neighbours, in the seeds' order.
     const graph: SearchHit[] = [];
     const seen = new Set<string>();
-    for (const seed of [...fts.slice(0, GRAPH_SEEDS), ...entity.slice(0, GRAPH_SEEDS)]) {
+    for (const seed of [
+      ...fts.slice(0, GRAPH_SEEDS),
+      ...near.slice(0, GRAPH_SEEDS),
+      ...entity.slice(0, GRAPH_SEEDS),
+    ]) {
       if (seen.has(seed.path)) continue;
       seen.add(seed.path);
       graph.push(seed);
