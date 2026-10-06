@@ -55,5 +55,5 @@ The `ConversationAgent` reads its settings from a real `AgentHost` in the same t
 bun run test        # every workspace
 bun run typecheck   # generates Workers types, then runs tsc in every workspace
 bun run lint
-bun run --filter @kelpie/memory eval   # the memory evaluation (#108); minutes, so not part of `test`
+bun run --filter @kelpie/memory eval   # the memory evaluation (#108); half a minute, so not in `test`
 ```

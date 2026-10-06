@@ -35,10 +35,10 @@ export function answerRank(
     const index = hits.findIndex((hit) => sameTarget(hit, target));
     return index === -1 ? null : index + 1;
   });
-  if (question.category === "multi-hop") {
-    return ranks.includes(null) ? null : Math.max(...(ranks as number[]));
-  }
   const found = ranks.filter((rank) => rank !== null);
+  if (question.category === "multi-hop") {
+    return found.length < ranks.length ? null : Math.max(...found);
+  }
   return found.length === 0 ? null : Math.min(...found);
 }
 
@@ -84,12 +84,9 @@ const round = (value: number) => Math.round(value * 1000) / 1000;
 
 export function aggregate(results: readonly QuestionResult[]): Metrics {
   const n = results.length;
-  const hit = Object.fromEntries(
-    KS.map((k) => [
-      k,
-      round(results.filter((r) => r.answerRank !== null && r.answerRank <= k).length / (n || 1)),
-    ]),
-  ) as Metrics["hit"];
+  const hitAt = (k: number) =>
+    round(results.filter((r) => r.answerRank !== null && r.answerRank <= k).length / (n || 1));
+  const hit = { 1: hitAt(1), 3: hitAt(3), 5: hitAt(5), 10: hitAt(10) };
   const stale = results.filter((r) => r.staleFirst !== null);
   return {
     n,
@@ -126,12 +123,21 @@ export function aggregate(results: readonly QuestionResult[]): Metrics {
   };
 }
 
-/** Overall, then one row per category that has questions. */
-export function bySlice(results: readonly QuestionResult[]): Record<string, Metrics> {
+/**
+ * Overall, then one row per category that has questions, then one per extra group of question ids,
+ * such as the questions that name someone by a first name the distractors share.
+ */
+export function bySlice(
+  results: readonly QuestionResult[],
+  groups: Record<string, ReadonlySet<string>> = {},
+): Record<string, Metrics> {
   const slices: Record<string, Metrics> = { overall: aggregate(results) };
   for (const category of CATEGORIES) {
     const slice = results.filter((r) => r.category === category);
     if (slice.length > 0) slices[category] = aggregate(slice);
+  }
+  for (const [name, ids] of Object.entries(groups)) {
+    slices[name] = aggregate(results.filter((r) => ids.has(r.id)));
   }
   return slices;
 }

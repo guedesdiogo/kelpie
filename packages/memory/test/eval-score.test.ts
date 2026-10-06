@@ -4,6 +4,7 @@ import type { Question } from "../eval/questions.ts";
 import {
   aggregate,
   answerRank,
+  bySlice,
   estimateTokens,
   percentile,
   type QuestionResult,
@@ -100,5 +101,24 @@ describe("aggregate", () => {
     expect(estimateTokens("abcde")).toBe(2);
     expect(percentile([5, 1, 3], 50)).toBe(3);
     expect(percentile([], 95)).toBe(0);
+  });
+
+  it("slices by category and by extra groups, and copes with no questions", () => {
+    const slices = bySlice(
+      [
+        result(1, { id: "q1", category: "entity" }),
+        result(null, { id: "q2", category: "multi-hop" }),
+      ],
+      { named: new Set(["q1"]) },
+    );
+    expect(Object.keys(slices)).toEqual(["overall", "entity", "multi-hop", "named"]);
+    expect(slices.named?.hit[1]).toBe(1);
+    expect(slices["multi-hop"]?.hit[10]).toBe(0);
+    expect(aggregate([])).toMatchObject({
+      n: 0,
+      mrr: 0,
+      hit: { 1: 0 },
+      tokens: { mean: 0, p95: 0 },
+    });
   });
 });

@@ -8,7 +8,8 @@ export default defineConfig({
   test: {
     include: ["eval/**/*.eval.ts"],
     reporters: ["default", ["json", { outputFile: "eval/last-run.json" }]],
-    // The largest vault takes minutes to generate and index.
+    // The largest vault takes about 20 seconds to generate and index on a laptop; slower machines
+    // and CI runners get room.
     testTimeout: 1_800_000,
     hookTimeout: 60_000,
   },

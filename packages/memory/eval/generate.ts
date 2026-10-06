@@ -326,7 +326,6 @@ const PLACE_NAMES = [
   "Bom Gosto",
   "Central",
   "Da Esquina",
-  "Estrela do Sul",
   "Flor de Lis",
   "Girassol",
   "Horizonte",
@@ -414,7 +413,10 @@ function isoDate(ms: number): string {
 }
 
 /** Builds a vault of `size` memories: the gold ones plus seeded distractors. */
-export async function buildVault(size: number, seed = 107): Promise<SyntheticVault> {
+/** The seed the baseline was recorded with. */
+export const SEED = 107;
+
+export async function buildVault(size: number, seed = SEED): Promise<SyntheticVault> {
   if (size < GOLD_MEMORIES.length)
     throw new RangeError(`size must be at least ${GOLD_MEMORIES.length}`);
   const rand = random(seed);
@@ -440,13 +442,16 @@ export async function buildVault(size: number, seed = 107): Promise<SyntheticVau
       if (!goldNames.has(name)) return name;
     }
   };
+  // Only the placeholders a template has draw from the generator.
+  const fillers: Record<string, () => string> = {
+    client: () => pick(CLIENTS),
+    person,
+    city: () => pick(CITIES),
+    hobby: () => pick(HOBBIES),
+    place: () => `${pick(PLACE_TYPES)} ${pick(PLACE_NAMES)}`,
+  };
   const fill = (template: string) =>
-    template
-      .replaceAll("{client}", pick(CLIENTS))
-      .replaceAll("{person}", person())
-      .replaceAll("{city}", pick(CITIES))
-      .replaceAll("{hobby}", pick(HOBBIES))
-      .replaceAll("{place}", `${pick(PLACE_TYPES)} ${pick(PLACE_NAMES)}`);
+    template.replace(/\{(\w+)\}/g, (_, key: string) => fillers[key]?.() ?? `{${key}}`);
   const day = () => Math.floor(rand() * DAYS);
 
   for (let i = 0; i < size - GOLD_MEMORIES.length; i += 1) {
