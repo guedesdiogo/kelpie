@@ -59,6 +59,9 @@ function fakeGateway(
   };
   const vectorOf = (text: string) => [/porto|mudou|mudança/i.test(text) ? 1 : 0, 0.1];
   const gateway: MemoryGateway = {
+    async generate() {
+      throw new Error("recall never generates");
+    },
     async embed(texts) {
       calls.embed += 1;
       calls.texts.push(...texts);

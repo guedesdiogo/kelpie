@@ -34,6 +34,17 @@ export type ProposeResult =
     };
 
 /** What a turn asks memory for (#110). */
+/**
+ * A file pushed with conflict markers, kept out of Kelpie's writes (#114): waiting on the model
+ * (`held`, with how many tries it has had) or on a pull request with its resolution (`proposed`).
+ */
+export interface HeldFile {
+  path: string;
+  state: "held" | "proposed";
+  attempts: number;
+  at: number;
+}
+
 export interface RecallOptions {
   /**
    * The scopes the turn may see, such as `["global", "conversation/telegram-123"]`, or `"all"` for
@@ -85,4 +96,6 @@ export interface ContextStoreContract {
    * vector, reranked by the qualifier, within the budget. An empty block when the vault is off.
    */
   recall(agentId: string, question: string, options: RecallOptions): Promise<RecallResult>;
+  /** Files pushed with conflict markers that still wait (#114), for the owner to see. */
+  held(): Promise<HeldFile[]>;
 }

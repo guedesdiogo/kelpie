@@ -2,12 +2,19 @@ import { createExecutionContext, runDurableObjectAlarm, runInDurableObject } fro
 import { env } from "cloudflare:workers";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
 import { afterEach, describe, expect, it } from "vitest";
-import { GitHubWebhooks, replaceBackendForTesting } from "../src/index.ts";
+import {
+  GitHubWebhooks,
+  replaceBackendForTesting,
+  replaceGatewayForTesting,
+} from "../src/index.ts";
 import { VAULT_README } from "../src/vault-readme.ts";
 
 const SECRET = "webhook-secret-for-tests";
 
-afterEach(() => replaceBackendForTesting(undefined));
+afterEach(() => {
+  replaceBackendForTesting(undefined);
+  replaceGatewayForTesting(undefined);
+});
 
 /** A vault with a README already, so the first sync doesn't queue one. */
 function vaultWith(files: Record<string, string>): FakeVaultBackend {
@@ -300,6 +307,8 @@ describe("Vault", () => {
   it("holds a file pushed with conflict markers, and keeps queued writes off it until it is clean", async () => {
     const base = "# Ana\n\nMora em Lisboa.\n\nGosta de café.\n";
     const backend = vaultWith({ "memory/people/ana.md": base });
+    // Without models, the file waits for the owner (resolve.test.ts covers the model).
+    replaceGatewayForTesting(null);
     const stub = vault("markers");
     await stub.compile("kelpie");
     const kelpie = base.replace("café", "chá");

@@ -112,6 +112,7 @@ describe("AgentHost with a vault", () => {
     write: async () => ({ ok: false, reason: "vault_off" }),
     propose: async () => ({ ok: false, reason: "vault_off" }),
     recall: async () => ({ text: "", tokens: 0, paths: [] }),
+    held: async () => [],
   });
 
   afterEach(() => replaceContextStoreForTesting(undefined));
