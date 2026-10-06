@@ -88,7 +88,7 @@ describe("Vault forget", () => {
     // The owner rewrote the history, so the leaked version is gone from git.
     // Its current files changed too: forgetting syncs before it rebuilds.
     backend.forcePush({ "README.md": "# Vault", [ana]: clean, [bia]: "# Bia\n\nNova.\n" });
-    expect(await stub.forget([ana])).toEqual({ ok: true, forgotten: 5 });
+    expect(await stub.forget([ana])).toEqual({ ok: true, forgotten: 5, stillInVault: [ana] });
 
     expect(await sql("SELECT path FROM versions ORDER BY path")).toEqual([
       { path: ana },
@@ -123,6 +123,38 @@ describe("Vault forget", () => {
     expect(await sql(`SELECT count(*) AS n FROM versions WHERE path = '${ana}'`)).toEqual([
       { n: 1 },
     ]);
+  });
+
+  it("forgets a folder, and names what the vault still has", async () => {
+    const backend = new FakeVaultBackend({
+      "README.md": "# Vault",
+      "memory/people/ana.md": "# Ana\n",
+      "memory/people/bia.md": "# Bia\n",
+      "memory/notes/caio.md": "# Caio\n",
+    });
+    replaceBackendForTesting(backend);
+    replaceGatewayForTesting(null);
+    const stub = vault("forget-folder");
+    await stub.compile("kelpie");
+    await stub.write(
+      "kelpie",
+      [
+        { path: "memory/people/ana.md", content: "# Ana\n\nNova.\n" },
+        { path: "memory/notes/caio.md", content: "# Caio\n\nNovo.\n" },
+      ],
+      "x",
+    );
+    // The rewrite dropped the people folder, but it wasn't pushed for Caio.
+    backend.forcePush({ "README.md": "# Vault", "memory/notes/caio.md": "# Caio\n" });
+    expect(await stub.forget(["memory/people/", "memory/notes/caio.md"])).toEqual({
+      ok: true,
+      forgotten: 2,
+      stillInVault: ["memory/notes/caio.md"],
+    });
+    const left = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql.exec("SELECT path FROM queue").toArray(),
+    );
+    expect(left).toEqual([]);
   });
 
   it("refuses paths it can't name, and does nothing with the vault off", async () => {

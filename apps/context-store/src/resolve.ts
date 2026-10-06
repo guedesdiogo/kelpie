@@ -55,10 +55,18 @@ export async function resolveConflict(
     maxOutputTokens: RESOLVE_OUTPUT_TOKENS,
   };
   const generation = await gateway.generate(RESOLVE_TIER, request);
-  const answer = await within(finished(generation), timeoutMs, () => {
-    generation.cancel().catch(() => undefined);
-  });
-  return checked(unfenced(answer), conflicted, file.marked);
+  try {
+    const answer = await within(finished(generation), timeoutMs, () => {
+      generation.cancel().catch(() => undefined);
+    });
+    return checked(unfenced(answer), conflicted, file.marked);
+  } finally {
+    // The RPC stub holds the call open until it is disposed.
+    const dispose = (Symbol as { dispose?: symbol }).dispose;
+    if (dispose !== undefined) {
+      (generation as unknown as Partial<Record<symbol, () => void>>)[dispose]?.();
+    }
+  }
 }
 
 async function finished(generation: Generation): Promise<string> {

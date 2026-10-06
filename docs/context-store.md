@@ -35,7 +35,7 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
       - Files over 48,000 characters aren't tried.
     - **Applied** until per-item approval exists (#113):
       - a file an agent may write is written as the owner's clean edit would be, and queued writes merge on top of it;
-      - a persona, rules or an agent's skill becomes a pull request, and stays held until it merges;
+      - a persona, rules or an agent's skill becomes a pull request. The file stays held until a clean version is pushed, as when the pull request merges; a pull request closed unmerged leaves it held and listed;
       - any other file stays held.
     - **Waiting:** after three failed tries, the file waits for the owner. `/commands/listHeldFiles` lists what waits ([admin-api.md](admin-api.md)), and a clean push of the file ends its hold.
     - **Audit:** a resolved file stays in `held`, as pushed, alongside git's history.
@@ -138,22 +138,37 @@ The owner edits the vault in Obsidian through [obsidian-git](https://github.com/
 
 ## Export
 
-The vault is the export: clone the repository. Every memory, person, conversation page and rule is a Markdown file in it ([memory-format.md](memory-format.md)). The Context Store's tables hold only copies (the working copy, memory's index, queued writes) and counts.
+The vault is the export: clone the repository. Every memory, person, conversation page and rule is a Markdown file in it ([memory-format.md](memory-format.md)).
+
+The Context Store's tables hold mostly copies of it: the working copy, memory's index, writes still queued, and counts. Two tables hold what git may not:
+- `conflicts`: Kelpie's writes that lost to the owner's edits, or that GitHub refused;
+- `held`: files pushed with conflict markers, as pushed.
 
 ## Erasing content
 
 Git keeps every version, so erasing content means rewriting the vault's history. Kelpie never rewrites it. These steps are the owner's.
 
-1. **Rewrite the history** on a fresh clone, with [`git filter-repo`](https://github.com/newren/git-filter-repo): `--path <file> --invert-paths` removes a file from every commit, and `--replace-text` removes a passage. Then push the result with `--force` to every branch that held the content.
-2. **Re-clone every device.** A device that still has the old history would push the content back: obsidian-git's pull doesn't notice a rewritten branch. Delete the vault's folder on each device and clone it again, or reset the device's branch to the rewritten one.
-3. **Ask GitHub to drop its copies.** Pull requests (Kelpie's proposals included) and GitHub's cached views keep the old commits. GitHub removes them only through its support, as its guide to [removing sensitive data from a repository](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository) explains. Close Kelpie's open proposals that touched the content, and delete their branches.
-4. **Make Kelpie forget its copies:** `/commands/forgetVaultPaths` with the erased paths ([admin-api.md](admin-api.md)).
-   - It syncs to the rewritten head.
-   - It rebuilds memory's index from the vault as it is now. That drops every old version, of every file, along with the vectors of content no version holds anymore.
-   - It deletes the rows that name the paths in `queue`, `conflicts`, `held`, `proposals` and `recall_counts`.
-   - It never touches git.
+1. **Rewrite the history** on a fresh clone, with [`git filter-repo`](https://github.com/newren/git-filter-repo):
+   - `--path <file> --invert-paths` removes a file from every commit;
+   - `--replace-text` removes a passage.
 
-**Not covered:** each conversation's raw history, kept in its Durable Object in `conversation-runtime` (#109), and the checkpoints that summarize it. Neither is pruned today.
+   Then push the result with `--force` to every branch that held the content.
+2. **Make Kelpie forget its copies, right away:** `/commands/forgetVaultPaths` with the erased paths ([admin-api.md](admin-api.md)). Doing it at once keeps Kelpie's queued writes from committing the content back onto the rewritten branch.
+   - **What it does:**
+     - it syncs to the rewritten head;
+     - it rebuilds memory's index from the vault as it is now, which drops every old version, of every file, with the vectors of content no version holds anymore;
+     - it deletes the rows that name the paths in `queue`, `conflicts`, `held`, `proposals` and `recall_counts`.
+
+     It never touches git.
+   - **Paths:** a path ending in `/` names a whole folder. Rows are matched by path, so a passage removed with `--replace-text` needs every file that held it named, or its folder.
+   - **The answer** lists, in `stillInVault`, the named files the vault still has. After removing whole files, a path in that list means the rewrite didn't reach the default branch. After removing a passage, the file stays, as expected.
+3. **Re-clone every device.** A device that still has the old history would push the content back: obsidian-git's pull doesn't notice a rewritten branch. Delete the vault's folder on each device and clone it again, or reset the device's branch to the rewritten one. Then run step 2 again, in case a device pushed before it was re-cloned.
+4. **Ask GitHub to drop its copies.** Pull requests (Kelpie's proposals included) and GitHub's cached views keep the old commits. GitHub removes them only through its support, as its guide to [removing sensitive data from a repository](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository) explains. Close Kelpie's open proposals that touched the content, and delete their branches.
+
+**Not covered:**
+- **Conversations:** each conversation's raw history, kept in its Durable Object in `conversation-runtime` (#109), and the checkpoints that summarize it. Neither is pruned today. A conversation that mentioned the content can also bring it back into a new session page.
+- **Model logs:** the model calls that resolved held files sent the files to the model's provider, through Cloudflare's AI Gateway. Their logs follow the provider's and the gateway's retention.
+- **Durable Object storage:** Cloudflare's point-in-time recovery can restore a Durable Object's storage to an earlier moment, within the window Cloudflare documents.
 
 ## Checking it
 

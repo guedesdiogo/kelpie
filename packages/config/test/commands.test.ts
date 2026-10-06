@@ -122,7 +122,7 @@ function fakePorts() {
         calls.push(`forget ${paths.join(",")}`);
         return paths.includes("off.md")
           ? { ok: false, reason: "vault_off" }
-          : { ok: true, forgotten: 2 };
+          : { ok: true, forgotten: 2, stillInVault: [] };
       },
     },
   };
@@ -464,7 +464,7 @@ describe("configuration commands", () => {
     const commands = createConfigCommands(ports);
     expect(await commands.forgetVaultPaths(owner, { paths: ["memory/people/ana.md"] })).toEqual({
       ok: true,
-      value: { forgotten: 2 },
+      value: { forgotten: 2, stillInVault: [] },
     });
     expect(await commands.forgetVaultPaths(owner, { paths: ["off.md"] })).toEqual({
       ok: false,

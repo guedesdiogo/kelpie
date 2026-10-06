@@ -35,7 +35,7 @@ Every endpoint is a `POST` with a JSON body.
 | `/commands/pairTelegram` | `{ "agentId": "sales" }`; answers `{ "link": "https://t.me/<bot>?start=<code>", "expiresAt": … }` (see "Pairing") |
 | `/commands/registerTelegramWebhook` | `{ "agentId": "sales" }`; points the agent's bot at ingress again, after a failed registration or a new ingress hostname |
 | `/commands/listHeldFiles` | none; the vault's files pushed with conflict markers that still wait, as `{ "path", "state": "held" \| "proposed", "attempts", "at" }` ([context-store.md](context-store.md)) |
-| `/commands/forgetVaultPaths` | `{ "paths": ["memory/people/ana.md"] }`, at most 1,000. After you rewrote the vault's history, Kelpie forgets its copies of them; answers `{ "forgotten": <rows> }` (see "Erasing content" in [context-store.md](context-store.md#erasing-content)) |
+| `/commands/forgetVaultPaths` | `{ "paths": ["memory/people/ana.md", "memory/old/"] }`, at most 1,000; a path ending in `/` names a folder. After you rewrote the vault's history, Kelpie forgets its copies of them; answers `{ "forgotten": <rows>, "stillInVault": [<named files the vault still has>] }` (see "Erasing content" in [context-store.md](context-store.md#erasing-content)) |
 | `/bootstrap` | `{ "token": "…" }` |
 | `/recover` | `{ "token": "…" }`, with the recovery token ("Recovering access") |
 

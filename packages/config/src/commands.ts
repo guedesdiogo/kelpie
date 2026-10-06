@@ -73,7 +73,7 @@ export interface HeldVaultFile {
 }
 
 export type ForgetVaultResult =
-  | { ok: true; forgotten: number }
+  | { ok: true; forgotten: number; stillInVault: string[] }
   | { ok: false; reason: "vault_off" | "invalid_input" };
 
 /** The most paths one `forgetVaultPaths` names, and the longest path the vault takes. */
@@ -326,12 +326,13 @@ export function createConfigCommands(ports: ConfigPorts) {
 
     /**
      * After the owner rewrote the vault's history to erase content (#114): Kelpie forgets its own
-     * copies of `paths`, and memory's index drops every old version. Git is never touched.
+     * copies of `paths` (a path ending in `/` names a folder), and memory's index drops every old
+     * version. It answers which of them the vault still has. Git is never touched.
      */
     async forgetVaultPaths(
       actor: Actor,
       input: unknown,
-    ): Promise<CommandResult<{ forgotten: number }>> {
+    ): Promise<CommandResult<{ forgotten: number; stillInVault: string[] }>> {
       if (!isOwner(actor)) return forbidden;
       const { paths } = (input ?? {}) as { paths?: unknown };
       if (
@@ -345,7 +346,12 @@ export function createConfigCommands(ports: ConfigPorts) {
         return invalid;
       }
       const result = await ports.vault.forget(paths);
-      if (result.ok) return { ok: true, value: { forgotten: result.forgotten } };
+      if (result.ok) {
+        return {
+          ok: true,
+          value: { forgotten: result.forgotten, stillInVault: result.stillInVault },
+        };
+      }
       return result.reason === "vault_off" ? { ok: false, reason: "not_configured" } : invalid;
     },
   };

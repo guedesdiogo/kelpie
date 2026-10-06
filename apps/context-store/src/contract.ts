@@ -45,9 +45,12 @@ export interface HeldFile {
   at: number;
 }
 
-/** What `forget` did: how many of the Context Store's rows named the paths, now gone. */
+/**
+ * What `forget` did: how many of the Context Store's rows named the paths, now gone, and which of
+ * the paths the vault still has, as when the rewritten history wasn't pushed.
+ */
 export type ForgetResult =
-  | { ok: true; forgotten: number }
+  | { ok: true; forgotten: number; stillInVault: string[] }
   | { ok: false; reason: "vault_off" | "invalid_input" };
 
 export interface RecallOptions {
@@ -112,8 +115,8 @@ export interface ContextStoreAdminContract {
   held(): Promise<HeldFile[]>;
   /**
    * After the owner rewrote the vault's history to erase content: Kelpie forgets its own copies.
-   * Memory's index is rebuilt from the vault as it is now, and the rows that name `paths` go. Git
-   * is never touched.
+   * Memory's index is rebuilt from the vault as it is now, and the rows that name `paths` go; a
+   * path ending in `/` names a folder. Git is never touched.
    */
   forget(paths: string[]): Promise<ForgetResult>;
 }

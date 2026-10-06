@@ -163,6 +163,19 @@ describe("the vector index, closely", () => {
     });
   });
 
+  it("keeps no vector for content no version holds", async () => {
+    await withMemories("vector-erased", [note("A", "um")], async (index) => {
+      const [a] = index.embeddingTexts(MODEL);
+      // Content erased while it was being embedded: its vector comes back to nothing.
+      index.putEmbeddings(MODEL, [
+        { blobSha: "0".repeat(40), vector: [1, 0] },
+        { blobSha: a?.blobSha ?? "", vector: [0, 1] },
+      ]);
+      expect(index.vectorHits(MODEL, [1, 0]).map((hit) => hit.title)).toEqual(["A"]);
+      expect(index.embeddingTexts(MODEL)).toEqual([]);
+    });
+  });
+
   it("lists each content once, current versions only, and bounds the limit", async () => {
     await withMemories(
       "embedding-rows",

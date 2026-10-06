@@ -88,7 +88,7 @@ function world({
         return [{ path: "memory/people/ana.md", state: "proposed", attempts: 1, at: NOW_MS }];
       },
       async forget(paths) {
-        return { ok: true, forgotten: paths.length };
+        return { ok: true, forgotten: paths.length, stillInVault: [] };
       },
     },
   };
@@ -243,7 +243,7 @@ describe("admin API commands", () => {
     });
     expect(await call(deps, "/commands/forgetVaultPaths", { paths: ["memory/a.md"] })).toEqual({
       status: 200,
-      body: { ok: true, value: { forgotten: 1 } },
+      body: { ok: true, value: { forgotten: 1, stillInVault: [] } },
     });
     expect((await call(deps, "/commands/forgetVaultPaths", { paths: [] })).status).toBe(400);
   });

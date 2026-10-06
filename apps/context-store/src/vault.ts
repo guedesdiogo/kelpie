@@ -560,9 +560,11 @@ export class Vault extends DurableObject<VaultEnv> {
     const gateway = this.#gateway();
     if (gateway === null) return;
     const row = this.#exec<{ path: string; content: string; previous: string | null }>(
-      "SELECT path, content, previous FROM held WHERE state = 'held' AND attempts < ? ORDER BY at",
+      `SELECT path, content, previous FROM held
+       WHERE state = 'held' AND attempts < ? AND length(content) <= ? ORDER BY at`,
       MAX_RESOLVE_ATTEMPTS,
-    ).find((held) => held.content.length <= RESOLVE_MAX_CHARS && resolution(held.path) !== null);
+      RESOLVE_MAX_CHARS,
+    ).find((held) => resolution(held.path) !== null);
     const route = row === undefined ? null : resolution(row.path);
     if (row === undefined || route === null) return;
     this.#exec("UPDATE held SET attempts = attempts + 1 WHERE path = ?", row.path);
@@ -570,7 +572,14 @@ export class Vault extends DurableObject<VaultEnv> {
     try {
       resolved = await resolveConflict(
         gateway,
-        { path: row.path, marked: row.content, previous: row.previous, rules: VAULT_README },
+        {
+          path: row.path,
+          marked: row.content,
+          // A previous version too large to send is left out; the conflict's sides remain.
+          previous:
+            row.previous !== null && row.previous.length <= RESOLVE_MAX_CHARS ? row.previous : null,
+          rules: VAULT_README,
+        },
         RESOLVE_TIMEOUT_MS,
       );
     } catch (error) {
@@ -592,7 +601,7 @@ export class Vault extends DurableObject<VaultEnv> {
         route.agentId,
         route.target,
         resolved,
-        "Resolve a merge conflict that was pushed unresolved",
+        "Kelpie's model resolved a merge conflict that was pushed unresolved. Check it before merging.",
       );
       if (proposed.ok) this.#exec("UPDATE held SET state = 'proposed' WHERE path = ?", row.path);
       return;
@@ -606,7 +615,7 @@ export class Vault extends DurableObject<VaultEnv> {
           route.agentId,
           row.path,
           content,
-          "Resolve a merge conflict that was pushed unresolved",
+          "Resolve a pushed merge conflict, with the model",
           Date.now(),
         );
       }
@@ -618,7 +627,8 @@ export class Vault extends DurableObject<VaultEnv> {
    * Forgets erased content (#114), once the owner rewrote the vault's history: it syncs to the
    * rewritten head, rebuilds memory's index from the working copy alone, which drops every old
    * version and the vectors of content no version holds, and deletes the rows that name `paths`.
-   * Git is never touched.
+   * A path ending in `/` names a folder. It answers which named files the vault still has. Git is
+   * never touched.
    */
   async forget(paths: unknown): Promise<ForgetResult> {
     if (this.#backend() === null) return { ok: false, reason: "vault_off" };
@@ -629,17 +639,26 @@ export class Vault extends DurableObject<VaultEnv> {
       paths.every((path) => typeof path === "string" && path.length > 0 && path.length <= 300);
     if (!valid) return { ok: false, reason: "invalid_input" };
     const named = JSON.stringify(paths);
+    // A path, or a folder's whole content when it ends in `/`. The table's column is named in full:
+    // json_each has a `path` column of its own.
+    const matches = (table: string) => `EXISTS (SELECT 1 FROM json_each(?) AS named
+      WHERE ${table}.path = named.value
+        OR (substr(named.value, -1) = '/' AND substr(${table}.path, 1, length(named.value)) = named.value))`;
     return this.#serialize(async (): Promise<ForgetResult> => {
       await this.#sync();
       const forgotten = this.ctx.storage.transactionSync(() => {
         let rows = 0;
         for (const table of PATH_TABLES) {
-          const where = `FROM ${table} WHERE path IN (SELECT value FROM json_each(?))`;
+          const where = `FROM ${table} WHERE ${matches(table)}`;
           rows += this.#exec<{ n: number }>(`SELECT count(*) AS n ${where}`, named)[0]?.n ?? 0;
           this.#exec(`DELETE ${where}`, named);
         }
         return rows;
       });
+      const stillInVault = this.#exec<{ path: string }>(
+        `SELECT path FROM files WHERE ${matches("files")} ORDER BY path`,
+        named,
+      ).map((row) => row.path);
       const head = this.#get("head") ?? "";
       const files = this.#exec<{ path: string; content: string }>(
         "SELECT path, content FROM files",
@@ -651,8 +670,12 @@ export class Vault extends DurableObject<VaultEnv> {
       this.#set("index_head", head);
       this.#set("index_commit", id);
       // The paths may name people, so the log holds only counts.
-      console.log("Vault: forgot erased content", { paths: paths.length, rows: forgotten });
-      return { ok: true, forgotten };
+      console.log("Vault: forgot erased content", {
+        paths: paths.length,
+        rows: forgotten,
+        stillInVault: stillInVault.length,
+      });
+      return { ok: true, forgotten, stillInVault };
     });
   }
 
