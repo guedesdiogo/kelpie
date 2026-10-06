@@ -4,6 +4,7 @@
 - Date: 2026-10-05
 - Issue: [#27](https://github.com/guedesdiogo/kelpie/issues/27)
 - Accepted by the owner on 2026-10-05: «aceito a decisão de ligar direto»
+- Amended by: [ADR-0022](0022-clef-qualifier.md), each agent chooses its qualifier, Clef on Workers AI by default, with bands per model
 
 ## Context
 

@@ -25,6 +25,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0019](0019-llm-gateway-keys.md) | The keys llm-gateway uses to call providers are deploy secrets | [#101](https://github.com/guedesdiogo/kelpie/issues/101) |
 | [0020](0020-shared-memory-engine.md) | Kelpie's memory is its own engine on Workers, modelled on ai-memory, over the owner's vault | [#105](https://github.com/guedesdiogo/kelpie/issues/105) |
 | [0021](0021-vault-app-secrets.md) | The vault's GitHub App credentials are deploy secrets on context-store | [#41](https://github.com/guedesdiogo/kelpie/issues/41) |
+| [0022](0022-clef-qualifier.md) | Each agent chooses its end-of-turn qualifier, Clef on Workers AI by default, Jev as the option | [#117](https://github.com/guedesdiogo/kelpie/issues/117) |
 
 ## Format
 
