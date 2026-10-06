@@ -41,17 +41,37 @@ async function vaultOf(memories: readonly MemoryInput[]): Promise<FakeVaultBacke
 }
 
 /** A gateway whose vectors put "Porto" notes near questions about moving, and whose judge likes Ana. */
-function fakeGateway(options: { failEmbed?: boolean; failQualify?: boolean } = {}) {
-  const calls = { embed: 0, qualify: 0 };
+function fakeGateway(
+  options: {
+    failEmbed?: boolean;
+    throwEmbed?: boolean;
+    failQualify?: boolean;
+    hangQualify?: boolean;
+    model?: string;
+  } = {},
+) {
+  const calls = {
+    embed: 0,
+    qualify: 0,
+    backends: [] as (string | undefined)[],
+    models: [] as string[],
+    texts: [] as string[],
+  };
   const vectorOf = (text: string) => [/porto|mudou|mudança/i.test(text) ? 1 : 0, 0.1];
   const gateway: MemoryGateway = {
     async embed(texts) {
       calls.embed += 1;
+      calls.texts.push(...texts);
+      if (options.throwEmbed) throw new Error("llm-gateway is down");
       if (options.failEmbed) return { ok: false, reason: "failed" };
-      return { ok: true, model: "fake-model", vectors: texts.map(vectorOf) };
+      const model = options.model ?? "fake-model";
+      calls.models.push(model);
+      return { ok: true, model, vectors: texts.map(vectorOf) };
     },
-    async qualify(state, questions) {
+    async qualify(state, questions, backend) {
       calls.qualify += 1;
+      calls.backends.push(backend);
+      if (options.hangQualify) return new Promise(() => {});
       if (options.failQualify) return { ok: false, reason: "failed" };
       const notes = (state as { notes: Record<string, string> }).notes;
       return {
@@ -71,6 +91,28 @@ function fakeGateway(options: { failEmbed?: boolean; failQualify?: boolean } = {
   };
   replaceGatewayForTesting(gateway);
   return calls;
+}
+
+/** The head the index was last brought to, and the vault's head: equal when it is current. */
+async function indexedHead(stub: ReturnType<typeof vault>) {
+  return runInDurableObject(stub, (_instance, state) => {
+    const value = (key: string) =>
+      state.storage.sql
+        .exec<{ value: string }>("SELECT value FROM state WHERE key = ?", key)
+        .toArray()[0]?.value;
+    return { index: value("index_head"), head: value("head") };
+  });
+}
+
+/** The vault's state rows that hold GitHub's backoff. */
+async function backoffOf(stub: ReturnType<typeof vault>) {
+  return runInDurableObject(stub, (_instance, state) =>
+    state.storage.sql
+      .exec<{ key: string; value: string }>(
+        "SELECT key, value FROM state WHERE key IN ('failures', 'retry_at') ORDER BY key",
+      )
+      .toArray(),
+  );
 }
 
 const ALL = { scopes: "all" as const, budgetTokens: 1_000 };
@@ -107,6 +149,9 @@ describe("recall", () => {
       "Remember Bruno",
     );
     await runDurableObjectAlarm(stub);
+    // Kelpie's own commit moved the index along, before any recall.
+    let at = await indexedHead(stub);
+    expect(at.index).toBe(at.head);
     expect((await stub.recall("kelpie", "Quem é o sócio do Rafael?", ALL)).paths).toContain(
       brunoPath,
     );
@@ -114,9 +159,38 @@ describe("recall", () => {
     backend.push({ [brunoPath]: null });
     await stub.requestSync("refs/heads/main");
     await runDurableObjectAlarm(stub);
+    at = await indexedHead(stub);
+    expect(at.index).toBe(at.head);
     expect((await stub.recall("kelpie", "Quem é o sócio do Rafael?", ALL)).paths).not.toContain(
       brunoPath,
     );
+  });
+
+  it("moves the index along with each sync and commit, without a catch-up", async () => {
+    // Without llm-gateway the alarm never catches the index up, so only the moves themselves can.
+    const backend = await vaultOf([person("Ana Souza", "Irmã do Rafael.")]);
+    replaceGatewayForTesting(null);
+    const stub = vault("recall-moves");
+    await stub.recall("kelpie", "Ana Souza", ALL);
+    const bruno = person("Bruno Lima", "Sócio do Rafael.");
+    await stub.write(
+      "kelpie",
+      [
+        {
+          path: memoryPath("global", "person", "Bruno Lima"),
+          content: (await writeMemory(bruno, { at: "2026-10-02T00:00:00Z" })).text,
+        },
+      ],
+      "Remember Bruno",
+    );
+    await runDurableObjectAlarm(stub);
+    let at = await indexedHead(stub);
+    expect(at.index).toBe(at.head);
+    backend.push({ [memoryPath("global", "person", "Ana Souza")]: null });
+    await stub.requestSync("refs/heads/main");
+    await runDurableObjectAlarm(stub);
+    at = await indexedHead(stub);
+    expect(at.index).toBe(at.head);
   });
 
   it("catches the index up after it starts over", async () => {
@@ -138,19 +212,20 @@ describe("recall", () => {
       person("Ana Souza", "Irmã do Rafael. Fez a mudança para o Porto."),
       person("Bruno Lima", "Sócio do Rafael."),
     ]);
-    const calls = fakeGateway({ failEmbed: true });
-    const stub = vault("recall-embed-fails");
-    await stub.recall("kelpie", "oi", ALL);
-    await runDurableObjectAlarm(stub);
-    expect(calls.embed).toBeGreaterThan(0);
-    const backoff = await runInDurableObject(stub, (_instance, state) =>
-      state.storage.sql
-        .exec<{ key: string; value: string }>(
-          "SELECT key, value FROM state WHERE key IN ('failures', 'retry_at')",
-        )
-        .toArray(),
-    );
-    expect(backoff.every((row) => row.value === "0")).toBe(true);
+    for (const [name, failure] of [
+      ["recall-embed-fails", { failEmbed: true }],
+      ["recall-embed-throws", { throwEmbed: true }],
+    ] as const) {
+      const calls = fakeGateway(failure);
+      const stub = vault(name);
+      await stub.recall("kelpie", "oi", ALL);
+      await runDurableObjectAlarm(stub);
+      expect(calls.embed).toBeGreaterThan(0);
+      expect(await backoffOf(stub)).toEqual([
+        { key: "failures", value: "0" },
+        { key: "retry_at", value: "0" },
+      ]);
+    }
   });
 
   it("finds a note by meaning once it is embedded", async () => {
@@ -158,11 +233,12 @@ describe("recall", () => {
       person("Ana Souza", "Irmã do Rafael. Fez a mudança para o Porto."),
       person("Bruno Lima", "Sócio do Rafael."),
     ]);
-    fakeGateway();
+    // The judge stays out, and the question shares no word with the note: only its vector finds it.
+    fakeGateway({ failQualify: true });
     const stub = vault("recall-vectors");
     await stub.recall("kelpie", "oi", ALL);
     await runDurableObjectAlarm(stub);
-    const result = await stub.recall("kelpie", "Para qual cidade ela foi?", ALL);
+    const result = await stub.recall("kelpie", "Ela se mudou?", ALL);
     expect(result.paths[0]).toBe(memoryPath("global", "person", "Ana Souza"));
   });
 
@@ -206,6 +282,109 @@ describe("recall", () => {
       { path: memoryPath("conversation/family", "person", "Carla Dias"), count: 1 },
       { path: memoryPath("global", "person", "Ana Souza"), count: 2 },
     ]);
+  });
+
+  it("follows a move of the head even when the index had started over", async () => {
+    const backend = await vaultOf([
+      person("Ana Souza", "Irmã do Rafael."),
+      person("Bruno Lima", "Sócio do Rafael."),
+    ]);
+    fakeGateway({ failQualify: true });
+    const stub = vault("recall-stale");
+    expect((await stub.recall("kelpie", "Ana Souza", ALL)).paths).toHaveLength(1);
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec("UPDATE meta SET value = '0' WHERE key = 'schema_version'");
+    });
+    await evictDurableObject(stub);
+    const carla = person("Carla Dias", "Amiga do Rafael.");
+    backend.push({
+      [memoryPath("global", "person", "Carla Dias")]: (
+        await writeMemory(carla, { at: "2026-10-03T00:00:00Z" })
+      ).text,
+    });
+    await stub.requestSync("refs/heads/main");
+    await runDurableObjectAlarm(stub);
+    // The sync alone brought the index to the new head, before any recall.
+    const head = await backend.branchHead("main");
+    const indexed = await runInDurableObject(
+      stub,
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ value: string }>("SELECT value FROM state WHERE key = 'index_head'")
+          .one().value,
+    );
+    expect(indexed).toBe(head);
+    expect((await stub.recall("kelpie", "Rafael", ALL)).paths).toHaveLength(3);
+  });
+
+  it("forgets a note when the owner rewinds the branch past it", async () => {
+    const backend = await vaultOf([person("Ana Souza", "Irmã do Rafael.")]);
+    fakeGateway({ failQualify: true });
+    const stub = vault("recall-rewind");
+    await stub.recall("kelpie", "Rafael", ALL);
+    const before = (await backend.branchHead("main")) ?? "";
+    const carlaPath = memoryPath("global", "person", "Carla Dias");
+    backend.push({
+      [carlaPath]: (
+        await writeMemory(person("Carla Dias", "Amiga do Rafael."), { at: "2026-10-03T00:00:00Z" })
+      ).text,
+    });
+    await stub.requestSync("refs/heads/main");
+    await runDurableObjectAlarm(stub);
+    expect((await stub.recall("kelpie", "Rafael", ALL)).paths).toContain(carlaPath);
+    await backend.deleteBranch("main");
+    await backend.createBranch("main", before);
+    await stub.requestSync("refs/heads/main");
+    await runDurableObjectAlarm(stub);
+    expect((await stub.recall("kelpie", "Rafael", ALL)).paths).not.toContain(carlaPath);
+  });
+
+  it("embeds the notes again when llm-gateway's model changes", async () => {
+    await vaultOf([person("Ana Souza", "Irmã do Rafael. Fez a mudança para o Porto.")]);
+    fakeGateway({ model: "model-a", failQualify: true });
+    const stub = vault("recall-model");
+    await stub.recall("kelpie", "oi", ALL);
+    await runDurableObjectAlarm(stub);
+    const calls = fakeGateway({ model: "model-b", failQualify: true });
+    await stub.recall("kelpie", "oi", ALL);
+    await runDurableObjectAlarm(stub);
+    expect(calls.embed).toBeGreaterThan(1);
+    expect((await stub.recall("kelpie", "Ela se mudou?", ALL)).paths).toHaveLength(1);
+  });
+
+  it("asks the agent's qualifier, and keeps the fused order when it doesn't answer", async () => {
+    await vaultOf([
+      person("Bruno Lima", "Rafael e o sócio. Rafael Rafael."),
+      person("Ana Souza", "Irmã do Rafael."),
+    ]);
+    const calls = fakeGateway();
+    const stub = vault("recall-qualifier");
+    await stub.recall("kelpie", "Rafael", { ...ALL, qualifier: "jev" });
+    await stub.recall("kelpie", "Rafael", ALL);
+    expect(calls.backends).toEqual(["jev", "clef"]);
+    fakeGateway({ hangQualify: true });
+    const started = Date.now();
+    const fused = await stub.recall("kelpie", "Rafael", ALL);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(fused.paths[0]).toBe(memoryPath("global", "person", "Bruno Lima"));
+  });
+
+  it("holds the budget's ceiling, and reads only the question's start", async () => {
+    const many = Array.from({ length: 30 }, (_, i) =>
+      person(`Pessoa ${i}`, `Rafael ${"conhecida de longa data ".repeat(300)}`),
+    );
+    await vaultOf(many);
+    fakeGateway({ failQualify: true });
+    const stub = vault("recall-ceiling");
+    const huge = await stub.recall("kelpie", "Rafael", { scopes: "all", budgetTokens: 1e9 });
+    expect(huge.tokens).toBeLessThanOrEqual(8_000);
+    expect(huge.tokens).toBeGreaterThan(7_000);
+    const calls = fakeGateway({ failQualify: true });
+    expect((await stub.recall("kelpie", `${"x".repeat(2_001)} Rafael`, ALL)).paths).toEqual([]);
+    expect(calls.texts.every((text) => text.length <= 2_000)).toBe(true);
+    expect(
+      await stub.recall("kelpie", "Rafael", { scopes: ["not a scope"], budgetTokens: 1_000 }),
+    ).toEqual({ text: "", tokens: 0, paths: [] });
   });
 
   it("refuses an unknown agent, and bounds the question and the budget", async () => {

@@ -236,11 +236,13 @@ describe("llm-gateway", () => {
   });
 
   it("waits longer for Clef when the caller asks, but never past 3 s", async () => {
-    // Clef answers after 1.5 s, unless the gateway gives up first.
+    // Clef answers after 1.5 s, or 3.5 s on the third call, unless the gateway gives up first.
+    let call = 0;
     const run = vi.fn(
       (_model: string, _input: unknown, options: { signal?: AbortSignal }) =>
         new Promise((resolve, reject) => {
-          const timer = setTimeout(() => resolve(RECORDED_CLEF), 1_500);
+          call += 1;
+          const timer = setTimeout(() => resolve(RECORDED_CLEF), call === 3 ? 3_500 : 1_500);
           options.signal?.addEventListener("abort", () => {
             clearTimeout(timer);
             reject(options.signal?.reason);
@@ -259,6 +261,9 @@ describe("llm-gateway", () => {
     });
     expect((await qualifyWith(withClef, state, questions, "clef", { timeoutMs: 2_000 })).ok).toBe(
       true,
+    );
+    expect((await qualifyWith(withClef, state, questions, "clef", { timeoutMs: 10_000 })).ok).toBe(
+      false,
     );
   });
 
