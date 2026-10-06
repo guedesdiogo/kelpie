@@ -112,7 +112,16 @@ const RESOLVE_RULES_CHARS = 8_000;
 const MAX_FORGET_PATHS = 1_000;
 const MAX_PATH_CHARS = 300;
 /** The Context Store's own rows that can name a vault path, and so hold a copy of what it was. */
-const PATH_TABLES = ["queue", "conflicts", "held", "proposals", "recall_counts"] as const;
+const PATH_TABLES = [
+  "queue",
+  "conflicts",
+  "held",
+  "proposals",
+  "recall_counts",
+  "authored",
+] as const;
+/** A held file's resolution, queued as the owner's text with a conflict settled (#114). */
+const RESOLVE_SUMMARY = "Resolve a pushed merge conflict, with the model";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
@@ -150,6 +159,10 @@ CREATE TABLE IF NOT EXISTS recall_counts (
   path TEXT PRIMARY KEY NOT NULL,
   count INTEGER NOT NULL,
   last_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS authored (
+  path TEXT PRIMARY KEY NOT NULL,
+  blob_sha TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS proposals (
   id INTEGER PRIMARY KEY,
@@ -697,7 +710,7 @@ export class Vault extends DurableObject<VaultEnv> {
               route.agentId,
               row.path,
               content,
-              "Resolve a pushed merge conflict, with the model",
+              RESOLVE_SUMMARY,
               Date.now(),
             );
           }
@@ -890,7 +903,7 @@ export class Vault extends DurableObject<VaultEnv> {
    * answers an empty block, so a turn goes on without memory.
    */
   async recall(agentId: string, question: string, options: RecallOptions): Promise<RecallResult> {
-    const empty: RecallResult = { text: "", tokens: 0, paths: [] };
+    const empty: RecallResult = { text: "", tokens: 0, paths: [], notes: [] };
     const budget = Math.min(
       Math.max(Math.floor(Number(options?.budgetTokens)) || 0, 0),
       MAX_RECALL_TOKENS,
@@ -960,11 +973,27 @@ export class Vault extends DurableObject<VaultEnv> {
           }
         });
       }
-      return packed;
+      const kelpie = this.#byKelpie(packed.paths);
+      return {
+        ...packed,
+        notes: packed.paths.map((path) => ({ path, byKelpie: kelpie.has(path) })),
+      };
     } catch (error) {
       console.error("Vault: recall failed", errorName(error));
       return empty;
     }
+  }
+
+  /** The paths whose version in the vault is one Kelpie's own commit wrote. */
+  #byKelpie(paths: readonly string[]): Set<string> {
+    if (paths.length === 0) return new Set();
+    return new Set(
+      this.#exec<{ path: string }>(
+        `SELECT f.path FROM files f JOIN authored a ON a.path = f.path AND a.blob_sha = f.blob_sha
+         WHERE f.path IN (SELECT value FROM json_each(?))`,
+        JSON.stringify(paths),
+      ).map((row) => row.path),
+    );
   }
 
   /** Sets the alarm to `at`, unless one is due sooner; never before a pending retry. */
@@ -1219,6 +1248,7 @@ export class Vault extends DurableObject<VaultEnv> {
         return;
       }
       const latest = new Map(rows.map((row) => [row.path, row.content]));
+      const lastRows = new Map(rows.map((row) => [row.path, row]));
       // A write equal to the vault's file, or the removal of a file it doesn't have, is nothing to
       // commit; GitHub would refuse such a removal.
       const writes = [...latest]
@@ -1287,8 +1317,21 @@ export class Vault extends DurableObject<VaultEnv> {
             content,
             shas[i] ?? "",
           );
+          // Provenance (#126): this version is Kelpie's, unless it only settled the owner's conflict.
+          if (lastRows.get(path)?.summary === RESOLVE_SUMMARY) {
+            this.#exec("DELETE FROM authored WHERE path = ?", path);
+          } else {
+            this.#exec(
+              "INSERT OR REPLACE INTO authored (path, blob_sha) VALUES (?, ?)",
+              path,
+              shas[i] ?? "",
+            );
+          }
         });
-        for (const path of deletions) this.#exec("DELETE FROM files WHERE path = ?", path);
+        for (const path of deletions) {
+          this.#exec("DELETE FROM files WHERE path = ?", path);
+          this.#exec("DELETE FROM authored WHERE path = ?", path);
+        }
         // Writes queued while the commit was in flight have larger ids, and stay.
         done();
         this.#set("head", commit);

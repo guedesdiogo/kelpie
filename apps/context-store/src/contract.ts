@@ -33,7 +33,6 @@ export type ProposeResult =
       reason: "vault_off" | "invalid_target" | "unchanged" | "rate_limited" | "failed";
     };
 
-/** What a turn asks memory for (#110). */
 /**
  * A file pushed with conflict markers, kept out of Kelpie's writes (#114): waiting on the model
  * (`held`, with how many tries it has had) or on a pull request with its resolution (`proposed`).
@@ -53,6 +52,7 @@ export type ForgetResult =
   | { ok: true; forgotten: number; stillInVault: string[] }
   | { ok: false; reason: "vault_off" | "invalid_input" | "unavailable" };
 
+/** What a turn asks memory for (#110). */
 export interface RecallOptions {
   /**
    * The scopes the turn may see, such as `["global", "conversation/telegram-123"]`, or `"all"` for
@@ -74,6 +74,12 @@ export interface RecallResult {
   text: string;
   tokens: number;
   paths: string[];
+  /**
+   * The same notes, each with its provenance (#126): `byKelpie` while the vault holds a version
+   * Kelpie's own commit wrote, its lines merged into an owner's edit included. An edit from
+   * elsewhere, or a conflict the model resolved from the file's own lines, is the owner's.
+   */
+  notes: { path: string; byKelpie: boolean }[];
 }
 
 export interface ContextStoreContract {

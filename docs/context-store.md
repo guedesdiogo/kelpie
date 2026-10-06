@@ -73,6 +73,8 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - `scopes` is required, at most 64 of them: `"all"` for a private chat with the owner, or the scopes a turn may see.
     - It never waits behind a commit to GitHub, only behind the first sync of a vault never synced.
     - Its only write is the access count.
+    - It returns each note's provenance beside its path (#126). A note is Kelpie's while the vault holds a version Kelpie's own commit wrote, including its lines merged into an owner's edit. An edit made elsewhere, or a conflict the model resolved from the file's own lines, makes it the owner's.
+      - The record is a table of the blobs Kelpie committed (`authored`), outside memory's index, so a rebuild keeps it.
     - With the vault off, or on any failure, it answers an empty block, and the turn goes on without memory.
   - **Access counts:** each recall counts the notes it packed, in one write, in a table outside the index. A rebuild keeps them, and they never reach git.
   - **The memory report** (#111): once a day, after the embeddings and the held files, the alarm writes what memory's index finds (cold notes, duplicates, possible contradictions) to `memory/_lint/report.md`, or removes the page when memory is clean ([memory-format.md](memory-format.md#the-daily-report)).
@@ -173,7 +175,7 @@ Git keeps every version, so erasing content means rewriting the vault's history.
    - **What it does:**
      - it syncs to the rewritten head;
      - it rebuilds memory's index from the vault as it is now, which drops every old version, of every file, with the vectors of content no version holds anymore;
-     - it deletes the rows that name the paths in `queue`, `conflicts`, `held`, `proposals` and `recall_counts`;
+     - it deletes the rows that name the paths in `queue`, `conflicts`, `held`, `proposals`, `recall_counts` and `authored`;
      - it drops a memory report still waiting in the queue or set aside in `conflicts`, and the next alarm writes the report again from what is left. That is within 15 minutes while GitHub answers.
 
      It never touches git.

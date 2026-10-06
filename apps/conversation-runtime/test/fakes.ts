@@ -288,6 +288,7 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
           text: world.memory,
           tokens: Math.ceil(world.memory.length / 4),
           paths: world.memory === "" ? [] : ["people/ana.md"],
+          notes: world.memory === "" ? [] : [{ path: "people/ana.md", byKelpie: false }],
         };
       },
       now: () => world.clock,

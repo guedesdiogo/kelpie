@@ -134,6 +134,7 @@ describe("recall", () => {
       text: "",
       tokens: 0,
       paths: [],
+      notes: [],
     });
   });
 
@@ -439,7 +440,7 @@ describe("recall", () => {
     expect(calls.texts.every((text) => text.length <= 2_000)).toBe(true);
     expect(
       await stub.recall("kelpie", "Rafael", { scopes: ["not a scope"], budgetTokens: 1_000 }),
-    ).toEqual({ text: "", tokens: 0, paths: [] });
+    ).toEqual({ text: "", tokens: 0, paths: [], notes: [] });
   });
 
   it("refuses an unknown agent, and bounds the question and the budget", async () => {
@@ -450,6 +451,7 @@ describe("recall", () => {
       text: "",
       tokens: 0,
       paths: [],
+      notes: [],
     });
     const huge = await stub.recall("kelpie", "Ana Souza", { scopes: "all", budgetTokens: 1e9 });
     expect(huge.tokens).toBeLessThanOrEqual(8_000);
