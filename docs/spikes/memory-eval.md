@@ -48,7 +48,7 @@ This spike builds that yardstick and records where the index from #107 stands on
   | procedure | 11 | Procedures and decisions |
 
 - **Each question names the memory versions that answer it**, for example `ana` (current) or `ana@1` (the first version).
-- **Frozen first.** The labels were committed in [`57d6f0e`](https://github.com/guedesdiogo/kelpie/commit/57d6f0e), before the generator, the runner or any retrieval run existed. That commit's message says 47 memories; there are 46.
+- **Frozen first.** The labels were committed in [`20e3f27`](https://github.com/guedesdiogo/kelpie/commit/20e3f27), before the generator, the runner or any retrieval run existed. That commit's message says 47 memories; there are 46.
   - Their SHA-256 is `12b9571a…640527`.
   - A test fails if they change without a new hash.
   - The test also checks that every "as of" date falls inside the labelled version's window, and every "valid at" date inside the commitment's.
