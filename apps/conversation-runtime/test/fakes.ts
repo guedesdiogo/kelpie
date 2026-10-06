@@ -67,8 +67,8 @@ export interface FakeWorld {
   modelHeld: boolean;
   cancelled: number;
   sent: string[];
-  /** Every bubble sent, with whether it went out silently. */
-  sends: { text: string; silent: boolean }[];
+  /** Every bubble sent, with whether it went out silently and the link it may preview, if any. */
+  sends: { text: string; silent: boolean; previewUrl?: string }[];
   typing: number;
   /** How many times "typing" was kept up while the model answered, and how many times it stopped. */
   typingKept: number;
@@ -200,7 +200,11 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
         // Polls a plain flag: a promise created here can't be resolved from the test's context.
         while (world.blockSends.has(call)) await new Promise((resolve) => setTimeout(resolve, 5));
         world.sent.push(text);
-        world.sends.push({ text, silent: options.silent });
+        world.sends.push({
+          text,
+          silent: options.silent,
+          ...(options.previewUrl === undefined ? {} : { previewUrl: options.previewUrl }),
+        });
         return { ok: true, providerMessageId: `m-${call}` };
       },
       async typing() {

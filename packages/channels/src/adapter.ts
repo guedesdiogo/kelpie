@@ -30,6 +30,11 @@ export interface SendResult {
 export interface SendOptions {
   /** Deliver without a notification; a reply notifies only on its last bubble. */
   silent?: boolean;
+  /**
+   * The one link in the text the channel may preview: one from the turn's inputs, never one the
+   * model built (#130). Without it, nothing is previewed.
+   */
+  previewUrl?: string;
 }
 
 /** The channel asked to slow down. Retrying before `retryAfterMs` fails again. */

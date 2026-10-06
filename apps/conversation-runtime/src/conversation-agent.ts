@@ -945,6 +945,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const agentId = this.#agentId();
     const destination = this.#destination();
     const capabilities = capabilitiesFor(destination.channel);
+    const previewable = this.#previewable(turn);
     // Only the reply's last bubble notifies; the others arrive silently.
     const lastSeq =
       this.#db
@@ -975,15 +976,42 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         return;
       }
       if (!this.#isRunning(turnId)) return;
-      if (
-        !(await this.#sendBubble(turnId, agentId, destination, row, row.seq !== lastSeq, signal))
-      ) {
-        return;
-      }
+      // The bubble's first link that the turn's inputs hold exactly as written.
+      const previewUrl = linksIn(row.text).find((link) => previewable.has(link));
+      const options = {
+        silent: row.seq !== lastSeq,
+        ...(previewUrl === undefined ? {} : { previewUrl }),
+      };
+      if (!(await this.#sendBubble(turnId, agentId, destination, row, options, signal))) return;
       // If the turn was settled during the send, settling already counted this bubble as sent.
       if (this.#isRunning(turnId)) this.#setBubble(row.id, "sent");
     }
     this.#settle(turnId, "finished");
+  }
+
+  /**
+   * The links a turn's reply may preview (#130). Telegram's servers fetch a previewed link, and one
+   * the model built could carry the vault's notes out in its path or query, so only the links in
+   * the turn's inputs count: the person's messages its request sent, and the memory block recalled
+   * for it. The checkpoint's summary and the replies don't: the model wrote them.
+   */
+  #previewable(turn: { checkpointId: number | null; context: string | null }): Set<string> {
+    const keptFrom =
+      turn.checkpointId === null
+        ? 0
+        : (this.#db
+            .select({ id: schema.checkpoints.keptFromHistoryId })
+            .from(schema.checkpoints)
+            .where(eq(schema.checkpoints.id, turn.checkpointId))
+            .get()?.id ?? 0);
+    const inputs = this.#db
+      .select({ message: schema.history.message })
+      .from(schema.history)
+      .where(and(eq(schema.history.role, "user"), gte(schema.history.id, keptFrom)))
+      .all()
+      .map(({ message }) => messageText(message));
+    if (turn.context !== null) inputs.push(turn.context);
+    return new Set(inputs.flatMap(linksIn));
   }
 
   /**
@@ -997,7 +1025,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     agentId: string,
     destination: Destination,
     bubble: { id: number; text: string },
-    silent: boolean,
+    options: { silent: boolean; previewUrl?: string },
     signal: AbortSignal,
   ): Promise<boolean> {
     for (let attempt = 1; ; attempt += 1) {
@@ -1005,7 +1033,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       this.#setBubble(bubble.id, "sending");
       let outcome: SendOutcome;
       try {
-        outcome = await this.#channel.send(agentId, destination, bubble.text, { silent });
+        outcome = await this.#channel.send(agentId, destination, bubble.text, options);
       } catch (error) {
         if (this.#isRunning(turnId)) this.#setBubble(bubble.id, "pending");
         throw error;
@@ -1436,6 +1464,26 @@ function newest(text: string, max: number): string {
   const tail = text.slice(-max);
   const first = tail.charCodeAt(0);
   return first >= 0xdc00 && first <= 0xdfff ? tail.slice(1) : tail;
+}
+
+const LINK = /https?:\/\/[^\s<>"]+/giu;
+/** Punctuation after a link belongs to the sentence. */
+const AFTER_LINK = /[.,:;!?'"]+$/u;
+
+/**
+ * The http and https links in `text`, in order, about as Telegram finds them: punctuation after a
+ * link stays out, and a closing parenthesis is the link's own only when it closes one the link
+ * opened (`/wiki/Foo_(bar)`). Links without a scheme (`t.me/x`, `example.com`) aren't found, so
+ * they never get a preview, which is the safe side.
+ */
+function linksIn(text: string): string[] {
+  return [...text.matchAll(LINK)].map(([found]) => {
+    let link = found.replace(AFTER_LINK, "");
+    while (link.endsWith(")") && link.split(")").length > link.split("(").length) {
+      link = link.slice(0, -1).replace(AFTER_LINK, "");
+    }
+    return link;
+  });
 }
 
 /** The text of any history message, without its tool calls or reasoning. */

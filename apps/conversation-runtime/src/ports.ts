@@ -26,13 +26,14 @@ export interface ConversationPorts {
   generate(tier: ModelTier, request: RoutedRequest): Promise<ModelCall>;
   /**
    * Sends one bubble through the agent's channel (channel-egress). A failure is a value: rate
-   * limited with the wait, recipient unavailable, not connected, or failed.
+   * limited with the wait, recipient unavailable, not connected, or failed. `previewUrl` is the one
+   * link in the bubble the channel may preview (#130); without it, none is.
    */
   send(
     agentId: string,
     destination: Destination,
     text: string,
-    options: { silent: boolean },
+    options: { silent: boolean; previewUrl?: string },
   ): Promise<SendOutcome>;
   /** Shows "typing" once. It is a courtesy, so callers ignore its failures. */
   typing(agentId: string, destination: Destination): Promise<void>;

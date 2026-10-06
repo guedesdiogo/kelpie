@@ -110,6 +110,7 @@ export class TelegramAdapter implements ChannelAdapter {
       text: escapeHtml(text),
       parse_mode: "HTML",
       disable_notification: options.silent === true,
+      link_preview_options: linkPreview(text, options.previewUrl),
       ...replyParameters(destination.replyToMessageId),
     });
     return { providerMessageId: String(result.message_id) };
@@ -242,6 +243,18 @@ function isWellFormed(message: unknown): message is TelegramMessage {
       (reply) => isObject(reply) && typeof reply.message_id === "number",
     )
   );
+}
+
+/**
+ * Telegram's servers fetch the link they preview, so a link the model built could carry what it
+ * read out in its path or query (#130). Only the link the caller vouches for is previewed, and
+ * only when the text holds it: the Bot API doesn't tie that link to the text, and an empty one
+ * means the text's first link. Everything else goes out with previews off.
+ */
+function linkPreview(text: string, previewUrl: string | undefined) {
+  return typeof previewUrl === "string" && previewUrl !== "" && text.includes(previewUrl)
+    ? { url: previewUrl }
+    : { is_disabled: true };
 }
 
 /** A reply to an id Telegram can't have issued goes out as a plain message. */
