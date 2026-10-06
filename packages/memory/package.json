@@ -9,7 +9,8 @@
   "scripts": {
     "types": "wrangler types -c test/wrangler.jsonc test/worker-configuration.d.ts",
     "typecheck": "bun run types > /dev/null && tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "eval": "vitest run --config vitest.eval.config.ts"
   },
   "dependencies": {
     "yaml": "2.9.1"
