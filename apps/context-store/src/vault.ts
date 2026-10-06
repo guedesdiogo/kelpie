@@ -28,6 +28,7 @@ import type {
   SkillEntry,
   WriteResult,
 } from "./contract.ts";
+import { mergeOwnerWins } from "./merge.ts";
 import {
   agentRulesPath,
   isAgentId,
@@ -674,10 +675,13 @@ export class Vault extends DurableObject<VaultEnv> {
       const snapshot = diff === null ? await backend.snapshot(remote) : null;
       const previous = head;
       const changed = this.ctx.storage.transactionSync(() => {
+        const bases = this.#queuedBases();
         const changed = snapshot
           ? this.#replaceFiles(snapshot.files)
           : this.#apply(diff?.changes ?? []);
-        for (const [path, content] of changed) this.#settleQueued(path, content);
+        for (const [path, content] of changed) {
+          this.#settleQueued(path, content, bases.get(path) ?? null);
+        }
         this.#set("head", remote);
         return changed;
       });
@@ -736,19 +740,57 @@ export class Vault extends DurableObject<VaultEnv> {
     return changed;
   }
 
-  /** Reconciles the writes queued for a path with the content a sync brought for it. */
-  #settleQueued(path: string, incoming: string | null): void {
-    const queued = this.#exec<{ id: number; agent: string; content: string | null }>(
-      "SELECT id, agent, content FROM queue WHERE path = ? ORDER BY id",
-      path,
+  /**
+   * The working copy of every path with queued writes, read before a sync replaces it: what those
+   * writes were built on, since a write is made on what a read shows, queued writes included.
+   */
+  #queuedBases(): Map<string, string> {
+    return new Map(
+      this.#exec<{ path: string; content: string }>(
+        "SELECT path, content FROM files WHERE path IN (SELECT path FROM queue)",
+      ).map((row) => [row.path, row.content]),
     );
-    if (queued.length === 0) return;
+  }
+
+  /**
+   * Reconciles the writes queued for a path with the content a sync brought for it: the owner's
+   * edit, merged with Kelpie's latest write line by line from `base`, the owner's side winning where
+   * they overlap. Without a common version, or when either side removed the file, the owner's edit
+   * wins whole. Kelpie's writes that lost lines are set aside in `conflicts`.
+   */
+  #settleQueued(path: string, incoming: string | null, base: string | null): void {
+    const queued = this.#exec<{
+      id: number;
+      agent: string;
+      content: string | null;
+      summary: string;
+      queued_at: number;
+    }>("SELECT id, agent, content, summary, queued_at FROM queue WHERE path = ? ORDER BY id", path);
+    const last = queued.at(-1);
+    if (last === undefined) return;
     const landed = queued.findLastIndex((row) => row.content === incoming);
     if (landed !== -1) {
       // Kelpie's own commit, whose answer was lost: those writes are done, later ones still wait.
       this.#exec("DELETE FROM queue WHERE path = ? AND id <= ?", path, queued[landed]?.id ?? 0);
       return;
     }
+    const merged =
+      incoming !== null && base !== null && last.content !== null
+        ? mergeOwnerWins(base, incoming, last.content)
+        : null;
+    this.#exec("DELETE FROM queue WHERE path = ?", path);
+    if (merged !== null && merged.content !== incoming) {
+      // One write, on top of the owner's edit.
+      this.#exec(
+        "INSERT INTO queue (agent, path, content, summary, queued_at) VALUES (?, ?, ?, ?, ?)",
+        last.agent,
+        path,
+        merged.content,
+        last.summary,
+        last.queued_at,
+      );
+    }
+    if (merged !== null && !merged.overlapped) return;
     for (const { agent, content } of queued) {
       this.#exec(
         "INSERT INTO conflicts (agent, path, content, reason, at) VALUES (?, ?, ?, 'owner_won', ?)",
@@ -758,7 +800,6 @@ export class Vault extends DurableObject<VaultEnv> {
         Date.now(),
       );
     }
-    this.#exec("DELETE FROM queue WHERE path = ?", path);
     // The path may name a person, so the log holds only how many writes yielded.
     console.warn("Vault: the owner's edit won over queued writes", { writes: queued.length });
   }

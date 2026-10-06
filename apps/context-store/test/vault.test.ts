@@ -208,6 +208,95 @@ describe("Vault", () => {
     });
   });
 
+  it("merges a queued write with the owner's edit, line by line, the owner winning overlaps", async () => {
+    const base = "# Ana\n\nMora em Lisboa.\n\nGosta de café.\n\nTem um gato.\n";
+    const backend = vaultWith({ "memory/people/ana.md": base, "memory/people/bia.md": base });
+    const stub = vault("three-way");
+    await stub.compile("kelpie");
+    // Two writes to one file: the second builds on the first, as a read shows it.
+    const first = base.replace("um gato", "dois gatos");
+    await stub.write("kelpie", [{ path: "memory/people/ana.md", content: first }], "x");
+    expect(await stub.read("memory/people/ana.md")).toBe(first);
+    await stub.write(
+      "kelpie",
+      [{ path: "memory/people/ana.md", content: first.replace("café", "chá") }],
+      "y",
+    );
+    await stub.write(
+      "kelpie",
+      [{ path: "memory/people/bia.md", content: base.replace("Lisboa", "Braga") }],
+      "z",
+    );
+    backend.push({
+      "memory/people/ana.md": base.replace("Lisboa", "Porto"),
+      "memory/people/bia.md": base.replace("Lisboa", "Faro"),
+    });
+
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()).toMatchObject({
+      // Nothing overlaps: both sides' changes stay.
+      "memory/people/ana.md": base
+        .replace("Lisboa", "Porto")
+        .replace("café", "chá")
+        .replace("um gato", "dois gatos"),
+      // The same line: the owner's side wins.
+      "memory/people/bia.md": base.replace("Lisboa", "Faro"),
+    });
+    // The owner's file is left as it is, without a commit of its own.
+    const committed = backend.commitRequests.flatMap((request) => request.writes);
+    expect(committed.map((write) => write.path)).toEqual(["memory/people/ana.md"]);
+    await runInDurableObject(stub, async (_instance, state) => {
+      expect(state.storage.sql.exec("SELECT count(*) AS n FROM queue").one()).toEqual({ n: 0 });
+      // Only what lost to the owner is set aside.
+      expect(
+        state.storage.sql.exec("SELECT agent, path, content, reason FROM conflicts").toArray(),
+      ).toEqual([
+        {
+          agent: "kelpie",
+          path: "memory/people/bia.md",
+          content: base.replace("Lisboa", "Braga"),
+          reason: "owner_won",
+        },
+      ]);
+    });
+  });
+
+  it("lets the owner win a file without a common version, or one either side removed", async () => {
+    const base = "# Ana\n\nMora em Lisboa.\n";
+    const backend = vaultWith({ "memory/people/ana.md": base, "memory/people/bia.md": base });
+    const stub = vault("three-way-none");
+    await stub.compile("kelpie");
+    await stub.write(
+      "kelpie",
+      [
+        { path: "memory/people/ana.md", content: `${base}\nTem um gato.\n` },
+        { path: "memory/people/bia.md", content: null },
+        { path: "memory/people/caio.md", content: "# Caio\n" },
+      ],
+      "x",
+    );
+    backend.push({
+      "memory/people/ana.md": null,
+      "memory/people/bia.md": `${base}\nTem um cão.\n`,
+      "memory/people/caio.md": "# Caio, by the owner\n",
+    });
+
+    await runDurableObjectAlarm(stub);
+    const files = backend.files();
+    expect(files["memory/people/ana.md"]).toBeUndefined();
+    expect(files["memory/people/bia.md"]).toBe(`${base}\nTem um cão.\n`);
+    expect(files["memory/people/caio.md"]).toBe("# Caio, by the owner\n");
+    await runInDurableObject(stub, async (_instance, state) => {
+      expect(
+        state.storage.sql.exec("SELECT path, reason FROM conflicts ORDER BY path").toArray(),
+      ).toEqual([
+        { path: "memory/people/ana.md", reason: "owner_won" },
+        { path: "memory/people/bia.md", reason: "owner_won" },
+        { path: "memory/people/caio.md", reason: "owner_won" },
+      ]);
+    });
+  });
+
   it("opens a pull request for a skill, and leaves the main branch alone", async () => {
     const backend = vaultWith({ "agents/kelpie/SOUL.md": "# Kelpie" });
     const stub = vault("propose");
