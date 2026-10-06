@@ -11,6 +11,7 @@ import { fromNdjsonStream, type LlmEvent, type ModelTier, type RoutedRequest } f
 import {
   type GatewayQualifyOutcome,
   type Qualifier,
+  type QualifierBackend,
   type Question,
   RemoteQualifier,
 } from "@kelpie/qualifier";
@@ -38,8 +39,8 @@ export interface ConversationPorts {
   typing(agentId: string, destination: Destination): Promise<void>;
   /** Keeps "typing" showing, renewed before it lapses, until `signal` aborts. */
   keepTyping(agentId: string, destination: Destination, signal: AbortSignal): Promise<void>;
-  /** The end-of-turn qualifier, or null for the keyless heuristic (ADR-0009). */
-  qualifier: Qualifier | null;
+  /** The end-of-turn qualifier the agent chose, or null for the heuristic alone (ADR-0009). */
+  qualifierFor(backend: QualifierBackend): Qualifier | null;
   now(): number;
   /** Waits `ms`, or rejects as soon as `signal` aborts. */
   sleep(ms: number, signal: AbortSignal): Promise<void>;
@@ -54,7 +55,11 @@ interface LlmGatewayBinding {
     events(): Promise<ReadableStream<Uint8Array>>;
     cancel(): Promise<void>;
   }>;
-  qualify(state: unknown, questions: Record<string, Question>): Promise<GatewayQualifyOutcome>;
+  qualify(
+    state: unknown,
+    questions: Record<string, Question>,
+    backend: QualifierBackend,
+  ): Promise<GatewayQualifyOutcome>;
 }
 
 let portsForTesting: ConversationPorts | undefined;
@@ -129,8 +134,10 @@ function productionPorts(env: Env): ConversationPorts {
         }
       }
     },
-    // Jev runs in llm-gateway, which holds its key; without one it answers not_configured at once.
-    qualifier: new RemoteQualifier((state, questions) => gateway.qualify(state, questions)),
+    // The qualifiers run in llm-gateway: Clef through its AI binding, Jev with the key it holds
+    // (without one, Jev answers not_configured at once).
+    qualifierFor: (backend) =>
+      new RemoteQualifier((state, questions) => gateway.qualify(state, questions, backend)),
     now: () => Date.now(),
     sleep,
   };

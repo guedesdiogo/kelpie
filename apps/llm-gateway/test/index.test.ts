@@ -63,6 +63,12 @@ const RECORDED_JEV = {
   answers: { "turn.end::user_finished": { type: "noul", noul: 0.87 } },
   usage: { input_tokens: 312, output_tokens: 24 },
 };
+// Built by hand from the documented output schema of @cf/cloudflare/clef-flash; spike #117 records one.
+const DOCUMENTED_CLEF = {
+  model: "clef-flash",
+  answers: { "turn.end::user_finished": { type: "noul", noul: 0.81 } },
+  usage: { input_tokens: 300, output_tokens: 1 },
+};
 const questions: Record<string, Question> = {
   "turn.end::user_finished": { type: "noul", instructions: "Has the user finished?" },
 };
@@ -113,7 +119,7 @@ describe("llm-gateway", () => {
     await vi.waitFor(() => expect(providerSignal?.aborted).toBe(true));
   });
 
-  it("asks Jev through TypeSafe's API with the pinned model and the key", async () => {
+  it("asks Jev when the caller names no backend, as conversation-runtime did before Clef", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async () => Response.json(RECORDED_JEV));
@@ -155,6 +161,57 @@ describe("llm-gateway", () => {
     const outcome = await qualifyWith(withoutJev, { fragments: ["oi"] }, questions);
     expect(outcome).toEqual({ ok: false, reason: "not_configured" });
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("asks Clef through the AI binding with the pinned model, and needs no key", async () => {
+    const run = vi.fn(async () => DOCUMENTED_CLEF);
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const { TYPESAFE_API_KEY: _key, ...withoutJev } = env as Parameters<typeof qualifyWith>[0];
+    const outcome = await qualifyWith(
+      { ...withoutJev, AI: { run } as unknown as Ai },
+      { fragments: ["vocês entregam?"] },
+      questions,
+      "clef",
+    );
+
+    expect(outcome).toEqual({
+      ok: true,
+      result: {
+        answers: { "turn.end::user_finished": { type: "noul", noul: 0.81 } },
+        provider: "clef-workers-ai",
+        calibrated: true,
+      },
+    });
+    const [model, input, options] = (run.mock.calls[0] ?? []) as unknown as [
+      string,
+      Record<string, unknown>,
+      { signal?: AbortSignal },
+    ];
+    expect(model).toBe("@cf/cloudflare/clef-flash");
+    expect(input).toMatchObject({ model: "clef-flash", state: { fragments: ["vocês entregam?"] } });
+    expect(options.signal).toBeInstanceOf(AbortSignal);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("answers failed when Workers AI fails, and logs only the error's name", async () => {
+    const run = vi.fn(async () => {
+      const error = new Error("bad input: meu cpf é 12345678909");
+      error.name = "InferenceUpstreamError";
+      throw error;
+    });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const outcome = await qualifyWith(
+      { ...(env as Parameters<typeof qualifyWith>[0]), AI: { run } as unknown as Ai },
+      { fragments: ["oi"] },
+      questions,
+      "clef",
+    );
+
+    expect(outcome).toEqual({ ok: false, reason: "failed" });
+    expect(String(logged.mock.calls[0]?.[0])).toContain(
+      "Workers AI failed: InferenceUpstreamError",
+    );
+    expect(JSON.stringify(logged.mock.calls)).not.toContain("cpf");
   });
 
   it("answers 404 over HTTP", async () => {

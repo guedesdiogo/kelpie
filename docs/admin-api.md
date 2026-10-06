@@ -26,7 +26,7 @@ Every endpoint is a `POST` with a JSON body.
 | `/commands/createAgent` | `{ "id": "sales", "name": "Sales" }` |
 | `/commands/renameAgent` | `{ "id": "sales", "name": "Sales team" }` |
 | `/commands/getAgent` | `{ "id": "sales" }` |
-| `/commands/configureAgent` | `{ "id": "sales", "settings": { "systemPrompt": "…", "conversational": false } }` |
+| `/commands/configureAgent` | `{ "id": "sales", "settings": { "systemPrompt": "…", "conversational": false, "qualifier": "jev" } }` |
 | `/commands/listIdentities` | none |
 | `/commands/enableIdentity` | `{ "channel": "telegram", "channelUserId": "…" }`; re-enables a disabled identity, never a pending one |
 | `/commands/disableIdentity` | same as `enableIdentity` |
@@ -96,7 +96,17 @@ Form pages are HTML:
       - pass each provider's passthrough URL as a flag, for example `--var OPENAI_BASE_URL:https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/openai`. Later deploys need the same flag, or calls go straight to the provider without a warning;
       - if the gateway requires authentication, set `AI_GATEWAY_TOKEN` to a Cloudflare API token with only `AI Gateway Run`. Such a token works on every gateway in the account. The Worker sends it only to `gateway.ai.cloudflare.com`.
 
-      For Jev at the end of turn (ADR-0018), set the optional `TYPESAFE_API_KEY` to a key from TypeSafe's console. `llm-gateway` calls TypeSafe's API directly with it, after masking emails, long numbers, link query strings and token-like strings in the fragments. Names, addresses and numbers written in words still go out, and TypeSafe keeps data with zero retention only on enterprise plans. Without the key, the heuristic decides.
+      **End of turn.** When the heuristic isn't sure whether the user has finished, the agent's `qualifier` setting picks who decides. Change it with `configureAgent`.
+      - **`clef`, the default:** Cloudflare's Clef model on Workers AI, through `llm-gateway`'s `AI` binding.
+        - It needs no key and is billed as Workers AI usage on the account.
+        - `CLEF_MODEL` pins the model.
+        - Cloudflare doesn't use the inputs to train or improve models.
+      - **`jev`:** Jev on TypeSafe's API (ADR-0018).
+        - Set the optional `TYPESAFE_API_KEY` to a key from TypeSafe's console.
+        - TypeSafe keeps data with zero retention only on enterprise plans.
+        - An agent set to `jev` without the key uses the heuristic.
+
+      Either way, `llm-gateway` masks emails, long numbers, link query strings and token-like strings in the fragments first. Names, addresses and numbers written in words still go out.
    2. `channel-egress`, with its `SECRETS_KEY` and `--var INGRESS_ORIGIN:https://<ingress hostname>` (`docs/secrets.md`);
    3. `conversation-runtime`;
    4. `ingress`, with `--domain <ingress hostname>`. Telegram's webhooks reach it there; like the admin API, it has no `workers.dev` URL. Later deploys need the same flag.

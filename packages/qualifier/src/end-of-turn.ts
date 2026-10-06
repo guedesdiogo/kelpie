@@ -120,9 +120,14 @@ export const HEURISTIC_BANDS: Bands = { high: 0.8, low: 0.3 };
 /** Jev 1.13.0 compresses its PT-BR probabilities (ADR-0018). Recalibrate on real conversations. */
 export const JEV_BANDS: Bands = { high: 0.7, low: 0.4 };
 
-/** The bands of whoever answered: Jev's ids get Jev's, everyone else the heuristic's. */
+/** Clef's bands. Provisional: spike #117 measures them on the PT-BR set before this ships. */
+export const CLEF_BANDS: Bands = { high: 0.8, low: 0.3 };
+
+/** The bands of whoever answered: Jev's and Clef's ids get their own, everyone else the heuristic's. */
 export function endOfTurnBands(source: QualifierId | "heuristic"): Bands {
-  return source.startsWith("jev-") ? JEV_BANDS : HEURISTIC_BANDS;
+  if (source.startsWith("jev-")) return JEV_BANDS;
+  if (source.startsWith("clef-")) return CLEF_BANDS;
+  return HEURISTIC_BANDS;
 }
 
 /** How long to wait for more fragments, given how likely the user is done. */

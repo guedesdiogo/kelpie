@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  CLEF_BANDS,
   type EndOfTurnContext,
   endOfTurn,
   endOfTurnBands,
@@ -108,6 +109,10 @@ describe("endOfTurnBands", () => {
     expect(endOfTurnBands("jev-workers-ai")).toEqual({ high: 0.7, low: 0.4 });
     expect(endOfTurnBands("heuristic")).toEqual({ high: 0.8, low: 0.3 });
     expect(endOfTurnBands("fake")).toEqual({ high: 0.8, low: 0.3 });
+  });
+
+  it("gives Clef its own bands", () => {
+    expect(endOfTurnBands("clef-workers-ai")).toBe(CLEF_BANDS);
   });
 });
 

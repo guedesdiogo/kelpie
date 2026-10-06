@@ -11,7 +11,15 @@ import {
   type RoutedRequest,
   toNdjsonStream,
 } from "@kelpie/llm";
-import { type GatewayQualifyOutcome, JevHttpQualifier, type Question } from "@kelpie/qualifier";
+import {
+  ClefQualifier,
+  type ClefRun,
+  type GatewayQualifyOutcome,
+  JevHttpQualifier,
+  type Qualifier,
+  type QualifierBackend,
+  type Question,
+} from "@kelpie/qualifier";
 
 /** Set by the owner with `wrangler secret put`. A provider is used only when its key is set. */
 interface Secrets {
@@ -23,7 +31,7 @@ interface Secrets {
   TYPESAFE_API_KEY?: string;
 }
 
-/** How long to wait for TypeSafe: just past the caller's 800 ms, whose abort doesn't cross RPC. */
+/** How long to wait for the qualifier: just past the caller's 800 ms, whose abort doesn't cross RPC. */
 const QUALIFY_TIMEOUT_MS = 1_000;
 
 type GatewayEnv = Env & Secrets;
@@ -65,31 +73,50 @@ export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
     return new Generation(events, controller);
   }
 
-  /** Typed decisions through Jev. Personal data in `state` is masked before it leaves. */
-  qualify(state: unknown, questions: Record<string, Question>): Promise<GatewayQualifyOutcome> {
-    return qualifyWith(this.env, state, questions);
+  /**
+   * Typed decisions through the agent's qualifier: Clef on Workers AI, or Jev on TypeSafe's API.
+   * A caller that names none gets Jev, as before Clef existed. Personal data in `state` is masked
+   * before it leaves.
+   */
+  qualify(
+    state: unknown,
+    questions: Record<string, Question>,
+    backend: QualifierBackend = "jev",
+  ): Promise<GatewayQualifyOutcome> {
+    return qualifyWith(this.env, state, questions, backend);
   }
 }
 
-/** Answers at once when no Jev key is set; a failure is logged here and answered as `failed`. */
+/** Answers at once when Jev is asked without its key; a failure is logged here and answered as `failed`. */
 export async function qualifyWith(
   env: GatewayEnv,
   state: unknown,
   questions: Record<string, Question>,
+  backend: QualifierBackend = "jev",
 ): Promise<GatewayQualifyOutcome> {
-  if (!env.TYPESAFE_API_KEY) return { ok: false, reason: "not_configured" };
-  const jev = new JevHttpQualifier({
-    apiKey: env.TYPESAFE_API_KEY,
-    model: env.JEV_MODEL,
-    fetch: (url, init) => fetch(url, init),
-  });
+  const qualifier = qualifierFor(env, backend);
+  if (!qualifier) return { ok: false, reason: "not_configured" };
   try {
     const signal = AbortSignal.timeout(QUALIFY_TIMEOUT_MS);
-    return { ok: true, result: await jev.qualify(state, questions, { signal }) };
+    return { ok: true, result: await qualifier.qualify(state, questions, { signal }) };
   } catch (error) {
     logFailure(error, env);
     return { ok: false, reason: "failed" };
   }
+}
+
+function qualifierFor(env: GatewayEnv, backend: QualifierBackend): Qualifier | null {
+  if (backend === "clef") {
+    // The binding's types list known models only; Clef's selector is a plain string here.
+    const run = env.AI.run.bind(env.AI) as unknown as ClefRun;
+    return new ClefQualifier({ model: env.CLEF_MODEL, run });
+  }
+  if (!env.TYPESAFE_API_KEY) return null;
+  return new JevHttpQualifier({
+    apiKey: env.TYPESAFE_API_KEY,
+    model: env.JEV_MODEL,
+    fetch: (url, init) => fetch(url, init),
+  });
 }
 
 function providers(env: GatewayEnv): Partial<Record<ProviderId, LlmProvider>> {
