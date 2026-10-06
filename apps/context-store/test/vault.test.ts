@@ -297,6 +297,56 @@ describe("Vault", () => {
     });
   });
 
+  it("holds a file pushed with conflict markers, and keeps queued writes off it until it is clean", async () => {
+    const base = "# Ana\n\nMora em Lisboa.\n\nGosta de café.\n";
+    const backend = vaultWith({ "memory/people/ana.md": base });
+    const stub = vault("markers");
+    await stub.compile("kelpie");
+    const kelpie = base.replace("café", "chá");
+    await stub.write("kelpie", [{ path: "memory/people/ana.md", content: kelpie }], "x");
+    const marked = [
+      "# Ana",
+      "",
+      "<<<<<<< HEAD",
+      "Mora no Porto.",
+      "=======",
+      "Mora em Braga.",
+      ">>>>>>> origin/main",
+      "",
+      "Gosta de café.",
+      "",
+    ].join("\n");
+    // A line of equals signs under text is a Markdown heading, not a conflict.
+    const heading = "Planos\n=======\n\nViajar em maio.\n";
+    backend.push({ "memory/people/ana.md": marked, "memory/notes/planos.md": heading });
+    // A later write to another file commits, and leaves the held file's write queued.
+    await stub.write("kelpie", [{ path: "memory/notes/outra.md", content: "# Outra\n" }], "y");
+
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()["memory/people/ana.md"]).toBe(marked);
+    expect(
+      backend.commitRequests.flatMap((request) => request.writes.map((write) => write.path)),
+    ).toEqual(["memory/notes/outra.md"]);
+    const rows = (sql: string) =>
+      runInDurableObject(stub, (_instance, state) => state.storage.sql.exec(sql).toArray());
+    expect(await rows("SELECT path, content FROM held")).toEqual([
+      { path: "memory/people/ana.md", content: marked },
+    ]);
+    expect(await rows("SELECT path, content FROM queue")).toEqual([
+      { path: "memory/people/ana.md", content: kelpie },
+    ]);
+    // A held write doesn't keep the alarm flushing every few seconds.
+    const alarm = await runInDurableObject(stub, (_instance, state) => state.storage.getAlarm());
+    expect(alarm).toBeGreaterThan(Date.now() + 60_000);
+
+    // The owner cleans it up: the hold ends, and the queued write merges into the clean file.
+    const clean = base.replace("Lisboa", "Porto");
+    backend.push({ "memory/people/ana.md": clean });
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()["memory/people/ana.md"]).toBe(clean.replace("café", "chá"));
+    expect(await rows("SELECT path FROM held")).toEqual([]);
+  });
+
   it("opens a pull request for a skill, and leaves the main branch alone", async () => {
     const backend = vaultWith({ "agents/kelpie/SOUL.md": "# Kelpie" });
     const stub = vault("propose");

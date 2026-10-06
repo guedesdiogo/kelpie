@@ -28,7 +28,7 @@ import type {
   SkillEntry,
   WriteResult,
 } from "./contract.ts";
-import { mergeOwnerWins } from "./merge.ts";
+import { hasConflictMarkers, mergeOwnerWins } from "./merge.ts";
 import {
   agentRulesPath,
   isAgentId,
@@ -113,6 +113,11 @@ CREATE TABLE IF NOT EXISTS conflicts (
   at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS proposal_attempts (at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS held (
+  path TEXT PRIMARY KEY NOT NULL,
+  content TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS recall_counts (
   path TEXT PRIMARY KEY NOT NULL,
   count INTEGER NOT NULL,
@@ -515,7 +520,10 @@ export class Vault extends DurableObject<VaultEnv> {
     // Memory's work comes after GitHub's and fails on its own, so an llm-gateway outage never
     // delays the vault's writes.
     const moreToEmbed = await this.#embedPending();
-    const queued = this.#exec<{ n: number }>("SELECT count(*) AS n FROM queue")[0]?.n ?? 0;
+    const queued =
+      this.#exec<{ n: number }>(
+        "SELECT count(*) AS n FROM queue WHERE path NOT IN (SELECT path FROM held)",
+      )[0]?.n ?? 0;
     await this.#alarmBy(
       Date.now() + (queued > 0 ? FLUSH_DELAY_MS : moreToEmbed ? EMBED_AGAIN_MS : RECONCILE_MS),
     );
@@ -680,6 +688,17 @@ export class Vault extends DurableObject<VaultEnv> {
           ? this.#replaceFiles(snapshot.files)
           : this.#apply(diff?.changes ?? []);
         for (const [path, content] of changed) {
+          if (content !== null && hasConflictMarkers(content)) {
+            // Held as pushed: queued writes would carry the markers, or overwrite the push.
+            this.#exec(
+              "INSERT OR REPLACE INTO held (path, content, at) VALUES (?, ?, ?)",
+              path,
+              content,
+              Date.now(),
+            );
+            continue;
+          }
+          this.#exec("DELETE FROM held WHERE path = ?", path);
           this.#settleQueued(path, content, bases.get(path) ?? null);
         }
         this.#set("head", remote);
@@ -807,7 +826,8 @@ export class Vault extends DurableObject<VaultEnv> {
   /** The oldest queued writes that fit in one commit, at most `limit`, without `skip`. */
   #nextBatch(limit: number, skip: number | null): QueuedRow[] {
     const rows = this.#exec<QueuedRow>(
-      "SELECT id, agent, path, content, summary FROM queue WHERE id != ? ORDER BY id LIMIT ?",
+      `SELECT id, agent, path, content, summary FROM queue
+       WHERE id != ? AND path NOT IN (SELECT path FROM held) ORDER BY id LIMIT ?`,
       skip ?? -1,
       limit,
     );
@@ -861,8 +881,13 @@ export class Vault extends DurableObject<VaultEnv> {
       const deletions = [...latest]
         .filter(([path, content]) => content === null && this.#fileContent(path) !== null)
         .map(([path]) => path);
+      // Writes to a held file were left out of the batch, and stay.
       const done = () =>
-        this.#exec("DELETE FROM queue WHERE id <= ? AND id != ?", last.id, suspect?.id ?? -1);
+        this.#exec(
+          "DELETE FROM queue WHERE id <= ? AND id != ? AND path NOT IN (SELECT path FROM held)",
+          last.id,
+          suspect?.id ?? -1,
+        );
       if (writes.length === 0 && deletions.length === 0) {
         done();
         continue;
