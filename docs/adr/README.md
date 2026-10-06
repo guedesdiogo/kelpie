@@ -28,6 +28,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0022](0022-clef-qualifier.md) | Each agent chooses its end-of-turn qualifier, Clef on Workers AI by default, Jev as the option | [#117](https://github.com/guedesdiogo/kelpie/issues/117) |
 | [0023](0023-webchat-access-login.md) | The webchat logs in with the owner's Cloudflare Access identity | [#40](https://github.com/guedesdiogo/kelpie/issues/40) |
 | [0024](0024-fixed-wait-end-of-turn.md) | Kelpie answers after a fixed, configurable wait; end of turn uses no qualifier | [#133](https://github.com/guedesdiogo/kelpie/issues/133) |
+| [0025](0025-turn-tool-loop.md) | A turn runs its tools in a bounded loop that keeps history append-only | [#141](https://github.com/guedesdiogo/kelpie/issues/141) |
 
 ## Format
 

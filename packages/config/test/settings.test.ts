@@ -22,8 +22,15 @@ describe("parseSettings", () => {
     expect(parseSettings({ qualifier: "clef" })).toEqual({ qualifier: "clef" });
   });
 
+  it("gives a turn's tools 120 s by default, which the owner may only raise, up to 10 minutes", () => {
+    expect(DEFAULT_SETTINGS.toolLoopMs).toBe(120_000);
+    expect(parseSettings({ toolLoopMs: 300_000 })).toEqual({ toolLoopMs: 300_000 });
+  });
+
   it.each([
     [{ tier: "gpt-9" }],
+    [{ toolLoopMs: 119_999 }],
+    [{ toolLoopMs: 600_001 }],
     [{ maxOutputTokens: 0 }],
     [{ maxOutputTokens: 1.5 }],
     [{ systemPrompt: "   " }],

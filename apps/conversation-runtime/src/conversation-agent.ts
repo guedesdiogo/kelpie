@@ -1,6 +1,6 @@
 import { canonicalTimeZone } from "@kelpie/access";
 import { CAPABILITIES, type ChannelCapabilities, type SendOutcome } from "@kelpie/channels";
-import type { AgentConfig, AgentSettings } from "@kelpie/config";
+import type { Actor, AgentConfig, AgentSettings } from "@kelpie/config";
 import {
   deliveredReply,
   planDelivery,
@@ -18,7 +18,7 @@ import {
   WEBCHAT_ADMISSION_HEADER,
   type WebchatAdmission,
 } from "@kelpie/conversation/contract";
-import type { AssistantMessage, ChatMessage, LlmEvent, Usage } from "@kelpie/llm";
+import type { AssistantMessage, ChatMessage, LlmEvent, ToolResult, Usage } from "@kelpie/llm";
 import { needsMemory, type OpenKeys, sessionPage } from "@kelpie/memory";
 import {
   Agent,
@@ -31,8 +31,17 @@ import { and, asc, count, desc, eq, gt, gte, inArray, isNull, like, lt, max } fr
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
-import { type ConversationPorts, portsFor } from "./ports.ts";
+import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
 import * as schema from "./schema.ts";
+import {
+  MAX_TOOL_ROUNDS,
+  runToolCall,
+  TOOL_BOUND_RESULT,
+  TOOL_LIMIT_TEXT,
+  TOOL_STOPPED_RESULT,
+  type Tool,
+  type ToolContext,
+} from "./tools.ts";
 import {
   parseAdmission,
   parseClientFrame,
@@ -114,6 +123,8 @@ const MAX_RATE_LIMIT_WAIT_MS = 30_000;
 interface TurnInFlight {
   controller: AbortController;
   call?: { cancel(): void };
+  /** The results of the round of tool calls running, as they finish. */
+  results?: ReadonlyMap<string, ToolResult> | undefined;
 }
 
 /**
@@ -159,7 +170,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   }
 
   /** Where replies go: the webchat's sockets on this object, or channel-egress for the others. */
-  get #channel(): Pick<ConversationPorts, "send" | "typing" | "keepTyping"> {
+  get #channel(): Pick<ConversationPorts, "send" | "typing" | "keepTyping" | "status"> {
     return this.#get<Destination | null>("destination", null)?.channel === "webchat"
       ? webchatEgress(() => this.getConnections())
       : this.#ports;
@@ -610,47 +621,46 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .run();
 
     const settings = settingsOf(turn);
+    const agentId = this.#agentId();
     const destination = this.#destination();
-    // "Typing" stays up while the model answers; delivery shows it again before each bubble.
+    const capabilities = capabilitiesFor(destination.channel);
+    // Once the wait is over, the turn shows it is working until the reply is in: its steps where the
+    // channel can show them (#141), "typing" elsewhere. Delivery shows "typing" before each bubble.
+    const showsSteps = settings.conversational && capabilities.status;
+    const step = (name: TurnStep, label?: string) => {
+      if (showsSteps) {
+        // A courtesy, like "typing": a failure doesn't stop the turn.
+        this.#channel.status(agentId, destination, name, label).catch(() => undefined);
+      }
+    };
     const answered = new AbortController();
     const typing =
-      settings.conversational && capabilitiesFor(destination.channel).typing.supported
+      settings.conversational && !capabilities.status && capabilities.typing.supported
         ? this.#channel
-            .keepTyping(
-              this.#agentId(),
-              destination,
-              AbortSignal.any([answered.signal, controller.signal]),
-            )
+            .keepTyping(agentId, destination, AbortSignal.any([answered.signal, controller.signal]))
             .catch(() => undefined)
         : Promise.resolve();
 
-    let finish: Extract<LlmEvent, { type: "finish" }> | undefined;
+    let finish: Extract<LlmEvent, { type: "finish" }> | null;
     try {
-      // The person waits for this, with "typing" showing.
-      const memory = await this.#recall(settings);
-      if (controller.signal.aborted || !this.#isRunning(turnId)) return;
-      // Kept with the turn, to be sent again unchanged on later requests (#137).
-      this.#db
-        .update(schema.turns)
-        .set({ context: memory })
-        .where(eq(schema.turns.id, turnId))
-        .run();
-      const call = await this.#ports.generate(settings.tier, {
-        system: `${settings.systemPrompt}\n\n${MEMORY_NOTE}`,
-        messages: this.#messages(turn.systemVersion, turn.checkpointId),
-        maxOutputTokens: settings.maxOutputTokens,
-        // History rows never keep it; the turn does, for later requests (#137).
-        ...(memory === null ? {} : { context: memory }),
-      });
-      const flight = this.#inFlight.get(turnId);
-      if (flight) flight.call = call;
-      if (controller.signal.aborted) {
-        call.cancel();
-        return;
+      let memory: string | null = null;
+      if (this.#toolRounds(turnId) > 0) {
+        // Picked up after an eviction mid-loop: the calls it left open get their results, and its
+        // calls in history keep the memory block the first round sent (#137).
+        this.#closeOpenCalls(turnId);
+      } else {
+        // The person waits for this.
+        step("memory");
+        memory = await this.#recall(settings);
+        if (controller.signal.aborted || !this.#isRunning(turnId)) return;
+        // Kept with the turn, to be sent again unchanged on later requests (#137).
+        this.#db
+          .update(schema.turns)
+          .set({ context: memory })
+          .where(eq(schema.turns.id, turnId))
+          .run();
       }
-      for await (const event of call.events) {
-        if (event.type === "finish") finish = event;
-      }
+      finish = await this.#loop(turn, controller, settings, memory, step);
     } catch (error) {
       // An interruption cancels the call; the turn is already settled.
       if (controller.signal.aborted || !this.#isRunning(turnId)) return;
@@ -661,8 +671,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       answered.abort();
       void typing;
     }
-    if (!this.#isRunning(turnId)) return;
-    if (!finish) throw new Error("The model stream ended without a reply");
+    if (!finish || !this.#isRunning(turnId)) return;
     if (this.#recordUsage(turnId, finish.usage) >= CHECKPOINT_BUDGET_TOKENS) {
       // Housekeeping: a fault here must not cost the reply.
       try {
@@ -672,19 +681,21 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       }
     }
     if (finish.reason === "refusal") {
+      // Calls in history keep the block they were sent after.
       this.#db
         .update(schema.turns)
-        .set({ status: "refused", context: null })
+        .set(
+          this.#toolRounds(turnId) > 0
+            ? { status: "refused" }
+            : { status: "refused", context: null },
+        )
         .where(eq(schema.turns.id, turnId))
         .run();
+      step("idle");
       return;
     }
 
-    const bubbles = planDelivery(
-      textOf(finish.message),
-      settings.conversational,
-      capabilitiesFor(destination.channel),
-    );
+    const bubbles = planDelivery(textOf(finish.message), settings.conversational, capabilities);
     const reply = finish.message;
     this.#db.transaction((tx) => {
       tx.update(schema.turns).set({ reply }).where(eq(schema.turns.id, turnId)).run();
@@ -695,6 +706,181 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       });
     });
     await this.#deliver(turnId, controller.signal);
+  }
+
+  /**
+   * The turn's model calls (ADR-0025). A reply that asks for tools goes into history, its calls run
+   * one at a time, and their results follow it; the next call sends history again, unchanged, with
+   * the memory block back after the turn's last user message instead of in `context` (#137). Past
+   * MAX_TOOL_ROUNDS rounds or the agent's `toolLoopMs`, calls get TOOL_BOUND_RESULT and one last
+   * call, with the same tools, answers; if it still asks for tools, TOOL_LIMIT_TEXT does. Returns
+   * the reply, with every round's usage, or null once the turn stopped.
+   */
+  async #loop(
+    turn: { id: number; systemVersion: number; checkpointId: number | null },
+    controller: AbortController,
+    settings: AgentSettings,
+    memory: string | null,
+    step: (name: TurnStep, label?: string) => void,
+  ): Promise<Extract<LlmEvent, { type: "finish" }> | null> {
+    const agentId = this.#agentId();
+    const tools = await this.#tools(agentId);
+    const specs = [...tools.values()].map((tool) => tool.spec);
+    const context: ToolContext = {
+      actor: this.#actor(turn.id, agentId),
+      agentId,
+      // Ingress admits only direct chats, and `Directory.admit` only the owner (ADR-0015), who may
+      // see every scope; #131 brings the turn's role and chat type.
+      scopes: "all",
+      signal: controller.signal,
+    };
+    const started = this.#ports.now();
+    let rounds = this.#toolRounds(turn.id);
+    let last = false;
+    let pendingContext = memory;
+    const usage: Usage[] = [];
+    for (;;) {
+      step("thinking");
+      const call = await this.#ports.generate(settings.tier, {
+        system: `${settings.systemPrompt}\n\n${MEMORY_NOTE}`,
+        messages: this.#messages(turn.systemVersion, turn.checkpointId),
+        ...(specs.length === 0 ? {} : { tools: specs }),
+        maxOutputTokens: settings.maxOutputTokens,
+        // History rows never keep it; the turn does, for later requests (#137).
+        ...(pendingContext === null ? {} : { context: pendingContext }),
+      });
+      pendingContext = null;
+      const flight = this.#inFlight.get(turn.id);
+      if (flight) flight.call = call;
+      if (controller.signal.aborted) {
+        call.cancel();
+        return null;
+      }
+      let finish: Extract<LlmEvent, { type: "finish" }> | undefined;
+      for await (const event of call.events) {
+        if (event.type === "finish") finish = event;
+      }
+      if (!this.#isRunning(turn.id)) return null;
+      if (!finish) throw new Error("The model stream ended without a reply");
+      usage.push(...finish.usage);
+      if (finish.reason !== "tool_calls") return { ...finish, usage };
+      if (last) {
+        return {
+          ...finish,
+          reason: "stop",
+          message: { role: "assistant", parts: [{ type: "text", text: TOOL_LIMIT_TEXT }] },
+          usage,
+        };
+      }
+
+      const calls = finish.message.parts.filter((part) => part.type === "tool_call");
+      this.#db
+        .insert(schema.history)
+        .values({
+          turnId: turn.id,
+          role: "assistant",
+          userId: null,
+          systemVersion: turn.systemVersion,
+          checkpointId: turn.checkpointId,
+          message: finish.message,
+          createdAt: this.#ports.now(),
+        })
+        .run();
+      rounds += 1;
+      const done = new Map<string, ToolResult>();
+      if (flight) flight.results = done;
+      for (const toolCall of calls) {
+        if (rounds > MAX_TOOL_ROUNDS || this.#ports.now() - started >= settings.toolLoopMs) {
+          last = true;
+          done.set(toolCall.id, { callId: toolCall.id, output: TOOL_BOUND_RESULT, isError: true });
+          continue;
+        }
+        step("tool", tools.get(toolCall.name)?.label);
+        const result = await runToolCall(tools, toolCall, context);
+        // Settling the turn already wrote this round's results.
+        if (!this.#isRunning(turn.id)) return null;
+        done.set(toolCall.id, result);
+      }
+      this.#closeOpenCalls(turn.id, done);
+      if (flight) flight.results = undefined;
+    }
+  }
+
+  /** The agent's tools, by name. A provider that can't list its tools is left out of this turn. */
+  async #tools(agentId: string): Promise<Map<string, Tool>> {
+    const listed = await Promise.allSettled(
+      this.#ports.tools.map((provider) => provider.tools(agentId)),
+    );
+    const tools = new Map<string, Tool>();
+    for (const result of listed) {
+      if (result.status === "rejected") {
+        console.error("ConversationAgent: a tool provider failed", errorName(result.reason));
+        continue;
+      }
+      for (const tool of result.value) tools.set(tool.spec.name, tool);
+    }
+    return tools;
+  }
+
+  /**
+   * Who the turn's calls act for: its latest author, as ingress admitted them, through the agent.
+   * Only owners are admitted for now (ADR-0015); #131 brings the role onto the turn.
+   */
+  #actor(turnId: number, agentId: string): Actor {
+    const author = this.#db
+      .select({ userId: schema.history.userId })
+      .from(schema.history)
+      .where(and(eq(schema.history.turnId, turnId), eq(schema.history.role, "user")))
+      .orderBy(desc(schema.history.id))
+      .limit(1)
+      .get();
+    if (!author?.userId) throw new Error("The turn has no author");
+    return { userId: author.userId, role: "owner", via: `agent:${agentId}` };
+  }
+
+  /** How many rounds of tool calls the turn has in history. */
+  #toolRounds(turnId: number): number {
+    return (
+      this.#db
+        .select({ value: count() })
+        .from(schema.history)
+        .where(and(eq(schema.history.turnId, turnId), eq(schema.history.role, "assistant")))
+        .get()?.value ?? 0
+    );
+  }
+
+  /**
+   * Gives the turn's latest calls their results, if history has none yet: the ones in `done`, and
+   * TOOL_STOPPED_RESULT for the rest. Every call then has a result row, as providers require.
+   */
+  #closeOpenCalls(turnId: number, done: ReadonlyMap<string, ToolResult> = new Map()): void {
+    const latest = this.#db
+      .select({ message: schema.history.message })
+      .from(schema.history)
+      .where(eq(schema.history.turnId, turnId))
+      .orderBy(desc(schema.history.id))
+      .limit(1)
+      .get();
+    if (latest?.message.role !== "assistant") return;
+    const results = latest.message.parts.flatMap((part) =>
+      part.type === "tool_call"
+        ? [done.get(part.id) ?? { callId: part.id, output: TOOL_STOPPED_RESULT, isError: true }]
+        : [],
+    );
+    if (results.length === 0) return;
+    const turn = this.#turn(turnId);
+    this.#db
+      .insert(schema.history)
+      .values({
+        turnId,
+        role: "tool",
+        userId: null,
+        systemVersion: turn?.systemVersion ?? 0,
+        checkpointId: turn?.checkpointId ?? null,
+        message: { role: "tool", results },
+        createdAt: this.#ports.now(),
+      })
+      .run();
   }
 
   /**
@@ -856,15 +1042,17 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           threadId: destination.threadId,
           timeZone: this.#get<string | null>("timeZone", null),
           openKeys: this.#get<OpenKeys>("openKeys", {}),
-          lines: rows.map((row) => ({
-            role: row.role,
-            speaker: row.role === "user" ? (row.userId ?? "someone") : agentId,
-            text:
-              row.role === "user"
-                ? withoutTypedStamps(messageText(row.message))
-                : messageText(row.message),
-            at: row.createdAt,
-          })),
+          lines: rows
+            .filter((row) => seen(row.message))
+            .map((row) => ({
+              role: row.role === "user" ? ("user" as const) : ("assistant" as const),
+              speaker: row.role === "user" ? (row.userId ?? "someone") : agentId,
+              text:
+                row.role === "user"
+                  ? withoutTypedStamps(messageText(row.message))
+                  : messageText(row.message),
+              at: row.createdAt,
+            })),
         });
       } catch (error) {
         console.error("ConversationAgent: a session page couldn't be built; it is skipped", {
@@ -1060,6 +1248,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         : rows.length > 0 && sent === rows.length
           ? "delivered"
           : "interrupted";
+    // Calls still running get their results now: the ones that finished keep theirs (ADR-0025).
+    this.#closeOpenCalls(turnId, this.#inFlight.get(turnId)?.results);
+    const ranTools = this.#toolRounds(turnId) > 0;
     const now = this.#ports.now();
     this.#db.transaction((tx) => {
       tx.update(schema.outbox)
@@ -1070,8 +1261,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         .set({ status: "cancelled" })
         .where(and(eq(schema.outbox.turnId, turnId), eq(schema.outbox.status, "pending")))
         .run();
-      // A turn that kept no reply sends its memories no more: they aren't kept either.
-      if (!kept) {
+      // A turn that kept no reply sends its memories no more: they aren't kept either. Its calls in
+      // history keep them, though, since they were sent after them (#137).
+      if (!kept && !ranTools) {
         tx.update(schema.turns).set({ context: null }).where(eq(schema.turns.id, turnId)).run();
       }
       if (kept) {
@@ -1093,6 +1285,13 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         .where(eq(schema.turns.id, turnId))
         .run();
     });
+    if (status !== "delivered" && turn.settings?.conversational) {
+      // Whatever step the page shows is over.
+      const destination = this.#destination();
+      if (capabilitiesFor(destination.channel).status) {
+        this.#channel.status(this.#agentId(), destination, "idle").catch(() => undefined);
+      }
+    }
   }
 
   /** A new message arrived: every turn in flight is settled now and its work stopped. */
@@ -1312,8 +1511,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .limit(WEBCHAT_REPLAY_ROWS)
       .all()
       .reverse()
+      .filter(({ message }) => seen(message))
       .map(({ role, message, at }) => ({
-        role,
+        role: role === "user" ? ("user" as const) : ("assistant" as const),
         text: role === "user" ? withoutTypedStamps(shownText(message)) : shownText(message),
         at,
       }));
@@ -1444,6 +1644,15 @@ function messageText(message: ChatMessage): string {
   return message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n\n");
 }
 
+/**
+ * Whether the person saw the message: theirs, or a reply. A reply that called tools was never
+ * delivered, and neither were the tools' results.
+ */
+function seen(message: ChatMessage): boolean {
+  if (message.role === "user") return true;
+  return message.role === "assistant" && !message.parts.some((part) => part.type === "tool_call");
+}
+
 function textOf(message: AssistantMessage): string {
   return message.parts
     .filter((part) => part.type === "text")
@@ -1461,13 +1670,14 @@ function summaryInput(
   previous: string | null,
   rows: readonly { role: string; userId: string | null; message: ChatMessage }[],
 ): string {
-  const lines = rows.map(({ role, userId, message }) => {
-    // History holds user and assistant messages only; tool results have no text of their own.
+  const lines = rows.flatMap(({ role, userId, message }) => {
+    // Tool results, and replies that only called tools, have no text of their own.
     const text =
       message.role === "tool"
         ? ""
         : message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
-    return role === "user" ? `user ${userId ?? ""}: ${text}` : `assistant: ${text}`;
+    if (text === "") return [];
+    return [role === "user" ? `user ${userId ?? ""}: ${text}` : `assistant: ${text}`];
   });
   // The newest text matters most; past the cap, the oldest goes, so the call fits the model.
   const conversation = lines.join("\n\n").slice(-CHECKPOINT_MAX_INPUT_CHARS);

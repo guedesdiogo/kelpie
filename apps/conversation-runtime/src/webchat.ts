@@ -1,6 +1,6 @@
 import type { WebchatAdmission } from "@kelpie/conversation/contract";
 import type { ChatMessage } from "@kelpie/llm";
-import type { ConversationPorts } from "./ports.ts";
+import type { ConversationPorts, TurnStep } from "./ports.ts";
 
 // The webchat's socket protocol (issue #40). The socket lives on the conversation's object;
 // ingress verifies the owner's Cloudflare Access login and admits them before the upgrade.
@@ -30,6 +30,8 @@ export type ServerFrame =
   | { type: "history"; messages: ShownMessage[]; received: string[]; paused: boolean }
   | { type: "bubble"; text: string }
   | { type: "typing"; active: boolean }
+  /** What the turn is doing (#141); `idle` once it stopped without a reply. */
+  | { type: "status"; status: TurnStep; label?: string }
   | { type: "paused" }
   | { type: "resumed" }
   | { type: "accepted"; id: string }
@@ -90,7 +92,7 @@ export function shownText(message: ChatMessage): string {
  */
 export function webchatEgress(
   sockets: () => Iterable<{ send(data: string): void }>,
-): Pick<ConversationPorts, "send" | "typing" | "keepTyping"> {
+): Pick<ConversationPorts, "send" | "typing" | "keepTyping" | "status"> {
   const broadcast = (frame: ServerFrame) => {
     const data = JSON.stringify(frame);
     for (const socket of sockets()) {
@@ -112,6 +114,13 @@ export function webchatEgress(
     // The page's indicator lasts until the next bubble, so it needs no renewal.
     async keepTyping() {
       broadcast({ type: "typing", active: true });
+    },
+    async status(_agentId, _destination, step, label) {
+      broadcast(
+        label === undefined
+          ? { type: "status", status: step }
+          : { type: "status", status: step, label },
+      );
     },
   };
 }
