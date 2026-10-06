@@ -103,6 +103,11 @@ describe("Vault lifecycle", () => {
         "[[knowledge/cozinha/receita-de-bolo|Receita de bolo]]",
       );
       state.storage.sql.exec(
+        "INSERT INTO conflicts (agent, path, content, reason, at) VALUES ('kelpie', ?, ?, 'owner_won', 1)",
+        LIFECYCLE_REPORT_PATH,
+        "[[knowledge/cozinha/receita-de-bolo|Receita de bolo]]",
+      );
+      state.storage.sql.exec(
         "UPDATE state SET value = '9999999999999' WHERE key = 'lifecycle_after'",
       );
     });
@@ -115,7 +120,10 @@ describe("Vault lifecycle", () => {
     await runInDurableObject(stub, (_instance, state) => {
       expect(
         state.storage.sql
-          .exec("SELECT count(*) AS n FROM queue WHERE path = ?", LIFECYCLE_REPORT_PATH)
+          .exec(
+            "SELECT (SELECT count(*) FROM queue WHERE path = ?1) + (SELECT count(*) FROM conflicts WHERE path = ?1) AS n",
+            LIFECYCLE_REPORT_PATH,
+          )
           .one().n,
       ).toBe(0);
     });

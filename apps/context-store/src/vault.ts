@@ -756,9 +756,10 @@ export class Vault extends DurableObject<VaultEnv> {
           rows += this.#exec<{ n: number }>(`SELECT count(*) AS n ${where}`, named)[0]?.n ?? 0;
           this.#exec(`DELETE ${where}`, named);
         }
-        // A queued memory report may name what is being erased: it goes, and the next alarm writes
-        // the report again from what is left.
+        // A memory report waiting in the queue, or set aside, may name what is being erased: it
+        // goes, and the next alarm writes the report again from what is left.
         this.#exec("DELETE FROM queue WHERE path = ?", LIFECYCLE_REPORT_PATH);
+        this.#exec("DELETE FROM conflicts WHERE path = ?", LIFECYCLE_REPORT_PATH);
         this.#set("lifecycle_after", "0");
         return rows;
       });

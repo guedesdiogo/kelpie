@@ -324,7 +324,10 @@ Once a day, the Context Store's alarm looks at the index, after GitHub's work an
 How the page behaves:
 - **Report only.** In v1 it is the lifecycle's only write: nothing listed is changed, merged or removed. The retention score never reaches retrieval.
 - **The same findings write the same page,** sorted and without a time stamp, so a day without news makes no commit. The page is removed when every list is empty.
-- **Titles, paths and entities can't break out of their links:** controls, invisible and bidirectional characters, and brackets, pipes, angle brackets, exclamation marks and backticks are dropped. Titles are cut to 120 characters, paths to 200, and a line lists 10 notes, then how many more.
+- **Notes can't write Markdown into the page:**
+  - Titles and paths can't break out of their links. Controls, invisible and bidirectional characters are dropped, and so are brackets, pipes, angle brackets, exclamation marks, backticks, backslashes and percent signs. A path keeps its `!`.
+  - An entity, outside any link, goes in a code span.
+  - Titles are cut to 120 characters, paths to 200, and a line lists 10 notes, then how many more.
 - **Never memory.** `placeOf` leaves `memory/_…/` out of the index, so recall, the jobs and link previews never read it.
 - **A failed run** waits for the next day.
 

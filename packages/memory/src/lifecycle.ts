@@ -218,16 +218,16 @@ function cosine(a: Float32Array, b: Float32Array): number {
 }
 
 /**
- * Text from a note, safe inside a link or a line: no controls, no invisible or bidirectional
- * characters, nothing Markdown or HTML reads as syntax, cut to `max` characters.
+ * What a title or an entity may not hold: controls, invisible and bidirectional characters, and
+ * what Markdown, Obsidian or HTML read as syntax there (links, embeds, code, escapes, comments).
  */
-function plain(text: string, max: number): string {
-  return Array.from(
-    text
-      .replace(/[\p{Cc}\p{Cf}[\]|<>!`]/gu, " ")
-      .replace(/\s+/g, " ")
-      .trim(),
-  )
+const UNSAFE_TEXT = /[\p{Cc}\p{Cf}[\]|<>!`\\%]/gu;
+/** In a link's path, `!` is no embed, and some file names have one; `#` and `^` would aim lower. */
+const UNSAFE_PATH = /[\p{Cc}\p{Cf}[\]|<>`\\%#^]/gu;
+
+/** Text from a note, safe inside a link or a code span, cut to `max` characters. */
+function plain(text: string, max: number, unsafe: RegExp = UNSAFE_TEXT): string {
+  return Array.from(text.replace(unsafe, " ").replace(/\s+/g, " ").trim())
     .slice(0, max)
     .join("")
     .trim();
@@ -235,7 +235,7 @@ function plain(text: string, max: number): string {
 
 /** A wikilink to a note, from the vault's root, that a title or a path can't break out of. */
 function link(note: NoteRef): string {
-  const path = plain(note.path.replace(/\.md$/, "").replace(/[#^]/g, " "), PATH_CHARS);
+  const path = plain(note.path.replace(/\.md$/, ""), PATH_CHARS, UNSAFE_PATH);
   return `[[${path}|${plain(note.title, TITLE_CHARS) || path}]]`;
 }
 
@@ -299,7 +299,7 @@ export function lifecycleReport(findings: LifecycleFindings): string | null {
         ...capped(
           findings.contradictions.map(
             (pair) =>
-              `- ${link(pair.notes[0])} and ${link(pair.notes[1])}, both about ${plain(pair.entity, TITLE_CHARS)}`,
+              `- ${link(pair.notes[0])} and ${link(pair.notes[1])}, both about \`${plain(pair.entity, TITLE_CHARS) || "?"}\``,
           ),
         ),
       ].join("\n"),
