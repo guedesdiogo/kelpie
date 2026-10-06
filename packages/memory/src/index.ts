@@ -49,7 +49,16 @@ export {
   type VaultChange,
   type VaultCommit,
 } from "./memory-index.ts";
-export { isMemoryId, LEVELS, type Level, type Note, readNote } from "./note.ts";
+export { isMemoryId, LEVELS, type Level, MAX_SOURCES, type Note, readNote } from "./note.ts";
+export {
+  type HitView,
+  type Page,
+  type PageLink,
+  READ_PAGE_CHARS,
+  type ReadPageOptions,
+  readPage,
+  renderHits,
+} from "./page.ts";
 export {
   type Judge,
   type NoulQualifier,
@@ -59,6 +68,7 @@ export {
 } from "./rerank.ts";
 export {
   asksAboutThePast,
+  bodyWithoutHeading,
   isSessionRecall,
   needsMemory,
   type Packed,
@@ -72,6 +82,7 @@ export {
 } from "./retrieve.ts";
 export { type Sanitized, sanitizeSecrets } from "./sanitize.ts";
 export {
+  conversationSource,
   type OpenKeys,
   type SessionInput,
   type SessionLine,

@@ -26,7 +26,7 @@ import type {
   ToolResult,
   Usage,
 } from "@kelpie/llm";
-import { needsMemory, type OpenKeys, sessionPage } from "@kelpie/memory";
+import { conversationSource, needsMemory, type OpenKeys, sessionPage } from "@kelpie/memory";
 import {
   Agent,
   type Connection,
@@ -874,6 +874,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           // Ingress admits only direct chats, and `Directory.admit` only the owner (ADR-0015), who
           // may see every scope; #131 brings the turn's role and chat type.
           scopes: "all",
+          qualifier: settings.qualifier,
+          turn: String(turn.id),
+          source: this.#source(),
           signal: controller.signal,
         };
         step("tool", tools.get(toolCall.name)?.label);
@@ -1018,6 +1021,27 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         createdAt: this.#ports.now(),
       })
       .run();
+  }
+
+  /** The conversation as its session pages name it (#109), and today in its time zone. */
+  #source(): string {
+    const destination = this.#destination();
+    const conversation = conversationSource(destination.channel, destination.threadId, 280);
+    const timeZone = this.#get<string | null>("timeZone", null) ?? "UTC";
+    const day = (zone: string) =>
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: zone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date(this.#ports.now()));
+    let today: string;
+    try {
+      today = day(timeZone);
+    } catch {
+      today = day("UTC");
+    }
+    return `${conversation}, ${today}`;
   }
 
   /**

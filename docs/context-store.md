@@ -73,7 +73,23 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - `scopes` is required, at most 64 of them: `"all"` for a private chat with the owner, or the scopes a turn may see.
     - It never waits behind a commit to GitHub, only behind the first sync of a vault never synced.
     - Its only write is the access count.
+    - It returns each note's provenance beside its path (#126). A note is Kelpie's while the vault holds a version Kelpie's own commit wrote, including its lines merged into an owner's edit. An edit made elsewhere, or a conflict the model resolved from the file's own lines, makes it the owner's.
+      - The record is a table of the blobs Kelpie committed (`authored`), outside memory's index, so a rebuild keeps it.
     - With the vault off, or on any failure, it answers an empty block, and the turn goes on without memory.
+  - **`search(agent, query, {scopes, k?, asOf?, validAt?, qualifier?})`,** for the agent's `memory_search` (#126).
+    - It is recall's retrieval and rerank, answered as hits instead of a packed block, in #110's fence: 3 by default, 10 at most.
+    - It returns each hit's scope, validity and provenance too, and counts no access.
+    - It answers `vault_off` or `unavailable` instead of an empty list, so the model doesn't take a failing memory for an empty one.
+  - **`readNote(agent, path, {scopes, offset?})`,** for the agent's `memory_read` (#126).
+    - **What opens:** only a current note of memory's index within the scopes. Anything else is "not found", the same answer whether the file exists or not.
+    - **A page:** under 9,500 characters, fence included, with `nextOffset`.
+    - **The first page** lists the links the scopes allow, and counts as one access.
+  - **`writeNote(agent, input, {scopes, sources})`,** the single writer behind the agent's `memory_write` (#126).
+    - **Checks first:** it runs `writeMemory`'s checks, removes secrets, refuses session pages and conflict markers, and keeps a found note's kind and scope.
+    - **A found note** keeps what the model left out ([memory-format.md](memory-format.md#retrieval)).
+    - **Writes:** it queues the note like any write, under a headline that doesn't name it, and answers `written` or `unchanged`, with the path. The path is chosen and the write queued in one stretch, without a pause.
+    - **Provenance:** a commit whose answer was lost still counts as Kelpie's. A file the owner removes, or a force-push takes away, leaves no record.
+    - **Refusals:** `invalid` comes with the problems found, for the model to fix. A path the turn can't see is `not_found`, the same as a missing note. A scope the turn can't write to is `scope_not_allowed`.
   - **Access counts:** each recall counts the notes it packed, in one write, in a table outside the index. A rebuild keeps them, and they never reach git.
   - **The memory report** (#111): once a day, after the embeddings and the held files, the alarm writes what memory's index finds (cold notes, duplicates, possible contradictions) to `memory/_lint/report.md`, or removes the page when memory is clean ([memory-format.md](memory-format.md#the-daily-report)).
     - The page is queued only when it changed, so a quiet day makes no commit.
@@ -173,7 +189,7 @@ Git keeps every version, so erasing content means rewriting the vault's history.
    - **What it does:**
      - it syncs to the rewritten head;
      - it rebuilds memory's index from the vault as it is now, which drops every old version, of every file, with the vectors of content no version holds anymore;
-     - it deletes the rows that name the paths in `queue`, `conflicts`, `held`, `proposals` and `recall_counts`;
+     - it deletes the rows that name the paths in `queue`, `conflicts`, `held`, `proposals`, `recall_counts` and `authored`;
      - it drops a memory report still waiting in the queue or set aside in `conflicts`, and the next alarm writes the report again from what is left. That is within 15 minutes while GitHub answers.
 
      It never touches git.

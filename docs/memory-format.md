@@ -298,9 +298,38 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - **Waiting:** the person waits for it while "typing" shows. Embedding the question takes up to 2 s, and the rerank 1.4 s at p50 and up to 2.5 s at p95 ([spike](spikes/memory-eval.md#with-models)), with its own 3.5 s cap.
   - **Failure:** a Context Store that fails, or doesn't answer in 6 s, leaves the turn without memory. A message that arrives meanwhile interrupts the turn before its model call, and the next turn asks again.
   - It logs the time, the number of notes and their tokens, never text.
+- **The agent's tools** (#126): beyond the turn's block, the agent can search memory and read a note, inside the turn's tool loop (#141).
+  - **`memory_search(query, k)`:** the same retrieval as a turn's, with the vector and the agent's qualifier's rerank.
+    - It lists the hits in #110's fence: title and path, then kind, scope, validity and whether Kelpie wrote the note, then its abstract or its body's first 240 characters. "Not written by Kelpie" isn't "written by the owner": Kelpie records its own commits only from #126 on, and other clients write to the vault too.
+    - It returns 3 hits by default and 10 at most, best first, with no score, within 9,500 characters; hits that don't fit are counted.
+    - Memory that is off or failing says so, rather than finding nothing.
+  - **`memory_read(path, offset)`:** a note of memory's index, a page at a time, each page under 9,500 characters, fence included.
+    - A page is never cut inside an emoji, and says where the next one starts.
+    - The first page also lists the note's links that the scopes allow, up to 50 within 2,000 characters, and counts as one access.
+  - **Scopes and the qualifier** come from the turn, never from the model. A note outside the scopes, or outside memory's index (persona, rules, skills, root files), gets the same "not found" as a missing one.
+  - **`memory_write(title, body, kind, level, …)`:** saves one memory through the Context Store's single writer.
+    - **A new memory** goes where its title puts it, an event under its `validFrom` date, which it needs. The path gets a number when another note holds it.
+    - **A found note's `path`** makes the memory that note's new version, of the same kind, unless it is another agent's or removed. It keeps what the model left out, as far as Kelpie can write it back:
+      - the note's id and the owner's keys;
+      - its tier, confidence, entities, validity and abstract;
+      - its `contradicts` links, by note name (a heading or alias in the link is dropped);
+      - its pin and evergreen flag.
+
+      The turn's source joins the note's sources, 20 at most. A carried value the writer can't take, such as a source with a tab, is dropped rather than refusing the update. A carried `invalid_at` can't be cleared, only replaced.
+    - **Where it can write:** any note the turn sees, for a new version. A new memory goes to the owner's global memory by default, or to the agent's own scope, when the turn sees every scope. When the turn lists its scopes, a new memory goes only to those (#131 will revisit this).
+    - **No news changes nothing,** so a retried call is safe:
+      - a new version that differs only in its `updated` stamp;
+      - a new memory whose title, body and validity a note at its path, or a numbered one, already holds, queued or committed;
+      - an exact twin elsewhere in the index.
+
+      The path is chosen and the write queued without a pause, so concurrent writes can't share a path.
+    - **What it carries:** secrets are removed from the title, body, abstract and entities. `sources` is the conversation, named as its session pages name it, and the day in its time zone, from the turn.
+    - **What it refuses:** `session`, since conversation pages are written for it, and bodies with merge conflict markers. The commit's headline never names the memory, since a headline outlives a `forget` in git.
+    - **Bounds:** a turn, across its rounds, saves 5 memories at most and stops after 3 failures. A store that fails or times out counts as a failure. The counts live in the Worker's isolate, so a turn resumed elsewhere after an eviction starts them again.
+    - **Fields sent as null** count as left out.
+  - **A note written in this turn** shows up only after the vault's next commit.
 - **Not yet:**
-  - the always-loaded core;
-  - the agent's memory tools (#126).
+  - the always-loaded core.
 
 ## Lifecycle
 
@@ -334,7 +363,7 @@ How the page behaves:
 
 ### The write decision
 
-Before a new memory is written, `decideWrite` says whether it is news (#111). The memory tools (#126) call it; nothing else does yet.
+Before a new memory is written, `decideWrite` says whether it is news (#111). `memory_write` (#126) calls it without the qualifier for now: ADR-0009 wants the qualifier's answers measured on a labeled set before they act, a question open on #111. So only the rules decide: an exact twin is a `NOOP`, and anything else is an `ADD`.
 - **The outcome:**
   - `ADD`: a new note, at `memoryPath`; the writer resolves a collision with an existing file;
   - `UPDATE`: the note at `path` stays true and the memory adds detail, so its new version holds both;
