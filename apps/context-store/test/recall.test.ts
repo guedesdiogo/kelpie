@@ -1,9 +1,15 @@
-import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import {
+  createExecutionContext,
+  evictDurableObject,
+  runDurableObjectAlarm,
+  runInDurableObject,
+} from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { type MemoryInput, memoryPath, writeMemory } from "@kelpie/memory";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  GitHubWebhooks,
   type MemoryGateway,
   replaceBackendForTesting,
   replaceGatewayForTesting,
@@ -129,6 +135,38 @@ describe("recall", () => {
       tokens: 0,
       paths: [],
     });
+  });
+
+  it("finds an edit made in Obsidian at the next recall, through the signed push webhook", async () => {
+    const backend = await vaultOf([person("Ana Souza", "Irmã do Rafael. Mora em Lisboa.")]);
+    fakeGateway();
+    const stub = vault("recall-obsidian");
+    const path = memoryPath("global", "person", "Ana Souza");
+    expect((await stub.recall("kelpie", "Onde a Ana Souza mora?", ALL)).text).toContain("Lisboa");
+
+    // obsidian-git commits the owner's edit and pushes it; GitHub calls the webhook.
+    const edited = (backend.files()[path] ?? "").replace("Mora em Lisboa.", "Mudou para o Porto.");
+    const after = backend.push({ [path]: edited });
+    const body = JSON.stringify({ ref: "refs/heads/main", after, commits: [] });
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode("webhook-secret-for-tests"),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const mac = new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body)),
+    );
+    const signature = `sha256=${Array.from(mac, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+    const hooks = new GitHubWebhooks(createExecutionContext(), env);
+    expect(await hooks.receive({ event: "push", signature, body })).toEqual({ status: 202 });
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+
+    const next = await stub.recall("kelpie", "Onde a Ana Souza mora?", ALL);
+    expect(next.paths).toEqual([path]);
+    expect(next.text).toContain("Mudou para o Porto.");
+    expect(next.text).not.toContain("Lisboa");
   });
 
   it("finds synced notes and Kelpie's own writes, and forgets removed ones", async () => {
