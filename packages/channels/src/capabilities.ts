@@ -7,6 +7,11 @@ export interface ChannelCapabilities {
   maxMessageLength: number;
   /** Whether the bot can show "typing", and how long one indicator lasts (null: until cleared). */
   typing: { supported: boolean; ttlMs: number | null };
+  /**
+   * Whether the channel can show what a turn is doing (reading memory, thinking, using a tool), not
+   * only "typing" (#141).
+   */
+  status: boolean;
   /** The minimum gap between two messages to the same conversation. */
   minGapMs: number;
   /** A stricter gap for group conversations, when the channel limits groups separately. */
@@ -21,6 +26,7 @@ export const CAPABILITIES = {
   webchat: {
     maxMessageLength: 16_000,
     typing: { supported: true, ttlMs: null },
+    status: true,
     minGapMs: 0,
     maxBubblesPerReply: 6,
     formatting: "markdown",
@@ -28,6 +34,8 @@ export const CAPABILITIES = {
   telegram: {
     maxMessageLength: 4_096,
     typing: { supported: true, ttlMs: 5_000 },
+    // Telegram's chat actions have no "thinking".
+    status: false,
     minGapMs: 1_000,
     // About 20 messages per minute in a group.
     groupMinGapMs: 3_000,

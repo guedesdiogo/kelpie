@@ -16,6 +16,11 @@ describe("channel capabilities", () => {
     expect(CAPABILITIES.webchat.typing).toEqual({ supported: true, ttlMs: null });
   });
 
+  it("shows what a turn is doing only in the webchat; Telegram has no such chat action", () => {
+    expect(CAPABILITIES.webchat.status).toBe(true);
+    expect(CAPABILITIES.telegram.status).toBe(false);
+  });
+
   it("renews typing before the channel's indicator expires", () => {
     expect(typingRenewIntervalMs(CAPABILITIES.telegram)).toBe(4_000);
   });
