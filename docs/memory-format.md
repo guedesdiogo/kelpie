@@ -163,9 +163,9 @@ How Kelpie writes a new version:
 
 Every conversation's history becomes session pages (#109), with no model call:
 - **When:** a session ends when the conversation stays quiet for 30 minutes, or when a summary checkpoint is written ([ADR-0017](adr/0017-history-compaction.md)). The next message starts a new session.
-  - While a turn runs or a message waits for one, the session goes on, and its close is tried again 10 minutes later.
-  - When the Context Store can't be reached, or doesn't answer within 30 seconds, the close is tried again 10 minutes later, with the messages that came since.
-  - A page that can't be built, or that the vault refuses, is skipped with a warning, so the sessions after it still get written. Its messages stay in the conversation's history.
+  - While a turn runs or a message waits for one, the session goes on, and its close is tried again 10 minutes later. A checkpoint written during a turn therefore leaves the session to the quiet timer.
+  - When the Context Store can't be reached, or doesn't answer within 10 seconds, the close is tried again 10 minutes later, with the messages that came since.
+  - A page that can't be built, or that the vault refuses, is skipped with an error logged, so the sessions after it still get written. Its messages stay in the conversation's history.
 - **Where:** `conversations/<channel>-<chat>/sessions/<year>/<date>-<time>-<first words>-<id>.md`, where `<id>` is the number of the session's first message in the conversation's history, so two sessions never share a file. A group's chat id, which starts with `-`, becomes `g`.
 - **What:**
   - a title, from the time and the first message from a person;
@@ -173,10 +173,22 @@ Every conversation's history becomes session pages (#109), with no model call:
   - each message as one line, with its time and speaker;
   - a session of more than 60 messages keeps the first 30 and the last 30.
 - **Time zone:** the latest one a person in the conversation gave, or UTC.
-- **Secrets:** only the first 8,192 characters of each message are read, and their secrets are replaced with `[REDACTED:<kind>]` before anything is cut. Then each message is cut to 280 characters, and `[[` is broken so a message adds no links to the vault. Nothing else is filtered: other people's data stays (ADR-0020 §4).
-  - Covered: API keys and tokens with a known prefix (OpenAI, Anthropic, xAI, Groq, Stripe, GitHub, GitLab, AWS, Google, Meta, npm, Hugging Face, SendGrid, Slack, Cloudflare, GoHighLevel, webhook secrets), Telegram bot tokens, JWTs, private keys (also one pasted across several messages by the same person), credentials in URLs and curl commands, cookies, auth headers, secret environment assignments, passwords and tokens in fields and in prose (English, Portuguese, Spanish), and 40-character keys in a message that names AWS or Cloudflare.
-  - Removed first: terminal escapes, control characters, bidirectional overrides and zero-width characters, so none can split or hide a secret.
-  - Not covered: a secret with no known shape and no name next to it, look-alike characters, and secrets wrapped in base64 or hex.
+- **Inert in Obsidian:** a message can't act when the owner opens the page. HTML, embedded images, inline code (which plugins such as Dataview run) and `%%` comments (which hide text from the owner but not from the agent) are escaped, and `[[` is broken, so a message adds no links to the vault.
+- **Secrets:** each message is normalized to NFC and stripped of invisible characters: terminal escapes, controls, Unicode's default-ignorable characters (zero-width spaces and joiners, bidirectional controls, variation selectors, tag characters) and the Braille blank. Emoji joined by a zero-width joiner come apart. Only the first 8,192 characters are read, cut back to a space. Secrets are replaced with `[REDACTED:<kind>]` before each message is cut to 280 characters. Nothing else is filtered: other people's data stays (ADR-0020 §4).
+  - **Covered:**
+    - API keys and tokens with a known prefix: OpenAI, Anthropic, xAI, Groq, Stripe, GitHub, GitLab, AWS, Google, Meta, npm, Hugging Face, SendGrid, Slack, Cloudflare, DigitalOcean, Shopify, PyPI, Supabase, Linear, Notion, Postman, Twilio, GoHighLevel, and webhook secrets;
+    - Telegram bot tokens, JWTs, and Slack and Discord webhook URLs;
+    - private keys, with or without their header. A key one person pastes across several messages stays out until it ends, for up to 10 minutes after their last message that held it, also across sessions;
+    - credentials in URLs, curl commands and long command-line flags, signed URLs' signatures, cookies, auth headers and secret environment assignments;
+    - passwords named in a field (`senha: x`, `"password": "x"`, `senha do wifi: x`), with a quoted value taken whole;
+    - passwords named in prose, in English, Portuguese and Spanish (`a senha nova é x`, `my password is: x`), when the value holds a digit or a symbol;
+    - tokens, secrets and keys named in a field or in prose, when the value holds a digit or a symbol (in prose, eight or more characters with a digit);
+    - 40-character keys in a message that names AWS or Cloudflare, and Cloudflare's 37-character global key.
+  - **Not covered:**
+    - a secret with no known shape and no name next to it;
+    - a password made only of letters, given in prose;
+    - a short flag such as `mysql -pX`, since `-p` is also a port;
+    - look-alike characters, and secrets wrapped in base64 or hex.
 - **Trust:** `level: explicit`, since it is what was said, and `confidence: 0.9` for a private chat, `0.6` when more than one person spoke.
 - **History:** stays in the conversation's Durable Object; nothing is deleted once it is in a page. Whether to prune it, and when, is an open decision.
 

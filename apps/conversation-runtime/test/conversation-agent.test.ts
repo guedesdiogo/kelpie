@@ -960,6 +960,14 @@ describe("ConversationAgent sessions", () => {
   // A bot token, assembled at run time so no key-shaped literal sits in the repository.
   const botToken = ["123456789", ":", "AA", "x".repeat(33)].join("");
 
+  /** When the session's close is armed, in minutes after the fake clock. */
+  async function closesIn(stub: ReturnType<typeof agent>, world: FakeWorld) {
+    const schedules = await runInDurableObject(stub, (instance) => instance.listSchedules());
+    return schedules
+      .filter((schedule) => schedule.callback === "closeSession")
+      .map((schedule) => Math.round((schedule.time * 1_000 - world.clock) / 60_000));
+  }
+
   async function deliveredTurn(stub: ReturnType<typeof agent>, world: FakeWorld, text: string) {
     await stub.ingest(message("m1", text));
     await stub.flush();
@@ -1004,6 +1012,7 @@ describe("ConversationAgent sessions", () => {
     world.failRemember = true;
     await stub.closeSession();
     expect(world.remembered).toEqual([]);
+    expect(await closesIn(stub, world)).toEqual([10]);
     world.failRemember = false;
     await stub.closeSession();
     expect(world.remembered).toHaveLength(1);
@@ -1017,6 +1026,7 @@ describe("ConversationAgent sessions", () => {
     await stub.ingest(message("m2", "segunda mensagem"));
     await stub.closeSession();
     expect(world.remembered).toEqual([]);
+    expect(await closesIn(stub, world)).toEqual([10]);
 
     world.modelHeld = true;
     await stub.flush();
@@ -1060,6 +1070,23 @@ describe("ConversationAgent sessions", () => {
     const content = world.remembered[0]?.changes[0]?.content ?? "";
     expect(content).toContain("segunda conversa");
     expect(content).not.toContain("primeira conversa");
+  });
+
+  it("keeps a private key pasted across two sessions out", async () => {
+    const world = use(fakeWorld([reply("Ok."), reply("Certo.")]));
+    const stub = agent("session-key");
+    const body = "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB".repeat(2);
+    await deliveredTurn(stub, world, ["a chave: -----BEGIN ", "PRIVATE KEY-----"].join(""));
+    await stub.closeSession();
+    await stub.ingest(message("m2", body));
+    await stub.flush();
+    await vi.waitFor(async () =>
+      expect((await stub.turns()).map((turn) => turn.status)).toEqual(["delivered", "delivered"]),
+    );
+    await stub.closeSession();
+    expect(world.remembered).toHaveLength(2);
+    expect(world.remembered[1]?.changes[0]?.content).toContain("[REDACTED:private_key]");
+    expect(world.remembered[1]?.changes[0]?.content).not.toContain(body);
   });
 
   it("keeps the time zone of the latest message, not of a retried one", async () => {

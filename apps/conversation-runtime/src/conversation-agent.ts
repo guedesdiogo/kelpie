@@ -16,7 +16,7 @@ import type {
   IngestResult,
 } from "@kelpie/conversation/contract";
 import type { AssistantMessage, ChatMessage, LlmEvent, Usage } from "@kelpie/llm";
-import { sessionPage } from "@kelpie/memory";
+import { type OpenKeys, sessionPage } from "@kelpie/memory";
 import { QualifierUnavailable } from "@kelpie/qualifier";
 import { Agent, type FiberRecoveryContext } from "agents";
 import { and, asc, count, desc, eq, gt, gte, inArray, isNull, lt, max } from "drizzle-orm";
@@ -318,12 +318,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .run();
     this.#set("checkpointFailedAt", null);
     console.log("conversation: checkpoint written", { summarizedRows: rows.length });
-    // A checkpoint is also where a session ends (#109); a failure there isn't the checkpoint's.
-    try {
-      await this.closeSession();
-    } catch (error) {
-      console.error("ConversationAgent: closing the session failed", errorName(error));
-    }
+    // A checkpoint is also where a session ends (#109).
+    await this.closeSession();
   }
 
   /** The bubbles of every turn, for inspection. */
@@ -578,8 +574,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    * secrets replaced, through the Context Store. The idle schedule and checkpoints call it.
    * - While a turn runs or messages wait for one, the session is still going: it closes later.
    * - A store that can't be reached is tried again later.
-   * - A page that can't be built, or that the vault refuses (it is off), is skipped with a warning,
-   *   so one bad session can't hold back the ones after it.
+   * - A page that can't be built, or that the vault refuses, is skipped with an error logged, so
+   *   one bad session can't hold back the ones after it. Its messages stay in the history.
    */
   async closeSession(): Promise<void> {
     if (this.#closingSession) return;
@@ -614,6 +610,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           channel: destination.channel,
           threadId: destination.threadId,
           timeZone: this.#get<string | null>("timeZone", null),
+          openKeys: this.#get<OpenKeys>("openKeys", {}),
           lines: rows.map((row) => ({
             role: row.role,
             speaker: row.role === "user" ? (row.userId ?? "someone") : agentId,
@@ -625,7 +622,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           })),
         });
       } catch (error) {
-        console.warn("ConversationAgent: a session page couldn't be built; it is skipped", {
+        console.error("ConversationAgent: a session page couldn't be built; it is skipped", {
           from: first.id,
           through: last.id,
           error: errorName(error),
@@ -645,10 +642,11 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           return;
         }
         if (!result.ok && result.reason !== "vault_off") {
-          console.warn("ConversationAgent: the vault refused a session page", {
+          console.error("ConversationAgent: the vault refused a session page", {
             reason: result.reason,
           });
         }
+        this.#set("openKeys", page.openKeys);
       }
       this.#set("capturedThrough", last.id);
     } finally {

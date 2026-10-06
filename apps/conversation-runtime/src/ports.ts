@@ -167,9 +167,10 @@ async function bounded<T>(call: Promise<T>): Promise<T | undefined> {
 
 /**
  * A memory write the Context Store hasn't answered after this long counts as failed, to be tried
- * again; it only queues the files, so it answers well within this.
+ * again; it only queues the files, so it answers well within this. A schedule runs it, and the
+ * object's schedules run one at a time, so it must not hold up a reply's.
  */
-const REMEMBER_TIMEOUT_MS = 30_000;
+const REMEMBER_TIMEOUT_MS = 10_000;
 
 async function withTimeout<T>(call: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;

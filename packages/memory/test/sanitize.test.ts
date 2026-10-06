@@ -44,9 +44,18 @@ describe("sanitizeSecrets", () => {
     expect(sanitizeSecrets(`a ${cut}`).text).toBe("a [REDACTED:private_key]");
   });
 
-  it("leaves ordinary Portuguese, numbers and times alone", () => {
-    const ordinary =
-      "Reunião às 14:30, sala 12:00-13:00, ASIAPACIFICREGION, pit-stop-strategy, R$ 1.200,50, chave da casa com a Lúcia.";
+  it.each([
+    "Reunião às 14:30, sala 12:00-13:00, ASIAPACIFICREGION, pit-stop-strategy, R$ 1.200,50, chave da casa com a Lúcia.",
+    "O segredo do bolo é a manteiga.",
+    "A chave do carro está na mesa.",
+    "O token é válido até amanhã, e o código é 123456.",
+    "Rode mkdir -p fotos e depois ssh -p 22 servidor.",
+    "Vou passar na padaria às 8h.",
+    "Esqueci minha senha e preciso recuperar.",
+    "A senha é muito importante.",
+    "Compass: norte. Token: expirado. O segredo: saber esperar. Pass: 3 x 2.",
+    "Eu comi um cookie: delicioso.",
+  ])("leaves ordinary text alone: %s", (ordinary) => {
     expect(sanitizeSecrets(ordinary)).toEqual({ text: ordinary, redactions: 0 });
   });
 
@@ -61,11 +70,20 @@ describe("sanitizeSecrets", () => {
       join("OPENAI", "_API_KEY=", tail(20), " e ", "Bearer ", tail(24)),
     ).text;
     expect(sanitizeSecrets(once)).toEqual({ text: once, redactions: 0 });
+    for (const redacted of [
+      "o token do bot: [REDACTED:telegram_token]",
+      "senha: [REDACTED:password]",
+      "secret is [REDACTED:api_key]",
+    ]) {
+      expect(sanitizeSecrets(redacted)).toEqual({ text: redacted, redactions: 0 });
+    }
   });
 
   it("stays fast on long text", () => {
     const started = Date.now();
     sanitizeSecrets(`${"password-token-key=".repeat(5_000)} ${"a".repeat(100_000)}`);
+    sanitizeSecrets("eyJ".repeat(20_000));
+    sanitizeSecrets(`senha ${"palavra ".repeat(10_000)}`);
     expect(Date.now() - started).toBeLessThan(1_000);
   });
 
@@ -126,10 +144,102 @@ describe("sanitizeSecrets", () => {
     expect(text).not.toMatch(/&3|!2024/);
   });
 
-  it("finds a secret hidden by zero-width characters, and keeps emoji joiners", () => {
+  it.each([
+    ["a colon after the verb", "the password is: Abc12345"],
+    ["a colon after é", "senha é: Abc12345"],
+    ["what the password is for", "a senha do gmail é Abc12345"],
+    ["a field with what it is for", "senha do wifi: Abc12345"],
+    ["a field with what it is for, in English", "password for gmail: Abc12345"],
+    ["está", "a senha está Abc12345"],
+    ["a bracketed value", "password: [Abc12345]"],
+    ["a list of passwords", '"passwords": ["Abc12345"]'],
+    ["a bold field name", "**password**: Abc12345"],
+    ["a code field name", "`password`: Abc12345"],
+    ["a token in prose", "my token is abcd1234efgh5678"],
+    ["an API key in prose", "my api key is Qz8vLm2pXw9rTt4y"],
+    ["a secret in prose", "o segredo é Abc12345xyz"],
+    ["a private key in hex", join("private key: 0x", tail(64, "0123456789abcdef"))],
+    ["a quoted passphrase", 'password = "correct horse battery staple"'],
+    ["a CLI flag", "login --password Abc12345 --user me"],
+    ["a token flag", "deploy --token Abc12345xyz"],
+    ["sshpass", "sshpass -p Abc12345 ssh me@host"],
+    ["a capitalized colon", "A senha é: Abc12345"],
+    ["whose password it is", "senha dela é: Abc12345"],
+    ["an adjective", "minha senha nova é Abc12345"],
+    ["eh", "senha eh Abc12345"],
+    ["Spanish", "mi clave es Abc12345"],
+    ["a token in Portuguese prose", "o token é Abc12345xyz"],
+    ["a bare secret in prose", "secret is Abc12345xyz"],
+    ["curl with no space", "curl -uadmin:Abc12345 https://x.example"],
+    ["curl with an equals sign", "curl --user=admin:Abc12345 https://x.example"],
+    ["a semicolon in the value", "senha: Abc;Abc12345"],
+  ])("redacts a password named with %s", (_label, phrase) => {
+    const { text } = sanitizeSecrets(`antes ${phrase} depois`);
+    expect(text).toContain("[REDACTED:");
+    expect(text).not.toMatch(/Abc12345|abcd1234|Qz8vLm2p|horse battery|0123456789abcdef/);
+  });
+
+  it.each([
+    ["a password-only URL", join("redis://:", tail(16), "@cache.example.com:6379")],
+    [
+      "a signed URL",
+      join("https://b.example.com/f?X-Amz-Signature=", tail(40, "0123456789abcdef")),
+    ],
+    ["an Azure SAS", join("https://a.blob.example.net/c?sv=2024&sig=", tail(40), "&se=1")],
+    ["a DigitalOcean token", join("do", "p_v1_", tail(64, "0123456789abcdef"))],
+    ["a Shopify token", join("shp", "at_", tail(32, "0123456789abcdef"))],
+    ["a PyPI token", join("py", "pi-AgEIcHlwaS5vcmc", tail(60))],
+    ["a Supabase key", join("sb_", "secret_", tail(32))],
+    ["a Linear key", join("lin", "_api_", tail(40))],
+    ["a Notion token", join("nt", "n_", tail(46))],
+    [
+      "a Postman key",
+      join("PM", "AK-", tail(24, "0123456789abcdef"), "-", tail(34, "0123456789abcdef")),
+    ],
+    ["a Google client secret", join("GOC", "SPX-", tail(28))],
+    ["a Twilio key", join("S", "K", tail(32, "0123456789abcdef"))],
+    [
+      "a Slack webhook",
+      join("https://hooks.", "slack.com/services/", tail(9), "/", tail(11), "/", tail(24)),
+    ],
+    [
+      "a Discord webhook",
+      join("https://discord.com/api/", "webhooks/", "123456789012345678/", tail(68)),
+    ],
+    ["a Cloudflare global key", join("Cloudflare global key ", tail(37, "0123456789abcdef"))],
+    ["a key body with no header", join("MII", "EvQIBADANBgkqhkiG9w0BAQEFAASC", tail(64))],
+    ["an OpenSSH key body with no header", join("b3BlbnNzaC1", "rZXktdjE", tail(64))],
+  ])("redacts %s", (_label, secret) => {
+    const { text } = sanitizeSecrets(`antes ${secret} depois`);
+    expect(text).toContain("[REDACTED:");
+    expect(text).not.toContain(secret.slice(-10));
+  });
+
+  it.each([
+    ["a zero-width joiner", "\u200d"],
+    ["a combining grapheme joiner", "\u034f"],
+    ["a variation selector", "\ufe0f"],
+    ["an Arabic letter mark", "\u061c"],
+    ["a Mongolian vowel separator", "\u180e"],
+    ["a Hangul filler", "\u3164"],
+    ["a Braille blank", "\u2800"],
+    ["a tag character", "\u{e0041}"],
+  ])("finds a secret split by %s", (_label, invisible) => {
+    const hidden = join("sk", "-", tail(10), invisible, tail(20));
+    expect(sanitizeSecrets(`x ${hidden}`).text).toBe("x [REDACTED:api_key]");
+  });
+
+  it("drops tag characters, and reads decomposed accents", () => {
+    expect(sanitizeSecrets("oi\u{e0049}\u{e0067}\u{e006e}").text).toBe("oi");
+    const { text } = sanitizeSecrets("contrase\u006e\u0303a: hunter2hunter2");
+    expect(text).not.toContain("hunter2");
+  });
+
+  it("finds a secret hidden by a zero-width space, and keeps emoji, apart", () => {
     const hidden = join("sk", "-", tail(10), "\u200b", tail(20));
     expect(sanitizeSecrets(`x ${hidden}`).text).toBe("x [REDACTED:api_key]");
-    const emoji = "dev \u{1F469}\u200d\u{1F4BB}";
-    expect(sanitizeSecrets(emoji).text).toBe(emoji);
+    expect(sanitizeSecrets("dev \u{1F469}\u{1F3FD}\u200d\u{1F4BB}").text).toBe(
+      "dev \u{1F469}\u{1F3FD}\u{1F4BB}",
+    );
   });
 });

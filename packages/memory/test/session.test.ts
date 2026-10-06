@@ -140,6 +140,133 @@ describe("sessionPage", () => {
     expect(page?.text).toContain("Continue.");
   });
 
+  it("keeps two sessions with the same long opening in two files", async () => {
+    const opening = `${"Uma pergunta bem comprida sobre a viagem de dezembro ".repeat(2)}?`;
+    const paths = await Promise.all(
+      ["101", "202"].map(
+        async (key) =>
+          (
+            await sessionPage({
+              key,
+              channel: "telegram",
+              threadId: "1",
+              timeZone: "UTC",
+              lines: [owner("09:00", opening)],
+            })
+          )?.path,
+      ),
+    );
+    expect(paths[0]).toMatch(/-101\.md$/);
+    expect(paths[1]).toMatch(/-202\.md$/);
+  });
+
+  it("keeps a message from acting in Obsidian", async () => {
+    const page = await sessionPage({
+      key: "s1",
+      channel: "telegram",
+      threadId: "1",
+      timeZone: "UTC",
+      lines: [
+        owner("09:00", "<img src=https://evil.example/p.png> oi"),
+        owner(
+          "09:01",
+          "![t](https://evil.example/a.png) e `$= dv.pages()` e %%oculto%% e [[[Ana Souza]]]",
+        ),
+      ],
+    });
+    const text = page?.text ?? "";
+    // The body is what Obsidian renders; the frontmatter's abstract is a quoted string.
+    const body = text.slice(text.indexOf("\n---\n") + 5);
+    expect(body).toContain("\\<img");
+    for (const live of [/(?<!\\)</, /!\[/, /(?<!\\)`/, /%%/, /\[\[/])
+      expect(body).not.toMatch(live);
+    expect(readNote(page?.path ?? "", text)?.links).toEqual([]);
+  });
+
+  it("keeps each speaker's private key out when two are pasted in turns", async () => {
+    const begin = ["-----BEGIN ", "PRIVATE KEY-----"].join("");
+    const end = ["-----END ", "PRIVATE KEY-----"].join("");
+    const bodyA = "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB".repeat(2);
+    const bodyB = "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJC".repeat(2);
+    const page = await sessionPage({
+      key: "s1",
+      channel: "telegram",
+      threadId: "-1",
+      timeZone: "UTC",
+      lines: [
+        owner("09:00", begin),
+        { role: "user", speaker: "u-bruno", text: begin, at: at("09:00") },
+        owner("09:01", `${bodyA}\n${end}`),
+        { role: "user", speaker: "u-bruno", text: `${bodyB}\n${end}`, at: at("09:01") },
+      ],
+    });
+    expect(page?.text).not.toContain(bodyA);
+    expect(page?.text).not.toContain(bodyB);
+  });
+
+  it("sees a key's header through invisible characters", async () => {
+    const begin = ["-----BEGIN RSA PRIVATE", "\u200b KEY-----"].join("");
+    const body = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC".repeat(2);
+    const page = await sessionPage({
+      key: "s1",
+      channel: "telegram",
+      threadId: "1",
+      timeZone: "UTC",
+      lines: [owner("09:00", begin), owner("09:01", `x${body.slice(3)}`)],
+    });
+    expect(page?.text).not.toContain(body.slice(3));
+  });
+
+  it("carries an open private key into the next session, for ten minutes", async () => {
+    const begin = ["-----BEGIN ", "PRIVATE KEY-----"].join("");
+    const body = "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB".repeat(2);
+    const first = await sessionPage({
+      key: "s1",
+      channel: "telegram",
+      threadId: "1",
+      timeZone: "UTC",
+      lines: [owner("09:00", `a chave: ${begin}`)],
+    });
+    expect(first?.openKeys).toEqual({ "u-owner": at("09:00") });
+    const next = await sessionPage({
+      key: "s2",
+      channel: "telegram",
+      threadId: "1",
+      timeZone: "UTC",
+      openKeys: first?.openKeys ?? {},
+      lines: [owner("09:05", body), owner("09:30", `de novo: ${body}`)],
+    });
+    expect(next?.text).toContain("[REDACTED:private_key]");
+    expect(next?.text).toContain("de novo:");
+    expect(next?.text?.split(body).length).toBe(2);
+    expect(next?.openKeys).toEqual({});
+  });
+
+  it("shows nothing of a secret the read limit cuts", async () => {
+    const secret = ["sk", "-", "ABCDEFGHIJKLMNOPQRSTUVWXYZ"].join("");
+    const page = await sessionPage({
+      key: "s1",
+      channel: "telegram",
+      threadId: "1",
+      timeZone: "UTC",
+      lines: [owner("09:00", `x${" ".repeat(8_182)}${secret}`)],
+    });
+    expect(page?.text).not.toContain("sk-ABC");
+  });
+
+  it("sees a key's header past the read limit", async () => {
+    const begin = ["-----BEGIN ", "PRIVATE KEY-----"].join("");
+    const body = "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB".repeat(2);
+    const page = await sessionPage({
+      key: "s1",
+      channel: "telegram",
+      threadId: "1",
+      timeZone: "UTC",
+      lines: [owner("09:00", `${"palavra ".repeat(1_100)}${begin}`), owner("09:01", body)],
+    });
+    expect(page?.text).not.toContain(body);
+  });
+
   it("writes a page whose first message sanitizes to nothing, and keeps wikilinks inert", async () => {
     const page = await sessionPage({
       key: "s1",

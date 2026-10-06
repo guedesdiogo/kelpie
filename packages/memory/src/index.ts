@@ -41,7 +41,13 @@ export {
 } from "./memory-index.ts";
 export { isMemoryId, LEVELS, type Level, type Note, readNote } from "./note.ts";
 export { type Sanitized, sanitizeSecrets } from "./sanitize.ts";
-export { type SessionInput, type SessionLine, type SessionPage, sessionPage } from "./session.ts";
+export {
+  type OpenKeys,
+  type SessionInput,
+  type SessionLine,
+  type SessionPage,
+  sessionPage,
+} from "./session.ts";
 export { instantOf, isDate, isDateTime } from "./time.ts";
 export {
   MemoryFormatError,
