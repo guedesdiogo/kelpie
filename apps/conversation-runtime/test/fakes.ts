@@ -200,7 +200,7 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
           else signal.addEventListener("abort", stop, { once: true });
         });
       },
-      qualifier: null,
+      qualifierFor: () => null,
       now: () => world.clock,
       sleep(ms, signal) {
         const call = sleeps++;

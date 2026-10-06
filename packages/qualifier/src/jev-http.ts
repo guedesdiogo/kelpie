@@ -1,5 +1,6 @@
 import { maskPersonalData } from "./mask.ts";
-import type { Answer, Qualifier, QualifierId, QualifyResult, Question } from "./types.ts";
+import { systemOneAnswers } from "./system-one.ts";
+import type { Qualifier, QualifierId, QualifyResult, Question } from "./types.ts";
 
 export const SYSTEM_ONE_URL = "https://api.typesafe.ai/v1/systemone";
 
@@ -46,46 +47,14 @@ export class JevHttpQualifier implements Qualifier {
     });
     // An error's body can echo the state, so only the status is reported.
     if (!response.ok) throw new Error(`TypeSafe answered ${response.status}`);
-    let body: { answers?: Record<string, unknown> } | null;
+    let body: unknown;
     try {
-      body = (await response.json()) as typeof body;
+      body = await response.json();
     } catch {
       // The parser's message quotes the body, which can echo the state.
       throw new Error("TypeSafe answered with a body that isn't JSON");
     }
-    const answers: Record<string, Answer> = {};
-    for (const [key, question] of Object.entries(questions)) {
-      const answer = toAnswer(question, body?.answers?.[key]);
-      if (answer) answers[key] = answer;
-    }
+    const answers = systemOneAnswers(questions, body);
     return { answers, provider: this.id, calibrated: this.calibrated };
   }
-}
-
-/** Keeps an answer only when its shape matches its question's type. */
-function toAnswer(question: Question, raw: unknown): Answer | null {
-  if (typeof raw !== "object" || raw === null) return null;
-  const value = raw as Record<string, unknown>;
-  if (value.type !== question.type) return null;
-  const { probabilities } = value;
-  switch (question.type) {
-    case "noul":
-      return typeof value.noul === "number" ? { type: "noul", noul: value.noul } : null;
-    case "choice":
-      return typeof value.choice === "string" && isProbabilities(probabilities)
-        ? { type: "choice", choice: value.choice, probabilities }
-        : null;
-    case "score":
-      return typeof value.score === "number" && isProbabilities(probabilities)
-        ? { type: "score", score: value.score, probabilities }
-        : null;
-  }
-}
-
-function isProbabilities(value: unknown): value is Record<string, number> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    Object.values(value).every((probability) => typeof probability === "number")
-  );
 }

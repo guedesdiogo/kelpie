@@ -1,6 +1,10 @@
 // The router module only: the package root also loads the provider SDKs.
 import { MODEL_TIERS, type ModelTier } from "@kelpie/llm/router";
-import type { QuietWindowPolicy } from "@kelpie/qualifier";
+import {
+  QUALIFIER_BACKENDS,
+  type QualifierBackend,
+  type QuietWindowPolicy,
+} from "@kelpie/qualifier";
 
 /** Kelpie runs one `Registry`, which lists the agents. */
 export const REGISTRY_NAME = "registry";
@@ -15,6 +19,8 @@ export interface AgentSettings {
   maxOutputTokens: number;
   quietWindow: QuietWindowPolicy;
   maxWaitMs: number;
+  /** Who decides the end of turn when the heuristic isn't sure: Clef on Workers AI, or Jev. */
+  qualifier: QualifierBackend;
 }
 
 export const DEFAULT_SETTINGS: AgentSettings = {
@@ -24,6 +30,7 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   maxOutputTokens: 1_024,
   quietWindow: { finishedMs: 1_500, defaultMs: 3_000, unfinishedMs: 6_000 },
   maxWaitMs: 10_000,
+  qualifier: "clef",
 };
 
 /** Agent ids become object names and URL segments: lowercase letters, digits and hyphens. */
@@ -66,6 +73,10 @@ export function parseSettings(input: unknown): Partial<AgentSettings> | null {
       case "maxWaitMs":
         if (!isInteger(value, 0, 120_000)) return null;
         parsed.maxWaitMs = value;
+        break;
+      case "qualifier":
+        if (!QUALIFIER_BACKENDS.includes(value as QualifierBackend)) return null;
+        parsed.qualifier = value as QualifierBackend;
         break;
       case "quietWindow": {
         const window = value as Partial<QuietWindowPolicy> | null;

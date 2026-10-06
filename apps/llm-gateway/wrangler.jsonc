@@ -7,6 +7,8 @@
   // Reached only through service bindings from Kelpie's other Workers.
   "workers_dev": false,
   "preview_urls": false,
+  // Clef, the default end-of-turn qualifier, runs on Workers AI and needs no key (issue #118).
+  "ai": { "binding": "AI" },
   "vars": {
     // To go through AI Gateway, override these with --var when deploying (docs/admin-api.md),
     // so the instance's account id stays out of the repository:
@@ -15,6 +17,9 @@
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
     // Jev's version for end of turn, pinned: its thresholds were measured on it (ADR-0018).
     "JEV_MODEL": "jev-1.13.0",
+    // Clef's model for end of turn, "clef" or "clef-flash", pinned like Jev's: each has its own
+    // bands (ADR-0022).
+    "CLEF_MODEL": "clef",
     // For each tier, the models to try in order. Owner configuration; edit freely.
     "MODEL_ROUTES": {
       "cheap": [
