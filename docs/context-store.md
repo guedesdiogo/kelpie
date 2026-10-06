@@ -75,6 +75,7 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - Its only write is the access count.
     - With the vault off, or on any failure, it answers an empty block, and the turn goes on without memory.
   - **Access counts:** each recall counts the notes it packed, in one write, in a table outside the index. A rebuild keeps them, and they never reach git.
+  - **The memory report** (#111): once a day, after the embeddings and the held files, the alarm writes what memory's index finds (cold notes, duplicates, possible contradictions) to `memory/_lint/report.md`, or removes the page when memory is clean ([memory-format.md](memory-format.md#the-daily-report)). The page is queued only when it changed, so a quiet day makes no commit.
 
 ## Setting it up
 
