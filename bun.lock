@@ -145,6 +145,17 @@
         "vitest": "^4.1.0",
       },
     },
+    "packages/memory": {
+      "name": "@kelpie/memory",
+      "dependencies": {
+        "yaml": "2.9.1",
+      },
+      "devDependencies": {
+        "@cloudflare/vitest-plugin": "^1.3.6",
+        "vitest": "^4.1.0",
+        "wrangler": "^4.147.0",
+      },
+    },
     "packages/qualifier": {
       "name": "@kelpie/qualifier",
       "devDependencies": {
@@ -394,6 +405,8 @@
     "@kelpie/llm": ["@kelpie/llm@workspace:packages/llm"],
 
     "@kelpie/llm-gateway": ["@kelpie/llm-gateway@workspace:apps/llm-gateway"],
+
+    "@kelpie/memory": ["@kelpie/memory@workspace:packages/memory"],
 
     "@kelpie/qualifier": ["@kelpie/qualifier@workspace:packages/qualifier"],
 
