@@ -16,9 +16,11 @@ export interface SessionLine {
 }
 
 export interface SessionInput {
+  /** Names this session in the page's path, so two sessions never share a file: a history row id. */
+  key: string;
   channel: string;
   threadId: string;
-  /** The owner's IANA time zone, or null for UTC. */
+  /** The IANA time zone a person in the conversation last gave, or null for UTC. */
   timeZone: string | null;
   lines: readonly SessionLine[];
 }
@@ -32,6 +34,13 @@ export interface SessionPage {
 
 /** Each message is cut to this many characters, after its secrets are replaced. */
 const EXCERPT_CHARS = 280;
+/**
+ * Only a message's start is read: the page shows at most its first 280 characters, and a secret
+ * cut off past this can't reach them. It bounds the sanitizer's work on long messages.
+ */
+const READ_CHARS = 8_192;
+const BEGIN_KEY = /-----BEGIN [A-Z ]{0,40}PRIVATE KEY(?: BLOCK)?-----/;
+const END_KEY = /-----END [A-Z ]{0,40}PRIVATE KEY(?: BLOCK)?-----/;
 /** A longer session keeps its first and last messages. */
 const HEAD_LINES = 30;
 const TAIL_LINES = 30;
@@ -70,10 +79,43 @@ function clock(at: number, timeZone: string): { date: string; time: string } {
   };
 }
 
-/** One line of text, at most `max` characters. */
+/**
+ * One line of text, at most `max` characters. `[[` is broken, so a message doesn't add links to
+ * the vault's graph.
+ */
 function excerpt(text: string, max: number): string {
-  const line = text.replace(/\s+/g, " ").trim();
+  const line = text.replace(/\s+/g, " ").replaceAll("[[", "[ [").trim();
   return line.length <= max ? line : `${line.slice(0, max - 1).trimEnd()}…`;
+}
+
+/**
+ * Each message's text with its secrets replaced. A private key one speaker opened and didn't close
+ * is redacted in their next messages too, up to its end, as when it is pasted in parts.
+ */
+function sanitizeAll(lines: readonly SessionLine[]): { texts: string[]; redactions: number } {
+  let redactions = 0;
+  /** Who opened a private key that no message of theirs has closed yet. */
+  let keyHolder: string | null = null;
+  const texts = lines.map((line) => {
+    let text = line.text.slice(0, READ_CHARS);
+    if (keyHolder !== null && line.speaker === keyHolder) {
+      const end = END_KEY.exec(text);
+      if (end === null) {
+        text = "";
+      } else {
+        keyHolder = null;
+        text = text.slice(end.index + end[0].length);
+      }
+      text = `[REDACTED:private_key]${text}`;
+      redactions += 1;
+    }
+    const begin = BEGIN_KEY.exec(text);
+    if (begin && !END_KEY.test(text.slice(begin.index))) keyHolder = line.speaker;
+    const sanitized = sanitizeSecrets(text);
+    redactions += sanitized.redactions;
+    return sanitized.text;
+  });
+  return { texts, redactions };
 }
 
 /** A speaker as plain text: nothing that Markdown would read as structure. */
@@ -94,14 +136,14 @@ export async function sessionPage(input: SessionInput): Promise<SessionPage | nu
 
   const timeZone = zoneOf(input.timeZone);
   // Each message is sanitized once, before anything is cut.
-  const sanitized = lines.map((line) => sanitizeSecrets(line.text));
-  const redactions = sanitized.reduce((sum, result) => sum + result.redactions, 0);
-  const cleanText = (line: SessionLine) => sanitized[lines.indexOf(line)]?.text ?? "";
+  const { texts, redactions } = sanitizeAll(lines);
+  const cleanText = (line: SessionLine) => texts[lines.indexOf(line)] ?? "";
 
   const start = clock(first.at, timeZone);
   const end = clock(last.at, timeZone);
   const opening = excerpt(cleanText(firstUser), 200);
   const title = excerpt(`${clock(firstUser.at, timeZone).time} ${opening}`, 120);
+  const source = `${input.channel}:${input.threadId}`.replace(/[\p{Cc}]/gu, "").slice(0, 300);
   const thread = input.threadId.replace(/^-/, "g");
   const scope = `conversation/${slugify(`${input.channel}-${thread}`)}` as Scope;
   const speakers = new Set(
@@ -131,10 +173,15 @@ export async function sessionPage(input: SessionInput): Promise<SessionPage | nu
       body,
       level: "explicit",
       confidence: speakers.size > 1 ? GROUP_CONFIDENCE : PRIVATE_CONFIDENCE,
-      sources: [`${input.channel}:${input.threadId}`],
-      abstract: opening,
+      sources: [source],
+      // A first message with nothing left once sanitized has no abstract.
+      ...(opening === "" ? {} : { abstract: opening }),
     },
     { at: new Date(last.at).toISOString().replace(/\.\d{3}Z$/, "Z") },
   );
-  return { path: memoryPath(scope, "session", title, start.date), text, redactions };
+  return {
+    path: memoryPath(scope, "session", `${title} ${input.key}`, start.date),
+    text,
+    redactions,
+  };
 }

@@ -986,7 +986,7 @@ describe("ConversationAgent sessions", () => {
     const [{ agentId, changes } = { agentId: "", changes: [] }] = world.remembered;
     expect(agentId).toBe("assistant");
     const [page] = changes;
-    expect(page?.path).toMatch(/^conversations\/telegram-chat-1\/sessions\/2026\//);
+    expect(page?.path).toMatch(/^conversations\/telegram-chat-1\/sessions\/\d{4}\//);
     expect(page?.content).toContain("guarda o token do bot: [REDACTED:telegram_token]");
     expect(page?.content).toContain("Anotado, não vou repetir o token.");
     expect(page?.content).not.toContain(botToken);
@@ -1008,5 +1008,73 @@ describe("ConversationAgent sessions", () => {
     await stub.closeSession();
     expect(world.remembered).toHaveLength(1);
     expect(world.remembered[0]?.changes[0]?.content).toContain("lembra de comprar café");
+  });
+
+  it("waits to close a session while a turn runs or a message waits for one", async () => {
+    const world = use(fakeWorld([reply("Ok."), held("Feito.")]));
+    const stub = agent("session-busy");
+    await deliveredTurn(stub, world, "primeira mensagem");
+    await stub.ingest(message("m2", "segunda mensagem"));
+    await stub.closeSession();
+    expect(world.remembered).toEqual([]);
+
+    world.modelHeld = true;
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(2));
+    await stub.closeSession();
+    expect(world.remembered).toEqual([]);
+
+    world.modelHeld = false;
+    await vi.waitFor(async () =>
+      expect((await stub.turns()).map((turn) => turn.status)).toEqual(["delivered", "delivered"]),
+    );
+    await stub.closeSession();
+    expect(world.remembered).toHaveLength(1);
+    const content = world.remembered[0]?.changes[0]?.content ?? "";
+    expect(content).toContain("primeira mensagem");
+    expect(content).toContain("segunda mensagem");
+    expect(content).toContain("Feito.");
+  });
+
+  it("skips a session whose page can't be built, and writes the next one", async () => {
+    const world = use(fakeWorld([reply("Ok."), reply("Certo.")]));
+    const stub = agent("session-poison");
+    await deliveredTurn(stub, world, "primeira conversa");
+    // A row no page can be built from: its time is past what a date can hold.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE history SET created_at = ? WHERE id = (SELECT MAX(id) FROM history)",
+        9e15,
+      );
+    });
+    await stub.closeSession();
+    expect(world.remembered).toEqual([]);
+
+    await stub.ingest(message("m2", "segunda conversa"));
+    await stub.flush();
+    await vi.waitFor(async () =>
+      expect((await stub.turns()).map((turn) => turn.status)).toEqual(["delivered", "delivered"]),
+    );
+    await stub.closeSession();
+    expect(world.remembered).toHaveLength(1);
+    const content = world.remembered[0]?.changes[0]?.content ?? "";
+    expect(content).toContain("segunda conversa");
+    expect(content).not.toContain("primeira conversa");
+  });
+
+  it("keeps the time zone of the latest message, not of a retried one", async () => {
+    use(fakeWorld([]));
+    const stub = agent("session-zone");
+    await stub.ingest(message("m1", "oi", { timeZone: "America/Sao_Paulo" }));
+    await stub.ingest(message("m2", "tudo bem?", { timeZone: "Europe/Lisbon" }));
+    expect(await stub.ingest(message("m1", "oi", { timeZone: "America/Sao_Paulo" }))).toMatchObject(
+      { status: "duplicate" },
+    );
+    const zone = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql
+        .exec<{ value: string }>("SELECT value FROM state WHERE key = 'timeZone'")
+        .one(),
+    );
+    expect(JSON.parse(zone.value)).toBe("Europe/Lisbon");
   });
 });

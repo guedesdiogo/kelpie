@@ -163,15 +163,22 @@ How Kelpie writes a new version:
 
 Every conversation's history becomes session pages (#109), with no model call:
 - **When:** a session ends when the conversation stays quiet for 30 minutes, or when a summary checkpoint is written ([ADR-0017](adr/0017-history-compaction.md)). The next message starts a new session.
-- **Where:** `conversations/<channel>-<chat>/sessions/<year>/<date>-<time>-<first words>.md`. A group's chat id, which starts with `-`, becomes `g`.
+  - While a turn runs or a message waits for one, the session goes on, and its close is tried again 10 minutes later.
+  - When the Context Store can't be reached, or doesn't answer within 30 seconds, the close is tried again 10 minutes later, with the messages that came since.
+  - A page that can't be built, or that the vault refuses, is skipped with a warning, so the sessions after it still get written. Its messages stay in the conversation's history.
+- **Where:** `conversations/<channel>-<chat>/sessions/<year>/<date>-<time>-<first words>-<id>.md`, where `<id>` is the number of the session's first message in the conversation's history, so two sessions never share a file. A group's chat id, which starts with `-`, becomes `g`.
 - **What:**
-  - a title, from the time and the first message;
-  - a line with the channel, the date, the times (in the owner's time zone when known) and the number of messages;
+  - a title, from the time and the first message from a person;
+  - a line with the channel, the date, the times and the number of messages;
   - each message as one line, with its time and speaker;
   - a session of more than 60 messages keeps the first 30 and the last 30.
-- **Secrets:** every message's secrets are replaced with `[REDACTED:<kind>]` before anything is cut. That covers API keys and tokens, Telegram bot tokens, JWTs, private keys, credentials in URLs, auth headers and secret environment assignments. Then each message is cut to 280 characters. Nothing else is filtered: other people's data stays (ADR-0020 §4).
+- **Time zone:** the latest one a person in the conversation gave, or UTC.
+- **Secrets:** only the first 8,192 characters of each message are read, and their secrets are replaced with `[REDACTED:<kind>]` before anything is cut. Then each message is cut to 280 characters, and `[[` is broken so a message adds no links to the vault. Nothing else is filtered: other people's data stays (ADR-0020 §4).
+  - Covered: API keys and tokens with a known prefix (OpenAI, Anthropic, xAI, Groq, Stripe, GitHub, GitLab, AWS, Google, Meta, npm, Hugging Face, SendGrid, Slack, Cloudflare, GoHighLevel, webhook secrets), Telegram bot tokens, JWTs, private keys (also one pasted across several messages by the same person), credentials in URLs and curl commands, cookies, auth headers, secret environment assignments, passwords and tokens in fields and in prose (English, Portuguese, Spanish), and 40-character keys in a message that names AWS or Cloudflare.
+  - Removed first: terminal escapes, control characters, bidirectional overrides and zero-width characters, so none can split or hide a secret.
+  - Not covered: a secret with no known shape and no name next to it, look-alike characters, and secrets wrapped in base64 or hex.
 - **Trust:** `level: explicit`, since it is what was said, and `confidence: 0.9` for a private chat, `0.6` when more than one person spoke.
-- **History:** once in a page, behind the latest checkpoint and older than 90 days, a conversation's history rows are deleted from its Durable Object.
+- **History:** stays in the conversation's Durable Object; nothing is deleted once it is in a page. Whether to prune it, and when, is an open decision.
 
 ## Links
 

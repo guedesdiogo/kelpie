@@ -68,4 +68,68 @@ describe("sanitizeSecrets", () => {
     sanitizeSecrets(`${"password-token-key=".repeat(5_000)} ${"a".repeat(100_000)}`);
     expect(Date.now() - started).toBeLessThan(1_000);
   });
+
+  it.each([
+    [
+      "the Bot API URL",
+      join("https://api.telegram.org/bot", "123456789", ":", "AA", tail(33), "/getMe"),
+    ],
+    [
+      "a PGP key",
+      join(
+        "-----BEGIN ",
+        "PGP PRIVATE KEY BLOCK-----\n",
+        tail(64),
+        "\n-----END ",
+        "PGP PRIVATE KEY BLOCK-----",
+      ),
+    ],
+    ["a Google access token", join("ya", "29.", tail(40))],
+    ["an npm token", join("np", "m_", tail(36))],
+    ["a Hugging Face token", join("h", "f_", tail(34))],
+    ["a SendGrid key", join("S", "G.", tail(22), ".", tail(43))],
+    ["a webhook secret", join("whs", "ec_", tail(32))],
+    ["a Stripe test key", join("sk", "_test_", tail(24))],
+    ["a GitLab token", join("glp", "at-", tail(20))],
+    ["a cookie", join("Cookie: session=", tail(32), "; theme=dark")],
+    ["curl credentials", join("curl https://x.example -u admin:", tail(12))],
+    ["a token as URL user", join("https://", tail(40, "0123456789abcdef"), "@github.com/o/r.git")],
+    ["an AWS secret key", join("aws secret access key: ", tail(40, "AbCdEf0123456789+/GhIj"))],
+    ["a Cloudflare token", join("o token da Cloudflare é ", tail(40, "AbCdEf0123456789_-GhIj"))],
+  ])("redacts %s", (_label, secret) => {
+    const { text } = sanitizeSecrets(`antes ${secret} depois`);
+    expect(text).toContain("[REDACTED:");
+    expect(text).not.toContain(secret.slice(-10));
+  });
+
+  it.each([
+    "minha senha é Tr0ub4dor&3xyz",
+    "senha: Tr0ub4dor&3xyz",
+    "my password is P@ssw0rd!2024",
+    "password: 'Tr0ub4dor&3xyz'",
+    "password=Sup3r$ecret99",
+    '{"token": "a1b2c3d4e5f6"}',
+    '{"senha":"segredo-da-casa"}',
+    "accessToken: a1b2c3d4e5f6g7",
+    "clientSecret=a1b2c3d4e5f6g7",
+    "DB_PASS=correct-horse-battery",
+    "pwd=a1b2c3d4!",
+    "contraseña: hunter2hunter2",
+  ])("redacts a password or token in %s", (phrase) => {
+    const secret =
+      phrase.match(
+        /(Tr0ub4dor&3xyz|P@ssw0rd!2024|Sup3r\$ecret99|a1b2c3d4e5f6(?:g7)?|segredo-da-casa|correct-horse-battery|a1b2c3d4!|hunter2hunter2)/,
+      )?.[0] ?? "";
+    const { text } = sanitizeSecrets(`antes ${phrase} depois`);
+    expect(text).toContain("[REDACTED:");
+    expect(text).not.toContain(secret);
+    expect(text).not.toMatch(/&3|!2024/);
+  });
+
+  it("finds a secret hidden by zero-width characters, and keeps emoji joiners", () => {
+    const hidden = join("sk", "-", tail(10), "\u200b", tail(20));
+    expect(sanitizeSecrets(`x ${hidden}`).text).toBe("x [REDACTED:api_key]");
+    const emoji = "dev \u{1F469}\u200d\u{1F4BB}";
+    expect(sanitizeSecrets(emoji).text).toBe(emoji);
+  });
 });

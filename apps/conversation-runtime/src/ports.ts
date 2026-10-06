@@ -41,7 +41,7 @@ export interface ConversationPorts {
   keepTyping(agentId: string, destination: Destination, signal: AbortSignal): Promise<void>;
   /**
    * Writes memory files to the vault through the Context Store (ADR-0020 §3). A refusal is a value;
-   * an unreachable store throws.
+   * a store that is unreachable, or doesn't answer in time, throws.
    */
   remember(
     agentId: string,
@@ -111,7 +111,8 @@ function productionPorts(env: Env): ConversationPorts {
       };
     },
     send: (agentId, destination, text, options) => egress.send(agentId, destination, text, options),
-    remember: (agentId, changes, summary) => contextStore.write(agentId, changes, summary),
+    remember: (agentId, changes, summary) =>
+      withTimeout(contextStore.write(agentId, changes, summary), REMEMBER_TIMEOUT_MS),
     async typing(agentId, destination) {
       await bounded(egress.typing(agentId, destination));
     },
@@ -159,6 +160,24 @@ async function bounded<T>(call: Promise<T>): Promise<T | undefined> {
   });
   try {
     return await Promise.race([call.catch(() => undefined), timeout]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
+ * A memory write the Context Store hasn't answered after this long counts as failed, to be tried
+ * again; it only queues the files, so it answers well within this.
+ */
+const REMEMBER_TIMEOUT_MS = 30_000;
+
+async function withTimeout<T>(call: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`no answer after ${ms} ms`)), ms);
+  });
+  try {
+    return await Promise.race([call, timeout]);
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }

@@ -18,6 +18,7 @@ const kelpie = (time: string, text: string): SessionLine => ({
 describe("sessionPage", () => {
   it("writes a private conversation as a session page, in the owner's time zone", async () => {
     const page = await sessionPage({
+      key: "s1",
       channel: "telegram",
       threadId: "100200300",
       timeZone: "America/Sao_Paulo",
@@ -29,7 +30,7 @@ describe("sessionPage", () => {
       ],
     });
     expect(page?.path).toBe(
-      "conversations/telegram-100200300/sessions/2026/2026-10-06-14-05-onde-a-ana-mora-agora.md",
+      "conversations/telegram-100200300/sessions/2026/2026-10-06-14-05-onde-a-ana-mora-agora-s1.md",
     );
     const note = readNote(page?.path ?? "", page?.text ?? "");
     expect(note).toMatchObject({
@@ -52,6 +53,7 @@ describe("sessionPage", () => {
 
   it("gives a group conversation lower confidence, and keeps group ids apart", async () => {
     const page = await sessionPage({
+      key: "s1",
       channel: "telegram",
       threadId: "-1001234",
       timeZone: null,
@@ -69,6 +71,7 @@ describe("sessionPage", () => {
   it("keeps secrets out, and speakers' names from forging Markdown", async () => {
     const token = ["123456789", ":", "AA", "x".repeat(33)].join("");
     const page = await sessionPage({
+      key: "s1",
       channel: "telegram",
       threadId: "1",
       timeZone: "UTC",
@@ -90,7 +93,13 @@ describe("sessionPage", () => {
         `mensagem ${i} ${"x".repeat(600)}`,
       ),
     );
-    const page = await sessionPage({ channel: "telegram", threadId: "1", timeZone: "UTC", lines });
+    const page = await sessionPage({
+      key: "s1",
+      channel: "telegram",
+      threadId: "1",
+      timeZone: "UTC",
+      lines,
+    });
     expect(page?.text).toContain("mensagem 0 ");
     expect(page?.text).toContain("mensagem 199 ");
     expect(page?.text).not.toContain("mensagem 100 ");
@@ -101,11 +110,47 @@ describe("sessionPage", () => {
   it("writes nothing for a session without a message from a person", async () => {
     expect(
       await sessionPage({
+        key: "s1",
         channel: "telegram",
         threadId: "1",
         timeZone: null,
         lines: [kelpie("09:00", "Oi?")],
       }),
     ).toBeNull();
+  });
+
+  it("keeps a private key out when it is split across messages", async () => {
+    const begin = ["-----BEGIN ", "PRIVATE KEY-----"].join("");
+    const end = ["-----END ", "PRIVATE KEY-----"].join("");
+    const body = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC".repeat(2);
+    const page = await sessionPage({
+      key: "s1",
+      channel: "telegram",
+      threadId: "1",
+      timeZone: "UTC",
+      lines: [
+        owner("09:00", `a chave: ${begin}\n${body}`),
+        kelpie("09:00", "Continue."),
+        owner("09:01", `${body}\n${end}`),
+        owner("09:02", "pronto"),
+      ],
+    });
+    expect(page?.text).not.toContain(body);
+    expect(page?.text).toContain("pronto");
+    expect(page?.text).toContain("Continue.");
+  });
+
+  it("writes a page whose first message sanitizes to nothing, and keeps wikilinks inert", async () => {
+    const page = await sessionPage({
+      key: "s1",
+      channel: "telegram",
+      threadId: "1",
+      timeZone: "UTC",
+      lines: [owner("09:00", "\u202e\u0007"), owner("09:01", "veja [[Ana Souza]]")],
+    });
+    const note = readNote(page?.path ?? "", page?.text ?? "");
+    expect(note?.warnings).toEqual([]);
+    expect(note?.abstract).toBeNull();
+    expect(note?.links).toEqual([]);
   });
 });
