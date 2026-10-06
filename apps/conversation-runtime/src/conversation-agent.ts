@@ -867,15 +867,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (epoch !== this.#epoch()) return;
     const pending = this.#pendingInbound();
     if (pending.length === 0) return;
-    const flushAt =
-      pending.length >= LIMITS.maxBuffered
-        ? now
-        : await planFlush(
-            pending.map((row) => ({ text: row.text, receivedAt: row.receivedAt })),
-            (await this.#config()).settings,
-            this.#ports.qualifier,
-            END_OF_TURN_LOGS,
-          );
+    const flushAt = pending.length >= LIMITS.maxBuffered ? now : await this.#planFlush(pending);
     // A newer message arrived while the settings or the decision were awaited, and plans with the
     // fuller buffer; or a flush already claimed the buffer.
     if (epoch !== this.#epoch() || this.#pendingInbound().length === 0) return;
@@ -888,6 +880,17 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       this.#set("flushAt", flushAt);
     }
     this.#set("plannedEpoch", epoch);
+  }
+
+  /** When to flush, decided by the qualifier the agent's settings choose. */
+  async #planFlush(pending: { text: string; receivedAt: number }[]): Promise<number> {
+    const { settings } = await this.#config();
+    return planFlush(
+      pending.map((row) => ({ text: row.text, receivedAt: row.receivedAt })),
+      settings,
+      this.#ports.qualifierFor(settings.qualifier),
+      END_OF_TURN_LOGS,
+    );
   }
 
   #serialized(step: () => Promise<void>): Promise<void> {

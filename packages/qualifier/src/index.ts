@@ -1,6 +1,8 @@
+export { type ClefOptions, ClefQualifier, type ClefRun } from "./clef.ts";
 export { type Decision, type RunHooks, runDecision, type Sourced } from "./decision.ts";
 export {
   type Bands,
+  CLEF_BANDS,
   type EndOfTurn,
   type EndOfTurnContext,
   endOfTurn,
@@ -20,11 +22,13 @@ export {
 } from "./jev-http.ts";
 export { maskPersonalData } from "./mask.ts";
 export { type GatewayQualifyOutcome, QualifierUnavailable, RemoteQualifier } from "./remote.ts";
-export type {
-  Answer,
-  Instructions,
-  Qualifier,
-  QualifierId,
-  QualifyResult,
-  Question,
+export {
+  type Answer,
+  type Instructions,
+  QUALIFIER_BACKENDS,
+  type Qualifier,
+  type QualifierBackend,
+  type QualifierId,
+  type QualifyResult,
+  type Question,
 } from "./types.ts";

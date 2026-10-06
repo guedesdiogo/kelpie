@@ -211,7 +211,7 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
         world.remembered.push({ agentId, changes });
         return { ok: true };
       },
-      qualifier: null,
+      qualifierFor: () => null,
       now: () => world.clock,
       sleep(ms, signal) {
         const call = sleeps++;

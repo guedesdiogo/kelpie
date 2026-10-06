@@ -12,7 +12,18 @@ export type Answer =
   | { type: "choice"; choice: string; probabilities: Record<string, number> }
   | { type: "score"; score: number; probabilities: Record<string, number> };
 
-export type QualifierId = "jev-workers-ai" | "jev-http" | "jev-openrouter" | "llm-judge" | "fake";
+export type QualifierId =
+  | "clef-workers-ai"
+  | "clef-flash-workers-ai"
+  | "jev-workers-ai"
+  | "jev-http"
+  | "jev-openrouter"
+  | "llm-judge"
+  | "fake";
+
+/** The qualifiers an agent can choose between (issue #118). */
+export const QUALIFIER_BACKENDS = ["clef", "jev"] as const;
+export type QualifierBackend = (typeof QUALIFIER_BACKENDS)[number];
 
 export interface QualifyResult {
   answers: Record<string, Answer>;

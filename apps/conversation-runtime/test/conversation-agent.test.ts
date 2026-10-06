@@ -100,7 +100,7 @@ describe("ConversationAgent buffering", () => {
 
   it("arms one schedule when messages arrive while the end-of-turn decision runs", async () => {
     const world = fakeWorld([]);
-    use({ ...world, ports: { ...world.ports, qualifier: slowQualifier(50) } });
+    use({ ...world, ports: { ...world.ports, qualifierFor: () => slowQualifier(50) } });
     const stub = agent("concurrent");
 
     // Neither message is one the heuristic is sure about, so both decisions ask the qualifier.
@@ -125,17 +125,36 @@ describe("ConversationAgent buffering", () => {
     expect(JSON.stringify(logged.mock.calls)).not.toContain("check my order");
   });
 
+  it("asks the qualifier the agent's settings choose: Clef, unless the owner picked Jev", async () => {
+    const world = fakeWorld([]);
+    const asked: string[] = [];
+    const qualifierFor = (backend: string) => {
+      asked.push(backend);
+      return null;
+    };
+    use({ ...world, ports: { ...world.ports, qualifierFor } });
+
+    await agent("clef-default").ingest(
+      message("m1", "it was the blue one", { agentId: "clef-agent" }),
+    );
+    await configure("jev-agent", { qualifier: "jev" });
+    await agent("jev-chosen").ingest(
+      message("m1", "it was the blue one", { agentId: "jev-agent" }),
+    );
+    expect(asked).toEqual(["clef", "jev"]);
+  });
+
   it("warns when the qualifier fails, but not when none is configured", async () => {
     const world = fakeWorld([]);
     const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
     const unavailable = (reason: "not_configured" | "failed") =>
       new RemoteQualifier(async () => ({ ok: false, reason }));
 
-    use({ ...world, ports: { ...world.ports, qualifier: unavailable("not_configured") } });
+    use({ ...world, ports: { ...world.ports, qualifierFor: () => unavailable("not_configured") } });
     await agent("jev-off").ingest(message("m1", "it was the blue one"));
     expect(warned).not.toHaveBeenCalled();
 
-    use({ ...world, ports: { ...world.ports, qualifier: unavailable("failed") } });
+    use({ ...world, ports: { ...world.ports, qualifierFor: () => unavailable("failed") } });
     await agent("jev-down").ingest(message("m1", "it was the blue one"));
     expect(warned).toHaveBeenCalledWith("conversation: end-of-turn qualifier failed", {
       error: "QualifierUnavailable",

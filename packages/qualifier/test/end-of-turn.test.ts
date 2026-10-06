@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  CLEF_BANDS,
   type EndOfTurnContext,
   endOfTurn,
   endOfTurnBands,
@@ -108,6 +109,12 @@ describe("endOfTurnBands", () => {
     expect(endOfTurnBands("jev-workers-ai")).toEqual({ high: 0.7, low: 0.4 });
     expect(endOfTurnBands("heuristic")).toEqual({ high: 0.8, low: 0.3 });
     expect(endOfTurnBands("fake")).toEqual({ high: 0.8, low: 0.3 });
+  });
+
+  it("gives each Clef model the bands spike #117 measured", () => {
+    expect(endOfTurnBands("clef-workers-ai")).toEqual({ high: 0.95, low: 0.46 });
+    expect(endOfTurnBands("clef-flash-workers-ai")).toEqual({ high: 0.87, low: 0.37 });
+    expect(CLEF_BANDS["clef-flash"]).toEqual({ high: 0.87, low: 0.37 });
   });
 });
 
