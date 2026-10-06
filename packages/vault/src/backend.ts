@@ -1,0 +1,72 @@
+// Where the vault lives (ADR-0005): one interface, with GitHub as its first adapter. Another backend
+// is one more class behind the same interface, picked by configuration.
+
+/** A file of the vault at one commit. */
+export interface VaultFile {
+  path: string;
+  content: string;
+  /** Git's blob SHA of the content. */
+  blobSha: string;
+}
+
+export interface VaultSnapshot {
+  commit: string;
+  files: VaultFile[];
+}
+
+/** A file a diff added or changed (`content`), or removed (`content: null`). */
+export interface FileChange {
+  path: string;
+  content: string | null;
+  blobSha?: string;
+}
+
+export interface VaultDiff {
+  from: string;
+  to: string;
+  changes: FileChange[];
+}
+
+export interface CommitRequest {
+  branch: string;
+  /** The head the commit must land on: if the branch moved, the commit is refused. */
+  expectedHead: string;
+  headline: string;
+  /** Trailers go here, such as `Kelpie-Agent: <agent-id>` (ADR-0016). */
+  body?: string;
+  writes: readonly { path: string; content: string }[];
+  deletions: readonly string[];
+}
+
+export type CommitOutcome = { kind: "committed"; commit: string } | { kind: "stale" };
+
+export interface PullRequest {
+  number: number;
+  url: string;
+}
+
+export interface VaultBackend {
+  defaultBranch(): Promise<string>;
+  /** The branch's head commit, or null when the branch doesn't exist. */
+  branchHead(branch: string): Promise<string | null>;
+  /** The vault's text files at a commit. */
+  snapshot(commit: string): Promise<VaultSnapshot>;
+  /**
+   * What changed from one commit to a later one. Null when `to` doesn't descend from `from` (a
+   * force-push) or the diff is too large to list: the caller then takes a snapshot.
+   */
+  diff(from: string, to: string): Promise<VaultDiff | null>;
+  commit(request: CommitRequest): Promise<CommitOutcome>;
+  createBranch(name: string, from: string): Promise<void>;
+  openPullRequest(request: {
+    branch: string;
+    base: string;
+    title: string;
+    body: string;
+  }): Promise<PullRequest>;
+}
+
+/** The files the Context Store keeps: Markdown, outside hidden folders such as `.obsidian/`. */
+export function isVaultText(path: string): boolean {
+  return path.endsWith(".md") && !path.split("/").some((segment) => segment.startsWith("."));
+}

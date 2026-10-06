@@ -1,0 +1,17 @@
+{
+  "name": "@kelpie/vault",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./fake": "./src/fake.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.0"
+  }
+}
