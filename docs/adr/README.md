@@ -25,6 +25,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0019](0019-llm-gateway-keys.md) | The keys llm-gateway uses to call providers are deploy secrets | [#101](https://github.com/guedesdiogo/kelpie/issues/101) |
 | [0020](0020-shared-memory-engine.md) | Kelpie's memory is its own engine on Workers, modelled on ai-memory, over the owner's vault | [#105](https://github.com/guedesdiogo/kelpie/issues/105) |
 | [0021](0021-vault-app-secrets.md) | The vault's GitHub App credentials are deploy secrets on context-store | [#41](https://github.com/guedesdiogo/kelpie/issues/41) |
+| [0023](0023-webchat-access-login.md) | The webchat logs in with the owner's Cloudflare Access identity | [#40](https://github.com/guedesdiogo/kelpie/issues/40) |
 
 ## Format
 

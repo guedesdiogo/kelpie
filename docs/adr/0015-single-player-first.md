@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-03
 - Issue: [#59](https://github.com/guedesdiogo/kelpie/issues/59)
+- Amended by: [ADR-0023](0023-webchat-access-login.md), the webchat logs in with the owner's Access identity, with no pairing of its own
 
 ## Context
 
