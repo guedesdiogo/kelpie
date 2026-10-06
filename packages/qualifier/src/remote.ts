@@ -18,7 +18,7 @@ export class QualifierUnavailable extends Error {
 
 /**
  * A qualifier that runs in llm-gateway, which holds the key. The result keeps the gateway's
- * `provider`, which picks the end-of-turn bands. An abort doesn't cross RPC: `runDecision`'s
+ * `provider`, which says who answered. An abort doesn't cross RPC: `runDecision`'s
  * timeout still returns on time, and the gateway bounds its own call.
  */
 export class RemoteQualifier implements Qualifier {

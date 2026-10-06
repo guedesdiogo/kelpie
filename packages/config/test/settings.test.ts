@@ -10,7 +10,13 @@ describe("parseSettings", () => {
     expect(parseSettings({})).toEqual({});
   });
 
-  it("lets the owner choose the end-of-turn qualifier, Clef by default", () => {
+  it("waits a fixed time for more messages, 10 s by default, within a 60 s cap", () => {
+    expect(DEFAULT_SETTINGS.quietMs).toBe(10_000);
+    expect(DEFAULT_SETTINGS.maxWaitMs).toBe(60_000);
+    expect(parseSettings({ quietMs: 4_000 })).toEqual({ quietMs: 4_000 });
+  });
+
+  it("lets the owner choose the qualifier for the agent's typed decisions, Clef by default", () => {
     expect(DEFAULT_SETTINGS.qualifier).toBe("clef");
     expect(parseSettings({ qualifier: "jev" })).toEqual({ qualifier: "jev" });
     expect(parseSettings({ qualifier: "clef" })).toEqual({ qualifier: "clef" });
@@ -21,7 +27,11 @@ describe("parseSettings", () => {
     [{ maxOutputTokens: 0 }],
     [{ maxOutputTokens: 1.5 }],
     [{ systemPrompt: "   " }],
-    [{ quietWindow: { finishedMs: 1 } }],
+    [{ quietMs: -1 }],
+    [{ quietMs: 1.5 }],
+    [{ quietMs: 120_001 }],
+    // The end-of-turn windows are gone (ADR-0024).
+    [{ quietWindow: { finishedMs: 1_000, defaultMs: 3_000, unfinishedMs: 6_000 } }],
     [{ qualifier: "openrouter" }],
     [{ surprise: true }],
     [null],

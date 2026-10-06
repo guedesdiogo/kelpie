@@ -26,7 +26,7 @@ Every endpoint is a `POST` with a JSON body.
 | `/commands/createAgent` | `{ "id": "sales", "name": "Sales" }` |
 | `/commands/renameAgent` | `{ "id": "sales", "name": "Sales team" }` |
 | `/commands/getAgent` | `{ "id": "sales" }` |
-| `/commands/configureAgent` | `{ "id": "sales", "settings": { "systemPrompt": "…", "conversational": false, "qualifier": "jev" } }` |
+| `/commands/configureAgent` | `{ "id": "sales", "settings": { "systemPrompt": "…", "quietMs": 5000, "qualifier": "jev" } }` |
 | `/commands/listIdentities` | none |
 | `/commands/enableIdentity` | `{ "channel": "telegram", "channelUserId": "…" }`; re-enables a disabled identity, never a pending one |
 | `/commands/disableIdentity` | same as `enableIdentity` |
@@ -55,6 +55,13 @@ Every endpoint is a `POST` with a JSON body.
 | 503 | `unavailable` (Access's keys couldn't be loaded) |
 
 Identity values in answers are masked.
+
+**Waiting for the rest of a message.** An agent answers `quietMs` after the owner's latest message, 10 s by default, and each new message starts the wait again. Its `maxWaitMs`, 60 s by default, caps the wait from the first buffered message; a `quietMs` above it is cut to the cap. `quietMs: 0` removes the wait: each message is processed at once. Nothing else starts before the wait ends, the memory recall included (ADR-0024). No end-of-turn decision is asked of a qualifier (ADR-0024). `conversational: false` answers each message at once.
+
+**Pausing.** `/pause` on Telegram (also `/pause@<bot>`), or the webchat's Pause button, holds every answer until the owner's next message (#134). A pause while paused changes nothing, and Telegram's redelivery of the same `/pause` is ignored.
+- A turn in flight is interrupted, and the planned answer is cancelled.
+- Telegram confirms with a short fixed message, not from the model. The webchat shows the pause.
+- The next message is answered together with the buffered ones, after the usual wait. The cap counts from that message.
 
 ## Pairing
 
@@ -96,17 +103,17 @@ Form pages are HTML:
       - pass each provider's passthrough URL as a flag, for example `--var OPENAI_BASE_URL:https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/openai`. Later deploys need the same flag, or calls go straight to the provider without a warning;
       - if the gateway requires authentication, set `AI_GATEWAY_TOKEN` to a Cloudflare API token with only `AI Gateway Run`. Such a token works on every gateway in the account. The Worker sends it only to `gateway.ai.cloudflare.com`.
 
-      **End of turn.** When the heuristic isn't sure whether the user has finished, the agent's `qualifier` setting picks who decides. Change it with `configureAgent`.
+      **Qualifier.** The agent's typed decisions, such as the memory rerank (#110), go through the qualifier its `qualifier` setting picks. Change it with `configureAgent`.
       - **`clef`, the default:** Cloudflare's Clef model on Workers AI, through `llm-gateway`'s `AI` binding.
         - It needs no key and is billed as Workers AI usage on the account.
-        - `CLEF_MODEL` pins the model: `clef` by default, or `clef-flash`, which is faster but decides fewer turns. Each has its own bands (ADR-0022).
+        - `CLEF_MODEL` pins the model: `clef` by default, or `clef-flash`, which is faster.
         - Cloudflare doesn't use the inputs to train or improve models.
       - **`jev`:** Jev on TypeSafe's API (ADR-0018).
         - Set the optional `TYPESAFE_API_KEY` to a key from TypeSafe's console.
         - TypeSafe keeps data with zero retention only on enterprise plans.
-        - An agent set to `jev` without the key uses the heuristic.
+        - An agent set to `jev` without the key falls back to each decision's deterministic default.
 
-      Either way, `llm-gateway` masks emails, long numbers, link query strings and token-like strings in the fragments first. Names, addresses and numbers written in words still go out.
+      Either way, `llm-gateway` masks emails, long numbers, link query strings and token-like strings in the state first. Names, addresses and numbers written in words still go out.
 
       **Embeddings.** Memory's vector search (#110) embeds notes and questions through `llm-gateway`'s `embed`. The `EMBEDDING_PROVIDER` var chooses the model for the whole vault:
       - **`workers-ai`, the default:** BAAI's multilingual `bge-m3` on Workers AI, 1,024 dimensions. It needs no key and is billed as Workers AI usage. Cloudflare doesn't use the inputs to train or improve models.
@@ -168,6 +175,7 @@ To set it up:
 3. **Open `https://<ingress hostname>/webchat/?agent=<agent id>`.**
    - Replies come as paced bubbles, and the page shows when the agent is typing.
    - While the owner types, buffered messages wait for the rest, up to the agent's `maxWaitMs`.
+   - Pause holds the answer until the next message ("Pausing").
    - A reply that arrives with the page closed shows when it opens again.
 
 ## Recovering access

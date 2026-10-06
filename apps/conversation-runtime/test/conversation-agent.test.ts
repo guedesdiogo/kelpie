@@ -3,7 +3,6 @@ import { env } from "cloudflare:workers";
 import type { AgentSettings } from "@kelpie/config";
 import { stampOf } from "@kelpie/conversation";
 import type { Usage } from "@kelpie/llm";
-import { RemoteQualifier } from "@kelpie/qualifier";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentHost } from "../src/agent-host/agent-host.ts";
 import { type ConversationAgent, MEMORY_NOTE } from "../src/conversation-agent.ts";
@@ -19,7 +18,6 @@ import {
   OVER_BUDGET,
   refuse,
   reply,
-  slowQualifier,
   truncate,
 } from "./fakes.ts";
 
@@ -81,16 +79,15 @@ describe("ConversationAgent buffering", () => {
     const stub = agent("rearm");
     const start = world.clock;
 
-    // "…" looks unfinished, so the quiet window is the long one.
+    // The wait is the same whatever a message says (ADR-0024), and starts again with each one.
     expect(await stub.ingest(message("m1", "so I was thinking..."))).toEqual({
       status: "accepted",
-      flushAt: start + 6_000,
+      flushAt: start + 10_000,
     });
-    // A question looks finished: the window shrinks, from the latest message.
     world.clock = start + 1_000;
     expect(await stub.ingest(message("m2", "can you check my order?"))).toEqual({
       status: "accepted",
-      flushAt: start + 2_500,
+      flushAt: start + 11_000,
     });
     const schedules = await runInDurableObject(stub, (instance: ConversationAgent) =>
       instance.getSchedules(),
@@ -98,12 +95,22 @@ describe("ConversationAgent buffering", () => {
     expect(schedules).toHaveLength(1);
   });
 
-  it("arms one schedule when messages arrive while the end-of-turn decision runs", async () => {
-    const world = fakeWorld([]);
-    use({ ...world, ports: { ...world.ports, qualifierFor: () => slowQualifier(50) } });
+  it("answers at once when the owner removes the wait", async () => {
+    const world = use(fakeWorld([reply("Right away.")]));
+    const stub = agent("no-wait");
+    await configure("no-wait", { quietMs: 0 });
+
+    expect(await stub.ingest(message("m1", "so", { agentId: "no-wait" }))).toEqual({
+      status: "accepted",
+      flushAt: null,
+    });
+    await vi.waitFor(() => expect(world.sent).toEqual(["Right away."]));
+  });
+
+  it("arms one schedule when messages arrive while the settings are read", async () => {
+    use(fakeWorld([]));
     const stub = agent("concurrent");
 
-    // Neither message is one the heuristic is sure about, so both decisions ask the qualifier.
     await Promise.all([
       stub.ingest(message("m1", "so")),
       stub.ingest(message("m2", "it was the blue one")),
@@ -113,52 +120,6 @@ describe("ConversationAgent buffering", () => {
       instance.getSchedules(),
     );
     expect(schedules).toHaveLength(1);
-  });
-
-  it("logs who decided the end of turn, with no text", async () => {
-    use(fakeWorld([]));
-    const logged = vi.spyOn(console, "log").mockImplementation(() => {});
-    await agent("decision-log").ingest(message("m1", "can you check my order?"));
-
-    const call = logged.mock.calls.find(([line]) => line === "conversation: end of turn");
-    expect(call?.[1]).toEqual({ source: "heuristic", finished: 0.9, ms: expect.any(Number) });
-    expect(JSON.stringify(logged.mock.calls)).not.toContain("check my order");
-  });
-
-  it("asks the qualifier the agent's settings choose: Clef, unless the owner picked Jev", async () => {
-    const world = fakeWorld([]);
-    const asked: string[] = [];
-    const qualifierFor = (backend: string) => {
-      asked.push(backend);
-      return null;
-    };
-    use({ ...world, ports: { ...world.ports, qualifierFor } });
-
-    await agent("clef-default").ingest(
-      message("m1", "it was the blue one", { agentId: "clef-agent" }),
-    );
-    await configure("jev-agent", { qualifier: "jev" });
-    await agent("jev-chosen").ingest(
-      message("m1", "it was the blue one", { agentId: "jev-agent" }),
-    );
-    expect(asked).toEqual(["clef", "jev"]);
-  });
-
-  it("warns when the qualifier fails, but not when none is configured", async () => {
-    const world = fakeWorld([]);
-    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const unavailable = (reason: "not_configured" | "failed") =>
-      new RemoteQualifier(async () => ({ ok: false, reason }));
-
-    use({ ...world, ports: { ...world.ports, qualifierFor: () => unavailable("not_configured") } });
-    await agent("jev-off").ingest(message("m1", "it was the blue one"));
-    expect(warned).not.toHaveBeenCalled();
-
-    use({ ...world, ports: { ...world.ports, qualifierFor: () => unavailable("failed") } });
-    await agent("jev-down").ingest(message("m1", "it was the blue one"));
-    expect(warned).toHaveBeenCalledWith("conversation: end-of-turn qualifier failed", {
-      error: "QualifierUnavailable",
-    });
   });
 
   it("ignores a flush from a schedule that a newer message replaced", async () => {
@@ -178,7 +139,7 @@ describe("ConversationAgent buffering", () => {
 
     expect(await stub.ingest(message("m1", "where is my order?"))).toEqual({
       status: "duplicate",
-      flushAt: start + 1_500,
+      flushAt: start + 10_000,
     });
     await stub.flush();
     await vi.waitFor(() => expect(world.sent).toEqual(["Hi!"]));
@@ -232,7 +193,7 @@ describe("ConversationAgent buffering", () => {
     const world = use(fakeWorld([reply("On time.")]));
     world.clock = Date.now();
     const stub = agent("alarm");
-    await configure("alarm", { quietWindow: { finishedMs: 50, defaultMs: 50, unfinishedMs: 50 } });
+    await configure("alarm", { quietMs: 50 });
     await stub.ingest(message("m1", "ping?", { agentId: "alarm" }));
 
     await new Promise((resolve) => setTimeout(resolve, 1_100));

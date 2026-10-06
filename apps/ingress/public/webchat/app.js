@@ -8,6 +8,7 @@ const typing = document.getElementById("typing");
 const status = document.getElementById("status");
 const form = document.getElementById("composer");
 const input = document.getElementById("text");
+const pause = document.getElementById("pause");
 
 /** Messages sent but not yet accepted, by id, so a reconnect resends them. */
 const unconfirmed = new Map();
@@ -17,6 +18,15 @@ let attempt = 0;
 let refused = 0;
 let typingTimer = null;
 let lastTypingSentAt = 0;
+let paused = false;
+
+const PAUSED_STATUS = "Paused: Kelpie answers after your next message";
+
+function setPaused(value) {
+  paused = value;
+  pause.disabled = value || socket?.readyState !== WebSocket.OPEN;
+  status.textContent = value ? PAUSED_STATUS : "Connected";
+}
 
 /** The agent's "typing" lasts until its next bubble, or this long. */
 const TYPING_SHOWN_MS = 20_000;
@@ -49,6 +59,7 @@ function send(frame) {
 function receive(frame) {
   switch (frame.type) {
     case "history":
+      setPaused(frame.paused);
       list.replaceChildren();
       for (const message of frame.messages) show(message.role, message.text);
       // The history already shows what the conversation received; only the rest goes again, and
@@ -65,6 +76,13 @@ function receive(frame) {
       break;
     case "typing":
       setTyping(frame.active);
+      break;
+    case "paused":
+      setTyping(false);
+      setPaused(true);
+      break;
+    case "resumed":
+      setPaused(false);
       break;
     case "accepted":
     case "rejected": {
@@ -91,7 +109,7 @@ function connect() {
   socket.addEventListener("open", () => {
     wasOpen = true;
     refused = 0;
-    status.textContent = "Connected";
+    setPaused(paused);
   });
   socket.addEventListener("message", (event) => {
     try {
@@ -101,6 +119,7 @@ function connect() {
     }
   });
   socket.addEventListener("close", () => {
+    pause.disabled = true;
     refused = wasOpen ? 0 : refused + 1;
     status.textContent =
       refused >= 3 ? "Can't connect. If your login expired, reload the page." : "Reconnecting…";
@@ -120,9 +139,15 @@ form.addEventListener("submit", (event) => {
   unconfirmed.set(id, text);
   show("user", text, id);
   send({ type: "message", id, text });
+  // The next message ends a pause.
+  if (paused) setPaused(false);
   send({ type: "typing", active: false });
   lastTypingSentAt = 0;
   input.value = "";
+});
+
+pause.addEventListener("click", () => {
+  send({ type: "pause" });
 });
 
 input.addEventListener("keydown", (event) => {

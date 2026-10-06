@@ -1,18 +1,5 @@
 export { type ClefOptions, ClefQualifier, type ClefRun } from "./clef.ts";
 export { type Decision, type RunHooks, runDecision, type Sourced } from "./decision.ts";
-export {
-  type Bands,
-  CLEF_BANDS,
-  type EndOfTurn,
-  type EndOfTurnContext,
-  endOfTurn,
-  endOfTurnBands,
-  HEURISTIC_BANDS,
-  heuristicFinished,
-  JEV_BANDS,
-  type QuietWindowPolicy,
-  quietWindowMs,
-} from "./end-of-turn.ts";
 export { FakeQualifier } from "./fake.ts";
 export {
   type JevFetch,

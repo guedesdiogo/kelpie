@@ -5,10 +5,14 @@ import type { ConversationPorts } from "./ports.ts";
 // The webchat's socket protocol (issue #40). The socket lives on the conversation's object;
 // ingress verifies the owner's Cloudflare Access login and admits them before the upgrade.
 
-/** What the browser sends: a message with an id of its own choosing, or whether it is typing. */
+/**
+ * What the browser sends: a message with an id of its own choosing, whether it is typing, or a
+ * pause that holds every answer until the next message.
+ */
 export type ClientFrame =
   | { type: "message"; id: string; text: string }
-  | { type: "typing"; active: boolean };
+  | { type: "typing"; active: boolean }
+  | { type: "pause" };
 
 /** One line of the conversation as the page shows it. */
 export interface ShownMessage {
@@ -23,9 +27,11 @@ export type ServerFrame =
    * The conversation so far, and the ids of the page's latest messages it has received: the page
    * shows and resends only the ones it doesn't list.
    */
-  | { type: "history"; messages: ShownMessage[]; received: string[] }
+  | { type: "history"; messages: ShownMessage[]; received: string[]; paused: boolean }
   | { type: "bubble"; text: string }
   | { type: "typing"; active: boolean }
+  | { type: "paused" }
+  | { type: "resumed" }
   | { type: "accepted"; id: string }
   | { type: "rejected"; id: string; reason: string };
 
@@ -64,6 +70,7 @@ export function parseClientFrame(message: unknown): ClientFrame | null {
   if (frame?.type === "typing" && typeof frame.active === "boolean") {
     return { type: "typing", active: frame.active };
   }
+  if (frame?.type === "pause") return { type: "pause" };
   return null;
 }
 

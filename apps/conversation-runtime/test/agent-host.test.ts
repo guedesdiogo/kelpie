@@ -27,6 +27,26 @@ describe("AgentHost", () => {
     expect(await host("fresh").config()).toEqual({ settings: DEFAULT_SETTINGS, promptVersion: 0 });
   });
 
+  it("drops the end-of-turn windows and the old 10 s cap from settings stored before ADR-0024", async () => {
+    const stub = host("legacy");
+    await stub.config();
+    const legacy = {
+      ...DEFAULT_SETTINGS,
+      tier: "frontier",
+      quietWindow: { finishedMs: 1_500, defaultMs: 3_000, unfinishedMs: 6_000 },
+      maxWaitMs: 10_000,
+    };
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT OR REPLACE INTO state (key, value) VALUES ('settings', ?)",
+        JSON.stringify(legacy),
+      );
+    });
+
+    const { settings } = await stub.config();
+    expect(settings).toEqual({ ...DEFAULT_SETTINGS, tier: "frontier" });
+  });
+
   it("applies a change, and bumps the prompt version only when the system prompt changes", async () => {
     const stub = host("versions");
 

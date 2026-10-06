@@ -66,6 +66,9 @@ form {
   gap: 0.5rem;
   padding: 1rem;
 }
+button:disabled {
+  opacity: 0.5;
+}
 textarea {
   flex: 1;
   font: inherit;

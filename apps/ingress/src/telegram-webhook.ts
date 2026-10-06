@@ -8,7 +8,13 @@ import {
 } from "@kelpie/channels";
 import { normalizeTelegramUpdate, TELEGRAM_SECRET_HEADER } from "@kelpie/channels/telegram";
 import { isAgentId } from "@kelpie/config";
-import type { Destination, InboundMessage, IngestResult } from "@kelpie/conversation/contract";
+import type {
+  Destination,
+  InboundMessage,
+  IngestResult,
+  PauseResult,
+  PauseTarget,
+} from "@kelpie/conversation/contract";
 
 /**
  * Telegram's updates are small: a message's text is at most 4,096 characters, and the message it
@@ -22,6 +28,8 @@ const MAX_BODY_BYTES = 256 * 1024;
 const WEBHOOK_SECRET = /^[A-Za-z0-9_-]{1,256}$/;
 /** `/start`, as a deep link sends it: `t.me/<bot>?start=<payload>` arrives as `/start <payload>`. */
 const START_COMMAND = /^\/start(?:\s+(\S+))?\s*$/;
+/** `/pause`, also as `/pause@<bot>` when the menu or a mention names the bot (issue #134). */
+const PAUSE_COMMAND = /^\/pause(?:@\w+)?$/i;
 
 export interface TelegramWebhookDeps {
   webhooks: ChannelWebhooksContract;
@@ -32,6 +40,8 @@ export interface TelegramWebhookDeps {
   >;
   /** Hands a message to the conversation's object, named by `conversationName`. */
   ingest(name: string, message: InboundMessage): Promise<IngestResult>;
+  /** Pauses the conversation until the owner's next message. */
+  pause(name: string, target: PauseTarget): Promise<PauseResult>;
 }
 
 /**
@@ -45,6 +55,7 @@ export interface TelegramWebhookDeps {
  *   malformed, too large, from a group or a stranger (ADR-0004), or without text.
  * - A stranger gets nothing. Their `/start <code>` may pair them, with a code the owner issued;
  *   anything else is noticed to the owner once (Story 3.6). A `/start` never reaches the model.
+ * - The owner's `/pause` pauses the conversation until their next message (issue #134).
  * - The answer comes once the conversation has stored the message. If egress, the Directory or the
  *   conversation fails, a 503 makes Telegram retry, and the conversation drops the duplicate. A
  *   message the conversation fails on every time holds the bot's later updates back until Telegram
@@ -101,6 +112,18 @@ async function deliver(event: CanonicalEvent, deps: TelegramWebhookDeps): Promis
     return;
   }
   const destination: Destination = { channel: event.channel, threadId: event.threadId };
+  // A pause never reaches the model; the conversation confirms it to the owner.
+  if (PAUSE_COMMAND.test(text.trim())) {
+    const paused = await deps.pause(conversationName(event.agentId, destination), {
+      agentId: event.agentId,
+      destination,
+      providerMessageId: event.providerMessageId,
+    });
+    if (paused.status === "rejected") {
+      console.warn("ingress: the conversation refused a pause", paused.reason);
+    }
+    return;
+  }
   const result = await deps.ingest(conversationName(event.agentId, destination), {
     agentId: event.agentId,
     providerMessageId: event.providerMessageId,

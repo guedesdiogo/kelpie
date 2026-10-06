@@ -14,13 +14,6 @@ import type {
 } from "@kelpie/context-store/contract";
 import type { Destination } from "@kelpie/conversation/contract";
 import { fromNdjsonStream, type LlmEvent, type ModelTier, type RoutedRequest } from "@kelpie/llm";
-import {
-  type GatewayQualifyOutcome,
-  type Qualifier,
-  type QualifierBackend,
-  type Question,
-  RemoteQualifier,
-} from "@kelpie/qualifier";
 
 /** One model call: its events, and a way to stop it on the gateway's side. */
 export interface ModelCall {
@@ -60,8 +53,6 @@ export interface ConversationPorts {
    * unreachable, or doesn't answer in time, throws.
    */
   recall(agentId: string, question: string, options: RecallOptions): Promise<RecallResult>;
-  /** The end-of-turn qualifier the agent chose, or null for the heuristic alone (ADR-0009). */
-  qualifierFor(backend: QualifierBackend): Qualifier | null;
   now(): number;
   /** Waits `ms`, or rejects as soon as `signal` aborts. */
   sleep(ms: number, signal: AbortSignal): Promise<void>;
@@ -76,11 +67,6 @@ interface LlmGatewayBinding {
     events(): Promise<ReadableStream<Uint8Array>>;
     cancel(): Promise<void>;
   }>;
-  qualify(
-    state: unknown,
-    questions: Record<string, Question>,
-    backend: QualifierBackend,
-  ): Promise<GatewayQualifyOutcome>;
 }
 
 let portsForTesting: ConversationPorts | undefined;
@@ -161,10 +147,6 @@ function productionPorts(env: Env): ConversationPorts {
         }
       }
     },
-    // The qualifiers run in llm-gateway: Clef through its AI binding, Jev with the key it holds
-    // (without one, Jev answers not_configured at once).
-    qualifierFor: (backend) =>
-      new RemoteQualifier((state, questions) => gateway.qualify(state, questions, backend)),
     now: () => Date.now(),
     sleep,
   };

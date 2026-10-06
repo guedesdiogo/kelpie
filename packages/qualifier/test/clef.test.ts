@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ClefQualifier, type ClefRun, endOfTurn, type Question } from "../src/index.ts";
+import { ClefQualifier, type ClefRun, type Question } from "../src/index.ts";
 
 // Recorded from Workers AI in spike #117 (2026-10-06, clef-flash, "vocês entregam em Niterói?").
 const RECORDED = {
@@ -8,7 +8,7 @@ const RECORDED = {
   usage: { input_tokens: 181, output_tokens: 0 },
 };
 
-const question = endOfTurn.questions({ fragments: [] }).user_finished as Question;
+const question: Question = { type: "noul", instructions: "Has the user finished their message?" };
 const questions: Record<string, Question> = { "turn.end::user_finished": question };
 
 const answering = (body: unknown) => vi.fn<ClefRun>(async () => body);
