@@ -6,6 +6,7 @@ import {
   type SendOutcome,
   typingRenewIntervalMs,
 } from "@kelpie/channels";
+import type { ContextStoreContract, WriteResult } from "@kelpie/context-store/contract";
 import type { Destination } from "@kelpie/conversation/contract";
 import { fromNdjsonStream, type LlmEvent, type ModelTier, type RoutedRequest } from "@kelpie/llm";
 import {
@@ -39,6 +40,15 @@ export interface ConversationPorts {
   typing(agentId: string, destination: Destination): Promise<void>;
   /** Keeps "typing" showing, renewed before it lapses, until `signal` aborts. */
   keepTyping(agentId: string, destination: Destination, signal: AbortSignal): Promise<void>;
+  /**
+   * Writes memory files to the vault through the Context Store (ADR-0020 §3). A refusal is a value;
+   * a store that is unreachable, or doesn't answer in time, throws.
+   */
+  remember(
+    agentId: string,
+    changes: { path: string; content: string | null }[],
+    summary: string,
+  ): Promise<WriteResult>;
   /** The end-of-turn qualifier the agent chose, or null for the heuristic alone (ADR-0009). */
   qualifierFor(backend: QualifierBackend): Qualifier | null;
   now(): number;
@@ -77,6 +87,8 @@ function productionPorts(env: Env): ConversationPorts {
   const gateway = env.LLM_GATEWAY as unknown as LlmGatewayBinding;
   // A service binding to channel-egress's ChannelEgress entrypoint, which answers with values.
   const egress = env.CHANNEL_EGRESS as unknown as ChannelEgressContract;
+  // A service binding to context-store's ContextStore entrypoint.
+  const contextStore = env.CONTEXT_STORE as unknown as ContextStoreContract;
   return {
     async generate(tier, request) {
       const generation = await gateway.generate(tier, request);
@@ -104,6 +116,8 @@ function productionPorts(env: Env): ConversationPorts {
       };
     },
     send: (agentId, destination, text, options) => egress.send(agentId, destination, text, options),
+    remember: (agentId, changes, summary) =>
+      withTimeout(contextStore.write(agentId, changes, summary), REMEMBER_TIMEOUT_MS),
     async typing(agentId, destination) {
       await bounded(egress.typing(agentId, destination));
     },
@@ -153,6 +167,25 @@ async function bounded<T>(call: Promise<T>): Promise<T | undefined> {
   });
   try {
     return await Promise.race([call.catch(() => undefined), timeout]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
+ * A memory write the Context Store hasn't answered after this long counts as failed, to be tried
+ * again; it only queues the files, so it answers well within this. A schedule runs it, and the
+ * object's schedules run one at a time, so it must not hold up a reply's.
+ */
+const REMEMBER_TIMEOUT_MS = 10_000;
+
+async function withTimeout<T>(call: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`no answer after ${ms} ms`)), ms);
+  });
+  try {
+    return await Promise.race([call, timeout]);
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
