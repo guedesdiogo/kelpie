@@ -311,7 +311,7 @@ What keeps memory clean as it grows (#111), without touching how notes rank.
 Once a day, the Context Store's alarm looks at the index, after GitHub's work and the held files. It writes what it finds to one page, `memory/_lint/report.md`, as links to the notes.
 - **Cold notes:** sessions and events nobody recalls any more. Facts don't decay, and pinned or evergreen notes are exempt.
   - A note's retention is e^(−0.02 × days old), plus 0.6 × ln(1 + recalls) × e^(−0.04 × days since the last recall). A note is cold below 0.2: about 80 days after it was written, if nobody recalled it.
-  - **When it was written:** its `updated`, else the date its file name starts with, else when the index first saw it. So a vault synced for the first time, or an index rebuilt, doesn't look new.
+  - **When it was written:** its `updated`, never later than its commit; else the date its file name starts with (`2026-03-04-standup.md`, `2026-03-04.md`); else when the index first saw it. So a vault synced for the first time, or an index rebuilt, doesn't look new.
   - An event ages from its end (`invalid_at`), then its start, then when it was written, so one still ahead isn't cold.
   - A recall is a turn that packed the note: the Context Store's access counts.
 - **Duplicates:** the same content at several paths, and the same title on several notes of one scope, compared as titles are. Projects' READMEs share a title, and that is no duplicate.
@@ -325,7 +325,8 @@ How the page behaves:
 - **Report only.** In v1 it is the lifecycle's only write: nothing listed is changed, merged or removed. The retention score never reaches retrieval.
 - **The same findings write the same page,** sorted and without a time stamp, so a day without news makes no commit. The page is removed when every list is empty.
 - **Notes can't write Markdown into the page:**
-  - Titles and paths can't break out of their links. Controls, invisible and bidirectional characters are dropped, and so are brackets, pipes, angle brackets, exclamation marks, backticks, backslashes and percent signs. A path keeps its `!`.
+  - Titles can't break out of their links. Controls, invisible and bidirectional characters are dropped, and so are brackets, pipes, angle brackets, exclamation marks, backticks, backslashes and percent signs. The joiners that hold emoji and some scripts together stay.
+  - A path is linked as it is, `!` included. A path that holds any of those characters, or `#` or `^`, or is longer than 200 characters, is shown as code instead.
   - An entity, outside any link, goes in a code span.
   - Titles are cut to 120 characters, paths to 200, and a line lists 10 notes, then how many more.
 - **Never memory.** `placeOf` leaves `memory/_…/` out of the index, so recall, the jobs and link previews never read it.
@@ -343,7 +344,7 @@ Before a new memory is written, `decideWrite` says whether it is news (#111). Th
   1. the same title;
   2. a shared entity;
   3. a vector at or above the low end of the model's contradiction band, when the writer embedded the memory.
-- **The same title, body and validity** as a candidate is a `NOOP` with no question.
+- **Its exact twin is a `NOOP` with no question:** a note of its scope and kind with the same title, body and validity, looked for first among every note with its title, expired ones too.
 - **Otherwise the agent's qualifier** (Clef, or Jev) answers one `choice` per candidate in one call: duplicate, refines, replaces or unrelated. The memory and the notes are in its state, marked as data, not instructions, at 1,200 characters each.
   - A duplicate anywhere is a `NOOP`. A duplicate judged on text cut to fit counts as refining the note, so a new tail isn't dropped.
   - Then the first note the memory replaces is superseded.

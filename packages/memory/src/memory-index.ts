@@ -710,7 +710,10 @@ export class MemoryIndex {
       blob_sha: string;
     }>(
       `SELECT path, scope, title, title_key, kind, tier, pinned, evergreen, recorded_at, valid_from,
-              invalid_at, json_extract(frontmatter, '$.updated') AS updated, blob_sha
+              invalid_at,
+              -- Too deep for SQLite's JSON functions: no 'updated', rather than no report.
+              CASE WHEN json_valid(frontmatter) THEN json_extract(frontmatter, '$.updated') END AS updated,
+              blob_sha
        FROM versions WHERE is_current = 1 ORDER BY path`,
     ).map((row) => ({
       path: row.path,

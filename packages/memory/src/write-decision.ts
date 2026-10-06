@@ -2,7 +2,7 @@
 // this typed choice (see #111's reference check): Mem0 asks a model to ADD, UPDATE, DELETE or NOOP
 // against the closest facts; ai-memory and hermes let the model pick a path or a replace. Kelpie
 // looks for close notes without a model first, and asks the agent's qualifier only about those.
-import { foldKey, normalizeEntities } from "./entities.ts";
+import { normalizeEntities } from "./entities.ts";
 import { CONTRADICTION_BANDS } from "./lifecycle.ts";
 import type { MemoryIndex, SearchHit, SearchOptions } from "./memory-index.ts";
 import { bodyWithoutHeading } from "./retrieve.ts";
@@ -95,7 +95,8 @@ const instant = (value: string | undefined) =>
  * Only current, unexpired notes in the memory's scope and of its kind are candidates, so a
  * decision never points at another scope's note. Three lookups find them, taken in turn up to five:
  * the same title, a shared entity, and a vector at or above the low end of the model's contradiction
- * band. A candidate with the same title, body and validity is a NOOP with no question.
+ * band. Before them, a note of its scope and kind with the same title, body and validity, expired or
+ * not, makes a NOOP with no question.
  *
  * Otherwise the qualifier answers one `choice` per candidate. A duplicate anywhere is a NOOP, then
  * the first note the memory replaces is superseded, then the first it refines is updated. A
@@ -112,6 +113,25 @@ export async function decideWrite(
   options: DecideWriteOptions,
 ): Promise<WriteDecision> {
   const add: WriteDecision = { action: "ADD", source: "heuristic" };
+  const body = words(input.body);
+  const validFrom = instant(input.validFrom);
+  const invalidAt = instant(input.invalidAt);
+  // Its exact twin, among every note with its title, expired ones too: a fact written again is no
+  // news, whenever it was true.
+  const twin = index
+    .titled(input.title, { scopes: [input.scope], limit: LOOKUP })
+    .filter((hit) => hit.kind === input.kind)
+    .find((hit) => {
+      const version = index.current(hit.path);
+      return (
+        version !== null &&
+        words(bodyWithoutHeading(version.title, version.body)) === body &&
+        version.validFrom === validFrom &&
+        version.invalidAt === invalidAt
+      );
+    });
+  if (twin !== undefined) return { action: "NOOP", path: twin.path, source: "heuristic" };
+
   const scoped = { scopes: [input.scope], limit: LOOKUP, notExpiredAt: options.now };
   const keys = normalizeEntities(input.entities ?? []).map((entity) => entity.key);
   const lookups = [
@@ -135,17 +155,6 @@ export async function decideWrite(
     const version = index.current(hit.path);
     return version === null ? [] : [{ path: hit.path, version }];
   });
-  const body = words(input.body);
-  const validFrom = instant(input.validFrom);
-  const invalidAt = instant(input.invalidAt);
-  const same = notes.find(
-    ({ version }) =>
-      foldKey(words(version.title)) === foldKey(words(input.title)) &&
-      words(bodyWithoutHeading(version.title, version.body)) === body &&
-      version.validFrom === validFrom &&
-      version.invalidAt === invalidAt,
-  );
-  if (same !== undefined) return { action: "NOOP", path: same.path, source: "heuristic" };
   if (options.qualifier === null || notes.length === 0) return add;
 
   const ids = notes.map((_note, i) => `c${i}`);

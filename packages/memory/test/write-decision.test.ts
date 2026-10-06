@@ -309,6 +309,50 @@ describe("decideWrite", () => {
       },
     );
   });
+  it("finds the memory's exact twin among every note with its title, expired ones too", async () => {
+    const twin = memory("Ana mora no Porto", {
+      entities: ["Ana Souza"],
+      body: "Ana mora no Porto desde 2025.",
+      invalidAt: "2026-10-15",
+    });
+    await withNotes(
+      "decide-twin",
+      [
+        memory("Ana mora no Porto", { entities: ["Ana Souza"], path: "knowledge/a.md" }),
+        memory("Ana mora no Porto", {
+          entities: ["Ana Souza"],
+          path: "knowledge/b.md",
+          body: "Outra.",
+        }),
+        { ...twin, path: "knowledge/c.md" },
+        memory("Ana gosta de café", { entities: ["Ana Souza"] }),
+        memory("Ana gosta de chá", { entities: ["Ana Souza"] }),
+      ],
+      async (index) => {
+        index.putEmbeddings(
+          "fake-model",
+          index
+            .embeddingTexts("fake-model")
+            .map((item) => ({ blobSha: item.blobSha, vector: [1, 0] })),
+        );
+        expect(
+          await decide(index, twin, {
+            qualifier: null,
+            vector: { model: "fake-model", values: [1, 0] },
+            bands: { "fake-model": [0.7, 0.95] },
+          }),
+        ).toEqual({ action: "NOOP", path: "knowledge/c.md", source: "heuristic" });
+        // An inherited key is no model with a band.
+        expect(
+          await decide(index, memory("Bruno mora em Faro"), {
+            qualifier: null,
+            vector: { model: "constructor", values: [1, 0] },
+          }),
+        ).toEqual({ action: "ADD", source: "heuristic" });
+      },
+    );
+  });
+
   it("never offers a note that has expired", async () => {
     await withNotes(
       "decide-expired",

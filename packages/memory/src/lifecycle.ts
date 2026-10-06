@@ -73,8 +73,11 @@ type LifecycleNote = ReturnType<MemoryIndex["lifecycleNotes"]>[number] & { writt
  */
 function writtenAt(note: ReturnType<MemoryIndex["lifecycleNotes"]>[number]): number {
   const updated = typeof note.updated === "string" ? instantOf(note.updated) : null;
-  if (updated !== null) return updated;
-  const dated = /^(\d{4}-\d{2}-\d{2})-/.exec(note.path.slice(note.path.lastIndexOf("/") + 1))?.[1];
+  // Kelpie writes `updated` before it commits, so a later one can't be right.
+  if (updated !== null) return Math.min(updated, note.recordedAt);
+  const dated = /^(\d{4}-\d{2}-\d{2})(?=[-_ .])/.exec(
+    note.path.slice(note.path.lastIndexOf("/") + 1),
+  )?.[1];
   return dated !== undefined && isDate(dated)
     ? (instantOf(dated) ?? note.recordedAt)
     : note.recordedAt;
@@ -221,22 +224,33 @@ function cosine(a: Float32Array, b: Float32Array): number {
  * What a title or an entity may not hold: controls, invisible and bidirectional characters, and
  * what Markdown, Obsidian or HTML read as syntax there (links, embeds, code, escapes, comments).
  */
-const UNSAFE_TEXT = /[\p{Cc}\p{Cf}[\]|<>!`\\%]/gu;
-/** In a link's path, `!` is no embed, and some file names have one; `#` and `^` would aim lower. */
-const UNSAFE_PATH = /[\p{Cc}\p{Cf}[\]|<>`\\%#^]/gu;
+const UNSAFE_TEXT = /[\p{Cc}\p{Cf}[\]|<>!`\\%]/u;
+/**
+ * What a link's path may not hold. `!` is no embed there, and some file names have one; `#` and `^`
+ * would aim at a heading or a block.
+ */
+const UNSAFE_PATH = /[\p{Cc}\p{Cf}[\]|<>`\\%#^]/u;
+/** In a code span, only a backtick or a line break could end it. */
+const UNSAFE_CODE = /[\p{Cc}\p{Cf}`]/u;
+/** Invisible, but they hold emoji and some scripts together. */
+const JOINERS = new Set(["\u200c", "\u200d"]);
 
 /** Text from a note, safe inside a link or a code span, cut to `max` characters. */
 function plain(text: string, max: number, unsafe: RegExp = UNSAFE_TEXT): string {
-  return Array.from(text.replace(unsafe, " ").replace(/\s+/g, " ").trim())
-    .slice(0, max)
-    .join("")
-    .trim();
+  const safe = text.replace(new RegExp(unsafe.source, "gu"), (char) =>
+    JOINERS.has(char) ? char : " ",
+  );
+  return Array.from(safe.replace(/\s+/g, " ").trim()).slice(0, max).join("").trim();
 }
 
 /** A wikilink to a note, from the vault's root, that a title or a path can't break out of. */
 function link(note: NoteRef): string {
-  const path = plain(note.path.replace(/\.md$/, ""), PATH_CHARS, UNSAFE_PATH);
-  return `[[${path}|${plain(note.title, TITLE_CHARS) || path}]]`;
+  const target = note.path.replace(/\.md$/, "");
+  // A path no link can name, or too long to show whole, is shown as code: nothing in it is syntax.
+  if (UNSAFE_PATH.test(target) || Array.from(target).length > PATH_CHARS) {
+    return `\`${plain(note.path, PATH_CHARS, UNSAFE_CODE)}\``;
+  }
+  return `[[${target}|${plain(note.title, TITLE_CHARS) || target}]]`;
 }
 
 /** A group's notes as links, the first GROUP_NOTES of them. */
