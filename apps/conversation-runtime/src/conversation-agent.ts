@@ -43,6 +43,8 @@ import {
 
 /** The most history rows a webchat socket is shown when it opens. */
 const WEBCHAT_REPLAY_ROWS = 50;
+/** While the owner types in the webchat, buffered messages wait at least this long for the rest. */
+const TYPING_HOLD_MS = 4_000;
 
 /** Bounds on what one conversation accepts. */
 export const LIMITS = {
@@ -157,7 +159,11 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   override async onMessage(connection: Connection, message: WSMessage): Promise<void> {
     const admission = connection.state as WebchatAdmission | null;
     const frame = parseClientFrame(message);
-    if (!admission || frame?.type !== "message") return;
+    if (!admission || !frame) return;
+    if (frame.type === "typing") {
+      if (frame.active) await this.#serialized(() => this.#holdForTyping());
+      return;
+    }
     const result = await this.ingest({
       agentId: admission.agentId,
       // The page picks the id, so a resend after a reconnect is deduplicated like any retry.
@@ -829,6 +835,31 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       this.#set("flushAt", flushAt);
     }
     this.#set("plannedEpoch", epoch);
+  }
+
+  /**
+   * The owner is typing in the webchat: a planned flush moves to at least `TYPING_HOLD_MS` from
+   * now, never past the cap counted from the first buffered message. Typing never plans a flush of
+   * its own, or brings one forward.
+   */
+  async #holdForTyping(): Promise<void> {
+    const flushAt = this.#get<number | null>("flushAt", null);
+    const first = this.#pendingInbound()[0];
+    if (flushAt === null || !first) return;
+    const epoch = this.#epoch();
+    const { settings } = await this.#config();
+    const target = Math.min(
+      Math.max(flushAt, this.#ports.now() + TYPING_HOLD_MS),
+      first.receivedAt + settings.maxWaitMs,
+    );
+    // A message or a flush may have changed the plan while the settings were read.
+    if (target <= flushAt || epoch !== this.#epoch() || this.#get("flushAt", null) !== flushAt) {
+      return;
+    }
+    await this.#cancelFlushSchedule();
+    const schedule = await this.schedule(new Date(target), "flush", { epoch });
+    this.#set("flushSchedule", schedule.id);
+    this.#set("flushAt", target);
   }
 
   #serialized(step: () => Promise<void>): Promise<void> {

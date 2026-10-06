@@ -1,6 +1,8 @@
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { WEBCHAT_ADMISSION_HEADER } from "@kelpie/conversation/contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ConversationAgent } from "../src/conversation-agent.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import { type FakeWorld, fakeWorld, reply } from "./fakes.ts";
 
@@ -36,6 +38,16 @@ async function open(name: string, admission: unknown = owner) {
 }
 
 const ofType = (frames: Frame[], type: string) => frames.filter((frame) => frame.type === type);
+
+/** When the conversation's flush schedules are due, in the SDK's whole seconds. */
+const flushTimes = (name: string) =>
+  runInDurableObject(agent(name), (instance: ConversationAgent) =>
+    instance
+      .getSchedules()
+      .filter((schedule) => schedule.callback === "flush")
+      .map((schedule) => schedule.time),
+  );
+const seconds = (ms: number) => Math.floor(ms / 1_000);
 
 function use(world: FakeWorld): FakeWorld {
   replacePortsForTesting(world.ports);
@@ -160,5 +172,44 @@ describe("webchat sockets", () => {
     );
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(ofType(chat.frames, "accepted")).toEqual([]);
+  });
+});
+
+describe("the owner's typing in the webchat", () => {
+  it("schedules nothing while no message is buffered", async () => {
+    use(fakeWorld([]));
+    const name = "assistant:webchat:typing-idle";
+    const chat = await open(name);
+    await vi.waitFor(() => expect(chat.frames).toHaveLength(1));
+    chat.send({ type: "typing", active: true });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await flushTimes(name)).toEqual([]);
+  });
+
+  it("holds the buffered messages while the owner types, never past the wait cap", async () => {
+    const world = use(fakeWorld([]));
+    const name = "assistant:webchat:typing-hold";
+    const start = world.clock;
+    const chat = await open(name);
+    // A trailing "então" looks unfinished: the flush waits the long window, 6 s.
+    chat.send({ type: "message", id: "c1", text: "então" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
+    expect(await flushTimes(name)).toEqual([seconds(start + 6_000)]);
+
+    // Typing pushes the flush to 4 s from now...
+    world.clock = start + 5_000;
+    chat.send({ type: "typing", active: true });
+    await vi.waitFor(async () => expect(await flushTimes(name)).toEqual([seconds(start + 9_000)]));
+
+    // ...but never past 10 s from the first message, and there is only ever one schedule.
+    world.clock = start + 8_000;
+    chat.send({ type: "typing", active: true });
+    await vi.waitFor(async () => expect(await flushTimes(name)).toEqual([seconds(start + 10_000)]));
+
+    // Stopping doesn't bring the flush forward.
+    chat.send({ type: "typing", active: false });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await flushTimes(name)).toEqual([seconds(start + 10_000)]);
   });
 });
