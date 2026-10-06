@@ -79,13 +79,16 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
   - **`search(agent, query, {scopes, k?, asOf?, validAt?, qualifier?})`,** for the agent's `memory_search` (#126).
     - It is recall's retrieval and rerank, answered as hits instead of a packed block, in #110's fence: 3 by default, 10 at most.
     - It returns each hit's scope, validity and provenance too, and counts no access.
+    - It answers `vault_off` or `unavailable` instead of an empty list, so the model doesn't take a failing memory for an empty one.
   - **`readNote(agent, path, {scopes, offset?})`,** for the agent's `memory_read` (#126).
     - **What opens:** only a current note of memory's index within the scopes. Anything else is "not found", the same answer whether the file exists or not.
     - **A page:** under 9,500 characters, fence included, with `nextOffset`.
     - **The first page** lists the links the scopes allow, and counts as one access.
   - **`writeNote(agent, input, {scopes, sources})`,** the single writer behind the agent's `memory_write` (#126).
-    - **Checks first:** it runs `writeMemory`'s checks, removes secrets, and keeps a found note's kind and scope.
-    - **Writes:** it queues the note like any write, and answers `written` or `unchanged`, with the path.
+    - **Checks first:** it runs `writeMemory`'s checks, removes secrets, refuses session pages and conflict markers, and keeps a found note's kind and scope.
+    - **A found note** keeps what the model left out ([memory-format.md](memory-format.md#retrieval)).
+    - **Writes:** it queues the note like any write, under a headline that doesn't name it, and answers `written` or `unchanged`, with the path. The path is chosen and the write queued in one stretch, without a pause.
+    - **Provenance:** a commit whose answer was lost still counts as Kelpie's. A file the owner removes leaves no record.
     - **Refusals:** `invalid` comes with the problems found, for the model to fix. A path the turn can't see is `not_found`, the same as a missing note. A scope the turn can't write to is `scope_not_allowed`.
   - **Access counts:** each recall counts the notes it packed, in one write, in a table outside the index. A rebuild keeps them, and they never reach git.
   - **The memory report** (#111): once a day, after the embeddings and the held files, the alarm writes what memory's index finds (cold notes, duplicates, possible contradictions) to `memory/_lint/report.md`, or removes the page when memory is clean ([memory-format.md](memory-format.md#the-daily-report)).

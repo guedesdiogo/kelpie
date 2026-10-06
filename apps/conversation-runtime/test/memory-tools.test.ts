@@ -24,7 +24,7 @@ const HITS =
 /** A Context Store that answers from `read` and `write`, and logs what it was asked. */
 function fakeStore(
   read: (path: string, offset: number) => ReadNoteResult = () => notFound,
-  write: (input: MemoryWriteInput) => WriteNoteResult = () => ({
+  write: (input: MemoryWriteInput) => WriteNoteResult | Promise<never> = () => ({
     ok: true,
     action: "written",
     path: "memory/notes/x.md",
@@ -34,7 +34,11 @@ function fakeStore(
   const store: MemoryStore = {
     async search(agentId: string, query: string, options: MemorySearchOptions) {
       calls.push({ method: "search", agentId, arg: query, options });
-      return query.includes("nada") ? { text: "", notes: [] } : { text: HITS, notes: [] };
+      if (query.includes("desligada")) return { ok: false, reason: "vault_off" };
+      if (query.includes("falha")) return { ok: false, reason: "unavailable" };
+      return query.includes("nada")
+        ? { ok: true, text: "", notes: [] }
+        : { ok: true, text: HITS, notes: [] };
     },
     async readNote(agentId: string, path: string, options: ReadNoteOptions) {
       calls.push({ method: "readNote", agentId, arg: path, options });
@@ -50,12 +54,15 @@ function fakeStore(
 
 const notFound: ReadNoteResult = { ok: false, reason: "not_found" };
 
-const context = (): ToolContext => ({
+let turns = 0;
+/** A fresh turn's context, unless `turn` names one. */
+const context = (turn = `turn-${turns++}`): ToolContext => ({
   actor: { userId: "u-owner", role: "owner", via: "agent:assistant" },
   agentId: "assistant",
+  turn,
   scopes: ["global", "conversation/familia"],
   qualifier: "jev",
-  source: "telegram/chat-1, 2026-10-06",
+  source: "telegram:chat-1, 2026-10-06",
   signal: new AbortController().signal,
 });
 
@@ -94,6 +101,12 @@ describe("memory tools", () => {
     expect(await search?.run({ query: "nada" }, context())).toEqual({
       output: "No notes match.",
     });
+    // Memory that is off, or failing, isn't empty memory.
+    expect(await search?.run({ query: "desligada" }, context())).toEqual({
+      output: "Memory is off: the vault isn't connected.",
+      isError: true,
+    });
+    await expect(search?.run({ query: "falha" }, context())).rejects.toThrow();
   });
 
   it("reads a note's pages, and says so when there is none", async () => {
@@ -163,7 +176,7 @@ describe("memory_write", () => {
         arg: "Café da Ana",
         options: {
           scopes: ["global", "conversation/familia"],
-          sources: ["telegram/chat-1, 2026-10-06"],
+          sources: ["telegram:chat-1, 2026-10-06"],
         },
       },
     ]);
@@ -211,11 +224,12 @@ describe("memory_write", () => {
   it("saves 5 memories a turn, and stops a model that keeps failing", async () => {
     const { store, calls } = fakeStore();
     const write = (await toolsOf(store)).get("memory_write");
-    const turn = context();
+    // Each call gets a signal of its own, as the host gives it; the turn is what counts.
+    const turn = () => context("one-turn");
     for (let i = 0; i < 5; i += 1) {
-      expect((await write?.run({ ...note, title: `Nota ${i}` }, turn))?.isError).toBeUndefined();
+      expect((await write?.run({ ...note, title: `Nota ${i}` }, turn()))?.isError).toBeUndefined();
     }
-    expect(await write?.run({ ...note, title: "Nota 5" }, turn)).toEqual({
+    expect(await write?.run({ ...note, title: "Nota 5" }, turn())).toEqual({
       output: "Not saved: this turn already saved 5 memories. Finish with what you have.",
       isError: true,
     });
@@ -229,13 +243,21 @@ describe("memory_write", () => {
       problems: ["`kind` is invalid"],
     }));
     const stubborn = (await toolsOf(refusing.store)).get("memory_write");
-    const another = context();
-    for (let i = 0; i < 3; i += 1) await stubborn?.run(note, another);
-    expect(await stubborn?.run(note, another)).toEqual({
+    for (let i = 0; i < 3; i += 1) await stubborn?.run(note, context("another"));
+    expect(await stubborn?.run(note, context("another"))).toEqual({
       output: "Not saved: memory writes failed 3 times in this turn. Stop retrying them.",
       isError: true,
     });
     expect(refusing.calls).toHaveLength(3);
+
+    // A store that fails counts as a failure too.
+    const down = fakeStore(undefined, () => Promise.reject(new Error("timeout")));
+    const failing = (await toolsOf(down.store)).get("memory_write");
+    for (let i = 0; i < 3; i += 1) {
+      await expect(failing?.run(note, context("down"))).rejects.toThrow();
+    }
+    expect((await failing?.run(note, context("down")))?.isError).toBe(true);
+    expect(down.calls).toHaveLength(3);
   });
 
   it("checks its input before asking the store", async () => {
@@ -253,6 +275,36 @@ afterEach(() => {
 });
 
 describe("memory tools in a turn", () => {
+  it("saves 5 memories at most in a turn, across its rounds", async () => {
+    const writes = (n: number, from: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        name: "memory_write",
+        input: { title: `Nota ${from + i}`, body: "Algo.", kind: "note", level: "explicit" },
+      }));
+    const world = fakeWorld([
+      toolCalls(...writes(3, 0)),
+      toolCalls(...writes(4, 3)),
+      reply("Feito."),
+    ]);
+    const { store, calls } = fakeStore();
+    world.tools = [memoryTools(store)];
+    replacePortsForTesting(world.ports);
+    const stub = env.CONVERSATION_AGENT.getByName("memory-tools-bounds");
+    await stub.ingest({
+      agentId: "assistant",
+      providerMessageId: "m1",
+      userId: "u-owner",
+      text: "anota tudo",
+      destination: { channel: "telegram", threadId: "chat-1" },
+      sentAt: Date.UTC(2026, 9, 4, 2, 30),
+      timeZone: null,
+    });
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Feito."]));
+    expect(calls.filter((call) => call.method === "writeNote")).toHaveLength(5);
+    expect(JSON.stringify(world.requests[2]?.messages)).toContain("already saved 5 memories");
+  });
+
   it("finds a note the turn wasn't given, reads it, then answers", async () => {
     const world = fakeWorld([
       toolCalls({ name: "memory_search", input: { query: "onde a Ana mora" } }),

@@ -46,7 +46,12 @@ export interface ToolContext {
   scopes: RecallOptions["scopes"];
   /** The agent's qualifier, for tools that rank as recall does: Clef unless the agent chose Jev. */
   qualifier: NonNullable<RecallOptions["qualifier"]>;
-  /** Where the turn's words came from, for what a tool saves: the conversation and the day. */
+  /** The turn, the same for all its calls: what a tool counts per turn is keyed by it. */
+  turn: string;
+  /**
+   * Where the turn's words came from, for what a tool saves: the conversation, as its session
+   * pages name it, and the day in its time zone.
+   */
   source: string;
   /** Aborts when the turn stops: a new message, a pause or an eviction. */
   signal: AbortSignal;

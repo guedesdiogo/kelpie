@@ -875,7 +875,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           // may see every scope; #131 brings the turn's role and chat type.
           scopes: "all",
           qualifier: settings.qualifier,
-          source: `${this.#destination().channel}/${this.#destination().threadId}, ${new Date(this.#ports.now()).toISOString().slice(0, 10)}`,
+          turn: String(turn.id),
+          source: this.#source(),
           signal: controller.signal,
         };
         step("tool", tools.get(toolCall.name)?.label);
@@ -1028,6 +1029,27 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    * slow store, an answer past the budget or nothing found leaves the turn without memory. Logs
    * counts only, never text.
    */
+  /** The conversation as its session pages name it (#109), and today in its time zone. */
+  #source(): string {
+    const destination = this.#destination();
+    const conversation = `${destination.channel}:${destination.threadId}`.slice(0, 200);
+    const timeZone = this.#get<string | null>("timeZone", null) ?? "UTC";
+    const day = (zone: string) =>
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: zone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date(this.#ports.now()));
+    let today: string;
+    try {
+      today = day(timeZone);
+    } catch {
+      today = day("UTC");
+    }
+    return `${conversation}, ${today}`;
+  }
+
   async #recall(settings: AgentSettings): Promise<string | null> {
     const started = this.#ports.now();
     try {

@@ -170,4 +170,149 @@ describe("writeNote", () => {
       reason: "vault_off",
     });
   });
+
+  it("keeps concurrent and retried writes apart, and never repeats one at a numbered path", async () => {
+    const backend = vaultWith({ "memory/notes/cafe.md": "# Café\n\nCom leite.\n" });
+    const stub = vault("write-concurrent");
+    const results = await Promise.all(
+      ["Sem açúcar.", "Com canela.", "Coado."].map((body) =>
+        stub.writeNote("kelpie", memory("Café", body), ALL),
+      ),
+    );
+    const paths = results.map((result) => (result.ok ? result.path : result.reason));
+    expect(new Set(paths).size).toBe(3);
+    // A retry before the commit, of the write that went to a numbered path.
+    const first = results.findIndex(
+      (result) => result.ok && result.path === "memory/notes/cafe-2.md",
+    );
+    const retried = await stub.writeNote(
+      "kelpie",
+      memory("Café", ["Sem açúcar.", "Com canela.", "Coado."][first] ?? ""),
+      ALL,
+    );
+    expect(retried).toEqual({ ok: true, action: "unchanged", path: "memory/notes/cafe-2.md" });
+    await runDurableObjectAlarm(stub);
+    expect(
+      Object.keys(backend.files())
+        .filter((path) => path.startsWith("memory/"))
+        .sort(),
+    ).toEqual([
+      "memory/notes/cafe-2.md",
+      "memory/notes/cafe-3.md",
+      "memory/notes/cafe-4.md",
+      "memory/notes/cafe.md",
+    ]);
+  });
+
+  it("keeps what a found note holds and the model left out, and adds the turn's source", async () => {
+    const ana = "memory/notes/casa-da-ana.md";
+    const backend = vaultWith({
+      [ana]: [
+        "---",
+        "tier: procedural",
+        "level: explicit",
+        "confidence: 0.95",
+        "sources:",
+        '  - "[[2026-01-02-conversa]]"',
+        "entities: [Ana Souza]",
+        "valid_from: 2025-01-01",
+        "abstract: Onde a Ana mora.",
+        "relations:",
+        '  contradicts: ["[[casa-antiga]]"]',
+        "---",
+        "",
+        "# Casa da Ana",
+        "",
+        "Lisboa.",
+        "",
+      ].join("\n"),
+    });
+    const stub = vault("write-carry");
+    expect(
+      await stub.writeNote(
+        "kelpie",
+        memory("Casa da Ana", "Porto.", { path: ana, level: "explicit" }),
+        ALL,
+      ),
+    ).toMatchObject({ ok: true, action: "written" });
+    await runDurableObjectAlarm(stub);
+    const file = backend.files()[ana] ?? "";
+    for (const kept of [
+      "tier: procedural",
+      "confidence: 0.95",
+      "[[2026-01-02-conversa]]",
+      "telegram/chat-1, 2026-10-06",
+      "Ana Souza",
+      "valid_from: 2025-01-01",
+      "abstract: Onde a Ana mora.",
+      "[[casa-antiga]]",
+      "Porto.",
+    ]) {
+      expect(file, kept).toContain(kept);
+    }
+    // Only a level change is still a change; the same version again isn't.
+    const again = memory("Casa da Ana", "Porto.", { path: ana, level: "explicit" });
+    expect(await stub.writeNote("kelpie", again, ALL)).toMatchObject({ action: "unchanged" });
+    expect(await stub.writeNote("kelpie", { ...again, level: "inferred" }, ALL)).toMatchObject({
+      action: "written",
+    });
+  });
+
+  it("updates any note the turn sees, and writes new ones only where the turn may", async () => {
+    vaultWith({ "conversations/familia/people/caio.md": "# Caio\n\nPrimo.\n" });
+    const stub = vault("write-seen");
+    expect(
+      await stub.writeNote(
+        "kelpie",
+        memory("Caio", "Primo, mora em Faro.", {
+          kind: "person",
+          path: "conversations/familia/people/caio.md",
+        }),
+        ALL,
+      ),
+    ).toMatchObject({ ok: true, action: "written" });
+    // A turn that sees one conversation writes nowhere else, global included.
+    const narrow = { scopes: ["conversation/familia"], sources: SOURCES };
+    expect(await stub.writeNote("kelpie", memory("Nota", "Algo."), narrow)).toEqual({
+      ok: false,
+      reason: "scope_not_allowed",
+    });
+    expect(
+      await stub.writeNote(
+        "kelpie",
+        memory("Nota", "Algo.", { scope: "conversation/familia" }),
+        narrow,
+      ),
+    ).toMatchObject({ ok: true });
+  });
+
+  it("refuses session pages, conflict markers and secrets in names", async () => {
+    const backend = vaultWith({
+      "memory/sessions/2026/2026-10-06-conversa.md": "# Conversa\n\nOi.\n",
+    });
+    const stub = vault("write-refusals");
+    for (const input of [
+      memory("Conversa", "Falamos.", { kind: "session" }),
+      memory("Conversa", "Falamos.", {
+        kind: "session",
+        path: "memory/sessions/2026/2026-10-06-conversa.md",
+      }),
+      memory("Nota", "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> main"),
+    ]) {
+      expect(await stub.writeNote("kelpie", input, ALL), JSON.stringify(input)).toMatchObject({
+        ok: false,
+        reason: "invalid",
+      });
+    }
+    const secret = `Bearer ${"b".repeat(24)}`;
+    expect(
+      await stub.writeNote("kelpie", memory("Chave", "Guardada.", { entities: [secret] }), ALL),
+    ).toMatchObject({ ok: true });
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()["memory/notes/chave.md"]).not.toContain("b".repeat(24));
+    // A commit's headline never names the memory: titles would outlive a forget in git.
+    expect(backend.commitRequests.map((request) => request.headline).join("\n")).not.toContain(
+      "Chave",
+    );
+  });
 });

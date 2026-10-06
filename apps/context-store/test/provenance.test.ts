@@ -131,4 +131,35 @@ describe("Vault provenance", () => {
     expect(backend.files()[ana]).toBe(resolved);
     expect(await provenance(stub, "Ana")).toEqual({ [ana]: false });
   });
+
+  it("knows its own commit when GitHub's answer was lost, and forgets a file the owner removed", async () => {
+    const backend = vaultWith({});
+    replaceGatewayForTesting(null);
+    const stub = vault("provenance-lost");
+    await stub.compile("kelpie");
+    const commit = backend.commit.bind(backend);
+    let lose = true;
+    backend.commit = async (request) => {
+      const outcome = await commit(request);
+      if (lose) {
+        lose = false;
+        throw new Error("GitHub commit answered 502");
+      }
+      return outcome;
+    };
+    const bolo = "memory/notes/bolo-da-ana.md";
+    await stub.write("kelpie", [{ path: bolo, content: "# Bolo da Ana\n\nTrês ovos.\n" }], "x");
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(await provenance(stub, "Ana")).toEqual({ [bolo]: true });
+
+    backend.push({ [bolo]: null });
+    await runDurableObjectAlarm(stub);
+    expect(
+      await runInDurableObject(
+        stub,
+        (_instance, state) => state.storage.sql.exec("SELECT count(*) AS n FROM authored").one().n,
+      ),
+    ).toBe(0);
+  });
 });

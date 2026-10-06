@@ -112,7 +112,7 @@ describe("AgentHost with a vault", () => {
     write: async () => ({ ok: false, reason: "vault_off" }),
     propose: async () => ({ ok: false, reason: "vault_off" }),
     recall: async () => ({ text: "", tokens: 0, paths: [], notes: [] }),
-    search: async () => ({ text: "", notes: [] }),
+    search: async () => ({ ok: false, reason: "vault_off" }),
     readNote: async () => ({ ok: false, reason: "vault_off" }),
     writeNote: async () => ({ ok: false, reason: "vault_off" }),
   });

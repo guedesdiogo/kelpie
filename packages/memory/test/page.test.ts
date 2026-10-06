@@ -106,7 +106,53 @@ describe("readPage", () => {
   });
 });
 
+describe("readPage's progress", () => {
+  it("always moves on, even past a lone half of a surrogate pair", () => {
+    const version = {
+      path: "memory/notes/x.md",
+      title: "X",
+      body: `# X\n\nabc\uD83D`,
+      abstract: null,
+      kind: "note",
+      scope: "global",
+      level: null,
+      pinned: false,
+      validFrom: null,
+      invalidAt: null,
+      frontmatter: {},
+    } as unknown as IndexedVersion;
+    let offset: number | null = 0;
+    for (let i = 0; i < 5 && offset !== null; i += 1) {
+      const page = readPage(version, { offset, byKelpie: false, links: [] });
+      expect(page.nextOffset === null || page.nextOffset > offset).toBe(true);
+      offset = page.nextOffset;
+    }
+    expect(offset).toBeNull();
+  });
+});
+
 describe("renderHits", () => {
+  it("stays under the page cap with the longest hits, escaping included", () => {
+    const worst = "<memory".repeat(60);
+    const text = renderHits(
+      Array.from({ length: 10 }, () => ({
+        path: `knowledge/${worst}.md`,
+        title: worst,
+        abstract: worst,
+        start: "",
+        kind: "note",
+        scope: `area/${"x".repeat(80)}`,
+        validFrom: 0,
+        invalidAt: 1,
+        current: false,
+        byKelpie: false,
+      })),
+    );
+    expect(text.length).toBeLessThanOrEqual(READ_PAGE_CHARS);
+    expect(text.endsWith("</memory-")).toBe(false);
+    expect(text).toMatch(/<\/memory-[0-9a-f]{16}>$/);
+  });
+
   it("lists hits in one fence, each with what it is and how it starts", () => {
     const text = renderHits([
       {

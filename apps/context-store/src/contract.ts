@@ -109,11 +109,15 @@ export interface MemoryHit {
   byKelpie: boolean;
 }
 
-export interface MemorySearchResult {
-  /** The hits as the model reads them, in #110's fence; empty when there are none. */
-  text: string;
-  notes: MemoryHit[];
-}
+/** The hits, or why there are none to give: memory off, or failing, isn't empty memory. */
+export type MemorySearchResult =
+  | {
+      ok: true;
+      /** The hits as the model reads them, in #110's fence; empty when there are none. */
+      text: string;
+      notes: MemoryHit[];
+    }
+  | { ok: false; reason: "vault_off" | "unavailable" };
 
 /** What the agent's `memory_read` asks (#126). */
 export interface ReadNoteOptions {

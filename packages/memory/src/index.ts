@@ -49,7 +49,7 @@ export {
   type VaultChange,
   type VaultCommit,
 } from "./memory-index.ts";
-export { isMemoryId, LEVELS, type Level, type Note, readNote } from "./note.ts";
+export { isMemoryId, LEVELS, type Level, MAX_SOURCES, type Note, readNote } from "./note.ts";
 export {
   type HitView,
   type Page,

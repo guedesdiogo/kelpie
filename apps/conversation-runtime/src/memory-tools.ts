@@ -52,6 +52,8 @@ const READ: Tool["spec"] = {
 /** A turn saves at most this many memories, and stops trying after this many failures (hermes). */
 const MAX_WRITES = 5;
 const MAX_WRITE_FAILURES = 3;
+/** The turns whose counts are kept: far more than one isolate runs at once. */
+const KEPT_TURNS = 64;
 
 const WRITE: Tool["spec"] = {
   name: "memory_write",
@@ -129,7 +131,10 @@ export function memoryTools(store: MemoryStore): ToolProvider {
         ...(k === undefined ? {} : { k: k as number }),
         qualifier: context.qualifier,
       });
-      return { output: found.text === "" ? "No notes match." : found.text };
+      if (found.ok) return { output: found.text === "" ? "No notes match." : found.text };
+      if (found.reason === "vault_off") return invalid("Memory is off: the vault isn't connected.");
+      // The host answers "The tool failed." without passing the store's reason on.
+      throw new Error(`search: ${found.reason}`);
     },
   };
   const read: Tool = {
@@ -156,14 +161,19 @@ export function memoryTools(store: MemoryStore): ToolProvider {
       throw new Error(`readNote: ${page.reason}`);
     },
   };
-  // A turn's writes and failures, by its signal: one per turn, and gone with it.
-  const turns = new WeakMap<AbortSignal, { writes: number; failures: number }>();
+  // Each turn's writes and failures, by the turn: the host gives every call a signal of its own.
+  const turns = new Map<string, { writes: number; failures: number }>();
   const write: Tool = {
     spec: WRITE,
     label: "Saving to memory",
     async run(input: unknown, context: ToolContext): Promise<ToolOutcome> {
-      const turn = turns.get(context.signal) ?? { writes: 0, failures: 0 };
-      turns.set(context.signal, turn);
+      const key = `${context.agentId}\n${context.turn}`;
+      const turn = turns.get(key) ?? { writes: 0, failures: 0 };
+      if (!turns.has(key)) {
+        turns.set(key, turn);
+        // The oldest turn's counts go first; a Map keeps insertion order.
+        if (turns.size > KEPT_TURNS) turns.delete(turns.keys().next().value as string);
+      }
       if (turn.failures >= MAX_WRITE_FAILURES) {
         return invalid(
           `Not saved: memory writes failed ${MAX_WRITE_FAILURES} times in this turn. Stop retrying them.`,
@@ -174,7 +184,14 @@ export function memoryTools(store: MemoryStore): ToolProvider {
           `Not saved: this turn already saved ${MAX_WRITES} memories. Finish with what you have.`,
         );
       }
-      const outcome = await saved(input, context);
+      let outcome: ToolOutcome;
+      try {
+        outcome = await saved(input, context);
+      } catch (error) {
+        // A store that fails or doesn't answer is a failure too.
+        turn.failures += 1;
+        throw error;
+      }
       if (outcome.isError) turn.failures += 1;
       else turn.writes += 1;
       return outcome;

@@ -8,6 +8,7 @@ import { env } from "cloudflare:workers";
 import { type MemoryInput, memoryPath, writeMemory } from "@kelpie/memory";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
 import { afterEach, describe, expect, it } from "vitest";
+import type { MemorySearchResult } from "../src/contract.ts";
 import {
   GitHubWebhooks,
   type MemoryGateway,
@@ -460,6 +461,13 @@ describe("recall", () => {
   });
 });
 
+/** Search's hits, or a failure. */
+async function hitsOf(search: PromiseLike<MemorySearchResult>) {
+  const result = await search;
+  if (!result.ok) throw new Error(`search failed: ${result.reason}`);
+  return result;
+}
+
 describe("search", () => {
   const family = [
     person("Ana Souza", "Irmã do Rafael. Mudou para o Porto."),
@@ -473,7 +481,7 @@ describe("search", () => {
     await vaultOf(family);
     fakeGateway();
     const stub = vault("search-hits");
-    const found = await stub.search("kelpie", "Ana Souza", { scopes: "all" });
+    const found = await hitsOf(stub.search("kelpie", "Ana Souza", { scopes: "all" }));
     expect(found.notes).toHaveLength(3);
     expect(found.notes[0]).toEqual({
       path: memoryPath("global", "person", "Ana Souza"),
@@ -488,9 +496,13 @@ describe("search", () => {
     });
     expect(found.text).toContain("## Ana Souza (memory/people/ana-souza.md) [");
     expect(found.text).toContain("Irmã do Rafael.");
-    expect((await stub.search("kelpie", "Souza", { scopes: "all", k: 50 })).notes).toHaveLength(5);
-    expect((await stub.search("kelpie", "Souza", { scopes: "all", k: 4 })).notes).toHaveLength(4);
-    const global = await stub.search("kelpie", "Caio Souza", { scopes: ["global"], k: 10 });
+    expect(
+      (await hitsOf(stub.search("kelpie", "Souza", { scopes: "all", k: 50 }))).notes,
+    ).toHaveLength(5);
+    expect(
+      (await hitsOf(stub.search("kelpie", "Souza", { scopes: "all", k: 4 }))).notes,
+    ).toHaveLength(4);
+    const global = await hitsOf(stub.search("kelpie", "Caio Souza", { scopes: ["global"], k: 10 }));
     expect(global.notes.map((note) => note.scope)).not.toContain("conversation/familia");
     expect(global.notes.length).toBeGreaterThan(0);
     expect(
@@ -507,7 +519,9 @@ describe("search", () => {
       Array.from({ length: 12 }, (_, i) => person(`Pessoa ${i} Souza`, `Parente ${i} da Ana.`)),
     );
     fakeGateway();
-    const found = await vault("search-cap").search("kelpie", "Souza", { scopes: "all", k: 50 });
+    const found = await hitsOf(
+      vault("search-cap").search("kelpie", "Souza", { scopes: "all", k: 50 }),
+    );
     expect(found.notes).toHaveLength(10);
   });
 
@@ -522,14 +536,15 @@ describe("search", () => {
       ["kelpie", "Ana", { scopes: undefined }],
     ] as const) {
       expect(await stub.search(agent, query, options as unknown as { scopes: "all" })).toEqual({
+        ok: true,
         text: "",
         notes: [],
       });
     }
     replaceBackendForTesting(null);
     expect(await vault("search-off").search("kelpie", "Ana", { scopes: "all" })).toEqual({
-      text: "",
-      notes: [],
+      ok: false,
+      reason: "vault_off",
     });
   });
 });
