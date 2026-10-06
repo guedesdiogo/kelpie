@@ -1,15 +1,21 @@
 import { RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
 import {
   AnthropicMessagesProvider,
+  EMBEDDING_PROVIDERS,
+  type Embedder,
+  type EmbeddingProviderId,
+  type EmbedOutcome,
   LlmError,
   type LlmProvider,
   ModelRouter,
   type ModelTier,
+  OpenAIEmbedder,
   OpenAIResponsesProvider,
   type ProviderId,
   parseRouteTable,
   type RoutedRequest,
   toNdjsonStream,
+  WorkersAiEmbedder,
 } from "@kelpie/llm";
 import {
   ClefQualifier,
@@ -33,8 +39,13 @@ interface Secrets {
 
 /** How long to wait for the qualifier: just past the caller's 800 ms, whose abort doesn't cross RPC. */
 const QUALIFY_TIMEOUT_MS = 1_000;
+/** One `embed` call takes at most this many texts, and this long. */
+const MAX_EMBED_TEXTS = 256;
+const EMBED_TIMEOUT_MS = 30_000;
 
-type GatewayEnv = Env & Secrets;
+/** Vars a deploy may set to any string, whatever the generated types say (`docs/admin-api.md`). */
+type GatewayEnv = Omit<Env, "EMBEDDING_PROVIDER" | "OPENAI_BASE_URL"> &
+  Secrets & { EMBEDDING_PROVIDER: string; OPENAI_BASE_URL: string };
 
 /**
  * One model call. Read `events()` once, as newline-delimited JSON (decode it with
@@ -85,6 +96,84 @@ export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
   ): Promise<GatewayQualifyOutcome> {
     return qualifyWith(this.env, state, questions, backend);
   }
+
+  /**
+   * Vectors for up to 256 texts, one each, in order, from the instance's embedding model:
+   * `EMBEDDING_PROVIDER` chooses bge-m3 on Workers AI or OpenAI (issue #110).
+   */
+  embed(texts: string[]): Promise<EmbedOutcome> {
+    return embedWith(this.env, texts);
+  }
+}
+
+/**
+ * Texts must be non-empty strings. A failure is logged by its kind only, never with a provider's
+ * message, which can quote a key, and answered as `failed`.
+ */
+export async function embedWith(
+  env: GatewayEnv,
+  texts: string[],
+  timeoutMs = EMBED_TIMEOUT_MS,
+): Promise<EmbedOutcome> {
+  if (!Array.isArray(texts) || texts.length === 0 || texts.length > MAX_EMBED_TEXTS) {
+    return { ok: false, reason: "invalid" };
+  }
+  // An indexed loop, so a hole in the array counts as missing.
+  for (let i = 0; i < texts.length; i += 1) {
+    const text = texts[i];
+    if (typeof text !== "string" || text.trim() === "") return { ok: false, reason: "invalid" };
+  }
+  const embedder = embedderFor(env);
+  if (!embedder) return { ok: false, reason: "not_configured" };
+  const signal = AbortSignal.timeout(timeoutMs);
+  try {
+    const vectors = await embedder.embed(texts, { signal });
+    return { ok: true, model: embedder.model, vectors };
+  } catch (error) {
+    if (signal.aborted) console.error("llm-gateway: embed timed out");
+    else {
+      const kind = error instanceof LlmError ? error.code : errorName(error);
+      console.error(`llm-gateway: embed failed: ${kind}`);
+    }
+    return { ok: false, reason: "failed" };
+  }
+}
+
+const isEmbeddingProvider = (value: string): value is EmbeddingProviderId =>
+  (EMBEDDING_PROVIDERS as readonly string[]).includes(value);
+
+/** The instance's embedder, or null when its provider is unknown or lacks its key. */
+function embedderFor(env: GatewayEnv): Embedder | null {
+  const provider = env.EMBEDDING_PROVIDER;
+  if (!isEmbeddingProvider(provider)) {
+    console.error(`llm-gateway: unknown EMBEDDING_PROVIDER: ${provider}`);
+    return null;
+  }
+  switch (provider) {
+    case "openai":
+      if (!env.OPENAI_API_KEY) return null;
+      return new OpenAIEmbedder(
+        providerConfig(env.OPENAI_API_KEY, env.OPENAI_BASE_URL, env.AI_GATEWAY_TOKEN),
+      );
+    case "workers-ai":
+      return new WorkersAiEmbedder({ run: aiRun(env) });
+  }
+}
+
+/**
+ * The AI binding as a plain signature: its types list known models with their own inputs, so
+ * Clef's and bge-m3's names go through this. The options are still checked against AiOptions.
+ */
+function aiRun(env: GatewayEnv) {
+  return env.AI.run.bind(env.AI) as unknown as <Input>(
+    model: string,
+    input: Input,
+    options: AiOptions,
+  ) => Promise<unknown>;
+}
+
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : "unknown";
 }
 
 /** Answers at once when Jev is asked without its key; a failure is logged here and answered as `failed`. */
@@ -111,13 +200,7 @@ export async function qualifyWith(
 
 function qualifierFor(env: GatewayEnv, backend: QualifierBackend): Qualifier | null {
   if (backend === "clef") {
-    // The binding's types list known models only, so Clef's name goes through a plain signature;
-    // the options are still checked against AiOptions.
-    const run = env.AI.run.bind(env.AI) as unknown as (
-      model: string,
-      input: unknown,
-      options: AiOptions,
-    ) => Promise<unknown>;
+    const run = aiRun(env);
     return new ClefQualifier({
       model: env.CLEF_MODEL,
       run: (model, input, options) => run(model, input, options),

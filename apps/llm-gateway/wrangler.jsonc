@@ -20,6 +20,8 @@
     // Clef's model for end of turn, "clef" or "clef-flash", pinned like Jev's: each has its own
     // bands (ADR-0022).
     "CLEF_MODEL": "clef",
+    // The vault's embedding model: "workers-ai" (bge-m3) or "openai" (text-embedding-3-small).
+    "EMBEDDING_PROVIDER": "workers-ai",
     // For each tier, the models to try in order. Owner configuration; edit freely.
     "MODEL_ROUTES": {
       "cheap": [
