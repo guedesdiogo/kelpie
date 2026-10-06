@@ -185,6 +185,22 @@ input.addEventListener("input", () => {
   }
 });
 
+/** Kelpie's version and the deploy's commit, in the footer (#148); nothing when it can't be read. */
+async function showVersion() {
+  try {
+    const response = await fetch("/version", { cache: "no-store" });
+    if (!response.ok) return;
+    const { version, commit } = await response.json();
+    if (typeof version !== "string") return;
+    document.getElementById("version").textContent =
+      typeof commit === "string" ? `Kelpie ${version} · ${commit}` : `Kelpie ${version}`;
+  } catch {
+    // The footer stays empty.
+  }
+}
+
+showVersion();
+
 if (agent) {
   connect();
 } else {

@@ -21,3 +21,9 @@ export {
   parseSettings,
   REGISTRY_NAME,
 } from "./settings.ts";
+export {
+  KELPIE_VERSION,
+  type VersionReport,
+  versionReport,
+  type WorkerVersionMetadata,
+} from "./version.ts";
