@@ -1,10 +1,11 @@
-// The memory evaluation (#108): the labelled questions against the index, at three vault sizes.
+// The memory evaluation (#108): the labelled questions against the index, at three vault sizes,
+// answered by the index's plain search (the baseline) and by retrieval (#110), side by side.
 // Run it with `bun run --filter @kelpie/memory eval`; it takes about half a minute, so `test`
 // doesn't run it. `eval:baseline` then writes docs/spikes/memory-eval-baseline.json from the run.
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { MemoryIndex, type SearchHit } from "../src/index.ts";
+import { MemoryIndex, pack as packRetrieved, retrieve, type SearchHit } from "../src/index.ts";
 import { buildVault, SEED } from "./generate.ts";
 import { GOLD_MEMORIES } from "./gold-vault.ts";
 import { LABELS_SHA256, labelsHash } from "./labels.ts";
@@ -14,6 +15,8 @@ import { answerRank, bySlice, estimateTokens, type QuestionResult, staleFirst } 
 /** Results per question; the baseline packs the top five hits, as #110 will do better. */
 const LIMIT = 10;
 const PACKED = 5;
+/** Retrieval packs its hits within this many tokens: #110's starting budget for the slice. */
+const BUDGET_TOKENS = 1_000;
 
 const SIZES = [1_000, 10_000, 100_000];
 
@@ -34,6 +37,20 @@ const NAMED = new Set(
   ).map((question) => question.id),
 );
 const UNNAMED = new Set(QUESTIONS.map((q) => q.id).filter((id) => !NAMED.has(id)));
+
+/**
+ * Retrieval's choices that departed from ai-memory were measured on the questions with an even
+ * number only; the odd ones are held out, and reported apart, to show whether those choices
+ * generalize (docs/spikes/memory-eval.md).
+ */
+const TUNING = new Set(QUESTIONS.map((q) => q.id).filter((id) => Number(id.slice(1)) % 2 === 0));
+const HELD_OUT = new Set(QUESTIONS.map((q) => q.id).filter((id) => !TUNING.has(id)));
+const SLICES = {
+  "names a shared first name": NAMED,
+  "names nobody by first name": UNNAMED,
+  "tuning half": TUNING,
+  "held-out half": HELD_OUT,
+};
 
 declare module "vitest" {
   interface TaskMeta {
@@ -58,6 +75,7 @@ describe("memory evaluation", () => {
           const buildMs = performance.now() - started;
 
           const results: QuestionResult[] = [];
+          const retrieved: QuestionResult[] = [];
           for (const question of QUESTIONS) {
             const options = {
               limit: LIMIT,
@@ -77,7 +95,23 @@ describe("memory evaluation", () => {
               tokens: estimateTokens(pack(index, hits.slice(0, PACKED))),
               latencyMs,
             });
+
+            const started = performance.now();
+            const found = retrieve(index, question.text, options);
+            const packed = packRetrieved(index, found, { budgetTokens: BUDGET_TOKENS });
+            retrieved.push({
+              id: question.id,
+              category: question.category,
+              answerRank: answerRank(question, found, vault.labels),
+              staleFirst: staleFirst(question, found, vault.labels),
+              tokens: packed.tokens,
+              latencyMs: performance.now() - started,
+            });
           }
+          // The budget holds at every size, for every question.
+          expect(Math.max(...retrieved.map((result) => result.tokens))).toBeLessThanOrEqual(
+            BUDGET_TOKENS,
+          );
           const versions = state.storage.sql
             .exec<{ n: number }>("SELECT count(*) AS n FROM versions")
             .one().n;
@@ -94,11 +128,13 @@ describe("memory evaluation", () => {
             commits: vault.commits.length,
             buildMs: Math.round(buildMs),
             databaseBytes: state.storage.sql.databaseSize,
-            slices: bySlice(results, {
-              "names a shared first name": NAMED,
-              "names nobody by first name": UNNAMED,
-            }),
+            slices: bySlice(results, SLICES),
             questions: results,
+            retrieval: {
+              budgetTokens: BUDGET_TOKENS,
+              slices: bySlice(retrieved, SLICES),
+              questions: retrieved,
+            },
           };
         },
       );

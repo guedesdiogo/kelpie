@@ -38,3 +38,24 @@ writeFileSync(
   new URL("../../../docs/spikes/memory-eval-baseline.json", import.meta.url),
   `${JSON.stringify(baseline, null, 2)}\n`,
 );
+
+// Retrieval (#110), from the same run, beside the baseline.
+const withoutLatency = (slices) =>
+  Object.fromEntries(
+    Object.entries(slices).map(([name, { latencyMs: _latency, ...metrics }]) => [name, metrics]),
+  );
+const retrieval = {
+  labelsSha256: first.labelsSha256,
+  seed: first.seed,
+  limit: first.limit,
+  budgetTokens: first.retrieval.budgetTokens,
+  runs: runs.map((run) => ({
+    size: run.size,
+    slices: withoutLatency(run.retrieval.slices),
+    questions: run.retrieval.questions.map(({ latencyMs: _latency, ...question }) => question),
+  })),
+};
+writeFileSync(
+  new URL("../../../docs/spikes/memory-eval-retrieval.json", import.meta.url),
+  `${JSON.stringify(retrieval, null, 2)}\n`,
+);

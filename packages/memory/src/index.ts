@@ -40,6 +40,17 @@ export {
   type VaultCommit,
 } from "./memory-index.ts";
 export { isMemoryId, LEVELS, type Level, type Note, readNote } from "./note.ts";
+export {
+  isSessionRecall,
+  needsMemory,
+  type Packed,
+  type PackOptions,
+  pack,
+  queryWords,
+  type Retrieved,
+  retrieve,
+  type StreamName,
+} from "./retrieve.ts";
 export { instantOf, isDate, isDateTime } from "./time.ts";
 export {
   MemoryFormatError,

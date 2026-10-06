@@ -189,7 +189,7 @@ The index is one SQLite database inside the Context Store's Durable Object ([ADR
 | `commits` | Every commit applied, with its order and time |
 | `versions` | One row per version of every indexed note: the commit that wrote it, its blob SHA, the commit it superseded, whether it is current, its ingestion window, and the parsed frontmatter and body. At most one current version per path |
 | `versions_fts` | FTS5 over title, abstract, body and the path's words. It uses `unicode61 remove_diacritics 2`, so "acucar" finds "açúcar" |
-| `entities` | Each version's entities |
+| `entities` | Each version's entities. A version's title is also kept folded, so an entity's own page, the note titled with its name, can be found |
 | `links` | Each version's links, unresolved: they are resolved when read |
 | `embeddings` | Vectors keyed by blob SHA and model; filled by retrieval (#110) |
 | `meta` | The schema version |
@@ -206,8 +206,37 @@ The index is one SQLite database inside the Context Store's Durable Object ([ADR
   - Embeddings of content still in the history survive a rebuild: they are keyed by content, so they stay valid, and recomputing them costs model calls. Embeddings of content no longer in the history are deleted.
 - **Erasure** is the operator's job (ADR-0020 §4): rewrite the vault's git history, then rebuild the index. The rebuild drops every version, link and embedding of the erased text.
 - **Search:** current versions only by default. With `asOf`, it searches the versions the vault held at that instant. With `validAt`, it keeps only memories valid in the world at that instant. It returns 1 to 100 results, 10 by default.
-- **A new schema version** drops the derived tables and starts empty, keeping the embeddings. The index then reports no last commit, which tells the sync to replay the vault from the start.
+- **Entity lookup:** the notes that name any of a set of entity keys, current or as of an instant. An entity's own page comes first. Each key weighs one over the number of notes that name it, so a rarer name says more.
+- **Neighbours:** the current notes one step from a note: the notes it links to, then the pages of the entities it names.
+- **A new schema version** drops the derived tables and starts empty, keeping the embeddings. The index then reports no last commit, which tells the sync to replay the vault from the start. Version 2 added the folded title.
+
+## Retrieval
+
+What a turn sees of memory (#110), built on the index. It follows ai-memory's hybrid search, with four changes measured on half of the evaluation's questions ([spike](spikes/memory-eval.md#retrieval-110)).
+- **The gate:** a message that is empty, a command (`/start`), only emoji, or a bare acknowledgement or greeting skips retrieval. Examples: "ok", "valeu!", "obrigado :)", "kkkk", "bom dia", "thanks". The list is in Portuguese and English. No model is called.
+- **Streams:**
+  - **full text:** the question's words, folded, with function words kept, since bm25 already weighs them down. When the question's date was already resolved into `asOf` or `validAt`, month and weekday names and years are dropped;
+  - **entities:** runs of one to four words that neither start nor end with a function word, looked up as entity keys;
+  - **graph:** the three best hits of each stream above, then their neighbours. A seed ranks above its own neighbours, so a neighbour can't pass it.
+
+  Each stream fetches max(4 × limit, 20) hits, at most limit + 300. A question about the past (`asOf`) searches the versions memory held then, by text and entities only.
+- **Fusion:** reciprocal rank fusion with k = 60, every stream weighing the same. Then an authority factor, between 0.55 and 1.5:
+  - a conversation's page ×0.77, below curated notes: ai-memory's session and episodic penalties together;
+  - a pinned note ×1.08.
+
+  A question about a past conversation ("da última vez", "a gente falou", "ontem", "last time") lifts sessions to ×1.25 instead. ai-memory's boosts for decisions and procedures are left out: they suit an agent's rules, and they cost answers on a person's life.
+- **Packing:** the hits as one block within a token budget, at four characters to a token:
+  - each note appears once, under its title and path, best first;
+  - each shows its abstract first, or the first 400 characters of its body;
+  - the budget left over then goes to the best notes' bodies.
+
+  The block is fenced as reference, not instructions: a conversation's page is what someone said, whoever said it. The budget holds by construction; the evaluation checks it on every question. The slice's starting budget is 1,000 tokens.
+- **Not yet:**
+  - vectors, which wait for the choice of an embedding model;
+  - the rerank, which needs a model call per turn;
+  - the always-loaded core;
+  - the agent's memory tools.
 
 ## Credits
 
-The design follows [ai-memory](https://github.com/akitaonrails/ai-memory) at [`fc4da03`](https://github.com/akitaonrails/ai-memory/tree/fc4da03) (MIT, © 2026 Fabio Akita): versioned pages, FTS5 with diacritics folded, entity normalization, typed edges with a closed vocabulary, and link extraction that skips code. Files translated from it carry its notice. The reference check is on [#107](https://github.com/guedesdiogo/kelpie/issues/107#issuecomment-6010168197).
+The design follows [ai-memory](https://github.com/akitaonrails/ai-memory) at [`fc4da03`](https://github.com/akitaonrails/ai-memory/tree/fc4da03) (MIT, © 2026 Fabio Akita): versioned pages, FTS5 with diacritics folded, entity normalization, typed edges with a closed vocabulary, link extraction that skips code, and hybrid retrieval. Files translated from it carry its notice. The reference checks are on [#107](https://github.com/guedesdiogo/kelpie/issues/107#issuecomment-6010168197) and [#110](https://github.com/guedesdiogo/kelpie/issues/110#issuecomment-6012868696). The retrieval gate follows [hermes-agent](https://github.com/NousResearch/hermes-agent) at `86bdb75` (MIT).
