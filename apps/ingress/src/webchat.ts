@@ -72,10 +72,12 @@ export async function handleWebchat(request: Request, deps: WebchatDeps): Promis
     agentId,
   );
   if (!admission.admitted) return new Response(null, { status: 403 });
-  const { userId, timeZone } = admission;
+  const { userId, role, timeZone } = admission;
   return deps.connect(conversationName(agentId, { channel: "webchat", threadId: userId }), {
     agentId,
     userId,
+    role,
+    chatType: "direct",
     timeZone,
   });
 }

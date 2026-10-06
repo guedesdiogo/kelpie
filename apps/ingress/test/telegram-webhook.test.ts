@@ -121,6 +121,8 @@ describe("Telegram webhook", () => {
           agentId: "kelpie",
           providerMessageId: "42",
           userId: "u-owner",
+          role: "owner",
+          chatType: "direct",
           text: "oi, tudo bem?",
           destination: { channel: "telegram", threadId: String(OWNER_CHAT_ID) },
           sentAt: 1_791_190_000_000,

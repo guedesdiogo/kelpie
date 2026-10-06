@@ -82,6 +82,7 @@ export {
 } from "./retrieve.ts";
 export { type Sanitized, sanitizeSecrets } from "./sanitize.ts";
 export {
+  conversationScope,
   conversationSource,
   type OpenKeys,
   type SessionInput,

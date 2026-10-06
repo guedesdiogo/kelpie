@@ -128,6 +128,8 @@ async function deliver(event: CanonicalEvent, deps: TelegramWebhookDeps): Promis
     agentId: event.agentId,
     providerMessageId: event.providerMessageId,
     userId: admission.userId,
+    role: admission.role,
+    chatType: event.chatType,
     text,
     destination,
     sentAt: event.providerTimestamp,

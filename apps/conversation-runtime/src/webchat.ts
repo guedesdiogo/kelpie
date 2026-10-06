@@ -1,6 +1,8 @@
-import type { WebchatAdmission } from "@kelpie/conversation/contract";
+import type { Role } from "@kelpie/access";
+import type { ChatType, WebchatAdmission } from "@kelpie/conversation/contract";
 import type { ChatMessage } from "@kelpie/llm";
 import type { ConversationPorts, TurnStep } from "./ports.ts";
+import { chatTypeOf, roleOf } from "./turn-access.ts";
 
 // The webchat's socket protocol (issue #40). The socket lives on the conversation's object;
 // ingress verifies the owner's Cloudflare Access login and admits them before the upgrade.
@@ -37,7 +39,16 @@ export type ServerFrame =
   | { type: "accepted"; id: string }
   | { type: "rejected"; id: string; reason: string };
 
-export function parseAdmission(value: string | null): WebchatAdmission | null {
+/**
+ * Who ingress admitted for a socket. The role and chat type are null when it named none, as before
+ * #131, or an unknown one: the socket stays open, and its turns see only their conversation.
+ */
+export type SocketAdmission = Omit<WebchatAdmission, "role" | "chatType"> & {
+  role: Role | null;
+  chatType: ChatType | null;
+};
+
+export function parseAdmission(value: string | null): SocketAdmission | null {
   if (!value) return null;
   try {
     const parsed = JSON.parse(value) as Partial<WebchatAdmission> | null;
@@ -46,7 +57,13 @@ export function parseAdmission(value: string | null): WebchatAdmission | null {
       typeof parsed.userId === "string" &&
       (parsed.timeZone === null || typeof parsed.timeZone === "string")
     ) {
-      return { agentId: parsed.agentId, userId: parsed.userId, timeZone: parsed.timeZone };
+      return {
+        agentId: parsed.agentId,
+        userId: parsed.userId,
+        role: roleOf(parsed.role),
+        chatType: chatTypeOf(parsed.chatType),
+        timeZone: parsed.timeZone,
+      };
     }
   } catch {
     // Not JSON: not something ingress sent.

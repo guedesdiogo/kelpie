@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readNote, type SessionLine, sessionPage } from "../src/index.ts";
+import { conversationScope, readNote, type SessionLine, sessionPage } from "../src/index.ts";
 
 const at = (time: string) => Date.parse(`2026-10-06T${time}:00Z`);
 const owner = (time: string, text: string): SessionLine => ({
@@ -66,6 +66,11 @@ describe("sessionPage", () => {
       page?.path.startsWith("conversations/telegram-g1001234/sessions/2026/2026-10-06-10-00-"),
     ).toBe(true);
     expect(readNote(page?.path ?? "", page?.text ?? "")?.confidence).toBe(0.6);
+    // A turn in that group sees this scope: the one its session pages are written in (#131).
+    expect(conversationScope("telegram", "-1001234")).toBe("conversation/telegram-g1001234");
+    expect(readNote(page?.path ?? "", page?.text ?? "")?.scope).toBe(
+      conversationScope("telegram", "-1001234"),
+    );
   });
 
   it("keeps secrets out, and speakers' names from forging Markdown", async () => {

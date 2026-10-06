@@ -10,7 +10,13 @@ import { type FakeWorld, fakeWorld, refuse, reply, sayThenCall } from "./fakes.t
 // and passes the admission in a header the browser can't set; these tests open sockets the way
 // ingress does.
 
-const owner = { agentId: "assistant", userId: "u-owner", timeZone: null };
+const owner = {
+  agentId: "assistant",
+  userId: "u-owner",
+  role: "owner",
+  chatType: "direct",
+  timeZone: null,
+};
 const agent = (name: string) => env.CONVERSATION_AGENT.getByName(name);
 
 type Frame = { type: string } & Record<string, unknown>;
@@ -73,6 +79,29 @@ describe("webchat sockets", () => {
     );
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(chat.frames.map((frame) => frame.type)).toEqual(["history"]);
+  });
+
+  it("keeps a socket whose admission has no role, and gives its turns only their own scope (#131)", async () => {
+    const world = use(fakeWorld([reply("Oi."), reply("Oi de novo.")]));
+    const name = "assistant:webchat:no-role";
+    // As ingress sent it before #131, and as a socket from then still holds it.
+    const before = await open(name, { agentId: "assistant", userId: "u-owner", timeZone: null });
+    before.send({ type: "message", id: "c1", text: "onde a Ana mora?" });
+    await vi.waitFor(() => expect(ofType(before.frames, "accepted")).toHaveLength(1));
+    await agent(name).flush();
+    await vi.waitFor(() => expect(world.recalls).toHaveLength(1));
+    expect(world.recalls[0]?.options.scopes).toEqual(["conversation/webchat-u-owner"]);
+
+    // The owner's next connection carries the role again, and every scope comes back.
+    await vi.waitFor(async () =>
+      expect((await agent(name).turns()).at(-1)?.status).toBe("delivered"),
+    );
+    const after = await open(name);
+    after.send({ type: "message", id: "c2", text: "e o Bruno?" });
+    await vi.waitFor(() => expect(ofType(after.frames, "accepted")).toHaveLength(1));
+    await agent(name).flush();
+    await vi.waitFor(() => expect(world.recalls).toHaveLength(2));
+    expect(world.recalls[1]?.options.scopes).toBe("all");
   });
 
   it("closes a socket that ingress didn't admit", async () => {

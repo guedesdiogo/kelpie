@@ -284,7 +284,12 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   Kelpie's judge is the agent's qualifier, asked one yes-or-no question per note in one call, with the notes marked as data, not instructions.
 - **In a turn:** the conversation runtime asks once per turn, when the person has finished.
   - **The question** is the lines of every message since the last reply, even a partial one, without their time stamps. Lines the gate skips, such as a bare acknowledgement, are left out, and a turn with nothing else left skips the lookup. Only the newest 2,000 characters go.
-  - **Scopes and budget:** it asks for all scopes, since ingress admits only the owner's direct chats ([ADR-0015](adr/0015-single-player-first.md)). The budget is the slice's 1,000 tokens, and the agent's qualifier reranks.
+  - **Scopes** come from who wrote and where (#131):
+    - **The owner in a direct chat** sees every scope ([ADR-0015](adr/0015-single-player-first.md)).
+    - **Any other turn** sees only its own conversation's scope, where its session pages go: the memory every participant may see ([ADR-0004](adr/0004-access-control.md)). That is a group, a role other than owner, or a role or chat type that ingress didn't name or the runtime doesn't know.
+    - **A turn with several authors** gets the least privileged of them, and keeps it for its retries.
+    - **Today** ingress admits only the owner's direct chats, so the narrow set is reached only when a role is missing. That happens for a webchat socket opened before #131, or a message pending at the migration, until the owner's next message or connection.
+  - **Budget:** the slice's 1,000 tokens, and the agent's qualifier reranks.
   - **Expired notes** (#111) are left out: those whose `invalid_at` has passed.
     - A note without `invalid_at` never expires, and one that becomes valid later stays, so future plans are still found.
     - A question that gives a date (`asOf`, `validAt`) or asks how things were brings them back. The cues are whole words, in Portuguese and English: "antes", "costumava", "morava", "ex", "used to", "back then", and the past-conversation cues above.
@@ -309,7 +314,7 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - **`memory_read(path, offset)`:** a note of memory's index, a page at a time, each page under 9,500 characters, fence included.
     - A page is never cut inside an emoji, and says where the next one starts.
     - The first page also lists the note's links, resolved among the notes the scopes allow, up to 50 within 2,000 characters, and counts as one access.
-  - **Scopes and the qualifier** come from the turn, never from the model. A note outside the scopes, or outside memory's index (persona, rules, skills, root files), gets the same "not found" as a missing one.
+  - **Scopes and the qualifier** come from the turn, never from the model: the same scopes as its recall. The calls act for the turn's latest author with the turn's role, and a turn without one acts as a member. A note outside the scopes, or outside memory's index (persona, rules, skills, root files), gets the same "not found" as a missing one.
   - **`memory_write(title, body, kind, level, …)`:** saves one memory through the Context Store's single writer.
     - **A new memory** goes where its title puts it, an event under its `validFrom` date, which it needs. The path gets a number when another note holds it.
     - **The owner's word stays** (#149): a `deduced` or `inferred` memory can't change a note the person stated: one with `level: explicit`, or one whose current version Kelpie didn't write, whatever its level, since the owner wrote or edited it. The tool asks the model to save it as a new note.
