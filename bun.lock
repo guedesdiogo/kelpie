@@ -153,6 +153,8 @@
       },
       "devDependencies": {
         "@cloudflare/vitest-plugin": "^1.3.6",
+        "@kelpie/llm": "workspace:*",
+        "@kelpie/qualifier": "workspace:*",
         "vitest": "^4.1.0",
         "wrangler": "^4.147.0",
       },
