@@ -37,6 +37,18 @@
         "wrangler": "^4.147.0",
       },
     },
+    "apps/context-store": {
+      "name": "@kelpie/context-store",
+      "dependencies": {
+        "@kelpie/vault": "workspace:*",
+        "yaml": "2.9.1",
+      },
+      "devDependencies": {
+        "@cloudflare/vitest-plugin": "^1.3.6",
+        "vitest": "^4.1.0",
+        "wrangler": "^4.147.0",
+      },
+    },
     "apps/conversation-runtime": {
       "name": "@kelpie/conversation-runtime",
       "dependencies": {
@@ -369,6 +381,8 @@
     "@kelpie/channels": ["@kelpie/channels@workspace:packages/channels"],
 
     "@kelpie/config": ["@kelpie/config@workspace:packages/config"],
+
+    "@kelpie/context-store": ["@kelpie/context-store@workspace:apps/context-store"],
 
     "@kelpie/conversation": ["@kelpie/conversation@workspace:packages/conversation"],
 

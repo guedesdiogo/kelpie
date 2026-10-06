@@ -1,0 +1,20 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "kelpie-context-store",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+  // Reached only through service bindings: conversation-runtime reads context, and ingress hands
+  // over GitHub's webhook.
+  "workers_dev": false,
+  "preview_urls": false,
+  // The vault's GitHub App and repository belong to one deployment, so they go in as `--var` flags
+  // when deploying (docs/context-store.md). While any is empty, or a secret is missing, the vault is
+  // off and agents run on their settings alone. The secrets are GITHUB_APP_PRIVATE_KEY (PKCS#8)
+  // and GITHUB_WEBHOOK_SECRET.
+  "vars": { "GITHUB_APP_ID": "", "GITHUB_INSTALLATION_ID": "", "VAULT_REPOSITORY": "" },
+  "durable_objects": {
+    "bindings": [{ "name": "VAULT", "class_name": "Vault" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Vault"] }]
+}
