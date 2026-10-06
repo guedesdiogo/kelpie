@@ -22,6 +22,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0016](0016-vault-second-brain.md) | The vault is the owner's second brain, usable without Kelpie and shared with Hermes | [#58](https://github.com/guedesdiogo/kelpie/issues/58) |
 | [0017](0017-history-compaction.md) | Long conversations are bounded by Kelpie's own summary checkpoints | [#64](https://github.com/guedesdiogo/kelpie/issues/64) |
 | [0018](0018-jev-direct-api.md) | Jev goes through TypeSafe's API first, and end of turn uses thresholds per qualifier | [#27](https://github.com/guedesdiogo/kelpie/issues/27) |
+| [0019](0019-llm-gateway-keys.md) | The keys llm-gateway uses to call providers are deploy secrets | [#101](https://github.com/guedesdiogo/kelpie/issues/101) |
 
 ## Format
 
