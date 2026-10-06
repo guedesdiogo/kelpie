@@ -168,7 +168,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   async flush(armed?: { epoch: number }): Promise<void> {
     if (armed && armed.epoch !== this.#epoch()) return;
     if (this.#pendingInbound().length === 0) return;
-    const { settings, promptVersion } = await this.#config();
+    const { settings, promptVersion } = await this.#turnConfig();
     // Other calls ran while this waited: a newer message may have re-armed the flush, or another
     // flush may have claimed the buffer.
     if (armed && armed.epoch !== this.#epoch()) return;
@@ -853,6 +853,13 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const agentId = this.#get<string | null>("agentId", null);
     if (!agentId) throw new Error("The conversation has no agent yet");
     return this.env.AGENT_HOST.getByName(agentId).config();
+  }
+
+  /** What a new turn runs with: the settings, and the system prompt from the agent's vault. */
+  async #turnConfig(): Promise<AgentConfig> {
+    const agentId = this.#get<string | null>("agentId", null);
+    if (!agentId) throw new Error("The conversation has no agent yet");
+    return this.env.AGENT_HOST.getByName(agentId).turnConfig();
   }
 
   #generation(): number {

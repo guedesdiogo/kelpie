@@ -3,6 +3,11 @@ import type { ChannelWebhooksContract } from "@kelpie/channels";
 import { TELEGRAM_WEBHOOK_PATH } from "@kelpie/channels/telegram";
 import type { ConversationContract } from "@kelpie/conversation/contract";
 import { admitSender } from "./admission.ts";
+import {
+  GITHUB_WEBHOOK_PATH,
+  type GitHubWebhookDeps,
+  handleGitHubWebhook,
+} from "./github-webhook.ts";
 import { handleTelegramWebhook, type TelegramWebhookDeps } from "./telegram-webhook.ts";
 
 export { Directory } from "./directory/directory.ts";
@@ -28,6 +33,11 @@ export default {
 
     if (request.method === "GET" && pathname === "/health") {
       return Response.json({ status: "ok" });
+    }
+
+    if (request.method === "POST" && pathname === GITHUB_WEBHOOK_PATH) {
+      // A service binding to context-store's GitHubWebhooks entrypoint, which answers with a status.
+      return handleGitHubWebhook(request, env.GITHUB_WEBHOOKS as unknown as GitHubWebhookDeps);
     }
 
     const prefix = `${TELEGRAM_WEBHOOK_PATH}/`;

@@ -12,6 +12,7 @@
     "@kelpie/access": "workspace:*",
     "@kelpie/channels": "workspace:*",
     "@kelpie/config": "workspace:*",
+    "@kelpie/context-store": "workspace:*",
     "@kelpie/conversation": "workspace:*",
     "@kelpie/llm": "workspace:*",
     "@kelpie/qualifier": "workspace:*",
