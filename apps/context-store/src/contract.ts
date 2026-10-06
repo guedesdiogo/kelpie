@@ -101,12 +101,19 @@ export interface ContextStoreContract {
    * vector, reranked by the qualifier, within the budget. An empty block when the vault is off.
    */
   recall(agentId: string, question: string, options: RecallOptions): Promise<RecallResult>;
-  /** Files pushed with conflict markers that still wait (#114), for the owner to see. */
+}
+
+/**
+ * The owner's actions on the vault (#114), on an entrypoint of their own that only admin-api binds:
+ * the Workers that run conversations, where prompt injection lands, can't reach them.
+ */
+export interface ContextStoreAdminContract {
+  /** Files pushed with conflict markers that still wait, for the owner to see. */
   held(): Promise<HeldFile[]>;
   /**
-   * After the owner rewrote the vault's history to erase content (#114): Kelpie forgets its own
-   * copies. Memory's index is rebuilt from the vault as it is now, and the rows that name `paths`
-   * go. Git is never touched.
+   * After the owner rewrote the vault's history to erase content: Kelpie forgets its own copies.
+   * Memory's index is rebuilt from the vault as it is now, and the rows that name `paths` go. Git
+   * is never touched.
    */
   forget(paths: string[]): Promise<ForgetResult>;
 }

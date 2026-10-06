@@ -24,7 +24,11 @@
       "service": "kelpie-channel-egress",
       "entrypoint": "ChannelForms"
     },
-    { "binding": "CONTEXT_STORE", "service": "kelpie-context-store", "entrypoint": "ContextStore" }
+    {
+      "binding": "CONTEXT_STORE_ADMIN",
+      "service": "kelpie-context-store",
+      "entrypoint": "ContextStoreAdmin"
+    }
   ],
   // The objects that hold configuration live in the Workers that run them.
   "durable_objects": {

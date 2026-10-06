@@ -35,7 +35,7 @@ export default defineConfig({
             AGENT_HOST: "AgentHost",
           }),
           stubWorker("kelpie-channel-egress", {}, ["ChannelForms"]),
-          stubWorker("kelpie-context-store", {}, ["ContextStore"]),
+          stubWorker("kelpie-context-store", {}, ["ContextStoreAdmin"]),
         ],
       },
     }),

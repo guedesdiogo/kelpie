@@ -70,6 +70,8 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
 
 `context-store` reaches llm-gateway through its `LLM_GATEWAY` service binding, for memory's embeddings and rerank, so llm-gateway deploys first. Without llm-gateway's models, recall works on full text, entities and links alone.
 
+Its `ContextStore` entrypoint serves the Workers that run conversations. `ContextStoreAdmin` holds the owner's actions, listing held files and forgetting erased content, and only admin-api binds it, so nothing a conversation reaches can call them.
+
 The vault needs a GitHub App with access to the vault repository alone. Spike #28's App works, or a new one.
 
 1. **The App's permissions** (repository): Contents read & write, Pull requests read & write, Metadata read.

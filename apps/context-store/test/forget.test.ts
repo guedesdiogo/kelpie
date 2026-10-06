@@ -4,6 +4,8 @@ import { gitBlobSha } from "@kelpie/vault";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  ContextStore,
+  ContextStoreAdmin,
   type MemoryGateway,
   replaceBackendForTesting,
   replaceGatewayForTesting,
@@ -134,5 +136,13 @@ describe("Vault forget", () => {
       ok: false,
       reason: "vault_off",
     });
+  });
+
+  it("is reachable only through the admin entrypoint, which conversations don't bind", () => {
+    const methods = (entrypoint: { prototype: object }) =>
+      Object.getOwnPropertyNames(entrypoint.prototype);
+    expect(methods(ContextStore)).not.toContain("forget");
+    expect(methods(ContextStore)).not.toContain("held");
+    expect(methods(ContextStoreAdmin)).toEqual(["constructor", "held", "forget"]);
   });
 });

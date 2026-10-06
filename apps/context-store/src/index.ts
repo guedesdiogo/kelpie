@@ -2,6 +2,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import { parsePushEvent, verifyWebhookSignature } from "@kelpie/vault";
 import type {
   CompiledContext,
+  ContextStoreAdminContract,
   ContextStoreContract,
   ForgetResult,
   HeldFile,
@@ -53,6 +54,16 @@ export class ContextStore extends WorkerEntrypoint<VaultEnv> implements ContextS
 
   recall(agentId: string, question: string, options: RecallOptions): Promise<RecallResult> {
     return this.#vault().recall(agentId, question, options);
+  }
+}
+
+/** The owner's actions on the vault, for admin-api alone (#114). */
+export class ContextStoreAdmin
+  extends WorkerEntrypoint<VaultEnv>
+  implements ContextStoreAdminContract
+{
+  #vault() {
+    return this.env.VAULT.getByName(VAULT_NAME);
   }
 
   held(): Promise<HeldFile[]> {
