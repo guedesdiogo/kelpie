@@ -196,6 +196,37 @@ describe("AnthropicMessagesProvider", () => {
     }
   });
 
+  it("sends a request's context after the conversation, and caches the conversation without it", async () => {
+    const { fetch, calls } = fakeFetch(sse(toolTurn), sse(toolTurn));
+    const context = "<memory>Ana mora em Lisboa.</memory>";
+    await collect(provider(fetch).stream(request({ context })));
+
+    const body = requestAt(calls, 0).body;
+    // The breakpoint sits before the context, which the next request won't repeat.
+    expect(body).not.toHaveProperty("cache_control");
+    expect(body.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Weather in Lisbon?", cache_control: { type: "ephemeral" } },
+          { type: "text", text: context },
+        ],
+      },
+    ]);
+
+    // After a reply, there is no user turn to join: the context comes as one.
+    const messages: ChatMessage[] = [
+      ...request().messages,
+      { role: "assistant", parts: [{ type: "text", text: "Sunny." }] },
+    ];
+    await collect(provider(fetch).stream(request({ messages, context })));
+    expect(requestAt(calls, 1).body).toMatchObject({ cache_control: { type: "ephemeral" } });
+    expect((requestAt(calls, 1).body.messages as unknown[]).slice(1)).toEqual([
+      { role: "assistant", content: [{ type: "text", text: "Sunny." }] },
+      { role: "user", content: [{ type: "text", text: context }] },
+    ]);
+  });
+
   it("sends neither effort nor refusal fallback to Claude Haiku 4.5", async () => {
     const { fetch, calls } = fakeFetch(sse(toolTurn));
     await collect(provider(fetch).stream(request({ model: "claude-haiku-4-5" })));

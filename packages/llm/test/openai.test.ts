@@ -207,6 +207,21 @@ describe("OpenAIResponsesProvider", () => {
     });
   });
 
+  it("sends a request's context as a last user message, after the conversation", async () => {
+    const { fetch, calls } = fakeFetch(sse(toolTurn));
+    const context = "<memory>Ana mora em Lisboa.</memory>";
+    await collect(provider(fetch).stream(request({ context })));
+
+    expect(requestAt(calls, 0).body.input).toEqual([
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "Weather in Lisbon?" }],
+      },
+      { type: "message", role: "user", content: [{ type: "input_text", text: context }] },
+    ]);
+  });
+
   it("replays a reply kept without its native output as neutral text", async () => {
     const { fetch, calls } = fakeFetch(sse(toolTurn));
     const messages: ChatMessage[] = [

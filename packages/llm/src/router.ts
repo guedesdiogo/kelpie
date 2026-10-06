@@ -58,6 +58,7 @@ export class ModelRouter {
         ...(request.tools ? { tools: request.tools } : {}),
         maxOutputTokens: request.maxOutputTokens,
         ...(candidate.effort ? { effort: candidate.effort } : {}),
+        ...(typeof request.context === "string" ? { context: request.context } : {}),
       };
       let started = false;
       try {

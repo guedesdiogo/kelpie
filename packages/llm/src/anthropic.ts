@@ -79,16 +79,20 @@ export class AnthropicMessagesProvider implements LlmProvider {
 
 function toParams(request: LlmRequest): BetaMessageStreamParams {
   const fallback = REFUSAL_FALLBACK_MODELS.has(request.model);
+  const messages = request.messages.flatMap((message) => {
+    const param = toMessageParam(message);
+    // Anthropic rejects an empty turn, such as a refusal that returned nothing.
+    return param.content.length === 0 ? [] : [param];
+  });
+  const withContext = request.context ? addContext(messages, request.context) : null;
   return {
     model: request.model,
     max_tokens: request.maxOutputTokens,
     system: request.system,
-    messages: request.messages.flatMap((message) => {
-      const param = toMessageParam(message);
-      // Anthropic rejects an empty turn, such as a refusal that returned nothing.
-      return param.content.length === 0 ? [] : [param];
-    }),
-    cache_control: { type: "ephemeral" },
+    messages: withContext?.messages ?? messages,
+    // The cache is written only at a breakpoint: the automatic one, on the last block, unless the
+    // context took its place before itself.
+    ...(withContext?.marked ? {} : { cache_control: { type: "ephemeral" } }),
     ...(request.tools
       ? {
           tools: request.tools.map((tool) => ({
@@ -101,6 +105,29 @@ function toParams(request: LlmRequest): BetaMessageStreamParams {
     ...(request.effort ? { output_config: { effort: request.effort } } : {}),
     ...(fallback ? { fallbacks: "default", betas: [REFUSAL_FALLBACK_BETA] } : {}),
   };
+}
+
+/**
+ * A request's context joins the last user turn, after a breakpoint on that turn's last block, so the
+ * conversation is cached without it. After a reply, the context comes as a turn of its own, and the
+ * automatic breakpoint stays.
+ */
+function addContext(
+  messages: MessageParam[],
+  context: string,
+): { messages: MessageParam[]; marked: boolean } {
+  const block: ContentBlockParam = { type: "text", text: context };
+  const last = messages.at(-1);
+  const end = Array.isArray(last?.content) ? last.content.at(-1) : undefined;
+  if (last?.role !== "user" || !Array.isArray(last.content) || !end) {
+    return { messages: [...messages, { role: "user", content: [block] }], marked: false };
+  }
+  const content = [
+    ...last.content.slice(0, -1),
+    { ...end, cache_control: { type: "ephemeral" } } as ContentBlockParam,
+    block,
+  ];
+  return { messages: [...messages.slice(0, -1), { role: "user", content }], marked: true };
 }
 
 function toMessageParam(message: ChatMessage): MessageParam {

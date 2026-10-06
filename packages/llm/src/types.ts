@@ -77,6 +77,11 @@ export interface LlmRequest {
   maxOutputTokens: number;
   /** Only for models that accept it. Claude Haiku 4.5 rejects it. */
   effort?: Effort;
+  /**
+   * Text for this request only, such as the memories a turn retrieved. It follows the messages,
+   * which stay cacheable without it: the next request repeats them, but not this.
+   */
+  context?: string;
 }
 
 export interface StreamOptions {
