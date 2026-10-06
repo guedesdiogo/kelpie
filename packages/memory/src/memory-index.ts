@@ -643,7 +643,8 @@ export class MemoryIndex {
       ...bindings,
     );
     for (const row of rows) {
-      if (row.dims !== query.length) continue;
+      // A vector of another length, or a blob that isn't whole floats, can't be compared.
+      if (row.dims !== query.length || row.vector.byteLength !== query.length * 4) continue;
       const vector = new Float32Array(row.vector);
       let dot = 0;
       let squares = 0;
@@ -653,6 +654,7 @@ export class MemoryIndex {
         squares += value * value;
       }
       const score = squares > 0 ? dot / (Math.sqrt(squares) * norm) : 0;
+      if (!Number.isFinite(score)) continue;
       if (best.length === limit && score <= (best.at(-1)?.score ?? -Infinity)) continue;
       const at = best.findIndex((entry) => score > entry.score);
       best.splice(at === -1 ? best.length : at, 0, { score, row });

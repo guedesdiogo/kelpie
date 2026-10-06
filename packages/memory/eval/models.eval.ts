@@ -32,8 +32,11 @@ const enabled = models.EVAL_MODELS === "1";
 /** 100k memories would take tens of minutes to embed per model; 1k and 10k show the trend. */
 const SIZES = [1_000, 10_000];
 const LIMIT = 10;
-/** ai-memory reranks 3 × limit candidates, at most 30. */
-const RERANK_CANDIDATES = 30;
+/**
+ * ai-memory reranks 3 × limit candidates, at most 30: retrieval fetches that many, the rerank
+ * reorders them, and the limit is kept after, so notes can rise from below it.
+ */
+const RERANK_CANDIDATES = Math.min(3 * LIMIT, 30);
 /** Calls to a model in flight at once. */
 const CONCURRENCY = 8;
 const AS_OF_TIME = "T23:59:59Z";
@@ -216,6 +219,22 @@ describe.skipIf(!enabled)("memory evaluation with models", () => {
           for (const commit of vault.commits) await index.applyCommit(commit);
           const clefJudge = qualifierJudge(clef());
           const rerankCalls: Record<string, CallLog> = {};
+          /** Retrieval of the rerank's candidates, reranked, then cut to the limit. */
+          const reranking = async (
+            question: (typeof QUESTIONS)[number],
+            judge: Judge,
+            vector?: { model: string; query: readonly number[] },
+          ) => {
+            const candidates = retrieve(index, question.text, {
+              ...optionsOf(question),
+              limit: RERANK_CANDIDATES,
+              ...(vector ? { vector } : {}),
+            });
+            const reranked = await rerank(index, question.text, candidates, judge, {
+              candidates: RERANK_CANDIDATES,
+            });
+            return reranked.slice(0, LIMIT);
+          };
           const judgeFor = (name: string) => {
             const log: CallLog = { ms: [], failed: 0 };
             rerankCalls[name] = log;
@@ -259,8 +278,9 @@ describe.skipIf(!enabled)("memory evaluation with models", () => {
             );
             const judge = judgeFor(`+ ${embedder.model} + rerank`);
             const reranked = await pooled(QUESTIONS, (question) =>
-              rerank(index, question.text, found[QUESTIONS.indexOf(question)] ?? [], judge, {
-                candidates: RERANK_CANDIDATES,
+              reranking(question, judge, {
+                model: embedder.model,
+                query: queries[QUESTIONS.indexOf(question)] ?? [],
               }),
             );
 
@@ -270,15 +290,7 @@ describe.skipIf(!enabled)("memory evaluation with models", () => {
           }
           const plainJudge = judgeFor("retrieval + rerank");
           const rerankedPlain = await pooled(QUESTIONS, (question) =>
-            rerank(
-              index,
-              question.text,
-              retrieve(index, question.text, optionsOf(question)),
-              plainJudge,
-              {
-                candidates: RERANK_CANDIDATES,
-              },
-            ),
+            reranking(question, plainJudge),
           );
           configs["retrieval + rerank"] = QUESTIONS.map((question, i) =>
             score(question, rerankedPlain[i] ?? []),

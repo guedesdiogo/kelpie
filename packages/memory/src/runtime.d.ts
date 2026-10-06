@@ -10,3 +10,5 @@ declare const crypto: {
     digest(algorithm: "SHA-1" | "SHA-256", data: Uint8Array): Promise<ArrayBuffer>;
   };
 };
+declare function setTimeout(callback: () => void, ms: number): unknown;
+declare function clearTimeout(timer: unknown): void;

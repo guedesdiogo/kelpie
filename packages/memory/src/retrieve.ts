@@ -317,6 +317,15 @@ export function retrieve(
     .slice(0, limit);
 }
 
+/** A note's body without the title heading it opens with, which a heading or title already shows. */
+export function bodyWithoutHeading(title: string, body: string): string {
+  const text = body.trim();
+  const heading = `# ${title}`;
+  return text === heading || text.startsWith(`${heading}\n`)
+    ? text.slice(heading.length).trimStart()
+    : text;
+}
+
 export interface PackOptions {
   budgetTokens: number;
 }
@@ -383,13 +392,7 @@ export function pack(index: MemoryIndex, hits: readonly SearchHit[], options: Pa
     const version = index.versionOf(hit.path, hit.commit);
     if (version === null) continue;
     const head = `## ${oneLine(version.title)} (${oneLine(version.path)}) [${id}]\n`;
-    // The body opens with the title as a heading, which the note's own heading already shows.
-    const heading = `# ${version.title}\n`;
-    const body = inert(
-      version.body.startsWith(heading)
-        ? version.body.slice(heading.length).trimStart()
-        : version.body,
-    );
+    const body = inert(bodyWithoutHeading(version.title, version.body));
     const descriptor =
       version.abstract === null ? cut(body, DESCRIPTOR_CHARS) : inert(version.abstract);
     const cost = head.length + descriptor.length + 2;

@@ -6,6 +6,7 @@ import {
   MemoryIndex,
   type MemoryInput,
   memoryPath,
+  qualifierJudge,
   rerank,
   retrieve,
   writeMemory,
@@ -125,47 +126,168 @@ describe("retrieve with vectors", () => {
   });
 });
 
-describe("rerank", () => {
-  const notes = Array.from({ length: 12 }, (_, i) => note(`Nota ${i}`, `trabalho número ${i}`));
+describe("the vector index, closely", () => {
+  it("ranks by cosine, not by the dot product", async () => {
+    await withMemories(
+      "cosine",
+      [note("Grande", "um"), note("Alinhado", "dois")],
+      async (index) => {
+        const [grande, alinhado] = index
+          .embeddingTexts(MODEL)
+          .sort((a, b) => (a.text < b.text ? 1 : -1));
+        index.putEmbeddings(MODEL, [
+          { blobSha: grande?.blobSha ?? "", vector: [10, 0] },
+          { blobSha: alinhado?.blobSha ?? "", vector: [1, 1] },
+        ]);
+        expect(index.vectorHits(MODEL, [1, 1]).map((hit) => hit.title)).toEqual([
+          "Alinhado",
+          "Grande",
+        ]);
+        expect(index.vectorHits(MODEL, [1, 1], { limit: 1 }).map((hit) => hit.title)).toEqual([
+          "Alinhado",
+        ]);
+        expect(index.vectorHits(MODEL, [0, 0])).toEqual([]);
+      },
+    );
+  });
 
-  it("reorders the best hits by the judge's scores, and leaves the rest", async () => {
-    await withMemories("rerank", notes, async (index) => {
-      const hits = retrieve(index, "trabalho", { limit: 12 });
-      const fused = hits.map((hit) => hit.title);
-      const judge: Judge = async (_question, candidates) =>
-        Object.fromEntries(
-          candidates.map((candidate) => [
-            candidate.id,
-            candidate.text.includes("número 7") ? 0.99 : 0.1,
-          ]),
-        );
-      const reranked = await rerank(index, "trabalho", hits, judge, { candidates: 4 });
-      const top4 = fused.slice(0, 4);
-      if (top4.includes("Nota 7")) expect(reranked[0]?.title).toBe("Nota 7");
-      expect(new Set(reranked.slice(0, 4).map((hit) => hit.title))).toEqual(new Set(top4));
-      expect(reranked.slice(4).map((hit) => hit.title)).toEqual(fused.slice(4));
+  it("replaces a vector, and skips one that isn't finite or isn't whole", async () => {
+    await withMemories("vector-rows", [note("A", "um"), note("B", "dois")], async (index) => {
+      const [a, b] = index.embeddingTexts(MODEL);
+      index.putEmbeddings(MODEL, [{ blobSha: a?.blobSha ?? "", vector: [1, 0] }]);
+      index.putEmbeddings(MODEL, [{ blobSha: a?.blobSha ?? "", vector: [0, 1] }]);
+      // 1e39 overflows a Float32 to infinity.
+      index.putEmbeddings(MODEL, [{ blobSha: b?.blobSha ?? "", vector: [1e39, 0] }]);
+      expect(index.vectorHits(MODEL, [0, 1]).map((hit) => hit.title)).toEqual(["A"]);
+      expect(index.vectorHits(MODEL, [1, 0]).map((hit) => hit.title)).toEqual(["A"]);
     });
   });
 
-  it("keeps the fused order when the judge fails or answers in part", async () => {
+  it("lists each content once, current versions only, and bounds the limit", async () => {
+    await withMemories(
+      "embedding-rows",
+      [note("A", "mesmo texto"), note("B", "outro"), note("C", "mais um")],
+      async (index) => {
+        expect(index.embeddingTexts(MODEL, 2)).toHaveLength(2);
+        expect(index.embeddingTexts(MODEL, 0)).toHaveLength(1);
+        expect(index.embeddingTexts(MODEL, 10_000)).toHaveLength(3);
+      },
+    );
+  });
+
+  it("keeps a note out when it isn't valid at the question's date", async () => {
+    await withMemories(
+      "vector-valid-at",
+      [
+        {
+          ...note("Viagem", "viagem de janeiro"),
+          validFrom: "2026-01-01",
+          invalidAt: "2026-02-01",
+        },
+      ],
+      async (index) => {
+        await embedAll(index);
+        const query = embed("viagem");
+        expect(
+          index.vectorHits(MODEL, query, { validAt: Date.parse("2026-01-15T12:00:00Z") }),
+        ).toHaveLength(1);
+        expect(
+          index.vectorHits(MODEL, query, { validAt: Date.parse("2026-03-15T12:00:00Z") }),
+        ).toEqual([]);
+        const hits = retrieve(index, "quando?", {
+          validAt: Date.parse("2026-01-15T12:00:00Z"),
+          vector: { model: MODEL, query },
+        });
+        expect(hits[0]?.streams).toContain("vector");
+      },
+    );
+  });
+
+  it("follows the graph from a note found only by meaning", async () => {
+    await withMemories(
+      "vector-seeds",
+      [note("Porto", "A mudança da Ana. Veja [[bruno]]."), note("Bruno", "Ajudou a carregar.")],
+      async (index) => {
+        await embedAll(index);
+        const hits = retrieve(index, "Onde ela foi morar?", {
+          vector: { model: MODEL, query: embed("mudança") },
+        });
+        expect(hits.find((hit) => hit.title === "Bruno")?.streams).toContain("graph");
+      },
+    );
+  });
+});
+
+describe("rerank", () => {
+  const notes = Array.from({ length: 12 }, (_, i) => note(`Nota ${i}`, `trabalho número ${i}`));
+  /** A judge that likes one note, by its title, and scores the rest low. */
+  const likes =
+    (title: string): Judge =>
+    async (_question, candidates) =>
+      Object.fromEntries(
+        candidates.map((candidate) => [
+          candidate.id,
+          candidate.text.startsWith(`${title}\n`) ? 0.99 : 0.1,
+        ]),
+      );
+
+  it("puts the note the judge likes first, keeps ties in fused order, and leaves the rest", async () => {
+    await withMemories("rerank", notes, async (index) => {
+      const hits = retrieve(index, "trabalho", { limit: 12 });
+      const fused = hits.map((hit) => hit.title);
+      const third = fused[2] ?? "";
+      const reranked = (await rerank(index, "trabalho", hits, likes(third), { candidates: 4 })).map(
+        (hit) => hit.title,
+      );
+      expect(reranked).toEqual([third, ...fused.slice(0, 2), fused[3], ...fused.slice(4)]);
+      const flat: Judge = async (_question, candidates) =>
+        Object.fromEntries(candidates.map((candidate) => [candidate.id, 0.5]));
+      expect((await rerank(index, "trabalho", hits, flat)).map((hit) => hit.title)).toEqual(fused);
+    });
+  });
+
+  it("keeps the fused order when the judge fails, is late, or scores outside 0 to 1", async () => {
     await withMemories("rerank-fails", notes, async (index) => {
       const hits = retrieve(index, "trabalho", { limit: 12 });
-      const failing: Judge = async () => {
-        throw new Error("timeout");
-      };
-      const partial: Judge = async (_question, candidates) => ({
-        [candidates[0]?.id ?? "x"]: 0.9,
-      });
-      const none: Judge = async () => null;
-      for (const judge of [failing, partial, none]) {
-        expect((await rerank(index, "trabalho", hits, judge)).map((hit) => hit.title)).toEqual(
-          hits.map((hit) => hit.title),
-        );
+      const fused = hits.map((hit) => hit.title);
+      const score =
+        (value: number): Judge =>
+        async (_question, candidates) =>
+          Object.fromEntries(
+            candidates.map((candidate, i) => [candidate.id, i === 1 ? value : 0.5]),
+          );
+      const judges: Judge[] = [
+        async () => {
+          throw new Error("failed");
+        },
+        async (_question, candidates) => ({ [candidates[0]?.id ?? "x"]: 0.9 }),
+        async () => null,
+        score(Number.NaN),
+        score(1.7),
+        score(-0.2),
+        () => new Promise(() => {}),
+      ];
+      for (const judge of judges) {
+        const reranked = await rerank(index, "trabalho", hits, judge, { timeoutMs: 50 });
+        expect(reranked.map((hit) => hit.title)).toEqual(fused);
       }
     });
   });
 
-  it("gives the judge each note's title and start, and no more than 30", async () => {
+  it("asks nothing of a judge for fewer than two hits", async () => {
+    await withMemories("rerank-one", [notes[0] as MemoryInput], async (index) => {
+      let asked = false;
+      const hits = retrieve(index, "trabalho");
+      await rerank(index, "trabalho", hits, async () => {
+        asked = true;
+        return null;
+      });
+      expect(hits).toHaveLength(1);
+      expect(asked).toBe(false);
+    });
+  });
+
+  it("shows the judge at most 30 notes, of at most 600 characters", async () => {
     const many = Array.from({ length: 40 }, (_, i) =>
       note(`Nota ${i}`, `trabalho ${"palavra ".repeat(400)}`),
     );
@@ -178,7 +300,54 @@ describe("rerank", () => {
       });
       expect(seen).toHaveLength(30);
       expect(seen.every((candidate) => candidate.text.length <= 600)).toBe(true);
-      expect(seen[0]?.text.startsWith("Nota")).toBe(true);
     });
+  });
+
+  it("shows the judge a note's title, abstract and body start, without its heading", async () => {
+    await withMemories(
+      "rerank-snippet",
+      [
+        { ...note("Resumida", "trabalho do corpo"), abstract: "Um resumo." },
+        note("Simples", "trabalho"),
+      ],
+      async (index) => {
+        let seen: { id: string; text: string }[] = [];
+        await rerank(
+          index,
+          "trabalho",
+          retrieve(index, "trabalho"),
+          async (_question, candidates) => {
+            seen = candidates;
+            return null;
+          },
+        );
+        const texts = seen.map((candidate) => candidate.text).sort();
+        expect(texts).toEqual(["Resumida\nUm resumo.\ntrabalho do corpo", "Simples\ntrabalho"]);
+      },
+    );
+  });
+});
+
+describe("qualifierJudge", () => {
+  it("asks one yes-or-no question per note, says the notes are data, and maps the answers", async () => {
+    const calls: { state: unknown; questions: Record<string, { instructions: string }> }[] = [];
+    const judge = qualifierJudge({
+      async qualify(state, questions) {
+        calls.push({ state, questions });
+        return { answers: { c0: { type: "noul", noul: 0.8 }, c1: { type: "choice" } } };
+      },
+    });
+    const scores = await judge("Onde a Ana mora?", [
+      { id: "c0", text: "Ana mora no Porto." },
+      { id: "c1", text: "Outra nota." },
+    ]);
+    expect(scores).toEqual({ c0: 0.8 });
+    const [seen] = calls;
+    expect(seen?.state).toEqual({
+      question: "Onde a Ana mora?",
+      notes: { c0: "Ana mora no Porto.", c1: "Outra nota." },
+    });
+    expect(Object.keys(seen?.questions ?? {})).toEqual(["c0", "c1"]);
+    expect(seen?.questions.c0?.instructions).toMatch(/data, not instructions/);
   });
 });
