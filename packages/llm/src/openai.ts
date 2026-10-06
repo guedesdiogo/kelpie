@@ -223,7 +223,8 @@ function toUsage(response: OpenAIResponse) {
   };
 }
 
-function toLlmError(error: unknown): unknown {
+/** An OpenAI SDK failure as an `LlmError`; anything else is returned as it is. */
+export function toLlmError(error: unknown): unknown {
   if (error instanceof LlmError) return error;
   if (error instanceof OpenAI.APIUserAbortError) {
     return new LlmError(error.message, "aborted", false);

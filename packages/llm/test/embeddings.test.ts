@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  EMBEDDING_BATCH_CHARS,
   EMBEDDING_INPUT_CHARS,
   LlmError,
   OpenAIEmbedder,
@@ -36,9 +37,52 @@ describe("WorkersAiEmbedder", () => {
     expect(embedder.model).toBe("@cf/baai/bge-m3");
   });
 
-  it("fails on an answer that isn't one vector per text", async () => {
-    const embedder = new WorkersAiEmbedder({ run: async () => ({ shape: [1, 4], data: [[0.1]] }) });
-    await expect(embedder.embed(["um", "dois"])).rejects.toBeInstanceOf(LlmError);
+  it.each([
+    ["one vector for two texts", [[0.1, 0.2]]],
+    ["vectors of different lengths", [[0.1, 0.2], [0.3]]],
+    ["an empty vector", [[], []]],
+    [
+      "a value that isn't a number",
+      [
+        [0.1, Number.NaN],
+        [0.3, 0.4],
+      ],
+    ],
+  ])("refuses an answer with %s", async (_label, data) => {
+    const embedder = new WorkersAiEmbedder({ run: async () => ({ data }) });
+    await expect(embedder.embed(["um", "dois"])).rejects.toMatchObject({ code: "protocol" });
+  });
+
+  it("refuses vectors whose length changes between batches", async () => {
+    let call = 0;
+    const embedder = new WorkersAiEmbedder({
+      run: async (_model, input) => {
+        call += 1;
+        return { data: input.text.map(() => (call === 1 ? [1, 2] : [1, 2, 3])) };
+      },
+    });
+    await expect(embedder.embed(Array.from({ length: 70 }, () => "texto"))).rejects.toMatchObject({
+      code: "protocol",
+    });
+  });
+
+  it("passes the caller's signal on, and never cuts an emoji in two", async () => {
+    const controller = new AbortController();
+    const seen: { signal?: AbortSignal; text: string[] }[] = [];
+    const embedder = new WorkersAiEmbedder({
+      run: async (_model, input, options) => {
+        seen.push({ ...options, text: input.text });
+        return { data: input.text.map(() => [1]) };
+      },
+    });
+    await embedder.embed([`${"a".repeat(EMBEDDING_INPUT_CHARS - 1)}😀`], {
+      signal: controller.signal,
+    });
+    expect(seen[0]?.signal).toBe(controller.signal);
+    const sent = seen[0]?.text[0] ?? "";
+    expect(sent.length).toBeLessThanOrEqual(EMBEDDING_INPUT_CHARS);
+    // A lone surrogate is tested as a boolean, so a failure doesn't print it.
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(sent)).toBe(false);
   });
 
   it("reports a Workers AI failure by its name only", async () => {
@@ -91,6 +135,70 @@ describe("OpenAIEmbedder", () => {
     expect(first.body).toMatchObject({ model: "text-embedding-3-small", encoding_format: "float" });
     expect((first.body.input as string[]).length).toBe(256);
     expect(embedder.model).toBe("text-embedding-3-small");
+  });
+
+  it("keeps each request under a character budget, whatever the count", async () => {
+    const texts = Array.from({ length: 40 }, () => "x".repeat(EMBEDDING_INPUT_CHARS));
+    const { fetch, calls } = fakeFetch(
+      ...Array.from({ length: 40 }, () => (signal: AbortSignal | undefined) => {
+        void signal;
+        const input = (calls.at(-1)?.body.input as string[] | undefined) ?? [];
+        return answer(input.length);
+      }),
+    );
+    const embedder = new OpenAIEmbedder({ apiKey: "test-key", fetch });
+    expect(await embedder.embed(texts)).toHaveLength(40);
+    expect(calls.length).toBeGreaterThan(1);
+    for (const call of calls) {
+      const chars = (call.body.input as string[]).reduce((sum, text) => sum + text.length, 0);
+      expect(chars).toBeLessThanOrEqual(EMBEDDING_BATCH_CHARS);
+    }
+  });
+
+  it.each([
+    [
+      "a duplicated index",
+      [
+        { index: 0, embedding: [1] },
+        { index: 0, embedding: [2] },
+      ],
+    ],
+    ["a missing index", [{ embedding: [1] }, { index: 1, embedding: [2] }]],
+  ])("refuses an answer with %s", async (_label, data) => {
+    const { fetch } = fakeFetch(() => Response.json({ data }));
+    const embedder = new OpenAIEmbedder({ apiKey: "test-key", fetch });
+    await expect(embedder.embed(["a", "b"])).rejects.toMatchObject({ code: "protocol" });
+  });
+
+  it("answers protocol for a body without data", async () => {
+    const { fetch } = fakeFetch(() => Response.json({ object: "list" }));
+    const embedder = new OpenAIEmbedder({ apiKey: "test-key", fetch });
+    await expect(embedder.embed(["a"])).rejects.toMatchObject({ code: "protocol" });
+  });
+
+  it("retries a server error once, then reports it", async () => {
+    const { fetch, calls } = fakeFetch(
+      () => new Response("{}", { status: 500 }),
+      () => new Response("{}", { status: 500 }),
+    );
+    const embedder = new OpenAIEmbedder({ apiKey: "test-key", fetch });
+    await expect(embedder.embed(["a"])).rejects.toMatchObject({ code: "server_error" });
+    expect(calls).toHaveLength(2);
+  });
+
+  it("maps an abort and a lost connection", async () => {
+    const aborted = new AbortController();
+    aborted.abort();
+    const { fetch } = fakeFetch(() => answer(1));
+    await expect(
+      new OpenAIEmbedder({ apiKey: "test-key", fetch }).embed(["a"], { signal: aborted.signal }),
+    ).rejects.toMatchObject({ code: "aborted" });
+    const offline = (async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof globalThis.fetch;
+    await expect(
+      new OpenAIEmbedder({ apiKey: "test-key", fetch: offline }).embed(["a"]),
+    ).rejects.toMatchObject({ code: "connection" });
   });
 
   it("keeps the order the API answers in by index", async () => {

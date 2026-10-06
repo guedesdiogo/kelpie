@@ -1,5 +1,6 @@
 export { type AnthropicConfig, AnthropicMessagesProvider } from "./anthropic.ts";
 export {
+  EMBEDDING_BATCH_CHARS,
   EMBEDDING_INPUT_CHARS,
   EMBEDDING_PROVIDERS,
   type Embedder,

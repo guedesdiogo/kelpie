@@ -109,10 +109,10 @@ Form pages are HTML:
       Either way, `llm-gateway` masks emails, long numbers, link query strings and token-like strings in the fragments first. Names, addresses and numbers written in words still go out.
 
       **Embeddings.** Memory's vector search (#110) embeds notes and questions through `llm-gateway`'s `embed`. The `EMBEDDING_PROVIDER` var chooses the model for the whole vault:
-      - **`workers-ai`, the default:** BAAI's multilingual `bge-m3` on Workers AI, 1,024 dimensions. It needs no key and is billed as Workers AI usage.
-      - **`openai`:** OpenAI's `text-embedding-3-small`, 1,536 dimensions, through `OPENAI_BASE_URL`. It needs `OPENAI_API_KEY`.
+      - **`workers-ai`, the default:** BAAI's multilingual `bge-m3` on Workers AI, 1,024 dimensions. It needs no key and is billed as Workers AI usage. Cloudflare doesn't use the inputs to train or improve models.
+      - **`openai`:** OpenAI's `text-embedding-3-small`, 1,536 dimensions, through `OPENAI_BASE_URL`. It needs `OPENAI_API_KEY`. The notes' text, personal data included, then goes to OpenAI, and through AI Gateway when that is configured; their retention policies apply.
 
-      Vectors are kept per model, so changing the var means every note is embedded again.
+      Each text is cut to its first 6,000 characters. Vectors are kept per model, so changing the var means every note is embedded again.
    2. `channel-egress`, with its `SECRETS_KEY` and `--var INGRESS_ORIGIN:https://<ingress hostname>` (`docs/secrets.md`);
    3. `context-store`, with the vault's GitHub App values and secrets (`docs/context-store.md`). Without them it runs with the vault off;
    4. `conversation-runtime`;

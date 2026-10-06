@@ -307,7 +307,69 @@ describe("embed", () => {
     }
   });
 
-  it("answers failed when Workers AI fails, and logs only the error's name", async () => {
+  it("refuses empty texts and holes, and answers not_configured for an unknown provider", async () => {
+    // biome-ignore lint/suspicious/noSparseArray: a hole is what this checks
+    for (const texts of [["oi", ""], ["  "], [, "oi"]]) {
+      expect(await embedWith(env as GatewayEnv, texts as string[])).toEqual({
+        ok: false,
+        reason: "invalid",
+      });
+    }
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(
+      await embedWith({ ...(env as GatewayEnv), EMBEDDING_PROVIDER: "cohere" }, ["oi"]),
+    ).toEqual({ ok: false, reason: "not_configured" });
+    expect(JSON.stringify(logged.mock.calls)).toContain("unknown EMBEDDING_PROVIDER: cohere");
+  });
+
+  it("logs a timeout as one", async () => {
+    const run = vi.fn(
+      (_model: string, _input: unknown, options: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) =>
+          options.signal?.addEventListener("abort", () => reject(options.signal?.reason)),
+        ),
+    );
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const outcome = await embedWith(
+      { ...(env as GatewayEnv), AI: { run } as unknown as Ai },
+      ["oi"],
+      20,
+    );
+    expect(outcome).toEqual({ ok: false, reason: "failed" });
+    expect(JSON.stringify(logged.mock.calls)).toContain("embed timed out");
+  });
+
+  it("sends AI Gateway's token, and logs a refused key by its kind only", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json(
+        {
+          error: {
+            message: "Incorrect API key provided: sk-proj-****wxyz",
+            code: "invalid_api_key",
+          },
+        },
+        { status: 401 },
+      ),
+    );
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const outcome = await embedWith(
+      {
+        ...(env as GatewayEnv),
+        EMBEDDING_PROVIDER: "openai",
+        OPENAI_API_KEY: "test-key",
+        OPENAI_BASE_URL: "https://gateway.ai.cloudflare.com/v1/acct/kelpie/openai",
+        AI_GATEWAY_TOKEN: "gateway-token",
+      },
+      ["oi"],
+    );
+    expect(outcome).toEqual({ ok: false, reason: "failed" });
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(new Headers(init?.headers).get("cf-aig-authorization")).toBe("Bearer gateway-token");
+    expect(JSON.stringify(logged.mock.calls)).toContain("embed failed: auth");
+    expect(JSON.stringify(logged.mock.calls)).not.toMatch(/sk-|wxyz/);
+  });
+
+  it("answers failed when Workers AI fails, and logs only the failure's kind", async () => {
     const run = vi.fn(async () => {
       const error = new Error("bad input: a senha é hunter2hunter2");
       error.name = "InferenceUpstreamError";
@@ -318,7 +380,7 @@ describe("embed", () => {
       "oi",
     ]);
     expect(outcome).toEqual({ ok: false, reason: "failed" });
-    expect(JSON.stringify(logged.mock.calls)).toContain("InferenceUpstreamError");
+    expect(JSON.stringify(logged.mock.calls)).toContain("embed failed: server_error");
     expect(JSON.stringify(logged.mock.calls)).not.toContain("hunter2");
   });
 });

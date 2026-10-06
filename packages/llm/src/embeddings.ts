@@ -1,15 +1,22 @@
 import OpenAI from "openai";
-import { errorFromStatus, LlmError } from "./errors.ts";
+import { LlmError } from "./errors.ts";
+import { toLlmError } from "./openai.ts";
 
 /** The embedding services an instance can choose between (issue #110). */
 export const EMBEDDING_PROVIDERS = ["workers-ai", "openai"] as const;
 export type EmbeddingProviderId = (typeof EMBEDDING_PROVIDERS)[number];
 
 /**
- * A text is cut to this many characters before it is embedded: both models take a few thousand
- * tokens at most, and a note's start says what it is about.
+ * A text is cut to this many characters before it is embedded. Both models take 8,192 tokens at
+ * most, and a character is rarely more than a token, so the cut stays under that in any script.
+ * A note's start says what it is about.
  */
-export const EMBEDDING_INPUT_CHARS = 8_000;
+export const EMBEDDING_INPUT_CHARS = 6_000;
+/**
+ * One request holds at most this many characters: OpenAI takes 300,000 tokens per request, summed
+ * over its inputs.
+ */
+export const EMBEDDING_BATCH_CHARS = 100_000;
 
 /** Turns texts into vectors, one per text, in order. */
 export interface Embedder {
@@ -24,28 +31,54 @@ export type EmbedOutcome =
   | { ok: true; model: string; vectors: number[][] }
   | { ok: false; reason: "not_configured" | "invalid" | "failed" };
 
-const cut = (text: string) => text.slice(0, EMBEDDING_INPUT_CHARS);
+/** A text's start, never half of an emoji's surrogate pair. */
+function cut(text: string): string {
+  if (text.length <= EMBEDDING_INPUT_CHARS) return text;
+  const last = text.charCodeAt(EMBEDDING_INPUT_CHARS - 1);
+  const end = last >= 0xd800 && last <= 0xdbff ? EMBEDDING_INPUT_CHARS - 1 : EMBEDDING_INPUT_CHARS;
+  return text.slice(0, end);
+}
 
+const protocol = (message: string) => new LlmError(message, "protocol", false);
+
+/**
+ * Embeds texts in batches of at most `size` texts and `EMBEDDING_BATCH_CHARS` characters. Every
+ * answer must be one vector per text, each of the same length, of finite numbers.
+ */
 async function inBatches(
   texts: readonly string[],
   size: number,
   embedBatch: (batch: string[]) => Promise<number[][]>,
 ): Promise<number[][]> {
   const vectors: number[][] = [];
-  for (let start = 0; start < texts.length; start += size) {
-    const batch = texts.slice(start, start + size).map(cut);
+  let dims: number | null = null;
+  let start = 0;
+  while (start < texts.length) {
+    const batch: string[] = [];
+    let chars = 0;
+    for (let i = start; i < texts.length && batch.length < size; i += 1) {
+      const text = cut(texts[i] ?? "");
+      if (batch.length > 0 && chars + text.length > EMBEDDING_BATCH_CHARS) break;
+      batch.push(text);
+      chars += text.length;
+    }
     const answer = await embedBatch(batch);
-    if (
-      answer.length !== batch.length ||
-      !answer.every((v) => Array.isArray(v) && v.length > 0 && v.every(Number.isFinite))
-    ) {
-      throw new LlmError(
-        "the embedding service didn't answer one vector per text",
-        "protocol",
-        false,
-      );
+    if (answer.length !== batch.length) {
+      throw protocol("the embedding service didn't answer one vector per text");
+    }
+    for (const vector of answer) {
+      dims ??= Array.isArray(vector) ? vector.length : 0;
+      if (
+        !Array.isArray(vector) ||
+        vector.length === 0 ||
+        vector.length !== dims ||
+        !vector.every(Number.isFinite)
+      ) {
+        throw protocol("the embedding service answered a malformed vector");
+      }
     }
     vectors.push(...answer);
+    start += batch.length;
   }
   return vectors;
 }
@@ -86,7 +119,8 @@ export class WorkersAiEmbedder implements Embedder {
         throw new LlmError(`Workers AI failed: ${name}`, "server_error", true);
       }
       const data = (answer as { data?: unknown } | null)?.data;
-      return Array.isArray(data) ? (data as number[][]) : [];
+      if (!Array.isArray(data)) throw protocol("Workers AI answered without vectors");
+      return data as number[][];
     });
   }
 }
@@ -119,21 +153,37 @@ export class OpenAIEmbedder implements Embedder {
 
   embed(texts: readonly string[], options: { signal?: AbortSignal } = {}): Promise<number[][]> {
     return inBatches(texts, 256, async (batch) => {
+      let data: unknown;
       try {
         const response = await this.#client.embeddings.create(
           { model: this.model, input: batch, encoding_format: "float" },
           options.signal ? { signal: options.signal } : {},
         );
-        return [...response.data].sort((a, b) => a.index - b.index).map((item) => item.embedding);
+        data = (response as { data?: unknown }).data;
       } catch (error) {
-        if (error instanceof OpenAI.APIUserAbortError) {
-          throw new LlmError("the embedding request was aborted", "aborted", false);
-        }
-        if (error instanceof OpenAI.APIError) {
-          throw errorFromStatus(error.status, error.message);
-        }
-        throw new LlmError(error instanceof Error ? error.message : "unknown", "connection", true);
+        const failure = toLlmError(error);
+        throw failure instanceof LlmError
+          ? failure
+          : new LlmError(failure instanceof Error ? failure.name : "unknown", "connection", true);
       }
+      if (!Array.isArray(data)) throw protocol("OpenAI answered without vectors");
+      // Each vector goes to the slot its index names, and every slot is filled exactly once.
+      const vectors: number[][] = new Array(batch.length);
+      for (const item of data as { index?: unknown; embedding?: unknown }[]) {
+        const index = item?.index;
+        if (
+          typeof index !== "number" ||
+          !Number.isInteger(index) ||
+          index < 0 ||
+          index >= batch.length ||
+          vectors[index] !== undefined
+        ) {
+          throw protocol("OpenAI answered vectors out of order");
+        }
+        vectors[index] = item.embedding as number[];
+      }
+      if (data.length !== batch.length) throw protocol("OpenAI answered a vector short");
+      return vectors;
     });
   }
 }
