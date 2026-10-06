@@ -39,6 +39,8 @@ interface Secrets {
 
 /** How long to wait for the qualifier: just past the caller's 800 ms, whose abort doesn't cross RPC. */
 const QUALIFY_TIMEOUT_MS = 1_000;
+/** A caller may wait longer, as memory's rerank does, but never more than this. */
+const MAX_QUALIFY_TIMEOUT_MS = 3_000;
 /** One `embed` call takes at most this many texts, and this long. */
 const MAX_EMBED_TEXTS = 256;
 const EMBED_TIMEOUT_MS = 30_000;
@@ -93,8 +95,9 @@ export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
     state: unknown,
     questions: Record<string, Question>,
     backend: QualifierBackend = "jev",
+    options: { timeoutMs?: number } = {},
   ): Promise<GatewayQualifyOutcome> {
-    return qualifyWith(this.env, state, questions, backend);
+    return qualifyWith(this.env, state, questions, backend, options);
   }
 
   /**
@@ -182,6 +185,7 @@ export async function qualifyWith(
   state: unknown,
   questions: Record<string, Question>,
   backend: QualifierBackend = "jev",
+  options: { timeoutMs?: number } = {},
 ): Promise<GatewayQualifyOutcome> {
   if (!QUALIFIER_BACKENDS.includes(backend)) {
     console.error("llm-gateway: unknown qualifier backend");
@@ -190,7 +194,11 @@ export async function qualifyWith(
   try {
     const qualifier = qualifierFor(env, backend);
     if (!qualifier) return { ok: false, reason: "not_configured" };
-    const signal = AbortSignal.timeout(QUALIFY_TIMEOUT_MS);
+    const asked = Math.trunc(options?.timeoutMs ?? QUALIFY_TIMEOUT_MS);
+    const timeout = Number.isFinite(asked)
+      ? Math.min(Math.max(asked, 100), MAX_QUALIFY_TIMEOUT_MS)
+      : QUALIFY_TIMEOUT_MS;
+    const signal = AbortSignal.timeout(timeout);
     return { ok: true, result: await qualifier.qualify(state, questions, { signal }) };
   } catch (error) {
     logFailure(error, env);

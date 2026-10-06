@@ -6,7 +6,12 @@ import {
   type SendOutcome,
   typingRenewIntervalMs,
 } from "@kelpie/channels";
-import type { ContextStoreContract, WriteResult } from "@kelpie/context-store/contract";
+import type {
+  ContextStoreContract,
+  RecallOptions,
+  RecallResult,
+  WriteResult,
+} from "@kelpie/context-store/contract";
 import type { Destination } from "@kelpie/conversation/contract";
 import { fromNdjsonStream, type LlmEvent, type ModelTier, type RoutedRequest } from "@kelpie/llm";
 
@@ -42,6 +47,12 @@ export interface ConversationPorts {
     changes: { path: string; content: string | null }[],
     summary: string,
   ): Promise<WriteResult>;
+  /**
+   * The vault's notes that answer a question, packed within a budget, through the Context Store
+   * (#110). The block is empty when nothing matches or the vault is off; a store that is
+   * unreachable, or doesn't answer in time, throws.
+   */
+  recall(agentId: string, question: string, options: RecallOptions): Promise<RecallResult>;
   now(): number;
   /** Waits `ms`, or rejects as soon as `signal` aborts. */
   sleep(ms: number, signal: AbortSignal): Promise<void>;
@@ -104,6 +115,8 @@ function productionPorts(env: Env): ConversationPorts {
     send: (agentId, destination, text, options) => egress.send(agentId, destination, text, options),
     remember: (agentId, changes, summary) =>
       withTimeout(contextStore.write(agentId, changes, summary), REMEMBER_TIMEOUT_MS),
+    recall: (agentId, question, options) =>
+      withTimeout(contextStore.recall(agentId, question, options), RECALL_TIMEOUT_MS),
     async typing(agentId, destination) {
       await bounded(egress.typing(agentId, destination));
     },
@@ -160,6 +173,12 @@ async function bounded<T>(call: Promise<T>): Promise<T | undefined> {
  * object's schedules run one at a time, so it must not hold up a reply's.
  */
 const REMEMBER_TIMEOUT_MS = 10_000;
+
+/**
+ * A recall the Context Store hasn't answered after this long is given up, and the turn goes on
+ * without memory. The store bounds its own calls: 2 s to embed the question, 3.5 s for the rerank.
+ */
+const RECALL_TIMEOUT_MS = 6_000;
 
 async function withTimeout<T>(call: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;

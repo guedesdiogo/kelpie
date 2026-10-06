@@ -108,7 +108,7 @@ const EMOJI = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]|\u{FE0F}|
 
 /**
  * Whether a message is worth a memory lookup: not empty, not a command, not a bare acknowledgement
- * or greeting. Cheap and local; a model only decides what this can't.
+ * or greeting. Cheap and local, and the whole gate: no model is asked (#110).
  */
 export function needsMemory(text: string): boolean {
   const stripped = foldKey(text.slice(0, MAX_QUESTION_CHARS).replace(EMOJI, "")).trim();
@@ -343,6 +343,10 @@ const CHARS_PER_TOKEN = 4;
 const DESCRIPTOR_CHARS = 400;
 /** A note cut shorter than this isn't worth its heading. */
 const MIN_ENTRY_CHARS = 80;
+/** A heading shows at most this much of a title, so one note can't fill the block. */
+const HEADING_TITLE_CHARS = 120;
+/** And this much of a path: enough that a real one stays whole, and can be cited. */
+const HEADING_PATH_CHARS = 300;
 
 /** At most `max` characters, with an ellipsis when cut; never half of an emoji's surrogate pair. */
 function cut(text: string, max: number): string {
@@ -355,12 +359,20 @@ function cut(text: string, max: number): string {
 
 /** Anything a note holds that could read as this block's tags is escaped. */
 const inert = (text: string) => text.replace(/<(\s*\/?\s*memory)/gi, "&lt;$1");
-/** One line, without controls: a heading a note can't split. */
-const oneLine = (text: string) =>
-  inert(text)
-    .replace(/\s+/g, " ")
-    .replace(/\p{Cc}/gu, "")
-    .trim();
+/**
+ * One line, without controls, cut to about `max`: a heading a note can't split. Controls go before
+ * escaping, so removing one can't re-form a tag; escaping comes last, and may lengthen it a little.
+ */
+const oneLine = (text: string, max: number) =>
+  inert(
+    cut(
+      text
+        .replace(/\s+/g, " ")
+        .replace(/\p{Cc}/gu, "")
+        .trim(),
+      max,
+    ),
+  );
 
 /** A random id for one block: a note can't guess it, so it can't close the block or forge a note. */
 function blockId(): string {
@@ -391,7 +403,8 @@ export function pack(index: MemoryIndex, hits: readonly SearchHit[], options: Pa
     seen.add(hit.path);
     const version = index.versionOf(hit.path, hit.commit);
     if (version === null) continue;
-    const head = `## ${oneLine(version.title)} (${oneLine(version.path)}) [${id}]\n`;
+    const title = oneLine(version.title, HEADING_TITLE_CHARS);
+    const head = `## ${title} (${oneLine(version.path, HEADING_PATH_CHARS)}) [${id}]\n`;
     const body = inert(bodyWithoutHeading(version.title, version.body));
     const descriptor =
       version.abstract === null ? cut(body, DESCRIPTOR_CHARS) : inert(version.abstract);

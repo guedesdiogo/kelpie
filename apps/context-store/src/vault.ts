@@ -1,4 +1,16 @@
 import { DurableObject } from "cloudflare:workers";
+import { EMBEDDING_INPUT_CHARS, type EmbedOutcome } from "@kelpie/llm";
+import {
+  isScope,
+  MemoryIndex,
+  pack,
+  qualifierJudge,
+  type RetrieveOptions,
+  rerank,
+  retrieve,
+  type Scope,
+} from "@kelpie/memory";
+import type { GatewayQualifyOutcome, QualifierBackend, Question } from "@kelpie/qualifier";
 import {
   type FileChange,
   GitHubVaultBackend,
@@ -11,6 +23,8 @@ import type {
   CompiledContext,
   ProposalTarget,
   ProposeResult,
+  RecallOptions,
+  RecallResult,
   SkillEntry,
   WriteResult,
 } from "./contract.ts";
@@ -54,6 +68,22 @@ const MAX_WRITE_BYTES = 2_000_000;
 /** What one commit may hold; a longer queue is committed in several. */
 const MAX_BATCH_ROWS = 100;
 const MAX_BATCH_BYTES = 2_000_000;
+/** Memory's recall (#110): the question read, the block's ceiling, the hits fused and reranked. */
+const MAX_QUESTION_CHARS = 2_000;
+const MAX_RECALL_TOKENS = 8_000;
+const RECALL_LIMIT = 10;
+/** As ai-memory: the rerank judges 3 × the limit, up to 30, then the limit is kept. */
+const RERANK_CANDIDATES = 30;
+const MAX_RECALL_SCOPES = 64;
+/** The question's vector waits this long, the rerank this long, then recall goes on without them. */
+const EMBED_QUESTION_TIMEOUT_MS = 2_000;
+const RERANK_TIMEOUT_MS = 3_000;
+/** An embedding call in the alarm is given up after this, so the alarm can't hang on it. */
+const EMBED_NOTES_TIMEOUT_MS = 40_000;
+/** Notes are embedded in the alarm, a few batches a run, so a large vault doesn't hold it up. */
+const EMBED_BATCH = 64;
+const EMBED_BATCHES_PER_RUN = 4;
+const EMBED_AGAIN_MS = 5_000;
 /** Each proposal costs three of GitHub's content-creating requests (ADR-0005). */
 const MAX_PROPOSALS_PER_HOUR = 10;
 const SYSTEM_AGENT = "context-store";
@@ -82,6 +112,11 @@ CREATE TABLE IF NOT EXISTS conflicts (
   at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS proposal_attempts (at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS recall_counts (
+  path TEXT PRIMARY KEY NOT NULL,
+  count INTEGER NOT NULL,
+  last_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS proposals (
   id INTEGER PRIMARY KEY,
   agent TEXT NOT NULL,
@@ -97,6 +132,37 @@ CREATE TABLE IF NOT EXISTS proposals (
 
 const encoder = new TextEncoder();
 const bytes = (text: string | null) => (text === null ? 0 : encoder.encode(text).byteLength);
+
+/** What memory asks of llm-gateway: embeddings, and the qualifier for the rerank. */
+export interface MemoryGateway {
+  embed(texts: string[]): Promise<EmbedOutcome>;
+  qualify(
+    state: unknown,
+    questions: Record<string, Question>,
+    backend?: QualifierBackend,
+    options?: { timeoutMs?: number },
+  ): Promise<GatewayQualifyOutcome>;
+}
+
+let gatewayForTesting: MemoryGateway | null | undefined;
+
+/** Tests run in the Worker's isolate and swap llm-gateway with this. Production never calls it. */
+export function replaceGatewayForTesting(gateway: MemoryGateway | null | undefined): void {
+  gatewayForTesting = gateway;
+}
+
+/** Waits for `call` at most `ms`, then answers null; the call isn't cancelled, only ignored. */
+async function within<T>(call: Promise<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  try {
+    return await Promise.race([call.catch(() => null), timeout]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
 
 let backendForTesting: VaultBackend | null | undefined;
 
@@ -148,10 +214,76 @@ export class Vault extends DurableObject<VaultEnv> {
   #work: Promise<unknown> = Promise.resolve();
   /** One backend per object, so its installation token is reused until it expires. */
   #cachedBackend: VaultBackend | null | undefined;
+  /** Memory's index, derived from the files: it follows every move of `head` (#110). */
+  readonly #memory: MemoryIndex;
 
   constructor(ctx: DurableObjectState, env: VaultEnv) {
     super(ctx, env);
     ctx.storage.sql.exec(SCHEMA);
+    this.#memory = new MemoryIndex(ctx.storage);
+  }
+
+  #gateway(): MemoryGateway | null {
+    if (gatewayForTesting !== undefined) return gatewayForTesting;
+    return (this.env.LLM_GATEWAY as unknown as MemoryGateway | undefined) ?? null;
+  }
+
+  /** Whether the index holds exactly the files at `head`, and hasn't started over since. */
+  #indexedAt(head: string): boolean {
+    return (
+      this.#get("index_head") === head &&
+      this.#memory.lastCommit()?.sha === this.#get("index_commit")
+    );
+  }
+
+  /**
+   * Applies changes to the index as one step toward `head`. Each step gets a fresh id: a head can
+   * come back after a rewind, and the index must apply it again rather than skip a known commit.
+   */
+  async #applyToIndex(head: string, changes: ReadonlyMap<string, string | null>): Promise<void> {
+    const seq = Number(this.#get("index_seq") ?? "0") + 1;
+    this.#set("index_seq", `${seq}`);
+    const id = `${head}#${seq}`;
+    await this.#memory.applyCommit({
+      sha: id,
+      committedAt: Date.now(),
+      changes: [...changes].map(([path, content]) => ({ path, content })),
+    });
+    this.#set("index_head", head);
+    this.#set("index_commit", id);
+  }
+
+  /**
+   * Follows a move of `head` from `previous`: the changes alone when the index was exactly at
+   * `previous`, else everything from the working copy, which the move already updated.
+   */
+  async #index(
+    previous: string | null,
+    head: string,
+    changes: ReadonlyMap<string, string | null>,
+  ): Promise<void> {
+    if (previous !== null && this.#indexedAt(previous)) await this.#applyToIndex(head, changes);
+    else await this.#reindex(head);
+  }
+
+  /** The index brought to `head` from the working copy; unchanged notes are skipped. */
+  async #reindex(head: string): Promise<void> {
+    const files = this.#exec<{ path: string; content: string }>("SELECT path, content FROM files");
+    const changes = new Map<string, string | null>(
+      this.#memory.currentPaths().map((path) => [path, null]),
+    );
+    for (const { path, content } of files) changes.set(path, content);
+    await this.#applyToIndex(head, changes);
+  }
+
+  /**
+   * Brings the index to `head` when it isn't there: after a crash between a move of `head` and its
+   * indexing, after a new schema started it over, or when this code first runs on a synced vault.
+   */
+  async #catchUp(): Promise<void> {
+    const head = this.#get("head");
+    if (head === null || this.#indexedAt(head)) return;
+    await this.#reindex(head);
   }
 
   #backend(): VaultBackend | null {
@@ -379,8 +511,133 @@ export class Vault extends DurableObject<VaultEnv> {
       await this.ctx.storage.setAlarm(retryAt);
       return;
     }
+    // Memory's work comes after GitHub's and fails on its own, so an llm-gateway outage never
+    // delays the vault's writes.
+    const moreToEmbed = await this.#embedPending();
     const queued = this.#exec<{ n: number }>("SELECT count(*) AS n FROM queue")[0]?.n ?? 0;
-    await this.#alarmBy(Date.now() + (queued > 0 ? FLUSH_DELAY_MS : RECONCILE_MS));
+    await this.#alarmBy(
+      Date.now() + (queued > 0 ? FLUSH_DELAY_MS : moreToEmbed ? EMBED_AGAIN_MS : RECONCILE_MS),
+    );
+  }
+
+  /**
+   * Embeds current notes without a vector from the gateway's model, a few batches a run. Answers
+   * whether more are waiting; a failure is logged and waits for the next run.
+   */
+  async #embedPending(): Promise<boolean> {
+    const gateway = this.#gateway();
+    if (gateway === null) return false;
+    try {
+      await this.#catchUp();
+      for (let run = 0; run < EMBED_BATCHES_PER_RUN; run += 1) {
+        const model = this.#get("embedding_model") ?? "";
+        const missing = this.#memory.embeddingTexts(model, EMBED_BATCH);
+        if (missing.length === 0) return false;
+        const outcome = await within(
+          gateway.embed(missing.map((item) => item.text.slice(0, EMBEDDING_INPUT_CHARS))),
+          EMBED_NOTES_TIMEOUT_MS,
+        );
+        if (!outcome?.ok || outcome.vectors.length !== missing.length) {
+          console.error("Vault: embedding notes failed", {
+            reason: outcome === null ? "no answer" : outcome.ok ? "vector count" : outcome.reason,
+          });
+          return false;
+        }
+        // The gateway names its model; a new one means every note is embedded again.
+        if (outcome.model !== model) {
+          this.#set("embedding_model", outcome.model);
+          if (model !== "") continue;
+        }
+        this.#memory.putEmbeddings(
+          outcome.model,
+          missing.map((item, i) => ({ blobSha: item.blobSha, vector: outcome.vectors[i] ?? [] })),
+        );
+      }
+      return this.#memory.embeddingTexts(this.#get("embedding_model") ?? "", 1).length > 0;
+    } catch (error) {
+      console.error("Vault: embedding notes failed", errorName(error));
+      return false;
+    }
+  }
+
+  /**
+   * The memories that answer a question, packed for one turn (#110). It never waits behind a commit
+   * to GitHub, only behind the first sync of a vault never synced; the question's vector and the
+   * rerank are skipped when they don't answer in time. What was packed is counted. A failure
+   * answers an empty block, so a turn goes on without memory.
+   */
+  async recall(agentId: string, question: string, options: RecallOptions): Promise<RecallResult> {
+    const empty: RecallResult = { text: "", tokens: 0, paths: [] };
+    const budget = Math.min(
+      Math.max(Math.floor(Number(options?.budgetTokens)) || 0, 0),
+      MAX_RECALL_TOKENS,
+    );
+    const text = typeof question === "string" ? question.slice(0, MAX_QUESTION_CHARS).trim() : "";
+    const scopes = options?.scopes;
+    const scopesValid =
+      scopes === "all" ||
+      (Array.isArray(scopes) &&
+        scopes.length <= MAX_RECALL_SCOPES &&
+        scopes.every((scope) => isScope(scope)));
+    if (!isAgentId(agentId) || text === "" || budget === 0 || !scopesValid) return empty;
+    if (this.#backend() === null) return empty;
+    try {
+      await this.#ready();
+      await this.#catchUp();
+      const gateway = this.#gateway();
+      const embedded =
+        gateway === null ? null : await within(gateway.embed([text]), EMBED_QUESTION_TIMEOUT_MS);
+      const query = embedded?.ok ? embedded.vectors[0] : undefined;
+      if (embedded?.ok && embedded.model !== this.#get("embedding_model")) {
+        // A new model on llm-gateway: the notes are embedded again, and until then this stream
+        // finds what it can.
+        this.#set("embedding_model", embedded.model);
+        await this.#alarmBy(Date.now() + EMBED_AGAIN_MS);
+      }
+      const retrieveOptions: RetrieveOptions = {
+        limit: gateway === null ? RECALL_LIMIT : RERANK_CANDIDATES,
+        ...(scopes === "all" ? {} : { scopes: scopes as readonly Scope[] }),
+        ...(typeof options.asOf === "number" ? { asOf: options.asOf } : {}),
+        ...(typeof options.validAt === "number" ? { validAt: options.validAt } : {}),
+        ...(embedded?.ok && query ? { vector: { model: embedded.model, query } } : {}),
+      };
+      let hits = retrieve(this.#memory, text, retrieveOptions);
+      if (gateway !== null) {
+        const backend: QualifierBackend = options.qualifier === "jev" ? "jev" : "clef";
+        const judge = qualifierJudge({
+          async qualify(state, questions) {
+            const outcome = await gateway.qualify(state, questions, backend, {
+              timeoutMs: RERANK_TIMEOUT_MS,
+            });
+            if (!outcome.ok) throw new Error(outcome.reason);
+            return outcome.result;
+          },
+        });
+        // A little past the gateway's own limit, for the call's way back.
+        hits = await rerank(this.#memory, text, hits, judge, {
+          candidates: RERANK_CANDIDATES,
+          timeoutMs: RERANK_TIMEOUT_MS + 500,
+        });
+      }
+      const packed = pack(this.#memory, hits.slice(0, RECALL_LIMIT), { budgetTokens: budget });
+      if (packed.paths.length > 0) {
+        const now = Date.now();
+        this.ctx.storage.transactionSync(() => {
+          for (const path of packed.paths) {
+            this.#exec(
+              `INSERT INTO recall_counts (path, count, last_at) VALUES (?, 1, ?)
+               ON CONFLICT (path) DO UPDATE SET count = count + 1, last_at = excluded.last_at`,
+              path,
+              now,
+            );
+          }
+        });
+      }
+      return packed;
+    } catch (error) {
+      console.error("Vault: recall failed", errorName(error));
+      return empty;
+    }
   }
 
   /** Sets the alarm to `at`, unless one is due sooner; never before a pending retry. */
@@ -415,13 +672,16 @@ export class Vault extends DurableObject<VaultEnv> {
     if (remote !== head) {
       const diff = head === null ? null : await backend.diff(head, remote);
       const snapshot = diff === null ? await backend.snapshot(remote) : null;
-      this.ctx.storage.transactionSync(() => {
+      const previous = head;
+      const changed = this.ctx.storage.transactionSync(() => {
         const changed = snapshot
           ? this.#replaceFiles(snapshot.files)
           : this.#apply(diff?.changes ?? []);
         for (const [path, content] of changed) this.#settleQueued(path, content);
         this.#set("head", remote);
+        return changed;
       });
+      await this.#index(previous, remote, changed);
       if (head === null && this.#visible("README.md") === null) {
         this.#exec(
           "INSERT INTO queue (agent, path, content, summary, queued_at) VALUES (?, ?, ?, ?, ?)",
@@ -573,6 +833,7 @@ export class Vault extends DurableObject<VaultEnv> {
           ? (summaries[0] ?? "")
           : `Update ${latest.size} files from ${agents.join(", ")}`;
       const shas = await Promise.all(writes.map(({ content }) => gitBlobSha(content)));
+      const previousHead = this.#get("head");
       let outcome: Awaited<ReturnType<VaultBackend["commit"]>>;
       try {
         outcome = await backend.commit({
@@ -619,6 +880,14 @@ export class Vault extends DurableObject<VaultEnv> {
         done();
         this.#set("head", commit);
       });
+      await this.#index(
+        previousHead,
+        commit,
+        new Map<string, string | null>([
+          ...writes.map(({ path, content }) => [path, content] as const),
+          ...deletions.map((path) => [path, null] as const),
+        ]),
+      );
       if (suspect) {
         this.#setAside(suspect);
         suspect = null;

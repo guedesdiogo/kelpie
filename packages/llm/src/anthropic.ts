@@ -79,16 +79,20 @@ export class AnthropicMessagesProvider implements LlmProvider {
 
 function toParams(request: LlmRequest): BetaMessageStreamParams {
   const fallback = REFUSAL_FALLBACK_MODELS.has(request.model);
+  const messages = request.messages.flatMap((message) => {
+    const param = toMessageParam(message);
+    // Anthropic rejects an empty turn, such as a refusal that returned nothing.
+    return param.content.length === 0 ? [] : [param];
+  });
+  const withContext = request.context?.trim() ? addContext(messages, request.context) : null;
   return {
     model: request.model,
     max_tokens: request.maxOutputTokens,
     system: request.system,
-    messages: request.messages.flatMap((message) => {
-      const param = toMessageParam(message);
-      // Anthropic rejects an empty turn, such as a refusal that returned nothing.
-      return param.content.length === 0 ? [] : [param];
-    }),
-    cache_control: { type: "ephemeral" },
+    messages: withContext?.messages ?? messages,
+    // The cache is written only at a breakpoint: the automatic one, on the last block, unless the
+    // context took its place before itself.
+    ...(withContext?.marked ? {} : { cache_control: { type: "ephemeral" } }),
     ...(request.tools
       ? {
           tools: request.tools.map((tool) => ({
@@ -101,6 +105,45 @@ function toParams(request: LlmRequest): BetaMessageStreamParams {
     ...(request.effort ? { output_config: { effort: request.effort } } : {}),
     ...(fallback ? { fallbacks: "default", betas: [REFUSAL_FALLBACK_BETA] } : {}),
   };
+}
+
+/**
+ * A request's context follows the conversation: in the last user turn, or as a turn of its own
+ * after a reply. A breakpoint on the last block before it that can carry one caches the
+ * conversation without it, since the next request repeats the conversation but not the context.
+ */
+function addContext(
+  messages: MessageParam[],
+  context: string,
+): { messages: MessageParam[]; marked: boolean } {
+  const block: ContentBlockParam = { type: "text", text: context };
+  const last = messages.at(-1);
+  if (last === undefined) return { messages: [{ role: "user", content: [block] }], marked: false };
+  const content: ContentBlockParam[] =
+    typeof last.content === "string"
+      ? [{ type: "text", text: last.content }]
+      : (last.content as ContentBlockParam[]);
+  const at = content.findLastIndex(cacheable);
+  const closed = content.map((item, i) =>
+    i === at ? ({ ...item, cache_control: { type: "ephemeral" } } as ContentBlockParam) : item,
+  );
+  const earlier = messages.slice(0, -1);
+  return {
+    messages:
+      last.role === "user"
+        ? [...earlier, { role: "user", content: [...closed, block] }]
+        : [...earlier, { role: last.role, content: closed }, { role: "user", content: [block] }],
+    marked: at !== -1,
+  };
+}
+
+/** Blocks that can carry a breakpoint: not reasoning, and not empty text. */
+function cacheable(block: ContentBlockParam): boolean {
+  return (
+    (block.type === "text" && block.text !== "") ||
+    block.type === "tool_use" ||
+    block.type === "tool_result"
+  );
 }
 
 function toMessageParam(message: ChatMessage): MessageParam {

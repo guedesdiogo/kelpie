@@ -40,6 +40,9 @@
     "apps/context-store": {
       "name": "@kelpie/context-store",
       "dependencies": {
+        "@kelpie/llm": "workspace:*",
+        "@kelpie/memory": "workspace:*",
+        "@kelpie/qualifier": "workspace:*",
         "@kelpie/vault": "workspace:*",
         "yaml": "2.9.1",
       },

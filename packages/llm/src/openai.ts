@@ -56,7 +56,19 @@ export class OpenAIResponsesProvider implements LlmProvider {
         {
           model: request.model,
           instructions: request.system,
-          input: request.messages.flatMap(toInputItems),
+          input: [
+            ...request.messages.flatMap(toInputItems),
+            // OpenAI caches the longest prefix it saw, so the context goes last.
+            ...(request.context?.trim()
+              ? [
+                  {
+                    type: "message" as const,
+                    role: "user" as const,
+                    content: [{ type: "input_text" as const, text: request.context }],
+                  },
+                ]
+              : []),
+          ],
           max_output_tokens: request.maxOutputTokens,
           store: false,
           include: ["reasoning.encrypted_content"],
