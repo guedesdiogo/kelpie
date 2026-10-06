@@ -51,6 +51,14 @@ export {
   retrieve,
   type StreamName,
 } from "./retrieve.ts";
+export { type Sanitized, sanitizeSecrets } from "./sanitize.ts";
+export {
+  type OpenKeys,
+  type SessionInput,
+  type SessionLine,
+  type SessionPage,
+  sessionPage,
+} from "./session.ts";
 export { instantOf, isDate, isDateTime } from "./time.ts";
 export {
   MemoryFormatError,
