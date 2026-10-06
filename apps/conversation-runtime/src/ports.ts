@@ -14,6 +14,7 @@ import type {
 } from "@kelpie/context-store/contract";
 import type { Destination } from "@kelpie/conversation/contract";
 import { fromNdjsonStream, type LlmEvent, type ModelTier, type RoutedRequest } from "@kelpie/llm";
+import type { ToolProvider } from "./tools.ts";
 
 /** One model call: its events, and a way to stop it on the gateway's side. */
 export interface ModelCall {
@@ -21,9 +22,17 @@ export interface ModelCall {
   cancel(): void;
 }
 
+/**
+ * What a turn is doing, for channels that can show it (#141): reading memory, thinking (a model
+ * call) or running a tool; `idle` once it stopped without a reply.
+ */
+export type TurnStep = "memory" | "thinking" | "tool" | "idle";
+
 /** Everything the ConversationAgent needs from outside, so tests can replace it (ADR-0002). */
 export interface ConversationPorts {
   generate(tier: ModelTier, request: RoutedRequest): Promise<ModelCall>;
+  /** The providers of the agents' tools (ADR-0014). */
+  tools: readonly ToolProvider[];
   /**
    * Sends one bubble through the agent's channel (channel-egress). A failure is a value: rate
    * limited with the wait, recipient unavailable, not connected, or failed.
@@ -38,6 +47,11 @@ export interface ConversationPorts {
   typing(agentId: string, destination: Destination): Promise<void>;
   /** Keeps "typing" showing, renewed before it lapses, until `signal` aborts. */
   keepTyping(agentId: string, destination: Destination, signal: AbortSignal): Promise<void>;
+  /**
+   * Shows the turn's step, on channels whose capabilities say they can (the webchat); the others
+   * keep "typing" up instead. A courtesy, like "typing".
+   */
+  status(agentId: string, destination: Destination, step: TurnStep, label?: string): Promise<void>;
   /**
    * Writes memory files to the vault through the Context Store (ADR-0020 §3). A refusal is a value;
    * a store that is unreachable, or doesn't answer in time, throws.
@@ -56,6 +70,11 @@ export interface ConversationPorts {
   now(): number;
   /** Waits `ms`, or rejects as soon as `signal` aborts. */
   sleep(ms: number, signal: AbortSignal): Promise<void>;
+  /**
+   * Resolves once `ms` pass, for the turn's time bound on a running tool (ADR-0025); never once
+   * `signal` aborts, which also clears its timer.
+   */
+  deadline(ms: number, signal: AbortSignal): Promise<void>;
 }
 
 /** The part of llm-gateway's RPC surface this Worker uses. */
@@ -112,6 +131,8 @@ function productionPorts(env: Env): ConversationPorts {
         },
       };
     },
+    // None yet: the setup agent's (#48) and the memory tools (#126) arrive as providers.
+    tools: [],
     send: (agentId, destination, text, options) => egress.send(agentId, destination, text, options),
     remember: (agentId, changes, summary) =>
       withTimeout(contextStore.write(agentId, changes, summary), REMEMBER_TIMEOUT_MS),
@@ -147,8 +168,11 @@ function productionPorts(env: Env): ConversationPorts {
         }
       }
     },
+    // No channel behind channel-egress shows a turn's step: they keep "typing" up instead.
+    async status() {},
     now: () => Date.now(),
     sleep,
+    deadline: (ms, signal) => sleep(ms, signal).catch(() => new Promise<void>(() => {})),
   };
 }
 

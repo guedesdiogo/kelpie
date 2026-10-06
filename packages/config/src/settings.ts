@@ -19,6 +19,11 @@ export interface AgentSettings {
   maxWaitMs: number;
   /** The qualifier the agent's typed decisions use, such as the memory rerank: Clef or Jev. */
   qualifier: QualifierBackend;
+  /**
+   * How long a turn may spend calling the model and running tools before it must answer (#141).
+   * 120 s is the floor the owner set; it can only go up.
+   */
+  toolLoopMs: number;
 }
 
 export const DEFAULT_SETTINGS: AgentSettings = {
@@ -29,6 +34,7 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   quietMs: 10_000,
   maxWaitMs: 60_000,
   qualifier: "clef",
+  toolLoopMs: 120_000,
 };
 
 /** Agent ids become object names and URL segments: lowercase letters, digits and hyphens. */
@@ -79,6 +85,10 @@ export function parseSettings(input: unknown): Partial<AgentSettings> | null {
       case "quietMs":
         if (!isInteger(value, 0, 120_000)) return null;
         parsed.quietMs = value;
+        break;
+      case "toolLoopMs":
+        if (!isInteger(value, 120_000, 600_000)) return null;
+        parsed.toolLoopMs = value;
         break;
       default:
         return null;

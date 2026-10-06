@@ -4,7 +4,7 @@ import { WEBCHAT_ADMISSION_HEADER } from "@kelpie/conversation/contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
-import { type FakeWorld, fakeWorld, reply } from "./fakes.ts";
+import { type FakeWorld, fakeWorld, refuse, reply, sayThenCall } from "./fakes.ts";
 
 // The webchat's socket lives on the conversation's object (issue #40). Ingress admits the owner
 // and passes the admission in a header the browser can't set; these tests open sockets the way
@@ -304,5 +304,72 @@ describe("pausing from the webchat", () => {
     await vi.waitFor(() =>
       expect(again.frames[0]).toMatchObject({ type: "history", paused: false }),
     );
+  });
+});
+
+describe("a turn's steps in the webchat", () => {
+  it("shows reading memory, thinking and each tool by name, then typing before the bubbles", async () => {
+    const world = use(fakeWorld([sayThenCall("Vou ver.", { name: "lookup" }), reply("Pronto.")]));
+    world.tools = [
+      {
+        async tools() {
+          return [
+            {
+              spec: { name: "lookup", description: "Looks up.", inputSchema: { type: "object" } },
+              label: "Looking it up",
+              run: async () => ({ output: "ok" }),
+            },
+          ];
+        },
+      },
+    ];
+    const name = "assistant:webchat:steps";
+    const chat = await open(name);
+    chat.send({ type: "message", id: "c1", text: "procura isso" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
+    // Nothing shows while the wait for more messages runs.
+    expect(ofType(chat.frames, "status")).toEqual([]);
+
+    await agent(name).flush();
+    await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(1));
+    expect(ofType(chat.frames, "status")).toEqual([
+      { type: "status", status: "memory" },
+      { type: "status", status: "thinking" },
+      { type: "status", status: "tool", label: "Looking it up" },
+      { type: "status", status: "thinking" },
+    ]);
+    const types = chat.frames.map((frame) => frame.type);
+    expect(types.lastIndexOf("status")).toBeLessThan(types.indexOf("typing"));
+    expect(world.steps).toEqual([]);
+
+    // A new socket is shown what the owner saw: no calls, no results, nothing said before them.
+    const later = await open(name);
+    await vi.waitFor(() =>
+      expect(later.frames[0]).toMatchObject({
+        type: "history",
+        messages: [
+          { role: "user", text: "procura isso" },
+          { role: "assistant", text: "Pronto." },
+        ],
+      }),
+    );
+  });
+
+  it("clears the step when the turn stops without a reply", async () => {
+    use(fakeWorld([refuse()]));
+    const name = "assistant:webchat:steps-refused";
+    const chat = await open(name);
+    chat.send({ type: "message", id: "c1", text: "faz isso" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
+
+    await agent(name).flush();
+    await vi.waitFor(() =>
+      expect(ofType(chat.frames, "status").at(-1)).toEqual({ type: "status", status: "idle" }),
+    );
+    expect(ofType(chat.frames, "status").map((frame) => frame.status)).toEqual([
+      "memory",
+      "thinking",
+      "idle",
+    ]);
   });
 });
