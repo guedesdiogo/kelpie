@@ -51,8 +51,12 @@ export function deriveTitle(frontmatterTitle: unknown, body: string, path: strin
   if (typeof frontmatterTitle === "string" && frontmatterTitle.trim() !== "") {
     return frontmatterTitle.trim();
   }
+  let fence: Fence | null = null;
   for (const line of body.split("\n")) {
-    if (line.startsWith("# ") && line.slice(2).trim() !== "") return line.slice(2).trim();
+    const [next, isCode] = stepFence(fence, line);
+    fence = next;
+    if (!isCode && line.startsWith("# ") && line.slice(2).trim() !== "")
+      return line.slice(2).trim();
   }
   const name = path.slice(path.lastIndexOf("/") + 1);
   return name.endsWith(".md") ? name.slice(0, -3) : name;
@@ -77,9 +81,12 @@ interface Fence {
   length: number;
 }
 
+/** List and quote markers before a fence: `- ```sh`, `1. ```, `> ````. */
+const CONTAINER_MARKERS = /^(?:[ \t]*(?:>[ \t]?|[-*+][ \t]+|\d{1,9}[.)][ \t]+))*/;
+
 /** Updates the code-fence state for a line; reports whether the line is code or a fence. */
 function stepFence(current: Fence | null, line: string): [Fence | null, boolean] {
-  const trimmed = line.trimStart();
+  const trimmed = line.replace(CONTAINER_MARKERS, "").trimStart();
   const glyph = trimmed[0];
   if (glyph !== "`" && glyph !== "~") return [current, current !== null];
   let length = 0;
@@ -142,24 +149,67 @@ function resolvePath(dir: string[], target: string): string | null {
   return parts.length === 0 ? null : parts.join("/");
 }
 
+/** Files Obsidian links to that aren't notes. A name with any other dot is a note's name. */
+const ATTACHMENTS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "bmp",
+  "svg",
+  "webp",
+  "avif",
+  "heic",
+  "tif",
+  "tiff",
+  "ico",
+  "mp3",
+  "wav",
+  "m4a",
+  "ogg",
+  "flac",
+  "3gp",
+  "webm",
+  "mp4",
+  "mov",
+  "mkv",
+  "ogv",
+  "avi",
+  "pdf",
+  "canvas",
+  "base",
+  "txt",
+  "csv",
+  "json",
+  "html",
+  "htm",
+  "zip",
+  "epub",
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "ppt",
+  "pptx",
+]);
+
 /**
  * A link's target as an index key; null for anything that isn't another note. Wikilinks are
  * vault-rooted unless they start with `./` or `../`; Markdown links are relative to the note and
  * must name a `.md` file.
  */
 function toTarget(raw: string, sourcePath: string, markdown: boolean): LinkTarget | null {
-  let target = raw.trim();
+  let target = raw.normalize("NFC").trim();
   if (target === "" || target.includes("://") || target.includes("\\")) return null;
   if (/^(mailto|data|javascript|tel):/i.test(target)) return null;
   const hash = target.indexOf("#");
   if (hash !== -1) target = target.slice(0, hash).trim();
   const lastSegment = target.slice(target.lastIndexOf("/") + 1);
   if (lastSegment === "") return null;
-  const extension = /\.([A-Za-z0-9]{1,8})$/.exec(lastSegment)?.[1];
-  if (extension !== undefined) {
-    if (extension.toLowerCase() !== "md") return null;
+  const extension = /\.([A-Za-z0-9]{1,8})$/.exec(lastSegment)?.[1]?.toLowerCase();
+  if (extension === "md") {
     target = target.slice(0, -3);
-  } else if (markdown) {
+  } else if (markdown || (extension !== undefined && ATTACHMENTS.has(extension))) {
     return null;
   }
   if (!markdown && !target.includes("/")) return { by: "name", target: target.toLowerCase() };
@@ -177,8 +227,10 @@ export function wikilinkTarget(inner: string, sourcePath: string): LinkTarget | 
   return toTarget(pipe === -1 ? unescaped : unescaped.slice(0, pipe), sourcePath, false);
 }
 
-const WIKILINK = /(!?)\[\[([^\]\n]+)\]\]/g;
-const MARKDOWN_LINK = /(!?)\[[^\]\n]*\]\(\s*(<[^>\n]*>|[^)\s]+)(?:\s+"[^"\n]*")?\s*\)/g;
+// Neither a note name nor a destination holds brackets or parentheses here, which keeps both
+// patterns linear on lines built to make them backtrack.
+const WIKILINK = /(!?)\[\[([^[\]\n]+)\]\]/g;
+const MARKDOWN_LINK = /(!?)\[[^[\]\n]*\]\(\s*(<[^<>\n]*>|[^()\s]+)(?:\s+"[^"\n]*")?\s*\)/g;
 
 /**
  * Links in a body: Obsidian wikilinks and embeds (`[[a]]`, `[[a|label]]`, `[[a#heading]]`,

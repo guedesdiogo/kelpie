@@ -103,12 +103,12 @@ Sister. Lives in [[Lisboa]].
     expect(v2.text).not.toMatch(/evergreen|abstract|valid_from/);
   });
 
-  it("mints a new id when the existing file has none or invalid frontmatter", async () => {
+  it("mints an id when the existing file has none", async () => {
     const plain = await writeMemory(ANA, { at: AT, existing: "# Ana\n\nOwner's own note." });
-    const broken = await writeMemory(ANA, { at: AT, existing: "---\nid: [x\n---\nx" });
+    const invalidId = await writeMemory(ANA, { at: AT, existing: "---\nid: -x\n---\nx" });
     const fresh = await writeMemory(ANA, { at: AT });
     expect(plain.id).toBe(fresh.id);
-    expect(broken.id).toBe(fresh.id);
+    expect(invalidId.id).toBe(fresh.id);
   });
 
   it("refuses an invalid memory and lists every problem", async () => {
@@ -134,6 +134,33 @@ Sister. Lives in [[Lisboa]].
       "`invalidAt` must be after `validFrom`",
       "`contradicts` must name notes, without brackets",
       "`at` must be a UTC date-time",
+    ]);
+  });
+
+  it("refuses to supersede a file whose frontmatter it can't read, instead of dropping it", async () => {
+    for (const existing of [
+      "---\ntags: [a, b\n---\nx",
+      "---\nlevel: a\nlevel: b\n---\nx",
+      "---\n- a\n---\nx",
+    ]) {
+      const error = await writeMemory(ANA, { at: AT, existing }).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(MemoryFormatError);
+      expect((error as MemoryFormatError).problems).toEqual([
+        "the existing file's frontmatter can't be read; fix it before writing a new version",
+      ]);
+    }
+    // An empty block is fine.
+    expect((await writeMemory(ANA, { at: AT, existing: "---\n---\nx" })).text).toContain("id: ");
+  });
+
+  it("accepts emoji and joiners in a title, and refuses impossible dates", async () => {
+    const { text } = await writeMemory({ ...ANA, title: "👩‍💻 Ana, dev" }, { at: AT });
+    expect(text).toContain("# 👩‍💻 Ana, dev");
+    const error = await writeMemory({ ...ANA, validFrom: "2026-02-30" }, { at: AT }).catch(
+      (caught: unknown) => caught,
+    );
+    expect((error as MemoryFormatError).problems).toEqual([
+      "`validFrom` must be a date or a date-time with an offset",
     ]);
   });
 });

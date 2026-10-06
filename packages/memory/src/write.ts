@@ -3,7 +3,8 @@ import { MAX_ENTITIES, normalizeEntities } from "./entities.ts";
 import { shortSha256 } from "./hash.ts";
 import { defaultTier, isScope, KINDS, type Kind, type Scope, TIERS, type Tier } from "./layout.ts";
 import { splitFrontmatter } from "./markdown.ts";
-import { instantOf, isMemoryId, LEVELS, type Level, MAX_SOURCES } from "./note.ts";
+import { isMemoryId, LEVELS, type Level, MAX_SOURCES } from "./note.ts";
+import { instantOf, isDateTime } from "./time.ts";
 
 /** A memory as Kelpie writes it. Every field is checked: Kelpie's own writes are strict. */
 export interface MemoryInput {
@@ -40,8 +41,9 @@ export class MemoryFormatError extends Error {
   }
 }
 
+/** No control characters, line breaks included; emoji and their joiners are fine. */
 const printableLine = (value: string, max: number) =>
-  value.trim() !== "" && value.length <= max && !/\p{C}/u.test(value);
+  value.trim() !== "" && value.length <= max && !/\p{Cc}/u.test(value);
 
 function check(input: MemoryInput, at: string): string[] {
   const problems: string[] = [];
@@ -76,7 +78,7 @@ function check(input: MemoryInput, at: string): string[] {
       problems.push("`contradicts` must name notes, without brackets");
     }
   }
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?Z$/.test(at) || instantOf(at) === null) {
+  if (!isDateTime(at) || !at.endsWith("Z")) {
     problems.push("`at` must be a UTC date-time");
   }
   return problems;
@@ -97,8 +99,13 @@ export interface WrittenMemory {
 
 /**
  * Renders a memory file. A new memory gets an `id` minted from its content, so writing the same
- * memory twice yields the same file. A superseding version keeps the existing file's `id`, and the
- * keys and comments Kelpie doesn't manage, in their places; the body is replaced.
+ * memory twice yields the same file.
+ *
+ * A superseding version keeps the existing file's `id`, and the keys and comments Kelpie doesn't
+ * manage, in their places. The input is the whole new version: a managed field it leaves out is
+ * removed, and the body is replaced. A caller that keeps a field, such as a `pinned` the owner set,
+ * reads the existing note first. An existing frontmatter that can't be read is refused rather than
+ * dropped with the owner's keys.
  */
 export async function writeMemory(
   input: MemoryInput,
@@ -111,9 +118,15 @@ export async function writeMemory(
   const body = input.body.trim();
   const existingYaml =
     options.existing === undefined ? null : splitFrontmatter(options.existing).yaml;
-  let doc =
-    existingYaml === null ? new Document({}) : parseDocument(existingYaml, { uniqueKeys: true });
-  if (doc.errors.length > 0 || !isMap(doc.contents)) doc = new Document({});
+  let doc = new Document({});
+  if (existingYaml !== null && existingYaml.trim() !== "") {
+    doc = parseDocument(existingYaml, { uniqueKeys: true });
+    if (doc.errors.length > 0 || !isMap(doc.contents)) {
+      throw new MemoryFormatError([
+        "the existing file's frontmatter can't be read; fix it before writing a new version",
+      ]);
+    }
+  }
   const existingId = doc.get("id");
   const id = isMemoryId(existingId)
     ? existingId

@@ -33,7 +33,7 @@ const ANA: MemoryInput = {
 const ANA_PATH = memoryPath("global", "person", "Ana Souza");
 
 describe("schema", () => {
-  it("is created once, and an index from another schema version is refused", async () => {
+  it("is created once, and an index from another schema version starts over", async () => {
     await withIndex("schema", async (_index, storage) => {
       const tables = storage.sql
         .exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
@@ -51,11 +51,21 @@ describe("schema", () => {
         ]),
       );
       // Opening it again keeps what is there.
-      storage.sql.exec("INSERT INTO commits (sha, seq, committed_at) VALUES ('x', 1, 0)");
+      storage.sql.exec(
+        "INSERT INTO commits (sha, seq, committed_at, recorded_at) VALUES ('x', 1, 0, 0)",
+      );
+      storage.sql.exec("INSERT INTO embeddings VALUES ('b', 'm', 1, ?)", new ArrayBuffer(4));
       expect(new MemoryIndex(storage).lastCommit()).toEqual({ sha: "x", committedAt: 0 });
+      // Another schema: the derived rows go, so the caller replays the vault from the start.
       storage.sql.exec("UPDATE meta SET value = '0' WHERE key = 'schema_version'");
-      expect(() => new MemoryIndex(storage)).toThrow(
-        `memory index schema 0 isn't ${SCHEMA_VERSION}`,
+      expect(new MemoryIndex(storage).lastCommit()).toBeNull();
+      expect(
+        storage.sql
+          .exec<{ value: string }>("SELECT value FROM meta WHERE key = 'schema_version'")
+          .one().value,
+      ).toBe(`${SCHEMA_VERSION}`);
+      expect(storage.sql.exec<{ n: number }>("SELECT count(*) AS n FROM embeddings").one().n).toBe(
+        1,
       );
     });
   });
@@ -203,6 +213,77 @@ describe("versions", () => {
   });
 });
 
+describe("ordering", () => {
+  it("applies concurrent commits one at a time, in call order", async () => {
+    await withIndex("concurrent", async (index) => {
+      const vault = new FakeVault();
+      const c1 = vault.commit({ "memory/notes/p.md": "# P\n\none" });
+      const c2 = vault.commit({ "memory/notes/p.md": "# P\n\ntwo" });
+      const c3 = vault.commit({ "memory/notes/p.md": null });
+      await index.applyCommit(c1);
+      // c3 has nothing to hash, so without serialization it would overtake c2.
+      await Promise.all([index.applyCommit(c2), index.applyCommit(c3)]);
+      expect(index.current("memory/notes/p.md")).toBeNull();
+      expect(index.dump().commits.map((c) => c.sha)).toEqual([c1.sha, c2.sha, c3.sha]);
+    });
+  });
+
+  it("finishes a rebuild before a commit that arrives during it", async () => {
+    await withIndex("rebuild-race", async (index) => {
+      const vault = new FakeVault();
+      const c1 = vault.commit({ "memory/notes/a.md": "# A" });
+      const c2 = vault.commit({ "memory/notes/b.md": "# B" });
+      const c3 = vault.commit({ "memory/notes/a.md": null });
+      await Promise.all([index.rebuild([c1, c2]), index.applyCommit(c3)]);
+      expect(index.dump().commits.map((c) => c.sha)).toEqual([c1.sha, c2.sha, c3.sha]);
+      expect(index.current("memory/notes/a.md")).toBeNull();
+      expect(index.lastCommit()?.sha).toBe(c3.sha);
+    });
+  });
+
+  it("keeps ingestion time moving forward when commit times don't", async () => {
+    await withIndex("clock", async (index) => {
+      const at = (sha: string, committedAt: number, changes: Record<string, string | null>) =>
+        index.applyCommit({
+          sha,
+          committedAt,
+          changes: Object.entries(changes).map(([path, content]) => ({ path, content })),
+        });
+      await at("c1", 10_000, { "memory/notes/p.md": "# P\n\nalpha" });
+      await at("c2", 30_000, { "memory/notes/p.md": null });
+      await at("c3", 20_000, { "memory/notes/p.md": "# P\n\nalpha again" });
+      expect(index.current("memory/notes/p.md")?.recordedAt).toBe(30_001);
+      expect(index.search("alpha", { asOf: 25_000 }).map((hit) => hit.commit)).toEqual(["c1"]);
+      // Two commits in the same millisecond: the first stays visible at its own time.
+      await at("c4", 40_000, { "memory/notes/q.md": "# Q\n\nbeta" });
+      await at("c5", 40_000, { "memory/notes/q.md": "# Q\n\ngamma" });
+      expect(index.versionAt("memory/notes/q.md", 40_000)?.commit).toBe("c4");
+      expect(index.versionAt("memory/notes/q.md", 40_001)?.commit).toBe("c5");
+    });
+  });
+
+  it("takes the blob SHA from the caller when it has git's", async () => {
+    await withIndex("blob-sha", async (index) => {
+      const content = "\u{FEFF}# BOM\n";
+      await index.applyCommit({
+        sha: "c1",
+        committedAt: 1,
+        changes: [{ path: "memory/notes/bom.md", content, blobSha: "a".repeat(40) }],
+      });
+      expect(index.current("memory/notes/bom.md")?.blobSha).toBe("a".repeat(40));
+      await index.applyCommit({
+        sha: "c2",
+        committedAt: 2,
+        changes: [{ path: "memory/notes/plain.md", content: "# Plain\n" }],
+      });
+      // `git hash-object` of "# Plain\n".
+      expect(index.current("memory/notes/plain.md")?.blobSha).toBe(
+        "adf3919bcec218dd4aabbca517159195c3d04d3f",
+      );
+    });
+  });
+});
+
 describe("search", () => {
   it("matches Portuguese with or without accents, and the path's words", async () => {
     await withIndex("search", async (index) => {
@@ -224,6 +305,9 @@ describe("search", () => {
       expect(index.search('" OR * NEAR(').length).toBe(0);
       expect(index.search("")).toEqual([]);
       expect(index.search("natal café", { limit: 1 })).toHaveLength(1);
+      expect(index.search("natal café", { limit: -1 })).toHaveLength(1);
+      // The path's words are searchable, its extension isn't.
+      expect(index.search("md")).toEqual([]);
     });
   });
 

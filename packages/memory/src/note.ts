@@ -17,6 +17,7 @@ import {
   splitFrontmatter,
   valueLinks,
 } from "./markdown.ts";
+import { instantOf, isDateTime } from "./time.ts";
 
 /** How a memory was reached: said by the owner, deduced from what was said, or guessed. */
 export const LEVELS = ["explicit", "deduced", "inferred"] as const;
@@ -32,18 +33,6 @@ const MEMORY_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 
 export function isMemoryId(value: unknown): value is string {
   return typeof value === "string" && MEMORY_ID.test(value);
-}
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
-
-/**
- * The instant a date names, in epoch milliseconds: `YYYY-MM-DD` is the start of that day in UTC,
- * and a date-time needs its offset. Null for anything else.
- */
-export function instantOf(value: string): number | null {
-  if (!DATE.test(value) && !DATE_TIME.test(value)) return null;
-  const ms = Date.parse(DATE.test(value) ? `${value}T00:00:00Z` : value);
-  return Number.isFinite(ms) ? ms : null;
 }
 
 /** A vault Markdown file as the memory index reads it. */
@@ -174,7 +163,13 @@ export function readNote(path: string, text: string): Note | null {
     warnings.push("`invalid_at` isn't after `valid_from`; ignored");
     invalidAt = null;
   }
-  const rawEntities = field(frontmatter, "entities", warnings, stringList(50, 200)) ?? [];
+  // A bad name drops that name, not the list.
+  const rawEntities =
+    field(frontmatter, "entities", warnings, (value) =>
+      Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === "string").slice(0, 100)
+        : null,
+    ) ?? [];
   const entities = normalizeEntities(rawEntities);
   if (entities.length < rawEntities.length) {
     warnings.push("some `entities` were duplicates, invalid or over the limit; dropped");
@@ -231,9 +226,7 @@ export function readNote(path: string, text: string): Note | null {
         : null,
     ),
     updated: field(frontmatter, "updated", warnings, (value) =>
-      typeof value === "string" && DATE_TIME.test(value) && instantOf(value) !== null
-        ? value
-        : null,
+      typeof value === "string" && isDateTime(value) ? value : null,
     ),
     frontmatter,
     body,

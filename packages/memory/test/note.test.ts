@@ -161,4 +161,15 @@ describe("readNote", () => {
   it("returns null outside the index", () => {
     expect(readNote("agents/kelpie/SOUL.md", "# Persona")).toBeNull();
   });
+
+  it("drops entities one by one, and rejects impossible dates", () => {
+    const many = Array.from({ length: 60 }, (_, i) => `E${i}`);
+    const note = readNote(
+      "memory/notes/x.md",
+      `---\nentities: [${[...many, "x".repeat(300)].join(", ")}]\nvalid_from: 2026-02-30\ninvalid_at: 2026-10-06T24:00:00Z\n---\nx`,
+    );
+    expect(note?.entities.map((entity) => entity.name)).toEqual(many.slice(0, 10));
+    expect(note?.validFrom).toBeNull();
+    expect(note?.invalidAt).toBeNull();
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractLinks, splitFrontmatter } from "../src/index.ts";
+import { extractLinks, readNote, splitFrontmatter } from "../src/index.ts";
 
 describe("splitFrontmatter", () => {
   it("splits a leading block", () => {
@@ -97,5 +97,52 @@ describe("extractLinks", () => {
       { kind: "link", by: "path", target: "memory/places/lisboa" },
       { kind: "link", by: "path", target: "memory/people/bruno" },
     ]);
+  });
+
+  it("sees fences opened on a list item or in a quote", () => {
+    const body = [
+      "- ```sh",
+      "  make [[inside]]",
+      "  ```",
+      "- next [[b]]",
+      "> ```",
+      "> [[quoted code]]",
+      "> ```",
+      "[[c]]",
+    ].join("\n");
+    expect(extractLinks(body, from).map((link) => link.target)).toEqual(["b", "c"]);
+  });
+
+  it("keeps note names with dots, and drops attachments by their extension", () => {
+    expect(
+      extractLinks(
+        "[[Meeting 2026.10.06]] [[Node.js]] [[x/Plan v2.1]] [[photo.JPG]] [[a.canvas]]",
+        from,
+      ),
+    ).toEqual([
+      { kind: "link", by: "name", target: "meeting 2026.10.06" },
+      { kind: "link", by: "name", target: "node.js" },
+      { kind: "link", by: "path", target: "x/plan v2.1" },
+    ]);
+  });
+
+  it("normalizes link targets to NFC", () => {
+    expect(extractLinks("[[Jos\u0065\u0301]]", from)).toEqual([
+      { kind: "link", by: "name", target: "jos\u00e9" },
+    ]);
+  });
+
+  it("stays linear on lines built to make regexes backtrack", () => {
+    const started = Date.now();
+    expect(extractLinks("[".repeat(200_000), from)).toEqual([]);
+    expect(extractLinks("[a](".repeat(50_000), from)).toEqual([]);
+    expect(extractLinks("`a``".repeat(50_000), from)).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+});
+
+describe("titles", () => {
+  it("skip headings inside code", () => {
+    expect(readNote("knowledge/x.md", "```sh\n# install deps\n```\nText")?.title).toBe("x");
   });
 });

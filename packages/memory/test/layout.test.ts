@@ -57,6 +57,9 @@ describe("paths Kelpie writes", () => {
       "conversations/family/sessions/2026/2026-12-24-natal.md",
     );
     expect(() => memoryPath("global", "event", "x", "24/12/2026")).toThrow(RangeError);
+    expect(() => memoryPath("global", "event", "x", "2026-99-99")).toThrow(RangeError);
+    expect(() => memoryPath("area/.." as never, "note", "x")).toThrow(RangeError);
+    expect(() => memoryPath("global", "thing" as never, "x")).toThrow(RangeError);
   });
 
   it("every path it writes is in the index, with the same scope and kind", () => {

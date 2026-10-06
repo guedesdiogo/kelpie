@@ -5,7 +5,8 @@ import { foldKey } from "./entities.ts";
 import { gitBlobSha } from "./hash.ts";
 import type { Kind, Scope, Tier } from "./layout.ts";
 import type { LinkBy, LinkKind } from "./markdown.ts";
-import { instantOf, type Level, readNote } from "./note.ts";
+import { type Level, readNote } from "./note.ts";
+import { instantOf } from "./time.ts";
 
 export type SqlValue = ArrayBuffer | string | number | null;
 
@@ -24,6 +25,11 @@ export interface IndexStorage {
 export interface VaultChange {
   path: string;
   content: string | null;
+  /**
+   * Git's blob SHA, when the caller has it, as GitHub's trees give it. Otherwise it is computed
+   * from `content`, which matches git only if the text was decoded without dropping a BOM.
+   */
+  blobSha?: string;
 }
 
 export interface VaultCommit {
@@ -42,7 +48,10 @@ export interface IndexedVersion {
   /** The commit of the version it replaced at the same path. */
   supersedes: string | null;
   current: boolean;
-  /** Ingestion time: when the vault started and stopped holding this version (commit times). */
+  /**
+   * Ingestion time: when the vault started and stopped holding this version. These are commit
+   * times, kept moving forward: a commit is recorded at least a millisecond after the one before.
+   */
   recordedAt: number;
   replacedAt: number | null;
   /** The commit that replaced or removed it. */
@@ -100,7 +109,7 @@ export interface ResolvedLink {
 
 /** Every derived row, ordered, without SQLite's row ids: two equal dumps are the same index. */
 export interface IndexDump {
-  commits: { sha: string; seq: number; committedAt: number }[];
+  commits: { sha: string; seq: number; committedAt: number; recordedAt: number }[];
   versions: IndexedVersion[];
   entities: { path: string; commit: string; key: string; name: string }[];
   links: { path: string; commit: string; kind: string; by: string; target: string }[];
@@ -112,7 +121,8 @@ const DERIVED_SCHEMA = `
 CREATE TABLE commits (
   sha TEXT PRIMARY KEY NOT NULL,
   seq INTEGER NOT NULL UNIQUE,
-  committed_at INTEGER NOT NULL
+  committed_at INTEGER NOT NULL,
+  recorded_at INTEGER NOT NULL
 );
 CREATE TABLE versions (
   rowid INTEGER PRIMARY KEY,
@@ -187,14 +197,14 @@ CREATE INDEX links_target ON links (by, target);
 `;
 
 const DERIVED_OBJECTS = [
-  "TRIGGER versions_fts_ai",
-  "TRIGGER versions_fts_ad",
-  "TRIGGER versions_fts_au",
-  "TABLE versions_fts",
-  "TABLE links",
-  "TABLE entities",
-  "TABLE versions",
-  "TABLE commits",
+  "TRIGGER IF EXISTS versions_fts_ai",
+  "TRIGGER IF EXISTS versions_fts_ad",
+  "TRIGGER IF EXISTS versions_fts_au",
+  "TABLE IF EXISTS versions_fts",
+  "TABLE IF EXISTS links",
+  "TABLE IF EXISTS entities",
+  "TABLE IF EXISTS versions",
+  "TABLE IF EXISTS commits",
 ];
 
 // Embeddings are keyed by content and model, so they stay valid across a rebuild and are kept as a
@@ -210,14 +220,13 @@ CREATE TABLE IF NOT EXISTS embeddings (
 ) WITHOUT ROWID;
 `;
 
-/** Path text for full-text search: `memory/people/ana-souza.md` also matches "ana" and "souza". */
+/** The path's words for full-text search, without `.md`: the tokenizer splits `-` and `_`. */
 function pathSearch(path: string): string {
-  const segments = path.replace(/[/.]/g, " ");
-  return `${segments} ${segments.replace(/[-_]/g, " ")}`;
+  return path.slice(0, -3).replaceAll("/", " ");
 }
 
 function linkKeys(path: string): { linkPath: string; linkName: string } {
-  const linkPath = path.slice(0, -3).toLowerCase();
+  const linkPath = path.slice(0, -3).normalize("NFC").toLowerCase();
   return { linkPath, linkName: linkPath.slice(linkPath.lastIndexOf("/") + 1) };
 }
 
@@ -289,11 +298,15 @@ function toVersion(row: VersionRow): IndexedVersion {
 }
 
 /**
- * The index over one vault, in a SQLite Durable Object. Commits are applied one at a time, in
- * history order: the caller serializes them, as the Context Store's single writer does.
+ * The index over one vault, in a SQLite Durable Object. It applies commits one at a time, in the
+ * order they are handed to it, and a rebuild runs alone; one instance per storage keeps that true.
+ * An index from another schema version starts empty, and `lastCommit()` then tells the caller to
+ * replay the vault from the start.
  */
 export class MemoryIndex {
   readonly #storage: IndexStorage;
+  /** The tail of the work queue: hashing is asynchronous, so two calls could otherwise interleave. */
+  #queue: Promise<unknown> = Promise.resolve();
 
   constructor(storage: IndexStorage) {
     this.#storage = storage;
@@ -302,31 +315,40 @@ export class MemoryIndex {
       const version = this.#exec<{ value: string }>(
         "SELECT value FROM meta WHERE key = 'schema_version'",
       )[0]?.value;
-      if (version === undefined) {
-        this.#exec(DERIVED_SCHEMA);
-        this.#exec(
-          "INSERT INTO meta (key, value) VALUES ('schema_version', ?)",
-          `${SCHEMA_VERSION}`,
-        );
-      } else if (version !== `${SCHEMA_VERSION}`) {
-        throw new Error(`memory index schema ${version} isn't ${SCHEMA_VERSION}; rebuild it`);
-      }
+      if (version === `${SCHEMA_VERSION}`) return;
+      for (const object of DERIVED_OBJECTS) this.#exec(`DROP ${object}`);
+      this.#exec(DERIVED_SCHEMA);
+      this.#exec(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
+        `${SCHEMA_VERSION}`,
+      );
     });
+  }
+
+  #serialize<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.#queue.then(task);
+    this.#queue = run.catch(() => undefined);
+    return run;
   }
 
   #exec<T extends Record<string, SqlValue>>(query: string, ...bindings: SqlValue[]): T[] {
     return this.#storage.sql.exec<T>(query, ...bindings).toArray();
   }
 
-  /** Applies one commit. A commit applied before is skipped, so replays are harmless. */
-  async applyCommit(commit: VaultCommit): Promise<ApplyResult> {
+  /** Applies one commit, after any still running. A commit applied before is skipped. */
+  applyCommit(commit: VaultCommit): Promise<ApplyResult> {
+    return this.#serialize(() => this.#apply(commit));
+  }
+
+  async #apply(commit: VaultCommit): Promise<ApplyResult> {
     // Hashing is asynchronous and SQLite work is synchronous, so the hashes come first.
     const changes = await Promise.all(
       [...commit.changes]
         .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
         .map(async (change) => ({
           ...change,
-          blobSha: change.content === null ? null : await gitBlobSha(change.content),
+          blobSha:
+            change.content === null ? null : (change.blobSha ?? (await gitBlobSha(change.content))),
         })),
     );
     return this.#storage.transactionSync(() => {
@@ -335,14 +357,19 @@ export class MemoryIndex {
         return result;
       }
       result.applied = true;
-      const seq =
-        (this.#exec<{ seq: number | null }>("SELECT max(seq) AS seq FROM commits")[0]?.seq ?? 0) +
-        1;
+      const last = this.#exec<{ seq: number; recorded_at: number }>(
+        "SELECT seq, recorded_at FROM commits ORDER BY seq DESC LIMIT 1",
+      )[0];
+      const seq = (last?.seq ?? 0) + 1;
+      // Committer times can go backwards (a rebase, a skewed clock) or repeat within a
+      // millisecond; ingestion windows need them to move forward.
+      const recordedAt = Math.max(commit.committedAt, (last?.recorded_at ?? -Infinity) + 1);
       this.#exec(
-        "INSERT INTO commits (sha, seq, committed_at) VALUES (?, ?, ?)",
+        "INSERT INTO commits (sha, seq, committed_at, recorded_at) VALUES (?, ?, ?, ?)",
         commit.sha,
         seq,
         commit.committedAt,
+        recordedAt,
       );
       for (const change of changes) {
         const current = this.#exec<{ rowid: number; blob_sha: string; commit_sha: string }>(
@@ -357,7 +384,7 @@ export class MemoryIndex {
           this.#exec(
             `UPDATE versions SET is_current = 0, replaced_at = ?, replaced_by_commit = ?
              WHERE rowid = ?`,
-            commit.committedAt,
+            recordedAt,
             commit.sha,
             current.rowid,
           );
@@ -386,7 +413,7 @@ export class MemoryIndex {
           seq,
           change.blobSha,
           previous,
-          commit.committedAt,
+          recordedAt,
           note.id,
           note.scope,
           note.kind,
@@ -434,12 +461,14 @@ export class MemoryIndex {
    * Drops every derived row and replays the vault's history, oldest commit first. Embeddings are
    * kept: they are keyed by content, so they stay valid.
    */
-  async rebuild(history: Iterable<VaultCommit> | AsyncIterable<VaultCommit>): Promise<void> {
-    this.#storage.transactionSync(() => {
-      for (const object of DERIVED_OBJECTS) this.#exec(`DROP ${object}`);
-      this.#exec(DERIVED_SCHEMA);
+  rebuild(history: Iterable<VaultCommit> | AsyncIterable<VaultCommit>): Promise<void> {
+    return this.#serialize(async () => {
+      this.#storage.transactionSync(() => {
+        for (const object of DERIVED_OBJECTS) this.#exec(`DROP ${object}`);
+        this.#exec(DERIVED_SCHEMA);
+      });
+      for await (const commit of history) await this.#apply(commit);
     });
-    for await (const commit of history) await this.applyCommit(commit);
   }
 
   /** The last commit applied, which is where the next sync starts. */
@@ -496,7 +525,7 @@ export class MemoryIndex {
       filters.push("(v.invalid_at IS NULL OR v.invalid_at > ?)");
       bindings.push(options.validAt, options.validAt);
     }
-    bindings.push(options.limit ?? 10);
+    bindings.push(Math.min(Math.max(Math.trunc(options.limit ?? 10), 1), 100));
     return this.#exec<{
       path: string;
       commit_sha: string;
@@ -580,9 +609,14 @@ export class MemoryIndex {
 
   dump(): IndexDump {
     return {
-      commits: this.#exec<{ sha: string; seq: number; committed_at: number }>(
-        "SELECT sha, seq, committed_at FROM commits ORDER BY seq",
-      ).map((row) => ({ sha: row.sha, seq: row.seq, committedAt: row.committed_at })),
+      commits: this.#exec<{ sha: string; seq: number; committed_at: number; recorded_at: number }>(
+        "SELECT sha, seq, committed_at, recorded_at FROM commits ORDER BY seq",
+      ).map((row) => ({
+        sha: row.sha,
+        seq: row.seq,
+        committedAt: row.committed_at,
+        recordedAt: row.recorded_at,
+      })),
       versions: this.#exec<VersionRow>(
         `SELECT ${VERSION_COLUMNS} FROM versions v ORDER BY v.path, v.commit_seq`,
       ).map(toVersion),

@@ -114,15 +114,15 @@ Every key is optional when reading. When Kelpie writes, it always sets `id`, `ki
 
 | Key | Value | Meaning | When missing or invalid |
 |---|---|---|---|
-| `id` | 1–64 of `A-Z a-z 0-9 . _ : -`; Kelpie writes 16 hex digits | The memory's stable id (see below) | none |
+| `id` | 1–64 of `A-Z a-z 0-9 . _ : -`, starting with a letter or digit; Kelpie writes 16 hex digits | The memory's stable id (see below) | none |
 | `kind` | a kind from the table above | What the memory is | the kind folder, else `note` |
 | `scope` | `global`, or `agent/…`, `area/…`, `project/…`, `conversation/…` | Who the memory belongs to | the path's scope |
 | `tier` | `episodic`, `semantic`, `procedural` | How long it is expected to matter; decay reads it (#111) | the kind's default |
 | `level` | `explicit`, `deduced`, `inferred` | Said by the owner, deduced from what was said, or guessed | none |
 | `confidence` | a number from 0 to 1 | How sure the writer was | none |
 | `sources` | up to 20 strings, each one line of up to 300 characters | Where it came from: a wikilink to a vault note (`"[[2026-10-06-family-chat]]"`) or any reference, such as a message id | none |
-| `entities` | up to 10 names, of up to 64 characters each | What the memory is about | none |
-| `valid_from`, `invalid_at` | `YYYY-MM-DD`, or a date-time with an offset | When the fact starts and stops being true in the world. A date is the start of that day in UTC, and `invalid_at` must come after `valid_from` | always valid |
+| `entities` | names of up to 64 characters; at most 10 are kept | What the memory is about | none; a bad name drops that name only |
+| `valid_from`, `invalid_at` | `YYYY-MM-DD`, or a date-time with an offset; a real calendar date, so `2026-02-30` is invalid | When the fact starts and stops being true in the world. A date is the start of that day in UTC, and `invalid_at` must come after `valid_from` | always valid |
 | `evergreen` | `true` or `false` | Exempt from decay | `false` |
 | `pinned` | `true` or `false` | Always loaded into the agent's core context, and exempt from decay | `false` |
 | `abstract` | one line of up to 300 characters | A summary that retrieval can show before the whole note | none |
@@ -137,30 +137,37 @@ How a file is read:
 - **The path wins.** If `kind` disagrees with the kind folder, or `scope` with the path, the folder and the path win, with a warning: moving a file in Obsidian is how the owner reclassifies it.
 - **Unknown keys are kept,** such as Obsidian's `aliases` and `tags`. Kelpie never removes them, and when it writes a new version it keeps them, with their comments, in their places.
 
+How Kelpie writes a new version:
+- **The input is the whole version.** A field Kelpie manages and the input leaves out is removed, and the body is replaced. A writer that keeps a field, such as a `pinned` the owner set in Obsidian, reads the note first and carries it over.
+- **A file whose frontmatter can't be read is refused,** rather than rewritten without the owner's keys. Examples: a half-saved edit or a duplicate key. The owner fixes it first.
+
 ### Identity and versions
 
 - **A memory's identity is its path.** Each version written at a path supersedes the one before it, and removing the file ends the chain. Writing the path again continues the chain.
 - **`id` is a content hash, taken once.** Kelpie mints it from the first version's scope, kind, title and body: the first 16 hex digits of a SHA-256.
   - Later versions keep it, so sources and relations can point at a memory whatever it says now.
   - Writing the same new memory twice produces the same file and the same id.
-- **The index never trusts a hash stored in a file,** because an edit in Obsidian doesn't recompute one. It computes each version's git blob SHA itself: the value GitHub's trees report, which is what lets the sync skip Kelpie's own commits (#41).
+- **The index never trusts a hash stored in a file,** because an edit in Obsidian doesn't recompute one. It keys each version by its git blob SHA: the value GitHub's trees report, which is what lets the sync skip Kelpie's own commits (#41). The sync passes the SHA from the tree. Without it, the index computes it from the text, which matches git as long as the text was decoded without dropping a BOM.
 - **A rename is a new chain in the index.** Git still has the history.
 
 ### Two kinds of time
 
 - **World time** is `valid_from` and `invalid_at`: when a fact is true. Retrieval can ask for the memories valid at an instant.
 - **Ingestion time** is when the vault started and stopped holding a version: the commit that wrote it and the commit that replaced it. "As of" questions use ingestion time. They answer what memory said then, not what was true then.
+  - Committer times can go backwards, after a rebase or with a skewed clock, and two commits can share a millisecond. The index records each commit at least a millisecond after the one before, so every version's window has a start and an end in order.
 
 ## Links
 
 - **Wikilinks:** `[[Ana Souza]]`, `[[Ana Souza|Ana]]`, `[[Ana Souza#Contact]]`, `[[Ana Souza#^block]]`, with `\|` inside tables.
-  - A link without a `/` names a file, which Obsidian finds anywhere in the vault.
+  - A link without a `/` names a file, which Obsidian finds anywhere in the vault. Names may hold dots (`[[Node.js]]`, `[[Meeting 2026.10.06]]`).
   - A link with a `/` is a path from the vault's root, or from the note's folder when it starts with `./` or `../`.
-- **Embeds:** `![[Recipe]]` is a link of its own kind. Embeds and links to anything but a note (`![[photo.png]]`, `[[doc.pdf]]`) are skipped.
+- **Embeds:** `![[Recipe]]` is a link of its own kind. Links and embeds of attachments are skipped. An attachment is a file with an image, audio, video, PDF, canvas, base, office or archive extension, such as `![[photo.png]]` or `[[doc.pdf]]`.
 - **Markdown links:** `[text](../places/lisboa.md)` must name a `.md` file and resolves from the note's folder. URLs, `mailto:` and images are skipped.
 - **What else is skipped:** links in fenced code blocks and inline code, and same-note links (`[[#Heading]]`).
+  - A fence may open on a list item or in a quote (``- ```sh``, ``> ```  ``).
+  - Inline code that spans lines isn't seen as code.
 - **Frontmatter links:** wikilinks in `sources` and in `relations.contradicts` become links of those kinds.
-- **Resolution** follows Obsidian, against the vault's current notes:
+- **Resolution** follows Obsidian, against the vault's current notes, with names and paths compared in Unicode NFC:
   - a path names one note;
   - a file name matches case-insensitively;
   - when two notes share a name, the one in the linking note's folder wins, then the shorter path;
@@ -190,11 +197,12 @@ The index is one SQLite database inside the Context Store's Durable Object ([ADR
   - a changed file adds a version and closes the previous one;
   - a removed file closes its current version.
 
-  A commit applied twice is skipped, so a repeated webhook is harmless.
+  A commit applied twice is skipped, so a repeated webhook is harmless. Commits apply one at a time, in the order they arrive, and a rebuild runs alone: a commit that arrives during a rebuild waits for it. That holds within one index instance, so a Durable Object keeps one.
 - **Rebuild:** dropping every derived table and replaying the vault's history gives the same index, row for row. That is tested.
   - Rebuilding from the head alone gives the same current notes, without their history.
   - Embeddings survive a rebuild: they are keyed by content, so they stay valid, and recomputing them costs model calls.
-- **Search:** current versions only by default. With `asOf`, it searches the versions the vault held at that instant. With `validAt`, it keeps only memories valid in the world at that instant.
+- **Search:** current versions only by default. With `asOf`, it searches the versions the vault held at that instant. With `validAt`, it keeps only memories valid in the world at that instant. It returns 1 to 100 results, 10 by default.
+- **A new schema version** drops the derived tables and starts empty, keeping the embeddings. The index then reports no last commit, which tells the sync to replay the vault from the start.
 
 ## Credits
 

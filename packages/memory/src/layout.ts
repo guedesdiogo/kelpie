@@ -1,5 +1,6 @@
 // Where memory lives in the vault (ADR-0016's layout, extended by ADR-0020). The path decides a
 // note's scope and, under a kind folder, its kind; docs/memory-format.md is the written spec.
+import { isDate } from "./time.ts";
 
 export const KINDS = [
   "preference",
@@ -134,8 +135,10 @@ export function slugify(title: string): string {
  * the date first, so a folder lists in order. The caller resolves a collision with an existing file.
  */
 export function memoryPath(scope: Scope, kind: Kind, title: string, date?: string): string {
+  if (!isScope(scope)) throw new RangeError(`not a scope: ${scope}`);
+  if (!KINDS.includes(kind)) throw new RangeError(`not a kind: ${kind}`);
   const folder = `${scopeRoot(scope)}/${KIND_FOLDERS[kind]}`;
   if (date === undefined) return `${folder}/${slugify(title)}.md`;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new RangeError(`not a YYYY-MM-DD date: ${date}`);
+  if (!isDate(date)) throw new RangeError(`not a YYYY-MM-DD date: ${date}`);
   return `${folder}/${date.slice(0, 4)}/${date}-${slugify(title)}.md`;
 }

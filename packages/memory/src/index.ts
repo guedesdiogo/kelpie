@@ -39,7 +39,8 @@ export {
   type VaultChange,
   type VaultCommit,
 } from "./memory-index.ts";
-export { instantOf, isMemoryId, LEVELS, type Level, type Note, readNote } from "./note.ts";
+export { isMemoryId, LEVELS, type Level, type Note, readNote } from "./note.ts";
+export { instantOf, isDate, isDateTime } from "./time.ts";
 export {
   MemoryFormatError,
   type MemoryInput,
