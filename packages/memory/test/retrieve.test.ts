@@ -283,6 +283,7 @@ describe("the index's entity and graph lookups", () => {
         expect(neighbours(["conversation/family", "global"])).toEqual([global]);
         expect(index.resolve(source, "name", "lisboa")).toBe(global);
         // A link to another scope's note by its path resolves to nothing in this one.
+        expect(index.resolve(source, "path", global.slice(0, -3))).toBe(global);
         expect(
           index.resolve(source, "path", global.slice(0, -3), { scopes: ["conversation/family"] }),
         ).toBeNull();

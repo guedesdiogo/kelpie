@@ -245,7 +245,7 @@ The index is one SQLite database inside the Context Store's Durable Object ([ADR
 - **Neighbours:** the current notes one step from a note: the notes it links to, then the pages of the entities it names, global ones first. A note it contradicts is what it replaced, so it isn't a neighbour.
 - **Scopes:** search, entity lookup, neighbours and a note's links can be limited to a set of scopes. Without one they see every scope. With one, links resolve among the notes in it, and a note outside it has no neighbours (#150).
   - **Residual, full-text ranking:** search ranks with bm25 statistics from the whole index, other scopes and past versions included, so notes outside the scopes can reorder the hits inside them. Revisit when scoped recall (#131) separates people who don't trust each other, such as a group with outsiders ([#152](https://github.com/guedesdiogo/kelpie/issues/152)).
-  - **Residual, unscoped reads:** backlinks, history, a path's current version, a version by commit and a note's entities take no scopes. Their callers pass only notes they already found within the scopes.
+  - **Residual, unscoped reads:** backlinks, history, a path's current version, a version by commit and a note's entities take no scopes, and a note's links given scopes don't check the note itself. Recall and the memory tools pass them only notes they already found within the scopes; the lifecycle report reads the whole vault on purpose.
 - **A new schema version** drops the derived tables and starts empty, keeping the embeddings. The index then reports no last commit, which tells the sync to replay the vault from the start. Version 2 added the folded title.
 
 ## Retrieval
