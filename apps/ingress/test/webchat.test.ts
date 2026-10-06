@@ -11,6 +11,7 @@ function deps(overrides: Partial<WebchatDeps> = {}) {
   const fakes = {
     authenticate: vi.fn(async (): Promise<Verification> => ({ ok: true, sub: "access-sub" })),
     admit: vi.fn(async (): Promise<Admission> => owner),
+    agentExists: vi.fn(async (agentId: string) => agentId === "assistant"),
     page: vi.fn(async () => new Response("<!doctype html>", { status: 200 })),
     connect: vi.fn(async () => new Response("socket", { status: 200 })),
     ...overrides,
@@ -35,6 +36,7 @@ describe("the webchat's page", () => {
     expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
     expect(response.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("cache-control")).toBe("no-store");
     expect(fakes.page).toHaveBeenCalledOnce();
   });
 
@@ -94,6 +96,15 @@ describe("the webchat's socket", () => {
     });
     expect((await handleWebchat(socketRequest(), refused)).status).toBe(403);
     expect(refused.connect).not.toHaveBeenCalled();
+  });
+
+  it("refuses an agent that isn't registered, before asking the Directory", async () => {
+    const fakes = deps();
+    expect((await handleWebchat(socketRequest("/webchat/ws?agent=nobody"), fakes)).status).toBe(
+      404,
+    );
+    expect(fakes.admit).not.toHaveBeenCalled();
+    expect(fakes.connect).not.toHaveBeenCalled();
   });
 
   it("answers 426 to a plain request on the socket path", async () => {

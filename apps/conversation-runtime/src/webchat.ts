@@ -19,7 +19,11 @@ export interface ShownMessage {
 
 /** What the page receives. */
 export type ServerFrame =
-  | { type: "history"; messages: ShownMessage[] }
+  /**
+   * The conversation so far, and the ids of the page's latest messages it has received: the page
+   * shows and resends only the ones it doesn't list.
+   */
+  | { type: "history"; messages: ShownMessage[]; received: string[] }
   | { type: "bubble"; text: string }
   | { type: "typing"; active: boolean }
   | { type: "accepted"; id: string }

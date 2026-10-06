@@ -58,8 +58,13 @@ export class ConversationAgent extends DurableObject {
     return (await this.ctx.storage.get("received")) ?? null;
   }
 }
+export class Registry extends DurableObject {
+  get(id) {
+    return id === "assistant" ? { id, name: "Assistant" } : null;
+  }
+}
 export default { fetch: () => new Response(null, { status: 404 }) };`,
-            durableObjects: { CONVERSATION_AGENT: "ConversationAgent" },
+            durableObjects: { CONVERSATION_AGENT: "ConversationAgent", REGISTRY: "Registry" },
           },
         ],
       },

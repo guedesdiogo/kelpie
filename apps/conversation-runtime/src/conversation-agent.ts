@@ -26,7 +26,7 @@ import {
   type FiberRecoveryContext,
   type WSMessage,
 } from "agents";
-import { and, asc, count, desc, eq, gte, inArray, isNull, lt, max } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNull, like, lt, max } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
@@ -43,6 +43,10 @@ import {
 
 /** The most history rows a webchat socket is shown when it opens. */
 const WEBCHAT_REPLAY_ROWS = 50;
+/** The page's message ids prefixed so they can't collide with another channel's. */
+const WEBCHAT_ID_PREFIX = "webchat:";
+/** How many of the page's latest message ids a socket is told the conversation has. */
+const WEBCHAT_RECEIVED_IDS = 100;
 /** While the owner types in the webchat, buffered messages wait at least this long for the rest. */
 const TYPING_HOLD_MS = 4_000;
 
@@ -153,7 +157,11 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       return;
     }
     connection.setState(admission);
-    send(connection, { type: "history", messages: this.#transcript() });
+    send(connection, {
+      type: "history",
+      messages: this.#transcript(),
+      received: this.#receivedWebchatIds(),
+    });
   }
 
   override async onMessage(connection: Connection, message: WSMessage): Promise<void> {
@@ -167,7 +175,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const result = await this.ingest({
       agentId: admission.agentId,
       // The page picks the id, so a resend after a reconnect is deduplicated like any retry.
-      providerMessageId: `webchat:${frame.id}`,
+      providerMessageId: `${WEBCHAT_ID_PREFIX}${frame.id}`,
       userId: admission.userId,
       text: frame.text,
       destination: { channel: "webchat", threadId: admission.userId },
@@ -857,6 +865,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       return;
     }
     await this.#cancelFlushSchedule();
+    // A flush the old schedule fired may have claimed the buffer while it was cancelled.
+    if (this.#pendingInbound().length === 0) return;
     const schedule = await this.schedule(new Date(target), "flush", { epoch });
     this.#set("flushSchedule", schedule.id);
     this.#set("flushAt", target);
@@ -1009,6 +1019,19 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       at: row.receivedAt,
     }));
     return [...rows, ...sent, ...waiting].filter((message) => message.text !== "");
+  }
+
+  /** The page's latest message ids this conversation has, oldest first. */
+  #receivedWebchatIds(): string[] {
+    return this.#db
+      .select({ id: schema.inbound.providerMessageId })
+      .from(schema.inbound)
+      .where(like(schema.inbound.providerMessageId, `${WEBCHAT_ID_PREFIX}%`))
+      .orderBy(desc(schema.inbound.id))
+      .limit(WEBCHAT_RECEIVED_IDS)
+      .all()
+      .reverse()
+      .map(({ id }) => id.slice(WEBCHAT_ID_PREFIX.length));
   }
 
   #agentId(): string {

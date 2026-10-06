@@ -133,6 +133,7 @@ Form pages are HTML:
 
 The webchat is a page on `ingress` where the owner chats with an agent, at `https://<ingress hostname>/webchat/?agent=<agent id>` (ADR-0023).
 - It logs in the same way as the admin API: Cloudflare Access, then the owner's Access identity in the Directory. It has no pairing of its own.
+- The agent must be in the registry.
 - `ingress` checks the Access token again on every request: the page, and the socket's upgrade.
 - The socket's upgrade must come from the page's own origin.
 - Until it is set up, every `/webchat` request answers 404, and Telegram and GitHub's webhooks are unaffected.
@@ -140,7 +141,7 @@ The webchat is a page on `ingress` where the owner chats with an agent, at `http
 To set it up:
 1. **Put `/webchat` behind Access.** Either:
    - add `<ingress hostname>/webchat` as another destination of the admin API's Access application, which keeps its AUD tag; or
-   - create a self-hosted application for that path, allowing only the owner.
+   - create a self-hosted application for that path, allowing only the owner. Its AUD tag then goes in `ACCESS_AUD` below.
 
    The path covers what is under it: the page's files and the socket at `/webchat/ws`. Leave the rest of the hostname outside Access: Telegram and GitHub can't log in.
 2. **Deploy `ingress` with the Access values,** as for the admin API:

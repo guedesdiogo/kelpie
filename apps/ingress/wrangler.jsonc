@@ -41,7 +41,9 @@
         "name": "CONVERSATION_AGENT",
         "class_name": "ConversationAgent",
         "script_name": "kelpie-conversation-runtime"
-      }
+      },
+      // The webchat opens only agents the registry lists.
+      { "name": "REGISTRY", "class_name": "Registry", "script_name": "kelpie-conversation-runtime" }
     ]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Directory"] }]

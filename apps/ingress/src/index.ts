@@ -1,6 +1,7 @@
 import { DIRECTORY_NAME, type Remote, remoteKeySet, verifyAccessJwt } from "@kelpie/access";
 import type { ChannelWebhooksContract } from "@kelpie/channels";
 import { TELEGRAM_WEBHOOK_PATH } from "@kelpie/channels/telegram";
+import { REGISTRY_NAME, type RegistryContract } from "@kelpie/config";
 import type { ConversationContract } from "@kelpie/conversation/contract";
 import { admitSender } from "./admission.ts";
 import {
@@ -44,6 +45,11 @@ function webchatDeps(env: Env): WebchatDeps {
         Math.floor(Date.now() / 1_000),
       ),
     admit: (identity, agentId) => env.DIRECTORY.getByName(DIRECTORY_NAME).admit(identity, agentId),
+    // The registry lives in conversation-runtime; its Registry implements this contract.
+    agentExists: async (agentId) =>
+      (await (env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<RegistryContract>).get(
+        agentId,
+      )) !== null,
     page: (request) => env.ASSETS.fetch(request),
     connect: (name, admission) => connectWebchat(env, name, admission),
   };

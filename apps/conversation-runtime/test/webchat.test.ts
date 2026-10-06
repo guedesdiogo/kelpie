@@ -1,4 +1,4 @@
-import { runInDurableObject } from "cloudflare:test";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { WEBCHAT_ADMISSION_HEADER } from "@kelpie/conversation/contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -63,7 +63,9 @@ describe("webchat sockets", () => {
     use(fakeWorld([]));
     const chat = await open("assistant:webchat:quiet");
 
-    await vi.waitFor(() => expect(chat.frames[0]).toEqual({ type: "history", messages: [] }));
+    await vi.waitFor(() =>
+      expect(chat.frames[0]).toEqual({ type: "history", messages: [], received: [] }),
+    );
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(chat.frames.map((frame) => frame.type)).toEqual(["history"]);
   });
@@ -156,6 +158,60 @@ describe("webchat sockets", () => {
         messages: [{ role: "user", text: "então" }],
       }),
     );
+  });
+
+  it("tells a new socket which of the page's messages it already has", async () => {
+    use(fakeWorld([reply("Ok.")]));
+    const name = "assistant:webchat:received";
+    const chat = await open(name);
+    chat.send({ type: "message", id: "c1", text: "primeira" });
+    chat.send({ type: "message", id: "c2", text: "segunda" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(2));
+    await agent(name).flush();
+    await vi.waitFor(async () =>
+      expect((await agent(name).turns()).at(-1)?.status).toBe("delivered"),
+    );
+
+    const later = await open(name);
+    await vi.waitFor(() => expect(later.frames[0]).toMatchObject({ received: ["c1", "c2"] }));
+  });
+
+  it("keeps the socket's admission after the object is evicted", async () => {
+    use(fakeWorld([]));
+    const name = "assistant:webchat:evicted";
+    const chat = await open(name);
+    await vi.waitFor(() => expect(chat.frames).toHaveLength(1));
+    await evictDurableObject(agent(name));
+
+    chat.send({ type: "message", id: "c1", text: "ainda aqui?" });
+    await vi.waitFor(() =>
+      expect(ofType(chat.frames, "accepted")).toEqual([{ type: "accepted", id: "c1" }]),
+    );
+  });
+
+  it("refuses a webchat message in a conversation another channel owns, and leaves its replies alone", async () => {
+    const world = use(fakeWorld([reply("Oi pelo Telegram.")]));
+    const name = "assistant:telegram:chat-9";
+    await agent(name).ingest({
+      agentId: "assistant",
+      providerMessageId: "t1",
+      userId: "u-owner",
+      text: "oi",
+      destination: { channel: "telegram", threadId: "chat-9" },
+      sentAt: world.clock,
+      timeZone: null,
+    });
+    const chat = await open(name);
+    chat.send({ type: "message", id: "c1", text: "oi pelo navegador" });
+    await vi.waitFor(() =>
+      expect(ofType(chat.frames, "rejected")).toEqual([
+        { type: "rejected", id: "c1", reason: "destination_mismatch" },
+      ]),
+    );
+
+    await agent(name).flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Oi pelo Telegram."]));
+    expect(ofType(chat.frames, "bubble")).toEqual([]);
   });
 
   it("rejects a message the conversation refuses, and ignores frames it doesn't know", async () => {
