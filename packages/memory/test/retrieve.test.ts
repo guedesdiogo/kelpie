@@ -2,6 +2,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import {
+  asksAboutThePast,
   MemoryIndex,
   type MemoryInput,
   memoryPath,
@@ -9,6 +10,7 @@ import {
   pack,
   queryWords,
   retrieve,
+  type Scope,
   writeMemory,
 } from "../src/index.ts";
 import { FakeVault } from "./vault.ts";
@@ -168,6 +170,64 @@ describe("the index's entity and graph lookups", () => {
     });
   });
 
+  it("counts a name's notes only in the scopes the lookup asks for", async () => {
+    const note = (scope: MemoryInput["scope"], title: string): MemoryInput => ({
+      ...person(title, "Uma nota qualquer.", ["Rafael Souza"]),
+      scope,
+      kind: "note",
+    });
+    const notes = (scope: MemoryInput["scope"], count: number) =>
+      Array.from({ length: count }, (_, i) => note(scope, `Assunto ${String(i).padStart(3, "0")}`));
+    // One note over the cap in one scope, and exactly the cap in another.
+    await withMemories(
+      "hot-key-scoped",
+      [...notes("conversation/work", 51), ...notes("conversation/family", 50)],
+      (index) => {
+        const family = index.entityHits(["rafael souza"], {
+          scopes: ["conversation/family"],
+          limit: 100,
+        });
+        expect(family.map((hit) => hit.path).sort()).toEqual(
+          notes("conversation/family", 50).map((n) => memoryPath(n.scope, n.kind, n.title)),
+        );
+        expect(index.entityHits(["rafael souza"], { scopes: ["conversation/work"] })).toEqual([]);
+        expect(index.entityHits(["rafael souza"])).toEqual([]);
+      },
+    );
+  });
+
+  it("looks up as many keys in as many scopes as it takes", async () => {
+    // 64 keys and 64 scopes, with every filter: more than a statement's 100 bound parameters.
+    const keys = [
+      "bruno lima",
+      ...Array.from({ length: 63 }, (_, i) => `nome ${String(i).padStart(2, "0")}`),
+    ];
+    const scopes: Scope[] = [
+      "global",
+      ...Array.from({ length: 63 }, (_, i): Scope => `area/a${String(i).padStart(2, "0")}`),
+    ];
+    const at = Date.parse("2026-12-01T00:00:00Z");
+    await withMemories("many-keys", [BRUNO], (index) => {
+      expect(
+        index
+          .entityHits(keys, { scopes, asOf: at, validAt: at, notExpiredAt: at })
+          .map((hit) => hit.path),
+      ).toEqual([BRUNO_PATH]);
+    });
+  });
+
+  it("counts a note once, not once per version it had", async () => {
+    const versions = Array.from({ length: 51 }, (_, i) => ({
+      ...person("Agenda", `Versão ${i}.`, ["Rafael Souza"]),
+      kind: "note" as const,
+    }));
+    const path = memoryPath("global", "note", "Agenda");
+    await withMemories("hot-key-history", versions, (index) => {
+      expect(index.history(path)).toHaveLength(51);
+      expect(index.entityHits(["rafael souza"]).map((hit) => hit.path)).toEqual([path]);
+    });
+  });
+
   it("reaches a note's neighbours: the notes it links to, and the pages of its entities", async () => {
     await withMemories(
       "neighbours",
@@ -279,6 +339,68 @@ describe("retrieve", () => {
       expect(titles("2026-01-15T12:00:00Z")).toEqual(["Bruno Lima", "Viagem a Recife"]);
       expect(titles("2026-03-15T12:00:00Z")).toEqual(["Bruno Lima"]);
     });
+  });
+
+  it("leaves out an expired note, unless the question asks how things were", async () => {
+    const note = (title: string, extra: Partial<MemoryInput>): MemoryInput => ({
+      scope: "global",
+      kind: "note",
+      title,
+      body: `${title}.`,
+      level: "explicit",
+      confidence: 0.9,
+      entities: ["Ana Souza"],
+      ...extra,
+    });
+    const lisboa = note("Ana mora em Lisboa", { invalidAt: "2026-03-01" });
+    const porto = note("Ana mora no Porto", { validFrom: "2026-03-01" });
+    // A plan that starts later is not expired: it stays.
+    const trip = note("Ana vai a Recife em dezembro", {
+      kind: "commitment",
+      validFrom: "2026-12-01",
+    });
+    const ana = person(
+      "Ana Souza",
+      "Irmã do Rafael. Ver [[ana-mora-em-lisboa]] e [[ana-mora-no-porto]].",
+      ["Ana Souza"],
+    );
+    await withMemories("expired", [lisboa, porto, trip, ana], (index) => {
+      const now = Date.parse("2026-10-06T12:00:00Z");
+      const titles = (question: string, options: Parameters<typeof retrieve>[2]) =>
+        retrieve(index, question, options).map((hit) => hit.title);
+      const current = titles("onde a Ana mora?", { notExpiredAt: now });
+      expect(current).toContain("Ana mora no Porto");
+      expect(current).not.toContain("Ana mora em Lisboa");
+      expect(titles("e a viagem da Ana?", { notExpiredAt: now })).toContain(
+        "Ana vai a Recife em dezembro",
+      );
+      // Through the graph too: Ana's page links both.
+      const linked = titles("Rafael", { notExpiredAt: now });
+      expect(linked).toContain("Ana mora no Porto");
+      expect(linked).not.toContain("Ana mora em Lisboa");
+      // A question about the past, or an explicit date, sees it again.
+      expect(titles("onde a Ana morava antes?", { notExpiredAt: now })).toContain(
+        "Ana mora em Lisboa",
+      );
+      expect(
+        titles("onde a Ana mora?", {
+          notExpiredAt: now,
+          validAt: Date.parse("2026-02-01T00:00:00Z"),
+        }),
+      ).toContain("Ana mora em Lisboa");
+      expect(titles("onde a Ana mora?", {})).toContain("Ana mora em Lisboa");
+    });
+  });
+
+  it.each([
+    ["onde a Ana morava antes?", true],
+    ["como era antigamente?", true],
+    ["o que a gente falou ontem?", true],
+    ["what did she use to do?", true],
+    ["onde a Ana mora?", false],
+    ["qual era o nome dela?", false],
+  ])("tells whether %s asks about the past", (question, past) => {
+    expect(asksAboutThePast(question)).toBe(past);
   });
 
   it("doesn't search a resolved date's words", async () => {

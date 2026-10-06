@@ -59,17 +59,28 @@ export const turns = sqliteTable("turns", {
    * stays what the model saw (#137). History rows never hold them.
    */
   context: text("context"),
+  /**
+   * The notes in `context` that Kelpie wrote itself, by path (#126): their text may be the model's,
+   * so their links never count as the turn's inputs for a preview (#130).
+   */
+  kelpieNotes: text("kelpie_notes", { mode: "json" }).$type<string[]>(),
+  /**
+   * A digest of the tools the turn's requests sent, null for none (ADR-0025). A reply is replayed
+   * with its native output only to a turn with the same tools: its reasoning is bound to them.
+   */
+  toolsKey: text("tools_key"),
   createdAt: integer("created_at").notNull(),
 });
 
 /**
  * What the model sees, append-only: earlier messages are never rewritten, so replayed reasoning
- * stays valid. Each user message carries its author's `userId` (ADR-0015).
+ * stays valid. Each user message carries its author's `userId` (ADR-0015). A turn that runs tools
+ * adds a reply asking for them, then a `tool` row with every call's result (ADR-0025).
  */
 export const history = sqliteTable("history", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   turnId: integer("turn_id").notNull(),
-  role: text("role", { enum: ["user", "assistant"] }).notNull(),
+  role: text("role", { enum: ["user", "assistant", "tool"] }).notNull(),
   userId: text("user_id"),
   /** The system prompt version the message was produced under. */
   systemVersion: integer("system_version").notNull(),

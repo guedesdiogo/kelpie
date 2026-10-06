@@ -194,6 +194,48 @@ const SESSION_RECALL = [
   "previously",
 ];
 
+/** Phrases that ask how things were, folded: an expired memory can answer them (#111). */
+const PAST = [
+  "antes",
+  "antigamente",
+  "na epoca",
+  "naquela epoca",
+  "naquele tempo",
+  "costumava",
+  "costumavam",
+  "morava",
+  "moravam",
+  "trabalhava",
+  "trabalhavam",
+  "estudava",
+  "antigo",
+  "antiga",
+  "antigos",
+  "antigas",
+  "anterior",
+  "ex",
+  "used to",
+  "use to",
+  "before",
+  "formerly",
+  "former",
+  "at the time",
+  "back then",
+];
+
+/**
+ * Whether a question asks how things were, or about a past conversation: then an expired memory
+ * is an answer, not noise.
+ */
+export function asksAboutThePast(text: string): boolean {
+  return pastOf(tokens(text));
+}
+
+function pastOf(words: readonly string[]): boolean {
+  const padded = ` ${words.join(" ")} `;
+  return recalls(words) || PAST.some((marker) => padded.includes(` ${marker} `));
+}
+
 /** Whether a question asks about a past conversation, so sessions aren't ranked down. */
 export function isSessionRecall(text: string): boolean {
   return recalls(tokens(text));
@@ -256,10 +298,13 @@ export function retrieve(
   const asked = Math.trunc(options.limit ?? 10);
   const limit = Number.isFinite(asked) ? Math.min(Math.max(asked, 1), 100) : 10;
   // ai-memory fetches max(4 × limit, 20) per stream, up to limit + 300; the index returns 100 at most.
-  const { vector, ...searchOptions } = options;
-  const fetched = { ...searchOptions, limit: Math.min(Math.max(4 * limit, 20), 100) };
+  const { vector, notExpiredAt, ...given } = options;
   const dated = options.asOf !== undefined || options.validAt !== undefined;
   const all = tokens(text);
+  // An expired memory answers only a question about how things were, or one at a date of its own.
+  const expiredAt = dated || pastOf(all) ? undefined : notExpiredAt;
+  const searchOptions = expiredAt === undefined ? given : { ...given, notExpiredAt: expiredAt };
+  const fetched = { ...searchOptions, limit: Math.min(Math.max(4 * limit, 20), 100) };
   const words = searchWords(all, dated);
   const fts = words.length === 0 ? [] : index.search(words.join(" "), fetched);
   const entity = index.entityHits(entityKeys(all), fetched);
@@ -290,6 +335,7 @@ export function retrieve(
       for (const hit of index.neighbours(seed.path, {
         limit: NEIGHBOURS_PER_SEED,
         ...(options.validAt === undefined ? {} : { validAt: options.validAt }),
+        ...(expiredAt === undefined ? {} : { notExpiredAt: expiredAt }),
         ...(options.scopes === undefined ? {} : { scopes: options.scopes }),
       })) {
         if (seen.has(hit.path)) continue;
@@ -349,7 +395,7 @@ const HEADING_TITLE_CHARS = 120;
 const HEADING_PATH_CHARS = 300;
 
 /** At most `max` characters, with an ellipsis when cut; never half of an emoji's surrogate pair. */
-function cut(text: string, max: number): string {
+export function cut(text: string, max: number): string {
   if (text.length <= max) return text;
   let end = Math.max(0, max - 1);
   const last = text.charCodeAt(end - 1);
@@ -358,12 +404,12 @@ function cut(text: string, max: number): string {
 }
 
 /** Anything a note holds that could read as this block's tags is escaped. */
-const inert = (text: string) => text.replace(/<(\s*\/?\s*memory)/gi, "&lt;$1");
+export const inert = (text: string) => text.replace(/<(\s*\/?\s*memory)/gi, "&lt;$1");
 /**
  * One line, without controls, cut to about `max`: a heading a note can't split. Controls go before
  * escaping, so removing one can't re-form a tag; escaping comes last, and may lengthen it a little.
  */
-const oneLine = (text: string, max: number) =>
+export const oneLine = (text: string, max: number) =>
   inert(
     cut(
       text
@@ -375,7 +421,7 @@ const oneLine = (text: string, max: number) =>
   );
 
 /** A random id for one block: a note can't guess it, so it can't close the block or forge a note. */
-function blockId(): string {
+export function blockId(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(8));
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }

@@ -2,6 +2,7 @@ export { type Entity, foldKey, MAX_ENTITIES, normalizeEntities } from "./entitie
 export { gitBlobSha } from "./hash.ts";
 export {
   defaultTier,
+  isReservedPath,
   isScope,
   KIND_FOLDERS,
   KINDS,
@@ -17,6 +18,15 @@ export {
   TIERS,
   type Tier,
 } from "./layout.ts";
+export {
+  CONTRADICTION_BANDS,
+  LIFECYCLE_REPORT_PATH,
+  type LifecycleFindings,
+  type LifecycleOptions,
+  lifecycleFindings,
+  lifecycleReport,
+  type NoteRef,
+} from "./lifecycle.ts";
 export {
   extractLinks,
   type LinkBy,
@@ -39,7 +49,16 @@ export {
   type VaultChange,
   type VaultCommit,
 } from "./memory-index.ts";
-export { isMemoryId, LEVELS, type Level, type Note, readNote } from "./note.ts";
+export { isMemoryId, LEVELS, type Level, MAX_SOURCES, type Note, readNote } from "./note.ts";
+export {
+  type HitView,
+  type Page,
+  type PageLink,
+  READ_PAGE_CHARS,
+  type ReadPageOptions,
+  readPage,
+  renderHits,
+} from "./page.ts";
 export {
   type Judge,
   type NoulQualifier,
@@ -48,6 +67,8 @@ export {
   rerank,
 } from "./rerank.ts";
 export {
+  asksAboutThePast,
+  bodyWithoutHeading,
   isSessionRecall,
   needsMemory,
   type Packed,
@@ -61,6 +82,7 @@ export {
 } from "./retrieve.ts";
 export { type Sanitized, sanitizeSecrets } from "./sanitize.ts";
 export {
+  conversationSource,
   type OpenKeys,
   type SessionInput,
   type SessionLine,
@@ -75,3 +97,9 @@ export {
   type WrittenMemory,
   writeMemory,
 } from "./write.ts";
+export {
+  type ChoiceQualifier,
+  type DecideWriteOptions,
+  decideWrite,
+  type WriteDecision,
+} from "./write-decision.ts";

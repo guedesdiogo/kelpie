@@ -1,14 +1,32 @@
 import { DurableObject } from "cloudflare:workers";
 import { EMBEDDING_INPUT_CHARS, type EmbedOutcome } from "@kelpie/llm";
 import {
+  bodyWithoutHeading,
+  decideWrite,
+  foldKey,
+  instantOf,
   isScope,
+  LIFECYCLE_REPORT_PATH,
+  lifecycleFindings,
+  lifecycleReport,
+  MAX_SOURCES,
+  MemoryFormatError,
   MemoryIndex,
+  type MemoryInput,
+  memoryPath,
+  type Note,
   pack,
+  readNote as parseNote,
   qualifierJudge,
   type RetrieveOptions,
+  readPage,
+  renderHits,
   rerank,
   retrieve,
   type Scope,
+  type SearchHit,
+  sanitizeSecrets,
+  writeMemory,
 } from "@kelpie/memory";
 import type { GatewayQualifyOutcome, QualifierBackend, Question } from "@kelpie/qualifier";
 import {
@@ -24,11 +42,19 @@ import type {
   CompiledContext,
   ForgetResult,
   HeldFile,
+  MemoryHit,
+  MemorySearchOptions,
+  MemorySearchResult,
+  MemoryWriteInput,
   ProposalTarget,
   ProposeResult,
+  ReadNoteOptions,
+  ReadNoteResult,
   RecallOptions,
   RecallResult,
   SkillEntry,
+  WriteNoteOptions,
+  WriteNoteResult,
   WriteResult,
 } from "./contract.ts";
 import { mergeOwnerWins } from "./merge.ts";
@@ -80,6 +106,45 @@ const RECALL_LIMIT = 10;
 /** As ai-memory: the rerank judges 3 × the limit, up to 30, then the limit is kept. */
 const RERANK_CANDIDATES = 30;
 const MAX_RECALL_SCOPES = 64;
+/** The agent's `memory_search` (#126): a few notes, as hermes's `session_search` returns. */
+const SEARCH_K = 3;
+const MAX_SEARCH_K = 10;
+/** A memory the agent writes without a confidence. */
+const DEFAULT_CONFIDENCE = 0.8;
+/** Two versions of a note that differ only in their frontmatter's `updated`. */
+function sameVersion(a: string, b: string): boolean {
+  const unstamped = (text: string) => {
+    const end = text.startsWith("---\n") ? text.indexOf("\n---\n", 3) : -1;
+    return end === -1
+      ? text
+      : `${text.slice(0, end).replace(/\nupdated: [^\n]*/, "")}${text.slice(end)}`;
+  };
+  return unstamped(a) === unstamped(b);
+}
+
+const words = (text: string) => text.trim().split(/\s+/u).join(" ");
+const instant = (value: string | null | undefined) =>
+  value === null || value === undefined ? null : instantOf(value);
+
+/** A note that already says this memory: its title, body and validity. */
+function saysTheSame(note: Note, memory: MemoryInput): boolean {
+  return (
+    foldKey(words(note.title)) === foldKey(words(memory.title)) &&
+    words(bodyWithoutHeading(note.title, note.body)) === words(memory.body) &&
+    instant(note.validFrom) === instant(memory.validFrom) &&
+    instant(note.invalidAt) === instant(memory.invalidAt)
+  );
+}
+
+/** What the writer takes as one line: printable, with no bidirectional overrides. */
+function writable(value: string, max: number): boolean {
+  return (
+    value.trim() !== "" && value.length <= max && !/[\p{Cc}\u202A-\u202E\u2066-\u2069]/u.test(value)
+  );
+}
+
+/** A new memory's file name is numbered up to this when its title's path is taken. */
+const MAX_PATH_NUMBER = 50;
 /** The question's vector waits this long, the rerank this long, then recall goes on without them. */
 const EMBED_QUESTION_TIMEOUT_MS = 2_000;
 const RERANK_TIMEOUT_MS = 3_000;
@@ -99,6 +164,8 @@ const MAX_RESOLVE_ATTEMPTS = 3;
 const RESOLVE_TIMEOUT_MS = 60_000;
 /** The wait between two tries at held files, so a short outage can't spend all of a file's. */
 const RESOLVE_RETRY_MS = 5 * 60_000;
+/** How often the lifecycle report is written (#111). */
+const LIFECYCLE_EVERY_MS = 24 * 60 * 60_000;
 /** The soonest the alarm wakes for a held file's next try. */
 const RESOLVE_WAKE_MS = 1_000;
 /** How much of the vault's `AGENTS.md` the model sees with a conflict. */
@@ -107,7 +174,16 @@ const RESOLVE_RULES_CHARS = 8_000;
 const MAX_FORGET_PATHS = 1_000;
 const MAX_PATH_CHARS = 300;
 /** The Context Store's own rows that can name a vault path, and so hold a copy of what it was. */
-const PATH_TABLES = ["queue", "conflicts", "held", "proposals", "recall_counts"] as const;
+const PATH_TABLES = [
+  "queue",
+  "conflicts",
+  "held",
+  "proposals",
+  "recall_counts",
+  "authored",
+] as const;
+/** A held file's resolution, queued as the owner's text with a conflict settled (#114). */
+const RESOLVE_SUMMARY = "Resolve a pushed merge conflict, with the model";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
@@ -145,6 +221,10 @@ CREATE TABLE IF NOT EXISTS recall_counts (
   path TEXT PRIMARY KEY NOT NULL,
   count INTEGER NOT NULL,
   last_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS authored (
+  path TEXT PRIMARY KEY NOT NULL,
+  blob_sha TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS proposals (
   id INTEGER PRIMARY KEY,
@@ -593,6 +673,7 @@ export class Vault extends DurableObject<VaultEnv> {
     // delays the vault's writes.
     const moreToEmbed = await this.#embedPending();
     await this.#resolveHeld();
+    await this.#lifecycle();
     const queued =
       this.#exec<{ n: number }>(`SELECT count(*) AS n FROM queue WHERE path NOT IN (${HELD})`)[0]
         ?.n ?? 0;
@@ -691,7 +772,7 @@ export class Vault extends DurableObject<VaultEnv> {
               route.agentId,
               row.path,
               content,
-              "Resolve a pushed merge conflict, with the model",
+              RESOLVE_SUMMARY,
               Date.now(),
             );
           }
@@ -750,6 +831,11 @@ export class Vault extends DurableObject<VaultEnv> {
           rows += this.#exec<{ n: number }>(`SELECT count(*) AS n ${where}`, named)[0]?.n ?? 0;
           this.#exec(`DELETE ${where}`, named);
         }
+        // A memory report waiting in the queue, or set aside, may name what is being erased: it
+        // goes, and the next alarm writes the report again from what is left.
+        this.#exec("DELETE FROM queue WHERE path = ?", LIFECYCLE_REPORT_PATH);
+        this.#exec("DELETE FROM conflicts WHERE path = ?", LIFECYCLE_REPORT_PATH);
+        this.#set("lifecycle_after", "0");
         return rows;
       });
       const stillInVault = this.#exec<{ path: string }>(
@@ -772,6 +858,46 @@ export class Vault extends DurableObject<VaultEnv> {
       });
       return { ok: true, forgotten, stillInVault };
     });
+  }
+
+  /**
+   * Once a day, after GitHub's work: what memory's index finds (#111), written as one report page
+   * in the vault, or the page removed when memory is clean. A day without news changes nothing,
+   * since the page is queued only when it differs. It reads the index at the head: if it can't bring
+   * it there, it tries again at the next alarm. Any other failure waits for the next day.
+   */
+  async #lifecycle(): Promise<void> {
+    const now = Date.now();
+    if (now < Number(this.#get("lifecycle_after") ?? "0")) return;
+    try {
+      await this.#catchUp();
+    } catch (error) {
+      console.error("Vault: the memory report waits for the index", errorName(error));
+      return;
+    }
+    this.#set("lifecycle_after", `${now + LIFECYCLE_EVERY_MS}`);
+    try {
+      const uses = new Map(
+        this.#exec<{ path: string; count: number; last_at: number }>(
+          "SELECT path, count, last_at FROM recall_counts",
+        ).map((row) => [row.path, { count: row.count, lastAt: row.last_at }]),
+      );
+      const model = this.#get("embedding_model");
+      const report = lifecycleReport(
+        lifecycleFindings(this.#memory, { now, uses, ...(model === null ? {} : { model }) }),
+      );
+      if (report === this.#visible(LIFECYCLE_REPORT_PATH)) return;
+      this.#exec(
+        "INSERT INTO queue (agent, path, content, summary, queued_at) VALUES (?, ?, ?, ?, ?)",
+        SYSTEM_AGENT,
+        LIFECYCLE_REPORT_PATH,
+        report,
+        "Update the memory report",
+        now,
+      );
+    } catch (error) {
+      console.error("Vault: the memory report failed", errorName(error));
+    }
   }
 
   /** The held file the model can try next: routable, small enough, with tries left. */
@@ -839,58 +965,15 @@ export class Vault extends DurableObject<VaultEnv> {
    * answers an empty block, so a turn goes on without memory.
    */
   async recall(agentId: string, question: string, options: RecallOptions): Promise<RecallResult> {
-    const empty: RecallResult = { text: "", tokens: 0, paths: [] };
+    const empty: RecallResult = { text: "", tokens: 0, paths: [], notes: [] };
     const budget = Math.min(
       Math.max(Math.floor(Number(options?.budgetTokens)) || 0, 0),
       MAX_RECALL_TOKENS,
     );
-    const text = typeof question === "string" ? question.slice(0, MAX_QUESTION_CHARS).trim() : "";
-    const scopes = options?.scopes;
-    const scopesValid =
-      scopes === "all" ||
-      (Array.isArray(scopes) &&
-        scopes.length <= MAX_RECALL_SCOPES &&
-        scopes.every((scope) => isScope(scope)));
-    if (!isAgentId(agentId) || text === "" || budget === 0 || !scopesValid) return empty;
-    if (this.#backend() === null) return empty;
+    if (budget === 0) return empty;
     try {
-      await this.#ready();
-      await this.#catchUp();
-      const gateway = this.#gateway();
-      const embedded =
-        gateway === null ? null : await within(gateway.embed([text]), EMBED_QUESTION_TIMEOUT_MS);
-      const query = embedded?.ok ? embedded.vectors[0] : undefined;
-      if (embedded?.ok && embedded.model !== this.#get("embedding_model")) {
-        // A new model on llm-gateway: the notes are embedded again, and until then this stream
-        // finds what it can.
-        this.#set("embedding_model", embedded.model);
-        await this.#alarmBy(Date.now() + EMBED_AGAIN_MS);
-      }
-      const retrieveOptions: RetrieveOptions = {
-        limit: gateway === null ? RECALL_LIMIT : RERANK_CANDIDATES,
-        ...(scopes === "all" ? {} : { scopes: scopes as readonly Scope[] }),
-        ...(typeof options.asOf === "number" ? { asOf: options.asOf } : {}),
-        ...(typeof options.validAt === "number" ? { validAt: options.validAt } : {}),
-        ...(embedded?.ok && query ? { vector: { model: embedded.model, query } } : {}),
-      };
-      let hits = retrieve(this.#memory, text, retrieveOptions);
-      if (gateway !== null) {
-        const backend: QualifierBackend = options.qualifier === "jev" ? "jev" : "clef";
-        const judge = qualifierJudge({
-          async qualify(state, questions) {
-            const outcome = await gateway.qualify(state, questions, backend, {
-              timeoutMs: RERANK_TIMEOUT_MS,
-            });
-            if (!outcome.ok) throw new Error(outcome.reason);
-            return outcome.result;
-          },
-        });
-        // A little past the gateway's own limit, for the call's way back.
-        hits = await rerank(this.#memory, text, hits, judge, {
-          candidates: RERANK_CANDIDATES,
-          timeoutMs: RERANK_TIMEOUT_MS + 500,
-        });
-      }
+      const hits = await this.#hits(agentId, question, options);
+      if (hits === null) return empty;
       const packed = pack(this.#memory, hits.slice(0, RECALL_LIMIT), { budgetTokens: budget });
       if (packed.paths.length > 0) {
         const now = Date.now();
@@ -907,11 +990,390 @@ export class Vault extends DurableObject<VaultEnv> {
           }
         });
       }
-      return packed;
+      const kelpie = this.#byKelpie(packed.paths);
+      return {
+        ...packed,
+        notes: packed.paths.map((path) => ({ path, byKelpie: kelpie.has(path) })),
+      };
     } catch (error) {
       console.error("Vault: recall failed", errorName(error));
       return empty;
     }
+  }
+
+  /**
+   * The notes that answer a query, as hits, for the agent's `memory_search` (#126): recall's
+   * retrieval and rerank, without the packing or the access count.
+   */
+  async search(
+    agentId: string,
+    query: string,
+    options: MemorySearchOptions,
+  ): Promise<MemorySearchResult> {
+    const k = Math.min(
+      Math.max(Math.floor(Number(options?.k ?? SEARCH_K)) || SEARCH_K, 1),
+      MAX_SEARCH_K,
+    );
+    if (this.#backend() === null) return { ok: false, reason: "vault_off" };
+    try {
+      const hits = (await this.#hits(agentId, query, options))?.slice(0, k) ?? [];
+      const kelpie = this.#byKelpie(hits.map((hit) => hit.path));
+      const found = hits.flatMap((hit) => {
+        const version = this.#memory.versionOf(hit.path, hit.commit);
+        if (version === null) return [];
+        const note: MemoryHit = {
+          path: hit.path,
+          title: hit.title,
+          abstract: hit.abstract,
+          kind: hit.kind,
+          scope: version.scope,
+          validFrom: version.validFrom,
+          invalidAt: version.invalidAt,
+          current: hit.current,
+          byKelpie: hit.current && kelpie.has(hit.path),
+        };
+        return [{ note, start: bodyWithoutHeading(version.title, version.body).slice(0, 400) }];
+      });
+      return {
+        ok: true,
+        text: renderHits(found.map(({ note, start }) => ({ ...note, start }))),
+        notes: found.map(({ note }) => note),
+      };
+    } catch (error) {
+      console.error("Vault: search failed", errorName(error));
+      return { ok: false, reason: "unavailable" };
+    }
+  }
+
+  /**
+   * A note of memory's index, a page at a time, for the agent's `memory_read` (#126). Only a current
+   * note within the scopes opens; anything else, persona and rules included, is "not found", the
+   * same answer whether it exists or not. The first page lists the links the scopes allow, and
+   * counts as one access.
+   */
+  async readNote(agentId: string, path: string, options: ReadNoteOptions): Promise<ReadNoteResult> {
+    const notFound: ReadNoteResult = { ok: false, reason: "not_found" };
+    const scopes = options?.scopes;
+    const scopesValid =
+      scopes === "all" ||
+      (Array.isArray(scopes) &&
+        scopes.length <= MAX_RECALL_SCOPES &&
+        scopes.every((scope) => isScope(scope)));
+    if (!isAgentId(agentId) || typeof path !== "string" || path.length > MAX_PATH_CHARS) {
+      return notFound;
+    }
+    if (!scopesValid) return notFound;
+    if (this.#backend() === null) return { ok: false, reason: "vault_off" };
+    const sees = (scope: string) =>
+      scopes === "all" || (scopes as readonly string[]).includes(scope);
+    try {
+      await this.#ready();
+      await this.#catchUp();
+      const version = this.#memory.current(path);
+      if (version === null || !sees(version.scope)) return notFound;
+      const offset = Math.max(Math.floor(Number(options.offset ?? 0)) || 0, 0);
+      const links: { title: string; path: string }[] = [];
+      if (offset === 0) {
+        const seen = new Set([path]);
+        for (const link of this.#memory.links(path)) {
+          if (link.path === null || seen.has(link.path)) continue;
+          seen.add(link.path);
+          const target = this.#memory.current(link.path);
+          if (target !== null && sees(target.scope))
+            links.push({ title: target.title, path: link.path });
+        }
+        this.#exec(
+          `INSERT INTO recall_counts (path, count, last_at) VALUES (?, 1, ?)
+           ON CONFLICT (path) DO UPDATE SET count = count + 1, last_at = excluded.last_at`,
+          path,
+          Date.now(),
+        );
+      }
+      const page = readPage(version, {
+        offset,
+        byKelpie: this.#byKelpie([path]).has(path),
+        links,
+      });
+      return { ok: true, path, text: page.text, nextOffset: page.nextOffset };
+    } catch (error) {
+      console.error("Vault: reading a note failed", errorName(error));
+      return { ok: false, reason: "unavailable" };
+    }
+  }
+
+  /**
+   * The single writer behind the agent's `memory_write` (#126).
+   * - **Where:** a found note's `path` takes the memory as its new version. What the model left
+   *   out, the note keeps: its id, the owner's keys, tier, confidence, entities, validity,
+   *   abstract, `contradicts` links, pin and evergreen flag; the turn's source joins its sources.
+   *   Otherwise the memory goes where its title, and an event's date, put it, numbered when another
+   *   note holds the path.
+   * - **Scopes:** a found note must be one the turn sees. A new memory goes to `global` or the
+   *   agent's own scope when the turn sees every scope, or to a scope the turn lists.
+   * - **No news:** the same version again, queued or committed, at its path or a numbered one, or
+   *   a twin `decideWrite` finds, is `unchanged`, so a retry writes nothing.
+   * - **Refused:** session pages, which the runtime writes, and merge conflict markers.
+   * - **The qualifier isn't asked yet:** ADR-0009 wants its answers measured first (#111), so the
+   *   rules decide alone.
+   * Titles, bodies, abstracts and entities lose their secrets first. The path is chosen and the
+   * write queued without a pause between them, so concurrent writes can't take the same path.
+   */
+  async writeNote(
+    agentId: string,
+    input: MemoryWriteInput,
+    options: WriteNoteOptions,
+  ): Promise<WriteNoteResult> {
+    const scopes = options?.scopes;
+    const scopesValid =
+      scopes === "all" ||
+      (Array.isArray(scopes) &&
+        scopes.length <= MAX_RECALL_SCOPES &&
+        scopes.every((scope) => isScope(scope)));
+    const sources = Array.isArray(options?.sources) ? options.sources : [];
+    if (!isAgentId(agentId) || !scopesValid || typeof input !== "object" || input === null) {
+      return { ok: false, reason: "invalid", problems: ["the request isn't valid"] };
+    }
+    if (this.#backend() === null) return { ok: false, reason: "vault_off" };
+    const sees = (scope: string) =>
+      scopes === "all" || (scopes as readonly string[]).includes(scope);
+    const clean = (text: unknown) => (typeof text === "string" ? sanitizeSecrets(text).text : text);
+    // A model often sends null for a field it leaves out.
+    const given = <T>(value: T | null | undefined): T | undefined =>
+      value === null ? undefined : value;
+    const path = given(input.path);
+    const entitiesGiven = given(input.entities);
+    try {
+      await this.#ready();
+      await this.#catchUp();
+      const found = typeof path === "string" ? this.#memory.current(path) : null;
+      if (path !== undefined && (found === null || !sees(found.scope))) {
+        return { ok: false, reason: "not_found" };
+      }
+      // Seen, but another agent's folder: not this agent's to write (`isWritable`).
+      if (found !== null && !isWritable(agentId, found.path)) {
+        return { ok: false, reason: "scope_not_allowed" };
+      }
+      const problems: string[] = [];
+      if (found !== null && given(input.scope) !== undefined && input.scope !== found.scope) {
+        problems.push(`\`scope\` must be the note's own, ${found.scope}`);
+      }
+      if (found !== null && input.kind !== found.kind) {
+        problems.push(`\`kind\` must be the note's own, ${found.kind}`);
+      }
+      if (input.kind === "session") {
+        problems.push("`kind` can't be session: a conversation's pages are written for it");
+      }
+      if (typeof input.body === "string" && hasConflictMarkers(input.body)) {
+        problems.push("`body` holds merge conflict markers");
+      }
+      if (entitiesGiven !== undefined && !Array.isArray(entitiesGiven)) {
+        problems.push("`entities` must be a list of names");
+      }
+      if (input.kind === "event" && given(input.validFrom) === undefined && found === null) {
+        problems.push("an event needs `validFrom`, its date");
+      }
+      if (problems.length > 0) return { ok: false, reason: "invalid", problems };
+
+      /**
+       * The memory as it will be written: what the model gave, and for a found note, what the note
+       * holds and the model left out, as far as the writer can write it back.
+       */
+      const build = (before: Note | null): MemoryInput => {
+        const contradicts =
+          (before?.frontmatter.relations as { contradicts?: unknown } | undefined)?.contradicts ??
+          [];
+        const targets = (Array.isArray(contradicts) ? contradicts : [])
+          .map((link) =>
+            typeof link === "string" ? /^\[\[([^\]|#]+)/.exec(link)?.[1]?.trim() : undefined,
+          )
+          .filter((name): name is string => !!name && writable(name, 200));
+        const allSources = [
+          ...new Set([...(before?.sources ?? []).filter((one) => writable(one, 300)), ...sources]),
+        ].slice(-MAX_SOURCES);
+        const entities =
+          entitiesGiven === undefined
+            ? before?.entities.map((entity) => entity.name)
+            : (entitiesGiven as unknown[]).map((entity) => clean(entity) as string);
+        const abstract =
+          given(input.abstract) === undefined
+            ? before?.abstract && writable(before.abstract, 300)
+              ? before.abstract
+              : undefined
+            : clean(input.abstract);
+        const validFrom = given(input.validFrom) ?? before?.validFrom ?? undefined;
+        const invalidAt = given(input.invalidAt) ?? before?.invalidAt ?? undefined;
+        return {
+          scope: found?.scope ?? given(input.scope) ?? "global",
+          kind: input.kind,
+          title: clean(input.title),
+          body: clean(input.body),
+          level: input.level,
+          confidence: given(input.confidence) ?? before?.confidence ?? DEFAULT_CONFIDENCE,
+          ...(before === null ? {} : { tier: before.tier }),
+          ...(allSources.length > 0 ? { sources: allSources } : {}),
+          ...(entities?.length ? { entities } : {}),
+          ...(validFrom === undefined ? {} : { validFrom }),
+          ...(invalidAt === undefined ? {} : { invalidAt }),
+          ...(abstract ? { abstract } : {}),
+          ...(targets.length > 0 ? { contradicts: targets } : {}),
+          ...(found?.pinned ? { pinned: true } : {}),
+          ...(found?.evergreen ? { evergreen: true } : {}),
+        } as MemoryInput;
+      };
+      // A note as the vault shows it now, queued writes included; a removal waiting in the queue
+      // means it is gone.
+      const shownAt = (target: string) => {
+        const text = this.#visible(target);
+        return { text, note: text === null ? null : parseNote(target, text) };
+      };
+      const first = found === null ? null : shownAt(found.path);
+      let memory = build(first?.note ?? null);
+      const at = new Date().toISOString();
+      try {
+        // Checks every field before anything reads them.
+        await writeMemory(memory, { at });
+      } catch (error) {
+        if (error instanceof MemoryFormatError) {
+          return { ok: false, reason: "invalid", problems: [...error.problems] };
+        }
+        throw error;
+      }
+      const scope = memory.scope;
+      if (
+        found === null &&
+        !(sees(scope) && (scope === "global" || scope === `agent/${agentId}` || scopes !== "all"))
+      ) {
+        return { ok: false, reason: "scope_not_allowed" };
+      }
+
+      let target: string | null = null;
+      let text = "";
+      if (found !== null) {
+        // The note may change while its new version is rendered: render again from what it shows.
+        for (let attempt = 0; attempt < 3 && target === null; attempt += 1) {
+          const shown = shownAt(found.path);
+          if (shown.text === null) return { ok: false, reason: "not_found" };
+          memory = build(shown.note);
+          text = (await writeMemory(memory, { at, existing: shown.text })).text;
+          if (this.#visible(found.path) !== shown.text) continue;
+          if (sameVersion(shown.text, text)) {
+            return { ok: true, action: "unchanged", path: found.path };
+          }
+          target = found.path;
+        }
+        if (target === null) return { ok: false, reason: "unavailable" };
+      } else {
+        const date = memory.kind === "event" ? memory.validFrom?.slice(0, 10) : undefined;
+        const own = memoryPath(memory.scope, memory.kind, memory.title, date);
+        text = (await writeMemory(memory, { at })).text;
+        const decision = await decideWrite(this.#memory, memory, {
+          now: Date.now(),
+          qualifier: null,
+        });
+        if (decision.action === "NOOP") {
+          return { ok: true, action: "unchanged", path: decision.path };
+        }
+        // From here to the queue, nothing pauses: no other write can take the path meanwhile.
+        for (let n = 1; n <= MAX_PATH_NUMBER && target === null; n += 1) {
+          const candidate = n === 1 ? own : own.replace(/\.md$/, `-${n}.md`);
+          const shown = shownAt(candidate);
+          if (shown.text === null) target = candidate;
+          else if (shown.note !== null && saysTheSame(shown.note, memory)) {
+            return { ok: true, action: "unchanged", path: candidate };
+          }
+        }
+        if (target === null) {
+          return {
+            ok: false,
+            reason: "invalid",
+            problems: ["too many notes share this title; choose another"],
+          };
+        }
+      }
+      // Never the title: a headline outlives a forget in git's history.
+      const written = await this.write(agentId, [{ path: target, content: text }], "Save a memory");
+      if (written.ok) return { ok: true, action: "written", path: target };
+      return { ok: false, reason: written.reason === "too_large" ? "too_large" : "unavailable" };
+    } catch (error) {
+      if (error instanceof MemoryFormatError) {
+        return { ok: false, reason: "invalid", problems: [...error.problems] };
+      }
+      console.error("Vault: writing a memory failed", errorName(error));
+      return { ok: false, reason: "unavailable" };
+    }
+  }
+
+  /**
+   * Retrieval for recall and search (#110): the question's vector if llm-gateway answers in time,
+   * the fused streams, and the agent's qualifier's rerank. Null when the input isn't valid or the
+   * vault is off.
+   */
+  async #hits(
+    agentId: string,
+    question: string,
+    options: Pick<RecallOptions, "scopes" | "asOf" | "validAt" | "qualifier">,
+  ): Promise<SearchHit[] | null> {
+    const text = typeof question === "string" ? question.slice(0, MAX_QUESTION_CHARS).trim() : "";
+    const scopes = options?.scopes;
+    const scopesValid =
+      scopes === "all" ||
+      (Array.isArray(scopes) &&
+        scopes.length <= MAX_RECALL_SCOPES &&
+        scopes.every((scope) => isScope(scope)));
+    if (!isAgentId(agentId) || text === "" || !scopesValid) return null;
+    if (this.#backend() === null) return null;
+    await this.#ready();
+    await this.#catchUp();
+    const gateway = this.#gateway();
+    const embedded =
+      gateway === null ? null : await within(gateway.embed([text]), EMBED_QUESTION_TIMEOUT_MS);
+    const query = embedded?.ok ? embedded.vectors[0] : undefined;
+    if (embedded?.ok && embedded.model !== this.#get("embedding_model")) {
+      // A new model on llm-gateway: the notes are embedded again, and until then this stream
+      // finds what it can.
+      this.#set("embedding_model", embedded.model);
+      await this.#alarmBy(Date.now() + EMBED_AGAIN_MS);
+    }
+    const retrieveOptions: RetrieveOptions = {
+      limit: gateway === null ? RECALL_LIMIT : RERANK_CANDIDATES,
+      // Expired notes stay out, unless the question asks how things were (#111).
+      notExpiredAt: Date.now(),
+      ...(scopes === "all" ? {} : { scopes: scopes as readonly Scope[] }),
+      ...(typeof options.asOf === "number" ? { asOf: options.asOf } : {}),
+      ...(typeof options.validAt === "number" ? { validAt: options.validAt } : {}),
+      ...(embedded?.ok && query ? { vector: { model: embedded.model, query } } : {}),
+    };
+    let hits = retrieve(this.#memory, text, retrieveOptions);
+    if (gateway !== null) {
+      const backend: QualifierBackend = options.qualifier === "jev" ? "jev" : "clef";
+      const judge = qualifierJudge({
+        async qualify(state, questions) {
+          const outcome = await gateway.qualify(state, questions, backend, {
+            timeoutMs: RERANK_TIMEOUT_MS,
+          });
+          if (!outcome.ok) throw new Error(outcome.reason);
+          return outcome.result;
+        },
+      });
+      // A little past the gateway's own limit, for the call's way back.
+      hits = await rerank(this.#memory, text, hits, judge, {
+        candidates: RERANK_CANDIDATES,
+        timeoutMs: RERANK_TIMEOUT_MS + 500,
+      });
+    }
+    return hits;
+  }
+
+  /** The paths whose version in the vault is one Kelpie's own commit wrote. */
+  #byKelpie(paths: readonly string[]): Set<string> {
+    if (paths.length === 0) return new Set();
+    return new Set(
+      this.#exec<{ path: string }>(
+        `SELECT f.path FROM files f JOIN authored a ON a.path = f.path AND a.blob_sha = f.blob_sha
+         WHERE f.path IN (SELECT value FROM json_each(?))`,
+        JSON.stringify(paths),
+      ).map((row) => row.path),
+    );
   }
 
   /** Sets the alarm to `at`, unless one is due sooner; never before a pending retry. */
@@ -993,6 +1455,7 @@ export class Vault extends DurableObject<VaultEnv> {
     for (const change of changes) {
       if (change.content === null) {
         this.#exec("DELETE FROM files WHERE path = ?", change.path);
+        this.#exec("DELETE FROM authored WHERE path = ?", change.path);
       } else {
         this.#exec(
           "INSERT OR REPLACE INTO files (path, content, blob_sha) VALUES (?, ?, ?)",
@@ -1024,6 +1487,8 @@ export class Vault extends DurableObject<VaultEnv> {
       if (before.get(file.path) === file.blobSha) changed.delete(file.path);
       else changed.set(file.path, file.content);
     }
+    // A file the vault no longer has leaves no provenance behind.
+    this.#exec("DELETE FROM authored WHERE path NOT IN (SELECT path FROM files)");
     return changed;
   }
 
@@ -1083,6 +1548,13 @@ export class Vault extends DurableObject<VaultEnv> {
     if (landed !== -1) {
       // Kelpie's own commit, whose answer was lost: those writes are done, later ones still wait.
       this.#exec("DELETE FROM queue WHERE path = ? AND id <= ?", path, queued[landed]?.id ?? 0);
+      // And the version is Kelpie's (#126), unless it only settled the owner's conflict.
+      if (incoming !== null && queued[landed]?.summary !== RESOLVE_SUMMARY) {
+        this.#exec(
+          "INSERT OR REPLACE INTO authored (path, blob_sha) SELECT path, blob_sha FROM files WHERE path = ?",
+          path,
+        );
+      }
       return;
     }
     const result =
@@ -1166,6 +1638,7 @@ export class Vault extends DurableObject<VaultEnv> {
         return;
       }
       const latest = new Map(rows.map((row) => [row.path, row.content]));
+      const lastRows = new Map(rows.map((row) => [row.path, row]));
       // A write equal to the vault's file, or the removal of a file it doesn't have, is nothing to
       // commit; GitHub would refuse such a removal.
       const writes = [...latest]
@@ -1234,8 +1707,21 @@ export class Vault extends DurableObject<VaultEnv> {
             content,
             shas[i] ?? "",
           );
+          // Provenance (#126): this version is Kelpie's, unless it only settled the owner's conflict.
+          if (lastRows.get(path)?.summary === RESOLVE_SUMMARY) {
+            this.#exec("DELETE FROM authored WHERE path = ?", path);
+          } else {
+            this.#exec(
+              "INSERT OR REPLACE INTO authored (path, blob_sha) VALUES (?, ?)",
+              path,
+              shas[i] ?? "",
+            );
+          }
         });
-        for (const path of deletions) this.#exec("DELETE FROM files WHERE path = ?", path);
+        for (const path of deletions) {
+          this.#exec("DELETE FROM files WHERE path = ?", path);
+          this.#exec("DELETE FROM authored WHERE path = ?", path);
+        }
         // Writes queued while the commit was in flight have larger ids, and stay.
         done();
         this.#set("head", commit);

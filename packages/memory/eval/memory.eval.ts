@@ -25,6 +25,12 @@ const AS_OF_TIME = "T23:59:59Z";
 const VALID_AT_TIME = "T12:00:00Z";
 
 /**
+ * Retrieval again with #111's expiry filter, as a turn on this day would run it: inside the vault's
+ * year, after some deadlines (the tax return's) and before others (the dentist's).
+ */
+const EXPIRY_NOW = "2026-10-06T12:00:00Z";
+
+/**
  * Questions that name someone by a first name only. Distractors reuse those first names, so these
  * questions get harder as the vault grows, and the rest don't; they are reported apart.
  */
@@ -76,6 +82,7 @@ describe("memory evaluation", () => {
 
           const results: QuestionResult[] = [];
           const retrieved: QuestionResult[] = [];
+          const expiring: QuestionResult[] = [];
           for (const question of QUESTIONS) {
             const options = {
               limit: LIMIT,
@@ -107,6 +114,20 @@ describe("memory evaluation", () => {
               tokens: packed.tokens,
               latencyMs: performance.now() - started,
             });
+
+            const startedExpiring = performance.now();
+            const current = retrieve(index, question.text, {
+              ...options,
+              notExpiredAt: Date.parse(EXPIRY_NOW),
+            });
+            expiring.push({
+              id: question.id,
+              category: question.category,
+              answerRank: answerRank(question, current, vault.labels),
+              staleFirst: staleFirst(question, current, vault.labels),
+              tokens: packRetrieved(index, current, { budgetTokens: BUDGET_TOKENS }).tokens,
+              latencyMs: performance.now() - startedExpiring,
+            });
           }
           // The budget holds at every size, for every question.
           expect(Math.max(...retrieved.map((result) => result.tokens))).toBeLessThanOrEqual(
@@ -134,6 +155,11 @@ describe("memory evaluation", () => {
               budgetTokens: BUDGET_TOKENS,
               slices: bySlice(retrieved, SLICES),
               questions: retrieved,
+              expiry: {
+                now: EXPIRY_NOW,
+                slices: bySlice(expiring, SLICES),
+                questions: expiring,
+              },
             },
           };
         },

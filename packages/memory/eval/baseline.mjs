@@ -53,6 +53,14 @@ const retrieval = {
     size: run.size,
     slices: withoutLatency(run.retrieval.slices),
     questions: run.retrieval.questions.map(({ latencyMs: _latency, ...question }) => question),
+    // The same retrieval with #111's expiry filter, at a fixed now.
+    expiry: {
+      now: run.retrieval.expiry.now,
+      slices: withoutLatency(run.retrieval.expiry.slices),
+      questions: run.retrieval.expiry.questions.map(
+        ({ latencyMs: _latency, ...question }) => question,
+      ),
+    },
   })),
 };
 writeFileSync(

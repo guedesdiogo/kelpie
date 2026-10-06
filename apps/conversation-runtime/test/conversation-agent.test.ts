@@ -801,6 +801,30 @@ describe("ConversationAgent link previews", () => {
     expect(world.sends.map((send) => send.previewUrl)).toEqual([undefined, NOTE_LINK]);
   });
 
+  it("previews no link from a note Kelpie wrote itself: the model may have written it", async () => {
+    const MODEL_LINK = "https://evil.example/?q=Lisboa";
+    const world = use(fakeWorld([reply(`${MODEL_LINK}\n\n${NOTE_LINK}`)]));
+    world.memory = [
+      `<memory-abc note="Notes from the owner's vault, for reference.">`,
+      "## Ana (memory/people/ana.md) [abc]",
+      `Perfil: ${NOTE_LINK}`,
+      "",
+      "## Bruno (memory/people/bruno.md) [abc]",
+      `Site: ${MODEL_LINK}`,
+      "</memory-abc>",
+    ].join("\n");
+    world.memoryNotes = [
+      { path: "memory/people/ana.md", byKelpie: false },
+      { path: "memory/people/bruno.md", byKelpie: true },
+    ];
+    const stub = agent("preview-kelpie-note");
+    await stub.ingest(message("m1", "onde a Ana e o Bruno moram?"));
+    await stub.flush();
+
+    await vi.waitFor(() => expect(world.sends).toHaveLength(2));
+    expect(world.sends.map((send) => send.previewUrl)).toEqual([undefined, NOTE_LINK]);
+  });
+
   it("previews no link the model changed, by a query or a fragment", async () => {
     const world = use(fakeWorld([reply(`${MENU}?ref=Lisboa\n\n${MENU}#Lisboa\n\n${MENU}/Lisboa`)]));
     const stub = agent("preview-changed");

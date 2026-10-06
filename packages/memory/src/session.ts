@@ -97,6 +97,14 @@ function clock(at: number, timeZone: string): { date: string; time: string } {
 }
 
 /**
+ * A conversation as its session pages name it in their sources: its channel and thread, as visible
+ * text on one line, at most `max` characters. The memory tools (#126) name it the same way.
+ */
+export function conversationSource(channel: string, threadId: string, max = 300): string {
+  return excerpt(visibleText(`${channel}:${threadId}`), max);
+}
+
+/**
  * One line of text, at most `max` characters. `[[` is broken, so a message doesn't add links to
  * the vault's graph.
  */
@@ -200,7 +208,7 @@ export async function sessionPage(input: SessionInput): Promise<SessionPage | nu
   const end = clock(last.at, timeZone);
   const opening = excerpt(cleanText(firstUser), 200);
   const title = inert(excerpt(`${clock(firstUser.at, timeZone).time} ${opening}`, 120));
-  const source = excerpt(visibleText(`${input.channel}:${input.threadId}`), 300);
+  const source = conversationSource(input.channel, input.threadId);
   const thread = input.threadId.replace(/^-/, "g");
   const scope = `conversation/${slugify(`${input.channel}-${thread}`)}` as Scope;
   const speakers = new Set(

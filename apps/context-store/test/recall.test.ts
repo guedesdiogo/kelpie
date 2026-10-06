@@ -8,6 +8,7 @@ import { env } from "cloudflare:workers";
 import { type MemoryInput, memoryPath, writeMemory } from "@kelpie/memory";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
 import { afterEach, describe, expect, it } from "vitest";
+import type { MemorySearchResult } from "../src/contract.ts";
 import {
   GitHubWebhooks,
   type MemoryGateway,
@@ -134,6 +135,7 @@ describe("recall", () => {
       text: "",
       tokens: 0,
       paths: [],
+      notes: [],
     });
   });
 
@@ -167,6 +169,20 @@ describe("recall", () => {
     expect(next.paths).toEqual([path]);
     expect(next.text).toContain("Mudou para o Porto.");
     expect(next.text).not.toContain("Lisboa");
+  });
+
+  it("leaves out a note that has expired, unless the question asks how things were", async () => {
+    const expired = {
+      ...person("Ana Souza", "Irmã do Rafael. Mora em Lisboa."),
+      invalidAt: "2020-01-01",
+    } satisfies MemoryInput;
+    await vaultOf([expired, person("Bruno Lima", "Sócio do Rafael. Mora no Porto.")]);
+    fakeGateway();
+    const stub = vault("recall-expired");
+    const now = await stub.recall("kelpie", "Onde a Ana Souza mora?", ALL);
+    expect(now.text).not.toContain("Lisboa");
+    const before = await stub.recall("kelpie", "Onde a Ana Souza morava antes?", ALL);
+    expect(before.text).toContain("Lisboa");
   });
 
   it("finds synced notes and Kelpie's own writes, and forgets removed ones", async () => {
@@ -425,7 +441,7 @@ describe("recall", () => {
     expect(calls.texts.every((text) => text.length <= 2_000)).toBe(true);
     expect(
       await stub.recall("kelpie", "Rafael", { scopes: ["not a scope"], budgetTokens: 1_000 }),
-    ).toEqual({ text: "", tokens: 0, paths: [] });
+    ).toEqual({ text: "", tokens: 0, paths: [], notes: [] });
   });
 
   it("refuses an unknown agent, and bounds the question and the budget", async () => {
@@ -436,10 +452,151 @@ describe("recall", () => {
       text: "",
       tokens: 0,
       paths: [],
+      notes: [],
     });
     const huge = await stub.recall("kelpie", "Ana Souza", { scopes: "all", budgetTokens: 1e9 });
     expect(huge.tokens).toBeLessThanOrEqual(8_000);
     const long = await stub.recall("kelpie", `Ana Souza ${"x".repeat(100_000)}`, ALL);
     expect(long.paths).toHaveLength(1);
+  });
+});
+
+/** Search's hits, or a failure. */
+async function hitsOf(search: PromiseLike<MemorySearchResult>) {
+  const result = await search;
+  if (!result.ok) throw new Error(`search failed: ${result.reason}`);
+  return result;
+}
+
+describe("search", () => {
+  const family = [
+    person("Ana Souza", "Irmã do Rafael. Mudou para o Porto."),
+    person("Bia Souza", "Prima da Ana."),
+    person("Dani Souza", "Tia da Ana."),
+    person("Edu Souza", "Tio da Ana."),
+    person("Caio Souza", "Primo da Ana.", "conversation/familia"),
+  ];
+
+  it("finds notes as hits, k of them, within the scopes, and counts nothing", async () => {
+    await vaultOf(family);
+    fakeGateway();
+    const stub = vault("search-hits");
+    const found = await hitsOf(stub.search("kelpie", "Ana Souza", { scopes: "all" }));
+    expect(found.notes).toHaveLength(3);
+    expect(found.notes[0]).toEqual({
+      path: memoryPath("global", "person", "Ana Souza"),
+      title: "Ana Souza",
+      abstract: null,
+      kind: "person",
+      scope: "global",
+      validFrom: null,
+      invalidAt: null,
+      current: true,
+      byKelpie: false,
+    });
+    expect(found.text).toContain("## Ana Souza (memory/people/ana-souza.md) [");
+    expect(found.text).toContain("Irmã do Rafael.");
+    expect(
+      (await hitsOf(stub.search("kelpie", "Souza", { scopes: "all", k: 50 }))).notes,
+    ).toHaveLength(5);
+    expect(
+      (await hitsOf(stub.search("kelpie", "Souza", { scopes: "all", k: 4 }))).notes,
+    ).toHaveLength(4);
+    const global = await hitsOf(stub.search("kelpie", "Caio Souza", { scopes: ["global"], k: 10 }));
+    expect(global.notes.map((note) => note.scope)).not.toContain("conversation/familia");
+    expect(global.notes.length).toBeGreaterThan(0);
+    expect(
+      await runInDurableObject(
+        stub,
+        (_instance, state) =>
+          state.storage.sql.exec("SELECT count(*) AS n FROM recall_counts").one().n,
+      ),
+    ).toBe(0);
+  });
+
+  it("finds 10 notes at most, whatever k asks", async () => {
+    await vaultOf(
+      Array.from({ length: 12 }, (_, i) => person(`Pessoa ${i} Souza`, `Parente ${i} da Ana.`)),
+    );
+    fakeGateway();
+    const found = await hitsOf(
+      vault("search-cap").search("kelpie", "Souza", { scopes: "all", k: 50 }),
+    );
+    expect(found.notes).toHaveLength(10);
+  });
+
+  it("refuses what recall refuses", async () => {
+    await vaultOf(family);
+    fakeGateway();
+    const stub = vault("search-refusals");
+    for (const [agent, query, options] of [
+      ["Not An Agent", "Ana", { scopes: "all" }],
+      ["kelpie", "   ", { scopes: "all" }],
+      ["kelpie", "Ana", { scopes: ["not a scope"] }],
+      ["kelpie", "Ana", { scopes: undefined }],
+    ] as const) {
+      expect(await stub.search(agent, query, options as unknown as { scopes: "all" })).toEqual({
+        ok: true,
+        text: "",
+        notes: [],
+      });
+    }
+    replaceBackendForTesting(null);
+    expect(await vault("search-off").search("kelpie", "Ana", { scopes: "all" })).toEqual({
+      ok: false,
+      reason: "vault_off",
+    });
+  });
+});
+
+describe("readNote", () => {
+  it("reads a note within the scopes, with the links the scopes allow", async () => {
+    const ana = memoryPath("global", "person", "Ana Souza");
+    const caio = memoryPath("conversation/familia", "person", "Caio Souza");
+    const backend = await vaultOf([
+      person("Ana Souza", "Irmã do Rafael. Ver [[bia-souza]] e [[caio-souza]]."),
+      person("Bia Souza", "Prima da Ana."),
+      person("Caio Souza", "Primo da Ana.", "conversation/familia"),
+    ]);
+    backend.push({ "agents/kelpie/SOUL.md": "# Kelpie\n\nSecreto." });
+    fakeGateway();
+    const stub = vault("read-note");
+    const page = await stub.readNote("kelpie", ana, { scopes: ["global"] });
+    if (!page.ok) throw new Error(page.reason);
+    expect(page.path).toBe(ana);
+    expect(page.nextOffset).toBeNull();
+    expect(page.text).toContain("Irmã do Rafael.");
+    expect(page.text).toContain("- Bia Souza (memory/people/bia-souza.md)");
+    expect(page.text).not.toContain(caio);
+    expect((await stub.readNote("kelpie", ana, { scopes: "all" })).ok).toBe(true);
+
+    // Out of scope, outside memory, or missing: the same answer.
+    for (const path of [caio, "agents/kelpie/SOUL.md", "README.md", "memory/people/zeca.md"]) {
+      expect(await stub.readNote("kelpie", path, { scopes: ["global"] }), path).toEqual({
+        ok: false,
+        reason: "not_found",
+      });
+    }
+    expect(await stub.readNote("Not An Agent", ana, { scopes: "all" })).toEqual({
+      ok: false,
+      reason: "not_found",
+    });
+  });
+
+  it("counts a read once, on its first page", async () => {
+    const long = `Começo. ${"Uma linha longa sobre a família. ".repeat(600)}`;
+    await vaultOf([person("Ana Souza", long)]);
+    fakeGateway();
+    const stub = vault("read-note-pages");
+    const ana = memoryPath("global", "person", "Ana Souza");
+    const first = await stub.readNote("kelpie", ana, { scopes: "all" });
+    if (!first.ok || first.nextOffset === null) throw new Error("expected more pages");
+    const second = await stub.readNote("kelpie", ana, { scopes: "all", offset: first.nextOffset });
+    expect(second.ok && second.text).toContain("Uma linha longa");
+    expect(
+      await runInDurableObject(stub, (_instance, state) =>
+        state.storage.sql.exec("SELECT path, count FROM recall_counts").toArray(),
+      ),
+    ).toEqual([{ path: ana, count: 1 }]);
   });
 });

@@ -92,6 +92,11 @@ export interface SearchOptions {
   asOf?: number;
   /** World time: keep only memories valid at this instant. */
   validAt?: number;
+  /**
+   * World time now: leave out memories whose `invalid_at` has passed (#111). A memory without one
+   * never expires, and one that becomes valid later stays.
+   */
+  notExpiredAt?: number;
 }
 
 export interface SearchHit {
@@ -246,8 +251,9 @@ function titleKey(title: string): string {
 /** At most this many entity keys are looked up at once. */
 const MAX_KEYS = 64;
 /**
- * A name on more versions than this singles nothing out: its notes would all weigh the same and come
- * in path order. It is left out of entity lookups, as a function word is left out of names.
+ * A name on more of the versions a lookup sees than this singles nothing out: its notes would all
+ * weigh the same and come in path order. It is left out of that lookup, as a function word is left
+ * out of names.
  */
 const MAX_ENTITY_VERSIONS = 50;
 
@@ -279,6 +285,10 @@ function versionFilter(options: SearchOptions): [string, SqlValue[]] {
     filters.push("(v.valid_from IS NULL OR v.valid_from <= ?)");
     filters.push("(v.invalid_at IS NULL OR v.invalid_at > ?)");
     bindings.push(options.validAt, options.validAt);
+  }
+  if (options.notExpiredAt !== undefined) {
+    filters.push("(v.invalid_at IS NULL OR v.invalid_at > ?)");
+    bindings.push(options.notExpiredAt);
   }
   return [filters.join(" AND "), bindings];
 }
@@ -635,7 +645,10 @@ export class MemoryIndex {
    * selects. The vectors are read row by row, so memory stays flat as the vault grows.
    */
   vectorHits(model: string, query: readonly number[], options: SearchOptions = {}): SearchHit[] {
-    const norm = Math.hypot(...query);
+    // A loop, not Math.hypot(...query): a long vector spread into arguments overflows the stack.
+    let squaredNorm = 0;
+    for (const value of query) squaredNorm += value * value;
+    const norm = Math.sqrt(squaredNorm);
     if (query.length === 0 || !(norm > 0)) return [];
     const limit = limitOf(options);
     const [filter, bindings] = versionFilter(options);
@@ -666,6 +679,93 @@ export class MemoryIndex {
       if (best.length > limit) best.pop();
     }
     return best.map(({ row }) => toHit(row));
+  }
+
+  /** Every current note, with what the lifecycle jobs (#111) score and group them by. */
+  lifecycleNotes(): {
+    path: string;
+    scope: string;
+    title: string;
+    titleKey: string;
+    kind: string;
+    tier: string;
+    pinned: boolean;
+    evergreen: boolean;
+    recordedAt: number;
+    validFrom: number | null;
+    invalidAt: number | null;
+    /** The frontmatter's `updated`, as written: Kelpie's last write, when it wrote the note. */
+    updated: unknown;
+    blobSha: string;
+  }[] {
+    return this.#exec<{
+      path: string;
+      scope: string;
+      title: string;
+      title_key: string;
+      kind: string;
+      tier: string;
+      pinned: number;
+      evergreen: number;
+      recorded_at: number;
+      valid_from: number | null;
+      invalid_at: number | null;
+      updated: SqlValue;
+      blob_sha: string;
+    }>(
+      `SELECT path, scope, title, title_key, kind, tier, pinned, evergreen, recorded_at, valid_from,
+              invalid_at,
+              -- Too deep for SQLite's JSON functions: no 'updated', rather than no report.
+              CASE WHEN json_valid(frontmatter) THEN json_extract(frontmatter, '$.updated') END AS updated,
+              blob_sha
+       FROM versions WHERE is_current = 1 ORDER BY path`,
+    ).map((row) => ({
+      path: row.path,
+      scope: row.scope,
+      title: row.title,
+      titleKey: row.title_key,
+      kind: row.kind,
+      tier: row.tier,
+      pinned: row.pinned === 1,
+      evergreen: row.evergreen === 1,
+      recordedAt: row.recorded_at,
+      validFrom: row.valid_from,
+      invalidAt: row.invalid_at,
+      updated: row.updated,
+      blobSha: row.blob_sha,
+    }));
+  }
+
+  /** The vectors `model` gave these contents, those that are whole floats. */
+  vectorsOf(model: string, blobShas: readonly string[]): Map<string, Float32Array> {
+    const found = new Map<string, Float32Array>();
+    for (const blobSha of new Set(blobShas)) {
+      const row = this.#storage.sql
+        .exec<{ vector: ArrayBuffer; dims: number }>(
+          "SELECT vector, dims FROM embeddings WHERE blob_sha = ? AND model = ?",
+          blobSha,
+          model,
+        )
+        .toArray()[0];
+      if (row !== undefined && row.vector.byteLength === row.dims * 4) {
+        found.set(blobSha, new Float32Array(row.vector));
+      }
+    }
+    return found;
+  }
+
+  /** Each current note's entities, by key with their names, for these paths. */
+  entitiesOf(paths: readonly string[]): Map<string, Map<string, string>> {
+    const found = new Map<string, Map<string, string>>();
+    for (const path of new Set(paths)) {
+      const rows = this.#exec<{ key: string; name: string }>(
+        `SELECT e.key, e.name FROM entities e JOIN versions v ON v.rowid = e.version
+         WHERE v.path = ? AND v.is_current = 1 ORDER BY e.key`,
+        path,
+      );
+      if (rows.length > 0) found.set(path, new Map(rows.map((row) => [row.key, row.name])));
+    }
+    return found;
   }
 
   /** The paths of every current note, in order. */
@@ -702,39 +802,46 @@ export class MemoryIndex {
     ).map(toHit);
   }
 
+  /** The notes with this title, in path order: titles compare without case, diacritics or extra spaces. */
+  titled(title: string, options: SearchOptions = {}): SearchHit[] {
+    const [filter, bindings] = versionFilter(options);
+    return this.#exec<HitRow>(
+      `SELECT ${HIT_COLUMNS} FROM versions v WHERE v.title_key = ? AND ${filter} ORDER BY v.path LIMIT ?`,
+      titleKey(title),
+      ...bindings,
+      limitOf(options),
+    ).map(toHit);
+  }
+
   /**
    * The notes that name any of these entity keys, best first. An entity's own page, the note titled
    * with its name, comes before the notes that mention it, and a global page before a scoped one.
    * A name on fewer notes says more, so each key weighs one over the number of notes that name it,
-   * as ai-memory weighs its entity stream. Current versions only, unless `asOf` asks for the past.
+   * as ai-memory weighs its entity stream, and a key on more than `MAX_ENTITY_VERSIONS` is left out.
+   * Both count only the versions this lookup sees, so notes in other scopes, and a note's past
+   * versions, don't switch a name off. Current versions only, unless `asOf` asks for the past.
    */
   entityHits(keys: readonly string[], options: SearchOptions = {}): SearchHit[] {
     const asked = [...new Set(keys)].slice(0, MAX_KEYS);
     if (asked.length === 0) return [];
-    const wanted = this.#exec<{ key: string; n: number }>(
-      `SELECT key, count(*) AS n FROM entities WHERE key IN (${asked.map(() => "?").join(", ")})
-       GROUP BY key`,
-      ...asked,
-    )
-      .filter((row) => row.n <= MAX_ENTITY_VERSIONS)
-      .map((row) => row.key);
-    if (wanted.length === 0) return [];
     const [filter, bindings] = versionFilter(options);
-    const marks = wanted.map(() => "?").join(", ");
+    // The keys go as one JSON array: 64 keys and 64 scopes as placeholders would pass the 100
+    // parameters a Durable Object's SQL statement may bind.
     return this.#exec<HitRow>(
       `WITH named AS (
          SELECT e.version, e.key FROM entities e JOIN versions v ON v.rowid = e.version
-         WHERE e.key IN (${marks}) AND ${filter}
+         WHERE e.key IN (SELECT value FROM json_each(?)) AND ${filter}
        ),
-       pages AS (SELECT key, count(*) AS n FROM named GROUP BY key)
+       pages AS (SELECT key, count(*) AS n FROM named GROUP BY key HAVING count(*) <= ?)
        SELECT ${HIT_COLUMNS}
        FROM named JOIN pages ON pages.key = named.key JOIN versions v ON v.rowid = named.version
        GROUP BY v.rowid
        ORDER BY max(CASE WHEN v.title_key <> named.key THEN 0 WHEN v.scope = 'global' THEN 2 ELSE 1 END) DESC,
          sum(1.0 / pages.n) DESC, v.path
        LIMIT ?`,
-      ...wanted,
+      JSON.stringify(asked),
       ...bindings,
+      MAX_ENTITY_VERSIONS,
       limitOf(options),
     ).map(toHit);
   }
@@ -746,7 +853,12 @@ export class MemoryIndex {
    */
   neighbours(
     path: string,
-    options: { limit?: number; validAt?: number; scopes?: readonly Scope[] } = {},
+    options: {
+      limit?: number;
+      validAt?: number;
+      notExpiredAt?: number;
+      scopes?: readonly Scope[];
+    } = {},
   ): SearchHit[] {
     const exists = this.#exec(
       "SELECT 1 AS one FROM versions WHERE path = ? AND is_current = 1",
@@ -756,6 +868,7 @@ export class MemoryIndex {
     const limit = limitOf(options);
     const [filter, bindings] = versionFilter({
       ...(options.validAt === undefined ? {} : { validAt: options.validAt }),
+      ...(options.notExpiredAt === undefined ? {} : { notExpiredAt: options.notExpiredAt }),
       ...(options.scopes === undefined ? {} : { scopes: options.scopes }),
     });
     const hits: SearchHit[] = [];

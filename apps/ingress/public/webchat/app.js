@@ -30,6 +30,10 @@ function setPaused(value) {
 
 /** The agent's "typing" lasts until its next bubble, or this long. */
 const TYPING_SHOWN_MS = 20_000;
+/** A turn's step lasts until the next frame, or this long: the most a turn's tools may take. */
+const STEP_SHOWN_MS = 600_000;
+/** What the page says for each step of a turn (#141); a tool's step shows the tool's label. */
+const STEP_TEXT = { memory: "Reading memory…", thinking: "Thinking…", tool: "Using a tool…" };
 /** While the owner types, the page says so at most this often. */
 const TYPING_SENT_EVERY_MS = 3_000;
 
@@ -46,10 +50,23 @@ function show(role, text, id) {
   return item;
 }
 
-function setTyping(active) {
+/** Shows what the agent is doing, or nothing for null. */
+function setActivity(text, shownMs = TYPING_SHOWN_MS) {
   clearTimeout(typingTimer);
-  typing.hidden = !active;
-  if (active) typingTimer = setTimeout(() => setTyping(false), TYPING_SHOWN_MS);
+  typing.hidden = text === null;
+  if (text !== null) {
+    typing.textContent = text;
+    typingTimer = setTimeout(() => setActivity(null), shownMs);
+  }
+}
+
+function setTyping(active) {
+  setActivity(active ? "Typing…" : null);
+}
+
+function setStep(step, label) {
+  if (!Object.hasOwn(STEP_TEXT, step)) return setActivity(null);
+  setActivity(step === "tool" && label ? `${label}…` : STEP_TEXT[step], STEP_SHOWN_MS);
 }
 
 function send(frame) {
@@ -76,6 +93,9 @@ function receive(frame) {
       break;
     case "typing":
       setTyping(frame.active);
+      break;
+    case "status":
+      setStep(frame.status, typeof frame.label === "string" ? frame.label : undefined);
       break;
     case "paused":
       setTyping(false);

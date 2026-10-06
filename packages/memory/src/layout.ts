@@ -98,6 +98,7 @@ export function placeOf(path: string): PathPlace | null {
   if (!path.endsWith(".md")) return null;
   const segments = path.split("/");
   if (segments.some((segment) => segment === "" || segment.startsWith("."))) return null;
+  if (isReservedPath(path)) return null;
   const [top, second, third] = segments;
   let scope: Scope;
   let rest: string[];
@@ -119,6 +120,15 @@ export function placeOf(path: string): PathPlace | null {
   const kind =
     top !== "knowledge" && rest.length > 1 ? (KIND_BY_FOLDER.get(rest[0] ?? "") ?? null) : null;
   return { scope, kind };
+}
+
+/**
+ * Whether a path is in a `memory/_…/` folder, which holds Kelpie's own files, such as the lifecycle
+ * report: never notes, and never an agent's to write. A file directly under `memory/` is a note.
+ */
+export function isReservedPath(path: string): boolean {
+  const segments = path.split("/");
+  return segments.length > 2 && segments[0] === "memory" && (segments[1] ?? "").startsWith("_");
 }
 
 /** A readable file name: lowercase ASCII, diacritics folded, words joined by hyphens. */

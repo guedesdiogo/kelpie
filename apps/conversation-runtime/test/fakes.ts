@@ -3,6 +3,7 @@ import type { RecallOptions } from "@kelpie/context-store/contract";
 import type { Destination } from "@kelpie/conversation/contract";
 import type { AssistantMessage, LlmEvent, RoutedRequest, Usage } from "@kelpie/llm";
 import type { ConversationPorts, ModelCall } from "../src/ports.ts";
+import type { ToolProvider } from "../src/tools.ts";
 
 // The Worker runs in the test's isolate, so these fakes replace the ConversationAgent's ports.
 
@@ -22,7 +23,9 @@ type ModelScript =
   /** The stream fails mid-way. */
   | { kind: "fail" }
   /** The stream ends without a finish event. */
-  | { kind: "truncate" };
+  | { kind: "truncate" }
+  /** Asks for these tool calls, after `text` if any; ids are `call-0`, `call-1`… across the world. */
+  | { kind: "tools"; calls: { name: string; input: unknown }[]; text?: string };
 
 export const reply = (text: string, usage?: Usage[]): ModelScript =>
   usage ? { kind: "reply", text, usage } : { kind: "reply", text };
@@ -31,6 +34,15 @@ export const refuse = (): ModelScript => ({ kind: "refuse" });
 export const hang = (): ModelScript => ({ kind: "hang" });
 export const fail = (): ModelScript => ({ kind: "fail" });
 export const truncate = (): ModelScript => ({ kind: "truncate" });
+export const toolCalls = (...calls: { name: string; input?: unknown }[]): ModelScript => ({
+  kind: "tools",
+  calls: calls.map(({ name, input }) => ({ name, input: input ?? {} })),
+});
+/** Says something, then asks for the tool calls in the same reply. */
+export const sayThenCall = (text: string, ...calls: { name: string; input?: unknown }[]) => ({
+  ...(toolCalls(...calls) as Extract<ModelScript, { kind: "tools" }>),
+  text,
+});
 
 /** What the fake model reports for every answer: one attempt, part of the prompt from cache. */
 export const FAKE_USAGE: Usage[] = [
@@ -56,8 +68,31 @@ function assistant(text: string): AssistantMessage {
   };
 }
 
+/** A reply asking for tools, with its native output as Anthropic would return it. */
+export function toolUse(
+  calls: { id: string; name: string; input: unknown }[],
+  text?: string,
+): AssistantMessage {
+  const said = text === undefined ? [] : [{ type: "text" as const, text }];
+  return {
+    role: "assistant",
+    parts: [...said, ...calls.map((call) => ({ type: "tool_call" as const, ...call }))],
+    native: {
+      provider: "anthropic",
+      model: "claude-haiku-4-5",
+      content: [...said, ...calls.map((call) => ({ type: "tool_use", ...call }))],
+    },
+  };
+}
+
 export interface FakeWorld {
   ports: ConversationPorts;
+  /** The providers the ports offer; none by default. */
+  tools: ToolProvider[];
+  /** Every step shown, as `step` or `step:label`. */
+  steps: string[];
+  /** While set, a tool started meanwhile has its deadline pass at once; otherwise it never does. */
+  expireDeadlines: boolean;
   /** The time `now()` returns; tests move it. Starts a minute ahead so no schedule comes due. */
   clock: number;
   requests: RoutedRequest[];
@@ -98,6 +133,8 @@ export interface FakeWorld {
   recalls: { agentId: string; question: string; options: RecallOptions }[];
   /** The block recall answers with; empty, as when nothing matches, by default. */
   memory: string;
+  /** The notes recall says the block holds, with their provenance; one owner's note by default. */
+  memoryNotes: { path: string; byKelpie: boolean }[] | null;
   /** While set, recall throws, as an unreachable Context Store would. */
   failRecall: boolean;
   /** While set, recall waits before it answers. */
@@ -107,7 +144,11 @@ export interface FakeWorld {
 export function fakeWorld(scripts: ModelScript[]): FakeWorld {
   let sleeps = 0;
   let sends = 0;
+  let calls = 0;
   const world: FakeWorld = {
+    tools: [],
+    steps: [],
+    expireDeadlines: false,
     clock: Date.now() + 60_000,
     requests: [],
     tiers: [],
@@ -119,6 +160,7 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
     failRemember: false,
     recalls: [],
     memory: "",
+    memoryNotes: null,
     failRecall: false,
     recallHeld: false,
     typing: 0,
@@ -134,6 +176,9 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
     sendAttempts: 0,
     failTyping: false,
     ports: {
+      get tools() {
+        return world.tools;
+      },
       async generate(tier, request): Promise<ModelCall> {
         world.requests.push(structuredClone(request));
         world.tiers.push(tier);
@@ -168,6 +213,17 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
                 type: "finish",
                 reason: "stop",
                 message: assistant(script.text),
+                usage: FAKE_USAGE,
+              };
+              return;
+            case "tools":
+              yield {
+                type: "finish",
+                reason: "tool_calls",
+                message: toolUse(
+                  script.calls.map((call) => ({ id: `call-${calls++}`, ...call })),
+                  script.text,
+                ),
                 usage: FAKE_USAGE,
               };
               return;
@@ -222,6 +278,9 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
           else signal.addEventListener("abort", stop, { once: true });
         });
       },
+      async status(_agentId, _destination, step, label) {
+        world.steps.push(label === undefined ? step : `${step}:${label}`);
+      },
       async remember(agentId, changes) {
         if (world.failRemember) throw new Error(INJECTED_FAILURE);
         world.remembered.push({ agentId, changes });
@@ -235,10 +294,17 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
         return {
           text: world.memory,
           tokens: Math.ceil(world.memory.length / 4),
-          paths: world.memory === "" ? [] : ["people/ana.md"],
+          paths:
+            world.memoryNotes?.map((note) => note.path) ??
+            (world.memory === "" ? [] : ["people/ana.md"]),
+          notes:
+            world.memoryNotes ??
+            (world.memory === "" ? [] : [{ path: "people/ana.md", byKelpie: false }]),
         };
       },
       now: () => world.clock,
+      // No timer: a pending one would hold off an eviction.
+      deadline: () => (world.expireDeadlines ? Promise.resolve() : new Promise<void>(() => {})),
       sleep(ms, signal) {
         const call = sleeps++;
         world.sleeps.push(ms);
