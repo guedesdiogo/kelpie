@@ -1,0 +1,243 @@
+import { parseDocument } from "yaml";
+import { type Entity, normalizeEntities } from "./entities.ts";
+import {
+  defaultTier,
+  isScope,
+  KINDS,
+  type Kind,
+  placeOf,
+  type Scope,
+  TIERS,
+  type Tier,
+} from "./layout.ts";
+import {
+  deriveTitle,
+  extractLinks,
+  type NoteLink,
+  splitFrontmatter,
+  valueLinks,
+} from "./markdown.ts";
+
+/** How a memory was reached: said by the owner, deduced from what was said, or guessed. */
+export const LEVELS = ["explicit", "deduced", "inferred"] as const;
+export type Level = (typeof LEVELS)[number];
+
+/** Larger frontmatter is ignored: it is a note's metadata, not its content. */
+export const MAX_FRONTMATTER_LENGTH = 16_384;
+export const MAX_SOURCES = 20;
+const MAX_SOURCE_LENGTH = 300;
+const MAX_ABSTRACT_LENGTH = 300;
+
+const MEMORY_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+
+export function isMemoryId(value: unknown): value is string {
+  return typeof value === "string" && MEMORY_ID.test(value);
+}
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * The instant a date names, in epoch milliseconds: `YYYY-MM-DD` is the start of that day in UTC,
+ * and a date-time needs its offset. Null for anything else.
+ */
+export function instantOf(value: string): number | null {
+  if (!DATE.test(value) && !DATE_TIME.test(value)) return null;
+  const ms = Date.parse(DATE.test(value) ? `${value}T00:00:00Z` : value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** A vault Markdown file as the memory index reads it. */
+export interface Note {
+  path: string;
+  /** From the path, always. */
+  scope: Scope;
+  /** From the kind folder, then the frontmatter, then `note`. */
+  kind: Kind;
+  tier: Tier;
+  title: string;
+  /** Minted once from the first version's content; stays the same across versions. */
+  id: string | null;
+  level: Level | null;
+  confidence: number | null;
+  sources: string[];
+  entities: Entity[];
+  /** World time: when the fact starts and stops being true. ISO dates or date-times. */
+  validFrom: string | null;
+  invalidAt: string | null;
+  /** Exempt from decay. */
+  evergreen: boolean;
+  /** Always loaded into the agent's core context, and exempt from decay. */
+  pinned: boolean;
+  abstract: string | null;
+  updated: string | null;
+  /** Every key, unknown ones included, as parsed. */
+  frontmatter: Record<string, unknown>;
+  body: string;
+  links: NoteLink[];
+  /** What was ignored or overridden, for lint. A note is never dropped for a bad value. */
+  warnings: string[];
+}
+
+type Frontmatter = Record<string, unknown>;
+
+function parseFrontmatter(yaml: string | null, warnings: string[]): Frontmatter {
+  if (yaml === null) return {};
+  if (yaml.length > MAX_FRONTMATTER_LENGTH) {
+    warnings.push(`frontmatter is longer than ${MAX_FRONTMATTER_LENGTH} characters; ignored`);
+    return {};
+  }
+  const doc = parseDocument(yaml, { uniqueKeys: true });
+  if (doc.errors.length > 0) {
+    warnings.push("frontmatter isn't valid YAML; ignored");
+    return {};
+  }
+  let value: unknown;
+  try {
+    // Aliases are refused outright: they are how a small YAML document expands into a huge one.
+    value = doc.toJS({ maxAliasCount: 0 });
+  } catch {
+    warnings.push("frontmatter uses YAML aliases; ignored");
+    return {};
+  }
+  if (value === null || value === undefined) return {};
+  if (typeof value !== "object" || Array.isArray(value)) {
+    warnings.push("frontmatter isn't a map of keys; ignored");
+    return {};
+  }
+  return value as Frontmatter;
+}
+
+/** Reads one field: missing is null, invalid is null plus a warning. */
+function field<T>(
+  frontmatter: Frontmatter,
+  key: string,
+  warnings: string[],
+  read: (value: unknown) => T | null,
+): T | null {
+  const value = frontmatter[key];
+  if (value === undefined || value === null) return null;
+  const parsed = read(value);
+  if (parsed === null) warnings.push(`\`${key}\` is invalid; ignored`);
+  return parsed;
+}
+
+const oneOf =
+  <T extends string>(values: readonly T[]) =>
+  (value: unknown): T | null =>
+    values.includes(value as T) ? (value as T) : null;
+
+const dateString = (value: unknown): string | null =>
+  typeof value === "string" && instantOf(value) !== null ? value : null;
+
+const stringList =
+  (maxItems: number, maxLength: number) =>
+  (value: unknown): string[] | null =>
+    Array.isArray(value) &&
+    value.length <= maxItems &&
+    value.every(
+      (item) => typeof item === "string" && item.trim() !== "" && item.length <= maxLength,
+    )
+      ? (value as string[])
+      : null;
+
+/** Reads a vault file into a note; null when the path is outside the memory index. */
+export function readNote(path: string, text: string): Note | null {
+  const place = placeOf(path);
+  if (place === null) return null;
+  const warnings: string[] = [];
+  const { yaml, body } = splitFrontmatter(text);
+  const frontmatter = parseFrontmatter(yaml, warnings);
+
+  const declaredKind = field(frontmatter, "kind", warnings, oneOf(KINDS));
+  if (place.kind !== null && declaredKind !== null && declaredKind !== place.kind) {
+    warnings.push(
+      `\`kind\` says ${declaredKind} but the folder says ${place.kind}; the folder wins`,
+    );
+  }
+  const kind = place.kind ?? declaredKind ?? "note";
+  const declaredScope = field(frontmatter, "scope", warnings, (value) =>
+    isScope(value) ? value : null,
+  );
+  if (declaredScope !== null && declaredScope !== place.scope) {
+    warnings.push(
+      `\`scope\` says ${declaredScope} but the path says ${place.scope}; the path wins`,
+    );
+  }
+
+  const validFrom = field(frontmatter, "valid_from", warnings, dateString);
+  let invalidAt = field(frontmatter, "invalid_at", warnings, dateString);
+  if (
+    validFrom !== null &&
+    invalidAt !== null &&
+    (instantOf(invalidAt) ?? 0) <= (instantOf(validFrom) ?? 0)
+  ) {
+    warnings.push("`invalid_at` isn't after `valid_from`; ignored");
+    invalidAt = null;
+  }
+  const rawEntities = field(frontmatter, "entities", warnings, stringList(50, 200)) ?? [];
+  const entities = normalizeEntities(rawEntities);
+  if (entities.length < rawEntities.length) {
+    warnings.push("some `entities` were duplicates, invalid or over the limit; dropped");
+  }
+  const sources = field(
+    frontmatter,
+    "sources",
+    warnings,
+    stringList(MAX_SOURCES, MAX_SOURCE_LENGTH),
+  );
+  const relations = field(frontmatter, "relations", warnings, (value) => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+    const keys = Object.keys(value);
+    if (keys.some((key) => key !== "contradicts")) return null;
+    return stringList(MAX_SOURCES, MAX_SOURCE_LENGTH)((value as Frontmatter).contradicts ?? []);
+  });
+
+  const links = extractLinks(body, path);
+  for (const source of sources ?? []) {
+    for (const target of valueLinks(source, path)) links.push({ kind: "source", ...target });
+  }
+  for (const contradicted of relations ?? []) {
+    for (const target of valueLinks(contradicted, path))
+      links.push({ kind: "contradicts", ...target });
+  }
+
+  const flag = (key: string) =>
+    field(frontmatter, key, warnings, (value) => (typeof value === "boolean" ? value : null)) ??
+    false;
+
+  return {
+    path,
+    scope: place.scope,
+    kind,
+    tier: field(frontmatter, "tier", warnings, oneOf(TIERS)) ?? defaultTier(kind),
+    title: deriveTitle(frontmatter.title, body, path),
+    id: field(frontmatter, "id", warnings, (value) => (isMemoryId(value) ? value : null)),
+    level: field(frontmatter, "level", warnings, oneOf(LEVELS)),
+    confidence: field(frontmatter, "confidence", warnings, (value) =>
+      typeof value === "number" && value >= 0 && value <= 1 ? value : null,
+    ),
+    sources: sources ?? [],
+    entities,
+    validFrom,
+    invalidAt,
+    evergreen: flag("evergreen"),
+    pinned: flag("pinned"),
+    abstract: field(frontmatter, "abstract", warnings, (value) =>
+      typeof value === "string" &&
+      value.trim() !== "" &&
+      value.length <= MAX_ABSTRACT_LENGTH &&
+      !value.includes("\n")
+        ? value.trim()
+        : null,
+    ),
+    updated: field(frontmatter, "updated", warnings, (value) =>
+      typeof value === "string" && DATE_TIME.test(value) && instantOf(value) !== null
+        ? value
+        : null,
+    ),
+    frontmatter,
+    body,
+    links,
+    warnings,
+  };
+}

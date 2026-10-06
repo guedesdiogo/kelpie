@@ -1,0 +1,155 @@
+import { Document, isMap, parseDocument } from "yaml";
+import { MAX_ENTITIES, normalizeEntities } from "./entities.ts";
+import { shortSha256 } from "./hash.ts";
+import { defaultTier, isScope, KINDS, type Kind, type Scope, TIERS, type Tier } from "./layout.ts";
+import { splitFrontmatter } from "./markdown.ts";
+import { instantOf, isMemoryId, LEVELS, type Level, MAX_SOURCES } from "./note.ts";
+
+/** A memory as Kelpie writes it. Every field is checked: Kelpie's own writes are strict. */
+export interface MemoryInput {
+  scope: Scope;
+  kind: Kind;
+  title: string;
+  /** Markdown, without the title heading. */
+  body: string;
+  level: Level;
+  /** 0 to 1. */
+  confidence: number;
+  /** Defaults to the kind's tier; written either way. */
+  tier?: Tier;
+  /** Where it came from: `"[[2026-10-06-family-chat]]"`, or any reference such as a message id. */
+  sources?: string[];
+  entities?: string[];
+  validFrom?: string;
+  invalidAt?: string;
+  evergreen?: boolean;
+  pinned?: boolean;
+  /** One line. */
+  abstract?: string;
+  /** Notes this one contradicts, by name or vault path, written as wikilinks. */
+  contradicts?: string[];
+}
+
+export class MemoryFormatError extends Error {
+  readonly problems: readonly string[];
+
+  constructor(problems: readonly string[]) {
+    super(`invalid memory: ${problems.join("; ")}`);
+    this.name = "MemoryFormatError";
+    this.problems = problems;
+  }
+}
+
+const printableLine = (value: string, max: number) =>
+  value.trim() !== "" && value.length <= max && !/\p{C}/u.test(value);
+
+function check(input: MemoryInput, at: string): string[] {
+  const problems: string[] = [];
+  if (!isScope(input.scope)) problems.push("`scope` is invalid");
+  if (!KINDS.includes(input.kind)) problems.push("`kind` is invalid");
+  if (!printableLine(input.title, 200))
+    problems.push("`title` must be one line of 1-200 characters");
+  if (input.body.trim() === "") problems.push("`body` is empty");
+  if (!LEVELS.includes(input.level)) problems.push("`level` is invalid");
+  if (!(input.confidence >= 0 && input.confidence <= 1)) problems.push("`confidence` must be 0-1");
+  if (input.tier !== undefined && !TIERS.includes(input.tier)) problems.push("`tier` is invalid");
+  const sources = input.sources ?? [];
+  if (sources.length > MAX_SOURCES || !sources.every((source) => printableLine(source, 300))) {
+    problems.push(`\`sources\` must be up to ${MAX_SOURCES} lines of 1-300 characters`);
+  }
+  const entities = input.entities ?? [];
+  if (normalizeEntities(entities).length !== entities.length || entities.length > MAX_ENTITIES) {
+    problems.push(`\`entities\` must be up to ${MAX_ENTITIES} distinct names of 1-64 characters`);
+  }
+  const from = input.validFrom === undefined ? undefined : instantOf(input.validFrom);
+  const to = input.invalidAt === undefined ? undefined : instantOf(input.invalidAt);
+  if (from === null) problems.push("`validFrom` must be a date or a date-time with an offset");
+  if (to === null) problems.push("`invalidAt` must be a date or a date-time with an offset");
+  if (typeof from === "number" && typeof to === "number" && to <= from) {
+    problems.push("`invalidAt` must be after `validFrom`");
+  }
+  if (input.abstract !== undefined && !printableLine(input.abstract, 300)) {
+    problems.push("`abstract` must be one line of 1-300 characters");
+  }
+  for (const target of input.contradicts ?? []) {
+    if (!printableLine(target, 200) || /[[\]|#]/.test(target)) {
+      problems.push("`contradicts` must name notes, without brackets");
+    }
+  }
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?Z$/.test(at) || instantOf(at) === null) {
+    problems.push("`at` must be a UTC date-time");
+  }
+  return problems;
+}
+
+export interface WriteOptions {
+  /** When this version is written, as a UTC date-time; the package reads no clock. */
+  at: string;
+  /** The file's current text, when this version supersedes it. */
+  existing?: string;
+}
+
+export interface WrittenMemory {
+  id: string;
+  /** The whole file: it holds this version only, and git keeps the earlier ones. */
+  text: string;
+}
+
+/**
+ * Renders a memory file. A new memory gets an `id` minted from its content, so writing the same
+ * memory twice yields the same file. A superseding version keeps the existing file's `id`, and the
+ * keys and comments Kelpie doesn't manage, in their places; the body is replaced.
+ */
+export async function writeMemory(
+  input: MemoryInput,
+  options: WriteOptions,
+): Promise<WrittenMemory> {
+  const problems = check(input, options.at);
+  if (problems.length > 0) throw new MemoryFormatError(problems);
+
+  const title = input.title.trim();
+  const body = input.body.trim();
+  const existingYaml =
+    options.existing === undefined ? null : splitFrontmatter(options.existing).yaml;
+  let doc =
+    existingYaml === null ? new Document({}) : parseDocument(existingYaml, { uniqueKeys: true });
+  if (doc.errors.length > 0 || !isMap(doc.contents)) doc = new Document({});
+  const existingId = doc.get("id");
+  const id = isMemoryId(existingId)
+    ? existingId
+    : await shortSha256(`${input.scope}\n${input.kind}\n${title}\n${body}`);
+
+  const fields: [string, unknown][] = [
+    ["id", id],
+    ["kind", input.kind],
+    ["scope", input.scope],
+    ["tier", input.tier ?? defaultTier(input.kind)],
+    ["level", input.level],
+    ["confidence", input.confidence],
+    ["sources", input.sources?.length ? input.sources : undefined],
+    ["entities", input.entities?.length ? input.entities.map((name) => name.trim()) : undefined],
+    ["valid_from", input.validFrom],
+    ["invalid_at", input.invalidAt],
+    ["evergreen", input.evergreen || undefined],
+    ["pinned", input.pinned || undefined],
+    ["abstract", input.abstract?.trim()],
+    [
+      "relations",
+      input.contradicts?.length
+        ? { contradicts: input.contradicts.map((target) => `[[${target.trim()}]]`) }
+        : undefined,
+    ],
+    ["updated", options.at],
+  ];
+  for (const [key, value] of fields) {
+    if (value === undefined) doc.delete(key);
+    else doc.set(key, value);
+  }
+  // A `title` key would win over the heading, so it follows the new title.
+  if (doc.has("title")) doc.set("title", title);
+
+  return {
+    id,
+    text: `---\n${doc.toString({ lineWidth: 0, flowCollectionPadding: false })}---\n\n# ${title}\n\n${body}\n`,
+  };
+}

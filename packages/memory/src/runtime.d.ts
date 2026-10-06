@@ -1,0 +1,11 @@
+// WebCrypto and TextEncoder exist in every runtime Kelpie targets (workerd and Node), but this
+// package compiles without DOM or Node typings to stay runtime-agnostic, so it declares what it uses.
+// Its tests compile against workerd's own types instead.
+declare class TextEncoder {
+  encode(input?: string): Uint8Array;
+}
+declare const crypto: {
+  readonly subtle: {
+    digest(algorithm: "SHA-1" | "SHA-256", data: Uint8Array): Promise<ArrayBuffer>;
+  };
+};
