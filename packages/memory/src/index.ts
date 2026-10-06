@@ -51,6 +51,15 @@ export {
 } from "./memory-index.ts";
 export { isMemoryId, LEVELS, type Level, type Note, readNote } from "./note.ts";
 export {
+  type HitView,
+  type Page,
+  type PageLink,
+  READ_PAGE_CHARS,
+  type ReadPageOptions,
+  readPage,
+  renderHits,
+} from "./page.ts";
+export {
   type Judge,
   type NoulQualifier,
   qualifierJudge,
@@ -59,6 +68,7 @@ export {
 } from "./rerank.ts";
 export {
   asksAboutThePast,
+  bodyWithoutHeading,
   isSessionRecall,
   needsMemory,
   type Packed,

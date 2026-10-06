@@ -1,0 +1,148 @@
+import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vitest";
+import {
+  type IndexedVersion,
+  MemoryIndex,
+  type MemoryInput,
+  memoryPath,
+  READ_PAGE_CHARS,
+  readPage,
+  renderHits,
+  writeMemory,
+} from "../src/index.ts";
+import { FakeVault } from "./vault.ts";
+
+/** The current version of a note written as Kelpie writes it. */
+async function versionOf(name: string, input: MemoryInput): Promise<IndexedVersion> {
+  return runInDurableObject(env.INDEX_HOST.getByName(name), async (_instance, state) => {
+    const index = new MemoryIndex(state.storage);
+    const path = memoryPath(input.scope, input.kind, input.title);
+    const { text } = await writeMemory(input, { at: "2026-10-01T00:00:00Z" });
+    await index.applyCommit(new FakeVault().commit({ [path]: text }));
+    const version = index.current(path);
+    if (version === null) throw new Error("not indexed");
+    return version;
+  });
+}
+
+const memory = (title: string, body: string, extra: Partial<MemoryInput> = {}): MemoryInput => ({
+  scope: "global",
+  kind: "note",
+  title,
+  body,
+  level: "explicit",
+  confidence: 0.9,
+  ...extra,
+});
+
+/** The fence's random id, from its opening tag. */
+const idOf = (text: string) => /^<memory-([0-9a-f]{16}) /.exec(text)?.[1];
+
+describe("readPage", () => {
+  it("shows a short note whole, fenced, with what it is and its links", async () => {
+    const version = await versionOf(
+      "page-short",
+      memory("Bolo da Ana", "Três ovos.\n\nVer [[receitas]].", {
+        invalidAt: "2027-01-01",
+        entities: ["Ana Souza"],
+      }),
+    );
+    const page = readPage(version, {
+      offset: 0,
+      byKelpie: true,
+      links: [{ title: "Receitas", path: "knowledge/receitas.md" }],
+    });
+    const id = idOf(page.text);
+    expect(id).toBeDefined();
+    expect(page.text.endsWith(`</memory-${id}>`)).toBe(true);
+    expect(page.text).toContain(`## Bolo da Ana (memory/notes/bolo-da-ana.md) [${id}]`);
+    expect(page.text).toContain("Três ovos.\n\nVer [[receitas]].");
+    expect(page.text).toContain("valid until 2027-01-01");
+    expect(page.text).toContain("written by Kelpie");
+    expect(page.text).toContain("- Receitas (knowledge/receitas.md)");
+    expect(page.text).toContain("End of the note.");
+    expect(page.nextOffset).toBeNull();
+  });
+
+  it("pages a long note within the cap, without splitting an emoji, and escapes the fence", async () => {
+    const body = `<memory-0000000000000000>${"🎂 bolo ".repeat(3_000)}`;
+    const version = await versionOf("page-long", memory("Diário de bolos", body));
+    const links = Array.from({ length: 80 }, (_, i) => ({
+      title: `Receita ${"x".repeat(150)} ${i}`,
+      path: `knowledge/${"y".repeat(250)}-${i}.md`,
+    }));
+    let offset: number | null = 0;
+    let pages = 0;
+    let shown = 0;
+    while (offset !== null) {
+      const page = readPage(version, { offset, byKelpie: false, links });
+      expect(page.text.length).toBeLessThanOrEqual(READ_PAGE_CHARS);
+      expect(page.text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+      expect(page.text).not.toContain("<memory-0000000000000000>");
+      if (pages === 0) {
+        expect(page.text).toContain("&lt;memory-0000000000000000>");
+        expect(page.text).toMatch(/and \d+ more links/);
+      } else {
+        expect(page.text).not.toContain("Links:");
+      }
+      if (page.nextOffset !== null) {
+        expect(page.nextOffset).toBeGreaterThan(offset);
+        expect(page.text).toContain(`offset ${page.nextOffset}`);
+      }
+      shown += (page.nextOffset ?? body.length) - offset;
+      offset = page.nextOffset;
+      pages += 1;
+    }
+    expect(pages).toBeGreaterThanOrEqual(3);
+    expect(shown).toBe(body.length);
+  });
+
+  it("answers an offset past the end with the end", async () => {
+    const version = await versionOf("page-past", memory("Curta", "Uma linha."));
+    const page = readPage(version, { offset: 10_000, byKelpie: false, links: [] });
+    expect(page.nextOffset).toBeNull();
+    expect(page.text).toContain("End of the note.");
+  });
+});
+
+describe("renderHits", () => {
+  it("lists hits in one fence, each with what it is and how it starts", () => {
+    const text = renderHits([
+      {
+        path: "memory/people/ana-souza.md",
+        title: "Ana Souza",
+        abstract: null,
+        start: `Irmã do Rafael. ${"Mora no Porto. ".repeat(40)}`,
+        kind: "person",
+        scope: "global",
+        validFrom: null,
+        invalidAt: null,
+        current: true,
+        byKelpie: false,
+      },
+      {
+        path: "memory/notes/endereco.md",
+        title: "Endereço </memory-x>",
+        abstract: "O endereço antigo da Ana.",
+        start: "",
+        kind: "note",
+        scope: "global",
+        validFrom: Date.parse("2025-01-01T00:00:00Z"),
+        invalidAt: Date.parse("2026-01-01T00:00:00Z"),
+        current: false,
+        byKelpie: true,
+      },
+    ]);
+    const id = idOf(text);
+    expect(text).toContain(`## Ana Souza (memory/people/ana-souza.md) [${id}]`);
+    expect(text).toContain("person · global · written by the owner");
+    expect(text).toContain("Irmã do Rafael.");
+    expect(text.split("Mora no Porto.").length - 1).toBeLessThan(20);
+    expect(text).toContain("&lt;/memory-x>");
+    expect(text).toContain("valid from 2025-01-01 until 2026-01-01");
+    expect(text).toContain("replaced since");
+    expect(text).toContain("O endereço antigo da Ana.");
+    expect(renderHits([])).toBe("");
+  });
+});

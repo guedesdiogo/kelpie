@@ -10,6 +10,8 @@ import type {
   MemorySearchResult,
   ProposalTarget,
   ProposeResult,
+  ReadNoteOptions,
+  ReadNoteResult,
   RecallOptions,
   RecallResult,
   WriteResult,
@@ -64,6 +66,10 @@ export class ContextStore extends WorkerEntrypoint<VaultEnv> implements ContextS
     options: MemorySearchOptions,
   ): Promise<MemorySearchResult> {
     return this.#vault().search(agentId, query, options);
+  }
+
+  readNote(agentId: string, path: string, options: ReadNoteOptions): Promise<ReadNoteResult> {
+    return this.#vault().readNote(agentId, path, options);
   }
 }
 

@@ -395,7 +395,7 @@ const HEADING_TITLE_CHARS = 120;
 const HEADING_PATH_CHARS = 300;
 
 /** At most `max` characters, with an ellipsis when cut; never half of an emoji's surrogate pair. */
-function cut(text: string, max: number): string {
+export function cut(text: string, max: number): string {
   if (text.length <= max) return text;
   let end = Math.max(0, max - 1);
   const last = text.charCodeAt(end - 1);
@@ -404,12 +404,12 @@ function cut(text: string, max: number): string {
 }
 
 /** Anything a note holds that could read as this block's tags is escaped. */
-const inert = (text: string) => text.replace(/<(\s*\/?\s*memory)/gi, "&lt;$1");
+export const inert = (text: string) => text.replace(/<(\s*\/?\s*memory)/gi, "&lt;$1");
 /**
  * One line, without controls, cut to about `max`: a heading a note can't split. Controls go before
  * escaping, so removing one can't re-form a tag; escaping comes last, and may lengthen it a little.
  */
-const oneLine = (text: string, max: number) =>
+export const oneLine = (text: string, max: number) =>
   inert(
     cut(
       text
@@ -421,7 +421,7 @@ const oneLine = (text: string, max: number) =>
   );
 
 /** A random id for one block: a note can't guess it, so it can't close the block or forge a note. */
-function blockId(): string {
+export function blockId(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(8));
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }

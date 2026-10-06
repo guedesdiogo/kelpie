@@ -110,8 +110,26 @@ export interface MemoryHit {
 }
 
 export interface MemorySearchResult {
+  /** The hits as the model reads them, in #110's fence; empty when there are none. */
+  text: string;
   notes: MemoryHit[];
 }
+
+/** What the agent's `memory_read` asks (#126). */
+export interface ReadNoteOptions {
+  /** The scopes the turn may see, as for recall. */
+  scopes: readonly string[] | "all";
+  /** Where the page starts in the note's body, as `nextOffset` gave it; 0 when left out. */
+  offset?: number;
+}
+
+/**
+ * A page of a note, fenced, under 10,000 characters, and where the next one starts. A note outside
+ * the scopes, outside memory's index, or missing is the same "not found".
+ */
+export type ReadNoteResult =
+  | { ok: true; path: string; text: string; nextOffset: number | null }
+  | { ok: false; reason: "not_found" | "vault_off" | "unavailable" };
 
 export interface ContextStoreContract {
   /** Empty when the vault is off. */
@@ -146,6 +164,11 @@ export interface ContextStoreContract {
    * recall, returned as hits. Nothing when the vault is off or the input isn't valid.
    */
   search(agentId: string, query: string, options: MemorySearchOptions): Promise<MemorySearchResult>;
+  /**
+   * A note of memory's index, a page at a time, for the agent's `memory_read` (#126): only within
+   * the scopes, with the links they allow on the first page, which counts as one access.
+   */
+  readNote(agentId: string, path: string, options: ReadNoteOptions): Promise<ReadNoteResult>;
 }
 
 /**

@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { EMBEDDING_INPUT_CHARS, type EmbedOutcome } from "@kelpie/llm";
 import {
+  bodyWithoutHeading,
   isScope,
   LIFECYCLE_REPORT_PATH,
   lifecycleFindings,
@@ -9,6 +10,8 @@ import {
   pack,
   qualifierJudge,
   type RetrieveOptions,
+  readPage,
+  renderHits,
   rerank,
   retrieve,
   type Scope,
@@ -28,10 +31,13 @@ import type {
   CompiledContext,
   ForgetResult,
   HeldFile,
+  MemoryHit,
   MemorySearchOptions,
   MemorySearchResult,
   ProposalTarget,
   ProposeResult,
+  ReadNoteOptions,
+  ReadNoteResult,
   RecallOptions,
   RecallResult,
   SkillEntry,
@@ -961,28 +967,85 @@ export class Vault extends DurableObject<VaultEnv> {
     try {
       const hits = (await this.#hits(agentId, query, options))?.slice(0, k) ?? [];
       const kelpie = this.#byKelpie(hits.map((hit) => hit.path));
+      const found = hits.flatMap((hit) => {
+        const version = this.#memory.versionOf(hit.path, hit.commit);
+        if (version === null) return [];
+        const note: MemoryHit = {
+          path: hit.path,
+          title: hit.title,
+          abstract: hit.abstract,
+          kind: hit.kind,
+          scope: version.scope,
+          validFrom: version.validFrom,
+          invalidAt: version.invalidAt,
+          current: hit.current,
+          byKelpie: hit.current && kelpie.has(hit.path),
+        };
+        return [{ note, start: bodyWithoutHeading(version.title, version.body).slice(0, 400) }];
+      });
       return {
-        notes: hits.flatMap((hit) => {
-          const version = this.#memory.versionOf(hit.path, hit.commit);
-          if (version === null) return [];
-          return [
-            {
-              path: hit.path,
-              title: hit.title,
-              abstract: hit.abstract,
-              kind: hit.kind,
-              scope: version.scope,
-              validFrom: version.validFrom,
-              invalidAt: version.invalidAt,
-              current: hit.current,
-              byKelpie: hit.current && kelpie.has(hit.path),
-            },
-          ];
-        }),
+        text: renderHits(found.map(({ note, start }) => ({ ...note, start }))),
+        notes: found.map(({ note }) => note),
       };
     } catch (error) {
       console.error("Vault: search failed", errorName(error));
-      return { notes: [] };
+      return { text: "", notes: [] };
+    }
+  }
+
+  /**
+   * A note of memory's index, a page at a time, for the agent's `memory_read` (#126). Only a current
+   * note within the scopes opens; anything else, persona and rules included, is "not found", the
+   * same answer whether it exists or not. The first page lists the links the scopes allow, and
+   * counts as one access.
+   */
+  async readNote(agentId: string, path: string, options: ReadNoteOptions): Promise<ReadNoteResult> {
+    const notFound: ReadNoteResult = { ok: false, reason: "not_found" };
+    const scopes = options?.scopes;
+    const scopesValid =
+      scopes === "all" ||
+      (Array.isArray(scopes) &&
+        scopes.length <= MAX_RECALL_SCOPES &&
+        scopes.every((scope) => isScope(scope)));
+    if (!isAgentId(agentId) || typeof path !== "string" || path.length > MAX_PATH_CHARS) {
+      return notFound;
+    }
+    if (!scopesValid) return notFound;
+    if (this.#backend() === null) return { ok: false, reason: "vault_off" };
+    const sees = (scope: string) =>
+      scopes === "all" || (scopes as readonly string[]).includes(scope);
+    try {
+      await this.#ready();
+      await this.#catchUp();
+      const version = this.#memory.current(path);
+      if (version === null || !sees(version.scope)) return notFound;
+      const offset = Math.max(Math.floor(Number(options.offset ?? 0)) || 0, 0);
+      const links: { title: string; path: string }[] = [];
+      if (offset === 0) {
+        const seen = new Set([path]);
+        for (const link of this.#memory.links(path)) {
+          if (link.path === null || seen.has(link.path)) continue;
+          seen.add(link.path);
+          const target = this.#memory.current(link.path);
+          if (target !== null && sees(target.scope))
+            links.push({ title: target.title, path: link.path });
+        }
+        this.#exec(
+          `INSERT INTO recall_counts (path, count, last_at) VALUES (?, 1, ?)
+           ON CONFLICT (path) DO UPDATE SET count = count + 1, last_at = excluded.last_at`,
+          path,
+          Date.now(),
+        );
+      }
+      const page = readPage(version, {
+        offset,
+        byKelpie: this.#byKelpie([path]).has(path),
+        links,
+      });
+      return { ok: true, path, text: page.text, nextOffset: page.nextOffset };
+    } catch (error) {
+      console.error("Vault: reading a note failed", errorName(error));
+      return { ok: false, reason: "unavailable" };
     }
   }
 
