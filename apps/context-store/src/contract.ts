@@ -161,6 +161,8 @@ export interface WriteNoteOptions {
   scopes: readonly string[] | "all";
   /** Where the memory came from, given by the runtime, never by the model. */
   sources: readonly string[];
+  /** The agent's qualifier, asked in the shadow (#149): Clef unless the agent chose Jev. */
+  qualifier?: "clef" | "jev";
 }
 
 /**
@@ -173,7 +175,14 @@ export type WriteNoteResult =
   | { ok: false; reason: "invalid"; problems: string[] }
   | {
       ok: false;
-      reason: "not_found" | "scope_not_allowed" | "too_large" | "vault_off" | "unavailable";
+      /** `owners_word`: a deduced or inferred memory can't change a note the person stated. */
+      reason:
+        | "not_found"
+        | "scope_not_allowed"
+        | "owners_word"
+        | "too_large"
+        | "vault_off"
+        | "unavailable";
     };
 
 export interface ContextStoreContract {

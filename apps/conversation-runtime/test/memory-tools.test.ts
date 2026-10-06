@@ -177,6 +177,7 @@ describe("memory_write", () => {
         options: {
           scopes: ["global", "conversation/familia"],
           sources: ["telegram:chat-1, 2026-10-06"],
+          qualifier: "jev",
         },
       },
     ]);
@@ -216,6 +217,14 @@ describe("memory_write", () => {
         {
           output:
             "Not saved: this conversation can't save to that scope. Choose one it sees, or leave scope out for the owner's global memory.",
+          isError: true,
+        },
+      ],
+      [
+        { ok: false, reason: "owners_word" },
+        {
+          output:
+            "Not saved: the owner stated that note, and a deduced or inferred memory can't change it. Save it as a new note that says what changed.",
           isError: true,
         },
       ],

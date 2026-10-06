@@ -3,8 +3,12 @@ import { env } from "cloudflare:workers";
 import type { MemoryWriteInput } from "@kelpie/context-store/contract";
 import { writeMemory } from "@kelpie/memory";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
-import { afterEach, describe, expect, it } from "vitest";
-import { replaceBackendForTesting, replaceGatewayForTesting } from "../src/index.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  type MemoryGateway,
+  replaceBackendForTesting,
+  replaceGatewayForTesting,
+} from "../src/index.ts";
 
 afterEach(() => {
   replaceBackendForTesting(undefined);
@@ -251,10 +255,10 @@ describe("writeNote", () => {
     ]) {
       expect(file, kept).toContain(kept);
     }
-    // Only a level change is still a change; the same version again isn't.
+    // Only a change is a change; the same version again isn't.
     const again = memory("Casa da Ana", "Porto.", { path: ana, level: "explicit" });
     expect(await stub.writeNote("kelpie", again, ALL)).toMatchObject({ action: "unchanged" });
-    expect(await stub.writeNote("kelpie", { ...again, level: "inferred" }, ALL)).toMatchObject({
+    expect(await stub.writeNote("kelpie", { ...again, confidence: 0.5 }, ALL)).toMatchObject({
       action: "written",
     });
   });
@@ -414,5 +418,153 @@ describe("writeNote", () => {
         { scopes: "all", sources: [] },
       ),
     ).toMatchObject({ action: "written" });
+  });
+
+  it("keeps the owner's word: only what the person said changes what the person said", async () => {
+    const stated = "memory/notes/cafe.md";
+    const owners = "memory/notes/cha.md";
+    const concluded = "memory/notes/agua.md";
+    const { text: explicitNote } = await writeMemory(
+      {
+        scope: "global",
+        kind: "note",
+        title: "Café",
+        body: "Sem açúcar.",
+        level: "explicit",
+        confidence: 0.9,
+      },
+      { at: "2026-10-01T00:00:00Z" },
+    );
+    const { text: deducedNote } = await writeMemory(
+      {
+        scope: "global",
+        kind: "note",
+        title: "Água",
+        body: "Dois litros.",
+        level: "deduced",
+        confidence: 0.7,
+      },
+      { at: "2026-10-01T00:00:00Z" },
+    );
+    vaultWith({ [stated]: explicitNote, [owners]: "# Chá\n\nVerde.\n", [concluded]: deducedNote });
+    const stub = vault("write-owners-word");
+    for (const [path, title] of [
+      [stated, "Café"],
+      [owners, "Chá"],
+    ] as const) {
+      for (const level of ["deduced", "inferred"]) {
+        expect(
+          await stub.writeNote("kelpie", memory(title, "Outro.", { path, level }), ALL),
+          `${path} ${level}`,
+        ).toEqual({ ok: false, reason: "owners_word" });
+      }
+      // What the person says now does change it.
+      expect(
+        await stub.writeNote("kelpie", memory(title, "Outro.", { path, level: "explicit" }), ALL),
+      ).toMatchObject({ ok: true, action: "written" });
+    }
+    // A note Kelpie wrote without a level isn't the owner's word.
+    await stub.write(
+      "kelpie",
+      [{ path: "memory/notes/pao.md", content: "# Pão\n\nIntegral.\n" }],
+      "x",
+    );
+    await runDurableObjectAlarm(stub);
+    expect(
+      await stub.writeNote(
+        "kelpie",
+        memory("Pão", "Sem glúten.", { path: "memory/notes/pao.md", level: "inferred" }),
+        ALL,
+      ),
+    ).toMatchObject({ ok: true, action: "written" });
+    // A conclusion can revise a conclusion.
+    expect(
+      await stub.writeNote(
+        "kelpie",
+        memory("Água", "Três litros.", { path: concluded, level: "inferred" }),
+        ALL,
+      ),
+    ).toMatchObject({ ok: true, action: "written" });
+  });
+
+  it("asks the qualifier in the shadow, logs what it would do, and writes by the rules", async () => {
+    vaultWith({ "memory/notes/cafe.md": "# Café\n\nCoado, sem açúcar.\n" });
+    const asked: string[] = [];
+    let hold = false;
+    let holdNext = false;
+    let failing = false;
+    const gateway: MemoryGateway = {
+      async generate() {
+        throw new Error("no model call here");
+      },
+      async embed() {
+        // Only the shadow's call waits, not the alarm's own embedding. It polls a plain flag: a
+        // promise made here can't be settled from the test's context.
+        if (holdNext) {
+          holdNext = false;
+          while (hold) await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        return { ok: false, reason: "failed" };
+      },
+      async qualify(_state, questions, backend) {
+        asked.push(String(backend));
+        if (failing) throw new Error("qualifier down");
+        return {
+          ok: true,
+          result: {
+            provider: "fake",
+            calibrated: false,
+            answers: Object.fromEntries(
+              Object.keys(questions).map((id) => [
+                id,
+                { type: "choice", choice: "duplicate", probabilities: { duplicate: 0.9 } },
+              ]),
+            ),
+          },
+        };
+      },
+    };
+    replaceGatewayForTesting(gateway);
+    const log = vi.spyOn(console, "log");
+    try {
+      const stub = vault("write-shadow");
+      // The shadow waits on its embedding while the vault commits the note: it must not find itself.
+      hold = true;
+      holdNext = true;
+      expect(
+        await stub.writeNote("kelpie", memory("Café", "Coado, sem açúcar, de manhã."), {
+          ...ALL,
+          qualifier: "jev",
+        }),
+      ).toEqual({ ok: true, action: "written", path: "memory/notes/cafe-2.md" });
+      await runDurableObjectAlarm(stub);
+      hold = false;
+      await vi.waitFor(() =>
+        expect(log).toHaveBeenCalledWith("Vault: write decision, in the shadow", {
+          rules: "ADD",
+          qualifier: "NOOP",
+          source: "qualifier",
+          backend: "jev",
+          answered: true,
+        }),
+      );
+      expect(asked).toEqual(["jev"]);
+      // A qualifier that fails is told apart from one that found nothing to compare.
+      failing = true;
+      expect(
+        await stub.writeNote("kelpie", memory("Café", "Com leite, à tarde."), ALL),
+      ).toMatchObject({ ok: true, action: "written" });
+      await vi.waitFor(() =>
+        expect(log).toHaveBeenCalledWith("Vault: write decision, in the shadow", {
+          rules: "ADD",
+          qualifier: "ADD",
+          source: "heuristic",
+          backend: "clef",
+          answered: false,
+        }),
+      );
+    } finally {
+      log.mockRestore();
+    }
   });
 });

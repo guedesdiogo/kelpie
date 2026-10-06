@@ -309,6 +309,9 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - **Scopes and the qualifier** come from the turn, never from the model. A note outside the scopes, or outside memory's index (persona, rules, skills, root files), gets the same "not found" as a missing one.
   - **`memory_write(title, body, kind, level, …)`:** saves one memory through the Context Store's single writer.
     - **A new memory** goes where its title puts it, an event under its `validFrom` date, which it needs. The path gets a number when another note holds it.
+    - **The owner's word stays** (#149): a `deduced` or `inferred` memory can't change a note the person stated, one with `level: explicit` or, without a level, one Kelpie didn't write. The tool asks the model to save it as a new note.
+      - **What the rule guards against:** an honest model labelling its own conclusion as such.
+      - **What it doesn't guard against:** the label is the model's own. An instruction injected into what the model reads could have it claim `explicit` and overwrite the note. Git keeps the old version, and the owner decides whether more is needed (#149).
     - **A found note's `path`** makes the memory that note's new version, of the same kind, unless it is another agent's or removed. It keeps what the model left out, as far as Kelpie can write it back:
       - the note's id and the owner's keys;
       - its tier, confidence, entities, validity and abstract;
@@ -363,7 +366,9 @@ How the page behaves:
 
 ### The write decision
 
-Before a new memory is written, `decideWrite` says whether it is news (#111). `memory_write` (#126) calls it without the qualifier for now: ADR-0009 wants the qualifier's answers measured on a labeled set before they act, a question open on #111. So only the rules decide: an exact twin is a `NOOP`, and anything else is an `ADD`.
+Before a new memory is written, `decideWrite` says whether it is news (#111). A conclusion (`deduced`, `inferred`) never replaces or refines what the person said: the qualifier's answer about such a note counts as unrelated (#149). `memory_write` (#126) calls it without the qualifier: ADR-0009 wants the qualifier's answers measured on a labeled PT-BR set before they act. So only the rules decide: an exact twin is a `NOOP`, and anything else is an `ADD`.
+- **In the shadow** (#149): after the rules add a memory, the agent's qualifier makes the same decision, unawaited. Its action is logged next to the rules' `ADD`, actions only, never text or paths, and nothing acts on it.
+- **Measured:** on #149's set of 80 pairs, Clef chose right 92.5% of the time, with no wrong `SUPERSEDE` and one wrong `NOOP` ([spike](spikes/memory-eval.md#write-decision-149)). Whether and above which probability it may act is the owner's call.
 - **The outcome:**
   - `ADD`: a new note, at `memoryPath`; the writer resolves a collision with an existing file;
   - `UPDATE`: the note at `path` stays true and the memory adds detail, so its new version holds both;

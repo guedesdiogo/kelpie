@@ -12,15 +12,18 @@ import {
   MemoryIndex,
   needsMemory,
   qualifierJudge,
+  RELATIONS,
   type Retrieved,
+  relationQuestion,
   rerank,
   retrieve,
 } from "../src/index.ts";
 import { buildVault, SEED } from "./generate.ts";
 import { GOLD_MEMORIES } from "./gold-vault.ts";
-import { LABELS_SHA256 } from "./labels.ts";
+import { LABELS_SHA256, WRITE_SET_SHA256 } from "./labels.ts";
 import { QUESTIONS } from "./questions.ts";
 import { answerRank, bySlice, percentile, type QuestionResult, staleFirst } from "./score.ts";
+import { WRITE_PAIRS, type WriteRelation } from "./write-decision-set.ts";
 
 const models = env as unknown as {
   EVAL_MODELS?: string;
@@ -205,6 +208,110 @@ describe.skipIf(!enabled)("memory evaluation with models", () => {
       },
     };
     expect(questions).toHaveLength(QUESTIONS.length);
+  });
+
+  it("measures the write decision's choice on its labeled set (#149)", async ({ task }) => {
+    const qualifier = clef();
+    const log: CallLog = { ms: [], failed: 0 };
+    const labels = Object.keys(RELATIONS) as WriteRelation[];
+    const answers = await pooled(WRITE_PAIRS, async (pair) => {
+      const started = performance.now();
+      try {
+        // As decideWrite asks it: the memory and the note in the state, one choice for the note.
+        const result = await qualifier.qualify(
+          {
+            memory: `${pair.memory.title}\n${pair.memory.body}`,
+            notes: { c0: `${pair.note.title}\n${pair.note.body}` },
+          },
+          { c0: relationQuestion("c0") },
+        );
+        const answer = result.answers.c0;
+        if (answer?.type !== "choice" || !labels.includes(answer.choice as WriteRelation)) {
+          log.failed += 1;
+          return { choice: "failed", probability: Number.NaN };
+        }
+        return {
+          choice: answer.choice as WriteRelation,
+          probability: answer.probabilities[answer.choice] ?? Number.NaN,
+        };
+      } catch {
+        log.failed += 1;
+        return { choice: "failed", probability: Number.NaN };
+      } finally {
+        log.ms.push(performance.now() - started);
+      }
+    });
+    const round = (value: number) => Math.round(value * 1000) / 1000;
+    const confusion = Object.fromEntries(
+      labels.map((label) => [
+        label,
+        Object.fromEntries(
+          [...labels, "failed"].map((choice) => [
+            choice,
+            WRITE_PAIRS.filter((pair, i) => pair.label === label && answers[i]?.choice === choice)
+              .length,
+          ]),
+        ),
+      ]),
+    );
+    const per = Object.fromEntries(
+      labels.map((label) => {
+        const chosen = answers.filter((answer) => answer.choice === label).length;
+        const right = WRITE_PAIRS.filter(
+          (pair, i) => pair.label === label && answers[i]?.choice === label,
+        ).length;
+        const truth = WRITE_PAIRS.filter((pair) => pair.label === label).length;
+        return [
+          label,
+          { precision: chosen === 0 ? null : round(right / chosen), recall: round(right / truth) },
+        ];
+      }),
+    );
+    const meanProbability = (correct: boolean) => {
+      const values = answers
+        .filter((answer, i) => (answer.choice === WRITE_PAIRS[i]?.label) === correct)
+        .map((answer) => answer.probability)
+        .filter((value) => Number.isFinite(value));
+      return values.length === 0 ? null : round(values.reduce((a, b) => a + b, 0) / values.length);
+    };
+    const writeDecision = {
+      model: "clef",
+      setSha256: WRITE_SET_SHA256,
+      pairs: WRITE_PAIRS.length,
+      accuracy: round(
+        WRITE_PAIRS.filter((pair, i) => answers[i]?.choice === pair.label).length /
+          WRITE_PAIRS.length,
+      ),
+      perLabel: per,
+      confusion,
+      // A NOOP on a memory that was news loses it; a SUPERSEDE of a note still true replaces it.
+      lostByNoop: WRITE_PAIRS.filter(
+        (pair, i) => answers[i]?.choice === "duplicate" && pair.label !== "duplicate",
+      ).map((pair) => pair.id),
+      wrongSupersede: WRITE_PAIRS.filter(
+        (pair, i) => answers[i]?.choice === "replaces" && pair.label !== "replaces",
+      ).map((pair) => pair.id),
+      // The chosen answer's probability, per pair the qualifier would act on, for a threshold.
+      actedOn: WRITE_PAIRS.flatMap((pair, i) => {
+        const answer = answers[i];
+        return answer && (answer.choice === "duplicate" || answer.choice === "replaces")
+          ? [
+              {
+                id: pair.id,
+                label: pair.label,
+                choice: answer.choice,
+                p: round(answer.probability),
+              },
+            ]
+          : [];
+      }),
+      meanProbabilityRight: meanProbability(true),
+      meanProbabilityWrong: meanProbability(false),
+      ...callStats(log),
+    };
+    console.log(JSON.stringify(writeDecision, null, 2));
+    task.meta.memoryEvalModels = { writeDecision };
+    expect(answers).toHaveLength(WRITE_PAIRS.length);
   });
 
   for (const size of SIZES) {

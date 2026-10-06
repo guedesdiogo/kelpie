@@ -1112,9 +1112,10 @@ export class Vault extends DurableObject<VaultEnv> {
    *   agent's own scope when the turn sees every scope, or to a scope the turn lists.
    * - **No news:** the same version again, queued or committed, at its path or a numbered one, or
    *   a twin `decideWrite` finds, is `unchanged`, so a retry writes nothing.
-   * - **Refused:** session pages, which the runtime writes, and merge conflict markers.
-   * - **The qualifier isn't asked yet:** ADR-0009 wants its answers measured first (#111), so the
-   *   rules decide alone.
+   * - **Refused:** session pages, which the runtime writes, and merge conflict markers; and a
+   *   `deduced` or `inferred` memory aimed at a note that holds the owner's word (`owners_word`, #149).
+   * - **The rules decide:** ADR-0009 wants the qualifier measured before it acts, so it is asked
+   *   only in the shadow, after the rules add a memory, and its action is logged (#149).
    * Titles, bodies, abstracts and entities lose their secrets first. The path is chosen and the
    * write queued without a pause between them, so concurrent writes can't take the same path.
    */
@@ -1253,6 +1254,9 @@ export class Vault extends DurableObject<VaultEnv> {
         for (let attempt = 0; attempt < 3 && target === null; attempt += 1) {
           const shown = shownAt(found.path);
           if (shown.text === null) return { ok: false, reason: "not_found" };
+          if (shown.note && memory.level !== "explicit" && this.#ownersWord(shown.note)) {
+            return { ok: false, reason: "owners_word" };
+          }
           memory = build(shown.note);
           text = (await writeMemory(memory, { at, existing: shown.text })).text;
           if (this.#visible(found.path) !== shown.text) continue;
@@ -1269,6 +1273,7 @@ export class Vault extends DurableObject<VaultEnv> {
         const decision = await decideWrite(this.#memory, memory, {
           now: Date.now(),
           qualifier: null,
+          ownersWord: (note) => this.#ownersWord(note),
         });
         if (decision.action === "NOOP") {
           return { ok: true, action: "unchanged", path: decision.path };
@@ -1292,6 +1297,12 @@ export class Vault extends DurableObject<VaultEnv> {
       }
       // Never the title: a headline outlives a forget in git's history.
       const written = await this.write(agentId, [{ path: target, content: text }], "Save a memory");
+      if (written.ok && found === null) {
+        // The rules wrote it; the qualifier is only measured, in the shadow, until it can decide.
+        this.ctx.waitUntil(
+          this.#shadowDecision(memory, target, options.qualifier === "jev" ? "jev" : "clef"),
+        );
+      }
       if (written.ok) return { ok: true, action: "written", path: target };
       return { ok: false, reason: written.reason === "too_large" ? "too_large" : "unavailable" };
     } catch (error) {
@@ -1362,6 +1373,68 @@ export class Vault extends DurableObject<VaultEnv> {
       });
     }
     return hits;
+  }
+
+  /**
+   * The qualifier's write decision for a memory the rules added (#149, ADR-0009): logged next to
+   * the rules' ADD, actions only, never acted on. Until a labeled set shows it can decide, this is
+   * how its answers are measured in use.
+   */
+  async #shadowDecision(
+    memory: MemoryInput,
+    written: string,
+    backend: QualifierBackend,
+  ): Promise<void> {
+    const gateway = this.#gateway();
+    if (gateway === null) return;
+    try {
+      // As memory's index embeds a note: title, abstract and body.
+      const text = [memory.title, memory.abstract, memory.body]
+        .filter((part) => part)
+        .join("\n\n")
+        .slice(0, EMBEDDING_INPUT_CHARS);
+      const embedded = await within(gateway.embed([text]), EMBED_QUESTION_TIMEOUT_MS);
+      const values = embedded?.ok ? embedded.vectors[0] : undefined;
+      let answered = false;
+      const decision = await decideWrite(this.#memory, memory, {
+        now: Date.now(),
+        qualifier: {
+          async qualify(state, questions) {
+            const outcome = await gateway.qualify(state, questions, backend, {
+              timeoutMs: RERANK_TIMEOUT_MS,
+            });
+            if (!outcome.ok) throw new Error(outcome.reason);
+            answered = true;
+            return outcome.result;
+          },
+        },
+        ...(embedded?.ok && values ? { vector: { model: embedded.model, values } } : {}),
+        ownersWord: (note) => this.#ownersWord(note),
+        // The note just written may be indexed by now: it isn't its own candidate.
+        exclude: [written],
+      });
+      // Actions only: no text, titles or paths.
+      console.log("Vault: write decision, in the shadow", {
+        rules: "ADD",
+        qualifier: decision.action,
+        source: decision.source,
+        backend,
+        answered,
+      });
+    } catch (error) {
+      console.error("Vault: the shadow write decision failed", errorName(error));
+    }
+  }
+
+  /**
+   * Whether a note holds what the person said (#149): `level: explicit`, or no level on a note
+   * Kelpie didn't write. A conclusion never changes it.
+   */
+  #ownersWord(note: { path: string; level: string | null }): boolean {
+    return (
+      note.level === "explicit" ||
+      (note.level === null && !this.#byKelpie([note.path]).has(note.path))
+    );
   }
 
   /** The paths whose version in the vault is one Kelpie's own commit wrote. */
