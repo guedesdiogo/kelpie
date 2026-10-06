@@ -678,6 +678,83 @@ export class MemoryIndex {
   }
 
   /** The paths of every current note, in order. */
+  /** Every current note, with what the lifecycle jobs (#111) score and group them by. */
+  lifecycleNotes(): {
+    path: string;
+    title: string;
+    titleKey: string;
+    kind: string;
+    tier: string;
+    pinned: boolean;
+    evergreen: boolean;
+    recordedAt: number;
+    validFrom: number | null;
+    invalidAt: number | null;
+    blobSha: string;
+  }[] {
+    return this.#exec<{
+      path: string;
+      title: string;
+      title_key: string;
+      kind: string;
+      tier: string;
+      pinned: number;
+      evergreen: number;
+      recorded_at: number;
+      valid_from: number | null;
+      invalid_at: number | null;
+      blob_sha: string;
+    }>(
+      `SELECT path, title, title_key, kind, tier, pinned, evergreen, recorded_at, valid_from,
+              invalid_at, blob_sha
+       FROM versions WHERE is_current = 1 ORDER BY path`,
+    ).map((row) => ({
+      path: row.path,
+      title: row.title,
+      titleKey: row.title_key,
+      kind: row.kind,
+      tier: row.tier,
+      pinned: row.pinned === 1,
+      evergreen: row.evergreen === 1,
+      recordedAt: row.recorded_at,
+      validFrom: row.valid_from,
+      invalidAt: row.invalid_at,
+      blobSha: row.blob_sha,
+    }));
+  }
+
+  /** The vectors `model` gave these contents, those that are whole floats. */
+  vectorsOf(model: string, blobShas: readonly string[]): Map<string, Float32Array> {
+    const found = new Map<string, Float32Array>();
+    for (const blobSha of new Set(blobShas)) {
+      const row = this.#storage.sql
+        .exec<{ vector: ArrayBuffer; dims: number }>(
+          "SELECT vector, dims FROM embeddings WHERE blob_sha = ? AND model = ?",
+          blobSha,
+          model,
+        )
+        .toArray()[0];
+      if (row !== undefined && row.vector.byteLength === row.dims * 4) {
+        found.set(blobSha, new Float32Array(row.vector));
+      }
+    }
+    return found;
+  }
+
+  /** Each current note's entities, by key with their names, for these paths. */
+  entitiesOf(paths: readonly string[]): Map<string, Map<string, string>> {
+    const found = new Map<string, Map<string, string>>();
+    for (const path of new Set(paths)) {
+      const rows = this.#exec<{ key: string; name: string }>(
+        `SELECT e.key, e.name FROM entities e JOIN versions v ON v.rowid = e.version
+         WHERE v.path = ? AND v.is_current = 1 ORDER BY e.key`,
+        path,
+      );
+      if (rows.length > 0) found.set(path, new Map(rows.map((row) => [row.key, row.name])));
+    }
+    return found;
+  }
+
   currentPaths(): string[] {
     return this.#exec<{ path: string }>(
       "SELECT path FROM versions WHERE is_current = 1 ORDER BY path",

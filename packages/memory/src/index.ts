@@ -18,6 +18,15 @@ export {
   type Tier,
 } from "./layout.ts";
 export {
+  CONTRADICTION_BANDS,
+  LIFECYCLE_REPORT_PATH,
+  type LifecycleFindings,
+  type LifecycleOptions,
+  lifecycleFindings,
+  lifecycleReport,
+  type NoteRef,
+} from "./lifecycle.ts";
+export {
   extractLinks,
   type LinkBy,
   type LinkKind,

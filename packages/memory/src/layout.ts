@@ -99,6 +99,8 @@ export function placeOf(path: string): PathPlace | null {
   const segments = path.split("/");
   if (segments.some((segment) => segment === "" || segment.startsWith("."))) return null;
   const [top, second, third] = segments;
+  // `memory/_…/` folders hold Kelpie's own files, such as the lifecycle report: never notes.
+  if (top === "memory" && second?.startsWith("_")) return null;
   let scope: Scope;
   let rest: string[];
   if (top === "memory" || top === "knowledge") {
