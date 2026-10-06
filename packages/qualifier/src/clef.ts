@@ -37,12 +37,17 @@ export class ClefQualifier implements Qualifier {
     options: { signal?: AbortSignal } = {},
   ): Promise<QualifyResult> {
     const { model, run } = this.#options;
+    // Clef accepts question ids of [A-Za-z0-9_.-] only, so `runDecision`'s `turn.end::` prefix
+    // goes out as `turn.end__`, and the answers come back under the caller's keys.
+    const sent = Object.fromEntries(
+      Object.entries(questions).map(([key, question]) => [clefId(key), question]),
+    );
     let body: unknown;
     try {
       body = await untilAborted(
         run(
           `@cf/cloudflare/${model}`,
-          { model, state: maskPersonalData(state), questions },
+          { model, state: maskPersonalData(state), questions: sent },
           options.signal ? { signal: options.signal } : {},
         ),
         options.signal,
@@ -51,8 +56,20 @@ export class ClefQualifier implements Qualifier {
       // A Workers AI error message can quote the input, so only the error's name is reported.
       throw new Error(`Workers AI failed: ${error instanceof Error ? error.name : "unknown"}`);
     }
-    return { answers: systemOneAnswers(questions, body), provider: this.id, calibrated: true };
+    const received = (body as { answers?: Record<string, unknown> } | null)?.answers ?? {};
+    const answers = Object.fromEntries(
+      Object.keys(questions).map((key) => [key, received[clefId(key)]]),
+    );
+    return {
+      answers: systemOneAnswers(questions, { answers }),
+      provider: this.id,
+      calibrated: true,
+    };
   }
+}
+
+function clefId(key: string): string {
+  return key.replace(/[^A-Za-z0-9_.-]/g, "_");
 }
 
 /** The binding may not honor the signal, so the call also stops waiting when it aborts. */

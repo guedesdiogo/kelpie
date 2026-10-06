@@ -63,11 +63,11 @@ const RECORDED_JEV = {
   answers: { "turn.end::user_finished": { type: "noul", noul: 0.87 } },
   usage: { input_tokens: 312, output_tokens: 24 },
 };
-// Built by hand from the documented output schema of @cf/cloudflare/clef-flash; spike #117 records one.
-const DOCUMENTED_CLEF = {
+// Recorded from Workers AI in spike #117 (2026-10-06, clef-flash).
+const RECORDED_CLEF = {
   model: "clef-flash",
-  answers: { "turn.end::user_finished": { type: "noul", noul: 0.81 } },
-  usage: { input_tokens: 300, output_tokens: 1 },
+  answers: { "turn.end__user_finished": { type: "noul", noul: 0.9323 } },
+  usage: { input_tokens: 181, output_tokens: 0 },
 };
 const questions: Record<string, Question> = {
   "turn.end::user_finished": { type: "noul", instructions: "Has the user finished?" },
@@ -164,7 +164,7 @@ describe("llm-gateway", () => {
   });
 
   it("asks Clef through the AI binding with the pinned model, and needs no key", async () => {
-    const run = vi.fn(async () => DOCUMENTED_CLEF);
+    const run = vi.fn(async () => RECORDED_CLEF);
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const { TYPESAFE_API_KEY: _key, ...withoutJev } = env as Parameters<typeof qualifyWith>[0];
     const outcome = await qualifyWith(
@@ -177,7 +177,7 @@ describe("llm-gateway", () => {
     expect(outcome).toEqual({
       ok: true,
       result: {
-        answers: { "turn.end::user_finished": { type: "noul", noul: 0.81 } },
+        answers: { "turn.end::user_finished": { type: "noul", noul: 0.9323 } },
         provider: "clef-workers-ai",
         calibrated: true,
       },
