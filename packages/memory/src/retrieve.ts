@@ -343,6 +343,8 @@ const CHARS_PER_TOKEN = 4;
 const DESCRIPTOR_CHARS = 400;
 /** A note cut shorter than this isn't worth its heading. */
 const MIN_ENTRY_CHARS = 80;
+/** A heading shows at most this much of a title, and of a path, so one note can't fill the block. */
+const HEADING_PART_CHARS = 120;
 
 /** At most `max` characters, with an ellipsis when cut; never half of an emoji's surrogate pair. */
 function cut(text: string, max: number): string {
@@ -355,12 +357,20 @@ function cut(text: string, max: number): string {
 
 /** Anything a note holds that could read as this block's tags is escaped. */
 const inert = (text: string) => text.replace(/<(\s*\/?\s*memory)/gi, "&lt;$1");
-/** One line, without controls: a heading a note can't split. */
+/**
+ * One line, without controls, at most HEADING_PART_CHARS: a heading a note can't split. Controls go
+ * before escaping, so removing one can't re-form a tag.
+ */
 const oneLine = (text: string) =>
-  inert(text)
-    .replace(/\s+/g, " ")
-    .replace(/\p{Cc}/gu, "")
-    .trim();
+  inert(
+    cut(
+      text
+        .replace(/\s+/g, " ")
+        .replace(/\p{Cc}/gu, "")
+        .trim(),
+      HEADING_PART_CHARS,
+    ),
+  );
 
 /** A random id for one block: a note can't guess it, so it can't close the block or forge a note. */
 function blockId(): string {
