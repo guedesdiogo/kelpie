@@ -16,9 +16,10 @@ import type {
   IngestResult,
 } from "@kelpie/conversation/contract";
 import type { AssistantMessage, ChatMessage, LlmEvent, Usage } from "@kelpie/llm";
+import { type OpenKeys, sessionPage } from "@kelpie/memory";
 import { QualifierUnavailable } from "@kelpie/qualifier";
 import { Agent, type FiberRecoveryContext } from "agents";
-import { and, asc, count, desc, eq, gte, inArray, isNull, lt, max } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, inArray, isNull, lt, max } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
@@ -56,6 +57,11 @@ Keep names, numbers, dates and commitments exact. Don't add anything that wasn't
 const CHECKPOINT_HEADING =
   "Summary of the earlier conversation (the messages it covers are no longer shown):";
 
+/** After this long without a turn, the conversation's session closes into a vault page (#109). */
+const SESSION_IDLE_MS = 30 * 60_000;
+/** A session that couldn't be written, or that a turn held open, is tried again after this long. */
+const SESSION_RETRY_MS = 10 * 60_000;
+
 /** A bubble the channel keeps rate-limiting is tried this many times before the turn fails. */
 const MAX_SEND_ATTEMPTS = 3;
 /** A rate limit asking for a longer wait than this fails the turn instead of stalling it. */
@@ -83,6 +89,8 @@ interface TurnInFlight {
  */
 export class ConversationAgent extends Agent<Env> implements ConversationContract {
   readonly #db: DrizzleSqliteDODatabase<typeof schema>;
+  /** A session close is running: another one would write the same history twice. */
+  #closingSession = false;
   readonly #inFlight = new Map<number, TurnInFlight>();
   /** Serializes flush planning, so concurrent messages can't arm two schedules. */
   #planning: Promise<void> = Promise.resolve();
@@ -152,6 +160,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       return { status: "duplicate", flushAt: this.#get<number | null>("flushAt", null) };
     }
 
+    // Session pages show times in the latest zone a person in the conversation gave; a retried
+    // message is older news.
+    const zone = canonicalTimeZone(message.timeZone);
+    if (zone) this.#set("timeZone", zone);
     this.#interrupt();
     const epoch = this.#epoch() + 1;
     this.#set("epoch", epoch);
@@ -306,6 +318,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .run();
     this.#set("checkpointFailedAt", null);
     console.log("conversation: checkpoint written", { summarizedRows: rows.length });
+    // A checkpoint is also where a session ends (#109).
+    await this.closeSession();
   }
 
   /** The bubbles of every turn, for inspection. */
@@ -387,7 +401,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     });
   }
 
-  /** Runs one step of a turn; any failure settles the turn instead of leaving it running. */
+  /**
+   * Runs one step of a turn; any failure settles the turn instead of leaving it running. Then the
+   * session's close is armed again, for when the conversation goes quiet.
+   */
   async #guarded(
     turnId: number,
     step: (controller: AbortController) => Promise<void>,
@@ -402,6 +419,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     } finally {
       if (this.#inFlight.get(turnId) === flight) this.#inFlight.delete(turnId);
     }
+    await this.#scheduleSessionClose(SESSION_IDLE_MS);
   }
 
   async #call(turnId: number, controller: AbortController): Promise<void> {
@@ -533,6 +551,118 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const id = this.#get<string | null>("checkpointSchedule", null);
     this.#set("checkpointSchedule", null);
     if (id) await this.cancelSchedule(id);
+  }
+
+  /**
+   * (Re)arms the session's close: after a turn, the session ends once the conversation stays quiet
+   * this long. Housekeeping: a failure here must not cost a reply.
+   */
+  async #scheduleSessionClose(delayMs: number): Promise<void> {
+    try {
+      const previous = this.#get<string | null>("sessionSchedule", null);
+      // The new schedule is armed before the old one goes, so a failure between them leaves one.
+      const schedule = await this.schedule(new Date(this.#ports.now() + delayMs), "closeSession");
+      this.#set("sessionSchedule", schedule.id);
+      if (previous && previous !== schedule.id) await this.cancelSchedule(previous);
+    } catch (error) {
+      console.error("ConversationAgent: scheduling the session's close failed", errorName(error));
+    }
+  }
+
+  /**
+   * Ends a session (#109): the history since the last one becomes a page in the vault, with its
+   * secrets replaced, through the Context Store. The idle schedule and checkpoints call it.
+   * - While a turn runs or messages wait for one, the session is still going: it closes later.
+   * - A store that can't be reached is tried again later.
+   * - A page that can't be built, or that the vault refuses, is skipped with an error logged, so
+   *   one bad session can't hold back the ones after it. Its messages stay in the history.
+   */
+  async closeSession(): Promise<void> {
+    if (this.#closingSession) return;
+    if (this.#turnRunning() || this.#pendingInbound().length > 0) {
+      await this.#scheduleSessionClose(SESSION_RETRY_MS);
+      return;
+    }
+    this.#closingSession = true;
+    try {
+      const through = this.#get<number>("capturedThrough", 0);
+      const rows = this.#db
+        .select({
+          id: schema.history.id,
+          role: schema.history.role,
+          userId: schema.history.userId,
+          message: schema.history.message,
+          createdAt: schema.history.createdAt,
+        })
+        .from(schema.history)
+        .where(gt(schema.history.id, through))
+        .orderBy(asc(schema.history.id))
+        .all();
+      const first = rows[0];
+      const last = rows.at(-1);
+      if (!first || !last) return;
+      const agentId = this.#agentId();
+      const destination = this.#destination();
+      let page: Awaited<ReturnType<typeof sessionPage>> = null;
+      try {
+        page = await sessionPage({
+          key: String(first.id),
+          channel: destination.channel,
+          threadId: destination.threadId,
+          timeZone: this.#get<string | null>("timeZone", null),
+          openKeys: this.#get<OpenKeys>("openKeys", {}),
+          lines: rows.map((row) => ({
+            role: row.role,
+            speaker: row.role === "user" ? (row.userId ?? "someone") : agentId,
+            text:
+              row.role === "user"
+                ? withoutTypedStamps(messageText(row.message))
+                : messageText(row.message),
+            at: row.createdAt,
+          })),
+        });
+      } catch (error) {
+        console.error("ConversationAgent: a session page couldn't be built; it is skipped", {
+          from: first.id,
+          through: last.id,
+          error: errorName(error),
+        });
+      }
+      if (page) {
+        let result: Awaited<ReturnType<ConversationPorts["remember"]>>;
+        try {
+          result = await this.#ports.remember(
+            agentId,
+            [{ path: page.path, content: page.text }],
+            "Record a conversation session",
+          );
+        } catch (error) {
+          console.error("ConversationAgent: the session page wasn't saved", errorName(error));
+          await this.#scheduleSessionClose(SESSION_RETRY_MS);
+          return;
+        }
+        if (!result.ok && result.reason !== "vault_off") {
+          console.error("ConversationAgent: the vault refused a session page", {
+            reason: result.reason,
+          });
+        }
+        this.#set("openKeys", page.openKeys);
+      }
+      this.#set("capturedThrough", last.id);
+    } finally {
+      this.#closingSession = false;
+    }
+  }
+
+  #turnRunning(): boolean {
+    return (
+      this.#db
+        .select({ id: schema.turns.id })
+        .from(schema.turns)
+        .where(eq(schema.turns.status, "running"))
+        .limit(1)
+        .get() !== undefined
+    );
   }
 
   #latestCheckpoint() {
@@ -953,6 +1083,12 @@ function byAuthor(rows: readonly { userId: string; text: string; stamp: string |
     run.lastStamp = row.stamp;
   }
   return runs.map((run) => ({ userId: run.userId, text: run.lines.join("\n") }));
+}
+
+/** The text of any history message, without its tool calls or reasoning. */
+function messageText(message: ChatMessage): string {
+  if (!("parts" in message)) return "";
+  return message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n\n");
 }
 
 function textOf(message: AssistantMessage): string {
