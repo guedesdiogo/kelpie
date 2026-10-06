@@ -35,6 +35,10 @@ describe("the webchat's page", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
     expect(response.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    // Some Safari versions don't match 'self' to wss:, so the socket's origin is named.
+    expect(response.headers.get("content-security-policy")).toContain(
+      "connect-src 'self' wss://ingress.test",
+    );
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(fakes.page).toHaveBeenCalledOnce();

@@ -23,14 +23,16 @@ export interface WebchatDeps {
   connect(name: string, admission: WebchatAdmission): Promise<Response>;
 }
 
-/** The page holds no secret, but it renders model output, so it may run only its own code. */
-const PAGE_HEADERS = {
-  "content-security-policy":
-    "default-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+/**
+ * The page holds no secret, but it renders model output, so it may run only its own code. Some
+ * Safari versions don't match 'self' to wss:, so the socket's origin is named.
+ */
+const pageHeaders = (host: string) => ({
+  "content-security-policy": `default-src 'self'; connect-src 'self' wss://${host}; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
   "cache-control": "no-store",
-};
+});
 
 /**
  * The webchat (issue #40) serves only the owner, who logs in through Cloudflare Access, as for
@@ -49,7 +51,9 @@ export async function handleWebchat(request: Request, deps: WebchatDeps): Promis
   if (url.pathname !== SOCKET_PATH) {
     const page = await deps.page(request);
     const response = new Response(page.body, page);
-    for (const [name, value] of Object.entries(PAGE_HEADERS)) response.headers.set(name, value);
+    for (const [name, value] of Object.entries(pageHeaders(url.host))) {
+      response.headers.set(name, value);
+    }
     return response;
   }
 
