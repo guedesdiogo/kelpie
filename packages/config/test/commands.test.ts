@@ -2,7 +2,7 @@ import type { ChannelIdentity, IdentityStatus } from "@kelpie/access";
 import type { WebhookRegistrationFailure } from "@kelpie/channels";
 import { describe, expect, it } from "vitest";
 import { type Actor, type ConfigPorts, createConfigCommands } from "../src/commands.ts";
-import { type AgentSettings, DEFAULT_SETTINGS } from "../src/settings.ts";
+import { type AgentSettings, DEFAULT_SETTINGS, SETUP_AGENT_ID } from "../src/settings.ts";
 
 const owner: Actor = { userId: "u-owner", role: "owner", via: "admin-api" };
 const member: Actor = { userId: "u-member", role: "member", via: "admin-api" };
@@ -168,6 +168,17 @@ describe("configuration commands", () => {
       ok: true,
       value: { created: false },
     });
+  });
+
+  it("keeps the setup agent's id to itself", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+
+    expect(await commands.createAgent(owner, { id: SETUP_AGENT_ID, name: "Mine" })).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(calls).toEqual([]);
   });
 
   it("refuses everyone but the owner, before touching anything", async () => {

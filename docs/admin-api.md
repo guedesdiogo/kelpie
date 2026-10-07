@@ -82,6 +82,11 @@ No command takes an identity value to admit someone: the owner proves an account
 2. The owner opens the link in Telegram, which sends the bot `/start <code>`.
 3. A match makes that Telegram account the owner's, enabled, and the bot answers with a fixed "paired" notice. The `/start` never reaches the model.
 
+**From the setup agent.** Its `pair_telegram` tool links to `https://<admin hostname>/pair/telegram/<agent id>`, a page behind the same Access login and owner check as the secure forms:
+- a `GET` shows a button, and pressing it is the owner's own yes;
+- the page's own `POST` (`Sec-Fetch-Site: same-origin`, or a matching `Origin`, form-encoded) runs `pairTelegram` and shows the `t.me` link;
+- without a connected bot, the page says to connect it first.
+
 A code pairs an account with the owner, not with one agent: any of the owner's Telegram bots accepts it, and the paired account reaches every agent.
 
 What a sender who isn't paired gets:
@@ -131,7 +136,7 @@ Form pages are HTML:
       Each text is cut to its first 6,000 characters. Vectors are kept per model, so changing the var means every note is embedded again.
    2. `channel-egress`, with its `SECRETS_KEY` and `--var INGRESS_ORIGIN:https://<ingress hostname>` (`docs/secrets.md`);
    3. `context-store`, with the vault's GitHub App values and secrets (`docs/context-store.md`). Without them it runs with the vault off. It calls `llm-gateway` for memory's embeddings and rerank;
-   4. `conversation-runtime`;
+   4. `conversation-runtime`, with `--var ADMIN_ORIGIN:https://<admin hostname>`, so the setup agent can link to the secure form and the pairing page ("Setup agent"). Later deploys need the same flag. Without it, the setup agent says it can't give those links;
    5. `ingress`, with `--domain <ingress hostname>`. Telegram's and GitHub's webhooks reach it there; like the admin API, it has no `workers.dev` URL. Later deploys need the same flag, and the webchat's Access flags once it is set up ("Webchat").
 2. **Create a self-hosted Access application** for the admin API's hostname, with a policy that allows only the owner. Do this before step 4: whoever passes Access and holds the token becomes the owner. Note the team domain (`https://<team>.cloudflareaccess.com`) and the application's AUD tag.
 3. **Keep the instance's values out of the repository.** The hostname and the Access values belong to one deployment, so they go in as flags when deploying (step 5), and `wrangler.jsonc` stays the same for every instance:
@@ -160,6 +165,45 @@ Form pages are HTML:
 7. **Keep the secret; delete the local copy.** Delete the file or shell variable that holds the token.
    - The Worker's `BOOTSTRAP_TOKEN` stays. `wrangler.jsonc` lists it in `secrets.required`, so `wrangler deploy` refuses to deploy without it, and deleting it would make every later deploy fail.
    - It is harmless where it is: `/bootstrap` answers `410` once an owner exists, and the token stops being accepted at the expiry it carries.
+
+## Setup agent
+
+Every instance has a built-in agent, `setup`, to configure Kelpie by talking to it: open `https://<ingress hostname>/webchat/?agent=setup` once the webchat is set up ("Webchat"). It guides a first setup: it creates the first agent, connects that agent's Telegram bot, and pairs the owner's Telegram account (Story 3.11, ADR-0013).
+
+- **Where it comes from.**
+  - A migration of the `Registry` adds it, on new instances and on ones bootstrapped before it.
+  - `createAgent` refuses its id.
+  - Its default prompt is a built-in persona. `configureAgent` can replace it, and the vault's persona does, as for any agent.
+  - **Before deploying it to an existing instance,** check with `listAgents` that no agent already uses the id `setup`. Such an agent would keep its name and gain the setup tools.
+- **Its tools** run the commands above, as the owner, through the agent (`via: agent:setup`), and only the setup agent has them:
+  - `list_agents`, `get_agent`, `create_agent` and `rename_agent` run directly;
+  - `configure_agent` and `connect_telegram` wait for the owner's confirmation (below);
+  - `pair_telegram` links to the pairing page ("Pairing").
+
+  The identity, time zone and vault commands stay on this API. `conversation-runtime` binds no `Directory`, which would make it and `ingress` bind each other. Of `channel-egress`, it binds only `SetupForms`, which opens a form and nothing more (`docs/secrets.md`).
+- **Confirmation.** A change to access, cost or an external account waits for the owner's yes, gated in code:
+  1. The first call doesn't run. After the agent's reply, Kelpie itself sends one more bubble, written from the change's validated input, not by the model: `Confirm: <the change>`, and a 6-character code.
+     - Invisible and control characters in the change are written out as `\u{…}`, so what the owner reads is all there is.
+     - A change too long for one bubble is refused before it is shown. Make it through this API instead.
+     - For `connect_telegram`, the change names the admin API's origin, so the owner can check where the form's link points.
+  2. The owner replies with just the code, on a line of its own, and the agent calls the same tool with the same input again. A message that only mentions the code, such as "don't do K7MPRX", or asks about it ("K7MPRX?"), is no yes.
+  3. A code confirms that one change, once. It lasts 10 minutes from the last time the agent asked for it.
+
+  What never confirms:
+  - another person's message;
+  - a tool's output;
+  - the model's replies, and what it passes to tools.
+
+  The model never sees a code before the owner types it. The bubble isn't part of the conversation's history, so it doesn't come back when the webchat reloads: asking the agent again shows it again.
+- **Secrets.** The bot's token goes into the secure form ("Secure forms"), never into the chat. If the owner pastes one in the chat anyway, it stays in the conversation: revoke it in BotFather and make a new one.
+- **Its context** is any agent's: the vault's persona and rules, recall, and the memory tools. A note in the vault could steer it toward a change that runs directly, such as creating or renaming an agent. The confirmed changes still need the owner's code.
+
+What the setup agent can't do, because it holds no Cloudflare token (ADR-0013):
+- deploy the Workers, in order, with their flags ("Setting it up");
+- set their secrets: the model keys, `SECRETS_KEY` and the bootstrap token (`docs/secrets.md`);
+- create the Access applications and the custom domains;
+- the first-run bootstrap itself;
+- Hyperdrive and Postgres, once a feature needs them (ADR-0015).
 
 ## Webchat
 

@@ -1,6 +1,7 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SetupForms } from "../src/index.ts";
 import { telegramWebhookUrl } from "../src/telegram-secret.ts";
 
 // The Worker runs in the test's isolate, so a stubbed global fetch stands in for the Bot API. It
@@ -49,6 +50,26 @@ async function connect(agentId: string) {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe("SetupForms", () => {
+  it("only opens a Telegram form, which the admin API's entrypoint then serves", async () => {
+    const form = await exports.SetupForms.createTelegramForm("sales");
+    if (!form.ok) throw new Error("form refused");
+    expect(await exports.ChannelForms.describeForm(form.token)).toEqual({
+      ok: true,
+      agentId: "sales",
+      kind: "telegram",
+    });
+    expect(await exports.SetupForms.createTelegramForm("Not An Agent")).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    // The setup agent's Worker binds it: it can't describe, redeem or register anything.
+    expect(
+      Object.getOwnPropertyNames(SetupForms.prototype).filter((name) => name !== "constructor"),
+    ).toEqual(["createTelegramForm"]);
+  });
 });
 
 describe("ChannelForms", () => {

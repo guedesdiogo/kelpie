@@ -71,6 +71,13 @@
       "when": 1791329281516,
       "tag": "0009_turn_access",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1791334120089,
+      "tag": "0010_confirmations",
+      "breakpoints": true
     }
   ]
 }

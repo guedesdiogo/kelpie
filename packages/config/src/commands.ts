@@ -10,7 +10,13 @@ import {
   type TimeZoneResult,
 } from "@kelpie/access";
 import type { ChannelFormsContract, ChannelId } from "@kelpie/channels";
-import { type AgentSettings, isAgentId, isAgentName, parseSettings } from "./settings.ts";
+import {
+  type AgentSettings,
+  isAgentId,
+  isAgentName,
+  parseSettings,
+  SETUP_AGENT_ID,
+} from "./settings.ts";
 
 /**
  * Who asked for a change, and through what: "admin-api", or "agent:<id>" for an agent's tool.
@@ -162,7 +168,8 @@ export function createConfigCommands(ports: ConfigPorts) {
     ): Promise<CommandResult<AgentSummary & { created: boolean }>> {
       if (!isOwner(actor)) return forbidden;
       const { id, name } = (input ?? {}) as { id?: unknown; name?: unknown };
-      if (!isAgentId(id) || !isAgentName(name)) return invalid;
+      // The setup agent exists on every instance; another agent with its id would get its tools.
+      if (!isAgentId(id) || id === SETUP_AGENT_ID || !isAgentName(name)) return invalid;
       const result = await ports.registry.add(id, name.trim(), actor);
       if (!result.ok) return result;
       return { ok: true, value: { id, name: name.trim(), created: result.created } };
