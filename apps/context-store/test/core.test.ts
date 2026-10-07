@@ -43,8 +43,23 @@ describe("Vault core", () => {
           state.storage.sql.exec("SELECT count(*) AS n FROM recall_counts").one().n,
       ),
     ).toBe(0);
-    // The budget is capped, as recall's is.
-    expect((await stub.core("kelpie", 1_000_000)).paths).toHaveLength(3);
+  });
+
+  it("caps the budget at 8,000 tokens, as recall's", async () => {
+    const long = (title: string) => pinned(title, "Longa. ".repeat(2_000));
+    replaceBackendForTesting(
+      new FakeVaultBackend({
+        "README.md": "# Vault",
+        "memory/notes/a.md": long("A"),
+        "memory/notes/b.md": long("B"),
+        "memory/notes/c.md": long("C"),
+      }),
+    );
+    replaceGatewayForTesting(null);
+    const core = await vault("core-cap").core("kelpie", 1_000_000);
+    expect(core.paths).toEqual(["memory/notes/a.md", "memory/notes/b.md"]);
+    expect(core.omitted).toBe(1);
+    expect(core.text.length).toBeLessThanOrEqual(8_000 * 4);
   });
 
   it("answers an empty core while the vault is off, and for an agent id that isn't one", async () => {

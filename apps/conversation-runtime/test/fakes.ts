@@ -145,6 +145,8 @@ export interface FakeWorld {
   core: string;
   /** While set, the core throws, as an unreachable Context Store would. */
   failCore: boolean;
+  /** How long each core request waits before it answers, in call order; none by default. */
+  coreDelays: number[];
 }
 
 export function fakeWorld(scripts: ModelScript[]): FakeWorld {
@@ -172,6 +174,7 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
     cores: [],
     core: "",
     failCore: false,
+    coreDelays: [],
     typing: 0,
     typingKept: 0,
     typingStopped: 0,
@@ -313,6 +316,8 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
       },
       async core(agentId, budgetTokens) {
         world.cores.push({ agentId, budgetTokens });
+        const delay = world.coreDelays.shift() ?? 0;
+        if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
         if (world.failCore) throw new Error(INJECTED_FAILURE);
         return {
           text: world.core,

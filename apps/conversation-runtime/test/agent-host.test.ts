@@ -111,6 +111,9 @@ describe("AgentHost", () => {
       settings: { memoryCore: true },
       promptVersion: 1,
     });
+    // The same value again changes nothing.
+    await stub.configure({ memoryCore: true }, owner);
+    expect((await stub.config()).promptVersion).toBe(1);
     await stub.configure({ memoryCore: false, tier: "medium" }, owner);
     expect((await stub.config()).promptVersion).toBe(2);
   });

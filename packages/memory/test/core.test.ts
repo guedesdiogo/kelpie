@@ -56,6 +56,7 @@ describe("the always-loaded core", () => {
           path: "agents/hermes/memory/profile/tom.md",
         }),
         note("Sem fixar"),
+        note("Fixado e expirado", { pinned: true, invalidAt: "2026-12-01" }),
         note("Expirado", {
           kind: "preference",
           path: "memory/profile/expirado.md",
@@ -95,6 +96,13 @@ describe("the always-loaded core", () => {
         expect(core.text.length).toBeLessThanOrEqual(500 * 4);
         expect(core.text).not.toContain("Longa.");
         expect(core.text).toContain("2 notes didn't fit.");
+        // A budget no note fits: nothing, rather than a block that only says so.
+        expect(coreBlock(index, { agentId: "kelpie", budgetTokens: 50, now: NOW })).toEqual({
+          text: "",
+          tokens: 0,
+          paths: [],
+          omitted: 3,
+        });
       },
     );
   });

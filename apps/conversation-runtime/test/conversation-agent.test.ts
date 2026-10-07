@@ -1531,6 +1531,46 @@ describe("ConversationAgent memory core", () => {
     });
   });
 
+  it("keeps no core from a turn interrupted while it loaded", async () => {
+    await configure("core-interrupted", { memoryCore: true });
+    const world = use(fakeWorld([reply("Ok."), reply("Ok de novo.")]));
+    world.core = CORE;
+    // The first turn's core answers late, after the next turn has kept its own.
+    world.coreDelays = [300];
+    const stub = agent("core-interrupted");
+    await stub.ingest(message("m1", "oi", { agentId: "core-interrupted" }));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.cores).toHaveLength(1));
+    await configure("core-interrupted", { systemPrompt: "Be brief." });
+    world.core = core("Com açúcar.");
+    await converse(stub, "core-interrupted", ["e agora?"]);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await converse(stub, "core-interrupted", ["e depois?"]);
+    expect(world.cores).toHaveLength(2);
+    expect(world.requests.at(-1)?.messages[0]).toEqual(world.requests[0]?.messages[0]);
+    const first = world.requests[0]?.messages[0];
+    expect(first?.role === "user" ? first.parts[0] : null).toEqual({
+      type: "text",
+      text: core("Com açúcar."),
+    });
+  });
+
+  it("never sends a blank core, nor one past its budget", async () => {
+    for (const [name, text] of [
+      ["core-empty", ""],
+      ["core-blank", " \n"],
+      ["core-too-big", "x".repeat(4_001)],
+    ] as const) {
+      await configure(name, { memoryCore: true });
+      const world = use(fakeWorld([reply("Ok.")]));
+      world.core = text;
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      await converse(agent(name), name, ["oi"]);
+      expect(world.cores, name).toHaveLength(1);
+      expect(world.requests[0]?.messages, name).toEqual([user("oi")]);
+    }
+  });
+
   it("goes without the core until the next refresh when the Context Store fails", async () => {
     await configure("core-fails", { memoryCore: true });
     const world = use(fakeWorld([reply("Ok."), reply("Ok de novo.")]));

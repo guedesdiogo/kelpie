@@ -115,6 +115,30 @@ afterEach(() => {
 });
 
 describe("a turn's tools", () => {
+  it("carries the memory core in every round of a turn (#112)", async () => {
+    const owner = { userId: "u-owner", role: "owner", via: "test" } as const;
+    expect(
+      await env.AGENT_HOST.getByName("tools-core").configure({ memoryCore: true }, owner),
+    ).toMatchObject({ ok: true });
+    const world = use(
+      fakeWorld([toolCalls({ name: "lookup", input: { q: "ana" } }), reply("Lisbon.")]),
+    );
+    const core = '<memory-c0de note="Always loaded.">\nCafé sem açúcar.\n</memory-c0de>';
+    world.core = core;
+    provide(world, { lookup: answer });
+    const stub = agent("tools-core");
+    await stub.ingest({ ...message("m1", "where does Ana live?"), agentId: "tools-core" });
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Lisbon."]));
+    expect(world.cores).toHaveLength(1);
+    const first = {
+      role: "user",
+      parts: [{ type: "text", text: core }, ...user("where does Ana live?").parts],
+    };
+    expect(world.requests[0]?.messages).toEqual([first]);
+    expect(world.requests[1]?.messages[0]).toEqual(first);
+  });
+
   it("runs the calls a reply asks for, round after round, then answers", async () => {
     const world = use(
       fakeWorld([

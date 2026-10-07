@@ -13,7 +13,7 @@ import {
 } from "./retrieve.ts";
 
 /** Where the owner's profile lives: what Kelpie concluded about the owner, and what they wrote. */
-export const PROFILE_ROOT = "memory/profile/";
+const PROFILE_ROOT = "memory/profile/";
 
 export interface CoreOptions {
   agentId: string;
@@ -79,8 +79,9 @@ export function coreBlock(index: MemoryIndex, options: CoreOptions): Core {
     loaded.push(path);
     left -= cost;
   }
+  // A block that only says nothing fit is no use, and the frame alone may pass a tiny budget.
+  if (entries.length === 0) return { ...empty, omitted };
   const parts = omitted > 0 ? [...entries, footer(omitted)] : entries;
-  if (parts.length === 0) return empty;
   const text = `${open}\n${parts.join("\n\n")}\n${close}`;
   return { text, tokens: Math.ceil(text.length / CHARS_PER_TOKEN), paths: loaded, omitted };
 }

@@ -709,12 +709,21 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       } else {
         // The person waits for this.
         if (this.#question() !== "") step("memory");
-        const [recalled] = await Promise.all([
+        const [recalled, core] = await Promise.all([
           this.#recall(settings),
-          this.#loadCore(turn.systemVersion, turn.checkpointId, settings),
+          this.#fetchCore(turn.systemVersion, turn.checkpointId, settings),
         ]);
         memory = recalled?.text ?? null;
         if (controller.signal.aborted || !this.#isRunning(turnId)) return;
+        // Kept only by a turn still running: an interrupted one's late answer could replace the
+        // core a newer turn already sent (#112).
+        if (core !== null && this.#core(turn.systemVersion, turn.checkpointId) === null) {
+          this.#set("core", {
+            version: turn.systemVersion,
+            checkpointId: turn.checkpointId,
+            text: core,
+          });
+        }
         // Kept with the turn, to be sent again unchanged on later requests (#137).
         this.#db
           .update(schema.turns)
@@ -1100,39 +1109,38 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   }
 
   /**
-   * Loads the always-loaded core (#112) once for a prompt version and checkpoint, and keeps it as
-   * it was sent: every request under the same pair carries it byte for byte, since a reply's
-   * reasoning is bound to everything sent before it (#137). With the core off, or when the Context
-   * Store fails, the pair goes without one: asking again later would change the prefix under a
-   * reply already given. A checkpoint or a new prompt version loads it again.
+   * The always-loaded core (#112) for a prompt version and checkpoint, or null when the pair has
+   * one already. The turn keeps it as it was sent: every request under the same pair carries it
+   * byte for byte, since a reply's reasoning is bound to everything sent before it (#137). With
+   * the core off, or when the Context Store fails, it is empty, and the pair goes without one:
+   * asking again later would change the prefix under a reply already given. A checkpoint or a new
+   * prompt version asks again.
    */
-  async #loadCore(
+  async #fetchCore(
     version: number,
     checkpointId: number | null,
     settings: AgentSettings,
-  ): Promise<void> {
-    if (this.#core(version, checkpointId) !== null) return;
-    let text = "";
-    if (settings.memoryCore ?? DEFAULT_SETTINGS.memoryCore) {
-      try {
-        const core = await this.#ports.core(this.#agentId(), CORE_BUDGET_TOKENS);
-        if (typeof core.text !== "string" || core.text.length > CORE_MAX_CHARS) {
-          throw new TypeError("the core answered past its budget");
-        }
-        console.log("conversation: core", {
-          notes: core.paths.length,
-          omitted: core.omitted,
-          tokens: core.tokens,
-        });
-        // Anthropic refuses blank text.
-        text = core.text.trim() === "" ? "" : core.text;
-      } catch (error) {
-        console.warn("conversation: core failed", { error: errorName(error) });
+  ): Promise<string | null> {
+    if (this.#core(version, checkpointId) !== null) return null;
+    // Settings stored before the core existed have no such field.
+    if (!(settings.memoryCore ?? DEFAULT_SETTINGS.memoryCore)) return "";
+    try {
+      const core = await this.#ports.core(this.#agentId(), CORE_BUDGET_TOKENS);
+      if (typeof core.text !== "string" || core.text.length > CORE_MAX_CHARS) {
+        throw new TypeError("the core answered past its budget");
       }
+      // Anthropic refuses blank text.
+      const text = core.text.trim() === "" ? "" : core.text;
+      console.log("conversation: core", {
+        notes: Array.isArray(core.paths) ? core.paths.length : 0,
+        omitted: Number(core.omitted) || 0,
+        tokens: Math.ceil(text.length / 4),
+      });
+      return text;
+    } catch (error) {
+      console.warn("conversation: core failed", { error: errorName(error) });
+      return "";
     }
-    // Loaded while the turn ran: the first answer for the pair is the one kept.
-    if (this.#core(version, checkpointId) !== null) return;
-    this.#set("core", { version, checkpointId, text });
   }
 
   /** The core kept for a prompt version and checkpoint, or null when none was loaded for them. */

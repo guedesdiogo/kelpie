@@ -201,6 +201,9 @@ Git keeps every version, so erasing content means rewriting the vault's history.
      It never touches git.
    - **Paths:** a path ending in `/` names a whole folder. Rows are matched by path, so a passage removed with `--replace-text` needs every file that held it named, or its folder.
    - **The answer** lists, in `stillInVault`, the named files the vault still has. After removing whole files, a path in that list means the rewrite didn't reach the default branch. After removing a passage, the file stays, as expected.
+   - **The always-loaded core** (#112): a conversation keeps the core it loaded until its next checkpoint. For every agent with `memoryCore` on, set it off and then on again (`/commands/configureAgent`).
+     - Each change starts a new prompt version.
+     - Every conversation then loads its core from the rebuilt index on its next turn.
 3. **Re-clone every device.** A device that still has the old history would push the content back: obsidian-git's pull doesn't notice a rewritten branch. Delete the vault's folder on each device and clone it again, or reset the device's branch to the rewritten one. Then run step 2 again, in case a device pushed before it was re-cloned.
 4. **Ask GitHub to drop its copies.** Pull requests (Kelpie's proposals included) and GitHub's cached views keep the old commits. GitHub removes them only through its support, as its guide to [removing sensitive data from a repository](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository) explains. Close Kelpie's open proposals that touched the content, and delete their branches.
 

@@ -239,7 +239,7 @@ The index is one SQLite database inside the Context Store's Durable Object ([ADR
 - **Rebuild:** dropping every derived table and replaying the vault's history gives the same index, row for row. That is tested.
   - Rebuilding from the head alone gives the same current notes, without their history.
   - Embeddings of content still in the history survive a rebuild: they are keyed by content, so they stay valid, and recomputing them costs model calls. Embeddings of content no longer in the history are deleted.
-- **Erasure** is the operator's job (ADR-0020 §4): rewrite the vault's git history, then rebuild the index. The rebuild drops every version, link and embedding of the erased text. Conversations keep the memory blocks their answered turns were sent with (#137), as they keep their history.
+- **Erasure** is the operator's job (ADR-0020 §4): rewrite the vault's git history, then rebuild the index. The rebuild drops every version, link and embedding of the erased text. Conversations keep the memory blocks their answered turns were sent with (#137), as they keep their history. They also keep the always-loaded core until it loads again; [context-store.md](context-store.md#erasing-content) says how to make it load again.
 - **Search:** current versions only by default. With `asOf`, it searches the versions the vault held at that instant. With `validAt`, it keeps only memories valid in the world at that instant. It returns 1 to 100 results, 10 by default.
 - **Entity lookup:** the notes that name any of a set of entity keys, current or as of an instant. An entity's own page, a note titled with the name that lists it, comes first, a global one before a scoped one. Each key weighs one over the number of notes that name it, so a rarer name says more. A name on more than 50 of the versions the lookup sees is left out: it singles nothing out. The weight and the cap count those versions only, so notes in other scopes, and a note's past versions, don't switch a name off (#146).
 - **Neighbours:** the current notes one step from a note: the notes it links to, then the pages of the entities it names, global ones first. A note it contradicts is what it replaced, so it isn't a neighbour.
@@ -357,6 +357,11 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - **Failure:** if the Context Store fails, or doesn't answer in 5 s, the conversation goes without the core until the next load. Asking again would change what an earlier reply was sent with.
   - **The Context Store** builds it from memory's index and counts no access, so carrying it into every conversation doesn't keep its notes from going cold.
   - **Logging:** the runtime logs how many notes went in, how many didn't fit and the tokens, never text.
+  - **What the model can change:**
+    - **It can't add a note to the core.** `memory_write` takes no `pinned`, and it puts a new memory in a kind folder, never in `profile/`.
+    - **It can rewrite a note already in the core,** by the note's path, under the owner's-word rule. An `explicit` memory can change any note, and a `deduced` or `inferred` one can change a note Kelpie wrote.
+    - **The risk:** an instruction injected into what the model reads could put text into the core of every later conversation.
+    - The owner accepted the model's `explicit` label for v1 (#149), and the daily report lists what Kelpie changed in the owner's notes. The core reaches every turn, though, so this is the risk to weigh before turning it on.
   - **Not yet:**
     - previews of links in core notes (#130);
     - notes pinned in a conversation's, area's or project's scope.
