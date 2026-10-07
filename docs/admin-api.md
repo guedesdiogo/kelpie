@@ -12,13 +12,16 @@ The owner's JSON API for the configuration commands (ADR-0013, Story 3.10). It r
    - it was issued to a person, because a service token has no `sub`.
 
    If the team domain or the AUD tag isn't configured, every request is refused.
-3. **The `Directory`.** It admits the token's `sub` as an identity from the `cloudflare-access` source, for the agent id `*`, which names no agent. Owner-only commands check the admitted role (ADR-0015). Emails are never compared.
+3. **The origin.** The Access cookie can go with another site's POST: its SameSite is the Access application's setting, `None` by default, and SameSite counts every hostname under the same registrable domain as one site anyway. So every JSON endpoint also refuses:
+   - a request from another origin, with `403 cross_origin`: a `Sec-Fetch-Site` other than `same-origin` or, without it, another `Origin`. Clients such as `cloudflared access curl` send neither, and pass;
+   - a request whose `Content-Type` isn't `application/json`, with `415 not_json`, even with no body. No HTML form can send that type, and another origin's `fetch` with it needs a CORS preflight, which Access refuses by default and the Worker answers with `404` and no CORS headers. Leave the Access application's CORS settings empty: if Access answered preflights for another origin, only the origin check would stand.
+4. **The `Directory`.** It admits the token's `sub` as an identity from the `cloudflare-access` source, for the agent id `*`, which names no agent. Owner-only commands check the admitted role (ADR-0015). Emails are never compared.
 
 No configuration command can add, enable or replace an Access identity. The first-run bootstrap adds the owner's, and a token-gated recovery replaces it ("Recovering access").
 
 ## Endpoints
 
-Every endpoint is a `POST` with a JSON body.
+Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`. Send the header even to a command that takes no input.
 
 | Endpoint | Input |
 |---|---|
@@ -48,14 +51,14 @@ Every endpoint is a `POST` with a JSON body.
 |---|---|
 | 400 | `invalid_input`, `invalid_identity`, `invalid_json`, `invalid_user` |
 | 401 | `unauthenticated` |
-| 403 | `forbidden`, `no_owner`, `invalid_bootstrap_token`, `invalid_recovery_token` |
+| 403 | `forbidden`, `no_owner`, `invalid_bootstrap_token`, `invalid_recovery_token`, `cross_origin` (sent from another origin's page) |
 | 404 | `unknown_agent`, `unknown_identity`, `unknown_user`, `not_found` |
 | 409 | `not_paired` (a pending identity; pair it instead), `not_connected` (the agent has no bot), `identity_taken` (a recovery to a login another user holds) |
-| 502 | `channel_refused` (Telegram refused, or couldn't be reached) |
-| 503 | `unavailable` (the secret store can't be reached), `not_configured` (`channel-egress` was deployed without ingress's origin, or the vault is off) |
 | 410 | `bootstrap_disabled`, `recovery_token_spent` |
 | 413 | `too_large` |
-| 503 | `unavailable` (Access's keys couldn't be loaded) |
+| 415 | `not_json` (a `Content-Type` other than `application/json`) |
+| 502 | `channel_refused` (Telegram refused, or couldn't be reached) |
+| 503 | `unavailable` (the secret store can't be reached, or Access's keys couldn't be loaded), `not_configured` (`channel-egress` was deployed without ingress's origin, or the vault is off) |
 
 Identity values in answers are masked.
 
@@ -85,7 +88,7 @@ No command takes an identity value to admit someone: the owner proves an account
 
 **From the setup agent.** Its `pair_telegram` tool links to `https://<admin hostname>/pair/telegram/<agent id>`, a page behind the same Access login and owner check as the secure forms:
 - a `GET` shows a button, and pressing it is the owner's own yes;
-- the page's own `POST` (`Sec-Fetch-Site: same-origin`, or a matching `Origin`, form-encoded) runs `pairTelegram` and shows the `t.me` link;
+- the page's own `POST` (`Sec-Fetch-Site: same-origin` or, without it, a matching `Origin`, form-encoded) runs `pairTelegram` and shows the `t.me` link. A `POST` with neither header is refused: current browsers send at least one;
 - without a connected bot, the page says to connect it first.
 
 A code pairs an account with the owner, not with one agent: any of the owner's Telegram bots accepts it, and the paired account reaches every agent.
@@ -107,7 +110,7 @@ The link expires after 15 minutes, works once, and closes after five refused tok
 
 Form pages are HTML:
 - they are sent with `Cache-Control: no-store`, `Referrer-Policy: same-origin` and a Content-Security-Policy that forbids framing and scripts;
-- a submission must come from the page itself (`Sec-Fetch-Site: same-origin`, or a matching `Origin`) and be form-encoded;
+- a submission must come from the page itself (`Sec-Fetch-Site: same-origin` or, without it, a matching `Origin`) and be form-encoded. A `POST` with neither header is refused: current browsers send at least one;
 - no page repeats the token.
 
 ## Setting it up

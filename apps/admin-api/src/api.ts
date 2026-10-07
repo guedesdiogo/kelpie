@@ -121,6 +121,16 @@ export async function handle(request: Request, deps: AdminDeps): Promise<Respons
     console.warn("admin-api: request refused", { reason: identity.reason });
     return refuse(401, "unauthenticated");
   }
+  // The Access cookie may go with another site's POST (its SameSite is the Access application's
+  // setting), so a page elsewhere must not be able to send a command: no foreign origin, and only
+  // `application/json`, which no form can send and no other origin can `fetch` without a preflight.
+  // Only here does a request with no `Origin` pass: `cloudflared access curl` sends none (#169).
+  const foreign = !isSameOriginSubmission(request, { allowNoOrigin: true });
+  if (foreign || !isJson(request)) {
+    const reason = foreign ? "cross_origin" : "not_json";
+    console.warn("admin-api: request refused", { reason });
+    return refuse(foreign ? 403 : 415, reason);
+  }
 
   const body = await readJson(request);
   if (!body.ok) return refuse(body.status, body.reason);
@@ -215,15 +225,31 @@ async function handlePairing(
 }
 
 /**
- * Whether a POST came from the form's own page. Browsers say so in `Sec-Fetch-Site`; without it,
- * a foreign `Origin` is refused. (The page's referrer policy is `same-origin`, so the browser
- * sends the real origin: under `no-referrer` it would send `null`.)
+ * Whether a POST came from this origin's own pages. Browsers say so in `Sec-Fetch-Site`; without
+ * it, the `Origin` must be this origin's. Current browsers send at least one of them on a POST, so a
+ * request with neither came from no page, and passes only with `allowNoOrigin`: a client such as
+ * curl.
+ * (The form pages' referrer policy is `same-origin`, so the browser sends the real origin: under
+ * `no-referrer` it would send `null`.)
  */
-function isSameOriginSubmission(request: Request): boolean {
+function isSameOriginSubmission(
+  request: Request,
+  options: { allowNoOrigin?: boolean } = {},
+): boolean {
   const site = request.headers.get("sec-fetch-site");
   if (site !== null) return site === "same-origin";
   const origin = request.headers.get("origin");
-  return origin === null || origin === new URL(request.url).origin;
+  if (origin === null) return options.allowNoOrigin ?? false;
+  return origin === new URL(request.url).origin;
+}
+
+/**
+ * Whether the media type is exactly `application/json`, parameters aside. A substring match would
+ * take `text/plain;application/json`, which a page elsewhere can send without a preflight.
+ */
+function isJson(request: Request): boolean {
+  const type = request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+  return type === "application/json";
 }
 
 async function run(
