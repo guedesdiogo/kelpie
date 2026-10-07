@@ -320,6 +320,7 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - **`memory_write(title, body, kind, level, …)`:** saves one memory through the Context Store's single writer.
     - **A new memory** goes where its title puts it, an event under its `validFrom` date, which it needs. The path gets a number when another note holds it.
     - **The owner's word stays** (#149): a `deduced` or `inferred` memory can't change a note the person stated: one with `level: explicit`, or one whose current version Kelpie didn't write, whatever its level, since the owner wrote or edited it. The tool asks the model to save it as a new note.
+    - **The core's notes stay the owner's** (#168): no memory, at any level, changes a note the always-loaded core carries, whether or not the core is on. Those are the notes pinned in the global scope or the agent's own, and the notes in the owner's or the agent's `profile/` folder. The tool asks the model to save a new note.
       - **A merge counts as the owner's** (#160): when Kelpie's queued write merges into an edit the owner made meanwhile, the version is Kelpie's commit, and its links get no preview (#126), but it holds the owner's lines, so the rule guards it until Kelpie writes the note anew.
       - **What the rule guards against:** an honest model labelling its own conclusion as such.
       - **What it doesn't guard against:** the label is the model's own. An instruction injected into what the model reads could have it claim `explicit` and overwrite the note. The owner accepted that for v1 (#149): git keeps the old version, and the daily report lists every note of the owner's that Kelpie changed.
@@ -367,9 +368,7 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - **Logging:** the runtime logs how many notes went in, how many didn't fit and the tokens, never text.
   - **What the model can change:**
     - **It can't add a note to the core.** `memory_write` takes no `pinned`, and it puts a new memory in a kind folder, never in `profile/`.
-    - **It can rewrite a note already in the core,** by the note's path, under the owner's-word rule. An `explicit` memory can change any note, and a `deduced` or `inferred` one can change a note Kelpie wrote.
-    - **The risk:** an instruction injected into what the model reads could put text into the core of every later conversation.
-    - The owner accepted the model's `explicit` label for v1 (#149), and the daily report lists what Kelpie changed in the owner's notes. The core reaches every turn, though, so this is the risk to weigh before turning it on.
+    - **It can't rewrite a note already in the core** (#168): `memory_write` refuses a pinned note or a profile note at any level. An injected instruction can't put text into every later conversation's core that way.
   - **Not yet:**
     - previews of links in core notes (#130);
     - notes pinned in a conversation's, area's or project's scope.

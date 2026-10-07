@@ -3,6 +3,7 @@ import { EMBEDDING_INPUT_CHARS, type EmbedOutcome } from "@kelpie/llm";
 import {
   bodyWithoutHeading,
   coreBlock,
+  coreCarries,
   decideWrite,
   foldKey,
   instantOf,
@@ -1382,8 +1383,9 @@ export class Vault extends DurableObject<VaultEnv> {
    *   agent's own scope when the turn sees every scope, or to a scope the turn lists.
    * - **No news:** the same version again, queued or committed, at its path or a numbered one, or
    *   a twin `decideWrite` finds, is `unchanged`, so a retry writes nothing.
-   * - **Refused:** session pages, which the runtime writes, and merge conflict markers; and a
-   *   `deduced` or `inferred` memory aimed at a note that holds the owner's word (`owners_word`, #149).
+   * - **Refused:** session pages, which the runtime writes, and merge conflict markers; a
+   *   `deduced` or `inferred` memory aimed at a note that holds the owner's word (`owners_word`, #149);
+   *   and any memory aimed at a note the always-loaded core carries (`core_note`, #168).
    * - **The rules decide:** ADR-0009 wants the qualifier measured before it acts, so it is asked
    *   only in the shadow, after the rules add a memory, and its action is logged (#149).
    * Titles, bodies, abstracts and entities lose their secrets first. The path is chosen and the
@@ -1525,6 +1527,11 @@ export class Vault extends DurableObject<VaultEnv> {
         for (let attempt = 0; attempt < 3 && target === null; attempt += 1) {
           const shown = shownAt(found.path);
           if (shown.text === null) return { ok: false, reason: "not_found" };
+          // The always-loaded core carries it (#112): the owner changes it, never the agent (#168).
+          const pinned = found.pinned || shown.note?.pinned === true;
+          if (coreCarries({ path: found.path, scope: found.scope, pinned }, agentId)) {
+            return { ok: false, reason: "core_note" };
+          }
           if (shown.note && memory.level !== "explicit" && this.#ownersWord(shown.note)) {
             return { ok: false, reason: "owners_word" };
           }

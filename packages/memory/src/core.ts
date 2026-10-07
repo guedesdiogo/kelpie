@@ -32,6 +32,30 @@ export interface Core {
   omitted: number;
 }
 
+/**
+ * Which of the core's groups carries a note for an agent, in the core's order, or null: 0 for a
+ * note pinned in the global scope or the agent's own, 1 for the owner's profile, 2 for the agent's
+ * self-model. A note in two groups is in the first.
+ */
+function coreGroup(
+  note: { path: string; scope: string; pinned: boolean },
+  agentId: string,
+): 0 | 1 | 2 | null {
+  const own = `agent/${agentId}` as const;
+  if (note.pinned && (note.scope === "global" || note.scope === own)) return 0;
+  if (note.path.startsWith(PROFILE_ROOT)) return 1;
+  if (note.path.startsWith(`${scopeRoot(own)}/profile/`)) return 2;
+  return null;
+}
+
+/** Whether the always-loaded core carries a note for an agent, whether it's on or not (#168). */
+export function coreCarries(
+  note: { path: string; scope: string; pinned: boolean },
+  agentId: string,
+): boolean {
+  return coreGroup(note, agentId) !== null;
+}
+
 const footer = (count: number) => `${count} ${count === 1 ? "note" : "notes"} didn't fit.`;
 
 /**
@@ -43,17 +67,12 @@ const footer = (count: number) => `${count} ${count === 1 ? "note" : "notes"} di
  */
 export function coreBlock(index: MemoryIndex, options: CoreOptions): Core {
   const empty: Core = { text: "", tokens: 0, paths: [], omitted: 0 };
-  const own = `agent/${options.agentId}` as const;
-  const selfRoot = `${scopeRoot(own)}/profile/`;
   const notes = index
     .lifecycleNotes()
     .filter((note) => note.invalidAt === null || note.invalidAt > options.now);
-  const ordered = [
-    ...notes.filter((note) => note.pinned && (note.scope === "global" || note.scope === own)),
-    ...notes.filter((note) => note.path.startsWith(PROFILE_ROOT)),
-    ...notes.filter((note) => note.path.startsWith(selfRoot)),
-  ].map((note) => note.path);
-  const paths = [...new Set(ordered)];
+  const paths = ([0, 1, 2] as const).flatMap((group) =>
+    notes.filter((note) => coreGroup(note, options.agentId) === group).map((note) => note.path),
+  );
   if (paths.length === 0) return empty;
 
   const id = blockId();
