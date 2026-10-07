@@ -81,7 +81,7 @@ export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
     const events = toNdjsonStream(
       router.stream(tier, request, { signal: controller.signal }),
       () => controller.abort(),
-      (error) => logFailure(error, this.env),
+      (error) => logFailure("generate", error),
     );
     return new Generation(events, controller);
   }
@@ -201,7 +201,7 @@ export async function qualifyWith(
     const signal = AbortSignal.timeout(timeout);
     return { ok: true, result: await qualifier.qualify(state, questions, { signal }) };
   } catch (error) {
-    logFailure(error, env);
+    logFailure("qualify", error);
     return { ok: false, reason: "failed" };
   }
 }
@@ -256,20 +256,25 @@ export function providerConfig(apiKey: string, baseURL: string, gatewayToken?: s
   };
 }
 
-/** Logs a failed call with the configured secrets redacted. Aborts are expected and not logged. */
-function logFailure(error: unknown, env: GatewayEnv): void {
-  if (error instanceof LlmError && error.code === "aborted") return;
-  let text = error instanceof LlmError ? `${error.code}: ${error.message}` : String(error);
-  const secrets = [
-    env.ANTHROPIC_API_KEY,
-    env.OPENAI_API_KEY,
-    env.AI_GATEWAY_TOKEN,
-    env.TYPESAFE_API_KEY,
-  ];
-  for (const secret of secrets) {
-    if (secret) text = text.replaceAll(secret, "[redacted]");
+/**
+ * Logs a failed call by its kind, status and name, never by its message: providers build theirs from
+ * the response, which can quote the prompt (issue #132). Aborts are expected and not logged.
+ */
+function logFailure(call: "generate" | "qualify", error: unknown): void {
+  if (error instanceof LlmError) {
+    if (error.code === "aborted") return;
+    console.error(`llm-gateway: ${call} failed`, {
+      code: error.code,
+      retryable: error.retryable,
+      ...(error.status === undefined ? {} : { status: error.status }),
+    });
+    return;
   }
-  console.error(`llm-gateway: ${text}`);
+  const status = (error as { status?: unknown } | null)?.status;
+  console.error(`llm-gateway: ${call} failed`, {
+    error: errorName(error),
+    ...(typeof status === "number" ? { status } : {}),
+  });
 }
 
 export default {
