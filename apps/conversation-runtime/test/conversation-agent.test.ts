@@ -43,7 +43,17 @@ function message(
     timeZone = null as string | null,
   } = {},
 ) {
-  return { agentId, providerMessageId: id, userId, text, destination, sentAt, timeZone };
+  return {
+    agentId,
+    providerMessageId: id,
+    userId,
+    role: "owner" as const,
+    chatType: "direct" as const,
+    text,
+    destination,
+    sentAt,
+    timeZone,
+  };
 }
 
 async function configure(agentId: string, changes: Partial<AgentSettings>) {
@@ -1229,6 +1239,68 @@ describe("ConversationAgent memory", () => {
     "</memory-abc>",
   ].join("\n");
   const options = { scopes: "all", budgetTokens: 1_000, qualifier: "clef" };
+  /** What any turn but the owner's in a direct chat may see: its own conversation (#131). */
+  const narrow = { ...options, scopes: ["conversation/telegram-chat-1"] };
+
+  it("asks for every scope only for the owner in a direct chat, and fails closed", async () => {
+    const world = use(fakeWorld(Array.from({ length: 8 }, () => reply("Ok."))));
+    const cases: [Record<string, unknown>, unknown][] = [
+      [{}, options],
+      [{ chatType: "group" }, narrow],
+      [{ role: "member" }, narrow],
+      [{ role: "admin" }, narrow],
+      // As an ingress from before #131 sends it, and values no ingress sends.
+      [{ chatType: undefined }, narrow],
+      [{ chatType: "dm" }, narrow],
+      [{ role: undefined, chatType: undefined }, narrow],
+      [{ role: "root", chatType: "dm" }, narrow],
+    ];
+    for (const [i, [overrides, expected]] of cases.entries()) {
+      const stub = agent(`memory-scopes-${i}`);
+      await stub.ingest({ ...message("m1", "onde a Ana mora?"), ...overrides });
+      await stub.flush();
+      await vi.waitFor(() => expect(world.recalls).toHaveLength(i + 1));
+      expect(world.recalls[i]?.options, JSON.stringify(overrides)).toEqual(expected);
+    }
+  });
+
+  it("takes a turn's least-privileged author, whoever wrote last, and each turn on its own", async () => {
+    const world = use(fakeWorld([reply("Ok."), reply("Ok."), reply("Ok.")]));
+    const stub = agent("memory-scopes-mixed");
+    const turn = async (...messages: Record<string, unknown>[]) => {
+      const before = world.recalls.length;
+      for (const sent of messages) await stub.ingest(sent as ReturnType<typeof message>);
+      await stub.flush();
+      await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).toBe("delivered"));
+      expect(world.recalls).toHaveLength(before + 1);
+      return world.recalls.at(-1)?.options;
+    };
+    const guest = { ...message("m1", "e o Bruno?", { userId: "u-guest" }), role: "member" };
+    expect(await turn(guest, message("m2", "onde a Ana mora?"))).toEqual(narrow);
+    const unknown = { ...message("m3", "e a Patrícia?"), role: undefined };
+    expect(await turn(unknown, message("m4", "e o Theo?"))).toEqual(narrow);
+    expect(await turn(message("m5", "e a Carla?"))).toEqual(options);
+  });
+
+  it("answers an interrupted turn's messages with their access too, as its question does", async () => {
+    const world = use(fakeWorld([hang(), reply("Ok.")]));
+    const stub = agent("memory-scopes-interrupted");
+    await stub.ingest({
+      ...message("m1", "onde a Ana mora?", { userId: "u-guest" }),
+      role: "member",
+    });
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(1));
+
+    // The owner interrupts: the next turn answers the guest's question too.
+    await stub.ingest(message("m2", "e o Bruno?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Ok."]));
+    expect(world.recalls.at(-1)).toMatchObject({
+      question: "onde a Ana mora?\ne o Bruno?",
+      options: narrow,
+    });
+  });
 
   it("sends a turn's memories with its request, and again in place on later ones", async () => {
     const world = use(fakeWorld([reply("Em Lisboa."), reply("Não sei."), reply("Também não.")]));

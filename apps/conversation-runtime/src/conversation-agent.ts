@@ -1,6 +1,7 @@
 import { canonicalTimeZone } from "@kelpie/access";
 import { CAPABILITIES, type ChannelCapabilities, type SendOutcome } from "@kelpie/channels";
 import { type Actor, type AgentConfig, type AgentSettings, DEFAULT_SETTINGS } from "@kelpie/config";
+import type { RecallOptions } from "@kelpie/context-store/contract";
 import {
   deliveredReply,
   planDelivery,
@@ -16,7 +17,6 @@ import {
   type PauseResult,
   type PauseTarget,
   WEBCHAT_ADMISSION_HEADER,
-  type WebchatAdmission,
 } from "@kelpie/conversation/contract";
 import type {
   AssistantMessage,
@@ -79,14 +79,22 @@ import {
   type ToolContext,
   visible,
 } from "./tools.ts";
+import { chatTypeOf, leastAccess, roleOf, type TurnAccess, turnScopes } from "./turn-access.ts";
 import {
   parseAdmission,
   parseClientFrame,
   type ServerFrame,
   type ShownMessage,
+  type SocketAdmission,
   shownText,
   webchatEgress,
 } from "./webchat.ts";
+
+/**
+ * A message as `ingest` takes it: from ingress, which may run another version, or from a webchat
+ * socket opened before #131. Its role and chat type are checked there; anything unknown is null.
+ */
+type Received = Omit<InboundMessage, "role" | "chatType"> & { role?: unknown; chatType?: unknown };
 
 /** The most history rows a webchat socket is shown when it opens. */
 const WEBCHAT_REPLAY_ROWS = 50;
@@ -261,7 +269,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   }
 
   override async onMessage(connection: Connection, message: WSMessage): Promise<void> {
-    const admission = connection.state as WebchatAdmission | null;
+    const admission = connection.state as SocketAdmission | null;
     const frame = parseClientFrame(message);
     if (!admission || !frame) return;
     if (frame.type === "typing") {
@@ -280,6 +288,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       // The page picks the id, so a resend after a reconnect is deduplicated like any retry.
       providerMessageId: `${WEBCHAT_ID_PREFIX}${frame.id}`,
       userId: admission.userId,
+      role: admission.role,
+      chatType: admission.chatType,
       text: frame.text,
       destination: { channel: "webchat", threadId: admission.userId },
       sentAt: this.#ports.now(),
@@ -297,7 +307,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    * Accepts one message from `ingress`. Nothing here waits on another object before the message is
    * stored and the turn in flight interrupted, so concurrent messages can't interleave there.
    */
-  async ingest(message: InboundMessage): Promise<IngestResult> {
+  async ingest(message: Received): Promise<IngestResult> {
     const now = this.#ports.now();
     if (message.text.length > LIMITS.maxTextLength)
       return { status: "rejected", reason: "too_long" };
@@ -319,6 +329,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         receivedAt: now,
         sentAt,
         stamp,
+        role: roleOf(message.role),
+        chatType: chatTypeOf(message.chatType),
       })
       .onConflictDoNothing({ target: schema.inbound.providerMessageId })
       .returning({ id: schema.inbound.id })
@@ -425,6 +437,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     await this.#cancelFlushSchedule();
     this.#set("resumedAt", null);
     const pending = this.#pendingInbound();
+    const access = leastAccess([...pending, ...this.#unansweredAccess()]);
     const now = this.#ports.now();
     const checkpointId = this.#latestCheckpoint()?.id ?? null;
     const turnId = this.#db.transaction((tx) => {
@@ -437,6 +450,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           systemVersion: promptVersion,
           checkpointId,
           settings,
+          ...access,
           createdAt: now,
         })
         .returning({ id: schema.turns.id })
@@ -715,7 +729,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       } else {
         // The person waits for this.
         if (this.#question() !== "") step("memory");
-        const recalled = await this.#recall(settings);
+        const recalled = await this.#recall(settings, turnScopes(turn, destination));
         memory = recalled?.text ?? null;
         if (controller.signal.aborted || !this.#isRunning(turnId)) return;
         // Kept with the turn, to be sent again unchanged on later requests (#137).
@@ -801,7 +815,12 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    * reply, with every round's usage, or null once the turn stopped.
    */
   async #loop(
-    turn: { id: number; systemVersion: number; checkpointId: number | null; usage: Usage[] | null },
+    turn: {
+      id: number;
+      systemVersion: number;
+      checkpointId: number | null;
+      usage: Usage[] | null;
+    } & TurnAccess,
     controller: AbortController,
     settings: AgentSettings,
     memory: string | null,
@@ -907,13 +926,11 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           continue;
         }
         if (!context) {
-          const actor = this.#actor(turn.id, agentId);
+          const actor = this.#actor(turn, agentId);
           context = {
             actor,
             agentId,
-            // Ingress admits only direct chats, and `Directory.admit` only the owner (ADR-0015), who
-            // may see every scope; #131 brings the turn's role and chat type.
-            scopes: "all",
+            scopes: turnScopes(turn, this.#destination()),
             qualifier: settings.qualifier,
             turn: String(turn.id),
             source: this.#source(),
@@ -993,19 +1010,20 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   }
 
   /**
-   * Who the turn's calls act for: its latest author, as ingress admitted them, through the agent.
-   * Only owners are admitted for now (ADR-0015); #131 brings the role onto the turn.
+   * Who the turn's calls act for: its latest author, through the agent, with the turn's
+   * least-privileged role (#131). A turn without one acts as a member, whom owner-only commands
+   * refuse (ADR-0015).
    */
-  #actor(turnId: number, agentId: string): Actor {
+  #actor(turn: { id: number } & TurnAccess, agentId: string): Actor {
     const author = this.#db
       .select({ userId: schema.history.userId })
       .from(schema.history)
-      .where(and(eq(schema.history.turnId, turnId), eq(schema.history.role, "user")))
+      .where(and(eq(schema.history.turnId, turn.id), eq(schema.history.role, "user")))
       .orderBy(desc(schema.history.id))
       .limit(1)
       .get();
     if (!author?.userId) throw new Error("The turn has no author");
-    return { userId: author.userId, role: "owner", via: `agent:${agentId}` };
+    return { userId: author.userId, role: turn.role ?? "member", via: `agent:${agentId}` };
   }
 
   /**
@@ -1181,15 +1199,16 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    * slow store, an answer past the budget or nothing found leaves the turn without memory. Logs
    * counts only, never text.
    */
-  async #recall(settings: AgentSettings): Promise<{ text: string; kelpieNotes: string[] } | null> {
+  async #recall(
+    settings: AgentSettings,
+    scopes: RecallOptions["scopes"],
+  ): Promise<{ text: string; kelpieNotes: string[] } | null> {
     const started = this.#ports.now();
     try {
       const question = this.#question();
       if (question === "") return null;
       const recalled = await this.#ports.recall(this.#agentId(), question, {
-        // Ingress admits only direct chats, and `Directory.admit` only the owner (ADR-0015), who
-        // may see every scope.
-        scopes: "all",
+        scopes,
         budgetTokens: RECALL_BUDGET_TOKENS,
         qualifier: settings.qualifier,
       });
@@ -1220,8 +1239,20 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    * Only the newest RECALL_QUESTION_CHARS go. Empty when no line is worth a lookup.
    */
   #question(): string {
-    // The last reply the person saw: a reply that called tools answered nothing yet.
-    const lastReply =
+    const lines = this.#db
+      .select({ message: schema.history.message })
+      .from(schema.history)
+      .where(gt(schema.history.id, this.#lastSeenReply()))
+      .orderBy(asc(schema.history.id))
+      .all()
+      .flatMap(({ message }) => withoutTypedStamps(messageText(message)).split("\n"))
+      .filter(needsMemory);
+    return newest(lines.join("\n"), RECALL_QUESTION_CHARS);
+  }
+
+  /** The history row of the last reply the person saw: a reply that called tools answered nothing yet. */
+  #lastSeenReply(): number {
+    return (
       this.#db
         .select({ id: schema.history.id, message: schema.history.message })
         .from(schema.history)
@@ -1229,16 +1260,21 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         .orderBy(desc(schema.history.id))
         .limit(QUESTION_REPLY_SCAN)
         .all()
-        .find(({ message }) => seen(message))?.id ?? 0;
-    const lines = this.#db
-      .select({ message: schema.history.message })
-      .from(schema.history)
-      .where(gt(schema.history.id, lastReply))
-      .orderBy(asc(schema.history.id))
-      .all()
-      .flatMap(({ message }) => withoutTypedStamps(messageText(message)).split("\n"))
-      .filter(needsMemory);
-    return newest(lines.join("\n"), RECALL_QUESTION_CHARS);
+        .find(({ message }) => seen(message))?.id ?? 0
+    );
+  }
+
+  /**
+   * The access of earlier turns whose messages no reply the person saw has answered yet. A new turn
+   * answers them too, as its question does (#131), so it takes their access as well.
+   */
+  #unansweredAccess(): TurnAccess[] {
+    return this.#db
+      .selectDistinct({ role: schema.turns.role, chatType: schema.turns.chatType })
+      .from(schema.turns)
+      .innerJoin(schema.history, eq(schema.history.turnId, schema.turns.id))
+      .where(and(eq(schema.history.role, "user"), gt(schema.history.id, this.#lastSeenReply())))
+      .all();
   }
 
   /**

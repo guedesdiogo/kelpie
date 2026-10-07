@@ -73,6 +73,8 @@ describe("the webchat's socket", () => {
     expect(fakes.connect).toHaveBeenCalledWith("assistant:webchat:u-owner", {
       agentId: "assistant",
       userId: "u-owner",
+      role: "owner",
+      chatType: "direct",
       timeZone: null,
     });
   });
@@ -123,6 +125,8 @@ describe("the webchat's socket", () => {
     const response = await connectWebchat(env, "assistant:webchat:u-owner", {
       agentId: "assistant",
       userId: "u-owner",
+      role: "owner",
+      chatType: "direct",
       timeZone: "America/Sao_Paulo",
     });
     const socket = response.webSocket;
@@ -136,6 +140,8 @@ describe("the webchat's socket", () => {
     expect(JSON.parse(seen[WEBCHAT_ADMISSION_HEADER] ?? "null")).toEqual({
       agentId: "assistant",
       userId: "u-owner",
+      role: "owner",
+      chatType: "direct",
       timeZone: "America/Sao_Paulo",
     });
     expect(Object.keys(seen).sort()).toEqual([WEBCHAT_ADMISSION_HEADER, "upgrade"].sort());

@@ -244,7 +244,7 @@ The index is one SQLite database inside the Context Store's Durable Object ([ADR
 - **Entity lookup:** the notes that name any of a set of entity keys, current or as of an instant. An entity's own page, a note titled with the name that lists it, comes first, a global one before a scoped one. Each key weighs one over the number of notes that name it, so a rarer name says more. A name on more than 50 of the versions the lookup sees is left out: it singles nothing out. The weight and the cap count those versions only, so notes in other scopes, and a note's past versions, don't switch a name off (#146).
 - **Neighbours:** the current notes one step from a note: the notes it links to, then the pages of the entities it names, global ones first. A note it contradicts is what it replaced, so it isn't a neighbour.
 - **Scopes:** search, entity lookup, neighbours and a note's links can be limited to a set of scopes. Without one they see every scope. With one, links resolve among the notes in it, and a note outside it has no neighbours (#150).
-  - **Residual, full-text ranking:** search ranks with bm25 statistics from the whole index, other scopes and past versions included, so notes outside the scopes can reorder the hits inside them. Revisit when scoped recall (#131) separates people who don't trust each other, such as a group with outsiders ([#152](https://github.com/guedesdiogo/kelpie/issues/152)).
+  - **Residual, full-text ranking:** search ranks with bm25 statistics from the whole index, other scopes and past versions included, so notes outside the scopes can reorder the hits inside them. Since #131 a turn other than the owner's direct chat sees only its own conversation, but only the owner is admitted, so the hits it ranks are the owner's own. Revisit when someone else is admitted (#60), such as a group with outsiders ([#152](https://github.com/guedesdiogo/kelpie/issues/152)).
   - **Residual, unscoped reads:** backlinks, history, a path's current version, a version by commit and a note's entities take no scopes, and a note's links given scopes don't check the note itself. Recall and the memory tools pass them only notes they already found within the scopes; the lifecycle report reads the whole vault on purpose.
 - **A new schema version** drops the derived tables and starts empty, keeping the embeddings. The index then reports no last commit, which tells the sync to replay the vault from the start. Version 2 added the folded title.
 
@@ -284,7 +284,14 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   Kelpie's judge is the agent's qualifier, asked one yes-or-no question per note in one call, with the notes marked as data, not instructions.
 - **In a turn:** the conversation runtime asks once per turn, when the person has finished.
   - **The question** is the lines of every message since the last reply, even a partial one, without their time stamps. Lines the gate skips, such as a bare acknowledgement, are left out, and a turn with nothing else left skips the lookup. Only the newest 2,000 characters go.
-  - **Scopes and budget:** it asks for all scopes, since ingress admits only the owner's direct chats ([ADR-0015](adr/0015-single-player-first.md)). The budget is the slice's 1,000 tokens, and the agent's qualifier reranks.
+  - **Scopes** come from who wrote and where (#131):
+    - **The owner in a direct chat** sees every scope ([ADR-0015](adr/0015-single-player-first.md)).
+    - **Any other turn** sees only its own conversation's scope, where its session pages go: the memory every participant may see ([ADR-0004](adr/0004-access-control.md)). That is a group, a role other than owner, or a role or chat type that ingress didn't name or the runtime doesn't know.
+    - **A turn with several authors** gets the least privileged of them, and keeps it for its retries. That includes the authors of an interrupted turn whose messages it answers, since its question reads every line since the last reply the person saw.
+    - **Today** ingress admits only the owner's direct chats, so the narrow set is reached only when a role is missing:
+      - a message pending, or a turn running, when migration 0009 runs, for that one turn;
+      - a webchat socket that an ingress from before #131 admitted, until the page reconnects. Deploying the runtime disconnects every socket ([Durable Objects](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)), so this lasts only while ingress runs an older version than the runtime.
+  - **Budget:** the slice's 1,000 tokens, and the agent's qualifier reranks.
   - **Expired notes** (#111) are left out: those whose `invalid_at` has passed.
     - A note without `invalid_at` never expires, and one that becomes valid later stays, so future plans are still found.
     - A question that gives a date (`asOf`, `validAt`) or asks how things were brings them back. The cues are whole words, in Portuguese and English: "antes", "costumava", "morava", "ex", "used to", "back then", and the past-conversation cues above.
@@ -309,7 +316,7 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - **`memory_read(path, offset)`:** a note of memory's index, a page at a time, each page under 9,500 characters, fence included.
     - A page is never cut inside an emoji, and says where the next one starts.
     - The first page also lists the note's links, resolved among the notes the scopes allow, up to 50 within 2,000 characters, and counts as one access.
-  - **Scopes and the qualifier** come from the turn, never from the model. A note outside the scopes, or outside memory's index (persona, rules, skills, root files), gets the same "not found" as a missing one.
+  - **Scopes and the qualifier** come from the turn, never from the model: the same scopes as its recall. The calls act for the turn's latest author with the turn's role, and a turn without one acts as a member. A note outside the scopes, or outside memory's index (persona, rules, skills, root files), gets the same "not found" as a missing one.
   - **`memory_write(title, body, kind, level, …)`:** saves one memory through the Context Store's single writer.
     - **A new memory** goes where its title puts it, an event under its `validFrom` date, which it needs. The path gets a number when another note holds it.
     - **The owner's word stays** (#149): a `deduced` or `inferred` memory can't change a note the person stated: one with `level: explicit`, or one whose current version Kelpie didn't write, whatever its level, since the owner wrote or edited it. The tool asks the model to save it as a new note.
@@ -323,7 +330,7 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
       - its pin and evergreen flag.
 
       The turn's source joins the note's sources, 20 at most. A carried value the writer can't take, such as a source with a tab, is dropped rather than refusing the update. A carried `invalid_at` can't be cleared, only replaced.
-    - **Where it can write:** any note the turn sees, for a new version. A new memory goes to the owner's global memory by default, or to the agent's own scope, when the turn sees every scope. When the turn lists its scopes, a new memory goes only to those (#131 will revisit this).
+    - **Where it can write:** any note the turn sees, for a new version. A new memory goes to the owner's global memory by default, or to the agent's own scope, when the turn sees every scope. When the turn lists its scopes, a new memory goes only to those. A turn that sees only its own conversation (#131) saves a new memory there unless the model names a scope, and a refusal says where it can save.
     - **No news changes nothing,** so a retried call is safe:
       - a new version that differs only in its `updated` stamp;
       - a new memory whose title, body and validity a note at its path, or a numbered one, already holds, queued or committed;
