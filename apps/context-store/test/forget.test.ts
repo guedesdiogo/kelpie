@@ -1,5 +1,6 @@
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import { DREAM_PAGE_PATH, LIFECYCLE_REPORT_PATH } from "@kelpie/memory";
 import { gitBlobSha } from "@kelpie/vault";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
 import { afterEach, describe, expect, it } from "vitest";
@@ -155,6 +156,44 @@ describe("Vault forget", () => {
     ]);
   });
 
+  it("drops the report and Dream's page wherever they wait, and wakes soon to write them again", async () => {
+    replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault", [ana]: clean }));
+    const stub = vault("forget-pages");
+    await stub.compile("kelpie");
+    await runDurableObjectAlarm(stub);
+    await runInDurableObject(stub, (_instance, state) => {
+      for (const page of [LIFECYCLE_REPORT_PATH, DREAM_PAGE_PATH]) {
+        state.storage.sql.exec(
+          "INSERT INTO queue (agent, path, content, summary, queued_at) VALUES ('context-store', ?, 'x', 'x', 1)",
+          page,
+        );
+        state.storage.sql.exec(
+          "INSERT INTO conflicts (agent, path, content, reason, at) VALUES ('context-store', ?, 'x', 'owner_won', 1)",
+          page,
+        );
+        state.storage.sql.exec("INSERT INTO owner_merges (path, content) VALUES (?, 'x')", page);
+        state.storage.sql.exec(
+          "INSERT INTO held (path, content, previous, state, attempts, at) VALUES (?, 'x', 'y', 'held', 0, 1)",
+          page,
+        );
+      }
+    });
+    expect(await stub.forget([ana])).toMatchObject({ ok: true });
+    expect(
+      await runInDurableObject(stub, (_instance, state) =>
+        state.storage.sql
+          .exec(
+            `SELECT path FROM queue UNION ALL SELECT path FROM conflicts
+             UNION ALL SELECT path FROM owner_merges UNION ALL SELECT path FROM held`,
+          )
+          .toArray(),
+      ),
+    ).toEqual([]);
+    // The next alarm writes them again from what is left, and soon.
+    const due = await runInDurableObject(stub, (_instance, state) => state.storage.getAlarm());
+    expect((due ?? Number.POSITIVE_INFINITY) - Date.now()).toBeLessThanOrEqual(5_000);
+  });
+
   it("forgets a folder, and names what the vault still has", async () => {
     const backend = new FakeVaultBackend({
       "README.md": "# Vault",
@@ -204,6 +243,26 @@ describe("Vault forget", () => {
     expect(await stub.forget(["memory/people/ana.md"])).toMatchObject({ ok: true });
     expect(await stub.read("memory/people/ana.md")).toBe(base);
     expect(await stub.held()).toHaveLength(1);
+  });
+
+  it("drops the hold of a page Kelpie writes, conflict and all: the next report writes it again", async () => {
+    const backend = new FakeVaultBackend({ "README.md": "# Vault", [ana]: clean });
+    replaceBackendForTesting(backend);
+    replaceGatewayForTesting(null);
+    const stub = vault("forget-held-page");
+    await stub.compile("kelpie");
+    backend.push({
+      [LIFECYCLE_REPORT_PATH]:
+        "# Memory report\n\n<<<<<<< HEAD\nUma.\n=======\nOutra.\n>>>>>>> main\n",
+    });
+    await runDurableObjectAlarm(stub);
+    expect(await stub.held()).toHaveLength(1);
+    expect(await stub.forget([ana])).toMatchObject({ ok: true });
+    expect(await stub.held()).toEqual([]);
+    // The next alarms write the page again from what is left: here, memory is clean, so it goes.
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()[LIFECYCLE_REPORT_PATH]).toBeUndefined();
   });
 
   it("refuses paths it can't name, and does nothing with the vault off", async () => {

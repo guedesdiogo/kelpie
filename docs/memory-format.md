@@ -480,7 +480,7 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
     - The summary must be plain lines within 2,000 characters, with no control characters but line breaks and tabs, and no line separators or bidirectional controls.
     - Secrets are removed from it next. It must then hold no heading, frontmatter fence or conflict markers.
   - **The page:** Dream's page, `memory/_lint/dream.md`, lists each proposed summary, newest day first, each with the pages it sums up (see "Dream's page" below).
-  - **Erasing:** forgetting a session page forgets its day's summary. Turning Dream off deletes the summaries too, and the next report removes the page; the vault's git history still holds its earlier versions. A call that ends after Dream was turned off keeps nothing.
+  - **Erasing:** forgetting a session page forgets its day's summary. Turning Dream off deletes the summaries too, drops any copy of the page waiting to be written, and the next report removes the page; the vault's git history still holds its earlier versions. A call that ends after Dream was turned off, or after its note changed or was forgotten, keeps nothing, for abstracts too.
 - **Duplicates** (#112): a dry run for now. `merges` can't be named in `writes` yet.
   - **Which notes:** Kelpie's own notes of one scope and kind that share a title, two or more.
   - **Left out**, as for abstracts:
