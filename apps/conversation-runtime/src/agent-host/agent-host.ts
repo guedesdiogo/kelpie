@@ -123,8 +123,8 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   /**
    * Applies changes and audits them. The configuration commands are its only callers and authorize
    * the actor (ADR-0013); this validates the changes again, because it is an RPC boundary. A new
-   * system prompt bumps the prompt version. Setting the current values changes nothing, so it
-   * isn't audited.
+   * system prompt bumps the prompt version, and so does turning the memory core on or off (#112).
+   * Setting the current values changes nothing, so it isn't audited.
    */
   configure(changes: Partial<AgentSettings>, actor: Actor): ConfigureResult {
     const parsed = parseSettings(changes);
@@ -136,7 +136,8 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     if (fields.length === 0) return { ok: true, value: current };
     const settings = { ...current.settings, ...parsed };
     const promptVersion =
-      settings.systemPrompt === current.settings.systemPrompt
+      settings.systemPrompt === current.settings.systemPrompt &&
+      settings.memoryCore === current.settings.memoryCore
         ? current.promptVersion
         : current.promptVersion + 1;
     this.#db.transaction((tx) => {

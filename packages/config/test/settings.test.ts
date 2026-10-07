@@ -27,8 +27,14 @@ describe("parseSettings", () => {
     expect(parseSettings({ toolLoopMs: 300_000 })).toEqual({ toolLoopMs: 300_000 });
   });
 
+  it("leaves the memory core off until the owner turns it on", () => {
+    expect(DEFAULT_SETTINGS.memoryCore).toBe(false);
+    expect(parseSettings({ memoryCore: true })).toEqual({ memoryCore: true });
+  });
+
   it.each([
     [{ tier: "gpt-9" }],
+    [{ memoryCore: "yes" }],
     [{ toolLoopMs: 119_999 }],
     [{ toolLoopMs: 600_001 }],
     [{ maxOutputTokens: 0 }],

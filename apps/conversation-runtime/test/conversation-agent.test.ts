@@ -1507,3 +1507,168 @@ describe("ConversationAgent memory", () => {
     );
   });
 });
+
+describe("ConversationAgent memory core", () => {
+  const core = (text: string) =>
+    [
+      `<memory-c0de note="Always loaded.">`,
+      "## Café (memory/notes/cafe.md) [c0de]",
+      text,
+      "</memory-c0de>",
+    ].join("\n");
+  const CORE = core("Sem açúcar.");
+
+  /** One turn per text, each delivered before the next. */
+  async function converse(stub: ReturnType<typeof agent>, agentId: string, texts: string[]) {
+    for (const text of texts) {
+      await stub.ingest(message(text, text, { agentId }));
+      await stub.flush();
+      await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).toBe("delivered"));
+    }
+  }
+
+  it("carries no core until the owner turns it on, and doesn't ask for one", async () => {
+    const world = use(fakeWorld([reply("Ok.")]));
+    world.core = CORE;
+    await converse(agent("core-off"), "assistant", ["oi"]);
+    expect(world.cores).toEqual([]);
+    expect(world.requests[0]?.messages).toEqual([user("oi")]);
+  });
+
+  it("carries no core into a turn that doesn't see every scope, as in a group (#131)", async () => {
+    await configure("core-group", { memoryCore: true });
+    const world = use(fakeWorld([reply("Ok.")]));
+    world.core = CORE;
+    const stub = agent("core-group");
+    await stub.ingest({ ...message("oi", "oi", { agentId: "core-group" }), chatType: "group" });
+    await stub.flush();
+    await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).toBe("delivered"));
+    expect(world.cores).toEqual([]);
+    expect(JSON.stringify(world.requests[0]?.messages)).not.toContain("Sem açúcar");
+  });
+
+  it("loads the core once, at the start, and sends it byte for byte after", async () => {
+    await configure("core-on", { memoryCore: true });
+    const world = use(fakeWorld([reply("Ok."), reply("Ok de novo.")]));
+    world.core = CORE;
+    const stub = agent("core-on");
+    await converse(stub, "core-on", ["oi"]);
+    expect(world.cores).toEqual([{ agentId: "core-on", budgetTokens: 1_000 }]);
+    const first = { role: "user", parts: [{ type: "text", text: CORE }, ...user("oi").parts] };
+    expect(world.requests[0]?.messages).toEqual([first]);
+    expect(world.requests[0]?.system.endsWith(`\n\n${MEMORY_NOTE}`)).toBe(true);
+
+    // A note edited meanwhile shows from the next refresh: this conversation's prefix holds.
+    world.core = core("Com açúcar.");
+    await converse(stub, "core-on", ["e agora?"]);
+    expect(world.cores).toHaveLength(1);
+    expect(world.requests[1]?.messages[0]).toEqual(first);
+    expect((await stub.history())[0]).toEqual(first);
+    const stored = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql.exec("SELECT message FROM history").toArray(),
+    );
+    expect(JSON.stringify(stored)).not.toContain("açúcar");
+  });
+
+  it("loads it again for a new prompt version", async () => {
+    await configure("core-version", { memoryCore: true });
+    const world = use(fakeWorld([reply("Ok."), reply("Ok de novo.")]));
+    world.core = CORE;
+    const stub = agent("core-version");
+    await converse(stub, "core-version", ["oi"]);
+    world.core = core("Com açúcar.");
+    await configure("core-version", { systemPrompt: "Be brief." });
+    await converse(stub, "core-version", ["e agora?"]);
+    expect(world.cores).toHaveLength(2);
+    expect(world.requests[1]?.messages[0]).toEqual({
+      role: "user",
+      parts: [{ type: "text", text: core("Com açúcar.") }, ...user("oi").parts],
+    });
+  });
+
+  it("loads it again after a checkpoint, ahead of the summary", async () => {
+    await configure("core-checkpoint", { memoryCore: true });
+    const world = use(
+      fakeWorld([
+        ...Array.from({ length: 5 }, (_, i) => reply(`r${i}`)),
+        reply("r5", OVER_BUDGET),
+        reply("THE SUMMARY"),
+        reply("r6"),
+      ]),
+    );
+    world.core = CORE;
+    const stub = agent("core-checkpoint");
+    await converse(stub, "core-checkpoint", ["q0", "q1", "q2", "q3", "q4", "q5"]);
+    await stub.compact();
+    // The summarizer reads history, which never holds the core.
+    expect(JSON.stringify(world.requests.at(-1)?.messages)).not.toContain("Sem açúcar");
+    world.core = core("Com açúcar.");
+    await converse(stub, "core-checkpoint", ["q6"]);
+    expect(world.cores).toHaveLength(2);
+    expect(world.requests.at(-1)?.messages[0]).toEqual({
+      role: "user",
+      parts: [
+        { type: "text", text: core("Com açúcar.") },
+        { type: "text", text: expect.stringContaining("THE SUMMARY") },
+        { type: "text", text: `${STAMP} q3` },
+      ],
+    });
+  });
+
+  it("keeps no core from a turn interrupted while it loaded", async () => {
+    await configure("core-interrupted", { memoryCore: true });
+    const world = use(fakeWorld([reply("Ok."), reply("Ok de novo.")]));
+    world.core = CORE;
+    // The first turn's core answers late, after the next turn has kept its own.
+    world.coreDelays = [300];
+    const stub = agent("core-interrupted");
+    await stub.ingest(message("m1", "oi", { agentId: "core-interrupted" }));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.cores).toHaveLength(1));
+    await configure("core-interrupted", { systemPrompt: "Be brief." });
+    world.core = core("Com açúcar.");
+    await converse(stub, "core-interrupted", ["e agora?"]);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await converse(stub, "core-interrupted", ["e depois?"]);
+    expect(world.cores).toHaveLength(2);
+    expect(world.requests.at(-1)?.messages[0]).toEqual(world.requests[0]?.messages[0]);
+    const first = world.requests[0]?.messages[0];
+    expect(first?.role === "user" ? first.parts[0] : null).toEqual({
+      type: "text",
+      text: core("Com açúcar."),
+    });
+  });
+
+  it("never sends a blank core, nor one past its budget", async () => {
+    for (const [name, text] of [
+      ["core-empty", ""],
+      ["core-blank", " \n"],
+      ["core-too-big", "x".repeat(4_001)],
+    ] as const) {
+      await configure(name, { memoryCore: true });
+      const world = use(fakeWorld([reply("Ok.")]));
+      world.core = text;
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      await converse(agent(name), name, ["oi"]);
+      expect(world.cores, name).toHaveLength(1);
+      expect(world.requests[0]?.messages, name).toEqual([user("oi")]);
+    }
+  });
+
+  it("goes without the core until the next refresh when the Context Store fails", async () => {
+    await configure("core-fails", { memoryCore: true });
+    const world = use(fakeWorld([reply("Ok."), reply("Ok de novo.")]));
+    world.core = CORE;
+    world.failCore = true;
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const stub = agent("core-fails");
+    await converse(stub, "core-fails", ["oi"]);
+    world.failCore = false;
+    await converse(stub, "core-fails", ["e agora?"]);
+    // Asking again would change the prefix under the reply already given.
+    expect(world.cores).toHaveLength(1);
+    expect(world.requests[0]?.messages).toEqual([user("oi")]);
+    expect(world.requests[1]?.messages[0]).toEqual(user("oi"));
+    expect(warned).toHaveBeenCalledWith("conversation: core failed", { error: "Error" });
+  });
+});

@@ -30,6 +30,12 @@ export interface AgentSettings {
    * 120 s is the floor the owner set; it can only go up.
    */
   toolLoopMs: number;
+  /**
+   * Carry the always-loaded core of memory (#112) into every turn: off until #108's evaluation
+   * shows it helps for the agent's model. Changing it starts a new prompt version, as a new system
+   * prompt does, since a reply's reasoning is bound to the core it was sent with.
+   */
+  memoryCore: boolean;
 }
 
 export const DEFAULT_SETTINGS: AgentSettings = {
@@ -41,6 +47,7 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   maxWaitMs: 60_000,
   qualifier: "clef",
   toolLoopMs: 120_000,
+  memoryCore: false,
 };
 
 /** Agent ids become object names and URL segments: lowercase letters, digits and hyphens. */
@@ -95,6 +102,10 @@ export function parseSettings(input: unknown): Partial<AgentSettings> | null {
       case "toolLoopMs":
         if (!isInteger(value, 120_000, 600_000)) return null;
         parsed.toolLoopMs = value;
+        break;
+      case "memoryCore":
+        if (typeof value !== "boolean") return null;
+        parsed.memoryCore = value;
         break;
       default:
         return null;
