@@ -83,6 +83,15 @@ export interface RecallResult {
   notes: { path: string; byKelpie: boolean }[];
 }
 
+/** The always-loaded core (#112), as one block within the budget, and the notes in it. */
+export interface MemoryCoreResult {
+  text: string;
+  tokens: number;
+  paths: string[];
+  /** How many notes didn't fit. */
+  omitted: number;
+}
+
 /** What the agent's `memory_search` asks (#126): retrieval as recall does, without the packing. */
 export interface MemorySearchOptions {
   /** The scopes the turn may see, as for recall. */
@@ -214,6 +223,12 @@ export interface ContextStoreContract {
    * vector, reranked by the qualifier, within the budget. An empty block when the vault is off.
    */
   recall(agentId: string, question: string, options: RecallOptions): Promise<RecallResult>;
+  /**
+   * The always-loaded core (#112): the notes the owner pinned in the global scope or the agent's
+   * own, the owner's profile and the agent's self-model, within the budget (at most 8,000 tokens).
+   * It counts no access. An empty block when the vault is off, or on any failure.
+   */
+  core(agentId: string, budgetTokens: number): Promise<MemoryCoreResult>;
   /**
    * The notes that answer a query, for the agent's `memory_search` (#126): the same retrieval as
    * recall, returned as hits. Nothing when the vault is off or the input isn't valid.

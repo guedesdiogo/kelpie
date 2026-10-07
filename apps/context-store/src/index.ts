@@ -6,6 +6,7 @@ import type {
   ContextStoreContract,
   ForgetResult,
   HeldFile,
+  MemoryCoreResult,
   MemorySearchOptions,
   MemorySearchResult,
   MemoryWriteInput,
@@ -61,6 +62,10 @@ export class ContextStore extends WorkerEntrypoint<VaultEnv> implements ContextS
 
   recall(agentId: string, question: string, options: RecallOptions): Promise<RecallResult> {
     return this.#vault().recall(agentId, question, options);
+  }
+
+  core(agentId: string, budgetTokens: number): Promise<MemoryCoreResult> {
+    return this.#vault().core(agentId, budgetTokens);
   }
 
   search(
