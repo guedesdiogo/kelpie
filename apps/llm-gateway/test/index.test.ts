@@ -119,6 +119,32 @@ describe("llm-gateway", () => {
     await vi.waitFor(() => expect(providerSignal?.aborted).toBe(true));
   });
 
+  it("logs a refused call by its kind and status, never the provider's message", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json(
+        {
+          type: "error",
+          error: { type: "invalid_request_error", message: "prompt quotes marker-1a2b" },
+        },
+        { status: 400 },
+      ),
+    );
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    using generation = await exports.LlmGateway.generate("cheap", request);
+    await expect(async () => {
+      for await (const _event of fromNdjsonStream(await generation.events())) {
+        // The stream ends with the error.
+      }
+    }).rejects.toThrow();
+
+    const lines = JSON.stringify(logged.mock.calls);
+    expect(lines).toContain("generate failed");
+    expect(lines).toContain('"code":"bad_request"');
+    expect(lines).toContain('"status":400');
+    expect(lines).not.toContain("marker-1a2b");
+  });
+
   it("asks Jev when the caller names no backend, as conversation-runtime did before Clef", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
@@ -151,8 +177,11 @@ describe("llm-gateway", () => {
       ok: false,
       reason: "failed",
     });
-    expect(String(logged.mock.calls[0]?.[0])).toContain("TypeSafe answered 401");
-    expect(JSON.stringify(logged.mock.calls)).not.toContain("ts-test");
+    const lines = JSON.stringify(logged.mock.calls);
+    expect(lines).toContain("qualify failed");
+    expect(lines).toContain('"error":"TypeSafeError"');
+    expect(lines).toContain('"status":401');
+    expect(lines).not.toContain("ts-test");
   });
 
   it("answers not_configured at once when no Jev key is set", async () => {
@@ -208,10 +237,10 @@ describe("llm-gateway", () => {
     );
 
     expect(outcome).toEqual({ ok: false, reason: "failed" });
-    expect(String(logged.mock.calls[0]?.[0])).toContain(
-      "Workers AI failed: InferenceUpstreamError",
-    );
-    expect(JSON.stringify(logged.mock.calls)).not.toContain("cpf");
+    const lines = JSON.stringify(logged.mock.calls);
+    expect(lines).toContain("qualify failed");
+    expect(lines).toContain('"error":"InferenceUpstreamError"');
+    expect(lines).not.toContain("cpf");
   });
 
   it("answers not_configured when Jev is asked for by name without its key", async () => {

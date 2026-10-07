@@ -105,6 +105,14 @@ export function conversationSource(channel: string, threadId: string, max = 300)
 }
 
 /**
+ * A conversation's own scope, where its session pages go and the most a turn outside the owner's
+ * direct chats may see (#131). A group's thread id starts with `-` on Telegram, written `g`.
+ */
+export function conversationScope(channel: string, threadId: string): Scope {
+  return `conversation/${slugify(`${channel}-${threadId.replace(/^-/, "g")}`)}` as Scope;
+}
+
+/**
  * One line of text, at most `max` characters. `[[` is broken, so a message doesn't add links to
  * the vault's graph.
  */
@@ -209,8 +217,7 @@ export async function sessionPage(input: SessionInput): Promise<SessionPage | nu
   const opening = excerpt(cleanText(firstUser), 200);
   const title = inert(excerpt(`${clock(firstUser.at, timeZone).time} ${opening}`, 120));
   const source = conversationSource(input.channel, input.threadId);
-  const thread = input.threadId.replace(/^-/, "g");
-  const scope = `conversation/${slugify(`${input.channel}-${thread}`)}` as Scope;
+  const scope = conversationScope(input.channel, input.threadId);
   const speakers = new Set(
     lines.filter((line) => line.role === "user").map((line) => line.speaker),
   );

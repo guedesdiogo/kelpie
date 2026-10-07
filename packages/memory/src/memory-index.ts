@@ -788,7 +788,8 @@ export class MemoryIndex {
   /**
    * Full-text search, best first. Current versions only, unless `asOf` asks for the past. bm25 takes
    * its statistics from the whole table, other scopes and past versions included, so they can
-   * reorder the hits in `scopes`: a residual the owner accepted until #131 (#152).
+   * reorder the hits in `scopes`: a residual the owner accepted until someone other than the owner is
+   * admitted (#60, #152).
    */
   search(text: string, options: SearchOptions = {}): SearchHit[] {
     const query = ftsQuery(text);

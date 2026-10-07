@@ -55,8 +55,12 @@ export class ClefQualifier implements Qualifier {
         options.signal,
       );
     } catch (error) {
-      // A Workers AI error message can quote the input, so only the error's name is reported.
-      throw new Error(`Workers AI failed: ${error instanceof Error ? error.name : "unknown"}`);
+      // A Workers AI error message can quote the input, so only the error's name is kept. The new
+      // error carries that name too, because logs report errors by name (issue #132).
+      const name = error instanceof Error ? error.name : "unknown";
+      const failure = new Error(`Workers AI failed: ${name}`);
+      failure.name = name;
+      throw failure;
     }
     const received = (body as { answers?: Record<string, unknown> } | null)?.answers ?? {};
     const answers = Object.fromEntries(
