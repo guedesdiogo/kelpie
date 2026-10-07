@@ -51,10 +51,11 @@ describe("readNote", () => {
       pinned: false,
       abstract: "Ana is the owner's sister; she lives in Lisbon.",
       updated: "2026-10-06T12:00:00Z",
+      // The frontmatter's links first.
       links: [
-        { kind: "link", by: "name", target: "lisboa" },
-        { kind: "source", by: "name", target: "2026-10-06-family-chat" },
         { kind: "contradicts", by: "path", target: "memory/people/ana-old" },
+        { kind: "source", by: "name", target: "2026-10-06-family-chat" },
+        { kind: "link", by: "name", target: "lisboa" },
       ],
     });
     // The duplicate entity is reported; nothing else is.

@@ -63,11 +63,11 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - The alarm and each recall check that the index stands at the head. Notes that haven't changed are skipped, so a check is cheap.
     - "As of" therefore means as of when the Context Store synced, not when the owner's device committed.
   - **Dream** (#112, [memory-format.md](memory-format.md#dream)): after the report, the alarm runs one step of Dream.
-    - **A step** is one model call. It proposes an abstract for a note Kelpie wrote, or a summary of one day of one conversation.
+    - **A step** is at most one model call. It proposes an abstract for a note Kelpie wrote, a summary of one day of one conversation, or a merge of Kelpie's duplicates. A merge of the same content needs no call.
     - **Activity:** a recall, search, read or write marks memory as active, and Dream waits for 30 minutes of quiet.
     - **What it keeps:** its proposals in `dream_proposals`, and its runs, with what each call used, in `dream_runs`.
     - **What it writes:** an abstract, for an operation the owner lets write, goes through the queue (`dream_writes` keeps what it wrote for a week).
-    - **Day summaries and merges,** while dry, are kept in `dream_summaries` and `dream_merges` and shown on Dream's plan, `memory/_lint/dream.md`.
+    - **Day summaries and merges,** while dry, are kept in `dream_summaries` and `dream_merges` and shown on Dream's page, `memory/_lint/dream.md`.
   - **Embeddings:** the alarm embeds the notes that have no vector yet, through llm-gateway's `embed`, four batches of 64 a run, until none is left.
     - The model is the one `EMBEDDING_PROVIDER` chooses on llm-gateway. A recall that sees a new model arms the alarm, which embeds every note again; until then the vector stream finds what it can.
     - This runs after GitHub's work and fails on its own, so an llm-gateway outage never delays the vault's writes. A call that doesn't answer in 40 s is given up.
@@ -194,7 +194,7 @@ Git keeps every version, so erasing content means rewriting the vault's history.
    - `--path <file> --invert-paths` removes a file from every commit;
    - `--replace-text` removes a passage.
 
-   The memory report, `memory/_lint/report.md`, lists notes by title and path, and Dream's plan adds an abstract of each note it lists, which a model wrote from the note's content (#112). When an erased note was ever in it, rewrite the report's history too, with the same `--replace-text` or by removing the file. Dream's plan, `memory/_lint/dream.md`, holds summaries a model wrote of conversations and merged bodies of notes: rewrite its history too.
+   The memory report, `memory/_lint/report.md`, lists notes by title and path, and Dream's plan adds an abstract of each note it lists, which a model wrote from the note's content (#112). When an erased note was ever in it, rewrite the report's history too, with the same `--replace-text` or by removing the file. Dream's page, `memory/_lint/dream.md`, holds summaries a model wrote of conversations and merged bodies of notes: rewrite its history too.
 
    Then push the result with `--force` to every branch that held the content.
 2. **Make Kelpie forget its copies, right away:** `/commands/forgetVaultPaths` with the erased paths ([admin-api.md](admin-api.md)). Doing it at once keeps Kelpie's queued writes from committing the content back onto the rewritten branch.

@@ -89,7 +89,7 @@ describe("dreamPage", () => {
         ],
         merges: [],
       }) ?? "";
-    expect(page.startsWith("# Dream's plan\n")).toBe(true);
+    expect(page.startsWith("# What Dream would write\n")).toBe(true);
     expect(page).toContain("\n## Day summaries\n\n### 2026-10-06 · conversation/telegram-1\n");
     expect(page).not.toContain("## Merges");
     expect(page.indexOf("2026-10-06")).toBeLessThan(page.indexOf("2026-10-05"));

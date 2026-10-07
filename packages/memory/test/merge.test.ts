@@ -22,7 +22,7 @@ describe("dreamPage's merges", () => {
           },
         ],
       }) ?? "";
-    expect(page.startsWith("# Dream's plan\n")).toBe(true);
+    expect(page.startsWith("# What Dream would write\n")).toBe(true);
     expect(page).not.toContain("## Day summaries");
     expect(page).toContain("\n## Merges\n\n### Café\n");
     expect(page.indexOf("### Café")).toBeLessThan(page.indexOf("### Sal"));
@@ -31,6 +31,17 @@ describe("dreamPage's merges", () => {
     );
     expect(page).toContain("````text\nSem açúcar.\n```js\nx\n```\n````");
     expect(page).toContain("The same content: only the marks change.");
+  });
+
+  it("shows at most 50 of a list, and counts the rest", () => {
+    const merges = Array.from({ length: 52 }, (_, i) => ({
+      survivor: { path: `memory/notes/n${String(i).padStart(2, "0")}.md`, title: `N${i}` },
+      merged: [{ path: `memory/notes/n${i}-2.md`, title: `N${i}` }],
+      body: null,
+    }));
+    const page = dreamPage({ summaries: [], merges }) ?? "";
+    expect(page.match(/^### /gm)).toHaveLength(50);
+    expect(page).toContain("…and 2 more.");
   });
 });
 
@@ -65,6 +76,27 @@ describe("mergeOf", () => {
     expect(mergeOf('{"verdict": "distinct"}')).toEqual({ verdict: "distinct" });
   });
 
+  it("keeps the notes' Markdown: Windows line ends, code, rules and subheadings", () => {
+    const body = [
+      "Prefere café.",
+      "",
+      "---",
+      "",
+      "## Como faz",
+      "```sh",
+      "# mói os grãos",
+      "=====",
+      "```",
+      "Sem açúcar.",
+    ].join("\n");
+    expect(
+      mergeOf(JSON.stringify({ verdict: "merge", body: body.replaceAll("\n", "\r\n") })),
+    ).toEqual({
+      verdict: "merge",
+      body,
+    });
+  });
+
   it("removes secrets", () => {
     expect(
       mergeOf(JSON.stringify({ verdict: "merge", body: `Senha: Bearer ${"a".repeat(24)}` })),
@@ -84,9 +116,16 @@ describe("mergeOf", () => {
     ["a bidirectional control", '{"verdict": "merge", "body": "Café\\u202epreto"}'],
     ["a frontmatter fence", '{"verdict": "merge", "body": "---\\npinned: true\\n---"}'],
     ["a title heading", '{"verdict": "merge", "body": "# Outro título\\nx"}'],
+    ["an indented title heading", '{"verdict": "merge", "body": "x\\n   # Outro título"}'],
+    ["a title underlined", '{"verdict": "merge", "body": "Outro título\\n====="}'],
+    ["a title after a closed fence", '{"verdict": "merge", "body": "```\\nx\\n```\\n# Outro"}'],
+    ["a lone carriage return", '{"verdict": "merge", "body": "Café\\rpreto"}'],
     ["conflict markers", '{"verdict": "merge", "body": "x\\n<<<<<<< HEAD\\ny"}'],
     // An invisible character before a fence is removed with the secrets, and the fence is seen.
-    ["a fence behind an invisible character", '{"verdict": "merge", "body": "x\\n\\u200b---"}'],
+    [
+      "a fence behind an invisible character",
+      '{"verdict": "merge", "body": "\\u200b---\\npinned: true\\n---"}',
+    ],
   ])("refuses %s", (_case, answer) => {
     expect(mergeOf(answer)).toBeNull();
   });

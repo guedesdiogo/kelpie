@@ -1210,32 +1210,35 @@ export class Vault extends DurableObject<VaultEnv> {
         row.key,
       ]),
     );
-    const candidates = [...groups.values()].flatMap((group) => {
-      const members = group.flatMap((note) => {
-        const version = this.#memory.current(note.path);
-        return version === null || version.level === "explicit"
-          ? []
-          : [
-              {
-                ...note,
-                version,
-                written: writtenAt(note),
-                linked: this.#memory.backlinks(note.path).length,
-              },
-            ];
+    // A note alone is no duplicate: only groups are read whole.
+    const candidates = [...groups.values()]
+      .filter((group) => group.length > 1)
+      .flatMap((group) => {
+        const members = group.flatMap((note) => {
+          const version = this.#memory.current(note.path);
+          return version === null || version.level === "explicit"
+            ? []
+            : [
+                {
+                  ...note,
+                  version,
+                  written: writtenAt(note),
+                  linked: this.#memory.backlinks(note.path).length,
+                },
+              ];
+        });
+        if (members.length < 2) return [];
+        // The survivor is the note most others link to, then the earliest, then the shorter path,
+        // since a later one is numbered: most links already lead to it.
+        members.sort(
+          (a, b) =>
+            b.linked - a.linked ||
+            a.written - b.written ||
+            a.path.length - b.path.length ||
+            (a.path < b.path ? -1 : 1),
+        );
+        return [{ members, newest: Math.max(...members.map((member) => member.written)) }];
       });
-      if (members.length < 2) return [];
-      // The survivor is the note most others link to, then the earliest, then the shorter path,
-      // since a later one is numbered: most links already lead to it.
-      members.sort(
-        (a, b) =>
-          b.linked - a.linked ||
-          a.written - b.written ||
-          a.path.length - b.path.length ||
-          (a.path < b.path ? -1 : 1),
-      );
-      return [{ members, newest: Math.max(...members.map((member) => member.written)) }];
-    });
     candidates.sort(
       (a, b) =>
         b.newest - a.newest || ((a.members[0]?.path ?? "") < (b.members[0]?.path ?? "") ? -1 : 1),
@@ -1280,8 +1283,13 @@ export class Vault extends DurableObject<VaultEnv> {
     const usage = [...(JSON.parse(run.usage) as unknown[]), ...used];
     this.ctx.storage.transactionSync(() => {
       // As for a summary: a failure is kept as no answer, so one group can't fail every run, and
-      // nothing is kept once a note changed or Dream was turned off during the call.
-      if (this.#get("dream_mode") !== "off" && this.#asRead(group.sources, group.key)) {
+      // nothing is kept once a note changed, was forgotten or stopped being Kelpie's, or Dream was
+      // turned off, during the call.
+      if (
+        this.#get("dream_mode") !== "off" &&
+        this.#asRead(group.sources, group.key) &&
+        this.#byKelpie(group.sources).size === group.sources.length
+      ) {
         // A group that grew or shrank replaces what was proposed for its notes.
         this.#exec(
           `DELETE FROM dream_merges WHERE EXISTS (SELECT 1
@@ -1640,7 +1648,7 @@ export class Vault extends DurableObject<VaultEnv> {
               ).map((row) => ({ ...row, written: true })),
             ];
       try {
-        // Dream's plan while dry (#112): its own page, as what it proposes spans lines. A summary
+        // Dream's page while dry (#112): what it would write, as that spans lines. A summary
         // the vault now holds, or one long past, goes; so does whatever read a note that changed.
         this.#exec(
           `DELETE FROM dream_summaries WHERE at < ?
@@ -1657,7 +1665,13 @@ export class Vault extends DurableObject<VaultEnv> {
         for (const row of this.#exec<{ path: string; key: string; sources: string }>(
           "SELECT path, key, sources FROM dream_merges",
         )) {
-          if (!this.#asRead(JSON.parse(row.sources) as string[], row.key)) {
+          // A note expires without a change to its file: that drops the merge too.
+          const sources = JSON.parse(row.sources) as string[];
+          const expired = sources.some((path) => {
+            const invalidAt = this.#memory.current(path)?.invalidAt ?? null;
+            return invalidAt !== null && invalidAt <= now;
+          });
+          if (expired || !this.#asRead(sources, row.key)) {
             this.#exec("DELETE FROM dream_merges WHERE path = ?", row.path);
           }
         }
@@ -1696,7 +1710,7 @@ export class Vault extends DurableObject<VaultEnv> {
             SYSTEM_AGENT,
             DREAM_PAGE_PATH,
             page,
-            "Update Dream's plan",
+            "Update Dream's page",
             now,
           );
         }
@@ -2009,13 +2023,13 @@ export class Vault extends DurableObject<VaultEnv> {
       }
       const problems: string[] = [];
       // A note merged into another (#112): what it held is there now, and so is the next version.
-      const merged =
-        found === null
-          ? undefined
-          : this.#memory.links(found.path).find((link) => link.kind === "merged_into");
-      if (merged !== undefined) {
+      // A mark that leads nowhere merges nothing. The note is named only when the turn sees it.
+      const into = found === null ? null : this.#memory.mergedInto(found.path);
+      if (into !== null) {
         problems.push(
-          `the note was merged into ${merged.path ?? `[[${merged.target}]]`}: write to that one`,
+          sees(this.#memory.current(into)?.scope ?? "")
+            ? `the note was merged into ${into}: write to that one`
+            : "the note was merged into another one",
         );
       }
       if (found !== null && given(input.scope) !== undefined && input.scope !== found.scope) {

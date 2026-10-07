@@ -207,17 +207,19 @@ export function readNote(path: string, text: string): Note | null {
     return contradicts === null || mergedInto === null ? null : { contradicts, mergedInto };
   });
 
-  let links = extractLinks(body, path);
-  for (const source of sources ?? []) {
-    for (const target of valueLinks(source, path)) links.push({ kind: "source", ...target });
+  // The frontmatter's links first: the cap below must never drop where a merged note went.
+  let links: NoteLink[] = [];
+  for (const survivor of relations?.mergedInto ?? []) {
+    for (const target of valueLinks(survivor, path)) links.push({ kind: "merged_into", ...target });
   }
   for (const contradicted of relations?.contradicts ?? []) {
     for (const target of valueLinks(contradicted, path))
       links.push({ kind: "contradicts", ...target });
   }
-  for (const survivor of relations?.mergedInto ?? []) {
-    for (const target of valueLinks(survivor, path)) links.push({ kind: "merged_into", ...target });
+  for (const source of sources ?? []) {
+    for (const target of valueLinks(source, path)) links.push({ kind: "source", ...target });
   }
+  links.push(...extractLinks(body, path));
   if (links.length > MAX_LINKS) {
     links = links.slice(0, MAX_LINKS);
     warnings.push(`more than ${MAX_LINKS} links; the rest are not indexed`);

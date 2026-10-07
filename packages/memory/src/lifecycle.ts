@@ -7,7 +7,7 @@ import { instantOf, isDate } from "./time.ts";
 
 /** Where the report lives: a `memory/_` folder, which memory never indexes (`placeOf`). */
 export const LIFECYCLE_REPORT_PATH = "memory/_lint/report.md";
-/** Dream's plan while it runs dry (#112): a page of its own, as what it proposes spans lines. */
+/** Dream's page while it runs dry (#112): what it would write, as that spans lines. */
 export const DREAM_PAGE_PATH = "memory/_lint/dream.md";
 
 /** ai-memory's defaults: a 35-day half-life for age, recalls that wear off over about 25 days. */
@@ -23,6 +23,8 @@ const BAND_NOTES = 60;
 const BAND_PAIRS = 25;
 /** Each list in the report shows this many entries at most, and each entry this many notes. */
 const REPORT_ENTRIES = 200;
+/** Each list on Dream's page: its texts are longer than the report's lines. */
+const DREAM_PAGE_ENTRIES = 50;
 const GROUP_NOTES = 10;
 /** A link's title and path are cut to these many characters. */
 const TITLE_CHARS = 120;
@@ -434,6 +436,10 @@ export interface DreamMerge {
   body: string | null;
 }
 
+/** What a list on Dream's page leaves out. */
+const more = (count: number) =>
+  count > DREAM_PAGE_ENTRIES ? [`…and ${count - DREAM_PAGE_ENTRIES} more.`] : [];
+
 /** Text a model wrote, as code: fenced by more backticks than it holds in a row, so it can't close. */
 function code(text: string): string {
   const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
@@ -442,7 +448,7 @@ function code(text: string): string {
 }
 
 /**
- * Dream's plan while it runs dry, as one page, or null when there is nothing in it: the day
+ * What Dream would write while it runs dry, as one page, or null when there is nothing in it: the day
  * summaries, newest day first, each naming the session pages it sums up; then the merges, by the
  * survivor's path. What a model wrote is shown as code, so nothing in it renders.
  */
@@ -458,15 +464,18 @@ export function dreamPage(plan: {
     parts.push(
       [
         "## Day summaries",
-        ...sorted.map((entry) =>
-          [
-            `### ${plain(entry.date, 10)} · ${plain(entry.scope, PATH_CHARS, UNSAFE_PATH)}`,
-            "",
-            `Sums up: ${links([...entry.sources])}`,
-            "",
-            code(entry.summary),
-          ].join("\n"),
-        ),
+        ...sorted
+          .slice(0, DREAM_PAGE_ENTRIES)
+          .map((entry) =>
+            [
+              `### ${plain(entry.date, 10)} · ${plain(entry.scope, PATH_CHARS, UNSAFE_PATH)}`,
+              "",
+              `Sums up: ${links([...entry.sources])}`,
+              "",
+              code(entry.summary),
+            ].join("\n"),
+          ),
+        ...more(sorted.length),
       ].join("\n\n"),
     );
   }
@@ -475,18 +484,21 @@ export function dreamPage(plan: {
     parts.push(
       [
         "## Merges",
-        ...sorted.map((entry) =>
-          [
-            `### ${plain(entry.survivor.title, TITLE_CHARS) || plain(entry.survivor.path, PATH_CHARS, UNSAFE_PATH)}`,
-            "",
-            `Keeps ${link(entry.survivor)}, and marks ${links([...entry.merged])} as merged into it.`,
-            "",
-            entry.body === null ? "The same content: only the marks change." : code(entry.body),
-          ].join("\n"),
-        ),
+        ...sorted
+          .slice(0, DREAM_PAGE_ENTRIES)
+          .map((entry) =>
+            [
+              `### ${plain(entry.survivor.title, TITLE_CHARS) || plain(entry.survivor.path, PATH_CHARS, UNSAFE_PATH)}`,
+              "",
+              `Keeps ${link(entry.survivor)}, and marks ${links([...entry.merged])} as merged into it.`,
+              "",
+              entry.body === null ? "The same content: only the marks change." : code(entry.body),
+            ].join("\n"),
+          ),
+        ...more(sorted.length),
       ].join("\n\n"),
     );
   }
   if (parts.length === 0) return null;
-  return `# Dream's plan\n\nA dry run: what Dream would write, shown as code. Nothing was written.\n\n${parts.join("\n\n")}\n`;
+  return `# What Dream would write\n\nA dry run: what Dream would write, shown as code. Nothing was written.\n\n${parts.join("\n\n")}\n`;
 }

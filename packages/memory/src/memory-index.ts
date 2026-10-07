@@ -264,14 +264,20 @@ function limitOf(options: { limit?: number }): number {
 }
 
 /**
- * The versions a lookup sees, as SQL over `v`: current ones, or those of `asOf`, valid at
- * `validAt`, in `scopes`.
+ * A version that isn't a note merged into another (#112): what went into it is found there. A
+ * mark counts while it leads to another current note, so one that leads nowhere hides nothing.
  */
-/** A version that isn't a note merged into another (#112): what went into it is found there. */
-const NOT_MERGED =
-  "NOT EXISTS (SELECT 1 FROM links m WHERE m.version = v.rowid AND m.kind = 'merged_into')";
+const NOT_MERGED = `NOT EXISTS (SELECT 1 FROM links m WHERE m.version = v.rowid AND m.kind = 'merged_into'
+  AND ((m.by = 'path' AND EXISTS (SELECT 1 FROM versions t
+      WHERE t.is_current = 1 AND t.link_path = m.target AND t.path <> v.path))
+    OR (m.by = 'name' AND EXISTS (SELECT 1 FROM versions t
+      WHERE t.is_current = 1 AND t.link_name = m.target AND t.path <> v.path))))`;
 
-function versionFilter(options: SearchOptions, merged = false): [string, SqlValue[]] {
+/**
+ * The versions a lookup sees, as SQL over `v`: current ones, or those of `asOf`, valid at
+ * `validAt`, in `scopes`, and not merged into another note unless `includeMerged`.
+ */
+function versionFilter(options: SearchOptions, includeMerged = false): [string, SqlValue[]] {
   const filters: string[] = [];
   const bindings: SqlValue[] = [];
   if (options.scopes !== undefined) {
@@ -294,7 +300,7 @@ function versionFilter(options: SearchOptions, merged = false): [string, SqlValu
     filters.push("(v.invalid_at IS NULL OR v.invalid_at > ?)");
     bindings.push(options.notExpiredAt);
   }
-  if (!merged) filters.push(NOT_MERGED);
+  if (!includeMerged) filters.push(NOT_MERGED);
   return [filters.join(" AND "), bindings];
 }
 
@@ -884,6 +890,8 @@ export class MemoryIndex {
       ...(options.notExpiredAt === undefined ? {} : { notExpiredAt: options.notExpiredAt }),
       ...scoped,
     });
+    // A note the lookup may see, merged or not: only such a note's mark leads anywhere.
+    const [marked, markedBindings] = versionFilter(scoped, true);
     const hits: SearchHit[] = [];
     const seen = new Set([path]);
     const take = (other: string | null) => {
@@ -898,12 +906,14 @@ export class MemoryIndex {
         hits.push(toHit(row));
         return;
       }
-      // A note merged into another (#112) leads to it, one step only.
+      // A note merged into another (#112) leads to it, one step only. A note outside the scopes
+      // has no say, its mark included.
       const survivor = this.#exec<{ by: string; target: string }>(
         `SELECT l.by, l.target FROM links l JOIN versions v ON v.rowid = l.version
-         WHERE v.path = ? AND v.is_current = 1 AND l.kind = 'merged_into'
+         WHERE v.path = ? AND ${marked} AND l.kind = 'merged_into'
          ORDER BY l.by, l.target LIMIT 1`,
         other,
+        ...markedBindings,
       )[0];
       const into =
         survivor === undefined
@@ -983,6 +993,23 @@ export class MemoryIndex {
         return a < b ? -1 : 1;
       })[0] ?? null
     );
+  }
+
+  /**
+   * The note a merged note went into (#112): where its mark leads among the current notes, or null
+   * when it has no mark, or the mark leads nowhere but to itself.
+   */
+  mergedInto(path: string): string | null {
+    const marks = this.#exec<{ by: string; target: string }>(
+      `SELECT l.by, l.target FROM links l JOIN versions v ON v.rowid = l.version
+       WHERE v.path = ? AND v.is_current = 1 AND l.kind = 'merged_into' ORDER BY l.by, l.target`,
+      path,
+    );
+    for (const mark of marks) {
+      const into = this.resolve(path, mark.by as LinkBy, mark.target);
+      if (into !== null && into !== path) return into;
+    }
+    return null;
   }
 
   /**

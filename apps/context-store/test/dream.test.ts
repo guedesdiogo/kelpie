@@ -817,6 +817,9 @@ describe("Vault Dream", () => {
     // Most links lead to the survivor.
     const bebidas = await note("Bebidas", "Ver [[memory/notes/cafe-2]].");
     const [rotina, rotina2] = await twice("Rotina", ["Acorda cedo.", "Dorme tarde."]);
+    const [antigo, antigo2] = await twice("Antigo", ["Um.", "Dois."], { invalidAt: "2020-01-01" });
+    // A version merged into the owner's edit is the owner's word.
+    const [leite, leite2] = await twice("Leite", ["De aveia.", "De vaca."]);
     const left = [
       // A fact the person stated keeps its own words.
       ...(await twice("Chá", ["Verde.", "Preto."], { level: "explicit", confidence: 0.9 })),
@@ -847,7 +850,10 @@ describe("Vault Dream", () => {
       { ...rotina, path: "memory/profile/rotina.md" },
       { ...rotina2, path: "memory/profile/rotina-2.md" },
       // Expired.
-      ...(await twice("Antigo", ["Um.", "Dois."], { invalidAt: "2020-01-01" })),
+      antigo,
+      antigo2,
+      leite,
+      leite2,
       // Too long to read whole.
       ...(await twice("Longa", ["a ".repeat(4_500), "b ".repeat(4_500)])),
       // Another kind.
@@ -876,14 +882,23 @@ describe("Vault Dream", () => {
     await stub.compile("kelpie");
     await stub.write("kelpie", [cafe, cafe2, sal, sal2, mesa, mesa2, bebidas, ...left], "x");
     await runDurableObjectAlarm(stub);
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO owner_merges (path, content) VALUES (?, ?)",
+        leite2.path,
+        leite2.content,
+      );
+    });
     const files = backend.files();
     await quiet(stub);
     for (let i = 0; i < 8; i++) await runDurableObjectAlarm(stub);
     // Two calls: the same content needs none.
     expect(asked).toHaveLength(2);
+    // Two merges and two session pages' abstracts: the same content counts no call.
+    expect(await rows(stub, "SELECT calls FROM dream_runs")).toEqual([{ calls: 4 }]);
     expect(asked.find((text) => text.includes("Café"))).toContain("Com canela.");
     expect(asked.join()).not.toMatch(
-      /Verde|Dentista|Bom dia|Segunda|Acorda|Um\.|a a a|Na esquina|Integral/,
+      /Verde|Dentista|Bom dia|Segunda|Acorda|Um\.|a a a|Na esquina|Integral|aveia/,
     );
     expect(
       await rows(stub, "SELECT path, verdict, body, sources FROM dream_merges ORDER BY path"),
@@ -927,6 +942,24 @@ describe("Vault Dream", () => {
     } = backend.files();
     expect(notes).toEqual(files);
 
+    // A note that expires drops a merge that read it at the next report, though its file is the same.
+    await runInDurableObject(stub, (_instance, state) => {
+      const blob = (path: string) =>
+        state.storage.sql
+          .exec<{ blob_sha: string }>("SELECT blob_sha FROM files WHERE path = ?", path)
+          .one().blob_sha;
+      state.storage.sql.exec(
+        "INSERT INTO dream_merges (path, key, sources, verdict, body, at) VALUES (?, ?, ?, 'same', NULL, 1)",
+        antigo.path,
+        `${blob(antigo.path)},${blob(antigo2.path)}`,
+        JSON.stringify([antigo.path, antigo2.path]),
+      );
+    });
+    await report();
+    expect(await rows(stub, `SELECT path FROM dream_merges WHERE path = '${antigo.path}'`)).toEqual(
+      [],
+    );
+
     // A new version of a note proposes its group again, in place of what was proposed.
     const before = asked.length;
     await stub.write(
@@ -958,6 +991,40 @@ describe("Vault Dream", () => {
     expect(await rows(stub, "SELECT path FROM dream_merges")).toEqual([{ path: mesa2.path }]);
     await stub.setDream("off");
     expect(await rows(stub, "SELECT path FROM dream_merges")).toEqual([]);
+  });
+
+  it("replaces a proposal when its group grows, under another survivor", async () => {
+    const note = async (body: string, path: string) => ({
+      ...(await kelpieNote({ title: "Café", body, abstract: "Café." })),
+      path,
+    });
+    const cafe = await note("Sem açúcar.", "memory/notes/cafe.md");
+    const cafe2 = await note("Com canela.", "memory/notes/cafe-2.md");
+    replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
+    fakeModelBy(() => JSON.stringify({ verdict: "merge", body: "Café." }));
+    const stub = vault("dream-merge-grows");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", [cafe, cafe2], "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    for (let i = 0; i < 3; i++) await runDurableObjectAlarm(stub);
+    expect(await rows(stub, "SELECT path, sources FROM dream_merges")).toEqual([
+      { path: cafe.path, sources: JSON.stringify([cafe.path, cafe2.path]) },
+    ]);
+    // A third, which another note links to: it's the survivor now.
+    const cafe3 = await note("Com leite.", "memory/notes/cafe-3.md");
+    const bebidas = await kelpieNote({
+      title: "Bebidas",
+      body: "Ver [[memory/notes/cafe-3]].",
+      abstract: "Bebidas.",
+    });
+    await stub.write("kelpie", [cafe3, bebidas], "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    for (let i = 0; i < 3; i++) await runDurableObjectAlarm(stub);
+    expect(await rows(stub, "SELECT path, sources FROM dream_merges")).toEqual([
+      { path: cafe3.path, sources: JSON.stringify([cafe3.path, cafe.path, cafe2.path]) },
+    ]);
   });
 
   it("leaves duplicates alone while one of them is held on conflict markers", async () => {
@@ -1007,10 +1074,13 @@ describe("Vault Dream", () => {
     // The owner's push lands, or the owner turns Dream off, while the model answers.
     for (const [name, during] of [
       [
+        // Kelpie's own new version: still Kelpie's, but not what the call read.
         "dream-merge-rewritten",
-        "UPDATE files SET blob_sha = 'rewritten' WHERE path = 'memory/notes/cafe-2.md'",
+        "UPDATE files SET blob_sha = 'rewritten' WHERE path = 'memory/notes/cafe-2.md'; UPDATE authored SET blob_sha = 'rewritten' WHERE path = 'memory/notes/cafe-2.md'",
       ],
       ["dream-merge-off", "INSERT OR REPLACE INTO state (key, value) VALUES ('dream_mode', 'off')"],
+      // A forget of a file still in the vault: its blob is the same, but it isn't Kelpie's.
+      ["dream-merge-forgotten", "DELETE FROM authored WHERE path = 'memory/notes/cafe-2.md'"],
     ] as const) {
       replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
       const stub = vault(name);

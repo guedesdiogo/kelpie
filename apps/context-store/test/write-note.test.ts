@@ -425,6 +425,10 @@ describe("writeNote", () => {
       "memory/notes/cafe.md": "# Café\n\nSem açúcar.\n",
       "memory/notes/cafe-2.md":
         '---\nrelations:\n  merged_into:\n    - "[[memory/notes/cafe]]"\n---\n# Café\n\nMerged into [[memory/notes/cafe]].\n',
+      "memory/notes/cha.md":
+        '---\nrelations:\n  merged_into:\n    - "[[memory/notes/nenhum]]"\n---\n# Chá\n\nPreto.\n',
+      "conversations/telegram-1/notes/cafe.md":
+        '---\nrelations:\n  merged_into:\n    - "[[memory/notes/cafe]]"\n---\n# Café\n\nMerged.\n',
     });
     const stub = vault("write-merged");
     expect(
@@ -438,6 +442,18 @@ describe("writeNote", () => {
       reason: "invalid",
       problems: ["the note was merged into memory/notes/cafe.md: write to that one"],
     });
+    // A turn that doesn't see where it went isn't told.
+    expect(
+      await stub.writeNote(
+        "kelpie",
+        memory("Café", "Com leite.", { path: "conversations/telegram-1/notes/cafe.md" }),
+        { scopes: ["conversation/telegram-1"], sources: SOURCES },
+      ),
+    ).toEqual({ ok: false, reason: "invalid", problems: ["the note was merged into another one"] });
+    // A mark that leads nowhere merges nothing: the note takes the write, and loses the mark.
+    expect(
+      await stub.writeNote("kelpie", memory("Chá", "Verde.", { path: "memory/notes/cha.md" }), ALL),
+    ).toMatchObject({ ok: true, action: "written", path: "memory/notes/cha.md" });
   });
 
   it("leaves a note the always-loaded core carries to the owner (#168)", async () => {

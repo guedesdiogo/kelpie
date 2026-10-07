@@ -215,13 +215,15 @@ Every conversation's history becomes session pages (#109), with no model call:
 
 A note merged into another (#112) stays at its path. It is never deleted.
 - **Its mark:** `relations.merged_into` names the note it went into, and its body says so. The owner can mark a note by hand the same way.
+  - The mark counts while it leads to another current note. A mark that leads nowhere, or to the note itself, hides nothing.
+  - Removing the mark makes it a note again.
 - **What it still is:** a file to read by its path, and a link to it still resolves to it, as in Obsidian.
 - **What it no longer is:**
-  - **Found:** search, title and entity lookups, vectors and the lifecycle report leave it out.
+  - **Found:** search, title and entity lookups, vectors, the lifecycle report and the always-loaded core leave it out, even when it is pinned.
   - **Embedded:** it gets no vector.
   - **Dream's:** no Dream operation picks it.
-  - **A neighbour:** one step from a note that links to it is the note it went into.
-- **Writing to it:** the agent's `memory_write` refuses it and names the note to write to instead, so the mark isn't lost.
+  - **A neighbour:** one step from a note that links to it is the note it went into, within the lookup's scopes. That is one step only: a link to a note merged into one that was merged in turn leads nowhere.
+- **Writing to it:** the agent's `memory_write` refuses it while the mark counts, so the mark isn't lost. It names the note to write to when the turn sees that note.
 
 ## Entities
 
@@ -426,7 +428,7 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
   - at most once every 6 hours;
   - once no turn has touched memory for 30 minutes. A recall, a search, a read or a write counts as a touch.
 - **How a run proceeds:**
-  - **One step per wake:** each time the alarm wakes, a run makes one model call, after GitHub's work, the held files and the report, so it never holds them back. The run's state is kept, so an eviction doesn't start it over.
+  - **One step per wake:** each time the alarm wakes, a run takes one step, after GitHub's work, the held files and the report, so it never holds them back. A step makes at most one model call; a merge of the same content makes none. The run's state is kept, so an eviction doesn't start it over.
   - **Cancellation:** memory used since a run started ends it before its next step.
   - **The cap:** at most 8 calls a run.
 - **Its operation: abstracts.**
@@ -470,12 +472,12 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
     - Its `sources` would name the session pages.
     - No session page can take that name, since theirs add a slug after the date.
   - **When it's proposed again:** the proposal is kept with the versions of the day's pages. A new page that day proposes it again, and nothing else does. A day whose summary the vault already shows isn't proposed.
-  - **The model:** the cheap tier, within the same 8 calls a run. Abstracts, days and merges take turns.
+  - **The model:** the cheap tier, within the same 8 calls a run. Abstracts, days and merges take turns; a merge of the same content counts no call.
     - The day's pages share 12,000 characters of input.
     - The answer must be JSON with one key, `summary`.
     - The summary must be plain lines within 2,000 characters, with no control characters but line breaks and tabs, and no line separators or bidirectional controls.
     - Secrets are removed from it next. It must then hold no heading, frontmatter fence or conflict markers.
-  - **The page:** Dream's plan, `memory/_lint/dream.md`, lists each proposed summary, newest day first, each with the pages it sums up (see "Dream's plan" below).
+  - **The page:** Dream's page, `memory/_lint/dream.md`, lists each proposed summary, newest day first, each with the pages it sums up (see "Dream's page" below).
   - **Erasing:** forgetting a session page forgets its day's summary. Turning Dream off deletes the summaries too, and the next report removes the page; the vault's git history still holds its earlier versions. A call that ends after Dream was turned off keeps nothing.
 - **Duplicates** (#112): a dry run for now. `merges` can't be named in `writes` yet.
   - **Which notes:** Kelpie's own notes of one scope and kind that share a title, two or more.
@@ -493,16 +495,17 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
   - **The survivor:** the note most others link to, then the earliest written, then the shorter path, since a later one is numbered.
   - **The same content:** no model call. Only the marks would change.
   - **Different content:** one call on the cheap tier, with the notes whole.
-    - A group past 16,000 characters isn't merged, since a cut would lose what it held. It stays on the report's list.
+    - A group whose notes pass 16,000 characters, each under a heading with its title and path, isn't merged, since a cut would lose what it held. It stays on the report's list.
     - The model first says whether the notes are about the same thing. The answer is JSON, either `{"verdict": "distinct"}` or `{"verdict": "merge", "body"}`.
     - The body must be within 8,000 characters, with no control characters but line breaks and tabs, and no line separators or bidirectional controls.
     - Secrets are removed from it next. It must then hold no title heading, frontmatter fence or conflict markers.
-    - Any other answer is kept as no answer, so those versions aren't asked about again.
+    - Any other answer, or a failed or late call, is kept as no answer, so those versions aren't asked about again. A failed or late call also ends the run.
   - **Kept only while its notes are:** a proposal is kept with the versions of its notes, and a change to any of them proposes the group again.
     - A forgotten note takes the proposal with it right away. A note changed or removed in the vault takes it at the next daily report.
-    - A group that grew or shrank replaces what was proposed for its notes.
+    - A group that grew, or has a new survivor, replaces what was proposed for its notes.
+    - A note that expires takes the proposal with it at the next daily report.
   - **Erasing:** turning Dream off deletes the proposals. A call that ends after that keeps nothing.
-- **Dream's plan:** `memory/_lint/dream.md`, outside the index, lists what Dream would write: the day summaries, then the merges.
+- **Dream's page:** `memory/_lint/dream.md`, outside the index, shows what Dream would write: the day summaries, then the merges, at most 50 of each, with a count of the rest.
   - Each merge names the note that stays and the notes it would mark as merged into it, with the merged body, or "the same content".
   - Whatever a model wrote is shown as code, fenced by more backticks than it holds in a row.
   - It is written with the report, and removed when nothing is proposed.

@@ -368,6 +368,16 @@ describe("merged notes (#112)", () => {
             `Merged into [[${ANA_PATH.slice(0, -3)}]]. Ana desenha capas de livros.`,
           ].join("\n"),
           [linking]: "# Família\n\nVer [[memory/notes/ana-souza]].",
+          // Outside the scopes below, its mark has no say there.
+          "areas/health/notes/terapia.md": `---\nrelations:\n  merged_into:\n    - "[[${ANA_PATH.slice(0, -3)}]]"\n---\n# Terapia\n`,
+          "memory/notes/visita.md": "---\nentities:\n  - Terapia\n---\n# Visita\n",
+          // A mark that leads nowhere, or only to itself, hides nothing.
+          "memory/notes/sem-destino.md":
+            '---\nrelations:\n  merged_into:\n    - "[[memory/notes/nenhum]]"\n---\n# Sem destino\n\nNinguém sabe.\n',
+          "memory/notes/eu-mesmo.md":
+            '---\nrelations:\n  merged_into:\n    - "[[eu-mesmo]]"\n---\n# Eu mesmo\n\nSó eu.\n',
+          // Past the link cap, the mark still counts.
+          "memory/notes/muitos-links.md": `---\nrelations:\n  merged_into:\n    - "[[${ANA_PATH.slice(0, -3)}]]"\n---\n# Muitos links\n\n${Array.from({ length: 520 }, (_, i) => `[[n${i}]]`).join(" ")}\n`,
         }),
       );
       const paths = (hits: readonly { path: string }[]) => hits.map((hit) => hit.path);
@@ -375,12 +385,26 @@ describe("merged notes (#112)", () => {
       expect(paths(index.titled("Ana Souza"))).toEqual([ANA_PATH]);
       expect(paths(index.entityHits(["ana souza"]))).toEqual([ANA_PATH]);
       expect(paths(index.lifecycleNotes())).not.toContain(stub);
-      const blob = index.current(stub)?.blobSha;
+      const blob = index.current(stub)?.blobSha ?? "";
       expect(index.embeddingTexts("m").map((item) => item.blobSha)).not.toContain(blob);
+      index.putEmbeddings("m", [
+        { blobSha: blob, vector: [1, 0] },
+        { blobSha: index.current(ANA_PATH)?.blobSha ?? "", vector: [1, 0] },
+      ]);
+      expect(paths(index.vectorHits("m", [1, 0]))).toEqual([ANA_PATH]);
+      expect(index.mergedInto(stub)).toBe(ANA_PATH);
+      for (const path of ["memory/notes/sem-destino.md", "memory/notes/eu-mesmo.md"]) {
+        expect(index.mergedInto(path)).toBeNull();
+        expect(paths(index.lifecycleNotes())).toContain(path);
+      }
+      expect(paths(index.search("Ninguém sabe"))).toEqual(["memory/notes/sem-destino.md"]);
+      expect(paths(index.titled("Muitos links"))).toEqual([]);
       // A note to read by its path still, and one step away it's the note it went into.
       expect(index.current(stub)?.title).toBe("Ana Souza");
       expect(paths(index.neighbours(linking))).toEqual([ANA_PATH]);
       expect(index.neighbours(stub)).toEqual([]);
+      expect(paths(index.neighbours("memory/notes/visita.md"))).toEqual([ANA_PATH]);
+      expect(index.neighbours("memory/notes/visita.md", { scopes: ["global"] })).toEqual([]);
     });
   });
 });
