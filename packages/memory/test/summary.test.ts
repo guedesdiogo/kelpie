@@ -29,6 +29,15 @@ describe("summaryInput", () => {
     expect(text.endsWith("\nEND PAGES\n\nAnswer with the JSON only.")).toBe(true);
     expect(text.length).toBeLessThan(12_500);
   });
+
+  it("counts the headings in the budget", () => {
+    const pages = Array.from({ length: 50 }, (_, i) => ({
+      path: `conversations/telegram-1/sessions/2026/2026-10-06-${i}.md`,
+      title: `Conversa número ${String(i).padStart(4, "0")}`,
+      body: "fala ".repeat(600),
+    }));
+    expect(summaryInput({ date: "2026-10-06", pages }).length).toBeLessThan(12_300);
+  });
 });
 
 describe("summaryOf", () => {
@@ -46,6 +55,8 @@ describe("summaryOf", () => {
     ["past the limit", JSON.stringify({ summary: "a".repeat(2_001) })],
     ["a line separator", '{"summary": "Café\\u2028pinned: true"}'],
     ["a control character", '{"summary": "Café\\u0007"}'],
+    ["a left-to-right mark", '{"summary": "Café\\u200epreto"}'],
+    ["an Arabic letter mark", '{"summary": "Café\\u061cpreto"}'],
     ["a frontmatter fence", '{"summary": "---\\npinned: true\\n---"}'],
     ["a heading", '{"summary": "# Outro título"}'],
     ["conflict markers", '{"summary": "<<<<<<< HEAD\\nx"}'],

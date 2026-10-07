@@ -635,8 +635,26 @@ describe("Vault Dream", () => {
     await runDurableObjectAlarm(stub);
     expect(backend.files()[DREAM_PAGE_PATH]).toContain("Falaram de café.");
 
+    // The page waiting in the queue, or set aside, holds the summaries too.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO queue (agent, path, content, summary, queued_at) VALUES ('context-store', ?, 'x', 'x', 1)",
+        DREAM_PAGE_PATH,
+      );
+      state.storage.sql.exec(
+        "INSERT INTO conflicts (agent, path, content, reason, at) VALUES ('context-store', ?, 'x', 'owner_won', 1)",
+        DREAM_PAGE_PATH,
+      );
+    });
     await stub.setDream("off");
     expect(await rows(stub, "SELECT path FROM dream_summaries")).toEqual([]);
+    expect(
+      await rows(
+        stub,
+        `SELECT path FROM queue WHERE path = '${DREAM_PAGE_PATH}'
+         UNION ALL SELECT path FROM conflicts WHERE path = '${DREAM_PAGE_PATH}'`,
+      ),
+    ).toEqual([]);
     await runDurableObjectAlarm(stub);
     await runDurableObjectAlarm(stub);
     expect(backend.files()[DREAM_PAGE_PATH]).toBeUndefined();
@@ -699,6 +717,76 @@ describe("Vault Dream", () => {
       off,
     );
     expect(await rows(stub, "SELECT path FROM dream_proposals")).toEqual([]);
+  });
+
+  it("leaves a day while a page of it is held on conflict markers, and sums up the next", async () => {
+    const session = (title: string, date: string) =>
+      kelpieNote({
+        kind: "session",
+        title,
+        scope: "conversation/telegram-1",
+        date,
+        body: `- **10:00 u-owner:** ${title}`,
+      });
+    const older = daysAgo(3).slice(0, 10);
+    const held = await session("Café", daysAgo(2).slice(0, 10));
+    const backend = new FakeVaultBackend({ "README.md": "# Vault" });
+    replaceBackendForTesting(backend);
+    const asked: string[] = [];
+    fakeModelBy((request) => {
+      if (!request.system.includes("sum up one day")) return abstract("Uma linha.");
+      asked.push(JSON.stringify(request.messages));
+      return JSON.stringify({ summary: "Falaram de chá." });
+    });
+    const stub = vault("dream-summary-held");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", [held, await session("Chá", older)], "x");
+    await runDurableObjectAlarm(stub);
+    // The owner pushes a conflict: the vault holds the markers, the index the version before.
+    backend.push({ [held.path]: "<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> main\n" });
+    await runDurableObjectAlarm(stub);
+    expect(await rows(stub, "SELECT path FROM held")).toEqual([{ path: held.path }]);
+    await quiet(stub);
+    for (let i = 0; i < 4; i++) await runDurableObjectAlarm(stub);
+    // A summary that couldn't be kept isn't asked for, run after run.
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toContain("Chá");
+    expect(asked[0]).not.toContain("Café");
+    expect(await rows(stub, "SELECT path FROM dream_summaries")).toEqual([
+      { path: `conversations/telegram-1/sessions/${older.slice(0, 4)}/${older}.md` },
+    ]);
+  });
+
+  it("still writes the memory report when Dream's page fails", async () => {
+    const note = await kelpieNote({ title: "Café" });
+    const backend = new FakeVaultBackend({ "README.md": "# Vault" });
+    replaceBackendForTesting(backend);
+    fakeModel([]);
+    const stub = vault("dream-page-fails");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", [note], "x");
+    await runDurableObjectAlarm(stub);
+    await runInDurableObject(stub, (_instance, state) => {
+      const sql = state.storage.sql;
+      const blob = sql
+        .exec<{ blob_sha: string }>("SELECT blob_sha FROM files WHERE path = ?", note.path)
+        .one().blob_sha;
+      sql.exec(
+        "INSERT INTO dream_proposals (path, blob_sha, abstract, at) VALUES (?, ?, 'Café.', ?)",
+        note.path,
+        blob,
+        Date.now(),
+      );
+      // A row the page can't read.
+      sql.exec(
+        "INSERT INTO dream_summaries (path, key, summary, sources, at) VALUES ('conversations/telegram-1/sessions/2026/2026-10-01.md', 'k', 'S.', 'not JSON', ?)",
+        Date.now(),
+      );
+      sql.exec("INSERT OR REPLACE INTO state (key, value) VALUES ('lifecycle_after', '0')");
+    });
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()[LIFECYCLE_REPORT_PATH]).toContain("## Dream's plan");
   });
 
   it("lets only known operations write, and forgets them when turned off", async () => {

@@ -193,7 +193,11 @@ const DREAM_TIMEOUT_MS = 30_000;
 const DREAM_STEP_MS = 5_000;
 /** Ended runs are kept this long, with what they used. */
 const DREAM_RUNS_MS = 30 * 24 * 60 * 60_000;
-/** Dream's write of an abstract (#112): the queue's mark, and a headline that names no note. */
+/**
+ * A session page is named by its conversation's local date. A date has ended in every time zone
+ * 12 hours after it ends in UTC; 2 more leave room for a conversation still going at midnight.
+ */
+const DREAM_DAY_ENDED_MS = 14 * 60 * 60_000;
 /** One day of one conversation Dream may sum up (#112): its summary's path and its pages. */
 interface DayCandidate {
   path: string;
@@ -202,6 +206,7 @@ interface DayCandidate {
   key: string;
   pages: { path: string; title: string; body: string }[];
 }
+/** Dream's write of an abstract (#112): the queue's mark, and a headline that names no note. */
 const DREAM_SUMMARY = "Write an abstract Dream proposed";
 /** Dream's operations, each dry until the owner lets it write (#112). */
 const DREAM_OPERATIONS = ["abstracts"] as const;
@@ -1002,6 +1007,9 @@ export class Vault extends DurableObject<VaultEnv> {
       if (mode === "off") {
         this.#exec("DELETE FROM dream_proposals");
         this.#exec("DELETE FROM dream_summaries");
+        // Dream's page waiting in the queue, or set aside, holds the summaries too.
+        this.#exec("DELETE FROM queue WHERE path = ?", DREAM_PAGE_PATH);
+        this.#exec("DELETE FROM conflicts WHERE path = ?", DREAM_PAGE_PATH);
         this.#set("lifecycle_after", "0");
       }
     });
@@ -1014,9 +1022,8 @@ export class Vault extends DurableObject<VaultEnv> {
    * these pages' versions already. One conversation's day at a time, so two are never mixed (#131).
    */
   #summaryCandidate(now: number): DayCandidate | null {
-    // A page is named by its conversation's local date: that day has ended in every time zone
-    // once UTC is 14 hours past the next midnight.
-    const ended = new Date(now - 14 * 60 * 60_000).toISOString().slice(0, 10);
+    // A date before this one has ended in every time zone.
+    const ended = new Date(now - DREAM_DAY_ENDED_MS).toISOString().slice(0, 10);
     const oldest = new Date(now - DREAM_LOOKBACK_MS).toISOString().slice(0, 10);
     const days = new Map<string, { date: string; pages: { path: string; blobSha: string }[] }>();
     for (const note of this.#memory.lifecycleNotes()) {
@@ -1058,6 +1065,10 @@ export class Vault extends DurableObject<VaultEnv> {
         });
       const key = children.map((page) => page.blobSha).join(",");
       if (children.length === 0 || proposed.get(path) === key) continue;
+      // The index can hold another version than the vault, as for a page held on conflict
+      // markers: a day whose summary couldn't be kept isn't asked for.
+      const sources = children.map((page) => page.path);
+      if (!this.#summaryCurrent(sources, key)) continue;
       return {
         path,
         date: day.date,

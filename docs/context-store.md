@@ -63,7 +63,7 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - The alarm and each recall check that the index stands at the head. Notes that haven't changed are skipped, so a check is cheap.
     - "As of" therefore means as of when the Context Store synced, not when the owner's device committed.
   - **Dream** (#112, [memory-format.md](memory-format.md#dream)): after the report, the alarm runs one step of Dream.
-    - **A step** is one model call that proposes an abstract for a note Kelpie wrote.
+    - **A step** is one model call. It proposes an abstract for a note Kelpie wrote, or a summary of one day of one conversation.
     - **Activity:** a recall, search, read or write marks memory as active, and Dream waits for 30 minutes of quiet.
     - **What it keeps:** its proposals in `dream_proposals`, and its runs, with what each call used, in `dream_runs`.
     - **What it writes:** an abstract, for an operation the owner lets write, goes through the queue (`dream_writes` keeps what it wrote for a week).
