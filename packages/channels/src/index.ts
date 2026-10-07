@@ -35,7 +35,7 @@ export {
   formatReply,
   type Inline,
   linksOf,
-  trimUrl,
+  webLinks,
 } from "./markdown.ts";
 
 // Adapters have their own entry points (`@kelpie/channels/telegram`): they need the runtime's fetch

@@ -204,6 +204,13 @@ describe("Telegram sending", () => {
     expect(calls[1]?.body.text).toBe("Confirm: rename **a** to <code>evil.example/login</code>");
   });
 
+  it("sends a reply with more formatting than Telegram reads plainer, its addresses still in code", async () => {
+    const { adapter, calls } = botApi();
+    const reply = `${"**a** ".repeat(95)}veja evil.example/login`;
+    await adapter.send({ threadId: "1001" }, reply, { links: [] });
+    expect(calls[0]?.body.text).toBe(`${"**a** ".repeat(95)}veja <code>evil.example/login</code>`);
+  });
+
   it("previews against the text as written, before it is formatted", async () => {
     const { adapter, calls } = botApi();
     const menu = "https://food.example/menu?a=1&b=2";

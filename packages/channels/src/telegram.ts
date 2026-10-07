@@ -11,7 +11,7 @@ import {
 } from "./adapter.ts";
 import { CAPABILITIES } from "./capabilities.ts";
 import type { CanonicalEvent, MessagePart } from "./events.ts";
-import { formatReply, toTelegramHtml, toTelegramPlain } from "./markdown.ts";
+import { fitsTelegram, formatReply, toTelegramHtml, toTelegramPlain } from "./markdown.ts";
 
 // Telegram through the Bot API (https://core.telegram.org/bots/api), webhooks only (ADR-0003).
 
@@ -108,10 +108,12 @@ export class TelegramAdapter implements ChannelAdapter {
     // A reply is formatted (#188). A notice goes as typed, and so does a reply Telegram can't read,
     // but with every address in code: a notice can quote what the model wrote, and Telegram would
     // make it tappable.
-    const formatted =
+    const html =
       options.links === undefined
         ? null
         : toTelegramHtml(formatReply(text, new Set(options.links)));
+    // A reply with more formatting than Telegram reads goes plainer, so no code span is dropped.
+    const formatted = html !== null && fitsTelegram(html) ? html : null;
     const sendAs = (html: string) =>
       this.#call<{ message_id: number }>("sendMessage", {
         chat_id: destination.threadId,

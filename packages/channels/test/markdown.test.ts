@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type Block,
+  fitsTelegram,
   formatReply,
   type Inline,
   linksOf,
@@ -143,6 +144,13 @@ describe("formatReply", () => {
     expect(telegram("*a **b** c*")).toBe("<i>a <b>b</b> c</i>");
   });
 
+  it("reads a run of three markers as bold and italics together", () => {
+    expect(telegram("***x*** e ___y___")).toBe("<b><i>x</i></b> e <b><i>y</i></b>");
+    expect(telegram("***Importante***: leia")).toBe("<b><i>Importante</i></b>: leia");
+    expect(telegram("*x **y***")).toBe("<i>x <b>y</b></i>");
+    expect(shown(telegram("**negrito***"))).toBe("negrito*");
+  });
+
   it("reads a backtick fence whose info string holds a backtick as a paragraph", () => {
     const html = telegram("```npm test``` first\nrest");
     expect(html).not.toContain("<pre>");
@@ -208,6 +216,8 @@ describe("formatReply on a hostile reply", () => {
       word: `${"a".repeat(n)}.`,
       hyphens: "a-".repeat(n / 2),
       fence: `${"`".repeat(n)}\nx`,
+      stars: `${"*".repeat(n / 2)}a${"*".repeat(n / 2)}`,
+      "scheme-like": "/ab+c.d-e".repeat(n / 10),
     };
     for (const [name, reply] of Object.entries(replies)) {
       const started = performance.now();
@@ -255,6 +265,17 @@ describe("toTelegramHtml", () => {
       "Veja <code>evil.example/login</code>, <code>www.evil.example</code> e <code>192.168.0.1/admin</code>. Ou <code>evil.example.com</code>.",
     );
     expect(telegram("Custa 3.5 vezes, e.g. a v1.2.")).toBe("Custa 3.5 vezes, e.g. a v1.2.");
+    expect(telegram("Abra tg://resolve?domain=evil_bot ou xhttps://evil.example.")).toBe(
+      "Abra <code>tg://resolve?domain=evil_bot</code> ou x<code>https://evil.example</code>.",
+    );
+  });
+
+  it("keeps within the entities Telegram reads, so no code span is dropped", () => {
+    const busy = `${"**a** ".repeat(95)}veja evil.example/login`;
+    expect(fitsTelegram(telegram(busy))).toBe(false);
+    expect(fitsTelegram(toTelegramPlain(busy))).toBe(true);
+    const addresses = "evil.example/x ".repeat(95);
+    expect(toTelegramPlain(addresses)).toBe(`<pre>${addresses}</pre>`);
   });
 
   it("sends a reply as written, its addresses in code, when the formatted one can't go", () => {

@@ -6,7 +6,7 @@ import {
   formatReply,
   linksOf,
   type SendOutcome,
-  trimUrl,
+  webLinks,
 } from "@kelpie/channels";
 import { type Actor, type AgentConfig, type AgentSettings, DEFAULT_SETTINGS } from "@kelpie/config";
 import type { RecallOptions } from "@kelpie/context-store/contract";
@@ -1577,7 +1577,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       }
       if (!this.#isRunning(turnId)) return;
       // The bubble's first link that the turn's inputs hold exactly as written.
-      const previewUrl = linksIn(row.text).find((link) => previewable.has(link));
+      const previewUrl = webLinks(row.text).find((link) => previewable.has(link));
       const options = {
         silent: row.seq !== lastSeq,
         ...(previewUrl === undefined ? {} : { previewUrl }),
@@ -1620,7 +1620,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (turn.context !== null) {
       inputs.push(...ownersNotes(turn.context, new Set(turn.kelpieNotes ?? [])));
     }
-    return new Set(inputs.flatMap(linksIn));
+    return new Set(inputs.flatMap(webLinks));
   }
 
   /**
@@ -2027,7 +2027,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     };
     const rows: ShownMessage[] = [];
     for (const { role, message, at, turnId } of window) {
-      if (role === "user") for (const link of linksIn(messageText(message))) said.add(link);
+      if (role === "user") for (const link of webLinks(messageText(message))) said.add(link);
       if (!seen(message)) continue;
       rows.push(
         role === "user"
@@ -2068,7 +2068,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     for (const turn of turns) {
       if (turn.context === null) continue;
       const notes = ownersNotes(turn.context, new Set(turn.kelpieNotes ?? []));
-      links.set(turn.id, new Set(notes.flatMap(linksIn)));
+      links.set(turn.id, new Set(notes.flatMap(webLinks)));
     }
     return links;
   }
@@ -2174,18 +2174,6 @@ function newest(text: string, max: number): string {
   const tail = text.slice(-max);
   const first = tail.charCodeAt(0);
   return first >= 0xdc00 && first <= 0xdfff ? tail.slice(1) : tail;
-}
-
-const LINK = /https?:\/\/[^\s<>"]+/giu;
-
-/**
- * The http and https links in `text`, in order, about as Telegram finds them: punctuation after a
- * link stays out, and a closing parenthesis is the link's own only when it closes one the link
- * opened (`/wiki/Foo_(bar)`). Links without a scheme (`t.me/x`, `example.com`) aren't found, so
- * they never get a preview, which is the safe side.
- */
-function linksIn(text: string): string[] {
-  return [...text.matchAll(LINK)].map(([found]) => trimUrl(found));
 }
 
 /**

@@ -73,7 +73,7 @@ Identity values in answers are masked.
 
 **Formatting** (#188). Replies show a small Markdown subset in the webchat and on Telegram: bold, italics, inline code, code blocks, bullet and numbered lists, and headings as bold. The runtime reads it, and the model's text is never passed on as markup:
 - the webchat builds the reply as elements on the page;
-- Telegram gets its own HTML, every text escaped. If Telegram can't read it, the reply goes again without formatting or links, its addresses still in code;
+- Telegram gets its own HTML, every text escaped. If Telegram can't read it, or it holds more formatting than Telegram reads (about 100 spans), the reply goes without formatting or links, its addresses still in code;
 - raw HTML stays text.
 
 A web address (http or https) shows as a link only when it is in the turn's inputs, or the admin API's origin (`ADMIN_ORIGIN`) starts it as written, whose pages only show behind Access:

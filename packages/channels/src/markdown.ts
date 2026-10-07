@@ -266,22 +266,27 @@ function readInline(source: string, allowed: AllowedLinks, depth = 0): Inline[] 
 }
 
 /**
- * Where each emphasis marker could close, in order: after a non-space and before a non-word
- * character, and not as part of a longer run of the same marker. One pass, so finding a closer
- * costs a search, not a scan.
+ * Where each emphasis marker could close, in order: a run of markers after a non-space and before a
+ * non-word character. A run of one closes `*`, of two `**`, and a longer one both, with its last
+ * two and its last one, so `***x***` is bold italics and `*a **b** c*` italics around bold. One
+ * pass, so finding a closer costs a search, not a scan.
  */
 function closerPositions(source: string): Map<string, number[]> {
   const positions = new Map<string, number[]>(EMPHASIS.map((marker) => [marker, []]));
-  for (let at = 1; at < source.length; at += 1) {
-    const char = source[at];
-    if (char !== "*" && char !== "_") continue;
-    const before = source[at - 1] ?? "";
-    if (/\s/.test(before) || before === char) continue;
-    for (const marker of EMPHASIS) {
-      if (!source.startsWith(marker, at)) continue;
-      const after = source[at + marker.length];
-      if (!isWordChar(after) && after !== marker[0]) positions.get(marker)?.push(at);
+  for (let at = 0; at < source.length; ) {
+    const char = source.charAt(at);
+    if (char !== "*" && char !== "_") {
+      at += 1;
+      continue;
     }
+    let end = at + 1;
+    while (source[end] === char) end += 1;
+    if (at > 0 && !/\s/.test(source.charAt(at - 1)) && !isWordChar(source[end])) {
+      const length = end - at;
+      if (length !== 1) positions.get(char + char)?.push(end - 2);
+      if (length !== 2) positions.get(char)?.push(end - 1);
+    }
+    at = end;
   }
   return positions;
 }
@@ -397,7 +402,28 @@ export function toTelegramPlain(text: string): string {
     from = at + found.length;
   }
   nodes.push({ type: "text", text: text.slice(from) });
-  return telegramInline(nodes);
+  const html = telegramInline(nodes);
+  return fitsTelegram(html) ? html : `<pre>${escapeHtml(text)}</pre>`;
+}
+
+/**
+ * Telegram reads about 100 entities in a message and ignores the rest (python-telegram-bot's
+ * `MAX_MESSAGE_ENTITIES`), so a code span past them would leave its address to be linked. Some room
+ * stays for the entities Telegram adds itself.
+ */
+const MAX_ENTITIES = 90;
+
+/** Whether Telegram reads every entity in `html`: if not, the reply goes plainer. */
+export function fitsTelegram(html: string): boolean {
+  return (html.match(/<[a-z]/g) ?? []).length <= MAX_ENTITIES;
+}
+
+/**
+ * The http and https links in `text`, in order, about as Telegram finds them: punctuation after a
+ * link stays out (`trimUrl`). Links without a scheme (`t.me/x`, `example.com`) aren't listed.
+ */
+export function webLinks(text: string): string[] {
+  return [...webUrls(text)].map(([url]) => url);
 }
 
 /** Each web URL in `text`, as `bareUrl` reads one, with where it starts. */
@@ -533,14 +559,33 @@ function codeAddresses(runs: readonly Run[]): Run[] {
 const HOST = /(?<![\p{L}\p{N}-])[\p{L}\p{N}-]+(?:[.。．｡][\p{L}\p{N}-]+)+/gu;
 /** What may follow a host in an address: a port, a path, a query or a fragment. */
 const HOST_TAIL = /[/?#:][^\s<>"]*/y;
-const SCHEME_BEFORE = /[a-z][a-z0-9+.-]{0,30}:\/\/$/i;
 const TOP_LEVEL = /^(?:\p{L}{2,}|xn--[\p{L}\p{N}-]+)$/iu;
+/** An address with any scheme, such as `tg://resolve?domain=…`, host or not. */
+const SCHEMED = /(?<![\p{L}\p{N}+.-])[a-z][a-z0-9+.-]{0,30}:\/\/[^\s<>"]+/giu;
 
 /**
- * Where `text` holds something Telegram could link: a host with a top-level domain or an IPv4
- * address, with the scheme before it and the path after it.
+ * Where `text` holds something Telegram could link: an address with a scheme, or a host with a
+ * top-level domain or an IPv4 address, with the path after it. In order, and never overlapping.
  */
 function addressRanges(text: string): { start: number; end: number }[] {
+  const found: { start: number; end: number }[] = [];
+  for (const match of text.matchAll(SCHEMED)) {
+    const address = trimUrl(match[0]);
+    if (!address.endsWith("://"))
+      found.push({ start: match.index, end: match.index + address.length });
+  }
+  found.push(...hostRanges(text));
+  found.sort((a, b) => a.start - b.start);
+  const ranges: { start: number; end: number }[] = [];
+  for (const range of found) {
+    const last = ranges.at(-1);
+    if (last && range.start <= last.end) last.end = Math.max(last.end, range.end);
+    else ranges.push({ ...range });
+  }
+  return ranges;
+}
+
+function hostRanges(text: string): { start: number; end: number }[] {
   const ranges: { start: number; end: number }[] = [];
   HOST.lastIndex = 0;
   for (let match = HOST.exec(text); match; match = HOST.exec(text)) {
@@ -551,11 +596,7 @@ function addressRanges(text: string): { start: number; end: number }[] {
     // that could be a top-level domain.
     while (!ipv4 && count > 1 && !TOP_LEVEL.test(labels[count - 1] ?? "")) count -= 1;
     if (count < 2) continue;
-    let start = match.index;
-    const scheme = SCHEME_BEFORE.exec(text.slice(Math.max(0, start - 32), start));
-    if (scheme) start -= scheme[0].length;
-    const previous = ranges.at(-1);
-    if (previous && start < previous.end) start = previous.end;
+    const start = match.index;
     let end = match.index + labels.slice(0, count).join(".").length;
     HOST_TAIL.lastIndex = end;
     const tail = count === labels.length ? HOST_TAIL.exec(text)?.[0] : undefined;
