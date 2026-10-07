@@ -24,6 +24,9 @@ export const inbound = sqliteTable(
      * zone change doesn't rewrite it (Story 3.12). History gets it in front of the text.
      */
     stamp: text("stamp"),
+    /** The author's role and the chat, as ingress admitted them; null for none it named (#131). */
+    role: text("role", { enum: ["owner", "admin", "member"] }),
+    chatType: text("chat_type", { enum: ["direct", "group"] }),
     turnId: integer("turn_id"),
   },
   (table) => [uniqueIndex("inbound_provider_message").on(table.providerMessageId)],
@@ -69,6 +72,12 @@ export const turns = sqliteTable("turns", {
    * with its native output only to a turn with the same tools: its reasoning is bound to them.
    */
   toolsKey: text("tools_key"),
+  /**
+   * The least-privileged role and chat type among the turn's messages, null where one wasn't
+   * known (#131). Recall, the tools and the actor read them, so a retry sees the same memory.
+   */
+  role: text("role", { enum: ["owner", "admin", "member"] }),
+  chatType: text("chat_type", { enum: ["direct", "group"] }),
   createdAt: integer("created_at").notNull(),
 });
 

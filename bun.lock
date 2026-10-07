@@ -132,6 +132,7 @@
     "packages/conversation": {
       "name": "@kelpie/conversation",
       "dependencies": {
+        "@kelpie/access": "workspace:*",
         "@kelpie/channels": "workspace:*",
         "@kelpie/llm": "workspace:*",
       },

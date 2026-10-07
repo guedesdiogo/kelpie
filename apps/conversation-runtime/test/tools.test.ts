@@ -40,6 +40,8 @@ function message(id: string, text: string) {
     agentId: "assistant",
     providerMessageId: id,
     userId: "u-owner",
+    role: "owner" as const,
+    chatType: "direct" as const,
     text,
     destination,
     sentAt: SENT_AT,
@@ -137,6 +139,39 @@ describe("a turn's tools", () => {
     };
     expect(world.requests[0]?.messages).toEqual([first]);
     expect(world.requests[1]?.messages[0]).toEqual(first);
+  });
+
+  it("run as the turn's least-privileged author, with the turn's own scopes (#131)", async () => {
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "lookup", input: { q: "ana" } }),
+        reply("Ok."),
+        toolCalls({ name: "lookup", input: { q: "bruno" } }),
+        reply("Ok."),
+      ]),
+    );
+    const runs = provide(world, { lookup: answer });
+    const narrow = ["conversation/telegram-chat-1"];
+
+    const mixed = agent("tools-member");
+    await mixed.ingest(message("m1", "who is Ana?"));
+    await mixed.ingest({ ...message("m2", "and Bruno?"), userId: "u-guest", role: "member" });
+    await mixed.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Ok."]));
+    expect(runs[0]?.context).toMatchObject({
+      actor: { userId: "u-guest", role: "member", via: "agent:assistant" },
+      scopes: narrow,
+    });
+
+    // No role at all, as an ingress from before #131 sends: owner-only commands refuse a member.
+    const unknown = agent("tools-no-role");
+    await unknown.ingest({ ...message("m1", "who is Bruno?"), role: undefined });
+    await unknown.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Ok.", "Ok."]));
+    expect(runs[1]?.context).toMatchObject({
+      actor: { userId: "u-owner", role: "member", via: "agent:assistant" },
+      scopes: narrow,
+    });
   });
 
   it("runs the calls a reply asks for, round after round, then answers", async () => {

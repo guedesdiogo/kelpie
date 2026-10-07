@@ -14,6 +14,7 @@
     "vitest": "^4.1.0"
   },
   "dependencies": {
+    "@kelpie/access": "workspace:*",
     "@kelpie/channels": "workspace:*",
     "@kelpie/llm": "workspace:*"
   }

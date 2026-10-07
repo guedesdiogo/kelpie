@@ -55,8 +55,9 @@ export type ForgetResult =
 /** What a turn asks memory for (#110). */
 export interface RecallOptions {
   /**
-   * The scopes the turn may see, such as `["global", "conversation/telegram-123"]`, or `"all"` for
-   * a private chat with the owner. Required, so no caller gets every scope by default.
+   * The scopes the turn may see: `"all"` for the owner's direct chat, or a list such as
+   * `["conversation/telegram-123"]`, a turn's own conversation, for any other (#131). Required, so
+   * no caller gets every scope by default.
    */
   scopes: readonly string[] | "all";
   /** The packed block's budget, in tokens of four characters; at most 8,000. */

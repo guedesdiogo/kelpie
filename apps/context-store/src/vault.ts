@@ -310,8 +310,9 @@ function backendFor(env: VaultEnv): VaultBackend | null {
   });
 }
 
+/** An error's name for the logs, never its message: GitHub's and memory's can quote a note (#132). */
 function errorName(error: unknown): string {
-  return error instanceof Error ? `${error.name}: ${error.message}` : "unknown error";
+  return error instanceof Error ? error.name : "unknown error";
 }
 
 interface QueuedRow extends Record<string, SqlStorageValue> {
