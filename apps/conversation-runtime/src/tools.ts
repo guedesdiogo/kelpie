@@ -1,5 +1,6 @@
 import type { Actor } from "@kelpie/config";
 import type { RecallOptions } from "@kelpie/context-store/contract";
+import { withoutTypedStamps } from "@kelpie/conversation";
 import type { ToolCallPart, ToolResult, ToolSpec } from "@kelpie/llm";
 
 // The tool layer (ADR-0014, issue #141): providers offer an agent tools, and the conversation's
@@ -53,9 +54,26 @@ export interface ConfirmationRequest {
 /** How long a confirmation's code lasts. */
 export const CONFIRMATION_MS = 10 * 60_000;
 
-/** The bubble the host sends after the turn's reply, so the owner can confirm a change. */
+/** The longest summary a notice shows, once made visible: the notice fits one Telegram message. */
+export const MAX_SUMMARY_CHARS = 3_500;
+
+/**
+ * The text with every control, format, private-use, unassigned and line or paragraph separator
+ * character written out as `\u{…}`, so nothing in it is invisible or reorders what is shown.
+ */
+export function visible(text: string): string {
+  return text.replace(
+    /[\p{C}\p{Zl}\p{Zp}]/gu,
+    (character) => `\\u{${(character.codePointAt(0) ?? 0).toString(16).toUpperCase()}}`,
+  );
+}
+
+/**
+ * The bubble the host sends after the turn's reply, so the owner can confirm a change. The summary
+ * is shown with its invisible characters written out.
+ */
 export function confirmationNotice(summary: string, code: string): string {
-  return `Confirm: ${summary}\nTo go ahead, reply with the code ${code}. It expires in 10 minutes.`;
+  return `Confirm: ${visible(summary)}\nTo go ahead, reply with just the code ${code}. It expires in ${CONFIRMATION_MS / 60_000} minutes.`;
 }
 
 /** Codes avoid letters and digits that read alike: no 0/O, 1/I/L, 2/Z, 5/S, 8/B. */
@@ -72,20 +90,31 @@ export function newConfirmationCode(): string {
   return code;
 }
 
-/** Whether a message holds the code as a word of its own, in any case. */
-export function holdsCode(text: string, code: string): boolean {
-  return text
-    .toUpperCase()
-    .split(/[^A-Z0-9]+/)
-    .includes(code);
+/**
+ * Whether a message confirms the code: one of its lines, past the time stamp in front of it, is
+ * the code alone, in any case, with trailing punctuation. A line that only mentions the code, such
+ * as "don't do K7MPRX", is no yes.
+ */
+export function confirmsCode(text: string, code: string): boolean {
+  return withoutTypedStamps(text)
+    .split("\n")
+    .some(
+      (line) =>
+        line
+          .trim()
+          .replace(/[.!?,;:]+$/u, "")
+          .toUpperCase() === code,
+    );
 }
 
 /** JSON with every object's keys sorted, so equal inputs compare equal. */
 export function canonicalJson(value: unknown): string {
-  return JSON.stringify(value, (_key, item: unknown) =>
-    item !== null && typeof item === "object" && !Array.isArray(item)
-      ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-      : item,
+  return (
+    JSON.stringify(value, (_key, item: unknown) =>
+      item !== null && typeof item === "object" && !Array.isArray(item)
+        ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+        : item,
+    ) ?? "null"
   );
 }
 

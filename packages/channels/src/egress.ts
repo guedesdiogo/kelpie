@@ -107,3 +107,6 @@ export interface ChannelFormsContract {
     | { ok: false; reason: "invalid_input" | "not_connected" | "store_unavailable" }
   >;
 }
+
+/** What the setup agent's Worker calls (Story 3.11): it only opens a form. */
+export type SetupFormsContract = Pick<ChannelFormsContract, "createTelegramForm">;

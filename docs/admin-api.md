@@ -175,11 +175,14 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
   - `configure_agent` and `connect_telegram` wait for the owner's confirmation (below);
   - `pair_telegram` links to the pairing page ("Pairing").
 
-  The identity, time zone and vault commands stay on this API. `conversation-runtime` binds no `Directory`, which would make it and `ingress` bind each other.
+  The identity, time zone and vault commands stay on this API. `conversation-runtime` binds no `Directory`, which would make it and `ingress` bind each other. Of `channel-egress`, it binds only `SetupForms`, which opens a form and nothing more (`docs/secrets.md`).
 - **Confirmation.** A change to access, cost or an external account waits for the owner's yes, gated in code:
   1. The first call doesn't run. After the agent's reply, Kelpie itself sends one more bubble, written from the change's validated input, not by the model: `Confirm: <the change>`, and a 6-character code.
-  2. The owner replies with the code, in a message of their own, and the agent calls the same tool with the same input again.
-  3. A code confirms that one change, once, for 10 minutes.
+     - Invisible and control characters in the change are written out as `\u{…}`, so what the owner reads is all there is.
+     - A change too long for one bubble is refused before it is shown. Make it through this API instead.
+     - For `connect_telegram`, the change names the admin API's origin, so the owner can check where the form's link points.
+  2. The owner replies with just the code, on a line of its own, and the agent calls the same tool with the same input again. A message that only mentions the code, such as "don't do K7MPRX", is no yes.
+  3. A code confirms that one change, once. It lasts 10 minutes from the last time it was shown.
 
   What never confirms:
   - another person's message;

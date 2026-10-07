@@ -3,9 +3,9 @@ import {
   CAPABILITIES,
   type ChannelCapabilities,
   type ChannelEgressContract,
-  type ChannelFormsContract,
   type ChannelId,
   type SendOutcome,
+  type SetupFormsContract,
   typingRenewIntervalMs,
 } from "@kelpie/channels";
 import {
@@ -116,8 +116,8 @@ function productionPorts(env: Env): ConversationPorts {
   const egress = env.CHANNEL_EGRESS as unknown as ChannelEgressContract;
   // A service binding to context-store's ContextStore entrypoint.
   const contextStore = env.CONTEXT_STORE as unknown as ContextStoreContract;
-  // A service binding to channel-egress's ChannelForms entrypoint, which returns values only.
-  const forms = env.CHANNEL_FORMS as unknown as ChannelFormsContract;
+  // A service binding to channel-egress's SetupForms entrypoint, which only opens a form.
+  const forms = env.SETUP_FORMS as unknown as SetupFormsContract;
   // Typed as the contracts the admin API binds, so both clients of the commands match.
   const registry = env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<RegistryContract>;
   const agentHost = (id: string) =>
@@ -158,7 +158,8 @@ function productionPorts(env: Env): ConversationPorts {
           withTimeout(contextStore.writeNote(agentId, input, options), REMEMBER_TIMEOUT_MS),
       }),
       // The setup agent's (#48): the same commands as the admin API, minus the ones that need the
-      // Directory or the vault's admin entrypoint, which this Worker doesn't bind.
+      // Directory, the vault's admin entrypoint or more of channel-egress than opening a form,
+      // which this Worker doesn't bind.
       setupTools(
         createConfigCommands({
           registry,
@@ -175,8 +176,8 @@ function productionPorts(env: Env): ConversationPorts {
           },
           channels: {
             createTelegramForm: (agentId) => forms.createTelegramForm(agentId),
-            registerTelegramWebhook: (agentId) => forms.registerTelegramWebhook(agentId),
-            describeTelegramBot: (agentId) => forms.describeTelegramBot(agentId),
+            registerTelegramWebhook: notBound,
+            describeTelegramBot: notBound,
           },
           vault: { held: notBound, forget: notBound },
         }),
@@ -227,8 +228,9 @@ function productionPorts(env: Env): ConversationPorts {
 }
 
 /**
- * What the setup agent's tools never call: the commands that need the Directory or the vault's
- * admin entrypoint. Binding the Directory here would make ingress and this Worker bind each other.
+ * What the setup agent's tools never call: the commands that need the Directory, the vault's admin
+ * entrypoint, or channel-egress beyond opening a form. Binding the Directory here would make ingress
+ * and this Worker bind each other.
  */
 function notBound(): Promise<never> {
   return Promise.reject(new Error("not bound in conversation-runtime"));

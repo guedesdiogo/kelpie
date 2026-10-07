@@ -8,7 +8,14 @@ import {
 } from "@kelpie/config";
 // The router module only: the package root also loads the provider SDKs.
 import { MODEL_TIERS } from "@kelpie/llm/router";
-import type { Tool, ToolContext, ToolOutcome, ToolProvider } from "./tools.ts";
+import {
+  MAX_SUMMARY_CHARS,
+  type Tool,
+  type ToolContext,
+  type ToolOutcome,
+  type ToolProvider,
+  visible,
+} from "./tools.ts";
 
 // The built-in setup agent (Story 3.11, ADR-0013): the owner configures Kelpie by talking to it, in
 // the webchat. Every instance has it (the Registry seeds it), and only it gets these tools: the
@@ -31,9 +38,6 @@ export type SetupCommands = Pick<
   ConfigCommands,
   "listAgents" | "getAgent" | "createAgent" | "renameAgent" | "configureAgent" | "connectTelegram"
 >;
-
-/** The longest prompt the setup agent sets: the owner's confirmation shows it whole. */
-const MAX_PROMPT_CHARS = 4_000;
 
 const AGENT_ID = {
   type: "string",
@@ -96,7 +100,6 @@ const SPECS = {
             },
             systemPrompt: {
               type: "string",
-              maxLength: MAX_PROMPT_CHARS,
               description: "The agent's instructions.",
             },
             conversational: {
@@ -207,12 +210,15 @@ export function setupTools(
   const adminOrigin = bareHttpsOrigin(options.adminOrigin);
   const isOwner = (context: ToolContext) => context.actor.role === "owner";
 
-  /** The agent's name, or the tool's refusal: checked before anything is shown to the owner. */
-  async function agentName(context: ToolContext, id: unknown): Promise<string | ToolOutcome> {
+  /** The agent, or the tool's refusal: checked before anything is shown to the owner. */
+  async function agentOf(
+    context: ToolContext,
+    id: unknown,
+  ): Promise<{ id: string; name: string } | ToolOutcome> {
     if (!isAgentId(id))
       return failed("That isn't an agent id: lowercase letters, digits and hyphens.");
     const agent = await commands.getAgent(context.actor, { id });
-    return agent.ok ? agent.value.name : refusal(agent, id);
+    return agent.ok ? { id, name: agent.value.name } : refusal(agent, id);
   }
 
   const tools: Tool[] = [
@@ -281,18 +287,20 @@ export function setupTools(
             "Those settings aren't valid. Pass only the settings to change, each with an allowed value.",
           );
         }
-        if ((parsed.systemPrompt?.length ?? 0) > MAX_PROMPT_CHARS) {
+        const agent = await agentOf(context, id);
+        if (!("id" in agent)) return agent;
+        const change = { id: agent.id, settings: parsed };
+        const summary = `change the settings of the agent ${JSON.stringify(agent.name)} (${agent.id}): ${describe(parsed)}.`;
+        // The owner confirms what they see, and one bubble shows the whole change, or nothing.
+        if (visible(summary).length > MAX_SUMMARY_CHARS) {
           return failed(
-            `A prompt longer than ${MAX_PROMPT_CHARS} characters goes through the admin API.`,
+            "That change is too long to show the owner for confirmation here: make it through the admin API.",
           );
         }
-        const name = await agentName(context, id);
-        if (typeof name !== "string") return name;
-        const change = { id: id as string, settings: parsed };
         const confirmed = await context.confirm({
           command: "configureAgent",
           input: change,
-          summary: `change the settings of the agent ${JSON.stringify(name)} (${change.id}): ${describe(parsed)}.`,
+          summary,
         });
         if (!confirmed) return { output: WAITING };
         const result = await commands.configureAgent(context.actor, change);
@@ -307,13 +315,14 @@ export function setupTools(
         if (!isOwner(context)) return NOT_OWNER;
         if (adminOrigin === "") return NOT_CONFIGURED;
         const { agentId } = fields(input);
-        const name = await agentName(context, agentId);
-        if (typeof name !== "string") return name;
-        const request = { agentId: agentId as string };
+        const agent = await agentOf(context, agentId);
+        if (!("id" in agent)) return agent;
+        const request = { agentId: agent.id };
+        // The admin API's origin comes from the deploy, so the owner can check the link they get.
         const confirmed = await context.confirm({
           command: "connectTelegram",
           input: request,
-          summary: `connect a Telegram bot to the agent ${JSON.stringify(name)} (${request.agentId}), through a one-time form for its token.`,
+          summary: `connect a Telegram bot to the agent ${JSON.stringify(agent.name)} (${agent.id}), through a one-time form for its token on ${adminOrigin}.`,
         });
         if (!confirmed) return { output: WAITING };
         const result = await commands.connectTelegram(context.actor, request);
@@ -330,10 +339,10 @@ export function setupTools(
         if (!isOwner(context)) return NOT_OWNER;
         if (adminOrigin === "") return NOT_CONFIGURED;
         const { agentId } = fields(input);
-        const name = await agentName(context, agentId);
-        if (typeof name !== "string") return name;
+        const agent = await agentOf(context, agentId);
+        if (!("id" in agent)) return agent;
         return {
-          output: `Give the owner this link: ${adminOrigin}/pair/telegram/${agentId as string}\nOn that page they press a button, and get a Telegram link that pairs the account they open it with as theirs. The agent's bot must be connected first.`,
+          output: `Give the owner this link: ${adminOrigin}/pair/telegram/${agent.id}\nOn that page they press a button, and get a Telegram link that pairs the account they open it with as theirs. The agent's bot must be connected first.`,
         };
       },
     },

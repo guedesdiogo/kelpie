@@ -17,8 +17,8 @@
     },
     // The vault's persona, rules and skills (ADR-0005).
     { "binding": "CONTEXT_STORE", "service": "kelpie-context-store", "entrypoint": "ContextStore" },
-    // The setup agent's secure form for a bot's token (Story 3.11).
-    { "binding": "CHANNEL_FORMS", "service": "kelpie-channel-egress", "entrypoint": "ChannelForms" }
+    // The setup agent opens a secure form for a bot's token, and nothing more (Story 3.11).
+    { "binding": "SETUP_FORMS", "service": "kelpie-channel-egress", "entrypoint": "SetupForms" }
   ],
   // The admin API's public origin, for the setup agent's links; set when deploying (Story 3.11).
   "vars": { "ADMIN_ORIGIN": "" },

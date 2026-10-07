@@ -5,7 +5,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import { type SetupCommands, setupTools } from "../src/setup-agent.ts";
-import type { ConfirmationRequest, Tool, ToolContext, ToolProvider } from "../src/tools.ts";
+import {
+  type ConfirmationRequest,
+  canonicalJson,
+  confirmationNotice,
+  type Tool,
+  type ToolContext,
+  type ToolProvider,
+} from "../src/tools.ts";
 import { type FakeWorld, fakeWorld, reply, toolCalls } from "./fakes.ts";
 
 // The setup agent's tools (Story 3.11): the configuration commands, owner-only, and the changes to
@@ -211,12 +218,29 @@ describe("the setup agent's tools", () => {
     const tools = await toolsOf(setupTools(fakeCommands().commands, { adminOrigin: ADMIN }));
     const { context, asked } = contextOf(true);
 
-    for (const settings of [{}, { tier: "huge" }, { systemPrompt: "x".repeat(4_001) }, "smart"]) {
+    // Past what one bubble shows, counting the escapes that make invisible characters visible.
+    const invisible = "\u{E0041}".repeat(400);
+    for (const settings of [
+      {},
+      { tier: "huge" },
+      { systemPrompt: "x".repeat(3_500) },
+      { systemPrompt: `Seja breve.${invisible}` },
+      "smart",
+    ]) {
       expect(
         await run(tools, "configure_agent", { id: SETUP_AGENT_ID, settings }, context),
       ).toMatchObject({ isError: true });
     }
     expect(asked).toEqual([]);
+    // A prompt that fits is shown whole.
+    const fits = await run(
+      tools,
+      "configure_agent",
+      { id: SETUP_AGENT_ID, settings: { systemPrompt: "x".repeat(3_000) } },
+      context,
+    );
+    expect(fits.isError).toBe(undefined);
+    expect(asked[0]?.summary).toContain("x".repeat(3_000));
   });
 
   it("gives the secure form's link only once the owner confirmed connecting a bot", async () => {
@@ -235,7 +259,7 @@ describe("the setup agent's tools", () => {
       {
         command: "connectTelegram",
         input: { agentId: SETUP_AGENT_ID },
-        summary: `connect a Telegram bot to the agent "Setup" (${SETUP_AGENT_ID}), through a one-time form for its token.`,
+        summary: `connect a Telegram bot to the agent "Setup" (${SETUP_AGENT_ID}), through a one-time form for its token on ${ADMIN}.`,
       },
     ]);
     expect(calls).toEqual([]);
@@ -369,7 +393,7 @@ async function turn(stub: ReturnType<typeof agent>, world: FakeWorld, id: string
 }
 
 const NOTICE =
-  /^Confirm: (.+)\nTo go ahead, reply with the code ([A-Z0-9]{6})\. It expires in 10 minutes\.$/s;
+  /^Confirm: (.+)\nTo go ahead, reply with just the code ([A-Z0-9]{6})\. It expires in 10 minutes\.$/s;
 
 /** The codes shown so far, in order. */
 const codes = (world: FakeWorld) =>
@@ -378,9 +402,31 @@ const codes = (world: FakeWorld) =>
     return code === undefined ? [] : [code];
   });
 
+const historyOf = (stub: ReturnType<typeof agent>) =>
+  runInDurableObject(stub, (instance: ConversationAgent) => instance.history());
+
 afterEach(() => {
   replacePortsForTesting(undefined);
   vi.restoreAllMocks();
+});
+
+describe("confirmation helpers", () => {
+  it("compares inputs whatever their keys' order", () => {
+    expect(canonicalJson({ b: 1, a: { d: [2, { f: 1, e: 0 }], c: 2 } })).toBe(
+      '{"a":{"c":2,"d":[2,{"e":0,"f":1}]},"b":1}',
+    );
+    expect(canonicalJson(undefined)).toBe("null");
+  });
+
+  it("shows every invisible or control character in a notice", () => {
+    const [rlo, tag, separator] = [0x202e, 0xe0041, 0x2028].map((point) =>
+      String.fromCodePoint(point),
+    );
+    const notice = confirmationNotice(`rename "A${rlo}b" to "c${tag}d${separator}e"`, "K7MPRX");
+    expect(notice).toContain("A\\u{202E}b");
+    expect(notice).toContain("c\\u{E0041}d\\u{2028}e");
+    for (const hidden of [rlo, tag, separator]) expect(notice).not.toContain(hidden);
+  });
 });
 
 describe("the confirmation gate", () => {
@@ -397,45 +443,101 @@ describe("the confirmation gate", () => {
 
     expect(world.sent).toHaveLength(2);
     expect(world.sent[0]).toBe("Confirme, por favor.");
-    expect(world.sent[1]).toMatch(NOTICE);
     expect(NOTICE.exec(world.sent[1] ?? "")?.[1]).toBe('change the thing to {"to":"smart"}.');
+    // The notice comes last, and it is the bubble that notifies.
+    expect(world.sends.map((send) => send.silent)).toEqual([true, false]);
     expect(ran).toEqual([]);
-    const [code] = codes(world);
-    // Neither a request nor history holds the code: the model can't ask for it in words of its own.
+    const [code = ""] = codes(world);
+    // Neither a request, history nor the outbox's inspection holds the code.
     expect(JSON.stringify(world.requests)).not.toContain(code);
-    const history = await runInDurableObject(stub, (instance: ConversationAgent) =>
-      instance.history(),
-    );
-    expect(JSON.stringify(history)).not.toContain(code);
+    expect(JSON.stringify(await historyOf(stub))).not.toContain(code);
+    expect(JSON.stringify(await stub.outbox())).not.toContain(code);
     // The reply is kept whole, and the turn counts as delivered.
     expect((await stub.turns()).at(-1)?.status).toBe("delivered");
   });
 
-  it("runs the change once the owner replies with its code, and only once", async () => {
-    const world = use(
-      fakeWorld([
-        toolCalls({ name: "change", input: { to: "smart" } }),
-        reply("Confirme."),
-        toolCalls({ name: "change", input: { to: "smart" } }),
-        reply("Feito."),
-        toolCalls({ name: "change", input: { to: "smart" } }),
-        reply("Confirme de novo."),
-      ]),
-    );
+  it("runs the change once the owner replies with just its code, and only once", async () => {
+    const scripts = [toolCalls({ name: "change", input: { to: "smart" } }), reply("Confirme.")];
+    const world = use(fakeWorld(scripts));
     const ran = gated(world);
     const stub = agent("gate-confirms");
     await turn(stub, world, "m1", "mude para smart");
-    const [code] = codes(world);
-    await turn(stub, world, "m2", `confirmo ${code?.toLowerCase()}`);
+    const [code = ""] = codes(world);
+
+    // A message that mentions the code without being it is no yes.
+    scripts.push(toolCalls({ name: "change", input: { to: "smart" } }), reply("Hm."));
+    await turn(stub, world, "m2", `não, não faça ${code}`);
+    expect(ran).toEqual([]);
+
+    scripts.push(
+      toolCalls({ name: "change", input: { to: "smart" } }),
+      reply("Feito."),
+      toolCalls({ name: "change", input: { to: "smart" } }),
+      reply("Confirme de novo."),
+    );
+    await turn(stub, world, "m3", `ok\n  ${code.toLowerCase()}.`);
     expect(ran).toEqual([{ to: "smart" }]);
     expect(world.sent.at(-1)).toBe("Feito.");
 
     // The code is spent: the same change asks again, with a new code.
-    await turn(stub, world, "m3", "de novo");
+    await turn(stub, world, "m4", "de novo");
     expect(ran).toEqual([{ to: "smart" }]);
-    const [, second] = codes(world);
-    expect(second).toMatch(/^[A-Z0-9]{6}$/);
-    expect(second).not.toBe(code);
+    const shown = codes(world);
+    expect(shown.slice(0, 2)).toEqual([code, code]);
+    expect(shown[2]).toMatch(/^[A-Z0-9]{6}$/);
+    expect(shown[2]).not.toBe(code);
+    expect(scripts).toEqual([]);
+  });
+
+  it("shows each change a turn asks for with a code of its own", async () => {
+    const world = use(
+      fakeWorld([
+        toolCalls(
+          { name: "change", input: { to: "smart" } },
+          { name: "change", input: { to: "frontier" } },
+        ),
+        reply("Confirme as duas."),
+      ]),
+    );
+    gated(world);
+    const stub = agent("gate-two");
+    await turn(stub, world, "m1", "mude tudo");
+
+    expect(world.sent.map((text) => NOTICE.exec(text)?.[1] ?? text)).toEqual([
+      "Confirme as duas.",
+      'change the thing to {"to":"smart"}.',
+      'change the thing to {"to":"frontier"}.',
+    ]);
+    const [first, second] = codes(world);
+    expect(first).not.toBe(second);
+  });
+
+  it("keeps the reply whole when a new message stops the turn before its notice", async () => {
+    const world = use(
+      fakeWorld([toolCalls({ name: "change", input: { to: "smart" } }), reply("Confirme.")]),
+    );
+    gated(world);
+    // The wait before the notice, the delivery's second, lasts until the turn stops.
+    world.blockSleeps.add(1);
+    const stub = agent("gate-interrupted");
+    await stub.ingest(message("m1", "mude para smart"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sleeps).toHaveLength(2));
+    expect(world.sent).toEqual(["Confirme."]);
+    await stub.ingest(message("m2", "espera"));
+    await stub.flush();
+    await vi.waitFor(async () => expect((await stub.turns())[0]?.status).toBe("interrupted"));
+
+    // The person saw the whole reply, which history keeps with its native output.
+    const history = await historyOf(stub);
+    const kept = history.find((row) => JSON.stringify(row).includes('"text":"Confirme."'));
+    expect(kept).toEqual(
+      expect.objectContaining({
+        parts: [{ type: "text", text: "Confirme." }],
+        native: expect.anything(),
+      }),
+    );
+    expect(JSON.stringify(history)).not.toMatch(/reply with just the code/);
   });
 
   it("counts no code from a tool's output, the model's words or another input's request", async () => {
@@ -450,7 +552,7 @@ describe("the confirmation gate", () => {
       // The code reaches the model through a tool, and the model says it: neither is the owner.
       toolCalls({ name: "echo", input: { said: code } }),
       toolCalls({ name: "change", input: { to: "smart" } }),
-      reply(`O código é ${code}.`),
+      reply(code),
       toolCalls({ name: "change", input: { to: "smart" } }),
       reply("Hm."),
       // The owner's code confirms its own input, not another.
@@ -459,26 +561,27 @@ describe("the confirmation gate", () => {
     );
     await turn(stub, world, "m2", "ok?");
     await turn(stub, world, "m3", "e agora?");
-    await turn(stub, world, "m4", `confirmo ${code}`);
+    await turn(stub, world, "m4", code);
 
     expect(ran).toEqual([]);
+    expect(scripts).toEqual([]);
     const shown = codes(world);
     expect(shown.slice(0, 3)).toEqual([code, code, code]);
     expect(shown[3]).not.toBe(code);
   });
 
-  it("counts only the requester's own messages, before the code expires", async () => {
+  it("counts only the requester's own messages, while the code lasts", async () => {
     const scripts = [toolCalls({ name: "change", input: { to: "smart" } }), reply("Confirme.")];
     const world = use(fakeWorld(scripts));
     const ran = gated(world);
     const stub = agent("gate-requester");
     await turn(stub, world, "m1", "mude para smart");
-    const [code] = codes(world);
+    const [code = ""] = codes(world);
 
     // Someone else's message with the code, in a turn the owner wrote last, doesn't count.
     scripts.push(toolCalls({ name: "change", input: { to: "smart" } }), reply("Hm."));
     const before = (await stub.turns()).length;
-    await stub.ingest(message("m2", `confirmo ${code}`, "u-other"));
+    await stub.ingest(message("m2", code, "u-other"));
     await stub.ingest(message("m3", "ok"));
     await stub.flush();
     await vi.waitFor(async () => {
@@ -487,11 +590,25 @@ describe("the confirmation gate", () => {
       expect(turns.at(-1)?.status).not.toBe("running");
     });
     expect(ran).toEqual([]);
+    expect(codes(world)).toEqual([code, code]);
 
-    // Past its 10 minutes, the owner's own code doesn't either.
-    scripts.push(toolCalls({ name: "change", input: { to: "smart" } }), reply("Expirou."));
+    // Shown again, the code lasts 10 minutes from then: 2 minutes later it still confirms.
+    world.clock += 9 * 60_000;
+    scripts.push(toolCalls({ name: "change", input: { to: "smart" } }), reply("Ainda vale."));
+    await turn(stub, world, "m4", "e então?");
+    world.clock += 2 * 60_000;
+    scripts.push(toolCalls({ name: "change", input: { to: "smart" } }), reply("Feito."));
+    await turn(stub, world, "m5", code);
+    expect(ran).toEqual([{ to: "smart" }]);
+
+    // Past its 10 minutes, a code doesn't confirm.
+    scripts.push(toolCalls({ name: "change", input: { to: "frontier" } }), reply("Confirme."));
+    await turn(stub, world, "m6", "agora frontier");
+    const latest = codes(world).at(-1) ?? "";
     world.clock += 10 * 60_000 + 1;
-    await turn(stub, world, "m4", `confirmo ${code}`);
-    expect(ran).toEqual([]);
+    scripts.push(toolCalls({ name: "change", input: { to: "frontier" } }), reply("Expirou."));
+    await turn(stub, world, "m7", latest);
+    expect(ran).toEqual([{ to: "smart" }]);
+    expect(scripts).toEqual([]);
   });
 });
