@@ -1,7 +1,7 @@
 import { createExecutionContext, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   GitHubWebhooks,
   replaceBackendForTesting,
@@ -417,6 +417,22 @@ describe("Vault", () => {
     backend.commit = commit;
     await runDurableObjectAlarm(stub);
     expect(backend.files()["memory/notes/a.md"]).toBe("# A");
+  });
+
+  it("logs a failed GitHub call by its error's name, never its message", async () => {
+    const backend = vaultWith({});
+    const stub = vault("retry-log");
+    await stub.write("kelpie", [{ path: "memory/notes/a.md", content: "# A" }], "x");
+    backend.commit = async () => {
+      throw new TypeError("GitHub refused: the note says marker-3c4d");
+    };
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    await runDurableObjectAlarm(stub);
+    const lines = JSON.stringify(logged.mock.calls);
+    logged.mockRestore();
+    expect(lines).toContain("a GitHub call failed");
+    expect(lines).toContain("TypeError");
+    expect(lines).not.toContain("marker-3c4d");
   });
 
   it("arms the reconcile once synced, and keeps an earlier alarm set during a run", async () => {
