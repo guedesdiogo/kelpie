@@ -212,6 +212,11 @@ export function readNote(path: string, text: string): Note | null {
   for (const survivor of relations?.mergedInto ?? []) {
     for (const target of valueLinks(survivor, path)) links.push({ kind: "merged_into", ...target });
   }
+  if (links.some((link) => link.kind === "merged_into" && link.by === "name")) {
+    warnings.push(
+      "`relations.merged_into` names a note by name: name it by its path, or it merges nothing",
+    );
+  }
   for (const contradicted of relations?.contradicts ?? []) {
     for (const target of valueLinks(contradicted, path))
       links.push({ kind: "contradicts", ...target });

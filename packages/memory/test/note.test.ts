@@ -182,6 +182,14 @@ describe("readNote", () => {
     });
     expect(note?.links).toContainEqual({ kind: "contradicts", by: "name", target: "cha" });
     expect(note?.warnings).toEqual([]);
+    // By name, it merges nothing, and the note says so.
+    const named = readNote(
+      "memory/notes/cafe-3.md",
+      '---\nrelations:\n  merged_into:\n    - "[[cafe]]"\n---\n# Café\n',
+    );
+    expect(named?.warnings).toEqual([
+      "`relations.merged_into` names a note by name: name it by its path, or it merges nothing",
+    ]);
   });
 
   it("returns null outside the index", () => {

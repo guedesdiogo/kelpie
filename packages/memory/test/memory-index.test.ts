@@ -381,9 +381,10 @@ describe("merged notes (#112)", () => {
             '---\nrelations:\n  merged_into:\n    - "[[memory/notes/eu-mesmo]]"\n---\n# Eu mesmo\n\nSó eu.\n',
           "memory/notes/alem.md":
             '---\nrelations:\n  merged_into:\n    - "[[areas/health/notes/sessoes]]"\n---\n# Além\n',
-          // Its own name, which a namesake elsewhere shares.
+          // Its own name, which namesakes share, in another scope and in its own.
           "memory/notes/sessoes.md":
             '---\nrelations:\n  merged_into:\n    - "[[sessoes]]"\n---\n# Sessões aqui\n',
+          "memory/people/sessoes.md": "# Sessões, a pessoa\n",
           // The first mark leads nowhere; the second counts.
           "memory/notes/gama.md": `---\nrelations:\n  merged_into:\n    - "[[memory/notes/aaa]]"\n    - "[[${ANA_PATH.slice(0, -3)}]]"\n---\n# Gama\n`,
           "memory/notes/liga-gama.md": "# Liga\n\nVer [[memory/notes/gama]].",

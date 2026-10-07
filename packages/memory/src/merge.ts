@@ -78,15 +78,17 @@ export function mergeOf(
 
 /**
  * Whether each line is in a fenced code block, as CommonMark reads one at the top level: an
- * opener indented at most 3 spaces, whose info string holds no backtick when its glyph is one, and
- * a closer of the same glyph, as long or longer, and nothing else. A fence left open runs to the
- * end, which is safe here: conflict markers are refused anywhere, in code too.
+ * opener at column 0, whose info string holds no backtick when its glyph is one, and a closer of the
+ * same glyph, as long or longer, and nothing else. An indented opener may belong to a list item or
+ * another container, which this doesn't read: it opens nothing, so more lines are checked, the safe
+ * side. A fence left open runs to the end, which is safe here: conflict markers are refused
+ * anywhere, in code too.
  */
 function fencedLines(text: string): boolean[] {
   let fence: string | null = null;
   return text.split("\n").map((line) => {
     if (fence === null) {
-      const opener = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      const opener = /^(`{3,}|~{3,})(.*)$/.exec(line);
       const run = opener?.[1];
       if (run === undefined || (run[0] === "`" && (opener?.[2] ?? "").includes("`"))) return false;
       fence = run;

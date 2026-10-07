@@ -215,7 +215,7 @@ Every conversation's history becomes session pages (#109), with no model call:
 
 A note merged into another (#112) stays at its path. It is never deleted.
 - **Its mark:** `relations.merged_into` names the note it went into, and its body says so. The owner can mark a note by hand the same way.
-  - **The mark counts** while it names, by its path from the vault's root (`[[memory/notes/cafe]]`), another current note of its own scope, as Dream writes it.
+  - **The mark counts** while it names, with a path link (`[[memory/notes/cafe]]`, or one relative to the note's folder), another current note of its own scope, as Dream writes it. A mark by name gets a warning on the note, since it merges nothing.
     - A mark by name hides nothing, since a name may resolve to the note itself or to a namesake elsewhere. So does a mark that leads nowhere, to the note itself or to another scope.
     - A mark is read against the vault as it is now, as a link resolves. A lookup as of an earlier time leaves out a version whose mark counts today.
   - Removing the mark makes it a note again.
@@ -505,7 +505,7 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
   - **Kept only while its notes are:** a proposal is kept with the versions of its notes, and a change to any of them proposes the group again.
     - A forgotten note takes the proposal with it right away. A note changed or removed in the vault takes it at the next daily report.
     - A group that grew, or has a new survivor, replaces what was proposed for its notes.
-    - A note that expires takes the proposal with it at the next daily report.
+    - A note that expires, or is merged into another since, takes the proposal with it at the next daily report.
   - **Erasing:** turning Dream off deletes the proposals. A call that ends after that keeps nothing.
 - **Dream's page:** `memory/_lint/dream.md`, outside the index, shows what Dream would write: the day summaries, then the merges, at most 50 of each, with a count of the rest.
   - Each merge names the note that stays and the notes it would mark as merged into it, with the merged body, or "the same content".

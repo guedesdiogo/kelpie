@@ -132,6 +132,10 @@ describe("mergeOf", () => {
       JSON.stringify({ verdict: "merge", body: "para\n\n    ```\n# Hijack" }),
     ],
     [
+      "a title after a fence in a list item",
+      JSON.stringify({ verdict: "merge", body: "- item\n   ~~~\n# Hijack" }),
+    ],
+    [
       "a title after a mixed closer",
       JSON.stringify({ verdict: "merge", body: "~~~\nx\n```\n~~~\n# Hijack" }),
     ],
