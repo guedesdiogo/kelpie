@@ -9,11 +9,12 @@ import {
   type ConfirmationRequest,
   canonicalJson,
   confirmationNotice,
+  confirmsCode,
   type Tool,
   type ToolContext,
   type ToolProvider,
 } from "../src/tools.ts";
-import { type FakeWorld, fakeWorld, reply, toolCalls } from "./fakes.ts";
+import { type FakeWorld, fakeWorld, held, reply, toolCalls } from "./fakes.ts";
 
 // The setup agent's tools (Story 3.11): the configuration commands, owner-only, and the changes to
 // access, cost or external accounts only after the owner's confirmation (ADR-0013), which the host
@@ -426,6 +427,30 @@ describe("confirmation helpers", () => {
     expect(notice).toContain("A\\u{202E}b");
     expect(notice).toContain("c\\u{E0041}d\\u{2028}e");
     for (const hidden of [rlo, tag, separator]) expect(notice).not.toContain(hidden);
+
+    // Default-ignorable characters that aren't controls: variation selectors, a Hangul filler.
+    const ignorable = [0xfe0f, 0xe0100, 0x3164].map((point) => String.fromCodePoint(point));
+    const shown = confirmationNotice(`prompt "ok${ignorable.join("")}"`, "K7MPRX");
+    expect(shown).toContain("ok\\u{FE0F}\\u{E0100}\\u{3164}");
+    for (const hidden of ignorable) expect(shown).not.toContain(hidden);
+  });
+
+  it("takes only the code alone on a line, in plain letters and digits", () => {
+    expect(confirmsCode("ok\n  k7mprx. ", "K7MPRX")).toBe(true);
+    expect(confirmsCode("[Tue 6 Oct 2026, 18:00, UTC] K7MPRX", "K7MPRX")).toBe(true);
+    // "ﬀ" uppercases to "FF", which the code's letters could spell.
+    const ligature = String.fromCodePoint(0xfb00);
+    for (const text of [
+      "não faça K7MPRX",
+      "K7MPRX?",
+      `A${ligature}C34`,
+      `${"!".repeat(20_000)}x K7MPRX`,
+    ]) {
+      expect(
+        confirmsCode(text, text.includes(ligature) ? "AFFC34" : "K7MPRX"),
+        text.slice(0, 20),
+      ).toBe(false);
+    }
   });
 });
 
@@ -610,5 +635,86 @@ describe("the confirmation gate", () => {
     await turn(stub, world, "m7", latest);
     expect(ran).toEqual([{ to: "smart" }]);
     expect(scripts).toEqual([]);
+  });
+  it("lets a tool fail rather than show the owner a notice too long for one message", async () => {
+    const world = use(fakeWorld([toolCalls({ name: "huge" }), reply("Não deu.")]));
+    world.tools = [
+      {
+        async tools() {
+          return [
+            {
+              spec: {
+                name: "huge",
+                description: "Huge.",
+                inputSchema: { type: "object" as const },
+              },
+              label: "Changing",
+              async run(input: unknown, context: ToolContext) {
+                await context.confirm({ command: "huge", input, summary: "x".repeat(3_501) });
+                return { output: "Not done yet." };
+              },
+            },
+          ];
+        },
+      },
+    ];
+    const stub = agent("gate-too-long");
+    await turn(stub, world, "m1", "faça");
+
+    expect(world.sent).toEqual(["Não deu."]);
+    expect(JSON.stringify(world.requests.at(-1)?.messages)).toContain("The tool failed.");
+  });
+
+  it("keeps a code unspent when the call that would use it ran out of the turn's time", async () => {
+    const scripts = [toolCalls({ name: "slow", input: { to: "smart" } }), reply("Confirme.")];
+    const world = use(fakeWorld(scripts));
+    const ran: unknown[] = [];
+    world.tools = [
+      {
+        async tools() {
+          return [
+            {
+              spec: {
+                name: "slow",
+                description: "Slow.",
+                inputSchema: { type: "object" as const },
+              },
+              label: "Changing",
+              async run(input: unknown, context: ToolContext) {
+                // A tool that ignores its signal, and asks only after its time is up.
+                if (world.expireDeadlines) await new Promise((resolve) => setTimeout(resolve, 50));
+                const summary = `change the thing to ${JSON.stringify(input)}.`;
+                if (!(await context.confirm({ command: "slow", input, summary }))) {
+                  return { output: "Not done yet." };
+                }
+                ran.push(input);
+                return { output: "Done." };
+              },
+            },
+          ];
+        },
+      },
+    ];
+    const stub = agent("gate-timed-out");
+    await turn(stub, world, "m1", "mude para smart");
+    const [code = ""] = codes(world);
+
+    // The owner confirms, but the call that would use the code times out; the turn's last call
+    // waits meanwhile, so the turn is still running when the abandoned tool asks.
+    world.expireDeadlines = true;
+    world.modelHeld = true;
+    scripts.push(toolCalls({ name: "slow", input: { to: "smart" } }), held("Acabou o tempo."));
+    await stub.ingest(message("m2", code));
+    await stub.flush();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    world.modelHeld = false;
+    await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).not.toBe("running"));
+    expect(ran).toEqual([]);
+
+    // The code is still the owner's yes for the next call.
+    world.expireDeadlines = false;
+    scripts.push(toolCalls({ name: "slow", input: { to: "smart" } }), reply("Feito."));
+    await turn(stub, world, "m3", "tenta de novo");
+    expect(ran).toEqual([{ to: "smart" }]);
   });
 });

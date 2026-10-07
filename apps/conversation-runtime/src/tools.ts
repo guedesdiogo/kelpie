@@ -58,12 +58,13 @@ export const CONFIRMATION_MS = 10 * 60_000;
 export const MAX_SUMMARY_CHARS = 3_500;
 
 /**
- * The text with every control, format, private-use, unassigned and line or paragraph separator
- * character written out as `\u{…}`, so nothing in it is invisible or reorders what is shown.
+ * The text with every control, format, private-use, unassigned, line or paragraph separator and
+ * default-ignorable character (variation selectors, fillers) written out as `\u{…}`, so nothing in
+ * it is invisible or reorders what is shown.
  */
 export function visible(text: string): string {
   return text.replace(
-    /[\p{C}\p{Zl}\p{Zp}]/gu,
+    /[\p{C}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/gu,
     (character) => `\\u{${(character.codePointAt(0) ?? 0).toString(16).toUpperCase()}}`,
   );
 }
@@ -92,20 +93,23 @@ export function newConfirmationCode(): string {
 
 /**
  * Whether a message confirms the code: one of its lines, past the time stamp in front of it, is
- * the code alone, in any case, with trailing punctuation. A line that only mentions the code, such
- * as "don't do K7MPRX", is no yes.
+ * the code alone, in ASCII letters and digits of any case, with a period or exclamation mark after
+ * it at most. A line that only mentions the code, such as "don't do K7MPRX", or asks about it
+ * ("K7MPRX?"), is no yes.
  */
 export function confirmsCode(text: string, code: string): boolean {
   return withoutTypedStamps(text)
     .split("\n")
-    .some(
-      (line) =>
-        line
-          .trim()
-          .replace(/[.!?,;:]+$/u, "")
-          .toUpperCase() === code,
-    );
+    .some((line) => {
+      const word = line.trim();
+      // Longer lines can't be the code; skipping them keeps a huge message cheap to check.
+      if (word.length > MAX_CODE_LINE_CHARS) return false;
+      const bare = word.replace(/[.!]+$/u, "");
+      return /^[A-Za-z0-9]+$/.test(bare) && bare.toUpperCase() === code;
+    });
 }
+
+const MAX_CODE_LINE_CHARS = 32;
 
 /** JSON with every object's keys sorted, so equal inputs compare equal. */
 export function canonicalJson(value: unknown): string {
@@ -137,8 +141,8 @@ export interface ToolContext {
   /** Aborts when the turn stops: a new message, a pause or an eviction. */
   signal: AbortSignal;
   /**
-   * Whether the owner confirmed this change (ADR-0013): they reply with the code the host showed
-   * them for it, in a message of their own. Until they do, the host shows them the summary and a
+   * Whether the owner confirmed this change (ADR-0013): they reply with just the code the host
+   * showed them for it, in a message of their own. Until they do, the host shows them the summary and a
    * code after the turn's reply, and this answers false: the call must not make the change. A code
    * lasts CONFIRMATION_MS, confirms exactly one command and input, and confirms once. The model never
    * sees a code before the owner types it.

@@ -181,8 +181,8 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
      - Invisible and control characters in the change are written out as `\u{…}`, so what the owner reads is all there is.
      - A change too long for one bubble is refused before it is shown. Make it through this API instead.
      - For `connect_telegram`, the change names the admin API's origin, so the owner can check where the form's link points.
-  2. The owner replies with just the code, on a line of its own, and the agent calls the same tool with the same input again. A message that only mentions the code, such as "don't do K7MPRX", is no yes.
-  3. A code confirms that one change, once. It lasts 10 minutes from the last time it was shown.
+  2. The owner replies with just the code, on a line of its own, and the agent calls the same tool with the same input again. A message that only mentions the code, such as "don't do K7MPRX", or asks about it ("K7MPRX?"), is no yes.
+  3. A code confirms that one change, once. It lasts 10 minutes from the last time the agent asked for it.
 
   What never confirms:
   - another person's message;

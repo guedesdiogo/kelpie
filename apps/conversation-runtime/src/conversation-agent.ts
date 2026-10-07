@@ -950,6 +950,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   ): Promise<ToolResult | null> {
     const finished = new AbortController();
     const expired = new AbortController();
+    const signal = AbortSignal.any([context.signal, expired.signal]);
     const timedOut = this.#ports.deadline(ms, finished.signal).then(() => {
       expired.abort();
       return null;
@@ -958,7 +959,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       return await Promise.race([
         runToolCall(tools, call, {
           ...context,
-          signal: AbortSignal.any([context.signal, expired.signal]),
+          signal,
+          // A call the turn gave up on can't confirm, so it can't spend the owner's code either.
+          confirm: (request) =>
+            signal.aborted ? Promise.resolve(false) : context.confirm(request),
         }),
         timedOut,
       ]);
@@ -1062,7 +1066,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         .run();
       return false;
     }
-    // Codes past use or expiry are kept a day, then dropped.
+    // Codes are kept a day past their expiry, used or not, then dropped.
     this.#db
       .delete(schema.confirmations)
       .where(lt(schema.confirmations.expiresAt, now - CONFIRMATIONS_KEPT_MS))
