@@ -124,8 +124,12 @@ export async function handle(request: Request, deps: AdminDeps): Promise<Respons
   // The Access cookie may go with another site's POST (its SameSite is the Access application's
   // setting), so a page elsewhere must not be able to send a command: no foreign origin, and only
   // `application/json`, which no form can send and no other origin can `fetch` without a preflight.
-  if (!isSameOriginSubmission(request)) return refuse(403, "cross_origin");
-  if (!isJson(request)) return refuse(415, "not_json");
+  const foreign = !isSameOriginSubmission(request);
+  if (foreign || !isJson(request)) {
+    const reason = foreign ? "cross_origin" : "not_json";
+    console.warn("admin-api: request refused", { reason });
+    return refuse(foreign ? 403 : 415, reason);
+  }
 
   const body = await readJson(request);
   if (!body.ok) return refuse(body.status, body.reason);

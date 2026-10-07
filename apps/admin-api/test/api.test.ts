@@ -303,6 +303,7 @@ describe("admin API commands", () => {
     ["an empty command", "POST", "/commands/"],
     ["the bootstrap with a trailing slash", "POST", "/bootstrap/"],
     ["a GET", "GET", "/commands/listAgents"],
+    ["a CORS preflight", "OPTIONS", "/commands/createAgent"],
   ])("answers 404 to %s", async (_label, method, path) => {
     const { deps, ran } = world();
     const response = await handle(new Request(`https://admin.example${path}`, { method }), deps);
@@ -368,6 +369,8 @@ describe("admin API cross-site requests", () => {
     ["text/plain naming JSON in a parameter", "text/plain;application/json", CREATE],
     ["a form-encoded body", "application/x-www-form-urlencoded", CREATE],
     ["a multipart body", "multipart/form-data; boundary=x", CREATE],
+    ["two Content-Type headers", "application/json, text/plain", CREATE],
+    ["a lookalike type", "application/json-patch+json", CREATE],
   ])("refuses a command sent as %s, before running it", async (_label, type, body) => {
     const { deps, ran } = world();
     const response = await send(deps, "/commands/createAgent", { "content-type": type }, body);
@@ -397,6 +400,7 @@ describe("admin API cross-site requests", () => {
     ["Sec-Fetch-Site: none", { "sec-fetch-site": "none" }],
     ["a foreign Origin without Sec-Fetch-Site", { origin: "https://evil.example" }],
     ["Origin: null without Sec-Fetch-Site", { origin: "null" }],
+    ["its own host over another scheme", { origin: "http://admin.example" }],
     [
       "a cross-site text/plain form, which fails both checks",
       { "sec-fetch-site": "cross-site", "content-type": "text/plain" },

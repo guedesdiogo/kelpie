@@ -12,9 +12,9 @@ The owner's JSON API for the configuration commands (ADR-0013, Story 3.10). It r
    - it was issued to a person, because a service token has no `sub`.
 
    If the team domain or the AUD tag isn't configured, every request is refused.
-3. **The origin.** The Access cookie can go with another site's POST: its SameSite is the Access application's setting, `None` by default, and SameSite counts every hostname under the same domain as one site anyway. So every JSON endpoint also refuses:
+3. **The origin.** The Access cookie can go with another site's POST: its SameSite is the Access application's setting, `None` by default, and SameSite counts every hostname under the same registrable domain as one site anyway. So every JSON endpoint also refuses:
    - a request from another origin, with `403 cross_origin`: a `Sec-Fetch-Site` other than `same-origin` or, without it, another `Origin`. Clients such as `cloudflared access curl` send neither, and pass;
-   - a request whose `Content-Type` isn't `application/json`, with `415 not_json`, even with no body. No HTML form can send that type, and another origin's `fetch` with it needs a CORS preflight, which Access refuses. Leave the Access application's CORS settings empty: if Access answered preflights for another origin, only the origin check would stand.
+   - a request whose `Content-Type` isn't `application/json`, with `415 not_json`, even with no body. No HTML form can send that type, and another origin's `fetch` with it needs a CORS preflight, which Access refuses by default and the Worker answers with `404` and no CORS headers. Leave the Access application's CORS settings empty: if Access answered preflights for another origin, only the origin check would stand.
 4. **The `Directory`.** It admits the token's `sub` as an identity from the `cloudflare-access` source, for the agent id `*`, which names no agent. Owner-only commands check the admitted role (ADR-0015). Emails are never compared.
 
 No configuration command can add, enable or replace an Access identity. The first-run bootstrap adds the owner's, and a token-gated recovery replaces it ("Recovering access").
