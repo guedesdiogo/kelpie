@@ -69,6 +69,10 @@ describe("Vault forget", () => {
         state.storage.sql.exec("INSERT INTO owner_changes (path, at) VALUES (?, 1)", path);
         state.storage.sql.exec("INSERT INTO owner_merges (path, content) VALUES (?, 'x')", path);
         state.storage.sql.exec(
+          "INSERT INTO dream_proposals (path, blob_sha, abstract, at) VALUES (?, 'sha', 'x', 1)",
+          path,
+        );
+        state.storage.sql.exec(
           "INSERT INTO held (path, content, previous, state, attempts, at) VALUES (?, 'x', NULL, 'resolved', 1, 1)",
           path,
         );
@@ -90,7 +94,7 @@ describe("Vault forget", () => {
     // The owner rewrote the history, so the leaked version is gone from git.
     // Its current files changed too: forgetting syncs before it rebuilds.
     backend.forcePush({ "README.md": "# Vault", [ana]: clean, [bia]: "# Bia\n\nNova.\n" });
-    expect(await stub.forget([ana])).toEqual({ ok: true, forgotten: 7, stillInVault: [ana] });
+    expect(await stub.forget([ana])).toEqual({ ok: true, forgotten: 8, stillInVault: [ana] });
 
     expect(await sql("SELECT path FROM versions ORDER BY path")).toEqual([
       { path: ana },
@@ -110,6 +114,7 @@ describe("Vault forget", () => {
       "recall_counts",
       "owner_changes",
       "owner_merges",
+      "dream_proposals",
     ];
     for (const table of ["queue", ...named]) {
       expect(await sql(`SELECT count(*) AS n FROM ${table} WHERE path = '${ana}'`)).toEqual([
@@ -221,6 +226,7 @@ describe("Vault forget", () => {
       Object.getOwnPropertyNames(entrypoint.prototype);
     expect(methods(ContextStore)).not.toContain("forget");
     expect(methods(ContextStore)).not.toContain("held");
-    expect(methods(ContextStoreAdmin)).toEqual(["constructor", "held", "forget"]);
+    expect(methods(ContextStore)).not.toContain("setDream");
+    expect(methods(ContextStoreAdmin)).toEqual(["constructor", "held", "forget", "setDream"]);
   });
 });

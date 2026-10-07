@@ -82,6 +82,9 @@ export type ForgetVaultResult =
   | { ok: true; forgotten: number; stillInVault: string[] }
   | { ok: false; reason: "vault_off" | "invalid_input" | "unavailable" };
 
+/** Dream's mode (#112): off, or dry runs that only propose. */
+export type DreamMode = "off" | "dry";
+
 /** The most paths one `forgetVaultPaths` names, and the longest path the vault takes. */
 const MAX_FORGET_PATHS = 1_000;
 const MAX_PATH_LENGTH = 300;
@@ -115,6 +118,9 @@ export interface ConfigPorts {
   vault: {
     held(): Promise<HeldVaultFile[]>;
     forget(paths: string[]): Promise<ForgetVaultResult>;
+    setDream(
+      mode: DreamMode,
+    ): Promise<{ ok: true; mode: DreamMode } | { ok: false; reason: "invalid" }>;
   };
 }
 
@@ -361,6 +367,18 @@ export function createConfigCommands(ports: ConfigPorts) {
       }
       if (result.reason === "vault_off") return { ok: false, reason: "not_configured" };
       return result.reason === "unavailable" ? { ok: false, reason: "unavailable" } : invalid;
+    },
+
+    /**
+     * Turns Dream off, or back on as dry runs that only propose (#112): one setting for the whole
+     * vault, dry runs until the owner says otherwise.
+     */
+    async setDream(actor: Actor, input: unknown): Promise<CommandResult<{ mode: DreamMode }>> {
+      if (!isOwner(actor)) return forbidden;
+      const { mode } = (input ?? {}) as { mode?: unknown };
+      if (mode !== "off" && mode !== "dry") return invalid;
+      const result = await ports.vault.setDream(mode);
+      return result.ok ? { ok: true, value: { mode: result.mode } } : invalid;
     },
   };
 }

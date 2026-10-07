@@ -16,6 +16,7 @@ import type {
   ReadNoteResult,
   RecallOptions,
   RecallResult,
+  SetDreamResult,
   WriteNoteOptions,
   WriteNoteResult,
   WriteResult,
@@ -104,6 +105,10 @@ export class ContextStoreAdmin
 
   forget(paths: string[]): Promise<ForgetResult> {
     return this.#vault().forget(paths);
+  }
+
+  setDream(mode: "off" | "dry"): Promise<SetDreamResult> {
+    return this.#vault().setDream(mode);
   }
 }
 

@@ -408,6 +408,38 @@ How the page behaves:
 - **Never memory.** `placeOf` leaves `memory/_…/` out of the index, so recall, the jobs and link previews never read it.
 - **A failed run** waits for the next day.
 
+### Dream
+
+Memory's consolidation (#112), off the hot path, on the Context Store's alarm. For now it runs dry: it only proposes. The daily report shows the plan, and no note changes.
+- **When it runs:** only when there is a note to work on, and:
+  - at most once every 6 hours;
+  - once no turn has touched memory for 30 minutes. A recall, a search, a read or a write counts as a touch.
+- **How a run proceeds:**
+  - **One step per wake:** each time the alarm wakes, a run makes one model call, after GitHub's work, the held files and the report, so it never holds them back. The run's state is kept, so an eviction doesn't start it over.
+  - **Cancellation:** memory used since a run started ends it before its next step.
+  - **The cap:** at most 8 calls a run.
+- **Its operation: abstracts.**
+  - **Which notes:** notes whose current version Kelpie wrote (#126) in the last 7 days, dated as the report dates notes, so a rebuilt index doesn't make old notes new. They are either session pages, whose abstract is their first message, or conclusions (`deduced`, `inferred`) without an abstract. Each gets a proposed abstract. A fact the person stated keeps its own words. The owner's notes never do, nor a version Kelpie merged into the owner's edit (#160).
+  - **The model:**
+    - the cheap tier, through llm-gateway;
+    - the note goes as data, up to 6,000 characters, between markers that say where it starts and ends;
+    - its answer must be JSON with one key, `abstract`: one printable line of at most 300 characters, the writer's rule. Any other answer is kept as no answer, so that version isn't asked about again.
+  - **One proposal per version:** a proposal is kept with the version it was made from. A note gets one proposal per version, and a newer version drops it.
+- **The plan:** the report's "Dream's plan" section lists each proposed abstract beside its note.
+  - A model wrote the abstract, so it is shown as code: no link, tag or markup in it renders.
+  - When a run ends, the report is written again on the next alarm.
+- **Cost:** each call's usage is kept with its run for 30 days. The logs count calls and output tokens, never text.
+  - A failed call ends the run, and that version gets no proposal, so one note can't fail every run.
+  - With nothing to do, Dream looks again after another 30 minutes of quiet, not on every wake.
+- **The switch:** `/commands/setDream` takes `off`, or `dry`, the default ([admin-api.md](admin-api.md)). When it's off:
+  - no run starts;
+  - a run in progress ends;
+  - what Dream proposed is deleted;
+  - the report is written again without the plan.
+- **Not yet:**
+  - writing what it proposes;
+  - the other operations: duplicates, contradictions, roll-ups, people and places, and summaries.
+
 ### The write decision
 
 Before a new memory is written, `decideWrite` says whether it is news (#111). A conclusion (`deduced`, `inferred`) never replaces or refines what the person said: the qualifier's answer about such a note counts as unrelated (#149). `memory_write` (#126) calls it without the qualifier: ADR-0009 wants the qualifier's answers measured on a labeled PT-BR set before they act. So only the rules decide: an exact twin is a `NOOP`, and anything else is an `ADD`.
