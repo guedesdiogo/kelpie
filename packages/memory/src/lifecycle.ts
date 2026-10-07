@@ -81,7 +81,7 @@ type LifecycleNote = ReturnType<MemoryIndex["lifecycleNotes"]>[number] & { writt
  * an event's), else when the index first saw it. The index's time alone would make a vault synced
  * for the first time, or rebuilt, look new.
  */
-function writtenAt(note: ReturnType<MemoryIndex["lifecycleNotes"]>[number]): number {
+export function writtenAt(note: ReturnType<MemoryIndex["lifecycleNotes"]>[number]): number {
   const updated = typeof note.updated === "string" ? instantOf(note.updated) : null;
   // Kelpie writes `updated` before it commits, so a later one can't be right.
   if (updated !== null) return Math.min(updated, note.recordedAt);

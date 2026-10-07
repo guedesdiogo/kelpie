@@ -27,6 +27,7 @@ import {
   type SearchHit,
   sanitizeSecrets,
   writeMemory,
+  writtenAt,
 } from "@kelpie/memory";
 import type { GatewayQualifyOutcome, QualifierBackend, Question } from "@kelpie/qualifier";
 import {
@@ -742,6 +743,15 @@ export class Vault extends DurableObject<VaultEnv> {
    * the owner decided on: the report shows the plan. Answers whether a run is still on.
    */
   async #dream(): Promise<boolean> {
+    try {
+      return await this.#dreamStep();
+    } catch (error) {
+      console.error("Vault: Dream failed", errorName(error));
+      return false;
+    }
+  }
+
+  async #dreamStep(): Promise<boolean> {
     const gateway = this.#gateway();
     if (gateway === null || this.#backend() === null) return false;
     const now = Date.now();
@@ -760,7 +770,11 @@ export class Vault extends DurableObject<VaultEnv> {
     }
     const note = this.#dreamCandidate(now);
     if (run === undefined) {
-      if (note === null) return false;
+      if (note === null) {
+        // Nothing to do: look again after another quiet spell, not on every wake.
+        this.#set("dream_after", `${now + DREAM_QUIET_MS}`);
+        return false;
+      }
       this.#set("dream_after", `${now + DREAM_EVERY_MS}`);
       const id = this.#exec<{ id: number }>(
         "INSERT INTO dream_runs (started_at) VALUES (?) RETURNING id",
@@ -769,21 +783,23 @@ export class Vault extends DurableObject<VaultEnv> {
       run = { id: id ?? 0, started_at: now, calls: 0, usage: "[]" };
     }
     if (note === null || run.calls >= DREAM_MAX_CALLS) return this.#endDream(run.id, "done");
-    let proposed: Awaited<ReturnType<typeof proposeAbstract>>;
+    let proposed: Awaited<ReturnType<typeof proposeAbstract>> | null = null;
     try {
       proposed = await proposeAbstract(gateway, note, DREAM_TIMEOUT_MS);
     } catch (error) {
       console.error("Vault: a Dream step failed", errorName(error));
-      return this.#endDream(run.id, "failed");
     }
-    const usage = [...(JSON.parse(run.usage) as unknown[]), ...proposed.usage];
+    const used = proposed?.usage ?? [];
+    const usage = [...(JSON.parse(run.usage) as unknown[]), ...used];
     this.ctx.storage.transactionSync(() => {
       // Kept with the version it was made from: a later version is a note to propose for again.
+      // A failure is kept as no answer too, so one note can't fail every run; an outage costs it
+      // this version's proposal.
       this.#exec(
         "INSERT OR REPLACE INTO dream_proposals (path, blob_sha, abstract, at) VALUES (?, ?, ?, ?)",
         note.path,
         note.blobSha,
-        proposed.abstract,
+        proposed?.abstract ?? null,
         Date.now(),
       );
       this.#exec(
@@ -792,11 +808,12 @@ export class Vault extends DurableObject<VaultEnv> {
         run.id,
       );
     });
+    if (proposed === null) return this.#endDream(run.id, "failed");
     // Counts only: the note and the abstract are personal data.
     console.log("Vault: Dream step", {
       calls: run.calls + 1,
       proposed: proposed.abstract !== null,
-      output: proposed.usage.reduce((sum, call) => sum + call.output, 0),
+      output: used.reduce((sum, call) => sum + (Number(call.output) || 0), 0),
     });
     return true;
   }
@@ -822,10 +839,12 @@ export class Vault extends DurableObject<VaultEnv> {
   #dreamCandidate(
     now: number,
   ): { path: string; blobSha: string; title: string; body: string } | null {
+    // When written, as the report dates notes: a rebuild indexes every note again as new.
     const recent = this.#memory
       .lifecycleNotes()
-      .filter((note) => note.recordedAt >= now - DREAM_LOOKBACK_MS)
-      .sort((a, b) => b.recordedAt - a.recordedAt || (a.path < b.path ? -1 : 1));
+      .map((note) => ({ ...note, writtenAt: writtenAt(note) }))
+      .filter((note) => note.writtenAt >= now - DREAM_LOOKBACK_MS)
+      .sort((a, b) => b.writtenAt - a.writtenAt || (a.path < b.path ? -1 : 1));
     const kelpie = this.#byKelpie(recent.map((note) => note.path));
     const waiting = new Set(
       this.#exec<{ path: string }>("SELECT path FROM queue UNION SELECT path FROM held").map(

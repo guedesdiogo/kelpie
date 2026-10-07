@@ -58,7 +58,8 @@ async function finished(generation: Generation): Promise<{ text: string; usage: 
     text: finish.message.parts
       .flatMap((part) => (part.type === "text" ? [part.text] : []))
       .join(""),
-    usage: finish.usage,
+    // The gateway is ours, but a frame is only cast: a missing list is none.
+    usage: Array.isArray(finish.usage) ? finish.usage : [],
   };
 }
 

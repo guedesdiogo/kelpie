@@ -390,7 +390,7 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. F
   - **Cancellation:** memory used since a run started ends it before its next step.
   - **The cap:** at most 8 calls a run.
 - **Its operation: abstracts.**
-  - **Which notes:** notes whose current version Kelpie wrote (#126) in the last 7 days, either session pages, whose abstract is their first message, or notes without an abstract. Each gets a proposed abstract. The owner's notes never do, nor a version Kelpie merged into the owner's edit (#160).
+  - **Which notes:** notes whose current version Kelpie wrote (#126) in the last 7 days, dated as the report dates notes, so a rebuilt index doesn't make old notes new. They are either session pages, whose abstract is their first message, or notes without an abstract. Each gets a proposed abstract. The owner's notes never do, nor a version Kelpie merged into the owner's edit (#160).
   - **The model:**
     - the cheap tier, through llm-gateway;
     - the note goes as data, up to 6,000 characters, between markers that say where it starts and ends;
@@ -399,7 +399,9 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. F
 - **The plan:** the report's "Dream's plan" section lists each proposed abstract beside its note.
   - A model wrote the abstract, so it is shown as code: no link, tag or markup in it renders.
   - When a run ends, the report is written again on the next alarm.
-- **Cost:** each call's usage is kept with its run for 30 days. The logs count calls and output tokens, never text. A failing model ends the run.
+- **Cost:** each call's usage is kept with its run for 30 days. The logs count calls and output tokens, never text.
+  - A failed call ends the run, and that version gets no proposal, so one note can't fail every run.
+  - With nothing to do, Dream looks again after another 30 minutes of quiet, not on every wake.
 - **The switch:** `/commands/setDream` takes `off`, or `dry`, the default ([admin-api.md](admin-api.md)). When it's off:
   - no run starts;
   - a run in progress ends;

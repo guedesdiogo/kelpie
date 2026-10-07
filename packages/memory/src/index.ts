@@ -26,6 +26,7 @@ export {
   lifecycleFindings,
   lifecycleReport,
   type NoteRef,
+  writtenAt,
 } from "./lifecycle.ts";
 export {
   extractLinks,

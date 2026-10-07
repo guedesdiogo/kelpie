@@ -107,7 +107,17 @@ function fakeModel(answers: (string | Error)[]) {
 const abstract = (text: string) => JSON.stringify({ abstract: text });
 
 /** As Kelpie writes a memory: its path and file. */
-async function kelpieNote(input: Partial<MemoryInput> & { title: string; date?: string }) {
+const DAY = 24 * 60 * 60_000;
+/** A moment `days` ago, as Kelpie stamps `updated`. */
+const daysAgo = (days: number) =>
+  new Date(Date.now() - days * DAY).toISOString().replace(/\.\d{3}Z$/, "Z");
+
+/** As Kelpie writes a memory, today unless `at` says when: its path and file. */
+async function kelpieNote({
+  at = daysAgo(0),
+  date,
+  ...input
+}: Partial<MemoryInput> & { title: string; date?: string; at?: string }) {
   const memory = {
     scope: "global",
     kind: "note",
@@ -116,8 +126,8 @@ async function kelpieNote(input: Partial<MemoryInput> & { title: string; date?: 
     confidence: 0.9,
     ...input,
   } as MemoryInput;
-  const { text } = await writeMemory(memory, { at: "2026-10-01T00:00:00Z" });
-  return { path: memoryPath(memory.scope, memory.kind, memory.title, input.date), content: text };
+  const { text } = await writeMemory(memory, { at });
+  return { path: memoryPath(memory.scope, memory.kind, memory.title, date), content: text };
 }
 
 /** Memory has been quiet for long enough, and no run happened lately. */
@@ -143,7 +153,8 @@ describe("Vault Dream", () => {
     });
     const plain = await kelpieNote({ title: "Café" });
     const summed = await kelpieNote({ title: "Sal", abstract: "Pouco sal." });
-    const old = await kelpieNote({ title: "Antigo" });
+    // Written a month ago: out of the run's reach, even once a rebuild indexes it again today.
+    const old = await kelpieNote({ title: "Antigo", at: daysAgo(30) });
     const backend = new FakeVaultBackend({
       "README.md": "# Vault",
       // The owner's note: never Dream's to change.
@@ -154,15 +165,12 @@ describe("Vault Dream", () => {
     const requests = fakeModel([
       abstract("Café, como a pessoa toma."),
       abstract("Conversa: café sem açúcar."),
+      abstract("Café, de outro jeito."),
     ]);
     const stub = vault("dream-abstracts");
     await stub.compile("kelpie");
     await stub.write("kelpie", [session, plain, summed, old], "x");
     await runDurableObjectAlarm(stub);
-    // Written long ago: out of the run's reach.
-    await runInDurableObject(stub, (_instance, state) => {
-      state.storage.sql.exec("UPDATE versions SET recorded_at = 1 WHERE path = ?", old.path);
-    });
     const files = backend.files();
 
     // Memory isn't quiet yet: Kelpie's write just touched it.
@@ -173,6 +181,9 @@ describe("Vault Dream", () => {
     await runDurableObjectAlarm(stub);
     expect(requests).toHaveLength(1);
     expect(requests[0]?.tier).toBe("cheap");
+    // The next step comes soon, not at the next reconcile.
+    const due = await runInDurableObject(stub, (_instance, state) => state.storage.getAlarm());
+    expect((due ?? Number.POSITIVE_INFINITY) - Date.now()).toBeLessThanOrEqual(5_000);
     await runDurableObjectAlarm(stub);
     await runDurableObjectAlarm(stub);
     expect(requests).toHaveLength(2);
@@ -194,6 +205,20 @@ describe("Vault Dream", () => {
     expect(report).toContain("|Conversa sobre café]]: `Conversa: café sem açúcar.`");
     const { [LIFECYCLE_REPORT_PATH]: _report, ...notes } = backend.files();
     expect(notes).toEqual(files);
+
+    // A new version of a note is a note to propose for again.
+    await stub.write(
+      "kelpie",
+      [{ ...plain, content: plain.content.replace("Café.", "Café forte.") }],
+      "x",
+    );
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    await runDurableObjectAlarm(stub);
+    expect(requests).toHaveLength(3);
+    expect(
+      await rows(stub, `SELECT abstract FROM dream_proposals WHERE path = '${plain.path}'`),
+    ).toEqual([{ abstract: "Café, de outro jeito." }]);
   });
 
   it("waits for quiet, runs at most every six hours, and stops when memory is used", async () => {
@@ -263,7 +288,7 @@ describe("Vault Dream", () => {
     ]);
   });
 
-  it("keeps a wrong answer from being asked again, and ends the run when the model fails", async () => {
+  it("asks no version again after a wrong answer or a failure, which ends the run", async () => {
     const notes = await Promise.all(["A", "B"].map((title) => kelpieNote({ title })));
     replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
     const requests = fakeModel(["not JSON", new Error("the model is down")]);
@@ -275,10 +300,17 @@ describe("Vault Dream", () => {
     await runDurableObjectAlarm(stub);
     await runDurableObjectAlarm(stub);
     expect(requests).toHaveLength(2);
-    expect(await rows(stub, "SELECT abstract FROM dream_proposals")).toEqual([{ abstract: null }]);
-    expect(await rows(stub, "SELECT calls, outcome FROM dream_runs")).toEqual([
-      { calls: 1, outcome: "failed" },
+    expect(await rows(stub, "SELECT abstract FROM dream_proposals")).toEqual([
+      { abstract: null },
+      { abstract: null },
     ]);
+    expect(await rows(stub, "SELECT calls, outcome FROM dream_runs")).toEqual([
+      { calls: 2, outcome: "failed" },
+    ]);
+    // A note that fails can't hold up every run: the next one finds nothing left to ask.
+    await quiet(stub);
+    await runDurableObjectAlarm(stub);
+    expect(requests).toHaveLength(2);
   });
 
   it("stays off when the owner turns it off, and takes only off or dry", async () => {
@@ -307,5 +339,24 @@ describe("Vault Dream", () => {
     await quiet(stub);
     await runDurableObjectAlarm(stub);
     expect(requests).toHaveLength(1);
+  });
+
+  it("ends a run in progress when the owner turns Dream off", async () => {
+    const notes = await Promise.all(["A", "B"].map((title) => kelpieNote({ title })));
+    replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
+    const requests = fakeModel([abstract("A."), abstract("B.")]);
+    const stub = vault("dream-off-mid-run");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", notes, "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    await runDurableObjectAlarm(stub);
+    expect(requests).toHaveLength(1);
+    await stub.setDream("off");
+    await runDurableObjectAlarm(stub);
+    expect(requests).toHaveLength(1);
+    expect(await rows(stub, "SELECT calls, outcome FROM dream_runs")).toEqual([
+      { calls: 1, outcome: "off" },
+    ]);
   });
 });
