@@ -55,6 +55,7 @@ function world({
     },
     directory: {
       async issuePairingCode() {
+        ran.push("directory.issuePairingCode");
         return { ok: true, code: "ABCD2345", expiresAt: NOW_MS + 3_600_000 };
       },
       async enableIdentity(identity) {
@@ -76,8 +77,10 @@ function world({
       async createTelegramForm() {
         return { ok: true, token: "form-token-1", expiresAt: NOW_MS + 900_000 };
       },
-      async describeTelegramBot() {
-        return { ok: true, username: "kelpie_bot" };
+      async describeTelegramBot(agentId) {
+        return agentId === "unwired"
+          ? { ok: false, reason: "not_connected" }
+          : { ok: true, username: "kelpie_bot" };
       },
       async registerTelegramWebhook(agentId) {
         return agentId === "unwired" ? { ok: false, reason: "not_connected" } : { ok: true };
@@ -708,5 +711,76 @@ describe("admin API secure forms", () => {
     ).text();
     expect(html).toContain("<code>&lt;i&gt;odd&lt;/i&gt;</code>");
     expect(html).not.toContain("<i>odd</i>");
+  });
+});
+
+describe("admin API pairing page", () => {
+  const pageUrl = (agentId: string) => `https://admin.example/pair/telegram/${agentId}`;
+  const press = (agentId: string, headers: Record<string, string> = {}) =>
+    new Request(pageUrl(agentId), {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+      body: "",
+    });
+  const sameOrigin = { origin: "https://admin.example" };
+
+  it("shows the owner a button, and pairs only when its own page posts", async () => {
+    const { deps, ran } = world();
+    await call(deps, "/commands/createAgent", { id: "sales", name: "<i>Sales</i>" });
+
+    const shown = await handle(new Request(pageUrl("sales")), deps);
+    expect(shown.status).toBe(200);
+    const form = await shown.text();
+    expect(form).toContain('<form method="post">');
+    expect(form).toContain("&lt;i&gt;Sales&lt;/i&gt;");
+    expect(form).toContain("<code>sales</code>");
+    expect(form).not.toContain("t.me");
+    expect(shown.headers.get("cache-control")).toBe("no-store");
+    expect(shown.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    expect(ran).not.toContain("directory.issuePairingCode");
+
+    const paired = await handle(press("sales", sameOrigin), deps);
+    expect(paired.status).toBe(200);
+    expect(await paired.text()).toContain('href="https://t.me/kelpie_bot?start=ABCD2345"');
+    expect(ran.filter((step) => step === "directory.issuePairingCode")).toHaveLength(1);
+  });
+
+  it("serves the page to the owner only, and takes no post from another site", async () => {
+    const stranger = world({ authenticated: null });
+    expect((await handle(new Request(pageUrl("sales")), stranger.deps)).status).toBe(401);
+    const member = world({ role: "member" });
+    expect((await handle(press("sales", sameOrigin), member.deps)).status).toBe(403);
+
+    const { deps, ran } = world();
+    await call(deps, "/commands/createAgent", { id: "sales", name: "Sales" });
+    expect((await handle(press("sales", { origin: "https://evil.example" }), deps)).status).toBe(
+      403,
+    );
+    expect(
+      (await handle(press("sales", { ...sameOrigin, "sec-fetch-site": "cross-site" }), deps))
+        .status,
+    ).toBe(403);
+    const json = new Request(pageUrl("sales"), {
+      method: "POST",
+      headers: { "content-type": "application/json", ...sameOrigin },
+      body: "{}",
+    });
+    expect((await handle(json, deps)).status).toBe(415);
+    expect([...stranger.ran, ...member.ran, ...ran]).not.toContain("directory.issuePairingCode");
+  });
+
+  it("answers 404 for an unknown agent or a malformed id, and says when no bot is connected", async () => {
+    const { deps, ran } = world();
+    await call(deps, "/commands/createAgent", { id: "unwired", name: "Unwired" });
+    expect((await handle(new Request(pageUrl("ghost")), deps)).status).toBe(404);
+    expect((await handle(new Request(pageUrl("Bad%20Id")), deps)).status).toBe(404);
+    expect((await handle(new Request(pageUrl("unwired"), { method: "PUT" }), deps)).status).toBe(
+      404,
+    );
+
+    const unwired = await handle(press("unwired", sameOrigin), deps);
+    expect(unwired.status).toBe(409);
+    expect(await unwired.text()).toContain("Connect the agent's Telegram bot first");
+    expect(ran).not.toContain("directory.issuePairingCode");
   });
 });
