@@ -390,18 +390,21 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. F
   - **Cancellation:** memory used since a run started ends it before its next step.
   - **The cap:** at most 8 calls a run.
 - **Its operation: abstracts.**
-  - **Which notes:** notes whose current version Kelpie wrote (#126) in the last 7 days, either session pages, whose abstract is their first message, or notes without an abstract. Each gets a proposed abstract. The owner's notes never do.
+  - **Which notes:** notes whose current version Kelpie wrote (#126) in the last 7 days, either session pages, whose abstract is their first message, or notes without an abstract. Each gets a proposed abstract. The owner's notes never do, nor a version Kelpie merged into the owner's edit (#160).
   - **The model:**
     - the cheap tier, through llm-gateway;
-    - the note goes as data, up to 6,000 characters;
+    - the note goes as data, up to 6,000 characters, between markers that say where it starts and ends;
     - its answer must be JSON with one key, `abstract`: one printable line of at most 300 characters, the writer's rule. Any other answer is kept as no answer, so that version isn't asked about again.
   - **One proposal per version:** a proposal is kept with the version it was made from. A note gets one proposal per version, and a newer version drops it.
-- **The plan:** the report's "Dream's plan" section lists each proposed abstract beside its note, made plain as titles are. When a run ends, the report is written again on the next alarm.
+- **The plan:** the report's "Dream's plan" section lists each proposed abstract beside its note.
+  - A model wrote the abstract, so it is shown as code: no link, tag or markup in it renders.
+  - When a run ends, the report is written again on the next alarm.
 - **Cost:** each call's usage is kept with its run for 30 days. The logs count calls and output tokens, never text. A failing model ends the run.
 - **The switch:** `/commands/setDream` takes `off`, or `dry`, the default ([admin-api.md](admin-api.md)). When it's off:
   - no run starts;
   - a run in progress ends;
-  - the report leaves the plan out.
+  - what Dream proposed is deleted;
+  - the report is written again without the plan.
 - **Not yet:**
   - writing what it proposes;
   - the other operations: duplicates, contradictions, roll-ups, people and places, and summaries.

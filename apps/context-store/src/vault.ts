@@ -816,7 +816,8 @@ export class Vault extends DurableObject<VaultEnv> {
   /**
    * The next note Dream may propose an abstract for (#112), newest first: one whose current version
    * Kelpie wrote (#126) within DREAM_LOOKBACK_MS, a session page or a note without an abstract, with
-   * no write waiting, not held, and not proposed for already. The owner's notes are never one.
+   * no write waiting, not held, and not proposed for already. The owner's notes are never one, nor
+   * a version merged into the owner's edit.
    */
   #dreamCandidate(
     now: number,
@@ -836,8 +837,14 @@ export class Vault extends DurableObject<VaultEnv> {
         "SELECT path, blob_sha FROM dream_proposals",
       ).map((row) => [row.path, row.blob_sha]),
     );
+    // Kelpie's commit, but holding the owner's lines (#160): the owner's word, so not Dream's.
+    const merged = new Set(
+      this.#exec<{ path: string }>(
+        "SELECT f.path FROM files f JOIN owner_merges m ON m.path = f.path AND m.content = f.content",
+      ).map((row) => row.path),
+    );
     for (const note of recent) {
-      if (!kelpie.has(note.path) || waiting.has(note.path)) continue;
+      if (!kelpie.has(note.path) || waiting.has(note.path) || merged.has(note.path)) continue;
       if (proposed.get(note.path) === note.blobSha) continue;
       const version = this.#memory.current(note.path);
       if (version === null || (note.kind !== "session" && version.abstract !== null)) continue;
@@ -846,10 +853,19 @@ export class Vault extends DurableObject<VaultEnv> {
     return null;
   }
 
-  /** Turns Dream off, or back on as dry runs (#112): one setting for the whole vault. */
+  /**
+   * Turns Dream off, or back on as dry runs (#112): one setting for the whole vault. Off, what it
+   * proposed goes, and the next alarm writes the report again without it.
+   */
   setDream(mode: unknown): SetDreamResult {
     if (mode !== "off" && mode !== "dry") return { ok: false, reason: "invalid" };
-    this.#set("dream_mode", mode);
+    this.ctx.storage.transactionSync(() => {
+      this.#set("dream_mode", mode);
+      if (mode === "off") {
+        this.#exec("DELETE FROM dream_proposals");
+        this.#set("lifecycle_after", "0");
+      }
+    });
     return { ok: true, mode };
   }
 

@@ -379,10 +379,13 @@ export function lifecycleReport(findings: LifecycleFindings): string | null {
       [
         "## Dream's plan",
         "",
-        "A dry run: the abstract Dream would give each note. Nothing was written.",
+        "A dry run: the abstract Dream would give each note, shown as code. Nothing was written.",
         "",
         ...capped(
-          findings.dream.map((note) => `- ${link(note)}: ${plain(note.abstract, ABSTRACT_CHARS)}`),
+          // A model wrote it: as code, no link, tag or markup in it renders.
+          findings.dream.map(
+            (note) => `- ${link(note)}: \`${plain(note.abstract, ABSTRACT_CHARS, UNSAFE_CODE)}\``,
+          ),
         ),
       ].join("\n"),
     );

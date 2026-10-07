@@ -96,7 +96,7 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - **Provenance:** a commit whose answer was lost still counts as Kelpie's. A file the owner removes, or a force-push takes away, leaves no record.
     - **Refusals:** `invalid` comes with the problems found, for the model to fix. A path the turn can't see is `not_found`, the same as a missing note. A scope the turn can't write to is `scope_not_allowed`.
   - **Access counts:** each recall counts the notes it packed, in one write, in a table outside the index. A rebuild keeps them, and they never reach git.
-  - **The memory report** (#111): once a day, after the embeddings and the held files, the alarm writes what memory's index finds (cold notes, duplicates, possible contradictions) to `memory/_lint/report.md`, or removes the page when memory is clean ([memory-format.md](memory-format.md#the-daily-report)).
+  - **The memory report** (#111): once a day, after the embeddings and the held files, the alarm writes what memory's index finds (cold notes, duplicates, possible contradictions), and Dream's plan, to `memory/_lint/report.md`, or removes the page when memory is clean ([memory-format.md](memory-format.md#the-daily-report)).
     - The page is queued only when it changed, so a quiet day makes no commit.
     - It reads the index at the head, bringing it there first; if that fails, it tries again at the next alarm.
     - Agents can't write under `memory/_…/`, so no one else writes the page.
@@ -187,7 +187,7 @@ Git keeps every version, so erasing content means rewriting the vault's history.
    - `--path <file> --invert-paths` removes a file from every commit;
    - `--replace-text` removes a passage.
 
-   The memory report, `memory/_lint/report.md`, lists notes by title and path. When an erased note was ever in it, rewrite the report's history too, with the same `--replace-text` or by removing the file.
+   The memory report, `memory/_lint/report.md`, lists notes by title and path, and Dream's plan adds an abstract of each note it lists, which a model wrote from the note's content (#112). When an erased note was ever in it, rewrite the report's history too, with the same `--replace-text` or by removing the file.
 
    Then push the result with `--force` to every branch that held the content.
 2. **Make Kelpie forget its copies, right away:** `/commands/forgetVaultPaths` with the erased paths ([admin-api.md](admin-api.md)). Doing it at once keeps Kelpie's queued writes from committing the content back onto the rewritten branch.

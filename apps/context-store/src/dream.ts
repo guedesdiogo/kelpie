@@ -37,7 +37,7 @@ export async function proposeAbstract(
         parts: [
           {
             type: "text",
-            text: `The note \`${note.path}\`, titled ${JSON.stringify(note.title)}:\n\n${note.body.slice(0, ABSTRACT_INPUT_CHARS)}`,
+            text: `The note \`${note.path}\`, titled ${JSON.stringify(note.title)}, between BEGIN NOTE and END NOTE:\n\nBEGIN NOTE\n${note.body.slice(0, ABSTRACT_INPUT_CHARS)}\nEND NOTE\n\nAnswer with the JSON only.`,
           },
         ],
       },

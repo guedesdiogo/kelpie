@@ -464,7 +464,7 @@ describe("lifecycle report", () => {
         dream: [
           {
             path: memoryPath("global", "note", "Chá"),
-            abstract: "Prefere chá [[verde]] | `sem` açúcar",
+            abstract: "Veja https://evil.example/login #urgente [[verde]] `sem` açúcar",
           },
           { path: memoryPath("global", "note", "Casa"), abstract: "Mora em Lisboa." },
           // A note the index no longer holds isn't listed.
@@ -474,8 +474,11 @@ describe("lifecycle report", () => {
       expect(findings.dream.map((entry) => entry.title)).toEqual(["Casa", "Chá"]);
       const page = lifecycleReport(findings) ?? "";
       expect(page).toContain("## Dream's plan");
-      expect(page).toContain("- [[memory/notes/casa|Casa]]: Mora em Lisboa.");
-      expect(page).toContain("- [[memory/notes/cha|Chá]]: Prefere chá verde sem açúcar");
+      // The model's line is shown as code: no link, tag or markup in it renders.
+      expect(page).toContain("- [[memory/notes/casa|Casa]]: `Mora em Lisboa.`");
+      expect(page).toContain(
+        "- [[memory/notes/cha|Chá]]: `Veja https://evil.example/login #urgente [[verde]] sem açúcar`",
+      );
       expect(page).not.toContain("velha");
     });
   });
