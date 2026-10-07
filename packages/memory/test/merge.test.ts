@@ -228,6 +228,36 @@ describe("mergeOf", () => {
       }),
     ],
     ["a quoted Mermaid fence", JSON.stringify({ verdict: "merge", body: "> ```mermaid\n> x" })],
+    // Obsidian's parser takes a task's checkbox as a container too.
+    [
+      "a Mermaid fence behind a task",
+      JSON.stringify({ verdict: "merge", body: "- [ ] ```mermaid\n  flowchart LR\n  ```" }),
+    ],
+    [
+      "a Mermaid fence after a space",
+      JSON.stringify({ verdict: "merge", body: "``` mermaid\nx\n```" }),
+    ],
+    ["a title behind a task", JSON.stringify({ verdict: "merge", body: "- [ ] # Outro" })],
+    [
+      "an app autolink with an entity",
+      JSON.stringify({ verdict: "merge", body: "<obsidia&#110;://open?vault=v>" }),
+    ],
+    [
+      "a script link after a `<` and a space",
+      JSON.stringify({ verdict: "merge", body: "[x](< javascript:alert(1)>)" }),
+    ],
+    [
+      "a script definition behind junk",
+      JSON.stringify({ verdict: "merge", body: "[x][r]\n\n[r]: <>javascript:alert(1)" }),
+    ],
+    [
+      "a script link behind a quote marker",
+      JSON.stringify({ verdict: "merge", body: "> [x](\n> javascript:alert(1))" }),
+    ],
+    [
+      "an inline script on its own line",
+      JSON.stringify({ verdict: "merge", body: "`\n$= dv.span(1)`" }),
+    ],
     [
       "a Mermaid fence by class",
       JSON.stringify({ verdict: "merge", body: "``` {.mermaid}\nx\n```" }),

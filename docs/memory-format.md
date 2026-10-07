@@ -481,7 +481,7 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
     - The summary must be plain lines within 2,000 characters. Windows line ends become line ends. Any other control character, line separator or bidirectional control is refused, at the edges too.
     - Secrets are removed from it next.
     - Then nothing in it may read as Markdown structure:
-      - no heading (a run of `#` and a space), quote (a line starting with `>`), fence, rule, HTML block (a line starting with a tag, which needs no `>`), title underline, frontmatter fence or conflict marker at a line's start, behind a list or quote marker too;
+      - no heading (a run of `#` and a space), quote (a line starting with `>`), fence, rule, HTML block (a line starting with a tag, which needs no `>`), title underline, frontmatter fence or conflict marker at a line's start, behind a list or quote marker or a task's checkbox too;
       - no link, link reference, wikilink, image, HTML tag, autolink (mail too), code or plugin template tag (`<%`, `%>`) anywhere. A bare URL, a hashtag or a `<` before a space or a digit in prose stays as text.
   - **The page:** Dream's page, `memory/_lint/dream.md`, lists each proposed summary, newest day first, each with the pages it sums up (see "Dream's page" below).
   - **Erasing:** forgetting a session page forgets its day's summary. Turning Dream off deletes the summaries too, and the next report removes the page; the vault's git history still holds its earlier versions. A call that ends after Dream was turned off keeps nothing.
@@ -510,12 +510,12 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
       - no frontmatter fence or conflict marker;
       - no image or link reference;
       - no HTML, and no HTML block's opener;
-      - no link or link definition with a scheme other than http, https or mailto, nor one whose destination spells a scheme with an entity. Relative links and wikilinks are kept;
+      - no link or link definition but to a web or mail URL, or to a plain relative path, and no autolink but to the web or mail, however spelled. Wikilinks are kept;
       - no plugin template tag (`<%`, `%>`) and no inline query (`` `= `` or `` `$= ``);
-      - no fence but of a language Obsidian shows as text: none, plain text, or a common programming language. A diagram's fence, such as Mermaid's, renders, and can fetch an image with no click.
+      - no fence but of a language Obsidian shows as text: none, plain text, or a common programming language. A diagram's fence, such as Mermaid's, renders, and can fetch an image with no click. Every fence counts, wherever it is, a task's checkbox included.
 
       An image split across lines, spelled with entities, or named by a reference behind a list marker would get past a rule that reads Markdown. So would a fence an HTML block swallows. These rules don't read Markdown at all.
-    - **Outside code,** it may hold no title heading, behind a list or quote marker too. In code, a `#` line is a comment.
+    - **Outside code,** it may hold no title heading, behind a list or quote marker or a task's checkbox too. In code, a `#` line is a comment.
     - Any other answer, or a failed or late call, is kept as no answer, so those versions aren't asked about again. A failed or late call also ends the run.
     - **The cost of these rules:** a body the rules refuse is kept as no answer too, so the group isn't merged, and isn't asked about again until one of its notes changes. A note with a `<` right before a letter, `!`, `?` or `/` in its code, such as `List<String>`, can't merge; the report keeps listing its group.
   - **Kept only while its notes are:** a proposal is kept with the versions of its notes, and a change to any of them proposes the group again.

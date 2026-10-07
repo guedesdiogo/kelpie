@@ -41,7 +41,7 @@ export function mergeInput(
 
 /** A title heading, ATX or underlined. */
 const TITLE =
-  /^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*(?:#(?:[ \t]|$)|=+[ \t]*$)/;
+  /^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])|\[[^\]\n]\](?=[ \t])))*[ \t]*(?:#(?:[ \t]|$)|=+[ \t]*$)/;
 /**
  * What reaches out when it renders, or renders as markup: any image, a link reference or
  * definition, HTML and an HTML block's opener. Refused anywhere, code included: an image split
@@ -55,9 +55,9 @@ const REMOTE_OR_HTML = /!\[|<\/?[A-Za-z][\w-]*(?:[\s>/]|$)|<[!?]/;
  * or mail's. A relative link and a wikilink have none.
  */
 const ODD_LINK =
-  /(?:\]\(|\]:)\s*(?!<?(?:https?|mailto):)<?[^)\s>]*[:&]|<(?!(?:https?|mailto):)[A-Za-z][A-Za-z0-9+.-]*:/i;
+  /(?:\]\(|\]:)(?!\s*(?:<?(?:https?|mailto):|[\w./#%-][^\s)<>:&\\]*(?:[\s)]|$)))|<(?!(?:https?|mailto):)[A-Za-z&][^\s<>]*[:&]/i;
 /** A plugin's template or query, which Obsidian would run: Templater's tags, Dataview's inline code. */
-const PLUGIN = /<%|%>|`[ \t]*\$?=/;
+const PLUGIN = /<%|%>|`[\s>]*\$?=/;
 /**
  * The fences whose code Obsidian shows as text. Another, a diagram or a plugin's, renders, and a
  * Mermaid diagram can fetch an image with no click.
@@ -100,9 +100,11 @@ const FENCE_LANGUAGES = new Set([
   "md",
   "markdown",
 ]);
-/** A fence's opener, behind a list or quote marker too, and its info string's first word. */
-const FENCE =
-  /^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*(?:`{3,}|~{3,})[ \t]*([^\s`]*)/;
+/**
+ * Every fence and its info string's first word, wherever it is: a fence behind any container, a
+ * task's checkbox too, can't hide from a rule that doesn't read containers.
+ */
+const FENCE = /(?:`{3,}|~{3,})[ \t]*([^ \t\n`]*)/g;
 
 /**
  * What an answer says: that the notes are distinct, or their merged body, within the limit.
@@ -143,9 +145,8 @@ export function mergeOf(
     return null;
   }
   // Fences only of languages shown as text.
-  for (const line of text.split("\n")) {
-    const info = FENCE.exec(line)?.[1];
-    if (info !== undefined && !FENCE_LANGUAGES.has(info.toLowerCase())) return null;
+  for (const match of text.matchAll(FENCE)) {
+    if (!FENCE_LANGUAGES.has((match[1] ?? "").toLowerCase())) return null;
   }
   // No title heading, but in code, where a `#` is a comment. Code only as both the reader, which
   // finds titles, and Markdown see it: a line either sees outside code is checked.

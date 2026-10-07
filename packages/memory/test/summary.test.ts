@@ -152,6 +152,10 @@ describe("summaryOf", () => {
     ["a template tag", JSON.stringify({ summary: "Café <% tp.file.title %>." })],
     ["an underline deep in a list", JSON.stringify({ summary: "- Texto\n    =" })],
     ["a heading behind a number", JSON.stringify({ summary: "1. # Outro" })],
+    // Obsidian's parser takes a task's checkbox as a container too.
+    ["a heading behind a task", JSON.stringify({ summary: "- [x] ## Outro" })],
+    ["an HTML block behind a task", JSON.stringify({ summary: "- [ ] <iframe src=x" })],
+    ["an autolink with an entity", JSON.stringify({ summary: "Ver <fil&#101;:///etc/hosts>." })],
     ["a rule of underscores", JSON.stringify({ summary: "x\n___" })],
     ["a bare heading mark", JSON.stringify({ summary: "x\n#" })],
     ["a link definition", JSON.stringify({ summary: "[1]: nota" })],
