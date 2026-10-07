@@ -484,7 +484,7 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
       - no heading (a run of `#` and a space), quote (a line starting with `>`), fence, rule, HTML block (a line starting with a tag, which needs no `>`), title underline, frontmatter fence or conflict marker at a line's start, behind a list or quote marker or a task's checkbox too;
       - no link, link reference, wikilink, image, HTML tag, autolink (mail too), code or plugin template tag (`<%`, `%>`) anywhere. A bare URL, a hashtag or a `<` before a space or a digit in prose stays as text.
   - **The page:** Dream's page, `memory/_lint/dream.md`, lists each proposed summary, newest day first, each with the pages it sums up (see "Dream's page" below).
-  - **Erasing:** forgetting a session page forgets its day's summary. Turning Dream off deletes the summaries too, and the next report removes the page; the vault's git history still holds its earlier versions. A call that ends after Dream was turned off keeps nothing.
+  - **Erasing:** forgetting a session page forgets its day's summary. Turning Dream off deletes the summaries too, drops any copy of the page waiting to be written, and the next report removes the page; the vault's git history still holds its earlier versions. A call that ends after Dream was turned off, or after its note changed or was forgotten, keeps nothing, for abstracts too.
 - **Duplicates** (#112): a dry run for now. `merges` can't be named in `writes` yet.
   - **Which notes:** Kelpie's own notes of one scope and kind that share a title, two or more.
   - **Left out**, as for abstracts:

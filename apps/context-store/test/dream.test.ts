@@ -670,6 +670,14 @@ describe("Vault Dream", () => {
         "INSERT INTO conflicts (agent, path, content, reason, at) VALUES ('context-store', ?, 'x', 'owner_won', 1)",
         DREAM_PAGE_PATH,
       );
+      state.storage.sql.exec(
+        "INSERT INTO owner_merges (path, content) VALUES (?, 'x')",
+        DREAM_PAGE_PATH,
+      );
+      state.storage.sql.exec(
+        "INSERT INTO held (path, content, previous, state, attempts, at) VALUES (?, 'x', 'y', 'held', 0, 1)",
+        DREAM_PAGE_PATH,
+      );
     });
     await stub.setDream("off");
     expect(await rows(stub, "SELECT path FROM dream_summaries")).toEqual([]);
@@ -677,7 +685,9 @@ describe("Vault Dream", () => {
       await rows(
         stub,
         `SELECT path FROM queue WHERE path = '${DREAM_PAGE_PATH}'
-         UNION ALL SELECT path FROM conflicts WHERE path = '${DREAM_PAGE_PATH}'`,
+         UNION ALL SELECT path FROM conflicts WHERE path = '${DREAM_PAGE_PATH}'
+         UNION ALL SELECT path FROM owner_merges WHERE path = '${DREAM_PAGE_PATH}'
+         UNION ALL SELECT path FROM held WHERE path = '${DREAM_PAGE_PATH}'`,
       ),
     ).toEqual([]);
     await runDurableObjectAlarm(stub);
@@ -735,13 +745,37 @@ describe("Vault Dream", () => {
       const stub = await run(name, session, "summary", during);
       expect(await rows(stub, "SELECT path FROM dream_summaries")).toEqual([]);
     }
-    const stub = await run(
-      "dream-abstract-off",
-      await kelpieNote({ title: "Café" }),
-      "abstract",
-      off,
-    );
-    expect(await rows(stub, "SELECT path FROM dream_proposals")).toEqual([]);
+    // An abstract too: off, a new version, or a forget of the file the vault still holds.
+    const kelpies = (sql: SqlStorage, path: string) => {
+      rewrite(sql, path);
+      sql.exec("UPDATE authored SET blob_sha = 'rewritten' WHERE path = ?", path);
+    };
+    const forgotten = (sql: SqlStorage, path: string) =>
+      sql.exec("DELETE FROM authored WHERE path = ?", path);
+    for (const [name, during] of [
+      ["dream-abstract-off", off],
+      ["dream-abstract-rewritten", kelpies],
+      ["dream-abstract-forgotten", forgotten],
+    ] as const) {
+      const stub = await run(name, await kelpieNote({ title: "Café" }), "abstract", during);
+      expect(await rows(stub, "SELECT path FROM dream_proposals")).toEqual([]);
+    }
+
+    // Nor is a note asked for while the index holds another version than the vault.
+    replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
+    const behind = vault("dream-abstract-behind");
+    const note = await kelpieNote({ title: "Chá" });
+    await behind.compile("kelpie");
+    await behind.write("kelpie", [note], "x");
+    await runDurableObjectAlarm(behind);
+    await runInDurableObject(behind, (_instance, state) => {
+      state.storage.sql.exec("UPDATE files SET blob_sha = 'newer' WHERE path = ?", note.path);
+      state.storage.sql.exec("UPDATE authored SET blob_sha = 'newer' WHERE path = ?", note.path);
+    });
+    const asked = fakeModelBy(() => abstract("Chá."));
+    await quiet(behind);
+    for (let i = 0; i < 3; i++) await runDurableObjectAlarm(behind);
+    expect(asked).toEqual([]);
   });
 
   it("leaves a day while a page of it is held on conflict markers, and sums up the next", async () => {
