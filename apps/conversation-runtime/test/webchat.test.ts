@@ -4,7 +4,8 @@ import { WEBCHAT_ADMISSION_HEADER } from "@kelpie/conversation/contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
-import { type FakeWorld, fakeWorld, refuse, reply, sayThenCall } from "./fakes.ts";
+import type { ToolContext } from "../src/tools.ts";
+import { type FakeWorld, fakeWorld, refuse, reply, sayThenCall, toolCalls } from "./fakes.ts";
 
 // The webchat's socket lives on the conversation's object (issue #40). Ingress admits the owner
 // and passes the admission in a header the browser can't set; these tests open sockets the way
@@ -353,6 +354,60 @@ describe("a turn's steps in the webchat", () => {
         ],
       }),
     );
+  });
+
+  it("shows a confirmation's notice as a bubble after the reply, and takes the code typed back", async () => {
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "change", input: { to: "frontier" } }),
+        reply("Confirme, por favor."),
+        toolCalls({ name: "change", input: { to: "frontier" } }),
+        reply("Feito."),
+      ]),
+    );
+    const ran: unknown[] = [];
+    world.tools = [
+      {
+        async tools() {
+          return [
+            {
+              spec: { name: "change", description: "Changes.", inputSchema: { type: "object" } },
+              label: "Changing",
+              async run(input: unknown, context: ToolContext) {
+                const summary = `change the tier to ${JSON.stringify(input)}.`;
+                if (!(await context.confirm({ command: "change", input, summary }))) {
+                  return { output: "Not done yet." };
+                }
+                ran.push(input);
+                return { output: "Done." };
+              },
+            },
+          ];
+        },
+      },
+    ];
+    const name = "assistant:webchat:confirm";
+    const chat = await open(name);
+    chat.send({ type: "message", id: "c1", text: "mude o tier" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
+    await agent(name).flush();
+    await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(2));
+
+    const [answer, notice] = ofType(chat.frames, "bubble").map((frame) => String(frame.text));
+    expect(answer).toBe("Confirme, por favor.");
+    const code = /reply with just the code ([A-Z0-9]{6})\./.exec(notice ?? "")?.[1] ?? "";
+    expect(notice).toMatch(/^Confirm: change the tier to \{"to":"frontier"\}\.\n/);
+    expect(world.sent).toEqual([]);
+
+    // The notice isn't history: a new socket doesn't get it back.
+    const later = await open(name);
+    await vi.waitFor(() => expect(later.frames[0]).toMatchObject({ type: "history" }));
+    expect(JSON.stringify(later.frames[0])).not.toContain(code);
+
+    chat.send({ type: "message", id: "c2", text: code });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(2));
+    await agent(name).flush();
+    await vi.waitFor(() => expect(ran).toEqual([{ to: "frontier" }]));
   });
 
   it("clears the step when the turn stops without a reply", async () => {
