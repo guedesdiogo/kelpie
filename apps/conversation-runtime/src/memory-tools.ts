@@ -260,7 +260,7 @@ export function memoryTools(store: MemoryStore): ToolProvider {
         );
       case "core_note":
         return invalid(
-          "Not saved: that note is in the agent's always-loaded memory (pinned, or a profile note), and only the owner changes it. Save it as a new note that says what changed.",
+          "Not saved: that note is pinned, or a profile note, which the agent's always-loaded memory carries, so only the owner changes it. Save it as a new note that says what changed.",
         );
       case "too_large":
         return invalid("Not saved: the note is too large. Save less, or split it.");

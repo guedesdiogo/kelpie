@@ -1,7 +1,14 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { coreBlock, MemoryIndex, type MemoryInput, memoryPath, writeMemory } from "../src/index.ts";
+import {
+  coreBlock,
+  coreCarries,
+  MemoryIndex,
+  type MemoryInput,
+  memoryPath,
+  writeMemory,
+} from "../src/index.ts";
 import { FakeVault } from "./vault.ts";
 
 type Stored = MemoryInput & { path?: string };
@@ -76,6 +83,12 @@ describe("the always-loaded core", () => {
         expect(core.text).toContain("Rotina.");
         expect(core.text).not.toContain("didn't fit");
         expect(core.tokens).toBe(Math.ceil(core.text.length / 4));
+        // What \`memory_write\` refuses (#168) is exactly what the core carries, expired notes aside.
+        for (const note of index.lifecycleNotes()) {
+          const carried = coreCarries(note, "kelpie");
+          if (core.paths.includes(note.path)) expect(carried, note.path).toBe(true);
+          if (/outro|familia|sem-fixar/.test(note.path)) expect(carried, note.path).toBe(false);
+        }
       },
     );
   });

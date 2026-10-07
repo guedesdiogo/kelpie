@@ -3,6 +3,7 @@ import { EMBEDDING_INPUT_CHARS, type EmbedOutcome } from "@kelpie/llm";
 import {
   bodyWithoutHeading,
   coreBlock,
+  coreCarries,
   decideWrite,
   foldKey,
   instantOf,
@@ -253,14 +254,6 @@ CREATE TABLE IF NOT EXISTS proposals (
   at INTEGER NOT NULL
 );
 `;
-
-/**
- * Whether the always-loaded core (#112) carries a note: pinned, or in a `profile/` folder, the
- * owner's or an agent's. The owner changes those notes, never the agent's `memory_write` (#168).
- */
-function inCore(path: string, note: { pinned: boolean } | null): boolean {
-  return note?.pinned === true || /^(?:memory|agents\/[^/]+\/memory)\/profile\//.test(path);
-}
 
 const encoder = new TextEncoder();
 const bytes = (text: string | null) => (text === null ? 0 : encoder.encode(text).byteLength);
@@ -1317,7 +1310,10 @@ export class Vault extends DurableObject<VaultEnv> {
           const shown = shownAt(found.path);
           if (shown.text === null) return { ok: false, reason: "not_found" };
           // The always-loaded core carries it (#112): the owner changes it, never the agent (#168).
-          if (inCore(found.path, shown.note)) return { ok: false, reason: "core_note" };
+          const pinned = found.pinned || shown.note?.pinned === true;
+          if (coreCarries({ path: found.path, scope: found.scope, pinned }, agentId)) {
+            return { ok: false, reason: "core_note" };
+          }
           if (shown.note && memory.level !== "explicit" && this.#ownersWord(shown.note)) {
             return { ok: false, reason: "owners_word" };
           }

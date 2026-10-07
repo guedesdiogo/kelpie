@@ -252,7 +252,7 @@ describe("memory_write", () => {
         { ok: false, reason: "core_note" },
         {
           output:
-            "Not saved: that note is in the agent's always-loaded memory (pinned, or a profile note), and only the owner changes it. Save it as a new note that says what changed.",
+            "Not saved: that note is pinned, or a profile note, which the agent's always-loaded memory carries, so only the owner changes it. Save it as a new note that says what changed.",
           isError: true,
         },
       ],

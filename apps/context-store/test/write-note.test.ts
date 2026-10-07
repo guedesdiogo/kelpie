@@ -425,13 +425,17 @@ describe("writeNote", () => {
       "memory/notes/cafe.md": "---\npinned: true\n---\n# Café\n\nSem açúcar.\n",
       "memory/profile/rotina.md": "# Rotina\n\nAcorda cedo.\n",
       "agents/kelpie/memory/profile/tom.md": "# Tom\n\nCurto e direto.\n",
+      "memory/profile/saude/sono.md": "# Sono\n\nOito horas.\n",
       "memory/notes/cha.md": "# Chá\n\nVerde.\n",
+      // Pinned in an area: the core doesn't carry it, so the agent may change it.
+      "areas/work/notes/pauta.md": "---\npinned: true\n---\n# Pauta\n\nSegunda.\n",
     });
     const stub = vault("write-core-notes");
     for (const [path, title] of [
       ["memory/notes/cafe.md", "Café"],
       ["memory/profile/rotina.md", "Rotina"],
       ["agents/kelpie/memory/profile/tom.md", "Tom"],
+      ["memory/profile/saude/sono.md", "Sono"],
     ] as const) {
       for (const level of ["explicit", "deduced", "inferred"] as const) {
         expect(
@@ -447,9 +451,15 @@ describe("writeNote", () => {
       ),
     ).toBe(0);
     // A note outside the core changes as before.
-    expect(
-      await stub.writeNote("kelpie", memory("Chá", "Preto.", { path: "memory/notes/cha.md" }), ALL),
-    ).toMatchObject({ ok: true, action: "written" });
+    for (const [path, title] of [
+      ["memory/notes/cha.md", "Chá"],
+      ["areas/work/notes/pauta.md", "Pauta"],
+    ] as const) {
+      expect(
+        await stub.writeNote("kelpie", memory(title, "Outro.", { path }), ALL),
+        path,
+      ).toMatchObject({ ok: true, action: "written" });
+    }
   });
 
   it("keeps the owner's word in a version Kelpie merged into the owner's edit", async () => {
