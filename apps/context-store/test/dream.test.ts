@@ -53,8 +53,8 @@ describe("proposeAbstract", () => {
     // The note is marked off, and the ask comes after it.
     const sent = JSON.stringify(asked[0]?.request.messages);
     expect(sent).toContain("BEGIN NOTE");
-    expect(sent).toContain("END NOTE\\n\\nAnswer with the JSON only.");
-    expect(JSON.stringify(asked[0]?.request.messages).length).toBeLessThan(6_300);
+    expect(sent).toMatch(/END NOTE [0-9a-f]{16}\\n\\nAnswer with the JSON only./);
+    expect(JSON.stringify(asked[0]?.request.messages).length).toBeLessThan(6_350);
   });
 });
 
