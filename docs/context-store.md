@@ -70,8 +70,9 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - **What it writes:** an abstract, for an operation the owner lets write, goes through the queue (`dream_writes` keeps what it wrote for a week).
     - **Day summaries and merges,** while dry, are kept in `dream_summaries` and `dream_merges` and shown on Dream's page, `memory/_lint/dream.md`.
       - Once their operation may write, each goes in a commit of Dream's own, outside the queue, so a merge lands whole or not at all.
-      - The commit is made only while what it read is as it read it, and what it writes over is Kelpie's, not held and with no write waiting. If the vault moved, it syncs, checks again, and writes nothing on any change.
+      - The commit is made only while what it read is as it read it, and what it writes over is Kelpie's, not held and with no write waiting. If the vault moved, it syncs and checks again, and writes nothing if any of that changed.
       - A write an agent queued meanwhile goes on top, as on the owner's edit.
+      - `dream_landing` holds the versions a commit writes until its answer comes, so a lost answer still leaves them Kelpie's (#126). `dream_written` keeps the days whose summary Dream wrote, so one the owner removes isn't written again.
   - **Embeddings:** the alarm embeds the notes that have no vector yet, through llm-gateway's `embed`, four batches of 64 a run, until none is left.
     - The model is the one `EMBEDDING_PROVIDER` chooses on llm-gateway. A recall that sees a new model arms the alarm, which embeds every note again; until then the vector stream finds what it can.
     - This runs after GitHub's work and fails on its own, so an llm-gateway outage never delays the vault's writes. A call that doesn't answer in 40 s is given up.
@@ -204,14 +205,14 @@ Git keeps every version, so erasing content means rewriting the vault's history.
    - a day's summary, `<scope>/sessions/YYYY/YYYY-MM-DD.md`, sums up the session pages its `sources` names;
    - a merge's survivor holds the text of the notes its `sources` names, which are marked `relations.merged_into` it.
 
-   Rewrite them too, and name them in step 2.
+   Follow them in turn: a note merged into another keeps its own `sources` and its mark, and the note it went into may have been merged in turn. Rewrite every note reached that way, and name them in step 2. A merged note names the commit that held its text, and that commit goes with the rewrite.
 
    Then push the result with `--force` to every branch that held the content.
 2. **Make Kelpie forget its copies, right away:** `/commands/forgetVaultPaths` with the erased paths ([admin-api.md](admin-api.md)). Doing it at once keeps Kelpie's queued writes from committing the content back onto the rewritten branch.
    - **What it does:**
      - it syncs to the rewritten head;
      - it rebuilds memory's index from the vault as it is now, which drops every old version, of every file, with the vectors of content no version holds anymore;
-     - it deletes the rows that name the paths in `queue`, `conflicts`, `held`, `proposals`, `recall_counts`, `authored`, `owner_changes`, `owner_merges`, `dream_proposals`, `dream_writes`, `dream_summaries` and `dream_merges`, and a day summary or a merge that read a forgotten path;
+     - it deletes the rows that name the paths in `queue`, `conflicts`, `held`, `proposals`, `recall_counts`, `authored`, `owner_changes`, `owner_merges`, `dream_proposals`, `dream_writes`, `dream_summaries`, `dream_merges`, `dream_written` and `dream_landing`, and a day summary or a merge that read a forgotten path;
      - it drops a memory report or Dream's page wherever a copy waits: in the queue, set aside in `conflicts`, merged with the owner's edit in `owner_merges`, or held. A conflict the owner left on one of these pages goes too; git history keeps it. It wakes within seconds, or at a retry already pending, and the next two alarms write the pages again from what is left, one queuing and one committing, while GitHub answers.
 
      It never touches git.

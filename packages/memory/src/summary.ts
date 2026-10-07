@@ -6,7 +6,7 @@ import { MAX_SOURCES, readNote } from "./note.ts";
 import { blockId, HEADING_PATH_CHARS, HEADING_TITLE_CHARS, oneLine } from "./retrieve.ts";
 import { sanitizeSecrets } from "./sanitize.ts";
 import { isDate } from "./time.ts";
-import { writeMemory } from "./write.ts";
+import { MemoryFormatError, writeMemory } from "./write.ts";
 
 /** A day's pages, shared out among them. */
 const SUMMARY_INPUT_CHARS = 12_000;
@@ -102,27 +102,32 @@ export function summaryOf(answer: string): string | null {
 
 /**
  * A day's summary as Dream writes it (#112): a `session` note beside the day's pages, deduced from
- * them, no surer than the least sure of them, with `sources` naming each. Null when the day has more
- * pages than a note's `sources` can name.
+ * them, no surer than the least sure of them, with `sources` naming each. Null when it can't be
+ * written: more pages than a note's `sources` can name, or a page whose path a source can't hold.
  */
 export async function summaryNote(
   day: { scope: Scope; date: string; pages: readonly VaultText[]; summary: string },
   at: string,
 ): Promise<string | null> {
   if (day.pages.length > MAX_SOURCES) return null;
-  const { text } = await writeMemory(
-    {
-      scope: day.scope,
-      kind: "session",
-      title: `Summary of ${day.date}`,
-      body: day.summary,
-      level: "deduced",
-      confidence: Math.min(
-        ...day.pages.map((page) => readNote(page.path, page.text)?.confidence ?? 0),
-      ),
-      sources: day.pages.map((page) => pathLink(page.path)),
-    },
-    { at },
-  );
-  return text;
+  try {
+    const { text } = await writeMemory(
+      {
+        scope: day.scope,
+        kind: "session",
+        title: `Summary of ${day.date}`,
+        body: day.summary,
+        level: "deduced",
+        confidence: Math.min(
+          ...day.pages.map((page) => readNote(page.path, page.text)?.confidence ?? 0),
+        ),
+        sources: day.pages.map((page) => pathLink(page.path)),
+      },
+      { at },
+    );
+    return text;
+  } catch (error) {
+    if (error instanceof MemoryFormatError) return null;
+    throw error;
+  }
 }

@@ -3,7 +3,7 @@
 import { isMap, parseDocument } from "yaml";
 import { normalizeEntities } from "./entities.ts";
 import { codeLines, splitFrontmatter } from "./markdown.ts";
-import { LEVELS, type Note, readNote } from "./note.ts";
+import { LEVELS, MAX_SOURCES, type Note, readNote } from "./note.ts";
 import { blockId, HEADING_PATH_CHARS, HEADING_TITLE_CHARS, oneLine } from "./retrieve.ts";
 import { sanitizeSecrets } from "./sanitize.ts";
 import { MemoryFormatError, writeMemory } from "./write.ts";
@@ -199,14 +199,17 @@ export function pathLink(path: string): string {
   return `[[${path.replace(/\.md$/, "")}]]`;
 }
 
-/** What a note's frontmatter says it contradicts, as the writer takes it: names, unbracketed. */
-function contradicted(note: Note): string[] {
+/**
+ * What a note's frontmatter says it contradicts, as the writer takes it: names, unbracketed. Null
+ * when one is in a form the writer can't write back, such as with a label or a heading.
+ */
+function contradicted(note: Note): string[] | null {
   const relations = note.frontmatter.relations as { contradicts?: unknown } | undefined;
   const listed = Array.isArray(relations?.contradicts) ? relations.contradicts : [];
-  return listed.flatMap((value) => {
-    const name = typeof value === "string" ? /^\[\[([^[\]|#]+)\]\]$/.exec(value)?.[1] : undefined;
-    return name === undefined ? [] : [name];
-  });
+  const names = listed.map((value) =>
+    typeof value === "string" ? /^\[\[([^[\]|#]+)\]\]$/.exec(value)?.[1] : undefined,
+  );
+  return names.every((name) => name !== undefined) ? (names as string[]) : null;
 }
 
 /**
@@ -214,8 +217,9 @@ function contradicted(note: Note): string[] {
  * body, and what the notes it takes in held. Their paths join its `sources`, never replacing one,
  * and their entities and what they contradict join its own. It takes the lowest level and
  * confidence among them, so a merge never makes a note surer. Its abstract goes, since it summed
- * up the old body. Null when it can't be written: a note the reader can't read, or more sources
- * than a note may name.
+ * up the old body. Null when it can't be written: a note the reader can't read, notes valid at other
+ * times, a contradiction the writer can't carry, or more sources or contradictions than a note may
+ * name.
  */
 export async function mergedSurvivor(
   survivor: VaultText,
@@ -227,6 +231,15 @@ export async function mergedSurvivor(
   const [own] = notes;
   if (own === undefined || own === null || notes.some((note) => note === null)) return null;
   const all = notes as Note[];
+  // A merge would make a fact true for longer, or for less, than it was.
+  if (all.some((note) => note.validFrom !== own.validFrom || note.invalidAt !== own.invalidAt)) {
+    return null;
+  }
+  const lists = all.map(contradicted);
+  if (lists.some((list) => list === null)) return null;
+  const contradicts = [...new Set(lists.flat() as string[])];
+  // The reader would drop the whole list past this.
+  if (contradicts.length > MAX_SOURCES) return null;
   const sources = [...new Set([...own.sources, ...merged.map((file) => pathLink(file.path))])];
   // A note that doesn't say how sure it is counts as the least sure.
   const level = LEVELS[Math.max(...all.map((note) => LEVELS.indexOf(note.level ?? "inferred")))];
@@ -248,7 +261,7 @@ export async function mergedSurvivor(
         ...(own.invalidAt === null ? {} : { invalidAt: own.invalidAt }),
         evergreen: own.evergreen,
         pinned: own.pinned,
-        contradicts: [...new Set(all.flatMap(contradicted))],
+        contradicts,
       },
       { at, existing: survivor.text },
     );

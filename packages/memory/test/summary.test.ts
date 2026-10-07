@@ -274,5 +274,12 @@ describe("summaryNote", () => {
       await summaryNote({ ...day, pages: pages.slice(0, 20) }, "2026-10-07T12:00:00Z"),
     ).not.toBeNull();
     expect(await summaryNote({ ...day, pages }, "2026-10-07T12:00:00Z")).toBeNull();
+    // A page whose path a source can't hold.
+    const [first] = pages;
+    const long = {
+      path: `conversations/telegram-1/sessions/2026/${"a".repeat(290)}.md`,
+      text: first?.text ?? "",
+    };
+    expect(await summaryNote({ ...day, pages: [long] }, "2026-10-07T12:00:00Z")).toBeNull();
   });
 });

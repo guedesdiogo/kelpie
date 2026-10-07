@@ -402,6 +402,35 @@ describe("mergedSurvivor", () => {
     expect(await mergedSurvivor(cafe, others, "Café.", AT)).toBeNull();
   });
 
+  it("refuses notes valid at other times, and contradictions it can't carry", async () => {
+    const cafe = await kelpieNote("memory/notes/cafe.md", { title: "Café" });
+    const until = await kelpieNote("memory/notes/cafe-2.md", {
+      title: "Café",
+      invalidAt: "2026-12-31",
+    });
+    // An expiring fact would become a lasting one.
+    expect(await mergedSurvivor(cafe, [until], "Café.", AT)).toBeNull();
+    const many = (from: number) =>
+      kelpieNote(`memory/notes/cafe-${from}.md`, {
+        title: "Café",
+        contradicts: Array.from({ length: 11 }, (_, i) => `Outra ${from + i}`),
+      });
+    // The reader would drop a list past twenty, and every contradiction with it.
+    expect(await mergedSurvivor(await many(0), [await many(100)], "Café.", AT)).toBeNull();
+    const labelled = {
+      ...cafe,
+      text: cafe.text.replace(
+        "kind: note\n",
+        'kind: note\nrelations:\n  contradicts:\n    - "[[Chá|o chá]]"\n',
+      ),
+    };
+    expect(readNote(cafe.path, labelled.text)?.frontmatter.relations).toEqual({
+      contradicts: ["[[Chá|o chá]]"],
+    });
+    const cafe2 = await kelpieNote("memory/notes/cafe-2.md", { title: "Café" });
+    expect(await mergedSurvivor(labelled, [cafe2], "Café.", AT)).toBeNull();
+  });
+
   it("refuses a note whose frontmatter can't be read", async () => {
     const cafe2 = await kelpieNote("memory/notes/cafe-2.md", { title: "Café" });
     const broken = { path: "memory/notes/cafe.md", text: "---\nkind: [note\n---\n# Café\n" };

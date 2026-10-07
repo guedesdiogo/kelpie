@@ -22,6 +22,7 @@ import {
   mergedStub,
   mergedSurvivor,
   mergeInput,
+  mergeOf,
   type Note,
   pack,
   readNote as parseNote,
@@ -38,6 +39,7 @@ import {
   sanitizeSecrets,
   summaryInput,
   summaryNote,
+  summaryOf,
   summaryPath,
   type VaultText,
   withAbstract,
@@ -266,6 +268,8 @@ const PATH_TABLES = [
   "dream_writes",
   "dream_summaries",
   "dream_merges",
+  "dream_written",
+  "dream_landing",
 ] as const;
 /** A held file's resolution, queued as the owner's text with a conflict settled (#114). */
 const RESOLVE_SUMMARY = "Resolve a pushed merge conflict, with the model";
@@ -354,6 +358,15 @@ CREATE TABLE IF NOT EXISTS dream_writes (
   blob_sha TEXT NOT NULL,
   abstract TEXT NOT NULL,
   at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS dream_written (
+  path TEXT PRIMARY KEY NOT NULL,
+  key TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS dream_landing (
+  path TEXT NOT NULL,
+  blob_sha TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS proposals (
   id INTEGER PRIMARY KEY,
@@ -845,7 +858,11 @@ export class Vault extends DurableObject<VaultEnv> {
       return await this.#dreamStep();
     } catch (error) {
       console.error("Vault: Dream failed", errorName(error));
-      return false;
+      // A step that throws ends its run, so it can't throw again on every wake.
+      const open = this.#exec<{ id: number }>(
+        "SELECT id FROM dream_runs WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1",
+      )[0];
+      return open === undefined ? false : this.#endDream(open.id, "failed");
     }
   }
 
@@ -893,12 +910,12 @@ export class Vault extends DurableObject<VaultEnv> {
     if (turn === "day" && day !== null) {
       return day.summary === undefined
         ? this.#summarize(gateway, run, day)
-        : this.#writeSummary(day, day.summary);
+        : this.#writeSummary(run, day, day.summary);
     }
     if (turn === "merge" && group !== null) {
       return group.proposal === undefined
         ? this.#merge(gateway, run, group)
-        : this.#writeMerge(group, group.proposal);
+        : this.#writeMerge(run, group, group.proposal);
     }
     if (note === null) return this.#endDream(run.id, "done");
     if (note.abstract !== undefined) {
@@ -1114,11 +1131,18 @@ export class Vault extends DurableObject<VaultEnv> {
       ).map((row) => [row.path, row]),
     );
     const writing = this.#dreamWrites().has("summaries");
+    // Days Dream wrote, with their pages' versions: one the owner removed isn't written again.
+    const written = new Map(
+      this.#exec<{ path: string; key: string }>("SELECT path, key FROM dream_written").map(
+        (row) => [row.path, row.key],
+      ),
+    );
     const newest = [...days].sort(([a, x], [b, y]) =>
       x.date === y.date ? (a < b ? -1 : 1) : x.date < y.date ? 1 : -1,
     );
     for (const [path, day] of newest) {
-      if (this.#visible(path) !== null) continue;
+      // A file at the path, held ones too, as the commit checks.
+      if (this.#visible(path) !== null || this.#fileContent(path) !== null) continue;
       const children = day.pages
         .sort((a, b) => (a.path < b.path ? -1 : 1))
         .flatMap((page) => {
@@ -1135,6 +1159,7 @@ export class Vault extends DurableObject<VaultEnv> {
               ];
         });
       const key = children.map((page) => page.blobSha).join(",");
+      if (written.get(path) === key) continue;
       const kept = proposed.get(path);
       // Proposed while dry, and now let write: no model call.
       const pending = kept?.key === key && writing ? (kept.summary ?? undefined) : undefined;
@@ -1387,13 +1412,24 @@ export class Vault extends DurableObject<VaultEnv> {
 
   /**
    * Writes a day's summary Dream proposed (#112), in a commit of its own: a `session` note beside the
-   * day's pages, while each page is as the summary read it and its path is free. One that can't be
-   * written, or that GitHub refuses, is kept as no answer, so it isn't tried again.
+   * day's pages, while each page is as the summary read it and its path is free. The summary is
+   * checked again, as a model's answer is, since it may have been kept under older rules. One that
+   * can't be written, or that GitHub refuses, is kept as no answer, so it isn't tried again. One
+   * written is remembered with its pages' versions, so it isn't written again if the owner removes it.
    */
-  async #writeSummary(day: DayCandidate, summary: string): Promise<boolean> {
+  async #writeSummary(run: { id: number }, day: DayCandidate, summary: string): Promise<boolean> {
     const blobs = day.key.split(",");
+    const still = () =>
+      this.#dreamWrites().has("summaries") &&
+      this.#exec(
+        "SELECT 1 FROM dream_summaries WHERE path = ? AND key = ? AND summary IS NOT NULL",
+        day.path,
+        day.key,
+      ).length > 0;
     const outcome = await this.#serialize(() =>
-      this.#commitDream(DREAM_DAY_HEADLINE, async () => {
+      this.#commitDream(DREAM_DAY_HEADLINE, still, async () => {
+        const checked = summaryOf(JSON.stringify({ summary }));
+        if (checked === null) return "unwritable";
         const pages: VaultText[] = [];
         for (const [i, page] of day.pages.entries()) {
           const text = this.#fileAt(page.path, blobs[i] ?? "");
@@ -1401,7 +1437,7 @@ export class Vault extends DurableObject<VaultEnv> {
           pages.push({ path: page.path, text });
         }
         const text = await summaryNote(
-          { scope: day.scope, date: day.date, pages, summary },
+          { scope: day.scope, date: day.date, pages, summary: checked },
           new Date().toISOString(),
         );
         if (text === null) return "unwritable";
@@ -1416,6 +1452,12 @@ export class Vault extends DurableObject<VaultEnv> {
     );
     if (outcome === "committed") {
       this.#exec("DELETE FROM dream_summaries WHERE path = ?", day.path);
+      this.#exec(
+        "INSERT OR REPLACE INTO dream_written (path, key, at) VALUES (?, ?, ?)",
+        day.path,
+        day.key,
+        Date.now(),
+      );
     } else if (outcome === "unwritable" || outcome === "refused") {
       this.#exec(
         "UPDATE dream_summaries SET summary = NULL WHERE path = ? AND key = ?",
@@ -1423,6 +1465,7 @@ export class Vault extends DurableObject<VaultEnv> {
         day.key,
       );
     }
+    this.#dreamTried(run, outcome);
     console.log("Vault: Dream wrote", { summary: outcome });
     return true;
   }
@@ -1434,13 +1477,26 @@ export class Vault extends DurableObject<VaultEnv> {
    * - Kelpie's stubs that were merged into one of those, pointed at the survivor, since a mark is
    *   followed one step only. A stub that isn't Kelpie's, or that is waiting or held, keeps its mark.
    *
-   * One that can't be written, or that GitHub refuses, is kept as no answer, so it isn't tried again.
+   * The merged body is checked again, as a model's answer is, since it may have been kept under older
+   * rules. One that can't be written, or that GitHub refuses, is kept as no answer, so it isn't tried
+   * again.
    */
-  async #writeMerge(group: MergeCandidate, proposal: MergeProposal): Promise<boolean> {
+  async #writeMerge(
+    run: { id: number },
+    group: MergeCandidate,
+    proposal: MergeProposal,
+  ): Promise<boolean> {
     const blobs = group.key.split(",");
     const survivor = group.sources[0] ?? "";
+    const still = () =>
+      this.#dreamWrites().has("merges") &&
+      this.#exec(
+        "SELECT 1 FROM dream_merges WHERE path = ? AND key = ? AND verdict IN ('same', 'merge')",
+        survivor,
+        group.key,
+      ).length > 0;
     const outcome = await this.#serialize(() =>
-      this.#commitDream(DREAM_MERGE_HEADLINE, async (head) => {
+      this.#commitDream(DREAM_MERGE_HEADLINE, still, async (head) => {
         const notes: VaultText[] = [];
         for (const [i, path] of group.sources.entries()) {
           const text = this.#fileAt(path, blobs[i] ?? "");
@@ -1455,7 +1511,9 @@ export class Vault extends DurableObject<VaultEnv> {
         );
         const writes: { path: string; content: string }[] = [];
         if (proposal.verdict === "merge") {
-          const text = await mergedSurvivor(kept, merged, proposal.body, at);
+          const answer = mergeOf(JSON.stringify({ verdict: "merge", body: proposal.body }));
+          if (answer?.verdict !== "merge") return "unwritable";
+          const text = await mergedSurvivor(kept, merged, answer.body, at);
           if (text === null) return "unwritable";
           writes.push({ path: survivor, content: text });
         }
@@ -1488,8 +1546,19 @@ export class Vault extends DurableObject<VaultEnv> {
         group.key,
       );
     }
+    this.#dreamTried(run, outcome);
     console.log("Vault: Dream wrote", { merge: outcome });
     return true;
+  }
+
+  /**
+   * A write that wrote nothing counts as a call of its run (#112), so one that keeps finding the vault
+   * changed can't spin: the run ends at DREAM_MAX_CALLS.
+   */
+  #dreamTried(run: { id: number }, outcome: DreamOutcome): void {
+    if (outcome !== "committed") {
+      this.#exec("UPDATE dream_runs SET calls = calls + 1 WHERE id = ?", run.id);
+    }
   }
 
   /**
@@ -1497,11 +1566,13 @@ export class Vault extends DurableObject<VaultEnv> {
    * each file alone: a merge lands whole or not at all. `plan` reads the vault and says what it read
    * and what it writes, for the head the commit goes on; after a sync it is asked again. Right before
    * the commit, every file it read must be at the version it read, every file it writes over
-   * Kelpie's version, not merged into the owner's edit, not held and with no write waiting, and
-   * Dream not off. Otherwise nothing is written. Runs inside `#serialize`.
+   * Kelpie's version, not merged into the owner's edit, not held and with no write waiting, Dream
+   * not off, and `still` true: the operation may still write, and its plan still stands. Otherwise
+   * nothing is written. Runs inside `#serialize`.
    */
   async #commitDream(
     headline: string,
+    still: () => boolean,
     plan: (head: string) => Promise<DreamCommit | "changed" | "unwritable">,
   ): Promise<DreamOutcome> {
     const backend = this.#backend();
@@ -1515,7 +1586,18 @@ export class Vault extends DurableObject<VaultEnv> {
       const shas = await Promise.all(planned.writes.map(({ content }) => gitBlobSha(content)));
       const branch = await this.#branch(backend);
       // Nothing is awaited from this check to the request, so no write slips in between.
-      if (!this.#dreamMayCommit(planned)) return "changed";
+      if (!still() || !this.#dreamMayCommit(planned)) return "changed";
+      // Until the answer comes: if it's lost, the sync still takes the versions as Kelpie's (#126).
+      this.ctx.storage.transactionSync(() => {
+        this.#exec("DELETE FROM dream_landing");
+        planned.writes.forEach(({ path }, i) => {
+          this.#exec(
+            "INSERT INTO dream_landing (path, blob_sha) VALUES (?, ?)",
+            path,
+            shas[i] ?? "",
+          );
+        });
+      });
       const outcome = await backend.commit({
         branch,
         expectedHead: head,
@@ -1524,6 +1606,7 @@ export class Vault extends DurableObject<VaultEnv> {
         writes: planned.writes,
         deletions: [],
       });
+      if (outcome.kind !== "committed") this.#exec("DELETE FROM dream_landing");
       if (outcome.kind === "stale") continue;
       if (outcome.kind === "refused") return "refused";
       const before = new Map(planned.writes.map(({ path }) => [path, this.#fileContent(path)]));
@@ -1542,11 +1625,12 @@ export class Vault extends DurableObject<VaultEnv> {
             shas[i] ?? "",
           );
         });
+        this.#exec("DELETE FROM dream_landing");
         this.#set("head", outcome.commit);
         // A write queued for these files while the commit was on its way was made on what they
-        // held before: it goes on top of Dream's, as on the owner's edit.
+        // held before: it goes on top of Dream's, as on the owner's edit, but stays Kelpie's.
         for (const { path, content } of planned.writes) {
-          this.#settleQueued(path, content, before.get(path) ?? null);
+          this.#settleQueued(path, content, before.get(path) ?? null, false, false);
         }
       });
       await this.#index(
@@ -1568,9 +1652,20 @@ export class Vault extends DurableObject<VaultEnv> {
           ?.blob_sha ?? null;
       if (current !== blob) return false;
     }
-    return this.#dreamMayWrite(
-      writes.map(({ path }) => path).filter((path) => reads.get(path) !== null),
-    );
+    const paths = writes.map(({ path }) => path);
+    // A new file's path: nothing waits to be written there either.
+    const fresh = JSON.stringify(paths.filter((path) => reads.get(path) === null));
+    if (
+      this.#exec(
+        `SELECT 1 FROM queue WHERE path IN (SELECT value FROM json_each(?))
+         UNION ALL SELECT 1 FROM held WHERE path IN (SELECT value FROM json_each(?))`,
+        fresh,
+        fresh,
+      ).length > 0
+    ) {
+      return false;
+    }
+    return this.#dreamMayWrite(paths.filter((path) => reads.get(path) !== null));
   }
 
   /**
@@ -1905,6 +2000,8 @@ export class Vault extends DurableObject<VaultEnv> {
            (SELECT 1 FROM files f WHERE f.path = dream_writes.path AND f.blob_sha = dream_writes.blob_sha))`,
         now - DREAM_LOOKBACK_MS,
       );
+      // Written before the lookback: no longer a day to sum up.
+      this.#exec("DELETE FROM dream_written WHERE at < ?", now - DREAM_LOOKBACK_MS);
       this.#exec(
         "DELETE FROM dream_runs WHERE ended_at IS NOT NULL AND ended_at < ?",
         now - DREAM_RUNS_MS,
@@ -2698,6 +2795,13 @@ export class Vault extends DurableObject<VaultEnv> {
         const changed = snapshot
           ? this.#replaceFiles(snapshot.files)
           : this.#apply(diff?.changes ?? []);
+        // A commit of Dream's that landed with its answer lost: its versions are Kelpie's (#126).
+        this.#exec(
+          `INSERT OR REPLACE INTO authored (path, blob_sha)
+           SELECT f.path, f.blob_sha FROM files f
+           JOIN dream_landing d ON d.path = f.path AND d.blob_sha = f.blob_sha`,
+        );
+        this.#exec("DELETE FROM dream_landing");
         for (const [path, content] of changed) {
           if (content !== null && hasConflictMarkers(content)) {
             // Held as pushed: queued writes would carry the markers, or overwrite the push.
@@ -2815,6 +2919,8 @@ export class Vault extends DurableObject<VaultEnv> {
     incoming: string | null,
     base: string | null,
     overOwners = false,
+    /** Whether `incoming` is the owner's (#160): Dream's own commit is Kelpie's. */
+    owners = true,
   ): void {
     const queued = this.#exec<{
       id: number;
@@ -2879,7 +2985,9 @@ export class Vault extends DurableObject<VaultEnv> {
         last.queued_at,
       );
       // Once committed it is Kelpie's version (#126), but it holds the owner's lines (#160).
-      this.#exec("INSERT INTO owner_merges (path, content) VALUES (?, ?)", path, merged.content);
+      if (owners) {
+        this.#exec("INSERT INTO owner_merges (path, content) VALUES (?, ?)", path, merged.content);
+      }
     }
     if (merged !== null && !merged.overlapped) return;
     for (const { agent, content } of queued) {
