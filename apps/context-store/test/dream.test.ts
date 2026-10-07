@@ -53,8 +53,8 @@ describe("proposeAbstract", () => {
     // The note is marked off, and the ask comes after it.
     const sent = JSON.stringify(asked[0]?.request.messages);
     expect(sent).toContain("BEGIN NOTE");
-    expect(sent).toContain("END NOTE\\n\\nAnswer with the JSON only.");
-    expect(JSON.stringify(asked[0]?.request.messages).length).toBeLessThan(6_300);
+    expect(sent).toMatch(/END NOTE [0-9a-f]{16}\\n\\nAnswer with the JSON only./);
+    expect(JSON.stringify(asked[0]?.request.messages).length).toBeLessThan(6_350);
   });
 });
 
@@ -602,6 +602,31 @@ describe("Vault Dream", () => {
       state.storage.sql.exec("UPDATE state SET value = '0' WHERE key = 'lifecycle_after'");
     });
     await runDurableObjectAlarm(stub);
+    expect(await rows(stub, "SELECT path FROM dream_summaries")).toEqual([]);
+  });
+
+  it("leaves a day of more pages than its input can show", async () => {
+    const day = daysAgo(2).slice(0, 10);
+    const pages = await Promise.all(
+      Array.from({ length: 26 }, (_, i) =>
+        kelpieNote({
+          kind: "session",
+          title: `${i} ${"conversa longa ".repeat(7)}`.trim(),
+          scope: "conversation/telegram-1",
+          date: day,
+          body: `- **10:00 u-owner:** ${i}`,
+        }),
+      ),
+    );
+    replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
+    const requests = fakeModelBy(() => abstract("Uma linha."));
+    const stub = vault("dream-summary-too-many");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", pages, "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    for (let i = 0; i < 10; i++) await runDurableObjectAlarm(stub);
+    expect(requests.filter((request) => request.system.includes("sum up one day"))).toEqual([]);
     expect(await rows(stub, "SELECT path FROM dream_summaries")).toEqual([]);
   });
 

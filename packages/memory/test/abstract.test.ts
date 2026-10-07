@@ -34,9 +34,14 @@ describe("abstractOf", () => {
 describe("abstractInput", () => {
   it("marks where the note starts and ends, cut at 6,000 characters", () => {
     const text = abstractInput({ path: "memory/notes/x.md", title: "X", body: "a".repeat(7_000) });
-    expect(text).toContain("BEGIN NOTE\n");
-    expect(text.endsWith("\nEND NOTE\n\nAnswer with the JSON only.")).toBe(true);
-    expect(text.length).toBeLessThan(6_200);
+    const id = /^BEGIN NOTE ([0-9a-f]{16})$/m.exec(text)?.[1];
+    expect(id).toBeDefined();
+    expect(text.endsWith(`\nEND NOTE ${id}\n\nAnswer with the JSON only.`)).toBe(true);
+    // A new id each call, so a note can't learn it.
+    expect(abstractInput({ path: "memory/notes/x.md", title: "X", body: "a" })).not.toContain(
+      `BEGIN NOTE ${id}`,
+    );
+    expect(text.length).toBeLessThan(6_250);
   });
 });
 
