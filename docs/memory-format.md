@@ -128,7 +128,7 @@ Every key is optional when reading. When Kelpie writes, it always sets `id`, `ki
 | `evergreen` | `true` or `false` | Exempt from decay | `false` |
 | `pinned` | `true` or `false` | Loaded into the agent's always-loaded core, when the agent has it on and the note is in the global scope or the agent's own; and exempt from decay | `false` |
 | `abstract` | one line of up to 300 characters | A summary that retrieval can show before the whole note | none |
-| `relations` | `contradicts:` and a list of wikilinks | Notes this one contradicts. The vocabulary is closed: any other key makes the whole field invalid | none |
+| `relations` | `contradicts:` or `merged_into:`, each with a list of wikilinks | `contradicts` names the notes this one contradicts. `merged_into` names the note this one was merged into (#112): see "Merged notes" below. The vocabulary is closed: any other key makes the whole field invalid | none |
 | `updated` | a date-time with an offset | When this version was written | none |
 | `title` | a string | Overrides the heading; Kelpie keeps it in step with the title when it is present | the first `# ` heading, else the file name |
 
@@ -203,13 +203,25 @@ Every conversation's history becomes session pages (#109), with no model call:
 - **What else is skipped:** links in fenced code blocks and inline code, and same-note links (`[[#Heading]]`).
   - A fence may open on a list item or in a quote (``- ```sh``, ``> ```  ``).
   - Inline code that spans lines isn't seen as code.
-- **Frontmatter links:** wikilinks in `sources` and in `relations.contradicts` become links of those kinds.
+- **Frontmatter links:** wikilinks in `sources`, `relations.contradicts` and `relations.merged_into` become links of those kinds.
 - **Resolution** follows Obsidian, against the vault's current notes, with names and paths compared in Unicode NFC:
   - a path names one note;
   - a file name matches case-insensitively;
   - when two notes share a name, the one in the linking note's folder wins, then the shorter path;
   - a link that matches nothing stays unresolved until a note with that name appears;
   - a lookup limited to a set of scopes resolves a link among the notes in them only, so a note in another scope can't take the link from one in them (#150).
+
+### Merged notes
+
+A note merged into another (#112) stays at its path. It is never deleted.
+- **Its mark:** `relations.merged_into` names the note it went into, and its body says so. The owner can mark a note by hand the same way.
+- **What it still is:** a file to read by its path, and a link to it still resolves to it, as in Obsidian.
+- **What it no longer is:**
+  - **Found:** search, title and entity lookups, vectors and the lifecycle report leave it out.
+  - **Embedded:** it gets no vector.
+  - **Dream's:** no Dream operation picks it.
+  - **A neighbour:** one step from a note that links to it is the note it went into.
+- **Writing to it:** the agent's `memory_write` refuses it and names the note to write to instead, so the mark isn't lost.
 
 ## Entities
 
@@ -242,11 +254,11 @@ The index is one SQLite database inside the Context Store's Durable Object ([ADR
 - **Erasure** is the operator's job (ADR-0020 §4): rewrite the vault's git history, then rebuild the index. The rebuild drops every version, link and embedding of the erased text. Conversations keep the memory blocks their answered turns were sent with (#137), as they keep their history. They also keep the always-loaded core until it loads again; [context-store.md](context-store.md#erasing-content) says how to make it load again.
 - **Search:** current versions only by default. With `asOf`, it searches the versions the vault held at that instant. With `validAt`, it keeps only memories valid in the world at that instant. It returns 1 to 100 results, 10 by default.
 - **Entity lookup:** the notes that name any of a set of entity keys, current or as of an instant. An entity's own page, a note titled with the name that lists it, comes first, a global one before a scoped one. Each key weighs one over the number of notes that name it, so a rarer name says more. A name on more than 50 of the versions the lookup sees is left out: it singles nothing out. The weight and the cap count those versions only, so notes in other scopes, and a note's past versions, don't switch a name off (#146).
-- **Neighbours:** the current notes one step from a note: the notes it links to, then the pages of the entities it names, global ones first. A note it contradicts is what it replaced, so it isn't a neighbour.
+- **Neighbours:** the current notes one step from a note: the notes it links to, then the pages of the entities it names, global ones first. A note it contradicts is what it replaced, so it isn't a neighbour. A link to a merged note leads to the note it went into.
 - **Scopes:** search, entity lookup, neighbours and a note's links can be limited to a set of scopes. Without one they see every scope. With one, links resolve among the notes in it, and a note outside it has no neighbours (#150).
   - **Residual, full-text ranking:** search ranks with bm25 statistics from the whole index, other scopes and past versions included, so notes outside the scopes can reorder the hits inside them. Since #131 a turn other than the owner's direct chat sees only its own conversation, but only the owner is admitted, so the hits it ranks are the owner's own. Revisit when someone else is admitted (#60), such as a group with outsiders ([#152](https://github.com/guedesdiogo/kelpie/issues/152)).
   - **Residual, unscoped reads:** backlinks, history, a path's current version, a version by commit and a note's entities take no scopes, and a note's links given scopes don't check the note itself. Recall and the memory tools pass them only notes they already found within the scopes; the lifecycle report reads the whole vault on purpose.
-- **A new schema version** drops the derived tables and starts empty, keeping the embeddings. The index then reports no last commit, which tells the sync to replay the vault from the start. Version 2 added the folded title.
+- **A new schema version** drops the derived tables and starts empty, keeping the embeddings. The index then reports no last commit, which tells the sync to replay the vault from the start. Version 2 added the folded title. Version 3 added `merged_into` links.
 
 ## Retrieval
 
@@ -458,18 +470,45 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
     - Its `sources` would name the session pages.
     - No session page can take that name, since theirs add a slug after the date.
   - **When it's proposed again:** the proposal is kept with the versions of the day's pages. A new page that day proposes it again, and nothing else does. A day whose summary the vault already shows isn't proposed.
-  - **The model:** the cheap tier, within the same 8 calls a run. Abstracts and days take turns.
+  - **The model:** the cheap tier, within the same 8 calls a run. Abstracts, days and merges take turns.
     - The day's pages share 12,000 characters of input.
     - The answer must be JSON with one key, `summary`.
     - The summary must be plain lines within 2,000 characters, with no control characters but line breaks and tabs, and no line separators or bidirectional controls.
     - Secrets are removed from it next. It must then hold no heading, frontmatter fence or conflict markers.
-  - **The page:** `memory/_lint/dream.md`, outside the index, lists each proposed summary.
-    - Each summary is shown as code, fenced by more backticks than it holds in a row.
-    - Newest day first, each with the pages it sums up.
-    - It is written with the report, and removed when nothing is proposed.
+  - **The page:** Dream's plan, `memory/_lint/dream.md`, lists each proposed summary, newest day first, each with the pages it sums up (see "Dream's plan" below).
   - **Erasing:** forgetting a session page forgets its day's summary. Turning Dream off deletes the summaries too, and the next report removes the page; the vault's git history still holds its earlier versions. A call that ends after Dream was turned off keeps nothing.
+- **Duplicates** (#112): a dry run for now. `merges` can't be named in `writes` yet.
+  - **Which notes:** Kelpie's own notes of one scope and kind that share a title, two or more.
+  - **Left out**, as for abstracts:
+    - a fact the person stated;
+    - a version Kelpie didn't write, or one merged into the owner's edit;
+    - a note with a write waiting, or one held.
+  - **Also left out:**
+    - a pinned note, or one the always-loaded core carries;
+    - a session or an event, since the same title on another day is no duplicate;
+    - an expired note;
+    - a merged note.
+  - **The owner's notes in a group** aren't touched. Only Kelpie's merge, and the report keeps listing the rest.
+  - **Content duplicates** with different titles, scopes or kinds are listed only.
+  - **The survivor:** the note most others link to, then the earliest written, then the shorter path, since a later one is numbered.
+  - **The same content:** no model call. Only the marks would change.
+  - **Different content:** one call on the cheap tier, with the notes whole.
+    - A group past 16,000 characters isn't merged, since a cut would lose what it held. It stays on the report's list.
+    - The model first says whether the notes are about the same thing. The answer is JSON, either `{"verdict": "distinct"}` or `{"verdict": "merge", "body"}`.
+    - The body must be within 8,000 characters, with no control characters but line breaks and tabs, and no line separators or bidirectional controls.
+    - Secrets are removed from it next. It must then hold no title heading, frontmatter fence or conflict markers.
+    - Any other answer is kept as no answer, so those versions aren't asked about again.
+  - **Kept only while its notes are:** a proposal is kept with the versions of its notes, and a change to any of them proposes the group again.
+    - A forgotten note takes the proposal with it right away. A note changed or removed in the vault takes it at the next daily report.
+    - A group that grew or shrank replaces what was proposed for its notes.
+  - **Erasing:** turning Dream off deletes the proposals. A call that ends after that keeps nothing.
+- **Dream's plan:** `memory/_lint/dream.md`, outside the index, lists what Dream would write: the day summaries, then the merges.
+  - Each merge names the note that stays and the notes it would mark as merged into it, with the merged body, or "the same content".
+  - Whatever a model wrote is shown as code, fenced by more backticks than it holds in a row.
+  - It is written with the report, and removed when nothing is proposed.
 - **Not yet:**
-  - duplicates and contradictions;
+  - writing merges and summaries;
+  - contradictions;
   - roll-ups, and people and places;
   - week and month summaries.
 

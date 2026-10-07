@@ -126,7 +126,7 @@ export interface IndexDump {
   links: { path: string; commit: string; kind: string; by: string; target: string }[];
 }
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const DERIVED_SCHEMA = `
 CREATE TABLE commits (
@@ -201,7 +201,7 @@ CREATE TABLE entities (
 CREATE INDEX entities_key ON entities (key);
 CREATE TABLE links (
   version INTEGER NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('link', 'embed', 'source', 'contradicts')),
+  kind TEXT NOT NULL CHECK (kind IN ('link', 'embed', 'source', 'contradicts', 'merged_into')),
   by TEXT NOT NULL CHECK (by IN ('path', 'name')),
   target TEXT NOT NULL,
   PRIMARY KEY (version, kind, by, target)
@@ -267,7 +267,11 @@ function limitOf(options: { limit?: number }): number {
  * The versions a lookup sees, as SQL over `v`: current ones, or those of `asOf`, valid at
  * `validAt`, in `scopes`.
  */
-function versionFilter(options: SearchOptions): [string, SqlValue[]] {
+/** A version that isn't a note merged into another (#112): what went into it is found there. */
+const NOT_MERGED =
+  "NOT EXISTS (SELECT 1 FROM links m WHERE m.version = v.rowid AND m.kind = 'merged_into')";
+
+function versionFilter(options: SearchOptions, merged = false): [string, SqlValue[]] {
   const filters: string[] = [];
   const bindings: SqlValue[] = [];
   if (options.scopes !== undefined) {
@@ -290,6 +294,7 @@ function versionFilter(options: SearchOptions): [string, SqlValue[]] {
     filters.push("(v.invalid_at IS NULL OR v.invalid_at > ?)");
     bindings.push(options.notExpiredAt);
   }
+  if (!merged) filters.push(NOT_MERGED);
   return [filters.join(" AND "), bindings];
 }
 
@@ -608,7 +613,7 @@ export class MemoryIndex {
   embeddingTexts(model: string, limit = 256): { blobSha: string; text: string }[] {
     return this.#exec<{ blob_sha: string; title: string; abstract: string | null; body: string }>(
       `SELECT v.blob_sha, v.title, v.abstract, v.body FROM versions v
-       WHERE v.is_current = 1
+       WHERE v.is_current = 1 AND ${NOT_MERGED}
          AND NOT EXISTS (SELECT 1 FROM embeddings e WHERE e.blob_sha = v.blob_sha AND e.model = ?)
        GROUP BY v.blob_sha ORDER BY v.blob_sha LIMIT ?`,
       model,
@@ -718,7 +723,7 @@ export class MemoryIndex {
               -- Too deep for SQLite's JSON functions: no 'updated', rather than no report.
               CASE WHEN json_valid(frontmatter) THEN json_extract(frontmatter, '$.updated') END AS updated,
               blob_sha
-       FROM versions WHERE is_current = 1 ORDER BY path`,
+       FROM versions v WHERE is_current = 1 AND ${NOT_MERGED} ORDER BY path`,
     ).map((row) => ({
       path: row.path,
       scope: row.scope,
@@ -889,7 +894,29 @@ export class MemoryIndex {
         other,
         ...bindings,
       )[0];
-      if (row !== undefined) hits.push(toHit(row));
+      if (row !== undefined) {
+        hits.push(toHit(row));
+        return;
+      }
+      // A note merged into another (#112) leads to it, one step only.
+      const survivor = this.#exec<{ by: string; target: string }>(
+        `SELECT l.by, l.target FROM links l JOIN versions v ON v.rowid = l.version
+         WHERE v.path = ? AND v.is_current = 1 AND l.kind = 'merged_into'
+         ORDER BY l.by, l.target LIMIT 1`,
+        other,
+      )[0];
+      const into =
+        survivor === undefined
+          ? null
+          : this.resolve(other, survivor.by as LinkBy, survivor.target, scoped);
+      if (into === null || seen.has(into)) return;
+      seen.add(into);
+      const merged = this.#exec<HitRow>(
+        `SELECT ${HIT_COLUMNS} FROM versions v WHERE v.path = ? AND ${filter}`,
+        into,
+        ...bindings,
+      )[0];
+      if (merged !== undefined) hits.push(toHit(merged));
     };
     // Links are resolved one at a time, so a note with many costs only what is taken. A note it
     // contradicts is what it replaced, not a neighbour.
@@ -929,8 +956,10 @@ export class MemoryIndex {
     target: string,
     options: { scopes?: readonly Scope[] } = {},
   ): string | null {
+    // A link names a file, as in Obsidian, merged into another or not.
     const [filter, bindings] = versionFilter(
       options.scopes === undefined ? {} : { scopes: options.scopes },
+      true,
     );
     const candidates = this.#exec<{ path: string }>(
       `SELECT v.path FROM versions v WHERE v.${by === "path" ? "link_path" : "link_name"} = ? AND ${filter}`,

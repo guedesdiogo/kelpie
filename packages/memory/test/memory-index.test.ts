@@ -345,6 +345,46 @@ describe("search", () => {
   });
 });
 
+describe("merged notes (#112)", () => {
+  it("are left out of every lookup, and a link to one leads where it went", async () => {
+    await withIndex("merged", async (index) => {
+      const vault = new FakeVault();
+      const ana = await writeMemory(ANA, { at: "2026-10-01T01:00:00Z" });
+      const stub = "memory/notes/ana-souza.md";
+      const linking = "memory/notes/familia.md";
+      await index.applyCommit(
+        vault.commit({
+          [ANA_PATH]: ana.text,
+          [stub]: [
+            "---",
+            "entities:",
+            "  - Ana Souza",
+            "relations:",
+            "  merged_into:",
+            `    - "[[${ANA_PATH.slice(0, -3)}]]"`,
+            "---",
+            "# Ana Souza",
+            "",
+            `Merged into [[${ANA_PATH.slice(0, -3)}]]. Ana desenha capas de livros.`,
+          ].join("\n"),
+          [linking]: "# Família\n\nVer [[memory/notes/ana-souza]].",
+        }),
+      );
+      const paths = (hits: readonly { path: string }[]) => hits.map((hit) => hit.path);
+      expect(paths(index.search("capas de livros"))).toEqual([]);
+      expect(paths(index.titled("Ana Souza"))).toEqual([ANA_PATH]);
+      expect(paths(index.entityHits(["ana souza"]))).toEqual([ANA_PATH]);
+      expect(paths(index.lifecycleNotes())).not.toContain(stub);
+      const blob = index.current(stub)?.blobSha;
+      expect(index.embeddingTexts("m").map((item) => item.blobSha)).not.toContain(blob);
+      // A note to read by its path still, and one step away it's the note it went into.
+      expect(index.current(stub)?.title).toBe("Ana Souza");
+      expect(paths(index.neighbours(linking))).toEqual([ANA_PATH]);
+      expect(index.neighbours(stub)).toEqual([]);
+    });
+  });
+});
+
 describe("links", () => {
   it("resolve as Obsidian does, and backlinks follow them", async () => {
     await withIndex("links", async (index) => {

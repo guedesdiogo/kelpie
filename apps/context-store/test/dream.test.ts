@@ -789,6 +789,249 @@ describe("Vault Dream", () => {
     expect(backend.files()[LIFECYCLE_REPORT_PATH]).toContain("## Dream's plan");
   });
 
+  it("proposes merging Kelpie's own duplicates, and writes nothing", async () => {
+    // With abstracts already, so only merges ask the model.
+    const note = (
+      title: string,
+      body: string,
+      extra: Partial<MemoryInput> & { date?: string; at?: string } = {},
+    ) => kelpieNote({ title, body, abstract: `${title}.`, ...extra });
+    const twice = async (
+      title: string,
+      bodies: [string, string],
+      extra: Partial<MemoryInput> = {},
+    ) => {
+      const first = await note(title, bodies[0], extra);
+      const second = await note(title, bodies[1], extra);
+      return [first, { ...second, path: first.path.replace(/\.md$/, "-2.md") }] as const;
+    };
+    const [cafe, cafe2] = await twice("Café", ["Sem açúcar.", "Com canela."]);
+    const sal = await note("Sal", "Pouco.");
+    const sal2 = { ...sal, path: "memory/notes/sal-2.md" };
+    // The model says these are distinct. The second is the earlier, so it stays.
+    const mesa = await note("Mesa", "De jantar.");
+    const mesa2 = {
+      ...(await note("Mesa", "Uma tabela de preços.", { at: daysAgo(1) })),
+      path: "memory/notes/mesa-2.md",
+    };
+    // Most links lead to the survivor.
+    const bebidas = await note("Bebidas", "Ver [[memory/notes/cafe-2]].");
+    const [rotina, rotina2] = await twice("Rotina", ["Acorda cedo.", "Dorme tarde."]);
+    const left = [
+      // A fact the person stated keeps its own words.
+      ...(await twice("Chá", ["Verde.", "Preto."], { level: "explicit", confidence: 0.9 })),
+      // The same title another day is no duplicate.
+      ...(await Promise.all(
+        [3, 2].map((days, i) => {
+          const date = daysAgo(days).slice(0, 10);
+          return note("Consulta", ["Dentista.", "Médico."][i] ?? "", {
+            kind: "event",
+            validFrom: date,
+            date,
+          });
+        }),
+      )),
+      ...(await Promise.all(
+        [3, 2].map((days, i) => {
+          const date = daysAgo(days).slice(0, 10);
+          return kelpieNote({
+            kind: "session",
+            title: "Conversa",
+            date,
+            body: `- **10:00 u-owner:** ${["Bom dia.", "Boa noite."][i]}`,
+          });
+        }),
+      )),
+      // Pinned, or carried by the core.
+      ...(await twice("Pauta", ["Segunda.", "Terça."], { scope: "area/work", pinned: true })),
+      { ...rotina, path: "memory/profile/rotina.md" },
+      { ...rotina2, path: "memory/profile/rotina-2.md" },
+      // Expired.
+      ...(await twice("Antigo", ["Um.", "Dois."], { invalidAt: "2020-01-01" })),
+      // Too long to read whole.
+      ...(await twice("Longa", ["a ".repeat(4_500), "b ".repeat(4_500)])),
+      // Another kind.
+      await note("Café", "Na esquina.", { kind: "place" }),
+    ];
+    const backend = new FakeVaultBackend({
+      "README.md": "# Vault",
+      // The owner's duplicates are listed only.
+      "memory/notes/pao.md": "# Pão\n\nIntegral.\n",
+      "memory/notes/pao-2.md": "# Pão\n\nFrancês.\n",
+    });
+    replaceBackendForTesting(backend);
+    const asked: string[] = [];
+    fakeModelBy((request) => {
+      if (!request.system.includes("You merge notes")) return abstract("Uma linha.");
+      const text = JSON.stringify(request.messages);
+      asked.push(text);
+      return text.includes("Mesa")
+        ? JSON.stringify({ verdict: "distinct" })
+        : JSON.stringify({
+            verdict: "merge",
+            body: "Sem açúcar, ou com canela: as notas conflitam.",
+          });
+    });
+    const stub = vault("dream-merges");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", [cafe, cafe2, sal, sal2, mesa, mesa2, bebidas, ...left], "x");
+    await runDurableObjectAlarm(stub);
+    const files = backend.files();
+    await quiet(stub);
+    for (let i = 0; i < 8; i++) await runDurableObjectAlarm(stub);
+    // Two calls: the same content needs none.
+    expect(asked).toHaveLength(2);
+    expect(asked.find((text) => text.includes("Café"))).toContain("Com canela.");
+    expect(asked.join()).not.toMatch(
+      /Verde|Dentista|Bom dia|Segunda|Acorda|Um\.|a a a|Na esquina|Integral/,
+    );
+    expect(
+      await rows(stub, "SELECT path, verdict, body, sources FROM dream_merges ORDER BY path"),
+    ).toEqual([
+      {
+        path: cafe2.path,
+        verdict: "merge",
+        body: "Sem açúcar, ou com canela: as notas conflitam.",
+        sources: JSON.stringify([cafe2.path, cafe.path]),
+      },
+      {
+        path: mesa2.path,
+        verdict: "distinct",
+        body: null,
+        sources: JSON.stringify([mesa2.path, mesa.path]),
+      },
+      {
+        path: sal.path,
+        verdict: "same",
+        body: null,
+        sources: JSON.stringify([sal.path, sal2.path]),
+      },
+    ]);
+    const report = async () => {
+      await runInDurableObject(stub, (_instance, state) => {
+        state.storage.sql.exec("UPDATE state SET value = '0' WHERE key = 'lifecycle_after'");
+      });
+      await runDurableObjectAlarm(stub);
+      await runDurableObjectAlarm(stub);
+    };
+    await report();
+    const page = backend.files()[DREAM_PAGE_PATH] ?? "";
+    expect(page).toContain("## Merges");
+    expect(page).toContain("```text\nSem açúcar, ou com canela: as notas conflitam.\n```");
+    expect(page).toContain("The same content: only the marks change.");
+    expect(page).not.toMatch(/Mesa|Chá|Pão/);
+    const {
+      [DREAM_PAGE_PATH]: _page,
+      [LIFECYCLE_REPORT_PATH]: _report,
+      ...notes
+    } = backend.files();
+    expect(notes).toEqual(files);
+
+    // A new version of a note proposes its group again, in place of what was proposed.
+    const before = asked.length;
+    await stub.write(
+      "kelpie",
+      [{ ...cafe, content: cafe.content.replace("Sem açúcar.", "Sem açúcar, nunca.") }],
+      "x",
+    );
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    for (let i = 0; i < 4; i++) await runDurableObjectAlarm(stub);
+    expect(asked.slice(before)).toHaveLength(1);
+    const blobs = new Map(
+      (await rows(stub, "SELECT path, blob_sha FROM files")).map((row) => [row.path, row.blob_sha]),
+    );
+    expect(await rows(stub, `SELECT key FROM dream_merges WHERE path = '${cafe2.path}'`)).toEqual([
+      { key: `${blobs.get(cafe2.path)},${blobs.get(cafe.path)}` },
+    ]);
+
+    // A merge reads its notes. One the owner changes drops it at the next report...
+    backend.push({ [sal2.path]: "# Sal\n\nMuito.\n" });
+    await runDurableObjectAlarm(stub);
+    await report();
+    expect(await rows(stub, "SELECT path FROM dream_merges ORDER BY path")).toEqual([
+      { path: cafe2.path },
+      { path: mesa2.path },
+    ]);
+    // ...forgetting one drops it at once, and off drops the rest.
+    expect(await stub.forget([cafe.path])).toMatchObject({ ok: true });
+    expect(await rows(stub, "SELECT path FROM dream_merges")).toEqual([{ path: mesa2.path }]);
+    await stub.setDream("off");
+    expect(await rows(stub, "SELECT path FROM dream_merges")).toEqual([]);
+  });
+
+  it("leaves duplicates alone while one of them is held on conflict markers", async () => {
+    const cafe = await kelpieNote({ title: "Café", body: "Sem açúcar.", abstract: "Café." });
+    const cafe2 = {
+      ...(await kelpieNote({ title: "Café", body: "Com canela.", abstract: "Café." })),
+      path: "memory/notes/cafe-2.md",
+    };
+    const backend = new FakeVaultBackend({ "README.md": "# Vault" });
+    replaceBackendForTesting(backend);
+    const requests = fakeModelBy(() => JSON.stringify({ verdict: "merge", body: "Café." }));
+    const stub = vault("dream-merge-held");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", [cafe, cafe2], "x");
+    await runDurableObjectAlarm(stub);
+    backend.push({ [cafe2.path]: "<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> main\n" });
+    await runDurableObjectAlarm(stub);
+    expect(await rows(stub, "SELECT path FROM held")).toEqual([{ path: cafe2.path }]);
+    await quiet(stub);
+    for (let i = 0; i < 3; i++) await runDurableObjectAlarm(stub);
+    // The held file's own resolution may ask the model; no merge does.
+    expect(requests.filter((request) => request.system.includes("You merge notes"))).toEqual([]);
+
+    // Nor while the index holds another version than the vault.
+    replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
+    const behind = vault("dream-merge-behind");
+    await behind.compile("kelpie");
+    await behind.write("kelpie", [cafe, cafe2], "x");
+    await runDurableObjectAlarm(behind);
+    await runInDurableObject(behind, (_instance, state) => {
+      // Kelpie's still, as a write the index hasn't caught up with would be.
+      state.storage.sql.exec("UPDATE files SET blob_sha = 'newer' WHERE path = ?", cafe2.path);
+      state.storage.sql.exec("UPDATE authored SET blob_sha = 'newer' WHERE path = ?", cafe2.path);
+    });
+    const asked = fakeModelBy(() => JSON.stringify({ verdict: "merge", body: "Café." }));
+    await quiet(behind);
+    for (let i = 0; i < 3; i++) await runDurableObjectAlarm(behind);
+    expect(asked).toEqual([]);
+  });
+
+  it("keeps no merge from a call once its notes or Dream's mode changed under it", async () => {
+    const cafe = await kelpieNote({ title: "Café", body: "Sem açúcar.", abstract: "Café." });
+    const cafe2 = {
+      ...(await kelpieNote({ title: "Café", body: "Com canela.", abstract: "Café." })),
+      path: "memory/notes/cafe-2.md",
+    };
+    // The owner's push lands, or the owner turns Dream off, while the model answers.
+    for (const [name, during] of [
+      [
+        "dream-merge-rewritten",
+        "UPDATE files SET blob_sha = 'rewritten' WHERE path = 'memory/notes/cafe-2.md'",
+      ],
+      ["dream-merge-off", "INSERT OR REPLACE INTO state (key, value) VALUES ('dream_mode', 'off')"],
+    ] as const) {
+      replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
+      const stub = vault(name);
+      await stub.compile("kelpie");
+      await stub.write("kelpie", [cafe, cafe2], "x");
+      await runDurableObjectAlarm(stub);
+      let sql: SqlStorage | undefined;
+      await runInDurableObject(stub, (_instance, state) => {
+        sql = state.storage.sql;
+      });
+      const requests = fakeModelBy(() => {
+        sql?.exec(during);
+        return JSON.stringify({ verdict: "merge", body: "Sem açúcar, ou com canela." });
+      });
+      await quiet(stub);
+      await runDurableObjectAlarm(stub);
+      expect(requests).toHaveLength(1);
+      expect(await rows(stub, "SELECT path FROM dream_merges")).toEqual([]);
+    }
+  });
+
   it("lets only known operations write, and forgets them when turned off", async () => {
     replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
     const stub = vault("dream-writes-switch");

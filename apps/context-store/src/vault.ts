@@ -19,6 +19,7 @@ import {
   MemoryIndex,
   type MemoryInput,
   memoryPath,
+  mergeInput,
   type Note,
   pack,
   readNote as parseNote,
@@ -68,7 +69,7 @@ import type {
   WriteNoteResult,
   WriteResult,
 } from "./contract.ts";
-import { proposeAbstract, proposeSummary } from "./dream.ts";
+import { proposeAbstract, proposeMerge, proposeSummary } from "./dream.ts";
 import { mergeOwnerWins } from "./merge.ts";
 import {
   agentRulesPath,
@@ -206,6 +207,16 @@ interface DayCandidate {
   key: string;
   pages: { path: string; title: string; body: string }[];
 }
+/** Duplicates Dream may merge (#112): the survivor first, then the notes it would take in. */
+interface MergeCandidate {
+  /** The notes' paths, the survivor's first. */
+  sources: string[];
+  /** Their versions, in the same order. */
+  key: string;
+  /** Whether they hold the same content, so only the marks would change. */
+  same: boolean;
+  notes: { path: string; title: string; body: string }[];
+}
 /** Dream's write of an abstract (#112): the queue's mark, and a headline that names no note. */
 const DREAM_SUMMARY = "Write an abstract Dream proposed";
 /** Dream's operations, each dry until the owner lets it write (#112). */
@@ -230,6 +241,7 @@ const PATH_TABLES = [
   "dream_proposals",
   "dream_writes",
   "dream_summaries",
+  "dream_merges",
 ] as const;
 /** A held file's resolution, queued as the owner's text with a conflict settled (#114). */
 const RESOLVE_SUMMARY = "Resolve a pushed merge conflict, with the model";
@@ -303,6 +315,14 @@ CREATE TABLE IF NOT EXISTS dream_summaries (
   key TEXT NOT NULL,
   summary TEXT,
   sources TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS dream_merges (
+  path TEXT PRIMARY KEY NOT NULL,
+  key TEXT NOT NULL,
+  sources TEXT NOT NULL,
+  verdict TEXT CHECK (verdict IN ('same', 'merge', 'distinct')),
+  body TEXT,
   at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS dream_writes (
@@ -824,8 +844,9 @@ export class Vault extends DurableObject<VaultEnv> {
     }
     const note = this.#dreamCandidate(now);
     const day = this.#summaryCandidate(now);
+    const group = this.#mergeCandidate(now);
     if (run === undefined) {
-      if (note === null && day === null) {
+      if (note === null && day === null && group === null) {
         // Nothing to do: look again after another quiet spell, not on every wake.
         this.#set("dream_after", `${now + DREAM_QUIET_MS}`);
         return false;
@@ -838,10 +859,15 @@ export class Vault extends DurableObject<VaultEnv> {
       run = { id: id ?? 0, started_at: now, calls: 0, usage: "[]" };
     }
     if (run.calls >= DREAM_MAX_CALLS) return this.#endDream(run.id, "done");
-    // The operations take turns, so many session pages' abstracts can't keep the days waiting.
-    if (day !== null && (note === null || run.calls % 2 === 1)) {
-      return this.#summarize(gateway, run, day);
-    }
+    // The operations with work take turns, so one with much to do can't keep the others waiting.
+    const turns = [
+      ...(note === null ? [] : ["abstract" as const]),
+      ...(day === null ? [] : ["day" as const]),
+      ...(group === null ? [] : ["merge" as const]),
+    ];
+    const turn = turns[run.calls % Math.max(turns.length, 1)];
+    if (turn === "day" && day !== null) return this.#summarize(gateway, run, day);
+    if (turn === "merge" && group !== null) return this.#merge(gateway, run, group);
     if (note === null) return this.#endDream(run.id, "done");
     if (note.abstract !== undefined) {
       // Proposed while dry, and now let write: no model call.
@@ -1007,6 +1033,7 @@ export class Vault extends DurableObject<VaultEnv> {
       if (mode === "off") {
         this.#exec("DELETE FROM dream_proposals");
         this.#exec("DELETE FROM dream_summaries");
+        this.#exec("DELETE FROM dream_merges");
         // Dream's page waiting in the queue, or set aside, holds the summaries too.
         this.#exec("DELETE FROM queue WHERE path = ?", DREAM_PAGE_PATH);
         this.#exec("DELETE FROM conflicts WHERE path = ?", DREAM_PAGE_PATH);
@@ -1068,7 +1095,7 @@ export class Vault extends DurableObject<VaultEnv> {
       // The index can hold another version than the vault, as for a page held on conflict
       // markers: a day whose summary couldn't be kept isn't asked for.
       const sources = children.map((page) => page.path);
-      if (!this.#summaryCurrent(sources, key)) continue;
+      if (!this.#asRead(sources, key)) continue;
       return {
         path,
         date: day.date,
@@ -1079,8 +1106,8 @@ export class Vault extends DurableObject<VaultEnv> {
     return null;
   }
 
-  /** Whether a day summary's pages are all in the vault, at the versions it read (#112). */
-  #summaryCurrent(sources: readonly string[], key: string): boolean {
+  /** Whether these notes are all in the vault, at the versions Dream read (#112). */
+  #asRead(sources: readonly string[], key: string): boolean {
     const blobs = key.split(",");
     return (
       sources.length === blobs.length &&
@@ -1114,7 +1141,7 @@ export class Vault extends DurableObject<VaultEnv> {
     this.ctx.storage.transactionSync(() => {
       // A failure is kept as no answer too, so one day can't fail every run. A page forgotten or
       // changed during the call leaves nothing behind: the summary read what's gone.
-      if (this.#get("dream_mode") !== "off" && this.#summaryCurrent(sources, day.key)) {
+      if (this.#get("dream_mode") !== "off" && this.#asRead(sources, day.key)) {
         this.#exec(
           "INSERT OR REPLACE INTO dream_summaries (path, key, summary, sources, at) VALUES (?, ?, ?, ?, ?)",
           day.path,
@@ -1135,6 +1162,156 @@ export class Vault extends DurableObject<VaultEnv> {
     console.log("Vault: Dream step", {
       calls: run.calls + 1,
       summarized: summary !== null,
+      output: used.reduce((sum, call) => sum + (Number(call.output) || 0), 0),
+    });
+    return true;
+  }
+
+  /**
+   * The next duplicates Dream may merge (#112), newest group first: Kelpie's own notes of one scope
+   * and kind that share a title, two or more, as the vault holds them, and not proposed for these
+   * versions already. A note is one only as for an abstract: Kelpie wrote its version, and it isn't
+   * a fact the person stated, merged into the owner's edit, waiting or held. Nor is it pinned,
+   * carried by the core, dated (a session or an event: the same title another day is no
+   * duplicate) or expired. The owner's notes in a group stay out, and on the report's list. A group
+   * that doesn't fit the model whole isn't merged: a cut would lose what it held.
+   */
+  #mergeCandidate(now: number): MergeCandidate | null {
+    const notes = this.#memory
+      .lifecycleNotes()
+      .filter(
+        (note) =>
+          note.kind !== "session" &&
+          note.kind !== "event" &&
+          !note.pinned &&
+          (note.invalidAt === null || note.invalidAt > now) &&
+          !coreCarries(note, note.scope.startsWith("agent/") ? note.scope.slice(6) : ""),
+      );
+    const kelpie = this.#byKelpie(notes.map((note) => note.path));
+    const waiting = new Set(
+      this.#exec<{ path: string }>("SELECT path FROM queue UNION SELECT path FROM held").map(
+        (row) => row.path,
+      ),
+    );
+    const merged = new Set(
+      this.#exec<{ path: string }>(
+        "SELECT f.path FROM files f JOIN owner_merges m ON m.path = f.path AND m.content = f.content",
+      ).map((row) => row.path),
+    );
+    const groups = new Map<string, typeof notes>();
+    for (const note of notes) {
+      if (!kelpie.has(note.path) || waiting.has(note.path) || merged.has(note.path)) continue;
+      const group = `${note.scope}\n${note.kind}\n${note.titleKey}`;
+      groups.set(group, [...(groups.get(group) ?? []), note]);
+    }
+    const proposed = new Map(
+      this.#exec<{ path: string; key: string }>("SELECT path, key FROM dream_merges").map((row) => [
+        row.path,
+        row.key,
+      ]),
+    );
+    const candidates = [...groups.values()].flatMap((group) => {
+      const members = group.flatMap((note) => {
+        const version = this.#memory.current(note.path);
+        return version === null || version.level === "explicit"
+          ? []
+          : [
+              {
+                ...note,
+                version,
+                written: writtenAt(note),
+                linked: this.#memory.backlinks(note.path).length,
+              },
+            ];
+      });
+      if (members.length < 2) return [];
+      // The survivor is the note most others link to, then the earliest, then the shorter path,
+      // since a later one is numbered: most links already lead to it.
+      members.sort(
+        (a, b) =>
+          b.linked - a.linked ||
+          a.written - b.written ||
+          a.path.length - b.path.length ||
+          (a.path < b.path ? -1 : 1),
+      );
+      return [{ members, newest: Math.max(...members.map((member) => member.written)) }];
+    });
+    candidates.sort(
+      (a, b) =>
+        b.newest - a.newest || ((a.members[0]?.path ?? "") < (b.members[0]?.path ?? "") ? -1 : 1),
+    );
+    for (const { members } of candidates) {
+      const sources = members.map((member) => member.path);
+      const key = members.map((member) => member.blobSha).join(",");
+      if (proposed.get(sources[0] ?? "") === key || !this.#asRead(sources, key)) continue;
+      const same = members.every((member) => member.blobSha === members[0]?.blobSha);
+      const shown = members.map((member) => ({
+        path: member.path,
+        title: member.version.title,
+        body: member.version.body,
+      }));
+      if (!same && mergeInput(shown) === null) continue;
+      return { sources, key, same, notes: shown };
+    }
+    return null;
+  }
+
+  /**
+   * One merge step (#112). The same content needs no model; otherwise one call says whether the
+   * notes are one and how they read merged. Kept with the versions it read, it runs dry: the plan
+   * goes to Dream's page, not the vault.
+   */
+  async #merge(
+    gateway: MemoryGateway,
+    run: { id: number; calls: number; usage: string },
+    group: MergeCandidate,
+  ): Promise<boolean> {
+    let proposed: Awaited<ReturnType<typeof proposeMerge>> | null = null;
+    if (!group.same) {
+      try {
+        proposed = await proposeMerge(gateway, group.notes, DREAM_TIMEOUT_MS);
+      } catch (error) {
+        console.error("Vault: a Dream step failed", errorName(error));
+      }
+    }
+    const used = proposed?.usage ?? [];
+    const verdict = group.same ? "same" : (proposed?.answer?.verdict ?? null);
+    const body = proposed?.answer?.verdict === "merge" ? proposed.answer.body : null;
+    const usage = [...(JSON.parse(run.usage) as unknown[]), ...used];
+    this.ctx.storage.transactionSync(() => {
+      // As for a summary: a failure is kept as no answer, so one group can't fail every run, and
+      // nothing is kept once a note changed or Dream was turned off during the call.
+      if (this.#get("dream_mode") !== "off" && this.#asRead(group.sources, group.key)) {
+        // A group that grew or shrank replaces what was proposed for its notes.
+        this.#exec(
+          `DELETE FROM dream_merges WHERE EXISTS (SELECT 1
+             FROM json_each(dream_merges.sources) AS old, json_each(?) AS fresh
+             WHERE old.value = fresh.value)`,
+          JSON.stringify(group.sources),
+        );
+        this.#exec(
+          "INSERT INTO dream_merges (path, key, sources, verdict, body, at) VALUES (?, ?, ?, ?, ?, ?)",
+          group.sources[0] ?? "",
+          group.key,
+          JSON.stringify(group.sources),
+          verdict,
+          body,
+          Date.now(),
+        );
+      }
+      if (!group.same) {
+        this.#exec(
+          "UPDATE dream_runs SET calls = calls + 1, usage = ? WHERE id = ?",
+          JSON.stringify(usage),
+          run.id,
+        );
+      }
+    });
+    if (!group.same && proposed === null) return this.#endDream(run.id, "failed");
+    // Counts only: the notes and the body are personal data.
+    console.log("Vault: Dream step", {
+      calls: run.calls + (group.same ? 0 : 1),
+      merge: verdict,
       output: used.reduce((sum, call) => sum + (Number(call.output) || 0), 0),
     });
     return true;
@@ -1357,13 +1534,16 @@ export class Vault extends DurableObject<VaultEnv> {
           rows += this.#exec<{ n: number }>(`SELECT count(*) AS n ${where}`, named)[0]?.n ?? 0;
           this.#exec(`DELETE ${where}`, named);
         }
-        // A day summary sums up its pages: forgetting one of them forgets the summary (#112).
-        const summarized = `FROM dream_summaries WHERE EXISTS (SELECT 1
-          FROM json_each(dream_summaries.sources) AS child, json_each(?) AS named
-          WHERE child.value = named.value OR (substr(named.value, -1) = '/'
-            AND substr(child.value, 1, length(named.value)) = named.value))`;
-        rows += this.#exec<{ n: number }>(`SELECT count(*) AS n ${summarized}`, named)[0]?.n ?? 0;
-        this.#exec(`DELETE ${summarized}`, named);
+        // A day summary sums up its pages, and a merge reads its notes: forgetting one of them
+        // forgets it (#112).
+        for (const table of ["dream_summaries", "dream_merges"]) {
+          const derived = `FROM ${table} WHERE EXISTS (SELECT 1
+            FROM json_each(${table}.sources) AS child, json_each(?) AS named
+            WHERE child.value = named.value OR (substr(named.value, -1) = '/'
+              AND substr(child.value, 1, length(named.value)) = named.value))`;
+          rows += this.#exec<{ n: number }>(`SELECT count(*) AS n ${derived}`, named)[0]?.n ?? 0;
+          this.#exec(`DELETE ${derived}`, named);
+        }
         // A memory report or Dream's page waiting in the queue, or set aside, may name what is
         // being erased: they go, and the next alarm writes them again from what is left.
         for (const page of [LIFECYCLE_REPORT_PATH, DREAM_PAGE_PATH]) {
@@ -1460,8 +1640,8 @@ export class Vault extends DurableObject<VaultEnv> {
               ).map((row) => ({ ...row, written: true })),
             ];
       try {
-        // Dream's day summaries while dry (#112): their own page, as they span lines. A summary the
-        // vault now holds, or one long past, goes.
+        // Dream's plan while dry (#112): its own page, as what it proposes spans lines. A summary
+        // the vault now holds, or one long past, goes; so does whatever read a note that changed.
         this.#exec(
           `DELETE FROM dream_summaries WHERE at < ?
              OR EXISTS (SELECT 1 FROM files f WHERE f.path = dream_summaries.path)`,
@@ -1470,33 +1650,53 @@ export class Vault extends DurableObject<VaultEnv> {
         for (const row of this.#exec<{ path: string; key: string; sources: string }>(
           "SELECT path, key, sources FROM dream_summaries",
         )) {
-          if (!this.#summaryCurrent(JSON.parse(row.sources) as string[], row.key)) {
+          if (!this.#asRead(JSON.parse(row.sources) as string[], row.key)) {
             this.#exec("DELETE FROM dream_summaries WHERE path = ?", row.path);
           }
         }
+        for (const row of this.#exec<{ path: string; key: string; sources: string }>(
+          "SELECT path, key, sources FROM dream_merges",
+        )) {
+          if (!this.#asRead(JSON.parse(row.sources) as string[], row.key)) {
+            this.#exec("DELETE FROM dream_merges WHERE path = ?", row.path);
+          }
+        }
+        const titled = (path: string) => ({
+          path,
+          title: this.#memory.current(path)?.title ?? path,
+        });
         const page =
           this.#get("dream_mode") === "off"
             ? null
-            : dreamPage(
-                this.#exec<{ path: string; summary: string; sources: string }>(
+            : dreamPage({
+                summaries: this.#exec<{ path: string; summary: string; sources: string }>(
                   "SELECT path, summary, sources FROM dream_summaries WHERE summary IS NOT NULL",
                 ).map((row) => ({
                   date: row.path.slice(row.path.lastIndexOf("/") + 1, -".md".length),
                   scope: placeOf(row.path)?.scope ?? "",
-                  sources: (JSON.parse(row.sources) as string[]).map((path) => ({
-                    path,
-                    title: this.#memory.current(path)?.title ?? path,
-                  })),
+                  sources: (JSON.parse(row.sources) as string[]).map(titled),
                   summary: row.summary,
                 })),
-              );
+                // A distinct verdict, or no answer, proposes nothing.
+                merges: this.#exec<{ sources: string; verdict: string; body: string | null }>(
+                  `SELECT sources, verdict, body FROM dream_merges
+                   WHERE verdict = 'same' OR (verdict = 'merge' AND body IS NOT NULL)`,
+                ).map((row) => {
+                  const [survivor = "", ...merged] = JSON.parse(row.sources) as string[];
+                  return {
+                    survivor: titled(survivor),
+                    merged: merged.map(titled),
+                    body: row.verdict === "same" ? null : row.body,
+                  };
+                }),
+              });
         if (page !== this.#visible(DREAM_PAGE_PATH)) {
           this.#exec(
             "INSERT INTO queue (agent, path, content, summary, queued_at) VALUES (?, ?, ?, ?, ?)",
             SYSTEM_AGENT,
             DREAM_PAGE_PATH,
             page,
-            "Update Dream's day summaries",
+            "Update Dream's plan",
             now,
           );
         }
@@ -1808,6 +2008,16 @@ export class Vault extends DurableObject<VaultEnv> {
         return { ok: false, reason: "scope_not_allowed" };
       }
       const problems: string[] = [];
+      // A note merged into another (#112): what it held is there now, and so is the next version.
+      const merged =
+        found === null
+          ? undefined
+          : this.#memory.links(found.path).find((link) => link.kind === "merged_into");
+      if (merged !== undefined) {
+        problems.push(
+          `the note was merged into ${merged.path ?? `[[${merged.target}]]`}: write to that one`,
+        );
+      }
       if (found !== null && given(input.scope) !== undefined && input.scope !== found.scope) {
         problems.push(`\`scope\` must be the note's own, ${found.scope}`);
       }

@@ -158,6 +158,31 @@ describe("readNote", () => {
     ]);
   });
 
+  it("reads where a merged note went (#112)", () => {
+    const note = readNote(
+      "memory/notes/cafe-2.md",
+      [
+        "---",
+        "relations:",
+        "  contradicts:",
+        '    - "[[cha]]"',
+        "  merged_into:",
+        '    - "[[memory/notes/cafe]]"',
+        "---",
+        "# Café",
+        "",
+        "Merged into [[memory/notes/cafe]].",
+      ].join("\n"),
+    );
+    expect(note?.links).toContainEqual({
+      kind: "merged_into",
+      by: "path",
+      target: "memory/notes/cafe",
+    });
+    expect(note?.links).toContainEqual({ kind: "contradicts", by: "name", target: "cha" });
+    expect(note?.warnings).toEqual([]);
+  });
+
   it("returns null outside the index", () => {
     expect(readNote("agents/kelpie/SOUL.md", "# Persona")).toBeNull();
   });

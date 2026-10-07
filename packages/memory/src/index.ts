@@ -23,6 +23,7 @@ export {
 export {
   CONTRADICTION_BANDS,
   DREAM_PAGE_PATH,
+  type DreamMerge,
   type DreamSummary,
   dreamPage,
   LIFECYCLE_REPORT_PATH,
@@ -55,6 +56,7 @@ export {
   type VaultChange,
   type VaultCommit,
 } from "./memory-index.ts";
+export { MERGE_PROMPT, mergeInput, mergeOf } from "./merge.ts";
 export { isMemoryId, LEVELS, type Level, MAX_SOURCES, type Note, readNote } from "./note.ts";
 export {
   type HitView,

@@ -64,7 +64,7 @@ export function deriveTitle(frontmatterTitle: unknown, body: string, path: strin
 
 /** How a link names its target: a vault path, or a file name that Obsidian resolves anywhere. */
 export type LinkBy = "path" | "name";
-export type LinkKind = "link" | "embed" | "source" | "contradicts";
+export type LinkKind = "link" | "embed" | "source" | "contradicts" | "merged_into";
 
 export interface LinkTarget {
   by: LinkBy;

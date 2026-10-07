@@ -196,20 +196,27 @@ export function readNote(path: string, text: string): Note | null {
     warnings,
     stringList(MAX_SOURCES, MAX_SOURCE_LENGTH),
   );
+  // A closed vocabulary: what a note contradicts, and where a merged note went (#112).
   const relations = field(frontmatter, "relations", warnings, (value) => {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
     const keys = Object.keys(value);
-    if (keys.some((key) => key !== "contradicts")) return null;
-    return stringList(MAX_SOURCES, MAX_SOURCE_LENGTH)((value as Frontmatter).contradicts ?? []);
+    if (keys.some((key) => key !== "contradicts" && key !== "merged_into")) return null;
+    const list = stringList(MAX_SOURCES, MAX_SOURCE_LENGTH);
+    const contradicts = list((value as Frontmatter).contradicts ?? []);
+    const mergedInto = list((value as Frontmatter).merged_into ?? []);
+    return contradicts === null || mergedInto === null ? null : { contradicts, mergedInto };
   });
 
   let links = extractLinks(body, path);
   for (const source of sources ?? []) {
     for (const target of valueLinks(source, path)) links.push({ kind: "source", ...target });
   }
-  for (const contradicted of relations ?? []) {
+  for (const contradicted of relations?.contradicts ?? []) {
     for (const target of valueLinks(contradicted, path))
       links.push({ kind: "contradicts", ...target });
+  }
+  for (const survivor of relations?.mergedInto ?? []) {
+    for (const target of valueLinks(survivor, path)) links.push({ kind: "merged_into", ...target });
   }
   if (links.length > MAX_LINKS) {
     links = links.slice(0, MAX_LINKS);
