@@ -200,6 +200,9 @@ describe("memory_write", () => {
     // The scope the model names stands, for the store to allow or refuse.
     await write?.run({ ...note, scope: "global" }, context());
     expect(given).toEqual({ ...note, scope: "global" });
+    // A found note's new version keeps the note's own scope.
+    await write?.run({ ...note, path: "memory/notes/cafe.md" }, context());
+    expect(given).toEqual({ ...note, path: "memory/notes/cafe.md" });
     // A turn that sees every scope leaves it to the store: the owner's global memory.
     await write?.run(note, { ...context(), scopes: "all" });
     expect(given).toEqual(note);

@@ -219,8 +219,13 @@ export function memoryTools(store: MemoryStore): ToolProvider {
       ]),
     ) as unknown as MemoryWriteInput;
     // A turn that lists its scopes sees only its own conversation (#131): a new memory goes there,
-    // not to the owner's global memory, which it can't write.
-    if (memory.scope === undefined && context.scopes !== "all" && context.scopes[0] !== undefined) {
+    // not to the owner's global memory, which it can't write. A found note keeps its own scope.
+    if (
+      memory.scope === undefined &&
+      memory.path === undefined &&
+      context.scopes !== "all" &&
+      context.scopes[0] !== undefined
+    ) {
       memory.scope = context.scopes[0];
     }
     const result = await store.writeNote(context.agentId, memory, {

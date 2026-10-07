@@ -1268,9 +1268,11 @@ describe("ConversationAgent memory", () => {
     const world = use(fakeWorld([reply("Ok."), reply("Ok."), reply("Ok.")]));
     const stub = agent("memory-scopes-mixed");
     const turn = async (...messages: Record<string, unknown>[]) => {
+      const before = world.recalls.length;
       for (const sent of messages) await stub.ingest(sent as ReturnType<typeof message>);
       await stub.flush();
       await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).toBe("delivered"));
+      expect(world.recalls).toHaveLength(before + 1);
       return world.recalls.at(-1)?.options;
     };
     const guest = { ...message("m1", "e o Bruno?", { userId: "u-guest" }), role: "member" };
