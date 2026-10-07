@@ -401,6 +401,52 @@ describe("Vault Dream", () => {
     expect(await rows(stub, "SELECT path FROM dream_writes")).toEqual([]);
   });
 
+  it("writes the plan the owner read once writes are on, without asking the model again", async () => {
+    const note = await kelpieNote({ title: "Café" });
+    const backend = new FakeVaultBackend({ "README.md": "# Vault" });
+    replaceBackendForTesting(backend);
+    const requests = fakeModel([abstract("Café, como a pessoa toma.")]);
+    const stub = vault("dream-writes-later");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", [note], "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(requests).toHaveLength(1);
+    expect(backend.files()[note.path]).toBe(note.content);
+
+    await stub.setDream("dry", ["abstracts"]);
+    await quiet(stub);
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(requests).toHaveLength(1);
+    expect(backend.files()[note.path]).toBe(
+      withAbstract(note.content, "Café, como a pessoa toma."),
+    );
+  });
+
+  it("drops its write when the owner edits the note before it commits", async () => {
+    const note = await kelpieNote({ title: "Café" });
+    const backend = new FakeVaultBackend({ "README.md": "# Vault" });
+    replaceBackendForTesting(backend);
+    fakeModel([abstract("Café, como a pessoa toma.")]);
+    const stub = vault("dream-writes-owner");
+    await stub.compile("kelpie");
+    await stub.setDream("dry", ["abstracts"]);
+    await stub.write("kelpie", [note], "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    // The step queues the write; the owner's own abstract lands before the next flush.
+    await runDurableObjectAlarm(stub);
+    const owners = withAbstract(note.content, "Do jeito do dono.") ?? "";
+    backend.push({ [note.path]: owners });
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()[note.path]).toBe(owners);
+    expect(await rows(stub, "SELECT path FROM queue")).toEqual([]);
+    expect(await rows(stub, "SELECT path FROM owner_merges")).toEqual([]);
+  });
+
   it("lets only known operations write, and forgets them when turned off", async () => {
     replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
     const stub = vault("dream-writes-switch");

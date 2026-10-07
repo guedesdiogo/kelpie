@@ -185,6 +185,8 @@ const DREAM_TIMEOUT_MS = 30_000;
 const DREAM_STEP_MS = 5_000;
 /** Ended runs are kept this long, with what they used. */
 const DREAM_RUNS_MS = 30 * 24 * 60 * 60_000;
+/** Dream's write of an abstract (#112): the queue's mark, and a headline that names no note. */
+const DREAM_SUMMARY = "Write an abstract Dream proposed";
 /** Dream's operations, each dry until the owner lets it write (#112). */
 const DREAM_OPERATIONS = ["abstracts"] as const;
 /** The soonest the alarm wakes for a held file's next try. */
@@ -793,6 +795,11 @@ export class Vault extends DurableObject<VaultEnv> {
       run = { id: id ?? 0, started_at: now, calls: 0, usage: "[]" };
     }
     if (note === null || run.calls >= DREAM_MAX_CALLS) return this.#endDream(run.id, "done");
+    if (note.abstract !== undefined) {
+      // Proposed while dry, and now let write: no model call.
+      await this.#writeAbstract(note, note.abstract);
+      return true;
+    }
     let proposed: Awaited<ReturnType<typeof proposeAbstract>> | null = null;
     try {
       proposed = await proposeAbstract(gateway, note, DREAM_TIMEOUT_MS);
@@ -852,9 +859,14 @@ export class Vault extends DurableObject<VaultEnv> {
    * no write waiting, not held, and not proposed for already. The owner's notes are never one, nor
    * a version merged into the owner's edit.
    */
-  #dreamCandidate(
-    now: number,
-  ): { path: string; blobSha: string; title: string; body: string } | null {
+  #dreamCandidate(now: number): {
+    path: string;
+    blobSha: string;
+    title: string;
+    body: string;
+    /** A proposal made while dry, for this version, now to write. */
+    abstract?: string;
+  } | null {
     // When written, as the report dates notes: a rebuild indexes every note again as new.
     const recent = this.#memory
       .lifecycleNotes()
@@ -884,6 +896,28 @@ export class Vault extends DurableObject<VaultEnv> {
         "SELECT f.path FROM files f JOIN owner_merges m ON m.path = f.path AND m.content = f.content",
       ).map((row) => row.path),
     );
+    if (this.#dreamWrites().has("abstracts")) {
+      // Proposals made while dry, for the version the vault still holds, and no write tried since.
+      const pending = this.#exec<{ path: string; blob_sha: string; abstract: string }>(
+        `SELECT p.path, p.blob_sha, p.abstract FROM dream_proposals p
+         JOIN files f ON f.path = p.path AND f.blob_sha = p.blob_sha
+         WHERE p.abstract IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM dream_writes w WHERE w.path = p.path AND w.at >= p.at)
+         ORDER BY p.at`,
+      );
+      for (const row of pending) {
+        if (!kelpie.has(row.path) || waiting.has(row.path) || merged.has(row.path)) continue;
+        const version = this.#memory.current(row.path);
+        if (version === null) continue;
+        return {
+          path: row.path,
+          blobSha: row.blob_sha,
+          title: version.title,
+          body: version.body,
+          abstract: row.abstract,
+        };
+      }
+    }
     for (const note of recent) {
       if (!kelpie.has(note.path) || waiting.has(note.path) || merged.has(note.path)) continue;
       if (proposed.get(note.path) === note.blobSha || written.get(note.path) === note.blobSha) {
@@ -958,7 +992,16 @@ export class Vault extends DurableObject<VaultEnv> {
       note.blobSha,
     )[0]?.content;
     const next = content === undefined ? null : withAbstract(content, abstract);
-    if (next === null || next === content) return;
+    if (content !== undefined && (next === null || next === content)) {
+      // Nothing to write: the note already says it, or its frontmatter can't be read.
+      this.#exec(
+        "UPDATE dream_proposals SET abstract = NULL WHERE path = ? AND blob_sha = ?",
+        note.path,
+        note.blobSha,
+      );
+      return;
+    }
+    if (next === null) return;
     const blobSha = await gitBlobSha(next);
     this.ctx.storage.transactionSync(() => {
       const unchanged =
@@ -979,7 +1022,7 @@ export class Vault extends DurableObject<VaultEnv> {
         note.path,
         next,
         // The headline outlives a forget in git, so it never names the note.
-        "Write an abstract Dream proposed",
+        DREAM_SUMMARY,
         now,
       );
       this.#exec(
@@ -1226,7 +1269,6 @@ export class Vault extends DurableObject<VaultEnv> {
                 `SELECT p.path, p.abstract FROM dream_proposals p
                  JOIN files f ON f.path = p.path AND f.blob_sha = p.blob_sha
                  WHERE p.abstract IS NOT NULL AND p.path NOT IN (SELECT path FROM queue)
-                   AND NOT EXISTS (SELECT 1 FROM dream_writes w WHERE w.path = p.path AND w.at >= p.at)
                  ORDER BY p.path`,
               ),
               // What it wrote in the last week, while the vault still holds that version.
@@ -2047,6 +2089,12 @@ export class Vault extends DurableObject<VaultEnv> {
           path,
         );
       }
+      return;
+    }
+    // Dream's write is an abstract for the version it read (#112): an edit since wins whole, as a
+    // line merge could leave two abstracts in the frontmatter.
+    if (last.summary === DREAM_SUMMARY) {
+      this.#exec("DELETE FROM queue WHERE path = ?", path);
       return;
     }
     const result =

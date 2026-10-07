@@ -393,7 +393,7 @@ export function lifecycleReport(findings: LifecycleFindings): string | null {
       [
         "## Dream's plan",
         "",
-        "A dry run: the abstract Dream would give each note, shown as code. Nothing was written.",
+        "The abstract Dream proposes for each note, shown as code. Nothing was written.",
         "",
         ...abstracts(planned),
       ].join("\n"),

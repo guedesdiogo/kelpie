@@ -418,7 +418,9 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
     - not merged into the owner's edit;
     - not held;
     - with no write waiting.
-  - **What changes:** only the frontmatter's `abstract`. Every other key, comment and the body stay byte for byte. The commit's headline never names the note.
+  - **What changes:** only the frontmatter's `abstract`. For a file Kelpie's writer produced, every other key, comment and the body stay byte for byte. The commit's headline never names the note.
+  - **An edit before the commit:** if the owner edits the note after Dream queued its write but before the commit, the owner's edit wins whole and Dream's write is dropped. A line merge there could leave two abstracts in the frontmatter.
+  - **A plan the owner already read:** once `abstracts` is named, the proposals Dream made while dry are written for the versions the vault still holds, with no new model call. A write that didn't land isn't tried again for that version.
   - **After it:** the version Dream wrote stays Kelpie's (#126), and it isn't proposed for again. The report's "Dream wrote" section lists the last week's abstracts, shown as code.
   - **Measured first:** #108's evaluation doesn't regress with the cheap tier's abstracts ([memory-eval.md](spikes/memory-eval.md#dreams-abstracts-112)).
 - **Not yet:** the other operations: duplicates, contradictions, roll-ups, people and places, and summaries.

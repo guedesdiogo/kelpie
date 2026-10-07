@@ -6,7 +6,7 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { MemoryIndex, retrieve } from "../src/index.ts";
+import { gitBlobSha, MemoryIndex, readNote, retrieve } from "../src/index.ts";
 import { buildVault, SEED, type SyntheticVault } from "./generate.ts";
 import { QUESTIONS } from "./questions.ts";
 import { answerRank, bySlice, type QuestionResult, staleFirst } from "./score.ts";
@@ -64,7 +64,24 @@ describe("Dream's abstracts", () => {
         entry.abstract === null ? [] : [[path, entry.abstract] as const],
       ),
     );
-    const before = await evaluate("abstracts-before", await buildVault(SIZE));
+    // Every session page has its abstract, asked for its content as the vault holds it now.
+    const plain = await buildVault(SIZE);
+    const sessions = new Map<string, string>();
+    for (const commit of plain.commits) {
+      for (const change of commit.changes) {
+        if (change.content === null) sessions.delete(change.path);
+        else if (readNote(change.path, change.content)?.kind === "session") {
+          sessions.set(change.path, change.content);
+        }
+      }
+    }
+    expect(abstracts.size).toBe(sessions.size);
+    for (const [path, content] of sessions) {
+      expect(cache.abstracts[path as keyof typeof cache.abstracts]?.blob, path).toBe(
+        await gitBlobSha(content),
+      );
+    }
+    const before = await evaluate("abstracts-before", plain);
     const after = await evaluate("abstracts-after", await buildVault(SIZE, SEED, { abstracts }));
     task.meta.abstractsEval = { model: cache.model, abstracts: abstracts.size, before, after };
     // What a turn uses doesn't drop (#110); docs/spikes/memory-eval.md records every slice.
