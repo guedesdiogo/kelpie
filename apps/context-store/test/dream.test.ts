@@ -118,12 +118,13 @@ async function kelpieNote({
   date,
   ...input
 }: Partial<MemoryInput> & { title: string; date?: string; at?: string }) {
+  // A conclusion by default: a fact the person stated isn't Dream's to sum up, but a session is.
   const memory = {
     scope: "global",
     kind: "note",
     body: `${input.title}.`,
-    level: "explicit",
-    confidence: 0.9,
+    level: "deduced",
+    confidence: 0.7,
     ...input,
   } as MemoryInput;
   const { text } = await writeMemory(memory, { at });
@@ -248,6 +249,22 @@ describe("Vault Dream", () => {
     await quiet(stub);
     await runDurableObjectAlarm(stub);
     expect(requests).toHaveLength(2);
+  });
+
+  it("leaves a fact the person stated alone", async () => {
+    const stated = await kelpieNote({ title: "Café", level: "explicit", confidence: 0.9 });
+    const concluded = await kelpieNote({ title: "Chá" });
+    replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
+    const requests = fakeModel([abstract("Chá.")]);
+    const stub = vault("dream-stated");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", [stated, concluded], "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(requests).toHaveLength(1);
+    expect(JSON.stringify(requests[0]?.request.messages)).toContain("Chá");
   });
 
   it("never proposes for a version merged into the owner's edit (#160)", async () => {

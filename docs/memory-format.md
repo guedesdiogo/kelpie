@@ -390,7 +390,7 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. F
   - **Cancellation:** memory used since a run started ends it before its next step.
   - **The cap:** at most 8 calls a run.
 - **Its operation: abstracts.**
-  - **Which notes:** notes whose current version Kelpie wrote (#126) in the last 7 days, dated as the report dates notes, so a rebuilt index doesn't make old notes new. They are either session pages, whose abstract is their first message, or notes without an abstract. Each gets a proposed abstract. The owner's notes never do, nor a version Kelpie merged into the owner's edit (#160).
+  - **Which notes:** notes whose current version Kelpie wrote (#126) in the last 7 days, dated as the report dates notes, so a rebuilt index doesn't make old notes new. They are either session pages, whose abstract is their first message, or conclusions (`deduced`, `inferred`) without an abstract. Each gets a proposed abstract. A fact the person stated keeps its own words. The owner's notes never do, nor a version Kelpie merged into the owner's edit (#160).
   - **The model:**
     - the cheap tier, through llm-gateway;
     - the note goes as data, up to 6,000 characters, between markers that say where it starts and ends;

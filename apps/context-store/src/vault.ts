@@ -832,7 +832,7 @@ export class Vault extends DurableObject<VaultEnv> {
 
   /**
    * The next note Dream may propose an abstract for (#112), newest first: one whose current version
-   * Kelpie wrote (#126) within DREAM_LOOKBACK_MS, a session page or a note without an abstract, with
+   * Kelpie wrote (#126) within DREAM_LOOKBACK_MS, a session page or a conclusion without an abstract, with
    * no write waiting, not held, and not proposed for already. The owner's notes are never one, nor
    * a version merged into the owner's edit.
    */
@@ -866,7 +866,13 @@ export class Vault extends DurableObject<VaultEnv> {
       if (!kelpie.has(note.path) || waiting.has(note.path) || merged.has(note.path)) continue;
       if (proposed.get(note.path) === note.blobSha) continue;
       const version = this.#memory.current(note.path);
-      if (version === null || (note.kind !== "session" && version.abstract !== null)) continue;
+      // A fact the person stated (`explicit`) keeps its own words; a session page is summed up.
+      if (
+        version === null ||
+        (note.kind !== "session" && (version.abstract !== null || version.level === "explicit"))
+      ) {
+        continue;
+      }
       return { path: note.path, blobSha: note.blobSha, title: version.title, body: version.body };
     }
     return null;
