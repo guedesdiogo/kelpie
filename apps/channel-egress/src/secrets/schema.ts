@@ -23,4 +23,9 @@ export const forms = sqliteTable("forms", {
   expiresAt: integer("expires_at").notNull(),
   /** Values refused so far; the form closes after a few, so a link can't probe tokens forever. */
   refusals: integer("refusals").notNull().default(0),
+  /**
+   * When the form stored its value. A used form is kept a while, until `expiresAt`, so the same
+   * value sent again, as a double click sends it, is answered with what it connected.
+   */
+  redeemedAt: integer("redeemed_at"),
 });

@@ -30,7 +30,7 @@ How you work:
 - For a first setup, go in this order: see which agents exist (list_agents); create the first agent, with a short id of lowercase letters, digits and hyphens, and a name (create_agent); connect its Telegram bot (connect_telegram); then pair the owner's Telegram account with it (pair_telegram). Changing an agent's model or prompt (configure_agent) is optional.
 - Some changes need the owner's confirmation. Kelpie itself shows them what will change and a code to reply with: don't ask them to confirm in other words, and never make up a code. Once they reply with just the code, call the same tool again with the same input.
 - Never ask for a secret in the chat, such as a bot token or an API key. A bot token goes only into the secure form whose link connect_telegram gives. If the owner pastes a secret in the chat anyway, tell them to revoke it and make a new one.
-- To make a Telegram bot, the owner sends /newbot to BotFather on Telegram and copies the token it answers with into the form.
+- To make a Telegram bot, the owner sends /newbot to BotFather on Telegram, which answers with the bot's token. Have them do that first, and only then call connect_telegram: its form works once and only for a few minutes. Tell them to submit the form once and wait for its page; a page that says the link was already used means the bot is connected.
 - Some steps are outside what you can do: deploying Kelpie's Workers, their bindings and secrets, Cloudflare Access, and the model keys. For those, point the owner to the setup checklist in docs/admin-api.md.`;
 
 /** The commands the setup agent's tools run; the identity and vault commands stay off them. */
@@ -201,13 +201,15 @@ function bareHttpsOrigin(value: string): string {
 /**
  * The setup agent's tools, over the configuration commands. `adminOrigin` is the admin API's
  * origin (`ADMIN_ORIGIN`), for the links to its secure form and its pairing page; anything but a
- * bare https origin counts as unset, so a mistyped value gives no link.
+ * bare https origin counts as unset, so a mistyped value gives no link. `now` tells how long a
+ * form has left: a duration, which the model passes on without turning a time into a zone.
  */
 export function setupTools(
   commands: SetupCommands,
-  options: { adminOrigin: string },
+  options: { adminOrigin: string; now?: () => number },
 ): ToolProvider {
   const adminOrigin = bareHttpsOrigin(options.adminOrigin);
+  const now = options.now ?? (() => Date.now());
   const isOwner = (context: ToolContext) => context.actor.role === "owner";
 
   /** The agent, or the tool's refusal: checked before anything is shown to the owner. */
@@ -328,7 +330,7 @@ export function setupTools(
         const result = await commands.connectTelegram(context.actor, request);
         if (!result.ok) return refusal(result, request.agentId);
         return {
-          output: `Give the owner this link to the secure form: ${adminOrigin}${result.value.path}\nIt works once, until ${new Date(result.value.expiresAt).toISOString()}. They paste the bot's token there, never in the chat. The form points the bot at Kelpie when it saves the token.`,
+          output: `Give the owner this link to the secure form: ${adminOrigin}${result.value.path}\nIt works once, for the next ${Math.max(Math.round((result.value.expiresAt - now()) / 60_000), 1)} minutes. They paste the bot's token there, never in the chat. The form points the bot at Kelpie when it saves the token.`,
         };
       },
     },

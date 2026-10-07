@@ -106,7 +106,12 @@ A channel's secret, such as a Telegram bot token, never goes through a command, 
 3. The owner pastes the token from BotFather. The admin API passes it straight to `channel-egress`'s `ChannelForms` entrypoint, which checks it with Telegram (`getMe`) and stores it encrypted (`docs/secrets.md`).
 4. `channel-egress` then registers the bot's webhook, so Telegram sends the bot's messages to ingress. If that fails, the page says why. The token stays stored, and `registerTelegramWebhook` tries again.
 
-The link expires after 15 minutes, works once, and closes after five refused tokens.
+The link expires after 15 minutes, works once, and closes after five refused tokens. For 15 minutes after it is used:
+- **The same token sent again,** as a second click sends it while the first is still on its way, gets the same "connected" page, and the bot's webhook is registered again.
+- **Any other value is refused.**
+- **The link opened again** says which bot it connected, instead of "This link no longer works".
+
+The token is stored, and the webhook registered, even when the browser drops the request.
 
 Form pages are HTML:
 - they are sent with `Cache-Control: no-store`, `Referrer-Policy: same-origin` and a Content-Security-Policy that forbids framing and scripts;

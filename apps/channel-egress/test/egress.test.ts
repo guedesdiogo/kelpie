@@ -98,7 +98,25 @@ describe("ChannelForms", () => {
       allowed_updates: ["message"],
     });
 
-    // The link works once.
+    // The link stores once. The same token again, as a double click sends it, answers with the
+    // bot it connected and points Telegram at Kelpie again; any other value is refused.
+    expect(await exports.ChannelForms.redeemTelegramForm(form.token, BOT_TOKEN)).toEqual(redeemed);
+    expect(calls.map((call) => call.method)).toEqual(["getMe", "setWebhook", "setWebhook"]);
+    expect(calls[2]?.body).toEqual(calls[1]?.body);
+    expect(
+      await exports.ChannelForms.redeemTelegramForm(form.token, BOT_TOKEN.replace("test", "othr")),
+    ).toEqual({ ok: false, reason: "unknown_form" });
+    expect(await exports.ChannelForms.describeForm(form.token)).toEqual({
+      ok: false,
+      reason: "redeemed",
+      agentId: "sales",
+      username: "kelpie_bot",
+    });
+
+    // Past its grace, a used link is just closed.
+    await runInDurableObject(store(), (_instance, state) => {
+      state.storage.sql.exec("UPDATE forms SET expires_at = 0");
+    });
     expect(await exports.ChannelForms.redeemTelegramForm(form.token, BOT_TOKEN)).toEqual({
       ok: false,
       reason: "unknown_form",

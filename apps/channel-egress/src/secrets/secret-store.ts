@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { and, eq, gt, lte } from "drizzle-orm";
+import { and, eq, gt, isNotNull, isNull, lte } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import { importSecretsKey, open, randomToken, seal, sha256 } from "./crypto.ts";
@@ -13,6 +13,8 @@ export const SECRET_STORE_NAME = "secrets";
 const FORM_LIFETIME_MS = 15 * 60_000;
 /** A form closes after this many refused values. */
 const MAX_REFUSALS = 5;
+/** A used form is kept this long, so its own value sent again is answered with what it stored. */
+const REDEEMED_GRACE_MS = 15 * 60_000;
 
 export type FormKind = "telegram";
 
@@ -64,6 +66,24 @@ export class SecretStore extends DurableObject<Env> {
     return form ? { agentId: form.agentId, kind: form.kind } : null;
   }
 
+  /** What a form stored, when it was used in the last REDEEMED_GRACE_MS. */
+  async redeemedForm(token: string): Promise<{ agentId: string; kind: FormKind } | null> {
+    if (!isFormToken(token)) return null;
+    const tokenHash = await sha256(token);
+    const form = this.#db
+      .select()
+      .from(schema.forms)
+      .where(
+        and(
+          eq(schema.forms.tokenHash, tokenHash),
+          isNotNull(schema.forms.redeemedAt),
+          gt(schema.forms.expiresAt, Date.now()),
+        ),
+      )
+      .get();
+    return form ? { agentId: form.agentId, kind: form.kind } : null;
+  }
+
   /** Counts a refused value; after a few the form closes. Returns whether it is still open. */
   async refuseValue(token: string): Promise<boolean> {
     const form = await this.#openForm(token);
@@ -83,7 +103,8 @@ export class SecretStore extends DurableObject<Env> {
   /**
    * Closes a form and stores its value, encrypted, in the form's slot. The value is sealed first;
    * claiming the form and storing it then happen together, with nothing awaited between, so two
-   * submissions of one link can't both store and a failure can't spend the form for nothing.
+   * submissions of one link can't both store and a failure can't spend the form for nothing. The
+   * used form is kept REDEEMED_GRACE_MS (`redeemedForm`).
    */
   async redeemForm(
     token: string,
@@ -98,15 +119,20 @@ export class SecretStore extends DurableObject<Env> {
     const slot = slotFor(form.kind, form.agentId);
     const sealed = await seal(key, slot, value);
     const claimed = this.#db.transaction((tx) => {
+      const updatedAt = Date.now();
       const still = tx
-        .delete(schema.forms)
+        .update(schema.forms)
+        .set({ redeemedAt: updatedAt, expiresAt: updatedAt + REDEEMED_GRACE_MS })
         .where(
-          and(eq(schema.forms.tokenHash, form.tokenHash), gt(schema.forms.expiresAt, Date.now())),
+          and(
+            eq(schema.forms.tokenHash, form.tokenHash),
+            isNull(schema.forms.redeemedAt),
+            gt(schema.forms.expiresAt, updatedAt),
+          ),
         )
         .returning({ tokenHash: schema.forms.tokenHash })
         .get();
       if (!still) return false;
-      const updatedAt = Date.now();
       tx.insert(schema.secrets)
         .values({ slot, ...sealed, updatedAt })
         .onConflictDoUpdate({ target: schema.secrets.slot, set: { ...sealed, updatedAt } })
@@ -133,7 +159,13 @@ export class SecretStore extends DurableObject<Env> {
     return this.#db
       .select()
       .from(schema.forms)
-      .where(and(eq(schema.forms.tokenHash, tokenHash), gt(schema.forms.expiresAt, Date.now())))
+      .where(
+        and(
+          eq(schema.forms.tokenHash, tokenHash),
+          isNull(schema.forms.redeemedAt),
+          gt(schema.forms.expiresAt, Date.now()),
+        ),
+      )
       .get();
   }
 

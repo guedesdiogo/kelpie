@@ -108,6 +108,8 @@ function world({
     ["form-unhooked", { agentId: "unhooked", refusals: 0 }],
   ]);
   const redeemed: { token: string; botToken: string }[] = [];
+  /** Forms used a moment ago, by token, with their agent. */
+  const used = new Map<string, string>();
   const deps: AdminDeps = {
     async authenticate(): Promise<Verification> {
       return authenticated ? { ok: true, sub: authenticated } : { ok: false, reason: "signature" };
@@ -149,12 +151,26 @@ function world({
       async describeForm(token) {
         if (token === "form-down") return { ok: false, reason: "store_unavailable" };
         const form = forms.get(token);
+        const done = used.get(token);
+        if (done)
+          return { ok: false, reason: "redeemed", agentId: done, username: "kelpie_<b>bot" };
         return form
           ? { ok: true, agentId: form.agentId, kind: "telegram" }
           : { ok: false, reason: "unknown_form" };
       },
       async redeemTelegramForm(token, botToken) {
         const form = forms.get(token);
+        const done = used.get(token);
+        // A used form answers its own token again, as channel-egress does after a double click.
+        if (done && botToken === GOOD_BOT_TOKEN) {
+          redeemed.push({ token, botToken });
+          return {
+            ok: true,
+            agentId: done,
+            bot: { id: 1, username: "kelpie_<b>bot" },
+            webhook: "registered",
+          };
+        }
         if (!form) return { ok: false, reason: "unknown_form" };
         redeemed.push({ token, botToken });
         if (botToken !== GOOD_BOT_TOKEN) {
@@ -163,6 +179,7 @@ function world({
           return { ok: false, reason: botToken.includes(":") ? "token_refused" : "invalid_token" };
         }
         forms.delete(token);
+        used.set(token, form.agentId);
         return {
           ok: true,
           agentId: form.agentId,
@@ -696,8 +713,17 @@ describe("admin API secure forms", () => {
     expect(html).not.toContain(GOOD_BOT_TOKEN);
     expect(redeemed).toEqual([{ token: "form-token-1", botToken: GOOD_BOT_TOKEN }]);
 
-    // The link works once.
-    expect((await handle(new Request(formUrl), deps)).status).toBe(404);
+    // Used, the link says what it connected; the same token again, as a double click sends it,
+    // gets the same answer.
+    const reopened = await handle(new Request(formUrl), deps);
+    expect(reopened.status).toBe(200);
+    const shown = await reopened.text();
+    expect(shown).toContain("@kelpie_&lt;b&gt;bot");
+    expect(shown).toContain("already used");
+    expect(shown).not.toContain('name="botToken"');
+    const again = await handle(submit(GOOD_BOT_TOKEN, { origin: "https://admin.example" }), deps);
+    expect(again.status).toBe(200);
+    expect(await again.text()).toContain("now answers");
   });
 
   it("says when the token is stored but Telegram couldn't be pointed at Kelpie", async () => {
