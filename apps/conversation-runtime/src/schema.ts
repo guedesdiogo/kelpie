@@ -123,8 +123,40 @@ export const outbox = sqliteTable(
     delayMs: integer("delay_ms").notNull(),
     status: text("status", { enum: ["pending", "sending", "sent", "cancelled"] }).notNull(),
     sentAt: integer("sent_at"),
+    /**
+     * A confirmation's notice, which the host adds after the reply (ADR-0013). History keeps only
+     * the reply's bubbles: the model never sees a notice's code.
+     */
+    notice: integer("notice", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [index("outbox_turn").on(table.turnId, table.seq)],
+);
+
+/**
+ * Changes waiting for the owner's yes (ADR-0013, Story 3.11). A code confirms exactly one command
+ * and input, for the user who asked, from a message of theirs written after the code was made.
+ */
+export const confirmations = sqliteTable(
+  "confirmations",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    code: text("code").notNull(),
+    userId: text("user_id").notNull(),
+    command: text("command").notNull(),
+    /** The parsed input, as canonical JSON. */
+    input: text("input").notNull(),
+    /** What the owner is shown, written by the tool's code. */
+    summary: text("summary").notNull(),
+    /** Only the requester's messages after this history row can confirm. */
+    afterHistoryId: integer("after_history_id").notNull(),
+    /** The turn whose reply shows the notice: the latest that asked. */
+    turnId: integer("turn_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    /** When a call went ahead on it: a code confirms once. */
+    usedAt: integer("used_at"),
+  },
+  (table) => [index("confirmations_request").on(table.userId, table.command, table.input)],
 );
 
 /** Small conversation-wide values: settings, counters, the destination, the pending flush. */

@@ -20,6 +20,7 @@ export {
   isAgentName,
   parseSettings,
   REGISTRY_NAME,
+  SETUP_AGENT_ID,
 } from "./settings.ts";
 export {
   KELPIE_RELEASE,

@@ -13,6 +13,8 @@ export default defineConfig({
           LLM_GATEWAY: () => new Response("llm-gateway is not available in tests", { status: 503 }),
           CHANNEL_EGRESS: () =>
             new Response("channel-egress is not available in tests", { status: 503 }),
+          CHANNEL_FORMS: () =>
+            new Response("channel-egress is not available in tests", { status: 503 }),
         },
         // An empty vault: agents run on their settings unless a test swaps in a Context Store.
         workers: [

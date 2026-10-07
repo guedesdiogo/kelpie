@@ -1,12 +1,24 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import { SETUP_AGENT_ID } from "@kelpie/config";
 import { describe, expect, it } from "vitest";
 
 // Each test uses its own Registry instance; Kelpie itself runs one, named REGISTRY_NAME.
 const registry = (name: string) => env.REGISTRY.getByName(name);
 const owner = { userId: "u-owner", role: "owner", via: "admin-api" } as const;
+/** Every registry starts with the setup agent (Story 3.11). */
+const SETUP = { id: SETUP_AGENT_ID, name: "Setup" };
 
 describe("Registry", () => {
+  it("has the setup agent from the start, and adding it again changes nothing", async () => {
+    const stub = registry("setup");
+
+    expect(await stub.list()).toEqual([SETUP]);
+    expect(await stub.add(SETUP_AGENT_ID, "Another", owner)).toEqual({ ok: true, created: false });
+    expect(await stub.rename(SETUP_AGENT_ID, "Configuração", owner)).toEqual({ ok: true });
+    expect(await stub.get(SETUP_AGENT_ID)).toEqual({ id: SETUP_AGENT_ID, name: "Configuração" });
+  });
+
   it("adds agents and lists them by id", async () => {
     const stub = registry("list");
     expect(await stub.add("sales", "Sales", owner)).toEqual({ ok: true, created: true });
@@ -15,6 +27,7 @@ describe("Registry", () => {
     expect(await stub.list()).toEqual([
       { id: "assistant", name: "Assistant" },
       { id: "sales", name: "Sales" },
+      SETUP,
     ]);
     expect(await stub.get("sales")).toEqual({ id: "sales", name: "Sales" });
     expect(await stub.get("ghost")).toBeNull();
@@ -25,7 +38,7 @@ describe("Registry", () => {
     await stub.add("sales", "Sales", owner);
 
     expect(await stub.add("sales", "Another name", owner)).toEqual({ ok: true, created: false });
-    expect(await stub.list()).toEqual([{ id: "sales", name: "Sales" }]);
+    expect(await stub.list()).toEqual([{ id: "sales", name: "Sales" }, SETUP]);
   });
 
   it("renames an agent it knows, and only those", async () => {
@@ -49,7 +62,7 @@ describe("Registry", () => {
     expect(await stub.add("sales", "x".repeat(81), owner)).toEqual(invalid);
     await stub.add("sales", "Sales", owner);
     expect(await stub.rename("sales", " ", owner)).toEqual(invalid);
-    expect(await stub.list()).toEqual([{ id: "sales", name: "Sales" }]);
+    expect(await stub.list()).toEqual([{ id: "sales", name: "Sales" }, SETUP]);
   });
 
   it("audits each creation and rename, and nothing that changed nothing", async () => {

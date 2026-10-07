@@ -1,9 +1,10 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { DEFAULT_SETTINGS } from "@kelpie/config";
+import { DEFAULT_SETTINGS, SETUP_AGENT_ID } from "@kelpie/config";
 import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
 import { afterEach, describe, expect, it } from "vitest";
 import { replaceContextStoreForTesting } from "../src/agent-host/agent-host.ts";
+import { SETUP_PROMPT } from "../src/setup-agent.ts";
 
 const host = (id: string) => env.AGENT_HOST.getByName(id);
 const owner = { userId: "u-owner", role: "owner", via: "admin-api" } as const;
@@ -25,6 +26,17 @@ async function auditOf(stub: ReturnType<typeof host>) {
 describe("AgentHost", () => {
   it("starts from the default settings, at prompt version 0", async () => {
     expect(await host("fresh").config()).toEqual({ settings: DEFAULT_SETTINGS, promptVersion: 0 });
+  });
+
+  it("gives the setup agent its built-in persona, which a change can still replace", async () => {
+    const stub = host(SETUP_AGENT_ID);
+    expect(await stub.config()).toEqual({
+      settings: { ...DEFAULT_SETTINGS, systemPrompt: SETUP_PROMPT },
+      promptVersion: 0,
+    });
+
+    await stub.configure({ systemPrompt: "Fale como um pirata." }, owner);
+    expect((await stub.config()).settings.systemPrompt).toBe("Fale como um pirata.");
   });
 
   it("drops the end-of-turn windows and the old 10 s cap from settings stored before ADR-0024", async () => {

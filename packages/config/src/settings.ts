@@ -5,6 +5,12 @@ import { QUALIFIER_BACKENDS, type QualifierBackend } from "@kelpie/qualifier";
 /** Kelpie runs one `Registry`, which lists the agents. */
 export const REGISTRY_NAME = "registry";
 
+/**
+ * The built-in setup agent (Story 3.11): every instance has it, and only it gets the configuration
+ * tools. No other agent may take its id.
+ */
+export const SETUP_AGENT_ID = "setup";
+
 /** One agent's settings, held by its `AgentHost` (ADR-0002) and read by its conversations. */
 export interface AgentSettings {
   /** Merge fragments and split replies into paced bubbles; off answers each message at once. */

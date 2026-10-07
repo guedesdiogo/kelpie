@@ -16,8 +16,12 @@
       "entrypoint": "ChannelEgress"
     },
     // The vault's persona, rules and skills (ADR-0005).
-    { "binding": "CONTEXT_STORE", "service": "kelpie-context-store", "entrypoint": "ContextStore" }
+    { "binding": "CONTEXT_STORE", "service": "kelpie-context-store", "entrypoint": "ContextStore" },
+    // The setup agent's secure form for a bot's token (Story 3.11).
+    { "binding": "CHANNEL_FORMS", "service": "kelpie-channel-egress", "entrypoint": "ChannelForms" }
   ],
+  // The admin API's public origin, for the setup agent's links; set when deploying (Story 3.11).
+  "vars": { "ADMIN_ORIGIN": "" },
   "durable_objects": {
     "bindings": [
       { "name": "CONVERSATION_AGENT", "class_name": "ConversationAgent" },

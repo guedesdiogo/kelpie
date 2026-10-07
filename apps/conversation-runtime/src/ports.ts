@@ -1,11 +1,19 @@
+import type { Remote } from "@kelpie/access";
 import {
   CAPABILITIES,
   type ChannelCapabilities,
   type ChannelEgressContract,
+  type ChannelFormsContract,
   type ChannelId,
   type SendOutcome,
   typingRenewIntervalMs,
 } from "@kelpie/channels";
+import {
+  type AgentHostContract,
+  createConfigCommands,
+  REGISTRY_NAME,
+  type RegistryContract,
+} from "@kelpie/config";
 import type {
   ContextStoreContract,
   RecallOptions,
@@ -15,6 +23,7 @@ import type {
 import type { Destination } from "@kelpie/conversation/contract";
 import { fromNdjsonStream, type LlmEvent, type ModelTier, type RoutedRequest } from "@kelpie/llm";
 import { memoryTools } from "./memory-tools.ts";
+import { setupTools } from "./setup-agent.ts";
 import type { ToolProvider } from "./tools.ts";
 
 /** One model call: its events, and a way to stop it on the gateway's side. */
@@ -107,6 +116,12 @@ function productionPorts(env: Env): ConversationPorts {
   const egress = env.CHANNEL_EGRESS as unknown as ChannelEgressContract;
   // A service binding to context-store's ContextStore entrypoint.
   const contextStore = env.CONTEXT_STORE as unknown as ContextStoreContract;
+  // A service binding to channel-egress's ChannelForms entrypoint, which returns values only.
+  const forms = env.CHANNEL_FORMS as unknown as ChannelFormsContract;
+  // Typed as the contracts the admin API binds, so both clients of the commands match.
+  const registry = env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<RegistryContract>;
+  const agentHost = (id: string) =>
+    env.AGENT_HOST.getByName(id) as unknown as Remote<AgentHostContract>;
   return {
     async generate(tier, request) {
       const generation = await gateway.generate(tier, request);
@@ -133,7 +148,6 @@ function productionPorts(env: Env): ConversationPorts {
         },
       };
     },
-    // The setup agent's (#48) arrive as providers too.
     tools: [
       memoryTools({
         search: (agentId, query, options) =>
@@ -143,6 +157,31 @@ function productionPorts(env: Env): ConversationPorts {
         writeNote: (agentId, input, options) =>
           withTimeout(contextStore.writeNote(agentId, input, options), REMEMBER_TIMEOUT_MS),
       }),
+      // The setup agent's (#48): the same commands as the admin API, minus the ones that need the
+      // Directory or the vault's admin entrypoint, which this Worker doesn't bind.
+      setupTools(
+        createConfigCommands({
+          registry,
+          agents: {
+            configure: (id, changes, actor) => agentHost(id).configure(changes, actor),
+            config: (id) => agentHost(id).config(),
+          },
+          directory: {
+            issuePairingCode: notBound,
+            enableIdentity: notBound,
+            disableIdentity: notBound,
+            listIdentities: notBound,
+            setTimeZone: notBound,
+          },
+          channels: {
+            createTelegramForm: (agentId) => forms.createTelegramForm(agentId),
+            registerTelegramWebhook: (agentId) => forms.registerTelegramWebhook(agentId),
+            describeTelegramBot: (agentId) => forms.describeTelegramBot(agentId),
+          },
+          vault: { held: notBound, forget: notBound },
+        }),
+        { adminOrigin: env.ADMIN_ORIGIN },
+      ),
     ],
     send: (agentId, destination, text, options) => egress.send(agentId, destination, text, options),
     remember: (agentId, changes, summary) =>
@@ -185,6 +224,14 @@ function productionPorts(env: Env): ConversationPorts {
     sleep,
     deadline: (ms, signal) => sleep(ms, signal).catch(() => new Promise<void>(() => {})),
   };
+}
+
+/**
+ * What the setup agent's tools never call: the commands that need the Directory or the vault's
+ * admin entrypoint. Binding the Directory here would make ingress and this Worker bind each other.
+ */
+function notBound(): Promise<never> {
+  return Promise.reject(new Error("not bound in conversation-runtime"));
 }
 
 /** "Typing" is a courtesy: a call that hangs or fails is given up after a few seconds. */

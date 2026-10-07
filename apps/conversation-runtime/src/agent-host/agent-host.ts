@@ -5,12 +5,13 @@ import type {
   AgentSettings,
   ConfigureResult,
 } from "@kelpie/config";
-import { DEFAULT_SETTINGS, parseSettings } from "@kelpie/config";
+import { DEFAULT_SETTINGS, parseSettings, SETUP_AGENT_ID } from "@kelpie/config";
 import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
 import { Agent } from "agents";
 import { eq } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
+import { SETUP_PROMPT } from "../setup-agent.ts";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
 import { composeSystemPrompt, hasVaultContext } from "./system-prompt.ts";
@@ -47,10 +48,17 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     });
   }
 
-  /** The agent's settings, defaults filled in, and its prompt version. */
+  /**
+   * The agent's settings, defaults filled in, and its prompt version. The setup agent's default
+   * prompt is its built-in persona.
+   */
   config(): AgentConfig {
+    const defaults =
+      this.ctx.id.name === SETUP_AGENT_ID
+        ? { ...DEFAULT_SETTINGS, systemPrompt: SETUP_PROMPT }
+        : DEFAULT_SETTINGS;
     return {
-      settings: { ...DEFAULT_SETTINGS, ...current(this.#get<StoredSettings>("settings", {})) },
+      settings: { ...defaults, ...current(this.#get<StoredSettings>("settings", {})) },
       promptVersion: this.#get("promptVersion", 0),
     };
   }
