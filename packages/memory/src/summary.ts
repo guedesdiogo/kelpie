@@ -1,6 +1,7 @@
 // Dream's day summaries (#112): where a scope's day goes, what a model is asked, and how its answer
 // is read. One summary is one day of one scope, so two conversations are never mixed (#131).
 import { type Scope, scopeRoot } from "./layout.ts";
+import { sanitizeSecrets } from "./sanitize.ts";
 import { isDate } from "./time.ts";
 
 /** A day's pages, shared out among them. */
@@ -31,9 +32,11 @@ export function summaryInput(day: {
   date: string;
   pages: readonly { path: string; title: string; body: string }[];
 }): string {
-  const share = Math.floor(SUMMARY_INPUT_CHARS / Math.max(day.pages.length, 1));
+  const headings = day.pages.map((page) => `## ${page.title} (${page.path})`);
+  const room = SUMMARY_INPUT_CHARS - headings.reduce((sum, heading) => sum + heading.length + 3, 0);
+  const share = Math.max(0, Math.floor(room / Math.max(day.pages.length, 1)));
   const pages = day.pages
-    .map((page) => `## ${page.title} (${page.path})\n${page.body.slice(0, share)}`)
+    .map((page, i) => `${headings[i]}\n${page.body.slice(0, share)}`)
     .join("\n\n");
   return `The session pages of ${day.date}, between BEGIN PAGES and END PAGES:\n\nBEGIN PAGES\n${pages}\nEND PAGES\n\nAnswer with the JSON only.`;
 }
@@ -41,8 +44,9 @@ export function summaryInput(day: {
 /**
  * The summary an answer holds: JSON with the one key `summary`, plain lines within the limit. No
  * control characters but line breaks, no line or paragraph separators, no heading, no frontmatter
- * fence and no conflict markers, so it can't pass for another note's structure. Anything else is
- * null. A code fence around the whole of it is tolerated.
+ * fence and no conflict markers, so it can't pass for another note's structure. Secrets are
+ * removed before the rules on lines. Anything else is null. A code fence around the whole of it
+ * is tolerated.
  */
 export function summaryOf(answer: string): string | null {
   const fenced = /^\s*```[\w-]*\r?\n([\s\S]*?)\r?\n```\s*$/.exec(answer);
@@ -57,12 +61,14 @@ export function summaryOf(answer: string): string | null {
   if (keys.length !== 1 || keys[0] !== "summary") return null;
   const { summary } = parsed as { summary: unknown };
   if (typeof summary !== "string") return null;
-  const text = summary.trim();
-  if (text === "" || text.length > SUMMARY_MAX_CHARS) return null;
   // Line breaks and tabs only: no other control, separator or bidirectional character.
-  if (/(?![\n\t])\p{Cc}|[\u2028\u2029\u202a-\u202e\u2066-\u2069]/u.test(text)) {
+  if (/(?![\n\t])\p{Cc}|[\u2028\u2029]|\p{Bidi_Control}/u.test(summary.trim())) {
     return null;
   }
+  // Secrets go before the rules on lines: removing invisible characters must not leave a line
+  // the rules refuse.
+  const text = sanitizeSecrets(summary).text.trim();
+  if (text === "" || text.length > SUMMARY_MAX_CHARS) return null;
   if (/^(?:---|#|<{7}|={7}|>{7})/m.test(text)) return null;
   return text;
 }

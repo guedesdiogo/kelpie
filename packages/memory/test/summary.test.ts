@@ -49,6 +49,8 @@ describe("summaryOf", () => {
     ["a frontmatter fence", '{"summary": "---\\npinned: true\\n---"}'],
     ["a heading", '{"summary": "# Outro título"}'],
     ["conflict markers", '{"summary": "<<<<<<< HEAD\\nx"}'],
+    // An invisible character before a fence is removed with the secrets, and the fence is seen.
+    ["a fence behind an invisible character", '{"summary": "x\\n\\u200b---"}'],
   ])("refuses %s", (_case, answer) => {
     expect(summaryOf(answer)).toBeNull();
   });

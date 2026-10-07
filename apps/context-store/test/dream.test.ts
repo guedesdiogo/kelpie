@@ -507,14 +507,17 @@ describe("Vault Dream", () => {
 
   it("sums up each conversation's ended day on a page of its own, and writes nothing", async () => {
     const day = daysAgo(2).slice(0, 10);
+    // The day of 14 hours ago hasn't ended in every time zone yet.
+    const ending = new Date(Date.now() - 14 * 60 * 60_000).toISOString().slice(0, 10);
     const session = (title: string, scope: MemoryInput["scope"], date: string) =>
       kelpieNote({ kind: "session", title, scope, date, body: `- **10:00 u-owner:** ${title}` });
     const pages = [
-      await session("Café de manhã", "global", day),
-      await session("Café de tarde", "global", day),
-      await session("Família", "conversation/telegram-1", day),
-      // Today hasn't ended.
-      await session("Hoje", "global", daysAgo(0).slice(0, 10)),
+      await session("Café de manhã", "conversation/telegram-1", day),
+      await session("Café de tarde", "conversation/telegram-1", day),
+      await session("Família", "conversation/telegram-2", day),
+      await session("Ontem", "conversation/telegram-1", ending),
+      // Not a conversation's own scope.
+      await session("Geral", "global", day),
     ];
     const backend = new FakeVaultBackend({ "README.md": "# Vault" });
     replaceBackendForTesting(backend);
@@ -538,17 +541,19 @@ describe("Vault Dream", () => {
     for (let i = 0; i < 9; i++) await runDurableObjectAlarm(stub);
     const summaries = asked.filter((text) => text.includes("BEGIN PAGES"));
     expect(summaries).toHaveLength(2);
+    // Abstracts and days take turns.
+    expect(asked[1]).toContain("BEGIN PAGES");
     // One conversation's day at a time: never mixed.
     expect(summaries.find((text) => text.includes("Família"))).not.toContain("Café");
-    expect(summaries.join()).not.toContain("Hoje");
+    expect(summaries.join()).not.toMatch(/Ontem|Geral/);
     expect(await rows(stub, "SELECT path, summary FROM dream_summaries ORDER BY path")).toEqual([
       {
         path: `conversations/telegram-1/sessions/${day.slice(0, 4)}/${day}.md`,
-        summary: "Falaram da família.",
+        summary: "Falaram de café.\n- Duas vezes.",
       },
       {
-        path: `memory/sessions/${day.slice(0, 4)}/${day}.md`,
-        summary: "Falaram de café.\n- Duas vezes.",
+        path: `conversations/telegram-2/sessions/${day.slice(0, 4)}/${day}.md`,
+        summary: "Falaram da família.",
       },
     ]);
     await runInDurableObject(stub, (_instance, state) => {
@@ -557,7 +562,7 @@ describe("Vault Dream", () => {
     await runDurableObjectAlarm(stub);
     await runDurableObjectAlarm(stub);
     const page = backend.files()[DREAM_PAGE_PATH] ?? "";
-    expect(page).toContain(`## ${day} · global`);
+    expect(page).toContain(`## ${day} · conversation/telegram-1`);
     expect(page).toContain("```text\nFalaram de café.\n- Duas vezes.\n```");
     const {
       [DREAM_PAGE_PATH]: _page,
@@ -569,7 +574,11 @@ describe("Vault Dream", () => {
 
     // A new page that day proposes the day again; nothing else does.
     const before = asked.length;
-    await stub.write("kelpie", [await session("Café de noite", "global", day)], "x");
+    await stub.write(
+      "kelpie",
+      [await session("Café de noite", "conversation/telegram-1", day)],
+      "x",
+    );
     await runDurableObjectAlarm(stub);
     await quiet(stub);
     for (let i = 0; i < 6; i++) await runDurableObjectAlarm(stub);
@@ -580,8 +589,116 @@ describe("Vault Dream", () => {
     // Forgetting a page forgets the day's summary.
     expect(await stub.forget([pages[2]?.path ?? ""])).toMatchObject({ ok: true });
     expect(
-      await rows(stub, "SELECT path FROM dream_summaries WHERE path LIKE 'conversations/%'"),
-    ).toEqual([]);
+      await rows(
+        stub,
+        "SELECT path FROM dream_summaries WHERE path LIKE 'conversations/telegram-2/%'",
+      ),
+    ).toHaveLength(0);
+
+    // The owner rewrites a page the summary read: the summary goes at the next report.
+    backend.push({ [pages[0]?.path ?? ""]: "# Café de manhã\n\nReescrita.\n" });
+    await runDurableObjectAlarm(stub);
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec("UPDATE state SET value = '0' WHERE key = 'lifecycle_after'");
+    });
+    await runDurableObjectAlarm(stub);
+    expect(await rows(stub, "SELECT path FROM dream_summaries")).toEqual([]);
+  });
+
+  it("forgets its day summaries and their page when the owner turns it off", async () => {
+    const page = await kelpieNote({
+      kind: "session",
+      title: "Café",
+      scope: "conversation/telegram-1",
+      date: daysAgo(2).slice(0, 10),
+      body: "- **10:00 u-owner:** café",
+    });
+    const backend = new FakeVaultBackend({ "README.md": "# Vault" });
+    replaceBackendForTesting(backend);
+    fakeModelBy((request) =>
+      request.system.includes("sum up one day")
+        ? JSON.stringify({ summary: "Falaram de café." })
+        : abstract("Café."),
+    );
+    const stub = vault("dream-summaries-off");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", [page], "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    // The page's abstract, then its day.
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec("UPDATE state SET value = '0' WHERE key = 'lifecycle_after'");
+    });
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()[DREAM_PAGE_PATH]).toContain("Falaram de café.");
+
+    await stub.setDream("off");
+    expect(await rows(stub, "SELECT path FROM dream_summaries")).toEqual([]);
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()[DREAM_PAGE_PATH]).toBeUndefined();
+  });
+
+  it("keeps nothing from a call once its pages or Dream's mode changed under it", async () => {
+    const session = await kelpieNote({
+      kind: "session",
+      title: "Café",
+      scope: "conversation/telegram-1",
+      date: daysAgo(2).slice(0, 10),
+      body: "- **10:00 u-owner:** café",
+    });
+    /** Steps on a fresh vault until the call `target` names, with `during` run while it answers. */
+    const run = async (
+      name: string,
+      note: { path: string; content: string },
+      target: "abstract" | "summary",
+      during: (sql: SqlStorage, path: string) => void,
+    ) => {
+      replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
+      const stub = vault(name);
+      await stub.compile("kelpie");
+      await stub.write("kelpie", [note], "x");
+      await runDurableObjectAlarm(stub);
+      let sql: SqlStorage | undefined;
+      await runInDurableObject(stub, (_instance, state) => {
+        sql = state.storage.sql;
+      });
+      const requests = fakeModelBy((request) => {
+        const summary = request.system.includes("sum up one day");
+        if (summary === (target === "summary") && sql !== undefined) during(sql, note.path);
+        return summary ? JSON.stringify({ summary: "Falaram de café." }) : abstract("Café.");
+      });
+      await quiet(stub);
+      // A session page's abstract comes first; its day takes the next turn.
+      const steps = target === "summary" ? 2 : 1;
+      for (let i = 0; i < steps; i++) await runDurableObjectAlarm(stub);
+      expect(requests.map((request) => request.system.includes("sum up one day"))).toEqual(
+        target === "summary" ? [false, true] : [false],
+      );
+      return stub;
+    };
+    // The owner's push lands, or the owner turns Dream off, while the model answers.
+    const rewrite = (sql: SqlStorage, path: string) =>
+      sql.exec("UPDATE files SET blob_sha = 'rewritten' WHERE path = ?", path);
+    const off = (sql: SqlStorage) =>
+      sql.exec("INSERT OR REPLACE INTO state (key, value) VALUES ('dream_mode', 'off')");
+    for (const [name, during] of [
+      ["dream-summary-rewritten", rewrite],
+      ["dream-summary-off", off],
+    ] as const) {
+      const stub = await run(name, session, "summary", during);
+      expect(await rows(stub, "SELECT path FROM dream_summaries")).toEqual([]);
+    }
+    const stub = await run(
+      "dream-abstract-off",
+      await kelpieNote({ title: "Café" }),
+      "abstract",
+      off,
+    );
+    expect(await rows(stub, "SELECT path FROM dream_proposals")).toEqual([]);
   });
 
   it("lets only known operations write, and forgets them when turned off", async () => {

@@ -9,6 +9,7 @@ import {
   dreamPage,
   foldKey,
   instantOf,
+  isDate,
   isScope,
   LIFECYCLE_REPORT_PATH,
   lifecycleFindings,
@@ -817,8 +818,7 @@ export class Vault extends DurableObject<VaultEnv> {
       }
     }
     const note = this.#dreamCandidate(now);
-    // Abstracts first; then a day to sum up (#112).
-    const day = note === null ? this.#summaryCandidate(now) : null;
+    const day = this.#summaryCandidate(now);
     if (run === undefined) {
       if (note === null && day === null) {
         // Nothing to do: look again after another quiet spell, not on every wake.
@@ -833,9 +833,11 @@ export class Vault extends DurableObject<VaultEnv> {
       run = { id: id ?? 0, started_at: now, calls: 0, usage: "[]" };
     }
     if (run.calls >= DREAM_MAX_CALLS) return this.#endDream(run.id, "done");
-    if (note === null) {
-      return day === null ? this.#endDream(run.id, "done") : this.#summarize(gateway, run, day);
+    // The operations take turns, so many session pages' abstracts can't keep the days waiting.
+    if (day !== null && (note === null || run.calls % 2 === 1)) {
+      return this.#summarize(gateway, run, day);
     }
+    if (note === null) return this.#endDream(run.id, "done");
     if (note.abstract !== undefined) {
       // Proposed while dry, and now let write: no model call.
       await this.#writeAbstract(note, note.abstract);
@@ -856,13 +858,16 @@ export class Vault extends DurableObject<VaultEnv> {
       // Kept with the version it was made from: a later version is a note to propose for again.
       // A failure is kept as no answer too, so one note can't fail every run; an outage costs it
       // this version's proposal.
-      this.#exec(
-        "INSERT OR REPLACE INTO dream_proposals (path, blob_sha, abstract, at) VALUES (?, ?, ?, ?)",
-        note.path,
-        note.blobSha,
-        proposedAbstract,
-        Date.now(),
-      );
+      // Turned off during the call: nothing is kept.
+      if (this.#get("dream_mode") !== "off") {
+        this.#exec(
+          "INSERT OR REPLACE INTO dream_proposals (path, blob_sha, abstract, at) VALUES (?, ?, ?, ?)",
+          note.path,
+          note.blobSha,
+          proposedAbstract,
+          Date.now(),
+        );
+      }
       this.#exec(
         "UPDATE dream_runs SET calls = calls + 1, usage = ? WHERE id = ?",
         JSON.stringify(usage),
@@ -1009,14 +1014,18 @@ export class Vault extends DurableObject<VaultEnv> {
    * these pages' versions already. One conversation's day at a time, so two are never mixed (#131).
    */
   #summaryCandidate(now: number): DayCandidate | null {
-    const today = new Date(now).toISOString().slice(0, 10);
+    // A page is named by its conversation's local date: that day has ended in every time zone
+    // once UTC is 14 hours past the next midnight.
+    const ended = new Date(now - 14 * 60 * 60_000).toISOString().slice(0, 10);
     const oldest = new Date(now - DREAM_LOOKBACK_MS).toISOString().slice(0, 10);
     const days = new Map<string, { date: string; pages: { path: string; blobSha: string }[] }>();
     for (const note of this.#memory.lifecycleNotes()) {
-      if (note.kind !== "session" || !isScope(note.scope)) continue;
+      // A conversation's own scope: where its session pages go, one conversation each (#131).
+      if (note.kind !== "session" || !note.scope.startsWith("conversation/")) continue;
+      if (!isScope(note.scope)) continue;
       // A session page's date leads its name; a day summary's name is the date alone.
       const date = /\/sessions\/\d{4}\/(\d{4}-\d{2}-\d{2})-[^/]+\.md$/.exec(note.path)?.[1];
-      if (date === undefined || date >= today || date < oldest) continue;
+      if (date === undefined || !isDate(date) || date >= ended || date < oldest) continue;
       const path = summaryPath(note.scope, date);
       const day = days.get(path) ?? { date, pages: [] };
       day.pages.push({ path: note.path, blobSha: note.blobSha });
@@ -1032,18 +1041,44 @@ export class Vault extends DurableObject<VaultEnv> {
     );
     for (const [path, day] of newest) {
       if (this.#visible(path) !== null) continue;
-      const children = day.pages.sort((a, b) => (a.path < b.path ? -1 : 1));
+      const children = day.pages
+        .sort((a, b) => (a.path < b.path ? -1 : 1))
+        .flatMap((page) => {
+          const version = this.#memory.current(page.path);
+          return version === null
+            ? []
+            : [
+                {
+                  path: page.path,
+                  blobSha: page.blobSha,
+                  title: version.title,
+                  body: version.body,
+                },
+              ];
+        });
       const key = children.map((page) => page.blobSha).join(",");
-      if (proposed.get(path) === key) continue;
-      const pages = children.flatMap((page) => {
-        const version = this.#memory.current(page.path);
-        return version === null
-          ? []
-          : [{ path: page.path, title: version.title, body: version.body }];
-      });
-      if (pages.length > 0) return { path, date: day.date, key, pages };
+      if (children.length === 0 || proposed.get(path) === key) continue;
+      return {
+        path,
+        date: day.date,
+        key,
+        pages: children.map(({ path, title, body }) => ({ path, title, body })),
+      };
     }
     return null;
+  }
+
+  /** Whether a day summary's pages are all in the vault, at the versions it read (#112). */
+  #summaryCurrent(sources: readonly string[], key: string): boolean {
+    const blobs = key.split(",");
+    return (
+      sources.length === blobs.length &&
+      sources.every(
+        (path, i) =>
+          this.#exec("SELECT 1 FROM files WHERE path = ? AND blob_sha = ?", path, blobs[i] ?? "")
+            .length > 0,
+      )
+    );
   }
 
   /**
@@ -1062,19 +1097,22 @@ export class Vault extends DurableObject<VaultEnv> {
       console.error("Vault: a Dream step failed", errorName(error));
     }
     const used = proposed?.usage ?? [];
-    // A model wrote it: secrets go, as they go from what the agent saves.
-    const summary = proposed?.summary == null ? null : sanitizeSecrets(proposed.summary).text;
+    const summary = proposed?.summary ?? null;
     const usage = [...(JSON.parse(run.usage) as unknown[]), ...used];
+    const sources = day.pages.map((page) => page.path);
     this.ctx.storage.transactionSync(() => {
-      // A failure is kept as no answer too, so one day can't fail every run.
-      this.#exec(
-        "INSERT OR REPLACE INTO dream_summaries (path, key, summary, sources, at) VALUES (?, ?, ?, ?, ?)",
-        day.path,
-        day.key,
-        summary,
-        JSON.stringify(day.pages.map((page) => page.path)),
-        Date.now(),
-      );
+      // A failure is kept as no answer too, so one day can't fail every run. A page forgotten or
+      // changed during the call leaves nothing behind: the summary read what's gone.
+      if (this.#get("dream_mode") !== "off" && this.#summaryCurrent(sources, day.key)) {
+        this.#exec(
+          "INSERT OR REPLACE INTO dream_summaries (path, key, summary, sources, at) VALUES (?, ?, ?, ?, ?)",
+          day.path,
+          day.key,
+          summary,
+          JSON.stringify(sources),
+          Date.now(),
+        );
+      }
       this.#exec(
         "UPDATE dream_runs SET calls = calls + 1, usage = ? WHERE id = ?",
         JSON.stringify(usage),
@@ -1410,38 +1448,49 @@ export class Vault extends DurableObject<VaultEnv> {
                  JOIN files f ON f.path = w.path AND f.blob_sha = w.blob_sha ORDER BY w.path`,
               ).map((row) => ({ ...row, written: true })),
             ];
-      // Dream's day summaries while dry (#112): their own page, as they span lines. A summary the
-      // vault now holds, or one long past, goes.
-      this.#exec(
-        `DELETE FROM dream_summaries WHERE at < ?
-           OR EXISTS (SELECT 1 FROM files f WHERE f.path = dream_summaries.path)`,
-        now - 2 * DREAM_LOOKBACK_MS,
-      );
-      const page =
-        this.#get("dream_mode") === "off"
-          ? null
-          : dreamPage(
-              this.#exec<{ path: string; summary: string; sources: string }>(
-                "SELECT path, summary, sources FROM dream_summaries WHERE summary IS NOT NULL",
-              ).map((row) => ({
-                date: row.path.slice(row.path.lastIndexOf("/") + 1, -".md".length),
-                scope: placeOf(row.path)?.scope ?? "",
-                sources: (JSON.parse(row.sources) as string[]).map((path) => ({
-                  path,
-                  title: this.#memory.current(path)?.title ?? path,
-                })),
-                summary: row.summary,
-              })),
-            );
-      if (page !== this.#visible(DREAM_PAGE_PATH)) {
+      try {
+        // Dream's day summaries while dry (#112): their own page, as they span lines. A summary the
+        // vault now holds, or one long past, goes.
         this.#exec(
-          "INSERT INTO queue (agent, path, content, summary, queued_at) VALUES (?, ?, ?, ?, ?)",
-          SYSTEM_AGENT,
-          DREAM_PAGE_PATH,
-          page,
-          "Update Dream's day summaries",
-          now,
+          `DELETE FROM dream_summaries WHERE at < ?
+             OR EXISTS (SELECT 1 FROM files f WHERE f.path = dream_summaries.path)`,
+          now - 2 * DREAM_LOOKBACK_MS,
         );
+        for (const row of this.#exec<{ path: string; key: string; sources: string }>(
+          "SELECT path, key, sources FROM dream_summaries",
+        )) {
+          if (!this.#summaryCurrent(JSON.parse(row.sources) as string[], row.key)) {
+            this.#exec("DELETE FROM dream_summaries WHERE path = ?", row.path);
+          }
+        }
+        const page =
+          this.#get("dream_mode") === "off"
+            ? null
+            : dreamPage(
+                this.#exec<{ path: string; summary: string; sources: string }>(
+                  "SELECT path, summary, sources FROM dream_summaries WHERE summary IS NOT NULL",
+                ).map((row) => ({
+                  date: row.path.slice(row.path.lastIndexOf("/") + 1, -".md".length),
+                  scope: placeOf(row.path)?.scope ?? "",
+                  sources: (JSON.parse(row.sources) as string[]).map((path) => ({
+                    path,
+                    title: this.#memory.current(path)?.title ?? path,
+                  })),
+                  summary: row.summary,
+                })),
+              );
+        if (page !== this.#visible(DREAM_PAGE_PATH)) {
+          this.#exec(
+            "INSERT INTO queue (agent, path, content, summary, queued_at) VALUES (?, ?, ?, ?, ?)",
+            SYSTEM_AGENT,
+            DREAM_PAGE_PATH,
+            page,
+            "Update Dream's day summaries",
+            now,
+          );
+        }
+      } catch (error) {
+        console.error("Vault: Dream's page failed", errorName(error));
       }
       const report = lifecycleReport(
         lifecycleFindings(this.#memory, {
@@ -2047,7 +2096,7 @@ export class Vault extends DurableObject<VaultEnv> {
    * Kelpie's own report isn't listed.
    */
   #recordOwnerChange(path: string, removed: boolean, at: number): void {
-    if (path === LIFECYCLE_REPORT_PATH) return;
+    if (path === LIFECYCLE_REPORT_PATH || path === DREAM_PAGE_PATH) return;
     this.#exec(
       `INSERT INTO owner_changes (path, at, removed)
        SELECT f.path, ?, ? FROM files f LEFT JOIN authored a ON a.path = f.path
@@ -2265,7 +2314,8 @@ export class Vault extends DurableObject<VaultEnv> {
       if (
         overOwners &&
         queued[landed]?.summary !== RESOLVE_SUMMARY &&
-        path !== LIFECYCLE_REPORT_PATH
+        path !== LIFECYCLE_REPORT_PATH &&
+        path !== DREAM_PAGE_PATH
       ) {
         this.#exec(
           "INSERT INTO owner_changes (path, at, removed) VALUES (?, ?, ?)",

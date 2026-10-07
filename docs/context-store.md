@@ -202,7 +202,7 @@ Git keeps every version, so erasing content means rewriting the vault's history.
      - it syncs to the rewritten head;
      - it rebuilds memory's index from the vault as it is now, which drops every old version, of every file, with the vectors of content no version holds anymore;
      - it deletes the rows that name the paths in `queue`, `conflicts`, `held`, `proposals`, `recall_counts`, `authored`, `owner_changes`, `owner_merges`, `dream_proposals`, `dream_writes` and `dream_summaries`, and a day summary whose pages include a forgotten path;
-     - it drops a memory report still waiting in the queue or set aside in `conflicts`, and the next alarm writes the report again from what is left. That is within 15 minutes while GitHub answers.
+     - it drops a memory report or Dream's page still waiting in the queue or set aside in `conflicts`, and the next alarm writes them again from what is left. That is within 15 minutes while GitHub answers.
 
      It never touches git.
    - **Paths:** a path ending in `/` names a whole folder. Rows are matched by path, so a passage removed with `--replace-text` needs every file that held it named, or its folder.

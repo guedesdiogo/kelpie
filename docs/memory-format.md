@@ -452,20 +452,22 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
   - **After it:** the version Dream wrote stays Kelpie's (#126), and it isn't proposed for again. The report's "Dream wrote" section lists the last week's abstracts, shown as code.
   - **Measured first:** #108's evaluation doesn't regress with the cheap tier's abstracts ([memory-eval.md](spikes/memory-eval.md#dreams-abstracts-112)).
 - **Day summaries** (#112): a dry run for now. `summaries` can't be named in `writes` yet.
-  - **What a summary covers:** one day of one conversation. Two conversations are never mixed (#131). A day is summed up once it has ended, and only within the last 7 days.
+  - **What a summary covers:** one day of one conversation, from the session pages in that conversation's own scope (`conversation/…`). Two conversations are never mixed (#131). A day is summed up once it has ended in every time zone, which is 14 hours after the next UTC midnight, and only within the last 7 days.
+  - **Kept only while its pages are:** a summary is kept, and shown, only while every page it read is still in the vault at that version. A page that's forgotten, changed or removed takes the summary with it.
   - **Where it would go:** `<scope>/sessions/YYYY/YYYY-MM-DD.md`, next to the session pages, as a `session` note at `level: deduced`.
     - Its `sources` would name the session pages.
     - No session page can take that name, since theirs add a slug after the date.
   - **When it's proposed again:** the proposal is kept with the versions of the day's pages. A new page that day proposes it again, and nothing else does. A day whose summary the vault already shows isn't proposed.
-  - **The model:** the cheap tier, after abstracts, within the same 8 calls a run.
+  - **The model:** the cheap tier, within the same 8 calls a run. Abstracts and days take turns.
     - The day's pages share 12,000 characters of input.
-    - The answer must be JSON with one key, `summary`: plain lines within 2,000 characters, with no heading, frontmatter fence, conflict markers or line separators.
-    - Secrets are removed from it.
+    - The answer must be JSON with one key, `summary`.
+    - The summary must be plain lines within 2,000 characters, with no control characters but line breaks and no line separators.
+    - Secrets are removed from it next. It must then hold no heading, frontmatter fence or conflict markers.
   - **The page:** `memory/_lint/dream.md`, outside the index, lists each proposed summary.
     - Each summary is shown as code, fenced by more backticks than it holds in a row.
     - Newest day first, each with the pages it sums up.
     - It is written with the report, and removed when nothing is proposed.
-  - **Erasing:** forgetting a session page forgets its day's summary. Turning Dream off deletes the summaries too.
+  - **Erasing:** forgetting a session page forgets its day's summary. Turning Dream off deletes the summaries too, and the next report removes the page; the vault's git history still holds its earlier versions. A call that ends after Dream was turned off keeps nothing.
 - **Not yet:**
   - duplicates and contradictions;
   - roll-ups, and people and places;
