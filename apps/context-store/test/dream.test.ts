@@ -4,7 +4,7 @@ import { type LlmEvent, type RoutedRequest, toNdjsonStream } from "@kelpie/llm";
 import { LIFECYCLE_REPORT_PATH, type MemoryInput, memoryPath, writeMemory } from "@kelpie/memory";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
 import { afterEach, describe, expect, it } from "vitest";
-import { abstractOf, proposeAbstract } from "../src/dream.ts";
+import { proposeAbstract } from "../src/dream.ts";
 import {
   type MemoryGateway,
   replaceBackendForTesting,
@@ -14,27 +14,6 @@ import {
 afterEach(() => {
   replaceBackendForTesting(undefined);
   replaceGatewayForTesting(undefined);
-});
-
-describe("abstractOf", () => {
-  it("takes one line under one key, fenced or not", () => {
-    expect(abstractOf('{"abstract": "Conversa sobre café."}')).toBe("Conversa sobre café.");
-    expect(abstractOf('```json\n{"abstract": " Café. "}\n```')).toBe("Café.");
-  });
-
-  it.each([
-    ["not JSON", "Conversa sobre café."],
-    ["an array", '["Café."]'],
-    ["another key too", '{"abstract": "Café.", "why": "x"}'],
-    ["another key only", '{"summary": "Café."}'],
-    ["a number", '{"abstract": 42}'],
-    ["a blank line", '{"abstract": "  "}'],
-    ["two lines", '{"abstract": "Café.\\nChá."}'],
-    ["a bidirectional override", '{"abstract": "Café \\u202e."}'],
-    ["past the writer's limit", JSON.stringify({ abstract: "a".repeat(301) })],
-  ])("refuses %s", (_case, answer) => {
-    expect(abstractOf(answer)).toBeNull();
-  });
 });
 
 describe("proposeAbstract", () => {

@@ -1,0 +1,523 @@
+{
+  "model": "gpt-6-luna",
+  "seed": 107,
+  "size": 1000,
+  "abstracts": {
+    "areas/work/sessions/2026/2026-01-02-conversa-sobre-o-orcamento-do-cervejaria-serra-alta.md": {
+      "blob": "7683c39765edc35b91f3f708cf52cec3713f9b50",
+      "abstract": "Conversa sobre o orçamento da Cervejaria Serra Alta; ficou combinado enviar um resumo por e-mail."
+    },
+    "areas/work/sessions/2026/2026-01-13-conversa-sobre-o-aniversario-de-sergio-ramos.md": {
+      "blob": "385bb92e597e67e7771cdce8b59f4ceb561e001e",
+      "abstract": "Conversa sobre o aniversário de Sérgio Ramos: combinaram falar com Bruno antes e depois remarcaram o encontro para Petrópolis."
+    },
+    "areas/work/sessions/2026/2026-01-24-conversa-sobre-o-aniversario-de-debora-rocha.md": {
+      "blob": "906c408c862758b574120653b653ace4137c2da2",
+      "abstract": "Conversa sobre o aniversário de Débora Rocha; ficou combinado falar com Bruno antes."
+    },
+    "areas/work/sessions/2026/2026-01-31-conversa-sobre-a-renovacao-do-contrato-do-construtora-horizonte-sul.md": {
+      "blob": "13cade8d092d7811348bd1d29291a055bfc58cb8",
+      "abstract": "Registro da conversa sobre a renovação do contrato da Construtora Horizonte Sul, com o combinado de falar com Bruno antes."
+    },
+    "areas/work/sessions/2026/2026-02-01-conversa-sobre-o-cronograma-do-agencia-pixel.md": {
+      "blob": "4d83ca5e02b69258c87fcbba970ec804a9991359",
+      "abstract": "Conversa sobre o cronograma do Agência Pixel; ficou combinado enviar um resumo por e-mail."
+    },
+    "areas/work/sessions/2026/2026-02-01-conversa-sobre-o-orcamento-do-rede-farma-mais.md": {
+      "blob": "f1c4b3f22b3df90abc2371d243f9197739f433fb",
+      "abstract": "Nota registra conversa sobre o orçamento do Rede Farma Mais e o combinado de falar com Bruno antes."
+    },
+    "areas/work/sessions/2026/2026-02-08-conversa-sobre-um-curso-de-corrida-de-rua.md": {
+      "blob": "bd820535bdfb11c903c3c1e0f4863af4823af72c",
+      "abstract": "Conversa sobre um curso de corrida de rua; ficou combinado retomar o assunto na semana seguinte."
+    },
+    "areas/work/sessions/2026/2026-02-13-conversa-sobre-o-aniversario-de-marcio-martins.md": {
+      "blob": "574627b29cc41710266ef15b729907697048a49b",
+      "abstract": "Conversa sobre o aniversário de Márcio Martins; ficou combinado esperar uma resposta."
+    },
+    "areas/work/sessions/2026/2026-02-17-conversa-sobre-um-curso-de-culinaria-japonesa.md": {
+      "blob": "471a31eb454978340aeb449810c8249e6dc51a54",
+      "abstract": "Conversa sobre um curso de culinária japonesa; ficou combinado retomar o assunto na semana que vem."
+    },
+    "areas/work/sessions/2026/2026-02-26-conversa-sobre-a-renovacao-do-contrato-do-grupo-vertice.md": {
+      "blob": "e576e87bfcde7ebbd233c11588e2b67a6509524a",
+      "abstract": "Conversa sobre a renovação do contrato do Grupo Vértice; ficou combinado retomar o assunto na semana seguinte."
+    },
+    "areas/work/sessions/2026/2026-02-28-conversa-sobre-a-mudanca-de-alexandre-castro-para-natal.md": {
+      "blob": "409051d3f168d6afa0bb05bfc22ed4b36138ae2b",
+      "abstract": "Conversa sobre a mudança de Alexandre Castro para Natal; ficou combinado pesquisar preços."
+    },
+    "areas/work/sessions/2026/2026-03-01-conversa-sobre-o-orcamento-do-banco-regional.md": {
+      "blob": "e889624ce3ff23938796f5c113f9758199ad3897",
+      "abstract": "Conversa sobre o orçamento do Banco Regional; ficou combinado aguardar uma resposta."
+    },
+    "areas/work/sessions/2026/2026-03-04-conversa-sobre-o-orcamento-do-laboratorio-vida.md": {
+      "blob": "c54fa98bfce75e80473b1b5bd7ab8208cf7b84e9",
+      "abstract": "Conversa sobre o orçamento do Laboratório Vida; ficou combinado retomar na semana seguinte, e a conversa continua com Bruno Freitas."
+    },
+    "areas/work/sessions/2026/2026-03-11-conversa-sobre-um-jantar-no-pet-shop-mirante.md": {
+      "blob": "6dfbd9b22a30562556918f24fe00d2f4b943b4df",
+      "abstract": "Conversa sobre um jantar no Pet shop Mirante; ficou combinado pesquisar preços, e a conversa continua com Débora Sales."
+    },
+    "areas/work/sessions/2026/2026-03-20-conversa-sobre-a-reforma-da-cozinha-de-camila-tavares.md": {
+      "blob": "b39451319e0a3f31e451be1057de517f4c31ae20",
+      "abstract": "Conversa sobre a reforma da cozinha de Camila Tavares; ficou combinado enviar um resumo por e-mail."
+    },
+    "areas/work/sessions/2026/2026-03-20-conversa-sobre-a-reforma-da-cozinha-de-roberto-queiroz.md": {
+      "blob": "63c7be1d287b1f12989b74ab2d14515836f68ddf",
+      "abstract": "Conversa sobre a reforma da cozinha de Roberto Queiroz; ficou combinado retomar o assunto na semana seguinte."
+    },
+    "areas/work/sessions/2026/2026-03-21-conversa-sobre-o-orcamento-do-grupo-vertice.md": {
+      "blob": "1652123828fbe44da51850a7056a634364fbcf63",
+      "abstract": "Conversa sobre o orçamento do Grupo Vértice; ficou combinado enviar um resumo por e-mail."
+    },
+    "areas/work/sessions/2026/2026-04-03-conversa-sobre-a-reforma-da-cozinha-de-otavio-gomes.md": {
+      "blob": "f0758f8c76fc92a8d23be74e80672e703f4108f7",
+      "abstract": "Conversa sobre a reforma da cozinha de Otávio Gomes; ficou combinado falar com Bruno antes."
+    },
+    "areas/work/sessions/2026/2026-04-09-conversa-sobre-a-mudanca-de-claudia-oliveira-para-salvador.md": {
+      "blob": "589b739b54ed08a8f5711451aa348062d7fee323",
+      "abstract": "Conversa sobre a mudança de Cláudia Oliveira para Salvador; ficou combinado pesquisar preços."
+    },
+    "areas/work/sessions/2026/2026-04-10-alinhamento-com-a-carla.md": {
+      "blob": "b096f1f3042036e0abcb3aa9a13e023d21c1295a",
+      "abstract": "Reunião com Carla Mendes, gerente de projetos da Lima & Souza, sobre o cronograma das obras da Construtora Horizonte; ela enviará um resumo por escrito."
+    },
+    "areas/work/sessions/2026/2026-04-17-conversa-sobre-o-aniversario-de-isabela-xavier.md": {
+      "blob": "78fe7d23e967614b78b1d4f0b875268c62182144",
+      "abstract": "Conversa sobre o aniversário de Isabela Xavier; ficou combinado pesquisar preços."
+    },
+    "areas/work/sessions/2026/2026-05-08-conversa-sobre-o-orcamento-do-laboratorio-vida.md": {
+      "blob": "599f3a267a945b959ba8e086954176c5a9c8e5df",
+      "abstract": "Conversa sobre o orçamento do Laboratório Vida; ficou combinado aguardar a resposta."
+    },
+    "areas/work/sessions/2026/2026-05-09-conversa-sobre-o-orcamento-do-hotel-mirante.md": {
+      "blob": "e65d380b865879f91a816304d73b65fb36f388b7",
+      "abstract": "Conversa sobre o orçamento do Hotel Mirante; ficou combinado enviar um resumo por e-mail."
+    },
+    "areas/work/sessions/2026/2026-05-20-conversa-sobre-a-reforma-da-cozinha-de-julia-moreira.md": {
+      "blob": "1e348cced86f9f99c1439b14ad1b6590a1ccb991",
+      "abstract": "Conversa sobre a reforma da cozinha de Júlia Moreira; ficou combinado falar com Bruno antes."
+    },
+    "areas/work/sessions/2026/2026-05-26-conversa-sobre-um-curso-de-pesca.md": {
+      "blob": "4a8c509a790e61ab7419f6f2f83e9b81e1d77f68",
+      "abstract": "Nota sobre uma conversa a respeito de um curso de pesca; ficou combinado falar com Bruno antes."
+    },
+    "areas/work/sessions/2026/2026-06-06-conversa-sobre-a-reforma-da-cozinha-de-igor-melo.md": {
+      "blob": "0c309a88069a9106dfe83167e0bfccd622c2edb8",
+      "abstract": "Conversa sobre a reforma da cozinha de Igor Melo; ficou combinado esperar a resposta."
+    },
+    "areas/work/sessions/2026/2026-06-18-conversa-sobre-um-jantar-no-pousada-aurora.md": {
+      "blob": "949c441a01dceed060c358e783d5a7276bd84fec",
+      "abstract": "Nota sobre conversa a respeito de um jantar na Pousada Aurora; ficou combinado enviar um resumo por e-mail."
+    },
+    "areas/work/sessions/2026/2026-06-19-conversa-sobre-um-jantar-no-lavanderia-flor-de-lis.md": {
+      "blob": "8a4db6e395518b41c6d55c0aebae9df534cd22aa",
+      "abstract": "Conversa sobre um jantar no Lavanderia Flor de Lis; ficou combinado retomar o assunto na semana seguinte."
+    },
+    "areas/work/sessions/2026/2026-06-20-conversa-sobre-o-aniversario-de-tatiane-queiroz.md": {
+      "blob": "a67d1730f4f6143e2c3ac81186ff0c450cc2b7af",
+      "abstract": "Conversa sobre o aniversário de Tatiane Queiroz; ficou combinado enviar um resumo por e-mail."
+    },
+    "areas/work/sessions/2026/2026-06-22-conversa-sobre-o-orcamento-do-construtora-horizonte-sul.md": {
+      "blob": "3344570cd4ae8b5b60ccd73e90b3f68359dd0a8c",
+      "abstract": "Conversa sobre o orçamento da Construtora Horizonte Sul; ficou combinado aguardar uma resposta."
+    },
+    "areas/work/sessions/2026/2026-06-26-conversa-sobre-o-orcamento-do-editora-lumen.md": {
+      "blob": "b1126a13c7d4022126b025a49bf2381e5a1c35a9",
+      "abstract": "Conversa sobre o orçamento da Editora Lumen; ficou combinado falar com o Bruno antes."
+    },
+    "areas/work/sessions/2026/2026-06-27-conversa-sobre-a-reforma-da-cozinha-de-renata-campos.md": {
+      "blob": "35b0bf9be9844f0e39bda7afbf339582ca819970",
+      "abstract": "Conversa sobre a reforma da cozinha de Renata Campos; ficou combinado pesquisar preços."
+    },
+    "areas/work/sessions/2026/2026-07-10-conversa-sobre-a-reforma-da-cozinha-de-matheus-moura.md": {
+      "blob": "e4acb54fa1c365c17b92741ad89b1a494a03d435",
+      "abstract": "Conversa sobre a reforma da cozinha de Matheus Moura; ficou combinado retomar o assunto na semana que vem."
+    },
+    "areas/work/sessions/2026/2026-07-23-conversa-sobre-a-mudanca-de-patricia-duarte-para-vitoria.md": {
+      "blob": "92294e4ca6df0bb94903fce00305d87fcd57b594",
+      "abstract": "Conversa sobre a mudança de Patrícia Duarte para Vitória; ficou combinado falar com Bruno antes."
+    },
+    "areas/work/sessions/2026/2026-07-31-conversa-sobre-a-reforma-da-cozinha-de-lucia-pereira.md": {
+      "blob": "fced8723c949f3ca666c37243de031f971897b2f",
+      "abstract": "Conversa sobre a reforma da cozinha de Lúcia Pereira; ficou combinado falar com Bruno antes."
+    },
+    "areas/work/sessions/2026/2026-08-01-conversa-sobre-o-orcamento-do-editora-lumen.md": {
+      "blob": "afd9951912022b7da8782f30f751421164c7f27c",
+      "abstract": "Conversa sobre o orçamento do Editora Lumen; ficou combinado retomar o assunto na semana que vem."
+    },
+    "areas/work/sessions/2026/2026-08-13-conversa-sobre-o-aniversario-de-aline-melo.md": {
+      "blob": "2d30e813159965be40554d041a02ba8e1e9f6c5b",
+      "abstract": "Nota sobre conversa a respeito do aniversário de Aline Melo; ficou combinado retomar o assunto na semana seguinte."
+    },
+    "areas/work/sessions/2026/2026-08-14-conversa-sobre-a-renovacao-do-contrato-do-escola-aprender.md": {
+      "blob": "adf362aac58236b13744d873fa8d72854b1df848",
+      "abstract": "Conversa sobre a renovação do contrato do Escola Aprender; ficou combinado retomar o assunto na semana que vem."
+    },
+    "areas/work/sessions/2026/2026-08-15-conversa-sobre-o-orcamento-do-grupo-vertice.md": {
+      "blob": "0246aed00e83828e37d91a8f0efaf5e985ef4fc1",
+      "abstract": "Conversa sobre o orçamento do Grupo Vértice; ficou combinado enviar um resumo por e-mail."
+    },
+    "areas/work/sessions/2026/2026-08-23-conversa-sobre-o-aniversario-de-leonardo-nascimento.md": {
+      "blob": "9a16e1d81f06883f226b67fd8842271e5d946c98",
+      "abstract": "Conversa sobre o aniversário de Leonardo Nascimento; ficou combinado pesquisar preços."
+    },
+    "areas/work/sessions/2026/2026-08-24-conversa-sobre-o-aniversario-de-gabriel-dias.md": {
+      "blob": "e1a58f21e820e865287dce827b8d4368d0064b31",
+      "abstract": "Conversa sobre o aniversário de Gabriel Dias; ficou combinado retomar o assunto na semana que vem."
+    },
+    "areas/work/sessions/2026/2026-08-25-conversa-sobre-a-reforma-da-cozinha-de-wagner-costa.md": {
+      "blob": "5b67d5b2e149a8f72c1a1eae73811d6882736722",
+      "abstract": "Conversa sobre a reforma da cozinha de Wagner Costa; ficou combinado pesquisar preços."
+    },
+    "areas/work/sessions/2026/2026-08-25-conversa-sobre-a-renovacao-do-contrato-do-construtora-horizonte-sul.md": {
+      "blob": "f69c056d0d8440079e4033f9be1e65e30d7265d3",
+      "abstract": "Conversa sobre a renovação do contrato da Construtora Horizonte Sul; ficou combinado enviar um resumo por e-mail."
+    },
+    "areas/work/sessions/2026/2026-09-08-conversa-sobre-o-orcamento-do-escola-aprender.md": {
+      "blob": "3fbbb5a2485e398b0be01cd78069945d5b3cf9de",
+      "abstract": "Conversa sobre o orçamento do Escola Aprender; ficou combinado falar com Bruno antes."
+    },
+    "areas/work/sessions/2026/2026-09-09-conversa-sobre-a-renovacao-do-contrato-do-banco-regional.md": {
+      "blob": "04f6b41e835cde6dcd484858dead67855dc5a853",
+      "abstract": "Conversa sobre a renovação do contrato do Banco Regional: ficou combinado falar com Bruno antes; atualização informa que ele se mudou para Petrópolis."
+    },
+    "areas/work/sessions/2026/2026-09-23-conversa-sobre-um-curso-de-trilhas.md": {
+      "blob": "fdc4b53b716f8a862dd9e33b828fbac426eeba2d",
+      "abstract": "Nota sobre uma conversa a respeito de um curso de trilhas; combinaram retomá-la na semana que vem."
+    },
+    "areas/work/sessions/2026/2026-09-28-conversa-sobre-uma-viagem-a-recife.md": {
+      "blob": "d03898c860937524e06802135a6edd1b443101e2",
+      "abstract": "Conversa sobre uma viagem a Recife; ficou combinado enviar um resumo por e-mail."
+    },
+    "memory/sessions/2026/2026-01-11-conversa-sobre-o-orcamento-do-laboratorio-vida.md": {
+      "blob": "e0ec5ae0a7ef87353edb9e35035abe785020eb69",
+      "abstract": "Conversa sobre o orçamento do Laboratório Vida; ficou combinado falar com Bruno antes."
+    },
+    "memory/sessions/2026/2026-01-14-conversa-sobre-um-curso-de-vinhos.md": {
+      "blob": "af1a387dc9d48aebd544470ae5ff5b707bcb8a29",
+      "abstract": "Conversa sobre um curso de vinhos; ficou combinado enviar um resumo por e-mail."
+    },
+    "memory/sessions/2026/2026-01-26-conversa-sobre-uma-viagem-a-lisboa.md": {
+      "blob": "0e2e0a834d185c0724b535b231a26aac8eb79fbc",
+      "abstract": "Conversa sobre uma viagem a Lisboa; ficou combinado esperar a resposta."
+    },
+    "memory/sessions/2026/2026-01-28-conversa-sobre-a-reforma-da-cozinha-de-vanessa-melo.md": {
+      "blob": "9e7048b7f0e540df2f53be0bd1e939ba83af8098",
+      "abstract": "Conversa sobre a reforma da cozinha de Vanessa Melo; ficou combinado pesquisar preços."
+    },
+    "memory/sessions/2026/2026-01-30-conversa-sobre-a-renovacao-do-contrato-do-fazenda-boa-vista.md": {
+      "blob": "52facca832cb11639cdc6cf7d840dabe150c7522",
+      "abstract": "Conversa sobre a renovação do contrato do Fazenda Boa Vista; ficou combinado falar com Bruno antes."
+    },
+    "memory/sessions/2026/2026-01-31-conversa-sobre-o-cronograma-do-escola-aprender.md": {
+      "blob": "6bb5f85ae0a0a35f0c9c4abb470e8104cf37db66",
+      "abstract": "Conversa sobre o cronograma do Escola Aprender; ficou combinado enviar um resumo por e-mail."
+    },
+    "memory/sessions/2026/2026-02-03-conversa-sobre-o-aniversario-de-gabriel-melo.md": {
+      "blob": "e6021231e3af77abf897b75c32e14e321ee56cb8",
+      "abstract": "Conversa sobre o aniversário de Gabriel Melo: combinaram falar com Bruno antes; atualização informa que Gabriel agora trabalha no Grupo Vértice."
+    },
+    "memory/sessions/2026/2026-02-05-conversa-sobre-uma-viagem-a-porto.md": {
+      "blob": "5fba72bbfcc2b68a0b880faece5456383cc7f253",
+      "abstract": "Conversa sobre uma viagem ao Porto: combinaram falar primeiro com Bruno; atualização: ele mudou-se para Curitiba."
+    },
+    "memory/sessions/2026/2026-02-09-conversa-sobre-um-curso-de-surfe.md": {
+      "blob": "d33fd14efcd406177aed1139b7e943da7b8b230f",
+      "abstract": "Conversa sobre um curso de surfe; ficou combinado falar com Bruno antes."
+    },
+    "memory/sessions/2026/2026-02-13-conversa-sobre-uma-viagem-a-paraty.md": {
+      "blob": "469a9c297b59db8fb77cf3f8c3b0516a6c8e2bbf",
+      "abstract": "Conversa sobre uma viagem a Paraty; ficou combinado esperar a resposta."
+    },
+    "memory/sessions/2026/2026-02-14-conversa-sobre-a-reforma-da-cozinha-de-tatiane-santos.md": {
+      "blob": "6e6554d911bcd2d6ab3e2db5599970841fc6e2ee",
+      "abstract": "Conversa sobre a reforma da cozinha de Tatiane Santos; ficou combinado falar com Bruno antes."
+    },
+    "memory/sessions/2026/2026-02-16-conversa-sobre-a-reforma-da-cozinha-de-alexandre-rezende.md": {
+      "blob": "9df35e7d7d984bcad51251f519c060fce05d049a",
+      "abstract": "Conversa sobre a reforma da cozinha de Alexandre Rezende; ficou combinado aguardar uma resposta."
+    },
+    "memory/sessions/2026/2026-02-21-conversa-sobre-a-mudanca-de-sergio-rocha-para-madri.md": {
+      "blob": "c7ddc54073c4c838ded5734878a62148569e2556",
+      "abstract": "Conversa sobre a mudança de Sérgio Rocha para Madri; ficou combinado enviar um resumo por e-mail."
+    },
+    "memory/sessions/2026/2026-02-21-conversa-sobre-a-mudanca-de-simone-castro-para-florianopolis.md": {
+      "blob": "a65076165ccf8b46eeff6cc8327f9c35b5ee3d67",
+      "abstract": "Conversa sobre a mudança de Simone Castro para Florianópolis; ficou combinado pesquisar preços."
+    },
+    "memory/sessions/2026/2026-02-21-conversa-sobre-o-orcamento-do-clinica-sorriso.md": {
+      "blob": "a01a26cf167e51d79406769f65d15437bca32502",
+      "abstract": "Conversa sobre o orçamento do Clínica Sorriso; ficou combinado falar com o Bruno antes."
+    },
+    "memory/sessions/2026/2026-02-24-conversa-sobre-uma-viagem-a-madri.md": {
+      "blob": "712270c0821ca932f087a1cce79f952ae0abbb50",
+      "abstract": "Conversa sobre uma viagem a Madri; ficou combinado pesquisar preços."
+    },
+    "memory/sessions/2026/2026-03-01-conversa-sobre-um-jantar-no-mercado-oliveira.md": {
+      "blob": "bef08719d83a403a2793b1c610a5b6976ceab4b5",
+      "abstract": "Conversa sobre um jantar no Mercado Oliveira; ficou combinado esperar uma resposta."
+    },
+    "memory/sessions/2026/2026-03-01-conversa-sobre-um-jantar-no-restaurante-oliveira.md": {
+      "blob": "c45b2711cce05b3bd85890cdfdddfbf0dc9843cb",
+      "abstract": "Conversa sobre um jantar no Restaurante Oliveira; ficou combinado falar com Bruno antes."
+    },
+    "memory/sessions/2026/2026-03-03-conversa-sobre-a-mudanca-de-alexandre-brandao-para-ribeirao-preto.md": {
+      "blob": "cd47103942a03f7681ff2bc8cf717a582544eb4f",
+      "abstract": "Conversa sobre a mudança de Alexandre Brandão para Ribeirão Preto; ficou combinado retomar o assunto na semana que vem."
+    },
+    "memory/sessions/2026/2026-03-03-conversa-sobre-um-jantar-no-restaurante-flor-de-lis.md": {
+      "blob": "3ff66f8d585ca783c70992b0013a74c50ed31c66",
+      "abstract": "Nota sobre conversa a respeito de um jantar no Restaurante Flor de Lis; ficou combinado enviar um resumo por e-mail."
+    },
+    "memory/sessions/2026/2026-03-03-vazamento-no-apartamento.md": {
+      "blob": "a89594299bd9dbd7b0f8abc7bbddb9520e965789",
+      "abstract": "Conversa sobre o vazamento no banheiro do apartamento na Vila Mariana: o síndico Arnaldo chamará o encanador na quinta, e Rafael deixará a chave na portaria."
+    },
+    "memory/sessions/2026/2026-03-05-conversa-sobre-a-renovacao-do-contrato-do-construtora-horizonte-sul.md": {
+      "blob": "7ebf53d1f53d17697577713a31dea49ca1fd7d84",
+      "abstract": "Conversa sobre a renovação do contrato da Construtora Horizonte Sul; ficou combinado aguardar uma resposta."
+    },
+    "memory/sessions/2026/2026-03-11-conversa-sobre-um-jantar-no-livraria-ipe.md": {
+      "blob": "0b31d383f7fe0179d67603a9f67e53f875e616fd",
+      "abstract": "Conversa sobre um jantar no Livraria Ipê; ficou combinado retomar o assunto na semana que vem."
+    },
+    "memory/sessions/2026/2026-03-14-ligacao-de-aniversario-da-ana.md": {
+      "blob": "de08f288326699168d4479f493fd3a45b4e40471",
+      "abstract": "Rafael ligou para Ana em Lisboa no aniversário dela; ela contou que a agência de branding está crescendo e que pretende ficar em Lisboa por mais alguns anos."
+    },
+    "memory/sessions/2026/2026-03-15-conversa-sobre-o-orcamento-do-mercado-boa-praca.md": {
+      "blob": "e4f716bedebbade1e10f144b514453212319cc01",
+      "abstract": "Conversa sobre o orçamento do Mercado Boa Praça; ficou combinado retomar o assunto na semana que vem."
+    },
+    "memory/sessions/2026/2026-03-17-conversa-sobre-o-cronograma-do-laboratorio-vida.md": {
+      "blob": "3062b53761988aea44c294d96f236fec6b29773e",
+      "abstract": "Conversa sobre o cronograma do Laboratório Vida; ficou combinado enviar um resumo por e-mail."
+    },
+    "memory/sessions/2026/2026-03-18-conversa-sobre-a-mudanca-de-bianca-tavares-para-berlim.md": {
+      "blob": "ca0a72b036a308f0a9b3d0083eca78c1f37b514b",
+      "abstract": "Conversa sobre a mudança de Bianca Tavares para Berlim; ficou combinado retomar o assunto na semana que vem."
+    },
+    "memory/sessions/2026/2026-03-19-conversa-sobre-a-renovacao-do-contrato-do-rede-farma-mais.md": {
+      "blob": "dd933b138ef9072a9b9d80cd2c2f11ab71cf6d21",
+      "abstract": "Conversa sobre a renovação do contrato do Rede Farma Mais; ficou combinado enviar um resumo por e-mail."
+    },
+    "memory/sessions/2026/2026-03-21-conversa-sobre-um-curso-de-yoga.md": {
+      "blob": "2bc64f963c9156f3e2f2a824697f70eddb38fb81",
+      "abstract": "Conversa sobre um curso de yoga; ficou combinado retomar o assunto na semana que vem."
+    },
+    "memory/sessions/2026/2026-03-24-conversa-sobre-o-cronograma-do-studio-forma.md": {
+      "blob": "e2b13be589efab48d5309ef76dd0c362bd33a6e8",
+      "abstract": "Conversa sobre o cronograma do Studio Forma; ficou combinado pesquisar preços."
+    },
+    "memory/sessions/2026/2026-03-27-conversa-sobre-a-reforma-da-cozinha-de-theo-guimaraes.md": {
+      "blob": "f5212077301771748a50007f2fc9650052abec5f",
+      "abstract": "Conversa sobre a reforma da cozinha de Theo Guimarães; ficou combinado retomar o assunto na semana que vem."
+    },
+    "memory/sessions/2026/2026-03-28-conversa-sobre-a-renovacao-do-contrato-do-cervejaria-serra-alta.md": {
+      "blob": "4913b7cdc30c1f89f348ecfb27c19ac74af77ecd",
+      "abstract": "Conversa sobre a renovação do contrato da Cervejaria Serra Alta; ficou combinado pesquisar preços."
+    },
+    "memory/sessions/2026/2026-03-28-conversa-sobre-o-aniversario-de-thiago-freitas.md": {
+      "blob": "1af190a444d06a78ea49988d4779aba296bf63d7",
+      "abstract": "Conversa sobre o aniversário de Thiago Freitas; ficou combinado retomar o assunto na semana que vem."
+    },
+    "memory/sessions/2026/2026-03-29-conversa-sobre-o-aniversario-de-otavio-lopes.md": {
+      "blob": "97714bfaaf448270793d95a6260a7b0183575bbf",
+      "abstract": "Conversa sobre o aniversário de Otávio Lopes; ficou combinado pesquisar preços."
+    },
+    "memory/sessions/2026/2026-04-07-conversa-sobre-a-mudanca-de-paulo-pereira-para-ribeirao-preto.md": {
+      "blob": "cd217f90c4f1c3e2e3961fdbf22cee6c7f295c0a",
+      "abstract": "Conversa sobre a mudança de Paulo Pereira para Ribeirão Preto; ficou combinado enviar um resumo por e-mail."
+    },
+    "memory/sessions/2026/2026-04-07-dor-no-joelho-depois-da-corrida.md": {
+      "blob": "3d6f5a4a5aa7195abe56ee42cd83224eee6b8bd2",
+      "abstract": "Rafael sentiu dor no joelho esquerdo após correr 10 km no Ibirapuera; decidiu voltar aos 8 km e procurar um fisioterapeuta se a dor continuar."
+    },
+    "memory/sessions/2026/2026-04-11-conversa-sobre-uma-viagem-a-londres.md": {
+      "blob": "93a516b614b69f73ced7da789a392df7b46a8889",
+      "abstract": "Conversa sobre uma viagem a Londres; ficou combinado esperar a resposta."
+    },
+    "memory/sessions/2026/2026-04-17-conversa-sobre-o-orcamento-do-escola-aprender.md": {
+      "blob": "67dd0879715b6ac15f3be2ae212630bb9acd0223",
+      "abstract": "Conversa sobre o orçamento do Escola Aprender; ficou combinado enviar um resumo por e-mail e o encontro foi remarcado para Toronto."
+    },
+    "memory/sessions/2026/2026-04-19-conversa-sobre-uma-viagem-a-paraty.md": {
+      "blob": "0bdf90156beb1c608e9dd98fb4dd046ad9c8e44a",
+      "abstract": "Conversa sobre uma viagem a Paraty; ficou combinado esperar a resposta."
+    },
+    "memory/sessions/2026/2026-04-26-churrasco-na-casa-do-bruno.md": {
+      "blob": "626478f81b0927e1cee2e063147b813a9e4680ec",
+      "abstract": "Nota sobre o churrasco de domingo na casa de Bruno e Patrícia: Rafael elogiou a picanha e levará a sobremesa na próxima vez."
+    },
+    "memory/sessions/2026/2026-05-03-conversa-sobre-um-jantar-no-hotel-ipe.md": {
+      "blob": "c8d4778972205136330fbc4aa2afb698434db5b9",
+      "abstract": "Conversa sobre um jantar no Hotel Ipê; ficou combinado retomar o assunto na semana que vem."
+    },
+    "memory/sessions/2026/2026-05-05-conversa-sobre-o-aniversario-de-gustavo-pereira.md": {
+      "blob": "ead4c04f35c489298623a4791ac401eadc547f86",
+      "abstract": "Conversa sobre o aniversário de Gustavo Pereira; ficou combinado retomar o assunto na semana que vem."
+    },
+    "memory/sessions/2026/2026-05-10-conversa-sobre-um-jantar-no-padaria-sabia.md": {
+      "blob": "16054b40335f6b3b0af9b9584a4295041bec631f",
+      "abstract": "Conversa sobre um jantar na Padaria Sabiá; ficou combinado falar com Bruno antes."
+    },
+    "memory/sessions/2026/2026-05-16-conversa-sobre-a-renovacao-do-contrato-do-cervejaria-serra-alta.md": {
+      "blob": "f8c0dfa19a703a2043d02d517a1ad8a7a13a725d",
+      "abstract": "Conversa sobre a renovação do contrato da Cervejaria Serra Alta; ficou combinado pesquisar preços."
+    },
+    "memory/sessions/2026/2026-05-20-conversa-sobre-uma-viagem-a-curitiba.md": {
+      "blob": "f9294f46564e6aad333c967bc84c427940228eae",
+      "abstract": "Registro de uma conversa sobre uma viagem a Curitiba, na qual ficou combinado esperar a resposta."
+    },
+    "memory/sessions/2026/2026-05-22-conversa-sobre-a-reforma-da-cozinha-de-sabrina-campos.md": {
+      "blob": "03ac506214d340bde3081c6a0facec6263fa592f",
+      "abstract": "Conversa sobre a reforma da cozinha de Sabrina Campos; combinaram enviar um resumo por e-mail e remarcaram o encontro para Berlim."
+    },
+    "memory/sessions/2026/2026-05-24-conversa-sobre-o-cronograma-do-construtora-atlantica.md": {
+      "blob": "ed615f368bad7fa5c76d6f0a66c62a4b8ee275c2",
+      "abstract": "Conversa sobre o cronograma do Construtora Atlântica; ficou combinado retomar o assunto na semana que vem."
+    },
+    "memory/sessions/2026/2026-05-25-conversa-sobre-um-jantar-no-lavanderia-girassol.md": {
+      "blob": "d0da5a7e71be1c651482155e854a6f575f783164",
+      "abstract": "Conversa sobre um jantar no Lavanderia Girassol; ficou combinado esperar a resposta."
+    },
+    "memory/sessions/2026/2026-05-29-conversa-sobre-o-cronograma-do-agencia-pixel.md": {
+      "blob": "279f8754faf8e6c81981eeae9bd095cf91675fb4",
+      "abstract": "Conversa sobre o cronograma do Agência Pixel; ficou combinado aguardar uma resposta."
+    },
+    "memory/sessions/2026/2026-05-31-conversa-sobre-um-curso-de-mpb.md": {
+      "blob": "a060b4377a4223e93137f98b296694aacfe3bc0a",
+      "abstract": "Conversa sobre um curso de MPB; ficou combinado enviar um resumo por e-mail."
+    },
+    "memory/sessions/2026/2026-06-01-conversa-sobre-a-reforma-da-cozinha-de-simone-moura.md": {
+      "blob": "18c736729f4dbded76e2d185a2b6dbb7f363c1c5",
+      "abstract": "Conversa sobre a reforma da cozinha de Simone Moura; ficou combinado enviar um resumo por e-mail."
+    },
+    "memory/sessions/2026/2026-06-02-conversa-sobre-a-mudanca-de-sergio-melo-para-londrina.md": {
+      "blob": "a762691dda2441a568b7cca820d4f1e8ba4771e8",
+      "abstract": "Conversa sobre a mudança de Sérgio Melo para Londrina; ficou combinado pesquisar preços."
+    },
+    "memory/sessions/2026/2026-06-02-conversa-sobre-um-jantar-no-mercado-horizonte.md": {
+      "blob": "94882da6ac1d96593480f82a4e126af9e5a2c470",
+      "abstract": "Nota sobre uma conversa a respeito de um jantar no Mercado Horizonte; ficou combinado esperar a resposta."
+    },
+    "memory/sessions/2026/2026-06-10-planejamento-das-ferias.md": {
+      "blob": "91d918f1efcbad8eafc599bf54650a58a223ffe2",
+      "abstract": "Planejamento das férias de dezembro: passagens para Lisboa de 10 a 24, hospedagem na casa da Ana e compra com milhas Smiles."
+    },
+    "memory/sessions/2026/2026-06-15-conversa-sobre-o-cronograma-do-laboratorio-vida.md": {
+      "blob": "7be8038093847517c211a25a2be2f520e93abd88",
+      "abstract": "Conversa sobre o cronograma do Laboratório Vida; ficou combinado pesquisar preços."
+    },
+    "memory/sessions/2026/2026-06-22-conversa-sobre-a-reforma-da-cozinha-de-priscila-soares.md": {
+      "blob": "de97aaf5c3c6bde66134c123f9aba868ccb6b0d7",
+      "abstract": "Conversa sobre a reforma da cozinha de Priscila Soares; ficou combinado falar com Bruno antes."
+    },
+    "memory/sessions/2026/2026-06-22-conversa-sobre-um-curso-de-fotografia.md": {
+      "blob": "db3b7c46cad1d3c4359067b21df1021c7bef1805",
+      "abstract": "Conversa sobre um curso de fotografia; ficou combinado retomar o assunto na semana que vem."
+    },
+    "memory/sessions/2026/2026-06-26-conversa-sobre-o-aniversario-de-mariana-santos.md": {
+      "blob": "9e372e8c28516a0c25af6054ccd1bca78e3c8aa5",
+      "abstract": "Conversa sobre o aniversário de Mariana Santos; ficou combinado pesquisar preços."
+    },
+    "memory/sessions/2026/2026-07-01-conversa-sobre-a-mudanca-de-marcio-martins-para-santos.md": {
+      "blob": "e48cb79db4c983a45beceaa0a861689033d61033",
+      "abstract": "Conversa sobre a mudança de Márcio Martins para Santos; ficou combinado enviar um resumo por e-mail."
+    },
+    "memory/sessions/2026/2026-07-01-conversa-sobre-o-aniversario-de-gisele-pinto.md": {
+      "blob": "874b877f77c681a808b11500fbfb272d81172c6a",
+      "abstract": "Conversa sobre o aniversário de Gisele Pinto; ficou combinado retomar o assunto na semana que vem."
+    },
+    "memory/sessions/2026/2026-07-05-conversa-sobre-o-cronograma-do-construtora-atlantica.md": {
+      "blob": "9c9dffc7a2252d4a348285cf8d6868a5d743bf81",
+      "abstract": "Registro de conversa sobre o cronograma da Construtora Atlântica; combinaram retomar o assunto na semana que vem."
+    },
+    "memory/sessions/2026/2026-07-16-conversa-sobre-uma-viagem-a-berlim.md": {
+      "blob": "c368bb818e7e806b074977801686a60b5f3aa513",
+      "abstract": "Nota sobre conversa a respeito de uma viagem a Berlim; ficou combinado pesquisar preços."
+    },
+    "memory/sessions/2026/2026-08-02-conversa-sobre-um-curso-de-pesca.md": {
+      "blob": "174690c63856996d7b7cb1647cd61b12454f88cf",
+      "abstract": "Conversa sobre um curso de pesca; ficou combinado enviar um resumo por e-mail."
+    },
+    "memory/sessions/2026/2026-08-07-conversa-sobre-o-cronograma-do-construtora-atlantica.md": {
+      "blob": "34faa911a403b3ee706d1a1bd1e33d8cb44ce13d",
+      "abstract": "Conversa sobre o cronograma da Construtora Atlântica; ficou combinado retomar o assunto na semana que vem."
+    },
+    "memory/sessions/2026/2026-08-15-conversa-sobre-um-curso-de-ciclismo.md": {
+      "blob": "da4b6182b004d110843b5613f8330c518d5b3a17",
+      "abstract": "Conversa sobre um curso de ciclismo; ficou combinado pesquisar preços."
+    },
+    "memory/sessions/2026/2026-08-16-conversa-sobre-um-curso-de-jazz.md": {
+      "blob": "71314cb05473c4ca7b3b45995c343d428b3cbd6e",
+      "abstract": "Conversa sobre um curso de jazz; ficou combinado pesquisar preços."
+    },
+    "memory/sessions/2026/2026-08-18-conversa-sobre-o-cronograma-do-studio-forma.md": {
+      "blob": "9601781125453a3d9f30b552cb4438446efda914",
+      "abstract": "Conversa sobre o cronograma do Studio Forma; ficou combinado aguardar uma resposta."
+    },
+    "memory/sessions/2026/2026-08-24-conversa-sobre-o-orcamento-do-studio-forma.md": {
+      "blob": "ccf0f1e971cdbcd9d640176955b7ac8a66eebb60",
+      "abstract": "Nota sobre conversa a respeito do orçamento do Studio Forma; ficou combinado falar com Bruno antes."
+    },
+    "memory/sessions/2026/2026-08-26-conversa-sobre-uma-viagem-a-florianopolis.md": {
+      "blob": "eea31df58b2fd483951eb3001d0b1c3df31d76d6",
+      "abstract": "Nota sobre uma conversa a respeito de uma viagem a Florianópolis; ficou combinado falar com Bruno antes."
+    },
+    "memory/sessions/2026/2026-08-31-conversa-sobre-um-curso-de-cinema-europeu.md": {
+      "blob": "bc6299d7d508c93ecbefd981190213046b63368f",
+      "abstract": "Conversa sobre um curso de cinema europeu; ficou combinado falar com Bruno antes."
+    },
+    "memory/sessions/2026/2026-09-02-conversa-sobre-a-mudanca-de-rodrigo-oliveira-para-toronto.md": {
+      "blob": "9fd8fea5d367eb58389147ad3e3955263365a41f",
+      "abstract": "Conversa sobre a mudança de Rodrigo Oliveira para Toronto; ficou combinado esperar a resposta."
+    },
+    "memory/sessions/2026/2026-09-02-conversa-sobre-a-renovacao-do-contrato-do-construtora-atlantica.md": {
+      "blob": "822925f76d272ce8ebb821cebfd1d31efdb934d6",
+      "abstract": "Conversa sobre a renovação do contrato da Construtora Atlântica; ficou combinado falar com Bruno antes."
+    },
+    "memory/sessions/2026/2026-09-02-conversa-sobre-o-cronograma-do-escola-aprender.md": {
+      "blob": "e271c789619474fa8d346f2177fd5fefe4bede66",
+      "abstract": "Conversa sobre o cronograma do Escola Aprender; ficou combinado aguardar uma resposta."
+    },
+    "memory/sessions/2026/2026-09-05-conversa-sobre-a-renovacao-do-contrato-do-laboratorio-vida.md": {
+      "blob": "d2e57fda8155ebe1e47d81cf42a4d2a7daf6eb8b",
+      "abstract": "Conversa sobre a renovação do contrato do Laboratório Vida; ficou combinado enviar um resumo por e-mail."
+    },
+    "memory/sessions/2026/2026-09-09-conversa-sobre-a-mudanca-de-paulo-brandao-para-manaus.md": {
+      "blob": "937142f3aaeff8666517d77b80acbfaa9e85a11f",
+      "abstract": "Conversa sobre a mudança de Paulo Brandão para Manaus; ficou combinado falar com Bruno antes."
+    },
+    "memory/sessions/2026/2026-09-09-conversa-sobre-o-cronograma-do-cervejaria-serra-alta.md": {
+      "blob": "9a1893e6c521ec4996f6b0021182b656497d3c4f",
+      "abstract": "Conversa sobre o cronograma da Cervejaria Serra Alta; ficou combinado pesquisar preços."
+    },
+    "memory/sessions/2026/2026-09-16-conversa-sobre-um-curso-de-escalada.md": {
+      "blob": "854fdfd24eef65a46311ec8e4817cfab9d269dbd",
+      "abstract": "Conversa sobre um curso de escalada; ficou combinado enviar um resumo por e-mail."
+    },
+    "memory/sessions/2026/2026-09-20-conversa-sobre-uma-viagem-a-ribeirao-preto.md": {
+      "blob": "da425a799d82a3e344bc2611127c2f84990d25c9",
+      "abstract": "Conversa sobre uma viagem a Ribeirão Preto; ficou combinado retomar o assunto na semana que vem."
+    },
+    "memory/sessions/2026/2026-09-22-conversa-sobre-a-reforma-da-cozinha-de-marcos-azevedo.md": {
+      "blob": "68fc3583b449f7ab95d40e5c54c32b4a7038b18c",
+      "abstract": "Conversa sobre a reforma da cozinha de Marcos Azevedo; ficou combinado retomar o assunto na semana que vem."
+    },
+    "memory/sessions/2026/2026-09-23-conversa-sobre-um-jantar-no-hotel-vitoria.md": {
+      "blob": "ed4cc4de48ab9f9222974cb7f0fc13320059a7ed",
+      "abstract": "Nota sobre a conversa a respeito de um jantar no Hotel Vitória; ficou combinado falar com o Bruno antes."
+    },
+    "memory/sessions/2026/2026-09-25-conversa-sobre-um-jantar-no-hotel-bom-gosto.md": {
+      "blob": "777346d6291e1832b7f08e139a6bad7c4b9fcb9c",
+      "abstract": "Conversa sobre um jantar no Hotel Bom Gosto; ficou combinado enviar um resumo por e-mail."
+    },
+    "memory/sessions/2026/2026-09-28-conversa-sobre-a-mudanca-de-vinicius-ramos-para-londres.md": {
+      "blob": "1eb6351ffe0fa76cd3fd5925917c89273904b3a4",
+      "abstract": "Conversa sobre a mudança de Vinícius Ramos para Londres; ficou combinado enviar um resumo por e-mail."
+    }
+  }
+}

@@ -1,3 +1,4 @@
+export { ABSTRACT_PROMPT, abstractInput, abstractOf } from "./abstract.ts";
 export { type Entity, foldKey, MAX_ENTITIES, normalizeEntities } from "./entities.ts";
 export { gitBlobSha } from "./hash.ts";
 export {
