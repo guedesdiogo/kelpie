@@ -107,8 +107,8 @@ export class ContextStoreAdmin
     return this.#vault().forget(paths);
   }
 
-  setDream(mode: "off" | "dry"): Promise<SetDreamResult> {
-    return this.#vault().setDream(mode);
+  setDream(mode: "off" | "dry", writes?: readonly string[]): Promise<SetDreamResult> {
+    return this.#vault().setDream(mode, writes);
   }
 }
 

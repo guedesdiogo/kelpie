@@ -1,10 +1,16 @@
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { type LlmEvent, type RoutedRequest, toNdjsonStream } from "@kelpie/llm";
-import { LIFECYCLE_REPORT_PATH, type MemoryInput, memoryPath, writeMemory } from "@kelpie/memory";
+import {
+  LIFECYCLE_REPORT_PATH,
+  type MemoryInput,
+  memoryPath,
+  withAbstract,
+  writeMemory,
+} from "@kelpie/memory";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
 import { afterEach, describe, expect, it } from "vitest";
-import { abstractOf, proposeAbstract } from "../src/dream.ts";
+import { proposeAbstract } from "../src/dream.ts";
 import {
   type MemoryGateway,
   replaceBackendForTesting,
@@ -14,27 +20,6 @@ import {
 afterEach(() => {
   replaceBackendForTesting(undefined);
   replaceGatewayForTesting(undefined);
-});
-
-describe("abstractOf", () => {
-  it("takes one line under one key, fenced or not", () => {
-    expect(abstractOf('{"abstract": "Conversa sobre café."}')).toBe("Conversa sobre café.");
-    expect(abstractOf('```json\n{"abstract": " Café. "}\n```')).toBe("Café.");
-  });
-
-  it.each([
-    ["not JSON", "Conversa sobre café."],
-    ["an array", '["Café."]'],
-    ["another key too", '{"abstract": "Café.", "why": "x"}'],
-    ["another key only", '{"summary": "Café."}'],
-    ["a number", '{"abstract": 42}'],
-    ["a blank line", '{"abstract": "  "}'],
-    ["two lines", '{"abstract": "Café.\\nChá."}'],
-    ["a bidirectional override", '{"abstract": "Café \\u202e."}'],
-    ["past the writer's limit", JSON.stringify({ abstract: "a".repeat(301) })],
-  ])("refuses %s", (_case, answer) => {
-    expect(abstractOf(answer)).toBeNull();
-  });
 });
 
 describe("proposeAbstract", () => {
@@ -251,11 +236,11 @@ describe("Vault Dream", () => {
     expect(requests).toHaveLength(2);
   });
 
-  it("leaves a fact the person stated alone", async () => {
+  it("leaves a fact the person stated alone, and keeps no secret a model wrote", async () => {
     const stated = await kelpieNote({ title: "Café", level: "explicit", confidence: 0.9 });
     const concluded = await kelpieNote({ title: "Chá" });
     replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
-    const requests = fakeModel([abstract("Chá.")]);
+    const requests = fakeModel([abstract(`Chá, e a senha Bearer ${"a".repeat(24)}`)]);
     const stub = vault("dream-stated");
     await stub.compile("kelpie");
     await stub.write("kelpie", [stated, concluded], "x");
@@ -265,6 +250,9 @@ describe("Vault Dream", () => {
     await runDurableObjectAlarm(stub);
     expect(requests).toHaveLength(1);
     expect(JSON.stringify(requests[0]?.request.messages)).toContain("Chá");
+    const [proposal] = await rows(stub, "SELECT abstract FROM dream_proposals");
+    expect(String(proposal?.abstract)).toContain("[REDACTED:bearer_token]");
+    expect(String(proposal?.abstract)).not.toContain("a".repeat(24));
   });
 
   it("never proposes for a version merged into the owner's edit (#160)", async () => {
@@ -342,7 +330,7 @@ describe("Vault Dream", () => {
         "INSERT INTO dream_proposals (path, blob_sha, abstract, at) VALUES ('memory/notes/x.md', 's', 'X.', 1)",
       );
     });
-    expect(await stub.setDream("off")).toEqual({ ok: true, mode: "off" });
+    expect(await stub.setDream("off")).toEqual({ ok: true, mode: "off", writes: [] });
     expect(await rows(stub, "SELECT path FROM dream_proposals")).toEqual([]);
     expect(await rows(stub, "SELECT value FROM state WHERE key = 'lifecycle_after'")).toEqual([
       { value: "0" },
@@ -352,10 +340,148 @@ describe("Vault Dream", () => {
     await quiet(stub);
     await runDurableObjectAlarm(stub);
     expect(requests).toHaveLength(0);
-    expect(await stub.setDream("dry")).toEqual({ ok: true, mode: "dry" });
+    expect(await stub.setDream("dry")).toEqual({ ok: true, mode: "dry", writes: [] });
     await quiet(stub);
     await runDurableObjectAlarm(stub);
     expect(requests).toHaveLength(1);
+  });
+
+  it("writes the abstracts the owner lets it write, once, and only the abstract", async () => {
+    const session = await kelpieNote({
+      kind: "session",
+      title: "Conversa sobre café",
+      date: "2026-10-06",
+      body: "- **10:00 u-owner:** quero café sem açúcar",
+      abstract: "quero café sem açúcar",
+    });
+    const backend = new FakeVaultBackend({ "README.md": "# Vault" });
+    replaceBackendForTesting(backend);
+    const requests = fakeModel([abstract("Conversa: café sem açúcar."), abstract("De novo.")]);
+    const stub = vault("dream-writes");
+    await stub.compile("kelpie");
+    expect(await stub.setDream("dry", ["abstracts"])).toEqual({
+      ok: true,
+      mode: "dry",
+      writes: ["abstracts"],
+    });
+    await stub.write("kelpie", [session], "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(requests).toHaveLength(1);
+    // Only the abstract changed, and the version is still Kelpie's (#126).
+    expect(backend.files()[session.path]).toBe(
+      withAbstract(session.content, "Conversa: café sem açúcar."),
+    );
+    expect(
+      await rows(
+        stub,
+        `SELECT count(*) AS n FROM files f JOIN authored a ON a.path = f.path AND a.blob_sha = f.blob_sha WHERE f.path = '${session.path}'`,
+      ),
+    ).toEqual([{ n: 1 }]);
+    // The version Dream wrote is no note to propose for again.
+    await quiet(stub);
+    await runDurableObjectAlarm(stub);
+    expect(requests).toHaveLength(1);
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    const report = backend.files()[LIFECYCLE_REPORT_PATH] ?? "";
+    expect(report).toContain("## Dream wrote");
+    expect(report).toContain("|Conversa sobre café]]: `Conversa: café sem açúcar.`");
+    expect(report).not.toContain("## Dream's plan");
+
+    // The owner edits the note: what Dream wrote there goes at the next report.
+    backend.push({ [session.path]: "# Conversa sobre café\n\nReescrita.\n" });
+    await runDurableObjectAlarm(stub);
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec("UPDATE state SET value = '0' WHERE key = 'lifecycle_after'");
+    });
+    await runDurableObjectAlarm(stub);
+    expect(await rows(stub, "SELECT path FROM dream_writes")).toEqual([]);
+  });
+
+  it("writes the plan the owner read once writes are on, without asking the model again", async () => {
+    const note = await kelpieNote({ title: "Café" });
+    const backend = new FakeVaultBackend({ "README.md": "# Vault" });
+    replaceBackendForTesting(backend);
+    const requests = fakeModel([abstract("Café, como a pessoa toma.")]);
+    const stub = vault("dream-writes-later");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", [note], "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(requests).toHaveLength(1);
+    expect(backend.files()[note.path]).toBe(note.content);
+
+    await stub.setDream("dry", ["abstracts"]);
+    await quiet(stub);
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(requests).toHaveLength(1);
+    expect(backend.files()[note.path]).toBe(
+      withAbstract(note.content, "Café, como a pessoa toma."),
+    );
+  });
+
+  it("never writes a plan made for a fact the person stated", async () => {
+    const stated = await kelpieNote({ title: "Café", level: "explicit", confidence: 0.9 });
+    const backend = new FakeVaultBackend({ "README.md": "# Vault" });
+    replaceBackendForTesting(backend);
+    const requests = fakeModel([]);
+    const stub = vault("dream-writes-stated");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", [stated], "x");
+    await runDurableObjectAlarm(stub);
+    // A proposal as an earlier Dream, without this rule, would have left it.
+    await runInDurableObject(stub, (_instance, state) => {
+      const blob = state.storage.sql
+        .exec<{ blob_sha: string }>("SELECT blob_sha FROM files WHERE path = ?", stated.path)
+        .one().blob_sha;
+      state.storage.sql.exec(
+        "INSERT INTO dream_proposals (path, blob_sha, abstract, at) VALUES (?, ?, 'Café.', 1)",
+        stated.path,
+        blob,
+      );
+    });
+    await stub.setDream("dry", ["abstracts"]);
+    await quiet(stub);
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(requests).toHaveLength(0);
+    expect(backend.files()[stated.path]).toBe(stated.content);
+  });
+
+  it("drops its write when the owner edits the note before it commits", async () => {
+    const note = await kelpieNote({ title: "Café" });
+    const backend = new FakeVaultBackend({ "README.md": "# Vault" });
+    replaceBackendForTesting(backend);
+    fakeModel([abstract("Café, como a pessoa toma.")]);
+    const stub = vault("dream-writes-owner");
+    await stub.compile("kelpie");
+    await stub.setDream("dry", ["abstracts"]);
+    await stub.write("kelpie", [note], "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    // The step queues the write; the owner's own abstract lands before the next flush.
+    await runDurableObjectAlarm(stub);
+    const owners = withAbstract(note.content, "Do jeito do dono.") ?? "";
+    backend.push({ [note.path]: owners });
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()[note.path]).toBe(owners);
+    expect(await rows(stub, "SELECT path FROM queue")).toEqual([]);
+    expect(await rows(stub, "SELECT path FROM owner_merges")).toEqual([]);
+  });
+
+  it("lets only known operations write, and forgets them when turned off", async () => {
+    replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
+    const stub = vault("dream-writes-switch");
+    expect(await stub.setDream("dry", ["summaries"])).toEqual({ ok: false, reason: "invalid" });
+    expect(await stub.setDream("dry", ["abstracts"])).toMatchObject({ writes: ["abstracts"] });
+    expect(await stub.setDream("off")).toEqual({ ok: true, mode: "off", writes: [] });
+    expect(await stub.setDream("dry")).toEqual({ ok: true, mode: "dry", writes: [] });
   });
 
   it("ends a run in progress when the owner turns Dream off", async () => {

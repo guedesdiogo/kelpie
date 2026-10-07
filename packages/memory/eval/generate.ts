@@ -416,7 +416,14 @@ function isoDate(ms: number): string {
 /** The seed the baseline was recorded with. */
 export const SEED = 107;
 
-export async function buildVault(size: number, seed = SEED): Promise<SyntheticVault> {
+export async function buildVault(
+  size: number,
+  seed = SEED,
+  options: {
+    /** Abstracts for session pages by path, as Dream would give them (#112). */
+    abstracts?: ReadonlyMap<string, string>;
+  } = {},
+): Promise<SyntheticVault> {
   if (size < GOLD_MEMORIES.length)
     throw new RangeError(`size must be at least ${GOLD_MEMORIES.length}`);
   const rand = random(seed);
@@ -483,6 +490,12 @@ export async function buildVault(size: number, seed = SEED): Promise<SyntheticVa
     }
   }
 
+  for (const item of planned) {
+    const abstract = options.abstracts?.get(item.path);
+    if (abstract !== undefined && item.input.kind === "session") {
+      item.input = { ...item.input, abstract };
+    }
+  }
   return assemble(planned);
 }
 

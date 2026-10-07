@@ -56,7 +56,7 @@ function depsFor(env: Env): AdminDeps {
       vault: {
         held: () => vault.held(),
         forget: (paths) => vault.forget(paths),
-        setDream: (mode) => vault.setDream(mode),
+        setDream: (mode, writes) => vault.setDream(mode, writes),
       },
     }),
     forms,

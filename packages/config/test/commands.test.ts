@@ -124,9 +124,11 @@ function fakePorts() {
           ? { ok: false, reason: "vault_off" }
           : { ok: true, forgotten: 2, stillInVault: [] };
       },
-      async setDream(mode) {
-        calls.push(`setDream ${mode}`);
-        return { ok: true, mode };
+      async setDream(mode, writes) {
+        calls.push(`setDream ${mode} ${writes?.join(",") ?? "-"}`);
+        return writes?.includes("summaries")
+          ? { ok: false, reason: "invalid" }
+          : { ok: true, mode, writes: [...(writes ?? [])] };
       },
     },
   };
@@ -483,12 +485,29 @@ describe("configuration commands", () => {
     const commands = createConfigCommands(ports);
     expect(await commands.setDream(owner, { mode: "off" })).toEqual({
       ok: true,
-      value: { mode: "off" },
+      value: { mode: "off", writes: [] },
     });
-    for (const input of [undefined, {}, { mode: "write" }, { mode: true }]) {
+    expect(await commands.setDream(owner, { mode: "dry", writes: ["abstracts"] })).toEqual({
+      ok: true,
+      value: { mode: "dry", writes: ["abstracts"] },
+    });
+    // An operation the vault doesn't know is the vault's to refuse.
+    expect(await commands.setDream(owner, { mode: "dry", writes: ["summaries"] })).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    for (const input of [
+      undefined,
+      {},
+      { mode: "write" },
+      { mode: true },
+      { mode: "dry", writes: "abstracts" },
+      { mode: "dry", writes: [1] },
+      { mode: "dry", writes: Array(11).fill("abstracts") },
+    ]) {
       expect(await commands.setDream(owner, input)).toEqual({ ok: false, reason: "invalid_input" });
     }
-    expect(calls).toEqual(["setDream off"]);
+    expect(calls).toEqual(["setDream off -", "setDream dry abstracts", "setDream dry summaries"]);
   });
 
   it("makes the Context Store forget erased paths, and refuses anything but a list of paths", async () => {

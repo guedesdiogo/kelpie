@@ -409,7 +409,7 @@ How the page behaves:
 
 ### Dream
 
-Memory's consolidation (#112), off the hot path, on the Context Store's alarm. For now it runs dry: it only proposes. The daily report shows the plan, and no note changes.
+Memory's consolidation (#112), off the hot path, on the Context Store's alarm. Each operation runs dry until the owner lets it write: it only proposes, and the daily report shows the plan.
 - **When it runs:** only when there is a note to work on, and:
   - at most once every 6 hours;
   - once no turn has touched memory for 30 minutes. A recall, a search, a read or a write counts as a touch.
@@ -418,7 +418,7 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. F
   - **Cancellation:** memory used since a run started ends it before its next step.
   - **The cap:** at most 8 calls a run.
 - **Its operation: abstracts.**
-  - **Which notes:** notes whose current version Kelpie wrote (#126) in the last 7 days, dated as the report dates notes, so a rebuilt index doesn't make old notes new. They are either session pages, whose abstract is their first message, or conclusions (`deduced`, `inferred`) without an abstract. Each gets a proposed abstract. A fact the person stated keeps its own words. The owner's notes never do, nor a version Kelpie merged into the owner's edit (#160).
+  - **Which notes:** notes whose current version Kelpie wrote (#126) in the last 7 days, dated as the report dates notes, so a rebuilt index doesn't make old notes new. They are either session pages, whose abstract is their first message, or conclusions (`deduced`, `inferred`) without an abstract. Each gets a proposed abstract, with secrets removed. A fact the person stated keeps its own words. The owner's notes never do, nor a version Kelpie merged into the owner's edit (#160).
   - **The model:**
     - the cheap tier, through llm-gateway;
     - the note goes as data, up to 6,000 characters, between markers that say where it starts and ends;
@@ -430,14 +430,28 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. F
 - **Cost:** each call's usage is kept with its run for 30 days. The logs count calls and output tokens, never text.
   - A failed call ends the run, and that version gets no proposal, so one note can't fail every run.
   - With nothing to do, Dream looks again after another 30 minutes of quiet, not on every wake.
-- **The switch:** `/commands/setDream` takes `off`, or `dry`, the default ([admin-api.md](admin-api.md)). When it's off:
-  - no run starts;
-  - a run in progress ends;
-  - what Dream proposed is deleted;
-  - the report is written again without the plan.
-- **Not yet:**
-  - writing what it proposes;
-  - the other operations: duplicates, contradictions, roll-ups, people and places, and summaries.
+- **The switch:** `/commands/setDream` takes `off`, or `dry`, the default ([admin-api.md](admin-api.md)).
+  - **`writes`** names the operations that may write, such as `["abstracts"]`. An operation not named only proposes, so one deployed later is dry until the owner names it.
+  - **When it's off:**
+    - no run starts;
+    - a run in progress ends;
+    - what Dream proposed is deleted;
+    - the list of operations that may write is forgotten;
+    - the report is written again without the plan.
+- **Writing an abstract:** this is what happens when `abstracts` is named.
+  - **The way in:** the abstract goes into the queue, as the report does, so Dream's own write doesn't count as memory activity.
+  - **When it goes:** only while the note is as it was proposed for:
+    - the same version;
+    - Kelpie's;
+    - not merged into the owner's edit;
+    - not held;
+    - with no write waiting.
+  - **What changes:** only the frontmatter's `abstract`. For a file Kelpie's writer produced, every other key, comment and the body stay byte for byte. The commit's headline never names the note.
+  - **An edit before the commit:** if the owner edits the note after Dream queued its write but before the commit, the owner's edit wins whole and Dream's write is dropped. A line merge there could leave two abstracts in the frontmatter.
+  - **A plan the owner already read:** once `abstracts` is named, the proposals Dream made while dry are written for the versions the vault still holds, with no new model call. A write that didn't land isn't tried again for that version.
+  - **After it:** the version Dream wrote stays Kelpie's (#126), and it isn't proposed for again. The report's "Dream wrote" section lists the last week's abstracts, shown as code.
+  - **Measured first:** #108's evaluation doesn't regress with the cheap tier's abstracts ([memory-eval.md](spikes/memory-eval.md#dreams-abstracts-112)).
+- **Not yet:** the other operations: duplicates, contradictions, roll-ups, people and places, and summaries.
 
 ### The write decision
 

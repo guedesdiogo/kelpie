@@ -28,6 +28,7 @@ import {
   type Scope,
   type SearchHit,
   sanitizeSecrets,
+  withAbstract,
   writeMemory,
   writtenAt,
 } from "@kelpie/memory";
@@ -187,6 +188,10 @@ const DREAM_TIMEOUT_MS = 30_000;
 const DREAM_STEP_MS = 5_000;
 /** Ended runs are kept this long, with what they used. */
 const DREAM_RUNS_MS = 30 * 24 * 60 * 60_000;
+/** Dream's write of an abstract (#112): the queue's mark, and a headline that names no note. */
+const DREAM_SUMMARY = "Write an abstract Dream proposed";
+/** Dream's operations, each dry until the owner lets it write (#112). */
+const DREAM_OPERATIONS = ["abstracts"] as const;
 /** The soonest the alarm wakes for a held file's next try. */
 const RESOLVE_WAKE_MS = 1_000;
 /** How much of the vault's `AGENTS.md` the model sees with a conflict. */
@@ -205,6 +210,7 @@ const PATH_TABLES = [
   "owner_changes",
   "owner_merges",
   "dream_proposals",
+  "dream_writes",
 ] as const;
 /** A held file's resolution, queued as the owner's text with a conflict settled (#114). */
 const RESOLVE_SUMMARY = "Resolve a pushed merge conflict, with the model";
@@ -273,6 +279,12 @@ CREATE TABLE IF NOT EXISTS dream_proposals (
   abstract TEXT,
   at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS dream_writes (
+  path TEXT PRIMARY KEY NOT NULL,
+  blob_sha TEXT NOT NULL,
+  abstract TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS proposals (
   id INTEGER PRIMARY KEY,
   agent TEXT NOT NULL,
@@ -285,6 +297,19 @@ CREATE TABLE IF NOT EXISTS proposals (
   at INTEGER NOT NULL
 );
 `;
+
+/**
+ * Whether Dream gives a note's current version an abstract (#112): a session page, whose abstract
+ * is its first message, or a conclusion without one. A fact the person stated (`explicit`) keeps
+ * its own words.
+ */
+function abstractWanted(version: {
+  kind: string;
+  abstract: string | null;
+  level: string | null;
+}): boolean {
+  return version.kind === "session" || (version.abstract === null && version.level !== "explicit");
+}
 
 const encoder = new TextEncoder();
 const bytes = (text: string | null) => (text === null ? 0 : encoder.encode(text).byteLength);
@@ -786,6 +811,11 @@ export class Vault extends DurableObject<VaultEnv> {
       run = { id: id ?? 0, started_at: now, calls: 0, usage: "[]" };
     }
     if (note === null || run.calls >= DREAM_MAX_CALLS) return this.#endDream(run.id, "done");
+    if (note.abstract !== undefined) {
+      // Proposed while dry, and now let write: no model call.
+      await this.#writeAbstract(note, note.abstract);
+      return true;
+    }
     let proposed: Awaited<ReturnType<typeof proposeAbstract>> | null = null;
     try {
       proposed = await proposeAbstract(gateway, note, DREAM_TIMEOUT_MS);
@@ -793,6 +823,9 @@ export class Vault extends DurableObject<VaultEnv> {
       console.error("Vault: a Dream step failed", errorName(error));
     }
     const used = proposed?.usage ?? [];
+    // A model wrote it: secrets go, as they go from what the agent saves.
+    const proposedAbstract =
+      proposed?.abstract == null ? null : sanitizeSecrets(proposed.abstract).text;
     const usage = [...(JSON.parse(run.usage) as unknown[]), ...used];
     this.ctx.storage.transactionSync(() => {
       // Kept with the version it was made from: a later version is a note to propose for again.
@@ -802,7 +835,7 @@ export class Vault extends DurableObject<VaultEnv> {
         "INSERT OR REPLACE INTO dream_proposals (path, blob_sha, abstract, at) VALUES (?, ?, ?, ?)",
         note.path,
         note.blobSha,
-        proposed?.abstract ?? null,
+        proposedAbstract,
         Date.now(),
       );
       this.#exec(
@@ -812,10 +845,13 @@ export class Vault extends DurableObject<VaultEnv> {
       );
     });
     if (proposed === null) return this.#endDream(run.id, "failed");
+    if (proposedAbstract !== null && this.#dreamWrites().has("abstracts")) {
+      await this.#writeAbstract(note, proposedAbstract);
+    }
     // Counts only: the note and the abstract are personal data.
     console.log("Vault: Dream step", {
       calls: run.calls + 1,
-      proposed: proposed.abstract !== null,
+      proposed: proposedAbstract !== null,
       output: used.reduce((sum, call) => sum + (Number(call.output) || 0), 0),
     });
     return true;
@@ -839,9 +875,14 @@ export class Vault extends DurableObject<VaultEnv> {
    * no write waiting, not held, and not proposed for already. The owner's notes are never one, nor
    * a version merged into the owner's edit.
    */
-  #dreamCandidate(
-    now: number,
-  ): { path: string; blobSha: string; title: string; body: string } | null {
+  #dreamCandidate(now: number): {
+    path: string;
+    blobSha: string;
+    title: string;
+    body: string;
+    /** A proposal made while dry, for this version, now to write. */
+    abstract?: string;
+  } | null {
     // When written, as the report dates notes: a rebuild indexes every note again as new.
     const recent = this.#memory
       .lifecycleNotes()
@@ -859,23 +900,47 @@ export class Vault extends DurableObject<VaultEnv> {
         "SELECT path, blob_sha FROM dream_proposals",
       ).map((row) => [row.path, row.blob_sha]),
     );
+    // A version Dream wrote is done with.
+    const written = new Map(
+      this.#exec<{ path: string; blob_sha: string }>("SELECT path, blob_sha FROM dream_writes").map(
+        (row) => [row.path, row.blob_sha],
+      ),
+    );
     // Kelpie's commit, but holding the owner's lines (#160): the owner's word, so not Dream's.
     const merged = new Set(
       this.#exec<{ path: string }>(
         "SELECT f.path FROM files f JOIN owner_merges m ON m.path = f.path AND m.content = f.content",
       ).map((row) => row.path),
     );
+    if (this.#dreamWrites().has("abstracts")) {
+      // Proposals made while dry, for the version the vault still holds, and no write tried since.
+      const pending = this.#exec<{ path: string; blob_sha: string; abstract: string }>(
+        `SELECT p.path, p.blob_sha, p.abstract FROM dream_proposals p
+         JOIN files f ON f.path = p.path AND f.blob_sha = p.blob_sha
+         WHERE p.abstract IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM dream_writes w WHERE w.path = p.path AND w.at >= p.at)
+         ORDER BY p.at`,
+      );
+      for (const row of pending) {
+        if (!kelpie.has(row.path) || waiting.has(row.path) || merged.has(row.path)) continue;
+        const version = this.#memory.current(row.path);
+        if (version === null || !abstractWanted(version)) continue;
+        return {
+          path: row.path,
+          blobSha: row.blob_sha,
+          title: version.title,
+          body: version.body,
+          abstract: row.abstract,
+        };
+      }
+    }
     for (const note of recent) {
       if (!kelpie.has(note.path) || waiting.has(note.path) || merged.has(note.path)) continue;
-      if (proposed.get(note.path) === note.blobSha) continue;
-      const version = this.#memory.current(note.path);
-      // A fact the person stated (`explicit`) keeps its own words; a session page is summed up.
-      if (
-        version === null ||
-        (note.kind !== "session" && (version.abstract !== null || version.level === "explicit"))
-      ) {
+      if (proposed.get(note.path) === note.blobSha || written.get(note.path) === note.blobSha) {
         continue;
       }
+      const version = this.#memory.current(note.path);
+      if (version === null || !abstractWanted(version)) continue;
       return { path: note.path, blobSha: note.blobSha, title: version.title, body: version.body };
     }
     return null;
@@ -885,16 +950,99 @@ export class Vault extends DurableObject<VaultEnv> {
    * Turns Dream off, or back on as dry runs (#112): one setting for the whole vault. Off, what it
    * proposed goes, and the next alarm writes the report again without it.
    */
-  setDream(mode: unknown): SetDreamResult {
+  setDream(mode: unknown, writes?: unknown): SetDreamResult {
     if (mode !== "off" && mode !== "dry") return { ok: false, reason: "invalid" };
+    const known = new Set<string>(DREAM_OPERATIONS);
+    if (
+      writes !== undefined &&
+      !(Array.isArray(writes) && writes.every((name) => known.has(name as string)))
+    ) {
+      return { ok: false, reason: "invalid" };
+    }
+    // Off forgets which operations may write: turned back on, each is dry until said again.
+    const allowed =
+      mode === "off"
+        ? []
+        : writes === undefined
+          ? [...this.#dreamWrites()]
+          : DREAM_OPERATIONS.filter((name) => (writes as unknown[]).includes(name));
     this.ctx.storage.transactionSync(() => {
       this.#set("dream_mode", mode);
+      this.#set("dream_writes", JSON.stringify(allowed));
       if (mode === "off") {
         this.#exec("DELETE FROM dream_proposals");
         this.#set("lifecycle_after", "0");
       }
     });
-    return { ok: true, mode };
+    return { ok: true, mode, writes: allowed };
+  }
+
+  /** The operations the owner lets Dream write with (#112); the others only propose. */
+  #dreamWrites(): Set<string> {
+    try {
+      const stored = JSON.parse(this.#get("dream_writes") ?? "[]") as unknown;
+      return new Set(
+        Array.isArray(stored) ? stored.filter((name) => typeof name === "string") : [],
+      );
+    } catch {
+      return new Set();
+    }
+  }
+
+  /**
+   * Writes the abstract Dream proposed for a note (#112), through the queue as the report is
+   * written, so it doesn't count as memory activity. Only the frontmatter's `abstract` changes, and
+   * only while the note is as it was proposed for: its version, Kelpie's, not merged into the
+   * owner's edit, not held, with no write waiting. The version it writes isn't proposed for again.
+   */
+  async #writeAbstract(note: { path: string; blobSha: string }, abstract: string): Promise<void> {
+    const content = this.#exec<{ content: string }>(
+      "SELECT content FROM files WHERE path = ? AND blob_sha = ?",
+      note.path,
+      note.blobSha,
+    )[0]?.content;
+    const next = content === undefined ? null : withAbstract(content, abstract);
+    if (content !== undefined && (next === null || next === content)) {
+      // Nothing to write: the note already says it, or its frontmatter can't be read.
+      this.#exec(
+        "UPDATE dream_proposals SET abstract = NULL WHERE path = ? AND blob_sha = ?",
+        note.path,
+        note.blobSha,
+      );
+      return;
+    }
+    if (next === null) return;
+    const blobSha = await gitBlobSha(next);
+    this.ctx.storage.transactionSync(() => {
+      const unchanged =
+        this.#exec(
+          `SELECT 1 FROM files f JOIN authored a ON a.path = f.path AND a.blob_sha = f.blob_sha
+           WHERE f.path = ? AND f.blob_sha = ?
+             AND NOT EXISTS (SELECT 1 FROM owner_merges m WHERE m.path = f.path AND m.content = f.content)
+             AND NOT EXISTS (SELECT 1 FROM held h WHERE h.path = f.path AND h.state != 'resolved')
+             AND NOT EXISTS (SELECT 1 FROM queue q WHERE q.path = f.path)`,
+          note.path,
+          note.blobSha,
+        ).length > 0;
+      if (!unchanged) return;
+      const now = Date.now();
+      this.#exec(
+        "INSERT INTO queue (agent, path, content, summary, queued_at) VALUES (?, ?, ?, ?, ?)",
+        SYSTEM_AGENT,
+        note.path,
+        next,
+        // The headline outlives a forget in git, so it never names the note.
+        DREAM_SUMMARY,
+        now,
+      );
+      this.#exec(
+        "INSERT OR REPLACE INTO dream_writes (path, blob_sha, abstract, at) VALUES (?, ?, ?, ?)",
+        note.path,
+        blobSha,
+        abstract,
+        now,
+      );
+    });
   }
 
   /** A turn touched memory: Dream waits for quiet, and a run in progress stops (#112). */
@@ -1110,8 +1258,14 @@ export class Vault extends DurableObject<VaultEnv> {
       ).map((row) => ({ path: row.path, at: row.at, removed: row.removed === 1 }));
       // Dream's proposals for versions the vault no longer holds go, and runs past their keep.
       this.#exec(
-        `DELETE FROM dream_proposals WHERE NOT EXISTS (SELECT 1 FROM files f
-           WHERE f.path = dream_proposals.path AND f.blob_sha = dream_proposals.blob_sha)`,
+        `DELETE FROM dream_proposals WHERE path NOT IN (SELECT path FROM queue) AND NOT EXISTS
+           (SELECT 1 FROM files f
+            WHERE f.path = dream_proposals.path AND f.blob_sha = dream_proposals.blob_sha)`,
+      );
+      this.#exec(
+        `DELETE FROM dream_writes WHERE at < ? OR (path NOT IN (SELECT path FROM queue) AND NOT EXISTS
+           (SELECT 1 FROM files f WHERE f.path = dream_writes.path AND f.blob_sha = dream_writes.blob_sha))`,
+        now - DREAM_LOOKBACK_MS,
       );
       this.#exec(
         "DELETE FROM dream_runs WHERE ended_at IS NOT NULL AND ended_at < ?",
@@ -1120,9 +1274,19 @@ export class Vault extends DurableObject<VaultEnv> {
       const dream =
         this.#get("dream_mode") === "off"
           ? []
-          : this.#exec<{ path: string; abstract: string }>(
-              "SELECT path, abstract FROM dream_proposals WHERE abstract IS NOT NULL ORDER BY path",
-            );
+          : [
+              ...this.#exec<{ path: string; abstract: string }>(
+                `SELECT p.path, p.abstract FROM dream_proposals p
+                 JOIN files f ON f.path = p.path AND f.blob_sha = p.blob_sha
+                 WHERE p.abstract IS NOT NULL AND p.path NOT IN (SELECT path FROM queue)
+                 ORDER BY p.path`,
+              ),
+              // What it wrote in the last week, while the vault still holds that version.
+              ...this.#exec<{ path: string; abstract: string }>(
+                `SELECT w.path, w.abstract FROM dream_writes w
+                 JOIN files f ON f.path = w.path AND f.blob_sha = w.blob_sha ORDER BY w.path`,
+              ).map((row) => ({ ...row, written: true })),
+            ];
       const report = lifecycleReport(
         lifecycleFindings(this.#memory, {
           now,
@@ -1961,6 +2125,12 @@ export class Vault extends DurableObject<VaultEnv> {
           path,
         );
       }
+      return;
+    }
+    // Dream's write is an abstract for the version it read (#112): an edit since wins whole, as a
+    // line merge could leave two abstracts in the frontmatter.
+    if (last.summary === DREAM_SUMMARY) {
+      this.#exec("DELETE FROM queue WHERE path = ?", path);
       return;
     }
     const result =

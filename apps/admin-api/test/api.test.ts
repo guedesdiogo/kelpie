@@ -93,8 +93,8 @@ function world({
       async forget(paths) {
         return { ok: true, forgotten: paths.length, stillInVault: [] };
       },
-      async setDream(mode) {
-        return { ok: true, mode };
+      async setDream(mode, writes) {
+        return { ok: true, mode, writes: [...(writes ?? [])] };
       },
     },
   };
@@ -258,7 +258,11 @@ describe("admin API commands", () => {
     const { deps } = world();
     expect(await call(deps, "/commands/setDream", { mode: "off" })).toEqual({
       status: 200,
-      body: { ok: true, value: { mode: "off" } },
+      body: { ok: true, value: { mode: "off", writes: [] } },
+    });
+    expect(await call(deps, "/commands/setDream", { mode: "dry", writes: ["abstracts"] })).toEqual({
+      status: 200,
+      body: { ok: true, value: { mode: "dry", writes: ["abstracts"] } },
     });
     expect((await call(deps, "/commands/setDream", { mode: "write" })).status).toBe(400);
   });

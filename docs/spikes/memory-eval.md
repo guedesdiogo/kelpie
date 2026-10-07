@@ -288,6 +288,46 @@ What the numbers show:
 - **Wider bands cost a lot:** [0.55, 0.95) catches 81% with bge-m3 but flags 43% of the other pairs.
 - **Small sample:** the pairs are few and synthetic, so the band is a starting value. The findings only go into the report, for Dream to look at.
 
+## Dream's abstracts (#112)
+
+Dream would give session pages an abstract, and an abstract is searched and embedded with the title and body. So writing abstracts changes retrieval, and #112 asks that this evaluation doesn't regress before Dream may write them.
+
+**The run:**
+- the 1k vault's 129 session pages got abstracts from `gpt-6-luna`, llm-gateway's cheap fallback, with the prompt Dream runs (2026-10-07, 29,056 tokens in and 7,936 out);
+- the questions were run on the vault as it is, where those pages have no abstract, and with those abstracts;
+- `eval/session-abstracts.json` caches the abstracts, so `eval` measures them without calling a model.
+
+| Overall, 1k vault | hit@1 | hit@3 | hit@5 | hit@10 | MRR |
+|---|---|---|---|---|---|
+| Retrieval, as it is | 0.600 | 0.767 | 0.827 | 0.860 | 0.694 |
+| Retrieval, with abstracts | 0.607 | 0.773 | 0.833 | 0.860 | 0.700 |
+| Plain search, as it is | 0.600 | 0.733 | 0.773 | 0.807 | 0.674 |
+| Plain search, with abstracts | 0.587 | 0.740 | 0.767 | 0.793 | 0.665 |
+
+What the numbers show:
+- **Retrieval doesn't regress.** This is what a turn uses (#110).
+  - Preferences rise: MRR 0.786 to 0.818.
+  - Multi-hop rises: hit@5 0.70 to 0.75.
+  - Entities move by one rank: MRR 0.701 to 0.699, with the same hits.
+  - `eval` checks that retrieval's overall numbers don't drop.
+- **Plain search drops a little.** It is the baseline, and no turn uses it: the abstracts' words add matches on distractor sessions.
+- **With vectors** (`eval:models`, 2026-10-07): retrieval with each model's vector, without the rerank.
+
+  | Overall, 1k vault | hit@1 | hit@3 | hit@5 | hit@10 | MRR |
+  |---|---|---|---|---|---|
+  | `@cf/baai/bge-m3`, as it is | 0.653 | 0.833 | 0.887 | 0.947 | 0.754 |
+  | `@cf/baai/bge-m3`, with abstracts | 0.660 | 0.827 | 0.893 | 0.947 | 0.755 |
+  | `text-embedding-3-small`, as it is | 0.627 | 0.833 | 0.893 | 0.953 | 0.737 |
+  | `text-embedding-3-small`, with abstracts | 0.640 | 0.847 | 0.900 | 0.953 | 0.749 |
+
+  - **MRR doesn't drop with either model.**
+  - **bge-m3, production's model, loses one question at hit@3,** and multi-hop dips: MRR 0.322 to 0.307, hit@3 0.60 to 0.55.
+  - **Preferences rise with both:** bge-m3's MRR goes from 0.883 to 0.903, `text-embedding-3-small`'s from 0.839 to 0.887.
+- **Not measured:**
+  - **The production baseline:** in production a session page's abstract is its first message, not none.
+  - **The tier:** `gpt-6-luna` stands in for the cheap tier's first model, Claude Haiku 4.5.
+  - **Real use:** whether abstracts help real recall. The owner judges that from the dry run's proposals.
+
 ## How to re-run
 
 ```bash
