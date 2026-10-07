@@ -93,6 +93,7 @@ export {
   type SessionPage,
   sessionPage,
 } from "./session.ts";
+export { SUMMARY_PROMPT, summaryInput, summaryOf, summaryPath } from "./summary.ts";
 export { instantOf, isDate, isDateTime } from "./time.ts";
 export {
   MemoryFormatError,
