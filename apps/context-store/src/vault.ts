@@ -1470,7 +1470,7 @@ export class Vault extends DurableObject<VaultEnv> {
             "SELECT content, blob_sha FROM files WHERE path = ?",
             path,
           )[0];
-          if (file === undefined || reads.has(path) || !this.#dreamMayWrite([path])) continue;
+          if (file === undefined || !this.#dreamMayWrite([path])) continue;
           const text = repointedStub({ path, text: file.content }, survivor, at);
           if (text === null) continue;
           reads.set(path, file.blob_sha);

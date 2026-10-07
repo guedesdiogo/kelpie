@@ -3,7 +3,7 @@
 import { isMap, parseDocument } from "yaml";
 import { normalizeEntities } from "./entities.ts";
 import { codeLines, splitFrontmatter } from "./markdown.ts";
-import { LEVELS, MAX_SOURCES, type Note, readNote } from "./note.ts";
+import { LEVELS, type Note, readNote } from "./note.ts";
 import { blockId, HEADING_PATH_CHARS, HEADING_TITLE_CHARS, oneLine } from "./retrieve.ts";
 import { sanitizeSecrets } from "./sanitize.ts";
 import { MemoryFormatError, writeMemory } from "./write.ts";
@@ -228,7 +228,6 @@ export async function mergedSurvivor(
   if (own === undefined || own === null || notes.some((note) => note === null)) return null;
   const all = notes as Note[];
   const sources = [...new Set([...own.sources, ...merged.map((file) => pathLink(file.path))])];
-  if (sources.length > MAX_SOURCES) return null;
   // A note that doesn't say how sure it is counts as the least sure.
   const level = LEVELS[Math.max(...all.map((note) => LEVELS.indexOf(note.level ?? "inferred")))];
   try {

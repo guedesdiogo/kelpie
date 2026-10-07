@@ -176,8 +176,14 @@ const MERGE_HEADLINE = "Merge notes Dream found to be duplicates";
 /** A vault where something else happens just before a commit with `headline` reaches it. */
 class RacingBackend extends FakeVaultBackend {
   race: { headline: string; run: () => void } | null = null;
+  /** A headline GitHub refuses. */
+  refuse: string | null = null;
 
   override async commit(request: CommitRequest): Promise<CommitOutcome> {
+    if (request.headline === this.refuse) {
+      this.commitRequests.push(request);
+      return { kind: "refused", reason: "UNPROCESSABLE" };
+    }
     if (this.race !== null && this.race.headline === request.headline) {
       const { run } = this.race;
       this.race = null;
@@ -1380,7 +1386,7 @@ describe("Vault Dream", () => {
     });
     // Most links lead to the survivor.
     const links = await Promise.all(
-      ["Bebidas", "Manhã"].map((title) =>
+      ["Bebidas", "Manhã", "Tarde", "Noite"].map((title) =>
         kelpieNote({ title, body: "Ver [[memory/notes/cafe]].", abstract: `${title}.` }),
       ),
     );
@@ -1391,10 +1397,19 @@ describe("Vault Dream", () => {
       content:
         mergedStub({ path: old.path, text: old.content }, cafe2.path, "abc123", daysAgo(0)) ?? "",
     };
+    // Kelpie's too, but merged into the owner's edit (#160): the owner's word, so it keeps its mark.
+    const old2 = await note("Velho 2", "Velho.", "memory/notes/velho-2.md");
+    const velho2 = {
+      path: old2.path,
+      content:
+        mergedStub({ path: old2.path, text: old2.content }, cafe2.path, "abc123", daysAgo(0)) ?? "",
+    };
+    // The owner's own mark keeps its one step too.
+    const dono = `---\nrelations:\n  merged_into:\n    - "[[memory/notes/cafe-2]]"\n---\n# Dono\n`;
     // The same content: only the mark changes.
     const sal = await note("Sal", "Pouco.", "memory/notes/sal.md");
     const sal2 = { ...sal, path: "memory/notes/sal-2.md" };
-    const backend = new FakeVaultBackend({ "README.md": "# Vault" });
+    const backend = new FakeVaultBackend({ "README.md": "# Vault", "memory/notes/dono.md": dono });
     replaceBackendForTesting(backend);
     const requests = fakeModelBy((request) =>
       request.system.includes("You merge notes")
@@ -1405,8 +1420,15 @@ describe("Vault Dream", () => {
     const stub = vault("dream-merge-writes");
     await stub.compile("kelpie");
     await letWrite(stub, ["merges"]);
-    await stub.write("kelpie", [cafe, cafe2, ...links, velho, sal, sal2], "x");
+    await stub.write("kelpie", [cafe, cafe2, ...links, velho, velho2, sal, sal2], "x");
     await runDurableObjectAlarm(stub);
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO owner_merges (path, content) VALUES (?, ?)",
+        velho2.path,
+        velho2.content,
+      );
+    });
     await quiet(stub);
     for (let i = 0; i < 8; i++) await runDurableObjectAlarm(stub);
     expect(merges()).toHaveLength(1);
@@ -1438,6 +1460,8 @@ describe("Vault Dream", () => {
     expect(readNote(velho.path, files[velho.path] ?? "")?.frontmatter.relations).toEqual({
       merged_into: [pathLink(cafe.path)],
     });
+    expect(files[velho2.path]).toBe(velho2.content);
+    expect(files["memory/notes/dono.md"]).toBe(dono);
     // The same content: the survivor stays as it was.
     expect(files[sal.path]).toBe(sal.content);
     expect(readNote(sal2.path, files[sal2.path] ?? "")?.frontmatter.relations).toEqual({
@@ -1503,6 +1527,37 @@ describe("Vault Dream", () => {
       edited.backend.commitRequests.filter((request) => request.headline === MERGE_HEADLINE),
     ).toHaveLength(1);
 
+    // The vault moves elsewhere: the commit reads it again, and lands on the new head.
+    const elsewhere = await run("dream-merge-race-elsewhere", (backend) =>
+      backend.push({ "memory/notes/outra.md": "# Outra\n" }),
+    );
+    expect(
+      elsewhere.backend.commitRequests.filter((request) => request.headline === MERGE_HEADLINE),
+    ).toHaveLength(2);
+    expect(
+      readNote(cafe2.path, elsewhere.backend.files()[cafe2.path] ?? "")?.frontmatter.relations,
+    ).toEqual({ merged_into: [pathLink(cafe.path)] });
+    expect(elsewhere.backend.files()["memory/notes/outra.md"]).toBe("# Outra\n");
+
+    // While the vault moved, Dream was turned off, or an agent's write came to wait on a note: the
+    // check after the sync writes nothing.
+    const off = await run("dream-merge-race-off", (backend, sql) => {
+      sql.exec("INSERT OR REPLACE INTO state (key, value) VALUES ('dream_mode', 'off')");
+      backend.push({ "memory/notes/outra.md": "# Outra\n" });
+    });
+    expect(off.backend.files()[cafe2.path]).toBe(cafe2.content);
+    const waiting = await run("dream-merge-race-waiting", (backend, sql) => {
+      sql.exec(
+        "INSERT INTO queue (agent, path, content, summary, queued_at) VALUES ('kelpie', ?, ?, 'x', ?)",
+        cafe2.path,
+        cafe2.content.replace("Com canela.", "Com canela, sempre."),
+        Date.now(),
+      );
+      backend.push({ "memory/notes/outra.md": "# Outra\n" });
+    });
+    // The agent's write landed as it was, with nothing of it set aside.
+    expect(await rows(waiting.stub, "SELECT path FROM conflicts")).toEqual([]);
+
     // An agent writes the survivor as the commit goes: its write is merged on top, as over the
     // owner's edit, and where its lines overlap the merge's, set aside.
     const agents = cafe.content.replace("Sem açúcar.", "Sem açúcar, nunca.");
@@ -1521,6 +1576,39 @@ describe("Vault Dream", () => {
       { path: cafe.path, content: agents, reason: "owner_won" },
     ]);
     expect(await rows(queued.stub, "SELECT path FROM queue")).toEqual([]);
+  });
+
+  it("keeps a merge GitHub refuses as no answer, and doesn't try it again", async () => {
+    const note = async (body: string, path: string) => ({
+      ...(await kelpieNote({ title: "Café", body, abstract: "Café." })),
+      path,
+    });
+    const cafe = await note("Sem açúcar.", "memory/notes/cafe.md");
+    const cafe2 = await note("Com canela.", "memory/notes/cafe-2.md");
+    const backend = new RacingBackend({ "README.md": "# Vault" });
+    backend.refuse = MERGE_HEADLINE;
+    replaceBackendForTesting(backend);
+    const requests = fakeModelBy(() =>
+      JSON.stringify({ verdict: "merge", body: "Sem açúcar, ou com canela." }),
+    );
+    const stub = vault("dream-merge-refused");
+    await stub.compile("kelpie");
+    await letWrite(stub, ["merges"]);
+    await stub.write("kelpie", [cafe, cafe2], "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    for (let i = 0; i < 4; i++) await runDurableObjectAlarm(stub);
+    const tried = () =>
+      backend.commitRequests.filter((request) => request.headline === MERGE_HEADLINE);
+    expect(tried()).toHaveLength(1);
+    expect(await rows(stub, "SELECT verdict, body FROM dream_merges")).toEqual([
+      { verdict: null, body: null },
+    ]);
+    await quiet(stub);
+    for (let i = 0; i < 4; i++) await runDurableObjectAlarm(stub);
+    expect(tried()).toHaveLength(1);
+    expect(requests).toHaveLength(1);
+    expect(backend.files()[cafe2.path]).toBe(cafe2.content);
   });
 
   it("keeps a plan it can't write as no answer, and doesn't try it again", async () => {
