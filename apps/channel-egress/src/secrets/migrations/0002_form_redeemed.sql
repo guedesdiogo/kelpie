@@ -1,0 +1,1 @@
+ALTER TABLE `forms` ADD `redeemed_at` integer;

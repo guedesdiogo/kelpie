@@ -246,7 +246,9 @@ describe("the setup agent's tools", () => {
 
   it("gives the secure form's link only once the owner confirmed connecting a bot", async () => {
     const { commands, calls } = fakeCommands();
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      setupTools(commands, { adminOrigin: ADMIN, now: () => Date.UTC(2026, 9, 6, 19, 45) }),
+    );
 
     const waiting = contextOf(false);
     const asked = await run(
@@ -272,7 +274,9 @@ describe("the setup agent's tools", () => {
       contextOf(true).context,
     );
     expect(done.output).toContain(`${ADMIN}/forms/tok123`);
-    expect(done.output).toContain("2026-10-06T20:00:00.000Z");
+    // How long, not until when: the model would otherwise turn a UTC time into the owner's zone.
+    expect(done.output).toContain("It works once, for the next 15 minutes.");
+    expect(done.output).not.toContain("2026");
     expect(calls).toEqual([`connectTelegram {"agentId":"${SETUP_AGENT_ID}"}`]);
   });
 

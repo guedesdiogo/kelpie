@@ -36,6 +36,13 @@ const store = (env: Env) => env.SECRET_STORE.getByName(SECRET_STORE_NAME);
 
 const unavailable = { ok: false as const, reason: "store_unavailable" as const };
 
+/** Compares two strings in constant time, through their digests. */
+async function sameText(a: string, b: string): Promise<boolean> {
+  const digest = (text: string) => crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  const [left, right] = await Promise.all([digest(a), digest(b)]);
+  return crypto.subtle.timingSafeEqual(left, right);
+}
+
 /**
  * The secure forms that take a channel's secrets (ADR-0013), for the admin API. Nothing here
  * returns a secret, and every answer is a value.
@@ -67,11 +74,23 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
     return openTelegramForm(this.env, agentId);
   }
 
+  /**
+   * What a form is for while it is open; for a form used in the last few minutes, the bot it
+   * connected, so a page opened again says so instead of "no longer works".
+   */
   async describeForm(token: string) {
     try {
-      const form = await store(this.env).describeForm(token);
-      return form
-        ? { ok: true as const, ...form }
+      const forms = store(this.env);
+      const form = await forms.describeForm(token);
+      if (form) return { ok: true as const, ...form };
+      const used = await this.#used(token);
+      return used
+        ? {
+            ok: false as const,
+            reason: "redeemed" as const,
+            agentId: used.agentId,
+            username: used.secret.username,
+          }
         : { ok: false as const, reason: "unknown_form" as const };
     } catch (error) {
       console.error("channel-egress: reading a form failed", errorName(error));
@@ -82,14 +101,23 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
   /**
    * Checks the token with Telegram (`getMe`), stores it with a new random webhook secret, then
    * registers the webhook with that secret. A refused token leaves the form open for another try,
-   * up to a few.
+   * up to a few. The same token sent again to a form just used, as a double click sends it, gets
+   * the same answer, and the webhook is registered again. The work finishes even when the caller
+   * goes away, as a browser's second click cancels its first.
    */
   async redeemTelegramForm(token: string, botToken: string) {
+    const work = this.#redeemTelegramForm(token, botToken);
+    this.ctx.waitUntil(work);
+    return work;
+  }
+
+  async #redeemTelegramForm(token: string, botToken: string) {
     try {
       const forms = store(this.env);
       const form = await forms.describeForm(token);
-      if (form?.kind !== "telegram") return { ok: false as const, reason: "unknown_form" as const };
       const candidate = typeof botToken === "string" ? botToken.trim() : "";
+      if (!form) return await this.#redeemAgain(token, candidate);
+      if (form.kind !== "telegram") return { ok: false as const, reason: "unknown_form" as const };
       if (!BOT_TOKEN.test(candidate)) {
         await forms.refuseValue(token);
         return { ok: false as const, reason: "invalid_token" as const };
@@ -111,7 +139,12 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
         username: bot.username,
       };
       const stored = await forms.redeemForm(token, JSON.stringify(secret));
-      if (!stored.ok) return stored;
+      // Another submission of the same link claimed it meanwhile: answer as for a resubmission.
+      if (!stored.ok) {
+        return stored.reason === "unknown_form"
+          ? await this.#redeemAgain(token, candidate)
+          : stored;
+      }
       // A new secret makes every update refused until Telegram has it, so it registers now.
       const webhook = await this.#register(stored.agentId, secret);
       return {
@@ -124,6 +157,32 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
       console.error("channel-egress: redeeming a form failed", errorName(error));
       return unavailable;
     }
+  }
+
+  /** A form used in the last few minutes, with the secret it stored. */
+  async #used(token: string): Promise<{ agentId: string; secret: TelegramSecret } | null> {
+    const used = await store(this.env).redeemedForm(token);
+    if (used?.kind !== "telegram") return null;
+    const found = await telegramSecret(this.env, used.agentId);
+    if (found.ok) return { agentId: used.agentId, secret: found.secret };
+    // The callers answer an unreachable store as such, not as a closed link.
+    if (found.reason === "store_unavailable") throw new Error("The secret store is unavailable");
+    return null;
+  }
+
+  /** The answer for a form just used, when its own token comes again; any other value is refused. */
+  async #redeemAgain(token: string, candidate: string) {
+    const used = await this.#used(token);
+    if (!used || !(await sameText(used.secret.botToken, candidate))) {
+      return { ok: false as const, reason: "unknown_form" as const };
+    }
+    const webhook = await this.#register(used.agentId, used.secret);
+    return {
+      ok: true as const,
+      agentId: used.agentId,
+      bot: { id: used.secret.botId, username: used.secret.username },
+      webhook: webhook.ok ? ("registered" as const) : webhook.reason,
+    };
   }
 
   async describeTelegramBot(agentId: string) {

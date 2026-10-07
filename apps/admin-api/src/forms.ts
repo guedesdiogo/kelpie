@@ -18,8 +18,22 @@ export function formTokenOf(pathname: string): string | null {
 
 export async function showForm(token: string, forms: FormDeps): Promise<Response> {
   const form = await forms.describeForm(token);
-  if (!form.ok) return form.reason === "unknown_form" ? closedPage() : unavailablePage();
+  if (!form.ok) return formGone(form);
   return page(200, "Connect Telegram", tokenForm(form.agentId, null));
+}
+
+type Gone = Extract<Awaited<ReturnType<FormDeps["describeForm"]>>, { ok: false }>;
+
+/** A form that isn't open: used a moment ago, closed, or unreachable. */
+function formGone(form: Gone): Response {
+  if (form.reason === "redeemed") {
+    return page(
+      200,
+      "Telegram connected",
+      `<p>This link was already used: @${escapeHtml(form.username)} answers for <code>${escapeHtml(form.agentId)}</code>. You can close this page.</p>`,
+    );
+  }
+  return form.reason === "unknown_form" ? closedPage() : unavailablePage();
 }
 
 export async function submitForm(
@@ -30,7 +44,7 @@ export async function submitForm(
   if (botToken.trim() === "") {
     // Nothing to check: an empty submission doesn't count against the form's attempts.
     const form = await forms.describeForm(token);
-    if (!form.ok) return form.reason === "unknown_form" ? closedPage() : unavailablePage();
+    if (!form.ok) return formGone(form);
     return page(400, "Connect Telegram", tokenForm(form.agentId, "Paste the bot token first."));
   }
   const result = await forms.redeemTelegramForm(token, botToken);
@@ -47,7 +61,7 @@ export async function submitForm(
   if (result.reason === "invalid_token" || result.reason === "token_refused") {
     // A form closes after a few refused values; then the link is spent.
     const form = await forms.describeForm(token);
-    if (!form.ok) return closedPage();
+    if (!form.ok) return form.reason === "redeemed" ? formGone(form) : closedPage();
     const message =
       result.reason === "invalid_token"
         ? "That doesn't look like a bot token. Copy it again from BotFather."
