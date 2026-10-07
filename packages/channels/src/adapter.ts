@@ -35,6 +35,12 @@ export interface SendOptions {
    * model built (#130). Without it, nothing is previewed.
    */
   previewUrl?: string;
+  /**
+   * When given, the text is a reply in the Markdown subset (#188), formatted for the channel, and
+   * these are the URLs it may link: from the turn's inputs or Kelpie's own. Without it, the text
+   * goes as typed, as Kelpie's own notices do.
+   */
+  links?: readonly string[];
 }
 
 /** The channel asked to slow down. Retrying before `retryAfterMs` fails again. */

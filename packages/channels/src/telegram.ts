@@ -11,6 +11,7 @@ import {
 } from "./adapter.ts";
 import { CAPABILITIES } from "./capabilities.ts";
 import type { CanonicalEvent, MessagePart } from "./events.ts";
+import { formatReply, toTelegramHtml } from "./markdown.ts";
 
 // Telegram through the Bot API (https://core.telegram.org/bots/api), webhooks only (ADR-0003).
 
@@ -104,15 +105,30 @@ export class TelegramAdapter implements ChannelAdapter {
     text: string,
     options: SendOptions = {},
   ): Promise<SendResult> {
-    const result = await this.#call<{ message_id: number }>("sendMessage", {
-      chat_id: destination.threadId,
-      // HTML lets formatting come later; until then every character shows as typed.
-      text: escapeHtml(text),
-      parse_mode: "HTML",
-      disable_notification: options.silent === true,
-      link_preview_options: linkPreview(text, options.previewUrl),
-      ...replyParameters(destination.replyToMessageId),
-    });
+    // A reply is formatted (#188); a notice, or a reply Telegram can't read, goes as typed.
+    const formatted =
+      options.links === undefined
+        ? null
+        : toTelegramHtml(formatReply(text, new Set(options.links)));
+    const sendAs = (html: string) =>
+      this.#call<{ message_id: number }>("sendMessage", {
+        chat_id: destination.threadId,
+        text: html,
+        parse_mode: "HTML",
+        disable_notification: options.silent === true,
+        // Checked against the text as written: formatting escapes the `&` in a link.
+        link_preview_options: linkPreview(text, options.previewUrl),
+        ...replyParameters(destination.replyToMessageId),
+      });
+    let result: { message_id: number };
+    try {
+      result = await sendAs(formatted ?? escapeHtml(text));
+    } catch (error) {
+      if (formatted === null || !(error instanceof ChannelRequestError) || error.status !== 400) {
+        throw error;
+      }
+      result = await sendAs(escapeHtml(text));
+    }
     return { providerMessageId: String(result.message_id) };
   }
 

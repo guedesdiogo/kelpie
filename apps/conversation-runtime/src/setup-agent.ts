@@ -181,7 +181,7 @@ function describe(settings: Partial<AgentSettings>): string {
 }
 
 /** The origin, when the value is a bare https origin; otherwise empty, as if it weren't set. */
-function bareHttpsOrigin(value: string): string {
+export function bareHttpsOrigin(value: string): string {
   let url: URL;
   try {
     url = new URL(value);

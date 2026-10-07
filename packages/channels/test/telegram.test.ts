@@ -184,6 +184,51 @@ describe("Telegram sending", () => {
     ]);
   });
 
+  it("formats a reply given its allowed links, and links only those (#188)", async () => {
+    const { adapter, calls } = botApi();
+    const form = "https://admin.example/forms/abc";
+    await adapter.send(
+      { threadId: "1001" },
+      `Abra **o formulário**: [aqui](${form}) e não https://evil.example/x.`,
+      { links: [form] },
+    );
+    expect(calls[0]?.body).toMatchObject({
+      text: `Abra <b>o formulário</b>: <a href="${form}">aqui</a> e não <code>https://evil.example/x</code>.`,
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+    });
+
+    // Without links, a send is plain text as before: notices stay what they say.
+    await adapter.send({ threadId: "1001" }, "Confirm: rename **a**");
+    expect(calls[1]?.body.text).toBe("Confirm: rename **a**");
+  });
+
+  it("previews against the text as written, before it is formatted", async () => {
+    const { adapter, calls } = botApi();
+    const menu = "https://food.example/menu?a=1&b=2";
+    await adapter.send({ threadId: "1001" }, `Veja ${menu}`, { previewUrl: menu, links: [menu] });
+    expect(calls[0]?.body).toMatchObject({
+      text: `Veja <a href="https://food.example/menu?a=1&amp;b=2">https://food.example/menu?a=1&amp;b=2</a>`,
+      link_preview_options: { url: menu },
+    });
+  });
+
+  it("sends a formatted reply again as plain text when Telegram can't read it", async () => {
+    let call = 0;
+    const { adapter, calls } = botApi(() =>
+      call++ === 0
+        ? Response.json(
+            { ok: false, error_code: 400, description: "Bad Request: can't parse entities" },
+            { status: 400 },
+          )
+        : Response.json({ ok: true, result: { message_id: 78 } }),
+    );
+    expect(await adapter.send({ threadId: "1001" }, "**a** < b", { links: [] })).toEqual({
+      providerMessageId: "78",
+    });
+    expect(calls.map((c) => c.body.text)).toEqual(["<b>a</b> &lt; b", "**a** &lt; b"]);
+  });
+
   it("escapes what already looks like an entity, and refuses to follow redirects", async () => {
     const { adapter, calls, redirects } = botApi();
     await adapter.send({ threadId: "1001" }, "&lt; is how you write <");

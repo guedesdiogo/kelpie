@@ -1,4 +1,5 @@
 import type { Role } from "@kelpie/access";
+import { type Block, formatReply } from "@kelpie/channels";
 import type { ChatType, WebchatAdmission } from "@kelpie/conversation/contract";
 import type { ChatMessage } from "@kelpie/llm";
 import type { ConversationPorts, TurnStep } from "./ports.ts";
@@ -21,6 +22,8 @@ export interface ShownMessage {
   role: "user" | "assistant";
   text: string;
   at: number;
+  /** A reply, formatted with the links it may show (#188); the page shows `text` without it. */
+  blocks?: Block[];
 }
 
 /** What the page receives. */
@@ -30,7 +33,8 @@ export type ServerFrame =
    * shows and resends only the ones it doesn't list.
    */
   | { type: "history"; messages: ShownMessage[]; received: string[]; paused: boolean }
-  | { type: "bubble"; text: string }
+  /** A reply's bubble comes formatted (#188); Kelpie's own notices don't. */
+  | { type: "bubble"; text: string; blocks?: Block[] }
   | { type: "typing"; active: boolean }
   /** What the turn is doing (#141); `idle` once it stopped without a reply. */
   | { type: "status"; status: TurnStep; label?: string }
@@ -121,8 +125,12 @@ export function webchatEgress(
     }
   };
   return {
-    async send(_agentId, _destination, text) {
-      broadcast({ type: "bubble", text });
+    async send(_agentId, _destination, text, options) {
+      broadcast(
+        options.links === undefined
+          ? { type: "bubble", text }
+          : { type: "bubble", text, blocks: formatReply(text, new Set(options.links)) },
+      );
       return { ok: true, providerMessageId: `webchat:${crypto.randomUUID()}` };
     },
     async typing() {

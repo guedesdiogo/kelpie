@@ -35,27 +35,56 @@ main {
   flex-direction: column;
   gap: 0.5rem;
 }
-#messages li {
+#messages > li {
   max-width: 80%;
   padding: 0.5rem 0.75rem;
   border-radius: 0.75rem;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-#messages li.user {
+#messages > li.user {
   align-self: flex-end;
   background: #2563eb;
   color: #fff;
 }
-#messages li.assistant {
+#messages > li.assistant {
   align-self: flex-start;
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
-#messages li.pending {
+#messages > li.pending {
   opacity: 0.6;
 }
-#messages li.rejected {
+#messages > li.rejected {
   outline: 2px solid #dc2626;
+}
+/* A formatted reply (#188): blocks keep the bubble's spacing, and code scrolls in place. */
+#messages > li > p,
+#messages > li > ul,
+#messages > li > ol,
+#messages > li > pre {
+  margin: 0;
+  white-space: pre-wrap;
+}
+#messages > li > :is(p, ul, ol, pre) + :is(p, ul, ol, pre) {
+  margin-top: 0.5rem;
+}
+#messages > li ul,
+#messages > li ol {
+  padding-left: 1.25rem;
+}
+#messages > li ul {
+  list-style: disc;
+}
+#messages > li pre {
+  overflow-x: auto;
+  white-space: pre;
+}
+#messages > li code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+}
+#messages > li a {
+  color: inherit;
 }
 #typing {
   font-size: 0.875rem;

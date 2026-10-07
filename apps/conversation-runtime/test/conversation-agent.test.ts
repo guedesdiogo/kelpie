@@ -763,10 +763,11 @@ describe("ConversationAgent link previews", () => {
     await stub.flush();
 
     await vi.waitFor(() => expect(world.sends).toHaveLength(3));
+    // The person's link may show as a link too (#188); the one the model built may not.
     expect(world.sends).toEqual([
-      { text: `Here: ${MENU}`, silent: true, previewUrl: MENU },
-      { text: `And ${leak}`, silent: true },
-      { text: "No link here.", silent: false },
+      { text: `Here: ${MENU}`, silent: true, previewUrl: MENU, links: [MENU] },
+      { text: `And ${leak}`, silent: true, links: [] },
+      { text: "No link here.", silent: false, links: [] },
     ]);
   });
 
@@ -869,8 +870,8 @@ describe("ConversationAgent link previews", () => {
 
     await vi.waitFor(() => expect(world.sends).toHaveLength(2));
     expect(world.sends).toEqual([
-      { text: "Ok.", silent: false },
-      { text: `It's all on ${MENU}.`, silent: false, previewUrl: MENU },
+      { text: "Ok.", silent: false, links: [] },
+      { text: `It's all on ${MENU}.`, silent: false, previewUrl: MENU, links: [MENU] },
     ]);
   });
 });

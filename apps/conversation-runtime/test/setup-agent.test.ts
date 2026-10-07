@@ -473,8 +473,10 @@ describe("the confirmation gate", () => {
     expect(world.sent).toHaveLength(2);
     expect(world.sent[0]).toBe("Confirme, por favor.");
     expect(NOTICE.exec(world.sent[1] ?? "")?.[1]).toBe('change the thing to {"to":"smart"}.');
-    // The notice comes last, and it is the bubble that notifies.
+    // The notice comes last, and it is the bubble that notifies. The reply is formatted (#188);
+    // the notice, Kelpie's own text, goes as written.
     expect(world.sends.map((send) => send.silent)).toEqual([true, false]);
+    expect(world.sends.map((send) => send.links)).toEqual([[], undefined]);
     expect(ran).toEqual([]);
     const [code = ""] = codes(world);
     // Neither a request, history nor the outbox's inspection holds the code.

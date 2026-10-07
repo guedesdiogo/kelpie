@@ -1,5 +1,10 @@
 import { canonicalTimeZone } from "@kelpie/access";
-import { CAPABILITIES, type ChannelCapabilities, type SendOutcome } from "@kelpie/channels";
+import {
+  CAPABILITIES,
+  type ChannelCapabilities,
+  formatReply,
+  type SendOutcome,
+} from "@kelpie/channels";
 import { type Actor, type AgentConfig, type AgentSettings, DEFAULT_SETTINGS } from "@kelpie/config";
 import type { RecallOptions } from "@kelpie/context-store/contract";
 import {
@@ -60,6 +65,7 @@ import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
 import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
 import * as schema from "./schema.ts";
+import { bareHttpsOrigin } from "./setup-agent.ts";
 import {
   CONFIRMATION_MS,
   type ConfirmationRequest,
@@ -1572,6 +1578,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       const options = {
         silent: row.seq !== lastSeq,
         ...(previewUrl === undefined ? {} : { previewUrl }),
+        // A reply is formatted, with its links from the turn's inputs or Kelpie's admin pages
+        // (#188); a notice is Kelpie's own text, shown as written.
+        ...(row.notice ? {} : { links: this.#linksAllowed(row.text, previewable) }),
       };
       if (!(await this.#sendBubble(turnId, agentId, destination, row, options, signal))) return;
       // If the turn was settled during the send, settling already counted this bubble as sent.
@@ -1609,6 +1618,23 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       inputs.push(...ownersNotes(turn.context, new Set(turn.kelpieNotes ?? [])));
     }
     return new Set(inputs.flatMap(linksIn));
+  }
+
+  /**
+   * The links in a reply's text that may show as links (#188): those in `inputs`, the owner's own,
+   * and those on the admin API's origin, whose pages only show behind the owner's Access login.
+   */
+  #linksAllowed(text: string, inputs: ReadonlySet<string>): string[] {
+    const admin = bareHttpsOrigin(this.env.ADMIN_ORIGIN ?? "");
+    return linksIn(text).filter((link) => {
+      if (inputs.has(link)) return true;
+      if (admin === "") return false;
+      try {
+        return new URL(link).origin === admin;
+      } catch {
+        return false;
+      }
+    });
   }
 
   /**
@@ -1965,25 +1991,32 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    * already sent, then messages no turn has claimed yet. History is written when a turn settles.
    */
   #transcript(): ShownMessage[] {
-    const rows = this.#db
+    const window = this.#db
       .select({
         role: schema.history.role,
         message: schema.history.message,
         at: schema.history.createdAt,
+        turnId: schema.history.turnId,
       })
       .from(schema.history)
       .orderBy(desc(schema.history.id))
       .limit(WEBCHAT_REPLAY_ROWS)
       .all()
-      .reverse()
+      .reverse();
+    const inputs = this.#replayedInputs(window);
+    const formatted = (text: string) => ({
+      text,
+      blocks: formatReply(text, new Set(this.#linksAllowed(text, inputs))),
+    });
+    const rows = window
       .filter(({ message }) => seen(message))
-      .map(({ role, message, at }) => ({
-        role: role === "user" ? ("user" as const) : ("assistant" as const),
-        text: role === "user" ? withoutTypedStamps(shownText(message)) : shownText(message),
-        at,
-      }));
+      .map(({ role, message, at }) =>
+        role === "user"
+          ? { role: "user" as const, text: withoutTypedStamps(shownText(message)), at }
+          : { role: "assistant" as const, ...formatted(shownText(message)), at },
+      );
     const sent = this.#db
-      .select({ text: schema.outbox.text, at: schema.outbox.sentAt })
+      .select({ text: schema.outbox.text, at: schema.outbox.sentAt, notice: schema.outbox.notice })
       .from(schema.outbox)
       .innerJoin(schema.turns, eq(schema.turns.id, schema.outbox.turnId))
       .where(
@@ -1991,13 +2024,44 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       )
       .orderBy(asc(schema.outbox.seq))
       .all()
-      .map(({ text, at }) => ({ role: "assistant" as const, text, at: at ?? 0 }));
+      .map(({ text, at, notice }) =>
+        notice
+          ? { role: "assistant" as const, text, at: at ?? 0 }
+          : { role: "assistant" as const, ...formatted(text), at: at ?? 0 },
+      );
     const waiting = this.#pendingInbound().map((row) => ({
       role: "user" as const,
       text: row.text,
       at: row.receivedAt,
     }));
     return [...rows, ...sent, ...waiting].filter((message) => message.text !== "");
+  }
+
+  /**
+   * The owner's links in a replayed window (#188): those in their messages there, and in their own
+   * notes of the memory blocks its turns were sent. A link they sent before the window shows as
+   * text.
+   */
+  #replayedInputs(
+    window: readonly { role: string; message: ChatMessage; turnId: number }[],
+  ): Set<string> {
+    const inputs = window
+      .filter(({ role }) => role === "user")
+      .map(({ message }) => messageText(message));
+    const turnIds = [...new Set(window.map(({ turnId }) => turnId))];
+    if (turnIds.length > 0) {
+      const turns = this.#db
+        .select({ context: schema.turns.context, kelpieNotes: schema.turns.kelpieNotes })
+        .from(schema.turns)
+        .where(inArray(schema.turns.id, turnIds))
+        .all();
+      for (const turn of turns) {
+        if (turn.context !== null) {
+          inputs.push(...ownersNotes(turn.context, new Set(turn.kelpieNotes ?? [])));
+        }
+      }
+    }
+    return new Set(inputs.flatMap(linksIn));
   }
 
   /** The page's latest message ids this conversation has, oldest first. */
