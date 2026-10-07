@@ -120,6 +120,11 @@ export async function handle(request: Request, deps: AdminDeps): Promise<Respons
     console.warn("admin-api: request refused", { reason: identity.reason });
     return refuse(401, "unauthenticated");
   }
+  // The Access cookie may go with another site's POST (its SameSite is the Access application's
+  // setting), so a page elsewhere must not be able to send a command: no foreign origin, and only
+  // `application/json`, which no form can send and no other origin can `fetch` without a preflight.
+  if (!isSameOriginSubmission(request)) return refuse(403, "cross_origin");
+  if (!isJson(request)) return refuse(415, "not_json");
 
   const body = await readJson(request);
   if (!body.ok) return refuse(body.status, body.reason);
@@ -214,15 +219,25 @@ async function handlePairing(
 }
 
 /**
- * Whether a POST came from the form's own page. Browsers say so in `Sec-Fetch-Site`; without it,
- * a foreign `Origin` is refused. (The page's referrer policy is `same-origin`, so the browser
- * sends the real origin: under `no-referrer` it would send `null`.)
+ * Whether a POST came from this origin's own pages, or from no page: a client such as curl sends
+ * neither header. Browsers say so in `Sec-Fetch-Site`; without it, a foreign `Origin` is refused.
+ * (The form pages' referrer policy is `same-origin`, so the browser sends the real origin: under
+ * `no-referrer` it would send `null`.)
  */
 function isSameOriginSubmission(request: Request): boolean {
   const site = request.headers.get("sec-fetch-site");
   if (site !== null) return site === "same-origin";
   const origin = request.headers.get("origin");
   return origin === null || origin === new URL(request.url).origin;
+}
+
+/**
+ * Whether the media type is exactly `application/json`, parameters aside. A substring match would
+ * take `text/plain;application/json`, which a page elsewhere can send without a preflight.
+ */
+function isJson(request: Request): boolean {
+  const type = request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+  return type === "application/json";
 }
 
 async function run(

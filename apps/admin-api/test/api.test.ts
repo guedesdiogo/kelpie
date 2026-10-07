@@ -177,7 +177,7 @@ function world({
 }
 
 function post(path: string, body?: unknown) {
-  const init: RequestInit = { method: "POST" };
+  const init: RequestInit = { method: "POST", headers: { "content-type": "application/json" } };
   if (body !== undefined) init.body = typeof body === "string" ? body : JSON.stringify(body);
   return new Request(`https://admin.example${path}`, init);
 }
@@ -322,7 +322,7 @@ describe("admin API commands", () => {
     const response = await handle(
       new Request("https://admin.example/commands/createAgent", {
         method: "POST",
-        headers: { "content-length": "10" },
+        headers: { "content-type": "application/json", "content-length": "10" },
         body,
       }),
       deps,
@@ -341,6 +341,110 @@ describe("admin API commands", () => {
     expect(
       (await call(deps, "/commands/configureAgent", { prompt: "x".repeat(70_000) })).status,
     ).toBe(413);
+  });
+});
+
+describe("admin API cross-site requests", () => {
+  const CREATE = JSON.stringify({ id: "sales", name: "Sales" });
+  const send = (deps: AdminDeps, path: string, headers: Record<string, string>, body: BodyInit) =>
+    handle(new Request(`https://admin.example${path}`, { method: "POST", headers, body }), deps);
+
+  it.each([
+    // What `<form enctype="text/plain">` sends for a field named `{"id":"sales","name":"Sales`
+    // with the value `"}`: a JSON body under a type that needs no CORS preflight.
+    ["a text/plain form", "text/plain", '{"id":"sales","name":"Sales="}\r\n'],
+    ["text/plain naming JSON in a parameter", "text/plain;application/json", CREATE],
+    ["a form-encoded body", "application/x-www-form-urlencoded", CREATE],
+    ["a multipart body", "multipart/form-data; boundary=x", CREATE],
+  ])("refuses a command sent as %s, before running it", async (_label, type, body) => {
+    const { deps, ran } = world();
+    const response = await send(deps, "/commands/createAgent", { "content-type": type }, body);
+    expect(response.status).toBe(415);
+    expect(await response.json()).toEqual({ ok: false, reason: "not_json" });
+    expect(ran).toEqual([]);
+  });
+
+  it("refuses a command without a Content-Type, even one that takes no input", async () => {
+    const { deps, ran } = world();
+    const bytes = new TextEncoder().encode(CREATE);
+    expect((await send(deps, "/commands/createAgent", {}, bytes)).status).toBe(415);
+    const empty = new Request("https://admin.example/commands/listAgents", { method: "POST" });
+    expect((await handle(empty, deps)).status).toBe(415);
+    expect(ran).toEqual([]);
+  });
+
+  it.each([
+    [
+      "Sec-Fetch-Site: cross-site",
+      { "sec-fetch-site": "cross-site", origin: "https://evil.example" },
+    ],
+    [
+      "Sec-Fetch-Site: same-site",
+      { "sec-fetch-site": "same-site", origin: "https://chat.example" },
+    ],
+    ["Sec-Fetch-Site: none", { "sec-fetch-site": "none" }],
+    ["a foreign Origin without Sec-Fetch-Site", { origin: "https://evil.example" }],
+    ["Origin: null without Sec-Fetch-Site", { origin: "null" }],
+  ])("refuses a JSON command with %s, before running it", async (_label, headers) => {
+    const { deps, ran } = world();
+    const response = await send(
+      deps,
+      "/commands/createAgent",
+      { "content-type": "application/json", ...headers },
+      CREATE,
+    );
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ ok: false, reason: "cross_origin" });
+    expect(ran).toEqual([]);
+  });
+
+  it.each([
+    [
+      "from its own origin, with a charset",
+      {
+        "content-type": "application/json; charset=utf-8",
+        "sec-fetch-site": "same-origin",
+        origin: "https://admin.example",
+      },
+    ],
+    ["with the media type in capitals", { "content-type": "Application/JSON" }],
+    [
+      "from a client that sends neither Origin nor Sec-Fetch-Site",
+      { "content-type": "application/json" },
+    ],
+  ])("runs a JSON command %s", async (_label, headers) => {
+    const { deps, ran } = world();
+    expect((await send(deps, "/commands/createAgent", headers, CREATE)).status).toBe(200);
+    expect(ran).toEqual(["registry.add"]);
+  });
+
+  it("applies the same rules to the bootstrap and the recovery", async () => {
+    const plain = { "content-type": "text/plain" };
+    const foreign = { "content-type": "application/json", "sec-fetch-site": "cross-site" };
+
+    const fresh = world({ owner: false });
+    const bootstrap = JSON.stringify({ token: TOKEN });
+    expect((await send(fresh.deps, "/bootstrap", plain, bootstrap)).status).toBe(415);
+    expect((await send(fresh.deps, "/bootstrap", foreign, bootstrap)).status).toBe(403);
+    expect(fresh.bootstraps).toEqual([]);
+
+    const back = world({ authenticated: "sub-new" });
+    back.deps.recoveryToken = RECOVERY;
+    const recovery = JSON.stringify({ token: RECOVERY });
+    expect((await send(back.deps, "/recover", plain, recovery)).status).toBe(415);
+    expect((await send(back.deps, "/recover", foreign, recovery)).status).toBe(403);
+    expect(back.relinks).toEqual([]);
+  });
+
+  it("still answers 401 first when the Access JWT doesn't verify", async () => {
+    const { deps } = world({ authenticated: null });
+    const response = await send(
+      deps,
+      "/commands/createAgent",
+      { "content-type": "text/plain" },
+      CREATE,
+    );
+    expect(response.status).toBe(401);
   });
 });
 
