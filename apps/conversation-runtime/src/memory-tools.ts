@@ -258,6 +258,10 @@ export function memoryTools(store: MemoryStore): ToolProvider {
         return invalid(
           "Not saved: that note holds the owner's word (something they stated, wrote or edited), and a deduced or inferred memory can't change it. Save it as a new note that says what changed.",
         );
+      case "core_note":
+        return invalid(
+          "Not saved: that note is pinned, or a profile note, which the agent's always-loaded memory carries, so only the owner changes it. Save it as a new note that says what changed.",
+        );
       case "too_large":
         return invalid("Not saved: the note is too large. Save less, or split it.");
       case "vault_off":

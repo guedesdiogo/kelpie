@@ -111,11 +111,11 @@ describe("writeNote", () => {
     });
   });
 
-  it("writes a found note's new version, keeping its id, the owner's keys and its pin", async () => {
+  it("writes a found note's new version, keeping its id, the owner's keys and its evergreen flag", async () => {
     const ana = "memory/people/ana-souza.md";
     const backend = vaultWith({
       [ana]:
-        "---\nid: 0123456789abcdef\npinned: true\naliases: [Aninha]\n---\n\n# Ana Souza\n\nMora em Lisboa.\n",
+        "---\nid: 0123456789abcdef\nevergreen: true\naliases: [Aninha]\n---\n\n# Ana Souza\n\nMora em Lisboa.\n",
       "conversations/familia/people/caio.md": "# Caio\n\nPrimo.\n",
       "agents/kelpie/SOUL.md": "# Kelpie\n",
     });
@@ -131,7 +131,7 @@ describe("writeNote", () => {
     const file = backend.files()[ana] ?? "";
     expect(file).toContain("id: 0123456789abcdef");
     expect(file).toContain("aliases: [Aninha]");
-    expect(file).toContain("pinned: true");
+    expect(file).toContain("evergreen: true");
     expect(file).toContain("Mora no Porto.");
 
     // The kind and the scope stay the note's; other paths aren't the agent's to name.
@@ -418,6 +418,48 @@ describe("writeNote", () => {
         { scopes: "all", sources: [] },
       ),
     ).toMatchObject({ action: "written" });
+  });
+
+  it("leaves a note the always-loaded core carries to the owner (#168)", async () => {
+    vaultWith({
+      "memory/notes/cafe.md": "---\npinned: true\n---\n# Café\n\nSem açúcar.\n",
+      "memory/profile/rotina.md": "# Rotina\n\nAcorda cedo.\n",
+      "agents/kelpie/memory/profile/tom.md": "# Tom\n\nCurto e direto.\n",
+      "memory/profile/saude/sono.md": "# Sono\n\nOito horas.\n",
+      "memory/notes/cha.md": "# Chá\n\nVerde.\n",
+      // Pinned in an area: the core doesn't carry it, so the agent may change it.
+      "areas/work/notes/pauta.md": "---\npinned: true\n---\n# Pauta\n\nSegunda.\n",
+    });
+    const stub = vault("write-core-notes");
+    for (const [path, title] of [
+      ["memory/notes/cafe.md", "Café"],
+      ["memory/profile/rotina.md", "Rotina"],
+      ["agents/kelpie/memory/profile/tom.md", "Tom"],
+      ["memory/profile/saude/sono.md", "Sono"],
+    ] as const) {
+      for (const level of ["explicit", "deduced", "inferred"] as const) {
+        expect(
+          await stub.writeNote("kelpie", memory(title, "Outro.", { path, level }), ALL),
+          `${path} ${level}`,
+        ).toEqual({ ok: false, reason: "core_note" });
+      }
+    }
+    expect(
+      await runInDurableObject(
+        stub,
+        (_instance, state) => state.storage.sql.exec("SELECT count(*) AS n FROM queue").one().n,
+      ),
+    ).toBe(0);
+    // A note outside the core changes as before.
+    for (const [path, title] of [
+      ["memory/notes/cha.md", "Chá"],
+      ["areas/work/notes/pauta.md", "Pauta"],
+    ] as const) {
+      expect(
+        await stub.writeNote("kelpie", memory(title, "Outro.", { path }), ALL),
+        path,
+      ).toMatchObject({ ok: true, action: "written" });
+    }
   });
 
   it("keeps the owner's word in a version Kelpie merged into the owner's edit", async () => {

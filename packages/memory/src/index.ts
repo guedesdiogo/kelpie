@@ -1,5 +1,5 @@
 export { ABSTRACT_PROMPT, abstractInput, abstractOf, withAbstract } from "./abstract.ts";
-export { type Core, type CoreOptions, coreBlock } from "./core.ts";
+export { type Core, type CoreOptions, coreBlock, coreCarries } from "./core.ts";
 export { type Entity, foldKey, MAX_ENTITIES, normalizeEntities } from "./entities.ts";
 export { gitBlobSha } from "./hash.ts";
 export {
