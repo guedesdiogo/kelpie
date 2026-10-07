@@ -65,6 +65,11 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
   - **Embeddings:** the alarm embeds the notes that have no vector yet, through llm-gateway's `embed`, four batches of 64 a run, until none is left.
     - The model is the one `EMBEDDING_PROVIDER` chooses on llm-gateway. A recall that sees a new model arms the alarm, which embeds every note again; until then the vector stream finds what it can.
     - This runs after GitHub's work and fails on its own, so an llm-gateway outage never delays the vault's writes. A call that doesn't answer in 40 s is given up.
+  - **`core(agent, budgetTokens)`:** the agent's always-loaded core (#112, [memory-format.md](memory-format.md#retrieval)), as one block.
+    - **Within the budget:** at most 8,000 tokens, as recall's.
+    - **What goes in:** the notes the owner pinned in the global scope or the agent's own, then the owner's profile, then the agent's self-model.
+    - **What it doesn't do:** it counts no access, and never waits behind a commit to GitHub.
+    - **Off or failing:** with the vault off, or on any failure, it answers an empty block.
   - **`recall(agent, question, {scopes, budgetTokens, asOf?, validAt?, qualifier?})`:** the memories that answer a question, packed for one turn.
     - The question is read up to 2,000 characters.
     - Its vector joins the retrieval if llm-gateway answers within 2 s.

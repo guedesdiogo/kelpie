@@ -103,6 +103,17 @@ describe("AgentHost", () => {
       },
     ]);
   });
+
+  it("starts a new prompt version when the memory core is turned on or off", async () => {
+    const stub = host("memory-core");
+    await stub.configure({ memoryCore: true }, owner);
+    expect(await stub.config()).toMatchObject({
+      settings: { memoryCore: true },
+      promptVersion: 1,
+    });
+    await stub.configure({ memoryCore: false, tier: "medium" }, owner);
+    expect((await stub.config()).promptVersion).toBe(2);
+  });
 });
 
 describe("AgentHost with a vault", () => {
@@ -112,6 +123,7 @@ describe("AgentHost with a vault", () => {
     write: async () => ({ ok: false, reason: "vault_off" }),
     propose: async () => ({ ok: false, reason: "vault_off" }),
     recall: async () => ({ text: "", tokens: 0, paths: [], notes: [] }),
+    core: async () => ({ text: "", tokens: 0, paths: [], omitted: 0 }),
     search: async () => ({ ok: false, reason: "vault_off" }),
     readNote: async () => ({ ok: false, reason: "vault_off" }),
     writeNote: async () => ({ ok: false, reason: "vault_off" }),

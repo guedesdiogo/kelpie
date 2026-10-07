@@ -134,6 +134,12 @@ const SESSION_RETRY_MS = 10 * 60_000;
 const RECALL_BUDGET_TOKENS = 1_000;
 /** A packed block takes four characters a token, so a longer answer is refused. */
 const RECALL_MAX_CHARS = RECALL_BUDGET_TOKENS * 4;
+/**
+ * The always-loaded core's budget (#112): 4,000 characters, gbrain's default and the size of the
+ * recalled slice. A longer answer is refused.
+ */
+const CORE_BUDGET_TOKENS = 1_000;
+const CORE_MAX_CHARS = CORE_BUDGET_TOKENS * 4;
 /** Retrieval reads no more of a question than this, so the newest text is what is sent. */
 const RECALL_QUESTION_CHARS = 2_000;
 /**
@@ -703,7 +709,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       } else {
         // The person waits for this.
         if (this.#question() !== "") step("memory");
-        const recalled = await this.#recall(settings);
+        const [recalled] = await Promise.all([
+          this.#recall(settings),
+          this.#loadCore(turn.systemVersion, turn.checkpointId, settings),
+        ]);
         memory = recalled?.text ?? null;
         if (controller.signal.aborted || !this.#isRunning(turnId)) return;
         // Kept with the turn, to be sent again unchanged on later requests (#137).
@@ -1088,6 +1097,53 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       });
       return null;
     }
+  }
+
+  /**
+   * Loads the always-loaded core (#112) once for a prompt version and checkpoint, and keeps it as
+   * it was sent: every request under the same pair carries it byte for byte, since a reply's
+   * reasoning is bound to everything sent before it (#137). With the core off, or when the Context
+   * Store fails, the pair goes without one: asking again later would change the prefix under a
+   * reply already given. A checkpoint or a new prompt version loads it again.
+   */
+  async #loadCore(
+    version: number,
+    checkpointId: number | null,
+    settings: AgentSettings,
+  ): Promise<void> {
+    if (this.#core(version, checkpointId) !== null) return;
+    let text = "";
+    if (settings.memoryCore ?? DEFAULT_SETTINGS.memoryCore) {
+      try {
+        const core = await this.#ports.core(this.#agentId(), CORE_BUDGET_TOKENS);
+        if (typeof core.text !== "string" || core.text.length > CORE_MAX_CHARS) {
+          throw new TypeError("the core answered past its budget");
+        }
+        console.log("conversation: core", {
+          notes: core.paths.length,
+          omitted: core.omitted,
+          tokens: core.tokens,
+        });
+        // Anthropic refuses blank text.
+        text = core.text.trim() === "" ? "" : core.text;
+      } catch (error) {
+        console.warn("conversation: core failed", { error: errorName(error) });
+      }
+    }
+    // Loaded while the turn ran: the first answer for the pair is the one kept.
+    if (this.#core(version, checkpointId) !== null) return;
+    this.#set("core", { version, checkpointId, text });
+  }
+
+  /** The core kept for a prompt version and checkpoint, or null when none was loaded for them. */
+  #core(version: number, checkpointId: number | null): string | null {
+    const kept = this.#get<{ version: number; checkpointId: number | null; text: string } | null>(
+      "core",
+      null,
+    );
+    return kept !== null && kept.version === version && kept.checkpointId === checkpointId
+      ? kept.text
+      : null;
   }
 
   /**
@@ -1656,15 +1712,16 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       const { native: _native, ...neutral } = message;
       return neutral;
     });
-    if (!checkpoint) return messages;
-    // The summary leads the first kept message, so roles still alternate.
-    const summary = {
-      type: "text" as const,
-      text: `${CHECKPOINT_HEADING}\n\n${checkpoint.summary}`,
-    };
+    // The core (#112), then the summary, lead the first kept message, so roles still alternate.
+    const core = this.#core(systemVersion, checkpointId) ?? "";
+    const lead = [
+      ...(core === "" ? [] : [core]),
+      ...(checkpoint ? [`${CHECKPOINT_HEADING}\n\n${checkpoint.summary}`] : []),
+    ].map((text) => ({ type: "text" as const, text }));
+    if (lead.length === 0) return messages;
     const [first, ...rest] = messages;
-    if (first?.role === "user") return [{ ...first, parts: [summary, ...first.parts] }, ...rest];
-    return [{ role: "user", parts: [summary] }, ...messages];
+    if (first?.role === "user") return [{ ...first, parts: [...lead, ...first.parts] }, ...rest];
+    return [{ role: "user", parts: lead }, ...messages];
   }
 
   #pendingInbound() {

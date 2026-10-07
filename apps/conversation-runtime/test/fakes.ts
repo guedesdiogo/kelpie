@@ -139,6 +139,12 @@ export interface FakeWorld {
   failRecall: boolean;
   /** While set, recall waits before it answers. */
   recallHeld: boolean;
+  /** Every request for the core (#112), in order. */
+  cores: { agentId: string; budgetTokens: number }[];
+  /** The block the core answers with; empty, as when nothing is pinned, by default. */
+  core: string;
+  /** While set, the core throws, as an unreachable Context Store would. */
+  failCore: boolean;
 }
 
 export function fakeWorld(scripts: ModelScript[]): FakeWorld {
@@ -163,6 +169,9 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
     memoryNotes: null,
     failRecall: false,
     recallHeld: false,
+    cores: [],
+    core: "",
+    failCore: false,
     typing: 0,
     typingKept: 0,
     typingStopped: 0,
@@ -300,6 +309,16 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
           notes:
             world.memoryNotes ??
             (world.memory === "" ? [] : [{ path: "people/ana.md", byKelpie: false }]),
+        };
+      },
+      async core(agentId, budgetTokens) {
+        world.cores.push({ agentId, budgetTokens });
+        if (world.failCore) throw new Error(INJECTED_FAILURE);
+        return {
+          text: world.core,
+          tokens: Math.ceil(world.core.length / 4),
+          paths: world.core === "" ? [] : ["memory/notes/cafe.md"],
+          omitted: 0,
         };
       },
       now: () => world.clock,
