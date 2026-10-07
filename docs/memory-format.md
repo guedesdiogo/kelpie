@@ -437,7 +437,7 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
   - **Which notes:** notes whose current version Kelpie wrote (#126) in the last 7 days, dated as the report dates notes, so a rebuilt index doesn't make old notes new. They are either session pages, whose abstract is their first message, or conclusions (`deduced`, `inferred`) without an abstract. Each gets a proposed abstract, with secrets removed. A fact the person stated keeps its own words. The owner's notes never do, nor a version Kelpie merged into the owner's edit (#160).
   - **The model:**
     - the cheap tier, through llm-gateway;
-    - the note goes as data, up to 6,000 characters, between markers that say where it starts and ends;
+    - the note goes as data, up to 6,000 characters, between `BEGIN NOTE` and `END NOTE` lines that carry a random id for each call, so the note can't close the block;
     - its answer must be JSON with one key, `abstract`: one printable line of at most 300 characters, the writer's rule. Any other answer is kept as no answer, so that version isn't asked about again.
   - **One proposal per version:** a proposal is kept with the version it was made from. A note gets one proposal per version, and a newer version drops it.
 - **The plan:** the report's "Dream's plan" section lists each proposed abstract beside its note.
@@ -476,13 +476,13 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
   - **When it's proposed again:** the proposal is kept with the versions of the day's pages. A new page that day proposes it again, and nothing else does. A day whose summary the vault already shows isn't proposed.
   - **The model:** the cheap tier, within the same 8 calls a run. Abstracts, days and merges take turns; a merge of the same content counts no call.
     - The day's pages share 12,000 characters of input, each under a heading with its title and path. A day whose headings alone would take half of that isn't summed up, since its summary would come from titles only.
-    - The pages go between a `BEGIN PAGES` line and an `END PAGES` line that carry a random id for each call, so a page can't close the block.
+    - The pages go between a `BEGIN PAGES` line and an `END PAGES` line that carry a random id for each call, and each page's heading ends in that id, so a page can't close the block or pass for another page.
     - The answer must be JSON with one key, `summary`.
     - The summary must be plain lines within 2,000 characters. Windows line ends become line ends. Any other control character, line separator or bidirectional control is refused, at the edges too.
     - Secrets are removed from it next.
     - Then nothing in it may read as Markdown structure:
-      - no heading, quote, fence, rule, title underline, frontmatter fence or conflict marker at a line's start;
-      - no link, wikilink, image or HTML anywhere.
+      - no heading (a run of `#` and a space), quote (a line starting with `>`), fence, rule, title underline, frontmatter fence or conflict marker at a line's start, behind a list or quote marker too;
+      - no link, link reference, wikilink, image, HTML tag or autolink, mail too, anywhere. A bare URL, a hashtag or a `<` in prose stays as text.
   - **The page:** Dream's page, `memory/_lint/dream.md`, lists each proposed summary, newest day first, each with the pages it sums up (see "Dream's page" below).
   - **Erasing:** forgetting a session page forgets its day's summary. Turning Dream off deletes the summaries too, and the next report removes the page; the vault's git history still holds its earlier versions. A call that ends after Dream was turned off keeps nothing.
 - **Duplicates** (#112): a dry run for now. `merges` can't be named in `writes` yet.
@@ -503,10 +503,17 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
   - **Different content:** one call on the cheap tier, with the notes whole.
     - A group whose notes pass 16,000 characters, each under a heading with its title and path, isn't merged, since a cut would lose what it held. It stays on the report's list.
     - The model first says whether the notes are about the same thing. The answer is JSON, either `{"verdict": "distinct"}` or `{"verdict": "merge", "body"}`.
-    - The notes go between `BEGIN NOTES` and `END NOTES` lines with a random id, as a day's pages do.
+    - The notes go between `BEGIN NOTES` and `END NOTES` lines with a random id, each note's heading ending in it, as a day's pages do.
     - The body must be within 8,000 characters, with the same rule on control characters as a summary's.
     - Secrets are removed from it next.
-    - It may hold no frontmatter fence or conflict marker. Outside code, it may hold no title heading, remote image, link reference or HTML, so it can't reach out when it renders. In code, all of these are text.
+    - **Anywhere, fenced or inline code included,** it may hold:
+      - no frontmatter fence or conflict marker;
+      - no image or link reference;
+      - no HTML, and no HTML block's opener;
+      - no link but to the web or to mail.
+
+      An image split across lines, spelled with entities, or named by a reference behind a list marker would get past a rule that reads Markdown. So would a fence an HTML block swallows. These rules don't read Markdown at all.
+    - **Outside code,** it may hold no title heading, behind a list or quote marker too. In code, a `#` line is a comment.
     - Any other answer, or a failed or late call, is kept as no answer, so those versions aren't asked about again. A failed or late call also ends the run.
   - **Kept only while its notes are:** a proposal is kept with the versions of its notes, and a change to any of them proposes the group again.
     - A forgotten note takes the proposal with it right away. A note changed or removed in the vault takes it at the next daily report.

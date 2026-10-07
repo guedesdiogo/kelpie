@@ -46,7 +46,22 @@ describe("summaryInput", () => {
     const ends = text.match(/^END PAGES.*$/gm) ?? [];
     expect(ends).toHaveLength(2);
     expect(ends[1]).toMatch(/^END PAGES [0-9a-f]{16}$/);
-    expect(summaryInput({ date: "2026-10-06", pages: [] })).not.toBe(text);
+    // A new id each call, on the block's lines and on each page's heading.
+    const again = summaryInput({ date: "2026-10-06", pages: [] }) ?? "";
+    const first = /^BEGIN PAGES ([0-9a-f]{16})$/m.exec(text)?.[1];
+    expect(again).not.toContain(`BEGIN PAGES ${first}`);
+    expect(text).toContain(
+      `## A (conversations/telegram-1/sessions/2026/2026-10-06-a.md) [${first}]`,
+    );
+    // A title or a path is one line, and capped.
+    const odd =
+      summaryInput({
+        date: "2026-10-06",
+        pages: [{ path: "x.md", title: `Linha\nOutra${"a".repeat(500)}`, body: "" }],
+      }) ?? "";
+    const heading = odd.split("\n").find((line) => line.startsWith("## ")) ?? "";
+    expect(heading).toMatch(/^## Linha Outraa+… \(x\.md\) \[[0-9a-f]{16}\]$/);
+    expect(heading.length).toBeLessThan(160);
   });
 
   it("gives up on a day whose headings would take half the budget", () => {
@@ -78,6 +93,21 @@ describe("summaryOf", () => {
     expect(summaryOf('```json\n{"summary": " Café. "}\n```')).toBe("Café.");
   });
 
+  it("keeps text that only looks like markup", () => {
+    for (const text of [
+      "Café <3.",
+      "Ver o item [1].",
+      "5<10 e a<b então.",
+      "Link: https://x.test/a",
+      "- -",
+      "Falaram de #kelpie.",
+      "#1 prioridade: café.",
+      "C# e F#.",
+    ]) {
+      expect(summaryOf(JSON.stringify({ summary: text })), text).toBe(text);
+    }
+  });
+
   it.each([
     ["not JSON", "Café."],
     ["another key too", '{"summary": "Café.", "x": 1}'],
@@ -102,6 +132,13 @@ describe("summaryOf", () => {
     ["an autolink", '{"summary": "Ver <https://x.test>."}'],
     ["HTML", '{"summary": "Café <b>forte</b>."}'],
     ["an HTML comment", '{"summary": "Café <!-- x -->."}'],
+    ["a link by reference", '{"summary": "Ver [aqui][r].\\n\\n[r]: https://x.test"}'],
+    ["a mail autolink", '{"summary": "Fale com <joao@x.test>."}'],
+    ["an image by shortcut reference", '{"summary": "Veja ![foto]."}'],
+    ["a subtitle under one -", '{"summary": "Outro\\n-"}'],
+    ["a heading behind a list marker", '{"summary": "- # Outro"}'],
+    ["a title under one =", '{"summary": "Outro\\n="}'],
+    ["an HTML block opener", '{"summary": "Café <?php x ?>"}'],
     ["a vertical tab at the edge", '{"summary": "Café\\u000b"}'],
     ["a form feed at the edge", '{"summary": "\\u000cCafé"}'],
     ["conflict markers", '{"summary": "<<<<<<< HEAD\\nx"}'],
