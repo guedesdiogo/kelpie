@@ -73,15 +73,16 @@ Identity values in answers are masked.
 
 **Formatting** (#188). Replies show a small Markdown subset in the webchat and on Telegram: bold, italics, inline code, code blocks, bullet and numbered lists, and headings as bold. The runtime reads it, and the model's text is never passed on as markup:
 - the webchat builds the reply as elements on the page;
-- Telegram gets its own HTML, every text escaped, and the reply goes again as plain text if Telegram can't read it;
+- Telegram gets its own HTML, every text escaped. If Telegram can't read it, the reply goes again without formatting or links, its addresses still in code;
 - raw HTML stays text.
 
-A link shows as a link only when its URL is in the turn's inputs, or it is on the admin API's origin (`ADMIN_ORIGIN`), whose pages only show behind Access:
+A web address (http or https) shows as a link only when it is in the turn's inputs, or the admin API's origin (`ADMIN_ORIGIN`) starts it as written, whose pages only show behind Access:
 - the inputs are the owner's messages and their own notes in the memory block, the same that may be previewed (#130);
-- any other address, whether the model wrote it or a tool or a note it read gave it, shows as code, with its label, so the owner sees where it points. Telegram doesn't link code by itself;
-- Kelpie's fixed notices, such as a confirmation's, are never formatted;
-- a reply replayed in the webchat links what the owner sent within the replayed messages;
-- a URL hidden behind text in a Telegram message the owner sent (a `text_link`) doesn't count yet.
+- any other address, whether the model wrote it or a tool or a note it read gave it, shows as code, with its label, so the owner sees where it points;
+- Telegram links addresses in plain text by itself, with or without a scheme (`example.com/login`, `www.example.com`), so on Telegram any text it could read as an address goes in code too. Emails, `@mentions`, hashtags and phone numbers still show as Telegram finds them;
+- Kelpie's fixed notices, such as a confirmation's, are never formatted. On Telegram the addresses they quote go in code all the same;
+- a reply replayed in the webchat links what the owner had sent before it among the replayed messages, and their notes its turn recalled;
+- a URL hidden behind text in a Telegram message the owner sent (a `text_link`) doesn't count yet (#190).
 
 **Pausing.** `/pause` on Telegram (also `/pause@<bot>`), or the webchat's Pause button, holds every answer until the owner's next message (#134). A pause while paused changes nothing, and Telegram's redelivery of the same `/pause` is ignored.
 - A turn in flight is interrupted, and the planned answer is cancelled.

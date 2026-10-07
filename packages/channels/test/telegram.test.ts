@@ -160,9 +160,9 @@ describe("Telegram sending", () => {
     await adapter.send({ threadId: "1001" }, `See ${menu} or https://evil.example/x`, {
       previewUrl: menu,
     });
-    // The link goes as typed; only the text is escaped.
+    // The link previews as typed. Sent without the links it may show (#188), every address is code.
     expect(calls[0]?.body).toMatchObject({
-      text: "See https://food.example/menu?a=1&amp;b=2 or https://evil.example/x",
+      text: "See <code>https://food.example/menu?a=1&amp;b=2</code> or <code>https://evil.example/x</code>",
       link_preview_options: { url: menu },
     });
 
@@ -198,9 +198,10 @@ describe("Telegram sending", () => {
       link_preview_options: { is_disabled: true },
     });
 
-    // Without links, a send is plain text as before: notices stay what they say.
-    await adapter.send({ threadId: "1001" }, "Confirm: rename **a**");
-    expect(calls[1]?.body.text).toBe("Confirm: rename **a**");
+    // Without links, a send is plain text: notices stay what they say, but what they quote can't
+    // be tapped.
+    await adapter.send({ threadId: "1001" }, "Confirm: rename **a** to evil.example/login");
+    expect(calls[1]?.body.text).toBe("Confirm: rename **a** to <code>evil.example/login</code>");
   });
 
   it("previews against the text as written, before it is formatted", async () => {
@@ -213,7 +214,7 @@ describe("Telegram sending", () => {
     });
   });
 
-  it("sends a formatted reply again as plain text when Telegram can't read it", async () => {
+  it("sends a formatted reply again as plain text when Telegram can't read it, links still off", async () => {
     let call = 0;
     const { adapter, calls } = botApi(() =>
       call++ === 0
@@ -223,10 +224,14 @@ describe("Telegram sending", () => {
           )
         : Response.json({ ok: true, result: { message_id: 78 } }),
     );
-    expect(await adapter.send({ threadId: "1001" }, "**a** < b", { links: [] })).toEqual({
+    const reply = "**a** < b, see https://evil.example/login or evil.example/x";
+    expect(await adapter.send({ threadId: "1001" }, reply, { links: [] })).toEqual({
       providerMessageId: "78",
     });
-    expect(calls.map((c) => c.body.text)).toEqual(["<b>a</b> &lt; b", "**a** &lt; b"]);
+    expect(calls.map((c) => c.body.text)).toEqual([
+      "<b>a</b> &lt; b, see <code>https://evil.example/login</code> or <code>evil.example/x</code>",
+      "**a** &lt; b, see <code>https://evil.example/login</code> or <code>evil.example/x</code>",
+    ]);
   });
 
   it("escapes what already looks like an entity, and refuses to follow redirects", async () => {

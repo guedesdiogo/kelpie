@@ -1,7 +1,8 @@
 // What a reply shows (#188): a small Markdown subset the model writes, read in code and rendered by
-// each channel without ever passing the model's text as markup. Raw HTML stays text. A link is a
-// link only when its URL is one the caller allows; any other shows its address as code, so a
-// channel that links bare URLs on its own (Telegram does) can't make it clickable either.
+// each channel without ever passing the model's text as markup. Raw HTML stays text. A web address
+// is a link only when the caller allows it; any other shows as code. Telegram links addresses in
+// plain text on its own, with or without a scheme, so its renderer puts every address it doesn't
+// link in code too. Every step is linear in the reply's length: a reply is the model's to write.
 
 export type Inline =
   | { type: "text"; text: string }
@@ -10,15 +11,29 @@ export type Inline =
   | { type: "code"; text: string }
   | { type: "link"; href: string; children: Inline[] };
 
-export type Block =
+export type Block = (
   | { type: "paragraph"; children: Inline[] }
-  | { type: "list"; ordered: boolean; start: number; items: Inline[][] }
-  | { type: "code"; text: string };
+  | {
+      type: "list";
+      ordered: boolean;
+      start: number;
+      items: Inline[][];
+      /** An ordered list's numbers as written, which Telegram shows; the webchat counts from `start`. */
+      numbers?: number[];
+    }
+  | { type: "code"; text: string }
+) & {
+  /** Written on the line right after the previous block, with no blank line between. */
+  tight?: true;
+};
+
+/** The addresses a reply may link. A `Set` of them will do. */
+export type AllowedLinks = { has(href: string): boolean };
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
-const HEADING = /^ {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
-const BULLET = /^ {0,3}[-*+][ \t]+(.*)$/;
-const NUMBERED = /^ {0,3}(\d{1,9})[.)][ \t]+(.*)$/;
+const HEADING = /^ {0,3}#{1,6}[ \t]+/;
+const BULLET = /^ {0,3}[-*+][ \t]+/;
+const NUMBERED = /^ {0,3}(\d{1,9})[.)][ \t]+/;
 const URL_START = /^https?:\/\//i;
 /** A web URL starting at `lastIndex`. */
 const WEB_URL_AT = /https?:\/\/[^\s<>"]+/iy;
@@ -28,30 +43,37 @@ const MAX_HREF_CHARS = 2_048;
 const MAX_DEPTH = 8;
 const EMPHASIS = ["**", "__", "*", "_"] as const;
 /** Punctuation after a URL belongs to the sentence. */
-const AFTER_URL = /[.,:;!?'"]+$/;
+const AFTER_URL = ".,:;!?'\"";
 /** What a backslash may escape, as CommonMark has it. */
 const ESCAPABLE = /[!-/:-@[-`{-~]/;
+const NONE: AllowedLinks = { has: () => false };
 
 /**
  * Reads a reply into blocks. `allowed` holds the URLs that may be links, written as the reply
- * writes them; only http and https URLs among them become links.
+ * writes them, as `linksOf` finds them; only http and https URLs among them become links.
  */
-export function formatReply(text: string, allowed: ReadonlySet<string>): Block[] {
+export function formatReply(text: string, allowed: AllowedLinks): Block[] {
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   const blocks: Block[] = [];
+  let blank = false;
   let paragraph: string[] = [];
-  let list: { ordered: boolean; start: number; items: string[] } | null = null;
+  let list: { ordered: boolean; numbers: number[]; items: string[] } | null = null;
   const inline = (source: string) => readInline(source, allowed);
+  const add = (block: Block) => {
+    if (blocks.length > 0 && !blank) block.tight = true;
+    blocks.push(block);
+    blank = false;
+  };
   const flush = () => {
-    if (paragraph.length > 0)
-      blocks.push({ type: "paragraph", children: inline(paragraph.join("\n")) });
+    if (paragraph.length > 0) add({ type: "paragraph", children: inline(paragraph.join("\n")) });
     paragraph = [];
     if (list) {
-      blocks.push({
+      add({
         type: "list",
         ordered: list.ordered,
-        start: list.start,
+        start: list.numbers[0] ?? 1,
         items: list.items.map(inline),
+        ...(list.ordered ? { numbers: list.numbers } : {}),
       });
     }
     list = null;
@@ -59,39 +81,39 @@ export function formatReply(text: string, allowed: ReadonlySet<string>): Block[]
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i] ?? "";
-    const fence = FENCE.exec(line);
+    const fence = openingFence(line);
     if (fence) {
       flush();
-      const marks = fence[1] ?? "```";
       const closing = new RegExp(
-        `^ {0,3}${marks[0] === "`" ? "`" : "~"}{${marks.length},}[ \\t]*$`,
+        `^ {0,3}${fence[0] === "`" ? "`" : "~"}{${fence.length},}[ \\t]*$`,
       );
       const body: string[] = [];
       for (i += 1; i < lines.length && !closing.test(lines[i] ?? ""); i += 1)
         body.push(lines[i] ?? "");
-      blocks.push({ type: "code", text: body.join("\n") });
+      add({ type: "code", text: body.join("\n") });
       continue;
     }
     if (line.trim() === "") {
       flush();
+      blank = true;
       continue;
     }
     const heading = HEADING.exec(line);
     if (heading) {
       flush();
-      blocks.push({
-        type: "paragraph",
-        children: [{ type: "bold", children: inline(heading[1] ?? "") }],
-      });
+      const title = headingText(line.slice(heading[0].length));
+      add({ type: "paragraph", children: [{ type: "bold", children: inline(title) }] });
       continue;
     }
     const bullet = BULLET.exec(line);
     const numbered = bullet ? null : NUMBERED.exec(line);
-    if (bullet || numbered) {
+    const marker = bullet ?? numbered;
+    if (marker) {
       const ordered = numbered !== null;
       if (paragraph.length > 0 || (list && list.ordered !== ordered)) flush();
-      list ??= { ordered, start: ordered ? Number(numbered?.[1]) : 1, items: [] };
-      list.items.push((bullet ? bullet[1] : numbered?.[2]) ?? "");
+      list ??= { ordered, numbers: [], items: [] };
+      if (numbered) list.numbers.push(Number(numbered[1]));
+      list.items.push(line.slice(marker[0].length));
       continue;
     }
     if (list) flush();
@@ -101,10 +123,73 @@ export function formatReply(text: string, allowed: ReadonlySet<string>): Block[]
   return blocks;
 }
 
-/** Reads one block's inline text. Unbalanced markers stay as they are. */
-function readInline(source: string, allowed: ReadonlySet<string>, depth = 0): Inline[] {
-  if (depth > MAX_DEPTH) return source === "" ? [] : [{ type: "text", text: source }];
-  const closers = closerPositions(source);
+/**
+ * The http and https addresses a reply holds, as `formatReply` reads them: the ones a caller may
+ * allow. Those in code, and in a link's label, never become links, so they aren't listed.
+ */
+export function linksOf(text: string): string[] {
+  const found: string[] = [];
+  formatReply(text, {
+    has: (href) => {
+      found.push(href);
+      return false;
+    },
+  });
+  return found;
+}
+
+/**
+ * A URL found in text, without the punctuation of the sentence after it. A closing parenthesis
+ * stays only when it closes one the URL opened (`/wiki/Foo_(bar)`). One pass from the end.
+ */
+export function trimUrl(found: string): string {
+  let opens = 0;
+  let closes = 0;
+  for (const char of found) {
+    if (char === "(") opens += 1;
+    else if (char === ")") closes += 1;
+  }
+  let end = found.length;
+  while (end > 0) {
+    const char = found.charAt(end - 1);
+    if (AFTER_URL.includes(char)) end -= 1;
+    else if (char === ")" && closes > opens) {
+      closes -= 1;
+      end -= 1;
+    } else break;
+  }
+  return found.slice(0, end);
+}
+
+/** A fence's marks, unless a backtick fence's info string holds a backtick (that's inline code). */
+function openingFence(line: string): string | null {
+  const match = FENCE.exec(line);
+  const marks = match?.[1];
+  if (!match || !marks) return null;
+  if (marks[0] === "`" && line.slice(match[0].length).includes("`")) return null;
+  return marks;
+}
+
+/** A heading's text, without the closing run of `#` that follows a space, if any. */
+function headingText(rest: string): string {
+  let end = rest.length;
+  while (end > 0 && " \t".includes(rest.charAt(end - 1))) end -= 1;
+  let hashes = end;
+  while (hashes > 0 && rest.charAt(hashes - 1) === "#") hashes -= 1;
+  if (hashes < end && (hashes === 0 || " \t".includes(rest.charAt(hashes - 1)))) {
+    end = hashes;
+    while (end > 0 && " \t".includes(rest.charAt(end - 1))) end -= 1;
+  }
+  return rest.slice(0, end);
+}
+
+/**
+ * Reads one block's inline text. Unbalanced markers stay as they are. Past `MAX_DEPTH` emphasis
+ * stays text, but code, links and addresses are still read, so none goes out unchecked.
+ */
+function readInline(source: string, allowed: AllowedLinks, depth = 0): Inline[] {
+  const emphasis = depth < MAX_DEPTH;
+  const closers = emphasis ? closerPositions(source) : new Map<string, number[]>();
   const nodes: Inline[] = [];
   let buffer = "";
   const flushText = () => {
@@ -136,13 +221,13 @@ function readInline(source: string, allowed: ReadonlySet<string>, depth = 0): In
     if (char === "[") {
       const link = readLink(source, i);
       if (link) {
-        const label = readInline(link.label, new Set(), depth + 1);
+        const label = readInline(link.label, NONE, depth + 1);
         push(...linkOrAddress(link.href, label, allowed));
         i = link.end;
         continue;
       }
     }
-    if ((char === "h" || char === "H") && !isWordChar(source[i - 1])) {
+    if (char === "h" || char === "H") {
       const url = bareUrl(source, i);
       if (url) {
         push(...linkOrAddress(url, [{ type: "text", text: url }], allowed, true));
@@ -150,15 +235,19 @@ function readInline(source: string, allowed: ReadonlySet<string>, depth = 0): In
         continue;
       }
     }
-    if ((char === "*" || char === "_") && next === char) {
+    if (emphasis && (char === "*" || char === "_") && next === char) {
+      // A pair that doesn't open bold stays text whole: half of it isn't an italic's marker.
       const end = closingOf(source, i, char + char, closers);
-      if (end !== -1) {
-        push({ type: "bold", children: readInline(source.slice(i + 2, end), allowed, depth + 1) });
-        i = end + 2;
+      if (end === -1) {
+        buffer += char + char;
+        i += 2;
         continue;
       }
+      push({ type: "bold", children: readInline(source.slice(i + 2, end), allowed, depth + 1) });
+      i = end + 2;
+      continue;
     }
-    if (char === "*" || char === "_") {
+    if (emphasis && (char === "*" || char === "_")) {
       const end = closingOf(source, i, char, closers);
       if (end !== -1) {
         push({
@@ -187,7 +276,7 @@ function closerPositions(source: string): Map<string, number[]> {
     const char = source[at];
     if (char !== "*" && char !== "_") continue;
     const before = source[at - 1] ?? "";
-    if (/\s/.test(before)) continue;
+    if (/\s/.test(before) || before === char) continue;
     for (const marker of EMPHASIS) {
       if (!source.startsWith(marker, at)) continue;
       const after = source[at + marker.length];
@@ -234,7 +323,7 @@ function readLink(
   if (source[close] !== "]" || source[close + 1] !== "(" || close === start + 1) return null;
   const label = source.slice(start + 1, close);
   let depth = 0;
-  const limit = Math.min(source.length, close + 2 + MAX_HREF_CHARS);
+  const limit = Math.min(source.length, close + 3 + MAX_HREF_CHARS);
   for (let at = close + 2; at < limit; at += 1) {
     const char = source[at];
     if (char === undefined || /[\s[\]]/.test(char)) return null;
@@ -255,16 +344,8 @@ function bareUrl(source: string, start: number): string | null {
   WEB_URL_AT.lastIndex = start;
   const found = WEB_URL_AT.exec(source)?.[0];
   if (!found) return null;
-  let url: string = found;
-  for (;;) {
-    const trimmed: string = url.replace(AFTER_URL, "");
-    const opens = (trimmed.match(/\(/g) ?? []).length;
-    const closes = (trimmed.match(/\)/g) ?? []).length;
-    const cut = trimmed.endsWith(")") && closes > opens ? trimmed.slice(0, -1) : trimmed;
-    if (cut === url) break;
-    url = cut;
-  }
-  return /^https?:\/\/[^/?#]/i.test(url) ? url : null;
+  const url = trimUrl(found);
+  return /^https?:\/\/./i.test(url) ? url : null;
 }
 
 /**
@@ -274,7 +355,7 @@ function bareUrl(source: string, start: number): string | null {
 function linkOrAddress(
   href: string,
   label: Inline[],
-  allowed: ReadonlySet<string>,
+  allowed: AllowedLinks,
   bare = false,
 ): Inline[] {
   if (URL_START.test(href) && allowed.has(href)) return [{ type: "link", href, children: label }];
@@ -291,63 +372,201 @@ function isWordChar(char: string | undefined): boolean {
   return char !== undefined && /[\p{L}\p{N}]/u.test(char);
 }
 
-/** What the blocks show, as text: what a channel counts against its length limit. */
-export function visibleText(blocks: readonly Block[]): string {
-  return blocks.map((block) => renderBlock(block, plainInline)).join("\n\n");
-}
-
-/** Telegram's HTML (`parse_mode: "HTML"`): only its own tags, every text and address escaped. */
+/**
+ * Telegram's HTML (`parse_mode: "HTML"`): only its own tags, every text and address escaped. What
+ * it shows is never longer than the reply as written, so a bubble split for Telegram's limit fits.
+ */
 export function toTelegramHtml(blocks: readonly Block[]): string {
-  return blocks.map((block) => renderBlock(block, htmlInline, true)).join("\n\n");
+  return blocks
+    .map((block, index) => {
+      const gap = index === 0 ? "" : block.tight ? "\n" : "\n\n";
+      return gap + telegramBlock(block);
+    })
+    .join("");
 }
 
-function renderBlock(
-  block: Block,
-  inline: (nodes: readonly Inline[]) => string,
-  html = false,
-): string {
-  switch (block.type) {
-    case "paragraph":
-      return inline(block.children);
-    case "list":
-      return block.items
-        .map((item, index) => `${block.ordered ? `${block.start + index}.` : "•"} ${inline(item)}`)
-        .join("\n");
-    case "code":
-      return html ? `<pre>${escapeHtml(block.text)}</pre>` : block.text;
+/**
+ * A reply as written, for when Telegram can't read its HTML: no formatting and no links, with every
+ * address in code all the same.
+ */
+export function toTelegramPlain(text: string): string {
+  const nodes: Inline[] = [];
+  let from = 0;
+  for (const [found, at = 0] of webUrls(text)) {
+    nodes.push({ type: "text", text: text.slice(from, at) }, { type: "code", text: found });
+    from = at + found.length;
+  }
+  nodes.push({ type: "text", text: text.slice(from) });
+  return telegramInline(nodes);
+}
+
+/** Each web URL in `text`, as `bareUrl` reads one, with where it starts. */
+function* webUrls(text: string): Generator<[string, number]> {
+  for (const match of text.matchAll(/https?:\/\/[^\s<>"]+/gi)) {
+    const url = trimUrl(match[0]);
+    if (/^https?:\/\/./i.test(url)) yield [url, match.index];
   }
 }
 
-function plainInline(nodes: readonly Inline[]): string {
-  return nodes
-    .map((node) => {
-      switch (node.type) {
-        case "text":
-        case "code":
-          return node.text;
-        default:
-          return plainInline(node.children);
-      }
-    })
+function telegramBlock(block: Block): string {
+  switch (block.type) {
+    case "paragraph":
+      return telegramInline(block.children);
+    case "list":
+      return block.items
+        .map((item, index) => {
+          const marker = block.ordered ? `${block.numbers?.[index] ?? block.start + index}.` : "•";
+          return `${marker} ${telegramInline(item)}`;
+        })
+        .join("\n");
+    case "code":
+      return `<pre>${escapeHtml(block.text)}</pre>`;
+  }
+}
+
+/** A stretch of inline text and the tags around it, outermost first. */
+type Run = { text: string; code: boolean; tags: readonly string[] };
+
+/**
+ * Telegram can't nest code in bold, italics or a link, so code closes the tags around it and opens
+ * them again after, and inside a link it is plain text. Text outside a link that Telegram could
+ * read as an address goes in code, whatever formatting it crosses.
+ */
+function telegramInline(nodes: readonly Inline[]): string {
+  const runs: Run[] = [];
+  flatten(nodes, [], runs);
+  let html = "";
+  let open: readonly string[] = [];
+  for (const run of codeAddresses(runs)) {
+    if (run.text === "") continue;
+    const tags = run.code ? [] : run.tags;
+    let kept = 0;
+    while (kept < open.length && kept < tags.length && open[kept] === tags[kept]) kept += 1;
+    html += closeTags(open.slice(kept));
+    html += tags
+      .slice(kept)
+      .map((tag) => `<${tag}>`)
+      .join("");
+    open = tags;
+    html += run.code ? `<code>${escapeHtml(run.text)}</code>` : escapeHtml(run.text);
+  }
+  return html + closeTags(open);
+}
+
+function flatten(nodes: readonly Inline[], tags: readonly string[], runs: Run[]): void {
+  const inLink = tags.some(isLinkTag);
+  for (const node of nodes) {
+    switch (node.type) {
+      case "text":
+        runs.push({ text: node.text, code: false, tags });
+        break;
+      case "code":
+        runs.push({ text: node.text, code: !inLink, tags });
+        break;
+      case "bold":
+        flatten(node.children, [...tags, "b"], runs);
+        break;
+      case "italic":
+        flatten(node.children, [...tags, "i"], runs);
+        break;
+      case "link":
+        flatten(node.children, [...tags, `a href="${escapeHtml(node.href)}"`], runs);
+        break;
+    }
+  }
+}
+
+function isLinkTag(tag: string): boolean {
+  return tag.startsWith("a ");
+}
+
+function closeTags(tags: readonly string[]): string {
+  return tags
+    .map((tag) => `</${tag.split(" ")[0]}>`)
+    .reverse()
     .join("");
 }
 
-function htmlInline(nodes: readonly Inline[]): string {
-  return nodes
-    .map((node) => {
-      switch (node.type) {
-        case "text":
-          return escapeHtml(node.text);
-        case "code":
-          return `<code>${escapeHtml(node.text)}</code>`;
-        case "bold":
-          return `<b>${htmlInline(node.children)}</b>`;
-        case "italic":
-          return `<i>${htmlInline(node.children)}</i>`;
+/**
+ * Puts in code each address in a stretch of text outside code and links, read across the runs it
+ * spans, since Telegram reads the text as shown.
+ */
+function codeAddresses(runs: readonly Run[]): Run[] {
+  const out: Run[] = [];
+  let stretch: Run[] = [];
+  const flushStretch = () => {
+    const text = stretch.map((run) => run.text).join("");
+    const ranges = addressRanges(text);
+    let next = 0;
+    let offset = 0;
+    for (const run of stretch) {
+      const end = offset + run.text.length;
+      let from = offset;
+      while (from < end) {
+        const range = ranges[next];
+        if (range && range.start <= from) {
+          if (from === range.start)
+            out.push({ text: text.slice(range.start, range.end), code: true, tags: [] });
+          from = Math.min(end, range.end);
+          if (from === range.end) next += 1;
+        } else {
+          const stop = range ? Math.min(end, range.start) : end;
+          out.push({ text: text.slice(from, stop), code: false, tags: run.tags });
+          from = stop;
+        }
       }
-      return `<a href="${escapeHtml(node.href)}">${htmlInline(node.children)}</a>`;
-    })
-    .join("");
+      offset = end;
+    }
+    stretch = [];
+  };
+  for (const run of runs) {
+    if (run.code || run.tags.some(isLinkTag)) {
+      flushStretch();
+      out.push(run);
+    } else stretch.push(run);
+  }
+  flushStretch();
+  return out;
+}
+
+/** A host name: labels joined by dots, as Telegram's clients find one in text. */
+const HOST = /(?<![\p{L}\p{N}-])[\p{L}\p{N}-]+(?:[.。．｡][\p{L}\p{N}-]+)+/gu;
+/** What may follow a host in an address: a port, a path, a query or a fragment. */
+const HOST_TAIL = /[/?#:][^\s<>"]*/y;
+const SCHEME_BEFORE = /[a-z][a-z0-9+.-]{0,30}:\/\/$/i;
+const TOP_LEVEL = /^(?:\p{L}{2,}|xn--[\p{L}\p{N}-]+)$/iu;
+
+/**
+ * Where `text` holds something Telegram could link: a host with a top-level domain or an IPv4
+ * address, with the scheme before it and the path after it.
+ */
+function addressRanges(text: string): { start: number; end: number }[] {
+  const ranges: { start: number; end: number }[] = [];
+  HOST.lastIndex = 0;
+  for (let match = HOST.exec(text); match; match = HOST.exec(text)) {
+    const labels = match[0].split(/[.。．｡]/);
+    let count = labels.length;
+    const ipv4 = count === 4 && labels.every((label) => /^\d{1,3}$/.test(label));
+    // `evil.example.-` is the host `evil.example` and some text: the host ends at its last label
+    // that could be a top-level domain.
+    while (!ipv4 && count > 1 && !TOP_LEVEL.test(labels[count - 1] ?? "")) count -= 1;
+    if (count < 2) continue;
+    let start = match.index;
+    const scheme = SCHEME_BEFORE.exec(text.slice(Math.max(0, start - 32), start));
+    if (scheme) start -= scheme[0].length;
+    const previous = ranges.at(-1);
+    if (previous && start < previous.end) start = previous.end;
+    let end = match.index + labels.slice(0, count).join(".").length;
+    HOST_TAIL.lastIndex = end;
+    const tail = count === labels.length ? HOST_TAIL.exec(text)?.[0] : undefined;
+    if (tail) {
+      end += trimUrl(tail).length;
+      // The path's own dots aren't another host.
+      HOST.lastIndex = match.index + match[0].length + tail.length;
+    }
+    ranges.push({ start, end });
+  }
+  return ranges;
 }
 
 function escapeHtml(text: string): string {

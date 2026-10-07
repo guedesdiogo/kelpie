@@ -1,9 +1,12 @@
 import { canonicalTimeZone } from "@kelpie/access";
 import {
+  type AllowedLinks,
   CAPABILITIES,
   type ChannelCapabilities,
   formatReply,
+  linksOf,
   type SendOutcome,
+  trimUrl,
 } from "@kelpie/channels";
 import { type Actor, type AgentConfig, type AgentSettings, DEFAULT_SETTINGS } from "@kelpie/config";
 import type { RecallOptions } from "@kelpie/context-store/contract";
@@ -1623,18 +1626,15 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   /**
    * The links in a reply's text that may show as links (#188): those in `inputs`, the owner's own,
    * and those on the admin API's origin, whose pages only show behind the owner's Access login.
+   * They are found as the formatter reads them, and the origin must start the link as written, so
+   * no URL parser can read another host into it.
    */
-  #linksAllowed(text: string, inputs: ReadonlySet<string>): string[] {
+  #linksAllowed(text: string, inputs: AllowedLinks): string[] {
     const admin = bareHttpsOrigin(this.env.ADMIN_ORIGIN ?? "");
-    return linksIn(text).filter((link) => {
-      if (inputs.has(link)) return true;
-      if (admin === "") return false;
-      try {
-        return new URL(link).origin === admin;
-      } catch {
-        return false;
-      }
-    });
+    return linksOf(text).filter(
+      (link) =>
+        inputs.has(link) || (admin !== "" && (link === admin || link.startsWith(`${admin}/`))),
+    );
   }
 
   /**
@@ -1648,7 +1648,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     agentId: string,
     destination: Destination,
     bubble: { id: number; text: string },
-    options: { silent: boolean; previewUrl?: string },
+    options: { silent: boolean; previewUrl?: string; links?: readonly string[] },
     signal: AbortSignal,
   ): Promise<boolean> {
     for (let attempt = 1; ; attempt += 1) {
@@ -2003,32 +2003,43 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .limit(WEBCHAT_REPLAY_ROWS)
       .all()
       .reverse();
-    const inputs = this.#replayedInputs(window);
-    const formatted = (text: string) => ({
-      text,
-      blocks: formatReply(text, new Set(this.#linksAllowed(text, inputs))),
-    });
-    const rows = window
-      .filter(({ message }) => seen(message))
-      .map(({ role, message, at }) =>
-        role === "user"
-          ? { role: "user" as const, text: withoutTypedStamps(shownText(message)), at }
-          : { role: "assistant" as const, ...formatted(shownText(message)), at },
-      );
-    const sent = this.#db
-      .select({ text: schema.outbox.text, at: schema.outbox.sentAt, notice: schema.outbox.notice })
+    const running = this.#db
+      .select({
+        text: schema.outbox.text,
+        at: schema.outbox.sentAt,
+        notice: schema.outbox.notice,
+        turnId: schema.outbox.turnId,
+      })
       .from(schema.outbox)
       .innerJoin(schema.turns, eq(schema.turns.id, schema.outbox.turnId))
       .where(
         and(eq(schema.turns.status, "running"), inArray(schema.outbox.status, ["sent", "sending"])),
       )
       .orderBy(asc(schema.outbox.seq))
-      .all()
-      .map(({ text, at, notice }) =>
-        notice
-          ? { role: "assistant" as const, text, at: at ?? 0 }
-          : { role: "assistant" as const, ...formatted(text), at: at ?? 0 },
+      .all();
+    // A reply links what the owner had sent before it, and their notes its turn recalled, as it
+    // could live (#188).
+    const noted = this.#notedLinks([...window, ...running].map(({ turnId }) => turnId));
+    const said = new Set<string>();
+    const formatted = (text: string, turnId: number) => {
+      const inputs = { has: (link: string) => said.has(link) || !!noted.get(turnId)?.has(link) };
+      return { text, blocks: formatReply(text, new Set(this.#linksAllowed(text, inputs))) };
+    };
+    const rows: ShownMessage[] = [];
+    for (const { role, message, at, turnId } of window) {
+      if (role === "user") for (const link of linksIn(messageText(message))) said.add(link);
+      if (!seen(message)) continue;
+      rows.push(
+        role === "user"
+          ? { role: "user", text: withoutTypedStamps(shownText(message)), at }
+          : { role: "assistant", ...formatted(shownText(message), turnId), at },
       );
+    }
+    const sent = running.map(({ text, at, notice, turnId }) =>
+      notice
+        ? { role: "assistant" as const, text, at: at ?? 0 }
+        : { role: "assistant" as const, ...formatted(text, turnId), at: at ?? 0 },
+    );
     const waiting = this.#pendingInbound().map((row) => ({
       role: "user" as const,
       text: row.text,
@@ -2038,30 +2049,28 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   }
 
   /**
-   * The owner's links in a replayed window (#188): those in their messages there, and in their own
-   * notes of the memory blocks its turns were sent. A link they sent before the window shows as
-   * text.
+   * The links in the owner's own notes of each turn's memory block, for the replay (#188). A turn
+   * whose block is gone has none, and a link the owner sent before the window shows as text.
    */
-  #replayedInputs(
-    window: readonly { role: string; message: ChatMessage; turnId: number }[],
-  ): Set<string> {
-    const inputs = window
-      .filter(({ role }) => role === "user")
-      .map(({ message }) => messageText(message));
-    const turnIds = [...new Set(window.map(({ turnId }) => turnId))];
-    if (turnIds.length > 0) {
-      const turns = this.#db
-        .select({ context: schema.turns.context, kelpieNotes: schema.turns.kelpieNotes })
-        .from(schema.turns)
-        .where(inArray(schema.turns.id, turnIds))
-        .all();
-      for (const turn of turns) {
-        if (turn.context !== null) {
-          inputs.push(...ownersNotes(turn.context, new Set(turn.kelpieNotes ?? [])));
-        }
-      }
+  #notedLinks(turnIds: readonly number[]): Map<number, Set<string>> {
+    const ids = [...new Set(turnIds)];
+    const links = new Map<number, Set<string>>();
+    if (ids.length === 0) return links;
+    const turns = this.#db
+      .select({
+        id: schema.turns.id,
+        context: schema.turns.context,
+        kelpieNotes: schema.turns.kelpieNotes,
+      })
+      .from(schema.turns)
+      .where(inArray(schema.turns.id, ids))
+      .all();
+    for (const turn of turns) {
+      if (turn.context === null) continue;
+      const notes = ownersNotes(turn.context, new Set(turn.kelpieNotes ?? []));
+      links.set(turn.id, new Set(notes.flatMap(linksIn)));
     }
-    return new Set(inputs.flatMap(linksIn));
+    return links;
   }
 
   /** The page's latest message ids this conversation has, oldest first. */
@@ -2168,8 +2177,6 @@ function newest(text: string, max: number): string {
 }
 
 const LINK = /https?:\/\/[^\s<>"]+/giu;
-/** Punctuation after a link belongs to the sentence. */
-const AFTER_LINK = /[.,:;!?'"]+$/u;
 
 /**
  * The http and https links in `text`, in order, about as Telegram finds them: punctuation after a
@@ -2178,13 +2185,7 @@ const AFTER_LINK = /[.,:;!?'"]+$/u;
  * they never get a preview, which is the safe side.
  */
 function linksIn(text: string): string[] {
-  return [...text.matchAll(LINK)].map(([found]) => {
-    let link = found.replace(AFTER_LINK, "");
-    while (link.endsWith(")") && link.split(")").length > link.split("(").length) {
-      link = link.slice(0, -1).replace(AFTER_LINK, "");
-    }
-    return link;
-  });
+  return [...text.matchAll(LINK)].map(([found]) => trimUrl(found));
 }
 
 /**

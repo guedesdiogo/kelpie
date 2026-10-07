@@ -183,6 +183,43 @@ describe("webchat sockets", () => {
     expect(replayed?.blocks).toEqual(blocks);
   });
 
+  it("links on replay only what the owner had sent before each reply, and the admin origin as written (#188)", async () => {
+    use(
+      fakeWorld([
+        reply("Veja https://later.example/a e [admin](https://admin.example\\@evil.example/x)."),
+        reply("Ok: **https://later.example/a**"),
+      ]),
+    );
+    const name = "assistant:webchat:replay-order";
+    const chat = await open(name);
+    const delivered = (count: number) =>
+      vi.waitFor(async () => {
+        const turns = await agent(name).turns();
+        expect(turns).toHaveLength(count);
+        expect(turns.at(-1)?.status).toBe("delivered");
+      });
+    chat.send({ type: "message", id: "c1", text: "oi" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
+    await agent(name).flush();
+    await delivered(1);
+    chat.send({ type: "message", id: "c2", text: "achei https://later.example/a" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(2));
+    await agent(name).flush();
+    await delivered(2);
+
+    const later = await open(name);
+    await vi.waitFor(() => expect(later.frames[0]).toMatchObject({ type: "history" }));
+    const messages = (later.frames[0]?.messages ?? []) as { role: string; blocks?: unknown }[];
+    const [first, second] = messages
+      .filter((message) => message.role === "assistant")
+      .map((message) => JSON.stringify(message.blocks));
+    // The owner sent the link after the first reply, which showed it as code live.
+    expect(first).not.toContain('"type":"link"');
+    expect(first).toContain('{"type":"code","text":"https://later.example/a"}');
+    expect(first).toContain('{"type":"code","text":"https://admin.example\\\\@evil.example/x"}');
+    expect(second).toContain('{"type":"link","href":"https://later.example/a"');
+  });
+
   it("replays the conversation to a new socket, without the time stamps", async () => {
     use(fakeWorld([reply("Claro, qual o número?")]));
     const name = "assistant:webchat:replay";

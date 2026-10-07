@@ -63,7 +63,6 @@ main {
 #messages > li > ol,
 #messages > li > pre {
   margin: 0;
-  white-space: pre-wrap;
 }
 #messages > li > :is(p, ul, ol, pre) + :is(p, ul, ol, pre) {
   margin-top: 0.5rem;
@@ -72,6 +71,7 @@ main {
 #messages > li ol {
   padding-left: 1.25rem;
 }
+/* Inside the messages list a list would get the nested style's circles. */
 #messages > li ul {
   list-style: disc;
 }

@@ -115,6 +115,8 @@ function renderInline(nodes) {
         }
         const link = document.createElement("a");
         link.href = node.href;
+        // The label is the model's; hovering shows where the link goes.
+        link.title = node.href;
         link.target = "_blank";
         link.rel = "noopener noreferrer";
         link.append(label);

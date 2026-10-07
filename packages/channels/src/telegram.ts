@@ -11,7 +11,7 @@ import {
 } from "./adapter.ts";
 import { CAPABILITIES } from "./capabilities.ts";
 import type { CanonicalEvent, MessagePart } from "./events.ts";
-import { formatReply, toTelegramHtml } from "./markdown.ts";
+import { formatReply, toTelegramHtml, toTelegramPlain } from "./markdown.ts";
 
 // Telegram through the Bot API (https://core.telegram.org/bots/api), webhooks only (ADR-0003).
 
@@ -105,7 +105,9 @@ export class TelegramAdapter implements ChannelAdapter {
     text: string,
     options: SendOptions = {},
   ): Promise<SendResult> {
-    // A reply is formatted (#188); a notice, or a reply Telegram can't read, goes as typed.
+    // A reply is formatted (#188). A notice goes as typed, and so does a reply Telegram can't read,
+    // but with every address in code: a notice can quote what the model wrote, and Telegram would
+    // make it tappable.
     const formatted =
       options.links === undefined
         ? null
@@ -122,12 +124,12 @@ export class TelegramAdapter implements ChannelAdapter {
       });
     let result: { message_id: number };
     try {
-      result = await sendAs(formatted ?? escapeHtml(text));
+      result = await sendAs(formatted ?? toTelegramPlain(text));
     } catch (error) {
       if (formatted === null || !(error instanceof ChannelRequestError) || error.status !== 400) {
         throw error;
       }
-      result = await sendAs(escapeHtml(text));
+      result = await sendAs(toTelegramPlain(text));
     }
     return { providerMessageId: String(result.message_id) };
   }
@@ -305,11 +307,6 @@ function mediaOf(
   if (message.video) return { kind: "video", file: message.video };
   if (message.document) return { kind: "file", file: message.document };
   return null;
-}
-
-/** The three characters Telegram's HTML mode needs escaped. */
-function escapeHtml(text: string): string {
-  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
 async function constantTimeEqual(a: string, b: string): Promise<boolean> {
