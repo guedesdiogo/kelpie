@@ -66,7 +66,11 @@ export class SecretStore extends DurableObject<Env> {
     return form ? { agentId: form.agentId, kind: form.kind } : null;
   }
 
-  /** What a form stored, when it was used in the last REDEEMED_GRACE_MS. */
+  /**
+   * What a form stored, when it was used in the last REDEEMED_GRACE_MS and its value is still the
+   * one stored: a later form for the same slot ends what this one can answer for. A form's claim
+   * and its value are written with one time stamp, which ties them.
+   */
   async redeemedForm(token: string): Promise<{ agentId: string; kind: FormKind } | null> {
     if (!isFormToken(token)) return null;
     const tokenHash = await sha256(token);
@@ -81,7 +85,15 @@ export class SecretStore extends DurableObject<Env> {
         ),
       )
       .get();
-    return form ? { agentId: form.agentId, kind: form.kind } : null;
+    if (!form?.redeemedAt) return null;
+    const stored = this.#db
+      .select({ updatedAt: schema.secrets.updatedAt })
+      .from(schema.secrets)
+      .where(eq(schema.secrets.slot, slotFor(form.kind, form.agentId)))
+      .get();
+    return stored?.updatedAt === form.redeemedAt
+      ? { agentId: form.agentId, kind: form.kind }
+      : null;
   }
 
   /** Counts a refused value; after a few the form closes. Returns whether it is still open. */

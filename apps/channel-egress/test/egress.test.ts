@@ -127,6 +127,28 @@ describe("ChannelForms", () => {
     });
   });
 
+  it("answers for a used link only while its bot is still the one stored", async () => {
+    botApi();
+    const first = await exports.ChannelForms.createTelegramForm("rotated");
+    const later = await exports.ChannelForms.createTelegramForm("rotated");
+    if (!first.ok || !later.ok) throw new Error("form refused");
+    const otherToken = BOT_TOKEN.replace("test", "othr");
+    await exports.ChannelForms.redeemTelegramForm(first.token, BOT_TOKEN);
+    await exports.ChannelForms.redeemTelegramForm(later.token, otherToken);
+
+    // The later form replaced the bot: the first link no longer speaks for it.
+    for (const value of [BOT_TOKEN, otherToken]) {
+      expect(await exports.ChannelForms.redeemTelegramForm(first.token, value)).toEqual({
+        ok: false,
+        reason: "unknown_form",
+      });
+    }
+    expect(await exports.ChannelForms.describeForm(first.token)).toEqual({
+      ok: false,
+      reason: "unknown_form",
+    });
+  });
+
   it("keeps the form open when the token is malformed or Telegram refuses it", async () => {
     botApi((method) =>
       method === "getMe"
@@ -486,16 +508,25 @@ describe("ChannelEgress", () => {
 });
 
 describe("channel-egress under pressure", () => {
-  it("stores once when the same link is submitted twice at the same time", async () => {
-    botApi();
+  it("stores once when the same link is submitted twice at the same time, and answers both", async () => {
+    const calls = botApi();
     const form = await exports.ChannelForms.createTelegramForm("twice");
     if (!form.ok) throw new Error("form refused");
     const results = await Promise.all([
       exports.ChannelForms.redeemTelegramForm(form.token, BOT_TOKEN),
       exports.ChannelForms.redeemTelegramForm(form.token, BOT_TOKEN),
     ]);
-    expect(results.filter((result) => result.ok)).toHaveLength(1);
-    expect(results).toContainEqual({ ok: false, reason: "unknown_form" });
+    // A double click: the browser shows the second answer, so both say the bot is connected.
+    const connected = {
+      ok: true,
+      agentId: "twice",
+      bot: { id: 123456789, username: "kelpie_bot" },
+      webhook: "registered",
+    };
+    expect(results).toEqual([connected, connected]);
+    // The one that lost the claim registered the stored secret, not the one it made.
+    const registered = calls.filter((call) => call.method === "setWebhook").map((c) => c.body);
+    expect(new Set(registered.map((body) => JSON.stringify(body))).size).toBe(1);
     const rows = await runInDurableObject(store(), (_instance, state) =>
       state.storage.sql.exec("SELECT slot FROM secrets WHERE slot = 'telegram:twice'").toArray(),
     );

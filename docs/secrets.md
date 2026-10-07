@@ -29,7 +29,7 @@ Kelpie keeps two kinds of secret (ADR-0013).
   - A link carries a random 256-bit token. The store keeps only its SHA-256.
   - It expires after 15 minutes and works once. A used form's hash is kept 15 minutes more, so the same token sent again, as a double click sends it, is answered with the bot it connected (compared in constant time with the stored one), and its webhook is registered again. Any other value is refused.
   - A Telegram bot token is checked with `getMe` before it is stored, so a refused token leaves the form open for another try. Five refused values close it.
-  - The link's token sits in the URL path, so the admin API turns off invocation logs. Cloudflare Access may still log the path; a logged token is useless once the form is used, closed or expired, and only the owner can open it.
+  - The link's token sits in the URL path, so the admin API turns off invocation logs. Cloudflare Access may still log the path; a logged link token is useless once the form is closed or expired, or 15 minutes after it was used. Until then it only shows which bot it connected, and registers the bot's webhook again if the bot's token is also known. Only the owner can open it.
   - The value is encrypted before the form is claimed, and claiming and storing happen in one transaction, so two submissions can't both store and a failure can't spend the form.
 - **Webhooks.**
   - Each stored bot gets a new random webhook secret.

@@ -139,7 +139,12 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
         username: bot.username,
       };
       const stored = await forms.redeemForm(token, JSON.stringify(secret));
-      if (!stored.ok) return stored;
+      // Another submission of the same link claimed it meanwhile: answer as for a resubmission.
+      if (!stored.ok) {
+        return stored.reason === "unknown_form"
+          ? await this.#redeemAgain(token, candidate)
+          : stored;
+      }
       // A new secret makes every update refused until Telegram has it, so it registers now.
       const webhook = await this.#register(stored.agentId, secret);
       return {
@@ -159,7 +164,10 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
     const used = await store(this.env).redeemedForm(token);
     if (used?.kind !== "telegram") return null;
     const found = await telegramSecret(this.env, used.agentId);
-    return found.ok ? { agentId: used.agentId, secret: found.secret } : null;
+    if (found.ok) return { agentId: used.agentId, secret: found.secret };
+    // The callers answer an unreachable store as such, not as a closed link.
+    if (found.reason === "store_unavailable") throw new Error("The secret store is unavailable");
+    return null;
   }
 
   /** The answer for a form just used, when its own token comes again; any other value is refused. */
