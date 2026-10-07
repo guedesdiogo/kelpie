@@ -800,6 +800,9 @@ export class Vault extends DurableObject<VaultEnv> {
       console.error("Vault: a Dream step failed", errorName(error));
     }
     const used = proposed?.usage ?? [];
+    // A model wrote it: secrets go, as they go from what the agent saves.
+    const proposedAbstract =
+      proposed?.abstract == null ? null : sanitizeSecrets(proposed.abstract).text;
     const usage = [...(JSON.parse(run.usage) as unknown[]), ...used];
     this.ctx.storage.transactionSync(() => {
       // Kept with the version it was made from: a later version is a note to propose for again.
@@ -809,7 +812,7 @@ export class Vault extends DurableObject<VaultEnv> {
         "INSERT OR REPLACE INTO dream_proposals (path, blob_sha, abstract, at) VALUES (?, ?, ?, ?)",
         note.path,
         note.blobSha,
-        proposed?.abstract ?? null,
+        proposedAbstract,
         Date.now(),
       );
       this.#exec(
@@ -819,13 +822,13 @@ export class Vault extends DurableObject<VaultEnv> {
       );
     });
     if (proposed === null) return this.#endDream(run.id, "failed");
-    if (proposed.abstract !== null && this.#dreamWrites().has("abstracts")) {
-      await this.#writeAbstract(note, proposed.abstract);
+    if (proposedAbstract !== null && this.#dreamWrites().has("abstracts")) {
+      await this.#writeAbstract(note, proposedAbstract);
     }
     // Counts only: the note and the abstract are personal data.
     console.log("Vault: Dream step", {
       calls: run.calls + 1,
-      proposed: proposed.abstract !== null,
+      proposed: proposedAbstract !== null,
       output: used.reduce((sum, call) => sum + (Number(call.output) || 0), 0),
     });
     return true;
@@ -845,7 +848,7 @@ export class Vault extends DurableObject<VaultEnv> {
 
   /**
    * The next note Dream may propose an abstract for (#112), newest first: one whose current version
-   * Kelpie wrote (#126) within DREAM_LOOKBACK_MS, a session page or a note without an abstract, with
+   * Kelpie wrote (#126) within DREAM_LOOKBACK_MS, a session page or a conclusion without an abstract, with
    * no write waiting, not held, and not proposed for already. The owner's notes are never one, nor
    * a version merged into the owner's edit.
    */
@@ -887,7 +890,13 @@ export class Vault extends DurableObject<VaultEnv> {
         continue;
       }
       const version = this.#memory.current(note.path);
-      if (version === null || (note.kind !== "session" && version.abstract !== null)) continue;
+      // A fact the person stated (`explicit`) keeps its own words; a session page is summed up.
+      if (
+        version === null ||
+        (note.kind !== "session" && (version.abstract !== null || version.level === "explicit"))
+      ) {
+        continue;
+      }
       return { path: note.path, blobSha: note.blobSha, title: version.title, body: version.body };
     }
     return null;
@@ -1200,7 +1209,11 @@ export class Vault extends DurableObject<VaultEnv> {
            (SELECT 1 FROM files f
             WHERE f.path = dream_proposals.path AND f.blob_sha = dream_proposals.blob_sha)`,
       );
-      this.#exec("DELETE FROM dream_writes WHERE at < ?", now - DREAM_LOOKBACK_MS);
+      this.#exec(
+        `DELETE FROM dream_writes WHERE at < ? OR (path NOT IN (SELECT path FROM queue) AND NOT EXISTS
+           (SELECT 1 FROM files f WHERE f.path = dream_writes.path AND f.blob_sha = dream_writes.blob_sha))`,
+        now - DREAM_LOOKBACK_MS,
+      );
       this.#exec(
         "DELETE FROM dream_runs WHERE ended_at IS NOT NULL AND ended_at < ?",
         now - DREAM_RUNS_MS,

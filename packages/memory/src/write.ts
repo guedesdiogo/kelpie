@@ -42,14 +42,15 @@ export class MemoryFormatError extends Error {
 }
 
 /**
- * One line of text: no control characters, line breaks included, and no bidirectional overrides,
- * which can make a title read differently from what it holds. Emoji and their joiners are fine.
+ * One line of text: no control characters, line breaks included, no line or paragraph separators,
+ * which a YAML 1.1 reader takes as breaks, and no bidirectional overrides, which can make a title
+ * read differently from what it holds. Emoji and their joiners are fine.
  */
 export const printableLine = (value: unknown, max: number): value is string =>
   typeof value === "string" &&
   value.trim() !== "" &&
   value.length <= max &&
-  !/[\p{Cc}\u202A-\u202E\u2066-\u2069]/u.test(value);
+  !/[\p{Cc}\u2028\u2029\u202A-\u202E\u2066-\u2069]/u.test(value);
 
 const dateOf = (value: unknown) => (typeof value === "string" ? instantOf(value) : null);
 

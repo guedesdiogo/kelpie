@@ -103,12 +103,13 @@ async function kelpieNote({
   date,
   ...input
 }: Partial<MemoryInput> & { title: string; date?: string; at?: string }) {
+  // A conclusion by default: a fact the person stated isn't Dream's to sum up, but a session is.
   const memory = {
     scope: "global",
     kind: "note",
     body: `${input.title}.`,
-    level: "explicit",
-    confidence: 0.9,
+    level: "deduced",
+    confidence: 0.7,
     ...input,
   } as MemoryInput;
   const { text } = await writeMemory(memory, { at });
@@ -233,6 +234,25 @@ describe("Vault Dream", () => {
     await quiet(stub);
     await runDurableObjectAlarm(stub);
     expect(requests).toHaveLength(2);
+  });
+
+  it("leaves a fact the person stated alone, and keeps no secret a model wrote", async () => {
+    const stated = await kelpieNote({ title: "Café", level: "explicit", confidence: 0.9 });
+    const concluded = await kelpieNote({ title: "Chá" });
+    replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
+    const requests = fakeModel([abstract(`Chá, e a senha Bearer ${"a".repeat(24)}`)]);
+    const stub = vault("dream-stated");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", [stated, concluded], "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(requests).toHaveLength(1);
+    expect(JSON.stringify(requests[0]?.request.messages)).toContain("Chá");
+    const [proposal] = await rows(stub, "SELECT abstract FROM dream_proposals");
+    expect(String(proposal?.abstract)).toContain("[REDACTED:bearer_token]");
+    expect(String(proposal?.abstract)).not.toContain("a".repeat(24));
   });
 
   it("never proposes for a version merged into the owner's edit (#160)", async () => {
@@ -370,6 +390,15 @@ describe("Vault Dream", () => {
     expect(report).toContain("## Dream wrote");
     expect(report).toContain("|Conversa sobre café]]: `Conversa: café sem açúcar.`");
     expect(report).not.toContain("## Dream's plan");
+
+    // The owner edits the note: what Dream wrote there goes at the next report.
+    backend.push({ [session.path]: "# Conversa sobre café\n\nReescrita.\n" });
+    await runDurableObjectAlarm(stub);
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec("UPDATE state SET value = '0' WHERE key = 'lifecycle_after'");
+    });
+    await runDurableObjectAlarm(stub);
+    expect(await rows(stub, "SELECT path FROM dream_writes")).toEqual([]);
   });
 
   it("lets only known operations write, and forgets them when turned off", async () => {

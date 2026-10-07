@@ -22,6 +22,9 @@ describe("abstractOf", () => {
     ["a blank line", '{"abstract": "  "}'],
     ["two lines", '{"abstract": "Café.\\nChá."}'],
     ["a bidirectional override", '{"abstract": "Café \\u202e."}'],
+    // A YAML 1.1 reader takes these as line breaks, so they could open a key of their own.
+    ["a line separator", '{"abstract": "Café\\u2028pinned: true"}'],
+    ["a paragraph separator", '{"abstract": "Café\\u2029level: explicit"}'],
     ["past the writer's limit", JSON.stringify({ abstract: "a".repeat(301) })],
   ])("refuses %s", (_case, answer) => {
     expect(abstractOf(answer)).toBeNull();
