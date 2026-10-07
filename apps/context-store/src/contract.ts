@@ -185,11 +185,15 @@ export type WriteNoteResult =
   | { ok: false; reason: "invalid"; problems: string[] }
   | {
       ok: false;
-      /** `owners_word`: a deduced or inferred memory can't change a note the person stated. */
+      /**
+       * `owners_word`: a deduced or inferred memory can't change a note the person stated.
+       * `core_note`: no memory changes a note the always-loaded core carries (#168).
+       */
       reason:
         | "not_found"
         | "scope_not_allowed"
         | "owners_word"
+        | "core_note"
         | "too_large"
         | "vault_off"
         | "unavailable";
