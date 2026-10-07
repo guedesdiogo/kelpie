@@ -8,6 +8,7 @@ import {
 } from "@kelpie/channels";
 import type {
   ContextStoreContract,
+  MemoryCoreResult,
   RecallOptions,
   RecallResult,
   WriteResult,
@@ -69,6 +70,12 @@ export interface ConversationPorts {
    * unreachable, or doesn't answer in time, throws.
    */
   recall(agentId: string, question: string, options: RecallOptions): Promise<RecallResult>;
+  /**
+   * The agent's always-loaded core (#112), through the Context Store: one block within a budget,
+   * empty when nothing is pinned or the vault is off. A store that is unreachable, or doesn't
+   * answer in time, throws.
+   */
+  core(agentId: string, budgetTokens: number): Promise<MemoryCoreResult>;
   now(): number;
   /** Waits `ms`, or rejects as soon as `signal` aborts. */
   sleep(ms: number, signal: AbortSignal): Promise<void>;
@@ -149,6 +156,8 @@ function productionPorts(env: Env): ConversationPorts {
       withTimeout(contextStore.write(agentId, changes, summary), REMEMBER_TIMEOUT_MS),
     recall: (agentId, question, options) =>
       withTimeout(contextStore.recall(agentId, question, options), RECALL_TIMEOUT_MS),
+    core: (agentId, budgetTokens) =>
+      withTimeout(contextStore.core(agentId, budgetTokens), CORE_TIMEOUT_MS),
     async typing(agentId, destination) {
       await bounded(egress.typing(agentId, destination));
     },
@@ -214,6 +223,8 @@ const REMEMBER_TIMEOUT_MS = 10_000;
  * without memory. The store bounds its own calls: 2 s to embed the question, 3.5 s for the rerank.
  */
 const RECALL_TIMEOUT_MS = 6_000;
+/** The core (#112) is one read of memory's index, with nothing to embed or rerank. */
+const CORE_TIMEOUT_MS = 5_000;
 /** The memory tools (#126): a search embeds and reranks as recall does; a read is one lookup. */
 const SEARCH_TIMEOUT_MS = 8_000;
 const READ_TIMEOUT_MS = 5_000;

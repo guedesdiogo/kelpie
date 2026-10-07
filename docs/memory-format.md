@@ -126,7 +126,7 @@ Every key is optional when reading. When Kelpie writes, it always sets `id`, `ki
 | `entities` | names of up to 64 characters; at most 10 are kept | What the memory is about | none; a bad name drops that name only |
 | `valid_from`, `invalid_at` | `YYYY-MM-DD`, or a date-time with an offset; a real calendar date, so `2026-02-30` is invalid | When the fact starts and stops being true in the world. A date is the start of that day in UTC, and `invalid_at` must come after `valid_from` | always valid |
 | `evergreen` | `true` or `false` | Exempt from decay | `false` |
-| `pinned` | `true` or `false` | Always loaded into the agent's core context, and exempt from decay | `false` |
+| `pinned` | `true` or `false` | Loaded into the agent's always-loaded core, when the agent has it on and the note is in the global scope or the agent's own; and exempt from decay | `false` |
 | `abstract` | one line of up to 300 characters | A summary that retrieval can show before the whole note | none |
 | `relations` | `contradicts:` and a list of wikilinks | Notes this one contradicts. The vocabulary is closed: any other key makes the whole field invalid | none |
 | `updated` | a date-time with an offset | When this version was written | none |
@@ -239,7 +239,7 @@ The index is one SQLite database inside the Context Store's Durable Object ([ADR
 - **Rebuild:** dropping every derived table and replaying the vault's history gives the same index, row for row. That is tested.
   - Rebuilding from the head alone gives the same current notes, without their history.
   - Embeddings of content still in the history survive a rebuild: they are keyed by content, so they stay valid, and recomputing them costs model calls. Embeddings of content no longer in the history are deleted.
-- **Erasure** is the operator's job (ADR-0020 §4): rewrite the vault's git history, then rebuild the index. The rebuild drops every version, link and embedding of the erased text. Conversations keep the memory blocks their answered turns were sent with (#137), as they keep their history.
+- **Erasure** is the operator's job (ADR-0020 §4): rewrite the vault's git history, then rebuild the index. The rebuild drops every version, link and embedding of the erased text. Conversations keep the memory blocks their answered turns were sent with (#137), as they keep their history. They also keep the always-loaded core until it loads again; [context-store.md](context-store.md#erasing-content) says how to make it load again.
 - **Search:** current versions only by default. With `asOf`, it searches the versions the vault held at that instant. With `validAt`, it keeps only memories valid in the world at that instant. It returns 1 to 100 results, 10 by default.
 - **Entity lookup:** the notes that name any of a set of entity keys, current or as of an instant. An entity's own page, a note titled with the name that lists it, comes first, a global one before a scoped one. Each key weighs one over the number of notes that name it, so a rarer name says more. A name on more than 50 of the versions the lookup sees is left out: it singles nothing out. The weight and the cap count those versions only, so notes in other scopes, and a note's past versions, don't switch a name off (#146).
 - **Neighbours:** the current notes one step from a note: the notes it links to, then the pages of the entities it names, global ones first. A note it contradicts is what it replaced, so it isn't a neighbour.
@@ -342,8 +342,37 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
     - **Bounds:** a turn, across its rounds, saves 5 memories at most and stops after 3 failures. A store that fails or times out counts as a failure. The counts live in the Worker's isolate, so a turn resumed elsewhere after an eviction starts them again.
     - **Fields sent as null** count as left out.
   - **A note written in this turn** shows up only after the vault's next commit.
-- **Not yet:**
-  - the always-loaded core.
+- **The always-loaded core** (#112): what the agent carries into every turn, beside the slice a question recalls.
+  - **Off by default:** the owner turns `memoryCore` on per agent ([admin-api.md](admin-api.md)). gbrain's held-out evaluation found that a core costs one model's instruction following, so #108's evaluation decides per model.
+  - **Who gets it:** only a turn that sees every scope, which is the owner's turn in a direct chat (#131). Any other conversation, such as a group's, goes without it, and the Context Store isn't asked.
+  - **What goes in,** in this order, each note once and whole:
+    1. **Pinned notes:** the notes the owner pinned (`pinned: true`) in the global scope or the agent's own. A note pinned in another agent's scope, or in an area's, a project's or a conversation's, stays out.
+    2. **The owner's profile:** notes under `memory/profile/`.
+    3. **The agent's self-model:** notes under `agents/<agent-id>/memory/profile/`.
+
+    Within each group they go by path. Expired notes stay out, as recall leaves them out.
+  - **The budget** is 1,000 tokens, or 4,000 characters. A note that doesn't fit is skipped and the next one is tried. The block ends by saying how many didn't fit.
+  - **The fence** is recall's: a random id on the block's tags and on every heading, and tags escaped inside notes. The block's own note says it is for reference, not instructions.
+  - **When it loads:** at the first request under a prompt version and checkpoint. It is kept as sent, and every later request under the same pair sends it byte for byte, since a reply's thinking is bound to everything sent before it (#137).
+    - **What loads it again:**
+      - a checkpoint;
+      - a change to the persona, rules or skills, or to the agent's system prompt;
+      - turning `memoryCore` on or off, which starts a new prompt version.
+    - A note edited meanwhile shows from the next load.
+  - **Where it goes:** first in the first message the model sees, ahead of a checkpoint's summary.
+    - The system prompt stays the agent's own, the same in every conversation.
+    - History rows never hold the core, so the checkpoint summarizer never reads it.
+  - **Failure:** if the Context Store fails, or doesn't answer in 5 s, the conversation goes without the core until the next load. Asking again would change what an earlier reply was sent with.
+  - **The Context Store** builds it from memory's index and counts no access, so carrying it into every conversation doesn't keep its notes from going cold.
+  - **Logging:** the runtime logs how many notes went in, how many didn't fit and the tokens, never text.
+  - **What the model can change:**
+    - **It can't add a note to the core.** `memory_write` takes no `pinned`, and it puts a new memory in a kind folder, never in `profile/`.
+    - **It can rewrite a note already in the core,** by the note's path, under the owner's-word rule. An `explicit` memory can change any note, and a `deduced` or `inferred` one can change a note Kelpie wrote.
+    - **The risk:** an instruction injected into what the model reads could put text into the core of every later conversation.
+    - The owner accepted the model's `explicit` label for v1 (#149), and the daily report lists what Kelpie changed in the owner's notes. The core reaches every turn, though, so this is the risk to weigh before turning it on.
+  - **Not yet:**
+    - previews of links in core notes (#130);
+    - notes pinned in a conversation's, area's or project's scope.
 
 ## Lifecycle
 
@@ -439,3 +468,5 @@ Before a new memory is written, `decideWrite` says whether it is news (#111). A 
 ## Credits
 
 The design follows [ai-memory](https://github.com/akitaonrails/ai-memory) at [`fc4da03`](https://github.com/akitaonrails/ai-memory/tree/fc4da03) (MIT, © 2026 Fabio Akita): versioned pages, FTS5 with diacritics folded, entity normalization, typed edges with a closed vocabulary, link extraction that skips code, and hybrid retrieval. Files translated from it carry its notice. The reference checks are on [#107](https://github.com/guedesdiogo/kelpie/issues/107#issuecomment-6010168197) and [#110](https://github.com/guedesdiogo/kelpie/issues/110#issuecomment-6012868696). The retrieval gate follows [hermes-agent](https://github.com/NousResearch/hermes-agent) at `86bdb75` (MIT). The lifecycle's retention score follows ai-memory's decay at [`b8e839f`](https://github.com/akitaonrails/ai-memory/blob/b8e839f6a9aee3e58f49dbc588e9107f8820e695/crates/ai-memory-store/src/decay.rs); its reference check is on [#111](https://github.com/guedesdiogo/kelpie/issues/111#issuecomment-6022538685).
+
+The always-loaded core follows [gbrain](https://github.com/garrytan/gbrain)'s core memory at [`9dbc00c`](https://github.com/garrytan/gbrain/blob/9dbc00c7c025420a7c2846ac55b56b937f09bceb/src/core/core-memory.ts) (MIT): whole notes within 4,000 characters, the ones left out counted, and off by default. It also follows ai-memory's profile digest at [`a63986b`](https://github.com/akitaonrails/ai-memory/blob/a63986bc6ba5a6b1ed62e405c86a7ddf7f70a03e/crates/ai-memory-core/src/profile.rs): fenced, in a fixed order and byte-stable. The reference checks are on [#112](https://github.com/guedesdiogo/kelpie/issues/112#issuecomment-6025770228).

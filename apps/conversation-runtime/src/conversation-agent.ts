@@ -142,6 +142,12 @@ const SESSION_RETRY_MS = 10 * 60_000;
 const RECALL_BUDGET_TOKENS = 1_000;
 /** A packed block takes four characters a token, so a longer answer is refused. */
 const RECALL_MAX_CHARS = RECALL_BUDGET_TOKENS * 4;
+/**
+ * The always-loaded core's budget (#112): 4,000 characters, gbrain's default and the size of the
+ * recalled slice. A longer answer is refused.
+ */
+const CORE_BUDGET_TOKENS = 1_000;
+const CORE_MAX_CHARS = CORE_BUDGET_TOKENS * 4;
 /** Retrieval reads no more of a question than this, so the newest text is what is sent. */
 const RECALL_QUESTION_CHARS = 2_000;
 /**
@@ -717,9 +723,22 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       } else {
         // The person waits for this.
         if (this.#question() !== "") step("memory");
-        const recalled = await this.#recall(settings, turnScopes(turn, destination));
+        const scopes = turnScopes(turn, destination);
+        const [recalled, core] = await Promise.all([
+          this.#recall(settings, scopes),
+          this.#fetchCore(turn.systemVersion, turn.checkpointId, settings, scopes),
+        ]);
         memory = recalled?.text ?? null;
         if (controller.signal.aborted || !this.#isRunning(turnId)) return;
+        // Kept only by a turn still running: an interrupted one's late answer could replace the
+        // core a newer turn already sent (#112).
+        if (core !== null && this.#core(turn.systemVersion, turn.checkpointId) === null) {
+          this.#set("core", {
+            version: turn.systemVersion,
+            checkpointId: turn.checkpointId,
+            text: core,
+          });
+        }
         // Kept with the turn, to be sent again unchanged on later requests (#137).
         this.#db
           .update(schema.turns)
@@ -1107,6 +1126,56 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       });
       return null;
     }
+  }
+
+  /**
+   * The always-loaded core (#112) for a prompt version and checkpoint, or null when the pair has
+   * one already. The turn keeps it as it was sent: every request under the same pair carries it
+   * byte for byte, since a reply's reasoning is bound to everything sent before it (#137). With
+   * the core off, or when the Context Store fails, it is empty, and the pair goes without one:
+   * asking again later would change the prefix under a reply already given. A checkpoint or a new
+   * prompt version asks again.
+   */
+  async #fetchCore(
+    version: number,
+    checkpointId: number | null,
+    settings: AgentSettings,
+    scopes: RecallOptions["scopes"],
+  ): Promise<string | null> {
+    if (this.#core(version, checkpointId) !== null) return null;
+    // The owner's pinned notes and profile go only to a turn that sees every scope: the owner's, in
+    // a direct chat (#131). Any other conversation goes without them.
+    if (scopes !== "all") return "";
+    // Settings stored before the core existed have no such field.
+    if (!(settings.memoryCore ?? DEFAULT_SETTINGS.memoryCore)) return "";
+    try {
+      const core = await this.#ports.core(this.#agentId(), CORE_BUDGET_TOKENS);
+      if (typeof core.text !== "string" || core.text.length > CORE_MAX_CHARS) {
+        throw new TypeError("the core answered past its budget");
+      }
+      // Anthropic refuses blank text.
+      const text = core.text.trim() === "" ? "" : core.text;
+      console.log("conversation: core", {
+        notes: Array.isArray(core.paths) ? core.paths.length : 0,
+        omitted: Number(core.omitted) || 0,
+        tokens: Math.ceil(text.length / 4),
+      });
+      return text;
+    } catch (error) {
+      console.warn("conversation: core failed", { error: errorName(error) });
+      return "";
+    }
+  }
+
+  /** The core kept for a prompt version and checkpoint, or null when none was loaded for them. */
+  #core(version: number, checkpointId: number | null): string | null {
+    const kept = this.#get<{ version: number; checkpointId: number | null; text: string } | null>(
+      "core",
+      null,
+    );
+    return kept !== null && kept.version === version && kept.checkpointId === checkpointId
+      ? kept.text
+      : null;
   }
 
   /**
@@ -1692,15 +1761,16 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       const { native: _native, ...neutral } = message;
       return neutral;
     });
-    if (!checkpoint) return messages;
-    // The summary leads the first kept message, so roles still alternate.
-    const summary = {
-      type: "text" as const,
-      text: `${CHECKPOINT_HEADING}\n\n${checkpoint.summary}`,
-    };
+    // The core (#112), then the summary, lead the first kept message, so roles still alternate.
+    const core = this.#core(systemVersion, checkpointId) ?? "";
+    const lead = [
+      ...(core === "" ? [] : [core]),
+      ...(checkpoint ? [`${CHECKPOINT_HEADING}\n\n${checkpoint.summary}`] : []),
+    ].map((text) => ({ type: "text" as const, text }));
+    if (lead.length === 0) return messages;
     const [first, ...rest] = messages;
-    if (first?.role === "user") return [{ ...first, parts: [summary, ...first.parts] }, ...rest];
-    return [{ role: "user", parts: [summary] }, ...messages];
+    if (first?.role === "user") return [{ ...first, parts: [...lead, ...first.parts] }, ...rest];
+    return [{ role: "user", parts: lead }, ...messages];
   }
 
   #pendingInbound() {

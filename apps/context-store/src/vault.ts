@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { EMBEDDING_INPUT_CHARS, type EmbedOutcome } from "@kelpie/llm";
 import {
   bodyWithoutHeading,
+  coreBlock,
   decideWrite,
   foldKey,
   instantOf,
@@ -43,6 +44,7 @@ import type {
   CompiledContext,
   ForgetResult,
   HeldFile,
+  MemoryCoreResult,
   MemoryHit,
   MemorySearchOptions,
   MemorySearchResult,
@@ -1241,6 +1243,26 @@ export class Vault extends DurableObject<VaultEnv> {
       };
     } catch (error) {
       console.error("Vault: recall failed", errorName(error));
+      return empty;
+    }
+  }
+
+  /**
+   * The always-loaded core (#112), from memory's index. Like recall, it never waits behind a commit
+   * to GitHub, only behind the first sync of a vault never synced. It counts no access: loading it
+   * into every conversation would keep its notes from ever going cold. A failure answers an empty
+   * block, so the conversation goes on without it.
+   */
+  async core(agentId: string, budgetTokens: number): Promise<MemoryCoreResult> {
+    const empty: MemoryCoreResult = { text: "", tokens: 0, paths: [], omitted: 0 };
+    const budget = Math.min(Math.max(Math.floor(Number(budgetTokens)) || 0, 0), MAX_RECALL_TOKENS);
+    if (budget === 0 || !isAgentId(agentId) || this.#backend() === null) return empty;
+    try {
+      await this.#ready();
+      await this.#catchUp();
+      return coreBlock(this.#memory, { agentId, budgetTokens: budget, now: Date.now() });
+    } catch (error) {
+      console.error("Vault: the core failed", errorName(error));
       return empty;
     }
   }

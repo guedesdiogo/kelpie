@@ -63,6 +63,11 @@ Identity values in answers are masked.
 
 **Tools.** A turn may run the agent's tools for up to 5 rounds, within `toolLoopMs`: 120 s by default, the floor, up to 600 000 (ADR-0025). Past either bound, one last model call answers with what it has. In the webchat, the turn shows its step once the wait is over: reading memory, thinking, or the tool it runs. Telegram shows "typing".
 
+**The memory core.** `memoryCore: true` carries the agent's always-loaded core into every turn, and it is off by default (#112, [memory-format.md](memory-format.md#retrieval)).
+- **What it holds:** the notes the owner pinned, the owner's profile and the agent's self-model, within 1,000 tokens.
+- **When it loads:** once per conversation, and again at each checkpoint.
+- **Turning it on or off** starts a new prompt version, like a new `systemPrompt`, so it applies from the next turn.
+
 **Pausing.** `/pause` on Telegram (also `/pause@<bot>`), or the webchat's Pause button, holds every answer until the owner's next message (#134). A pause while paused changes nothing, and Telegram's redelivery of the same `/pause` is ignored.
 - A turn in flight is interrupted, and the planned answer is cancelled.
 - Telegram confirms with a short fixed message, not from the model. The webchat shows the pause.
