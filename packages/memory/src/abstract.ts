@@ -1,5 +1,7 @@
 // What Dream asks a model for a note's abstract (#112), and how its answer is read. The Context
 // Store and the memory evaluation share them, so what is measured is what runs.
+import { isMap, parseDocument } from "yaml";
+import { splitFrontmatter } from "./markdown.ts";
 import { printableLine } from "./write.ts";
 
 /** As much of a note as is sent, ai-memory's limit for a page. */
@@ -38,4 +40,17 @@ export function abstractOf(answer: string): string | null {
   if (keys.length !== 1 || keys[0] !== "abstract") return null;
   const { abstract } = parsed as { abstract: unknown };
   return printableLine(abstract, ABSTRACT_MAX_CHARS) ? abstract.trim() : null;
+}
+
+/**
+ * The file with its frontmatter's `abstract` set, rendered as the writer renders it, so every other
+ * key, comment and the body stay as they were. Null when the frontmatter can't be read.
+ */
+export function withAbstract(text: string, abstract: string): string | null {
+  const { yaml, body } = splitFrontmatter(text);
+  if (yaml === null) return null;
+  const doc = parseDocument(yaml, { uniqueKeys: true });
+  if (doc.errors.length > 0 || !isMap(doc.contents)) return null;
+  doc.set("abstract", abstract);
+  return `---\n${doc.toString({ lineWidth: 0, flowCollectionPadding: false })}---\n${body}`;
 }
