@@ -5,12 +5,13 @@ import type {
   AgentSettings,
   ConfigureResult,
 } from "@kelpie/config";
-import { DEFAULT_SETTINGS, parseSettings } from "@kelpie/config";
+import { DEFAULT_SETTINGS, parseSettings, SETUP_AGENT_ID } from "@kelpie/config";
 import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
 import { Agent } from "agents";
 import { eq } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
+import { SETUP_PROMPT } from "../setup-agent.ts";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
 import { composeSystemPrompt, hasVaultContext } from "./system-prompt.ts";
@@ -47,10 +48,17 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     });
   }
 
-  /** The agent's settings, defaults filled in, and its prompt version. */
+  /**
+   * The agent's settings, defaults filled in, and its prompt version. The setup agent's default
+   * prompt is its built-in persona.
+   */
   config(): AgentConfig {
+    const defaults =
+      this.ctx.id.name === SETUP_AGENT_ID
+        ? { ...DEFAULT_SETTINGS, systemPrompt: SETUP_PROMPT }
+        : DEFAULT_SETTINGS;
     return {
-      settings: { ...DEFAULT_SETTINGS, ...current(this.#get<StoredSettings>("settings", {})) },
+      settings: { ...defaults, ...current(this.#get<StoredSettings>("settings", {})) },
       promptVersion: this.#get("promptVersion", 0),
     };
   }
@@ -115,8 +123,8 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   /**
    * Applies changes and audits them. The configuration commands are its only callers and authorize
    * the actor (ADR-0013); this validates the changes again, because it is an RPC boundary. A new
-   * system prompt bumps the prompt version. Setting the current values changes nothing, so it
-   * isn't audited.
+   * system prompt bumps the prompt version, and so does turning the memory core on or off (#112).
+   * Setting the current values changes nothing, so it isn't audited.
    */
   configure(changes: Partial<AgentSettings>, actor: Actor): ConfigureResult {
     const parsed = parseSettings(changes);
@@ -128,7 +136,8 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     if (fields.length === 0) return { ok: true, value: current };
     const settings = { ...current.settings, ...parsed };
     const promptVersion =
-      settings.systemPrompt === current.settings.systemPrompt
+      settings.systemPrompt === current.settings.systemPrompt &&
+      settings.memoryCore === current.settings.memoryCore
         ? current.promptVersion
         : current.promptVersion + 1;
     this.#db.transaction((tx) => {

@@ -8,6 +8,13 @@
       "when": 1791080003679,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791330770905,
+      "tag": "0001_seed_setup_agent",
+      "breakpoints": true
     }
   ]
 }

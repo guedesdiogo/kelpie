@@ -5,6 +5,12 @@ import { QUALIFIER_BACKENDS, type QualifierBackend } from "@kelpie/qualifier";
 /** Kelpie runs one `Registry`, which lists the agents. */
 export const REGISTRY_NAME = "registry";
 
+/**
+ * The built-in setup agent (Story 3.11): every instance has it, and only it gets the configuration
+ * tools. No other agent may take its id.
+ */
+export const SETUP_AGENT_ID = "setup";
+
 /** One agent's settings, held by its `AgentHost` (ADR-0002) and read by its conversations. */
 export interface AgentSettings {
   /** Merge fragments and split replies into paced bubbles; off answers each message at once. */
@@ -24,6 +30,12 @@ export interface AgentSettings {
    * 120 s is the floor the owner set; it can only go up.
    */
   toolLoopMs: number;
+  /**
+   * Carry the always-loaded core of memory (#112) into every turn: off until #108's evaluation
+   * shows it helps for the agent's model. Changing it starts a new prompt version, as a new system
+   * prompt does, since a reply's reasoning is bound to the core it was sent with.
+   */
+  memoryCore: boolean;
 }
 
 export const DEFAULT_SETTINGS: AgentSettings = {
@@ -35,6 +47,7 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   maxWaitMs: 60_000,
   qualifier: "clef",
   toolLoopMs: 120_000,
+  memoryCore: false,
 };
 
 /** Agent ids become object names and URL segments: lowercase letters, digits and hyphens. */
@@ -89,6 +102,10 @@ export function parseSettings(input: unknown): Partial<AgentSettings> | null {
       case "toolLoopMs":
         if (!isInteger(value, 120_000, 600_000)) return null;
         parsed.toolLoopMs = value;
+        break;
+      case "memoryCore":
+        if (typeof value !== "boolean") return null;
+        parsed.memoryCore = value;
         break;
       default:
         return null;

@@ -384,15 +384,15 @@ export interface Packed {
   paths: string[];
 }
 
-const CHARS_PER_TOKEN = 4;
+export const CHARS_PER_TOKEN = 4;
 /** What a note shows before bodies are added: its abstract, or the start of its body. */
 const DESCRIPTOR_CHARS = 400;
 /** A note cut shorter than this isn't worth its heading. */
 const MIN_ENTRY_CHARS = 80;
 /** A heading shows at most this much of a title, so one note can't fill the block. */
-const HEADING_TITLE_CHARS = 120;
+export const HEADING_TITLE_CHARS = 120;
 /** And this much of a path: enough that a real one stays whole, and can be cited. */
-const HEADING_PATH_CHARS = 300;
+export const HEADING_PATH_CHARS = 300;
 
 /** At most `max` characters, with an ellipsis when cut; never half of an emoji's surrogate pair. */
 export function cut(text: string, max: number): string {

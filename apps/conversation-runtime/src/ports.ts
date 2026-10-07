@@ -1,13 +1,22 @@
+import type { Remote } from "@kelpie/access";
 import {
   CAPABILITIES,
   type ChannelCapabilities,
   type ChannelEgressContract,
   type ChannelId,
   type SendOutcome,
+  type SetupFormsContract,
   typingRenewIntervalMs,
 } from "@kelpie/channels";
+import {
+  type AgentHostContract,
+  createConfigCommands,
+  REGISTRY_NAME,
+  type RegistryContract,
+} from "@kelpie/config";
 import type {
   ContextStoreContract,
+  MemoryCoreResult,
   RecallOptions,
   RecallResult,
   WriteResult,
@@ -15,6 +24,7 @@ import type {
 import type { Destination } from "@kelpie/conversation/contract";
 import { fromNdjsonStream, type LlmEvent, type ModelTier, type RoutedRequest } from "@kelpie/llm";
 import { memoryTools } from "./memory-tools.ts";
+import { setupTools } from "./setup-agent.ts";
 import type { ToolProvider } from "./tools.ts";
 
 /** One model call: its events, and a way to stop it on the gateway's side. */
@@ -69,6 +79,12 @@ export interface ConversationPorts {
    * unreachable, or doesn't answer in time, throws.
    */
   recall(agentId: string, question: string, options: RecallOptions): Promise<RecallResult>;
+  /**
+   * The agent's always-loaded core (#112), through the Context Store: one block within a budget,
+   * empty when nothing is pinned or the vault is off. A store that is unreachable, or doesn't
+   * answer in time, throws.
+   */
+  core(agentId: string, budgetTokens: number): Promise<MemoryCoreResult>;
   now(): number;
   /** Waits `ms`, or rejects as soon as `signal` aborts. */
   sleep(ms: number, signal: AbortSignal): Promise<void>;
@@ -107,6 +123,12 @@ function productionPorts(env: Env): ConversationPorts {
   const egress = env.CHANNEL_EGRESS as unknown as ChannelEgressContract;
   // A service binding to context-store's ContextStore entrypoint.
   const contextStore = env.CONTEXT_STORE as unknown as ContextStoreContract;
+  // A service binding to channel-egress's SetupForms entrypoint, which only opens a form.
+  const forms = env.SETUP_FORMS as unknown as SetupFormsContract;
+  // Typed as the contracts the admin API binds, so both clients of the commands match.
+  const registry = env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<RegistryContract>;
+  const agentHost = (id: string) =>
+    env.AGENT_HOST.getByName(id) as unknown as Remote<AgentHostContract>;
   return {
     async generate(tier, request) {
       const generation = await gateway.generate(tier, request);
@@ -133,7 +155,6 @@ function productionPorts(env: Env): ConversationPorts {
         },
       };
     },
-    // The setup agent's (#48) arrive as providers too.
     tools: [
       memoryTools({
         search: (agentId, query, options) =>
@@ -143,12 +164,40 @@ function productionPorts(env: Env): ConversationPorts {
         writeNote: (agentId, input, options) =>
           withTimeout(contextStore.writeNote(agentId, input, options), REMEMBER_TIMEOUT_MS),
       }),
+      // The setup agent's (#48): the same commands as the admin API, minus the ones that need the
+      // Directory, the vault's admin entrypoint or more of channel-egress than opening a form,
+      // which this Worker doesn't bind.
+      setupTools(
+        createConfigCommands({
+          registry,
+          agents: {
+            configure: (id, changes, actor) => agentHost(id).configure(changes, actor),
+            config: (id) => agentHost(id).config(),
+          },
+          directory: {
+            issuePairingCode: notBound,
+            enableIdentity: notBound,
+            disableIdentity: notBound,
+            listIdentities: notBound,
+            setTimeZone: notBound,
+          },
+          channels: {
+            createTelegramForm: (agentId) => forms.createTelegramForm(agentId),
+            registerTelegramWebhook: notBound,
+            describeTelegramBot: notBound,
+          },
+          vault: { held: notBound, forget: notBound },
+        }),
+        { adminOrigin: env.ADMIN_ORIGIN },
+      ),
     ],
     send: (agentId, destination, text, options) => egress.send(agentId, destination, text, options),
     remember: (agentId, changes, summary) =>
       withTimeout(contextStore.write(agentId, changes, summary), REMEMBER_TIMEOUT_MS),
     recall: (agentId, question, options) =>
       withTimeout(contextStore.recall(agentId, question, options), RECALL_TIMEOUT_MS),
+    core: (agentId, budgetTokens) =>
+      withTimeout(contextStore.core(agentId, budgetTokens), CORE_TIMEOUT_MS),
     async typing(agentId, destination) {
       await bounded(egress.typing(agentId, destination));
     },
@@ -187,6 +236,15 @@ function productionPorts(env: Env): ConversationPorts {
   };
 }
 
+/**
+ * What the setup agent's tools never call: the commands that need the Directory, the vault's admin
+ * entrypoint, or channel-egress beyond opening a form. Binding the Directory here would make ingress
+ * and this Worker bind each other.
+ */
+function notBound(): Promise<never> {
+  return Promise.reject(new Error("not bound in conversation-runtime"));
+}
+
 /** "Typing" is a courtesy: a call that hangs or fails is given up after a few seconds. */
 const TYPING_TIMEOUT_MS = 3_000;
 
@@ -214,6 +272,8 @@ const REMEMBER_TIMEOUT_MS = 10_000;
  * without memory. The store bounds its own calls: 2 s to embed the question, 3.5 s for the rerank.
  */
 const RECALL_TIMEOUT_MS = 6_000;
+/** The core (#112) is one read of memory's index, with nothing to embed or rerank. */
+const CORE_TIMEOUT_MS = 5_000;
 /** The memory tools (#126): a search embeds and reranks as recall does; a read is one lookup. */
 const SEARCH_TIMEOUT_MS = 8_000;
 const READ_TIMEOUT_MS = 5_000;

@@ -7,7 +7,7 @@ import {
   type OwnerResult,
   type RelinkResult,
 } from "@kelpie/access";
-import type { Actor, CommandResult, ConfigCommands } from "@kelpie/config";
+import { type Actor, type CommandResult, type ConfigCommands, isAgentId } from "@kelpie/config";
 import {
   closedPage,
   type FormDeps,
@@ -17,6 +17,13 @@ import {
   submitForm,
   unavailablePage,
 } from "./forms.ts";
+import {
+  noAgentPage,
+  notConnectedPage,
+  pairedPage,
+  pairingAgentOf,
+  pairingPage,
+} from "./pairing.ts";
 
 /** What the API needs from outside, so tests can replace it. */
 export interface AdminDeps {
@@ -94,6 +101,8 @@ const COMMANDS: Record<string, Command> = {
 export async function handle(request: Request, deps: AdminDeps): Promise<Response> {
   const { pathname } = new URL(request.url);
   if (pathname.startsWith("/forms/")) return handleForm(request, pathname, deps);
+  const pairing = pairingAgentOf(pathname);
+  if (pairing !== null) return handlePairing(request, pairing, deps);
   const command = pathname.startsWith("/commands/") ? pathname.slice("/commands/".length) : null;
   const tokenRoute = pathname === "/bootstrap" || pathname === "/recover";
   if (request.method !== "POST" || (!tokenRoute && !command)) {
@@ -158,6 +167,49 @@ async function handleForm(request: Request, pathname: string, deps: AdminDeps): 
     return await submitForm(token, botToken, deps.forms);
   } catch (error) {
     console.error("admin-api: form failed", errorName(error));
+    return unavailablePage();
+  }
+}
+
+/**
+ * The page that pairs the owner's Telegram account with an agent's bot (Story 3.11), for the owner
+ * only, with the same checks as the secure forms. `GET` shows a button; its own `POST` runs
+ * `pairTelegram` and shows the `t.me` link. Answers are pages, never JSON.
+ */
+async function handlePairing(
+  request: Request,
+  agentId: string,
+  deps: AdminDeps,
+): Promise<Response> {
+  if (!isAgentId(agentId) || (request.method !== "GET" && request.method !== "POST")) {
+    return noAgentPage();
+  }
+  try {
+    const identity = await deps.authenticate(request);
+    if (!identity.ok)
+      return page(401, "Sign in first", "<p>Open this link in your browser again.</p>");
+    if (request.method === "POST" && !isSameOriginSubmission(request)) {
+      return page(403, "Not allowed", "<p>This page only accepts its own submissions.</p>");
+    }
+    const admission = await deps.directory.admit(
+      { channel: ACCESS_SOURCE, channelUserId: identity.sub },
+      ADMIN_AGENT_ID,
+    );
+    if (!admission.admitted || admission.role !== "owner") {
+      return page(403, "Not allowed", "<p>Only the owner can use this link.</p>");
+    }
+    const actor: Actor = { userId: admission.userId, role: admission.role, via: "admin-api" };
+    const agent = await deps.commands.getAgent(actor, { id: agentId });
+    if (!agent.ok) return agent.reason === "unknown_agent" ? noAgentPage() : unavailablePage();
+    if (request.method === "GET") return pairingPage(agent.value);
+    if (!request.headers.get("content-type")?.startsWith("application/x-www-form-urlencoded")) {
+      return page(415, "Not a form submission", "<p>Press the button on the page.</p>");
+    }
+    const result = await deps.commands.pairTelegram(actor, { agentId });
+    if (result.ok) return pairedPage(result.value.link, result.value.expiresAt);
+    return result.reason === "not_connected" ? notConnectedPage() : unavailablePage();
+  } catch (error) {
+    console.error("admin-api: pairing page failed", errorName(error));
     return unavailablePage();
   }
 }

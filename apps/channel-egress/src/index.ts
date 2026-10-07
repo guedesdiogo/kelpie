@@ -10,6 +10,7 @@ import {
   RecipientUnavailableError,
   type SendOptions,
   type SendOutcome,
+  type SetupFormsContract,
   type TypingOutcome,
   type WebhookNotice,
   type WebhookRegistration,
@@ -39,15 +40,31 @@ const unavailable = { ok: false as const, reason: "store_unavailable" as const }
  * The secure forms that take a channel's secrets (ADR-0013), for the admin API. Nothing here
  * returns a secret, and every answer is a value.
  */
+/** Opens a one-time form for an agent's Telegram bot token. */
+async function openTelegramForm(env: Env, agentId: string) {
+  if (!isAgentId(agentId)) return { ok: false as const, reason: "invalid_input" as const };
+  try {
+    return { ok: true as const, ...(await store(env).createForm(agentId, "telegram")) };
+  } catch (error) {
+    console.error("channel-egress: creating a form failed", errorName(error));
+    return unavailable;
+  }
+}
+
+/**
+ * What the setup agent's Worker binds (Story 3.11): it only opens a form, whose link the owner then
+ * opens on the admin API. Binding `ChannelForms` there would also let a model-driven Worker
+ * describe, redeem and register.
+ */
+export class SetupForms extends WorkerEntrypoint<Env> implements SetupFormsContract {
+  async createTelegramForm(agentId: string) {
+    return openTelegramForm(this.env, agentId);
+  }
+}
+
 export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsContract {
   async createTelegramForm(agentId: string) {
-    if (!isAgentId(agentId)) return { ok: false as const, reason: "invalid_input" as const };
-    try {
-      return { ok: true as const, ...(await store(this.env).createForm(agentId, "telegram")) };
-    } catch (error) {
-      console.error("channel-egress: creating a form failed", errorName(error));
-      return unavailable;
-    }
+    return openTelegramForm(this.env, agentId);
   }
 
   async describeForm(token: string) {
