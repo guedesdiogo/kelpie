@@ -70,24 +70,42 @@ describe("summaryOf", () => {
 describe("dreamPage", () => {
   it("shows each day's summary as code, fenced past any backticks it holds, newest first", () => {
     const page =
-      dreamPage([
-        {
-          date: "2026-10-05",
-          scope: "global",
-          sources: [{ path: "memory/sessions/2026/2026-10-05-a.md", title: "A" }],
-          summary: "Falaram de ```código``` e de [[links]].",
-        },
-        {
-          date: "2026-10-06",
-          scope: "conversation/telegram-1",
-          sources: [{ path: "conversations/telegram-1/sessions/2026/2026-10-06-b.md", title: "B" }],
-          summary: "Combinaram sexta.",
-        },
-      ]) ?? "";
+      dreamPage({
+        summaries: [
+          {
+            date: "2026-10-05",
+            scope: "global",
+            sources: [{ path: "memory/sessions/2026/2026-10-05-a.md", title: "A" }],
+            summary: "Falaram de ```código``` e de [[links]].",
+          },
+          {
+            date: "2026-10-06",
+            scope: "conversation/telegram-1",
+            sources: [
+              { path: "conversations/telegram-1/sessions/2026/2026-10-06-b.md", title: "B" },
+            ],
+            summary: "Combinaram sexta.",
+          },
+        ],
+        merges: [],
+      }) ?? "";
+    expect(page.startsWith("# What Dream would write\n")).toBe(true);
+    expect(page).toContain("\n## Day summaries\n\n### 2026-10-06 · conversation/telegram-1\n");
+    expect(page).not.toContain("## Merges");
     expect(page.indexOf("2026-10-06")).toBeLessThan(page.indexOf("2026-10-05"));
     expect(page).toContain("Sums up: [[memory/sessions/2026/2026-10-05-a|A]]");
     expect(page).toContain("````text\nFalaram de ```código``` e de [[links]].\n````");
     expect(page).toContain("```text\nCombinaram sexta.\n```");
-    expect(dreamPage([])).toBeNull();
+    expect(dreamPage({ summaries: [], merges: [] })).toBeNull();
+    // At most 50, and a count of the rest.
+    const many = Array.from({ length: 51 }, (_, i) => ({
+      date: `2026-10-${String((i % 28) + 1).padStart(2, "0")}`,
+      scope: `conversation/c${i}`,
+      sources: [],
+      summary: "Café.",
+    }));
+    const long = dreamPage({ summaries: many, merges: [] }) ?? "";
+    expect(long.match(/^### /gm)).toHaveLength(50);
+    expect(long).toContain("…and 1 more.");
   });
 });

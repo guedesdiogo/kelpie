@@ -7,7 +7,7 @@ import { instantOf, isDate } from "./time.ts";
 
 /** Where the report lives: a `memory/_` folder, which memory never indexes (`placeOf`). */
 export const LIFECYCLE_REPORT_PATH = "memory/_lint/report.md";
-/** Dream's day summaries while they run dry (#112): a page of their own, as they span lines. */
+/** Dream's page while it runs dry (#112): what it would write, as that spans lines. */
 export const DREAM_PAGE_PATH = "memory/_lint/dream.md";
 
 /** ai-memory's defaults: a 35-day half-life for age, recalls that wear off over about 25 days. */
@@ -23,6 +23,8 @@ const BAND_NOTES = 60;
 const BAND_PAIRS = 25;
 /** Each list in the report shows this many entries at most, and each entry this many notes. */
 const REPORT_ENTRIES = 200;
+/** Each list on Dream's page: its texts are longer than the report's lines. */
+const DREAM_PAGE_ENTRIES = 50;
 const GROUP_NOTES = 10;
 /** A link's title and path are cut to these many characters. */
 const TITLE_CHARS = 120;
@@ -425,27 +427,78 @@ export interface DreamSummary {
 }
 
 /**
- * Dream's day summaries as one page, newest day first, or null when there are none. Each text is
- * shown as code, fenced by more backticks than it holds in a row, so nothing a model wrote renders
- * or closes the fence; each names the session pages it sums up.
+ * A merge Dream proposes (#112): the note that stays, the notes marked as merged into it, and its
+ * new body, or null when they hold the same content and only the marks change.
  */
-export function dreamPage(summaries: readonly DreamSummary[]): string | null {
-  if (summaries.length === 0) return null;
-  const sorted = [...summaries].sort((a, b) =>
-    a.date < b.date ? 1 : a.date > b.date ? -1 : a.scope < b.scope ? -1 : 1,
-  );
-  const sections = sorted.map((entry) => {
-    const longest = Math.max(0, ...(entry.summary.match(/`+/g) ?? []).map((run) => run.length));
-    const fence = "`".repeat(Math.max(3, longest + 1));
-    return [
-      `## ${plain(entry.date, 10)} · ${plain(entry.scope, PATH_CHARS, UNSAFE_PATH)}`,
-      "",
-      `Sums up: ${links([...entry.sources])}`,
-      "",
-      `${fence}text`,
-      entry.summary,
-      fence,
-    ].join("\n");
-  });
-  return `# Dream's day summaries\n\nA dry run: the summary Dream would write for each day of each conversation, shown as code. Nothing was written.\n\n${sections.join("\n\n")}\n`;
+export interface DreamMerge {
+  survivor: NoteRef;
+  merged: readonly NoteRef[];
+  body: string | null;
+}
+
+/** What a list on Dream's page leaves out. */
+const more = (count: number) =>
+  count > DREAM_PAGE_ENTRIES ? [`…and ${count - DREAM_PAGE_ENTRIES} more.`] : [];
+
+/** Text a model wrote, as code: fenced by more backticks than it holds in a row, so it can't close. */
+function code(text: string): string {
+  const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = "`".repeat(Math.max(3, longest + 1));
+  return `${fence}text\n${text}\n${fence}`;
+}
+
+/**
+ * What Dream would write while it runs dry, as one page, or null when there is nothing in it: the day
+ * summaries, newest day first, each naming the session pages it sums up; then the merges, by the
+ * survivor's path. What a model wrote is shown as code, so nothing in it renders.
+ */
+export function dreamPage(plan: {
+  summaries: readonly DreamSummary[];
+  merges: readonly DreamMerge[];
+}): string | null {
+  const parts: string[] = [];
+  if (plan.summaries.length > 0) {
+    const sorted = [...plan.summaries].sort((a, b) =>
+      a.date < b.date ? 1 : a.date > b.date ? -1 : a.scope < b.scope ? -1 : 1,
+    );
+    parts.push(
+      [
+        "## Day summaries",
+        ...sorted
+          .slice(0, DREAM_PAGE_ENTRIES)
+          .map((entry) =>
+            [
+              `### ${plain(entry.date, 10)} · ${plain(entry.scope, PATH_CHARS, UNSAFE_PATH)}`,
+              "",
+              `Sums up: ${links([...entry.sources])}`,
+              "",
+              code(entry.summary),
+            ].join("\n"),
+          ),
+        ...more(sorted.length),
+      ].join("\n\n"),
+    );
+  }
+  if (plan.merges.length > 0) {
+    const sorted = [...plan.merges].sort((a, b) => (a.survivor.path < b.survivor.path ? -1 : 1));
+    parts.push(
+      [
+        "## Merges",
+        ...sorted
+          .slice(0, DREAM_PAGE_ENTRIES)
+          .map((entry) =>
+            [
+              `### ${plain(entry.survivor.title, TITLE_CHARS) || plain(entry.survivor.path, PATH_CHARS, UNSAFE_PATH)}`,
+              "",
+              `Keeps ${link(entry.survivor)}, and marks ${links([...entry.merged])} as merged into it.`,
+              "",
+              entry.body === null ? "The same content: only the marks change." : code(entry.body),
+            ].join("\n"),
+          ),
+        ...more(sorted.length),
+      ].join("\n\n"),
+    );
+  }
+  if (parts.length === 0) return null;
+  return `# What Dream would write\n\nA dry run: what Dream would write, shown as code. Nothing was written.\n\n${parts.join("\n\n")}\n`;
 }

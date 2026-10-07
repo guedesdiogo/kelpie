@@ -46,6 +46,16 @@ export function splitFrontmatter(text: string): Split {
   return { yaml: null, body: input };
 }
 
+/** Whether each line of a body is code, or a fence, as the reader sees it when it finds a title. */
+export function codeLines(body: string): boolean[] {
+  let fence: Fence | null = null;
+  return body.split("\n").map((line) => {
+    const [next, isCode] = stepFence(fence, line);
+    fence = next;
+    return isCode;
+  });
+}
+
 /** Title from the frontmatter, then the first `# ` heading, then the file name. */
 export function deriveTitle(frontmatterTitle: unknown, body: string, path: string): string {
   if (typeof frontmatterTitle === "string" && frontmatterTitle.trim() !== "") {
@@ -64,7 +74,7 @@ export function deriveTitle(frontmatterTitle: unknown, body: string, path: strin
 
 /** How a link names its target: a vault path, or a file name that Obsidian resolves anywhere. */
 export type LinkBy = "path" | "name";
-export type LinkKind = "link" | "embed" | "source" | "contradicts";
+export type LinkKind = "link" | "embed" | "source" | "contradicts" | "merged_into";
 
 export interface LinkTarget {
   by: LinkBy;

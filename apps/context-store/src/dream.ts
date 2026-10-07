@@ -5,6 +5,9 @@ import {
   ABSTRACT_PROMPT,
   abstractInput,
   abstractOf,
+  MERGE_PROMPT,
+  mergeInput,
+  mergeOf,
   SUMMARY_PROMPT,
   summaryInput,
   summaryOf,
@@ -52,4 +55,28 @@ export async function proposeSummary(
   };
   const { text, usage } = await complete(gateway, DREAM_TIER, request, timeoutMs);
   return { summary: summaryOf(text), usage };
+}
+
+/** Room for a model that thinks; the merged body is at most 8,000 characters. */
+const MERGE_OUTPUT_TOKENS = 6_000;
+
+/**
+ * What the model says of notes that share a title: that they're distinct, or their merged body;
+ * null when its answer isn't one. Throws when the notes don't fit whole, or the model fails or is
+ * late.
+ */
+export async function proposeMerge(
+  gateway: ModelGateway,
+  notes: readonly { path: string; title: string; body: string }[],
+  timeoutMs: number,
+): Promise<{ answer: ReturnType<typeof mergeOf>; usage: Usage[] }> {
+  const input = mergeInput(notes);
+  if (input === null) throw new RangeError("the notes don't fit whole");
+  const request: RoutedRequest = {
+    system: MERGE_PROMPT,
+    messages: [{ role: "user", parts: [{ type: "text", text: input }] }],
+    maxOutputTokens: MERGE_OUTPUT_TOKENS,
+  };
+  const { text, usage } = await complete(gateway, DREAM_TIER, request, timeoutMs);
+  return { answer: mergeOf(text), usage };
 }

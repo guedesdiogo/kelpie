@@ -126,7 +126,7 @@ export interface IndexDump {
   links: { path: string; commit: string; kind: string; by: string; target: string }[];
 }
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const DERIVED_SCHEMA = `
 CREATE TABLE commits (
@@ -201,7 +201,7 @@ CREATE TABLE entities (
 CREATE INDEX entities_key ON entities (key);
 CREATE TABLE links (
   version INTEGER NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('link', 'embed', 'source', 'contradicts')),
+  kind TEXT NOT NULL CHECK (kind IN ('link', 'embed', 'source', 'contradicts', 'merged_into')),
   by TEXT NOT NULL CHECK (by IN ('path', 'name')),
   target TEXT NOT NULL,
   PRIMARY KEY (version, kind, by, target)
@@ -264,10 +264,23 @@ function limitOf(options: { limit?: number }): number {
 }
 
 /**
- * The versions a lookup sees, as SQL over `v`: current ones, or those of `asOf`, valid at
- * `validAt`, in `scopes`.
+ * Where a version's merge mark leads (#112): another current note of its own scope, named by its
+ * path, as Dream writes it. A name is no mark, since it may resolve to the note itself or to a
+ * namesake elsewhere; nor is a path that leads nowhere, to the note itself or to another scope. The
+ * mark is read against the vault as it is now, as a link resolves.
  */
-function versionFilter(options: SearchOptions): [string, SqlValue[]] {
+const MERGED_INTO = `FROM links m JOIN versions t
+  ON t.is_current = 1 AND t.link_path = m.target AND t.path <> v.path AND t.scope = v.scope
+  WHERE m.version = v.rowid AND m.kind = 'merged_into' AND m.by = 'path'`;
+
+/** A version that isn't a note merged into another (#112): what went into it is found there. */
+const NOT_MERGED = `NOT EXISTS (SELECT 1 ${MERGED_INTO})`;
+
+/**
+ * The versions a lookup sees, as SQL over `v`: current ones, or those of `asOf`, valid at
+ * `validAt`, in `scopes`, and not merged into another note unless `includeMerged`.
+ */
+function versionFilter(options: SearchOptions, includeMerged = false): [string, SqlValue[]] {
   const filters: string[] = [];
   const bindings: SqlValue[] = [];
   if (options.scopes !== undefined) {
@@ -290,6 +303,7 @@ function versionFilter(options: SearchOptions): [string, SqlValue[]] {
     filters.push("(v.invalid_at IS NULL OR v.invalid_at > ?)");
     bindings.push(options.notExpiredAt);
   }
+  if (!includeMerged) filters.push(NOT_MERGED);
   return [filters.join(" AND "), bindings];
 }
 
@@ -608,7 +622,7 @@ export class MemoryIndex {
   embeddingTexts(model: string, limit = 256): { blobSha: string; text: string }[] {
     return this.#exec<{ blob_sha: string; title: string; abstract: string | null; body: string }>(
       `SELECT v.blob_sha, v.title, v.abstract, v.body FROM versions v
-       WHERE v.is_current = 1
+       WHERE v.is_current = 1 AND ${NOT_MERGED}
          AND NOT EXISTS (SELECT 1 FROM embeddings e WHERE e.blob_sha = v.blob_sha AND e.model = ?)
        GROUP BY v.blob_sha ORDER BY v.blob_sha LIMIT ?`,
       model,
@@ -718,7 +732,7 @@ export class MemoryIndex {
               -- Too deep for SQLite's JSON functions: no 'updated', rather than no report.
               CASE WHEN json_valid(frontmatter) THEN json_extract(frontmatter, '$.updated') END AS updated,
               blob_sha
-       FROM versions WHERE is_current = 1 ORDER BY path`,
+       FROM versions v WHERE is_current = 1 AND ${NOT_MERGED} ORDER BY path`,
     ).map((row) => ({
       path: row.path,
       scope: row.scope,
@@ -889,7 +903,21 @@ export class MemoryIndex {
         other,
         ...bindings,
       )[0];
-      if (row !== undefined) hits.push(toHit(row));
+      if (row !== undefined) {
+        hits.push(toHit(row));
+        return;
+      }
+      // A note merged into another (#112) leads to it, one step only. It went into a note of its
+      // own scope, so a note outside the scopes leads nowhere the lookup sees.
+      const into = this.mergedInto(other);
+      if (into === null || seen.has(into)) return;
+      seen.add(into);
+      const merged = this.#exec<HitRow>(
+        `SELECT ${HIT_COLUMNS} FROM versions v WHERE v.path = ? AND ${filter}`,
+        into,
+        ...bindings,
+      )[0];
+      if (merged !== undefined) hits.push(toHit(merged));
     };
     // Links are resolved one at a time, so a note with many costs only what is taken. A note it
     // contradicts is what it replaced, not a neighbour.
@@ -929,8 +957,10 @@ export class MemoryIndex {
     target: string,
     options: { scopes?: readonly Scope[] } = {},
   ): string | null {
+    // A link names a file, as in Obsidian, merged into another or not.
     const [filter, bindings] = versionFilter(
       options.scopes === undefined ? {} : { scopes: options.scopes },
+      true,
     );
     const candidates = this.#exec<{ path: string }>(
       `SELECT v.path FROM versions v WHERE v.${by === "path" ? "link_path" : "link_name"} = ? AND ${filter}`,
@@ -953,6 +983,20 @@ export class MemoryIndex {
         }
         return a < b ? -1 : 1;
       })[0] ?? null
+    );
+  }
+
+  /**
+   * The note a merged note went into (#112): another current note of its scope, which its mark
+   * names by path, or null when no mark of it counts. Exactly the notes lookups leave out have one.
+   */
+  mergedInto(path: string): string | null {
+    return (
+      this.#exec<{ path: string | null }>(
+        `SELECT (SELECT t.path ${MERGED_INTO} ORDER BY t.path LIMIT 1) AS path
+         FROM versions v WHERE v.path = ? AND v.is_current = 1`,
+        path,
+      )[0]?.path ?? null
     );
   }
 

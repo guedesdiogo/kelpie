@@ -51,10 +51,11 @@ describe("readNote", () => {
       pinned: false,
       abstract: "Ana is the owner's sister; she lives in Lisbon.",
       updated: "2026-10-06T12:00:00Z",
+      // The frontmatter's links first.
       links: [
-        { kind: "link", by: "name", target: "lisboa" },
-        { kind: "source", by: "name", target: "2026-10-06-family-chat" },
         { kind: "contradicts", by: "path", target: "memory/people/ana-old" },
+        { kind: "source", by: "name", target: "2026-10-06-family-chat" },
+        { kind: "link", by: "name", target: "lisboa" },
       ],
     });
     // The duplicate entity is reported; nothing else is.
@@ -155,6 +156,39 @@ describe("readNote", () => {
       "`confidence` is invalid; ignored",
       "`abstract` is invalid; ignored",
       "`updated` is invalid; ignored",
+    ]);
+  });
+
+  it("reads where a merged note went (#112)", () => {
+    const note = readNote(
+      "memory/notes/cafe-2.md",
+      [
+        "---",
+        "relations:",
+        "  contradicts:",
+        '    - "[[cha]]"',
+        "  merged_into:",
+        '    - "[[memory/notes/cafe]]"',
+        "---",
+        "# Café",
+        "",
+        "Merged into [[memory/notes/cafe]].",
+      ].join("\n"),
+    );
+    expect(note?.links).toContainEqual({
+      kind: "merged_into",
+      by: "path",
+      target: "memory/notes/cafe",
+    });
+    expect(note?.links).toContainEqual({ kind: "contradicts", by: "name", target: "cha" });
+    expect(note?.warnings).toEqual([]);
+    // By name, it merges nothing, and the note says so.
+    const named = readNote(
+      "memory/notes/cafe-3.md",
+      '---\nrelations:\n  merged_into:\n    - "[[cafe]]"\n---\n# Café\n',
+    );
+    expect(named?.warnings).toEqual([
+      "`relations.merged_into` names a note by name: name it by its path, or it merges nothing",
     ]);
   });
 
