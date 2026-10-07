@@ -45,7 +45,7 @@ export class MemoryFormatError extends Error {
  * One line of text: no control characters, line breaks included, and no bidirectional overrides,
  * which can make a title read differently from what it holds. Emoji and their joiners are fine.
  */
-const printableLine = (value: unknown, max: number): value is string =>
+export const printableLine = (value: unknown, max: number): value is string =>
   typeof value === "string" &&
   value.trim() !== "" &&
   value.length <= max &&

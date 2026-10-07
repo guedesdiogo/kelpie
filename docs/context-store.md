@@ -62,6 +62,10 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - A step is applied as a change set only when the index stood exactly at the previous head. Otherwise the index is brought to the new head from the working copy. That covers a crash between a move and its indexing, a new schema, and a branch the owner rewound.
     - The alarm and each recall check that the index stands at the head. Notes that haven't changed are skipped, so a check is cheap.
     - "As of" therefore means as of when the Context Store synced, not when the owner's device committed.
+  - **Dream** (#112, [memory-format.md](memory-format.md#dream)): after the report, the alarm runs one step of Dream.
+    - **A step** is one model call that proposes an abstract for a note Kelpie wrote.
+    - **Activity:** a recall, search, read or write marks memory as active, and Dream waits for 30 minutes of quiet.
+    - **What it keeps:** its proposals in `dream_proposals`, and its runs, with what each call used, in `dream_runs`.
   - **Embeddings:** the alarm embeds the notes that have no vector yet, through llm-gateway's `embed`, four batches of 64 a run, until none is left.
     - The model is the one `EMBEDDING_PROVIDER` chooses on llm-gateway. A recall that sees a new model arms the alarm, which embeds every note again; until then the vector stream finds what it can.
     - This runs after GitHub's work and fails on its own, so an llm-gateway outage never delays the vault's writes. A call that doesn't answer in 40 s is given up.
@@ -97,7 +101,7 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - **Provenance:** a commit whose answer was lost still counts as Kelpie's. A file the owner removes, or a force-push takes away, leaves no record.
     - **Refusals:** `invalid` comes with the problems found, for the model to fix. A path the turn can't see is `not_found`, the same as a missing note. A scope the turn can't write to is `scope_not_allowed`.
   - **Access counts:** each recall counts the notes it packed, in one write, in a table outside the index. A rebuild keeps them, and they never reach git.
-  - **The memory report** (#111): once a day, after the embeddings and the held files, the alarm writes what memory's index finds (cold notes, duplicates, possible contradictions) to `memory/_lint/report.md`, or removes the page when memory is clean ([memory-format.md](memory-format.md#the-daily-report)).
+  - **The memory report** (#111): once a day, after the embeddings and the held files, the alarm writes what memory's index finds (cold notes, duplicates, possible contradictions), and Dream's plan, to `memory/_lint/report.md`, or removes the page when memory is clean ([memory-format.md](memory-format.md#the-daily-report)).
     - The page is queued only when it changed, so a quiet day makes no commit.
     - It reads the index at the head, bringing it there first; if that fails, it tries again at the next alarm.
     - Agents can't write under `memory/_…/`, so no one else writes the page.
@@ -106,7 +110,7 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
 
 `context-store` reaches llm-gateway through its `LLM_GATEWAY` service binding, for memory's embeddings and rerank, so llm-gateway deploys first. Without llm-gateway's models, recall works on full text, entities and links alone.
 
-Its `ContextStore` entrypoint serves the Workers that run conversations. `ContextStoreAdmin` holds the owner's actions, listing held files and forgetting erased content, and only admin-api binds it, so nothing a conversation reaches can call them.
+Its `ContextStore` entrypoint serves the Workers that run conversations. `ContextStoreAdmin` holds the owner's actions: listing held files, forgetting erased content, and turning Dream off or back to dry runs (#112). Only admin-api binds it, so nothing a conversation reaches can call them.
 
 The vault needs a GitHub App with access to the vault repository alone. Spike #28's App works, or a new one.
 
@@ -188,14 +192,14 @@ Git keeps every version, so erasing content means rewriting the vault's history.
    - `--path <file> --invert-paths` removes a file from every commit;
    - `--replace-text` removes a passage.
 
-   The memory report, `memory/_lint/report.md`, lists notes by title and path. When an erased note was ever in it, rewrite the report's history too, with the same `--replace-text` or by removing the file.
+   The memory report, `memory/_lint/report.md`, lists notes by title and path, and Dream's plan adds an abstract of each note it lists, which a model wrote from the note's content (#112). When an erased note was ever in it, rewrite the report's history too, with the same `--replace-text` or by removing the file.
 
    Then push the result with `--force` to every branch that held the content.
 2. **Make Kelpie forget its copies, right away:** `/commands/forgetVaultPaths` with the erased paths ([admin-api.md](admin-api.md)). Doing it at once keeps Kelpie's queued writes from committing the content back onto the rewritten branch.
    - **What it does:**
      - it syncs to the rewritten head;
      - it rebuilds memory's index from the vault as it is now, which drops every old version, of every file, with the vectors of content no version holds anymore;
-     - it deletes the rows that name the paths in `queue`, `conflicts`, `held`, `proposals`, `recall_counts`, `authored`, `owner_changes` and `owner_merges`;
+     - it deletes the rows that name the paths in `queue`, `conflicts`, `held`, `proposals`, `recall_counts`, `authored`, `owner_changes`, `owner_merges` and `dream_proposals`;
      - it drops a memory report still waiting in the queue or set aside in `conflicts`, and the next alarm writes the report again from what is left. That is within 15 minutes while GitHub answers.
 
      It never touches git.

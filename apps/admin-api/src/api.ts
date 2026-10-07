@@ -91,6 +91,7 @@ const COMMANDS: Record<string, Command> = {
     commands.registerTelegramWebhook(actor, input),
   listHeldFiles: (commands, actor) => commands.listHeldFiles(actor),
   forgetVaultPaths: (commands, actor, input) => commands.forgetVaultPaths(actor, input),
+  setDream: (commands, actor, input) => commands.setDream(actor, input),
 };
 
 /**
