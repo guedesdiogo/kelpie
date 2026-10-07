@@ -218,8 +218,8 @@ function contradicted(note: Note): string[] | null {
  * and their entities and what they contradict join its own. It takes the lowest level and
  * confidence among them, so a merge never makes a note surer. Its abstract goes, since it summed
  * up the old body. Null when it can't be written: a note the reader can't read, notes valid at other
- * times, a contradiction the writer can't carry, or more sources or contradictions than a note may
- * name.
+ * times or of which only some are evergreen, a contradiction the writer can't carry, or more sources
+ * or contradictions than a note may name.
  */
 export async function mergedSurvivor(
   survivor: VaultText,
@@ -231,8 +231,15 @@ export async function mergedSurvivor(
   const [own] = notes;
   if (own === undefined || own === null || notes.some((note) => note === null)) return null;
   const all = notes as Note[];
-  // A merge would make a fact true for longer, or for less, than it was.
-  if (all.some((note) => note.validFrom !== own.validFrom || note.invalidAt !== own.invalidAt)) {
+  // A merge would make a fact true for longer, or for less, than it was, or change whether it decays.
+  if (
+    all.some(
+      (note) =>
+        note.validFrom !== own.validFrom ||
+        note.invalidAt !== own.invalidAt ||
+        note.evergreen !== own.evergreen,
+    )
+  ) {
     return null;
   }
   const lists = all.map(contradicted);

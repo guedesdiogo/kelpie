@@ -191,7 +191,8 @@ const OWNER_CHANGES_MS = 7 * 24 * 60 * 60_000;
 const LIFECYCLE_EVERY_MS = 24 * 60 * 60_000;
 /**
  * Dream (#112): a run starts at most this often, once no turn has touched memory for this long, on
- * the notes Kelpie wrote this recently, and makes this many model calls at most, one per wake.
+ * the notes Kelpie wrote this recently, and makes this many calls at most, one per wake: a model
+ * call, or a write of its plan that wrote nothing.
  */
 const DREAM_EVERY_MS = 6 * 60 * 60_000;
 const DREAM_QUIET_MS = 30 * 60_000;
@@ -235,6 +236,8 @@ type MergeProposal = { verdict: "same" } | { verdict: "merge"; body: string };
 interface DreamCommit {
   reads: Map<string, string | null>;
   writes: { path: string; content: string }[];
+  /** A day's summary's path, remembered once it lands, so one the owner removes isn't written again. */
+  written?: string;
 }
 type DreamOutcome = "committed" | "changed" | "unwritable" | "refused";
 /** Dream's write of an abstract (#112): the queue's mark, and a headline that names no note. */
@@ -361,12 +364,12 @@ CREATE TABLE IF NOT EXISTS dream_writes (
 );
 CREATE TABLE IF NOT EXISTS dream_written (
   path TEXT PRIMARY KEY NOT NULL,
-  key TEXT NOT NULL,
   at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS dream_landing (
   path TEXT NOT NULL,
-  blob_sha TEXT NOT NULL
+  blob_sha TEXT NOT NULL,
+  day INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS proposals (
   id INTEGER PRIMARY KEY,
@@ -1131,11 +1134,10 @@ export class Vault extends DurableObject<VaultEnv> {
       ).map((row) => [row.path, row]),
     );
     const writing = this.#dreamWrites().has("summaries");
-    // Days Dream wrote, with their pages' versions: one the owner removed isn't written again.
-    const written = new Map(
-      this.#exec<{ path: string; key: string }>("SELECT path, key FROM dream_written").map(
-        (row) => [row.path, row.key],
-      ),
+    // Days Dream wrote: one the owner removed isn't written again, even once its pages change, as
+    // Dream's own abstracts change them.
+    const written = new Set(
+      this.#exec<{ path: string }>("SELECT path FROM dream_written").map((row) => row.path),
     );
     const newest = [...days].sort(([a, x], [b, y]) =>
       x.date === y.date ? (a < b ? -1 : 1) : x.date < y.date ? 1 : -1,
@@ -1159,7 +1161,7 @@ export class Vault extends DurableObject<VaultEnv> {
               ];
         });
       const key = children.map((page) => page.blobSha).join(",");
-      if (written.get(path) === key) continue;
+      if (written.has(path)) continue;
       const kept = proposed.get(path);
       // Proposed while dry, and now let write: no model call.
       const pending = kept?.key === key && writing ? (kept.summary ?? undefined) : undefined;
@@ -1447,17 +1449,12 @@ export class Vault extends DurableObject<VaultEnv> {
             [day.path, null],
           ]),
           writes: [{ path: day.path, content: text }],
+          written: day.path,
         };
       }),
     );
     if (outcome === "committed") {
       this.#exec("DELETE FROM dream_summaries WHERE path = ?", day.path);
-      this.#exec(
-        "INSERT OR REPLACE INTO dream_written (path, key, at) VALUES (?, ?, ?)",
-        day.path,
-        day.key,
-        Date.now(),
-      );
     } else if (outcome === "unwritable" || outcome === "refused") {
       this.#exec(
         "UPDATE dream_summaries SET summary = NULL WHERE path = ? AND key = ?",
@@ -1528,7 +1525,8 @@ export class Vault extends DurableObject<VaultEnv> {
             "SELECT content, blob_sha FROM files WHERE path = ?",
             path,
           )[0];
-          if (file === undefined || !this.#dreamMayWrite([path])) continue;
+          // A note marked into two of them comes once.
+          if (file === undefined || reads.has(path) || !this.#dreamMayWrite([path])) continue;
           const text = repointedStub({ path, text: file.content }, survivor, at);
           if (text === null) continue;
           reads.set(path, file.blob_sha);
@@ -1592,9 +1590,10 @@ export class Vault extends DurableObject<VaultEnv> {
         this.#exec("DELETE FROM dream_landing");
         planned.writes.forEach(({ path }, i) => {
           this.#exec(
-            "INSERT INTO dream_landing (path, blob_sha) VALUES (?, ?)",
+            "INSERT INTO dream_landing (path, blob_sha, day) VALUES (?, ?, ?)",
             path,
             shas[i] ?? "",
+            planned.written === path ? 1 : 0,
           );
         });
       });
@@ -1625,6 +1624,13 @@ export class Vault extends DurableObject<VaultEnv> {
             shas[i] ?? "",
           );
         });
+        if (planned.written !== undefined) {
+          this.#exec(
+            "INSERT OR REPLACE INTO dream_written (path, at) VALUES (?, ?)",
+            planned.written,
+            Date.now(),
+          );
+        }
         this.#exec("DELETE FROM dream_landing");
         this.#set("head", outcome.commit);
         // A write queued for these files while the commit was on its way was made on what they
@@ -1658,7 +1664,7 @@ export class Vault extends DurableObject<VaultEnv> {
     if (
       this.#exec(
         `SELECT 1 FROM queue WHERE path IN (SELECT value FROM json_each(?))
-         UNION ALL SELECT 1 FROM held WHERE path IN (SELECT value FROM json_each(?))`,
+         UNION ALL SELECT 1 FROM held WHERE state != 'resolved' AND path IN (SELECT value FROM json_each(?))`,
         fresh,
         fresh,
       ).length > 0
@@ -2795,11 +2801,25 @@ export class Vault extends DurableObject<VaultEnv> {
         const changed = snapshot
           ? this.#replaceFiles(snapshot.files)
           : this.#apply(diff?.changes ?? []);
-        // A commit of Dream's that landed with its answer lost: its versions are Kelpie's (#126).
+        // A commit of Dream's that landed with its answer lost: its versions are Kelpie's (#126),
+        // a write queued over them meanwhile stays Kelpie's, and a day's summary is remembered.
+        const landed = new Set(
+          this.#exec<{ path: string }>(
+            `SELECT d.path FROM dream_landing d
+             JOIN files f ON f.path = d.path AND f.blob_sha = d.blob_sha`,
+          ).map((row) => row.path),
+        );
         this.#exec(
           `INSERT OR REPLACE INTO authored (path, blob_sha)
            SELECT f.path, f.blob_sha FROM files f
            JOIN dream_landing d ON d.path = f.path AND d.blob_sha = f.blob_sha`,
+        );
+        this.#exec(
+          `INSERT OR REPLACE INTO dream_written (path, at)
+           SELECT d.path, ? FROM dream_landing d
+           JOIN files f ON f.path = d.path AND f.blob_sha = d.blob_sha
+           WHERE d.day = 1`,
+          Date.now(),
         );
         this.#exec("DELETE FROM dream_landing");
         for (const [path, content] of changed) {
@@ -2809,7 +2829,13 @@ export class Vault extends DurableObject<VaultEnv> {
             continue;
           }
           this.#exec("DELETE FROM held WHERE path = ? AND state != 'resolved'", path);
-          this.#settleQueued(path, content, bases.get(path) ?? null, owners.has(path));
+          this.#settleQueued(
+            path,
+            content,
+            bases.get(path) ?? null,
+            owners.has(path),
+            !landed.has(path),
+          );
         }
         this.#set("head", remote);
         return changed;

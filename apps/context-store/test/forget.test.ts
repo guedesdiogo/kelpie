@@ -85,6 +85,11 @@ describe("Vault forget", () => {
           "INSERT INTO dream_merges (path, key, sources, verdict, body, at) VALUES (?, 'k', '[]', 'same', NULL, 1)",
           path,
         );
+        state.storage.sql.exec("INSERT INTO dream_written (path, at) VALUES (?, 1)", path);
+        state.storage.sql.exec(
+          "INSERT INTO dream_landing (path, blob_sha, day) VALUES (?, 'sha', 0)",
+          path,
+        );
         state.storage.sql.exec(
           "INSERT INTO held (path, content, previous, state, attempts, at) VALUES (?, 'x', NULL, 'resolved', 1, 1)",
           path,
@@ -107,7 +112,7 @@ describe("Vault forget", () => {
     // The owner rewrote the history, so the leaked version is gone from git.
     // Its current files changed too: forgetting syncs before it rebuilds.
     backend.forcePush({ "README.md": "# Vault", [ana]: clean, [bia]: "# Bia\n\nNova.\n" });
-    expect(await stub.forget([ana])).toEqual({ ok: true, forgotten: 11, stillInVault: [ana] });
+    expect(await stub.forget([ana])).toEqual({ ok: true, forgotten: 12, stillInVault: [ana] });
 
     expect(await sql("SELECT path FROM versions ORDER BY path")).toEqual([
       { path: ana },
@@ -131,8 +136,9 @@ describe("Vault forget", () => {
       "dream_writes",
       "dream_summaries",
       "dream_merges",
+      "dream_written",
     ];
-    for (const table of ["queue", ...named]) {
+    for (const table of ["queue", "dream_landing", ...named]) {
       expect(await sql(`SELECT count(*) AS n FROM ${table} WHERE path = '${ana}'`)).toEqual([
         { n: 0 },
       ]);

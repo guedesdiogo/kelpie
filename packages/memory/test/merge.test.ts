@@ -344,6 +344,7 @@ describe("mergedSurvivor", () => {
       contradicts: ["Leite"],
       level: "inferred",
       confidence: 0.6,
+      evergreen: true,
     });
     const text = (await mergedSurvivor(cafe, [cafe2], "Sem açúcar, ou com canela.", AT)) ?? "";
     const note = readNote(cafe.path, text);
@@ -410,6 +411,9 @@ describe("mergedSurvivor", () => {
     });
     // An expiring fact would become a lasting one.
     expect(await mergedSurvivor(cafe, [until], "Café.", AT)).toBeNull();
+    // A fact exempt from decay would decay.
+    const kept = await kelpieNote("memory/notes/cafe-3.md", { title: "Café", evergreen: true });
+    expect(await mergedSurvivor(cafe, [kept], "Café.", AT)).toBeNull();
     const many = (from: number) =>
       kelpieNote(`memory/notes/cafe-${from}.md`, {
         title: "Café",

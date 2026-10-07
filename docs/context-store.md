@@ -72,7 +72,7 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
       - Once their operation may write, each goes in a commit of Dream's own, outside the queue, so a merge lands whole or not at all.
       - The commit is made only while what it read is as it read it, and what it writes over is Kelpie's, not held and with no write waiting. If the vault moved, it syncs and checks again, and writes nothing if any of that changed.
       - A write an agent queued meanwhile goes on top, as on the owner's edit.
-      - `dream_landing` holds the versions a commit writes until its answer comes, so a lost answer still leaves them Kelpie's (#126). `dream_written` keeps the days whose summary Dream wrote, so one the owner removes isn't written again.
+      - `dream_landing` holds the versions a commit writes until its answer comes, so a lost answer still leaves them Kelpie's (#126), and a write queued over them too. `dream_written` keeps the days whose summary Dream wrote, for the lookback, so one the owner removes isn't written again.
   - **Embeddings:** the alarm embeds the notes that have no vector yet, through llm-gateway's `embed`, four batches of 64 a run, until none is left.
     - The model is the one `EMBEDDING_PROVIDER` chooses on llm-gateway. A recall that sees a new model arms the alarm, which embeds every note again; until then the vector stream finds what it can.
     - This runs after GitHub's work and fails on its own, so an llm-gateway outage never delays the vault's writes. A call that doesn't answer in 40 s is given up.
