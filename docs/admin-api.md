@@ -89,7 +89,7 @@ No command takes an identity value to admit someone: the owner proves an account
 
 **From the setup agent.** Its `pair_telegram` tool links to `https://<admin hostname>/pair/telegram/<agent id>`, a page behind the same Access login and owner check as the secure forms:
 - a `GET` shows a button, and pressing it is the owner's own yes;
-- the page's own `POST` (`Sec-Fetch-Site: same-origin`, or a matching `Origin`, form-encoded) runs `pairTelegram` and shows the `t.me` link;
+- the page's own `POST` (`Sec-Fetch-Site: same-origin` or, without it, a matching `Origin`, form-encoded) runs `pairTelegram` and shows the `t.me` link. A `POST` with neither header is refused: current browsers send at least one;
 - without a connected bot, the page says to connect it first.
 
 A code pairs an account with the owner, not with one agent: any of the owner's Telegram bots accepts it, and the paired account reaches every agent.
@@ -111,7 +111,7 @@ The link expires after 15 minutes, works once, and closes after five refused tok
 
 Form pages are HTML:
 - they are sent with `Cache-Control: no-store`, `Referrer-Policy: same-origin` and a Content-Security-Policy that forbids framing and scripts;
-- a submission must come from the page itself (`Sec-Fetch-Site: same-origin`, or a matching `Origin`) and be form-encoded;
+- a submission must come from the page itself (`Sec-Fetch-Site: same-origin` or, without it, a matching `Origin`) and be form-encoded. A `POST` with neither header is refused: current browsers send at least one;
 - no page repeats the token.
 
 ## Setting it up

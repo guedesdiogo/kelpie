@@ -645,7 +645,11 @@ describe("admin API access recovery", () => {
 
 describe("admin API secure forms", () => {
   const formUrl = "https://admin.example/forms/form-token-1";
-  const submit = (botToken: string, headers: Record<string, string> = {}) =>
+  /** A browser's submission from the form page, unless a test gives its own headers. */
+  const submit = (
+    botToken: string,
+    headers: Record<string, string> = { "sec-fetch-site": "same-origin" },
+  ) =>
     new Request(formUrl, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
@@ -758,6 +762,14 @@ describe("admin API secure forms", () => {
     expect(redeemed).toEqual([]);
   });
 
+  it("refuses a submission with neither Sec-Fetch-Site nor Origin", async () => {
+    const { deps, redeemed } = world();
+    const response = await handle(submit(GOOD_BOT_TOKEN, {}), deps);
+    expect(response.status).toBe(403);
+    expect(await response.text()).toContain("This form only accepts its own submissions.");
+    expect(redeemed).toEqual([]);
+  });
+
   it("serves the form to the owner only", async () => {
     const stranger = world({ authenticated: null });
     expect((await handle(new Request(formUrl), stranger.deps)).status).toBe(401);
@@ -775,7 +787,10 @@ describe("admin API secure forms", () => {
     expect((await handle(new Request(formUrl, { method: "PUT" }), deps)).status).toBe(404);
     const huge = new Request(formUrl, {
       method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "sec-fetch-site": "same-origin",
+      },
       body: `botToken=${"x".repeat(70_000)}`,
     });
     expect((await handle(huge, deps)).status).toBe(413);
@@ -808,7 +823,7 @@ describe("admin API secure forms", () => {
     const { deps, redeemed } = world();
     const json = new Request(formUrl, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
       body: JSON.stringify({ botToken: GOOD_BOT_TOKEN }),
     });
     expect((await handle(json, deps)).status).toBe(415);
@@ -844,7 +859,11 @@ describe("admin API secure forms", () => {
 
 describe("admin API pairing page", () => {
   const pageUrl = (agentId: string) => `https://admin.example/pair/telegram/${agentId}`;
-  const press = (agentId: string, headers: Record<string, string> = {}) =>
+  /** A browser's POST from the page, unless a test gives its own headers. */
+  const press = (
+    agentId: string,
+    headers: Record<string, string> = { "sec-fetch-site": "same-origin" },
+  ) =>
     new Request(pageUrl(agentId), {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
@@ -895,6 +914,15 @@ describe("admin API pairing page", () => {
     });
     expect((await handle(json, deps)).status).toBe(415);
     expect([...stranger.ran, ...member.ran, ...ran]).not.toContain("directory.issuePairingCode");
+  });
+
+  it("takes no post with neither Sec-Fetch-Site nor Origin", async () => {
+    const { deps, ran } = world();
+    await call(deps, "/commands/createAgent", { id: "sales", name: "Sales" });
+    const response = await handle(press("sales", {}), deps);
+    expect(response.status).toBe(403);
+    expect(await response.text()).toContain("This page only accepts its own submissions.");
+    expect(ran).not.toContain("directory.issuePairingCode");
   });
 
   it("answers 404 for an unknown agent or a malformed id, and says when no bot is connected", async () => {
