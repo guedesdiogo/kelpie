@@ -159,4 +159,153 @@ describe("Vault lifecycle", () => {
     await runDurableObjectAlarm(stub);
     expect(backend.files()[LIFECYCLE_REPORT_PATH]).toBe(report);
   });
+
+  it("lists the owner's notes Kelpie changed, and not its own", async () => {
+    const backend = new FakeVaultBackend({
+      "README.md": "# Vault",
+      "memory/notes/cha.md": "# Chá\n\nVerde.\n",
+      "memory/notes/velho.md": "# Velho\n\nApagar.\n",
+      // The owner's edit of the report itself: Kelpie's next report isn't a change to list.
+      [LIFECYCLE_REPORT_PATH]: "# Memory report\n\nEditado à mão.\n",
+    });
+    replaceBackendForTesting(backend);
+    replaceGatewayForTesting(null);
+    const stub = vault("lifecycle-owner-changes");
+    await stub.compile("kelpie");
+    await stub.write(
+      "kelpie",
+      [{ path: "memory/notes/cha.md", content: "# Chá\n\nPreto.\n" }],
+      "x",
+    );
+    await stub.write("kelpie", [{ path: "memory/notes/velho.md", content: null }], "x");
+    await stub.write(
+      "kelpie",
+      [{ path: "memory/notes/pao.md", content: "# Pão\n\nIntegral.\n" }],
+      "x",
+    );
+    await runDurableObjectAlarm(stub);
+    await stub.write(
+      "kelpie",
+      [{ path: "memory/notes/pao.md", content: "# Pão\n\nCom sal.\n" }],
+      "x",
+    );
+    await aDayLater(stub);
+    // A change older than a week is no longer listed, nor kept.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO owner_changes (path, at) VALUES ('memory/notes/velha.md', 1)",
+      );
+    });
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    const report = backend.files()[LIFECYCLE_REPORT_PATH] ?? "";
+    expect(report).toContain("## Your notes Kelpie changed");
+    expect(report).toContain("[[memory/notes/cha|Chá]]: changed");
+    expect(report).not.toContain("memory/notes/pao");
+    expect(report).toContain("- `memory/notes/velho.md`: removed");
+    expect(report).not.toContain("velha");
+    expect(
+      await runInDurableObject(stub, (_instance, state) =>
+        state.storage.sql.exec("SELECT path FROM owner_changes ORDER BY path").toArray(),
+      ),
+    ).toEqual([{ path: "memory/notes/cha.md" }, { path: "memory/notes/velho.md" }]);
+  });
+
+  it("drops a merge's mark once its version is gone, and keeps one still waiting to commit", async () => {
+    const cha = "memory/notes/cha.md";
+    const pao = "memory/notes/pao.md";
+    const sal = "memory/notes/sal.md";
+    const backend = new FakeVaultBackend({
+      "README.md": "# Vault",
+      [cha]: "# Chá\n\nVerde.\n",
+      [pao]: "# Pão\n\nIntegral.\n",
+      [sal]: "# Sal\n\nPouco.\n",
+    });
+    replaceBackendForTesting(backend);
+    replaceGatewayForTesting(null);
+    const stub = vault("lifecycle-owner-merges");
+    await stub.compile("kelpie");
+    // A conflict pushed into Sal holds it, so Kelpie's write to it waits in the queue.
+    backend.push({
+      [sal]: "# Sal\n\n<<<<<<< HEAD\nPouco.\n=======\nNada.\n>>>>>>> origin/main\n",
+    });
+    await runDurableObjectAlarm(stub);
+    await stub.write("kelpie", [{ path: sal, content: "# Sal\n\nPouco, e fino.\n" }], "x");
+    await runInDurableObject(stub, (_instance, state) => {
+      for (const [path, content] of [
+        // The vault's version: kept.
+        [cha, "# Chá\n\nVerde.\n"],
+        // A version replaced since, and a removed note: their text goes.
+        [pao, "# Pão\n\nCom sal.\n"],
+        ["memory/notes/velho.md", "# Velho\n"],
+        // Still waiting to commit: kept.
+        [sal, "# Sal\n\nPouco, e fino.\n"],
+      ]) {
+        state.storage.sql.exec(
+          "INSERT INTO owner_merges (path, content) VALUES (?, ?)",
+          path,
+          content,
+        );
+      }
+    });
+    await aDayLater(stub);
+    await runDurableObjectAlarm(stub);
+    expect(
+      await runInDurableObject(stub, (_instance, state) =>
+        state.storage.sql.exec("SELECT path FROM owner_merges ORDER BY path").toArray(),
+      ),
+    ).toEqual([{ path: cha }, { path: sal }]);
+  });
+
+  it("lists a change whose commit answer was lost, once the sync finds it", async () => {
+    const backend = new FakeVaultBackend({
+      "README.md": "# Vault",
+      "memory/notes/cha.md": "# Chá\n\nVerde.\n",
+      "memory/notes/velho.md": "# Velho\n\nApagar.\n",
+    });
+    replaceBackendForTesting(backend);
+    replaceGatewayForTesting(null);
+    const stub = vault("lifecycle-owner-lost-answer");
+    await stub.compile("kelpie");
+    const commit = backend.commit.bind(backend);
+    let lose = false;
+    backend.commit = async (request) => {
+      const outcome = await commit(request);
+      if (lose) {
+        lose = false;
+        throw new Error("GitHub commit answered 502");
+      }
+      return outcome;
+    };
+    await stub.write(
+      "kelpie",
+      [{ path: "memory/notes/pao.md", content: "# Pão\n\nIntegral.\n" }],
+      "x",
+    );
+    await runDurableObjectAlarm(stub);
+    lose = true;
+    await stub.write(
+      "kelpie",
+      [
+        { path: "memory/notes/cha.md", content: "# Chá\n\nPreto.\n" },
+        { path: "memory/notes/velho.md", content: null },
+        // Kelpie's own note: replacing its version isn't the owner's change.
+        { path: "memory/notes/pao.md", content: "# Pão\n\nCom sal.\n" },
+      ],
+      "x",
+    );
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()["memory/notes/cha.md"]).toBe("# Chá\n\nPreto.\n");
+    expect(backend.files()["memory/notes/velho.md"]).toBeUndefined();
+    expect(backend.files()["memory/notes/pao.md"]).toBe("# Pão\n\nCom sal.\n");
+    expect(
+      await runInDurableObject(stub, (_instance, state) =>
+        state.storage.sql.exec("SELECT path, removed FROM owner_changes ORDER BY path").toArray(),
+      ),
+    ).toEqual([
+      { path: "memory/notes/cha.md", removed: 0 },
+      { path: "memory/notes/velho.md", removed: 1 },
+    ]);
+  });
 });
