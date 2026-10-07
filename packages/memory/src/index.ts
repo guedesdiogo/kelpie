@@ -22,6 +22,9 @@ export {
 } from "./layout.ts";
 export {
   CONTRADICTION_BANDS,
+  DREAM_PAGE_PATH,
+  type DreamSummary,
+  dreamPage,
   LIFECYCLE_REPORT_PATH,
   type LifecycleFindings,
   type LifecycleOptions,
@@ -93,6 +96,7 @@ export {
   type SessionPage,
   sessionPage,
 } from "./session.ts";
+export { SUMMARY_PROMPT, summaryInput, summaryOf, summaryPath } from "./summary.ts";
 export { instantOf, isDate, isDateTime } from "./time.ts";
 export {
   MemoryFormatError,

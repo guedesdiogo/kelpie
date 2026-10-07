@@ -4,9 +4,12 @@ import {
   bodyWithoutHeading,
   coreBlock,
   coreCarries,
+  DREAM_PAGE_PATH,
   decideWrite,
+  dreamPage,
   foldKey,
   instantOf,
+  isDate,
   isScope,
   LIFECYCLE_REPORT_PATH,
   lifecycleFindings,
@@ -19,6 +22,7 @@ import {
   type Note,
   pack,
   readNote as parseNote,
+  placeOf,
   qualifierJudge,
   type RetrieveOptions,
   readPage,
@@ -28,6 +32,7 @@ import {
   type Scope,
   type SearchHit,
   sanitizeSecrets,
+  summaryPath,
   withAbstract,
   writeMemory,
   writtenAt,
@@ -63,7 +68,7 @@ import type {
   WriteNoteResult,
   WriteResult,
 } from "./contract.ts";
-import { proposeAbstract } from "./dream.ts";
+import { proposeAbstract, proposeSummary } from "./dream.ts";
 import { mergeOwnerWins } from "./merge.ts";
 import {
   agentRulesPath,
@@ -188,6 +193,19 @@ const DREAM_TIMEOUT_MS = 30_000;
 const DREAM_STEP_MS = 5_000;
 /** Ended runs are kept this long, with what they used. */
 const DREAM_RUNS_MS = 30 * 24 * 60 * 60_000;
+/**
+ * A session page is named by its conversation's local date. A date has ended in every time zone
+ * 12 hours after it ends in UTC; 2 more leave room for a conversation still going at midnight.
+ */
+const DREAM_DAY_ENDED_MS = 14 * 60 * 60_000;
+/** One day of one conversation Dream may sum up (#112): its summary's path and its pages. */
+interface DayCandidate {
+  path: string;
+  date: string;
+  /** The pages' versions, so new pages that day propose it again. */
+  key: string;
+  pages: { path: string; title: string; body: string }[];
+}
 /** Dream's write of an abstract (#112): the queue's mark, and a headline that names no note. */
 const DREAM_SUMMARY = "Write an abstract Dream proposed";
 /** Dream's operations, each dry until the owner lets it write (#112). */
@@ -211,6 +229,7 @@ const PATH_TABLES = [
   "owner_merges",
   "dream_proposals",
   "dream_writes",
+  "dream_summaries",
 ] as const;
 /** A held file's resolution, queued as the owner's text with a conflict settled (#114). */
 const RESOLVE_SUMMARY = "Resolve a pushed merge conflict, with the model";
@@ -277,6 +296,13 @@ CREATE TABLE IF NOT EXISTS dream_proposals (
   path TEXT PRIMARY KEY NOT NULL,
   blob_sha TEXT NOT NULL,
   abstract TEXT,
+  at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS dream_summaries (
+  path TEXT PRIMARY KEY NOT NULL,
+  key TEXT NOT NULL,
+  summary TEXT,
+  sources TEXT NOT NULL,
   at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS dream_writes (
@@ -797,8 +823,9 @@ export class Vault extends DurableObject<VaultEnv> {
       }
     }
     const note = this.#dreamCandidate(now);
+    const day = this.#summaryCandidate(now);
     if (run === undefined) {
-      if (note === null) {
+      if (note === null && day === null) {
         // Nothing to do: look again after another quiet spell, not on every wake.
         this.#set("dream_after", `${now + DREAM_QUIET_MS}`);
         return false;
@@ -810,7 +837,12 @@ export class Vault extends DurableObject<VaultEnv> {
       )[0]?.id;
       run = { id: id ?? 0, started_at: now, calls: 0, usage: "[]" };
     }
-    if (note === null || run.calls >= DREAM_MAX_CALLS) return this.#endDream(run.id, "done");
+    if (run.calls >= DREAM_MAX_CALLS) return this.#endDream(run.id, "done");
+    // The operations take turns, so many session pages' abstracts can't keep the days waiting.
+    if (day !== null && (note === null || run.calls % 2 === 1)) {
+      return this.#summarize(gateway, run, day);
+    }
+    if (note === null) return this.#endDream(run.id, "done");
     if (note.abstract !== undefined) {
       // Proposed while dry, and now let write: no model call.
       await this.#writeAbstract(note, note.abstract);
@@ -831,13 +863,16 @@ export class Vault extends DurableObject<VaultEnv> {
       // Kept with the version it was made from: a later version is a note to propose for again.
       // A failure is kept as no answer too, so one note can't fail every run; an outage costs it
       // this version's proposal.
-      this.#exec(
-        "INSERT OR REPLACE INTO dream_proposals (path, blob_sha, abstract, at) VALUES (?, ?, ?, ?)",
-        note.path,
-        note.blobSha,
-        proposedAbstract,
-        Date.now(),
-      );
+      // Turned off during the call: nothing is kept.
+      if (this.#get("dream_mode") !== "off") {
+        this.#exec(
+          "INSERT OR REPLACE INTO dream_proposals (path, blob_sha, abstract, at) VALUES (?, ?, ?, ?)",
+          note.path,
+          note.blobSha,
+          proposedAbstract,
+          Date.now(),
+        );
+      }
       this.#exec(
         "UPDATE dream_runs SET calls = calls + 1, usage = ? WHERE id = ?",
         JSON.stringify(usage),
@@ -971,10 +1006,138 @@ export class Vault extends DurableObject<VaultEnv> {
       this.#set("dream_writes", JSON.stringify(allowed));
       if (mode === "off") {
         this.#exec("DELETE FROM dream_proposals");
+        this.#exec("DELETE FROM dream_summaries");
+        // Dream's page waiting in the queue, or set aside, holds the summaries too.
+        this.#exec("DELETE FROM queue WHERE path = ?", DREAM_PAGE_PATH);
+        this.#exec("DELETE FROM conflicts WHERE path = ?", DREAM_PAGE_PATH);
         this.#set("lifecycle_after", "0");
       }
     });
     return { ok: true, mode, writes: allowed };
+  }
+
+  /**
+   * The next day Dream may sum up (#112), newest first: the session pages of one scope's day, ended
+   * and within DREAM_LOOKBACK_MS, whose summary the vault doesn't show yet, and not proposed for
+   * these pages' versions already. One conversation's day at a time, so two are never mixed (#131).
+   */
+  #summaryCandidate(now: number): DayCandidate | null {
+    // A date before this one has ended in every time zone.
+    const ended = new Date(now - DREAM_DAY_ENDED_MS).toISOString().slice(0, 10);
+    const oldest = new Date(now - DREAM_LOOKBACK_MS).toISOString().slice(0, 10);
+    const days = new Map<string, { date: string; pages: { path: string; blobSha: string }[] }>();
+    for (const note of this.#memory.lifecycleNotes()) {
+      // A conversation's own scope: where its session pages go, one conversation each (#131).
+      if (note.kind !== "session" || !note.scope.startsWith("conversation/")) continue;
+      if (!isScope(note.scope)) continue;
+      // A session page's date leads its name; a day summary's name is the date alone.
+      const date = /\/sessions\/\d{4}\/(\d{4}-\d{2}-\d{2})-[^/]+\.md$/.exec(note.path)?.[1];
+      if (date === undefined || !isDate(date) || date >= ended || date < oldest) continue;
+      const path = summaryPath(note.scope, date);
+      const day = days.get(path) ?? { date, pages: [] };
+      day.pages.push({ path: note.path, blobSha: note.blobSha });
+      days.set(path, day);
+    }
+    const proposed = new Map(
+      this.#exec<{ path: string; key: string }>("SELECT path, key FROM dream_summaries").map(
+        (row) => [row.path, row.key],
+      ),
+    );
+    const newest = [...days].sort(([a, x], [b, y]) =>
+      x.date === y.date ? (a < b ? -1 : 1) : x.date < y.date ? 1 : -1,
+    );
+    for (const [path, day] of newest) {
+      if (this.#visible(path) !== null) continue;
+      const children = day.pages
+        .sort((a, b) => (a.path < b.path ? -1 : 1))
+        .flatMap((page) => {
+          const version = this.#memory.current(page.path);
+          return version === null
+            ? []
+            : [
+                {
+                  path: page.path,
+                  blobSha: page.blobSha,
+                  title: version.title,
+                  body: version.body,
+                },
+              ];
+        });
+      const key = children.map((page) => page.blobSha).join(",");
+      if (children.length === 0 || proposed.get(path) === key) continue;
+      // The index can hold another version than the vault, as for a page held on conflict
+      // markers: a day whose summary couldn't be kept isn't asked for.
+      const sources = children.map((page) => page.path);
+      if (!this.#summaryCurrent(sources, key)) continue;
+      return {
+        path,
+        date: day.date,
+        key,
+        pages: children.map(({ path, title, body }) => ({ path, title, body })),
+      };
+    }
+    return null;
+  }
+
+  /** Whether a day summary's pages are all in the vault, at the versions it read (#112). */
+  #summaryCurrent(sources: readonly string[], key: string): boolean {
+    const blobs = key.split(",");
+    return (
+      sources.length === blobs.length &&
+      sources.every(
+        (path, i) =>
+          this.#exec("SELECT 1 FROM files WHERE path = ? AND blob_sha = ?", path, blobs[i] ?? "")
+            .length > 0,
+      )
+    );
+  }
+
+  /**
+   * One summary step (#112): one call for one day of one conversation, kept with the versions of
+   * the pages it read. Like an abstract, it runs dry: the summary goes to Dream's page, not the vault.
+   */
+  async #summarize(
+    gateway: MemoryGateway,
+    run: { id: number; calls: number; usage: string },
+    day: DayCandidate,
+  ): Promise<boolean> {
+    let proposed: Awaited<ReturnType<typeof proposeSummary>> | null = null;
+    try {
+      proposed = await proposeSummary(gateway, day, DREAM_TIMEOUT_MS);
+    } catch (error) {
+      console.error("Vault: a Dream step failed", errorName(error));
+    }
+    const used = proposed?.usage ?? [];
+    const summary = proposed?.summary ?? null;
+    const usage = [...(JSON.parse(run.usage) as unknown[]), ...used];
+    const sources = day.pages.map((page) => page.path);
+    this.ctx.storage.transactionSync(() => {
+      // A failure is kept as no answer too, so one day can't fail every run. A page forgotten or
+      // changed during the call leaves nothing behind: the summary read what's gone.
+      if (this.#get("dream_mode") !== "off" && this.#summaryCurrent(sources, day.key)) {
+        this.#exec(
+          "INSERT OR REPLACE INTO dream_summaries (path, key, summary, sources, at) VALUES (?, ?, ?, ?, ?)",
+          day.path,
+          day.key,
+          summary,
+          JSON.stringify(sources),
+          Date.now(),
+        );
+      }
+      this.#exec(
+        "UPDATE dream_runs SET calls = calls + 1, usage = ? WHERE id = ?",
+        JSON.stringify(usage),
+        run.id,
+      );
+    });
+    if (proposed === null) return this.#endDream(run.id, "failed");
+    // Counts only: the pages and the summary are personal data.
+    console.log("Vault: Dream step", {
+      calls: run.calls + 1,
+      summarized: summary !== null,
+      output: used.reduce((sum, call) => sum + (Number(call.output) || 0), 0),
+    });
+    return true;
   }
 
   /** The operations the owner lets Dream write with (#112); the others only propose. */
@@ -1194,10 +1357,19 @@ export class Vault extends DurableObject<VaultEnv> {
           rows += this.#exec<{ n: number }>(`SELECT count(*) AS n ${where}`, named)[0]?.n ?? 0;
           this.#exec(`DELETE ${where}`, named);
         }
-        // A memory report waiting in the queue, or set aside, may name what is being erased: it
-        // goes, and the next alarm writes the report again from what is left.
-        this.#exec("DELETE FROM queue WHERE path = ?", LIFECYCLE_REPORT_PATH);
-        this.#exec("DELETE FROM conflicts WHERE path = ?", LIFECYCLE_REPORT_PATH);
+        // A day summary sums up its pages: forgetting one of them forgets the summary (#112).
+        const summarized = `FROM dream_summaries WHERE EXISTS (SELECT 1
+          FROM json_each(dream_summaries.sources) AS child, json_each(?) AS named
+          WHERE child.value = named.value OR (substr(named.value, -1) = '/'
+            AND substr(child.value, 1, length(named.value)) = named.value))`;
+        rows += this.#exec<{ n: number }>(`SELECT count(*) AS n ${summarized}`, named)[0]?.n ?? 0;
+        this.#exec(`DELETE ${summarized}`, named);
+        // A memory report or Dream's page waiting in the queue, or set aside, may name what is
+        // being erased: they go, and the next alarm writes them again from what is left.
+        for (const page of [LIFECYCLE_REPORT_PATH, DREAM_PAGE_PATH]) {
+          this.#exec("DELETE FROM queue WHERE path = ?", page);
+          this.#exec("DELETE FROM conflicts WHERE path = ?", page);
+        }
         this.#set("lifecycle_after", "0");
         return rows;
       });
@@ -1287,6 +1459,50 @@ export class Vault extends DurableObject<VaultEnv> {
                  JOIN files f ON f.path = w.path AND f.blob_sha = w.blob_sha ORDER BY w.path`,
               ).map((row) => ({ ...row, written: true })),
             ];
+      try {
+        // Dream's day summaries while dry (#112): their own page, as they span lines. A summary the
+        // vault now holds, or one long past, goes.
+        this.#exec(
+          `DELETE FROM dream_summaries WHERE at < ?
+             OR EXISTS (SELECT 1 FROM files f WHERE f.path = dream_summaries.path)`,
+          now - 2 * DREAM_LOOKBACK_MS,
+        );
+        for (const row of this.#exec<{ path: string; key: string; sources: string }>(
+          "SELECT path, key, sources FROM dream_summaries",
+        )) {
+          if (!this.#summaryCurrent(JSON.parse(row.sources) as string[], row.key)) {
+            this.#exec("DELETE FROM dream_summaries WHERE path = ?", row.path);
+          }
+        }
+        const page =
+          this.#get("dream_mode") === "off"
+            ? null
+            : dreamPage(
+                this.#exec<{ path: string; summary: string; sources: string }>(
+                  "SELECT path, summary, sources FROM dream_summaries WHERE summary IS NOT NULL",
+                ).map((row) => ({
+                  date: row.path.slice(row.path.lastIndexOf("/") + 1, -".md".length),
+                  scope: placeOf(row.path)?.scope ?? "",
+                  sources: (JSON.parse(row.sources) as string[]).map((path) => ({
+                    path,
+                    title: this.#memory.current(path)?.title ?? path,
+                  })),
+                  summary: row.summary,
+                })),
+              );
+        if (page !== this.#visible(DREAM_PAGE_PATH)) {
+          this.#exec(
+            "INSERT INTO queue (agent, path, content, summary, queued_at) VALUES (?, ?, ?, ?, ?)",
+            SYSTEM_AGENT,
+            DREAM_PAGE_PATH,
+            page,
+            "Update Dream's day summaries",
+            now,
+          );
+        }
+      } catch (error) {
+        console.error("Vault: Dream's page failed", errorName(error));
+      }
       const report = lifecycleReport(
         lifecycleFindings(this.#memory, {
           now,
@@ -1891,7 +2107,7 @@ export class Vault extends DurableObject<VaultEnv> {
    * Kelpie's own report isn't listed.
    */
   #recordOwnerChange(path: string, removed: boolean, at: number): void {
-    if (path === LIFECYCLE_REPORT_PATH) return;
+    if (path === LIFECYCLE_REPORT_PATH || path === DREAM_PAGE_PATH) return;
     this.#exec(
       `INSERT INTO owner_changes (path, at, removed)
        SELECT f.path, ?, ? FROM files f LEFT JOIN authored a ON a.path = f.path
@@ -2109,7 +2325,8 @@ export class Vault extends DurableObject<VaultEnv> {
       if (
         overOwners &&
         queued[landed]?.summary !== RESOLVE_SUMMARY &&
-        path !== LIFECYCLE_REPORT_PATH
+        path !== LIFECYCLE_REPORT_PATH &&
+        path !== DREAM_PAGE_PATH
       ) {
         this.#exec(
           "INSERT INTO owner_changes (path, at, removed) VALUES (?, ?, ?)",

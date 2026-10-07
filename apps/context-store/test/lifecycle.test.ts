@@ -1,6 +1,6 @@
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { LIFECYCLE_REPORT_PATH } from "@kelpie/memory";
+import { DREAM_PAGE_PATH, LIFECYCLE_REPORT_PATH } from "@kelpie/memory";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
 import { afterEach, describe, expect, it } from "vitest";
 import { replaceBackendForTesting, replaceGatewayForTesting } from "../src/index.ts";
@@ -167,6 +167,8 @@ describe("Vault lifecycle", () => {
       "memory/notes/velho.md": "# Velho\n\nApagar.\n",
       // The owner's edit of the report itself: Kelpie's next report isn't a change to list.
       [LIFECYCLE_REPORT_PATH]: "# Memory report\n\nEditado à mão.\n",
+      // Nor is Dream's page, which goes with no summary to show.
+      [DREAM_PAGE_PATH]: "# Dream's day summaries\n\nEditado à mão.\n",
     });
     replaceBackendForTesting(backend);
     replaceGatewayForTesting(null);
@@ -204,6 +206,7 @@ describe("Vault lifecycle", () => {
     expect(report).not.toContain("memory/notes/pao");
     expect(report).toContain("- `memory/notes/velho.md`: removed");
     expect(report).not.toContain("velha");
+    expect(backend.files()[DREAM_PAGE_PATH]).toBeUndefined();
     expect(
       await runInDurableObject(stub, (_instance, state) =>
         state.storage.sql.exec("SELECT path FROM owner_changes ORDER BY path").toArray(),
