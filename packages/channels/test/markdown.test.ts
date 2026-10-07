@@ -271,11 +271,15 @@ describe("toTelegramHtml", () => {
     expect(telegram("-tg://user?id=1, ev`il`.com e evil.com-x")).toBe(
       "-<code>tg://user?id=1</code>, <code>evil.com</code> e <code>evil.com</code>-x",
     );
+    expect(telegram("tg://resolve?domain=evilbot,a:// ou https://")).toBe(
+      "<code>tg://resolve?domain=evilbot,a://</code> ou https://",
+    );
   });
 
   it("writes nothing Telegram could refuse: no tag inside the same tag, no empty block", () => {
     expect(telegram("## **Título**")).toBe("<b>Título</b>");
     expect(telegram("```\n```\ntexto")).toBe("texto");
+    expect(telegram("```\n \n```\ntexto")).toBe("texto");
   });
 
   it("keeps within the entities Telegram reads, so no code span is dropped", () => {
@@ -288,6 +292,9 @@ describe("toTelegramHtml", () => {
     const tags = `${"#t ".repeat(95)}veja evil.example/login`;
     expect(fitsTelegram(telegram(tags))).toBe(false);
     expect(toTelegramPlain(tags)).toBe(`<pre>${tags}</pre>`);
+    expect(fitsTelegram(`${"<code>x</code> ".repeat(85)}${"+12025550123 ".repeat(10)}`)).toBe(
+      false,
+    );
   });
 
   it("sends a reply as written, its addresses in code, when the formatted one can't go", () => {

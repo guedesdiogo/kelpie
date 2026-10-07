@@ -90,8 +90,8 @@ export function formatReply(text: string, allowed: AllowedLinks): Block[] {
       const body: string[] = [];
       for (i += 1; i < lines.length && !closing.test(lines[i] ?? ""); i += 1)
         body.push(lines[i] ?? "");
-      // An empty block shows nothing, and Telegram may refuse an empty entity.
-      if (body.join("") !== "") add({ type: "code", text: body.join("\n") });
+      // A block of only white space shows nothing, and Telegram may refuse an empty entity.
+      if (body.join("").trim() !== "") add({ type: "code", text: body.join("\n") });
       continue;
     }
     if (line.trim() === "") {
@@ -414,8 +414,11 @@ export function toTelegramPlain(text: string): string {
  */
 const MAX_ENTITIES = 90;
 
-/** Text Telegram makes an entity of by itself: hashtags, cashtags, commands, mentions, emails. */
-const OWN_ENTITY = /(?<![\p{L}\p{N}_])[#$/][\p{L}\p{N}_]|@[\p{L}\p{N}_]/gu;
+/**
+ * Text Telegram may make an entity of by itself: hashtags, cashtags, commands, mentions, emails,
+ * and phone or card numbers. Counted generously: an extra one only makes a reply plainer.
+ */
+const OWN_ENTITY = /(?<![\p{L}\p{N}_])[#＃$/][\p{L}\p{N}_]|[@＠][\p{L}\p{N}_]|\d{7,}/gu;
 
 /**
  * Whether Telegram reads every entity in `html`, its own among them: if not, the reply goes
@@ -582,7 +585,8 @@ function addressRanges(text: string): { start: number; end: number }[] {
   const found: { start: number; end: number }[] = [];
   for (const match of text.matchAll(SCHEMED)) {
     const address = trimUrl(match[0]);
-    if (!address.endsWith("://"))
+    // Only a scheme alone is no address; `tg://x,a://` still is one.
+    if (!/^[a-z][a-z0-9+.-]*:\/\/$/i.test(address))
       found.push({ start: match.index, end: match.index + address.length });
   }
   found.push(...hostRanges(text));
