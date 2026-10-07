@@ -421,6 +421,16 @@ describe("merged notes (#112)", () => {
       expect(paths(index.neighbours(linking))).toEqual([ANA_PATH]);
       expect(index.neighbours(stub)).toEqual([]);
       expect(index.mergedInto("memory/notes/gama.md")).toBe(ANA_PATH);
+      // The other way: the notes whose mark counts and leads to a note.
+      expect(index.mergedFrom(ANA_PATH)).toEqual([
+        stub,
+        "memory/notes/gama.md",
+        "memory/notes/muitos-links.md",
+      ]);
+      expect(index.mergedFrom("areas/health/notes/sessoes.md")).toEqual([
+        "areas/health/notes/terapia.md",
+      ]);
+      expect(index.mergedFrom("memory/notes/eu-mesmo.md")).toEqual([]);
       expect(paths(index.neighbours("memory/notes/liga-gama.md"))).toEqual([ANA_PATH]);
       expect(paths(index.neighbours("memory/notes/visita.md"))).toEqual([
         "areas/health/notes/sessoes.md",

@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { dreamPage, memoryPath, summaryInput, summaryOf, summaryPath } from "../src/index.ts";
+import {
+  dreamPage,
+  memoryPath,
+  readNote,
+  summaryInput,
+  summaryNote,
+  summaryOf,
+  summaryPath,
+  writeMemory,
+} from "../src/index.ts";
 
 describe("summaryPath", () => {
   it("names a scope's day next to its session pages, where no session page can be", () => {
@@ -212,5 +221,58 @@ describe("dreamPage", () => {
     const long = dreamPage({ summaries: many, merges: [] }) ?? "";
     expect(long.match(/^### /gm)).toHaveLength(50);
     expect(long).toContain("…and 1 more.");
+  });
+});
+
+describe("summaryNote", () => {
+  const page = async (n: number, confidence: number) => {
+    const { text } = await writeMemory(
+      {
+        scope: "conversation/telegram-1",
+        kind: "session",
+        title: `10:0${n % 10} Café`,
+        body: "- **10:00 u-owner:** café",
+        level: "explicit",
+        confidence,
+      },
+      { at: "2026-10-06T10:00:00Z" },
+    );
+    return { path: `conversations/telegram-1/sessions/2026/2026-10-06-cafe-${n}.md`, text };
+  };
+
+  it("writes the day as a session note, deduced from its pages and naming each", async () => {
+    const pages = [await page(1, 0.9), await page(2, 0.6)];
+    const day = {
+      scope: "conversation/telegram-1" as const,
+      date: "2026-10-06",
+      pages,
+      summary: "Ana pediu café.\n- Sem açúcar.",
+    };
+    const text = (await summaryNote(day, "2026-10-07T12:00:00Z")) ?? "";
+    const note = readNote(summaryPath(day.scope, day.date), text);
+    expect(note).toMatchObject({
+      scope: "conversation/telegram-1",
+      kind: "session",
+      title: "Summary of 2026-10-06",
+      level: "deduced",
+      // No surer than the least sure page.
+      confidence: 0.6,
+      sources: [
+        "[[conversations/telegram-1/sessions/2026/2026-10-06-cafe-1]]",
+        "[[conversations/telegram-1/sessions/2026/2026-10-06-cafe-2]]",
+      ],
+      abstract: null,
+      updated: "2026-10-07T12:00:00Z",
+    });
+    expect(note?.body).toBe("\n# Summary of 2026-10-06\n\nAna pediu café.\n- Sem açúcar.\n");
+  });
+
+  it("leaves a day of more pages than a note's sources can name", async () => {
+    const pages = await Promise.all(Array.from({ length: 21 }, (_, i) => page(i, 0.9)));
+    const day = { scope: "conversation/telegram-1" as const, date: "2026-10-06", summary: "Café." };
+    expect(
+      await summaryNote({ ...day, pages: pages.slice(0, 20) }, "2026-10-07T12:00:00Z"),
+    ).not.toBeNull();
+    expect(await summaryNote({ ...day, pages }, "2026-10-07T12:00:00Z")).toBeNull();
   });
 });

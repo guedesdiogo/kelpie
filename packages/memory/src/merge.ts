@@ -1,8 +1,12 @@
 // Dream's merges of duplicate notes (#112): what a model is asked, and how its answer is read. The
 // survivor keeps its own frontmatter and title; the model writes only the body.
-import { codeLines } from "./markdown.ts";
+import { isMap, parseDocument } from "yaml";
+import { normalizeEntities } from "./entities.ts";
+import { codeLines, splitFrontmatter } from "./markdown.ts";
+import { LEVELS, MAX_SOURCES, type Note, readNote } from "./note.ts";
 import { blockId, HEADING_PATH_CHARS, HEADING_TITLE_CHARS, oneLine } from "./retrieve.ts";
 import { sanitizeSecrets } from "./sanitize.ts";
+import { MemoryFormatError, writeMemory } from "./write.ts";
 
 /** The notes' text, whole: a group that doesn't fit isn't merged, since a cut would lose facts. */
 const MERGE_INPUT_CHARS = 16_000;
@@ -182,4 +186,127 @@ function fencedLines(text: string): boolean[] {
     }
     return true;
   });
+}
+
+/** A vault file: its path and its text. */
+export interface VaultText {
+  path: string;
+  text: string;
+}
+
+/** How Dream names a note in a mark or a source: by its vault path, without `.md`. */
+export function pathLink(path: string): string {
+  return `[[${path.replace(/\.md$/, "")}]]`;
+}
+
+/** What a note's frontmatter says it contradicts, as the writer takes it: names, unbracketed. */
+function contradicted(note: Note): string[] {
+  const relations = note.frontmatter.relations as { contradicts?: unknown } | undefined;
+  const listed = Array.isArray(relations?.contradicts) ? relations.contradicts : [];
+  return listed.flatMap((value) => {
+    const name = typeof value === "string" ? /^\[\[([^[\]|#]+)\]\]$/.exec(value)?.[1] : undefined;
+    return name === undefined ? [] : [name];
+  });
+}
+
+/**
+ * The survivor of a merge as Dream writes it (#112): its own title and frontmatter, the merged
+ * body, and what the notes it takes in held. Their paths join its `sources`, never replacing one,
+ * and their entities and what they contradict join its own. It takes the lowest level and
+ * confidence among them, so a merge never makes a note surer. Its abstract goes, since it summed
+ * up the old body. Null when it can't be written: a note the reader can't read, or more sources
+ * than a note may name.
+ */
+export async function mergedSurvivor(
+  survivor: VaultText,
+  merged: readonly VaultText[],
+  body: string,
+  at: string,
+): Promise<string | null> {
+  const notes = [survivor, ...merged].map((file) => readNote(file.path, file.text));
+  const [own] = notes;
+  if (own === undefined || own === null || notes.some((note) => note === null)) return null;
+  const all = notes as Note[];
+  const sources = [...new Set([...own.sources, ...merged.map((file) => pathLink(file.path))])];
+  if (sources.length > MAX_SOURCES) return null;
+  // A note that doesn't say how sure it is counts as the least sure.
+  const level = LEVELS[Math.max(...all.map((note) => LEVELS.indexOf(note.level ?? "inferred")))];
+  try {
+    const { text } = await writeMemory(
+      {
+        scope: own.scope,
+        kind: own.kind,
+        title: own.title,
+        body,
+        level: level ?? "inferred",
+        confidence: Math.min(...all.map((note) => note.confidence ?? 0)),
+        tier: own.tier,
+        sources,
+        entities: normalizeEntities(
+          all.flatMap((note) => note.entities.map(({ name }) => name)),
+        ).map(({ name }) => name),
+        ...(own.validFrom === null ? {} : { validFrom: own.validFrom }),
+        ...(own.invalidAt === null ? {} : { invalidAt: own.invalidAt }),
+        evergreen: own.evergreen,
+        pinned: own.pinned,
+        contradicts: [...new Set(all.flatMap(contradicted))],
+      },
+      { at, existing: survivor.text },
+    );
+    return text;
+  } catch (error) {
+    if (error instanceof MemoryFormatError) return null;
+    throw error;
+  }
+}
+
+/**
+ * The note with its frontmatter's `relations.merged_into` naming `survivor` by path, `updated` set,
+ * and every other key as it was; the body is `body`'s, or the note's own. Null when the frontmatter
+ * can't be read, or when the mark wouldn't count, such as beside a relation the reader doesn't know.
+ */
+function marked(note: VaultText, survivor: string, at: string, body: string | null): string | null {
+  const split = splitFrontmatter(note.text);
+  if (split.yaml === null) return null;
+  const doc = parseDocument(split.yaml, { uniqueKeys: true });
+  if (doc.errors.length > 0 || !isMap(doc.contents)) return null;
+  try {
+    doc.setIn(["relations", "merged_into"], doc.createNode([pathLink(survivor)]));
+  } catch {
+    // `relations` isn't a map.
+    return null;
+  }
+  doc.set("updated", at);
+  const text = `---\n${doc.toString({ lineWidth: 0, flowCollectionPadding: false })}---\n${body ?? split.body}`;
+  const read = readNote(note.path, text);
+  const target = survivor.replace(/\.md$/, "").toLowerCase();
+  const counts = read?.links.some(
+    (link) => link.kind === "merged_into" && link.by === "path" && link.target === target,
+  );
+  return counts ? text : null;
+}
+
+/**
+ * A note merged into another (#112): it keeps its frontmatter, adds `relations.merged_into` naming
+ * the survivor by path, and its body says where its text went and in which commit it still is.
+ * Null when its frontmatter can't be read, or the mark wouldn't count.
+ */
+export function mergedStub(
+  note: VaultText,
+  survivor: string,
+  commit: string,
+  at: string,
+): string | null {
+  const title = readNote(note.path, note.text)?.title;
+  if (title === undefined) return null;
+  const body = `\n# ${title}\n\nMerged into ${pathLink(survivor)} on ${at.slice(0, 10)}. What this note said before is in commit ${commit}.\n`;
+  return marked(note, survivor, at, body);
+}
+
+/**
+ * A note merged into one that is merged in turn, pointed at where that one went (#112), since a
+ * mark is followed one step only. Only the mark and `updated` change.
+ */
+export function repointedStub(note: VaultText, survivor: string, at: string): string | null {
+  return marked(note, survivor, at, null);
 }

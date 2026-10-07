@@ -6,9 +6,14 @@ import {
   LIFECYCLE_REPORT_PATH,
   type MemoryInput,
   memoryPath,
+  mergedStub,
+  pathLink,
+  readNote,
+  summaryPath,
   withAbstract,
   writeMemory,
 } from "@kelpie/memory";
+import type { CommitOutcome, CommitRequest } from "@kelpie/vault";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
 import { afterEach, describe, expect, it } from "vitest";
 import { proposeAbstract } from "../src/dream.ts";
@@ -155,6 +160,32 @@ async function quiet(stub: ReturnType<typeof vault>) {
 
 const rows = (stub: ReturnType<typeof vault>, sql: string) =>
   runInDurableObject(stub, (_instance, state) => state.storage.sql.exec(sql).toArray());
+
+/** Lets Dream write with these operations, as `setDream` will once #182's measurement is in. */
+const letWrite = (stub: ReturnType<typeof vault>, operations: string[]) =>
+  runInDurableObject(stub, (_instance, state) => {
+    state.storage.sql.exec(
+      "INSERT OR REPLACE INTO state (key, value) VALUES ('dream_writes', ?)",
+      JSON.stringify(operations),
+    );
+  });
+
+const SUMMARY_HEADLINE = "Write a day summary Dream proposed";
+const MERGE_HEADLINE = "Merge notes Dream found to be duplicates";
+
+/** A vault where something else happens just before a commit with `headline` reaches it. */
+class RacingBackend extends FakeVaultBackend {
+  race: { headline: string; run: () => void } | null = null;
+
+  override async commit(request: CommitRequest): Promise<CommitOutcome> {
+    if (this.race !== null && this.race.headline === request.headline) {
+      const { run } = this.race;
+      this.race = null;
+      run();
+    }
+    return super.commit(request);
+  }
+}
 
 describe("Vault Dream", () => {
   it("proposes abstracts for Kelpie's recent notes, one call a wake, and writes nothing", async () => {
@@ -1198,7 +1229,9 @@ describe("Vault Dream", () => {
   it("lets only known operations write, and forgets them when turned off", async () => {
     replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
     const stub = vault("dream-writes-switch");
+    // Summaries and merges write only once #182's measurement is in.
     expect(await stub.setDream("dry", ["summaries"])).toEqual({ ok: false, reason: "invalid" });
+    expect(await stub.setDream("dry", ["merges"])).toEqual({ ok: false, reason: "invalid" });
     expect(await stub.setDream("dry", ["abstracts"])).toMatchObject({ writes: ["abstracts"] });
     expect(await stub.setDream("off")).toEqual({ ok: true, mode: "off", writes: [] });
     expect(await stub.setDream("dry")).toEqual({ ok: true, mode: "dry", writes: [] });
@@ -1221,5 +1254,334 @@ describe("Vault Dream", () => {
     expect(await rows(stub, "SELECT calls, outcome FROM dream_runs")).toEqual([
       { calls: 1, outcome: "off" },
     ]);
+  });
+  it("writes a day's summary it proposed once let, in a commit of its own, with no new call", async () => {
+    const day = daysAgo(2).slice(0, 10);
+    const session = (title: string) =>
+      kelpieNote({
+        kind: "session",
+        title,
+        scope: "conversation/telegram-1",
+        date: day,
+        body: `- **10:00 u-owner:** ${title}`,
+        level: "explicit",
+        confidence: 0.9,
+      });
+    const pages = [await session("Café de manhã"), await session("Café de tarde")];
+    const backend = new FakeVaultBackend({ "README.md": "# Vault" });
+    replaceBackendForTesting(backend);
+    const requests = fakeModelBy((request) =>
+      request.system.includes("sum up one day")
+        ? JSON.stringify({ summary: "Falaram de café.\n- Duas vezes." })
+        : abstract("Uma linha."),
+    );
+    const days = () => requests.filter((request) => request.system.includes("sum up one day"));
+    const stub = vault("dream-summary-writes");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", pages, "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    for (let i = 0; i < 4; i++) await runDurableObjectAlarm(stub);
+    expect(days()).toHaveLength(1);
+    const path = summaryPath("conversation/telegram-1", day);
+    expect(backend.files()[path]).toBeUndefined();
+
+    await letWrite(stub, ["summaries"]);
+    await quiet(stub);
+    for (let i = 0; i < 3; i++) await runDurableObjectAlarm(stub);
+    expect(days()).toHaveLength(1);
+    const written = readNote(path, backend.files()[path] ?? "");
+    expect(written).toMatchObject({
+      kind: "session",
+      title: `Summary of ${day}`,
+      level: "deduced",
+      confidence: 0.9,
+      sources: pages.map((page) => pathLink(page.path)),
+    });
+    expect(written?.body).toContain("Falaram de café.\n- Duas vezes.");
+    // One commit of its own, whose headline names no note.
+    const commits = backend.commitRequests.filter((request) =>
+      request.writes.some((write) => write.path === path),
+    );
+    expect(commits).toHaveLength(1);
+    expect(commits[0]).toMatchObject({ headline: SUMMARY_HEADLINE, deletions: [] });
+    expect(commits[0]?.writes.map((write) => write.path)).toEqual([path]);
+    // Kelpie's version (#126), and nothing left to propose or write for that day.
+    expect(
+      await rows(
+        stub,
+        `SELECT count(*) AS n FROM files f JOIN authored a ON a.path = f.path AND a.blob_sha = f.blob_sha WHERE f.path = '${path}'`,
+      ),
+    ).toEqual([{ n: 1 }]);
+    expect(await rows(stub, "SELECT path FROM dream_summaries")).toEqual([]);
+    await quiet(stub);
+    for (let i = 0; i < 4; i++) await runDurableObjectAlarm(stub);
+    expect(days()).toHaveLength(1);
+    expect(
+      backend.commitRequests.filter((request) => request.headline === SUMMARY_HEADLINE),
+    ).toHaveLength(1);
+  });
+
+  it("writes no summary when its page or its place changes as it commits", async () => {
+    const day = daysAgo(2).slice(0, 10);
+    const page = await kelpieNote({
+      kind: "session",
+      title: "Café",
+      scope: "conversation/telegram-1",
+      date: day,
+      body: "- **10:00 u-owner:** café",
+      abstract: "café",
+    });
+    const path = summaryPath("conversation/telegram-1", day);
+    for (const [name, pushed] of [
+      ["dream-summary-race-page", { [page.path]: "# Café\n\nReescrita.\n" }],
+      ["dream-summary-race-place", { [path]: "# Do dono\n" }],
+    ] as const) {
+      const backend = new RacingBackend({ "README.md": "# Vault" });
+      replaceBackendForTesting(backend);
+      fakeModelBy((request) =>
+        request.system.includes("sum up one day")
+          ? JSON.stringify({ summary: "Falaram de café." })
+          : abstract("Uma linha."),
+      );
+      const stub = vault(name);
+      await stub.compile("kelpie");
+      await letWrite(stub, ["summaries"]);
+      await stub.write("kelpie", [page], "x");
+      await runDurableObjectAlarm(stub);
+      backend.race = { headline: SUMMARY_HEADLINE, run: () => backend.push(pushed) };
+      await quiet(stub);
+      for (let i = 0; i < 4; i++) await runDurableObjectAlarm(stub);
+      // The commit found the vault moved, read it again, and wrote nothing.
+      expect(backend.race).toBeNull();
+      const tried = backend.commitRequests.filter(
+        (request) => request.headline === SUMMARY_HEADLINE,
+      );
+      expect(tried).toHaveLength(1);
+      expect(backend.files()[path] ?? null).toBe(pushed[path] ?? null);
+    }
+  });
+
+  it("merges duplicates once let: the survivor, its stubs and the marks that led to them, in one commit", async () => {
+    const note = async (
+      title: string,
+      body: string,
+      path: string,
+      extra: Partial<MemoryInput> = {},
+    ) => ({
+      ...(await kelpieNote({ title, body, abstract: `${title}.`, ...extra })),
+      path,
+    });
+    const cafe = await note("Café", "Sem açúcar.", "memory/notes/cafe.md", { entities: ["Ana"] });
+    const cafe2 = await note("Café", "Com canela.", "memory/notes/cafe-2.md", {
+      entities: ["Bruno"],
+      level: "inferred",
+      confidence: 0.5,
+    });
+    // Most links lead to the survivor.
+    const links = await Promise.all(
+      ["Bebidas", "Manhã"].map((title) =>
+        kelpieNote({ title, body: "Ver [[memory/notes/cafe]].", abstract: `${title}.` }),
+      ),
+    );
+    // A note merged into one of them before: its mark is pointed at where that one goes.
+    const old = await note("Velho", "Velho.", "memory/notes/velho.md");
+    const velho = {
+      path: old.path,
+      content:
+        mergedStub({ path: old.path, text: old.content }, cafe2.path, "abc123", daysAgo(0)) ?? "",
+    };
+    // The same content: only the mark changes.
+    const sal = await note("Sal", "Pouco.", "memory/notes/sal.md");
+    const sal2 = { ...sal, path: "memory/notes/sal-2.md" };
+    const backend = new FakeVaultBackend({ "README.md": "# Vault" });
+    replaceBackendForTesting(backend);
+    const requests = fakeModelBy((request) =>
+      request.system.includes("You merge notes")
+        ? JSON.stringify({ verdict: "merge", body: "Sem açúcar, ou com canela." })
+        : abstract("Uma linha."),
+    );
+    const merges = () => requests.filter((request) => request.system.includes("You merge notes"));
+    const stub = vault("dream-merge-writes");
+    await stub.compile("kelpie");
+    await letWrite(stub, ["merges"]);
+    await stub.write("kelpie", [cafe, cafe2, ...links, velho, sal, sal2], "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    for (let i = 0; i < 8; i++) await runDurableObjectAlarm(stub);
+    expect(merges()).toHaveLength(1);
+
+    const commits = backend.commitRequests.filter((request) => request.headline === MERGE_HEADLINE);
+    expect(commits.map((commit) => commit.writes.map((write) => write.path).sort())).toEqual([
+      [cafe2.path, cafe.path, velho.path],
+      [sal2.path],
+    ]);
+    const files = backend.files();
+    const survivor = readNote(cafe.path, files[cafe.path] ?? "");
+    expect(survivor).toMatchObject({
+      title: "Café",
+      level: "inferred",
+      confidence: 0.5,
+      sources: [pathLink(cafe2.path)],
+      entities: [
+        { name: "Ana", key: "ana" },
+        { name: "Bruno", key: "bruno" },
+      ],
+      abstract: null,
+    });
+    expect(survivor?.body).toContain("Sem açúcar, ou com canela.");
+    // The stub says in which commit its text still is: the one the merge landed on.
+    const stub2 = readNote(cafe2.path, files[cafe2.path] ?? "");
+    expect(stub2?.frontmatter.relations).toEqual({ merged_into: [pathLink(cafe.path)] });
+    expect(stub2?.body).toContain(`in commit ${commits[0]?.expectedHead}.`);
+    expect(stub2?.body).not.toContain("Com canela.");
+    expect(readNote(velho.path, files[velho.path] ?? "")?.frontmatter.relations).toEqual({
+      merged_into: [pathLink(cafe.path)],
+    });
+    // The same content: the survivor stays as it was.
+    expect(files[sal.path]).toBe(sal.content);
+    expect(readNote(sal2.path, files[sal2.path] ?? "")?.frontmatter.relations).toEqual({
+      merged_into: [pathLink(sal.path)],
+    });
+    // Each version is Kelpie's (#126), and nothing is left to propose.
+    const written = [cafe.path, cafe2.path, velho.path, sal2.path];
+    expect(
+      await rows(
+        stub,
+        `SELECT count(*) AS n FROM files f JOIN authored a ON a.path = f.path AND a.blob_sha = f.blob_sha WHERE f.path IN (${written.map((path) => `'${path}'`).join(", ")})`,
+      ),
+    ).toEqual([{ n: 4 }]);
+    expect(await rows(stub, "SELECT path FROM dream_merges")).toEqual([]);
+    await quiet(stub);
+    for (let i = 0; i < 4; i++) await runDurableObjectAlarm(stub);
+    expect(merges()).toHaveLength(1);
+    expect(
+      backend.commitRequests.filter((request) => request.headline === MERGE_HEADLINE),
+    ).toHaveLength(2);
+  });
+
+  it("merges nothing when a note changes as it commits, and keeps an agent's write made meanwhile", async () => {
+    const note = async (body: string, path: string) => ({
+      ...(await kelpieNote({ title: "Café", body, abstract: "Café." })),
+      path,
+    });
+    const cafe = await note("Sem açúcar.", "memory/notes/cafe.md");
+    const cafe2 = await note("Com canela.", "memory/notes/cafe-2.md");
+    const run = async (name: string, race: (backend: RacingBackend, sql: SqlStorage) => void) => {
+      const backend = new RacingBackend({ "README.md": "# Vault" });
+      replaceBackendForTesting(backend);
+      fakeModelBy(() => JSON.stringify({ verdict: "merge", body: "Sem açúcar, ou com canela." }));
+      const stub = vault(name);
+      await stub.compile("kelpie");
+      await letWrite(stub, ["merges"]);
+      await stub.write("kelpie", [cafe, cafe2], "x");
+      await runDurableObjectAlarm(stub);
+      let sql: SqlStorage | undefined;
+      await runInDurableObject(stub, (_instance, state) => {
+        sql = state.storage.sql;
+      });
+      backend.race = {
+        headline: MERGE_HEADLINE,
+        run: () => {
+          if (sql !== undefined) race(backend, sql);
+        },
+      };
+      await quiet(stub);
+      for (let i = 0; i < 4; i++) await runDurableObjectAlarm(stub);
+      expect(backend.race).toBeNull();
+      return { backend, stub };
+    };
+
+    // The owner edits a note: the commit finds the vault moved, reads it again, and writes nothing.
+    const owners = "# Café\n\nCom canela, do dono.\n";
+    const edited = await run("dream-merge-race-owner", (backend) =>
+      backend.push({ [cafe2.path]: owners }),
+    );
+    expect(edited.backend.files()[cafe.path]).toBe(cafe.content);
+    expect(edited.backend.files()[cafe2.path]).toBe(owners);
+    expect(
+      edited.backend.commitRequests.filter((request) => request.headline === MERGE_HEADLINE),
+    ).toHaveLength(1);
+
+    // An agent writes the survivor as the commit goes: its write is merged on top, as over the
+    // owner's edit, and where its lines overlap the merge's, set aside.
+    const agents = cafe.content.replace("Sem açúcar.", "Sem açúcar, nunca.");
+    const queued = await run("dream-merge-race-agent", (_backend, sql) => {
+      sql.exec(
+        "INSERT INTO queue (agent, path, content, summary, queued_at) VALUES ('kelpie', ?, ?, 'x', ?)",
+        cafe.path,
+        agents,
+        Date.now(),
+      );
+    });
+    const merged = queued.backend.files()[cafe.path] ?? "";
+    expect(merged).toContain("Sem açúcar, ou com canela.");
+    expect(merged).not.toContain("nunca");
+    expect(await rows(queued.stub, "SELECT path, content, reason FROM conflicts")).toEqual([
+      { path: cafe.path, content: agents, reason: "owner_won" },
+    ]);
+    expect(await rows(queued.stub, "SELECT path FROM queue")).toEqual([]);
+  });
+
+  it("keeps a plan it can't write as no answer, and doesn't try it again", async () => {
+    const day = daysAgo(2).slice(0, 10);
+    // More pages than a note's sources can name, though their headings fit the input.
+    const pages = await Promise.all(
+      Array.from({ length: 21 }, (_, i) =>
+        kelpieNote({
+          kind: "session",
+          title: `${i}`,
+          scope: "conversation/telegram-1",
+          date: day,
+          body: `- **10:00 u-owner:** ${i}`,
+          abstract: `${i}`,
+        }),
+      ),
+    );
+    // A survivor that already names as many sources as a note may.
+    const cafe = {
+      ...(await kelpieNote({
+        title: "Café",
+        body: "Sem açúcar.",
+        abstract: "Café.",
+        sources: Array.from({ length: 20 }, (_, i) => `telegram:1/${i}`),
+      })),
+      path: "memory/notes/cafe.md",
+    };
+    const cafe2 = {
+      ...(await kelpieNote({ title: "Café", body: "Com canela.", abstract: "Café." })),
+      path: "memory/notes/cafe-2.md",
+    };
+    const backend = new FakeVaultBackend({ "README.md": "# Vault" });
+    replaceBackendForTesting(backend);
+    const requests = fakeModelBy((request) =>
+      request.system.includes("sum up one day")
+        ? JSON.stringify({ summary: "Falaram muito." })
+        : request.system.includes("You merge notes")
+          ? JSON.stringify({ verdict: "merge", body: "Sem açúcar, ou com canela." })
+          : abstract("Uma linha."),
+    );
+    const stub = vault("dream-writes-unwritable");
+    await stub.compile("kelpie");
+    await letWrite(stub, ["summaries", "merges"]);
+    await stub.write("kelpie", [...pages, cafe, cafe2], "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    for (let i = 0; i < 8; i++) await runDurableObjectAlarm(stub);
+    const asked = () =>
+      requests.filter((request) => !request.system.includes("You write the abstract")).length;
+    expect(asked()).toBe(2);
+    expect(
+      backend.commitRequests.filter((request) =>
+        [SUMMARY_HEADLINE, MERGE_HEADLINE].includes(request.headline),
+      ),
+    ).toEqual([]);
+    expect(await rows(stub, "SELECT summary FROM dream_summaries")).toEqual([{ summary: null }]);
+    expect(await rows(stub, "SELECT verdict, body FROM dream_merges")).toEqual([
+      { verdict: null, body: null },
+    ]);
+    await quiet(stub);
+    for (let i = 0; i < 8; i++) await runDurableObjectAlarm(stub);
+    expect(asked()).toBe(2);
   });
 });

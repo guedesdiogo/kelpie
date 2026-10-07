@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { dreamPage, mergeInput, mergeOf } from "../src/index.ts";
+import {
+  dreamPage,
+  type MemoryInput,
+  mergedStub,
+  mergedSurvivor,
+  mergeInput,
+  mergeOf,
+  pathLink,
+  readNote,
+  repointedStub,
+  writeMemory,
+} from "../src/index.ts";
 
 describe("dreamPage's merges", () => {
   it("shows each merge's survivor, the notes marked, and the body as code", () => {
@@ -285,5 +296,166 @@ describe("mergeOf", () => {
     ],
   ])("refuses %s", (_case, answer) => {
     expect(mergeOf(answer)).toBeNull();
+  });
+});
+
+const AT = "2026-10-07T12:00:00Z";
+
+/** As Kelpie writes a note: global, a conclusion, at `path`. */
+async function kelpieNote(path: string, input: Partial<MemoryInput> & { title: string }) {
+  const { text } = await writeMemory(
+    {
+      scope: "global",
+      kind: "note",
+      body: `${input.title}.`,
+      level: "deduced",
+      confidence: 0.8,
+      ...input,
+    } as MemoryInput,
+    { at: "2026-10-01T10:00:00Z" },
+  );
+  return { path, text };
+}
+
+describe("pathLink", () => {
+  it("names a note by its vault path, without .md", () => {
+    expect(pathLink("memory/notes/cafe-2.md")).toBe("[[memory/notes/cafe-2]]");
+  });
+});
+
+describe("mergedSurvivor", () => {
+  it("takes the merged body under its own title, and what the others held", async () => {
+    const cafe = await kelpieNote("memory/notes/cafe.md", {
+      title: "Café",
+      body: "Sem açúcar.",
+      sources: ["telegram:1/42"],
+      entities: ["Ana"],
+      contradicts: ["Chá"],
+      abstract: "Café sem açúcar.",
+      evergreen: true,
+      confidence: 0.8,
+    });
+    // A key Kelpie doesn't manage stays where it was.
+    cafe.text = cafe.text.replace("kind: note\n", "kind: note\ncor: preto\n");
+    const cafe2 = await kelpieNote("memory/notes/cafe-2.md", {
+      title: "Café",
+      body: "Com canela.",
+      entities: ["ana", "Bruno"],
+      contradicts: ["Leite"],
+      level: "inferred",
+      confidence: 0.6,
+    });
+    const text = (await mergedSurvivor(cafe, [cafe2], "Sem açúcar, ou com canela.", AT)) ?? "";
+    const note = readNote(cafe.path, text);
+    expect(note).toMatchObject({
+      title: "Café",
+      id: readNote(cafe.path, cafe.text)?.id,
+      kind: "note",
+      evergreen: true,
+      // Never surer than the least sure of them.
+      level: "inferred",
+      confidence: 0.6,
+      sources: ["telegram:1/42", "[[memory/notes/cafe-2]]"],
+      entities: [
+        { name: "Ana", key: "ana" },
+        { name: "Bruno", key: "bruno" },
+      ],
+      // It summed up the old body: Dream proposes another.
+      abstract: null,
+      updated: AT,
+    });
+    expect(note?.frontmatter.relations).toEqual({ contradicts: ["[[Chá]]", "[[Leite]]"] });
+    expect(note?.frontmatter.cor).toBe("preto");
+    expect(text).toMatch(/\n---\n\n# Café\n\nSem açúcar, ou com canela\.\n$/);
+  });
+
+  it("never raises the level, and lists a note once", async () => {
+    const cafe = await kelpieNote("memory/notes/cafe.md", {
+      title: "Café",
+      level: "inferred",
+      sources: ["[[memory/notes/cafe-2]]"],
+    });
+    const cafe2 = await kelpieNote("memory/notes/cafe-2.md", { title: "Café", level: "deduced" });
+    const note = readNote(cafe.path, (await mergedSurvivor(cafe, [cafe2], "Café.", AT)) ?? "");
+    expect(note).toMatchObject({ level: "inferred", sources: ["[[memory/notes/cafe-2]]"] });
+  });
+
+  it("keeps ten entities, and refuses more sources than a note may name", async () => {
+    const sources = Array.from({ length: 18 }, (_, i) => `telegram:1/${i}`);
+    const cafe = await kelpieNote("memory/notes/cafe.md", {
+      title: "Café",
+      sources,
+      entities: Array.from({ length: 8 }, (_, i) => `Pessoa ${i}`),
+    });
+    const others = await Promise.all(
+      [2, 3, 4].map((n) =>
+        kelpieNote(`memory/notes/cafe-${n}.md`, { title: "Café", entities: [`Outra ${n}`] }),
+      ),
+    );
+    const twenty = (await mergedSurvivor(cafe, others.slice(0, 2), "Café.", AT)) ?? "";
+    expect(readNote(cafe.path, twenty)?.sources).toHaveLength(20);
+    expect(readNote(cafe.path, twenty)?.entities.map((entity) => entity.name)).toEqual([
+      ...Array.from({ length: 8 }, (_, i) => `Pessoa ${i}`),
+      "Outra 2",
+      "Outra 3",
+    ]);
+    expect(await mergedSurvivor(cafe, others, "Café.", AT)).toBeNull();
+  });
+
+  it("refuses a note whose frontmatter can't be read", async () => {
+    const cafe2 = await kelpieNote("memory/notes/cafe-2.md", { title: "Café" });
+    const broken = { path: "memory/notes/cafe.md", text: "---\nkind: [note\n---\n# Café\n" };
+    expect(await mergedSurvivor(broken, [cafe2], "Café.", AT)).toBeNull();
+  });
+});
+
+describe("mergedStub", () => {
+  it("keeps its frontmatter, marks where it went, and says where its text is", async () => {
+    const cafe2 = await kelpieNote("memory/notes/cafe-2.md", {
+      title: "Café",
+      body: "Com canela.",
+      contradicts: ["Leite"],
+      abstract: "Café com canela.",
+    });
+    const text = mergedStub(cafe2, "memory/notes/cafe.md", "abc123", AT) ?? "";
+    const note = readNote(cafe2.path, text);
+    expect(note).toMatchObject({ title: "Café", abstract: "Café com canela.", updated: AT });
+    expect(note?.frontmatter.relations).toEqual({
+      contradicts: ["[[Leite]]"],
+      merged_into: ["[[memory/notes/cafe]]"],
+    });
+    expect(note?.links).toContainEqual({
+      kind: "merged_into",
+      by: "path",
+      target: "memory/notes/cafe",
+    });
+    expect(note?.warnings).toEqual([]);
+    expect(text).toContain('  merged_into:\n    - "[[memory/notes/cafe]]"\n');
+    expect(text).toMatch(
+      /\n---\n\n# Café\n\nMerged into \[\[memory\/notes\/cafe\]\] on 2026-10-07\. What this note said before is in commit abc123\.\n$/,
+    );
+    expect(text).not.toContain("Com canela.");
+  });
+
+  it("refuses a note whose mark wouldn't count", async () => {
+    const odd = {
+      path: "memory/notes/cafe-2.md",
+      text: "---\nrelations:\n  outra: []\n---\n# Café\n",
+    };
+    expect(mergedStub(odd, "memory/notes/cafe.md", "abc123", AT)).toBeNull();
+    const broken = { path: "memory/notes/cafe-2.md", text: "---\nkind: [note\n---\n# Café\n" };
+    expect(mergedStub(broken, "memory/notes/cafe.md", "abc123", AT)).toBeNull();
+  });
+});
+
+describe("repointedStub", () => {
+  it("points a merged note's mark at the survivor, and changes nothing else", async () => {
+    const cafe2 = await kelpieNote("memory/notes/cafe-2.md", { title: "Café" });
+    const stub = mergedStub(cafe2, "memory/notes/cafe-3.md", "abc123", AT) ?? "";
+    const text = repointedStub({ path: cafe2.path, text: stub }, "memory/notes/cafe.md", AT) ?? "";
+    expect(readNote(cafe2.path, text)?.frontmatter.relations).toEqual({
+      merged_into: ["[[memory/notes/cafe]]"],
+    });
+    expect(text.split("\n---\n")[1]).toBe(stub.split("\n---\n")[1]);
   });
 });

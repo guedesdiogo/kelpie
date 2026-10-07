@@ -56,7 +56,16 @@ export {
   type VaultChange,
   type VaultCommit,
 } from "./memory-index.ts";
-export { MERGE_PROMPT, mergeInput, mergeOf } from "./merge.ts";
+export {
+  MERGE_PROMPT,
+  mergedStub,
+  mergedSurvivor,
+  mergeInput,
+  mergeOf,
+  pathLink,
+  repointedStub,
+  type VaultText,
+} from "./merge.ts";
 export { isMemoryId, LEVELS, type Level, MAX_SOURCES, type Note, readNote } from "./note.ts";
 export {
   type HitView,
@@ -98,7 +107,13 @@ export {
   type SessionPage,
   sessionPage,
 } from "./session.ts";
-export { SUMMARY_PROMPT, summaryInput, summaryOf, summaryPath } from "./summary.ts";
+export {
+  SUMMARY_PROMPT,
+  summaryInput,
+  summaryNote,
+  summaryOf,
+  summaryPath,
+} from "./summary.ts";
 export { instantOf, isDate, isDateTime } from "./time.ts";
 export {
   MemoryFormatError,

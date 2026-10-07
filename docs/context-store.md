@@ -69,6 +69,9 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - **What it keeps:** its proposals in `dream_proposals`, and its runs, with what each call used, in `dream_runs`.
     - **What it writes:** an abstract, for an operation the owner lets write, goes through the queue (`dream_writes` keeps what it wrote for a week).
     - **Day summaries and merges,** while dry, are kept in `dream_summaries` and `dream_merges` and shown on Dream's page, `memory/_lint/dream.md`.
+      - Once their operation may write, each goes in a commit of Dream's own, outside the queue, so a merge lands whole or not at all.
+      - The commit is made only while what it read is as it read it, and what it writes over is Kelpie's, not held and with no write waiting. If the vault moved, it syncs, checks again, and writes nothing on any change.
+      - A write an agent queued meanwhile goes on top, as on the owner's edit.
   - **Embeddings:** the alarm embeds the notes that have no vector yet, through llm-gateway's `embed`, four batches of 64 a run, until none is left.
     - The model is the one `EMBEDDING_PROVIDER` chooses on llm-gateway. A recall that sees a new model arms the alarm, which embeds every note again; until then the vector stream finds what it can.
     - This runs after GitHub's work and fails on its own, so an llm-gateway outage never delays the vault's writes. A call that doesn't answer in 40 s is given up.
@@ -196,6 +199,12 @@ Git keeps every version, so erasing content means rewriting the vault's history.
    - `--replace-text` removes a passage.
 
    The memory report, `memory/_lint/report.md`, lists notes by title and path, and Dream's plan adds an abstract of each note it lists, which a model wrote from the note's content (#112). When an erased note was ever in it, rewrite the report's history too, with the same `--replace-text` or by removing the file. Dream's page, `memory/_lint/dream.md`, holds summaries a model wrote of conversations and merged bodies of notes: rewrite its history too.
+
+   Once Dream writes summaries and merges, its notes hold the content as well:
+   - a day's summary, `<scope>/sessions/YYYY/YYYY-MM-DD.md`, sums up the session pages its `sources` names;
+   - a merge's survivor holds the text of the notes its `sources` names, which are marked `relations.merged_into` it.
+
+   Rewrite them too, and name them in step 2.
 
    Then push the result with `--force` to every branch that held the content.
 2. **Make Kelpie forget its copies, right away:** `/commands/forgetVaultPaths` with the erased paths ([admin-api.md](admin-api.md)). Doing it at once keeps Kelpie's queued writes from committing the content back onto the rewritten branch.
