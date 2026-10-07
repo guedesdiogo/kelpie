@@ -960,6 +960,40 @@ describe("Vault Dream", () => {
       [],
     );
 
+    // A mark that comes to count drops a merge too: its note is merged now, its file the same.
+    const marked = (path: string) => ({
+      path,
+      content: '---\nrelations:\n  merged_into:\n    - "[[memory/notes/alvo]]"\n---\n# Marcada\n',
+    });
+    await stub.write(
+      "kelpie",
+      [marked("memory/notes/marcada.md"), marked("memory/notes/marcada-2.md")],
+      "x",
+    );
+    await runDurableObjectAlarm(stub);
+    await runInDurableObject(stub, (_instance, state) => {
+      const blob = (path: string) =>
+        state.storage.sql
+          .exec<{ blob_sha: string }>("SELECT blob_sha FROM files WHERE path = ?", path)
+          .one().blob_sha;
+      state.storage.sql.exec(
+        "INSERT INTO dream_merges (path, key, sources, verdict, body, at) VALUES (?, ?, ?, 'same', NULL, 1)",
+        "memory/notes/marcada.md",
+        `${blob("memory/notes/marcada.md")},${blob("memory/notes/marcada-2.md")}`,
+        JSON.stringify(["memory/notes/marcada.md", "memory/notes/marcada-2.md"]),
+      );
+    });
+    await report();
+    expect(
+      await rows(stub, "SELECT path FROM dream_merges WHERE path = 'memory/notes/marcada.md'"),
+    ).toHaveLength(1);
+    await stub.write("kelpie", [{ path: "memory/notes/alvo.md", content: "# Alvo\n" }], "x");
+    await runDurableObjectAlarm(stub);
+    await report();
+    expect(
+      await rows(stub, "SELECT path FROM dream_merges WHERE path = 'memory/notes/marcada.md'"),
+    ).toEqual([]);
+
     // A new version of a note proposes its group again, in place of what was proposed.
     const before = asked.length;
     await stub.write(

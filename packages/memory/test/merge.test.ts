@@ -118,6 +118,23 @@ describe("mergeOf", () => {
     ["a title heading", '{"verdict": "merge", "body": "# Outro título\\nx"}'],
     ["an indented title heading", '{"verdict": "merge", "body": "x\\n   # Outro título"}'],
     ["a title underlined", '{"verdict": "merge", "body": "Outro título\\n====="}'],
+    // A fence only one of the two readings sees doesn't hide a title.
+    [
+      "a title after a backtick opener with a backtick",
+      JSON.stringify({ verdict: "merge", body: "```a`b\n# Hijack\n```" }),
+    ],
+    [
+      "a title after a fence a list item closed",
+      JSON.stringify({ verdict: "merge", body: "```\ncode\n- ```\n# Hijack\n```" }),
+    ],
+    [
+      "a title after an indented fence",
+      JSON.stringify({ verdict: "merge", body: "para\n\n    ```\n# Hijack" }),
+    ],
+    [
+      "a title after a mixed closer",
+      JSON.stringify({ verdict: "merge", body: "~~~\nx\n```\n~~~\n# Hijack" }),
+    ],
     ["a title after a closed fence", '{"verdict": "merge", "body": "```\\nx\\n```\\n# Outro"}'],
     ["a lone carriage return", '{"verdict": "merge", "body": "Café\\rpreto"}'],
     ["conflict markers", '{"verdict": "merge", "body": "x\\n<<<<<<< HEAD\\ny"}'],

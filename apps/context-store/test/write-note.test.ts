@@ -442,14 +442,14 @@ describe("writeNote", () => {
       reason: "invalid",
       problems: ["the note was merged into memory/notes/cafe.md: write to that one"],
     });
-    // A turn that doesn't see where it went isn't told.
+    // A mark into another scope merges nothing: the note takes the write.
     expect(
       await stub.writeNote(
         "kelpie",
         memory("Café", "Com leite.", { path: "conversations/telegram-1/notes/cafe.md" }),
         { scopes: ["conversation/telegram-1"], sources: SOURCES },
       ),
-    ).toEqual({ ok: false, reason: "invalid", problems: ["the note was merged into another one"] });
+    ).toMatchObject({ ok: true, action: "written" });
     // A mark that leads nowhere merges nothing: the note takes the write, and loses the mark.
     expect(
       await stub.writeNote("kelpie", memory("Chá", "Verde.", { path: "memory/notes/cha.md" }), ALL),

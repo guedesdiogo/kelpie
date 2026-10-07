@@ -369,13 +369,24 @@ describe("merged notes (#112)", () => {
           ].join("\n"),
           [linking]: "# Família\n\nVer [[memory/notes/ana-souza]].",
           // Outside the scopes below, its mark has no say there.
-          "areas/health/notes/terapia.md": `---\nrelations:\n  merged_into:\n    - "[[${ANA_PATH.slice(0, -3)}]]"\n---\n# Terapia\n`,
+          "areas/health/notes/terapia.md":
+            '---\nrelations:\n  merged_into:\n    - "[[areas/health/notes/sessoes]]"\n---\n# Terapia\n',
+          "areas/health/notes/sessoes.md": "# Sessões\n",
           "memory/notes/visita.md": "---\nentities:\n  - Terapia\n---\n# Visita\n",
-          // A mark that leads nowhere, or only to itself, hides nothing.
+          // A mark that leads nowhere, to the note itself, to another scope, or by name, hides
+          // nothing.
           "memory/notes/sem-destino.md":
             '---\nrelations:\n  merged_into:\n    - "[[memory/notes/nenhum]]"\n---\n# Sem destino\n\nNinguém sabe.\n',
           "memory/notes/eu-mesmo.md":
-            '---\nrelations:\n  merged_into:\n    - "[[eu-mesmo]]"\n---\n# Eu mesmo\n\nSó eu.\n',
+            '---\nrelations:\n  merged_into:\n    - "[[memory/notes/eu-mesmo]]"\n---\n# Eu mesmo\n\nSó eu.\n',
+          "memory/notes/alem.md":
+            '---\nrelations:\n  merged_into:\n    - "[[areas/health/notes/sessoes]]"\n---\n# Além\n',
+          // Its own name, which a namesake elsewhere shares.
+          "memory/notes/sessoes.md":
+            '---\nrelations:\n  merged_into:\n    - "[[sessoes]]"\n---\n# Sessões aqui\n',
+          // The first mark leads nowhere; the second counts.
+          "memory/notes/gama.md": `---\nrelations:\n  merged_into:\n    - "[[memory/notes/aaa]]"\n    - "[[${ANA_PATH.slice(0, -3)}]]"\n---\n# Gama\n`,
+          "memory/notes/liga-gama.md": "# Liga\n\nVer [[memory/notes/gama]].",
           // Past the link cap, the mark still counts.
           "memory/notes/muitos-links.md": `---\nrelations:\n  merged_into:\n    - "[[${ANA_PATH.slice(0, -3)}]]"\n---\n# Muitos links\n\n${Array.from({ length: 520 }, (_, i) => `[[n${i}]]`).join(" ")}\n`,
         }),
@@ -393,7 +404,12 @@ describe("merged notes (#112)", () => {
       ]);
       expect(paths(index.vectorHits("m", [1, 0]))).toEqual([ANA_PATH]);
       expect(index.mergedInto(stub)).toBe(ANA_PATH);
-      for (const path of ["memory/notes/sem-destino.md", "memory/notes/eu-mesmo.md"]) {
+      for (const path of [
+        "memory/notes/sem-destino.md",
+        "memory/notes/eu-mesmo.md",
+        "memory/notes/alem.md",
+        "memory/notes/sessoes.md",
+      ]) {
         expect(index.mergedInto(path)).toBeNull();
         expect(paths(index.lifecycleNotes())).toContain(path);
       }
@@ -403,7 +419,11 @@ describe("merged notes (#112)", () => {
       expect(index.current(stub)?.title).toBe("Ana Souza");
       expect(paths(index.neighbours(linking))).toEqual([ANA_PATH]);
       expect(index.neighbours(stub)).toEqual([]);
-      expect(paths(index.neighbours("memory/notes/visita.md"))).toEqual([ANA_PATH]);
+      expect(index.mergedInto("memory/notes/gama.md")).toBe(ANA_PATH);
+      expect(paths(index.neighbours("memory/notes/liga-gama.md"))).toEqual([ANA_PATH]);
+      expect(paths(index.neighbours("memory/notes/visita.md"))).toEqual([
+        "areas/health/notes/sessoes.md",
+      ]);
       expect(index.neighbours("memory/notes/visita.md", { scopes: ["global"] })).toEqual([]);
     });
   });

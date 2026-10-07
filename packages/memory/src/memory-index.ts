@@ -264,14 +264,17 @@ function limitOf(options: { limit?: number }): number {
 }
 
 /**
- * A version that isn't a note merged into another (#112): what went into it is found there. A
- * mark counts while it leads to another current note, so one that leads nowhere hides nothing.
+ * Where a version's merge mark leads (#112): another current note of its own scope, named by its
+ * path, as Dream writes it. A name is no mark, since it may resolve to the note itself or to a
+ * namesake elsewhere; nor is a path that leads nowhere, to the note itself or to another scope. The
+ * mark is read against the vault as it is now, as a link resolves.
  */
-const NOT_MERGED = `NOT EXISTS (SELECT 1 FROM links m WHERE m.version = v.rowid AND m.kind = 'merged_into'
-  AND ((m.by = 'path' AND EXISTS (SELECT 1 FROM versions t
-      WHERE t.is_current = 1 AND t.link_path = m.target AND t.path <> v.path))
-    OR (m.by = 'name' AND EXISTS (SELECT 1 FROM versions t
-      WHERE t.is_current = 1 AND t.link_name = m.target AND t.path <> v.path))))`;
+const MERGED_INTO = `FROM links m JOIN versions t
+  ON t.is_current = 1 AND t.link_path = m.target AND t.path <> v.path AND t.scope = v.scope
+  WHERE m.version = v.rowid AND m.kind = 'merged_into' AND m.by = 'path'`;
+
+/** A version that isn't a note merged into another (#112): what went into it is found there. */
+const NOT_MERGED = `NOT EXISTS (SELECT 1 ${MERGED_INTO})`;
 
 /**
  * The versions a lookup sees, as SQL over `v`: current ones, or those of `asOf`, valid at
@@ -890,8 +893,6 @@ export class MemoryIndex {
       ...(options.notExpiredAt === undefined ? {} : { notExpiredAt: options.notExpiredAt }),
       ...scoped,
     });
-    // A note the lookup may see, merged or not: only such a note's mark leads anywhere.
-    const [marked, markedBindings] = versionFilter(scoped, true);
     const hits: SearchHit[] = [];
     const seen = new Set([path]);
     const take = (other: string | null) => {
@@ -906,19 +907,9 @@ export class MemoryIndex {
         hits.push(toHit(row));
         return;
       }
-      // A note merged into another (#112) leads to it, one step only. A note outside the scopes
-      // has no say, its mark included.
-      const survivor = this.#exec<{ by: string; target: string }>(
-        `SELECT l.by, l.target FROM links l JOIN versions v ON v.rowid = l.version
-         WHERE v.path = ? AND ${marked} AND l.kind = 'merged_into'
-         ORDER BY l.by, l.target LIMIT 1`,
-        other,
-        ...markedBindings,
-      )[0];
-      const into =
-        survivor === undefined
-          ? null
-          : this.resolve(other, survivor.by as LinkBy, survivor.target, scoped);
+      // A note merged into another (#112) leads to it, one step only. It went into a note of its
+      // own scope, so a note outside the scopes leads nowhere the lookup sees.
+      const into = this.mergedInto(other);
       if (into === null || seen.has(into)) return;
       seen.add(into);
       const merged = this.#exec<HitRow>(
@@ -996,20 +987,17 @@ export class MemoryIndex {
   }
 
   /**
-   * The note a merged note went into (#112): where its mark leads among the current notes, or null
-   * when it has no mark, or the mark leads nowhere but to itself.
+   * The note a merged note went into (#112): another current note of its scope, which its mark
+   * names by path, or null when no mark of it counts. Exactly the notes lookups leave out have one.
    */
   mergedInto(path: string): string | null {
-    const marks = this.#exec<{ by: string; target: string }>(
-      `SELECT l.by, l.target FROM links l JOIN versions v ON v.rowid = l.version
-       WHERE v.path = ? AND v.is_current = 1 AND l.kind = 'merged_into' ORDER BY l.by, l.target`,
-      path,
+    return (
+      this.#exec<{ path: string | null }>(
+        `SELECT (SELECT t.path ${MERGED_INTO} ORDER BY t.path LIMIT 1) AS path
+         FROM versions v WHERE v.path = ? AND v.is_current = 1`,
+        path,
+      )[0]?.path ?? null
     );
-    for (const mark of marks) {
-      const into = this.resolve(path, mark.by as LinkBy, mark.target);
-      if (into !== null && into !== path) return into;
-    }
-    return null;
   }
 
   /**

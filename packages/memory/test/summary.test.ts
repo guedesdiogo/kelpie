@@ -97,5 +97,15 @@ describe("dreamPage", () => {
     expect(page).toContain("````text\nFalaram de ```código``` e de [[links]].\n````");
     expect(page).toContain("```text\nCombinaram sexta.\n```");
     expect(dreamPage({ summaries: [], merges: [] })).toBeNull();
+    // At most 50, and a count of the rest.
+    const many = Array.from({ length: 51 }, (_, i) => ({
+      date: `2026-10-${String((i % 28) + 1).padStart(2, "0")}`,
+      scope: `conversation/c${i}`,
+      sources: [],
+      summary: "Café.",
+    }));
+    const long = dreamPage({ summaries: many, merges: [] }) ?? "";
+    expect(long.match(/^### /gm)).toHaveLength(50);
+    expect(long).toContain("…and 1 more.");
   });
 });

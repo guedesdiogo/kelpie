@@ -1665,13 +1665,16 @@ export class Vault extends DurableObject<VaultEnv> {
         for (const row of this.#exec<{ path: string; key: string; sources: string }>(
           "SELECT path, key, sources FROM dream_merges",
         )) {
-          // A note expires without a change to its file: that drops the merge too.
+          // A note expires, or another's arrival makes its mark count, without a change to its
+          // file: that drops the merge too.
           const sources = JSON.parse(row.sources) as string[];
-          const expired = sources.some((path) => {
+          const gone = sources.some((path) => {
             const invalidAt = this.#memory.current(path)?.invalidAt ?? null;
-            return invalidAt !== null && invalidAt <= now;
+            return (
+              (invalidAt !== null && invalidAt <= now) || this.#memory.mergedInto(path) !== null
+            );
           });
-          if (expired || !this.#asRead(sources, row.key)) {
+          if (gone || !this.#asRead(sources, row.key)) {
             this.#exec("DELETE FROM dream_merges WHERE path = ?", row.path);
           }
         }
@@ -2022,16 +2025,10 @@ export class Vault extends DurableObject<VaultEnv> {
         return { ok: false, reason: "scope_not_allowed" };
       }
       const problems: string[] = [];
-      // A note merged into another (#112): what it held is there now, and so is the next version.
-      // A mark that leads nowhere merges nothing. The note is named only when the turn sees it.
+      // A note merged into another of its scope (#112), which the turn sees too: what it held is
+      // there now, and so is the next version.
       const into = found === null ? null : this.#memory.mergedInto(found.path);
-      if (into !== null) {
-        problems.push(
-          sees(this.#memory.current(into)?.scope ?? "")
-            ? `the note was merged into ${into}: write to that one`
-            : "the note was merged into another one",
-        );
-      }
+      if (into !== null) problems.push(`the note was merged into ${into}: write to that one`);
       if (found !== null && given(input.scope) !== undefined && input.scope !== found.scope) {
         problems.push(`\`scope\` must be the note's own, ${found.scope}`);
       }

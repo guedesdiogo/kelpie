@@ -46,6 +46,16 @@ export function splitFrontmatter(text: string): Split {
   return { yaml: null, body: input };
 }
 
+/** Whether each line of a body is code, or a fence, as the reader sees it when it finds a title. */
+export function codeLines(body: string): boolean[] {
+  let fence: Fence | null = null;
+  return body.split("\n").map((line) => {
+    const [next, isCode] = stepFence(fence, line);
+    fence = next;
+    return isCode;
+  });
+}
+
 /** Title from the frontmatter, then the first `# ` heading, then the file name. */
 export function deriveTitle(frontmatterTitle: unknown, body: string, path: string): string {
   if (typeof frontmatterTitle === "string" && frontmatterTitle.trim() !== "") {

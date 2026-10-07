@@ -215,15 +215,17 @@ Every conversation's history becomes session pages (#109), with no model call:
 
 A note merged into another (#112) stays at its path. It is never deleted.
 - **Its mark:** `relations.merged_into` names the note it went into, and its body says so. The owner can mark a note by hand the same way.
-  - The mark counts while it leads to another current note. A mark that leads nowhere, or to the note itself, hides nothing.
+  - **The mark counts** while it names, by its path from the vault's root (`[[memory/notes/cafe]]`), another current note of its own scope, as Dream writes it.
+    - A mark by name hides nothing, since a name may resolve to the note itself or to a namesake elsewhere. So does a mark that leads nowhere, to the note itself or to another scope.
+    - A mark is read against the vault as it is now, as a link resolves. A lookup as of an earlier time leaves out a version whose mark counts today.
   - Removing the mark makes it a note again.
 - **What it still is:** a file to read by its path, and a link to it still resolves to it, as in Obsidian.
 - **What it no longer is:**
   - **Found:** search, title and entity lookups, vectors, the lifecycle report and the always-loaded core leave it out, even when it is pinned.
   - **Embedded:** it gets no vector.
   - **Dream's:** no Dream operation picks it.
-  - **A neighbour:** one step from a note that links to it is the note it went into, within the lookup's scopes. That is one step only: a link to a note merged into one that was merged in turn leads nowhere.
-- **Writing to it:** the agent's `memory_write` refuses it while the mark counts, so the mark isn't lost. It names the note to write to when the turn sees that note.
+  - **A neighbour:** one step from a note that links to it is the note it went into, in its own scope, when the lookup sees it. That is one step only: a link to a note merged into one that was merged in turn leads nowhere.
+- **Writing to it:** the agent's `memory_write` refuses it while the mark counts, so the mark isn't lost, and names the note to write to: the turn sees that one, as it's in the same scope.
 
 ## Entities
 

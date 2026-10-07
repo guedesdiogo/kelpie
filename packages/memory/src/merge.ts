@@ -1,5 +1,6 @@
 // Dream's merges of duplicate notes (#112): what a model is asked, and how its answer is read. The
 // survivor keeps its own frontmatter and title; the model writes only the body.
+import { codeLines } from "./markdown.ts";
 import { sanitizeSecrets } from "./sanitize.ts";
 
 /** The notes' text, whole: a group that doesn't fit isn't merged, since a cut would lose facts. */
@@ -59,28 +60,42 @@ export function mergeOf(
   if (text === "" || text.length > MERGE_MAX_CHARS) return null;
   // No frontmatter, and no conflict markers anywhere.
   if (/^---[ \t]*(?:\n|$)/.test(text) || /^(?:<{7}|>{7})/m.test(text)) return null;
-  // No title heading, but in code, where a `#` is a comment.
-  if (outsideCode(text).some((line) => /^ {0,3}(?:#(?:[ \t]|$)|=+[ \t]*$)/.test(line))) return null;
+  // No title heading, but in code, where a `#` is a comment. Code only as both the reader, which
+  // finds titles, and Markdown see it: a line either sees outside code is checked.
+  const reader = codeLines(text);
+  const markdown = fencedLines(text);
+  if (
+    text
+      .split("\n")
+      .some(
+        (line, i) => !(reader[i] && markdown[i]) && /^ {0,3}(?:#(?:[ \t]|$)|=+[ \t]*$)/.test(line),
+      )
+  ) {
+    return null;
+  }
   return { verdict, body: text };
 }
 
-/** The lines outside fenced code, where Markdown reads its structure. */
-function outsideCode(text: string): string[] {
-  const outside: string[] = [];
+/**
+ * Whether each line is in a fenced code block, as CommonMark reads one at the top level: an
+ * opener indented at most 3 spaces, whose info string holds no backtick when its glyph is one, and
+ * a closer of the same glyph, as long or longer, and nothing else. A fence left open runs to the
+ * end, which is safe here: conflict markers are refused anywhere, in code too.
+ */
+function fencedLines(text: string): boolean[] {
   let fence: string | null = null;
-  for (const line of text.split("\n")) {
-    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+  return text.split("\n").map((line) => {
     if (fence === null) {
-      if (marker === undefined) outside.push(line);
-      else fence = marker;
-    } else if (
-      marker !== undefined &&
-      marker[0] === fence[0] &&
-      marker.length >= fence.length &&
-      /^ {0,3}[`~]+[ \t]*$/.test(line)
-    ) {
+      const opener = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      const run = opener?.[1];
+      if (run === undefined || (run[0] === "`" && (opener?.[2] ?? "").includes("`"))) return false;
+      fence = run;
+      return true;
+    }
+    const closer = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line)?.[1];
+    if (closer !== undefined && closer[0] === fence[0] && closer.length >= fence.length) {
       fence = null;
     }
-  }
-  return outside;
+    return true;
+  });
 }
