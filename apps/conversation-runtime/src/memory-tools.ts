@@ -90,7 +90,8 @@ const WRITE: Tool["spec"] = {
       abstract: { type: "string", description: "One line that sums it up." },
       scope: {
         type: "string",
-        description: "Where to save it; the owner's global memory when left out.",
+        description:
+          "Where to save it. Left out: the owner's global memory, or this conversation's own scope when that is all it sees.",
       },
       path: { type: "string", description: "A found note's path, to write its new version." },
     },
@@ -217,6 +218,11 @@ export function memoryTools(store: MemoryStore): ToolProvider {
         given[key],
       ]),
     ) as unknown as MemoryWriteInput;
+    // A turn that lists its scopes sees only its own conversation (#131): a new memory goes there,
+    // not to the owner's global memory, which it can't write.
+    if (memory.scope === undefined && context.scopes !== "all" && context.scopes[0] !== undefined) {
+      memory.scope = context.scopes[0];
+    }
     const result = await store.writeNote(context.agentId, memory, {
       scopes: context.scopes,
       sources: [context.source],
@@ -239,7 +245,9 @@ export function memoryTools(store: MemoryStore): ToolProvider {
         );
       case "scope_not_allowed":
         return invalid(
-          "Not saved: this conversation can't save to that scope. Choose one it sees, or leave scope out for the owner's global memory.",
+          context.scopes === "all"
+            ? "Not saved: this conversation can't save to that scope. Choose one it sees, or leave scope out for the owner's global memory."
+            : `Not saved: this conversation can save only to ${context.scopes.join(" or ")}. Leave scope out to save to ${context.scopes[0]}.`,
         );
       case "owners_word":
         return invalid(

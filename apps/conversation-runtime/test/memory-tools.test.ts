@@ -60,7 +60,7 @@ const context = (turn = `turn-${turns++}`): ToolContext => ({
   actor: { userId: "u-owner", role: "owner", via: "agent:assistant" },
   agentId: "assistant",
   turn,
-  scopes: ["global", "conversation/familia"],
+  scopes: ["conversation/familia"],
   qualifier: "jev",
   source: "telegram:chat-1, 2026-10-06",
   signal: new AbortController().signal,
@@ -95,7 +95,7 @@ describe("memory tools", () => {
         method: "search",
         agentId: "assistant",
         arg: "Ana",
-        options: { scopes: ["global", "conversation/familia"], k: 5, qualifier: "jev" },
+        options: { scopes: ["conversation/familia"], k: 5, qualifier: "jev" },
       },
     ]);
     expect(await search?.run({ query: "nada" }, context())).toEqual({
@@ -121,7 +121,7 @@ describe("memory tools", () => {
     });
     expect(calls[0]).toMatchObject({
       method: "readNote",
-      options: { scopes: ["global", "conversation/familia"], offset: 9_000 },
+      options: { scopes: ["conversation/familia"], offset: 9_000 },
     });
     expect(await read?.run({ path: "agents/assistant/SOUL.md" }, context())).toEqual({
       output: "There is no note at that path in the memory this conversation can see.",
@@ -175,7 +175,7 @@ describe("memory_write", () => {
         agentId: "assistant",
         arg: "Café da Ana",
         options: {
-          scopes: ["global", "conversation/familia"],
+          scopes: ["conversation/familia"],
           sources: ["telegram:chat-1, 2026-10-06"],
           qualifier: "jev",
         },
@@ -183,8 +183,25 @@ describe("memory_write", () => {
     ]);
     // What the model sent beyond the memory's fields doesn't reach the store.
     expect(given).toEqual({ ...note, scope: "conversation/familia" });
-    // Nor do the fields it sent as null, meaning left out.
+    // Nor do the fields it sent as null, meaning left out: the scope is the conversation's.
     await write?.run({ ...note, entities: null, validFrom: null, path: null }, context());
+    expect(given).toEqual({ ...note, scope: "conversation/familia" });
+  });
+
+  it("saves a new memory in its conversation when a turn sees only that, and the model names no scope (#131)", async () => {
+    let given: MemoryWriteInput | undefined;
+    const { store } = fakeStore(undefined, (input) => {
+      given = input;
+      return { ok: true, action: "written", path: "conversations/familia/notes/x.md" };
+    });
+    const write = (await toolsOf(store)).get("memory_write");
+    await write?.run(note, context());
+    expect(given).toEqual({ ...note, scope: "conversation/familia" });
+    // The scope the model names stands, for the store to allow or refuse.
+    await write?.run({ ...note, scope: "global" }, context());
+    expect(given).toEqual({ ...note, scope: "global" });
+    // A turn that sees every scope leaves it to the store: the owner's global memory.
+    await write?.run(note, { ...context(), scopes: "all" });
     expect(given).toEqual(note);
   });
 
@@ -216,7 +233,7 @@ describe("memory_write", () => {
         { ok: false, reason: "scope_not_allowed" },
         {
           output:
-            "Not saved: this conversation can't save to that scope. Choose one it sees, or leave scope out for the owner's global memory.",
+            "Not saved: this conversation can save only to conversation/familia. Leave scope out to save to conversation/familia.",
           isError: true,
         },
       ],
@@ -241,6 +258,16 @@ describe("memory_write", () => {
       const write = (await toolsOf(fakeStore(undefined, () => result).store)).get("memory_write");
       expect(await write?.run(note, context())).toEqual(outcome);
     }
+    const refused = fakeStore(undefined, () => ({ ok: false, reason: "scope_not_allowed" }));
+    expect(
+      await (await toolsOf(refused.store))
+        .get("memory_write")
+        ?.run(note, { ...context(), scopes: "all" }),
+    ).toEqual({
+      output:
+        "Not saved: this conversation can't save to that scope. Choose one it sees, or leave scope out for the owner's global memory.",
+      isError: true,
+    });
     const failing = fakeStore(undefined, () => ({ ok: false, reason: "unavailable" }));
     await expect(
       (await toolsOf(failing.store)).get("memory_write")?.run(note, context()),
