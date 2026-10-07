@@ -90,7 +90,8 @@ export function formatReply(text: string, allowed: AllowedLinks): Block[] {
       const body: string[] = [];
       for (i += 1; i < lines.length && !closing.test(lines[i] ?? ""); i += 1)
         body.push(lines[i] ?? "");
-      add({ type: "code", text: body.join("\n") });
+      // An empty block shows nothing, and Telegram may refuse an empty entity.
+      if (body.join("") !== "") add({ type: "code", text: body.join("\n") });
       continue;
     }
     if (line.trim() === "") {
@@ -413,9 +414,17 @@ export function toTelegramPlain(text: string): string {
  */
 const MAX_ENTITIES = 90;
 
-/** Whether Telegram reads every entity in `html`: if not, the reply goes plainer. */
+/** Text Telegram makes an entity of by itself: hashtags, cashtags, commands, mentions, emails. */
+const OWN_ENTITY = /(?<![\p{L}\p{N}_])[#$/][\p{L}\p{N}_]|@[\p{L}\p{N}_]/gu;
+
+/**
+ * Whether Telegram reads every entity in `html`, its own among them: if not, the reply goes
+ * plainer. Nothing is found inside code or a link.
+ */
 export function fitsTelegram(html: string): boolean {
-  return (html.match(/<[a-z]/g) ?? []).length <= MAX_ENTITIES;
+  const tags = html.match(/<[a-z]/g)?.length ?? 0;
+  const outside = html.replace(/<(code|pre)>[^<]*<\/\1>|<a [^>]*>[\s\S]*?<\/a>/g, " ");
+  return tags + (outside.match(OWN_ENTITY)?.length ?? 0) <= MAX_ENTITIES;
 }
 
 /**
@@ -490,10 +499,10 @@ function flatten(nodes: readonly Inline[], tags: readonly string[], runs: Run[])
         runs.push({ text: node.text, code: !inLink, tags });
         break;
       case "bold":
-        flatten(node.children, [...tags, "b"], runs);
+        flatten(node.children, tags.includes("b") ? tags : [...tags, "b"], runs);
         break;
       case "italic":
-        flatten(node.children, [...tags, "i"], runs);
+        flatten(node.children, tags.includes("i") ? tags : [...tags, "i"], runs);
         break;
       case "link":
         flatten(node.children, [...tags, `a href="${escapeHtml(node.href)}"`], runs);
@@ -514,8 +523,8 @@ function closeTags(tags: readonly string[]): string {
 }
 
 /**
- * Puts in code each address in a stretch of text outside code and links, read across the runs it
- * spans, since Telegram reads the text as shown.
+ * Puts in code each address in a stretch of text outside links, read across the runs it spans,
+ * code among them, since Telegram reads the text as shown.
  */
 function codeAddresses(runs: readonly Run[]): Run[] {
   const out: Run[] = [];
@@ -537,7 +546,7 @@ function codeAddresses(runs: readonly Run[]): Run[] {
           if (from === range.end) next += 1;
         } else {
           const stop = range ? Math.min(end, range.start) : end;
-          out.push({ text: text.slice(from, stop), code: false, tags: run.tags });
+          out.push({ text: text.slice(from, stop), code: run.code, tags: run.tags });
           from = stop;
         }
       }
@@ -546,7 +555,7 @@ function codeAddresses(runs: readonly Run[]): Run[] {
     stretch = [];
   };
   for (const run of runs) {
-    if (run.code || run.tags.some(isLinkTag)) {
+    if (run.tags.some(isLinkTag)) {
       flushStretch();
       out.push(run);
     } else stretch.push(run);
@@ -560,8 +569,10 @@ const HOST = /(?<![\p{L}\p{N}-])[\p{L}\p{N}-]+(?:[.。．｡][\p{L}\p{N}-]+)+/gu
 /** What may follow a host in an address: a port, a path, a query or a fragment. */
 const HOST_TAIL = /[/?#:][^\s<>"]*/y;
 const TOP_LEVEL = /^(?:\p{L}{2,}|xn--[\p{L}\p{N}-]+)$/iu;
-/** An address with any scheme, such as `tg://resolve?domain=…`, host or not. */
-const SCHEMED = /(?<![\p{L}\p{N}+.-])[a-z][a-z0-9+.-]{0,30}:\/\/[^\s<>"]+/giu;
+/** An address with any scheme, such as `tg://resolve?domain=…`, host or not, wherever it starts. */
+const SCHEMED = /[a-z][a-z0-9+.-]{0,30}:\/\/[^\s<>"]+/giu;
+/** The start of a label that could be a top-level domain, as in `evil.com-x`. */
+const TOP_LEVEL_START = /^\p{L}{2,}/u;
 
 /**
  * Where `text` holds something Telegram could link: an address with a scheme, or a host with a
@@ -589,17 +600,12 @@ function hostRanges(text: string): { start: number; end: number }[] {
   const ranges: { start: number; end: number }[] = [];
   HOST.lastIndex = 0;
   for (let match = HOST.exec(text); match; match = HOST.exec(text)) {
-    const labels = match[0].split(/[.。．｡]/);
-    let count = labels.length;
-    const ipv4 = count === 4 && labels.every((label) => /^\d{1,3}$/.test(label));
-    // `evil.example.-` is the host `evil.example` and some text: the host ends at its last label
-    // that could be a top-level domain.
-    while (!ipv4 && count > 1 && !TOP_LEVEL.test(labels[count - 1] ?? "")) count -= 1;
-    if (count < 2) continue;
+    const length = hostLength(match[0]);
+    if (length === 0) continue;
     const start = match.index;
-    let end = match.index + labels.slice(0, count).join(".").length;
+    let end = start + length;
     HOST_TAIL.lastIndex = end;
-    const tail = count === labels.length ? HOST_TAIL.exec(text)?.[0] : undefined;
+    const tail = length === match[0].length ? HOST_TAIL.exec(text)?.[0] : undefined;
     if (tail) {
       end += trimUrl(tail).length;
       // The path's own dots aren't another host.
@@ -608,6 +614,27 @@ function hostRanges(text: string): { start: number; end: number }[] {
     ranges.push({ start, end });
   }
   return ranges;
+}
+
+/**
+ * How much of `found` is a host Telegram could link, or 0. `evil.example.-` is the host
+ * `evil.example` and some text, and `evil.com-x` the host `evil.com`: the host ends at its last
+ * label that is, or starts with, a top-level domain.
+ */
+function hostLength(found: string): number {
+  const labels = found.split(/[.。．｡]/);
+  if (labels.length === 4 && labels.every((label) => /^\d{1,3}$/.test(label))) return found.length;
+  // Where each label starts: every separator is one character.
+  const starts = [0];
+  for (const label of labels) starts.push((starts.at(-1) ?? 0) + label.length + 1);
+  for (let count = labels.length; count > 1; count -= 1) {
+    const last = labels[count - 1] ?? "";
+    const before = starts[count - 1] ?? 0;
+    if (TOP_LEVEL.test(last)) return before + last.length;
+    const start = TOP_LEVEL_START.exec(last)?.[0];
+    if (start) return before + start.length;
+  }
+  return 0;
 }
 
 function escapeHtml(text: string): string {

@@ -266,8 +266,16 @@ describe("toTelegramHtml", () => {
     );
     expect(telegram("Custa 3.5 vezes, e.g. a v1.2.")).toBe("Custa 3.5 vezes, e.g. a v1.2.");
     expect(telegram("Abra tg://resolve?domain=evil_bot ou xhttps://evil.example.")).toBe(
-      "Abra <code>tg://resolve?domain=evil_bot</code> ou x<code>https://evil.example</code>.",
+      "Abra <code>tg://resolve?domain=evil_bot</code> ou <code>xhttps://evil.example</code>.",
     );
+    expect(telegram("-tg://user?id=1, ev`il`.com e evil.com-x")).toBe(
+      "-<code>tg://user?id=1</code>, <code>evil.com</code> e <code>evil.com</code>-x",
+    );
+  });
+
+  it("writes nothing Telegram could refuse: no tag inside the same tag, no empty block", () => {
+    expect(telegram("## **Título**")).toBe("<b>Título</b>");
+    expect(telegram("```\n```\ntexto")).toBe("texto");
   });
 
   it("keeps within the entities Telegram reads, so no code span is dropped", () => {
@@ -276,6 +284,10 @@ describe("toTelegramHtml", () => {
     expect(fitsTelegram(toTelegramPlain(busy))).toBe(true);
     const addresses = "evil.example/x ".repeat(95);
     expect(toTelegramPlain(addresses)).toBe(`<pre>${addresses}</pre>`);
+    // Telegram's own entities count too.
+    const tags = `${"#t ".repeat(95)}veja evil.example/login`;
+    expect(fitsTelegram(telegram(tags))).toBe(false);
+    expect(toTelegramPlain(tags)).toBe(`<pre>${tags}</pre>`);
   });
 
   it("sends a reply as written, its addresses in code, when the formatted one can't go", () => {
