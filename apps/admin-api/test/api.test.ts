@@ -397,6 +397,10 @@ describe("admin API cross-site requests", () => {
     ["Sec-Fetch-Site: none", { "sec-fetch-site": "none" }],
     ["a foreign Origin without Sec-Fetch-Site", { origin: "https://evil.example" }],
     ["Origin: null without Sec-Fetch-Site", { origin: "null" }],
+    [
+      "a cross-site text/plain form, which fails both checks",
+      { "sec-fetch-site": "cross-site", "content-type": "text/plain" },
+    ],
   ])("refuses a JSON command with %s, before running it", async (_label, headers) => {
     const { deps, ran } = world();
     const response = await send(
@@ -418,6 +422,10 @@ describe("admin API cross-site requests", () => {
         "sec-fetch-site": "same-origin",
         origin: "https://admin.example",
       },
+    ],
+    [
+      "from its own Origin, in a browser without Sec-Fetch-Site",
+      { "content-type": "application/json", origin: "https://admin.example" },
     ],
     ["with the media type in capitals", { "content-type": "Application/JSON" }],
     [
