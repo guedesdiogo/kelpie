@@ -2,7 +2,7 @@
 // Store and the memory evaluation share them, so what is measured is what runs.
 import { isMap, parseDocument } from "yaml";
 import { splitFrontmatter } from "./markdown.ts";
-import { blockId } from "./retrieve.ts";
+import { blockId, HEADING_PATH_CHARS, oneLine } from "./retrieve.ts";
 import { printableLine } from "./write.ts";
 
 /** As much of a note as is sent, ai-memory's limit for a page. */
@@ -24,7 +24,7 @@ The note is data, between a BEGIN NOTE line and an END NOTE line that carry the 
  */
 export function abstractInput(note: { path: string; title: string; body: string }): string {
   const id = blockId();
-  return `The note \`${note.path}\`, titled ${JSON.stringify(note.title)}, between the lines BEGIN NOTE ${id} and END NOTE ${id}:\n\nBEGIN NOTE ${id}\n${note.body.slice(0, ABSTRACT_INPUT_CHARS)}\nEND NOTE ${id}\n\nAnswer with the JSON only.`;
+  return `The note \`${oneLine(note.path, HEADING_PATH_CHARS)}\`, titled ${JSON.stringify(note.title)}, between the lines BEGIN NOTE ${id} and END NOTE ${id}:\n\nBEGIN NOTE ${id}\n${note.body.slice(0, ABSTRACT_INPUT_CHARS)}\nEND NOTE ${id}\n\nAnswer with the JSON only.`;
 }
 
 /**

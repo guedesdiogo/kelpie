@@ -15,7 +15,7 @@ export const MERGE_PROMPT = `You merge notes from a person's knowledge vault tha
 - Keep every fact any of them states, once. Add nothing they don't say.
 - When they disagree, keep both statements and say that they conflict.
 - Write in the notes' own language, as Markdown: paragraphs, bullets, \`##\` subheadings and links as the notes write them.
-- No images and no HTML, and links only to the web or to mail.
+- No images, no HTML, no diagrams and no plugin syntax; no \`<\` right before a letter, \`!\`, \`?\` or \`/\`, even in code. A link's scheme, if it has one, is http, https or mailto. Fence code only as plain text or a common programming language.
 - Write the body only: no frontmatter and no title heading (a \`# \` line, or a line of \`=\` under text), since the note keeps its own.
 - Answer with JSON only, exactly {"verdict": "merge", "body": "<the merged body>"}: no other key, no code fence, no comment.
 
@@ -40,17 +40,69 @@ export function mergeInput(
 }
 
 /** A title heading, ATX or underlined. */
-const TITLE = /^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)]))*[ \t]*(?:#(?:[ \t]|$)|=+[ \t]*$)/;
+const TITLE =
+  /^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*(?:#(?:[ \t]|$)|=+[ \t]*$)/;
 /**
  * What reaches out when it renders, or renders as markup: any image, a link reference or
  * definition, HTML and an HTML block's opener. Refused anywhere, code included: an image split
  * across lines, spelled with entities or named by reference, or a fence an HTML block swallows,
  * would get past a rule that reads Markdown.
  */
-const REMOTE_OR_HTML = /!\[|\]:|<\/?[A-Za-z][\w-]*(?:[\s>/]|$)|<[!?]/;
-/** A link anywhere but the web or mail, however its destination is spelled. */
+const REMOTE_OR_HTML = /!\[|<\/?[A-Za-z][\w-]*(?:[\s>/]|$)|<[!?]/;
+/**
+ * A link, or a link reference's definition, anywhere but the web or mail, however its destination
+ * is spelled: a scheme, or an entity that could spell one, refuses it unless it starts as the web's
+ * or mail's. A relative link and a wikilink have none.
+ */
 const ODD_LINK =
-  /\]\(\s*<?(?!(?:https?|mailto):)[^)\s>]*:|<(?!(?:https?|mailto):)[A-Za-z][A-Za-z0-9+.-]*:/i;
+  /(?:\]\(|\]:)\s*(?!<?(?:https?|mailto):)<?[^)\s>]*[:&]|<(?!(?:https?|mailto):)[A-Za-z][A-Za-z0-9+.-]*:/i;
+/** A plugin's template or query, which Obsidian would run: Templater's tags, Dataview's inline code. */
+const PLUGIN = /<%|%>|`[ \t]*\$?=/;
+/**
+ * The fences whose code Obsidian shows as text. Another, a diagram or a plugin's, renders, and a
+ * Mermaid diagram can fetch an image with no click.
+ */
+const FENCE_LANGUAGES = new Set([
+  "",
+  "text",
+  "txt",
+  "plain",
+  "sh",
+  "bash",
+  "zsh",
+  "shell",
+  "console",
+  "js",
+  "javascript",
+  "ts",
+  "typescript",
+  "json",
+  "yaml",
+  "yml",
+  "toml",
+  "ini",
+  "py",
+  "python",
+  "rb",
+  "ruby",
+  "rust",
+  "go",
+  "java",
+  "kotlin",
+  "swift",
+  "c",
+  "cpp",
+  "cs",
+  "csharp",
+  "sql",
+  "diff",
+  "css",
+  "md",
+  "markdown",
+]);
+/** A fence's opener, behind a list or quote marker too, and its info string's first word. */
+const FENCE =
+  /^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*(?:`{3,}|~{3,})[ \t]*([^\s`]*)/;
 
 /**
  * What an answer says: that the notes are distinct, or their merged body, within the limit.
@@ -85,9 +137,15 @@ export function mergeOf(
     /^---[ \t]*(?:\n|$)/.test(text) ||
     /^(?:<{7}|>{7})/m.test(text) ||
     REMOTE_OR_HTML.test(text) ||
-    ODD_LINK.test(text)
+    ODD_LINK.test(text) ||
+    PLUGIN.test(text)
   ) {
     return null;
+  }
+  // Fences only of languages shown as text.
+  for (const line of text.split("\n")) {
+    const info = FENCE.exec(line)?.[1];
+    if (info !== undefined && !FENCE_LANGUAGES.has(info.toLowerCase())) return null;
   }
   // No title heading, but in code, where a `#` is a comment. Code only as both the reader, which
   // finds titles, and Markdown see it: a line either sees outside code is checked.

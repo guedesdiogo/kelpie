@@ -103,6 +103,8 @@ describe("summaryOf", () => {
       "Falaram de #kelpie.",
       "#1 prioridade: café.",
       "C# e F#.",
+      "-> o próximo passo.",
+      "-# não é título.",
     ]) {
       expect(summaryOf(JSON.stringify({ summary: text })), text).toBe(text);
     }
@@ -139,6 +141,23 @@ describe("summaryOf", () => {
     ["a heading behind a list marker", '{"summary": "- # Outro"}'],
     ["a title under one =", '{"summary": "Outro\\n="}'],
     ["an HTML block opener", '{"summary": "Café <?php x ?>"}'],
+    // A tag closes at the first `>`, and an HTML block needs none.
+    [
+      "a tag with a `<` in an attribute",
+      JSON.stringify({ summary: 'Café <img src="https://x.test/a.png" alt="<">' }),
+    ],
+    ["an HTML block left open", JSON.stringify({ summary: "<iframe src=https://x.test/a" })],
+    ["an HTML block in a list", JSON.stringify({ summary: "- <iframe src=https://x.test/a" })],
+    ["inline code", JSON.stringify({ summary: "Use `cafe`." })],
+    ["a template tag", JSON.stringify({ summary: "Café <% tp.file.title %>." })],
+    ["an underline deep in a list", JSON.stringify({ summary: "- Texto\n    =" })],
+    ["a heading behind a number", JSON.stringify({ summary: "1. # Outro" })],
+    ["a rule of underscores", JSON.stringify({ summary: "x\n___" })],
+    ["a bare heading mark", JSON.stringify({ summary: "x\n#" })],
+    ["a link definition", JSON.stringify({ summary: "[1]: nota" })],
+    ["a full reference link", JSON.stringify({ summary: "Ver [a][b]." })],
+    ["a closing tag", JSON.stringify({ summary: "Café</p>." })],
+    ["a tag with attributes", JSON.stringify({ summary: "Café <a href=x>." })],
     ["a vertical tab at the edge", '{"summary": "Café\\u000b"}'],
     ["a form feed at the edge", '{"summary": "\\u000cCafé"}'],
     ["conflict markers", '{"summary": "<<<<<<< HEAD\\nx"}'],

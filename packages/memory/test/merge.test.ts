@@ -94,7 +94,7 @@ describe("mergeOf", () => {
 
   it("keeps links to the web and mail, and to other notes", () => {
     const body =
-      "[Site](https://x.test), [mail](mailto:a@x.test), <https://x.test>, [nota](notas/cafe.md) e [[Ana]].";
+      "[Site](HTTPS://x.test), [mail](mailto:a@x.test), <https://x.test>, [site](<https://x.test>), [nota](notas/cafe.md) e [[Ana]].\n\n- [[Ana]]: prefere café.\n- [x]: feito.\n\n`Map<string, number>` e `i < n && j > m`.";
     expect(mergeOf(JSON.stringify({ verdict: "merge", body }))).toEqual({ verdict: "merge", body });
   });
 
@@ -207,6 +207,40 @@ describe("mergeOf", () => {
     ],
     ["a script autolink", JSON.stringify({ verdict: "merge", body: "<javascript:alert(1)>" })],
     ["a title behind a list marker", JSON.stringify({ verdict: "merge", body: "- # Outro" })],
+    ["a title behind a number", JSON.stringify({ verdict: "merge", body: "1. # Outro" })],
+    ["an HTML block opener", JSON.stringify({ verdict: "merge", body: "Café.\n<? x" })],
+    [
+      "a script link after a space",
+      JSON.stringify({ verdict: "merge", body: "[x]( javascript:alert(1))" }),
+    ],
+    [
+      "a script definition with an entity",
+      JSON.stringify({ verdict: "merge", body: "[x][r]\n\n[r]: javascript&#58;alert(1)" }),
+    ],
+    // The cost of a rule that doesn't read Markdown: a generic type in code is refused too.
+    ["a generic type in code", JSON.stringify({ verdict: "merge", body: "`List<String>`" })],
+    // A fence Obsidian renders: a Mermaid diagram can fetch an image with no click.
+    [
+      "a Mermaid fence",
+      JSON.stringify({
+        verdict: "merge",
+        body: '```mermaid\nflowchart LR\n  A@{ img: "https://x.test/p.png" }\n```',
+      }),
+    ],
+    ["a quoted Mermaid fence", JSON.stringify({ verdict: "merge", body: "> ```mermaid\n> x" })],
+    [
+      "a Mermaid fence by class",
+      JSON.stringify({ verdict: "merge", body: "``` {.mermaid}\nx\n```" }),
+    ],
+    ["a Dataview fence", JSON.stringify({ verdict: "merge", body: "```dataviewjs\ndv.x()\n```" })],
+    ["a template tag", JSON.stringify({ verdict: "merge", body: "Café <% tp.file.title %>." })],
+    ["an inline query", JSON.stringify({ verdict: "merge", body: "Café `= this.file.name`." })],
+    ["an inline script", JSON.stringify({ verdict: "merge", body: "Café `$= dv.current()`." })],
+    ["a file link with entities", JSON.stringify({ verdict: "merge", body: "[x](file&#58;///x)" })],
+    [
+      "an app link with entities",
+      JSON.stringify({ verdict: "merge", body: "[x](obsidian&colon;//open?vault=v)" }),
+    ],
     ["a title behind a quote", JSON.stringify({ verdict: "merge", body: "> # Outro" })],
     ["a title under one =", JSON.stringify({ verdict: "merge", body: "Outro\n=" })],
     ["an HTML comment", JSON.stringify({ verdict: "merge", body: "Café.\n<!-- x -->" })],

@@ -293,7 +293,7 @@ What the numbers show:
 Dream would give session pages an abstract, and an abstract is searched and embedded with the title and body. So writing abstracts changes retrieval, and #112 asks that this evaluation doesn't regress before Dream may write them.
 
 **The run:**
-- the 1k vault's 129 session pages got abstracts from `gpt-6-luna`, llm-gateway's cheap fallback, with the prompt Dream runs (2026-10-07, 29,056 tokens in and 7,936 out);
+- the 1k vault's 129 session pages got abstracts from `gpt-6-luna`, llm-gateway's cheap fallback, with the prompt Dream ran then (2026-10-07, 29,056 tokens in and 7,936 out). #182 later marked the note with a random id per call; the cache, keyed by path and blob, didn't run again;
 - the questions were run on the vault as it is, where those pages have no abstract, and with those abstracts;
 - `eval/session-abstracts.json` caches the abstracts, so `eval` measures them without calling a model.
 

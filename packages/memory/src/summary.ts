@@ -52,17 +52,18 @@ export function summaryInput(day: {
 }
 
 /**
- * What Markdown reads as structure at a line's start: a heading, a quote, a fence, a rule, a title
- * underline, a frontmatter fence or a conflict marker.
+ * What Markdown reads as structure at a line's start, behind a list or quote marker too: a heading,
+ * a quote, a fence, a rule, an HTML block, which needs no `>`, a title underline, a frontmatter
+ * fence or a conflict marker.
  */
 const STRUCTURE =
-  /^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)]))*[ \t]*(?:#{1,6}(?:[ \t]|$)|>|```|~~~|<{7}|([-*_])(?:[ \t]*\1){2,}[ \t]*$)|^ {0,3}(?:=+|-+)[ \t]*$/m;
+  /^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*(?:#{1,6}(?:[ \t]|$)|>|```|~~~|<{7}|<\/?[A-Za-z]|([-*_])(?:[ \t]*\1){2,}[ \t]*$)|^[ \t]*(?:=+|-+)[ \t]*$/m;
 /**
- * A link, a link reference or definition, an image, HTML, an HTML block's opener, or an autolink,
- * mail too, anywhere.
+ * A link, a link reference or definition, an image, HTML, an HTML block's opener, an autolink, mail
+ * too, code, or a plugin's template tags, anywhere.
  */
 const MARKUP =
-  /\[\[|!\[|\]\(|\]:|\]\[|<\/?[A-Za-z][\w-]*(?:[\s/][^<>]*)?>|<[A-Za-z][A-Za-z0-9+.-]*:|<[^\s<>@]+@[^\s<>@]+>|<[!?]/;
+  /\[\[|!\[|\]\(|\]:|\]\[|<\/?[A-Za-z][\w-]*(?:[\s/][^>]*)?>|<[A-Za-z][A-Za-z0-9+.-]*:|<[^\s<>@]+@[^\s<>@]+>|<[!?]|`|<%|%>/;
 
 /**
  * The summary an answer holds: JSON with the one key `summary`, plain lines within the limit.
