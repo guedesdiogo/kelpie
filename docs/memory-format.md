@@ -287,7 +287,7 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - **Scopes** come from who wrote and where (#131):
     - **The owner in a direct chat** sees every scope ([ADR-0015](adr/0015-single-player-first.md)).
     - **Any other turn** sees only its own conversation's scope, where its session pages go: the memory every participant may see ([ADR-0004](adr/0004-access-control.md)). That is a group, a role other than owner, or a role or chat type that ingress didn't name or the runtime doesn't know.
-    - **A turn with several authors** gets the least privileged of them, and keeps it for its retries.
+    - **A turn with several authors** gets the least privileged of them, and keeps it for its retries. That includes the authors of an interrupted turn whose messages it answers, since its question reads every line since the last reply the person saw.
     - **Today** ingress admits only the owner's direct chats, so the narrow set is reached only when a role is missing:
       - a message pending, or a turn running, when migration 0009 runs, for that one turn;
       - a webchat socket that an ingress from before #131 admitted, until the page reconnects. Deploying the runtime disconnects every socket ([Durable Objects](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)), so this lasts only while ingress runs an older version than the runtime.

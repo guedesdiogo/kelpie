@@ -426,6 +426,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     await this.#cancelFlushSchedule();
     this.#set("resumedAt", null);
     const pending = this.#pendingInbound();
+    const access = leastAccess([...pending, ...this.#unansweredAccess()]);
     const now = this.#ports.now();
     const checkpointId = this.#latestCheckpoint()?.id ?? null;
     const turnId = this.#db.transaction((tx) => {
@@ -438,7 +439,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           systemVersion: promptVersion,
           checkpointId,
           settings,
-          ...leastAccess(pending),
+          ...access,
           createdAt: now,
         })
         .returning({ id: schema.turns.id })
@@ -1114,8 +1115,20 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    * Only the newest RECALL_QUESTION_CHARS go. Empty when no line is worth a lookup.
    */
   #question(): string {
-    // The last reply the person saw: a reply that called tools answered nothing yet.
-    const lastReply =
+    const lines = this.#db
+      .select({ message: schema.history.message })
+      .from(schema.history)
+      .where(gt(schema.history.id, this.#lastSeenReply()))
+      .orderBy(asc(schema.history.id))
+      .all()
+      .flatMap(({ message }) => withoutTypedStamps(messageText(message)).split("\n"))
+      .filter(needsMemory);
+    return newest(lines.join("\n"), RECALL_QUESTION_CHARS);
+  }
+
+  /** The history row of the last reply the person saw: a reply that called tools answered nothing yet. */
+  #lastSeenReply(): number {
+    return (
       this.#db
         .select({ id: schema.history.id, message: schema.history.message })
         .from(schema.history)
@@ -1123,16 +1136,21 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         .orderBy(desc(schema.history.id))
         .limit(QUESTION_REPLY_SCAN)
         .all()
-        .find(({ message }) => seen(message))?.id ?? 0;
-    const lines = this.#db
-      .select({ message: schema.history.message })
-      .from(schema.history)
-      .where(gt(schema.history.id, lastReply))
-      .orderBy(asc(schema.history.id))
-      .all()
-      .flatMap(({ message }) => withoutTypedStamps(messageText(message)).split("\n"))
-      .filter(needsMemory);
-    return newest(lines.join("\n"), RECALL_QUESTION_CHARS);
+        .find(({ message }) => seen(message))?.id ?? 0
+    );
+  }
+
+  /**
+   * The access of earlier turns whose messages no reply the person saw has answered yet. A new turn
+   * answers them too, as its question does (#131), so it takes their access as well.
+   */
+  #unansweredAccess(): TurnAccess[] {
+    return this.#db
+      .selectDistinct({ role: schema.turns.role, chatType: schema.turns.chatType })
+      .from(schema.turns)
+      .innerJoin(schema.history, eq(schema.history.turnId, schema.turns.id))
+      .where(and(eq(schema.history.role, "user"), gt(schema.history.id, this.#lastSeenReply())))
+      .all();
   }
 
   /**

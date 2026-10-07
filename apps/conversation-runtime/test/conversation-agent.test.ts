@@ -1282,6 +1282,26 @@ describe("ConversationAgent memory", () => {
     expect(await turn(message("m5", "e a Carla?"))).toEqual(options);
   });
 
+  it("answers an interrupted turn's messages with their access too, as its question does", async () => {
+    const world = use(fakeWorld([hang(), reply("Ok.")]));
+    const stub = agent("memory-scopes-interrupted");
+    await stub.ingest({
+      ...message("m1", "onde a Ana mora?", { userId: "u-guest" }),
+      role: "member",
+    });
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(1));
+
+    // The owner interrupts: the next turn answers the guest's question too.
+    await stub.ingest(message("m2", "e o Bruno?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Ok."]));
+    expect(world.recalls.at(-1)).toMatchObject({
+      question: "onde a Ana mora?\ne o Bruno?",
+      options: narrow,
+    });
+  });
+
   it("sends a turn's memories with its request, and again in place on later ones", async () => {
     const world = use(fakeWorld([reply("Em Lisboa."), reply("Não sei."), reply("Também não.")]));
     const logged = vi.spyOn(console, "log").mockImplementation(() => {});
