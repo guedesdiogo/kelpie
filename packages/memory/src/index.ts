@@ -93,6 +93,7 @@ export { instantOf, isDate, isDateTime } from "./time.ts";
 export {
   MemoryFormatError,
   type MemoryInput,
+  printableLine,
   type WriteOptions,
   type WrittenMemory,
   writeMemory,

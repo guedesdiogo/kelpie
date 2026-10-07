@@ -52,11 +52,13 @@ import type {
   ReadNoteResult,
   RecallOptions,
   RecallResult,
+  SetDreamResult,
   SkillEntry,
   WriteNoteOptions,
   WriteNoteResult,
   WriteResult,
 } from "./contract.ts";
+import { proposeAbstract } from "./dream.ts";
 import { mergeOwnerWins } from "./merge.ts";
 import {
   agentRulesPath,
@@ -168,6 +170,19 @@ const RESOLVE_RETRY_MS = 5 * 60_000;
 const OWNER_CHANGES_MS = 7 * 24 * 60 * 60_000;
 /** How often the lifecycle report is written (#111). */
 const LIFECYCLE_EVERY_MS = 24 * 60 * 60_000;
+/**
+ * Dream (#112): a run starts at most this often, once no turn has touched memory for this long, on
+ * the notes Kelpie wrote this recently, and makes this many model calls at most, one per wake.
+ */
+const DREAM_EVERY_MS = 6 * 60 * 60_000;
+const DREAM_QUIET_MS = 30 * 60_000;
+const DREAM_LOOKBACK_MS = 7 * 24 * 60 * 60_000;
+const DREAM_MAX_CALLS = 8;
+const DREAM_TIMEOUT_MS = 30_000;
+/** While a run is on, the alarm comes back this soon for its next step. */
+const DREAM_STEP_MS = 5_000;
+/** Ended runs are kept this long, with what they used. */
+const DREAM_RUNS_MS = 30 * 24 * 60 * 60_000;
 /** The soonest the alarm wakes for a held file's next try. */
 const RESOLVE_WAKE_MS = 1_000;
 /** How much of the vault's `AGENTS.md` the model sees with a conflict. */
@@ -185,6 +200,7 @@ const PATH_TABLES = [
   "authored",
   "owner_changes",
   "owner_merges",
+  "dream_proposals",
 ] as const;
 /** A held file's resolution, queued as the owner's text with a conflict settled (#114). */
 const RESOLVE_SUMMARY = "Resolve a pushed merge conflict, with the model";
@@ -238,6 +254,20 @@ CREATE TABLE IF NOT EXISTS authored (
 CREATE TABLE IF NOT EXISTS owner_merges (
   path TEXT PRIMARY KEY NOT NULL,
   content TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS dream_runs (
+  id INTEGER PRIMARY KEY,
+  started_at INTEGER NOT NULL,
+  ended_at INTEGER,
+  outcome TEXT,
+  calls INTEGER NOT NULL DEFAULT 0,
+  usage TEXT NOT NULL DEFAULT '[]'
+);
+CREATE TABLE IF NOT EXISTS dream_proposals (
+  path TEXT PRIMARY KEY NOT NULL,
+  blob_sha TEXT NOT NULL,
+  abstract TEXT,
+  at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS proposals (
   id INTEGER PRIMARY KEY,
@@ -517,6 +547,7 @@ export class Vault extends DurableObject<VaultEnv> {
     summary: string,
   ): Promise<WriteResult> {
     if (this.#backend() === null) return { ok: false, reason: "vault_off" };
+    this.#touch();
     const valid =
       isAgentId(agentId) &&
       Array.isArray(changes) &&
@@ -687,6 +718,7 @@ export class Vault extends DurableObject<VaultEnv> {
     const moreToEmbed = await this.#embedPending();
     await this.#resolveHeld();
     await this.#lifecycle();
+    const dreaming = await this.#dream();
     const queued =
       this.#exec<{ n: number }>(`SELECT count(*) AS n FROM queue WHERE path NOT IN (${HELD})`)[0]
         ?.n ?? 0;
@@ -698,6 +730,131 @@ export class Vault extends DurableObject<VaultEnv> {
       const due = Number(this.#get("resolve_after") ?? "0");
       await this.#alarmBy(Math.max(due, Date.now() + RESOLVE_WAKE_MS));
     }
+    if (dreaming) await this.#alarmBy(Date.now() + DREAM_STEP_MS);
+  }
+
+  /**
+   * One step of Dream (#112), after the vault's other work: one model call per wake, as a held
+   * file's resolution, so a run never holds back GitHub's. A run starts at most every
+   * DREAM_EVERY_MS, once no turn has touched memory for DREAM_QUIET_MS, and only with a note to work
+   * on; memory used since it started ends it before its next step. It only proposes, the dry run
+   * the owner decided on: the report shows the plan. Answers whether a run is still on.
+   */
+  async #dream(): Promise<boolean> {
+    const gateway = this.#gateway();
+    if (gateway === null || this.#backend() === null) return false;
+    const now = Date.now();
+    const off = this.#get("dream_mode") === "off";
+    const activeAt = Number(this.#get("active_at") ?? "0");
+    let run = this.#exec<{ id: number; started_at: number; calls: number; usage: string }>(
+      "SELECT id, started_at, calls, usage FROM dream_runs WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1",
+    )[0];
+    if (run !== undefined && (off || activeAt > run.started_at)) {
+      return this.#endDream(run.id, off ? "off" : "cancelled");
+    }
+    if (run === undefined) {
+      if (off || now < Number(this.#get("dream_after") ?? "0") || now - activeAt < DREAM_QUIET_MS) {
+        return false;
+      }
+    }
+    const note = this.#dreamCandidate(now);
+    if (run === undefined) {
+      if (note === null) return false;
+      this.#set("dream_after", `${now + DREAM_EVERY_MS}`);
+      const id = this.#exec<{ id: number }>(
+        "INSERT INTO dream_runs (started_at) VALUES (?) RETURNING id",
+        now,
+      )[0]?.id;
+      run = { id: id ?? 0, started_at: now, calls: 0, usage: "[]" };
+    }
+    if (note === null || run.calls >= DREAM_MAX_CALLS) return this.#endDream(run.id, "done");
+    let proposed: Awaited<ReturnType<typeof proposeAbstract>>;
+    try {
+      proposed = await proposeAbstract(gateway, note, DREAM_TIMEOUT_MS);
+    } catch (error) {
+      console.error("Vault: a Dream step failed", errorName(error));
+      return this.#endDream(run.id, "failed");
+    }
+    const usage = [...(JSON.parse(run.usage) as unknown[]), ...proposed.usage];
+    this.ctx.storage.transactionSync(() => {
+      // Kept with the version it was made from: a later version is a note to propose for again.
+      this.#exec(
+        "INSERT OR REPLACE INTO dream_proposals (path, blob_sha, abstract, at) VALUES (?, ?, ?, ?)",
+        note.path,
+        note.blobSha,
+        proposed.abstract,
+        Date.now(),
+      );
+      this.#exec(
+        "UPDATE dream_runs SET calls = calls + 1, usage = ? WHERE id = ?",
+        JSON.stringify(usage),
+        run.id,
+      );
+    });
+    // Counts only: the note and the abstract are personal data.
+    console.log("Vault: Dream step", {
+      calls: run.calls + 1,
+      proposed: proposed.abstract !== null,
+      output: proposed.usage.reduce((sum, call) => sum + call.output, 0),
+    });
+    return true;
+  }
+
+  /** Ends a run; the report shows its plan when the next alarm writes it. */
+  #endDream(id: number, outcome: "done" | "cancelled" | "failed" | "off"): false {
+    this.#exec(
+      "UPDATE dream_runs SET ended_at = ?, outcome = ? WHERE id = ?",
+      Date.now(),
+      outcome,
+      id,
+    );
+    this.#set("lifecycle_after", "0");
+    return false;
+  }
+
+  /**
+   * The next note Dream may propose an abstract for (#112), newest first: one whose current version
+   * Kelpie wrote (#126) within DREAM_LOOKBACK_MS, a session page or a note without an abstract, with
+   * no write waiting, not held, and not proposed for already. The owner's notes are never one.
+   */
+  #dreamCandidate(
+    now: number,
+  ): { path: string; blobSha: string; title: string; body: string } | null {
+    const recent = this.#memory
+      .lifecycleNotes()
+      .filter((note) => note.recordedAt >= now - DREAM_LOOKBACK_MS)
+      .sort((a, b) => b.recordedAt - a.recordedAt || (a.path < b.path ? -1 : 1));
+    const kelpie = this.#byKelpie(recent.map((note) => note.path));
+    const waiting = new Set(
+      this.#exec<{ path: string }>("SELECT path FROM queue UNION SELECT path FROM held").map(
+        (row) => row.path,
+      ),
+    );
+    const proposed = new Map(
+      this.#exec<{ path: string; blob_sha: string }>(
+        "SELECT path, blob_sha FROM dream_proposals",
+      ).map((row) => [row.path, row.blob_sha]),
+    );
+    for (const note of recent) {
+      if (!kelpie.has(note.path) || waiting.has(note.path)) continue;
+      if (proposed.get(note.path) === note.blobSha) continue;
+      const version = this.#memory.current(note.path);
+      if (version === null || (note.kind !== "session" && version.abstract !== null)) continue;
+      return { path: note.path, blobSha: note.blobSha, title: version.title, body: version.body };
+    }
+    return null;
+  }
+
+  /** Turns Dream off, or back on as dry runs (#112): one setting for the whole vault. */
+  setDream(mode: unknown): SetDreamResult {
+    if (mode !== "off" && mode !== "dry") return { ok: false, reason: "invalid" };
+    this.#set("dream_mode", mode);
+    return { ok: true, mode };
+  }
+
+  /** A turn touched memory: Dream waits for quiet, and a run in progress stops (#112). */
+  #touch(): void {
+    this.#set("active_at", `${Date.now()}`);
   }
 
   /**
@@ -906,11 +1063,27 @@ export class Vault extends DurableObject<VaultEnv> {
       const changed = this.#exec<{ path: string; at: number; removed: number }>(
         "SELECT path, at, removed FROM owner_changes ORDER BY path, at",
       ).map((row) => ({ path: row.path, at: row.at, removed: row.removed === 1 }));
+      // Dream's proposals for versions the vault no longer holds go, and runs past their keep.
+      this.#exec(
+        `DELETE FROM dream_proposals WHERE NOT EXISTS (SELECT 1 FROM files f
+           WHERE f.path = dream_proposals.path AND f.blob_sha = dream_proposals.blob_sha)`,
+      );
+      this.#exec(
+        "DELETE FROM dream_runs WHERE ended_at IS NOT NULL AND ended_at < ?",
+        now - DREAM_RUNS_MS,
+      );
+      const dream =
+        this.#get("dream_mode") === "off"
+          ? []
+          : this.#exec<{ path: string; abstract: string }>(
+              "SELECT path, abstract FROM dream_proposals WHERE abstract IS NOT NULL ORDER BY path",
+            );
       const report = lifecycleReport(
         lifecycleFindings(this.#memory, {
           now,
           uses,
           changed,
+          dream,
           ...(model === null ? {} : { model }),
         }),
       );
@@ -993,6 +1166,7 @@ export class Vault extends DurableObject<VaultEnv> {
    * answers an empty block, so a turn goes on without memory.
    */
   async recall(agentId: string, question: string, options: RecallOptions): Promise<RecallResult> {
+    this.#touch();
     const empty: RecallResult = { text: "", tokens: 0, paths: [], notes: [] };
     const budget = Math.min(
       Math.max(Math.floor(Number(options?.budgetTokens)) || 0, 0),
@@ -1038,6 +1212,7 @@ export class Vault extends DurableObject<VaultEnv> {
     query: string,
     options: MemorySearchOptions,
   ): Promise<MemorySearchResult> {
+    this.#touch();
     const k = Math.min(
       Math.max(Math.floor(Number(options?.k ?? SEARCH_K)) || SEARCH_K, 1),
       MAX_SEARCH_K,
@@ -1080,6 +1255,7 @@ export class Vault extends DurableObject<VaultEnv> {
    * counts as one access.
    */
   async readNote(agentId: string, path: string, options: ReadNoteOptions): Promise<ReadNoteResult> {
+    this.#touch();
     const notFound: ReadNoteResult = { ok: false, reason: "not_found" };
     const scopes = options?.scopes;
     const scopesValid =
@@ -1154,6 +1330,7 @@ export class Vault extends DurableObject<VaultEnv> {
     input: MemoryWriteInput,
     options: WriteNoteOptions,
   ): Promise<WriteNoteResult> {
+    this.#touch();
     const scopes = options?.scopes;
     const scopesValid =
       scopes === "all" ||

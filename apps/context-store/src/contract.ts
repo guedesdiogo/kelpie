@@ -247,4 +247,11 @@ export interface ContextStoreAdminContract {
    * path ending in `/` names a folder. Git is never touched.
    */
   forget(paths: string[]): Promise<ForgetResult>;
+  /**
+   * Turns Dream off, or back on as dry runs that only propose (#112): one setting for the vault,
+   * `dry` until the owner says otherwise.
+   */
+  setDream(mode: "off" | "dry"): Promise<SetDreamResult>;
 }
+
+export type SetDreamResult = { ok: true; mode: "off" | "dry" } | { ok: false; reason: "invalid" };

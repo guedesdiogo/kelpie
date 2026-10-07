@@ -25,6 +25,8 @@ const GROUP_NOTES = 10;
 /** A link's title and path are cut to these many characters. */
 const TITLE_CHARS = 120;
 const PATH_CHARS = 200;
+/** The writer's limit for an abstract. */
+const ABSTRACT_CHARS = 300;
 
 /**
  * The cosine band in which two notes about one entity may contradict each other, per embedding
@@ -55,6 +57,8 @@ export interface LifecycleFindings {
   contradictions: { notes: [NoteRef, NoteRef]; entity: string }[];
   /** The owner's notes Kelpie changed lately (#160): each one's latest change, newest first. */
   changed: (NoteRef & { changedAt: number; removed: boolean })[];
+  /** Dream's dry-run plan (#112): the abstract it would give each note, by path. */
+  dream: (NoteRef & { abstract: string })[];
 }
 
 export interface LifecycleOptions {
@@ -66,6 +70,8 @@ export interface LifecycleOptions {
   bands?: Readonly<Record<string, readonly [number, number]>>;
   /** When Kelpie changed a note it hadn't written (the Context Store's record), in the window shown. */
   changed?: readonly { path: string; at: number; removed?: boolean }[];
+  /** Dream's proposals (the Context Store's), each made from the note's current version. */
+  dream?: readonly { path: string; abstract: string }[];
 }
 
 type LifecycleNote = ReturnType<MemoryIndex["lifecycleNotes"]>[number] & { writtenAt: number };
@@ -161,7 +167,20 @@ export function lifecycleFindings(
     }))
     .sort((a, b) => b.changedAt - a.changedAt || byPath(a, b));
 
-  return { cold, duplicates, contradictions: contradictions(index, notes, options), changed };
+  const dream = (options.dream ?? [])
+    .flatMap(({ path, abstract }) => {
+      const current = index.current(path);
+      return current === null ? [] : [{ path, title: current.title, abstract }];
+    })
+    .sort(byPath);
+
+  return {
+    cold,
+    duplicates,
+    contradictions: contradictions(index, notes, options),
+    changed,
+    dream,
+  };
 }
 
 /**
@@ -351,6 +370,19 @@ export function lifecycleReport(findings: LifecycleFindings): string | null {
             (pair) =>
               `- ${link(pair.notes[0])} and ${link(pair.notes[1])}, both about \`${plain(pair.entity, TITLE_CHARS) || "?"}\``,
           ),
+        ),
+      ].join("\n"),
+    );
+  }
+  if (findings.dream.length > 0) {
+    sections.push(
+      [
+        "## Dream's plan",
+        "",
+        "A dry run: the abstract Dream would give each note. Nothing was written.",
+        "",
+        ...capped(
+          findings.dream.map((note) => `- ${link(note)}: ${plain(note.abstract, ABSTRACT_CHARS)}`),
         ),
       ].join("\n"),
     );
