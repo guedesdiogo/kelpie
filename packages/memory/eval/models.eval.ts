@@ -23,6 +23,7 @@ import { GOLD_MEMORIES } from "./gold-vault.ts";
 import { LABELS_SHA256, WRITE_SET_SHA256 } from "./labels.ts";
 import { QUESTIONS } from "./questions.ts";
 import { answerRank, bySlice, percentile, type QuestionResult, staleFirst } from "./score.ts";
+import abstractsCache from "./session-abstracts.json";
 import { WRITE_PAIRS, type WriteRelation } from "./write-decision-set.ts";
 
 const models = env as unknown as {
@@ -542,5 +543,60 @@ describe.skipIf(!enabled)("memory evaluation with models", () => {
     task.meta.memoryEvalModels = { band };
     console.log(JSON.stringify({ band }, null, 1));
     expect(Object.keys(band).length).toBeGreaterThan(0);
+  });
+
+  it("measures Dream's abstracts with vectors over 1,000 memories (#112)", async ({ task }) => {
+    // An abstract is embedded with the title and body, so writing one moves the vectors too.
+    const abstracts = new Map(
+      Object.entries(abstractsCache.abstracts).flatMap(([path, entry]) =>
+        entry.abstract === null ? [] : [[path, entry.abstract] as const],
+      ),
+    );
+    const vaults = {
+      before: await buildVault(1_000),
+      after: await buildVault(1_000, SEED, { abstracts }),
+    };
+    const overall: Record<string, Record<string, unknown>> = {};
+    for (const [name, vault] of Object.entries(vaults)) {
+      overall[name] = await runInDurableObject(
+        env.INDEX_HOST.getByName(`models-abstracts-${name}`),
+        async (_instance, state) => {
+          const index = new MemoryIndex(state.storage);
+          for (const commit of vault.commits) await index.applyCommit(commit);
+          const configs: Record<string, unknown> = {};
+          for (const embedder of embedders()) {
+            for (;;) {
+              const missing = index.embeddingTexts(embedder.model, 256);
+              if (missing.length === 0) break;
+              const vectors = await embedder.embed(missing.map((item) => item.text));
+              index.putEmbeddings(
+                embedder.model,
+                missing.map((item, i) => ({ blobSha: item.blobSha, vector: vectors[i] ?? [] })),
+              );
+            }
+            const queries = await embedder.embed(QUESTIONS.map((question) => question.text));
+            const results: QuestionResult[] = QUESTIONS.map((question, i) => {
+              const hits = retrieve(index, question.text, {
+                ...optionsOf(question),
+                vector: { model: embedder.model, query: queries[i] ?? [] },
+              });
+              return {
+                id: question.id,
+                category: question.category,
+                answerRank: answerRank(question, hits, vault.labels),
+                staleFirst: staleFirst(question, hits, vault.labels),
+                tokens: 0,
+                latencyMs: 0,
+              };
+            });
+            configs[`+ ${embedder.model}`] = bySlice(results);
+          }
+          return configs;
+        },
+      );
+    }
+    task.meta.memoryEvalModels = { abstracts: { count: abstracts.size, ...overall } };
+    console.log(JSON.stringify({ abstracts: overall }, null, 1));
+    expect(Object.keys(overall.before ?? {}).length).toBeGreaterThan(0);
   });
 });

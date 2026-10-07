@@ -311,8 +311,19 @@ What the numbers show:
   - Entities move by one rank: MRR 0.701 to 0.699, with the same hits.
   - `eval` checks that retrieval's overall numbers don't drop.
 - **Plain search drops a little.** It is the baseline, and no turn uses it: the abstracts' words add matches on distractor sessions.
+- **With vectors** (`eval:models`, 2026-10-07): retrieval with each model's vector, without the rerank.
+
+  | Overall, 1k vault | hit@1 | hit@3 | hit@5 | hit@10 | MRR |
+  |---|---|---|---|---|---|
+  | `@cf/baai/bge-m3`, as it is | 0.653 | 0.833 | 0.887 | 0.947 | 0.754 |
+  | `@cf/baai/bge-m3`, with abstracts | 0.660 | 0.827 | 0.893 | 0.947 | 0.755 |
+  | `text-embedding-3-small`, as it is | 0.627 | 0.833 | 0.893 | 0.953 | 0.737 |
+  | `text-embedding-3-small`, with abstracts | 0.640 | 0.847 | 0.900 | 0.953 | 0.749 |
+
+  - **MRR doesn't drop with either model.**
+  - **bge-m3, production's model, loses one question at hit@3,** and multi-hop dips: MRR 0.322 to 0.307, hit@3 0.60 to 0.55.
+  - **Preferences rise with both:** bge-m3's MRR goes from 0.883 to 0.903, `text-embedding-3-small`'s from 0.839 to 0.887.
 - **Not measured:**
-  - **Vectors:** `eval:models` wasn't run with the abstracts.
   - **The production baseline:** in production a session page's abstract is its first message, not none.
   - **The tier:** `gpt-6-luna` stands in for the cheap tier's first model, Claude Haiku 4.5.
   - **Real use:** whether abstracts help real recall. The owner judges that from the dry run's proposals.
