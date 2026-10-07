@@ -451,7 +451,25 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
   - **A plan the owner already read:** once `abstracts` is named, the proposals Dream made while dry are written for the versions the vault still holds, with no new model call. A write that didn't land isn't tried again for that version.
   - **After it:** the version Dream wrote stays Kelpie's (#126), and it isn't proposed for again. The report's "Dream wrote" section lists the last week's abstracts, shown as code.
   - **Measured first:** #108's evaluation doesn't regress with the cheap tier's abstracts ([memory-eval.md](spikes/memory-eval.md#dreams-abstracts-112)).
-- **Not yet:** the other operations: duplicates, contradictions, roll-ups, people and places, and summaries.
+- **Day summaries** (#112): a dry run for now. `summaries` can't be named in `writes` yet.
+  - **What a summary covers:** one day of one conversation. Two conversations are never mixed (#131). A day is summed up once it has ended, and only within the last 7 days.
+  - **Where it would go:** `<scope>/sessions/YYYY/YYYY-MM-DD.md`, next to the session pages, as a `session` note at `level: deduced`.
+    - Its `sources` would name the session pages.
+    - No session page can take that name, since theirs add a slug after the date.
+  - **When it's proposed again:** the proposal is kept with the versions of the day's pages. A new page that day proposes it again, and nothing else does. A day whose summary the vault already shows isn't proposed.
+  - **The model:** the cheap tier, after abstracts, within the same 8 calls a run.
+    - The day's pages share 12,000 characters of input.
+    - The answer must be JSON with one key, `summary`: plain lines within 2,000 characters, with no heading, frontmatter fence, conflict markers or line separators.
+    - Secrets are removed from it.
+  - **The page:** `memory/_lint/dream.md`, outside the index, lists each proposed summary.
+    - Each summary is shown as code, fenced by more backticks than it holds in a row.
+    - Newest day first, each with the pages it sums up.
+    - It is written with the report, and removed when nothing is proposed.
+  - **Erasing:** forgetting a session page forgets its day's summary. Turning Dream off deletes the summaries too.
+- **Not yet:**
+  - duplicates and contradictions;
+  - roll-ups, and people and places;
+  - week and month summaries.
 
 ### The write decision
 

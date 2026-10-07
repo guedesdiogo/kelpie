@@ -59,7 +59,8 @@ export function summaryOf(answer: string): string | null {
   if (typeof summary !== "string") return null;
   const text = summary.trim();
   if (text === "" || text.length > SUMMARY_MAX_CHARS) return null;
-  if (/[\u0000-\u0009\u000b-\u001f\u007f\u2028\u2029\u202a-\u202e\u2066-\u2069]/u.test(text)) {
+  // Line breaks and tabs only: no other control, separator or bidirectional character.
+  if (/(?![\n\t])\p{Cc}|[\u2028\u2029\u202a-\u202e\u2066-\u2069]/u.test(text)) {
     return null;
   }
   if (/^(?:---|#|<{7}|={7}|>{7})/m.test(text)) return null;

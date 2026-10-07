@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { memoryPath, summaryInput, summaryOf, summaryPath } from "../src/index.ts";
+import { dreamPage, memoryPath, summaryInput, summaryOf, summaryPath } from "../src/index.ts";
 
 describe("summaryPath", () => {
   it("names a scope's day next to its session pages, where no session page can be", () => {
@@ -51,5 +51,30 @@ describe("summaryOf", () => {
     ["conflict markers", '{"summary": "<<<<<<< HEAD\\nx"}'],
   ])("refuses %s", (_case, answer) => {
     expect(summaryOf(answer)).toBeNull();
+  });
+});
+
+describe("dreamPage", () => {
+  it("shows each day's summary as code, fenced past any backticks it holds, newest first", () => {
+    const page =
+      dreamPage([
+        {
+          date: "2026-10-05",
+          scope: "global",
+          sources: [{ path: "memory/sessions/2026/2026-10-05-a.md", title: "A" }],
+          summary: "Falaram de ```código``` e de [[links]].",
+        },
+        {
+          date: "2026-10-06",
+          scope: "conversation/telegram-1",
+          sources: [{ path: "conversations/telegram-1/sessions/2026/2026-10-06-b.md", title: "B" }],
+          summary: "Combinaram sexta.",
+        },
+      ]) ?? "";
+    expect(page.indexOf("2026-10-06")).toBeLessThan(page.indexOf("2026-10-05"));
+    expect(page).toContain("Sums up: [[memory/sessions/2026/2026-10-05-a|A]]");
+    expect(page).toContain("````text\nFalaram de ```código``` e de [[links]].\n````");
+    expect(page).toContain("```text\nCombinaram sexta.\n```");
+    expect(dreamPage([])).toBeNull();
   });
 });

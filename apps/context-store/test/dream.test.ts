@@ -2,6 +2,7 @@ import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { type LlmEvent, type RoutedRequest, toNdjsonStream } from "@kelpie/llm";
 import {
+  DREAM_PAGE_PATH,
   LIFECYCLE_REPORT_PATH,
   type MemoryInput,
   memoryPath,
@@ -89,6 +90,33 @@ function fakeModel(answers: (string | Error)[]) {
   return requests;
 }
 
+/** A gateway whose model answers each request as `answer` says. */
+function fakeModelBy(answer: (request: RoutedRequest) => string) {
+  const requests: RoutedRequest[] = [];
+  replaceGatewayForTesting({
+    async embed() {
+      return { ok: false, reason: "failed" };
+    },
+    async qualify() {
+      return { ok: false, reason: "failed" };
+    },
+    async generate(_tier, request) {
+      requests.push(request);
+      const text = answer(request);
+      async function* events(): AsyncIterable<LlmEvent> {
+        yield {
+          type: "finish",
+          reason: "stop",
+          message: { role: "assistant", parts: [{ type: "text", text }] },
+          usage: USAGE,
+        };
+      }
+      return { events: async () => toNdjsonStream(events(), () => {}), cancel: async () => {} };
+    },
+  });
+  return requests;
+}
+
 const abstract = (text: string) => JSON.stringify({ abstract: text });
 
 /** As Kelpie writes a memory: its path and file. */
@@ -133,7 +161,8 @@ describe("Vault Dream", () => {
     const session = await kelpieNote({
       kind: "session",
       title: "Conversa sobre café",
-      date: "2026-10-06",
+      // Today: not a day to sum up yet.
+      date: daysAgo(0).slice(0, 10),
       body: "- **10:00 u-owner:** quero café sem açúcar",
       abstract: "quero café sem açúcar",
     });
@@ -350,7 +379,8 @@ describe("Vault Dream", () => {
     const session = await kelpieNote({
       kind: "session",
       title: "Conversa sobre café",
-      date: "2026-10-06",
+      // Today: not a day to sum up yet.
+      date: daysAgo(0).slice(0, 10),
       body: "- **10:00 u-owner:** quero café sem açúcar",
       abstract: "quero café sem açúcar",
     });
@@ -473,6 +503,85 @@ describe("Vault Dream", () => {
     expect(backend.files()[note.path]).toBe(owners);
     expect(await rows(stub, "SELECT path FROM queue")).toEqual([]);
     expect(await rows(stub, "SELECT path FROM owner_merges")).toEqual([]);
+  });
+
+  it("sums up each conversation's ended day on a page of its own, and writes nothing", async () => {
+    const day = daysAgo(2).slice(0, 10);
+    const session = (title: string, scope: MemoryInput["scope"], date: string) =>
+      kelpieNote({ kind: "session", title, scope, date, body: `- **10:00 u-owner:** ${title}` });
+    const pages = [
+      await session("Café de manhã", "global", day),
+      await session("Café de tarde", "global", day),
+      await session("Família", "conversation/telegram-1", day),
+      // Today hasn't ended.
+      await session("Hoje", "global", daysAgo(0).slice(0, 10)),
+    ];
+    const backend = new FakeVaultBackend({ "README.md": "# Vault" });
+    replaceBackendForTesting(backend);
+    const asked: string[] = [];
+    const requests = fakeModelBy((request) => {
+      const text = JSON.stringify(request.messages);
+      asked.push(text);
+      if (!request.system.includes("sum up one day")) return abstract("Uma linha.");
+      return JSON.stringify({
+        summary: text.includes("Família")
+          ? "Falaram da família."
+          : "Falaram de café.\n- Duas vezes.",
+      });
+    });
+    const stub = vault("dream-summaries");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", pages, "x");
+    await runDurableObjectAlarm(stub);
+    const files = backend.files();
+    await quiet(stub);
+    for (let i = 0; i < 9; i++) await runDurableObjectAlarm(stub);
+    const summaries = asked.filter((text) => text.includes("BEGIN PAGES"));
+    expect(summaries).toHaveLength(2);
+    // One conversation's day at a time: never mixed.
+    expect(summaries.find((text) => text.includes("Família"))).not.toContain("Café");
+    expect(summaries.join()).not.toContain("Hoje");
+    expect(await rows(stub, "SELECT path, summary FROM dream_summaries ORDER BY path")).toEqual([
+      {
+        path: `conversations/telegram-1/sessions/${day.slice(0, 4)}/${day}.md`,
+        summary: "Falaram da família.",
+      },
+      {
+        path: `memory/sessions/${day.slice(0, 4)}/${day}.md`,
+        summary: "Falaram de café.\n- Duas vezes.",
+      },
+    ]);
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec("UPDATE state SET value = '0' WHERE key = 'lifecycle_after'");
+    });
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    const page = backend.files()[DREAM_PAGE_PATH] ?? "";
+    expect(page).toContain(`## ${day} · global`);
+    expect(page).toContain("```text\nFalaram de café.\n- Duas vezes.\n```");
+    const {
+      [DREAM_PAGE_PATH]: _page,
+      [LIFECYCLE_REPORT_PATH]: _report,
+      ...notes
+    } = backend.files();
+    expect(notes).toEqual(files);
+    expect(requests.length).toBeGreaterThan(2);
+
+    // A new page that day proposes the day again; nothing else does.
+    const before = asked.length;
+    await stub.write("kelpie", [await session("Café de noite", "global", day)], "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    for (let i = 0; i < 6; i++) await runDurableObjectAlarm(stub);
+    const again = asked.slice(before).filter((text) => text.includes("BEGIN PAGES"));
+    expect(again).toHaveLength(1);
+    expect(again[0]).toContain("Café de noite");
+
+    // Forgetting a page forgets the day's summary.
+    expect(await stub.forget([pages[2]?.path ?? ""])).toMatchObject({ ok: true });
+    expect(
+      await rows(stub, "SELECT path FROM dream_summaries WHERE path LIKE 'conversations/%'"),
+    ).toEqual([]);
   });
 
   it("lets only known operations write, and forgets them when turned off", async () => {

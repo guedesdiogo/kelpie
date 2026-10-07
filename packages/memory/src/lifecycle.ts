@@ -7,6 +7,8 @@ import { instantOf, isDate } from "./time.ts";
 
 /** Where the report lives: a `memory/_` folder, which memory never indexes (`placeOf`). */
 export const LIFECYCLE_REPORT_PATH = "memory/_lint/report.md";
+/** Dream's day summaries while they run dry (#112): a page of their own, as they span lines. */
+export const DREAM_PAGE_PATH = "memory/_lint/dream.md";
 
 /** ai-memory's defaults: a 35-day half-life for age, recalls that wear off over about 25 days. */
 const AGE_DECAY = 0.02;
@@ -412,4 +414,38 @@ export function lifecycleReport(findings: LifecycleFindings): string | null {
   }
   if (sections.length === 0) return null;
   return `# Memory report\n\nKelpie writes this page every day from memory's index. Nothing listed under cold notes, duplicates or possible contradictions was changed. It goes away when every list is empty.\n\n${sections.join("\n\n")}\n`;
+}
+
+/** A day summary Dream proposes (#112): the day, its scope, the pages it sums up, and the text. */
+export interface DreamSummary {
+  date: string;
+  scope: string;
+  sources: readonly NoteRef[];
+  summary: string;
+}
+
+/**
+ * Dream's day summaries as one page, newest day first, or null when there are none. Each text is
+ * shown as code, fenced by more backticks than it holds in a row, so nothing a model wrote renders
+ * or closes the fence; each names the session pages it sums up.
+ */
+export function dreamPage(summaries: readonly DreamSummary[]): string | null {
+  if (summaries.length === 0) return null;
+  const sorted = [...summaries].sort((a, b) =>
+    a.date < b.date ? 1 : a.date > b.date ? -1 : a.scope < b.scope ? -1 : 1,
+  );
+  const sections = sorted.map((entry) => {
+    const longest = Math.max(0, ...(entry.summary.match(/`+/g) ?? []).map((run) => run.length));
+    const fence = "`".repeat(Math.max(3, longest + 1));
+    return [
+      `## ${plain(entry.date, 10)} · ${plain(entry.scope, PATH_CHARS, UNSAFE_PATH)}`,
+      "",
+      `Sums up: ${links([...entry.sources])}`,
+      "",
+      `${fence}text`,
+      entry.summary,
+      fence,
+    ].join("\n");
+  });
+  return `# Dream's day summaries\n\nA dry run: the summary Dream would write for each day of each conversation, shown as code. Nothing was written.\n\n${sections.join("\n\n")}\n`;
 }
