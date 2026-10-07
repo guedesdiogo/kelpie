@@ -17,6 +17,8 @@ export class LlmError extends Error {
     message: string,
     readonly code: LlmErrorCode,
     readonly retryable: boolean,
+    /** The provider's HTTP status, when it answered with one. */
+    readonly status?: number,
   ) {
     super(message);
   }
@@ -46,8 +48,8 @@ export function errorFromStatus(
       ? new LlmError(message, "bad_request", false)
       : new LlmError(message, "server_error", true);
   }
-  if (status >= 500) return new LlmError(message, "server_error", true);
-  if (status === 429) return new LlmError(message, "rate_limited", true);
-  if (status === 401 || status === 403) return new LlmError(message, "auth", false);
-  return new LlmError(message, "bad_request", false);
+  if (status >= 500) return new LlmError(message, "server_error", true, status);
+  if (status === 429) return new LlmError(message, "rate_limited", true, status);
+  if (status === 401 || status === 403) return new LlmError(message, "auth", false, status);
+  return new LlmError(message, "bad_request", false, status);
 }

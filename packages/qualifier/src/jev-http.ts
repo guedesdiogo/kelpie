@@ -46,15 +46,28 @@ export class JevHttpQualifier implements Qualifier {
       ...(options.signal ? { signal: options.signal } : {}),
     });
     // An error's body can echo the state, so only the status is reported.
-    if (!response.ok) throw new Error(`TypeSafe answered ${response.status}`);
+    if (!response.ok)
+      throw new TypeSafeError(`TypeSafe answered ${response.status}`, response.status);
     let body: unknown;
     try {
       body = await response.json();
     } catch {
       // The parser's message quotes the body, which can echo the state.
-      throw new Error("TypeSafe answered with a body that isn't JSON");
+      throw new TypeSafeError("TypeSafe answered with a body that isn't JSON");
     }
     const answers = systemOneAnswers(questions, body);
     return { answers, provider: this.id, calibrated: this.calibrated };
+  }
+}
+
+/** TypeSafe refused the call or sent no JSON. `status` is its HTTP status, when it answered with one. */
+class TypeSafeError extends Error {
+  override readonly name = "TypeSafeError";
+
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
   }
 }
