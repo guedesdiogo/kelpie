@@ -1,7 +1,13 @@
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { type LlmEvent, type RoutedRequest, toNdjsonStream } from "@kelpie/llm";
-import { LIFECYCLE_REPORT_PATH, type MemoryInput, memoryPath, writeMemory } from "@kelpie/memory";
+import {
+  LIFECYCLE_REPORT_PATH,
+  type MemoryInput,
+  memoryPath,
+  withAbstract,
+  writeMemory,
+} from "@kelpie/memory";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
 import { afterEach, describe, expect, it } from "vitest";
 import { proposeAbstract } from "../src/dream.ts";
@@ -304,7 +310,7 @@ describe("Vault Dream", () => {
         "INSERT INTO dream_proposals (path, blob_sha, abstract, at) VALUES ('memory/notes/x.md', 's', 'X.', 1)",
       );
     });
-    expect(await stub.setDream("off")).toEqual({ ok: true, mode: "off" });
+    expect(await stub.setDream("off")).toEqual({ ok: true, mode: "off", writes: [] });
     expect(await rows(stub, "SELECT path FROM dream_proposals")).toEqual([]);
     expect(await rows(stub, "SELECT value FROM state WHERE key = 'lifecycle_after'")).toEqual([
       { value: "0" },
@@ -314,10 +320,65 @@ describe("Vault Dream", () => {
     await quiet(stub);
     await runDurableObjectAlarm(stub);
     expect(requests).toHaveLength(0);
-    expect(await stub.setDream("dry")).toEqual({ ok: true, mode: "dry" });
+    expect(await stub.setDream("dry")).toEqual({ ok: true, mode: "dry", writes: [] });
     await quiet(stub);
     await runDurableObjectAlarm(stub);
     expect(requests).toHaveLength(1);
+  });
+
+  it("writes the abstracts the owner lets it write, once, and only the abstract", async () => {
+    const session = await kelpieNote({
+      kind: "session",
+      title: "Conversa sobre café",
+      date: "2026-10-06",
+      body: "- **10:00 u-owner:** quero café sem açúcar",
+      abstract: "quero café sem açúcar",
+    });
+    const backend = new FakeVaultBackend({ "README.md": "# Vault" });
+    replaceBackendForTesting(backend);
+    const requests = fakeModel([abstract("Conversa: café sem açúcar."), abstract("De novo.")]);
+    const stub = vault("dream-writes");
+    await stub.compile("kelpie");
+    expect(await stub.setDream("dry", ["abstracts"])).toEqual({
+      ok: true,
+      mode: "dry",
+      writes: ["abstracts"],
+    });
+    await stub.write("kelpie", [session], "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(requests).toHaveLength(1);
+    // Only the abstract changed, and the version is still Kelpie's (#126).
+    expect(backend.files()[session.path]).toBe(
+      withAbstract(session.content, "Conversa: café sem açúcar."),
+    );
+    expect(
+      await rows(
+        stub,
+        `SELECT count(*) AS n FROM files f JOIN authored a ON a.path = f.path AND a.blob_sha = f.blob_sha WHERE f.path = '${session.path}'`,
+      ),
+    ).toEqual([{ n: 1 }]);
+    // The version Dream wrote is no note to propose for again.
+    await quiet(stub);
+    await runDurableObjectAlarm(stub);
+    expect(requests).toHaveLength(1);
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    const report = backend.files()[LIFECYCLE_REPORT_PATH] ?? "";
+    expect(report).toContain("## Dream wrote");
+    expect(report).toContain("|Conversa sobre café]]: `Conversa: café sem açúcar.`");
+    expect(report).not.toContain("## Dream's plan");
+  });
+
+  it("lets only known operations write, and forgets them when turned off", async () => {
+    replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
+    const stub = vault("dream-writes-switch");
+    expect(await stub.setDream("dry", ["summaries"])).toEqual({ ok: false, reason: "invalid" });
+    expect(await stub.setDream("dry", ["abstracts"])).toMatchObject({ writes: ["abstracts"] });
+    expect(await stub.setDream("off")).toEqual({ ok: true, mode: "off", writes: [] });
+    expect(await stub.setDream("dry")).toEqual({ ok: true, mode: "dry", writes: [] });
   });
 
   it("ends a run in progress when the owner turns Dream off", async () => {

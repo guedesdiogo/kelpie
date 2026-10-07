@@ -76,8 +76,10 @@ export type ForgetVaultResult =
   | { ok: true; forgotten: number; stillInVault: string[] }
   | { ok: false; reason: "vault_off" | "invalid_input" | "unavailable" };
 
-/** Dream's mode (#112): off, or dry runs that only propose. */
+/** Dream's mode (#112): off, or on, where only the operations the owner names write. */
 export type DreamMode = "off" | "dry";
+/** More operation names than Dream will ever have. */
+const MAX_DREAM_OPERATIONS = 10;
 
 /** The most paths one `forgetVaultPaths` names, and the longest path the vault takes. */
 const MAX_FORGET_PATHS = 1_000;
@@ -114,7 +116,8 @@ export interface ConfigPorts {
     forget(paths: string[]): Promise<ForgetVaultResult>;
     setDream(
       mode: DreamMode,
-    ): Promise<{ ok: true; mode: DreamMode } | { ok: false; reason: "invalid" }>;
+      writes?: readonly string[],
+    ): Promise<{ ok: true; mode: DreamMode; writes: string[] } | { ok: false; reason: "invalid" }>;
   };
 }
 
@@ -363,15 +366,31 @@ export function createConfigCommands(ports: ConfigPorts) {
     },
 
     /**
-     * Turns Dream off, or back on as dry runs that only propose (#112): one setting for the whole
-     * vault, dry runs until the owner says otherwise.
+     * Turns Dream off, or back on (#112): one setting for the whole vault, dry runs until the owner
+     * says otherwise. `writes` names the operations that may write, such as `abstracts`; the others
+     * only propose, and off forgets them.
      */
-    async setDream(actor: Actor, input: unknown): Promise<CommandResult<{ mode: DreamMode }>> {
+    async setDream(
+      actor: Actor,
+      input: unknown,
+    ): Promise<CommandResult<{ mode: DreamMode; writes: string[] }>> {
       if (!isOwner(actor)) return forbidden;
-      const { mode } = (input ?? {}) as { mode?: unknown };
+      const { mode, writes } = (input ?? {}) as { mode?: unknown; writes?: unknown };
       if (mode !== "off" && mode !== "dry") return invalid;
-      const result = await ports.vault.setDream(mode);
-      return result.ok ? { ok: true, value: { mode: result.mode } } : invalid;
+      if (
+        writes !== undefined &&
+        !(
+          Array.isArray(writes) &&
+          writes.length <= MAX_DREAM_OPERATIONS &&
+          writes.every((name) => typeof name === "string" && name.length <= 40)
+        )
+      ) {
+        return invalid;
+      }
+      const result = await ports.vault.setDream(mode, writes as string[] | undefined);
+      return result.ok
+        ? { ok: true, value: { mode: result.mode, writes: result.writes } }
+        : invalid;
     },
   };
 }

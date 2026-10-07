@@ -57,8 +57,11 @@ export interface LifecycleFindings {
   contradictions: { notes: [NoteRef, NoteRef]; entity: string }[];
   /** The owner's notes Kelpie changed lately (#160): each one's latest change, newest first. */
   changed: (NoteRef & { changedAt: number; removed: boolean })[];
-  /** Dream's dry-run plan (#112): the abstract it would give each note, by path. */
-  dream: (NoteRef & { abstract: string })[];
+  /**
+   * Dream's abstracts (#112), by path: those it would give each note, and, `written`, those it wrote
+   * lately.
+   */
+  dream: (NoteRef & { abstract: string; written?: boolean })[];
 }
 
 export interface LifecycleOptions {
@@ -70,8 +73,8 @@ export interface LifecycleOptions {
   bands?: Readonly<Record<string, readonly [number, number]>>;
   /** When Kelpie changed a note it hadn't written (the Context Store's record), in the window shown. */
   changed?: readonly { path: string; at: number; removed?: boolean }[];
-  /** Dream's proposals (the Context Store's), each made from the note's current version. */
-  dream?: readonly { path: string; abstract: string }[];
+  /** Dream's proposals (the Context Store's), each for the note's current version, and its writes. */
+  dream?: readonly { path: string; abstract: string; written?: boolean }[];
 }
 
 type LifecycleNote = ReturnType<MemoryIndex["lifecycleNotes"]>[number] & { writtenAt: number };
@@ -168,9 +171,11 @@ export function lifecycleFindings(
     .sort((a, b) => b.changedAt - a.changedAt || byPath(a, b));
 
   const dream = (options.dream ?? [])
-    .flatMap(({ path, abstract }) => {
+    .flatMap(({ path, abstract, written }) => {
       const current = index.current(path);
-      return current === null ? [] : [{ path, title: current.title, abstract }];
+      return current === null
+        ? []
+        : [{ path, title: current.title, abstract, ...(written ? { written } : {}) }];
     })
     .sort(byPath);
 
@@ -374,19 +379,34 @@ export function lifecycleReport(findings: LifecycleFindings): string | null {
       ].join("\n"),
     );
   }
-  if (findings.dream.length > 0) {
+  // A model wrote the abstracts: as code, no link, tag or markup in them renders.
+  const abstracts = (notes: typeof findings.dream) =>
+    capped(
+      notes.map(
+        (note) => `- ${link(note)}: \`${plain(note.abstract, ABSTRACT_CHARS, UNSAFE_CODE)}\``,
+      ),
+    );
+  const planned = findings.dream.filter((note) => !note.written);
+  const written = findings.dream.filter((note) => note.written);
+  if (planned.length > 0) {
     sections.push(
       [
         "## Dream's plan",
         "",
         "A dry run: the abstract Dream would give each note, shown as code. Nothing was written.",
         "",
-        ...capped(
-          // A model wrote it: as code, no link, tag or markup in it renders.
-          findings.dream.map(
-            (note) => `- ${link(note)}: \`${plain(note.abstract, ABSTRACT_CHARS, UNSAFE_CODE)}\``,
-          ),
-        ),
+        ...abstracts(planned),
+      ].join("\n"),
+    );
+  }
+  if (written.length > 0) {
+    sections.push(
+      [
+        "## Dream wrote",
+        "",
+        "The abstracts Dream wrote in the last week, shown as code. Git keeps every earlier version.",
+        "",
+        ...abstracts(written),
       ].join("\n"),
     );
   }

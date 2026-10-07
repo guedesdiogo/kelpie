@@ -66,6 +66,7 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - **A step** is one model call that proposes an abstract for a note Kelpie wrote.
     - **Activity:** a recall, search, read or write marks memory as active, and Dream waits for 30 minutes of quiet.
     - **What it keeps:** its proposals in `dream_proposals`, and its runs, with what each call used, in `dream_runs`.
+    - **What it writes:** an abstract, for an operation the owner lets write, goes through the queue (`dream_writes` keeps what it wrote for a week).
   - **Embeddings:** the alarm embeds the notes that have no vector yet, through llm-gateway's `embed`, four batches of 64 a run, until none is left.
     - The model is the one `EMBEDDING_PROVIDER` chooses on llm-gateway. A recall that sees a new model arms the alarm, which embeds every note again; until then the vector stream finds what it can.
     - This runs after GitHub's work and fails on its own, so an llm-gateway outage never delays the vault's writes. A call that doesn't answer in 40 s is given up.
@@ -194,7 +195,7 @@ Git keeps every version, so erasing content means rewriting the vault's history.
    - **What it does:**
      - it syncs to the rewritten head;
      - it rebuilds memory's index from the vault as it is now, which drops every old version, of every file, with the vectors of content no version holds anymore;
-     - it deletes the rows that name the paths in `queue`, `conflicts`, `held`, `proposals`, `recall_counts`, `authored`, `owner_changes`, `owner_merges` and `dream_proposals`;
+     - it deletes the rows that name the paths in `queue`, `conflicts`, `held`, `proposals`, `recall_counts`, `authored`, `owner_changes`, `owner_merges`, `dream_proposals` and `dream_writes`;
      - it drops a memory report still waiting in the queue or set aside in `conflicts`, and the next alarm writes the report again from what is left. That is within 15 minutes while GitHub answers.
 
      It never touches git.

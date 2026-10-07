@@ -249,10 +249,14 @@ export interface ContextStoreAdminContract {
    */
   forget(paths: string[]): Promise<ForgetResult>;
   /**
-   * Turns Dream off, or back on as dry runs that only propose (#112): one setting for the vault,
-   * `dry` until the owner says otherwise.
+   * Turns Dream off, or back on (#112): one setting for the vault, `dry` until the owner says
+   * otherwise. `writes` names the operations that may write; the others only propose. Off forgets
+   * them.
    */
-  setDream(mode: "off" | "dry"): Promise<SetDreamResult>;
+  setDream(mode: "off" | "dry", writes?: readonly string[]): Promise<SetDreamResult>;
 }
 
-export type SetDreamResult = { ok: true; mode: "off" | "dry" } | { ok: false; reason: "invalid" };
+/** With the operations that may write, each dry until the owner names it (`abstracts`). */
+export type SetDreamResult =
+  | { ok: true; mode: "off" | "dry"; writes: string[] }
+  | { ok: false; reason: "invalid" };
