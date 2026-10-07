@@ -345,6 +345,7 @@ describe("lifecycle report", () => {
     const plainNote = { path: "knowledge/Wow!.md", title: "Família 👨‍👩‍👧" };
     const page =
       lifecycleReport({
+        changed: [],
         cold: [],
         duplicates: [{ kind: "title", notes: [hostile, plainNote] }],
         contradictions: [
@@ -367,6 +368,7 @@ describe("lifecycle report", () => {
     expect(
       lifecycleReport({
         cold: [],
+        changed: [],
         duplicates: [
           { kind: "title", notes: [hostile, { path: "memory/notes/b.md", title: hostile.title }] },
         ],
@@ -376,6 +378,7 @@ describe("lifecycle report", () => {
     expect(
       lifecycleReport({
         cold: [],
+        changed: [],
         duplicates: [
           {
             kind: "title",
@@ -391,7 +394,62 @@ describe("lifecycle report", () => {
   });
 
   it("is nothing when memory is clean", () => {
-    expect(lifecycleReport({ cold: [], duplicates: [], contradictions: [] })).toBeNull();
+    expect(
+      lifecycleReport({ cold: [], duplicates: [], contradictions: [], changed: [] }),
+    ).toBeNull();
+  });
+
+  it("keeps each note's latest change, newest first, and shows a removed note by its path", async () => {
+    await withNotes("lifecycle-changed", [note("Chá"), note("Casa")], (index) => {
+      const day = (d: string) => Date.parse(`2026-10-${d}T10:00:00Z`);
+      const findings = lifecycleFindings(index, {
+        now: NOW,
+        uses: new Map(),
+        changed: [
+          { path: memoryPath("global", "note", "Chá"), at: day("04") },
+          { path: memoryPath("global", "note", "Chá"), at: day("01") },
+          { path: memoryPath("global", "note", "Casa"), at: day("03") },
+          { path: "memory/notes/velho.md", at: day("02"), removed: true },
+        ],
+      });
+      expect(findings.changed.map((entry) => [entry.title, entry.removed])).toEqual([
+        ["Chá", false],
+        ["Casa", false],
+        ["velho", true],
+      ]);
+      const page = lifecycleReport(findings) ?? "";
+      expect(page).toContain("|Chá]]: changed 2026-10-04");
+      expect(page).toContain("- `memory/notes/velho.md`: removed 2026-10-02");
+      expect(page).not.toContain("[[memory/notes/velho");
+      // The page doesn't claim nothing listed on it was changed.
+      expect(page).not.toContain("nothing listed here was changed");
+    });
+  });
+
+  it("lists the owner's notes Kelpie changed, newest change per note", () => {
+    const page =
+      lifecycleReport({
+        cold: [],
+        duplicates: [],
+        contradictions: [],
+        changed: [
+          {
+            path: "memory/notes/cha.md",
+            title: "Chá",
+            changedAt: Date.parse("2026-10-05T10:00:00Z"),
+            removed: false,
+          },
+          {
+            path: "knowledge/casa.md",
+            title: "Casa",
+            changedAt: Date.parse("2026-10-06T09:00:00Z"),
+            removed: false,
+          },
+        ],
+      }) ?? "";
+    expect(page).toContain("## Your notes Kelpie changed");
+    expect(page).toContain("- [[knowledge/casa|Casa]]: changed 2026-10-06");
+    expect(page).toContain("- [[memory/notes/cha|Chá]]: changed 2026-10-05");
   });
 
   it("lives where memory never reads it", () => {

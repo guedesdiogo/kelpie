@@ -75,6 +75,7 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - Its only write is the access count.
     - It returns each note's provenance beside its path (#126). A note is Kelpie's while the vault holds a version Kelpie's own commit wrote, including its lines merged into an owner's edit. An edit made elsewhere, or a conflict the model resolved from the file's own lines, makes it the owner's.
       - The record is a table of the blobs Kelpie committed (`authored`), outside memory's index, so a rebuild keeps it.
+      - A merged version also holds the owner's lines, so the owner's-word rule still guards it (#160): `owner_merges` keeps its content while the vault holds it, or while the merged write waits to commit; the daily report's run drops it after that.
     - With the vault off, or on any failure, it answers an empty block, and the turn goes on without memory.
   - **`search(agent, query, {scopes, k?, asOf?, validAt?, qualifier?})`,** for the agent's `memory_search` (#126).
     - It is recall's retrieval and rerank, answered as hits instead of a packed block, in #110's fence: 3 by default, 10 at most.
@@ -189,7 +190,7 @@ Git keeps every version, so erasing content means rewriting the vault's history.
    - **What it does:**
      - it syncs to the rewritten head;
      - it rebuilds memory's index from the vault as it is now, which drops every old version, of every file, with the vectors of content no version holds anymore;
-     - it deletes the rows that name the paths in `queue`, `conflicts`, `held`, `proposals`, `recall_counts` and `authored`;
+     - it deletes the rows that name the paths in `queue`, `conflicts`, `held`, `proposals`, `recall_counts`, `authored`, `owner_changes` and `owner_merges`;
      - it drops a memory report still waiting in the queue or set aside in `conflicts`, and the next alarm writes the report again from what is left. That is within 15 minutes while GitHub answers.
 
      It never touches git.

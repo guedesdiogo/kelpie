@@ -66,6 +66,8 @@ describe("Vault forget", () => {
           "INSERT INTO recall_counts (path, count, last_at) VALUES (?, 1, 1)",
           path,
         );
+        state.storage.sql.exec("INSERT INTO owner_changes (path, at) VALUES (?, 1)", path);
+        state.storage.sql.exec("INSERT INTO owner_merges (path, content) VALUES (?, 'x')", path);
         state.storage.sql.exec(
           "INSERT INTO held (path, content, previous, state, attempts, at) VALUES (?, 'x', NULL, 'resolved', 1, 1)",
           path,
@@ -88,7 +90,7 @@ describe("Vault forget", () => {
     // The owner rewrote the history, so the leaked version is gone from git.
     // Its current files changed too: forgetting syncs before it rebuilds.
     backend.forcePush({ "README.md": "# Vault", [ana]: clean, [bia]: "# Bia\n\nNova.\n" });
-    expect(await stub.forget([ana])).toEqual({ ok: true, forgotten: 5, stillInVault: [ana] });
+    expect(await stub.forget([ana])).toEqual({ ok: true, forgotten: 7, stillInVault: [ana] });
 
     expect(await sql("SELECT path FROM versions ORDER BY path")).toEqual([
       { path: ana },
@@ -101,12 +103,20 @@ describe("Vault forget", () => {
     expect(await sql("SELECT blob_sha FROM embeddings")).toEqual([
       { blob_sha: await gitBlobSha(clean) },
     ]);
-    for (const table of ["queue", "conflicts", "held", "proposals", "recall_counts"]) {
+    const named = [
+      "conflicts",
+      "held",
+      "proposals",
+      "recall_counts",
+      "owner_changes",
+      "owner_merges",
+    ];
+    for (const table of ["queue", ...named]) {
       expect(await sql(`SELECT count(*) AS n FROM ${table} WHERE path = '${ana}'`)).toEqual([
         { n: 0 },
       ]);
     }
-    for (const table of ["conflicts", "held", "proposals", "recall_counts"]) {
+    for (const table of named) {
       expect(await sql(`SELECT path FROM ${table}`)).toEqual([{ path: bia }]);
     }
     expect(await sql(`SELECT body FROM versions WHERE path = '${bia}'`)).toEqual([
