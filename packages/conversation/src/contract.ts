@@ -1,4 +1,5 @@
-import type { ChannelId } from "@kelpie/channels";
+import type { Role } from "@kelpie/access";
+import type { CanonicalEvent, ChannelId } from "@kelpie/channels";
 
 // The ConversationAgent's contract with ingress, which reaches it through a Durable Object binding
 // to another Worker. It has its own entry point (`@kelpie/conversation/contract`), so ingress
@@ -10,6 +11,9 @@ export interface Destination {
   threadId: string;
 }
 
+/** A direct chat or a group: they see different memory (ADR-0004, #131). */
+export type ChatType = CanonicalEvent["chatType"];
+
 /** One inbound message, already admitted by `ingress` (ADR-0004, ADR-0015). */
 export interface InboundMessage {
   /** The agent that answers; its `AgentHost` holds the settings. */
@@ -17,6 +21,9 @@ export interface InboundMessage {
   providerMessageId: string;
   /** The admitted author. */
   userId: string;
+  /** The author's role, from their admission. */
+  role: Role;
+  chatType: ChatType;
   text: string;
   destination: Destination;
   /** When the provider says the message was sent (epoch ms). */
@@ -65,5 +72,8 @@ export const WEBCHAT_ADMISSION_HEADER = "x-kelpie-webchat-admission";
 export interface WebchatAdmission {
   agentId: string;
   userId: string;
+  role: Role;
+  /** The webchat is the owner's own login (ADR-0023): always a direct chat. */
+  chatType: ChatType;
   timeZone: string | null;
 }
