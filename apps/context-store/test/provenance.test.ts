@@ -130,6 +130,14 @@ describe("Vault provenance", () => {
     await runDurableObjectAlarm(stub);
     expect(backend.files()[ana]).toBe(resolved);
     expect(await provenance(stub, "Ana")).toEqual({ [ana]: false });
+    // Kelpie's resolution of a held conflict isn't listed among the owner's notes it changed (#160).
+    expect(
+      await runInDurableObject(
+        stub,
+        (_instance, state) =>
+          state.storage.sql.exec("SELECT count(*) AS n FROM owner_changes").one().n,
+      ),
+    ).toBe(0);
   });
 
   it("knows its own commit when GitHub's answer was lost, and forgets a file the owner removed", async () => {
