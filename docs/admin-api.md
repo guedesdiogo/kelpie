@@ -54,12 +54,11 @@ Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`
 | 403 | `forbidden`, `no_owner`, `invalid_bootstrap_token`, `invalid_recovery_token`, `cross_origin` (sent from another origin's page) |
 | 404 | `unknown_agent`, `unknown_identity`, `unknown_user`, `not_found` |
 | 409 | `not_paired` (a pending identity; pair it instead), `not_connected` (the agent has no bot), `identity_taken` (a recovery to a login another user holds) |
-| 502 | `channel_refused` (Telegram refused, or couldn't be reached) |
-| 503 | `unavailable` (the secret store can't be reached), `not_configured` (`channel-egress` was deployed without ingress's origin, or the vault is off) |
 | 410 | `bootstrap_disabled`, `recovery_token_spent` |
 | 413 | `too_large` |
 | 415 | `not_json` (a `Content-Type` other than `application/json`) |
-| 503 | `unavailable` (Access's keys couldn't be loaded) |
+| 502 | `channel_refused` (Telegram refused, or couldn't be reached) |
+| 503 | `unavailable` (the secret store can't be reached, or Access's keys couldn't be loaded), `not_configured` (`channel-egress` was deployed without ingress's origin, or the vault is off) |
 
 Identity values in answers are masked.
 
