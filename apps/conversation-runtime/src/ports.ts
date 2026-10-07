@@ -186,7 +186,7 @@ function productionPorts(env: Env): ConversationPorts {
             registerTelegramWebhook: notBound,
             describeTelegramBot: notBound,
           },
-          vault: { held: notBound, forget: notBound },
+          vault: { held: notBound, forget: notBound, setDream: notBound },
         }),
         { adminOrigin: env.ADMIN_ORIGIN },
       ),
