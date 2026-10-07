@@ -75,10 +75,12 @@ export interface ChannelFormsContract {
     | { ok: true; token: string; expiresAt: number }
     | { ok: false; reason: "invalid_input" | "store_unavailable" }
   >;
+  /** An open form, or one used in the last few minutes with the bot it connected. */
   describeForm(
     token: string,
   ): Promise<
     | { ok: true; agentId: string; kind: "telegram" }
+    | { ok: false; reason: "redeemed"; agentId: string; username: string }
     | { ok: false; reason: "unknown_form" | "store_unavailable" }
   >;
   redeemTelegramForm(
