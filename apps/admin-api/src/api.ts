@@ -226,8 +226,9 @@ async function handlePairing(
 
 /**
  * Whether a POST came from this origin's own pages. Browsers say so in `Sec-Fetch-Site`; without
- * it, the `Origin` must be this origin's. A browser sends `Origin` on every POST, so a request with
- * neither header came from no page, and passes only with `allowNoOrigin`: a client such as curl.
+ * it, the `Origin` must be this origin's. Current browsers send at least one of them on a POST, so a
+ * request with neither came from no page, and passes only with `allowNoOrigin`: a client such as
+ * curl.
  * (The form pages' referrer policy is `same-origin`, so the browser sends the real origin: under
  * `no-referrer` it would send `null`.)
  */

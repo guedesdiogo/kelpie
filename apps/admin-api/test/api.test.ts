@@ -762,7 +762,7 @@ describe("admin API secure forms", () => {
     expect(redeemed).toEqual([]);
   });
 
-  it("refuses a submission with neither Sec-Fetch-Site nor Origin, which no browser sends", async () => {
+  it("refuses a submission with neither Sec-Fetch-Site nor Origin", async () => {
     const { deps, redeemed } = world();
     const response = await handle(submit(GOOD_BOT_TOKEN, {}), deps);
     expect(response.status).toBe(403);
@@ -916,7 +916,7 @@ describe("admin API pairing page", () => {
     expect([...stranger.ran, ...member.ran, ...ran]).not.toContain("directory.issuePairingCode");
   });
 
-  it("takes no post with neither Sec-Fetch-Site nor Origin, which no browser sends", async () => {
+  it("takes no post with neither Sec-Fetch-Site nor Origin", async () => {
     const { deps, ran } = world();
     await call(deps, "/commands/createAgent", { id: "sales", name: "Sales" });
     const response = await handle(press("sales", {}), deps);
