@@ -1005,6 +1005,9 @@ export class Vault extends DurableObject<VaultEnv> {
       if (proposed.get(note.path) === note.blobSha || written.get(note.path) === note.blobSha) {
         continue;
       }
+      // The index can hold another version than the vault: one whose proposal couldn't be kept
+      // isn't asked for, call after call.
+      if (!this.#asRead([note.path], note.blobSha)) continue;
       const version = this.#memory.current(note.path);
       if (version === null || !abstractWanted(version)) continue;
       return { path: note.path, blobSha: note.blobSha, title: version.title, body: version.body };
@@ -2343,10 +2346,10 @@ export class Vault extends DurableObject<VaultEnv> {
     );
   }
 
-  /** The paths whose version in the vault is one Kelpie's own commit wrote. */
   /**
    * Drops a page Kelpie writes from wherever a copy of it waits: the queue, the writes set aside,
-   * the merges with the owner's edit and the held files. The next report writes it again.
+   * the merges with the owner's edit and the held files. A conflict the owner left on the page goes
+   * with its hold: the page is Kelpie's to write, and the next report writes it again.
    */
   #dropPage(path: string): void {
     for (const table of ["queue", "conflicts", "owner_merges", "held"]) {
@@ -2354,6 +2357,7 @@ export class Vault extends DurableObject<VaultEnv> {
     }
   }
 
+  /** The paths whose version in the vault is one Kelpie's own commit wrote. */
   #byKelpie(paths: readonly string[]): Set<string> {
     if (paths.length === 0) return new Set();
     return new Set(

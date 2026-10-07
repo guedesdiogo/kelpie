@@ -245,6 +245,26 @@ describe("Vault forget", () => {
     expect(await stub.held()).toHaveLength(1);
   });
 
+  it("drops the hold of a page Kelpie writes, conflict and all: the next report writes it again", async () => {
+    const backend = new FakeVaultBackend({ "README.md": "# Vault", [ana]: clean });
+    replaceBackendForTesting(backend);
+    replaceGatewayForTesting(null);
+    const stub = vault("forget-held-page");
+    await stub.compile("kelpie");
+    backend.push({
+      [LIFECYCLE_REPORT_PATH]:
+        "# Memory report\n\n<<<<<<< HEAD\nUma.\n=======\nOutra.\n>>>>>>> main\n",
+    });
+    await runDurableObjectAlarm(stub);
+    expect(await stub.held()).toHaveLength(1);
+    expect(await stub.forget([ana])).toMatchObject({ ok: true });
+    expect(await stub.held()).toEqual([]);
+    // The next alarms write the page again from what is left: here, memory is clean, so it goes.
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()[LIFECYCLE_REPORT_PATH]).toBeUndefined();
+  });
+
   it("refuses paths it can't name, and does nothing with the vault off", async () => {
     replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
     const stub = vault("forget-input");

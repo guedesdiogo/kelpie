@@ -735,6 +735,22 @@ describe("Vault Dream", () => {
       const stub = await run(name, await kelpieNote({ title: "Café" }), "abstract", during);
       expect(await rows(stub, "SELECT path FROM dream_proposals")).toEqual([]);
     }
+
+    // Nor is a note asked for while the index holds another version than the vault.
+    replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
+    const behind = vault("dream-abstract-behind");
+    const note = await kelpieNote({ title: "Chá" });
+    await behind.compile("kelpie");
+    await behind.write("kelpie", [note], "x");
+    await runDurableObjectAlarm(behind);
+    await runInDurableObject(behind, (_instance, state) => {
+      state.storage.sql.exec("UPDATE files SET blob_sha = 'newer' WHERE path = ?", note.path);
+      state.storage.sql.exec("UPDATE authored SET blob_sha = 'newer' WHERE path = ?", note.path);
+    });
+    const asked = fakeModelBy(() => abstract("Chá."));
+    await quiet(behind);
+    for (let i = 0; i < 3; i++) await runDurableObjectAlarm(behind);
+    expect(asked).toEqual([]);
   });
 
   it("leaves a day while a page of it is held on conflict markers, and sums up the next", async () => {

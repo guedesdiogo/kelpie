@@ -38,6 +38,7 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - **Held:** the file is kept as pushed in the object's `held` table.
       - Reads, the agent's prompt (persona, rules and skills) and memory see its version from before the conflict, never the markers. A file stays held while the vault still has it as pushed, even through `forget`.
       - Kelpie's queued writes to it stay out of commits.
+      - **The exception:** the pages Kelpie writes, the memory report and Dream's page under `memory/_lint/`, lose their hold on `forget`, and Dream's page also when Dream is turned off. The next report writes them again over the conflict, which git history keeps.
     - **Resolved by the model,** one held file at a time, after GitHub's work.
       - **What it sees,** through llm-gateway's `generate`: the vault's layout, its `AGENTS.md`, the file as the vault had it before the push, and the file as pushed.
       - **The answer:** it must leave no markers, keep every line outside the conflicts verbatim and in order, take each conflict's lines only from its sides or its base, and keep its frontmatter parseable. The model resolves; it can't rewrite. The answer ends as the file ends, with or without a final newline.
@@ -48,7 +49,7 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
       - a persona, rules or an agent's skill becomes a pull request that says the model wrote it. The file stays held until a clean version is pushed, as when the pull request merges. A pull request closed unmerged leaves it held and listed;
       - any other file stays held.
     - **Waiting:** after three failed tries, the file waits for the owner. `/commands/listHeldFiles` lists what waits ([admin-api.md](admin-api.md)), and a clean push of the file ends its hold.
-    - **Audit:** a resolved file stays in `held`, as pushed, alongside git's history.
+    - **Audit:** a resolved file stays in `held`, as pushed, alongside git's history, except Kelpie's own pages, as above.
 - **When GitHub fails.**
   - **A call fails** (GitHub down, a timeout, a rate limit): the object retries after a minute, then twice as long each time, up to an hour. Queued writes wait and stay readable; new writes and pushes wait for the retry too.
   - **GitHub refuses a commit:**
@@ -202,7 +203,7 @@ Git keeps every version, so erasing content means rewriting the vault's history.
      - it syncs to the rewritten head;
      - it rebuilds memory's index from the vault as it is now, which drops every old version, of every file, with the vectors of content no version holds anymore;
      - it deletes the rows that name the paths in `queue`, `conflicts`, `held`, `proposals`, `recall_counts`, `authored`, `owner_changes`, `owner_merges`, `dream_proposals`, `dream_writes`, `dream_summaries` and `dream_merges`, and a day summary or a merge that read a forgotten path;
-     - it drops a memory report or Dream's page wherever a copy waits: in the queue, set aside in `conflicts`, merged with the owner's edit in `owner_merges`, or held. It wakes within seconds, and the next alarm writes them again from what is left, while GitHub answers.
+     - it drops a memory report or Dream's page wherever a copy waits: in the queue, set aside in `conflicts`, merged with the owner's edit in `owner_merges`, or held. A conflict the owner left on one of these pages goes too; git history keeps it. It wakes within seconds, or at a retry already pending, and the next two alarms write the pages again from what is left, one queuing and one committing, while GitHub answers.
 
      It never touches git.
    - **Paths:** a path ending in `/` names a whole folder. Rows are matched by path, so a passage removed with `--replace-text` needs every file that held it named, or its folder.
