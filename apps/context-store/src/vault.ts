@@ -889,8 +889,13 @@ export class Vault extends DurableObject<VaultEnv> {
       // Kept with the version it was made from: a later version is a note to propose for again.
       // A failure is kept as no answer too, so one note can't fail every run; an outage costs it
       // this version's proposal.
-      // Turned off during the call: nothing is kept.
-      if (this.#get("dream_mode") !== "off") {
+      // Nothing is kept once Dream was turned off, or the note changed, was forgotten or stopped
+      // being Kelpie's, during the call.
+      if (
+        this.#get("dream_mode") !== "off" &&
+        this.#asRead([note.path], note.blobSha) &&
+        this.#byKelpie([note.path]).has(note.path)
+      ) {
         this.#exec(
           "INSERT OR REPLACE INTO dream_proposals (path, blob_sha, abstract, at) VALUES (?, ?, ?, ?)",
           note.path,
@@ -1034,9 +1039,8 @@ export class Vault extends DurableObject<VaultEnv> {
         this.#exec("DELETE FROM dream_proposals");
         this.#exec("DELETE FROM dream_summaries");
         this.#exec("DELETE FROM dream_merges");
-        // Dream's page waiting in the queue, or set aside, holds the summaries too.
-        this.#exec("DELETE FROM queue WHERE path = ?", DREAM_PAGE_PATH);
-        this.#exec("DELETE FROM conflicts WHERE path = ?", DREAM_PAGE_PATH);
+        // Dream's page, wherever it waits, holds the summaries too.
+        this.#dropPage(DREAM_PAGE_PATH);
         this.#set("lifecycle_after", "0");
       }
     });
@@ -1552,12 +1556,10 @@ export class Vault extends DurableObject<VaultEnv> {
           rows += this.#exec<{ n: number }>(`SELECT count(*) AS n ${derived}`, named)[0]?.n ?? 0;
           this.#exec(`DELETE ${derived}`, named);
         }
-        // A memory report or Dream's page waiting in the queue, or set aside, may name what is
-        // being erased: they go, and the next alarm writes them again from what is left.
-        for (const page of [LIFECYCLE_REPORT_PATH, DREAM_PAGE_PATH]) {
-          this.#exec("DELETE FROM queue WHERE path = ?", page);
-          this.#exec("DELETE FROM conflicts WHERE path = ?", page);
-        }
+        // A memory report or Dream's page waiting in the queue, set aside, merged with the
+        // owner's edit or held may name what is being erased: they go, and the next alarm, soon,
+        // writes them again from what is left.
+        for (const page of [LIFECYCLE_REPORT_PATH, DREAM_PAGE_PATH]) this.#dropPage(page);
         this.#set("lifecycle_after", "0");
         return rows;
       });
@@ -1573,6 +1575,7 @@ export class Vault extends DurableObject<VaultEnv> {
       await this.#memory.rebuild([{ sha: id, committedAt: Date.now(), changes: files }]);
       this.#set("index_head", head);
       this.#set("index_commit", id);
+      await this.#alarmBy(Date.now() + FLUSH_DELAY_MS);
       // The paths may name people, so the log holds only counts.
       console.log("Vault: forgot erased content", {
         paths: paths.length,
@@ -2341,6 +2344,16 @@ export class Vault extends DurableObject<VaultEnv> {
   }
 
   /** The paths whose version in the vault is one Kelpie's own commit wrote. */
+  /**
+   * Drops a page Kelpie writes from wherever a copy of it waits: the queue, the writes set aside,
+   * the merges with the owner's edit and the held files. The next report writes it again.
+   */
+  #dropPage(path: string): void {
+    for (const table of ["queue", "conflicts", "owner_merges", "held"]) {
+      this.#exec(`DELETE FROM ${table} WHERE path = ?`, path);
+    }
+  }
+
   #byKelpie(paths: readonly string[]): Set<string> {
     if (paths.length === 0) return new Set();
     return new Set(
