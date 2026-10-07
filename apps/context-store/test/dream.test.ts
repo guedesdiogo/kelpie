@@ -605,6 +605,31 @@ describe("Vault Dream", () => {
     expect(await rows(stub, "SELECT path FROM dream_summaries")).toEqual([]);
   });
 
+  it("leaves a day of more pages than its input can show", async () => {
+    const day = daysAgo(2).slice(0, 10);
+    const pages = await Promise.all(
+      Array.from({ length: 26 }, (_, i) =>
+        kelpieNote({
+          kind: "session",
+          title: `${i} ${"conversa longa ".repeat(7)}`.trim(),
+          scope: "conversation/telegram-1",
+          date: day,
+          body: `- **10:00 u-owner:** ${i}`,
+        }),
+      ),
+    );
+    replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
+    const requests = fakeModelBy(() => abstract("Uma linha."));
+    const stub = vault("dream-summary-too-many");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", pages, "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    for (let i = 0; i < 10; i++) await runDurableObjectAlarm(stub);
+    expect(requests.filter((request) => request.system.includes("sum up one day"))).toEqual([]);
+    expect(await rows(stub, "SELECT path FROM dream_summaries")).toEqual([]);
+  });
+
   it("forgets its day summaries and their page when the owner turns it off", async () => {
     const page = await kelpieNote({
       kind: "session",

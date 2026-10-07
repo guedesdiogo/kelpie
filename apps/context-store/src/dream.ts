@@ -48,9 +48,11 @@ export async function proposeSummary(
   day: { date: string; pages: readonly { path: string; title: string; body: string }[] },
   timeoutMs: number,
 ): Promise<{ summary: string | null; usage: Usage[] }> {
+  const input = summaryInput(day);
+  if (input === null) throw new RangeError("the day's pages don't fit");
   const request: RoutedRequest = {
     system: SUMMARY_PROMPT,
-    messages: [{ role: "user", parts: [{ type: "text", text: summaryInput(day) }] }],
+    messages: [{ role: "user", parts: [{ type: "text", text: input }] }],
     maxOutputTokens: SUMMARY_OUTPUT_TOKENS,
   };
   const { text, usage } = await complete(gateway, DREAM_TIER, request, timeoutMs);

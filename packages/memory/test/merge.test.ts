@@ -52,10 +52,11 @@ describe("mergeInput", () => {
         { path: "memory/notes/cafe.md", title: "Café", body: "Sem açúcar." },
         { path: "memory/notes/cafe-2.md", title: "Café", body: "Com canela." },
       ]) ?? "";
+    const id = /^BEGIN NOTES ([0-9a-f]{16})$/m.exec(text)?.[1];
     expect(text).toContain(
-      "BEGIN NOTES\n## Café (memory/notes/cafe.md)\nSem açúcar.\n\n## Café (memory/notes/cafe-2.md)\nCom canela.\nEND NOTES",
+      `BEGIN NOTES ${id}\n## Café (memory/notes/cafe.md)\nSem açúcar.\n\n## Café (memory/notes/cafe-2.md)\nCom canela.\nEND NOTES ${id}`,
     );
-    expect(text.endsWith("\nEND NOTES\n\nAnswer with the JSON only.")).toBe(true);
+    expect(text.endsWith(`\nEND NOTES ${id}\n\nAnswer with the JSON only.`)).toBe(true);
     const long = { path: "memory/notes/cafe.md", title: "Café", body: "fala ".repeat(1_500) };
     expect(mergeInput([long, { ...long, path: "memory/notes/cafe-2.md" }])).not.toBeNull();
     expect(mergeInput([long, long, long])).toBeNull();
@@ -86,6 +87,7 @@ describe("mergeOf", () => {
       "```sh",
       "# mói os grãos",
       "=====",
+      "<b>no código, HTML é texto</b> ![x](https://x.test)",
       "```",
       "Sem açúcar.",
     ].join("\n");
@@ -139,6 +141,18 @@ describe("mergeOf", () => {
       "a title after a mixed closer",
       JSON.stringify({ verdict: "merge", body: "~~~\nx\n```\n~~~\n# Hijack" }),
     ],
+    // Nothing that reaches out, or renders as markup.
+    [
+      "a remote image",
+      JSON.stringify({ verdict: "merge", body: "Café.\n![x](https://x.test/a.png?d=1)" }),
+    ],
+    [
+      "a reference to a remote image",
+      JSON.stringify({ verdict: "merge", body: "![x][r]\n\n[r]: https://x.test/a.png" }),
+    ],
+    ["raw HTML", JSON.stringify({ verdict: "merge", body: "Café <img src=x onerror=y>." })],
+    ["an HTML comment", JSON.stringify({ verdict: "merge", body: "Café.\n<!-- x -->" })],
+    ["a vertical tab at the edge", JSON.stringify({ verdict: "merge", body: "Café.\u000b" })],
     ["a title after a closed fence", '{"verdict": "merge", "body": "```\\nx\\n```\\n# Outro"}'],
     ["a lone carriage return", '{"verdict": "merge", "body": "Café\\rpreto"}'],
     ["conflict markers", '{"verdict": "merge", "body": "x\\n<<<<<<< HEAD\\ny"}'],

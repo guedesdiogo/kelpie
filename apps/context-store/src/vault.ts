@@ -33,6 +33,7 @@ import {
   type Scope,
   type SearchHit,
   sanitizeSecrets,
+  summaryInput,
   summaryPath,
   withAbstract,
   writeMemory,
@@ -1096,12 +1097,10 @@ export class Vault extends DurableObject<VaultEnv> {
       // markers: a day whose summary couldn't be kept isn't asked for.
       const sources = children.map((page) => page.path);
       if (!this.#asRead(sources, key)) continue;
-      return {
-        path,
-        date: day.date,
-        key,
-        pages: children.map(({ path, title, body }) => ({ path, title, body })),
-      };
+      const pages = children.map(({ path, title, body }) => ({ path, title, body }));
+      // A day of more pages than its input can show isn't summed up: titles alone say little.
+      if (summaryInput({ date: day.date, pages }) === null) continue;
+      return { path, date: day.date, key, pages };
     }
     return null;
   }
