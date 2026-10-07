@@ -22,6 +22,7 @@ Kelpie keeps two kinds of secret (ADR-0013).
   - Each value records the version of the key that sealed it.
 - **Who reads it.** Only `channel-egress` binds the store, because reading returns plaintext. Other Workers reach it through `channel-egress`'s entrypoints, which return no secret:
   - `ChannelForms`, for the admin API, creates, describes and redeems forms, and registers webhooks;
+  - `SetupForms`, for the setup agent in the conversation runtime, only creates a Telegram form. The owner opens its link on the admin API, so the Worker a model drives can't describe, redeem or register anything (Story 3.11);
   - `ChannelEgress`, for the conversation runtime, sends and shows typing;
   - `ChannelWebhooks`, for ingress, checks the secret a webhook presents and sends two fixed notices: "paired", and a stranger notice to the owner (`docs/admin-api.md`, "Pairing"). The Worker that takes public requests can't send text of its own: `channel-egress` writes both notices, with a stranger's name cleaned up and cut to 64 characters.
 - **Forms.**

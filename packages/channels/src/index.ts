@@ -22,6 +22,7 @@ export type {
   DeliveryFailure,
   EgressDestination,
   SendOutcome,
+  SetupFormsContract,
   TypingOutcome,
   WebhookNotice,
   WebhookRegistration,

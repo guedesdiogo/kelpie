@@ -10,7 +10,13 @@ import {
   type TimeZoneResult,
 } from "@kelpie/access";
 import type { ChannelFormsContract, ChannelId } from "@kelpie/channels";
-import { type AgentSettings, isAgentId, isAgentName, parseSettings } from "./settings.ts";
+import {
+  type AgentSettings,
+  isAgentId,
+  isAgentName,
+  parseSettings,
+  SETUP_AGENT_ID,
+} from "./settings.ts";
 
 /**
  * Who asked for a change, and through what: "admin-api", or "agent:<id>" for an agent's tool.
@@ -76,6 +82,9 @@ export type ForgetVaultResult =
   | { ok: true; forgotten: number; stillInVault: string[] }
   | { ok: false; reason: "vault_off" | "invalid_input" | "unavailable" };
 
+/** Dream's mode (#112): off, or dry runs that only propose. */
+export type DreamMode = "off" | "dry";
+
 /** The most paths one `forgetVaultPaths` names, and the longest path the vault takes. */
 const MAX_FORGET_PATHS = 1_000;
 const MAX_PATH_LENGTH = 300;
@@ -109,6 +118,9 @@ export interface ConfigPorts {
   vault: {
     held(): Promise<HeldVaultFile[]>;
     forget(paths: string[]): Promise<ForgetVaultResult>;
+    setDream(
+      mode: DreamMode,
+    ): Promise<{ ok: true; mode: DreamMode } | { ok: false; reason: "invalid" }>;
   };
 }
 
@@ -162,7 +174,8 @@ export function createConfigCommands(ports: ConfigPorts) {
     ): Promise<CommandResult<AgentSummary & { created: boolean }>> {
       if (!isOwner(actor)) return forbidden;
       const { id, name } = (input ?? {}) as { id?: unknown; name?: unknown };
-      if (!isAgentId(id) || !isAgentName(name)) return invalid;
+      // The setup agent exists on every instance; another agent with its id would get its tools.
+      if (!isAgentId(id) || id === SETUP_AGENT_ID || !isAgentName(name)) return invalid;
       const result = await ports.registry.add(id, name.trim(), actor);
       if (!result.ok) return result;
       return { ok: true, value: { id, name: name.trim(), created: result.created } };
@@ -354,6 +367,18 @@ export function createConfigCommands(ports: ConfigPorts) {
       }
       if (result.reason === "vault_off") return { ok: false, reason: "not_configured" };
       return result.reason === "unavailable" ? { ok: false, reason: "unavailable" } : invalid;
+    },
+
+    /**
+     * Turns Dream off, or back on as dry runs that only propose (#112): one setting for the whole
+     * vault, dry runs until the owner says otherwise.
+     */
+    async setDream(actor: Actor, input: unknown): Promise<CommandResult<{ mode: DreamMode }>> {
+      if (!isOwner(actor)) return forbidden;
+      const { mode } = (input ?? {}) as { mode?: unknown };
+      if (mode !== "off" && mode !== "dry") return invalid;
+      const result = await ports.vault.setDream(mode);
+      return result.ok ? { ok: true, value: { mode: result.mode } } : invalid;
     },
   };
 }

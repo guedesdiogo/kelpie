@@ -2,7 +2,7 @@ import type { ChannelIdentity, IdentityStatus } from "@kelpie/access";
 import type { WebhookRegistrationFailure } from "@kelpie/channels";
 import { describe, expect, it } from "vitest";
 import { type Actor, type ConfigPorts, createConfigCommands } from "../src/commands.ts";
-import { type AgentSettings, DEFAULT_SETTINGS } from "../src/settings.ts";
+import { type AgentSettings, DEFAULT_SETTINGS, SETUP_AGENT_ID } from "../src/settings.ts";
 
 const owner: Actor = { userId: "u-owner", role: "owner", via: "admin-api" };
 const member: Actor = { userId: "u-member", role: "member", via: "admin-api" };
@@ -124,6 +124,10 @@ function fakePorts() {
           ? { ok: false, reason: "vault_off" }
           : { ok: true, forgotten: 2, stillInVault: [] };
       },
+      async setDream(mode) {
+        calls.push(`setDream ${mode}`);
+        return { ok: true, mode };
+      },
     },
   };
   return { ports, calls };
@@ -170,6 +174,17 @@ describe("configuration commands", () => {
     });
   });
 
+  it("keeps the setup agent's id to itself", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+
+    expect(await commands.createAgent(owner, { id: SETUP_AGENT_ID, name: "Mine" })).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(calls).toEqual([]);
+  });
+
   it("refuses everyone but the owner, before touching anything", async () => {
     const { ports, calls } = fakePorts();
     const commands = createConfigCommands(ports);
@@ -185,6 +200,10 @@ describe("configuration commands", () => {
     });
     expect(await commands.listHeldFiles(member)).toEqual({ ok: false, reason: "forbidden" });
     expect(await commands.forgetVaultPaths(member, { paths: ["memory/a.md"] })).toEqual({
+      ok: false,
+      reason: "forbidden",
+    });
+    expect(await commands.setDream(member, { mode: "off" })).toEqual({
       ok: false,
       reason: "forbidden",
     });
@@ -457,6 +476,19 @@ describe("configuration commands", () => {
       ok: true,
       value: [{ path: "memory/people/ana.md", state: "held", attempts: 3, at: 1_000 }],
     });
+  });
+
+  it("turns Dream off or back to dry runs, and nothing else", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+    expect(await commands.setDream(owner, { mode: "off" })).toEqual({
+      ok: true,
+      value: { mode: "off" },
+    });
+    for (const input of [undefined, {}, { mode: "write" }, { mode: true }]) {
+      expect(await commands.setDream(owner, input)).toEqual({ ok: false, reason: "invalid_input" });
+    }
+    expect(calls).toEqual(["setDream off"]);
   });
 
   it("makes the Context Store forget erased paths, and refuses anything but a list of paths", async () => {

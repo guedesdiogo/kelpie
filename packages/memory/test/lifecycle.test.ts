@@ -346,6 +346,7 @@ describe("lifecycle report", () => {
     const page =
       lifecycleReport({
         changed: [],
+        dream: [],
         cold: [],
         duplicates: [{ kind: "title", notes: [hostile, plainNote] }],
         contradictions: [
@@ -369,6 +370,7 @@ describe("lifecycle report", () => {
       lifecycleReport({
         cold: [],
         changed: [],
+        dream: [],
         duplicates: [
           { kind: "title", notes: [hostile, { path: "memory/notes/b.md", title: hostile.title }] },
         ],
@@ -379,6 +381,7 @@ describe("lifecycle report", () => {
       lifecycleReport({
         cold: [],
         changed: [],
+        dream: [],
         duplicates: [
           {
             kind: "title",
@@ -395,7 +398,7 @@ describe("lifecycle report", () => {
 
   it("is nothing when memory is clean", () => {
     expect(
-      lifecycleReport({ cold: [], duplicates: [], contradictions: [], changed: [] }),
+      lifecycleReport({ cold: [], duplicates: [], contradictions: [], changed: [], dream: [] }),
     ).toBeNull();
   });
 
@@ -432,6 +435,7 @@ describe("lifecycle report", () => {
         cold: [],
         duplicates: [],
         contradictions: [],
+        dream: [],
         changed: [
           {
             path: "memory/notes/cha.md",
@@ -450,6 +454,33 @@ describe("lifecycle report", () => {
     expect(page).toContain("## Your notes Kelpie changed");
     expect(page).toContain("- [[knowledge/casa|Casa]]: changed 2026-10-06");
     expect(page).toContain("- [[memory/notes/cha|Chá]]: changed 2026-10-05");
+  });
+
+  it("lists Dream's dry-run plan by note, with each abstract made plain", async () => {
+    await withNotes("lifecycle-dream", [note("Chá"), note("Casa")], (index) => {
+      const findings = lifecycleFindings(index, {
+        now: NOW,
+        uses: new Map(),
+        dream: [
+          {
+            path: memoryPath("global", "note", "Chá"),
+            abstract: "Veja https://evil.example/login #urgente [[verde]] `sem` açúcar",
+          },
+          { path: memoryPath("global", "note", "Casa"), abstract: "Mora em Lisboa." },
+          // A note the index no longer holds isn't listed.
+          { path: "memory/notes/velha.md", abstract: "Some." },
+        ],
+      });
+      expect(findings.dream.map((entry) => entry.title)).toEqual(["Casa", "Chá"]);
+      const page = lifecycleReport(findings) ?? "";
+      expect(page).toContain("## Dream's plan");
+      // The model's line is shown as code: no link, tag or markup in it renders.
+      expect(page).toContain("- [[memory/notes/casa|Casa]]: `Mora em Lisboa.`");
+      expect(page).toContain(
+        "- [[memory/notes/cha|Chá]]: `Veja https://evil.example/login #urgente [[verde]] sem açúcar`",
+      );
+      expect(page).not.toContain("velha");
+    });
   });
 
   it("lives where memory never reads it", () => {

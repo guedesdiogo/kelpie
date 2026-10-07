@@ -55,6 +55,7 @@ function world({
     },
     directory: {
       async issuePairingCode() {
+        ran.push("directory.issuePairingCode");
         return { ok: true, code: "ABCD2345", expiresAt: NOW_MS + 3_600_000 };
       },
       async enableIdentity(identity) {
@@ -76,8 +77,10 @@ function world({
       async createTelegramForm() {
         return { ok: true, token: "form-token-1", expiresAt: NOW_MS + 900_000 };
       },
-      async describeTelegramBot() {
-        return { ok: true, username: "kelpie_bot" };
+      async describeTelegramBot(agentId) {
+        return agentId === "unwired"
+          ? { ok: false, reason: "not_connected" }
+          : { ok: true, username: "kelpie_bot" };
       },
       async registerTelegramWebhook(agentId) {
         return agentId === "unwired" ? { ok: false, reason: "not_connected" } : { ok: true };
@@ -89,6 +92,9 @@ function world({
       },
       async forget(paths) {
         return { ok: true, forgotten: paths.length, stillInVault: [] };
+      },
+      async setDream(mode) {
+        return { ok: true, mode };
       },
     },
   };
@@ -174,7 +180,7 @@ function world({
 }
 
 function post(path: string, body?: unknown) {
-  const init: RequestInit = { method: "POST" };
+  const init: RequestInit = { method: "POST", headers: { "content-type": "application/json" } };
   if (body !== undefined) init.body = typeof body === "string" ? body : JSON.stringify(body);
   return new Request(`https://admin.example${path}`, init);
 }
@@ -248,6 +254,15 @@ describe("admin API commands", () => {
     expect((await call(deps, "/commands/forgetVaultPaths", { paths: [] })).status).toBe(400);
   });
 
+  it("turns Dream off, or back to dry runs", async () => {
+    const { deps } = world();
+    expect(await call(deps, "/commands/setDream", { mode: "off" })).toEqual({
+      status: 200,
+      body: { ok: true, value: { mode: "off" } },
+    });
+    expect((await call(deps, "/commands/setDream", { mode: "write" })).status).toBe(400);
+  });
+
   it("sets the owner's time zone", async () => {
     const { deps } = world();
     expect(await call(deps, "/commands/setTimeZone", { timeZone: "America/Sao_Paulo" })).toEqual({
@@ -288,6 +303,7 @@ describe("admin API commands", () => {
     ["an empty command", "POST", "/commands/"],
     ["the bootstrap with a trailing slash", "POST", "/bootstrap/"],
     ["a GET", "GET", "/commands/listAgents"],
+    ["a CORS preflight", "OPTIONS", "/commands/createAgent"],
   ])("answers 404 to %s", async (_label, method, path) => {
     const { deps, ran } = world();
     const response = await handle(new Request(`https://admin.example${path}`, { method }), deps);
@@ -319,7 +335,7 @@ describe("admin API commands", () => {
     const response = await handle(
       new Request("https://admin.example/commands/createAgent", {
         method: "POST",
-        headers: { "content-length": "10" },
+        headers: { "content-type": "application/json", "content-length": "10" },
         body,
       }),
       deps,
@@ -338,6 +354,121 @@ describe("admin API commands", () => {
     expect(
       (await call(deps, "/commands/configureAgent", { prompt: "x".repeat(70_000) })).status,
     ).toBe(413);
+  });
+});
+
+describe("admin API cross-site requests", () => {
+  const CREATE = JSON.stringify({ id: "sales", name: "Sales" });
+  const send = (deps: AdminDeps, path: string, headers: Record<string, string>, body: BodyInit) =>
+    handle(new Request(`https://admin.example${path}`, { method: "POST", headers, body }), deps);
+
+  it.each([
+    // What `<form enctype="text/plain">` sends for a field named `{"id":"sales","name":"Sales`
+    // with the value `"}`: a JSON body under a type that needs no CORS preflight.
+    ["a text/plain form", "text/plain", '{"id":"sales","name":"Sales="}\r\n'],
+    ["text/plain naming JSON in a parameter", "text/plain;application/json", CREATE],
+    ["a form-encoded body", "application/x-www-form-urlencoded", CREATE],
+    ["a multipart body", "multipart/form-data; boundary=x", CREATE],
+    ["two Content-Type headers", "application/json, text/plain", CREATE],
+    ["a lookalike type", "application/json-patch+json", CREATE],
+  ])("refuses a command sent as %s, before running it", async (_label, type, body) => {
+    const { deps, ran } = world();
+    const response = await send(deps, "/commands/createAgent", { "content-type": type }, body);
+    expect(response.status).toBe(415);
+    expect(await response.json()).toEqual({ ok: false, reason: "not_json" });
+    expect(ran).toEqual([]);
+  });
+
+  it("refuses a command without a Content-Type, even one that takes no input", async () => {
+    const { deps, ran } = world();
+    const bytes = new TextEncoder().encode(CREATE);
+    expect((await send(deps, "/commands/createAgent", {}, bytes)).status).toBe(415);
+    const empty = new Request("https://admin.example/commands/listAgents", { method: "POST" });
+    expect((await handle(empty, deps)).status).toBe(415);
+    expect(ran).toEqual([]);
+  });
+
+  it.each([
+    [
+      "Sec-Fetch-Site: cross-site",
+      { "sec-fetch-site": "cross-site", origin: "https://evil.example" },
+    ],
+    [
+      "Sec-Fetch-Site: same-site",
+      { "sec-fetch-site": "same-site", origin: "https://chat.example" },
+    ],
+    ["Sec-Fetch-Site: none", { "sec-fetch-site": "none" }],
+    ["a foreign Origin without Sec-Fetch-Site", { origin: "https://evil.example" }],
+    ["Origin: null without Sec-Fetch-Site", { origin: "null" }],
+    ["its own host over another scheme", { origin: "http://admin.example" }],
+    [
+      "a cross-site text/plain form, which fails both checks",
+      { "sec-fetch-site": "cross-site", "content-type": "text/plain" },
+    ],
+  ])("refuses a JSON command with %s, before running it", async (_label, headers) => {
+    const { deps, ran } = world();
+    const response = await send(
+      deps,
+      "/commands/createAgent",
+      { "content-type": "application/json", ...headers },
+      CREATE,
+    );
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ ok: false, reason: "cross_origin" });
+    expect(ran).toEqual([]);
+  });
+
+  it.each([
+    [
+      "from its own origin, with a charset",
+      {
+        "content-type": "application/json; charset=utf-8",
+        "sec-fetch-site": "same-origin",
+        origin: "https://admin.example",
+      },
+    ],
+    [
+      "from its own Origin, in a browser without Sec-Fetch-Site",
+      { "content-type": "application/json", origin: "https://admin.example" },
+    ],
+    ["with the media type in capitals", { "content-type": "Application/JSON" }],
+    [
+      "from a client that sends neither Origin nor Sec-Fetch-Site",
+      { "content-type": "application/json" },
+    ],
+  ])("runs a JSON command %s", async (_label, headers) => {
+    const { deps, ran } = world();
+    expect((await send(deps, "/commands/createAgent", headers, CREATE)).status).toBe(200);
+    expect(ran).toEqual(["registry.add"]);
+  });
+
+  it("applies the same rules to the bootstrap and the recovery", async () => {
+    const plain = { "content-type": "text/plain" };
+    const foreign = { "content-type": "application/json", "sec-fetch-site": "cross-site" };
+
+    const fresh = world({ owner: false });
+    const bootstrap = JSON.stringify({ token: TOKEN });
+    expect((await send(fresh.deps, "/bootstrap", plain, bootstrap)).status).toBe(415);
+    expect((await send(fresh.deps, "/bootstrap", foreign, bootstrap)).status).toBe(403);
+    expect(fresh.bootstraps).toEqual([]);
+
+    const back = world({ authenticated: "sub-new" });
+    back.deps.recoveryToken = RECOVERY;
+    const recovery = JSON.stringify({ token: RECOVERY });
+    expect((await send(back.deps, "/recover", plain, recovery)).status).toBe(415);
+    expect((await send(back.deps, "/recover", foreign, recovery)).status).toBe(403);
+    expect(back.relinks).toEqual([]);
+  });
+
+  it("still answers 401 first when the Access JWT doesn't verify", async () => {
+    const { deps } = world({ authenticated: null });
+    const response = await send(
+      deps,
+      "/commands/createAgent",
+      { "content-type": "text/plain" },
+      CREATE,
+    );
+    expect(response.status).toBe(401);
   });
 });
 
@@ -514,7 +645,11 @@ describe("admin API access recovery", () => {
 
 describe("admin API secure forms", () => {
   const formUrl = "https://admin.example/forms/form-token-1";
-  const submit = (botToken: string, headers: Record<string, string> = {}) =>
+  /** A browser's submission from the form page, unless a test gives its own headers. */
+  const submit = (
+    botToken: string,
+    headers: Record<string, string> = { "sec-fetch-site": "same-origin" },
+  ) =>
     new Request(formUrl, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
@@ -627,6 +762,14 @@ describe("admin API secure forms", () => {
     expect(redeemed).toEqual([]);
   });
 
+  it("refuses a submission with neither Sec-Fetch-Site nor Origin", async () => {
+    const { deps, redeemed } = world();
+    const response = await handle(submit(GOOD_BOT_TOKEN, {}), deps);
+    expect(response.status).toBe(403);
+    expect(await response.text()).toContain("This form only accepts its own submissions.");
+    expect(redeemed).toEqual([]);
+  });
+
   it("serves the form to the owner only", async () => {
     const stranger = world({ authenticated: null });
     expect((await handle(new Request(formUrl), stranger.deps)).status).toBe(401);
@@ -644,7 +787,10 @@ describe("admin API secure forms", () => {
     expect((await handle(new Request(formUrl, { method: "PUT" }), deps)).status).toBe(404);
     const huge = new Request(formUrl, {
       method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "sec-fetch-site": "same-origin",
+      },
       body: `botToken=${"x".repeat(70_000)}`,
     });
     expect((await handle(huge, deps)).status).toBe(413);
@@ -677,7 +823,7 @@ describe("admin API secure forms", () => {
     const { deps, redeemed } = world();
     const json = new Request(formUrl, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
       body: JSON.stringify({ botToken: GOOD_BOT_TOKEN }),
     });
     expect((await handle(json, deps)).status).toBe(415);
@@ -708,5 +854,89 @@ describe("admin API secure forms", () => {
     ).text();
     expect(html).toContain("<code>&lt;i&gt;odd&lt;/i&gt;</code>");
     expect(html).not.toContain("<i>odd</i>");
+  });
+});
+
+describe("admin API pairing page", () => {
+  const pageUrl = (agentId: string) => `https://admin.example/pair/telegram/${agentId}`;
+  /** A browser's POST from the page, unless a test gives its own headers. */
+  const press = (
+    agentId: string,
+    headers: Record<string, string> = { "sec-fetch-site": "same-origin" },
+  ) =>
+    new Request(pageUrl(agentId), {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+      body: "",
+    });
+  const sameOrigin = { origin: "https://admin.example" };
+
+  it("shows the owner a button, and pairs only when its own page posts", async () => {
+    const { deps, ran } = world();
+    await call(deps, "/commands/createAgent", { id: "sales", name: "<i>Sales</i>" });
+
+    const shown = await handle(new Request(pageUrl("sales")), deps);
+    expect(shown.status).toBe(200);
+    const form = await shown.text();
+    expect(form).toContain('<form method="post">');
+    expect(form).toContain("&lt;i&gt;Sales&lt;/i&gt;");
+    expect(form).toContain("<code>sales</code>");
+    expect(form).not.toContain("t.me");
+    expect(shown.headers.get("cache-control")).toBe("no-store");
+    expect(shown.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    expect(ran).not.toContain("directory.issuePairingCode");
+
+    const paired = await handle(press("sales", sameOrigin), deps);
+    expect(paired.status).toBe(200);
+    expect(await paired.text()).toContain('href="https://t.me/kelpie_bot?start=ABCD2345"');
+    expect(ran.filter((step) => step === "directory.issuePairingCode")).toHaveLength(1);
+  });
+
+  it("serves the page to the owner only, and takes no post from another site", async () => {
+    const stranger = world({ authenticated: null });
+    expect((await handle(new Request(pageUrl("sales")), stranger.deps)).status).toBe(401);
+    const member = world({ role: "member" });
+    expect((await handle(press("sales", sameOrigin), member.deps)).status).toBe(403);
+
+    const { deps, ran } = world();
+    await call(deps, "/commands/createAgent", { id: "sales", name: "Sales" });
+    expect((await handle(press("sales", { origin: "https://evil.example" }), deps)).status).toBe(
+      403,
+    );
+    expect(
+      (await handle(press("sales", { ...sameOrigin, "sec-fetch-site": "cross-site" }), deps))
+        .status,
+    ).toBe(403);
+    const json = new Request(pageUrl("sales"), {
+      method: "POST",
+      headers: { "content-type": "application/json", ...sameOrigin },
+      body: "{}",
+    });
+    expect((await handle(json, deps)).status).toBe(415);
+    expect([...stranger.ran, ...member.ran, ...ran]).not.toContain("directory.issuePairingCode");
+  });
+
+  it("takes no post with neither Sec-Fetch-Site nor Origin", async () => {
+    const { deps, ran } = world();
+    await call(deps, "/commands/createAgent", { id: "sales", name: "Sales" });
+    const response = await handle(press("sales", {}), deps);
+    expect(response.status).toBe(403);
+    expect(await response.text()).toContain("This page only accepts its own submissions.");
+    expect(ran).not.toContain("directory.issuePairingCode");
+  });
+
+  it("answers 404 for an unknown agent or a malformed id, and says when no bot is connected", async () => {
+    const { deps, ran } = world();
+    await call(deps, "/commands/createAgent", { id: "unwired", name: "Unwired" });
+    expect((await handle(new Request(pageUrl("ghost")), deps)).status).toBe(404);
+    expect((await handle(new Request(pageUrl("Bad%20Id")), deps)).status).toBe(404);
+    expect((await handle(new Request(pageUrl("unwired"), { method: "PUT" }), deps)).status).toBe(
+      404,
+    );
+
+    const unwired = await handle(press("unwired", sameOrigin), deps);
+    expect(unwired.status).toBe(409);
+    expect(await unwired.text()).toContain("Connect the agent's Telegram bot first");
+    expect(ran).not.toContain("directory.issuePairingCode");
   });
 });

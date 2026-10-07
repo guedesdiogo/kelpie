@@ -120,7 +120,7 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 </form>`;
 }
 
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
   return text
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")

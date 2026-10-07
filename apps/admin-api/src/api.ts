@@ -7,7 +7,7 @@ import {
   type OwnerResult,
   type RelinkResult,
 } from "@kelpie/access";
-import type { Actor, CommandResult, ConfigCommands } from "@kelpie/config";
+import { type Actor, type CommandResult, type ConfigCommands, isAgentId } from "@kelpie/config";
 import {
   closedPage,
   type FormDeps,
@@ -17,6 +17,13 @@ import {
   submitForm,
   unavailablePage,
 } from "./forms.ts";
+import {
+  noAgentPage,
+  notConnectedPage,
+  pairedPage,
+  pairingAgentOf,
+  pairingPage,
+} from "./pairing.ts";
 
 /** What the API needs from outside, so tests can replace it. */
 export interface AdminDeps {
@@ -84,6 +91,7 @@ const COMMANDS: Record<string, Command> = {
     commands.registerTelegramWebhook(actor, input),
   listHeldFiles: (commands, actor) => commands.listHeldFiles(actor),
   forgetVaultPaths: (commands, actor, input) => commands.forgetVaultPaths(actor, input),
+  setDream: (commands, actor, input) => commands.setDream(actor, input),
 };
 
 /**
@@ -93,6 +101,8 @@ const COMMANDS: Record<string, Command> = {
 export async function handle(request: Request, deps: AdminDeps): Promise<Response> {
   const { pathname } = new URL(request.url);
   if (pathname.startsWith("/forms/")) return handleForm(request, pathname, deps);
+  const pairing = pairingAgentOf(pathname);
+  if (pairing !== null) return handlePairing(request, pairing, deps);
   const command = pathname.startsWith("/commands/") ? pathname.slice("/commands/".length) : null;
   const tokenRoute = pathname === "/bootstrap" || pathname === "/recover";
   if (request.method !== "POST" || (!tokenRoute && !command)) {
@@ -110,6 +120,16 @@ export async function handle(request: Request, deps: AdminDeps): Promise<Respons
   if (!identity.ok) {
     console.warn("admin-api: request refused", { reason: identity.reason });
     return refuse(401, "unauthenticated");
+  }
+  // The Access cookie may go with another site's POST (its SameSite is the Access application's
+  // setting), so a page elsewhere must not be able to send a command: no foreign origin, and only
+  // `application/json`, which no form can send and no other origin can `fetch` without a preflight.
+  // Only here does a request with no `Origin` pass: `cloudflared access curl` sends none (#169).
+  const foreign = !isSameOriginSubmission(request, { allowNoOrigin: true });
+  if (foreign || !isJson(request)) {
+    const reason = foreign ? "cross_origin" : "not_json";
+    console.warn("admin-api: request refused", { reason });
+    return refuse(foreign ? 403 : 415, reason);
   }
 
   const body = await readJson(request);
@@ -162,15 +182,74 @@ async function handleForm(request: Request, pathname: string, deps: AdminDeps): 
 }
 
 /**
- * Whether a POST came from the form's own page. Browsers say so in `Sec-Fetch-Site`; without it,
- * a foreign `Origin` is refused. (The page's referrer policy is `same-origin`, so the browser
- * sends the real origin: under `no-referrer` it would send `null`.)
+ * The page that pairs the owner's Telegram account with an agent's bot (Story 3.11), for the owner
+ * only, with the same checks as the secure forms. `GET` shows a button; its own `POST` runs
+ * `pairTelegram` and shows the `t.me` link. Answers are pages, never JSON.
  */
-function isSameOriginSubmission(request: Request): boolean {
+async function handlePairing(
+  request: Request,
+  agentId: string,
+  deps: AdminDeps,
+): Promise<Response> {
+  if (!isAgentId(agentId) || (request.method !== "GET" && request.method !== "POST")) {
+    return noAgentPage();
+  }
+  try {
+    const identity = await deps.authenticate(request);
+    if (!identity.ok)
+      return page(401, "Sign in first", "<p>Open this link in your browser again.</p>");
+    if (request.method === "POST" && !isSameOriginSubmission(request)) {
+      return page(403, "Not allowed", "<p>This page only accepts its own submissions.</p>");
+    }
+    const admission = await deps.directory.admit(
+      { channel: ACCESS_SOURCE, channelUserId: identity.sub },
+      ADMIN_AGENT_ID,
+    );
+    if (!admission.admitted || admission.role !== "owner") {
+      return page(403, "Not allowed", "<p>Only the owner can use this link.</p>");
+    }
+    const actor: Actor = { userId: admission.userId, role: admission.role, via: "admin-api" };
+    const agent = await deps.commands.getAgent(actor, { id: agentId });
+    if (!agent.ok) return agent.reason === "unknown_agent" ? noAgentPage() : unavailablePage();
+    if (request.method === "GET") return pairingPage(agent.value);
+    if (!request.headers.get("content-type")?.startsWith("application/x-www-form-urlencoded")) {
+      return page(415, "Not a form submission", "<p>Press the button on the page.</p>");
+    }
+    const result = await deps.commands.pairTelegram(actor, { agentId });
+    if (result.ok) return pairedPage(result.value.link, result.value.expiresAt);
+    return result.reason === "not_connected" ? notConnectedPage() : unavailablePage();
+  } catch (error) {
+    console.error("admin-api: pairing page failed", errorName(error));
+    return unavailablePage();
+  }
+}
+
+/**
+ * Whether a POST came from this origin's own pages. Browsers say so in `Sec-Fetch-Site`; without
+ * it, the `Origin` must be this origin's. Current browsers send at least one of them on a POST, so a
+ * request with neither came from no page, and passes only with `allowNoOrigin`: a client such as
+ * curl.
+ * (The form pages' referrer policy is `same-origin`, so the browser sends the real origin: under
+ * `no-referrer` it would send `null`.)
+ */
+function isSameOriginSubmission(
+  request: Request,
+  options: { allowNoOrigin?: boolean } = {},
+): boolean {
   const site = request.headers.get("sec-fetch-site");
   if (site !== null) return site === "same-origin";
   const origin = request.headers.get("origin");
-  return origin === null || origin === new URL(request.url).origin;
+  if (origin === null) return options.allowNoOrigin ?? false;
+  return origin === new URL(request.url).origin;
+}
+
+/**
+ * Whether the media type is exactly `application/json`, parameters aside. A substring match would
+ * take `text/plain;application/json`, which a page elsewhere can send without a preflight.
+ */
+function isJson(request: Request): boolean {
+  const type = request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+  return type === "application/json";
 }
 
 async function run(

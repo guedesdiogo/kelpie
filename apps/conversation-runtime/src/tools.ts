@@ -1,5 +1,6 @@
 import type { Actor } from "@kelpie/config";
 import type { RecallOptions } from "@kelpie/context-store/contract";
+import { withoutTypedStamps } from "@kelpie/conversation";
 import type { ToolCallPart, ToolResult, ToolSpec } from "@kelpie/llm";
 
 // The tool layer (ADR-0014, issue #141): providers offer an agent tools, and the conversation's
@@ -37,6 +38,90 @@ export const TOOL_FAILED_RESULT = "The tool failed.";
 export const TOOL_LIMIT_TEXT =
   "I couldn't finish this within my limits. Ask me again, or narrow it down.";
 
+/** A change a tool makes only with the owner's yes (ADR-0013). */
+export interface ConfirmationRequest {
+  /** The command the yes is for. */
+  command: string;
+  /** Its input as the command takes it, after parsing: the yes is for exactly this. */
+  input: unknown;
+  /**
+   * What the owner is shown, written by the tool's code from the validated input, never by the
+   * model: a sentence, starting in lower case, that names an agent by its id.
+   */
+  summary: string;
+}
+
+/** How long a confirmation's code lasts. */
+export const CONFIRMATION_MS = 10 * 60_000;
+
+/** The longest summary a notice shows, once made visible: the notice fits one Telegram message. */
+export const MAX_SUMMARY_CHARS = 3_500;
+
+/**
+ * The text with every control, format, private-use, unassigned, line or paragraph separator and
+ * default-ignorable character (variation selectors, fillers) written out as `\u{…}`, so nothing in
+ * it is invisible or reorders what is shown.
+ */
+export function visible(text: string): string {
+  return text.replace(
+    /[\p{C}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/gu,
+    (character) => `\\u{${(character.codePointAt(0) ?? 0).toString(16).toUpperCase()}}`,
+  );
+}
+
+/**
+ * The bubble the host sends after the turn's reply, so the owner can confirm a change. The summary
+ * is shown with its invisible characters written out.
+ */
+export function confirmationNotice(summary: string, code: string): string {
+  return `Confirm: ${visible(summary)}\nTo go ahead, reply with just the code ${code}. It expires in ${CONFIRMATION_MS / 60_000} minutes.`;
+}
+
+/** Codes avoid letters and digits that read alike: no 0/O, 1/I/L, 2/Z, 5/S, 8/B. */
+const CODE_ALPHABET = "ACDEFHJKMNPRTWXY34679";
+
+export function newConfirmationCode(): string {
+  let code = "";
+  while (code.length < 6) {
+    // The largest multiple of the alphabet's size that fits a byte: above it, a byte would skew.
+    for (const byte of crypto.getRandomValues(new Uint8Array(8))) {
+      if (byte < 252 && code.length < 6) code += CODE_ALPHABET[byte % CODE_ALPHABET.length];
+    }
+  }
+  return code;
+}
+
+/**
+ * Whether a message confirms the code: one of its lines, past the time stamp in front of it, is
+ * the code alone, in ASCII letters and digits of any case, with a period or exclamation mark after
+ * it at most. A line that only mentions the code, such as "don't do K7MPRX", or asks about it
+ * ("K7MPRX?"), is no yes.
+ */
+export function confirmsCode(text: string, code: string): boolean {
+  return withoutTypedStamps(text)
+    .split("\n")
+    .some((line) => {
+      const word = line.trim();
+      // Longer lines can't be the code; skipping them keeps a huge message cheap to check.
+      if (word.length > MAX_CODE_LINE_CHARS) return false;
+      const bare = word.replace(/[.!]+$/u, "");
+      return /^[A-Za-z0-9]+$/.test(bare) && bare.toUpperCase() === code;
+    });
+}
+
+const MAX_CODE_LINE_CHARS = 32;
+
+/** JSON with every object's keys sorted, so equal inputs compare equal. */
+export function canonicalJson(value: unknown): string {
+  return (
+    JSON.stringify(value, (_key, item: unknown) =>
+      item !== null && typeof item === "object" && !Array.isArray(item)
+        ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+        : item,
+    ) ?? "null"
+  );
+}
+
 /** What a tool's run knows about the turn. None of it comes from model output. */
 export interface ToolContext {
   /** Built from the turn's admitted user, `via` the agent. */
@@ -55,6 +140,14 @@ export interface ToolContext {
   source: string;
   /** Aborts when the turn stops: a new message, a pause or an eviction. */
   signal: AbortSignal;
+  /**
+   * Whether the owner confirmed this change (ADR-0013): they reply with just the code the host
+   * showed them for it, in a message of their own. Until they do, the host shows them the summary and a
+   * code after the turn's reply, and this answers false: the call must not make the change. A code
+   * lasts CONFIRMATION_MS, confirms exactly one command and input, and confirms once. The model never
+   * sees a code before the owner types it.
+   */
+  confirm(request: ConfirmationRequest): Promise<boolean>;
 }
 
 /**
