@@ -426,6 +426,34 @@ describe("Vault Dream", () => {
     );
   });
 
+  it("never writes a plan made for a fact the person stated", async () => {
+    const stated = await kelpieNote({ title: "Café", level: "explicit", confidence: 0.9 });
+    const backend = new FakeVaultBackend({ "README.md": "# Vault" });
+    replaceBackendForTesting(backend);
+    const requests = fakeModel([]);
+    const stub = vault("dream-writes-stated");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", [stated], "x");
+    await runDurableObjectAlarm(stub);
+    // A proposal as an earlier Dream, without this rule, would have left it.
+    await runInDurableObject(stub, (_instance, state) => {
+      const blob = state.storage.sql
+        .exec<{ blob_sha: string }>("SELECT blob_sha FROM files WHERE path = ?", stated.path)
+        .one().blob_sha;
+      state.storage.sql.exec(
+        "INSERT INTO dream_proposals (path, blob_sha, abstract, at) VALUES (?, ?, 'Café.', 1)",
+        stated.path,
+        blob,
+      );
+    });
+    await stub.setDream("dry", ["abstracts"]);
+    await quiet(stub);
+    await runDurableObjectAlarm(stub);
+    await runDurableObjectAlarm(stub);
+    expect(requests).toHaveLength(0);
+    expect(backend.files()[stated.path]).toBe(stated.content);
+  });
+
   it("drops its write when the owner edits the note before it commits", async () => {
     const note = await kelpieNote({ title: "Café" });
     const backend = new FakeVaultBackend({ "README.md": "# Vault" });

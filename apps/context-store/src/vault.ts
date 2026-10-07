@@ -295,6 +295,19 @@ CREATE TABLE IF NOT EXISTS proposals (
 );
 `;
 
+/**
+ * Whether Dream gives a note's current version an abstract (#112): a session page, whose abstract
+ * is its first message, or a conclusion without one. A fact the person stated (`explicit`) keeps
+ * its own words.
+ */
+function abstractWanted(version: {
+  kind: string;
+  abstract: string | null;
+  level: string | null;
+}): boolean {
+  return version.kind === "session" || (version.abstract === null && version.level !== "explicit");
+}
+
 const encoder = new TextEncoder();
 const bytes = (text: string | null) => (text === null ? 0 : encoder.encode(text).byteLength);
 
@@ -908,7 +921,7 @@ export class Vault extends DurableObject<VaultEnv> {
       for (const row of pending) {
         if (!kelpie.has(row.path) || waiting.has(row.path) || merged.has(row.path)) continue;
         const version = this.#memory.current(row.path);
-        if (version === null) continue;
+        if (version === null || !abstractWanted(version)) continue;
         return {
           path: row.path,
           blobSha: row.blob_sha,
@@ -924,13 +937,7 @@ export class Vault extends DurableObject<VaultEnv> {
         continue;
       }
       const version = this.#memory.current(note.path);
-      // A fact the person stated (`explicit`) keeps its own words; a session page is summed up.
-      if (
-        version === null ||
-        (note.kind !== "session" && (version.abstract !== null || version.level === "explicit"))
-      ) {
-        continue;
-      }
+      if (version === null || !abstractWanted(version)) continue;
       return { path: note.path, blobSha: note.blobSha, title: version.title, body: version.body };
     }
     return null;
