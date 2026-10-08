@@ -22,6 +22,8 @@ const MAX_FILE_BYTES = 1_048_576;
 const BLOB_BATCH = 50;
 /** GitHub's compare lists at most 300 files; a longer diff takes a snapshot instead. */
 const COMPARE_FILE_LIMIT = 300;
+/** Git's mode for a symbolic link. Its blob holds the target's path, not a note (#196). */
+const SYMLINK_MODE = 0o120000;
 
 export interface GitHubVaultOptions {
   appId: string;
@@ -159,14 +161,17 @@ export class GitHubVaultBackend implements VaultBackend {
   async snapshot(commit: string): Promise<VaultSnapshot> {
     const { status, body } = await this.#rest<{
       truncated?: boolean;
-      tree?: { path: string; type: string; sha: string; size?: number }[];
+      tree?: { path: string; mode?: string; type: string; sha: string; size?: number }[];
     }>("tree", "GET", `/git/trees/${commit}?recursive=1`);
     if (status !== 200 || !body?.tree) throw new GitHubError("tree", status);
     if (body.truncated)
       throw new GitHubError("tree", status, "the vault's tree is too large to list");
     const entries = body.tree.filter(
       (entry) =>
-        entry.type === "blob" && isVaultText(entry.path) && (entry.size ?? 0) <= MAX_FILE_BYTES,
+        entry.type === "blob" &&
+        entry.mode !== SYMLINK_MODE.toString(8) &&
+        isVaultText(entry.path) &&
+        (entry.size ?? 0) <= MAX_FILE_BYTES,
     );
     return { commit, files: await this.#read(commit, entries) };
   }
@@ -205,6 +210,33 @@ export class GitHubVaultBackend implements VaultBackend {
       }
     }
     return files;
+  }
+
+  /** Which of these files are symbolic links at a commit, from their folders' entries. */
+  async #symlinks(commit: string, entries: readonly { path: string }[]): Promise<Set<string>> {
+    const wanted = new Set(entries.map(({ path }) => path));
+    const folders = [...new Set([...wanted].map(folderOf))];
+    const links = new Set<string>();
+    for (let start = 0; start < folders.length; start += BLOB_BATCH) {
+      const batch = folders.slice(start, start + BLOB_BATCH);
+      const variables: Record<string, unknown> = { owner: this.#owner, name: this.#name };
+      batch.forEach((folder, i) => {
+        variables[`d${i}`] = `${commit}:${folder}`;
+      });
+      const { data, errors } = await this.#graphql<{
+        repository: Record<string, { entries?: { name: string; mode: number }[] } | null>;
+      }>("read folders", readFoldersQuery(batch.length), variables);
+      if (errors.length > 0 || !data) {
+        throw new GitHubError("read folders", 200, errors[0]?.type ?? "no data");
+      }
+      for (const [i, folder] of batch.entries()) {
+        for (const { name, mode } of data.repository[`d${i}`]?.entries ?? []) {
+          const path = folder === "" ? name : `${folder}/${name}`;
+          if (mode === SYMLINK_MODE && wanted.has(path)) links.add(path);
+        }
+      }
+    }
+    return links;
   }
 
   async #blobText(sha: string): Promise<string | null> {
@@ -249,12 +281,16 @@ export class GitHubVaultBackend implements VaultBackend {
       if (file.status === "removed") changes.push({ path: file.filename, content: null });
       else reads.push({ path: file.filename, sha: file.sha });
     }
-    const read = await this.#read(to, reads);
+    // The compare API gives no mode. A link leaves the working copy, as a snapshot leaves it out.
+    const links = await this.#symlinks(to, reads);
+    for (const path of links) changes.push({ path, content: null });
+    const notes = reads.filter(({ path }) => !links.has(path));
+    const read = await this.#read(to, notes);
     for (const file of read) changes.push(file);
     // A file past the size the vault keeps, or no longer text, leaves the working copy, as a
     // snapshot would leave it out.
     const kept = new Set(read.map((file) => file.path));
-    for (const { path } of reads) if (!kept.has(path)) changes.push({ path, content: null });
+    for (const { path } of notes) if (!kept.has(path)) changes.push({ path, content: null });
     return {
       from,
       to,
@@ -350,6 +386,25 @@ function readFilesQuery(count: number): string {
     ${fields}
   }
 }`;
+}
+
+/** The entries of folders, by `object(expression:)`; GraphQL gives a mode as a decimal number. */
+function readFoldersQuery(count: number): string {
+  const variables = Array.from({ length: count }, (_, i) => `$d${i}: String!`).join(", ");
+  const fields = Array.from(
+    { length: count },
+    (_, i) => `d${i}: object(expression: $d${i}) { ... on Tree { entries { name mode } } }`,
+  ).join("\n    ");
+  return `query ($owner: String!, $name: String!, ${variables}) {
+  repository(owner: $owner, name: $name) {
+    ${fields}
+  }
+}`;
+}
+
+/** A path's folder, empty at the root, which `<commit>:` names. */
+function folderOf(path: string): string {
+  return path.slice(0, Math.max(path.lastIndexOf("/"), 0));
 }
 
 /** A JSON body, or null when GitHub answered with something else, such as an HTML 5xx page. */

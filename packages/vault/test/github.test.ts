@@ -18,8 +18,16 @@ interface Call {
 /** GitHub's API as the adapter uses it, answering from fixed data and recording each call. */
 function fakeGitHub(
   files: Record<string, string>,
-  options: { stale?: boolean; refuse?: boolean } = {},
+  options: {
+    stale?: boolean;
+    refuse?: boolean;
+    links?: Record<string, string>;
+    changedLinks?: string[];
+  } = {},
 ) {
+  // Symbolic links, by path, and the target each one's blob holds; the diff lists `changedLinks`.
+  const links = options.links ?? {};
+  const changedLinks = options.changedLinks ?? Object.keys(links);
   const calls: Call[] = [];
   let tokens = 0;
   const json = (status: number, body: unknown) => Response.json(body, { status });
@@ -48,6 +56,13 @@ function fakeGitHub(
         truncated: false,
         tree: [
           ...Object.keys(files).map((p) => ({ path: p, type: "blob", sha: `sha-${p}`, size: 10 })),
+          ...Object.keys(links).map((p) => ({
+            path: p,
+            mode: "120000",
+            type: "blob",
+            sha: `sha-${p}`,
+            size: 10,
+          })),
           { path: "memory", type: "tree", sha: "t1" },
           { path: ".obsidian/workspace.md", type: "blob", sha: "s1", size: 10 },
           { path: "photo.png", type: "blob", sha: "s2", size: 10 },
@@ -69,6 +84,7 @@ function fakeGitHub(
           },
           { filename: "photo.png", status: "added", sha: "y" },
           { filename: "knowledge/huge.md", status: "added", sha: "sha-knowledge/huge.md" },
+          ...changedLinks.map((p) => ({ filename: p, status: "added", sha: `sha-${p}` })),
         ],
       });
     }
@@ -99,10 +115,26 @@ function fakeGitHub(
         return json(200, { data: { createCommitOnBranch: { commit: { oid: "c".repeat(40) } } } });
       }
       const repository: Record<string, unknown> = {};
+      if (query.includes("on Tree")) {
+        // A folder's entries, with GraphQL's modes: decimal numbers for git's octal ones.
+        for (const [key, value] of Object.entries(variables)) {
+          if (!key.startsWith("d")) continue;
+          const folder = String(value).slice(41);
+          const entries = [
+            ...Object.keys(files).map((p) => ({ path: p, mode: 0o100644 })),
+            ...Object.keys(links).map((p) => ({ path: p, mode: 0o120000 })),
+          ]
+            .filter(({ path: p }) => p.slice(0, Math.max(p.lastIndexOf("/"), 0)) === folder)
+            .map(({ path: p, mode }) => ({ name: p.slice(p.lastIndexOf("/") + 1), mode }));
+          repository[key] = { entries };
+        }
+        return json(200, { data: { repository } });
+      }
       for (const [key, value] of Object.entries(variables)) {
         if (!key.startsWith("e")) continue;
         const filePath = String(value).slice(41);
-        const text = files[filePath];
+        // A link's blob is its target's path, as GitHub answers it.
+        const text = files[filePath] ?? links[filePath];
         repository[`f${key.slice(1)}`] =
           text === undefined
             ? null
@@ -211,6 +243,53 @@ describe("GitHubVaultBackend", () => {
     });
     // A force-push: the caller takes a snapshot.
     expect(await vault.diff(HEAD, BASE)).toBeNull();
+  });
+
+  it("skips symbolic links, whose blob holds a path rather than a note, in a snapshot and a diff", async () => {
+    const github = fakeGitHub(
+      {
+        "memory/notes/a.md": "# A2",
+        "memory/notes/b.md": "# B",
+        "knowledge/huge.md": "past the size limit",
+        "top.md": "# Top",
+      },
+      {
+        links: {
+          "memory/notes/link.md": "a.md",
+          "memory/notes/old-link.md": "b.md",
+          "agents.md": "agents/kelpie/AGENTS.md",
+        },
+        changedLinks: ["memory/notes/link.md", "agents.md"],
+      },
+    );
+    const vault = backend(github);
+    expect((await vault.snapshot(HEAD)).files.map((file) => file.path)).toEqual([
+      "memory/notes/a.md",
+      "memory/notes/b.md",
+      "top.md",
+    ]);
+    const diff = await vault.diff(BASE, HEAD);
+    // Added as links, they leave the working copy, as a snapshot leaves them out.
+    expect(diff?.changes).toContainEqual({ path: "memory/notes/link.md", content: null });
+    expect(diff?.changes).toContainEqual({ path: "agents.md", content: null });
+    // A link the diff doesn't list, beside a changed note, is left as it is.
+    expect(diff?.changes.map((change) => change.path)).not.toContain("memory/notes/old-link.md");
+    expect(diff?.changes).toContainEqual({
+      path: "memory/notes/a.md",
+      content: "# A2",
+      blobSha: "sha-memory/notes/a.md",
+    });
+    const read = github.calls.flatMap((call) => {
+      const { query, variables } = (call.body ?? {}) as {
+        query?: string;
+        variables?: Record<string, unknown>;
+      };
+      return query?.includes("on Blob") ? Object.values(variables ?? {}).map(String) : [];
+    });
+    expect(read.some((expression) => expression.endsWith(":memory/notes/a.md"))).toBe(true);
+    expect(
+      read.filter((expression) => /:(?:memory\/notes\/link|agents)\.md$/.test(expression)),
+    ).toEqual([]);
   });
 
   it("commits writes and deletions on the expected head, with the body for trailers", async () => {

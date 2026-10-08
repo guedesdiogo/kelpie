@@ -46,7 +46,8 @@ Rules for paths:
   - skills (`skills/`) and each agent's `SOUL.md`, `AGENTS.md` and `skills/`, which the Context Store loads separately;
   - hidden folders (`.obsidian/`, `.trash/`);
   - folders under `memory/` whose name starts with `_`, which hold Kelpie's own files, such as the [lifecycle report](#lifecycle) at `memory/_lint/report.md`. No agent may write there. A file directly under `memory/`, such as `memory/_inbox.md`, is still a note;
-  - anything that isn't `.md`.
+  - anything that isn't `.md`;
+  - symbolic links, even named `.md`: git keeps the target's path as the file's content, not a note.
 
 ## A memory file
 
