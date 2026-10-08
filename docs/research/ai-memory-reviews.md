@@ -14,7 +14,9 @@ Last reviewed commit: `237933b50151b4ce369a65e83edad1c16627c97b`
 
 The routine follows these steps, and so does a review run by hand.
 
-1. **The range.** From the last reviewed commit above to ai-memory's `main`. With no new commit, the review stops: no issue and no pull request.
+1. **The range.** From the last reviewed commit above to ai-memory's `main`.
+   - With no new commit, the review stops: no issue and no pull request.
+   - While an earlier review's pull request is still open, the pin on `main` is stale. The review stops and adds a one-line comment to that pull request. The next review after it merges covers both weeks.
 2. **What to read:**
    - releases and `CHANGELOG.md` for the range;
    - the diff of `docs/`, `README.md` and `AGENTS.md`;
