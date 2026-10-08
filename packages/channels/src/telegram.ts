@@ -11,6 +11,7 @@ import {
 } from "./adapter.ts";
 import { CAPABILITIES } from "./capabilities.ts";
 import type { CanonicalEvent, MessagePart } from "./events.ts";
+import { fitsTelegram, formatReply, toTelegramHtml, toTelegramPlain } from "./markdown.ts";
 
 // Telegram through the Bot API (https://core.telegram.org/bots/api), webhooks only (ADR-0003).
 
@@ -104,15 +105,34 @@ export class TelegramAdapter implements ChannelAdapter {
     text: string,
     options: SendOptions = {},
   ): Promise<SendResult> {
-    const result = await this.#call<{ message_id: number }>("sendMessage", {
-      chat_id: destination.threadId,
-      // HTML lets formatting come later; until then every character shows as typed.
-      text: escapeHtml(text),
-      parse_mode: "HTML",
-      disable_notification: options.silent === true,
-      link_preview_options: linkPreview(text, options.previewUrl),
-      ...replyParameters(destination.replyToMessageId),
-    });
+    // A reply is formatted (#188). A notice goes as typed, and so does a reply Telegram can't read,
+    // but with every address in code: a notice can quote what the model wrote, and Telegram would
+    // make it tappable.
+    const html =
+      options.links === undefined
+        ? null
+        : toTelegramHtml(formatReply(text, new Set(options.links)));
+    // A reply with more formatting than Telegram reads goes plainer, so no code span is dropped.
+    const formatted = html !== null && fitsTelegram(html) ? html : null;
+    const sendAs = (html: string) =>
+      this.#call<{ message_id: number }>("sendMessage", {
+        chat_id: destination.threadId,
+        text: html,
+        parse_mode: "HTML",
+        disable_notification: options.silent === true,
+        // Checked against the text as written: formatting escapes the `&` in a link.
+        link_preview_options: linkPreview(text, options.previewUrl),
+        ...replyParameters(destination.replyToMessageId),
+      });
+    let result: { message_id: number };
+    try {
+      result = await sendAs(formatted ?? toTelegramPlain(text));
+    } catch (error) {
+      if (formatted === null || !(error instanceof ChannelRequestError) || error.status !== 400) {
+        throw error;
+      }
+      result = await sendAs(toTelegramPlain(text));
+    }
     return { providerMessageId: String(result.message_id) };
   }
 
@@ -289,11 +309,6 @@ function mediaOf(
   if (message.video) return { kind: "video", file: message.video };
   if (message.document) return { kind: "file", file: message.document };
   return null;
-}
-
-/** The three characters Telegram's HTML mode needs escaped. */
-function escapeHtml(text: string): string {
-  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
 async function constantTimeEqual(a: string, b: string): Promise<boolean> {

@@ -29,6 +29,14 @@ export type {
   WebhookRegistrationFailure,
 } from "./egress.ts";
 export { type CanonicalEvent, type ChannelId, dedupeKey, type MessagePart } from "./events.ts";
+export {
+  type AllowedLinks,
+  type Block,
+  formatReply,
+  type Inline,
+  linksOf,
+  webLinks,
+} from "./markdown.ts";
 
 // Adapters have their own entry points (`@kelpie/channels/telegram`): they need the runtime's fetch
 // and crypto, which packages that only use the types above don't declare.

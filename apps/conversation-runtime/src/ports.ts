@@ -47,13 +47,14 @@ export interface ConversationPorts {
   /**
    * Sends one bubble through the agent's channel (channel-egress). A failure is a value: rate
    * limited with the wait, recipient unavailable, not connected, or failed. `previewUrl` is the one
-   * link in the bubble the channel may preview (#130); without it, none is.
+   * link in the bubble the channel may preview (#130); without it, none is. `links` makes the
+   * bubble a formatted reply that may link those URLs (#188); without it, the text goes as typed.
    */
   send(
     agentId: string,
     destination: Destination,
     text: string,
-    options: { silent: boolean; previewUrl?: string },
+    options: { silent: boolean; previewUrl?: string; links?: readonly string[] },
   ): Promise<SendOutcome>;
   /** Shows "typing" once. It is a courtesy, so callers ignore its failures. */
   typing(agentId: string, destination: Destination): Promise<void>;

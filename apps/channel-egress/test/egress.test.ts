@@ -424,6 +424,26 @@ describe("ChannelEgress", () => {
     expect(await exports.ChannelEgress.typing("assistant", destination)).toEqual({ ok: true });
   });
 
+  it("formats a reply the runtime passes with its links, and links nothing else (#188)", async () => {
+    const calls = botApi();
+    await connect("formats");
+    await exports.ChannelEgress.send(
+      "formats",
+      destination,
+      "**Ok**: [menu](https://food.example/menu) e https://evil.example/x",
+      { silent: false, links: ["https://food.example/menu"] },
+    );
+    await exports.ChannelWebhooks.notice("formats", destination, { kind: "paired" });
+    const sent = calls
+      .filter((call) => call.method === "sendMessage")
+      .map((call) => call.body.text);
+    expect(sent[0]).toBe(
+      '<b>Ok</b>: <a href="https://food.example/menu">menu</a> e <code>https://evil.example/x</code>',
+    );
+    // A fixed notice isn't a reply: it goes as written.
+    expect(sent[1]).not.toContain("<");
+  });
+
   it("previews only the link the runtime passes, and no link in anything else (#130)", async () => {
     const calls = botApi();
     await connect("previews");

@@ -132,6 +132,94 @@ describe("webchat sockets", () => {
     expect(world.typing).toBe(0);
   });
 
+  it("formats a reply, linking only what the owner sent and Kelpie's admin pages (#188)", async () => {
+    use(
+      fakeWorld([
+        reply(
+          "**Pronto**: [o guia](https://docs.example/guia), [o formulário](https://admin.example/forms/abc) e [outro](https://evil.example/x).",
+        ),
+      ]),
+    );
+    const name = "assistant:webchat:formatted";
+    const chat = await open(name);
+    chat.send({ type: "message", id: "c1", text: "segui https://docs.example/guia" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
+    await agent(name).flush();
+    await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(1));
+
+    const blocks = [
+      {
+        type: "paragraph",
+        children: [
+          { type: "bold", children: [{ type: "text", text: "Pronto" }] },
+          { type: "text", text: ": " },
+          {
+            type: "link",
+            href: "https://docs.example/guia",
+            children: [{ type: "text", text: "o guia" }],
+          },
+          { type: "text", text: ", " },
+          {
+            type: "link",
+            href: "https://admin.example/forms/abc",
+            children: [{ type: "text", text: "o formulário" }],
+          },
+          { type: "text", text: " e " },
+          { type: "text", text: "outro" },
+          { type: "text", text: " (" },
+          { type: "code", text: "https://evil.example/x" },
+          { type: "text", text: ")" },
+          { type: "text", text: "." },
+        ],
+      },
+    ];
+    expect(ofType(chat.frames, "bubble")[0]).toMatchObject({ blocks });
+
+    // A new socket gets the reply formatted the same way.
+    const later = await open(name);
+    await vi.waitFor(() => expect(later.frames[0]).toMatchObject({ type: "history" }));
+    const messages = (later.frames[0]?.messages ?? []) as { role: string; blocks?: unknown }[];
+    const replayed = messages.find((message) => message.role === "assistant");
+    expect(replayed?.blocks).toEqual(blocks);
+  });
+
+  it("links on replay only what the owner had sent before each reply, and the admin origin as written (#188)", async () => {
+    use(
+      fakeWorld([
+        reply("Veja https://later.example/a e [admin](https://admin.example\\@evil.example/x)."),
+        reply("Ok: **https://later.example/a**"),
+      ]),
+    );
+    const name = "assistant:webchat:replay-order";
+    const chat = await open(name);
+    const delivered = (count: number) =>
+      vi.waitFor(async () => {
+        const turns = await agent(name).turns();
+        expect(turns).toHaveLength(count);
+        expect(turns.at(-1)?.status).toBe("delivered");
+      });
+    chat.send({ type: "message", id: "c1", text: "oi" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
+    await agent(name).flush();
+    await delivered(1);
+    chat.send({ type: "message", id: "c2", text: "achei https://later.example/a" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(2));
+    await agent(name).flush();
+    await delivered(2);
+
+    const later = await open(name);
+    await vi.waitFor(() => expect(later.frames[0]).toMatchObject({ type: "history" }));
+    const messages = (later.frames[0]?.messages ?? []) as { role: string; blocks?: unknown }[];
+    const [first, second] = messages
+      .filter((message) => message.role === "assistant")
+      .map((message) => JSON.stringify(message.blocks));
+    // The owner sent the link after the first reply, which showed it as code live.
+    expect(first).not.toContain('"type":"link"');
+    expect(first).toContain('{"type":"code","text":"https://later.example/a"}');
+    expect(first).toContain('{"type":"code","text":"https://admin.example\\\\@evil.example/x"}');
+    expect(second).toContain('{"type":"link","href":"https://later.example/a"');
+  });
+
   it("replays the conversation to a new socket, without the time stamps", async () => {
     use(fakeWorld([reply("Claro, qual o número?")]));
     const name = "assistant:webchat:replay";
@@ -426,6 +514,9 @@ describe("a turn's steps in the webchat", () => {
     expect(answer).toBe("Confirme, por favor.");
     const code = /reply with just the code ([A-Z0-9]{6})\./.exec(notice ?? "")?.[1] ?? "";
     expect(notice).toMatch(/^Confirm: change the tier to \{"to":"frontier"\}\.\n/);
+    // The notice is Kelpie's own text: shown as written, never formatted.
+    expect(ofType(chat.frames, "bubble")[1]).not.toHaveProperty("blocks");
+    expect(ofType(chat.frames, "bubble")[0]).toHaveProperty("blocks");
     expect(world.sent).toEqual([]);
 
     // The notice isn't history: a new socket doesn't get it back.

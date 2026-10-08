@@ -1,6 +1,7 @@
 // The webchat (issue #40). Cloudflare Access has logged the owner in before this page loads, and
-// the socket's upgrade carries the same login. Everything shown goes through textContent: model
-// output is never parsed as HTML.
+// the socket's upgrade carries the same login. Model output is never parsed as HTML: text goes
+// through text nodes, and a reply's formatting (#188) comes as blocks the runtime read, built here
+// with createElement. Its links are the ones the runtime allowed, and only web links.
 
 const agent = new URLSearchParams(location.search).get("agent") ?? "";
 const list = document.getElementById("messages");
@@ -37,10 +38,11 @@ const STEP_TEXT = { memory: "Reading memory…", thinking: "Thinking…", tool: 
 /** While the owner types, the page says so at most this often. */
 const TYPING_SENT_EVERY_MS = 3_000;
 
-function show(role, text, id) {
+function show(role, text, id, blocks) {
   const item = document.createElement("li");
   item.className = role;
-  item.textContent = text;
+  if (Array.isArray(blocks)) item.append(renderBlocks(blocks));
+  else item.textContent = text;
   if (id) {
     item.dataset.id = id;
     item.classList.add("pending");
@@ -48,6 +50,91 @@ function show(role, text, id) {
   list.append(item);
   item.scrollIntoView({ block: "end" });
   return item;
+}
+
+/** A reply's blocks (#188) as elements. Anything not one of the known kinds is left out. */
+function renderBlocks(blocks) {
+  const fragment = document.createDocumentFragment();
+  for (const block of blocks) {
+    switch (block?.type) {
+      case "paragraph": {
+        const paragraph = document.createElement("p");
+        paragraph.append(renderInline(block.children));
+        fragment.append(paragraph);
+        break;
+      }
+      case "list": {
+        const list = document.createElement(block.ordered ? "ol" : "ul");
+        if (block.ordered && Number.isInteger(block.start)) list.start = block.start;
+        for (const item of Array.isArray(block.items) ? block.items : []) {
+          const entry = document.createElement("li");
+          entry.append(renderInline(item));
+          list.append(entry);
+        }
+        fragment.append(list);
+        break;
+      }
+      case "code": {
+        const pre = document.createElement("pre");
+        const code = document.createElement("code");
+        code.textContent = String(block.text ?? "");
+        pre.append(code);
+        fragment.append(pre);
+        break;
+      }
+    }
+  }
+  return fragment;
+}
+
+function renderInline(nodes) {
+  const fragment = document.createDocumentFragment();
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    switch (node?.type) {
+      case "text":
+        fragment.append(String(node.text ?? ""));
+        break;
+      case "code": {
+        const code = document.createElement("code");
+        code.textContent = String(node.text ?? "");
+        fragment.append(code);
+        break;
+      }
+      case "bold":
+      case "italic": {
+        const emphasis = document.createElement(node.type === "bold" ? "strong" : "em");
+        emphasis.append(renderInline(node.children));
+        fragment.append(emphasis);
+        break;
+      }
+      case "link": {
+        const label = renderInline(node.children);
+        if (!isWebLink(node.href)) {
+          fragment.append(label);
+          break;
+        }
+        const link = document.createElement("a");
+        link.href = node.href;
+        // The label is the model's; hovering shows where the link goes.
+        link.title = node.href;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.append(label);
+        fragment.append(link);
+        break;
+      }
+    }
+  }
+  return fragment;
+}
+
+function isWebLink(href) {
+  try {
+    const { protocol } = new URL(href);
+    return protocol === "https:" || protocol === "http:";
+  } catch {
+    return false;
+  }
 }
 
 /** Shows what the agent is doing, or nothing for null. */
@@ -78,7 +165,9 @@ function receive(frame) {
     case "history":
       setPaused(frame.paused);
       list.replaceChildren();
-      for (const message of frame.messages) show(message.role, message.text);
+      for (const message of frame.messages) {
+        show(message.role, message.text, undefined, message.blocks);
+      }
       // The history already shows what the conversation received; only the rest goes again, and
       // the conversation would drop a repeat by its id anyway.
       for (const id of frame.received) unconfirmed.delete(id);
@@ -89,7 +178,7 @@ function receive(frame) {
       break;
     case "bubble":
       setTyping(false);
-      show("assistant", frame.text);
+      show("assistant", frame.text, undefined, frame.blocks);
       break;
     case "typing":
       setTyping(frame.active);

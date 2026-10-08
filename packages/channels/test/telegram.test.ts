@@ -160,9 +160,9 @@ describe("Telegram sending", () => {
     await adapter.send({ threadId: "1001" }, `See ${menu} or https://evil.example/x`, {
       previewUrl: menu,
     });
-    // The link goes as typed; only the text is escaped.
+    // The link previews as typed. Sent without the links it may show (#188), every address is code.
     expect(calls[0]?.body).toMatchObject({
-      text: "See https://food.example/menu?a=1&amp;b=2 or https://evil.example/x",
+      text: "See <code>https://food.example/menu?a=1&amp;b=2</code> or <code>https://evil.example/x</code>",
       link_preview_options: { url: menu },
     });
 
@@ -181,6 +181,63 @@ describe("Telegram sending", () => {
       { is_disabled: true },
       { is_disabled: true },
       { is_disabled: true },
+    ]);
+  });
+
+  it("formats a reply given its allowed links, and links only those (#188)", async () => {
+    const { adapter, calls } = botApi();
+    const form = "https://admin.example/forms/abc";
+    await adapter.send(
+      { threadId: "1001" },
+      `Abra **o formulário**: [aqui](${form}) e não https://evil.example/x.`,
+      { links: [form] },
+    );
+    expect(calls[0]?.body).toMatchObject({
+      text: `Abra <b>o formulário</b>: <a href="${form}">aqui</a> e não <code>https://evil.example/x</code>.`,
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+    });
+
+    // Without links, a send is plain text: notices stay what they say, but what they quote can't
+    // be tapped.
+    await adapter.send({ threadId: "1001" }, "Confirm: rename **a** to evil.example/login");
+    expect(calls[1]?.body.text).toBe("Confirm: rename **a** to <code>evil.example/login</code>");
+  });
+
+  it("sends a reply with more formatting than Telegram reads plainer, its addresses still in code", async () => {
+    const { adapter, calls } = botApi();
+    const reply = `${"**a** ".repeat(95)}veja evil.example/login`;
+    await adapter.send({ threadId: "1001" }, reply, { links: [] });
+    expect(calls[0]?.body.text).toBe(`${"**a** ".repeat(95)}veja <code>evil.example/login</code>`);
+  });
+
+  it("previews against the text as written, before it is formatted", async () => {
+    const { adapter, calls } = botApi();
+    const menu = "https://food.example/menu?a=1&b=2";
+    await adapter.send({ threadId: "1001" }, `Veja ${menu}`, { previewUrl: menu, links: [menu] });
+    expect(calls[0]?.body).toMatchObject({
+      text: `Veja <a href="https://food.example/menu?a=1&amp;b=2">https://food.example/menu?a=1&amp;b=2</a>`,
+      link_preview_options: { url: menu },
+    });
+  });
+
+  it("sends a formatted reply again as plain text when Telegram can't read it, links still off", async () => {
+    let call = 0;
+    const { adapter, calls } = botApi(() =>
+      call++ === 0
+        ? Response.json(
+            { ok: false, error_code: 400, description: "Bad Request: can't parse entities" },
+            { status: 400 },
+          )
+        : Response.json({ ok: true, result: { message_id: 78 } }),
+    );
+    const reply = "**a** < b, see https://evil.example/login or evil.example/x";
+    expect(await adapter.send({ threadId: "1001" }, reply, { links: [] })).toEqual({
+      providerMessageId: "78",
+    });
+    expect(calls.map((c) => c.body.text)).toEqual([
+      "<b>a</b> &lt; b, see <code>https://evil.example/login</code> or <code>evil.example/x</code>",
+      "**a** &lt; b, see <code>https://evil.example/login</code> or <code>evil.example/x</code>",
     ]);
   });
 

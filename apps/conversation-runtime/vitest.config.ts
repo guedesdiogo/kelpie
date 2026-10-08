@@ -9,6 +9,8 @@ export default defineConfig({
       // Tests replace the model and channel ports with fakes, so llm-gateway and channel-egress
       // are never called; the bindings only have to exist for the runtime to start.
       miniflare: {
+        // The admin API's origin, as a deploy sets it: links to it are Kelpie's own (#188).
+        bindings: { ADMIN_ORIGIN: "https://admin.example" },
         serviceBindings: {
           LLM_GATEWAY: () => new Response("llm-gateway is not available in tests", { status: 503 }),
           CHANNEL_EGRESS: () =>

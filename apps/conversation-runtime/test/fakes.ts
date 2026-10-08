@@ -103,7 +103,7 @@ export interface FakeWorld {
   cancelled: number;
   sent: string[];
   /** Every bubble sent, with whether it went out silently and the link it may preview, if any. */
-  sends: { text: string; silent: boolean; previewUrl?: string }[];
+  sends: { text: string; silent: boolean; previewUrl?: string; links?: readonly string[] }[];
   typing: number;
   /** How many times "typing" was kept up while the model answered, and how many times it stopped. */
   typingKept: number;
@@ -272,6 +272,7 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
           text,
           silent: options.silent,
           ...(options.previewUrl === undefined ? {} : { previewUrl: options.previewUrl }),
+          ...(options.links === undefined ? {} : { links: options.links }),
         });
         return { ok: true, providerMessageId: `m-${call}` };
       },
