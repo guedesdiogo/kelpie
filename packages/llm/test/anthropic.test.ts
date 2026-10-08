@@ -659,6 +659,28 @@ describe("the haiku alias", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("ends the turn when the key is refused, as a refused call would", async () => {
+    const { fetch } = fakeFetch(
+      httpError(401, { type: "error", error: { type: "authentication_error" } }),
+    );
+    const failure = collect(aliased(fetch).stream(request({ model: "haiku" })));
+
+    await expect(failure).rejects.toMatchObject({ code: "auth", retryable: false });
+  });
+
+  it("ranks a release date it can't read below any real one", async () => {
+    const { fetch, calls } = fakeFetch(
+      modelsPage([
+        ["claude-haiku-6-0", "not a date"],
+        ["claude-haiku-5-5", "2026-09-15T00:00:00Z"],
+      ]),
+      sse(haikuTurn),
+    );
+    await collect(aliased(fetch).stream(request({ model: "haiku" })));
+
+    expect(requestAt(calls, 1).body).toMatchObject({ model: "claude-haiku-5-5" });
+  });
+
   it("stops when the caller aborts while the models are listed", async () => {
     const { fetch } = fakeFetch((signal) => {
       if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");

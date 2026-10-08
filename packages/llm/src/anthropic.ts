@@ -94,30 +94,31 @@ export class AnthropicMessagesProvider implements LlmProvider {
   }
 
   /**
-   * An alias becomes the newest matching model in the Models API, by release date. Any failure is
-   * retryable, so the router tries the tier's next candidate instead of ending the turn.
+   * An alias becomes the newest matching model in the Models API, by release date. A refused key
+   * or an abort ends the turn, as on the call itself. Any other failure is retryable, so the router
+   * tries the tier's next candidate: a gateway that doesn't serve the list answers 404.
    */
   async #resolve(model: string, signal: AbortSignal | undefined): Promise<string> {
     const prefix = MODEL_ALIASES.get(model);
     if (prefix === undefined) return model;
     const cached = this.#aliases.get(model);
     if (cached && cached.expires > Date.now()) return cached.model;
-    let newest: Anthropic.ModelInfo | undefined;
+    let newest: { id: string; released: number } | undefined;
     try {
       for await (const info of this.#client.models.list(
         { limit: 1000 },
         signal ? { signal } : {},
       )) {
-        if (
-          info.id.startsWith(prefix) &&
-          (!newest || Date.parse(info.created_at) > Date.parse(newest.created_at))
-        ) {
-          newest = info;
-        }
+        if (!info.id.startsWith(prefix)) continue;
+        // A date that doesn't parse ranks below any real one.
+        const released = Date.parse(info.created_at) || Number.NEGATIVE_INFINITY;
+        if (!newest || released > newest.released) newest = { id: info.id, released };
       }
     } catch (error) {
       const failure = toLlmError(error);
-      if (failure instanceof LlmError && failure.code === "aborted") throw failure;
+      if (failure instanceof LlmError && (failure.code === "aborted" || failure.code === "auth")) {
+        throw failure;
+      }
       const status = failure instanceof LlmError ? failure.status : undefined;
       throw new LlmError(
         `Couldn't resolve the model alias "${model}"`,
