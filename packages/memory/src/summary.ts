@@ -1,9 +1,12 @@
 // Dream's day summaries (#112): where a scope's day goes, what a model is asked, and how its answer
 // is read. One summary is one day of one scope, so two conversations are never mixed (#131).
 import { type Scope, scopeRoot } from "./layout.ts";
+import { pathLink, type VaultText } from "./merge.ts";
+import { MAX_SOURCES, readNote } from "./note.ts";
 import { blockId, HEADING_PATH_CHARS, HEADING_TITLE_CHARS, oneLine } from "./retrieve.ts";
 import { sanitizeSecrets } from "./sanitize.ts";
 import { isDate } from "./time.ts";
+import { MemoryFormatError, writeMemory } from "./write.ts";
 
 /** A day's pages, shared out among them. */
 const SUMMARY_INPUT_CHARS = 12_000;
@@ -95,4 +98,36 @@ export function summaryOf(answer: string): string | null {
   if (text === "" || text.length > SUMMARY_MAX_CHARS) return null;
   if (STRUCTURE.test(text) || MARKUP.test(text)) return null;
   return text;
+}
+
+/**
+ * A day's summary as Dream writes it (#112): a `session` note beside the day's pages, deduced from
+ * them, no surer than the least sure of them, with `sources` naming each. Null when it can't be
+ * written: more pages than a note's `sources` can name, or a page whose path a source can't hold.
+ */
+export async function summaryNote(
+  day: { scope: Scope; date: string; pages: readonly VaultText[]; summary: string },
+  at: string,
+): Promise<string | null> {
+  if (day.pages.length > MAX_SOURCES) return null;
+  try {
+    const { text } = await writeMemory(
+      {
+        scope: day.scope,
+        kind: "session",
+        title: `Summary of ${day.date}`,
+        body: day.summary,
+        level: "deduced",
+        confidence: Math.min(
+          ...day.pages.map((page) => readNote(page.path, page.text)?.confidence ?? 0),
+        ),
+        sources: day.pages.map((page) => pathLink(page.path)),
+      },
+      { at },
+    );
+    return text;
+  } catch (error) {
+    if (error instanceof MemoryFormatError) return null;
+    throw error;
+  }
 }

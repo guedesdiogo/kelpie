@@ -1000,6 +1000,16 @@ export class MemoryIndex {
     );
   }
 
+  /** The notes merged into this one (#112): those whose mark counts and names it. */
+  mergedFrom(path: string): string[] {
+    return this.#exec<{ path: string }>(
+      `SELECT v.path FROM versions v
+       WHERE v.is_current = 1 AND EXISTS (SELECT 1 ${MERGED_INTO} AND t.path = ?)
+       ORDER BY v.path`,
+      path,
+    ).map((row) => row.path);
+  }
+
   /**
    * The current version's links, each resolved against the current vault, or among the notes in
    * `scopes` when given.

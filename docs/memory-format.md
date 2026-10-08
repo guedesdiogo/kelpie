@@ -218,6 +218,7 @@ A note merged into another (#112) stays at its path. It is never deleted.
   - **The mark counts** while it names, with a path link (`[[memory/notes/cafe]]`, or one relative to the note's folder), another current note of its own scope, as Dream writes it. A mark by name gets a warning on the note, since it merges nothing.
     - A mark by name hides nothing, since a name may resolve to the note itself or to a namesake elsewhere. So does a mark that leads nowhere, to the note itself or to another scope.
     - A mark is read against the vault as it is now, as a link resolves. A lookup as of an earlier time leaves out a version whose mark counts today.
+  - **The body Dream writes** is one line: the note it went into, and the commit that still holds what it said ("Dream" below).
   - Removing the mark makes it a note again.
 - **What it still is:** a file to read by its path, and a link to it still resolves to it, as in Obsidian.
 - **What it no longer is:**
@@ -467,14 +468,31 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
   - **A plan the owner already read:** once `abstracts` is named, the proposals Dream made while dry are written for the versions the vault still holds, with no new model call. A write that didn't land isn't tried again for that version.
   - **After it:** the version Dream wrote stays Kelpie's (#126), and it isn't proposed for again. The report's "Dream wrote" section lists the last week's abstracts, shown as code.
   - **Measured first:** #108's evaluation doesn't regress with the cheap tier's abstracts ([memory-eval.md](spikes/memory-eval.md#dreams-abstracts-112)).
-- **Day summaries** (#112): a dry run for now. `summaries` can't be named in `writes` yet.
+- **Writing a day summary or a merge:** Dream's own commit, one per summary or merge, outside the queue, so a merge lands whole or not at all.
+  - **When:** as for abstracts, a plan made while dry is written once its operation may write, with no new model call. A plan made with writes on is written at the next step.
+  - **Checked right before the commit:**
+    - every note it read is at the version it read;
+    - every note it writes over is Kelpie's version, not merged into the owner's edit, not held, and has no write waiting;
+    - a new note's path is still free, with nothing waiting to be written there;
+    - Dream isn't off, the operation may still write, and its plan still stands.
+  - **Checked again:** the summary or merged body is put through the rules for a model's answer once more, since it may have been kept under older ones.
+  - **If the vault moved,** the commit is refused. Dream syncs and checks again. It writes nothing if what it read, or what it writes over, changed, and otherwise commits on the new head.
+  - **What can't be written,** such as a note past its `sources` limit, or what GitHub refuses, is kept as no answer, so it isn't tried again.
+  - **A write that writes nothing** counts as a call of its run, so one that keeps finding the vault changed ends with the run.
+  - **A write queued during the commit:** an agent's write to one of those notes was made on what it held before, so it goes on top of Dream's, as on the owner's edit, and stays Kelpie's. Lines that overlap are set aside in `conflicts`.
+  - **After it:** each version is Kelpie's (#126), even when the commit lands and its answer is lost: the next sync recognizes the versions it wrote, keeps a write queued over them Kelpie's, and remembers a summary as written. The commit's headline never names a note.
+- **Day summaries** (#112): proposed as a dry run, and written once `summaries` may write. `setDream` can't name it until #182's measurement is in.
   - **What a summary covers:** one day of one conversation, from the session pages in that conversation's own scope (`conversation/…`). Two conversations are never mixed (#131). A day is summed up once it has ended in every time zone, and only within the last 7 days. That is 14 hours after the next UTC midnight: 12 for the last time zone, and 2 for a conversation still going at midnight.
   - **Kept only while its pages are:** a summary is kept, and shown, only while every page it read is still in the vault at that version. A page that's forgotten takes the summary with it right away. A page changed or removed in the vault takes it at the next daily report.
-  - **Where it would go:** `<scope>/sessions/YYYY/YYYY-MM-DD.md`, next to the session pages, as a `session` note at `level: deduced`.
-    - Its `sources` would name the session pages.
+  - **Where it goes:** `<scope>/sessions/YYYY/YYYY-MM-DD.md`, next to the session pages, as a `session` note at `level: deduced`, titled `Summary of YYYY-MM-DD`.
+    - Its `sources` name the session pages by path. A day of more than 20 pages, the most `sources` names, isn't written.
+    - Its confidence is the lowest of its pages'.
     - No session page can take that name, since theirs add a slug after the date.
-  - **When it's proposed again:** the proposal is kept with the versions of the day's pages. A new page that day proposes it again, and nothing else does. A day whose summary the vault already shows isn't proposed.
-  - **The model:** the cheap tier, within the same 8 calls a run. Abstracts, days and merges take turns; a merge of the same content counts no call.
+    - It gets no abstract when written. Dream's abstracts may propose one, as for any conclusion.
+    - **Not refreshed:** once written, a summary stays as it is, even if a page of its day changes.
+    - **Removed by the owner:** it isn't written again, even once a page of its day changes. Forgetting the summary's path forgets that it was written too, so forget its pages as well, or it may be written again.
+  - **When it's proposed again:** the proposal is kept with the versions of the day's pages. A new page that day proposes it again, and nothing else does. A day whose summary the vault already shows, or whose place holds a file, isn't proposed.
+  - **The model:** the cheap tier, within the same 8 calls a run. Abstracts, days and merges take turns; a merge of the same content counts no call, and neither does writing a plan, unless the write writes nothing.
     - The day's pages share 12,000 characters of input, each under a heading with its title and path. A day whose headings alone would take half of that isn't summed up, since its summary would come from titles only.
     - The pages go between a `BEGIN PAGES` line and an `END PAGES` line that carry a random id for each call, and each page's heading ends in that id, so a page can't close the block or pass for another page.
     - The answer must be JSON with one key, `summary`.
@@ -485,7 +503,7 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
       - no link, link reference, wikilink, image, HTML tag, autolink (mail too), code or plugin template tag (`<%`, `%>`) anywhere. A bare URL, a hashtag or a `<` before a space or a digit in prose stays as text.
   - **The page:** Dream's page, `memory/_lint/dream.md`, lists each proposed summary, newest day first, each with the pages it sums up (see "Dream's page" below).
   - **Erasing:** forgetting a session page forgets its day's summary. Turning Dream off deletes the summaries too, drops any copy of the page waiting to be written, and the next report removes the page; the vault's git history still holds its earlier versions. A call that ends after Dream was turned off, or after its note changed or was forgotten, keeps nothing, for abstracts too.
-- **Duplicates** (#112): a dry run for now. `merges` can't be named in `writes` yet.
+- **Duplicates** (#112): proposed as a dry run, and merged once `merges` may write. `setDream` can't name it until #182's measurement is in.
   - **Which notes:** Kelpie's own notes of one scope and kind that share a title, two or more.
   - **Left out**, as for abstracts:
     - a fact the person stated;
@@ -523,12 +541,23 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
     - A group that grew, or has a new survivor, replaces what was proposed for its notes.
     - A note that expires, or is merged into another since, takes the proposal with it at the next daily report.
   - **Erasing:** turning Dream off deletes the proposals. A call that ends after that keeps nothing.
+  - **Writing a merge,** in one commit:
+    - **The survivor:**
+      - it keeps its title, frontmatter and `id`, and takes the merged body;
+      - its `sources` gain the notes it took in, by path, and never lose one. Past 20, the merge isn't written. Each note it took in keeps its own `sources`;
+      - entities and what the notes contradict are unioned, with at most 10 entities, as a note keeps. Past 20 contradictions, or one written with a label or a heading, the merge isn't written;
+      - notes valid at other times (`valid_from`, `invalid_at`), or of which only some are `evergreen`, aren't merged, since a fact would hold for longer or for less than it did, or start or stop decaying;
+      - it takes the lowest level and confidence among the notes, so a merge never makes a note surer;
+      - its abstract is removed, so Dream's abstracts propose a new one.
+    - **Each other note** keeps its frontmatter and gets `relations.merged_into` naming the survivor by path, and a new `updated`. Its body becomes one line that names the survivor and the commit that still holds what the note said: the commit the merge lands on.
+    - **The same content:** only the other notes are written. The survivor stays as it is.
+    - **Chains:** Kelpie's own notes that were merged into one of the merged notes are pointed at the survivor, in the same commit, since a mark is followed one step only. A note the owner marked by hand, or one waiting or held, keeps its mark.
 - **Dream's page:** `memory/_lint/dream.md`, outside the index, shows what Dream would write: the day summaries, then the merges, at most 50 of each, with a count of the rest.
   - Each merge names the note that stays and the notes it would mark as merged into it, with the merged body, or "the same content".
   - Whatever a model wrote is shown as code, fenced by more backticks than it holds in a row.
   - It is written with the report, and removed when nothing is proposed.
 - **Not yet:**
-  - writing merges and summaries;
+  - naming `summaries` and `merges` in `writes`, until #182's measurement;
   - contradictions;
   - roll-ups, and people and places;
   - week and month summaries.
