@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { AnthropicMessagesProvider } from "../src/anthropic.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { AnthropicMessagesProvider, type ResolvedAlias } from "../src/anthropic.ts";
 import { LlmError } from "../src/errors.ts";
 import type { ChatMessage, LlmEvent, LlmRequest } from "../src/types.ts";
-import { collect, fakeFetch, hangingSse, httpError, requestAt, sse } from "./fake-fetch.ts";
+import { collect, fakeFetch, hangingSse, httpError, json, requestAt, sse } from "./fake-fetch.ts";
 
 const GATEWAY = "https://gateway.ai.cloudflare.com/v1/account/kelpie/anthropic";
 
@@ -535,5 +535,141 @@ describe("AnthropicMessagesProvider", () => {
 
     await expect(run).rejects.toMatchObject({ code: "aborted", retryable: false });
     expect(seen).toEqual([{ type: "text", delta: "Hi" }]);
+  });
+});
+
+describe("the haiku alias", () => {
+  // Pages in the Models API's documented format (`GET /v1/models`), not recorded.
+  function modelsPage(models: [id: string, createdAt: string][], hasMore = false) {
+    return json({
+      data: models.map(([id, created_at]) => ({
+        type: "model",
+        id,
+        display_name: id,
+        created_at,
+        max_input_tokens: 200_000,
+        max_tokens: 64_000,
+        capabilities: null,
+      })),
+      has_more: hasMore,
+      first_id: models[0]?.[0] ?? null,
+      last_id: models.at(-1)?.[0] ?? null,
+    });
+  }
+
+  const catalog: [string, string][] = [
+    ["claude-sonnet-5-5", "2026-09-30T00:00:00Z"],
+    ["claude-haiku-5-5", "2026-09-15T00:00:00Z"],
+    ["claude-haiku-4-5-20251001", "2025-10-01T00:00:00Z"],
+    ["claude-3-5-haiku-20241022", "2024-10-22T00:00:00Z"],
+  ];
+
+  const haikuTurn = [
+    messageStart("claude-haiku-5-5", { input_tokens: 10 }),
+    ...textBlock(0, "Hi"),
+    ...messageEnd("end_turn", { output_tokens: 2 }),
+  ];
+
+  // The gateway builds a provider for every call, so each test passes the cache they share.
+  function aliased(fetchFn: typeof fetch, aliasCache = new Map<string, ResolvedAlias>()) {
+    return new AnthropicMessagesProvider({
+      apiKey: "sk-ant-test",
+      baseURL: GATEWAY,
+      fetch: fetchFn,
+      aliasCache,
+    });
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("sends and reports the newest Claude Haiku the Models API lists", async () => {
+    const { fetch, calls } = fakeFetch(modelsPage(catalog), sse(haikuTurn));
+    const events = await collect(aliased(fetch).stream(request({ model: "haiku" })));
+
+    expect(requestAt(calls, 0).url).toBe(`${GATEWAY}/v1/models?limit=1000`);
+    expect(requestAt(calls, 0).headers.get("x-api-key")).toBe("sk-ant-test");
+    expect(requestAt(calls, 1).body).toMatchObject({ model: "claude-haiku-5-5" });
+    expect(finishOf(events).usage).toEqual([
+      expect.objectContaining({ model: "claude-haiku-5-5" }),
+    ]);
+  });
+
+  it("goes by release date, not by the list's order, across pages", async () => {
+    const { fetch, calls } = fakeFetch(
+      modelsPage(
+        [
+          ["claude-haiku-4-5-20251001", "2025-10-01T00:00:00Z"],
+          ["claude-opus-5-5", "2026-09-01T00:00:00Z"],
+        ],
+        true,
+      ),
+      modelsPage([["claude-haiku-5-5", "2026-09-15T00:00:00Z"]]),
+      sse(haikuTurn),
+    );
+    await collect(aliased(fetch).stream(request({ model: "haiku" })));
+
+    expect(requestAt(calls, 1).url).toBe(
+      `${GATEWAY}/v1/models?limit=1000&after_id=claude-opus-5-5`,
+    );
+    expect(requestAt(calls, 2).body).toMatchObject({ model: "claude-haiku-5-5" });
+  });
+
+  it("asks the Models API again only after an hour", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-08T12:00:00Z"));
+    const cache = new Map<string, ResolvedAlias>();
+    const { fetch, calls } = fakeFetch(
+      modelsPage(catalog),
+      sse(haikuTurn),
+      sse(haikuTurn),
+      modelsPage(catalog),
+      sse(haikuTurn),
+    );
+
+    await collect(aliased(fetch, cache).stream(request({ model: "haiku" })));
+    vi.setSystemTime(new Date("2026-10-08T12:59:00Z"));
+    await collect(aliased(fetch, cache).stream(request({ model: "haiku" })));
+    vi.setSystemTime(new Date("2026-10-08T13:01:00Z"));
+    await collect(aliased(fetch, cache).stream(request({ model: "haiku" })));
+
+    expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+      "/v1/account/kelpie/anthropic/v1/models",
+      "/v1/account/kelpie/anthropic/v1/messages",
+      "/v1/account/kelpie/anthropic/v1/messages",
+      "/v1/account/kelpie/anthropic/v1/models",
+      "/v1/account/kelpie/anthropic/v1/messages",
+    ]);
+  });
+
+  it.each([
+    [
+      "a refused models call",
+      httpError(404, { type: "error", error: { type: "not_found_error" } }),
+    ],
+    ["a server error", httpError(500, { type: "error", error: { type: "api_error" } })],
+    ["a list without a Haiku", modelsPage([["claude-opus-5-5", "2026-09-01T00:00:00Z"]])],
+  ])("lets the router try the next candidate after %s", async (_case, response) => {
+    const { fetch, calls } = fakeFetch(response);
+    const failure = collect(aliased(fetch).stream(request({ model: "haiku" })));
+
+    await expect(failure).rejects.toBeInstanceOf(LlmError);
+    await expect(failure).rejects.toMatchObject({ code: "unavailable", retryable: true });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("stops when the caller aborts while the models are listed", async () => {
+    const { fetch } = fakeFetch((signal) => {
+      if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
+      throw new Error("the request should have been aborted");
+    });
+    const controller = new AbortController();
+    controller.abort();
+    const failure = collect(
+      aliased(fetch).stream(request({ model: "haiku" }), { signal: controller.signal }),
+    );
+
+    await expect(failure).rejects.toMatchObject({ code: "aborted", retryable: false });
   });
 });
