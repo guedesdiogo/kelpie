@@ -23,6 +23,8 @@ function fakeGitHub(
     refuse?: boolean;
     links?: Record<string, string>;
     changedLinks?: string[];
+    /** Folders GraphQL answers with no object. */
+    lostFolders?: string[];
   } = {},
 ) {
   // Symbolic links, by path, and the target each one's blob holds; the diff lists `changedLinks`.
@@ -120,6 +122,10 @@ function fakeGitHub(
         for (const [key, value] of Object.entries(variables)) {
           if (!key.startsWith("d")) continue;
           const folder = String(value).slice(41);
+          if (options.lostFolders?.includes(folder)) {
+            repository[key] = null;
+            continue;
+          }
           const entries = [
             ...Object.keys(files).map((p) => ({ path: p, mode: 0o100644 })),
             ...Object.keys(links).map((p) => ({ path: p, mode: 0o120000 })),
@@ -290,6 +296,16 @@ describe("GitHubVaultBackend", () => {
     expect(
       read.filter((expression) => /:(?:memory\/notes\/link|agents)\.md$/.test(expression)),
     ).toEqual([]);
+  });
+
+  it("fails a diff whose changed file's folder has no tree, as a listed file with no object", async () => {
+    const vault = backend(
+      fakeGitHub(
+        { "memory/notes/a.md": "# A2", "memory/notes/b.md": "# B", "knowledge/huge.md": "x" },
+        { lostFolders: ["memory/notes"] },
+      ),
+    );
+    await expect(vault.diff(BASE, HEAD)).rejects.toThrow(GitHubError);
   });
 
   it("commits writes and deletions on the expected head, with the body for trailers", async () => {

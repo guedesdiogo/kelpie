@@ -230,7 +230,10 @@ export class GitHubVaultBackend implements VaultBackend {
         throw new GitHubError("read folders", 200, errors[0]?.type ?? "no data");
       }
       for (const [i, folder] of batch.entries()) {
-        for (const { name, mode } of data.repository[`d${i}`]?.entries ?? []) {
+        const tree = data.repository[`d${i}`];
+        // A listed file's folder exists at this commit, so a missing tree is a failed read.
+        if (!tree?.entries) throw new GitHubError("read folders", 200, "a listed folder has no tree");
+        for (const { name, mode } of tree.entries) {
           const path = folder === "" ? name : `${folder}/${name}`;
           if (mode === SYMLINK_MODE && wanted.has(path)) links.add(path);
         }
