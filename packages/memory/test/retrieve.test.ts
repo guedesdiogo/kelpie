@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import {
   asksAboutThePast,
+  isSessionRecall,
   MemoryIndex,
   type MemoryInput,
   memoryPath,
@@ -480,6 +481,21 @@ describe("retrieve", () => {
     ["qual era o nome dela?", false],
   ])("tells whether %s asks about the past", (question, past) => {
     expect(asksAboutThePast(question)).toBe(past);
+  });
+
+  // ai-memory's Portuguese phrases (#196). "Sessão" alone isn't one: it names other things too.
+  it.each([
+    ["onde paramos?", true],
+    ["Onde a gente parou?", true],
+    ["na última sessão, o que eu pedi?", true],
+    ["na ultima sessao", true],
+    ["e a sessão anterior?", true],
+    ["como foi a conversa anterior?", true],
+    ["qual foi a decisão anterior sobre o carro?", true],
+    ["erro na sessão do banco", false],
+    ["a sessão de fisioterapia é amanhã?", false],
+  ])("tells whether %s asks about a past conversation", (question, recall) => {
+    expect(isSessionRecall(question)).toBe(recall);
   });
 
   it("doesn't search a resolved date's words", async () => {

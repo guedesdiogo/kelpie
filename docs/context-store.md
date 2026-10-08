@@ -4,7 +4,7 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
 
 ## What it does
 
-- **A working copy.** Its one `Vault` Durable Object keeps the Markdown of the vault's default branch in SQLite. It skips hidden folders such as `.obsidian/` and files over 1 MiB or not UTF-8, whether they arrive in a full read or in a push; a file that grows past the limit leaves the working copy.
+- **A working copy.** Its one `Vault` Durable Object keeps the Markdown of the vault's default branch in SQLite. It skips hidden folders such as `.obsidian/`, symbolic links, and files over 1 MiB or not UTF-8, whether they arrive in a full read or in a push; a file that grows past the limit or becomes a link leaves the working copy.
 - **Reads for a turn.** `compile(agent)` returns the agent's persona (`agents/<agent>/SOUL.md`), the shared `AGENTS.md`, the agent's own `AGENTS.md`, and the skills it can see:
   - `skills/**/SKILL.md` and `agents/<agent>/skills/**/SKILL.md`;
   - each named and described by its frontmatter.

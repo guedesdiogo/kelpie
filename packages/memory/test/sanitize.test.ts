@@ -22,6 +22,16 @@ describe("sanitizeSecrets", () => {
     ["url_credentials", join("postgres://kelpie:", tail(12), "@db.example.com:5432/vault")],
     ["env_secret", join("OPENAI", "_API_KEY=", tail(20))],
     ["env_secret", join("MY_SERVICE", "_TOKEN=", tail(20))],
+    // ai-memory's suffixes one step outside KEY and TOKEN, uppercase only (#196).
+    ["env_secret", join("LITESTREAM_ACCESS", "_KEY_ID=", tail(32))],
+    ["env_secret", join("GPG", "_PASSPHRASE=", tail(20))],
+    ["env_secret", join("RELEASE", "_SIGNING_KEY=", tail(20))],
+    ["env_secret", join("AUTH_TOKEN", "_PEPPER=", tail(30))],
+    ["env_secret", join("PASSWORD", "_SALT: ", tail(18))],
+    // A dotless base64 JSON object, as a Cloudflare tunnel token is handed out.
+    ["base64_json_token", join("ey", "J", tail(60), "=")],
+    // Gemini's auth keys, issued instead of AIza ones since 2026-05.
+    ["google_api_key", join("AQ", ".Ab", tail(48))],
   ])("redacts a %s", (kind, secret) => {
     const { text, redactions } = sanitizeSecrets(`antes ${secret} depois`);
     expect(text).toContain(`[REDACTED:${kind}]`);
@@ -56,6 +66,21 @@ describe("sanitizeSecrets", () => {
     "Compass: norte. Token: expirado. O segredo: saber esperar. Pass: 3 x 2.",
     "Eu comi um cookie: delicioso.",
   ])("leaves ordinary text alone: %s", (ordinary) => {
+    expect(sanitizeSecrets(ordinary)).toEqual({ text: ordinary, redactions: 0 });
+  });
+
+  // ai-memory's cases for the same rules (#196): code identifiers, digests and short fragments.
+  it.each([
+    "let api_key_id = row.get(0);",
+    "pub password_salt: String,",
+    "struct Row { user_key_id: u64 }",
+    "add a pinch of SALT and a KEY_ID column",
+    "commit 1f0775428a9e4b1c2d3e4f5a6b7c8d9e0f1a2b3c",
+    "sha256 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "request 3b58f2d3-c1ac-81b2-b387-dd04ff9a3d11",
+    "payload eyJhIjoi",
+    "see AQ.Ab for details, and the AQ.A section",
+  ])("leaves this alone: %s", (ordinary) => {
     expect(sanitizeSecrets(ordinary)).toEqual({ text: ordinary, redactions: 0 });
   });
 
