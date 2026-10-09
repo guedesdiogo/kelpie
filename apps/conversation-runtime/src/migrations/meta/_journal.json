@@ -78,6 +78,13 @@
       "when": 1791334120089,
       "tag": "0010_confirmations",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1791580603396,
+      "tag": "0011_host_notices",
+      "breakpoints": true
     }
   ]
 }

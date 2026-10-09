@@ -1,6 +1,7 @@
 import type { AgentSettings } from "@kelpie/config";
 import type { AssistantMessage, ChatMessage, Usage } from "@kelpie/llm";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import type { HostLink } from "./tools.ts";
 
 // One conversation's state, in its ConversationAgent's SQLite (ADR-0002, ADR-0012). The Agents SDK
 // keeps its own tables (schedules, fibers) alongside these.
@@ -78,6 +79,11 @@ export const turns = sqliteTable("turns", {
    */
   role: text("role", { enum: ["owner", "admin", "member"] }),
   chatType: text("chat_type", { enum: ["direct", "group"] }),
+  /**
+   * The links the turn's tools had Kelpie send after its reply (#186), until the reply's bubbles
+   * are written and they follow it as notices. Cleared when the turn settles.
+   */
+  links: text("links", { mode: "json" }).$type<HostLink[]>(),
   createdAt: integer("created_at").notNull(),
 });
 
@@ -133,10 +139,14 @@ export const outbox = sqliteTable(
     status: text("status", { enum: ["pending", "sending", "sent", "cancelled"] }).notNull(),
     sentAt: integer("sent_at"),
     /**
-     * A confirmation's notice, which the host adds after the reply (ADR-0013). History keeps only
-     * the reply's bubbles: the model never sees a notice's code.
+     * A notice the host adds after the reply: a confirmation (ADR-0013) or a tool's link (#186).
+     * History keeps only the reply's bubbles: the model never sees a notice's code or link.
      */
     notice: integer("notice", { mode: "boolean" }).notNull().default(false),
+    /** A link notice's one link, the only text in it that shows as a link (#186). */
+    link: text("link"),
+    /** The confirmation a notice is for: the webchat shows it with a Confirm button (#186). */
+    confirmationId: integer("confirmation_id"),
   },
   (table) => [index("outbox_turn").on(table.turnId, table.seq)],
 );

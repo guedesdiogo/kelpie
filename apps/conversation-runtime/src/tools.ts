@@ -71,10 +71,25 @@ export function visible(text: string): string {
 
 /**
  * The bubble the host sends after the turn's reply, so the owner can confirm a change. The summary
- * is shown with its invisible characters written out.
+ * is shown with its invisible characters written out. With `button`, the webchat shows the notice
+ * with a Confirm button that sends the code for the owner (#186); the code still works typed.
  */
-export function confirmationNotice(summary: string, code: string): string {
-  return `Confirm: ${visible(summary)}\nTo go ahead, reply with just the code ${code}. It expires in ${CONFIRMATION_MS / 60_000} minutes.`;
+export function confirmationNotice(summary: string, code: string, button = false): string {
+  const how = button
+    ? `press Confirm, or reply with just the code ${code}`
+    : `reply with just the code ${code}`;
+  return `Confirm: ${visible(summary)}\nTo go ahead, ${how}. It expires in ${CONFIRMATION_MS / 60_000} minutes.`;
+}
+
+/**
+ * A link a tool has the host send the owner after the turn's reply, as a bubble of Kelpie's own
+ * (#186): the model never sees it, so it can't alter it.
+ */
+export interface HostLink {
+  /** Written by the tool's code from validated input, never by the model; it holds `href`. */
+  text: string;
+  /** The bubble's one link: a page on the admin API's origin, behind the owner's Access login. */
+  href: string;
 }
 
 /** Codes avoid letters and digits that read alike: no 0/O, 1/I/L, 2/Z, 5/S, 8/B. */
@@ -142,12 +157,22 @@ export interface ToolContext {
   signal: AbortSignal;
   /**
    * Whether the owner confirmed this change (ADR-0013): they reply with just the code the host
-   * showed them for it, in a message of their own. Until they do, the host shows them the summary and a
-   * code after the turn's reply, and this answers false: the call must not make the change. A code
-   * lasts CONFIRMATION_MS, confirms exactly one command and input, and confirms once. The model never
-   * sees a code before the owner types it.
+   * showed them for it, in a message of their own, or press the notice's Confirm button in the
+   * webchat, which replies with the code for them (#186). Until they do, the host shows them the
+   * summary and a code after the turn's reply, and this answers false: the call must not make the
+   * change. A code lasts CONFIRMATION_MS, confirms exactly one command and input, and confirms
+   * once. The model never sees a code before the owner sends it.
    */
   confirm(request: ConfirmationRequest): Promise<boolean>;
+  /**
+   * Has the host send the owner `link` after the turn's reply, as its own bubble, where `href` is
+   * the only text that shows as a link (#186); the same `href` goes once a turn. History, the
+   * requests and the outbox's inspection never hold it. A turn stopped before its reply drops it, as
+   * it drops the reply, and a call the turn gave up on sends nothing; a call an eviction cut short
+   * may have sent it, as it may have done its work. An `href` that isn't an admin API page in
+   * `text`, or a `text` too long for one bubble, makes it throw.
+   */
+  sendLink(link: HostLink): void;
 }
 
 /**
