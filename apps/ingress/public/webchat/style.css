@@ -75,13 +75,25 @@ main {
 #messages > li ul {
   list-style: disc;
 }
-#messages > li pre {
-  overflow-x: auto;
-  white-space: pre;
-}
+/* Code, a command among it, stands out from the text: a chip inline, a framed block (#201). */
 #messages > li code {
   font-family: ui-monospace, monospace;
   font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border-radius: 0.3em;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+#messages > li pre {
+  overflow-x: auto;
+  white-space: pre;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+#messages > li pre code {
+  padding: 0;
+  background: none;
 }
 #messages > li a {
   color: inherit;
