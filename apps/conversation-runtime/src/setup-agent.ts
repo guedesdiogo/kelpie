@@ -20,7 +20,8 @@ import {
 // The built-in setup agent (Story 3.11, ADR-0013): the owner configures Kelpie by talking to it, in
 // the webchat. Every instance has it (the Registry seeds it), and only it gets these tools: the
 // configuration commands the admin API runs, with the same checks. A change to access, cost or an
-// external account waits for the owner's confirmation, which the host gates in code.
+// external account waits for the owner's own yes (ADR-0013, ADR-0026): a confirmation the host
+// gates in code, or the owner's act on an admin API page whose link the host sends itself.
 
 /** Its persona, until the owner configures another. */
 export const SETUP_PROMPT = `You are Kelpie's setup agent. You help the owner configure Kelpie by talking: creating their agents, connecting each agent's Telegram bot, and pairing the owner's own Telegram account with it. Reply in the language the owner writes in.
@@ -28,8 +29,9 @@ export const SETUP_PROMPT = `You are Kelpie's setup agent. You help the owner co
 How you work:
 - Make every change with your tools, and never say you made one your tools didn't confirm.
 - For a first setup, go in this order: see which agents exist (list_agents); create the first agent, with a short id of lowercase letters, digits and hyphens, and a name (create_agent); connect its Telegram bot (connect_telegram); then pair the owner's Telegram account with it (pair_telegram). Changing an agent's model or prompt (configure_agent) is optional.
-- Some changes need the owner's confirmation. Kelpie itself shows them what will change and a code to reply with: don't ask them to confirm in other words, and never make up a code. Once they reply with just the code, call the same tool again with the same input.
-- Never ask for a secret in the chat, such as a bot token or an API key. A bot token goes only into the secure form whose link connect_telegram gives. If the owner pastes a secret in the chat anyway, tell them to revoke it and make a new one.
+- Changing an agent's settings needs the owner's confirmation. Kelpie itself shows them what will change, with a Confirm button in the webchat or a code to reply with: don't ask them to confirm in other words, and never make up a code. Once they confirm, call the same tool again with the same input.
+- Kelpie itself sends the owner the links of connect_telegram and pair_telegram, in a message of its own after your reply. Never write those links yourself, and never make one up: just tell the owner to open the link Kelpie sent. What the owner does on that page is their yes.
+- Never ask for a secret in the chat, such as a bot token or an API key. A bot token goes only into the secure form connect_telegram has Kelpie send. If the owner pastes a secret in the chat anyway, tell them to revoke it and make a new one.
 - To make a Telegram bot, the owner sends /newbot to BotFather on Telegram, which answers with the bot's token. Have them do that first, and only then call connect_telegram: its form works once and only for a few minutes. Tell them to submit the form once and wait for its page; a page that says the link was already used means the bot is connected.
 - Some steps are outside what you can do: deploying Kelpie's Workers, their bindings and secrets, Cloudflare Access, and the model keys. For those, point the owner to the setup checklist in docs/admin-api.md.`;
 
@@ -84,7 +86,7 @@ const SPECS = {
   configure_agent: {
     name: "configure_agent",
     description:
-      "Change some of an agent's settings. It needs the owner's confirmation: the first call shows them the change; call it again with the same input once they confirm.",
+      "Change some of an agent's settings. It needs the owner's confirmation: the first call shows them the change, with a Confirm button in the webchat or a code to reply with; call it again with the same input once they confirm.",
     inputSchema: {
       type: "object",
       properties: {
@@ -127,7 +129,7 @@ const SPECS = {
   connect_telegram: {
     name: "connect_telegram",
     description:
-      "Start connecting an agent's Telegram bot. It needs the owner's confirmation: once they confirm and you call it again, it gives a one-time link to a secure form where they paste the bot's token.",
+      "Start connecting an agent's Telegram bot: Kelpie sends the owner a one-time link to a secure form, where they paste the bot's token. Submitting the form is their yes.",
     inputSchema: {
       type: "object",
       properties: { agentId: AGENT_ID },
@@ -138,7 +140,7 @@ const SPECS = {
   pair_telegram: {
     name: "pair_telegram",
     description:
-      "Give the owner a link that pairs their own Telegram account with an agent's bot, once the bot is connected.",
+      "Have Kelpie send the owner the link to the page that pairs their own Telegram account with an agent's bot, once the bot is connected.",
     inputSchema: {
       type: "object",
       properties: { agentId: AGENT_ID },
@@ -158,6 +160,9 @@ const NOT_CONFIGURED = failed(
 );
 const WAITING =
   "Not done yet: Kelpie showed the owner this change, and how to confirm it. Tell them it waits for their confirmation. Once they confirm, call this tool again with the same input.";
+/** What a tool whose link the host sends says about it: never the link. */
+const LINK_SENT =
+  "Kelpie sends the owner the link in a message of its own, right after your reply: don't write a link yourself. If they say they didn't get it, call this tool again.";
 
 /** A refusal, in words the model can act on. */
 function refusal(result: Extract<CommandResult<unknown>, { ok: false }>, id?: string): ToolOutcome {
@@ -319,18 +324,19 @@ export function setupTools(
         const { agentId } = fields(input);
         const agent = await agentOf(context, agentId);
         if (!("id" in agent)) return agent;
-        const request = { agentId: agent.id };
-        // The admin API's origin comes from the deploy, so the owner can check the link they get.
-        const confirmed = await context.confirm({
-          command: "connectTelegram",
-          input: request,
-          summary: `connect a Telegram bot to the agent ${JSON.stringify(agent.name)} (${agent.id}), through a one-time form for its token on ${adminOrigin}.`,
+        // Opening a form changes nothing: the owner's submitting it, behind Access and the owner
+        // check, is the yes (ADR-0026). Kelpie sends its link, so the model can't alter it.
+        const result = await commands.connectTelegram(context.actor, { agentId: agent.id });
+        if (!result.ok) return refusal(result, agent.id);
+        const href = `${adminOrigin}${result.value.path}`;
+        const minutes = Math.max(Math.round((result.value.expiresAt - now()) / 60_000), 1);
+        // The agent by its id only: its name is the model's, and the bubble is formatted.
+        context.sendLink({
+          href,
+          text: `The secure form to connect the Telegram bot of the agent ${agent.id}: ${href}\nIt works once, for the next ${minutes} minutes. Paste the bot's token there, never in the chat.`,
         });
-        if (!confirmed) return { output: WAITING };
-        const result = await commands.connectTelegram(context.actor, request);
-        if (!result.ok) return refusal(result, request.agentId);
         return {
-          output: `Give the owner this link to the secure form: ${adminOrigin}${result.value.path}\nIt works once, for the next ${Math.max(Math.round((result.value.expiresAt - now()) / 60_000), 1)} minutes. They paste the bot's token there, never in the chat. The form points the bot at Kelpie when it saves the token.`,
+          output: `${LINK_SENT}\nThe form works once, for the next ${minutes} minutes. The owner pastes the bot's token there, never in the chat; submitting it is their yes. The form points the bot at Kelpie when it saves the token.`,
         };
       },
     },
@@ -343,8 +349,13 @@ export function setupTools(
         const { agentId } = fields(input);
         const agent = await agentOf(context, agentId);
         if (!("id" in agent)) return agent;
+        const href = `${adminOrigin}/pair/telegram/${agent.id}`;
+        context.sendLink({
+          href,
+          text: `To pair your own Telegram account with the bot of the agent ${agent.id}, open ${href} and press its button.`,
+        });
         return {
-          output: `Give the owner this link: ${adminOrigin}/pair/telegram/${agent.id}\nOn that page they press a button, and get a Telegram link that pairs the account they open it with as theirs. The agent's bot must be connected first.`,
+          output: `${LINK_SENT}\nOn that page the owner presses a button, and gets a Telegram link that pairs the account they open it with as theirs. The agent's bot must be connected first.`,
         };
       },
     },

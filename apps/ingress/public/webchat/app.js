@@ -1,7 +1,8 @@
 // The webchat (issue #40). Cloudflare Access has logged the owner in before this page loads, and
 // the socket's upgrade carries the same login. Model output is never parsed as HTML: text goes
 // through text nodes, and a reply's formatting (#188) comes as blocks the runtime read, built here
-// with createElement. Its links are the ones the runtime allowed, and only web links.
+// with createElement. Its links are the ones the runtime allowed, and only web links. A Confirm
+// button shows only on a confirmation's notice, which the runtime marks with its id (#186).
 
 const agent = new URLSearchParams(location.search).get("agent") ?? "";
 const list = document.getElementById("messages");
@@ -38,11 +39,14 @@ const STEP_TEXT = { memory: "Reading memory…", thinking: "Thinking…", tool: 
 /** While the owner types, the page says so at most this often. */
 const TYPING_SENT_EVERY_MS = 3_000;
 
-function show(role, text, id, blocks) {
+function show(role, text, id, blocks, confirmation) {
   const item = document.createElement("li");
   item.className = role;
   if (Array.isArray(blocks)) item.append(renderBlocks(blocks));
   else item.textContent = text;
+  if (role === "assistant" && Number.isSafeInteger(confirmation)) {
+    item.append(confirmButton(confirmation));
+  }
   if (id) {
     item.dataset.id = id;
     item.classList.add("pending");
@@ -50,6 +54,33 @@ function show(role, text, id, blocks) {
   list.append(item);
   item.scrollIntoView({ block: "end" });
   return item;
+}
+
+/**
+ * A confirmation notice's button (#186). Pressing it sends the confirmation's id, and the
+ * conversation replies with the notice's code for the owner, once.
+ */
+function confirmButton(id) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "confirm";
+  button.dataset.confirmation = String(id);
+  button.textContent = "Confirm";
+  button.addEventListener("click", () => {
+    if (socket?.readyState !== WebSocket.OPEN) return;
+    button.disabled = true;
+    button.textContent = "Confirming…";
+    send({ type: "confirm", id });
+  });
+  return button;
+}
+
+/** What a press did, on every notice of that confirmation. */
+function pressed(id, status) {
+  for (const button of list.querySelectorAll(`button.confirm[data-confirmation="${id}"]`)) {
+    button.disabled = true;
+    button.textContent = status === "accepted" ? "Confirmed" : "No longer valid: ask again";
+  }
 }
 
 /** A reply's blocks (#188) as elements. Anything not one of the known kinds is left out. */
@@ -166,7 +197,7 @@ function receive(frame) {
       setPaused(frame.paused);
       list.replaceChildren();
       for (const message of frame.messages) {
-        show(message.role, message.text, undefined, message.blocks);
+        show(message.role, message.text, undefined, message.blocks, message.confirmation);
       }
       // The history already shows what the conversation received; only the rest goes again, and
       // the conversation would drop a repeat by its id anyway.
@@ -178,7 +209,10 @@ function receive(frame) {
       break;
     case "bubble":
       setTyping(false);
-      show("assistant", frame.text, undefined, frame.blocks);
+      show("assistant", frame.text, undefined, frame.blocks, frame.confirmation);
+      break;
+    case "confirmation":
+      if (Number.isSafeInteger(frame.id)) pressed(frame.id, frame.status);
       break;
     case "typing":
       setTyping(frame.active);

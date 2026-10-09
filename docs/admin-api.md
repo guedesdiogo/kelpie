@@ -80,7 +80,7 @@ A web address (http or https) shows as a link only when it is in the turn's inpu
 - the inputs are the owner's messages and their own notes in the memory block, the same that may be previewed (#130);
 - any other address, whether the model wrote it or a tool or a note it read gave it, shows as code, with its label, so the owner sees where it points;
 - Telegram links addresses in plain text by itself, with or without a scheme (`example.com/login`, `www.example.com`), so on Telegram any text it could read as an address goes in code too. Emails, `@mentions`, hashtags and phone numbers still show as Telegram finds them;
-- Kelpie's fixed notices, such as a confirmation's, are never formatted. On Telegram the addresses they quote go in code all the same;
+- Kelpie's fixed notices, such as a confirmation's, are never formatted. On Telegram the addresses they quote go in code all the same. The exception is a link Kelpie sends itself, such as a secure form's ("Setup agent"): its own link shows as a link, and any other address in it shows as text;
 - a reply replayed in the webchat links what the owner had sent before it among the replayed messages, and their notes its turn recalled;
 - a URL hidden behind text in a Telegram message the owner sent (a `text_link`) doesn't count yet (#190).
 
@@ -199,16 +199,20 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
   - **Before deploying it to an existing instance,** check with `listAgents` that no agent already uses the id `setup`. Such an agent would keep its name and gain the setup tools.
 - **Its tools** run the commands above, as the owner, through the agent (`via: agent:setup`), and only the setup agent has them:
   - `list_agents`, `get_agent`, `create_agent` and `rename_agent` run directly;
-  - `configure_agent` and `connect_telegram` wait for the owner's confirmation (below);
-  - `pair_telegram` links to the pairing page ("Pairing").
+  - `configure_agent` waits for the owner's confirmation (below);
+  - `connect_telegram` opens a secure form ("Secure forms"), and `pair_telegram` leads to the pairing page ("Pairing"). Kelpie sends each link itself (below), and the owner's submitting that page is their yes (ADR-0026).
 
   The identity, time zone and vault commands stay on this API. `conversation-runtime` binds no `Directory`, which would make it and `ingress` bind each other. Of `channel-egress`, it binds only `SetupForms`, which opens a form and nothing more (`docs/secrets.md`).
-- **Confirmation.** A change to access, cost or an external account waits for the owner's yes, gated in code:
+- **Confirmation.** A change to an agent's settings (`configure_agent`) waits for the owner's yes, gated in code:
   1. The first call doesn't run. After the agent's reply, Kelpie itself sends one more bubble, written from the change's validated input, not by the model: `Confirm: <the change>`, and a 6-character code.
      - Invisible and control characters in the change are written out as `\u{…}`, so what the owner reads is all there is.
      - A change too long for one bubble is refused before it is shown. Make it through this API instead.
-     - For `connect_telegram`, the change names the admin API's origin, so the owner can check where the form's link points.
-  2. The owner replies with just the code, on a line of its own, and the agent calls the same tool with the same input again. A message that only mentions the code, such as "don't do K7MPRX", or asks about it ("K7MPRX?"), is no yes.
+  2. The owner says yes, and the agent calls the same tool with the same input again:
+     - **In the webchat,** the owner presses the bubble's Confirm button, which replies with the code for them (#186).
+       - A press counts only from the socket of the user who asked, for a confirmation of theirs still open.
+       - Any other press is refused, and the button says the confirmation is no longer valid.
+       - A second press of the same button sends nothing new.
+     - **On Telegram, or in the webchat,** the owner replies with just the code, on a line of its own. A message that only mentions the code, such as "don't do K7MPRX", or asks about it ("K7MPRX?"), is no yes.
   3. A code confirms that one change, once. It lasts 10 minutes from the last time the agent asked for it.
 
   What never confirms:
@@ -216,9 +220,15 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
   - a tool's output;
   - the model's replies, and what it passes to tools.
 
-  The model never sees a code before the owner types it. The bubble isn't part of the conversation's history, so it doesn't come back when the webchat reloads: asking the agent again shows it again.
+  The model's text can't show a Confirm button: only Kelpie's own bubble carries one. The model never sees a code before the owner sends it. The bubble isn't part of the conversation's history, so it doesn't come back when the webchat reloads: asking the agent again shows it again.
+- **Links Kelpie sends itself.** `connect_telegram` and `pair_telegram` don't give the model their links (#186, ADR-0026):
+  - After the agent's reply, Kelpie sends its own bubble with the link. The secure form's link carries the form's one-time token.
+  - The bubble names the agent by its id, never by its name, which the model chose.
+  - Its one link is the admin API page. Any other address in it shows as text.
+  - The model learns only that the link was sent. History, later requests and the outbox's inspection never hold the link.
+  - As with a confirmation, the bubble doesn't come back once its turn has settled and the webchat reloads. If the owner says they didn't get it, the agent calls the tool again for a new link.
 - **Secrets.** The bot's token goes into the secure form ("Secure forms"), never into the chat. If the owner pastes one in the chat anyway, it stays in the conversation: revoke it in BotFather and make a new one.
-- **Its context** is any agent's: the vault's persona and rules, recall, and the memory tools. A note in the vault could steer it toward a change that runs directly, such as creating or renaming an agent. The confirmed changes still need the owner's code.
+- **Its context** is any agent's: the vault's persona and rules, recall, and the memory tools. A note in the vault could steer it toward a change that runs directly, such as creating or renaming an agent. The confirmed changes still need the owner's yes: the code or the button, or their own submission on the form or the pairing page.
 
 What the setup agent can't do, because it holds no Cloudflare token (ADR-0013):
 - deploy the Workers, in order, with their flags ("Setting it up");

@@ -49,12 +49,19 @@ export interface ConversationPorts {
    * limited with the wait, recipient unavailable, not connected, or failed. `previewUrl` is the one
    * link in the bubble the channel may preview (#130); without it, none is. `links` makes the
    * bubble a formatted reply that may link those URLs (#188); without it, the text goes as typed.
+   * `confirmation` makes it a confirmation's notice with a Confirm button, where the channel has
+   * one (#186): the webchat; channel-egress never gets it.
    */
   send(
     agentId: string,
     destination: Destination,
     text: string,
-    options: { silent: boolean; previewUrl?: string; links?: readonly string[] },
+    options: {
+      silent: boolean;
+      previewUrl?: string;
+      links?: readonly string[];
+      confirmation?: number;
+    },
   ): Promise<SendOutcome>;
   /** Shows "typing" once. It is a courtesy, so callers ignore its failures. */
   typing(agentId: string, destination: Destination): Promise<void>;
@@ -192,7 +199,9 @@ function productionPorts(env: Env): ConversationPorts {
         { adminOrigin: env.ADMIN_ORIGIN },
       ),
     ],
-    send: (agentId, destination, text, options) => egress.send(agentId, destination, text, options),
+    // A Confirm button is the webchat's alone (#186): channel-egress takes only what it sends.
+    send: (agentId, destination, text, { confirmation: _button, ...options }) =>
+      egress.send(agentId, destination, text, options),
     remember: (agentId, changes, summary) =>
       withTimeout(contextStore.write(agentId, changes, summary), REMEMBER_TIMEOUT_MS),
     recall: (agentId, question, options) =>

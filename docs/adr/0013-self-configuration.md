@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-03
 - Issue: [#47](https://github.com/guedesdiogo/kelpie/issues/47)
-- Amended by: [ADR-0015](0015-single-player-first.md), until multi-user lands (single-player); [ADR-0019](0019-llm-gateway-keys.md), the keys `llm-gateway` uses to call providers are deploy secrets; [ADR-0021](0021-vault-app-secrets.md), the vault's GitHub App credentials are deploy secrets on `context-store`
+- Amended by: [ADR-0015](0015-single-player-first.md), until multi-user lands (single-player); [ADR-0019](0019-llm-gateway-keys.md), the keys `llm-gateway` uses to call providers are deploy secrets; [ADR-0021](0021-vault-app-secrets.md), the vault's GitHub App credentials are deploy secrets on `context-store`; [ADR-0026](0026-confirmation-by-owner-act.md), the owner's own act on an admin API page, or the webchat's Confirm button, is a yes besides a typed code
 
 ## Context
 

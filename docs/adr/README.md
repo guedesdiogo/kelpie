@@ -29,6 +29,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0023](0023-webchat-access-login.md) | The webchat logs in with the owner's Cloudflare Access identity | [#40](https://github.com/guedesdiogo/kelpie/issues/40) |
 | [0024](0024-fixed-wait-end-of-turn.md) | Kelpie answers after a fixed, configurable wait; end of turn uses no qualifier | [#133](https://github.com/guedesdiogo/kelpie/issues/133) |
 | [0025](0025-turn-tool-loop.md) | A turn runs its tools in a bounded loop that keeps history append-only | [#141](https://github.com/guedesdiogo/kelpie/issues/141) |
+| [0026](0026-confirmation-by-owner-act.md) | The owner's own act on a Kelpie page or button is a yes, besides a typed code | [#186](https://github.com/guedesdiogo/kelpie/issues/186) |
 
 ## Format
 

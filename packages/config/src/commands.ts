@@ -243,8 +243,8 @@ export function createConfigCommands(ports: ConfigPorts) {
     /**
      * Starts connecting an agent's Telegram bot (Story 3.6): returns the path of a one-time secure
      * form on the admin API, where the owner pastes the bot token. The token never passes through
-     * this command or a conversation (ADR-0013). From an agent's tool (Story 3.11) it needs the
-     * owner's confirmation first.
+     * this command or a conversation (ADR-0013). Opening a form changes nothing: the owner's
+     * submitting it, behind Access and the owner check, is their yes (ADR-0026).
      */
     async connectTelegram(
       actor: Actor,

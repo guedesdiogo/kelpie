@@ -75,6 +75,7 @@ import {
   canonicalJson,
   confirmationNotice,
   confirmsCode,
+  type HostLink,
   MAX_SUMMARY_CHARS,
   MAX_TOOL_ROUNDS,
   newConfirmationCode,
@@ -298,24 +299,66 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       });
       return;
     }
-    const result = await this.ingest({
-      agentId: admission.agentId,
-      // The page picks the id, so a resend after a reconnect is deduplicated like any retry.
-      providerMessageId: `${WEBCHAT_ID_PREFIX}${frame.id}`,
-      userId: admission.userId,
-      role: admission.role,
-      chatType: admission.chatType,
-      text: frame.text,
-      destination: { channel: "webchat", threadId: admission.userId },
-      sentAt: this.#ports.now(),
-      timeZone: admission.timeZone,
-    });
+    if (frame.type === "confirm") {
+      send(connection, {
+        type: "confirmation",
+        id: frame.id,
+        status: await this.#press(admission, frame.id),
+      });
+      return;
+    }
+    // The page picks the id, so a resend after a reconnect is deduplicated like any retry.
+    const result = await this.#ingestFrom(admission, frame.id, frame.text);
     send(
       connection,
       result.status === "rejected"
         ? { type: "rejected", id: frame.id, reason: result.reason }
         : { type: "accepted", id: frame.id },
     );
+  }
+
+  /** A message from a webchat socket, as its admitted user's, under the page's id for it. */
+  #ingestFrom(admission: SocketAdmission, id: string, text: string): Promise<IngestResult> {
+    return this.ingest({
+      agentId: admission.agentId,
+      providerMessageId: `${WEBCHAT_ID_PREFIX}${id}`,
+      userId: admission.userId,
+      role: admission.role,
+      chatType: admission.chatType,
+      text,
+      destination: { channel: "webchat", threadId: admission.userId },
+      sentAt: this.#ports.now(),
+      timeZone: admission.timeZone,
+    });
+  }
+
+  /**
+   * A press of a confirmation notice's Confirm button (#186). It counts only from the socket of the
+   * user who asked, for a confirmation of theirs still open, and then it replies with the code for
+   * them: ADR-0013's gate then confirms it as a typed code, once. The id is the confirmation's
+   * only, so a second press is the same message again, which the conversation drops.
+   */
+  async #press(admission: SocketAdmission, id: number): Promise<"accepted" | "refused"> {
+    const pending = this.#db
+      .select({
+        code: schema.confirmations.code,
+        userId: schema.confirmations.userId,
+        usedAt: schema.confirmations.usedAt,
+        expiresAt: schema.confirmations.expiresAt,
+      })
+      .from(schema.confirmations)
+      .where(eq(schema.confirmations.id, id))
+      .get();
+    if (
+      !pending ||
+      pending.userId !== admission.userId ||
+      pending.usedAt !== null ||
+      pending.expiresAt <= this.#ports.now()
+    ) {
+      return "refused";
+    }
+    const result = await this.#ingestFrom(admission, `confirm:${id}`, pending.code);
+    return result.status === "rejected" ? "refused" : "accepted";
   }
 
   /**
@@ -804,13 +847,32 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
 
     const bubbles = planDelivery(textOf(finish.message), settings.conversational, capabilities);
     const reply = finish.message;
-    // The changes this turn asked the owner to confirm follow the reply, written by the host.
-    const notices = this.#db
-      .select({ code: schema.confirmations.code, summary: schema.confirmations.summary })
+    // The changes this turn asked the owner to confirm follow the reply, written by the host, and
+    // then the links its tools had Kelpie send (#186). The webchat shows a Confirm button.
+    const button = destination.channel === "webchat";
+    const confirmations = this.#db
+      .select({
+        id: schema.confirmations.id,
+        code: schema.confirmations.code,
+        summary: schema.confirmations.summary,
+      })
       .from(schema.confirmations)
       .where(and(eq(schema.confirmations.turnId, turnId), isNull(schema.confirmations.usedAt)))
       .orderBy(asc(schema.confirmations.id))
       .all();
+    const links =
+      this.#db
+        .select({ links: schema.turns.links })
+        .from(schema.turns)
+        .where(eq(schema.turns.id, turnId))
+        .get()?.links ?? [];
+    const notices = [
+      ...confirmations.map(({ id, code, summary }) => ({
+        text: confirmationNotice(summary, code, button),
+        confirmationId: id,
+      })),
+      ...links.map(({ text, href }) => ({ text, link: href })),
+    ];
     this.#db.transaction((tx) => {
       tx.update(schema.turns).set({ reply }).where(eq(schema.turns.id, turnId)).run();
       bubbles.forEach((bubble, seq) => {
@@ -818,15 +880,15 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           .values({ turnId, seq, text: bubble.text, delayMs: bubble.delayMs, status: "pending" })
           .run();
       });
-      notices.forEach(({ code, summary }, index) => {
+      notices.forEach((notice, index) => {
         tx.insert(schema.outbox)
           .values({
             turnId,
             seq: bubbles.length + index,
-            text: confirmationNotice(summary, code),
             delayMs: 0,
             status: "pending",
             notice: true,
+            ...notice,
           })
           .run();
       });
@@ -964,6 +1026,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
             source: this.#source(),
             signal: controller.signal,
             confirm: async (request) => this.#confirm(turn.id, actor.userId, request),
+            sendLink: (link) => this.#sendLink(turn.id, link),
           };
         }
         step("tool", tools.get(toolCall.name)?.label);
@@ -1008,6 +1071,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           // A call the turn gave up on can't confirm, so it can't spend the owner's code either.
           confirm: (request) =>
             signal.aborted ? Promise.resolve(false) : context.confirm(request),
+          // Nor send a link, since the model never learns it did.
+          sendLink: (link) => {
+            if (!signal.aborted) context.sendLink(link);
+          },
         }),
         timedOut,
       ]);
@@ -1056,8 +1123,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
 
   /**
    * ADR-0013's gate. True once the requester replied, in a message of their own written after the
-   * code was made, with the code shown for exactly this command and input; the code is then used
-   * up. Otherwise the change waits, and this turn's reply shows its code: the same one while it
+   * code was made, with the code shown for exactly this command and input, typed or sent by the
+   * webchat's Confirm button (#186); the code is then used up. Otherwise the change waits, and this turn's reply shows its code: the same one while it
    * lasts. A tool's output, the model's replies and its tool input are never the requester's
    * messages, so none of them can confirm.
    */
@@ -1137,6 +1204,28 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       })
       .run();
     return false;
+  }
+
+  /**
+   * Keeps a link a tool has Kelpie send after the turn's reply (#186). Only an admin API page, as
+   * the formatter reads it in the text, can be one: those pages show only behind the owner's
+   * Access login, as replies may already link them (#188).
+   */
+  #sendLink(turnId: number, link: HostLink): void {
+    if (!this.#isRunning(turnId)) return;
+    if (!this.#linksAllowed(link.text, new Set()).includes(link.href)) {
+      throw new RangeError("A link Kelpie sends must be an admin API page in its text");
+    }
+    const turn = this.#db
+      .select({ links: schema.turns.links })
+      .from(schema.turns)
+      .where(eq(schema.turns.id, turnId))
+      .get();
+    this.#db
+      .update(schema.turns)
+      .set({ links: [...(turn?.links ?? []), { text: link.text, href: link.href }] })
+      .where(eq(schema.turns.id, turnId))
+      .run();
   }
 
   /** How many rounds of tool calls the turn has in history. */
@@ -1582,8 +1671,14 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         silent: row.seq !== lastSeq,
         ...(previewUrl === undefined ? {} : { previewUrl }),
         // A reply is formatted, with its links from the turn's inputs or Kelpie's admin pages
-        // (#188); a notice is Kelpie's own text, shown as written.
-        ...(row.notice ? {} : { links: this.#linksAllowed(row.text, previewable) }),
+        // (#188). A notice is Kelpie's own text, shown as written, or formatted with its one link,
+        // and a confirmation's has a Confirm button where the channel shows one (#186).
+        ...(row.notice
+          ? row.link === null
+            ? {}
+            : { links: [row.link] }
+          : { links: this.#linksAllowed(row.text, previewable) }),
+        ...(row.confirmationId === null ? {} : { confirmation: row.confirmationId }),
       };
       if (!(await this.#sendBubble(turnId, agentId, destination, row, options, signal))) return;
       // If the turn was settled during the send, settling already counted this bubble as sent.
@@ -1648,7 +1743,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     agentId: string,
     destination: Destination,
     bubble: { id: number; text: string },
-    options: { silent: boolean; previewUrl?: string; links?: readonly string[] },
+    options: Parameters<ConversationPorts["send"]>[3],
     signal: AbortSignal,
   ): Promise<boolean> {
     for (let attempt = 1; ; attempt += 1) {
@@ -1756,7 +1851,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       }
       // History holds what was kept; the full reply and the settings aren't needed any more.
       tx.update(schema.turns)
-        .set({ status, reply: null, settings: null })
+        .set({ status, reply: null, settings: null, links: null })
         .where(eq(schema.turns.id, turnId))
         .run();
     });
@@ -2008,6 +2103,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         text: schema.outbox.text,
         at: schema.outbox.sentAt,
         notice: schema.outbox.notice,
+        link: schema.outbox.link,
+        confirmationId: schema.outbox.confirmationId,
         turnId: schema.outbox.turnId,
       })
       .from(schema.outbox)
@@ -2035,9 +2132,16 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           : { role: "assistant", ...formatted(shownText(message), turnId), at },
       );
     }
-    const sent = running.map(({ text, at, notice, turnId }) =>
+    // A notice shows as it went out (#186).
+    const sent = running.map(({ text, at, notice, link, confirmationId, turnId }) =>
       notice
-        ? { role: "assistant" as const, text, at: at ?? 0 }
+        ? {
+            role: "assistant" as const,
+            text,
+            ...(link === null ? {} : { blocks: formatReply(text, new Set([link])) }),
+            ...(confirmationId === null ? {} : { confirmation: confirmationId }),
+            at: at ?? 0,
+          }
         : { role: "assistant" as const, ...formatted(text, turnId), at: at ?? 0 },
     );
     const waiting = this.#pendingInbound().map((row) => ({

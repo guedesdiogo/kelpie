@@ -65,6 +65,7 @@ const context = (turn = `turn-${turns++}`): ToolContext => ({
   source: "telegram:chat-1, 2026-10-06",
   signal: new AbortController().signal,
   confirm: async () => false,
+  sendLink: () => {},
 });
 
 async function toolsOf(store: MemoryStore): Promise<Map<string, Tool>> {
