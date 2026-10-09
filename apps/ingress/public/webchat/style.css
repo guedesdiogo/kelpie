@@ -75,13 +75,34 @@ main {
 #messages > li ul {
   list-style: disc;
 }
-#messages > li pre {
-  overflow-x: auto;
-  white-space: pre;
-}
+/*
+ * Code, a command among it, stands out from the text: blue, in a chip inline and in a framed block
+ * (#201). Each blue keeps WCAG AA contrast (4.5:1) on the bubble in its color scheme.
+ */
 #messages > li code {
   font-family: ui-monospace, monospace;
   font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border-radius: 0.3em;
+  color: #1e40af;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  #messages > li code {
+    color: #93c5fd;
+  }
+}
+#messages > li pre {
+  overflow-x: auto;
+  white-space: pre;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+#messages > li pre code {
+  padding: 0;
+  background: none;
 }
 #messages > li a {
   color: inherit;
