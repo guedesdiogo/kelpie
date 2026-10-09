@@ -642,7 +642,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     await this.closeSession();
   }
 
-  /** The bubbles of every turn's reply, for inspection; never a notice, which holds a live code. */
+  /**
+   * The bubbles of every turn's reply, for inspection; never a notice, which holds a live code or a
+   * one-time link.
+   */
   outbox(): { turnId: number; seq: number; text: string; status: string }[] {
     return this.#db
       .select({
@@ -831,13 +834,14 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       }
     }
     if (finish.reason === "refusal") {
-      // Calls in history keep the block they were sent after.
+      // Calls in history keep the block they were sent after. Nothing follows a refused reply, the
+      // links its tools had Kelpie send among it (#186).
       this.#db
         .update(schema.turns)
         .set(
           this.#toolRounds(turnId) > 0
-            ? { status: "refused" }
-            : { status: "refused", context: null },
+            ? { status: "refused", links: null }
+            : { status: "refused", context: null, links: null },
         )
         .where(eq(schema.turns.id, turnId))
         .run();
@@ -1124,9 +1128,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   /**
    * ADR-0013's gate. True once the requester replied, in a message of their own written after the
    * code was made, with the code shown for exactly this command and input, typed or sent by the
-   * webchat's Confirm button (#186); the code is then used up. Otherwise the change waits, and this turn's reply shows its code: the same one while it
-   * lasts. A tool's output, the model's replies and its tool input are never the requester's
-   * messages, so none of them can confirm.
+   * webchat's Confirm button (#186); the code is then used up. Otherwise the change waits, and this
+   * turn's reply shows its code: the same one while it lasts. A tool's output, the model's replies
+   * and its tool input are never the requester's messages, so none of them can confirm.
    */
   #confirm(turnId: number, userId: string, request: ConfirmationRequest): boolean {
     // A tool that ignored its signal, after its turn stopped, neither confirms nor shows anything.
@@ -1207,23 +1211,29 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   }
 
   /**
-   * Keeps a link a tool has Kelpie send after the turn's reply (#186). Only an admin API page, as
-   * the formatter reads it in the text, can be one: those pages show only behind the owner's
-   * Access login, as replies may already link them (#188).
+   * Keeps a link a tool has Kelpie send after the turn's reply (#186), once per turn. Only an admin
+   * API page, as the formatter reads it in the text, can be one: those pages show only behind the
+   * owner's Access login, as replies may already link them (#188).
    */
   #sendLink(turnId: number, link: HostLink): void {
     if (!this.#isRunning(turnId)) return;
     if (!this.#linksAllowed(link.text, new Set()).includes(link.href)) {
       throw new RangeError("A link Kelpie sends must be an admin API page in its text");
     }
-    const turn = this.#db
-      .select({ links: schema.turns.links })
-      .from(schema.turns)
-      .where(eq(schema.turns.id, turnId))
-      .get();
+    // One bubble, as a confirmation's notice is.
+    if (visible(link.text).length > MAX_SUMMARY_CHARS) {
+      throw new RangeError("A link's text is too long to show");
+    }
+    const links =
+      this.#db
+        .select({ links: schema.turns.links })
+        .from(schema.turns)
+        .where(eq(schema.turns.id, turnId))
+        .get()?.links ?? [];
+    if (links.some(({ href }) => href === link.href)) return;
     this.#db
       .update(schema.turns)
-      .set({ links: [...(turn?.links ?? []), { text: link.text, href: link.href }] })
+      .set({ links: [...links, { text: link.text, href: link.href }] })
       .where(eq(schema.turns.id, turnId))
       .run();
   }
@@ -1797,7 +1807,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .orderBy(asc(schema.outbox.seq))
       .all();
     const isSent = (row: { status: string }) => row.status === "sent" || row.status === "sending";
-    // History keeps what the person saw of the reply; a confirmation's notice isn't part of it.
+    // History keeps what the person saw of the reply; a notice isn't part of it.
     const replyRows = rows.filter((row) => !row.notice);
     const kept = turn.reply
       ? deliveredReply(

@@ -160,15 +160,17 @@ export interface ToolContext {
    * showed them for it, in a message of their own, or press the notice's Confirm button in the
    * webchat, which replies with the code for them (#186). Until they do, the host shows them the
    * summary and a code after the turn's reply, and this answers false: the call must not make the
-   * change. A code lasts CONFIRMATION_MS, confirms exactly one command and input, and confirms once.
-   * The model never sees a code before the owner sends it.
+   * change. A code lasts CONFIRMATION_MS, confirms exactly one command and input, and confirms
+   * once. The model never sees a code before the owner sends it.
    */
   confirm(request: ConfirmationRequest): Promise<boolean>;
   /**
    * Has the host send the owner `link` after the turn's reply, as its own bubble, where `href` is
-   * the only text that shows as a link (#186). History, the requests and the outbox's inspection
-   * never hold it. A turn stopped before its reply drops it, as it drops the reply; a call the turn
-   * gave up on sends nothing. An `href` that isn't an admin API page in `text` makes it throw.
+   * the only text that shows as a link (#186); the same `href` goes once a turn. History, the
+   * requests and the outbox's inspection never hold it. A turn stopped before its reply drops it, as
+   * it drops the reply, and a call the turn gave up on sends nothing; a call an eviction cut short
+   * may have sent it, as it may have done its work. An `href` that isn't an admin API page in
+   * `text`, or a `text` too long for one bubble, makes it throw.
    */
   sendLink(link: HostLink): void;
 }

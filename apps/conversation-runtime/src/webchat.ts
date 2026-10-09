@@ -49,7 +49,7 @@ export type ServerFrame =
   | { type: "resumed" }
   | { type: "accepted"; id: string }
   | { type: "rejected"; id: string; reason: string }
-  /** What a press of a Confirm button did: refused when the confirmation isn't open, or not theirs. */
+  /** What a press of a Confirm button did: refused for a confirmation not open, or not theirs. */
   | { type: "confirmation"; id: number; status: "accepted" | "refused" };
 
 /**
@@ -121,7 +121,8 @@ export function shownText(message: ChatMessage): string {
 /**
  * The webchat's side of the channel ports: replies go to the conversation's open sockets. With
  * none open, a bubble still counts as delivered, because history keeps it and the next socket is
- * shown it.
+ * shown it. A notice isn't history: a socket opened once its turn has settled doesn't get it, and
+ * asking the agent again shows it again.
  */
 export function webchatEgress(
   sockets: () => Iterable<{ send(data: string): void }>,

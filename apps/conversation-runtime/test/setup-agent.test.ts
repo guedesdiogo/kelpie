@@ -665,7 +665,10 @@ describe("the confirmation gate", () => {
   });
   it("sends a tool's link after the reply, as Kelpie's own bubble with only that link, kept from the model (#186)", async () => {
     const href = "https://admin.example/forms/tok-9";
-    const world = use(fakeWorld([toolCalls({ name: "form" }), reply("Abra o link abaixo.")]));
+    // Asked twice in a turn, the same link goes once.
+    const world = use(
+      fakeWorld([toolCalls({ name: "form" }, { name: "form" }), reply("Abra o link abaixo.")]),
+    );
     world.tools = [linking({ href, text: `The secure form: ${href}\nIt works once.` })];
     const stub = agent("link-sent");
     await turn(stub, world, "m1", "conecta o bot");
@@ -723,6 +726,44 @@ describe("the confirmation gate", () => {
 
     expect(world.sent).toEqual(["Não deu."]);
     expect(JSON.stringify(world.requests.at(-1)?.messages)).toContain("The tool failed.");
+  });
+
+  it("sends no link from a call that ran out of the turn's time (#186)", async () => {
+    const href = "https://admin.example/forms/late";
+    const world = use(fakeWorld([toolCalls({ name: "form" }), held("Acabou o tempo.")]));
+    world.tools = [
+      {
+        async tools() {
+          return [
+            {
+              spec: {
+                name: "form",
+                description: "Form.",
+                inputSchema: { type: "object" as const },
+              },
+              label: "Opening a form",
+              async run(_input: unknown, context: ToolContext) {
+                // A tool that ignores its signal, and sends its link only after its time is up.
+                await new Promise((resolve) => setTimeout(resolve, 50));
+                context.sendLink({ href, text: `The secure form: ${href}` });
+                return { output: "Kelpie sends the link." };
+              },
+            },
+          ];
+        },
+      },
+    ];
+    // The turn's last call waits meanwhile, so the turn is still running when the tool sends.
+    world.expireDeadlines = true;
+    world.modelHeld = true;
+    const stub = agent("link-timed-out");
+    await stub.ingest(message("m1", "conecta o bot"));
+    await stub.flush();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    world.modelHeld = false;
+    await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).not.toBe("running"));
+
+    expect(world.sent).toEqual(["Acabou o tempo."]);
   });
 
   it("keeps a code unspent when the call that would use it ran out of the turn's time", async () => {
