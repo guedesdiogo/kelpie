@@ -47,7 +47,7 @@ async function open(name: string, admission: unknown = owner) {
 const ofType = (frames: Frame[], type: string) => frames.filter((frame) => frame.type === type);
 
 /** The code in a confirmation's notice, as the webchat shows it (#186). */
-const NOTICE_CODE = /press Confirm, or reply with just the code ([A-Z0-9]{6})\./;
+const NOTICE_CODE = /\b(?:code|código) ([A-Z0-9]{6})\./;
 
 /** Every link's href in a bubble's blocks, in order. */
 function hrefsOf(blocks: unknown): string[] {
@@ -543,7 +543,10 @@ describe("a turn's steps in the webchat", () => {
     const [answer, notice] = ofType(chat.frames, "bubble");
     expect(answer?.text).toBe("Confirme, por favor.");
     const code = NOTICE_CODE.exec(String(notice?.text))?.[1] ?? "";
-    expect(notice?.text).toMatch(/^Confirm: change the tier to \{"to":"frontier"\}\.\n/);
+    // In the conversation's language, Portuguese here, with the button's own word (#187).
+    expect(notice?.text).toBe(
+      `Confirme: change the tier to {"to":"frontier"}.\nPara seguir, toque em Confirmar, ou responda só com o código ${code}. Expira em 10 minutos.`,
+    );
     // The notice is Kelpie's own text: shown as written, never formatted, with its button (#186).
     expect(notice).not.toHaveProperty("blocks");
     expect(notice?.confirmation).toEqual(expect.any(Number));
@@ -622,6 +625,22 @@ describe("a turn's steps in the webchat", () => {
     expect(ran).toEqual([{ to: "frontier" }]);
   });
 
+  it("falls back to the browser's language when the owner's words don't say (#187)", async () => {
+    const world = use(
+      fakeWorld([toolCalls({ name: "change", input: { to: "frontier" } }), reply("Vale.")]),
+    );
+    changing(world);
+    const name = "assistant:webchat:browser-language";
+    const chat = await open(name, { ...owner, language: "es-ES,es;q=0.9" });
+    chat.send({ type: "message", id: "c1", text: "ok" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
+    await agent(name).flush();
+    await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(2));
+    expect(String(ofType(chat.frames, "bubble")[1]?.text)).toMatch(
+      /^Confirma: .+\nPara seguir, presiona Confirmar, o responde solo con el código [A-Z0-9]{6}\. Expira en 10 minutos\.$/s,
+    );
+  });
+
   it("refuses a press once the confirmation expired (#186)", async () => {
     const world = use(
       fakeWorld([toolCalls({ name: "change", input: { to: "frontier" } }), reply("Confirme.")]),
@@ -645,14 +664,20 @@ describe("a turn's steps in the webchat", () => {
   it("sends a tool's link after the reply as Kelpie's own bubble, linking only it (#186)", async () => {
     const href = "https://admin.example/forms/to_k-1_x";
     const world = use(fakeWorld([toolCalls({ name: "form" }), reply("Pronto.")]));
+    const locales: string[] = [];
     world.tools = [
       {
         async tools() {
           return [
             {
               spec: { name: "form", description: "Opens a form.", inputSchema: { type: "object" } },
-              label: "Opening a form",
+              label: {
+                en: "Opening a form",
+                "pt-BR": "Abrindo um formulário",
+                es: "Abriendo un formulario",
+              },
               async run(_input: unknown, context: ToolContext) {
+                locales.push(context.locale);
                 context.sendLink({
                   href,
                   text: `The secure form for _bot_: ${href}\nAlso https://admin.example/other.`,
@@ -666,7 +691,7 @@ describe("a turn's steps in the webchat", () => {
     ];
     const name = "assistant:webchat:link";
     const chat = await open(name);
-    chat.send({ type: "message", id: "c1", text: "conecta o bot" });
+    chat.send({ type: "message", id: "c1", text: "pode conectar o bot?" });
     await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
     await agent(name).flush();
     await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(2));
@@ -677,6 +702,13 @@ describe("a turn's steps in the webchat", () => {
       `The secure form for _bot_: ${href}\nAlso https://admin.example/other.`,
     );
     expect(notice).not.toHaveProperty("confirmation");
+    // The tool and its label speak the conversation's language (#187).
+    expect(locales).toEqual(["pt-BR"]);
+    expect(ofType(chat.frames, "status")).toContainEqual({
+      type: "status",
+      status: "tool",
+      label: "Abrindo um formulário",
+    });
     // Its own link only, exactly as the tool made it; the other admin page stays text.
     expect(hrefsOf(notice?.blocks)).toEqual([href]);
     expect(JSON.stringify(world.requests)).not.toContain("to_k-1_x");

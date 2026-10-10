@@ -87,6 +87,18 @@ describe("Telegram normalize", () => {
     );
   });
 
+  it("keeps the language the sender's app is set to, for Kelpie's fixed texts (#187)", () => {
+    const from = { ...updates.privateText.message.from, language_code: "pt-br" };
+    expect(normalize(withMessage({ from }))[0]?.sender).toEqual({
+      channelUserId: "1001",
+      displayName: "Diogo",
+      languageCode: "pt-br",
+    });
+    // Optional in Telegram's API, and bounded like a language tag.
+    const long = { ...updates.privateText.message.from, language_code: "x".repeat(36) };
+    expect(normalize(withMessage({ from: long }))[0]?.sender).not.toHaveProperty("languageCode");
+  });
+
   it("keeps what a message replies to, and marks group chats", () => {
     expect(normalize(updates.reply)[0]?.replyTo).toEqual({ providerMessageId: "41" });
     expect(normalize(updates.groupText)[0]).toMatchObject({

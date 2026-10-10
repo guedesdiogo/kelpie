@@ -25,7 +25,11 @@ export interface CanonicalEvent {
   threadId: string;
   /** Direct messages and groups get different rules for replying and for memory (ADR-0004). */
   chatType: "direct" | "group";
-  sender: { channelUserId: string; displayName?: string };
+  /**
+   * Who sent it. `languageCode` is the language their app is set to, when the channel says
+   * (Telegram's `language_code`): what Kelpie's fixed texts fall back to (#187).
+   */
+  sender: { channelUserId: string; displayName?: string; languageCode?: string };
   /** The provider's id for the message; unique only within its thread on some channels. */
   providerMessageId: string;
   /** When the provider says the message was sent (epoch ms). */

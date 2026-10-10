@@ -1,3 +1,4 @@
+import type { Locale, Localized } from "@kelpie/channels";
 import {
   type AgentSettings,
   type CommandResult,
@@ -178,12 +179,55 @@ function refusal(result: Extract<CommandResult<unknown>, { ok: false }>, id?: st
   }
 }
 
+/**
+ * What the owner reads (#187): the confirmation's summary, and the bubbles with the links Kelpie
+ * sends, which name an agent by its id only.
+ */
+const TEXTS: Localized<{
+  settingTo: string;
+  changeSettings: (agent: string, id: string, changes: string) => string;
+  form: (id: string, href: string, minutes: number) => string;
+  pairing: (id: string, href: string) => string;
+}> = {
+  en: {
+    settingTo: "to",
+    changeSettings: (agent, id, changes) =>
+      `change the settings of the agent ${agent} (${id}): ${changes}.`,
+    form: (id, href, minutes) =>
+      `The secure form to connect the Telegram bot of the agent ${id}: ${href}\nIt works once, for the next ${minutes} minutes. Paste the bot's token there, never in the chat.`,
+    pairing: (id, href) =>
+      `To pair your own Telegram account with the bot of the agent ${id}, open ${href} and press its button.`,
+  },
+  "pt-BR": {
+    settingTo: "para",
+    changeSettings: (agent, id, changes) =>
+      `alterar as configurações do agente ${agent} (${id}): ${changes}.`,
+    form: (id, href, minutes) =>
+      `O formulário seguro para conectar o bot do Telegram do agente ${id}: ${href}\nFunciona uma vez, nos próximos ${minutes} minutos. Cole o token do bot lá, nunca no chat.`,
+    pairing: (id, href) =>
+      `Para parear sua própria conta do Telegram com o bot do agente ${id}, abra ${href} e toque no botão da página.`,
+  },
+  es: {
+    settingTo: "a",
+    changeSettings: (agent, id, changes) =>
+      `cambiar la configuración del agente ${agent} (${id}): ${changes}.`,
+    form: (id, href, minutes) =>
+      `El formulario seguro para conectar el bot de Telegram del agente ${id}: ${href}\nFunciona una vez, durante los próximos ${minutes} minutos. Pega allí el token del bot, nunca en el chat.`,
+    pairing: (id, href) =>
+      `Para vincular tu propia cuenta de Telegram con el bot del agente ${id}, abre ${href} y presiona el botón de la página.`,
+  },
+};
+
 /** The setting changes, for the owner's confirmation: each as its key and its exact value. */
-function describe(settings: Partial<AgentSettings>): string {
+function describe(settings: Partial<AgentSettings>, locale: Locale): string {
   return Object.entries(settings)
-    .map(([key, value]) => `${key} to ${JSON.stringify(value)}`)
+    .map(([key, value]) => `${key} ${TEXTS[locale].settingTo} ${JSON.stringify(value)}`)
     .join(", ");
 }
+
+/** An admin page's link, in the conversation's language, so the page opens in it too (#187). */
+const pageLink = (origin: string, path: string, locale: Locale) =>
+  `${origin}${path}?lang=${locale}`;
 
 /** The origin, when the value is a bare https origin; otherwise empty, as if it weren't set. */
 export function bareHttpsOrigin(value: string): string {
@@ -231,7 +275,7 @@ export function setupTools(
   const tools: Tool[] = [
     {
       spec: SPECS.list_agents,
-      label: "Listing agents",
+      label: { en: "Listing agents", "pt-BR": "Listando agentes", es: "Listando agentes" },
       async run(_input, context) {
         const result = await commands.listAgents(context.actor);
         if (!result.ok) return refusal(result);
@@ -240,7 +284,7 @@ export function setupTools(
     },
     {
       spec: SPECS.get_agent,
-      label: "Reading an agent",
+      label: { en: "Reading an agent", "pt-BR": "Lendo um agente", es: "Leyendo un agente" },
       async run(input, context) {
         const { id } = fields(input);
         if (!isAgentId(id))
@@ -252,7 +296,7 @@ export function setupTools(
     },
     {
       spec: SPECS.create_agent,
-      label: "Creating an agent",
+      label: { en: "Creating an agent", "pt-BR": "Criando um agente", es: "Creando un agente" },
       async run(input, context) {
         const { id, name } = fields(input);
         const result = await commands.createAgent(context.actor, { id, name });
@@ -272,7 +316,11 @@ export function setupTools(
     },
     {
       spec: SPECS.rename_agent,
-      label: "Renaming an agent",
+      label: {
+        en: "Renaming an agent",
+        "pt-BR": "Renomeando um agente",
+        es: "Renombrando un agente",
+      },
       async run(input, context) {
         const { id, name } = fields(input);
         const result = await commands.renameAgent(context.actor, { id, name });
@@ -284,7 +332,11 @@ export function setupTools(
     },
     {
       spec: SPECS.configure_agent,
-      label: "Changing an agent's settings",
+      label: {
+        en: "Changing an agent's settings",
+        "pt-BR": "Alterando as configurações de um agente",
+        es: "Cambiando la configuración de un agente",
+      },
       async run(input, context) {
         if (!isOwner(context)) return NOT_OWNER;
         const { id, settings } = fields(input);
@@ -297,7 +349,11 @@ export function setupTools(
         const agent = await agentOf(context, id);
         if (!("id" in agent)) return agent;
         const change = { id: agent.id, settings: parsed };
-        const summary = `change the settings of the agent ${JSON.stringify(agent.name)} (${agent.id}): ${describe(parsed)}.`;
+        const summary = TEXTS[context.locale].changeSettings(
+          JSON.stringify(agent.name),
+          agent.id,
+          describe(parsed, context.locale),
+        );
         // The owner confirms what they see, and one bubble shows the whole change, or nothing.
         if (visible(summary).length > MAX_SUMMARY_CHARS) {
           return failed(
@@ -317,7 +373,11 @@ export function setupTools(
     },
     {
       spec: SPECS.connect_telegram,
-      label: "Connecting a Telegram bot",
+      label: {
+        en: "Connecting a Telegram bot",
+        "pt-BR": "Conectando um bot do Telegram",
+        es: "Conectando un bot de Telegram",
+      },
       async run(input, context) {
         if (!isOwner(context)) return NOT_OWNER;
         if (adminOrigin === "") return NOT_CONFIGURED;
@@ -328,13 +388,10 @@ export function setupTools(
         // check, is the yes (ADR-0026). Kelpie sends its link, so the model can't alter it.
         const result = await commands.connectTelegram(context.actor, { agentId: agent.id });
         if (!result.ok) return refusal(result, agent.id);
-        const href = `${adminOrigin}${result.value.path}`;
+        const href = pageLink(adminOrigin, result.value.path, context.locale);
         const minutes = Math.max(Math.round((result.value.expiresAt - now()) / 60_000), 1);
         // The agent by its id only: its name is the model's, and the bubble is formatted.
-        context.sendLink({
-          href,
-          text: `The secure form to connect the Telegram bot of the agent ${agent.id}: ${href}\nIt works once, for the next ${minutes} minutes. Paste the bot's token there, never in the chat.`,
-        });
+        context.sendLink({ href, text: TEXTS[context.locale].form(agent.id, href, minutes) });
         return {
           output: `${LINK_SENT}\nThe form works once, for the next ${minutes} minutes. The owner pastes the bot's token there, never in the chat; submitting it is their yes. The form points the bot at Kelpie when it saves the token.`,
         };
@@ -342,18 +399,15 @@ export function setupTools(
     },
     {
       spec: SPECS.pair_telegram,
-      label: "Pairing Telegram",
+      label: { en: "Pairing Telegram", "pt-BR": "Pareando o Telegram", es: "Vinculando Telegram" },
       async run(input, context) {
         if (!isOwner(context)) return NOT_OWNER;
         if (adminOrigin === "") return NOT_CONFIGURED;
         const { agentId } = fields(input);
         const agent = await agentOf(context, agentId);
         if (!("id" in agent)) return agent;
-        const href = `${adminOrigin}/pair/telegram/${agent.id}`;
-        context.sendLink({
-          href,
-          text: `To pair your own Telegram account with the bot of the agent ${agent.id}, open ${href} and press its button.`,
-        });
+        const href = pageLink(adminOrigin, `/pair/telegram/${agent.id}`, context.locale);
+        context.sendLink({ href, text: TEXTS[context.locale].pairing(agent.id, href) });
         return {
           output: `${LINK_SENT}\nOn that page the owner presses a button, and gets a Telegram link that pairs the account they open it with as theirs. The agent's bot must be connected first.`,
         };

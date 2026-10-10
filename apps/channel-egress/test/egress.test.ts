@@ -337,6 +337,34 @@ describe("Telegram bot facts and notices", () => {
     expect(String(sent(calls)[0]?.body.text)).toContain("Paired");
   });
 
+  it("writes the notices in the locale ingress names, and in English for none or an unknown one (#187)", async () => {
+    const calls = botApi();
+    await connect("speaks");
+    const stranger = { kind: "stranger", senderId: "5550123456", displayName: "Eve" } as const;
+    for (const notice of [
+      { kind: "paired", locale: "pt-BR" },
+      { kind: "paired", locale: "es" },
+      { kind: "paired", locale: "fr" },
+      { ...stranger, locale: "pt-BR" },
+      { ...stranger, locale: "es" },
+      stranger,
+    ]) {
+      // An older or odd ingress may name a locale Kelpie doesn't have.
+      const sentNotice = notice as unknown as Parameters<typeof exports.ChannelWebhooks.notice>[2];
+      expect(await exports.ChannelWebhooks.notice("speaks", owner, sentNotice)).toEqual({
+        ok: true,
+      });
+    }
+    expect(sent(calls).map((call) => String(call.body.text))).toEqual([
+      "Pareado. Esta conta do Telegram já pode falar com este agente.",
+      "Vinculado. Esta cuenta de Telegram ya puede hablar con este agente.",
+      "Paired. This Telegram account can now talk to this agent.",
+      "Alguém que não está pareado mandou uma mensagem para este bot: Eve (55••••••56). Não recebeu resposta.",
+      "Alguien que no está vinculado escribió a este bot: Eve (55••••••56). No recibió respuesta.",
+      "Someone who isn't paired messaged this bot: Eve (55••••••56). They got no answer.",
+    ]);
+  });
+
   it("tells the owner about a stranger with a cleaned-up name and a masked id", async () => {
     const calls = botApi();
     await connect("guarded");

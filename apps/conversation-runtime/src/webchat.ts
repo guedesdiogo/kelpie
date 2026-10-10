@@ -76,6 +76,8 @@ export function parseAdmission(value: string | null): SocketAdmission | null {
         role: roleOf(parsed.role),
         chatType: chatTypeOf(parsed.chatType),
         timeZone: parsed.timeZone,
+        // The browser's language (#187); an older ingress names none.
+        language: typeof parsed.language === "string" ? parsed.language : null,
       };
     }
   } catch {

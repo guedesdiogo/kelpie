@@ -15,5 +15,6 @@ export async function admitSender(env: Env, event: CanonicalEvent): Promise<Admi
   return env.DIRECTORY.getByName(DIRECTORY_NAME).admit(
     { channel: event.channel, channelUserId: event.sender.channelUserId },
     event.agentId,
+    event.sender.languageCode,
   );
 }

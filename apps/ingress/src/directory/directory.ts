@@ -15,7 +15,7 @@ import {
   type StrangerNotice,
   type TimeZoneResult,
 } from "@kelpie/access";
-import type { ChannelId } from "@kelpie/channels";
+import { type ChannelId, MAX_LANGUAGE_TAG_CHARS } from "@kelpie/channels";
 import { and, count, eq, gt, isNull, lt, or } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
@@ -232,7 +232,10 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
       .where(lt(schema.noticedSenders.noticedAt, new Date(now - NOTICED_SENDER_RETENTION_MS)))
       .run();
     const owner = this.#db
-      .select({ channelUserId: schema.identities.channelUserId })
+      .select({
+        channelUserId: schema.identities.channelUserId,
+        languageCode: schema.identities.languageCode,
+      })
       .from(schema.identities)
       .innerJoin(schema.users, eq(schema.users.userId, schema.identities.userId))
       .where(
@@ -271,7 +274,13 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
       .insert(schema.noticedSenders)
       .values({ channel, channelUserId: sender.channelUserId, noticedAt: new Date(now) })
       .run();
-    return { notify: true, ownerChannelUserId: owner.channelUserId };
+    return owner.languageCode === null
+      ? { notify: true, ownerChannelUserId: owner.channelUserId }
+      : {
+          notify: true,
+          ownerChannelUserId: owner.channelUserId,
+          ownerLanguage: owner.languageCode,
+        };
   }
 
   /** Undoes `noticeStranger` when the notice couldn't be sent, so it is neither spent nor lost. */
@@ -410,12 +419,13 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
    * Decides whether a sender may reach an agent. The owner reaches every agent. Other roles don't
    * exist until multi-user lands; then they'll need a grant for `agentId` (ADR-0015).
    */
-  admit(identity: ChannelIdentity, _agentId: string): Admission {
+  admit(identity: ChannelIdentity, _agentId: string, language?: string): Admission {
     const user = this.#db
       .select({
         userId: schema.users.userId,
         role: schema.users.role,
         timeZone: schema.users.timeZone,
+        languageCode: schema.identities.languageCode,
       })
       .from(schema.identities)
       .innerJoin(schema.users, eq(schema.users.userId, schema.identities.userId))
@@ -429,6 +439,23 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
       .get();
     if (!user) return { admitted: false, reason: "unknown_identity" };
     if (user.role !== "owner") return { admitted: false, reason: "no_grant" };
+    // Written only when it changed, so a message doesn't cost a write.
+    if (
+      typeof language === "string" &&
+      language.length <= MAX_LANGUAGE_TAG_CHARS &&
+      language !== user.languageCode
+    ) {
+      this.#db
+        .update(schema.identities)
+        .set({ languageCode: language })
+        .where(
+          and(
+            eq(schema.identities.channel, identity.channel),
+            eq(schema.identities.channelUserId, identity.channelUserId),
+          ),
+        )
+        .run();
+    }
     return { admitted: true, userId: user.userId, role: user.role, timeZone: user.timeZone };
   }
 

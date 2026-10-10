@@ -30,6 +30,12 @@ export interface InboundMessage {
   sentAt: number;
   /** The author's IANA time zone, from their admission, or null while they haven't set one. */
   timeZone: string | null;
+  /**
+   * The language the author's device or app is set to, as a tag or an `Accept-Language` value,
+   * when the channel says: what Kelpie's fixed texts fall back to (#187). An older ingress sends
+   * none.
+   */
+  language?: string | null;
 }
 
 export type IngestResult =
@@ -49,6 +55,8 @@ export interface PauseTarget {
   destination: Destination;
   /** The command's own message id, when the channel retries deliveries. */
   providerMessageId?: string;
+  /** The device language of whoever paused, as on a message (#187); an older ingress sends none. */
+  language?: string | null;
 }
 
 export type PauseResult =
@@ -76,4 +84,6 @@ export interface WebchatAdmission {
   /** The webchat is the owner's own login (ADR-0023): always a direct chat. */
   chatType: ChatType;
   timeZone: string | null;
+  /** The browser's language, as the page names it (#187); an older ingress or page sends none. */
+  language?: string | null;
 }

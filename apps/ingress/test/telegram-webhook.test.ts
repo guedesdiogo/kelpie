@@ -299,7 +299,7 @@ describe("Telegram pairing and strangers", () => {
       {
         agentId: "kelpie",
         destination: { channel: "telegram", threadId: "4242" },
-        notice: { kind: "paired" },
+        notice: { kind: "paired", locale: "en" },
       },
     ]);
     expect(
@@ -334,7 +334,7 @@ describe("Telegram pairing and strangers", () => {
       {
         agentId: "kelpie",
         destination: { channel: "telegram", threadId: String(OWNER_TELEGRAM_ID) },
-        notice: { kind: "stranger", senderId: "4444", displayName: "Mallory" },
+        notice: { kind: "stranger", senderId: "4444", displayName: "Mallory", locale: "en" },
       },
     ]);
   });
@@ -449,6 +449,37 @@ describe("Telegram pairing and strangers", () => {
     expect(
       await directory().redeemPairingCode(code, { channel: "telegram", channelUserId: "5051" }),
     ).toMatchObject({ ok: true });
+  });
+
+  it("speaks each account's app language: the paired notice, the owner's messages and stranger notices (#187)", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { deps, ingested, notices } = fakes();
+    const pairing = start(5858, await issueCode());
+    pairing.message.from = { ...pairing.message.from, language_code: "pt-br" } as never;
+    await handleTelegramWebhook(webhook(pairing), "kelpie", deps);
+    expect(notices.at(-1)?.notice).toEqual({ kind: "paired", locale: "pt-BR" });
+
+    // The owner's message carries the language to the conversation, and the Directory keeps it.
+    const owner = update({
+      message_id: 700,
+      from: { id: OWNER_TELEGRAM_ID, is_bot: false, first_name: "Owner", language_code: "es" },
+    });
+    await handleTelegramWebhook(webhook(owner), "kelpie", deps);
+    expect(ingested.at(-1)?.message.language).toBe("es");
+
+    // So a notice about a stranger reaches the owner in it.
+    const stranger = update({
+      message_id: 701,
+      from: { id: 5959, is_bot: false, first_name: "Trudy", language_code: "en" },
+      chat: { id: 5959, type: "private" },
+    });
+    await handleTelegramWebhook(webhook(stranger), "kelpie", deps);
+    expect(notices.at(-1)?.notice).toEqual({
+      kind: "stranger",
+      senderId: "5959",
+      displayName: "Trudy",
+      locale: "es",
+    });
   });
 });
 

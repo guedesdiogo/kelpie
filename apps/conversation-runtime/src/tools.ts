@@ -1,3 +1,4 @@
+import type { Locale, Localized } from "@kelpie/channels";
 import type { Actor } from "@kelpie/config";
 import type { RecallOptions } from "@kelpie/context-store/contract";
 import { withoutTypedStamps } from "@kelpie/conversation";
@@ -34,9 +35,13 @@ export const TOOL_OUTPUT_MAX_CHARS = 10_000;
 /** What a tool that threw gets. Its error isn't passed on: it could quote personal data. */
 export const TOOL_FAILED_RESULT = "The tool failed.";
 
-/** The reply when even the last call asks for tools again. */
-export const TOOL_LIMIT_TEXT =
-  "I couldn't finish this within my limits. Ask me again, or narrow it down.";
+/** The reply when even the last call asks for tools again, in the conversation's language (#187). */
+export const TOOL_LIMIT_TEXT: Localized = {
+  en: "I couldn't finish this within my limits. Ask me again, or narrow it down.",
+  "pt-BR":
+    "Não consegui terminar isto dentro dos meus limites. Peça de novo, ou restrinja o pedido.",
+  es: "No pude terminar esto dentro de mis límites. Pídemelo de nuevo, o acota lo que necesitas.",
+};
 
 /** A change a tool makes only with the owner's yes (ADR-0013). */
 export interface ConfirmationRequest {
@@ -69,16 +74,47 @@ export function visible(text: string): string {
   );
 }
 
+const NOTICE: Localized<{
+  confirm: string;
+  button: (code: string) => string;
+  typed: (code: string) => string;
+  goAhead: (how: string, minutes: number) => string;
+}> = {
+  en: {
+    confirm: "Confirm",
+    button: (code) => `press Confirm, or reply with just the code ${code}`,
+    typed: (code) => `reply with just the code ${code}`,
+    goAhead: (how, minutes) => `To go ahead, ${how}. It expires in ${minutes} minutes.`,
+  },
+  "pt-BR": {
+    confirm: "Confirme",
+    button: (code) => `toque em Confirmar, ou responda só com o código ${code}`,
+    typed: (code) => `responda só com o código ${code}`,
+    goAhead: (how, minutes) => `Para seguir, ${how}. Expira em ${minutes} minutos.`,
+  },
+  es: {
+    confirm: "Confirma",
+    button: (code) => `presiona Confirmar, o responde solo con el código ${code}`,
+    typed: (code) => `responde solo con el código ${code}`,
+    goAhead: (how, minutes) => `Para seguir, ${how}. Expira en ${minutes} minutos.`,
+  },
+};
+
 /**
- * The bubble the host sends after the turn's reply, so the owner can confirm a change. The summary
- * is shown with its invisible characters written out. With `button`, the webchat shows the notice
- * with a Confirm button that sends the code for the owner (#186); the code still works typed.
+ * The bubble the host sends after the turn's reply, so the owner can confirm a change, in the
+ * conversation's language (#187). The summary is shown with its invisible characters written out.
+ * With `button`, the webchat shows the notice with a Confirm button that sends the code for the
+ * owner (#186); the code still works typed.
  */
-export function confirmationNotice(summary: string, code: string, button = false): string {
-  const how = button
-    ? `press Confirm, or reply with just the code ${code}`
-    : `reply with just the code ${code}`;
-  return `Confirm: ${visible(summary)}\nTo go ahead, ${how}. It expires in ${CONFIRMATION_MS / 60_000} minutes.`;
+export function confirmationNotice(
+  summary: string,
+  code: string,
+  button = false,
+  locale: Locale = "en",
+): string {
+  const texts = NOTICE[locale];
+  const how = button ? texts.button(code) : texts.typed(code);
+  return `${texts.confirm}: ${visible(summary)}\n${texts.goAhead(how, CONFIRMATION_MS / 60_000)}`;
 }
 
 /**
@@ -139,6 +175,8 @@ export function canonicalJson(value: unknown): string {
 
 /** What a tool's run knows about the turn. None of it comes from model output. */
 export interface ToolContext {
+  /** The conversation's language, for the texts a tool has Kelpie show the owner (#187). */
+  locale: Locale;
   /** Built from the turn's admitted user, `via` the agent. */
   actor: Actor;
   agentId: string;
@@ -187,8 +225,11 @@ export interface ToolOutcome {
 
 export interface Tool {
   spec: ToolSpec;
-  /** Plain words the webchat shows while the tool runs, such as "Searching memory". */
-  label: string;
+  /**
+   * Plain words the webchat shows while the tool runs, such as "Searching memory": in each
+   * language (#187), or one text for all.
+   */
+  label: string | Localized;
   run(input: unknown, context: ToolContext): Promise<ToolOutcome>;
 }
 
@@ -199,6 +240,11 @@ export interface ToolProvider {
    * starts the provider's cache over.
    */
   tools(agentId: string): Promise<Tool[]>;
+}
+
+/** A tool's label in `locale`. */
+export function labelIn(label: Tool["label"], locale: Locale): string {
+  return typeof label === "string" ? label : label[locale];
 }
 
 /** Runs one call. An unknown tool and a tool that throws are answered with an error. */

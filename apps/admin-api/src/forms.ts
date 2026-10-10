@@ -1,4 +1,5 @@
-import type { ChannelFormsContract } from "@kelpie/channels";
+import type { ChannelFormsContract, Locale } from "@kelpie/channels";
+import { PAGES } from "./texts.ts";
 
 // The one-time secure forms (ADR-0013) where the owner pastes a channel's secret, such as a
 // Telegram bot token. The page is served by the admin API behind Access; the secret goes straight
@@ -16,36 +17,38 @@ export function formTokenOf(pathname: string): string | null {
   return FORM_TOKEN.test(token) ? token : null;
 }
 
-export async function showForm(token: string, forms: FormDeps): Promise<Response> {
+export async function showForm(token: string, forms: FormDeps, locale: Locale): Promise<Response> {
   const form = await forms.describeForm(token);
-  if (!form.ok) return formGone(form);
-  return page(200, "Connect Telegram", tokenForm(form.agentId, null));
+  if (!form.ok) return formGone(form, locale);
+  return page(200, PAGES[locale].connect.title, tokenForm(form.agentId, null, locale), locale);
 }
 
 type Gone = Extract<Awaited<ReturnType<FormDeps["describeForm"]>>, { ok: false }>;
 
 /** A form that isn't open: used a moment ago, closed, or unreachable. */
-function formGone(form: Gone): Response {
+function formGone(form: Gone, locale: Locale): Response {
   if (form.reason === "redeemed") {
-    return page(
-      200,
-      "Telegram connected",
-      `<p>This link was already used: @${escapeHtml(form.username)} answers for <code>${escapeHtml(form.agentId)}</code>. You can close this page.</p>`,
-    );
+    const texts = PAGES[locale].connected;
+    const bot = `@${escapeHtml(form.username)}`;
+    const agent = `<code>${escapeHtml(form.agentId)}</code>`;
+    return page(200, texts.title, `<p>${texts.used(bot, agent)}</p>`, locale);
   }
-  return form.reason === "unknown_form" ? closedPage() : unavailablePage();
+  return form.reason === "unknown_form" ? closedPage(locale) : unavailablePage(locale);
 }
 
 export async function submitForm(
   token: string,
   botToken: string,
   forms: FormDeps,
+  locale: Locale,
 ): Promise<Response> {
+  const texts = PAGES[locale];
   if (botToken.trim() === "") {
     // Nothing to check: an empty submission doesn't count against the form's attempts.
     const form = await forms.describeForm(token);
-    if (!form.ok) return formGone(form);
-    return page(400, "Connect Telegram", tokenForm(form.agentId, "Paste the bot token first."));
+    if (!form.ok) return formGone(form, locale);
+    const body = tokenForm(form.agentId, texts.connect.empty, locale);
+    return page(400, texts.connect.title, body, locale);
   }
   const result = await forms.redeemTelegramForm(token, botToken);
   if (result.ok) {
@@ -54,39 +57,38 @@ export async function submitForm(
     // The token is stored either way; only the webhook needs another try.
     const body =
       result.webhook === "registered"
-        ? `<p>${bot} now answers for ${agent}. You can close this page.</p>`
-        : `<p>${bot} is connected to ${agent}, but Telegram couldn't be pointed at Kelpie (<code>${escapeHtml(result.webhook)}</code>). Until it is, messages to the bot do not reach Kelpie. Once that is fixed, run the <code>registerTelegramWebhook</code> command for ${agent}.</p>`;
-    return page(200, "Telegram connected", body);
+        ? `<p>${texts.connected.done(bot, agent)}</p>`
+        : `<p>${texts.connected.noWebhook(bot, agent, `<code>${escapeHtml(result.webhook)}</code>`)}</p>`;
+    return page(200, texts.connected.title, body, locale);
   }
   if (result.reason === "invalid_token" || result.reason === "token_refused") {
     // A form closes after a few refused values; then the link is spent.
     const form = await forms.describeForm(token);
-    if (!form.ok) return form.reason === "redeemed" ? formGone(form) : closedPage();
+    if (!form.ok) return form.reason === "redeemed" ? formGone(form, locale) : closedPage(locale);
     const message =
-      result.reason === "invalid_token"
-        ? "That doesn't look like a bot token. Copy it again from BotFather."
-        : "Telegram didn't accept that token. Check it in BotFather and paste it again.";
-    return page(400, "Connect Telegram", tokenForm(form.agentId, message));
+      result.reason === "invalid_token" ? texts.connect.invalid : texts.connect.refused;
+    return page(400, texts.connect.title, tokenForm(form.agentId, message, locale), locale);
   }
-  return result.reason === "unknown_form" ? closedPage() : unavailablePage();
+  return result.reason === "unknown_form" ? closedPage(locale) : unavailablePage(locale);
 }
 
-export function closedPage(): Response {
-  return page(
-    404,
-    "This link no longer works",
-    "<p>It expired, was used, or was refused too many times. Ask for a new one.</p>",
-  );
+export function closedPage(locale: Locale): Response {
+  const texts = PAGES[locale].closed;
+  return page(404, texts.title, `<p>${texts.body}</p>`, locale);
 }
 
-export function unavailablePage(): Response {
-  return page(503, "Try again later", "<p>Kelpie couldn't reach its secret store.</p>");
+export function unavailablePage(locale: Locale): Response {
+  const texts = PAGES[locale].unavailable;
+  return page(503, texts.title, `<p>${texts.body}</p>`, locale);
 }
 
-/** A page with headers that keep the form out of caches, referrers and frames. */
-export function page(status: number, title: string, body: string): Response {
+/**
+ * A page in `locale`, with headers that keep the form out of caches, referrers and frames. `title`
+ * is escaped; `body` is HTML, with whatever came from elsewhere already escaped.
+ */
+export function page(status: number, title: string, body: string, locale: Locale): Response {
   const html = `<!doctype html>
-<html lang="en">
+<html lang="${locale}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -124,13 +126,15 @@ export function page(status: number, title: string, body: string): Response {
   });
 }
 
-function tokenForm(agentId: string, error: string | null): string {
-  return `<p>Paste the token BotFather gave you for the bot that answers as <code>${escapeHtml(agentId)}</code>. It goes straight to Kelpie's secret store.</p>
+/** The form, which posts to its own URL, so the answer keeps the link's `?lang=`. */
+function tokenForm(agentId: string, error: string | null, locale: Locale): string {
+  const texts = PAGES[locale].connect;
+  return `<p>${texts.intro(`<code>${escapeHtml(agentId)}</code>`)}</p>
 ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 <form method="post">
-  <label for="botToken">Bot token</label>
+  <label for="botToken">${texts.label}</label>
   <input id="botToken" name="botToken" type="password" autocomplete="off" spellcheck="false" maxlength="128" required>
-  <button type="submit">Connect</button>
+  <button type="submit">${texts.button}</button>
 </form>`;
 }
 
