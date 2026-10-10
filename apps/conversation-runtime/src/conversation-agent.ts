@@ -14,7 +14,14 @@ import {
   type SendOutcome,
   webLinks,
 } from "@kelpie/channels";
-import { type Actor, type AgentConfig, type AgentSettings, DEFAULT_SETTINGS } from "@kelpie/config";
+import {
+  type Actor,
+  type AgentConfig,
+  type AgentSettings,
+  DEFAULT_SETTINGS,
+  type SetupEvent,
+  type SetupStep,
+} from "@kelpie/config";
 import type { RecallOptions } from "@kelpie/context-store/contract";
 import {
   deliveredReply,
@@ -74,7 +81,7 @@ import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
 import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
 import * as schema from "./schema.ts";
-import { bareHttpsOrigin } from "./setup-agent.ts";
+import { bareHttpsOrigin, setupNote } from "./setup-agent.ts";
 import {
   CONFIRMATION_MS,
   type ConfirmationRequest,
@@ -127,6 +134,11 @@ export const PAUSED_TEXT: Localized = {
   "pt-BR": "Pausado. Respondo depois da sua próxima mensagem.",
   es: "En pausa. Responderé después de tu próximo mensaje.",
 };
+/**
+ * How long past its end a setup step's wait still takes the report (#206): a form submitted in its
+ * last seconds is reported a moment after.
+ */
+const SETUP_WAIT_GRACE_MS = 5 * 60_000;
 /** The person's latest messages the conversation's language is read from (#187). */
 const LANGUAGE_WINDOW = 5;
 /** Of each, the end, where a run of messages has its newest: enough to tell a language. */
@@ -462,6 +474,86 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     return { status: "paused" };
   }
 
+  /**
+   * The owner finished a setup step behind a link this conversation sent (#206), as the agent's
+   * AgentHost reports it. Kelpie writes a note of its own into the conversation, authored as that
+   * owner so its turn keeps their role, and the agent answers it without the owner typing "done".
+   * The note never interrupts a turn: it waits for the running one, or joins the person's waiting
+   * messages, or starts a turn of its own.
+   */
+  async setupDone(agentId: string, event: SetupEvent): Promise<void> {
+    const text = setupNote(agentId, event);
+    if (text === null) return;
+    const now = this.#ports.now();
+    // Only a step this conversation waits for, and once: a second report finds no wait.
+    if (!this.#takeWait(agentId, event.step, now)) return;
+    this.#db
+      .insert(schema.inbound)
+      .values({
+        providerMessageId: `kelpie:${event.step}:${agentId}:${crypto.randomUUID()}`,
+        userId: event.userId,
+        text,
+        receivedAt: now,
+        sentAt: now,
+        stamp: stampOf(now, this.#get<string | null>("timeZone", null)),
+        // The owner finished the step; Kelpie serves only the owner, in direct chats (ADR-0015).
+        role: "owner",
+        chatType: "direct",
+        fromKelpie: true,
+      })
+      .run();
+    // Answered on a schedule of its own: it survives an eviction, and the AgentHost reporting to
+    // every waiting conversation isn't held up by a turn starting here.
+    await this.schedule(0, "answerNotes");
+  }
+
+  /** The schedule `setupDone` arms (#206). */
+  async answerNotes(): Promise<void> {
+    await this.#serialized(() => this.#answerKelpieNotes());
+  }
+
+  /**
+   * Starts a turn for Kelpie's notes (#206) when nothing else will: no turn runs, and nothing the
+   * person wrote waits, whose own planned flush answers the notes with it. Never alongside a running
+   * turn: its end calls this again. While paused, the notes wait for the owner's next message. A
+   * message of the person's arriving meanwhile moves the epoch, and its own plan answers both.
+   */
+  async #answerKelpieNotes(): Promise<void> {
+    if (this.#turnRunning() || this.#get("paused", false)) return;
+    const pending = this.#pendingInbound();
+    if (pending.length === 0 || pending.some((row) => !row.fromKelpie)) return;
+    await this.flush({ epoch: this.#epoch() });
+  }
+
+  /**
+   * Notes that this conversation waits for a setup step (#206), before the agent's AgentHost is
+   * told: a report is taken only for a step the conversation waits for itself.
+   */
+  #noteWait(agentId: string, step: SetupStep, until: number): void {
+    const now = this.#ports.now();
+    const waits = this.#waits().filter(
+      (wait) =>
+        wait.until + SETUP_WAIT_GRACE_MS > now && !(wait.agentId === agentId && wait.step === step),
+    );
+    this.#set("setupWaits", [...waits, { agentId, step, until }]);
+  }
+
+  /** Ends the conversation's wait for a step, if it had one still running. */
+  #takeWait(agentId: string, step: SetupStep, now: number): boolean {
+    const waits = this.#waits();
+    const left = waits.filter((wait) => !(wait.agentId === agentId && wait.step === step));
+    const had = waits.some(
+      (wait) =>
+        wait.agentId === agentId && wait.step === step && wait.until + SETUP_WAIT_GRACE_MS > now,
+    );
+    if (left.length !== waits.length) this.#set("setupWaits", left);
+    return had;
+  }
+
+  #waits(): { agentId: string; step: SetupStep; until: number }[] {
+    return this.#get<{ agentId: string; step: SetupStep; until: number }[]>("setupWaits", []);
+  }
+
   /** Best effort: the webchat's sockets are told, and other channels get a short fixed message. */
   async #confirmPause({ agentId, destination }: PauseTarget): Promise<void> {
     if (destination.channel === "webchat") {
@@ -551,6 +643,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
             userId: run.userId,
             systemVersion: promptVersion,
             message: { role: "user", parts: [{ type: "text", text: run.text }] },
+            fromKelpie: run.fromKelpie,
             createdAt: now,
           })
           .run();
@@ -716,6 +809,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     } catch (error) {
       console.error("ConversationAgent: turn recovery failed", { turnId, error: errorName(error) });
       this.#settle(turnId, "failed");
+      // A note of Kelpie's that waited for this turn would otherwise wait for the next message.
+      await this.schedule(0, "answerNotes");
     }
     return { status: "completed" as const };
   }
@@ -730,6 +825,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       const turn = this.#turn(turnId);
       if (turn?.status !== "running") return;
       if (this.#outboxCount(turnId) > 0) {
+        // An eviction may have come before the waits for its links were noted (#206); noting
+        // them again changes nothing.
+        await this.#awaitSteps(turn.links ?? []);
         // A bubble caught mid-send may or may not have arrived; it is sent again.
         this.#db
           .update(schema.outbox)
@@ -764,6 +862,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       if (this.#inFlight.get(turnId) === flight) this.#inFlight.delete(turnId);
     }
     await this.#scheduleSessionClose(SESSION_IDLE_MS);
+    // A note of Kelpie's that came while this turn ran waited for it (#206).
+    await this.#serialized(() => this.#answerKelpieNotes());
   }
 
   async #call(turnId: number, controller: AbortController): Promise<void> {
@@ -918,7 +1018,25 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           .run();
       });
     });
+    await this.#awaitSteps(links);
     await this.#deliver(turnId, controller.signal);
+  }
+
+  /**
+   * Tells each agent whose setup link the reply sends that this conversation waits for the step
+   * behind it (#206), so the owner's finishing it is reported here. Best effort: a wait lost to an
+   * unreachable or slow object means the owner says "done" themselves, as before.
+   */
+  async #awaitSteps(links: readonly HostLink[]): Promise<void> {
+    for (const { awaits } of links) {
+      if (!awaits) continue;
+      this.#noteWait(awaits.agentId, awaits.step, awaits.until);
+      try {
+        await this.#ports.awaitSetup(awaits.agentId, this.name, awaits.step, awaits.until);
+      } catch (error) {
+        console.warn("ConversationAgent: a setup step's wait wasn't kept", errorName(error));
+      }
+    }
   }
 
   /**
@@ -1189,6 +1307,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           and(
             eq(schema.history.role, "user"),
             eq(schema.history.userId, userId),
+            // Kelpie's notes are authored as the owner, but never say yes for them (#206).
+            eq(schema.history.fromKelpie, false),
             gt(schema.history.id, pending.afterHistoryId),
           ),
         )
@@ -1257,9 +1377,11 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         .where(eq(schema.turns.id, turnId))
         .get()?.links ?? [];
     if (links.some(({ href }) => href === link.href)) return;
+    const kept: HostLink = { text: link.text, href: link.href };
+    if (link.awaits) kept.awaits = link.awaits;
     this.#db
       .update(schema.turns)
-      .set({ links: [...links, { text: link.text, href: link.href }] })
+      .set({ links: [...links, kept] })
       .where(eq(schema.turns.id, turnId))
       .run();
   }
@@ -1445,7 +1567,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const lines = this.#db
       .select({ message: schema.history.message })
       .from(schema.history)
-      .where(gt(schema.history.id, this.#lastSeenReply()))
+      // Kelpie's notes ask nothing of memory (#206).
+      .where(
+        and(gt(schema.history.id, this.#lastSeenReply()), eq(schema.history.fromKelpie, false)),
+      )
       .orderBy(asc(schema.history.id))
       .all()
       .flatMap(({ message }) => withoutTypedStamps(messageText(message)).split("\n"))
@@ -1560,6 +1685,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           role: schema.history.role,
           userId: schema.history.userId,
           message: schema.history.message,
+          fromKelpie: schema.history.fromKelpie,
           createdAt: schema.history.createdAt,
         })
         .from(schema.history)
@@ -1579,8 +1705,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           threadId: destination.threadId,
           timeZone: this.#get<string | null>("timeZone", null),
           openKeys: this.#get<OpenKeys>("openKeys", {}),
+          // A session page records what the person said; Kelpie's notes aren't that (#206).
           lines: rows
-            .filter((row) => seen(row.message))
+            .filter((row) => seen(row.message) && !row.fromKelpie)
             .map((row) => ({
               role: row.role === "user" ? ("user" as const) : ("assistant" as const),
               speaker: row.role === "user" ? (row.userId ?? "someone") : agentId,
@@ -1745,7 +1872,13 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const inputs = this.#db
       .select({ message: schema.history.message })
       .from(schema.history)
-      .where(and(eq(schema.history.role, "user"), gte(schema.history.id, keptFrom)))
+      .where(
+        and(
+          eq(schema.history.role, "user"),
+          eq(schema.history.fromKelpie, false),
+          gte(schema.history.id, keptFrom),
+        ),
+      )
       .all()
       .map(({ message }) => messageText(message));
     if (turn.context !== null) {
@@ -1921,7 +2054,12 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (epoch !== this.#epoch() || this.#get("paused", false)) return;
     const pending = this.#pendingInbound();
     if (pending.length === 0) return;
-    const flushAt = pending.length >= LIMITS.maxBuffered ? now : await this.#planFlush(pending);
+    // The wait is the person's: Kelpie's notes neither start nor cap it (#206).
+    const written = pending.filter((row) => !row.fromKelpie);
+    const flushAt =
+      pending.length >= LIMITS.maxBuffered || written.length === 0
+        ? now
+        : await this.#planFlush(written);
     // A newer message arrived while the settings were awaited, and plans with the fuller buffer;
     // or a flush already claimed the buffer.
     if (epoch !== this.#epoch() || this.#pendingInbound().length === 0) return;
@@ -1953,7 +2091,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    */
   async #holdForTyping(): Promise<void> {
     const flushAt = this.#get<number | null>("flushAt", null);
-    const first = this.#pendingInbound()[0];
+    const first = this.#pendingInbound().find((row) => !row.fromKelpie);
     if (flushAt === null || !first) return;
     const epoch = this.#epoch();
     const { settings } = await this.#config();
@@ -2072,7 +2210,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const waiting = this.#db
       .select({ text: schema.inbound.text })
       .from(schema.inbound)
-      .where(isNull(schema.inbound.turnId))
+      // Kelpie's notes are its own words, in English (#206).
+      .where(and(isNull(schema.inbound.turnId), eq(schema.inbound.fromKelpie, false)))
       .orderBy(desc(schema.inbound.id))
       .limit(LANGUAGE_WINDOW)
       .all()
@@ -2080,7 +2219,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const said = this.#db
       .select({ message: schema.history.message })
       .from(schema.history)
-      .where(eq(schema.history.role, "user"))
+      .where(and(eq(schema.history.role, "user"), eq(schema.history.fromKelpie, false)))
       .orderBy(desc(schema.history.id))
       .limit(LANGUAGE_WINDOW)
       .all()
@@ -2175,6 +2314,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         message: schema.history.message,
         at: schema.history.createdAt,
         turnId: schema.history.turnId,
+        fromKelpie: schema.history.fromKelpie,
       })
       .from(schema.history)
       .orderBy(desc(schema.history.id))
@@ -2206,7 +2346,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       return { text, blocks: formatReply(text, new Set(this.#linksAllowed(text, inputs))) };
     };
     const rows: ShownMessage[] = [];
-    for (const { role, message, at, turnId } of window) {
+    for (const { role, message, at, turnId, fromKelpie } of window) {
+      // Kelpie's notes are for the model: never shown, and never the owner's links (#206).
+      if (fromKelpie) continue;
       if (role === "user") for (const link of webLinks(messageText(message))) said.add(link);
       if (!seen(message)) continue;
       rows.push(
@@ -2227,11 +2369,13 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           }
         : { role: "assistant" as const, ...formatted(text, turnId), at: at ?? 0 },
     );
-    const waiting = this.#pendingInbound().map((row) => ({
-      role: "user" as const,
-      text: row.text,
-      at: row.receivedAt,
-    }));
+    const waiting = this.#pendingInbound()
+      .filter((row) => !row.fromKelpie)
+      .map((row) => ({
+        role: "user" as const,
+        text: row.text,
+        at: row.receivedAt,
+      }));
     return [...rows, ...sent, ...waiting].filter((message) => message.text !== "");
   }
 
@@ -2339,12 +2483,16 @@ function sameDestination(a: Destination, b: Destination): boolean {
  * Consecutive messages from one author become one history message, each keeping its author. Each
  * message starts with its stamp, unless the message before it in the same run has the same one.
  */
-function byAuthor(rows: readonly { userId: string; text: string; stamp: string | null }[]) {
-  const runs: { userId: string; lines: string[]; lastStamp: string | null }[] = [];
+function byAuthor(
+  rows: readonly { userId: string; text: string; stamp: string | null; fromKelpie: boolean }[],
+) {
+  const runs: { userId: string; fromKelpie: boolean; lines: string[]; lastStamp: string | null }[] =
+    [];
   for (const row of rows) {
     let run = runs.at(-1);
-    if (!run || run.userId !== row.userId) {
-      run = { userId: row.userId, lines: [], lastStamp: null };
+    // Kelpie's notes are authored as the owner but never share a row with the owner's own words.
+    if (!run || run.userId !== row.userId || run.fromKelpie !== row.fromKelpie) {
+      run = { userId: row.userId, fromKelpie: row.fromKelpie, lines: [], lastStamp: null };
       runs.push(run);
     }
     run.lines.push(
@@ -2352,7 +2500,11 @@ function byAuthor(rows: readonly { userId: string; text: string; stamp: string |
     );
     run.lastStamp = row.stamp;
   }
-  return runs.map((run) => ({ userId: run.userId, text: run.lines.join("\n") }));
+  return runs.map((run) => ({
+    userId: run.userId,
+    fromKelpie: run.fromKelpie,
+    text: run.lines.join("\n"),
+  }));
 }
 
 /** The last `max` characters of `text`, never starting on half of a surrogate pair. */

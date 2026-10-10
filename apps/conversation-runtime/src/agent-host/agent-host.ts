@@ -4,11 +4,13 @@ import type {
   AgentHostContract,
   AgentSettings,
   ConfigureResult,
+  SetupEvent,
+  SetupStep,
 } from "@kelpie/config";
 import { DEFAULT_SETTINGS, parseSettings, SETUP_AGENT_ID } from "@kelpie/config";
 import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
 import { Agent } from "agents";
-import { eq } from "drizzle-orm";
+import { and, eq, lte } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import { SETUP_PROMPT } from "../setup-agent.ts";
@@ -164,6 +166,78 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     return { ok: true, value: { settings, promptVersion } };
   }
 
+  /**
+   * Notes that a conversation waits for a step of this agent (#206). Waiting again moves its end.
+   * An RPC boundary, so the values are checked; a bad one is ignored.
+   */
+  awaitSetup(conversation: string, step: SetupStep, until: number): void {
+    if (
+      typeof conversation !== "string" ||
+      conversation === "" ||
+      conversation.length > MAX_CONVERSATION_NAME ||
+      !isSetupStep(step) ||
+      !Number.isFinite(until)
+    ) {
+      return;
+    }
+    const now = Date.now();
+    this.#pruneWaits(now);
+    // No wait outlasts the longest a link does.
+    const capped = Math.min(until, now + MAX_SETUP_WAIT_MS);
+    this.#db
+      .insert(schema.setupWaits)
+      .values({ conversation, step, until: capped })
+      .onConflictDoUpdate({
+        target: [schema.setupWaits.conversation, schema.setupWaits.step],
+        set: { until: capped },
+      })
+      .run();
+  }
+
+  /**
+   * Tells each conversation still waiting for the event's step that the owner finished it. A wait
+   * ends once its conversation took the event; one it couldn't reach stays, for the next report.
+   * Expired waits go first.
+   */
+  async setupDone(event: SetupEvent): Promise<void> {
+    const agentId = this.ctx.id.name;
+    if (!agentId || !isSetupStep(event?.step)) return;
+    this.#pruneWaits(Date.now());
+    const waiting = this.#db
+      .select({ conversation: schema.setupWaits.conversation })
+      .from(schema.setupWaits)
+      .where(eq(schema.setupWaits.step, event.step))
+      .all();
+    for (const { conversation } of waiting) {
+      try {
+        await this.env.CONVERSATION_AGENT.getByName(conversation).setupDone(agentId, event);
+      } catch (error) {
+        console.error("AgentHost: a conversation wasn't told a setup step", errorName(error));
+        continue;
+      }
+      this.#db
+        .delete(schema.setupWaits)
+        .where(
+          and(
+            eq(schema.setupWaits.conversation, conversation),
+            eq(schema.setupWaits.step, event.step),
+          ),
+        )
+        .run();
+    }
+  }
+
+  /**
+   * Drops the waits whose links ran out, a grace past their end: a form submitted in its last
+   * seconds is reported a moment after.
+   */
+  #pruneWaits(now: number): void {
+    this.#db
+      .delete(schema.setupWaits)
+      .where(lte(schema.setupWaits.until, now - SETUP_WAIT_GRACE_MS))
+      .run();
+  }
+
   #get<T>(key: string, fallback: T): T {
     const row = this.#db
       .select({ value: schema.state.value })
@@ -173,6 +247,17 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     return row ? (row.value as T) : fallback;
   }
 }
+
+/** Every setup step: a new one doesn't compile until it is here. */
+const SETUP_STEPS: Record<SetupStep, true> = { telegram_connected: true, telegram_paired: true };
+const isSetupStep = (step: unknown): step is SetupStep =>
+  typeof step === "string" && Object.hasOwn(SETUP_STEPS, step);
+/** The longest a link lasts: a day for the pairing page, whose Telegram code starts later. */
+const MAX_SETUP_WAIT_MS = 24 * 60 * 60_000;
+/** How long past its end a wait still takes a report. */
+const SETUP_WAIT_GRACE_MS = 5 * 60_000;
+/** A conversation object's name is an agent id, a channel and a thread id. */
+const MAX_CONVERSATION_NAME = 256;
 
 function errorName(error: unknown): string {
   return error instanceof Error ? error.name : "unknown error";

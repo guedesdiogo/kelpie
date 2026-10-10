@@ -1,6 +1,11 @@
 import type { Verification } from "@kelpie/access";
 import { ACCESS_SOURCE, type ChannelIdentity, type IdentityStatus } from "@kelpie/access";
-import { type ConfigPorts, createConfigCommands, DEFAULT_SETTINGS } from "@kelpie/config";
+import {
+  type ConfigPorts,
+  createConfigCommands,
+  DEFAULT_SETTINGS,
+  type SetupEvent,
+} from "@kelpie/config";
 import { describe, expect, it, vi } from "vitest";
 import { type AdminDeps, handle } from "../src/api.ts";
 import { PAGES } from "../src/texts.ts";
@@ -26,6 +31,7 @@ function world({
   }
   const agents = new Map<string, string>();
   const ran: string[] = [];
+  const reported: { agentId: string; event: SetupEvent }[] = [];
   const ports: ConfigPorts = {
     registry: {
       async add(id, name) {
@@ -189,12 +195,15 @@ function world({
         };
       },
     },
+    async setupDone(agentId, event) {
+      reported.push({ agentId, event });
+    },
     bootstrapToken: TOKEN,
     recoveryToken: undefined,
     now: () => NOW_MS,
     newUserId: () => "u-new",
   };
-  return { deps, ran, bootstraps, redeemed, relinks };
+  return { deps, ran, bootstraps, redeemed, relinks, reported };
 }
 
 function post(path: string, body?: unknown) {
@@ -725,6 +734,44 @@ describe("admin API secure forms", () => {
     const again = await handle(submit(GOOD_BOT_TOKEN, { origin: "https://admin.example" }), deps);
     expect(again.status).toBe(200);
     expect(await again.text()).toContain("now answers");
+  });
+
+  it("reports the connected bot to the agent's conversations, and answers whatever the report does (#206)", async () => {
+    const { deps, reported } = world();
+    await handle(submit(GOOD_BOT_TOKEN, { origin: "https://admin.example" }), deps);
+    expect(reported).toEqual([
+      {
+        agentId: "sales",
+        event: {
+          step: "telegram_connected",
+          userId: "u-owner",
+          bot: "kelpie_<b>bot",
+          webhookRegistered: true,
+        },
+      },
+    ]);
+    // A refused token reports nothing.
+    const refused = world();
+    await handle(submit("not-a-token", { origin: "https://admin.example" }), refused.deps);
+    expect(refused.reported).toEqual([]);
+
+    // A report that fails, or doesn't answer, never costs the owner the page.
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const setupDone of [
+      async () => {
+        throw new Error("AgentHost down");
+      },
+      () => new Promise<void>(() => {}),
+    ]) {
+      const broken = world();
+      broken.deps.setupDone = setupDone;
+      const response = await handle(
+        submit(GOOD_BOT_TOKEN, { origin: "https://admin.example" }),
+        broken.deps,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain("now answers");
+    }
   });
 
   it("says when the token is stored but Telegram couldn't be pointed at Kelpie", async () => {

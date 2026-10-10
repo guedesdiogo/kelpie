@@ -65,9 +65,36 @@ export interface RegistryContract {
   list(): AgentSummary[];
 }
 
+/**
+ * A setup step the owner finishes on an admin page or in Telegram, behind a link Kelpie sent
+ * (#206): connecting the agent's Telegram bot through the secure form, or pairing their own
+ * Telegram account with it.
+ */
+export type SetupStep = "telegram_connected" | "telegram_paired";
+
+/**
+ * A finished step, as the place that saw it reports it: the owner who finished it, and for a
+ * connected bot its username and whether Telegram was pointed at Kelpie.
+ */
+export type SetupEvent =
+  | { step: "telegram_connected"; userId: string; bot: string; webhookRegistered: boolean }
+  | { step: "telegram_paired"; userId: string };
+
 export interface AgentHostContract {
   configure(changes: Partial<AgentSettings>, actor: Actor): ConfigureResult;
   config(): AgentConfig;
+  /**
+   * Notes that a conversation, by its object's name, waits for a step of this agent until `until`
+   * (#206): it sent the owner the link to it.
+   */
+  awaitSetup(conversation: string, step: SetupStep, until: number): void;
+  /** Tells each conversation still waiting for the event's step that the owner finished it. */
+  setupDone(event: SetupEvent): Promise<void>;
+}
+
+/** conversation-runtime's `SetupEvents` entrypoint: ingress reports a finished pairing (#206). */
+export interface SetupEventsContract {
+  setupDone(agentId: string, event: SetupEvent): Promise<void>;
 }
 
 /** A vault file pushed with conflict markers that still waits: on the model, or on a pull request. */

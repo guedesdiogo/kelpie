@@ -13,6 +13,7 @@ import {
   createConfigCommands,
   REGISTRY_NAME,
   type RegistryContract,
+  type SetupStep,
 } from "@kelpie/config";
 import type {
   ContextStoreContract,
@@ -63,6 +64,11 @@ export interface ConversationPorts {
       confirmation?: number;
     },
   ): Promise<SendOutcome>;
+  /**
+   * Tells an agent's AgentHost that the conversation named `conversation` waits for one of its setup
+   * steps until `until` (#206). Bounded; a failure throws.
+   */
+  awaitSetup(agentId: string, conversation: string, step: SetupStep, until: number): Promise<void>;
   /** Shows "typing" once. It is a courtesy, so callers ignore its failures. */
   typing(agentId: string, destination: Destination): Promise<void>;
   /** Keeps "typing" showing, renewed before it lapses, until `signal` aborts. */
@@ -199,6 +205,8 @@ function productionPorts(env: Env): ConversationPorts {
         { adminOrigin: env.ADMIN_ORIGIN },
       ),
     ],
+    awaitSetup: (agentId, conversation, step, until) =>
+      withTimeout(agentHost(agentId).awaitSetup(conversation, step, until), AWAIT_SETUP_TIMEOUT_MS),
     // A Confirm button is the webchat's alone (#186): channel-egress takes only what it sends.
     send: (agentId, destination, text, { confirmation: _button, ...options }) =>
       egress.send(agentId, destination, text, options),
@@ -284,6 +292,8 @@ const REMEMBER_TIMEOUT_MS = 10_000;
 const RECALL_TIMEOUT_MS = 6_000;
 /** The core (#112) is one read of memory's index, with nothing to embed or rerank. */
 const CORE_TIMEOUT_MS = 5_000;
+/** Noting a setup step's wait is one write in the agent's object (#206). */
+const AWAIT_SETUP_TIMEOUT_MS = 3_000;
 /** The memory tools (#126): a search embeds and reranks as recall does; a read is one lookup. */
 const SEARCH_TIMEOUT_MS = 8_000;
 const READ_TIMEOUT_MS = 5_000;

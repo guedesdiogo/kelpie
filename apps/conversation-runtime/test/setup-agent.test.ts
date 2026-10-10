@@ -285,6 +285,12 @@ describe("the setup agent's tools", () => {
       {
         href: `${ADMIN}/forms/tok123?lang=en`,
         text: `The secure form to connect the Telegram bot of the agent assistant: ${ADMIN}/forms/tok123?lang=en\nIt works once, for the next 15 minutes. Paste the bot's token there, never in the chat.`,
+        // The conversation waits for the form while it is open, to be told when it is used (#206).
+        awaits: {
+          agentId: "assistant",
+          step: "telegram_connected",
+          until: Date.UTC(2026, 9, 6, 20),
+        },
       },
     ]);
     for (const [locale, text] of [
@@ -311,7 +317,10 @@ describe("the setup agent's tools", () => {
   });
 
   it("has Kelpie send the link to the admin page that pairs the owner's Telegram account (#186)", async () => {
-    const tools = await toolsOf(setupTools(fakeCommands().commands, { adminOrigin: ADMIN }));
+    const sentAt = Date.UTC(2026, 9, 6, 19);
+    const tools = await toolsOf(
+      setupTools(fakeCommands().commands, { adminOrigin: ADMIN, now: () => sentAt }),
+    );
     const { context, asked, links } = contextOf(false);
 
     const linked = await run(tools, "pair_telegram", { agentId: SETUP_AGENT_ID }, context);
@@ -319,6 +328,12 @@ describe("the setup agent's tools", () => {
       {
         href: `${ADMIN}/pair/telegram/${SETUP_AGENT_ID}?lang=en`,
         text: `To pair your own Telegram account with the bot of the agent ${SETUP_AGENT_ID}, open ${ADMIN}/pair/telegram/${SETUP_AGENT_ID}?lang=en and press its button.`,
+        // The page doesn't expire, so the conversation waits a day for the pairing (#206).
+        awaits: {
+          agentId: SETUP_AGENT_ID,
+          step: "telegram_paired",
+          until: sentAt + 24 * 60 * 60_000,
+        },
       },
     ]);
     const spoken = contextOf(false, owner, "pt-BR");

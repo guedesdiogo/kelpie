@@ -238,6 +238,18 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
   - Its one link is the admin API page. Any other address in it shows as text.
   - The model learns only that the link was sent. History, later requests and the outbox's inspection never hold the link.
   - As with a confirmation, the bubble doesn't come back once its turn has settled and the webchat reloads. If the owner says they didn't get it, the agent calls the tool again for a new link.
+- **Steps the owner finishes.** When the owner submits the secure form, or pairs by pressing Start in the bot, the conversation that sent the link learns it without being told (#206, ADR-0028):
+  - **The wait:** the conversation waits for the step while its link lasts, the form's 15 minutes or a day for pairing, with a few minutes' grace. Both the conversation and the agent's `AgentHost` keep the wait.
+  - **The report:** the admin API reports a stored token and `ingress` a redeemed pairing code, through conversation-runtime's `SetupEvents` entrypoint, which does nothing else. Each report is bounded and best effort, so the page or the webhook answers whatever happens to it.
+  - **The note:** each waiting conversation gets a note Kelpie writes in fixed words, "Kelpie, automatically (the owner didn't write this): …", naming the bot or the pairing. A conversation takes a report only for a step it waits for, and only once. The agent answers the note.
+  - **When the turn starts:**
+    - while a turn runs, the note waits for that turn to end and doesn't interrupt it;
+    - with the owner's messages waiting, it joins them;
+    - otherwise it starts a turn at once;
+    - while the conversation is paused, it waits for the owner's next message.
+  - **How the turn runs:** the note is authored as the owner who finished the step, so its turn can run the next step's tools. Confirmations still need the code or the button.
+  - **What the note never counts as:** the owner's words. It confirms no code, allows no link, doesn't show in the webchat, stays out of session pages and recall, and doesn't change the conversation's language.
+  - **A webhook that failed:** the note says Telegram couldn't be pointed at Kelpie. The agent tells the owner to run `registerTelegramWebhook` on this API, since it can't.
 - **Secrets.** The bot's token goes into the secure form ("Secure forms"), never into the chat. If the owner pastes one in the chat anyway, it stays in the conversation: revoke it in BotFather and make a new one.
 - **Its context** is any agent's: the vault's persona and rules, recall, and the memory tools. A note in the vault could steer it toward a change that runs directly, such as creating or renaming an agent. The confirmed changes still need the owner's yes: the code or the button, or their own submission on the form or the pairing page.
 

@@ -31,6 +31,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0025](0025-turn-tool-loop.md) | A turn runs its tools in a bounded loop that keeps history append-only | [#141](https://github.com/guedesdiogo/kelpie/issues/141) |
 | [0026](0026-confirmation-by-owner-act.md) | The owner's own act on a Kelpie page or button is a yes, besides a typed code | [#186](https://github.com/guedesdiogo/kelpie/issues/186) |
 | [0027](0027-fixed-texts-in-three-languages.md) | Kelpie's fixed texts follow the conversation, in English, Portuguese or Spanish | [#187](https://github.com/guedesdiogo/kelpie/issues/187) |
+| [0028](0028-setup-step-notes.md) | A setup step the owner finishes is told to the conversation that sent its link, in a note Kelpie writes | [#206](https://github.com/guedesdiogo/kelpie/issues/206) |
 
 ## Format
 

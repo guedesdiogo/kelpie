@@ -36,11 +36,23 @@ function formGone(form: Gone, locale: Locale): Response {
   return form.reason === "unknown_form" ? closedPage(locale) : unavailablePage(locale);
 }
 
+/** What a stored token tells the conversation that sent the form (#206): which bot, and its webhook. */
+export type Connected = (agentId: string, bot: string, webhookRegistered: boolean) => Promise<void>;
+
+/** A setup step's report the form's answer doesn't wait on for longer than this (#206). */
+const REPORT_TIMEOUT_MS = 2_000;
+
+/**
+ * Submits the token. Once it is stored, `connected` reports it, at most REPORT_TIMEOUT_MS and best
+ * effort: the page answers either way, and a report that fails only means the owner tells the
+ * agent themselves.
+ */
 export async function submitForm(
   token: string,
   botToken: string,
   forms: FormDeps,
   locale: Locale,
+  connected?: Connected,
 ): Promise<Response> {
   const texts = PAGES[locale];
   if (botToken.trim() === "") {
@@ -52,6 +64,12 @@ export async function submitForm(
   }
   const result = await forms.redeemTelegramForm(token, botToken);
   if (result.ok) {
+    if (connected) {
+      await bounded(
+        () => connected(result.agentId, result.bot.username, result.webhook === "registered"),
+        REPORT_TIMEOUT_MS,
+      );
+    }
     const bot = `@${escapeHtml(result.bot.username)}`;
     const agent = `<code>${escapeHtml(result.agentId)}</code>`;
     // The token is stored either way; only the webhook needs another try.
@@ -70,6 +88,27 @@ export async function submitForm(
     return page(400, texts.connect.title, tokenForm(form.agentId, message, locale), locale);
   }
   return result.reason === "unknown_form" ? closedPage(locale) : unavailablePage(locale);
+}
+
+/** Runs `work`, waits for it at most `ms`, and never fails: a report is a courtesy. */
+async function bounded(work: () => Promise<void>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      work(),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, ms);
+      }),
+    ]);
+  } catch (error) {
+    console.error("admin-api: a setup step wasn't reported", errorName(error));
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : "unknown error";
 }
 
 export function closedPage(locale: Locale): Response {
