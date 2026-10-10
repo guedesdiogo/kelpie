@@ -52,17 +52,44 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
 
   /**
    * The agent's settings, defaults filled in, and its prompt version. The setup agent's default
-   * prompt is its built-in persona.
+   * prompt is its built-in persona. A deploy that changed the default prompt in effect bumps the
+   * prompt version, as a configured prompt change does.
    */
   config(): AgentConfig {
     const defaults =
       this.ctx.id.name === SETUP_AGENT_ID
         ? { ...DEFAULT_SETTINGS, systemPrompt: SETUP_PROMPT }
         : DEFAULT_SETTINGS;
+    const stored = current(this.#get<StoredSettings>("settings", {}));
     return {
-      settings: { ...defaults, ...current(this.#get<StoredSettings>("settings", {})) },
-      promptVersion: this.#get("promptVersion", 0),
+      settings: { ...defaults, ...stored },
+      promptVersion: this.#promptVersion(defaults.systemPrompt, stored.systemPrompt === undefined),
     };
+  }
+
+  /**
+   * The prompt version, once the built-in default prompt is checked against the one last seen. A
+   * new default bumps it only while no configured prompt replaces it; with none seen yet, the
+   * default is recorded without a bump. The compare, the bump and the write are one synchronous
+   * step.
+   */
+  #promptVersion(builtIn: string, inEffect: boolean): number {
+    const version = this.#get("promptVersion", 0);
+    const seen = this.#get<string | null>("defaultPrompt", null);
+    if (seen === builtIn) return version;
+    const promptVersion = seen !== null && inEffect ? version + 1 : version;
+    this.#db.transaction((tx) => {
+      for (const [key, value] of [
+        ["defaultPrompt", builtIn],
+        ["promptVersion", promptVersion],
+      ] as const) {
+        tx.insert(schema.state)
+          .values({ key, value })
+          .onConflictDoUpdate({ target: schema.state.key, set: { value } })
+          .run();
+      }
+    });
+    return promptVersion;
   }
 
   /**
