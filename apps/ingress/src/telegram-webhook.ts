@@ -4,6 +4,7 @@ import {
   type ChannelWebhooksContract,
   type EgressDestination,
   InvalidWebhookError,
+  localeOf,
   type WebhookNotice,
 } from "@kelpie/channels";
 import { normalizeTelegramUpdate, TELEGRAM_SECRET_HEADER } from "@kelpie/channels/telegram";
@@ -134,6 +135,7 @@ async function deliver(event: CanonicalEvent, deps: TelegramWebhookDeps): Promis
     destination,
     sentAt: event.providerTimestamp,
     timeZone: admission.timeZone,
+    ...(event.sender.languageCode === undefined ? {} : { language: event.sender.languageCode }),
   });
   if (result.status === "rejected") {
     console.warn("ingress: the conversation refused a message", result.reason);
@@ -164,9 +166,8 @@ async function fromStranger(
       deps,
       event.agentId,
       { channel: event.channel, threadId: event.threadId },
-      {
-        kind: "paired",
-      },
+      // In the language of the account that just paired, which has no conversation yet (#187).
+      { kind: "paired", locale: localeOf(event.sender.languageCode) ?? "en" },
     );
     return;
   }
@@ -174,7 +175,12 @@ async function fromStranger(
   try {
     const notice = await deps.directory.noticeStranger(sender);
     if (!notice.notify) return;
-    const stranger: WebhookNotice = { kind: "stranger", senderId: sender.channelUserId };
+    // In the owner's language, as their account there was last seen (#187).
+    const stranger: WebhookNotice = {
+      kind: "stranger",
+      senderId: sender.channelUserId,
+      locale: localeOf(notice.ownerLanguage) ?? "en",
+    };
     if (event.sender.displayName) stranger.displayName = event.sender.displayName;
     const sent = await notify(
       deps,

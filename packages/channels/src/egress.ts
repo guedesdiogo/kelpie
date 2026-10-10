@@ -1,5 +1,6 @@
 import type { SendOptions } from "./adapter.ts";
 import type { ChannelId } from "./events.ts";
+import type { Locale } from "./locale.ts";
 
 // The contracts of the channel-egress Worker (ADR-0002), the only place that reads a channel's
 // secrets. Other Workers reach it through service bindings, and every answer is a value: thrown
@@ -45,11 +46,12 @@ export type WebhookRegistration = { ok: true } | { ok: false; reason: WebhookReg
 
 /**
  * A fixed notice ingress may have the bot send (Story 3.6): "paired" to an account that just paired,
- * or "stranger" to the owner about a sender who was dropped. channel-egress writes the text.
+ * or "stranger" to the owner about a sender who was dropped. channel-egress writes the text, in
+ * `locale` (#187), or in English when an older ingress names none.
  */
 export type WebhookNotice =
-  | { kind: "paired" }
-  | { kind: "stranger"; senderId: string; displayName?: string };
+  | { kind: "paired"; locale?: Locale }
+  | { kind: "stranger"; senderId: string; displayName?: string; locale?: Locale };
 
 /**
  * What ingress calls: check that a webhook came from the agent's own bot, and send one of the fixed

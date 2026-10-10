@@ -3,8 +3,13 @@ import {
   type AllowedLinks,
   CAPABILITIES,
   type ChannelCapabilities,
+  detectLocale,
   formatReply,
+  isLocale,
+  type Locale,
+  type Localized,
   linksOf,
+  localeOf,
   type SendOutcome,
   webLinks,
 } from "@kelpie/channels";
@@ -76,6 +81,7 @@ import {
   confirmationNotice,
   confirmsCode,
   type HostLink,
+  labelIn,
   MAX_SUMMARY_CHARS,
   MAX_TOOL_ROUNDS,
   newConfirmationCode,
@@ -114,8 +120,16 @@ const WEBCHAT_ID_PREFIX = "webchat:";
 const WEBCHAT_RECEIVED_IDS = 100;
 /** While the owner types in the webchat, buffered messages wait at least this long for the rest. */
 const TYPING_HOLD_MS = 4_000;
-/** What the owner is told on a channel when they pause a conversation (issue #134). */
-export const PAUSED_TEXT = "Paused. I'll answer after your next message.";
+/** What the owner is told on a channel when they pause a conversation (issue #134, #187). */
+export const PAUSED_TEXT: Localized = {
+  en: "Paused. I'll answer after your next message.",
+  "pt-BR": "Pausado. Respondo depois da sua próxima mensagem.",
+  es: "En pausa. Responderé después de tu próximo mensaje.",
+};
+/** The person's latest messages the conversation's language is read from (#187). */
+const LANGUAGE_WINDOW = 5;
+/** A device's language is a tag or an `Accept-Language` value: a few tags at most. */
+const MAX_LANGUAGE_CHARS = 200;
 
 /** Bounds on what one conversation accepts. */
 export const LIMITS = {
@@ -329,6 +343,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       destination: { channel: "webchat", threadId: admission.userId },
       sentAt: this.#ports.now(),
       timeZone: admission.timeZone,
+      language: admission.language ?? null,
     });
   }
 
@@ -406,6 +421,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     // message is older news.
     const zone = canonicalTimeZone(message.timeZone);
     if (zone) this.#set("timeZone", zone);
+    this.#noteLanguage(message.language);
     // The owner's next message ends a pause: the wait and the cap count from it.
     if (this.#get("paused", false)) {
       this.#set("paused", false);
@@ -450,7 +466,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       return;
     }
     try {
-      const sent = await this.#ports.send(agentId, destination, PAUSED_TEXT, { silent: false });
+      const text = PAUSED_TEXT[this.#locale()];
+      const sent = await this.#ports.send(agentId, destination, text, { silent: false });
       if (!sent.ok)
         console.warn("conversation: the pause wasn't confirmed", { reason: sent.reason });
     } catch (error) {
@@ -854,6 +871,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     // The changes this turn asked the owner to confirm follow the reply, written by the host, and
     // then the links its tools had Kelpie send (#186). The webchat shows a Confirm button.
     const button = destination.channel === "webchat";
+    const locale = this.#locale();
     const confirmations = this.#db
       .select({
         id: schema.confirmations.id,
@@ -872,7 +890,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         .get()?.links ?? [];
     const notices = [
       ...confirmations.map(({ id, code, summary }) => ({
-        text: confirmationNotice(summary, code, button),
+        text: confirmationNotice(summary, code, button, locale),
         confirmationId: id,
       })),
       ...links.map(({ text, href }) => ({ text, link: href })),
@@ -981,7 +999,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         return {
           ...finish,
           reason: "stop",
-          message: { role: "assistant", parts: [{ type: "text", text: TOOL_LIMIT_TEXT }] },
+          message: {
+            role: "assistant",
+            parts: [{ type: "text", text: TOOL_LIMIT_TEXT[this.#locale()] }],
+          },
           usage,
         };
       }
@@ -1022,6 +1043,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         if (!context) {
           const actor = this.#actor(turn, agentId);
           context = {
+            locale: this.#locale(),
             actor,
             agentId,
             scopes: turnScopes(turn, this.#destination()),
@@ -1033,7 +1055,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
             sendLink: (link) => this.#sendLink(turn.id, link),
           };
         }
-        step("tool", tools.get(toolCall.name)?.label);
+        const label = tools.get(toolCall.name)?.label;
+        step("tool", label === undefined ? undefined : labelIn(label, context.locale));
         progress.running = toolCall.id;
         const result = await this.#runWithin(tools, toolCall, context, remaining);
         progress.running = undefined;
@@ -2032,6 +2055,39 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const [first, ...rest] = messages;
     if (first?.role === "user") return [{ ...first, parts: [...lead, ...first.parts] }, ...rest];
     return [{ role: "user", parts: lead }, ...messages];
+  }
+
+  /**
+   * Notes what tells the conversation's language (#187): the device's, from a message that names
+   * one, and the language of the person's latest messages, kept while they say nothing clear.
+   */
+  #noteLanguage(device: string | null | undefined): void {
+    if (typeof device === "string" && device !== "") {
+      this.#set("deviceLanguage", device.slice(0, MAX_LANGUAGE_CHARS));
+    }
+    const said = this.#db
+      .select({ message: schema.history.message })
+      .from(schema.history)
+      .where(eq(schema.history.role, "user"))
+      .orderBy(desc(schema.history.id))
+      .limit(LANGUAGE_WINDOW)
+      .all()
+      .map(({ message }) => withoutTypedStamps(messageText(message)));
+    const waiting = this.#pendingInbound()
+      .slice(-LANGUAGE_WINDOW)
+      .map((row) => row.text);
+    const detected = detectLocale([...said, ...waiting].join("\n"));
+    if (detected) this.#set("language", detected);
+  }
+
+  /**
+   * The conversation's language, for Kelpie's fixed texts (#187): what its person writes in, else
+   * what their device is set to, else English.
+   */
+  #locale(): Locale {
+    const written = this.#get<unknown>("language", null);
+    if (isLocale(written)) return written;
+    return localeOf(this.#get<string | null>("deviceLanguage", null)) ?? "en";
   }
 
   #pendingInbound() {

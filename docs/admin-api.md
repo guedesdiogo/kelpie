@@ -84,6 +84,17 @@ A web address (http or https) shows as a link only when it is in the turn's inpu
 - a reply replayed in the webchat links what the owner had sent before it among the replayed messages, and their notes its turn recalled;
 - a URL hidden behind text in a Telegram message the owner sent (a `text_link`) doesn't count yet (#190).
 
+**Languages.** Kelpie's own texts come in English, Brazilian Portuguese or Spanish (#187, ADR-0027). Any other language gets English. This covers its notices, the confirmation, the link bubbles, the paused message, the limit text, the tool labels and the pages behind its links. The model's replies follow the person by themselves.
+- **In a chat,** a text follows the conversation's language: what the person's latest messages are written in. It stays the same while those messages say nothing clear, such as "ok" or a code.
+  - Before anything is clear, it follows the device's language: the Telegram app's, or the webchat browser's.
+  - A text is written in the language of its moment, and isn't rewritten later.
+- **A page** behind a link Kelpie sent (the secure form, the pairing page) opens in the conversation's language, which the link names (`?lang=`). Its answer keeps that language. Opened by hand, a page follows the browser's first language.
+- **The webchat page's own texts** follow the browser.
+- **Telegram's notices:**
+  - "paired" follows the language of the account that paired;
+  - a stranger notice follows the language the owner's account was last seen in.
+- **Not covered yet:** the vault's own texts (its README and pull requests) and session pages stay in English.
+
 **Pausing.** `/pause` on Telegram (also `/pause@<bot>`), or the webchat's Pause button, holds every answer until the owner's next message (#134). A pause while paused changes nothing, and Telegram's redelivery of the same `/pause` is ignored.
 - A turn in flight is interrupted, and the planned answer is cancelled.
 - Telegram confirms with a short fixed message, not from the model. The webchat shows the pause.
@@ -204,7 +215,7 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
 
   The identity, time zone and vault commands stay on this API. `conversation-runtime` binds no `Directory`, which would make it and `ingress` bind each other. Of `channel-egress`, it binds only `SetupForms`, which opens a form and nothing more (`docs/secrets.md`).
 - **Confirmation.** A change to an agent's settings (`configure_agent`) waits for the owner's yes, gated in code:
-  1. The first call doesn't run. After the agent's reply, Kelpie itself sends one more bubble, written from the change's validated input, not by the model: `Confirm: <the change>`, and a 6-character code.
+  1. The first call doesn't run. After the agent's reply, Kelpie itself sends one more bubble, written from the change's validated input, not by the model: `Confirm: <the change>`, and a 6-character code. The bubble is in the conversation's language ("Languages").
      - Invisible and control characters in the change are written out as `\u{…}`, so what the owner reads is all there is.
      - A change too long for one bubble is refused before it is shown. Make it through this API instead.
   2. The owner says yes, and the agent calls the same tool with the same input again:

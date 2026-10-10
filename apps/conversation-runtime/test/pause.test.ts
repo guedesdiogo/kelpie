@@ -49,10 +49,25 @@ describe("pausing a conversation", () => {
 
     expect(await stub.pause(target)).toEqual({ status: "paused" });
     expect(await flushes("pause-buffer")).toEqual([]);
-    expect(world.sent).toEqual([PAUSED_TEXT]);
+    expect(world.sent).toEqual([PAUSED_TEXT.en]);
 
     await stub.flush();
     expect(await stub.turns()).toEqual([]);
+  });
+
+  it("confirms the pause in the conversation's language (#187)", async () => {
+    const world = use(fakeWorld([]));
+    const portuguese = agent("pause-pt");
+    await portuguese.ingest(message("m1", "espera um pouco, eu já volto"));
+    await portuguese.pause(target);
+    const spanish = agent("pause-es");
+    // Nothing in the text says; the device's language does.
+    await spanish.ingest({ ...message("m1", "ok"), language: "es-419" });
+    await spanish.pause(target);
+    expect(world.sent).toEqual([
+      "Pausado. Respondo depois da sua próxima mensagem.",
+      "En pausa. Responderé después de tu próximo mensaje.",
+    ]);
   });
 
   it("interrupts the turn in flight and cancels its model call", async () => {
@@ -81,7 +96,7 @@ describe("pausing a conversation", () => {
       flushAt: start + 110_000,
     });
     await stub.flush();
-    await vi.waitFor(() => expect(world.sent).toEqual([PAUSED_TEXT, "Both, then."]));
+    await vi.waitFor(() => expect(world.sent).toEqual([PAUSED_TEXT.en, "Both, then."]));
     const asked = JSON.stringify(world.requests[0]?.messages);
     expect(asked).toContain("so");
     expect(asked).toContain("and the rest");
@@ -105,7 +120,7 @@ describe("pausing a conversation", () => {
 
     await Promise.all([stub.flush(), stub.pause(target)]);
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(world.sent).toEqual([PAUSED_TEXT]);
+    expect(world.sent).toEqual([PAUSED_TEXT.en]);
     expect(await stub.turns()).toEqual([]);
   });
 
@@ -115,7 +130,7 @@ describe("pausing a conversation", () => {
     await stub.ingest(message("m1", "so"));
     await stub.pause(target);
     expect(await stub.pause(target)).toEqual({ status: "paused" });
-    expect(world.sent).toEqual([PAUSED_TEXT]);
+    expect(world.sent).toEqual([PAUSED_TEXT.en]);
   });
 
   it("ignores a redelivered /pause after the next message resumed the conversation", async () => {
@@ -129,7 +144,7 @@ describe("pausing a conversation", () => {
       status: "duplicate",
     });
     expect(await flushes("pause-redelivered")).toHaveLength(1);
-    expect(world.sent).toEqual([PAUSED_TEXT]);
+    expect(world.sent).toEqual([PAUSED_TEXT.en]);
   });
 
   it("refuses a pause for another conversation", async () => {

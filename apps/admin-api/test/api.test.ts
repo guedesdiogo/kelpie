@@ -3,6 +3,7 @@ import { ACCESS_SOURCE, type ChannelIdentity, type IdentityStatus } from "@kelpi
 import { type ConfigPorts, createConfigCommands, DEFAULT_SETTINGS } from "@kelpie/config";
 import { describe, expect, it, vi } from "vitest";
 import { type AdminDeps, handle } from "../src/api.ts";
+import { PAGES } from "../src/texts.ts";
 
 const OWNER_SUB = "sub-owner";
 const GOOD_BOT_TOKEN = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw-test";
@@ -968,5 +969,96 @@ describe("admin API pairing page", () => {
     expect(unwired.status).toBe(409);
     expect(await unwired.text()).toContain("Connect the agent's Telegram bot first");
     expect(ran).not.toContain("directory.issuePairingCode");
+  });
+});
+
+// The pages follow the language of the link Kelpie sent, else the browser's, else English (#187).
+describe("admin API pages in the owner's language", () => {
+  const formUrl = "https://admin.example/forms/form-token-1";
+  const sameOrigin = { origin: "https://admin.example" };
+
+  it("opens the form in the link's language, and answers its own post in it", async () => {
+    const { deps } = world();
+    const shown = await handle(new Request(`${formUrl}?lang=pt-BR`), deps);
+    const form = await shown.text();
+    expect(form).toContain('<html lang="pt-BR">');
+    expect(form).toContain("Conectar o Telegram");
+    expect(form).toContain("Cole o token que o BotFather deu");
+    // No `action`: the browser posts to the same URL, `?lang=` included.
+    expect(form).toContain('<form method="post">');
+
+    const posted = await handle(
+      new Request(`${formUrl}?lang=pt-BR`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", ...sameOrigin },
+        body: new URLSearchParams({ botToken: GOOD_BOT_TOKEN }).toString(),
+      }),
+      deps,
+    );
+    expect(await posted.text()).toContain("agora responde por <code>sales</code>");
+  });
+
+  it("follows the browser when the link names no language, and English for any other", async () => {
+    const { deps } = world();
+    const spanish = await handle(
+      new Request(formUrl, { headers: { "accept-language": "es-AR,es;q=0.9,en;q=0.5" } }),
+      deps,
+    );
+    expect(await spanish.text()).toContain("Pega el token que BotFather te dio");
+    // The link's language comes first.
+    const named = await handle(
+      new Request(`${formUrl}?lang=es`, { headers: { "accept-language": "pt-BR" } }),
+      deps,
+    );
+    expect(await named.text()).toContain('<html lang="es">');
+    for (const headers of [{ "accept-language": "fr-FR,pt;q=0.8" }, {}]) {
+      const english = await handle(new Request(formUrl, { headers }), deps);
+      expect(await english.text()).toContain("Paste the token BotFather gave you");
+    }
+    const closed = await handle(new Request("https://admin.example/forms/x%20y?lang=es"), deps);
+    expect(await closed.text()).toContain("Este enlace ya no funciona");
+  });
+
+  it("pairs in the link's language, saying how long the Telegram link lasts", async () => {
+    const { deps } = world();
+    await call(deps, "/commands/createAgent", { id: "sales", name: "Sales" });
+    const url = "https://admin.example/pair/telegram/sales?lang=es";
+    const shown = await (await handle(new Request(url), deps)).text();
+    expect(shown).toContain("Vincula tu propia cuenta de Telegram");
+    expect(shown).toContain("Obtener el enlace");
+    const paired = await handle(
+      new Request(url, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", ...sameOrigin },
+        body: "",
+      }),
+      deps,
+    );
+    const html = await paired.text();
+    expect(html).toContain("y pulsa Iniciar");
+    expect(html).toMatch(/durante los próximos \d+ minutos/);
+    expect(html).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("has every text in every language, each showing what English shows", () => {
+    const keys = (texts: unknown): string[] =>
+      typeof texts === "object" && texts !== null
+        ? Object.entries(texts).flatMap(([key, value]) => [
+            key,
+            ...keys(value).map((inner) => `${key}.${inner}`),
+          ])
+        : [];
+    // Every value passed in shows up: no language drops a bot, an agent or a link.
+    const filled = (texts: unknown): string[] =>
+      typeof texts === "function"
+        ? [String(texts("ARG1", "ARG2", "ARG3"))]
+        : typeof texts === "object" && texts !== null
+          ? Object.values(texts).flatMap(filled)
+          : [];
+    const args = (text: string) => (text.match(/ARG\d/g) ?? []).sort().join();
+    for (const locale of ["pt-BR", "es"] as const) {
+      expect(keys(PAGES[locale])).toEqual(keys(PAGES.en));
+      expect(filled(PAGES[locale]).map(args)).toEqual(filled(PAGES.en).map(args));
+    }
   });
 });

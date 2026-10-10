@@ -125,7 +125,7 @@ const isCount = (value: unknown, min: number, max: number) =>
 export function memoryTools(store: MemoryStore): ToolProvider {
   const search: Tool = {
     spec: SEARCH,
-    label: "Searching memory",
+    label: { en: "Searching memory", "pt-BR": "Buscando na memória", es: "Buscando en la memoria" },
     async run(input: unknown, context: ToolContext): Promise<ToolOutcome> {
       const { query, k } = fields(input);
       if (typeof query !== "string" || query.trim() === "" || query.length > MAX_QUERY_CHARS) {
@@ -147,7 +147,7 @@ export function memoryTools(store: MemoryStore): ToolProvider {
   };
   const read: Tool = {
     spec: READ,
-    label: "Reading a note",
+    label: { en: "Reading a note", "pt-BR": "Lendo uma nota", es: "Leyendo una nota" },
     async run(input: unknown, context: ToolContext): Promise<ToolOutcome> {
       const { path, offset } = fields(input);
       if (typeof path !== "string" || path === "" || path.length > MAX_PATH_CHARS) {
@@ -171,7 +171,11 @@ export function memoryTools(store: MemoryStore): ToolProvider {
   };
   const write: Tool = {
     spec: WRITE,
-    label: "Saving to memory",
+    label: {
+      en: "Saving to memory",
+      "pt-BR": "Salvando na memória",
+      es: "Guardando en la memoria",
+    },
     async run(input: unknown, context: ToolContext): Promise<ToolOutcome> {
       const key = `${context.agentId}\n${context.source}\n${context.turn}`;
       const turn = turns.get(key) ?? { writes: 0, failures: 0 };

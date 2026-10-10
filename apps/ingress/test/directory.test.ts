@@ -555,6 +555,20 @@ describe("Directory pairing", () => {
 describe("Directory stranger notices", () => {
   const sender = (id: number) => ({ channel: "telegram", channelUserId: String(id) }) as const;
 
+  it("names the owner's app language, as their account was last seen, only when it changed (#187)", async () => {
+    const stub = await withEnabledOwner("notice-language");
+    await stub.admit(telegram, "kelpie", "pt-br");
+    expect(await stub.noticeStranger(sender(7301))).toEqual({
+      notify: true,
+      ownerChannelUserId: telegram.channelUserId,
+      ownerLanguage: "pt-br",
+    });
+    // A message without one, or with an odd one, keeps it.
+    await stub.admit(telegram, "kelpie");
+    await stub.admit(telegram, "kelpie", "x".repeat(36));
+    expect(await stub.noticeStranger(sender(7302))).toMatchObject({ ownerLanguage: "pt-br" });
+  });
+
   it("tells the owner about each stranger once, on the owner's own account there", async () => {
     const stub = await withEnabledOwner("notice-once");
     expect(await stub.noticeStranger(sender(7001))).toEqual({

@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-06
 - Issue: [#141](https://github.com/guedesdiogo/kelpie/issues/141)
+- Amended by: [ADR-0027](0027-fixed-texts-in-three-languages.md), Kelpie's fixed texts follow the conversation, in English, Brazilian Portuguese or Spanish
 - Accepted by the owner on 2026-10-06, in the decisions on [#126](https://github.com/guedesdiogo/kelpie/issues/126):
   - on interruption: «aceito, mas quando for enviado a proxima mensagem essa mensagem que parou no meio deve ser considerada»;
   - on bounds: 5 rounds, and a time bound of at least 120 s that can go higher;

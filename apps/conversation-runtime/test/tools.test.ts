@@ -231,6 +231,7 @@ describe("a turn's tools", () => {
           source: expect.stringMatching(/^telegram:chat-1, \d{4}-\d{2}-\d{2}$/),
           confirm: expect.any(Function),
           sendLink: expect.any(Function),
+          locale: "en",
         },
       },
       expect.objectContaining({ input: { q: "bruno" } }),
@@ -368,7 +369,7 @@ describe("a turn's tool bounds", () => {
     const stub = agent("tools-fallback");
     await stub.ingest(message("m1", "dig forever"));
     await stub.flush();
-    await vi.waitFor(() => expect(world.sent).toEqual([TOOL_LIMIT_TEXT]));
+    await vi.waitFor(() => expect(world.sent).toEqual([TOOL_LIMIT_TEXT.en]));
 
     // The last call's tool calls never reach history: they would have no results.
     const messages = await history(stub);
@@ -377,7 +378,7 @@ describe("a turn's tool bounds", () => {
     );
     expect(messages.at(-1)).toEqual({
       role: "assistant",
-      parts: [{ type: "text", text: TOOL_LIMIT_TEXT }],
+      parts: [{ type: "text", text: TOOL_LIMIT_TEXT.en }],
     });
   });
 

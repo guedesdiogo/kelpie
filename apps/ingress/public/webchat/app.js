@@ -5,6 +5,77 @@
 // button shows only on a confirmation's notice, which the runtime marks with its id (#186).
 
 const agent = new URLSearchParams(location.search).get("agent") ?? "";
+
+/** The page's own texts, in the browser's language: English, Brazilian Portuguese or Spanish (#187). */
+const TEXTS = {
+  en: {
+    connecting: "Connecting…",
+    conversation: "Conversation",
+    typing: "Typing…",
+    message: "Message",
+    send: "Send",
+    pause: "Pause",
+    pauseTitle: "Hold the answer until your next message",
+    paused: "Paused: Kelpie answers after your next message",
+    connected: "Connected",
+    steps: { memory: "Reading memory…", thinking: "Thinking…", tool: "Using a tool…" },
+    confirm: "Confirm",
+    confirming: "Confirming…",
+    confirmed: "Confirmed",
+    stale: "No longer valid: ask again",
+    cantConnect: "Can't connect. If your login expired, reload the page.",
+    reconnecting: "Reconnecting…",
+    noAgent: "Open this page with ?agent=<agent id>",
+  },
+  "pt-BR": {
+    connecting: "Conectando…",
+    conversation: "Conversa",
+    typing: "Digitando…",
+    message: "Mensagem",
+    send: "Enviar",
+    pause: "Pausar",
+    pauseTitle: "Segurar a resposta até a sua próxima mensagem",
+    paused: "Pausado: o Kelpie responde depois da sua próxima mensagem",
+    connected: "Conectado",
+    steps: { memory: "Lendo a memória…", thinking: "Pensando…", tool: "Usando uma ferramenta…" },
+    confirm: "Confirmar",
+    confirming: "Confirmando…",
+    confirmed: "Confirmado",
+    stale: "Não vale mais: peça de novo",
+    cantConnect: "Não foi possível conectar. Se o seu login expirou, recarregue a página.",
+    reconnecting: "Reconectando…",
+    noAgent: "Abra esta página com ?agent=<id do agente>",
+  },
+  es: {
+    connecting: "Conectando…",
+    conversation: "Conversación",
+    typing: "Escribiendo…",
+    message: "Mensaje",
+    send: "Enviar",
+    pause: "Pausar",
+    pauseTitle: "Retener la respuesta hasta tu próximo mensaje",
+    paused: "En pausa: Kelpie responde después de tu próximo mensaje",
+    connected: "Conectado",
+    steps: {
+      memory: "Leyendo la memoria…",
+      thinking: "Pensando…",
+      tool: "Usando una herramienta…",
+    },
+    confirm: "Confirmar",
+    confirming: "Confirmando…",
+    confirmed: "Confirmado",
+    stale: "Ya no es válido: pídelo de nuevo",
+    cantConnect: "No se puede conectar. Si tu sesión caducó, recarga la página.",
+    reconnecting: "Reconectando…",
+    noAgent: "Abre esta página con ?agent=<id del agente>",
+  },
+};
+
+/** The browser's selected language, if it is one Kelpie has; English otherwise. */
+const LOCALE =
+  { pt: "pt-BR", es: "es", en: "en" }[(navigator.language || "").toLowerCase().split(/[-_]/)[0]] ??
+  "en";
+const T = TEXTS[LOCALE];
 const list = document.getElementById("messages");
 const typing = document.getElementById("typing");
 const status = document.getElementById("status");
@@ -22,12 +93,10 @@ let typingTimer = null;
 let lastTypingSentAt = 0;
 let paused = false;
 
-const PAUSED_STATUS = "Paused: Kelpie answers after your next message";
-
 function setPaused(value) {
   paused = value;
   pause.disabled = value || socket?.readyState !== WebSocket.OPEN;
-  status.textContent = value ? PAUSED_STATUS : "Connected";
+  status.textContent = value ? T.paused : T.connected;
 }
 
 /** The agent's "typing" lasts until its next bubble, or this long. */
@@ -35,7 +104,7 @@ const TYPING_SHOWN_MS = 20_000;
 /** A turn's step lasts until the next frame, or this long: the most a turn's tools may take. */
 const STEP_SHOWN_MS = 600_000;
 /** What the page says for each step of a turn (#141); a tool's step shows the tool's label. */
-const STEP_TEXT = { memory: "Reading memory…", thinking: "Thinking…", tool: "Using a tool…" };
+const STEP_TEXT = T.steps;
 /** While the owner types, the page says so at most this often. */
 const TYPING_SENT_EVERY_MS = 3_000;
 
@@ -65,11 +134,11 @@ function confirmButton(id) {
   button.type = "button";
   button.className = "confirm";
   button.dataset.confirmation = String(id);
-  button.textContent = "Confirm";
+  button.textContent = T.confirm;
   button.addEventListener("click", () => {
     if (socket?.readyState !== WebSocket.OPEN) return;
     button.disabled = true;
-    button.textContent = "Confirming…";
+    button.textContent = T.confirming;
     send({ type: "confirm", id });
   });
   return button;
@@ -79,7 +148,7 @@ function confirmButton(id) {
 function pressed(id, status) {
   for (const button of list.querySelectorAll(`button.confirm[data-confirmation="${id}"]`)) {
     button.disabled = true;
-    button.textContent = status === "accepted" ? "Confirmed" : "No longer valid: ask again";
+    button.textContent = status === "accepted" ? T.confirmed : T.stale;
   }
 }
 
@@ -179,7 +248,7 @@ function setActivity(text, shownMs = TYPING_SHOWN_MS) {
 }
 
 function setTyping(active) {
-  setActivity(active ? "Typing…" : null);
+  setActivity(active ? T.typing : null);
 }
 
 function setStep(step, label) {
@@ -246,7 +315,9 @@ function receive(frame) {
 function connect() {
   const opened = Date.now();
   socket = new WebSocket(
-    `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/webchat/ws?agent=${encodeURIComponent(agent)}`,
+    // The browser's language goes along, for Kelpie's own messages when the owner's words don't say
+    // which language the conversation is in (#187).
+    `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/webchat/ws?agent=${encodeURIComponent(agent)}&lang=${encodeURIComponent(navigator.language || "")}`,
   );
   let wasOpen = false;
   socket.addEventListener("open", () => {
@@ -264,8 +335,7 @@ function connect() {
   socket.addEventListener("close", () => {
     pause.disabled = true;
     refused = wasOpen ? 0 : refused + 1;
-    status.textContent =
-      refused >= 3 ? "Can't connect. If your login expired, reload the page." : "Reconnecting…";
+    status.textContent = refused >= 3 ? T.cantConnect : T.reconnecting;
     setTyping(false);
     // A socket that dies quickly counts as a failed attempt; full jitter, from 300 ms to 15 s.
     attempt = Date.now() - opened < 5_000 ? attempt + 1 : 0;
@@ -322,11 +392,24 @@ async function showVersion() {
   }
 }
 
+/** The page's own texts in its language; index.html holds the English ones. */
+function translatePage() {
+  document.documentElement.lang = LOCALE;
+  status.textContent = T.connecting;
+  list.setAttribute("aria-label", T.conversation);
+  typing.textContent = T.typing;
+  document.querySelector('label[for="text"]').textContent = T.message;
+  form.querySelector('button[type="submit"]').textContent = T.send;
+  pause.textContent = T.pause;
+  pause.title = T.pauseTitle;
+}
+
+translatePage();
 showVersion();
 
 if (agent) {
   connect();
 } else {
-  status.textContent = "Open this page with ?agent=<agent id>";
+  status.textContent = T.noAgent;
   form.hidden = true;
 }

@@ -1,0 +1,1 @@
+ALTER TABLE `identities` ADD `language_code` text;
