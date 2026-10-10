@@ -642,13 +642,44 @@ describe("a turn's steps in the webchat", () => {
   });
 
   it("never shows Kelpie's note about a finished setup step, and answers it (#206)", async () => {
-    const world = use(fakeWorld([reply("Abra o link."), reply("Bot conectado!")]));
+    const world = use(
+      fakeWorld([toolCalls({ name: "form" }), reply("Abra o link."), reply("Bot conectado!")]),
+    );
+    // The first turn sends the form's link, so the conversation waits for the bot.
+    world.tools = [
+      {
+        async tools() {
+          return [
+            {
+              spec: { name: "form", description: "Form.", inputSchema: { type: "object" } },
+              label: "Opening a form",
+              async run(_input: unknown, context: ToolContext) {
+                const href = "https://admin.example/forms/tok-2";
+                context.sendLink({
+                  href,
+                  text: `The secure form: ${href}`,
+                  awaits: {
+                    agentId: "lume",
+                    step: "telegram_connected",
+                    until: Date.now() + 60_000,
+                  },
+                });
+                return { output: "Kelpie sends the link." };
+              },
+            },
+          ];
+        },
+      },
+    ];
     const name = "setup:webchat:u-owner-note";
     const chat = await open(name, { ...owner, agentId: "setup" });
     chat.send({ type: "message", id: "c1", text: "vamos conectar o bot" });
     await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
     await agent(name).flush();
-    await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(1));
+    await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(2));
+    await vi.waitFor(async () =>
+      expect((await agent(name).turns()).at(-1)?.status).toBe("delivered"),
+    );
 
     await agent(name).setupDone("lume", {
       step: "telegram_connected",
@@ -656,7 +687,7 @@ describe("a turn's steps in the webchat", () => {
       bot: "LumeBot",
       webhookRegistered: true,
     });
-    await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(2));
+    await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(3));
     expect(world.sent).toEqual([]);
     expect(JSON.stringify(world.requests.at(-1)?.messages)).toContain("Kelpie, automatically");
 

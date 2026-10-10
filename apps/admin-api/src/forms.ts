@@ -66,7 +66,7 @@ export async function submitForm(
   if (result.ok) {
     if (connected) {
       await bounded(
-        connected(result.agentId, result.bot.username, result.webhook === "registered"),
+        () => connected(result.agentId, result.bot.username, result.webhook === "registered"),
         REPORT_TIMEOUT_MS,
       );
     }
@@ -90,12 +90,12 @@ export async function submitForm(
   return result.reason === "unknown_form" ? closedPage(locale) : unavailablePage(locale);
 }
 
-/** Waits for `work` at most `ms`, and never fails: a report is a courtesy. */
-async function bounded(work: Promise<void>, ms: number): Promise<void> {
+/** Runs `work`, waits for it at most `ms`, and never fails: a report is a courtesy. */
+async function bounded(work: () => Promise<void>, ms: number): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
-      work,
+      work(),
       new Promise<void>((resolve) => {
         timer = setTimeout(resolve, ms);
       }),

@@ -188,7 +188,7 @@ export function setupNote(agentId: string, event: SetupEvent): string | null {
   }
   const kelpie = "Kelpie, automatically (the owner didn't write this):";
   if (event.step === "telegram_paired") {
-    return `${kelpie} the owner paired their own Telegram account with the bot of the agent ${agentId}.`;
+    return `${kelpie} the owner's pairing link was used: a Telegram account is now paired, as the owner's, with the bot of the agent ${agentId}.`;
   }
   if (event.step !== "telegram_connected" || !BOT_USERNAME.test(String(event.bot))) return null;
   return event.webhookRegistered === true

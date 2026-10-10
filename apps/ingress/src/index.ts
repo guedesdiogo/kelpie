@@ -2,9 +2,9 @@ import { DIRECTORY_NAME, type Remote, remoteKeySet, verifyAccessJwt } from "@kel
 import type { ChannelWebhooksContract } from "@kelpie/channels";
 import { TELEGRAM_WEBHOOK_PATH } from "@kelpie/channels/telegram";
 import {
-  type AgentHostContract,
   REGISTRY_NAME,
   type RegistryContract,
+  type SetupEventsContract,
   versionReport,
 } from "@kelpie/config";
 import type { ConversationContract } from "@kelpie/conversation/contract";
@@ -35,9 +35,9 @@ function telegramDeps(env: Env): TelegramWebhookDeps {
     directory: env.DIRECTORY.getByName(DIRECTORY_NAME),
     ingest: (name, message) => conversation(env, name).ingest(message),
     pause: (name, target) => conversation(env, name).pause(target),
-    // The agent's AgentHost lives in conversation-runtime and implements this contract (#206).
-    setupDone: (agentId, event) =>
-      (env.AGENT_HOST.getByName(agentId) as unknown as Remote<AgentHostContract>).setupDone(event),
+    // A service binding to conversation-runtime's SetupEvents entrypoint, which only reports (#206).
+    setupDone: async (agentId, event) =>
+      (env.SETUP_EVENTS as unknown as SetupEventsContract).setupDone(agentId, event),
   };
 }
 

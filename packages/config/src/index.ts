@@ -12,6 +12,7 @@ export {
   type RegistryContract,
   type RenameAgentResult,
   type SetupEvent,
+  type SetupEventsContract,
   type SetupStep,
   type ShownIdentity,
 } from "./commands.ts";

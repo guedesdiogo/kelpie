@@ -1,4 +1,5 @@
 import type { SendOutcome } from "@kelpie/channels";
+import type { SetupStep } from "@kelpie/config";
 import type { RecallOptions } from "@kelpie/context-store/contract";
 import type { Destination } from "@kelpie/conversation/contract";
 import type { AssistantMessage, LlmEvent, RoutedRequest, Usage } from "@kelpie/llm";
@@ -104,6 +105,13 @@ export interface FakeWorld {
   sent: string[];
   /** Every wait a conversation noted for a setup step (#206). */
   awaits: { agentId: string; conversation: string; step: string; until: number }[];
+  /** Also called with each wait: a test hands it to the agent's real AgentHost. */
+  onAwait?: (wait: {
+    agentId: string;
+    conversation: string;
+    step: SetupStep;
+    until: number;
+  }) => Promise<void>;
   /** Every bubble sent, with whether it went out silently and the link it may preview, if any. */
   sends: { text: string; silent: boolean; previewUrl?: string; links?: readonly string[] }[];
   typing: number;
@@ -196,6 +204,7 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
       },
       async awaitSetup(agentId, conversation, step, until) {
         world.awaits.push({ agentId, conversation, step, until });
+        await world.onAwait?.({ agentId, conversation, step, until });
       },
       async generate(tier, request): Promise<ModelCall> {
         world.requests.push(structuredClone(request));

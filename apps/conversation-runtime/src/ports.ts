@@ -205,9 +205,9 @@ function productionPorts(env: Env): ConversationPorts {
         { adminOrigin: env.ADMIN_ORIGIN },
       ),
     ],
-    // A Confirm button is the webchat's alone (#186): channel-egress takes only what it sends.
     awaitSetup: (agentId, conversation, step, until) =>
       withTimeout(agentHost(agentId).awaitSetup(conversation, step, until), AWAIT_SETUP_TIMEOUT_MS),
+    // A Confirm button is the webchat's alone (#186): channel-egress takes only what it sends.
     send: (agentId, destination, text, { confirmation: _button, ...options }) =>
       egress.send(agentId, destination, text, options),
     remember: (agentId, changes, summary) =>

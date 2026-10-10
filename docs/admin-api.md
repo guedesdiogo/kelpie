@@ -239,9 +239,9 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
   - The model learns only that the link was sent. History, later requests and the outbox's inspection never hold the link.
   - As with a confirmation, the bubble doesn't come back once its turn has settled and the webchat reloads. If the owner says they didn't get it, the agent calls the tool again for a new link.
 - **Steps the owner finishes.** When the owner submits the secure form, or pairs by pressing Start in the bot, the conversation that sent the link learns it without being told (#206, ADR-0028):
-  - **The wait:** the conversation waits for the step while its link lasts, the form's 15 minutes or a day for pairing. The agent's `AgentHost` keeps the wait.
-  - **The report:** the admin API reports a stored token and `ingress` a redeemed pairing code. Each report is bounded and best effort, so the page or the webhook answers whatever happens to it.
-  - **The note:** each waiting conversation gets a note Kelpie writes in fixed words, "Kelpie, automatically (the owner didn't write this): …", naming the bot or the pairing. The note is told once, and the agent answers it.
+  - **The wait:** the conversation waits for the step while its link lasts, the form's 15 minutes or a day for pairing, with a few minutes' grace. Both the conversation and the agent's `AgentHost` keep the wait.
+  - **The report:** the admin API reports a stored token and `ingress` a redeemed pairing code, through conversation-runtime's `SetupEvents` entrypoint, which does nothing else. Each report is bounded and best effort, so the page or the webhook answers whatever happens to it.
+  - **The note:** each waiting conversation gets a note Kelpie writes in fixed words, "Kelpie, automatically (the owner didn't write this): …", naming the bot or the pairing. A conversation takes a report only for a step it waits for, and only once. The agent answers the note.
   - **When the turn starts:**
     - while a turn runs, the note waits for that turn to end and doesn't interrupt it;
     - with the owner's messages waiting, it joins them;

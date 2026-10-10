@@ -175,17 +175,21 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       typeof conversation !== "string" ||
       conversation === "" ||
       conversation.length > MAX_CONVERSATION_NAME ||
-      !SETUP_STEPS.includes(step) ||
+      !isSetupStep(step) ||
       !Number.isFinite(until)
     ) {
       return;
     }
+    const now = Date.now();
+    this.#pruneWaits(now);
+    // No wait outlasts the longest a link does.
+    const capped = Math.min(until, now + MAX_SETUP_WAIT_MS);
     this.#db
       .insert(schema.setupWaits)
-      .values({ conversation, step, until })
+      .values({ conversation, step, until: capped })
       .onConflictDoUpdate({
         target: [schema.setupWaits.conversation, schema.setupWaits.step],
-        set: { until },
+        set: { until: capped },
       })
       .run();
   }
@@ -197,8 +201,8 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
    */
   async setupDone(event: SetupEvent): Promise<void> {
     const agentId = this.ctx.id.name;
-    if (!agentId || !SETUP_STEPS.includes(event?.step)) return;
-    this.#db.delete(schema.setupWaits).where(lte(schema.setupWaits.until, Date.now())).run();
+    if (!agentId || !isSetupStep(event?.step)) return;
+    this.#pruneWaits(Date.now());
     const waiting = this.#db
       .select({ conversation: schema.setupWaits.conversation })
       .from(schema.setupWaits)
@@ -223,6 +227,17 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     }
   }
 
+  /**
+   * Drops the waits whose links ran out, a grace past their end: a form submitted in its last
+   * seconds is reported a moment after.
+   */
+  #pruneWaits(now: number): void {
+    this.#db
+      .delete(schema.setupWaits)
+      .where(lte(schema.setupWaits.until, now - SETUP_WAIT_GRACE_MS))
+      .run();
+  }
+
   #get<T>(key: string, fallback: T): T {
     const row = this.#db
       .select({ value: schema.state.value })
@@ -233,10 +248,14 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   }
 }
 
-const SETUP_STEPS: readonly unknown[] = [
-  "telegram_connected",
-  "telegram_paired",
-] satisfies SetupStep[];
+/** Every setup step: a new one doesn't compile until it is here. */
+const SETUP_STEPS: Record<SetupStep, true> = { telegram_connected: true, telegram_paired: true };
+const isSetupStep = (step: unknown): step is SetupStep =>
+  typeof step === "string" && Object.hasOwn(SETUP_STEPS, step);
+/** The longest a link lasts: a day for the pairing page, whose Telegram code starts later. */
+const MAX_SETUP_WAIT_MS = 24 * 60 * 60_000;
+/** How long past its end a wait still takes a report. */
+const SETUP_WAIT_GRACE_MS = 5 * 60_000;
 /** A conversation object's name is an agent id, a channel and a thread id. */
 const MAX_CONVERSATION_NAME = 256;
 

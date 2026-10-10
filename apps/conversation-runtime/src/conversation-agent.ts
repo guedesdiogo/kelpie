@@ -20,6 +20,7 @@ import {
   type AgentSettings,
   DEFAULT_SETTINGS,
   type SetupEvent,
+  type SetupStep,
 } from "@kelpie/config";
 import type { RecallOptions } from "@kelpie/context-store/contract";
 import {
@@ -133,6 +134,11 @@ export const PAUSED_TEXT: Localized = {
   "pt-BR": "Pausado. Respondo depois da sua próxima mensagem.",
   es: "En pausa. Responderé después de tu próximo mensaje.",
 };
+/**
+ * How long past its end a setup step's wait still takes the report (#206): a form submitted in its
+ * last seconds is reported a moment after.
+ */
+const SETUP_WAIT_GRACE_MS = 5 * 60_000;
 /** The person's latest messages the conversation's language is read from (#187). */
 const LANGUAGE_WINDOW = 5;
 /** Of each, the end, where a run of messages has its newest: enough to tell a language. */
@@ -477,9 +483,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    */
   async setupDone(agentId: string, event: SetupEvent): Promise<void> {
     const text = setupNote(agentId, event);
-    // A conversation that never started sent no link.
-    if (text === null || !this.#get<string | null>("agentId", null)) return;
+    if (text === null) return;
     const now = this.#ports.now();
+    // Only a step this conversation waits for, and once: a second report finds no wait.
+    if (!this.#takeWait(agentId, event.step, now)) return;
     this.#db
       .insert(schema.inbound)
       .values({
@@ -495,19 +502,56 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         fromKelpie: true,
       })
       .run();
+    // Answered on a schedule of its own: it survives an eviction, and the AgentHost reporting to
+    // every waiting conversation isn't held up by a turn starting here.
+    await this.schedule(0, "answerNotes");
+  }
+
+  /** The schedule `setupDone` arms (#206). */
+  async answerNotes(): Promise<void> {
     await this.#serialized(() => this.#answerKelpieNotes());
   }
 
   /**
    * Starts a turn for Kelpie's notes (#206) when nothing else will: no turn runs, and nothing the
    * person wrote waits, whose own planned flush answers the notes with it. Never alongside a running
-   * turn: its end calls this again. While paused, the notes wait for the owner's next message.
+   * turn: its end calls this again. While paused, the notes wait for the owner's next message. A
+   * message of the person's arriving meanwhile moves the epoch, and its own plan answers both.
    */
   async #answerKelpieNotes(): Promise<void> {
     if (this.#turnRunning() || this.#get("paused", false)) return;
     const pending = this.#pendingInbound();
     if (pending.length === 0 || pending.some((row) => !row.fromKelpie)) return;
-    await this.flush();
+    await this.flush({ epoch: this.#epoch() });
+  }
+
+  /**
+   * Notes that this conversation waits for a setup step (#206), before the agent's AgentHost is
+   * told: a report is taken only for a step the conversation waits for itself.
+   */
+  #noteWait(agentId: string, step: SetupStep, until: number): void {
+    const now = this.#ports.now();
+    const waits = this.#waits().filter(
+      (wait) =>
+        wait.until + SETUP_WAIT_GRACE_MS > now && !(wait.agentId === agentId && wait.step === step),
+    );
+    this.#set("setupWaits", [...waits, { agentId, step, until }]);
+  }
+
+  /** Ends the conversation's wait for a step, if it had one still running. */
+  #takeWait(agentId: string, step: SetupStep, now: number): boolean {
+    const waits = this.#waits();
+    const left = waits.filter((wait) => !(wait.agentId === agentId && wait.step === step));
+    const had = waits.some(
+      (wait) =>
+        wait.agentId === agentId && wait.step === step && wait.until + SETUP_WAIT_GRACE_MS > now,
+    );
+    if (left.length !== waits.length) this.#set("setupWaits", left);
+    return had;
+  }
+
+  #waits(): { agentId: string; step: SetupStep; until: number }[] {
+    return this.#get<{ agentId: string; step: SetupStep; until: number }[]>("setupWaits", []);
   }
 
   /** Best effort: the webchat's sockets are told, and other channels get a short fixed message. */
@@ -765,6 +809,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     } catch (error) {
       console.error("ConversationAgent: turn recovery failed", { turnId, error: errorName(error) });
       this.#settle(turnId, "failed");
+      // A note of Kelpie's that waited for this turn would otherwise wait for the next message.
+      await this.schedule(0, "answerNotes");
     }
     return { status: "completed" as const };
   }
@@ -779,6 +825,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       const turn = this.#turn(turnId);
       if (turn?.status !== "running") return;
       if (this.#outboxCount(turnId) > 0) {
+        // An eviction may have come before the waits for its links were noted (#206); noting
+        // them again changes nothing.
+        await this.#awaitSteps(turn.links ?? []);
         // A bubble caught mid-send may or may not have arrived; it is sent again.
         this.#db
           .update(schema.outbox)
@@ -981,6 +1030,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   async #awaitSteps(links: readonly HostLink[]): Promise<void> {
     for (const { awaits } of links) {
       if (!awaits) continue;
+      this.#noteWait(awaits.agentId, awaits.step, awaits.until);
       try {
         await this.#ports.awaitSetup(awaits.agentId, this.name, awaits.step, awaits.until);
       } catch (error) {
@@ -2004,7 +2054,12 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (epoch !== this.#epoch() || this.#get("paused", false)) return;
     const pending = this.#pendingInbound();
     if (pending.length === 0) return;
-    const flushAt = pending.length >= LIMITS.maxBuffered ? now : await this.#planFlush(pending);
+    // The wait is the person's: Kelpie's notes neither start nor cap it (#206).
+    const written = pending.filter((row) => !row.fromKelpie);
+    const flushAt =
+      pending.length >= LIMITS.maxBuffered || written.length === 0
+        ? now
+        : await this.#planFlush(written);
     // A newer message arrived while the settings were awaited, and plans with the fuller buffer;
     // or a flush already claimed the buffer.
     if (epoch !== this.#epoch() || this.#pendingInbound().length === 0) return;
@@ -2036,7 +2091,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    */
   async #holdForTyping(): Promise<void> {
     const flushAt = this.#get<number | null>("flushAt", null);
-    const first = this.#pendingInbound()[0];
+    const first = this.#pendingInbound().find((row) => !row.fromKelpie);
     if (flushAt === null || !first) return;
     const epoch = this.#epoch();
     const { settings } = await this.#config();

@@ -92,6 +92,11 @@ export interface AgentHostContract {
   setupDone(event: SetupEvent): Promise<void>;
 }
 
+/** conversation-runtime's `SetupEvents` entrypoint: ingress reports a finished pairing (#206). */
+export interface SetupEventsContract {
+  setupDone(agentId: string, event: SetupEvent): Promise<void>;
+}
+
 /** A vault file pushed with conflict markers that still waits: on the model, or on a pull request. */
 export interface HeldVaultFile {
   path: string;

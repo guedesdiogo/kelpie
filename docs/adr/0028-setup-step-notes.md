@@ -20,15 +20,21 @@ The reference check on #206 found:
 ## Decision
 
 1. **The conversation waits for the step.**
-   - When a setup tool has Kelpie send a link, the conversation tells the agent's `AgentHost` that it waits for that step, by its object's name.
+   - When a setup tool has Kelpie send a link, the conversation notes the wait itself. It then tells the agent's `AgentHost` that it waits for that step, by its object's name, before the reply goes out.
    - The wait lasts as long as the link: the form's 15 minutes, or a day for pairing. The pairing page doesn't expire, and the Telegram code's hour starts only when the owner presses the page's button.
+   - A report a few minutes late still counts: a form submitted in its last seconds is reported a moment after.
+   - The `AgentHost` keeps no wait longer than a day.
 2. **What finishes the step reports it.**
    - The admin API reports when a form's token is stored. `ingress` reports when a pairing code is redeemed.
+   - `ingress` reports through a `SetupEvents` entrypoint that does nothing else. It doesn't bind the `AgentHost`, whose other methods configure agents.
    - Each report is bounded and best effort: the page or the webhook answers whatever happens to it.
    - The `AgentHost` tells each conversation still waiting, once, and drops waits that ran out.
+   - A conversation takes a report only for a step it waits for itself, and only once. A report it doesn't wait for, or a second one, changes nothing.
 3. **Kelpie writes a note into the conversation.**
    - Its fixed words say no person wrote it: "Kelpie, automatically (the owner didn't write this): …". They are built only from checked fields: the step, the agent's id, the bot's username, and whether Telegram was pointed at Kelpie.
    - The note never interrupts a turn. It waits for the running one, or joins the owner's waiting messages, or starts a turn of its own. While the conversation is paused, it waits for the owner's next message.
+   - **The turn starts on a schedule of its own.** It survives an eviction, and the `AgentHost` isn't held up while a turn starts.
+   - **The owner's messages keep their wait.** The note neither starts nor caps their fixed wait.
 4. **A turn the note starts acts for the owner who finished the step.** The note is authored as that owner, so the setup tools of the next step work.
    - This is the owner's own act, as in ADR-0026.
    - Like any owner turn, it can run the changes that need no confirmation.
@@ -41,11 +47,16 @@ The reference check on #206 found:
    - recall's question;
    - the conversation's language (ADR-0027).
 
+   Two readers take the note on purpose:
+   - a checkpoint's summary, which is the model's own context;
+   - the turn's actor, which is the owner who finished the step.
+
 ## Consequences
 
-- `ingress` binds the `AgentHost`, as the admin API already does.
-- The `AgentHost` keeps a small table of waits, and the conversation's records gain the marker.
-- **Residual:** a wait is noted after the reply's bubbles are written. An eviction between the two, or an `AgentHost` that doesn't answer, loses the wait, and the owner says "done" as before.
+- `ingress` binds conversation-runtime's `SetupEvents` entrypoint. The admin API already binds the `AgentHost`.
+- The `AgentHost` keeps a small table of waits. The conversation keeps its own waits and the marker in its records.
+- **Residual: a lost wait.** A wait is noted after the reply's bubbles are written, and noted again if the turn is picked up after an eviction. An `AgentHost` that doesn't answer in time still loses its side of it, and the owner says "done" as before.
+- **Residual: a schedule that fails.** If the note's schedule fails, the note waits for the end of the next turn or for the owner's next message.
 - **Residual:** two conversations waiting for the same agent's step are both told. That is true either way: the bot is connected.
 
 ## Alternatives considered

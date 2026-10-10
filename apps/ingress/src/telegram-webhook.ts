@@ -174,7 +174,7 @@ async function fromStranger(
     );
     // Then the conversation that sent the pairing link goes on by itself (#206). Best effort, and
     // bounded: the webhook still answers 200, or Telegram would send the /start again.
-    await bounded(
+    await bounded(() =>
       deps.setupDone(event.agentId, { step: "telegram_paired", userId: paired.userId }),
     );
     return;
@@ -206,12 +206,12 @@ async function fromStranger(
 /** A setup step's report the webhook doesn't wait on for longer than this (#206). */
 const REPORT_TIMEOUT_MS = 2_000;
 
-/** Waits for `work` at most REPORT_TIMEOUT_MS, and never fails: a report is a courtesy. */
-async function bounded(work: Promise<void>): Promise<void> {
+/** Runs `work`, waits for it at most REPORT_TIMEOUT_MS, and never fails: a report is a courtesy. */
+async function bounded(work: () => Promise<void>): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
-      work,
+      work(),
       new Promise<void>((resolve) => {
         timer = setTimeout(resolve, REPORT_TIMEOUT_MS);
       }),
