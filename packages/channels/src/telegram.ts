@@ -11,6 +11,7 @@ import {
 } from "./adapter.ts";
 import { CAPABILITIES } from "./capabilities.ts";
 import type { CanonicalEvent, MessagePart } from "./events.ts";
+import { MAX_LANGUAGE_TAG_CHARS } from "./locale.ts";
 import { fitsTelegram, formatReply, toTelegramHtml, toTelegramPlain } from "./markdown.ts";
 
 // Telegram through the Bot API (https://core.telegram.org/bots/api), webhooks only (ADR-0003).
@@ -227,7 +228,9 @@ export function normalizeTelegramUpdate(
   if (message.from.first_name) event.sender.displayName = message.from.first_name;
   // Optional in Telegram's API, so a message without it is just as well formed.
   const language = message.from.language_code;
-  if (typeof language === "string" && language.length <= 35) event.sender.languageCode = language;
+  if (typeof language === "string" && language.length <= MAX_LANGUAGE_TAG_CHARS) {
+    event.sender.languageCode = language;
+  }
   if (message.reply_to_message) {
     event.replyTo = { providerMessageId: String(message.reply_to_message.message_id) };
   }

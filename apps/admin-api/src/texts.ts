@@ -149,11 +149,11 @@ export const PAGES: Localized<PageTexts> = {
     },
     noBot: {
       title: "Ainda sem bot",
-      body: "Conecte primeiro o bot do Telegram do agente: peça ao agente de setup, ou rode o comando <code>connectTelegram</code>.",
+      body: "Conecte primeiro o bot do Telegram do agente: peça ao agente de configuração, ou rode o comando <code>connectTelegram</code>.",
     },
     noAgent: {
       title: "Esse agente não existe",
-      body: "Confira o link, ou peça um novo ao agente de setup.",
+      body: "Confira o link, ou peça um novo ao agente de configuração.",
     },
   },
   es: {
@@ -167,7 +167,7 @@ export const PAGES: Localized<PageTexts> = {
     notSubmission: {
       title: "No es un envío de formulario",
       form: "Envía el token desde la página del formulario.",
-      page: "Pulsa el botón de la página.",
+      page: "Presiona el botón de la página.",
     },
     tooLarge: { title: "Demasiado grande", body: "Eso no es un token de bot." },
     connect: {
@@ -190,7 +190,7 @@ export const PAGES: Localized<PageTexts> = {
     },
     closed: {
       title: "Este enlace ya no funciona",
-      body: "Caducó, ya se usó o se rechazó demasiadas veces. Pide uno nuevo.",
+      body: "Expiró, ya se usó o se rechazó demasiadas veces. Pide uno nuevo.",
     },
     unavailable: {
       title: "Inténtalo de nuevo más tarde",
@@ -202,7 +202,7 @@ export const PAGES: Localized<PageTexts> = {
         `Vincula tu propia cuenta de Telegram con el bot de ${name} (${id}). Recibes un enlace para abrir en Telegram, donde tienes la sesión iniciada; la cuenta que lo abra pasa a ser tuya en Kelpie.`,
       button: "Obtener el enlace",
       open: (href, minutes) =>
-        `Abre <a href="${href}" rel="noreferrer">este enlace</a> en Telegram y pulsa Iniciar. Funciona una vez, durante los próximos ${minutes} minutos, y uno nuevo reemplaza al anterior.`,
+        `Abre <a href="${href}" rel="noreferrer">este enlace</a> en Telegram y presiona Iniciar. Funciona una vez, durante los próximos ${minutes} minutos, y uno nuevo reemplaza al anterior.`,
     },
     noBot: {
       title: "Todavía no hay bot",

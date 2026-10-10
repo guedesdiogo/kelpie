@@ -880,7 +880,7 @@ describe("the conversation's language", () => {
 
   it("follows what the person writes, else their device, else English", async () => {
     expect(await noticeFor("lang-es", "hola, cambia el modelo")).toMatch(
-      /^Confirma: .+\nPara seguir, responde solo con el código [A-Z0-9]{6}\. Caduca en 10 minutos\.$/s,
+      /^Confirma: .+\nPara seguir, responde solo con el código [A-Z0-9]{6}\. Expira en 10 minutos\.$/s,
     );
     expect(await noticeFor("lang-device", "ok", "es-MX")).toMatch(/^Confirma: /);
     expect(await noticeFor("lang-text-first", "quero mudar o modelo", "en-US")).toMatch(
@@ -902,10 +902,31 @@ describe("the conversation's language", () => {
     gated(world);
     const stub = agent("lang-kept");
     await turn(stub, world, "m1", "mude para smart");
+    // More unclear messages than the window holds: the language read before stays.
     scripts.push(toolCalls({ name: "change", input: { to: "frontier" } }), reply("Ok."));
-    await turn(stub, world, "m2", "ok");
+    const before = (await stub.turns()).length;
+    for (const id of ["m2", "m3", "m4", "m5", "m6", "m7"]) await stub.ingest(message(id, "ok"));
+    await stub.flush();
+    await vi.waitFor(async () => {
+      const turns = await stub.turns();
+      expect(turns).toHaveLength(before + 1);
+      expect(turns.at(-1)?.status).not.toBe("running");
+    });
     expect(
       world.sent.filter((text) => NOTICE.test(text)).map((text) => text.split(":")[0]),
     ).toEqual(["Confirme", "Confirme"]);
+  });
+
+  it("switches at once when the person clearly writes in another language", async () => {
+    const scripts = [toolCalls({ name: "change", input: { to: "smart" } }), reply("Confirme.")];
+    const world = use(fakeWorld(scripts));
+    gated(world);
+    const stub = agent("lang-switch");
+    await turn(stub, world, "m1", "mude para smart, por favor, eu quero isso agora");
+    scripts.push(toolCalls({ name: "change", input: { to: "frontier" } }), reply("Sure."));
+    await turn(stub, world, "m2", "please change it to frontier instead");
+    expect(
+      world.sent.filter((text) => NOTICE.test(text)).map((text) => text.split(":")[0]),
+    ).toEqual(["Confirme", "Confirm"]);
   });
 });

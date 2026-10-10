@@ -26,7 +26,7 @@ The reference check on #187 found no prior art for choosing per conversation: he
 
 This amends ADR-0025's "the fixed texts are in English".
 
-1. **Three languages.** Kelpie's own texts come in English, Brazilian Portuguese (`pt-BR`, which `pt` also maps to) and Spanish (`es`). Any other language gets English. Each text has the same placeholders in every language, and a test holds them to English's.
+1. **Three languages.** Kelpie's own texts come in English, Brazilian Portuguese (`pt-BR`, which `pt` also maps to) and Spanish (`es`). Any other language gets English. Each text takes the same values in every language. A test holds the admin pages' texts to English's, and the chat texts are checked word for word in each language.
 2. **In a chat, the conversation's language.**
    - It is the language the person's latest messages are written in, read by a small detector of words and letters that mark one of the three languages. The language stays while the messages say nothing clear ("ok", a code).
    - Until the messages say, the latest message's device language counts: Telegram's `language_code`, or the language the webchat page names. Failing that, English.

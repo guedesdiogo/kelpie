@@ -36,6 +36,8 @@ export {
   type Locale,
   type Localized,
   localeOf,
+  MAX_LANGUAGE_CHARS,
+  MAX_LANGUAGE_TAG_CHARS,
 } from "./locale.ts";
 export {
   type AllowedLinks,

@@ -64,9 +64,13 @@ describe("pausing a conversation", () => {
     // Nothing in the text says; the device's language does.
     await spanish.ingest({ ...message("m1", "ok"), language: "es-419" });
     await spanish.pause(target);
+    // A pause can be the first thing a conversation gets.
+    const first = agent("pause-first");
+    await first.pause({ ...target, language: "pt-BR" });
     expect(world.sent).toEqual([
       "Pausado. Respondo depois da sua próxima mensagem.",
       "En pausa. Responderé después de tu próximo mensaje.",
+      "Pausado. Respondo depois da sua próxima mensagem.",
     ]);
   });
 

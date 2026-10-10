@@ -55,6 +55,8 @@ export interface PauseTarget {
   destination: Destination;
   /** The command's own message id, when the channel retries deliveries. */
   providerMessageId?: string;
+  /** The device language of whoever paused, as on a message (#187); an older ingress sends none. */
+  language?: string | null;
 }
 
 export type PauseResult =

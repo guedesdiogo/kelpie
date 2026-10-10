@@ -41,7 +41,7 @@ const TEXTS = {
     confirm: "Confirmar",
     confirming: "Confirmando…",
     confirmed: "Confirmado",
-    stale: "Não vale mais: peça de novo",
+    stale: "Não é mais válido: peça de novo",
     cantConnect: "Não foi possível conectar. Se o seu login expirou, recarregue a página.",
     reconnecting: "Reconectando…",
     noAgent: "Abra esta página com ?agent=<id do agente>",
@@ -65,16 +65,18 @@ const TEXTS = {
     confirming: "Confirmando…",
     confirmed: "Confirmado",
     stale: "Ya no es válido: pídelo de nuevo",
-    cantConnect: "No se puede conectar. Si tu sesión caducó, recarga la página.",
+    cantConnect: "No se puede conectar. Si tu sesión expiró, recarga la página.",
     reconnecting: "Reconectando…",
     noAgent: "Abre esta página con ?agent=<id del agente>",
   },
 };
 
 /** The browser's selected language, if it is one Kelpie has; English otherwise. */
-const LOCALE =
-  { pt: "pt-BR", es: "es", en: "en" }[(navigator.language || "").toLowerCase().split(/[-_]/)[0]] ??
-  "en";
+const LOCALE = (() => {
+  const primary = (navigator.language || "").toLowerCase().split(/[-_]/)[0];
+  const known = { pt: "pt-BR", es: "es", en: "en" };
+  return Object.hasOwn(known, primary) ? known[primary] : "en";
+})();
 const T = TEXTS[LOCALE];
 const list = document.getElementById("messages");
 const typing = document.getElementById("typing");

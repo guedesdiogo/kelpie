@@ -4,13 +4,12 @@ import {
   type ChannelIdentity,
   type Verification,
 } from "@kelpie/access";
+import { MAX_LANGUAGE_CHARS } from "@kelpie/channels";
 import { isAgentId } from "@kelpie/config";
 import { WEBCHAT_ADMISSION_HEADER, type WebchatAdmission } from "@kelpie/conversation/contract";
 import { conversationName } from "./telegram-webhook.ts";
 
 export const WEBCHAT_PATH = "/webchat";
-/** An `Accept-Language` value is a few tags; anything longer is cut. */
-const MAX_LANGUAGE_CHARS = 200;
 const SOCKET_PATH = `${WEBCHAT_PATH}/ws`;
 
 export interface WebchatDeps {
@@ -77,9 +76,10 @@ export async function handleWebchat(request: Request, deps: WebchatDeps): Promis
   const { userId, role, timeZone } = admission;
   // The browser's language, for Kelpie's fixed texts (#187): the page names it on the socket's URL,
   // since not every browser sends Accept-Language with a socket. Not a security input.
+  // An empty `lang`, from a browser that names none, leaves the header to say.
   const language = (
-    url.searchParams.get("lang") ??
-    request.headers.get("accept-language") ??
+    url.searchParams.get("lang") ||
+    request.headers.get("accept-language") ||
     ""
   ).slice(0, MAX_LANGUAGE_CHARS);
   return deps.connect(conversationName(agentId, { channel: "webchat", threadId: userId }), {

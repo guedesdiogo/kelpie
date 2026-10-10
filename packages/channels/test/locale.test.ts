@@ -13,6 +13,7 @@ describe("localeOf", () => {
     expect(localeOf("en-GB")).toBe("en");
     expect(localeOf("pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7")).toBe("pt-BR");
     expect(localeOf("en;q=0.5, es")).toBe("es");
+    expect(localeOf("en;Q=0.5, pt;Q=0.9")).toBe("pt-BR");
   });
 
   it("gives nothing for a language Kelpie doesn't have, so the caller's fallback applies", () => {
@@ -36,6 +37,8 @@ describe("detectLocale", () => {
       "feito",
       "mude para smart",
       "não, não faça isso",
+      "me mostra os agentes",
+      "Me ajuda",
     ]) {
       expect(detectLocale(line), line).toBe("pt-BR");
     }
@@ -50,9 +53,27 @@ describe("detectLocale", () => {
     ]) {
       expect(detectLocale(line), line).toBe("es");
     }
-    for (const line of ["what bots do I have?", "let's create a new bot", "done", "thanks"]) {
+    for (const line of [
+      "what bots do I have?",
+      "let's create a new bot",
+      "done",
+      "thanks",
+      "build an AI bot",
+      "set up an AI agent",
+      "don’t do that",
+    ]) {
       expect(detectLocale(line), line).toBe("en");
     }
+  });
+
+  it("reads the newest message first, so a clear switch shows at once and a stray word doesn't", () => {
+    const portuguese = Array.from({ length: 5 }, () => "vamos criar um agente novo, por favor");
+    // Newest first.
+    expect(detectLocale(["please create a new agent called sales", ...portuguese])).toBe("en");
+    expect(detectLocale(["thanks, that is done", ...portuguese])).toBe("en");
+    expect(detectLocale(["ok", ...portuguese])).toBe("pt-BR");
+    expect(detectLocale(["thanks", ...portuguese])).toBe("pt-BR");
+    expect(detectLocale(["ok", "K7MPRX"])).toBeNull();
   });
 
   it("gives nothing when the text doesn't say", () => {

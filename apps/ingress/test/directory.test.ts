@@ -555,7 +555,7 @@ describe("Directory pairing", () => {
 describe("Directory stranger notices", () => {
   const sender = (id: number) => ({ channel: "telegram", channelUserId: String(id) }) as const;
 
-  it("names the owner's app language, as their account was last seen, only when it changed (#187)", async () => {
+  it("names the owner's app language as their account was last seen, kept through messages that name none (#187)", async () => {
     const stub = await withEnabledOwner("notice-language");
     await stub.admit(telegram, "kelpie", "pt-br");
     expect(await stub.noticeStranger(sender(7301))).toEqual({

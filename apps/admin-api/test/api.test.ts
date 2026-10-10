@@ -1035,7 +1035,7 @@ describe("admin API pages in the owner's language", () => {
       deps,
     );
     const html = await paired.text();
-    expect(html).toContain("y pulsa Iniciar");
+    expect(html).toContain("y presiona Iniciar");
     expect(html).toMatch(/durante los próximos \d+ minutos/);
     expect(html).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
   });

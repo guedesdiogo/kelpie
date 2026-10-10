@@ -214,7 +214,7 @@ const TEXTS: Localized<{
     form: (id, href, minutes) =>
       `El formulario seguro para conectar el bot de Telegram del agente ${id}: ${href}\nFunciona una vez, durante los próximos ${minutes} minutos. Pega allí el token del bot, nunca en el chat.`,
     pairing: (id, href) =>
-      `Para vincular tu propia cuenta de Telegram con el bot del agente ${id}, abre ${href} y pulsa el botón de la página.`,
+      `Para vincular tu propia cuenta de Telegram con el bot del agente ${id}, abre ${href} y presiona el botón de la página.`,
   },
 };
 

@@ -10,6 +10,7 @@ import {
   type Localized,
   linksOf,
   localeOf,
+  MAX_LANGUAGE_CHARS,
   type SendOutcome,
   webLinks,
 } from "@kelpie/channels";
@@ -128,8 +129,8 @@ export const PAUSED_TEXT: Localized = {
 };
 /** The person's latest messages the conversation's language is read from (#187). */
 const LANGUAGE_WINDOW = 5;
-/** A device's language is a tag or an `Accept-Language` value: a few tags at most. */
-const MAX_LANGUAGE_CHARS = 200;
+/** Of each, the end, where a run of messages has its newest: enough to tell a language. */
+const LANGUAGE_SAMPLE_CHARS = 2_000;
 
 /** Bounds on what one conversation accepts. */
 export const LIMITS = {
@@ -449,6 +450,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       return { status: "duplicate" };
     }
     if (target.providerMessageId) this.#set("lastPauseId", target.providerMessageId);
+    // A pause may be the first thing a conversation gets: its answer needs a language too (#187).
+    this.#noteLanguage(target.language);
     if (this.#get("paused", false)) return { status: "paused" };
     this.#interrupt();
     this.#set("epoch", this.#epoch() + 1);
@@ -2063,8 +2066,17 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    */
   #noteLanguage(device: string | null | undefined): void {
     if (typeof device === "string" && device !== "") {
-      this.#set("deviceLanguage", device.slice(0, MAX_LANGUAGE_CHARS));
+      this.#setIfChanged("deviceLanguage", device.slice(0, MAX_LANGUAGE_CHARS));
     }
+    // Newest first: the messages no turn has claimed yet, then history's.
+    const waiting = this.#db
+      .select({ text: schema.inbound.text })
+      .from(schema.inbound)
+      .where(isNull(schema.inbound.turnId))
+      .orderBy(desc(schema.inbound.id))
+      .limit(LANGUAGE_WINDOW)
+      .all()
+      .map((row) => row.text);
     const said = this.#db
       .select({ message: schema.history.message })
       .from(schema.history)
@@ -2073,11 +2085,16 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .limit(LANGUAGE_WINDOW)
       .all()
       .map(({ message }) => withoutTypedStamps(messageText(message)));
-    const waiting = this.#pendingInbound()
-      .slice(-LANGUAGE_WINDOW)
-      .map((row) => row.text);
-    const detected = detectLocale([...said, ...waiting].join("\n"));
-    if (detected) this.#set("language", detected);
+    const latest = [...waiting, ...said]
+      .slice(0, LANGUAGE_WINDOW)
+      .map((text) => text.slice(-LANGUAGE_SAMPLE_CHARS));
+    const detected = detectLocale(latest);
+    if (detected) this.#setIfChanged("language", detected);
+  }
+
+  /** Writes a state value only when it differs, so a message doesn't cost needless writes. */
+  #setIfChanged(key: string, value: string): void {
+    if (this.#get<unknown>(key, null) !== value) this.#set(key, value);
   }
 
   /**

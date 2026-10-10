@@ -95,6 +95,16 @@ describe("the webchat's socket", () => {
       "assistant:webchat:u-owner",
       expect.objectContaining({ language: "pt-BR,pt;q=0.9" }),
     );
+    // A browser that names no language sends an empty one: the header says instead.
+    const empty = deps();
+    await handleWebchat(
+      socketRequest("/webchat/ws?agent=assistant&lang=", { "Accept-Language": "es" }),
+      empty,
+    );
+    expect(empty.connect).toHaveBeenCalledWith(
+      "assistant:webchat:u-owner",
+      expect.objectContaining({ language: "es" }),
+    );
     const long = deps();
     await handleWebchat(socketRequest(`/webchat/ws?agent=assistant&lang=${"x".repeat(500)}`), long);
     expect(long.connect).toHaveBeenCalledWith(

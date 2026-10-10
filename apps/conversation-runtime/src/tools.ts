@@ -94,9 +94,9 @@ const NOTICE: Localized<{
   },
   es: {
     confirm: "Confirma",
-    button: (code) => `pulsa Confirmar, o responde solo con el código ${code}`,
+    button: (code) => `presiona Confirmar, o responde solo con el código ${code}`,
     typed: (code) => `responde solo con el código ${code}`,
-    goAhead: (how, minutes) => `Para seguir, ${how}. Caduca en ${minutes} minutos.`,
+    goAhead: (how, minutes) => `Para seguir, ${how}. Expira en ${minutes} minutos.`,
   },
 };
 

@@ -15,7 +15,7 @@ import {
   type StrangerNotice,
   type TimeZoneResult,
 } from "@kelpie/access";
-import type { ChannelId } from "@kelpie/channels";
+import { type ChannelId, MAX_LANGUAGE_TAG_CHARS } from "@kelpie/channels";
 import { and, count, eq, gt, isNull, lt, or } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
@@ -440,7 +440,11 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
     if (!user) return { admitted: false, reason: "unknown_identity" };
     if (user.role !== "owner") return { admitted: false, reason: "no_grant" };
     // Written only when it changed, so a message doesn't cost a write.
-    if (typeof language === "string" && language.length <= 35 && language !== user.languageCode) {
+    if (
+      typeof language === "string" &&
+      language.length <= MAX_LANGUAGE_TAG_CHARS &&
+      language !== user.languageCode
+    ) {
       this.#db
         .update(schema.identities)
         .set({ languageCode: language })

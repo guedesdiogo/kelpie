@@ -637,7 +637,7 @@ describe("a turn's steps in the webchat", () => {
     await agent(name).flush();
     await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(2));
     expect(String(ofType(chat.frames, "bubble")[1]?.text)).toMatch(
-      /^Confirma: .+\nPara seguir, pulsa Confirmar, o responde solo con el código [A-Z0-9]{6}\. Caduca en 10 minutos\.$/s,
+      /^Confirma: .+\nPara seguir, presiona Confirmar, o responde solo con el código [A-Z0-9]{6}\. Expira en 10 minutos\.$/s,
     );
   });
 
