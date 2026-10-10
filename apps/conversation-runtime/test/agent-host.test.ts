@@ -1,4 +1,4 @@
-import { runInDurableObject } from "cloudflare:test";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { DEFAULT_SETTINGS, SETUP_AGENT_ID } from "@kelpie/config";
 import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
@@ -89,6 +89,24 @@ describe("AgentHost", () => {
       settings: { systemPrompt: "Fale como um pirata." },
       promptVersion: 1,
     });
+  });
+
+  it("starts a new prompt version once for an agent from before built-in prompts were tracked", async () => {
+    const stub = host("untracked");
+    await stub.config();
+    // A deploy before this one ran the agent and kept no built-in prompt.
+    await seedState(stub, { defaultPrompt: null });
+    await evictDurableObject(stub);
+
+    expect((await stub.config()).promptVersion).toBe(1);
+    expect((await stub.config()).promptVersion).toBe(1);
+
+    // One whose configured prompt replaces the built-in one keeps its version.
+    const configured = host("untracked-configured");
+    await configured.configure({ systemPrompt: "Fale como um pirata." }, owner);
+    await seedState(configured, { defaultPrompt: null });
+    await evictDurableObject(configured);
+    expect((await configured.config()).promptVersion).toBe(1);
   });
 
   it("drops the end-of-turn windows and the old 10 s cap from settings stored before ADR-0024", async () => {

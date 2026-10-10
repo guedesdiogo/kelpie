@@ -35,10 +35,16 @@ const COMPILE_TIMEOUT_MS = 3_000;
  */
 export class AgentHost extends Agent<Env> implements AgentHostContract {
   readonly #db: DrizzleSqliteDODatabase<typeof schema>;
+  /** True when the agent's tables were already there: it ran before this instance. */
+  readonly #existed: boolean;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.#db = drizzle(ctx.storage, { schema });
+    this.#existed =
+      ctx.storage.sql
+        .exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'state'")
+        .toArray().length > 0;
     // If a migration fails the object resets, and the next request retries it.
     void ctx.blockConcurrencyWhile(async () => {
       try {
@@ -69,15 +75,16 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
 
   /**
    * The prompt version, once the built-in default prompt is checked against the one last seen. A
-   * new default bumps it only while no configured prompt replaces it; with none seen yet, the
-   * default is recorded without a bump. The compare, the bump and the write are one synchronous
-   * step.
+   * new default bumps it only while no configured prompt replaces it. With none seen yet, a new
+   * agent records the default without a bump; an agent from before defaults were kept can't tell
+   * whether its default changed since its replies, so it bumps once. The compare, the bump and the
+   * write are one synchronous step.
    */
   #promptVersion(builtIn: string, inEffect: boolean): number {
     const version = this.#get("promptVersion", 0);
     const seen = this.#get<string | null>("defaultPrompt", null);
     if (seen === builtIn) return version;
-    const promptVersion = seen !== null && inEffect ? version + 1 : version;
+    const promptVersion = (seen !== null || this.#existed) && inEffect ? version + 1 : version;
     this.#db.transaction((tx) => {
       for (const [key, value] of [
         ["defaultPrompt", builtIn],
