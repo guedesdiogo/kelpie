@@ -75,10 +75,10 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
 
   /**
    * The prompt version, once the built-in default prompt is checked against the one last seen. A
-   * new default bumps it only while no configured prompt replaces it. With none seen yet, a new
-   * agent records the default without a bump; an agent from before defaults were kept can't tell
-   * whether its default changed since its replies, so it bumps once. The compare, the bump and the
-   * write are one synchronous step.
+   * new default bumps it only while no configured prompt replaces it. With none seen yet, an agent
+   * this instance created records the default without a bump; one whose tables were already there
+   * can't tell whether its default changed since its replies, so it bumps once. The compare, the
+   * bump and the write are one synchronous step.
    */
   #promptVersion(builtIn: string, inEffect: boolean): number {
     const version = this.#get("promptVersion", 0);

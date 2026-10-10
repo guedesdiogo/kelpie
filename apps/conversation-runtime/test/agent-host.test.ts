@@ -66,6 +66,9 @@ describe("AgentHost", () => {
     });
     expect((await stub.config()).promptVersion).toBe(5);
     expect((await stub.turnConfig()).promptVersion).toBe(5);
+
+    // Only this id gets the persona: leave it as a new agent for the other test that uses it.
+    await seedState(stub, { promptVersion: null, defaultPrompt: SETUP_PROMPT });
   });
 
   it("does the same for any agent's built-in prompt, and a later change bumps only for its own", async () => {
