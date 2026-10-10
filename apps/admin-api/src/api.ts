@@ -7,7 +7,13 @@ import {
   type OwnerResult,
   type RelinkResult,
 } from "@kelpie/access";
-import { type Actor, type CommandResult, type ConfigCommands, isAgentId } from "@kelpie/config";
+import {
+  type Actor,
+  type CommandResult,
+  type ConfigCommands,
+  isAgentId,
+  type SetupEvent,
+} from "@kelpie/config";
 import {
   closedPage,
   type FormDeps,
@@ -39,6 +45,8 @@ export interface AdminDeps {
   commands: ConfigCommands;
   /** The one-time secure forms in channel-egress. */
   forms: FormDeps;
+  /** Reports a setup step the owner finished to the agent's AgentHost (#206). */
+  setupDone(agentId: string, event: SetupEvent): Promise<void>;
   /** The first-run token set at deploy (ADR-0013): `<expiry in epoch seconds>.<random>`. */
   bootstrapToken: string | undefined;
   /**
@@ -178,7 +186,16 @@ async function handleForm(request: Request, pathname: string, deps: AdminDeps): 
     const body = await readBody(request);
     if (!body.ok) return answer(body.status, texts.tooLarge, texts.tooLarge.body);
     const botToken = new URLSearchParams(body.text).get("botToken") ?? "";
-    return await submitForm(token, botToken, deps.forms, locale);
+    // The conversation that sent the form learns the bot is connected (#206).
+    const { userId } = admission;
+    return await submitForm(token, botToken, deps.forms, locale, (agentId, bot, registered) =>
+      deps.setupDone(agentId, {
+        step: "telegram_connected",
+        userId,
+        bot,
+        webhookRegistered: registered,
+      }),
+    );
   } catch (error) {
     console.error("admin-api: form failed", errorName(error));
     return unavailablePage(locale);

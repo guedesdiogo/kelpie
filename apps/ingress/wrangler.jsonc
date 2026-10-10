@@ -45,7 +45,17 @@
         "script_name": "kelpie-conversation-runtime"
       },
       // The webchat opens only agents the registry lists.
-      { "name": "REGISTRY", "class_name": "Registry", "script_name": "kelpie-conversation-runtime" }
+      {
+        "name": "REGISTRY",
+        "class_name": "Registry",
+        "script_name": "kelpie-conversation-runtime"
+      },
+      // A finished pairing is reported to the agent, which tells the conversation that sent it (#206).
+      {
+        "name": "AGENT_HOST",
+        "class_name": "AgentHost",
+        "script_name": "kelpie-conversation-runtime"
+      }
     ]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Directory"] }]

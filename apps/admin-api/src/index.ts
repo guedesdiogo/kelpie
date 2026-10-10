@@ -60,6 +60,7 @@ function depsFor(env: Env): AdminDeps {
       },
     }),
     forms,
+    setupDone: (agentId, event) => agentHost(agentId).setupDone(event),
     bootstrapToken: env.BOOTSTRAP_TOKEN,
     // Optional: set only during a recovery and deleted after it, so `secrets.required` can't list
     // it, and `wrangler types` leaves it out of `Env`.

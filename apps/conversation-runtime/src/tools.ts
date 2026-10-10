@@ -1,5 +1,5 @@
 import type { Locale, Localized } from "@kelpie/channels";
-import type { Actor } from "@kelpie/config";
+import type { Actor, SetupStep } from "@kelpie/config";
 import type { RecallOptions } from "@kelpie/context-store/contract";
 import { withoutTypedStamps } from "@kelpie/conversation";
 import type { ToolCallPart, ToolResult, ToolSpec } from "@kelpie/llm";
@@ -126,6 +126,11 @@ export interface HostLink {
   text: string;
   /** The bubble's one link: a page on the admin API's origin, behind the owner's Access login. */
   href: string;
+  /**
+   * The setup step the page finishes, and until when the conversation waits for it (#206): the
+   * owner's finishing it is reported to the conversation, which goes on without them saying so.
+   */
+  awaits?: { agentId: string; step: SetupStep; until: number };
 }
 
 /** Codes avoid letters and digits that read alike: no 0/O, 1/I/L, 2/Z, 5/S, 8/B. */

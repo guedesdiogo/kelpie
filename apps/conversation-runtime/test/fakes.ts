@@ -102,6 +102,8 @@ export interface FakeWorld {
   modelHeld: boolean;
   cancelled: number;
   sent: string[];
+  /** Every wait a conversation noted for a setup step (#206). */
+  awaits: { agentId: string; conversation: string; step: string; until: number }[];
   /** Every bubble sent, with whether it went out silently and the link it may preview, if any. */
   sends: { text: string; silent: boolean; previewUrl?: string; links?: readonly string[] }[];
   typing: number;
@@ -163,6 +165,7 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
     modelHeld: false,
     cancelled: 0,
     sent: [],
+    awaits: [],
     sends: [],
     remembered: [],
     failRemember: false,
@@ -190,6 +193,9 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
     ports: {
       get tools() {
         return world.tools;
+      },
+      async awaitSetup(agentId, conversation, step, until) {
+        world.awaits.push({ agentId, conversation, step, until });
       },
       async generate(tier, request): Promise<ModelCall> {
         world.requests.push(structuredClone(request));

@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { DIRECTORY_NAME } from "@kelpie/access";
 import type { EgressDestination, WebhookNotice } from "@kelpie/channels";
+import type { SetupEvent } from "@kelpie/config";
 import type {
   InboundMessage,
   IngestResult,
@@ -53,6 +54,7 @@ function fakes(overrides: Partial<TelegramWebhookDeps> = {}) {
   const ingested: { name: string; message: InboundMessage }[] = [];
   const paused: { name: string; target: PauseTarget }[] = [];
   const notices: { agentId: string; destination: EgressDestination; notice: WebhookNotice }[] = [];
+  const reported: { agentId: string; event: SetupEvent }[] = [];
   const deps: TelegramWebhookDeps = {
     webhooks: {
       async verifyTelegram(agentId, secret) {
@@ -74,9 +76,12 @@ function fakes(overrides: Partial<TelegramWebhookDeps> = {}) {
       paused.push({ name, target });
       return { status: "paused" };
     },
+    async setupDone(agentId, event) {
+      reported.push({ agentId, event });
+    },
     ...overrides,
   };
-  return { deps, verified, ingested, notices, paused };
+  return { deps, verified, ingested, notices, paused, reported };
 }
 
 /** A `/start` as Telegram sends it from a deep link: a bot command entity at the start. */
@@ -305,6 +310,37 @@ describe("Telegram pairing and strangers", () => {
     expect(
       await directory().admit({ channel: "telegram", channelUserId: "4242" }, "kelpie"),
     ).toMatchObject({ admitted: true, userId: "u-owner" });
+  });
+
+  it("reports a finished pairing to the agent, and answers whatever the report does (#206)", async () => {
+    const { deps, reported, notices } = fakes();
+    await handleTelegramWebhook(webhook(start(6161, await issueCode())), "kelpie", deps);
+    expect(reported).toEqual([
+      { agentId: "kelpie", event: { step: "telegram_paired", userId: "u-owner" } },
+    ]);
+    expect(notices.at(-1)?.notice).toMatchObject({ kind: "paired" });
+
+    // A report that fails, or doesn't answer, still lets the webhook answer 200 and say "paired",
+    // so Telegram doesn't send the /start again.
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (const [id, setupDone] of [
+      [
+        6262,
+        async () => {
+          throw new Error("AgentHost down");
+        },
+      ],
+      [6363, () => new Promise<void>(() => {})],
+    ] as const) {
+      const broken = fakes({ setupDone });
+      const response = await handleTelegramWebhook(
+        webhook(start(id, await issueCode())),
+        "kelpie",
+        broken.deps,
+      );
+      expect(response.status).toBe(200);
+      expect(broken.notices).toMatchObject([{ notice: { kind: "paired" } }]);
+    }
   });
 
   it("answers a wrong code with nothing at all", async () => {

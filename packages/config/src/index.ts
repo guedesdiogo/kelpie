@@ -11,6 +11,8 @@ export {
   createConfigCommands,
   type RegistryContract,
   type RenameAgentResult,
+  type SetupEvent,
+  type SetupStep,
   type ShownIdentity,
 } from "./commands.ts";
 export {

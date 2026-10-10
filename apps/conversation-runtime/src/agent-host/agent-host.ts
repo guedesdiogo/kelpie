@@ -4,11 +4,13 @@ import type {
   AgentHostContract,
   AgentSettings,
   ConfigureResult,
+  SetupEvent,
+  SetupStep,
 } from "@kelpie/config";
 import { DEFAULT_SETTINGS, parseSettings, SETUP_AGENT_ID } from "@kelpie/config";
 import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
 import { Agent } from "agents";
-import { eq } from "drizzle-orm";
+import { and, eq, lte } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import { SETUP_PROMPT } from "../setup-agent.ts";
@@ -164,6 +166,63 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     return { ok: true, value: { settings, promptVersion } };
   }
 
+  /**
+   * Notes that a conversation waits for a step of this agent (#206). Waiting again moves its end.
+   * An RPC boundary, so the values are checked; a bad one is ignored.
+   */
+  awaitSetup(conversation: string, step: SetupStep, until: number): void {
+    if (
+      typeof conversation !== "string" ||
+      conversation === "" ||
+      conversation.length > MAX_CONVERSATION_NAME ||
+      !SETUP_STEPS.includes(step) ||
+      !Number.isFinite(until)
+    ) {
+      return;
+    }
+    this.#db
+      .insert(schema.setupWaits)
+      .values({ conversation, step, until })
+      .onConflictDoUpdate({
+        target: [schema.setupWaits.conversation, schema.setupWaits.step],
+        set: { until },
+      })
+      .run();
+  }
+
+  /**
+   * Tells each conversation still waiting for the event's step that the owner finished it. A wait
+   * ends once its conversation took the event; one it couldn't reach stays, for the next report.
+   * Expired waits go first.
+   */
+  async setupDone(event: SetupEvent): Promise<void> {
+    const agentId = this.ctx.id.name;
+    if (!agentId || !SETUP_STEPS.includes(event?.step)) return;
+    this.#db.delete(schema.setupWaits).where(lte(schema.setupWaits.until, Date.now())).run();
+    const waiting = this.#db
+      .select({ conversation: schema.setupWaits.conversation })
+      .from(schema.setupWaits)
+      .where(eq(schema.setupWaits.step, event.step))
+      .all();
+    for (const { conversation } of waiting) {
+      try {
+        await this.env.CONVERSATION_AGENT.getByName(conversation).setupDone(agentId, event);
+      } catch (error) {
+        console.error("AgentHost: a conversation wasn't told a setup step", errorName(error));
+        continue;
+      }
+      this.#db
+        .delete(schema.setupWaits)
+        .where(
+          and(
+            eq(schema.setupWaits.conversation, conversation),
+            eq(schema.setupWaits.step, event.step),
+          ),
+        )
+        .run();
+    }
+  }
+
   #get<T>(key: string, fallback: T): T {
     const row = this.#db
       .select({ value: schema.state.value })
@@ -173,6 +232,13 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     return row ? (row.value as T) : fallback;
   }
 }
+
+const SETUP_STEPS: readonly unknown[] = [
+  "telegram_connected",
+  "telegram_paired",
+] satisfies SetupStep[];
+/** A conversation object's name is an agent id, a channel and a thread id. */
+const MAX_CONVERSATION_NAME = 256;
 
 function errorName(error: unknown): string {
   return error instanceof Error ? error.name : "unknown error";

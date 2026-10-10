@@ -63,8 +63,17 @@ export class Registry extends DurableObject {
     return id === "assistant" ? { id, name: "Assistant" } : null;
   }
 }
+export class AgentHost extends DurableObject {
+  async setupDone(event) {
+    await this.ctx.storage.put("reported", event);
+  }
+}
 export default { fetch: () => new Response(null, { status: 404 }) };`,
-            durableObjects: { CONVERSATION_AGENT: "ConversationAgent", REGISTRY: "Registry" },
+            durableObjects: {
+              CONVERSATION_AGENT: "ConversationAgent",
+              REGISTRY: "Registry",
+              AGENT_HOST: "AgentHost",
+            },
           },
         ],
       },

@@ -641,6 +641,33 @@ describe("a turn's steps in the webchat", () => {
     );
   });
 
+  it("never shows Kelpie's note about a finished setup step, and answers it (#206)", async () => {
+    const world = use(fakeWorld([reply("Abra o link."), reply("Bot conectado!")]));
+    const name = "setup:webchat:u-owner-note";
+    const chat = await open(name, { ...owner, agentId: "setup" });
+    chat.send({ type: "message", id: "c1", text: "vamos conectar o bot" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
+    await agent(name).flush();
+    await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(1));
+
+    await agent(name).setupDone("lume", {
+      step: "telegram_connected",
+      userId: "u-owner",
+      bot: "LumeBot",
+      webhookRegistered: true,
+    });
+    await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(2));
+    expect(world.sent).toEqual([]);
+    expect(JSON.stringify(world.requests.at(-1)?.messages)).toContain("Kelpie, automatically");
+
+    const later = await open(name, { ...owner, agentId: "setup" });
+    await vi.waitFor(() => expect(later.frames[0]).toMatchObject({ type: "history" }));
+    const replay = JSON.stringify(later.frames[0]);
+    expect(replay).toContain("vamos conectar o bot");
+    expect(replay).toContain("Bot conectado!");
+    expect(replay).not.toContain("Kelpie, automatically");
+  });
+
   it("refuses a press once the confirmation expired (#186)", async () => {
     const world = use(
       fakeWorld([toolCalls({ name: "change", input: { to: "frontier" } }), reply("Confirme.")]),

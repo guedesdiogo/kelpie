@@ -29,6 +29,11 @@ export const inbound = sqliteTable(
     role: text("role", { enum: ["owner", "admin", "member"] }),
     chatType: text("chat_type", { enum: ["direct", "group"] }),
     turnId: integer("turn_id"),
+    /**
+     * A note Kelpie wrote, not the person (#206): that the owner finished a setup step. It is
+     * authored as that owner, so its turn keeps their role, but it is never read as their words.
+     */
+    fromKelpie: integer("from_kelpie", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [uniqueIndex("inbound_provider_message").on(table.providerMessageId)],
 );
@@ -106,6 +111,12 @@ export const history = sqliteTable("history", {
    */
   checkpointId: integer("checkpoint_id"),
   message: text("message", { mode: "json" }).$type<ChatMessage>().notNull(),
+  /**
+   * A user row holding Kelpie's own note (#206), as on `inbound`: the model reads it, and nothing
+   * that reads the person's words does (the code gate, allowed links, the replay, session pages,
+   * the conversation's language, recall).
+   */
+  fromKelpie: integer("from_kelpie", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at").notNull(),
 });
 
