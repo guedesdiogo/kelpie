@@ -1,4 +1,4 @@
-import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { type LlmEvent, toNdjsonStream } from "@kelpie/llm";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
@@ -9,9 +9,12 @@ import {
   replaceGatewayForTesting,
 } from "../src/index.ts";
 
-afterEach(() => {
+afterEach(async () => {
   replaceBackendForTesting(undefined);
   replaceGatewayForTesting(undefined);
+  // A test's vaults go, alarms and all (#223): one left with an alarm wakes in a later test, where
+  // it syncs with that test's backend and asks that test's model.
+  await reset();
 });
 
 const vault = (name: string) => env.VAULT.getByName(name);
