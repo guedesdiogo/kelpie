@@ -23,9 +23,11 @@
     // The vault's embedding model: "workers-ai" (bge-m3) or "openai" (text-embedding-3-small).
     "EMBEDDING_PROVIDER": "workers-ai",
     // For each tier, the models to try in order. Owner configuration; edit freely.
+    // "haiku" is Kelpie's alias for the newest Claude Haiku, looked up in Anthropic's Models API
+    // once an hour; a pinned id such as "claude-haiku-5-5" works too (issue #199).
     "MODEL_ROUTES": {
       "cheap": [
-        { "provider": "anthropic", "model": "claude-haiku-4-5" },
+        { "provider": "anthropic", "model": "haiku" },
         { "provider": "openai", "model": "gpt-6-luna" }
       ],
       "medium": [

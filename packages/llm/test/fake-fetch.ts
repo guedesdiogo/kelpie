@@ -16,7 +16,8 @@ export function fakeFetch(...responders: Responder[]) {
     calls.push({
       url: input instanceof Request ? input.url : input.toString(),
       headers: new Headers(init?.headers),
-      body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+      // A GET, such as the Models API's, has no body.
+      body: (init?.body ? JSON.parse(String(init.body)) : {}) as Record<string, unknown>,
     });
     const responder = responders[calls.length - 1];
     if (!responder) throw new Error(`Unexpected request #${calls.length}`);
@@ -59,6 +60,11 @@ export function hangingSse(events: readonly SseEvent[]): Responder {
       }),
       { headers: { "content-type": "text/event-stream" } },
     );
+}
+
+/** A JSON response, such as a page of the Models API. */
+export function json(body: unknown): Responder {
+  return () => Response.json(body);
 }
 
 /** An HTTP error the SDK must not retry. */

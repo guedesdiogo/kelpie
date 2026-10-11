@@ -23,7 +23,7 @@ const start = {
     id: "msg_01",
     type: "message",
     role: "assistant",
-    model: "claude-haiku-4-5",
+    model: "claude-haiku-5-5",
     content: [],
     stop_reason: null,
     stop_sequence: null,
@@ -57,6 +57,36 @@ function sseResponse(events: { type: string }[], signal?: AbortSignal | null) {
   );
 }
 
+// The cheap tier's "haiku" alias lists Anthropic's models before the call, unless an earlier test in
+// this isolate already resolved it, so Anthropic's stubs answer by path. The page is built from the
+// Models API's documented format, not recorded.
+const MODELS = {
+  data: [
+    ["claude-haiku-5-5", "2026-09-15T00:00:00Z"],
+    ["claude-haiku-4-5-20251001", "2025-10-01T00:00:00Z"],
+  ].map(([id, created_at]) => ({
+    type: "model",
+    id,
+    display_name: id,
+    created_at,
+    max_input_tokens: 200_000,
+    max_tokens: 64_000,
+    capabilities: null,
+  })),
+  has_more: false,
+  first_id: "claude-haiku-5-5",
+  last_id: "claude-haiku-4-5-20251001",
+};
+
+function anthropic(messages: (init?: RequestInit) => Response) {
+  return async (input: RequestInfo | URL, init?: RequestInit) =>
+    String(input).startsWith("https://api.anthropic.com/v1/models")
+      ? Response.json(MODELS)
+      : messages(init);
+}
+
+const isMessages = ([input]: unknown[]) => String(input).includes("/v1/messages");
+
 // Recorded from TypeSafe's API in the Jev spike (issue #27).
 const RECORDED_JEV = {
   model: "jev-1.13.0",
@@ -81,7 +111,7 @@ describe("llm-gateway", () => {
   it("streams a tier's reply over RPC as NDJSON events", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockImplementation(async () => sseResponse([start, ...text, ...end]));
+      .mockImplementation(anthropic(() => sseResponse([start, ...text, ...end])));
 
     using generation = await exports.LlmGateway.generate("cheap", request);
     const events: LlmEvent[] = [];
@@ -93,21 +123,24 @@ describe("llm-gateway", () => {
       reason: "stop",
       message: { parts: [{ type: "text", text: "Olá!" }] },
       usage: [
-        { model: "claude-haiku-4-5", inputUncached: 12, cacheRead: 0, cacheWrite: 0, output: 5 },
+        { model: "claude-haiku-5-5", inputUncached: 12, cacheRead: 0, cacheWrite: 0, output: 5 },
       ],
     });
-    const [url, init] = fetchSpy.mock.calls[0] ?? [];
+    const [url, init] = fetchSpy.mock.calls.find(isMessages) ?? [];
     expect(String(url)).toBe("https://api.anthropic.com/v1/messages?beta=true");
     expect(new Headers(init?.headers).get("x-api-key")).toBe("sk-ant-test");
-    expect(JSON.parse(String(init?.body))).toMatchObject({ model: "claude-haiku-4-5" });
+    // The newest Haiku in the models list, which the cheap tier's alias stands for.
+    expect(JSON.parse(String(init?.body))).toMatchObject({ model: "claude-haiku-5-5" });
   });
 
   it("aborts the provider request when the caller stops reading", async () => {
     let providerSignal: AbortSignal | null | undefined;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
-      providerSignal = init?.signal;
-      return sseResponse([start, ...text], init?.signal);
-    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      anthropic((init) => {
+        providerSignal = init?.signal;
+        return sseResponse([start, ...text], init?.signal);
+      }),
+    );
 
     using generation = await exports.LlmGateway.generate("cheap", request);
     for await (const _event of fromNdjsonStream(await generation.events(), () =>
@@ -120,13 +153,15 @@ describe("llm-gateway", () => {
   });
 
   it("logs a refused call by its kind and status, never the provider's message", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
-      Response.json(
-        {
-          type: "error",
-          error: { type: "invalid_request_error", message: "prompt quotes marker-1a2b" },
-        },
-        { status: 400 },
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      anthropic(() =>
+        Response.json(
+          {
+            type: "error",
+            error: { type: "invalid_request_error", message: "prompt quotes marker-1a2b" },
+          },
+          { status: 400 },
+        ),
       ),
     );
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});

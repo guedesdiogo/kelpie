@@ -25,7 +25,21 @@ export interface AnthropicConfig {
   /** Extra headers, such as `cf-aig-authorization` for an authenticated gateway. */
   headers?: Record<string, string>;
   fetch?: typeof fetch;
+  /** Where resolved aliases are kept. Defaults to one cache per isolate. */
+  aliasCache?: Map<string, ResolvedAlias>;
 }
+
+/** A model alias resolved to a model id, trusted until `expires` (epoch milliseconds). */
+export interface ResolvedAlias {
+  model: string;
+  expires: number;
+}
+
+// The API has no alias for a model family (`claude-haiku-latest` and `haiku` answer 404), so Kelpie
+// resolves these itself: each stands for the newest release whose id has the prefix (issue #199).
+const MODEL_ALIASES = new Map([["haiku", "claude-haiku-"]]);
+const ALIAS_TTL_MS = 60 * 60 * 1000;
+const ALIAS_CACHE = new Map<string, ResolvedAlias>();
 
 // Models that accept server-side refusal fallback. On a policy decline the API retries the same
 // request on a substitute model chosen by refusal category, inside the same call.
@@ -46,8 +60,10 @@ const REFUSAL_FALLBACK_BETA = "server-side-fallback-2026-07-01";
 export class AnthropicMessagesProvider implements LlmProvider {
   readonly id = "anthropic";
   readonly #client: Anthropic;
+  readonly #aliases: Map<string, ResolvedAlias>;
 
   constructor(config: AnthropicConfig) {
+    this.#aliases = config.aliasCache ?? ALIAS_CACHE;
     this.#client = new Anthropic({
       apiKey: config.apiKey,
       ...(config.baseURL ? { baseURL: config.baseURL } : {}),
@@ -59,9 +75,10 @@ export class AnthropicMessagesProvider implements LlmProvider {
   }
 
   async *stream(request: LlmRequest, options: StreamOptions = {}): AsyncIterable<LlmEvent> {
+    const model = await this.#resolve(request.model, options.signal);
     let final: Anthropic.Beta.BetaMessage;
     try {
-      const stream = this.#client.beta.messages.stream(toParams(request), {
+      const stream = this.#client.beta.messages.stream(toParams({ ...request, model }), {
         ...(options.signal ? { signal: options.signal } : {}),
       });
       for await (const event of stream) {
@@ -73,7 +90,46 @@ export class AnthropicMessagesProvider implements LlmProvider {
     } catch (error) {
       throw toLlmError(error);
     }
-    yield toFinish(final, request.model);
+    yield toFinish(final, model);
+  }
+
+  /**
+   * An alias becomes the newest matching model in the Models API, by release date. A refused key
+   * or an abort ends the turn, as on the call itself. Any other failure is retryable, so the router
+   * tries the tier's next candidate: a gateway that doesn't serve the list answers 404.
+   */
+  async #resolve(model: string, signal: AbortSignal | undefined): Promise<string> {
+    const prefix = MODEL_ALIASES.get(model);
+    if (prefix === undefined) return model;
+    const cached = this.#aliases.get(model);
+    if (cached && cached.expires > Date.now()) return cached.model;
+    let newest: { id: string; released: number } | undefined;
+    try {
+      for await (const info of this.#client.models.list(
+        { limit: 1000 },
+        signal ? { signal } : {},
+      )) {
+        if (!info.id.startsWith(prefix)) continue;
+        // A date that doesn't parse ranks below any real one.
+        const released = Date.parse(info.created_at) || Number.NEGATIVE_INFINITY;
+        if (!newest || released > newest.released) newest = { id: info.id, released };
+      }
+    } catch (error) {
+      const failure = toLlmError(error);
+      if (failure instanceof LlmError && (failure.code === "aborted" || failure.code === "auth")) {
+        throw failure;
+      }
+      const status = failure instanceof LlmError ? failure.status : undefined;
+      throw new LlmError(
+        `Couldn't resolve the model alias "${model}"`,
+        "unavailable",
+        true,
+        status,
+      );
+    }
+    if (!newest) throw new LlmError(`No model matches the alias "${model}"`, "unavailable", true);
+    this.#aliases.set(model, { model: newest.id, expires: Date.now() + ALIAS_TTL_MS });
+    return newest.id;
   }
 }
 
