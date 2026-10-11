@@ -2,7 +2,7 @@
 
 Kelpie's memory engine is modelled on [ai-memory](https://github.com/akitaonrails/ai-memory) (MIT), and a weekly routine reviews ai-memory's changes, so Kelpie adapts what makes sense ([ADR-0020](../adr/0020-shared-memory-engine.md) §1, Story 4.14, [#115](https://github.com/guedesdiogo/kelpie/issues/115)). This file records the last reviewed commit and how a review runs.
 
-Last reviewed commit: `c97766d55fe911843a0437831460b6624377324d`
+Last reviewed commit: `88f88044560437fd988b4dea49a3c4d14227d6ea`
 
 ## Reviews
 
@@ -10,6 +10,7 @@ Last reviewed commit: `c97766d55fe911843a0437831460b6624377324d`
 |---|---|---|---|
 | 2026-10-07 | `fc4da03..237933b` | v2.6.0, plus two unreleased fixes | [#196](https://github.com/guedesdiogo/kelpie/issues/196); comments on [#112](https://github.com/guedesdiogo/kelpie/issues/112#issuecomment-6050004378) and [#113](https://github.com/guedesdiogo/kelpie/issues/113#issuecomment-6050010566) |
 | 2026-10-09 | `237933b..c97766d` | v2.6.1 and v2.6.2, plus eight unreleased changelog entries | [#203](https://github.com/guedesdiogo/kelpie/issues/203); comment on [#112](https://github.com/guedesdiogo/kelpie/issues/112#issuecomment-6087802408) |
+| 2026-10-10 | `c97766d..88f8804` | v2.6.3, plus two unreleased changelog entries | [#230](https://github.com/guedesdiogo/kelpie/issues/230); comments on [#112](https://github.com/guedesdiogo/kelpie/issues/112#issuecomment-6104488824) and [#113](https://github.com/guedesdiogo/kelpie/issues/113#issuecomment-6104489006) |
 
 ## How a review runs
 
