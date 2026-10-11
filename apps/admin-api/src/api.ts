@@ -7,7 +7,13 @@ import {
   type OwnerResult,
   type RelinkResult,
 } from "@kelpie/access";
-import { type Actor, type CommandResult, type ConfigCommands, isAgentId } from "@kelpie/config";
+import {
+  type Actor,
+  type CommandResult,
+  type ConfigCommands,
+  isAgentId,
+  type SetupEvent,
+} from "@kelpie/config";
 import {
   closedPage,
   type FormDeps,
@@ -24,6 +30,7 @@ import {
   pairingAgentOf,
   pairingPage,
 } from "./pairing.ts";
+import { PAGES, pageLocale } from "./texts.ts";
 
 /** What the API needs from outside, so tests can replace it. */
 export interface AdminDeps {
@@ -38,6 +45,8 @@ export interface AdminDeps {
   commands: ConfigCommands;
   /** The one-time secure forms in channel-egress. */
   forms: FormDeps;
+  /** Reports a setup step the owner finished to the agent's AgentHost (#206). */
+  setupDone(agentId: string, event: SetupEvent): Promise<void>;
   /** The first-run token set at deploy (ADR-0013): `<expiry in epoch seconds>.<random>`. */
   bootstrapToken: string | undefined;
   /**
@@ -151,33 +160,45 @@ export async function handle(request: Request, deps: AdminDeps): Promise<Respons
  * check and owner admission as the commands. Answers are pages, never JSON.
  */
 async function handleForm(request: Request, pathname: string, deps: AdminDeps): Promise<Response> {
+  const locale = pageLocale(request);
+  const texts = PAGES[locale];
+  const answer = (status: number, { title }: { title: string }, body: string) =>
+    page(status, title, `<p>${body}</p>`, locale);
   const token = formTokenOf(pathname);
-  if (!token || (request.method !== "GET" && request.method !== "POST")) return closedPage();
+  if (!token || (request.method !== "GET" && request.method !== "POST")) return closedPage(locale);
   try {
     const identity = await deps.authenticate(request);
-    if (!identity.ok)
-      return page(401, "Sign in first", "<p>Open this link in your browser again.</p>");
+    if (!identity.ok) return answer(401, texts.signIn, texts.signIn.body);
     if (request.method === "POST" && !isSameOriginSubmission(request)) {
-      return page(403, "Not allowed", "<p>This form only accepts its own submissions.</p>");
+      return answer(403, texts.notAllowed, texts.notAllowed.ownForm);
     }
     const admission = await deps.directory.admit(
       { channel: ACCESS_SOURCE, channelUserId: identity.sub },
       ADMIN_AGENT_ID,
     );
     if (!admission.admitted || admission.role !== "owner") {
-      return page(403, "Not allowed", "<p>Only the owner can use this link.</p>");
+      return answer(403, texts.notAllowed, texts.notAllowed.ownerOnly);
     }
-    if (request.method === "GET") return await showForm(token, deps.forms);
+    if (request.method === "GET") return await showForm(token, deps.forms, locale);
     if (!request.headers.get("content-type")?.startsWith("application/x-www-form-urlencoded")) {
-      return page(415, "Not a form submission", "<p>Submit the token from the form page.</p>");
+      return answer(415, texts.notSubmission, texts.notSubmission.form);
     }
     const body = await readBody(request);
-    if (!body.ok) return page(body.status, "Too large", "<p>That isn't a bot token.</p>");
+    if (!body.ok) return answer(body.status, texts.tooLarge, texts.tooLarge.body);
     const botToken = new URLSearchParams(body.text).get("botToken") ?? "";
-    return await submitForm(token, botToken, deps.forms);
+    // The conversation that sent the form learns the bot is connected (#206).
+    const { userId } = admission;
+    return await submitForm(token, botToken, deps.forms, locale, (agentId, bot, registered) =>
+      deps.setupDone(agentId, {
+        step: "telegram_connected",
+        userId,
+        bot,
+        webhookRegistered: registered,
+      }),
+    );
   } catch (error) {
     console.error("admin-api: form failed", errorName(error));
-    return unavailablePage();
+    return unavailablePage(locale);
   }
 }
 
@@ -191,36 +212,43 @@ async function handlePairing(
   agentId: string,
   deps: AdminDeps,
 ): Promise<Response> {
+  const locale = pageLocale(request);
+  const texts = PAGES[locale];
+  const answer = (status: number, { title }: { title: string }, body: string) =>
+    page(status, title, `<p>${body}</p>`, locale);
   if (!isAgentId(agentId) || (request.method !== "GET" && request.method !== "POST")) {
-    return noAgentPage();
+    return noAgentPage(locale);
   }
   try {
     const identity = await deps.authenticate(request);
-    if (!identity.ok)
-      return page(401, "Sign in first", "<p>Open this link in your browser again.</p>");
+    if (!identity.ok) return answer(401, texts.signIn, texts.signIn.body);
     if (request.method === "POST" && !isSameOriginSubmission(request)) {
-      return page(403, "Not allowed", "<p>This page only accepts its own submissions.</p>");
+      return answer(403, texts.notAllowed, texts.notAllowed.ownPage);
     }
     const admission = await deps.directory.admit(
       { channel: ACCESS_SOURCE, channelUserId: identity.sub },
       ADMIN_AGENT_ID,
     );
     if (!admission.admitted || admission.role !== "owner") {
-      return page(403, "Not allowed", "<p>Only the owner can use this link.</p>");
+      return answer(403, texts.notAllowed, texts.notAllowed.ownerOnly);
     }
     const actor: Actor = { userId: admission.userId, role: admission.role, via: "admin-api" };
     const agent = await deps.commands.getAgent(actor, { id: agentId });
-    if (!agent.ok) return agent.reason === "unknown_agent" ? noAgentPage() : unavailablePage();
-    if (request.method === "GET") return pairingPage(agent.value);
+    if (!agent.ok) {
+      return agent.reason === "unknown_agent" ? noAgentPage(locale) : unavailablePage(locale);
+    }
+    if (request.method === "GET") return pairingPage(agent.value, locale);
     if (!request.headers.get("content-type")?.startsWith("application/x-www-form-urlencoded")) {
-      return page(415, "Not a form submission", "<p>Press the button on the page.</p>");
+      return answer(415, texts.notSubmission, texts.notSubmission.page);
     }
     const result = await deps.commands.pairTelegram(actor, { agentId });
-    if (result.ok) return pairedPage(result.value.link, result.value.expiresAt);
-    return result.reason === "not_connected" ? notConnectedPage() : unavailablePage();
+    if (result.ok) {
+      return pairedPage(result.value.link, result.value.expiresAt, deps.now(), locale);
+    }
+    return result.reason === "not_connected" ? notConnectedPage(locale) : unavailablePage(locale);
   } catch (error) {
     console.error("admin-api: pairing page failed", errorName(error));
-    return unavailablePage();
+    return unavailablePage(locale);
   }
 }
 

@@ -4,10 +4,11 @@ import {
   type ChannelWebhooksContract,
   type EgressDestination,
   InvalidWebhookError,
+  localeOf,
   type WebhookNotice,
 } from "@kelpie/channels";
 import { normalizeTelegramUpdate, TELEGRAM_SECRET_HEADER } from "@kelpie/channels/telegram";
-import { isAgentId } from "@kelpie/config";
+import { isAgentId, type SetupEvent } from "@kelpie/config";
 import type {
   Destination,
   InboundMessage,
@@ -42,6 +43,8 @@ export interface TelegramWebhookDeps {
   ingest(name: string, message: InboundMessage): Promise<IngestResult>;
   /** Pauses the conversation until the owner's next message. */
   pause(name: string, target: PauseTarget): Promise<PauseResult>;
+  /** Reports a setup step the owner finished to the agent's AgentHost (#206). */
+  setupDone(agentId: string, event: SetupEvent): Promise<void>;
 }
 
 /**
@@ -118,6 +121,7 @@ async function deliver(event: CanonicalEvent, deps: TelegramWebhookDeps): Promis
       agentId: event.agentId,
       destination,
       providerMessageId: event.providerMessageId,
+      ...(event.sender.languageCode === undefined ? {} : { language: event.sender.languageCode }),
     });
     if (paused.status === "rejected") {
       console.warn("ingress: the conversation refused a pause", paused.reason);
@@ -134,6 +138,7 @@ async function deliver(event: CanonicalEvent, deps: TelegramWebhookDeps): Promis
     destination,
     sentAt: event.providerTimestamp,
     timeZone: admission.timeZone,
+    ...(event.sender.languageCode === undefined ? {} : { language: event.sender.languageCode }),
   });
   if (result.status === "rejected") {
     console.warn("ingress: the conversation refused a message", result.reason);
@@ -164,9 +169,13 @@ async function fromStranger(
       deps,
       event.agentId,
       { channel: event.channel, threadId: event.threadId },
-      {
-        kind: "paired",
-      },
+      // In the language of the account that just paired, which has no conversation yet (#187).
+      { kind: "paired", locale: localeOf(event.sender.languageCode) ?? "en" },
+    );
+    // Then the conversation that sent the pairing link goes on by itself (#206). Best effort, and
+    // bounded: the webhook still answers 200, or Telegram would send the /start again.
+    await bounded(() =>
+      deps.setupDone(event.agentId, { step: "telegram_paired", userId: paired.userId }),
     );
     return;
   }
@@ -174,7 +183,12 @@ async function fromStranger(
   try {
     const notice = await deps.directory.noticeStranger(sender);
     if (!notice.notify) return;
-    const stranger: WebhookNotice = { kind: "stranger", senderId: sender.channelUserId };
+    // In the owner's language, as their account there was last seen (#187).
+    const stranger: WebhookNotice = {
+      kind: "stranger",
+      senderId: sender.channelUserId,
+      locale: localeOf(notice.ownerLanguage) ?? "en",
+    };
     if (event.sender.displayName) stranger.displayName = event.sender.displayName;
     const sent = await notify(
       deps,
@@ -186,6 +200,26 @@ async function fromStranger(
     if (!sent) await deps.directory.releaseStrangerNotice(sender);
   } catch (error) {
     console.warn("ingress: a stranger notice failed", errorName(error));
+  }
+}
+
+/** A setup step's report the webhook doesn't wait on for longer than this (#206). */
+const REPORT_TIMEOUT_MS = 2_000;
+
+/** Runs `work`, waits for it at most REPORT_TIMEOUT_MS, and never fails: a report is a courtesy. */
+async function bounded(work: () => Promise<void>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      work(),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, REPORT_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    console.warn("ingress: a setup step wasn't reported", errorName(error));
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 

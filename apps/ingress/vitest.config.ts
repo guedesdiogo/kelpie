@@ -41,7 +41,7 @@ export default { fetch: () => new Response(null, { status: 404 }) };`,
             name: "kelpie-conversation-runtime",
             modules: true,
             compatibilityDate: "2026-10-01",
-            script: `import { DurableObject } from "cloudflare:workers";
+            script: `import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 export class ConversationAgent extends DurableObject {
   // The webchat's upgrade: the socket's first frame echoes the headers this object received.
   async fetch(request) {
@@ -62,6 +62,9 @@ export class Registry extends DurableObject {
   get(id) {
     return id === "assistant" ? { id, name: "Assistant" } : null;
   }
+}
+export class SetupEvents extends WorkerEntrypoint {
+  setupDone() {}
 }
 export default { fetch: () => new Response(null, { status: 404 }) };`,
             durableObjects: { CONVERSATION_AGENT: "ConversationAgent", REGISTRY: "Registry" },

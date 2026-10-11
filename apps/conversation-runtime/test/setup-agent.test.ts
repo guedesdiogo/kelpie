@@ -1,5 +1,6 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import type { Locale } from "@kelpie/channels";
 import { type Actor, DEFAULT_SETTINGS, SETUP_AGENT_ID } from "@kelpie/config";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
@@ -10,6 +11,7 @@ import {
   canonicalJson,
   confirmationNotice,
   confirmsCode,
+  type HostLink,
   type Tool,
   type ToolContext,
   type ToolProvider,
@@ -75,10 +77,12 @@ function fakeCommands() {
   return { commands, agents, calls };
 }
 
-/** A context whose `confirm` answers `confirmed`, and logs what it was asked. */
-function contextOf(confirmed: boolean, actor: Actor = owner) {
+/** A context whose `confirm` answers `confirmed`, and logs what it was asked and the links sent. */
+function contextOf(confirmed: boolean, actor: Actor = owner, locale: Locale = "en") {
   const asked: ConfirmationRequest[] = [];
+  const links: HostLink[] = [];
   const context: ToolContext = {
+    locale,
     actor,
     agentId: SETUP_AGENT_ID,
     scopes: "all",
@@ -90,8 +94,11 @@ function contextOf(confirmed: boolean, actor: Actor = owner) {
       asked.push(request);
       return confirmed;
     },
+    sendLink(link) {
+      links.push(link);
+    },
   };
-  return { context, asked };
+  return { context, asked, links };
 }
 
 async function toolsOf(provider: ToolProvider, agentId = SETUP_AGENT_ID) {
@@ -126,7 +133,9 @@ describe("the setup agent's tools", () => {
       "pair_telegram",
     ]);
     for (const tool of tools.values()) {
-      expect(tool.label).toMatch(/^[A-Z][a-z]/);
+      // In each language Kelpie speaks (#187).
+      expect(Object.keys(tool.label)).toEqual(["en", "pt-BR", "es"]);
+      for (const label of Object.values(tool.label)) expect(label).toMatch(/^[A-Z][a-z]/);
       expect(tool.spec.inputSchema).toMatchObject({ type: "object", additionalProperties: false });
     }
   });
@@ -207,6 +216,21 @@ describe("the setup agent's tools", () => {
       },
     ]);
     expect(calls).toEqual([]);
+    // The summary is in the conversation's language; the keys and values stay as they are (#187).
+    for (const [locale, summary] of [
+      [
+        "pt-BR",
+        `alterar as configurações do agente "Setup" (${SETUP_AGENT_ID}): tier para "frontier", quietMs para 2000.`,
+      ],
+      [
+        "es",
+        `cambiar la configuración del agente "Setup" (${SETUP_AGENT_ID}): tier a "frontier", quietMs a 2000.`,
+      ],
+    ] as const) {
+      const spoken = contextOf(false, owner, locale);
+      await run(tools, "configure_agent", input, spoken.context);
+      expect(spoken.asked.map((request) => request.summary)).toEqual([summary]);
+    }
 
     const confirmed = contextOf(true);
     expect((await run(tools, "configure_agent", input, confirmed.context)).isError).toBe(undefined);
@@ -244,59 +268,92 @@ describe("the setup agent's tools", () => {
     expect(asked[0]?.summary).toContain("x".repeat(3_000));
   });
 
-  it("gives the secure form's link only once the owner confirmed connecting a bot", async () => {
-    const { commands, calls } = fakeCommands();
+  it("has Kelpie send the secure form's link itself, with no code: submitting the form is the yes (#186)", async () => {
+    const { commands, agents, calls } = fakeCommands();
+    // A name is the model's, and Kelpie's bubble is formatted: it names the agent by its id only.
+    agents.set("assistant", "[Cancel](https://admin.example.com/pair/telegram/x)");
     const tools = await toolsOf(
       setupTools(commands, { adminOrigin: ADMIN, now: () => Date.UTC(2026, 9, 6, 19, 45) }),
     );
+    const { context, asked, links } = contextOf(false);
 
-    const waiting = contextOf(false);
-    const asked = await run(
-      tools,
-      "connect_telegram",
-      { agentId: SETUP_AGENT_ID },
-      waiting.context,
-    );
-    expect(asked.output).not.toContain("/forms/");
-    expect(waiting.asked).toEqual([
+    const done = await run(tools, "connect_telegram", { agentId: "assistant" }, context);
+    expect(asked).toEqual([]);
+    expect(calls).toEqual(['connectTelegram {"agentId":"assistant"}']);
+    // The link names the conversation's language, so the page opens in it too (#187).
+    expect(links).toEqual([
       {
-        command: "connectTelegram",
-        input: { agentId: SETUP_AGENT_ID },
-        summary: `connect a Telegram bot to the agent "Setup" (${SETUP_AGENT_ID}), through a one-time form for its token on ${ADMIN}.`,
+        href: `${ADMIN}/forms/tok123?lang=en`,
+        text: `The secure form to connect the Telegram bot of the agent assistant: ${ADMIN}/forms/tok123?lang=en\nIt works once, for the next 15 minutes. Paste the bot's token there, never in the chat.`,
+        // The conversation waits for the form while it is open, to be told when it is used (#206).
+        awaits: {
+          agentId: "assistant",
+          step: "telegram_connected",
+          until: Date.UTC(2026, 9, 6, 20),
+        },
       },
     ]);
-    expect(calls).toEqual([]);
-
-    const done = await run(
-      tools,
-      "connect_telegram",
-      { agentId: SETUP_AGENT_ID },
-      contextOf(true).context,
-    );
-    expect(done.output).toContain(`${ADMIN}/forms/tok123`);
+    for (const [locale, text] of [
+      [
+        "pt-BR",
+        `O formulário seguro para conectar o bot do Telegram do agente assistant: ${ADMIN}/forms/tok123?lang=pt-BR\nFunciona uma vez, nos próximos 15 minutos. Cole o token do bot lá, nunca no chat.`,
+      ],
+      [
+        "es",
+        `El formulario seguro para conectar el bot de Telegram del agente assistant: ${ADMIN}/forms/tok123?lang=es\nFunciona una vez, durante los próximos 15 minutos. Pega allí el token del bot, nunca en el chat.`,
+      ],
+    ] as const) {
+      const spoken = contextOf(false, owner, locale);
+      await run(tools, "connect_telegram", { agentId: "assistant" }, spoken.context);
+      expect(spoken.links.map((link) => link.text)).toEqual([text]);
+    }
+    // The model learns the link was sent, never the link or its token.
+    expect(done.output).not.toContain("/forms/");
+    expect(done.output).not.toContain("tok123");
+    expect(done.output).toContain("don't write a link yourself");
     // How long, not until when: the model would otherwise turn a UTC time into the owner's zone.
-    expect(done.output).toContain("It works once, for the next 15 minutes.");
+    expect(done.output).toContain("works once, for the next 15 minutes.");
     expect(done.output).not.toContain("2026");
-    expect(calls).toEqual([`connectTelegram {"agentId":"${SETUP_AGENT_ID}"}`]);
   });
 
-  it("links to the admin page that pairs the owner's Telegram account", async () => {
-    const tools = await toolsOf(setupTools(fakeCommands().commands, { adminOrigin: ADMIN }));
-    const { context, asked } = contextOf(false);
+  it("has Kelpie send the link to the admin page that pairs the owner's Telegram account (#186)", async () => {
+    const sentAt = Date.UTC(2026, 9, 6, 19);
+    const tools = await toolsOf(
+      setupTools(fakeCommands().commands, { adminOrigin: ADMIN, now: () => sentAt }),
+    );
+    const { context, asked, links } = contextOf(false);
 
     const linked = await run(tools, "pair_telegram", { agentId: SETUP_AGENT_ID }, context);
-    expect(linked.output).toContain(`${ADMIN}/pair/telegram/${SETUP_AGENT_ID}`);
+    expect(links).toEqual([
+      {
+        href: `${ADMIN}/pair/telegram/${SETUP_AGENT_ID}?lang=en`,
+        text: `To pair your own Telegram account with the bot of the agent ${SETUP_AGENT_ID}, open ${ADMIN}/pair/telegram/${SETUP_AGENT_ID}?lang=en and press its button.`,
+        // The page doesn't expire, so the conversation waits a day for the pairing (#206).
+        awaits: {
+          agentId: SETUP_AGENT_ID,
+          step: "telegram_paired",
+          until: sentAt + 24 * 60 * 60_000,
+        },
+      },
+    ]);
+    const spoken = contextOf(false, owner, "pt-BR");
+    await run(tools, "pair_telegram", { agentId: SETUP_AGENT_ID }, spoken.context);
+    expect(spoken.links.map((link) => link.text)).toEqual([
+      `Para parear sua própria conta do Telegram com o bot do agente ${SETUP_AGENT_ID}, abra ${ADMIN}/pair/telegram/${SETUP_AGENT_ID}?lang=pt-BR e toque no botão da página.`,
+    ]);
+    expect(linked.output).not.toContain("/pair/");
     expect(asked).toEqual([]);
     expect(await run(tools, "pair_telegram", { agentId: "ghost" }, context)).toMatchObject({
       isError: true,
     });
+    expect(links).toHaveLength(1);
   });
 
   it("says so, before asking anything, when the admin API's address isn't a bare https origin", async () => {
     for (const adminOrigin of ["", "http://admin.example.com", `${ADMIN}/x`, "admin.example.com"]) {
       const { commands, calls } = fakeCommands();
       const tools = await toolsOf(setupTools(commands, { adminOrigin }));
-      const { context, asked } = contextOf(true);
+      const { context, asked, links } = contextOf(true);
 
       for (const name of ["connect_telegram", "pair_telegram"]) {
         const answer = await run(tools, name, { agentId: SETUP_AGENT_ID }, context);
@@ -304,6 +361,7 @@ describe("the setup agent's tools", () => {
         expect(answer.output, name).toContain("ADMIN_ORIGIN");
       }
       expect(asked).toEqual([]);
+      expect(links).toEqual([]);
       expect(calls).toEqual([]);
     }
   });
@@ -312,13 +370,12 @@ describe("the setup agent's tools", () => {
     const { commands, calls } = fakeCommands();
     const tools = await toolsOf(setupTools(commands, { adminOrigin: `${ADMIN}/` }));
     const token = "123456789:AAH-secret-token";
-    const waiting = contextOf(false);
+    const { context, asked, links } = contextOf(false);
     const input = { agentId: SETUP_AGENT_ID, botToken: token };
 
-    const asked = await run(tools, "connect_telegram", input, waiting.context);
-    const done = await run(tools, "connect_telegram", input, contextOf(true).context);
-    expect(JSON.stringify([asked, done, waiting.asked, calls])).not.toContain("secret");
-    expect(done.output).toContain(`${ADMIN}/forms/tok123`);
+    const done = await run(tools, "connect_telegram", input, context);
+    expect(JSON.stringify([done, asked, links, calls])).not.toContain("secret");
+    expect(links.map((link) => link.href)).toEqual([`${ADMIN}/forms/tok123?lang=en`]);
   });
 });
 
@@ -380,6 +437,24 @@ function gated(world: FakeWorld) {
   return ran;
 }
 
+/** A provider with one tool, `form`, that has Kelpie send `link` (#186). */
+function linking(link: HostLink): ToolProvider {
+  return {
+    async tools() {
+      return [
+        {
+          spec: { name: "form", description: "Form.", inputSchema: { type: "object" as const } },
+          label: "Opening a form",
+          async run(_input: unknown, context: ToolContext) {
+            context.sendLink(link);
+            return { output: "Kelpie sends the link." };
+          },
+        },
+      ];
+    },
+  };
+}
+
 function use(world: FakeWorld): FakeWorld {
   replacePortsForTesting(world.ports);
   return world;
@@ -397,8 +472,8 @@ async function turn(stub: ReturnType<typeof agent>, world: FakeWorld, id: string
   return world;
 }
 
-const NOTICE =
-  /^Confirm: (.+)\nTo go ahead, reply with just the code ([A-Z0-9]{6})\. It expires in 10 minutes\.$/s;
+/** A confirmation's notice, in any of Kelpie's languages (#187): its summary, then its code. */
+const NOTICE = /^(?:Confirm|Confirme|Confirma): (.+)\n.*\b(?:code|código) ([A-Z0-9]{6})\. [^\n]*$/s;
 
 /** The codes shown so far, in order. */
 const codes = (world: FakeWorld) =>
@@ -473,6 +548,10 @@ describe("the confirmation gate", () => {
     expect(world.sent).toHaveLength(2);
     expect(world.sent[0]).toBe("Confirme, por favor.");
     expect(NOTICE.exec(world.sent[1] ?? "")?.[1]).toBe('change the thing to {"to":"smart"}.');
+    // In the conversation's language, Portuguese here (#187).
+    expect(world.sent[1]).toBe(
+      `Confirme: change the thing to {"to":"smart"}.\nPara seguir, responda só com o código ${codes(world)[0]}. Expira em 10 minutos.`,
+    );
     // The notice comes last, and it is the bubble that notifies. The reply is formatted (#188);
     // the notice, Kelpie's own text, goes as written.
     expect(world.sends.map((send) => send.silent)).toEqual([true, false]);
@@ -568,7 +647,7 @@ describe("the confirmation gate", () => {
         native: expect.anything(),
       }),
     );
-    expect(JSON.stringify(history)).not.toMatch(/reply with just the code/);
+    expect(JSON.stringify(history)).not.toMatch(/(?:code|código) [A-Z0-9]{6}/);
   });
 
   it("counts no code from a tool's output, the model's words or another input's request", async () => {
@@ -642,6 +721,42 @@ describe("the confirmation gate", () => {
     expect(ran).toEqual([{ to: "smart" }]);
     expect(scripts).toEqual([]);
   });
+  it("sends a tool's link after the reply, as Kelpie's own bubble with only that link, kept from the model (#186)", async () => {
+    const href = "https://admin.example/forms/tok-9";
+    // Asked twice in a turn, the same link goes once.
+    const world = use(
+      fakeWorld([toolCalls({ name: "form" }, { name: "form" }), reply("Abra o link abaixo.")]),
+    );
+    world.tools = [linking({ href, text: `The secure form: ${href}\nIt works once.` })];
+    const stub = agent("link-sent");
+    await turn(stub, world, "m1", "conecta o bot");
+
+    expect(world.sends).toEqual([
+      { text: "Abra o link abaixo.", silent: true, links: [] },
+      { text: `The secure form: ${href}\nIt works once.`, silent: false, links: [href] },
+    ]);
+    expect((await stub.turns()).at(-1)?.status).toBe("delivered");
+    // Neither a request, history nor the outbox's inspection holds the link.
+    expect(JSON.stringify(world.requests)).not.toContain("tok-9");
+    expect(JSON.stringify(await historyOf(stub))).not.toContain("tok-9");
+    expect(JSON.stringify(await stub.outbox())).not.toContain("tok-9");
+  });
+
+  it("lets a tool fail rather than send a link that isn't an admin page in its text (#186)", async () => {
+    for (const link of [
+      { href: "https://evil.example/forms/x", text: "Form: https://evil.example/forms/x" },
+      { href: "https://admin.example/forms/x", text: "Form: https://admin.example/forms/y" },
+    ]) {
+      const world = use(fakeWorld([toolCalls({ name: "form" }), reply("Não deu.")]));
+      world.tools = [linking(link)];
+      const stub = agent(`link-refused-${link.text.at(-1)}`);
+      await turn(stub, world, "m1", "conecta o bot");
+
+      expect(world.sent).toEqual(["Não deu."]);
+      expect(JSON.stringify(world.requests.at(-1)?.messages)).toContain("The tool failed.");
+    }
+  });
+
   it("lets a tool fail rather than show the owner a notice too long for one message", async () => {
     const world = use(fakeWorld([toolCalls({ name: "huge" }), reply("Não deu.")]));
     world.tools = [
@@ -669,6 +784,44 @@ describe("the confirmation gate", () => {
 
     expect(world.sent).toEqual(["Não deu."]);
     expect(JSON.stringify(world.requests.at(-1)?.messages)).toContain("The tool failed.");
+  });
+
+  it("sends no link from a call that ran out of the turn's time (#186)", async () => {
+    const href = "https://admin.example/forms/late";
+    const world = use(fakeWorld([toolCalls({ name: "form" }), held("Acabou o tempo.")]));
+    world.tools = [
+      {
+        async tools() {
+          return [
+            {
+              spec: {
+                name: "form",
+                description: "Form.",
+                inputSchema: { type: "object" as const },
+              },
+              label: "Opening a form",
+              async run(_input: unknown, context: ToolContext) {
+                // A tool that ignores its signal, and sends its link only after its time is up.
+                await new Promise((resolve) => setTimeout(resolve, 50));
+                context.sendLink({ href, text: `The secure form: ${href}` });
+                return { output: "Kelpie sends the link." };
+              },
+            },
+          ];
+        },
+      },
+    ];
+    // The turn's last call waits meanwhile, so the turn is still running when the tool sends.
+    world.expireDeadlines = true;
+    world.modelHeld = true;
+    const stub = agent("link-timed-out");
+    await stub.ingest(message("m1", "conecta o bot"));
+    await stub.flush();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    world.modelHeld = false;
+    await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).not.toBe("running"));
+
+    expect(world.sent).toEqual(["Acabou o tempo."]);
   });
 
   it("keeps a code unspent when the call that would use it ran out of the turn's time", async () => {
@@ -722,5 +875,73 @@ describe("the confirmation gate", () => {
     scripts.push(toolCalls({ name: "slow", input: { to: "smart" } }), reply("Feito."));
     await turn(stub, world, "m3", "tenta de novo");
     expect(ran).toEqual([{ to: "smart" }]);
+  });
+});
+
+// Kelpie's fixed texts follow the conversation (#187): what the person writes, else their device's
+// language, else English.
+describe("the conversation's language", () => {
+  async function noticeFor(name: string, text: string, language?: string) {
+    const world = use(
+      fakeWorld([toolCalls({ name: "change", input: { to: "smart" } }), reply("…")]),
+    );
+    gated(world);
+    const stub = agent(name);
+    await stub.ingest({ ...message("m1", text), ...(language === undefined ? {} : { language }) });
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toHaveLength(2));
+    return world.sent[1] ?? "";
+  }
+
+  it("follows what the person writes, else their device, else English", async () => {
+    expect(await noticeFor("lang-es", "hola, cambia el modelo")).toMatch(
+      /^Confirma: .+\nPara seguir, responde solo con el código [A-Z0-9]{6}\. Expira en 10 minutos\.$/s,
+    );
+    expect(await noticeFor("lang-device", "ok", "es-MX")).toMatch(/^Confirma: /);
+    expect(await noticeFor("lang-text-first", "quero mudar o modelo", "en-US")).toMatch(
+      /^Confirme: /,
+    );
+    for (const [name, language] of [
+      ["lang-other", "fr-FR"],
+      ["lang-none", undefined],
+    ] as const) {
+      expect(await noticeFor(name, "ok", language)).toMatch(
+        /^Confirm: .+\nTo go ahead, reply with just the code [A-Z0-9]{6}\. It expires in 10 minutes\.$/s,
+      );
+    }
+  });
+
+  it("keeps the language while the person's messages say nothing clear", async () => {
+    const scripts = [toolCalls({ name: "change", input: { to: "smart" } }), reply("Confirme.")];
+    const world = use(fakeWorld(scripts));
+    gated(world);
+    const stub = agent("lang-kept");
+    await turn(stub, world, "m1", "mude para smart");
+    // More unclear messages than the window holds: the language read before stays.
+    scripts.push(toolCalls({ name: "change", input: { to: "frontier" } }), reply("Ok."));
+    const before = (await stub.turns()).length;
+    for (const id of ["m2", "m3", "m4", "m5", "m6", "m7"]) await stub.ingest(message(id, "ok"));
+    await stub.flush();
+    await vi.waitFor(async () => {
+      const turns = await stub.turns();
+      expect(turns).toHaveLength(before + 1);
+      expect(turns.at(-1)?.status).not.toBe("running");
+    });
+    expect(
+      world.sent.filter((text) => NOTICE.test(text)).map((text) => text.split(":")[0]),
+    ).toEqual(["Confirme", "Confirme"]);
+  });
+
+  it("switches at once when the person clearly writes in another language", async () => {
+    const scripts = [toolCalls({ name: "change", input: { to: "smart" } }), reply("Confirme.")];
+    const world = use(fakeWorld(scripts));
+    gated(world);
+    const stub = agent("lang-switch");
+    await turn(stub, world, "m1", "mude para smart, por favor, eu quero isso agora");
+    scripts.push(toolCalls({ name: "change", input: { to: "frontier" } }), reply("Sure."));
+    await turn(stub, world, "m2", "please change it to frontier instead");
+    expect(
+      world.sent.filter((text) => NOTICE.test(text)).map((text) => text.split(":")[0]),
+    ).toEqual(["Confirme", "Confirm"]);
   });
 });

@@ -1,4 +1,4 @@
-import { runInDurableObject } from "cloudflare:test";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { DEFAULT_SETTINGS, SETUP_AGENT_ID } from "@kelpie/config";
 import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
@@ -23,6 +23,71 @@ async function auditOf(stub: ReturnType<typeof host>) {
   );
 }
 
+/** Leaves state rows as an earlier deploy would have; `null` removes one. */
+async function seedState(stub: ReturnType<typeof host>, rows: Record<string, unknown>) {
+  await runInDurableObject(stub, (_instance, state) => {
+    for (const [key, value] of Object.entries(rows)) {
+      if (value === null) state.storage.sql.exec("DELETE FROM state WHERE key = ?", key);
+      else
+        state.storage.sql.exec(
+          "INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)",
+          key,
+          JSON.stringify(value),
+        );
+    }
+  });
+}
+
+/** The settings row as stored, not as `config()` fills it in. */
+async function storedOf(stub: ReturnType<typeof host>) {
+  return runInDurableObject(stub, (_instance, state) => {
+    const [row] = state.storage.sql
+      .exec<{ value: string }>("SELECT value FROM state WHERE key = 'settings'")
+      .toArray();
+    return row ? JSON.parse(row.value) : undefined;
+  });
+}
+
+/**
+ * Leaves the settings, the prompt version and the audit log as a deploy that stored the whole
+ * settings would have, with no cleanup run yet and no built-in prompt kept (#210) unless one is
+ * given, then evicts the object so the next call starts it again.
+ */
+async function seedStored(
+  stub: ReturnType<typeof host>,
+  settings: Record<string, unknown>,
+  audited: string[][],
+  promptVersion: number,
+  defaultPrompt?: string,
+) {
+  await stub.config();
+  await runInDurableObject(stub, (_instance, state) => {
+    state.storage.sql.exec(
+      "DELETE FROM state WHERE key IN ('settingsOverridesOnly', 'defaultPrompt')",
+    );
+    for (const [key, value] of [
+      ["settings", settings],
+      ["promptVersion", promptVersion],
+      ...(defaultPrompt === undefined ? [] : [["defaultPrompt", defaultPrompt] as const]),
+    ] as const) {
+      state.storage.sql.exec(
+        "INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)",
+        key,
+        JSON.stringify(value),
+      );
+    }
+    for (const fields of audited) {
+      state.storage.sql.exec(
+        "INSERT INTO audit_log (at, action, user_id, via, fields, prompt_version) VALUES (?, 'settings.changed', 'u-owner', 'admin-api', ?, ?)",
+        Date.now(),
+        JSON.stringify(fields),
+        promptVersion,
+      );
+    }
+  });
+  await evictDurableObject(stub);
+}
+
 describe("AgentHost", () => {
   it("starts from the default settings, at prompt version 0", async () => {
     expect(await host("fresh").config()).toEqual({ settings: DEFAULT_SETTINGS, promptVersion: 0 });
@@ -37,6 +102,64 @@ describe("AgentHost", () => {
 
     await stub.configure({ systemPrompt: "Fale como um pirata." }, owner);
     expect((await stub.config()).settings.systemPrompt).toBe("Fale como um pirata.");
+  });
+
+  it("starts a new prompt version once when a deploy changed the setup agent's built-in persona", async () => {
+    const stub = host(SETUP_AGENT_ID);
+    await stub.config();
+    // The last deploy ran an older persona, at version 4, and nothing configured replaces it.
+    await seedState(stub, { settings: null, promptVersion: 4, defaultPrompt: "An older persona." });
+
+    expect(await stub.config()).toEqual({
+      settings: { ...DEFAULT_SETTINGS, systemPrompt: SETUP_PROMPT },
+      promptVersion: 5,
+    });
+    expect((await stub.config()).promptVersion).toBe(5);
+    expect((await stub.turnConfig()).promptVersion).toBe(5);
+
+    // Only this id gets the persona: leave it as a new agent for the other test that uses it.
+    await seedState(stub, { promptVersion: null, defaultPrompt: SETUP_PROMPT });
+  });
+
+  it("does the same for any agent's built-in prompt, and a later change bumps only for its own", async () => {
+    const stub = host("default-changed");
+    await stub.config();
+    await seedState(stub, { defaultPrompt: "You are an older assistant." });
+
+    expect(await stub.config()).toEqual({ settings: DEFAULT_SETTINGS, promptVersion: 1 });
+    await stub.configure({ tier: "frontier" }, owner);
+    expect((await stub.config()).promptVersion).toBe(1);
+    await stub.configure({ systemPrompt: "You are terse." }, owner);
+    expect((await stub.config()).promptVersion).toBe(2);
+  });
+
+  it("keeps the prompt version when a configured prompt replaces the built-in one", async () => {
+    const stub = host("default-replaced");
+    await stub.configure({ systemPrompt: "Fale como um pirata." }, owner);
+    await seedState(stub, { defaultPrompt: "You are an older assistant." });
+
+    expect(await stub.config()).toMatchObject({
+      settings: { systemPrompt: "Fale como um pirata." },
+      promptVersion: 1,
+    });
+  });
+
+  it("starts a new prompt version once for an agent from before built-in prompts were tracked", async () => {
+    const stub = host("untracked");
+    await stub.config();
+    // A deploy before this one ran the agent and kept no built-in prompt.
+    await seedState(stub, { defaultPrompt: null });
+    await evictDurableObject(stub);
+
+    expect((await stub.config()).promptVersion).toBe(1);
+    expect((await stub.config()).promptVersion).toBe(1);
+
+    // One whose configured prompt replaces the built-in one keeps its version.
+    const configured = host("untracked-configured");
+    await configured.configure({ systemPrompt: "Fale como um pirata." }, owner);
+    await seedState(configured, { defaultPrompt: null });
+    await evictDurableObject(configured);
+    expect((await configured.config()).promptVersion).toBe(1);
   });
 
   it("drops the end-of-turn windows and the old 10 s cap from settings stored before ADR-0024", async () => {
@@ -57,6 +180,111 @@ describe("AgentHost", () => {
 
     const { settings } = await stub.config();
     expect(settings).toEqual({ ...DEFAULT_SETTINGS, tier: "frontier" });
+  });
+
+  it("stores only the settings a change sets, so the others keep following the defaults", async () => {
+    const stub = host("overrides");
+    await stub.configure({ tier: "frontier" }, owner);
+    expect(await storedOf(stub)).toEqual({ tier: "frontier" });
+
+    // A value the agent already has isn't stored, even beside one that changes.
+    await stub.configure({ conversational: true, maxOutputTokens: 2_000 }, owner);
+    expect(await storedOf(stub)).toEqual({ tier: "frontier", maxOutputTokens: 2_000 });
+    expect((await stub.config()).settings).toEqual({
+      ...DEFAULT_SETTINGS,
+      tier: "frontier",
+      maxOutputTokens: 2_000,
+    });
+  });
+
+  it("drops the defaults an earlier change stored, and keeps what a change named", async () => {
+    const stub = host("frozen-current");
+    await seedStored(stub, { ...DEFAULT_SETTINGS, tier: "frontier" }, [["tier"]], 3);
+
+    // The prompt in effect is the same, so neither the cleanup nor the built-in check bumps.
+    expect(await stub.config()).toEqual({
+      settings: { ...DEFAULT_SETTINGS, tier: "frontier" },
+      promptVersion: 3,
+    });
+    expect(await storedOf(stub)).toEqual({ tier: "frontier" });
+  });
+
+  it("starts a new prompt version when a dropped default prompt or memory core was another", async () => {
+    const prompt = host("frozen-older-prompt");
+    await seedStored(
+      prompt,
+      { ...DEFAULT_SETTINGS, systemPrompt: "You are an older assistant.", tier: "frontier" },
+      [["tier"]],
+      2,
+    );
+    expect(await prompt.config()).toEqual({
+      settings: { ...DEFAULT_SETTINGS, tier: "frontier" },
+      promptVersion: 3,
+    });
+    await evictDurableObject(prompt);
+    expect((await prompt.config()).promptVersion).toBe(3);
+
+    // #210 ran first and kept the built-in prompt while the copy replaced it: still one bump.
+    const after210 = host("frozen-older-prompt-after-210");
+    await seedStored(
+      after210,
+      { ...DEFAULT_SETTINGS, systemPrompt: "You are an older assistant." },
+      [["tier"]],
+      2,
+      DEFAULT_SETTINGS.systemPrompt,
+    );
+    expect((await after210.config()).promptVersion).toBe(3);
+
+    const core = host("frozen-older-core");
+    await seedStored(core, { ...DEFAULT_SETTINGS, memoryCore: true }, [["tier"]], 0);
+    expect(await core.config()).toEqual({ settings: DEFAULT_SETTINGS, promptVersion: 1 });
+  });
+
+  it("keeps a prompt a change named, and a setting a change set back to its default", async () => {
+    const stub = host("chosen");
+    await seedStored(
+      stub,
+      { ...DEFAULT_SETTINGS, systemPrompt: "Fale como um pirata." },
+      [["tier"], ["systemPrompt"], ["tier"]],
+      1,
+    );
+
+    expect(await stub.config()).toEqual({
+      settings: { ...DEFAULT_SETTINGS, systemPrompt: "Fale como um pirata." },
+      promptVersion: 1,
+    });
+    expect(await storedOf(stub)).toEqual({
+      tier: DEFAULT_SETTINGS.tier,
+      systemPrompt: "Fale como um pirata.",
+    });
+
+    // The cleanup ran once: an audit log that lost its rows later changes nothing.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec("DELETE FROM audit_log");
+    });
+    await evictDurableObject(stub);
+    expect((await stub.config()).settings.systemPrompt).toBe("Fale como um pirata.");
+  });
+
+  it("drops the end-of-turn windows and the old cap from storage, even when a change named the cap", async () => {
+    const stub = host("legacy-stored");
+    await seedStored(
+      stub,
+      {
+        ...DEFAULT_SETTINGS,
+        tier: "frontier",
+        quietWindow: { finishedMs: 1_500, defaultMs: 3_000, unfinishedMs: 6_000 },
+        maxWaitMs: 10_000,
+      },
+      [["tier", "maxWaitMs", "quietWindow"]],
+      0,
+    );
+
+    expect(await stub.config()).toEqual({
+      settings: { ...DEFAULT_SETTINGS, tier: "frontier" },
+      promptVersion: 0,
+    });
+    expect(await storedOf(stub)).toEqual({ tier: "frontier" });
   });
 
   it("applies a change, and bumps the prompt version only when the system prompt changes", async () => {

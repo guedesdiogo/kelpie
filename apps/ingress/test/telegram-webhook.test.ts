@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { DIRECTORY_NAME } from "@kelpie/access";
 import type { EgressDestination, WebhookNotice } from "@kelpie/channels";
+import type { SetupEvent } from "@kelpie/config";
 import type {
   InboundMessage,
   IngestResult,
@@ -53,6 +54,7 @@ function fakes(overrides: Partial<TelegramWebhookDeps> = {}) {
   const ingested: { name: string; message: InboundMessage }[] = [];
   const paused: { name: string; target: PauseTarget }[] = [];
   const notices: { agentId: string; destination: EgressDestination; notice: WebhookNotice }[] = [];
+  const reported: { agentId: string; event: SetupEvent }[] = [];
   const deps: TelegramWebhookDeps = {
     webhooks: {
       async verifyTelegram(agentId, secret) {
@@ -74,9 +76,12 @@ function fakes(overrides: Partial<TelegramWebhookDeps> = {}) {
       paused.push({ name, target });
       return { status: "paused" };
     },
+    async setupDone(agentId, event) {
+      reported.push({ agentId, event });
+    },
     ...overrides,
   };
-  return { deps, verified, ingested, notices, paused };
+  return { deps, verified, ingested, notices, paused, reported };
 }
 
 /** A `/start` as Telegram sends it from a deep link: a bot command entity at the start. */
@@ -299,12 +304,43 @@ describe("Telegram pairing and strangers", () => {
       {
         agentId: "kelpie",
         destination: { channel: "telegram", threadId: "4242" },
-        notice: { kind: "paired" },
+        notice: { kind: "paired", locale: "en" },
       },
     ]);
     expect(
       await directory().admit({ channel: "telegram", channelUserId: "4242" }, "kelpie"),
     ).toMatchObject({ admitted: true, userId: "u-owner" });
+  });
+
+  it("reports a finished pairing to the agent, and answers whatever the report does (#206)", async () => {
+    const { deps, reported, notices } = fakes();
+    await handleTelegramWebhook(webhook(start(6161, await issueCode())), "kelpie", deps);
+    expect(reported).toEqual([
+      { agentId: "kelpie", event: { step: "telegram_paired", userId: "u-owner" } },
+    ]);
+    expect(notices.at(-1)?.notice).toMatchObject({ kind: "paired" });
+
+    // A report that fails, or doesn't answer, still lets the webhook answer 200 and say "paired",
+    // so Telegram doesn't send the /start again.
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (const [id, setupDone] of [
+      [
+        6262,
+        async () => {
+          throw new Error("AgentHost down");
+        },
+      ],
+      [6363, () => new Promise<void>(() => {})],
+    ] as const) {
+      const broken = fakes({ setupDone });
+      const response = await handleTelegramWebhook(
+        webhook(start(id, await issueCode())),
+        "kelpie",
+        broken.deps,
+      );
+      expect(response.status).toBe(200);
+      expect(broken.notices).toMatchObject([{ notice: { kind: "paired" } }]);
+    }
   });
 
   it("answers a wrong code with nothing at all", async () => {
@@ -334,7 +370,7 @@ describe("Telegram pairing and strangers", () => {
       {
         agentId: "kelpie",
         destination: { channel: "telegram", threadId: String(OWNER_TELEGRAM_ID) },
-        notice: { kind: "stranger", senderId: "4444", displayName: "Mallory" },
+        notice: { kind: "stranger", senderId: "4444", displayName: "Mallory", locale: "en" },
       },
     ]);
   });
@@ -449,6 +485,37 @@ describe("Telegram pairing and strangers", () => {
     expect(
       await directory().redeemPairingCode(code, { channel: "telegram", channelUserId: "5051" }),
     ).toMatchObject({ ok: true });
+  });
+
+  it("speaks each account's app language: the paired notice, the owner's messages and stranger notices (#187)", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { deps, ingested, notices } = fakes();
+    const pairing = start(5858, await issueCode());
+    pairing.message.from = { ...pairing.message.from, language_code: "pt-br" } as never;
+    await handleTelegramWebhook(webhook(pairing), "kelpie", deps);
+    expect(notices.at(-1)?.notice).toEqual({ kind: "paired", locale: "pt-BR" });
+
+    // The owner's message carries the language to the conversation, and the Directory keeps it.
+    const owner = update({
+      message_id: 700,
+      from: { id: OWNER_TELEGRAM_ID, is_bot: false, first_name: "Owner", language_code: "es" },
+    });
+    await handleTelegramWebhook(webhook(owner), "kelpie", deps);
+    expect(ingested.at(-1)?.message.language).toBe("es");
+
+    // So a notice about a stranger reaches the owner in it.
+    const stranger = update({
+      message_id: 701,
+      from: { id: 5959, is_bot: false, first_name: "Trudy", language_code: "en" },
+      chat: { id: 5959, type: "private" },
+    });
+    await handleTelegramWebhook(webhook(stranger), "kelpie", deps);
+    expect(notices.at(-1)?.notice).toEqual({
+      kind: "stranger",
+      senderId: "5959",
+      displayName: "Trudy",
+      locale: "es",
+    });
   });
 });
 

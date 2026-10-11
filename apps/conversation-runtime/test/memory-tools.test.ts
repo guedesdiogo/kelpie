@@ -65,6 +65,8 @@ const context = (turn = `turn-${turns++}`): ToolContext => ({
   source: "telegram:chat-1, 2026-10-06",
   signal: new AbortController().signal,
   confirm: async () => false,
+  sendLink: () => {},
+  locale: "en",
 });
 
 async function toolsOf(store: MemoryStore): Promise<Map<string, Tool>> {
@@ -76,9 +78,21 @@ describe("memory tools", () => {
   it("offers search and read, with stable specs and plain labels", async () => {
     const tools = await toolsOf(fakeStore().store);
     expect([...tools.keys()]).toEqual(["memory_search", "memory_read", "memory_write"]);
-    expect(tools.get("memory_write")?.label).toBe("Saving to memory");
-    expect(tools.get("memory_search")?.label).toBe("Searching memory");
-    expect(tools.get("memory_read")?.label).toBe("Reading a note");
+    expect(tools.get("memory_write")?.label).toEqual({
+      en: "Saving to memory",
+      "pt-BR": "Salvando na memória",
+      es: "Guardando en la memoria",
+    });
+    expect(tools.get("memory_search")?.label).toEqual({
+      en: "Searching memory",
+      "pt-BR": "Buscando na memória",
+      es: "Buscando en la memoria",
+    });
+    expect(tools.get("memory_read")?.label).toEqual({
+      en: "Reading a note",
+      "pt-BR": "Lendo uma nota",
+      es: "Leyendo una nota",
+    });
     // The same specs every time: a turn keys its tools by them.
     expect(
       JSON.stringify([...(await toolsOf(fakeStore().store)).values()].map((t) => t.spec)),

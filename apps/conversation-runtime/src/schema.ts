@@ -1,6 +1,7 @@
 import type { AgentSettings } from "@kelpie/config";
 import type { AssistantMessage, ChatMessage, Usage } from "@kelpie/llm";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import type { HostLink } from "./tools.ts";
 
 // One conversation's state, in its ConversationAgent's SQLite (ADR-0002, ADR-0012). The Agents SDK
 // keeps its own tables (schedules, fibers) alongside these.
@@ -28,6 +29,11 @@ export const inbound = sqliteTable(
     role: text("role", { enum: ["owner", "admin", "member"] }),
     chatType: text("chat_type", { enum: ["direct", "group"] }),
     turnId: integer("turn_id"),
+    /**
+     * A note Kelpie wrote, not the person (#206): that the owner finished a setup step. It is
+     * authored as that owner, so its turn keeps their role, but it is never read as their words.
+     */
+    fromKelpie: integer("from_kelpie", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [uniqueIndex("inbound_provider_message").on(table.providerMessageId)],
 );
@@ -73,11 +79,22 @@ export const turns = sqliteTable("turns", {
    */
   toolsKey: text("tools_key"),
   /**
+   * A digest of the system prompt the turn's requests sent and the heading that leads a
+   * checkpoint's summary, null before it was kept (#211). A reply is replayed with its native
+   * output only to a turn with the same key, so a deploy that edits built-in text drops it.
+   */
+  promptKey: text("prompt_key"),
+  /**
    * The least-privileged role and chat type among the turn's messages, null where one wasn't
    * known (#131). Recall, the tools and the actor read them, so a retry sees the same memory.
    */
   role: text("role", { enum: ["owner", "admin", "member"] }),
   chatType: text("chat_type", { enum: ["direct", "group"] }),
+  /**
+   * The links the turn's tools had Kelpie send after its reply (#186), until the reply's bubbles
+   * are written and they follow it as notices. Cleared when the turn settles.
+   */
+  links: text("links", { mode: "json" }).$type<HostLink[]>(),
   createdAt: integer("created_at").notNull(),
 });
 
@@ -100,6 +117,12 @@ export const history = sqliteTable("history", {
    */
   checkpointId: integer("checkpoint_id"),
   message: text("message", { mode: "json" }).$type<ChatMessage>().notNull(),
+  /**
+   * A user row holding Kelpie's own note (#206), as on `inbound`: the model reads it, and nothing
+   * that reads the person's words does (the code gate, allowed links, the replay, session pages,
+   * the conversation's language, recall).
+   */
+  fromKelpie: integer("from_kelpie", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at").notNull(),
 });
 
@@ -133,10 +156,14 @@ export const outbox = sqliteTable(
     status: text("status", { enum: ["pending", "sending", "sent", "cancelled"] }).notNull(),
     sentAt: integer("sent_at"),
     /**
-     * A confirmation's notice, which the host adds after the reply (ADR-0013). History keeps only
-     * the reply's bubbles: the model never sees a notice's code.
+     * A notice the host adds after the reply: a confirmation (ADR-0013) or a tool's link (#186).
+     * History keeps only the reply's bubbles: the model never sees a notice's code or link.
      */
     notice: integer("notice", { mode: "boolean" }).notNull().default(false),
+    /** A link notice's one link, the only text in it that shows as a link (#186). */
+    link: text("link"),
+    /** The confirmation a notice is for: the webchat shows it with a Confirm button (#186). */
+    confirmationId: integer("confirmation_id"),
   },
   (table) => [index("outbox_turn").on(table.turnId, table.seq)],
 );

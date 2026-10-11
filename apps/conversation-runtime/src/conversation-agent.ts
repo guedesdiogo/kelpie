@@ -3,12 +3,25 @@ import {
   type AllowedLinks,
   CAPABILITIES,
   type ChannelCapabilities,
+  detectLocale,
   formatReply,
+  isLocale,
+  type Locale,
+  type Localized,
   linksOf,
+  localeOf,
+  MAX_LANGUAGE_CHARS,
   type SendOutcome,
   webLinks,
 } from "@kelpie/channels";
-import { type Actor, type AgentConfig, type AgentSettings, DEFAULT_SETTINGS } from "@kelpie/config";
+import {
+  type Actor,
+  type AgentConfig,
+  type AgentSettings,
+  DEFAULT_SETTINGS,
+  type SetupEvent,
+  type SetupStep,
+} from "@kelpie/config";
 import type { RecallOptions } from "@kelpie/context-store/contract";
 import {
   deliveredReply,
@@ -68,13 +81,15 @@ import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
 import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
 import * as schema from "./schema.ts";
-import { bareHttpsOrigin } from "./setup-agent.ts";
+import { bareHttpsOrigin, setupNote } from "./setup-agent.ts";
 import {
   CONFIRMATION_MS,
   type ConfirmationRequest,
   canonicalJson,
   confirmationNotice,
   confirmsCode,
+  type HostLink,
+  labelIn,
   MAX_SUMMARY_CHARS,
   MAX_TOOL_ROUNDS,
   newConfirmationCode,
@@ -113,8 +128,21 @@ const WEBCHAT_ID_PREFIX = "webchat:";
 const WEBCHAT_RECEIVED_IDS = 100;
 /** While the owner types in the webchat, buffered messages wait at least this long for the rest. */
 const TYPING_HOLD_MS = 4_000;
-/** What the owner is told on a channel when they pause a conversation (issue #134). */
-export const PAUSED_TEXT = "Paused. I'll answer after your next message.";
+/** What the owner is told on a channel when they pause a conversation (issue #134, #187). */
+export const PAUSED_TEXT: Localized = {
+  en: "Paused. I'll answer after your next message.",
+  "pt-BR": "Pausado. Respondo depois da sua próxima mensagem.",
+  es: "En pausa. Responderé después de tu próximo mensaje.",
+};
+/**
+ * How long past its end a setup step's wait still takes the report (#206): a form submitted in its
+ * last seconds is reported a moment after.
+ */
+const SETUP_WAIT_GRACE_MS = 5 * 60_000;
+/** The person's latest messages the conversation's language is read from (#187). */
+const LANGUAGE_WINDOW = 5;
+/** Of each, the end, where a run of messages has its newest: enough to tell a language. */
+const LANGUAGE_SAMPLE_CHARS = 2_000;
 
 /** Bounds on what one conversation accepts. */
 export const LIMITS = {
@@ -298,24 +326,67 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       });
       return;
     }
-    const result = await this.ingest({
-      agentId: admission.agentId,
-      // The page picks the id, so a resend after a reconnect is deduplicated like any retry.
-      providerMessageId: `${WEBCHAT_ID_PREFIX}${frame.id}`,
-      userId: admission.userId,
-      role: admission.role,
-      chatType: admission.chatType,
-      text: frame.text,
-      destination: { channel: "webchat", threadId: admission.userId },
-      sentAt: this.#ports.now(),
-      timeZone: admission.timeZone,
-    });
+    if (frame.type === "confirm") {
+      send(connection, {
+        type: "confirmation",
+        id: frame.id,
+        status: await this.#press(admission, frame.id),
+      });
+      return;
+    }
+    // The page picks the id, so a resend after a reconnect is deduplicated like any retry.
+    const result = await this.#ingestFrom(admission, frame.id, frame.text);
     send(
       connection,
       result.status === "rejected"
         ? { type: "rejected", id: frame.id, reason: result.reason }
         : { type: "accepted", id: frame.id },
     );
+  }
+
+  /** A message from a webchat socket, as its admitted user's, under the page's id for it. */
+  #ingestFrom(admission: SocketAdmission, id: string, text: string): Promise<IngestResult> {
+    return this.ingest({
+      agentId: admission.agentId,
+      providerMessageId: `${WEBCHAT_ID_PREFIX}${id}`,
+      userId: admission.userId,
+      role: admission.role,
+      chatType: admission.chatType,
+      text,
+      destination: { channel: "webchat", threadId: admission.userId },
+      sentAt: this.#ports.now(),
+      timeZone: admission.timeZone,
+      language: admission.language ?? null,
+    });
+  }
+
+  /**
+   * A press of a confirmation notice's Confirm button (#186). It counts only from the socket of the
+   * user who asked, for a confirmation of theirs still open, and then it replies with the code for
+   * them: ADR-0013's gate then confirms it as a typed code, once. The id is the confirmation's
+   * only, so a second press is the same message again, which the conversation drops.
+   */
+  async #press(admission: SocketAdmission, id: number): Promise<"accepted" | "refused"> {
+    const pending = this.#db
+      .select({
+        code: schema.confirmations.code,
+        userId: schema.confirmations.userId,
+        usedAt: schema.confirmations.usedAt,
+        expiresAt: schema.confirmations.expiresAt,
+      })
+      .from(schema.confirmations)
+      .where(eq(schema.confirmations.id, id))
+      .get();
+    if (
+      !pending ||
+      pending.userId !== admission.userId ||
+      pending.usedAt !== null ||
+      pending.expiresAt <= this.#ports.now()
+    ) {
+      return "refused";
+    }
+    const result = await this.#ingestFrom(admission, `confirm:${id}`, pending.code);
+    return result.status === "rejected" ? "refused" : "accepted";
   }
 
   /**
@@ -363,6 +434,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     // message is older news.
     const zone = canonicalTimeZone(message.timeZone);
     if (zone) this.#set("timeZone", zone);
+    this.#noteLanguage(message.language);
     // The owner's next message ends a pause: the wait and the cap count from it.
     if (this.#get("paused", false)) {
       this.#set("paused", false);
@@ -390,6 +462,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       return { status: "duplicate" };
     }
     if (target.providerMessageId) this.#set("lastPauseId", target.providerMessageId);
+    // A pause may be the first thing a conversation gets: its answer needs a language too (#187).
+    this.#noteLanguage(target.language);
     if (this.#get("paused", false)) return { status: "paused" };
     this.#interrupt();
     this.#set("epoch", this.#epoch() + 1);
@@ -400,6 +474,86 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     return { status: "paused" };
   }
 
+  /**
+   * The owner finished a setup step behind a link this conversation sent (#206), as the agent's
+   * AgentHost reports it. Kelpie writes a note of its own into the conversation, authored as that
+   * owner so its turn keeps their role, and the agent answers it without the owner typing "done".
+   * The note never interrupts a turn: it waits for the running one, or joins the person's waiting
+   * messages, or starts a turn of its own.
+   */
+  async setupDone(agentId: string, event: SetupEvent): Promise<void> {
+    const text = setupNote(agentId, event);
+    if (text === null) return;
+    const now = this.#ports.now();
+    // Only a step this conversation waits for, and once: a second report finds no wait.
+    if (!this.#takeWait(agentId, event.step, now)) return;
+    this.#db
+      .insert(schema.inbound)
+      .values({
+        providerMessageId: `kelpie:${event.step}:${agentId}:${crypto.randomUUID()}`,
+        userId: event.userId,
+        text,
+        receivedAt: now,
+        sentAt: now,
+        stamp: stampOf(now, this.#get<string | null>("timeZone", null)),
+        // The owner finished the step; Kelpie serves only the owner, in direct chats (ADR-0015).
+        role: "owner",
+        chatType: "direct",
+        fromKelpie: true,
+      })
+      .run();
+    // Answered on a schedule of its own: it survives an eviction, and the AgentHost reporting to
+    // every waiting conversation isn't held up by a turn starting here.
+    await this.schedule(0, "answerNotes");
+  }
+
+  /** The schedule `setupDone` arms (#206). */
+  async answerNotes(): Promise<void> {
+    await this.#serialized(() => this.#answerKelpieNotes());
+  }
+
+  /**
+   * Starts a turn for Kelpie's notes (#206) when nothing else will: no turn runs, and nothing the
+   * person wrote waits, whose own planned flush answers the notes with it. Never alongside a running
+   * turn: its end calls this again. While paused, the notes wait for the owner's next message. A
+   * message of the person's arriving meanwhile moves the epoch, and its own plan answers both.
+   */
+  async #answerKelpieNotes(): Promise<void> {
+    if (this.#turnRunning() || this.#get("paused", false)) return;
+    const pending = this.#pendingInbound();
+    if (pending.length === 0 || pending.some((row) => !row.fromKelpie)) return;
+    await this.flush({ epoch: this.#epoch() });
+  }
+
+  /**
+   * Notes that this conversation waits for a setup step (#206), before the agent's AgentHost is
+   * told: a report is taken only for a step the conversation waits for itself.
+   */
+  #noteWait(agentId: string, step: SetupStep, until: number): void {
+    const now = this.#ports.now();
+    const waits = this.#waits().filter(
+      (wait) =>
+        wait.until + SETUP_WAIT_GRACE_MS > now && !(wait.agentId === agentId && wait.step === step),
+    );
+    this.#set("setupWaits", [...waits, { agentId, step, until }]);
+  }
+
+  /** Ends the conversation's wait for a step, if it had one still running. */
+  #takeWait(agentId: string, step: SetupStep, now: number): boolean {
+    const waits = this.#waits();
+    const left = waits.filter((wait) => !(wait.agentId === agentId && wait.step === step));
+    const had = waits.some(
+      (wait) =>
+        wait.agentId === agentId && wait.step === step && wait.until + SETUP_WAIT_GRACE_MS > now,
+    );
+    if (left.length !== waits.length) this.#set("setupWaits", left);
+    return had;
+  }
+
+  #waits(): { agentId: string; step: SetupStep; until: number }[] {
+    return this.#get<{ agentId: string; step: SetupStep; until: number }[]>("setupWaits", []);
+  }
+
   /** Best effort: the webchat's sockets are told, and other channels get a short fixed message. */
   async #confirmPause({ agentId, destination }: PauseTarget): Promise<void> {
     if (destination.channel === "webchat") {
@@ -407,7 +561,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       return;
     }
     try {
-      const sent = await this.#ports.send(agentId, destination, PAUSED_TEXT, { silent: false });
+      const text = PAUSED_TEXT[this.#locale()];
+      const sent = await this.#ports.send(agentId, destination, text, { silent: false });
       if (!sent.ok)
         console.warn("conversation: the pause wasn't confirmed", { reason: sent.reason });
     } catch (error) {
@@ -488,6 +643,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
             userId: run.userId,
             systemVersion: promptVersion,
             message: { role: "user", parts: [{ type: "text", text: run.text }] },
+            fromKelpie: run.fromKelpie,
             createdAt: now,
           })
           .run();
@@ -508,7 +664,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   async history(): Promise<ChatMessage[]> {
     if (!this.#get<string | null>("agentId", null)) return [];
     const latest = this.#db
-      .select({ toolsKey: schema.turns.toolsKey })
+      .select({ toolsKey: schema.turns.toolsKey, promptKey: schema.turns.promptKey })
       .from(schema.turns)
       .orderBy(desc(schema.turns.id))
       .limit(1)
@@ -517,6 +673,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       (await this.#config()).promptVersion,
       this.#latestCheckpoint()?.id ?? null,
       latest?.toolsKey ?? null,
+      latest?.promptKey ?? null,
     );
   }
 
@@ -599,7 +756,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     await this.closeSession();
   }
 
-  /** The bubbles of every turn's reply, for inspection; never a notice, which holds a live code. */
+  /**
+   * The bubbles of every turn's reply, for inspection; never a notice, which holds a live code or a
+   * one-time link.
+   */
   outbox(): { turnId: number; seq: number; text: string; status: string }[] {
     return this.#db
       .select({
@@ -650,6 +810,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     } catch (error) {
       console.error("ConversationAgent: turn recovery failed", { turnId, error: errorName(error) });
       this.#settle(turnId, "failed");
+      // A note of Kelpie's that waited for this turn would otherwise wait for the next message.
+      await this.schedule(0, "answerNotes");
     }
     return { status: "completed" as const };
   }
@@ -664,6 +826,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       const turn = this.#turn(turnId);
       if (turn?.status !== "running") return;
       if (this.#outboxCount(turnId) > 0) {
+        // An eviction may have come before the waits for its links were noted (#206); noting
+        // them again changes nothing.
+        await this.#awaitSteps(turn.links ?? []);
         // A bubble caught mid-send may or may not have arrived; it is sent again.
         this.#db
           .update(schema.outbox)
@@ -698,6 +863,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       if (this.#inFlight.get(turnId) === flight) this.#inFlight.delete(turnId);
     }
     await this.#scheduleSessionClose(SESSION_IDLE_MS);
+    // A note of Kelpie's that came while this turn ran waited for it (#206).
+    await this.#serialized(() => this.#answerKelpieNotes());
   }
 
   async #call(turnId: number, controller: AbortController): Promise<void> {
@@ -788,13 +955,14 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       }
     }
     if (finish.reason === "refusal") {
-      // Calls in history keep the block they were sent after.
+      // Calls in history keep the block they were sent after. Nothing follows a refused reply, the
+      // links its tools had Kelpie send among it (#186).
       this.#db
         .update(schema.turns)
         .set(
           this.#toolRounds(turnId) > 0
-            ? { status: "refused" }
-            : { status: "refused", context: null },
+            ? { status: "refused", links: null }
+            : { status: "refused", context: null, links: null },
         )
         .where(eq(schema.turns.id, turnId))
         .run();
@@ -804,13 +972,33 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
 
     const bubbles = planDelivery(textOf(finish.message), settings.conversational, capabilities);
     const reply = finish.message;
-    // The changes this turn asked the owner to confirm follow the reply, written by the host.
-    const notices = this.#db
-      .select({ code: schema.confirmations.code, summary: schema.confirmations.summary })
+    // The changes this turn asked the owner to confirm follow the reply, written by the host, and
+    // then the links its tools had Kelpie send (#186). The webchat shows a Confirm button.
+    const button = destination.channel === "webchat";
+    const locale = this.#locale();
+    const confirmations = this.#db
+      .select({
+        id: schema.confirmations.id,
+        code: schema.confirmations.code,
+        summary: schema.confirmations.summary,
+      })
       .from(schema.confirmations)
       .where(and(eq(schema.confirmations.turnId, turnId), isNull(schema.confirmations.usedAt)))
       .orderBy(asc(schema.confirmations.id))
       .all();
+    const links =
+      this.#db
+        .select({ links: schema.turns.links })
+        .from(schema.turns)
+        .where(eq(schema.turns.id, turnId))
+        .get()?.links ?? [];
+    const notices = [
+      ...confirmations.map(({ id, code, summary }) => ({
+        text: confirmationNotice(summary, code, button, locale),
+        confirmationId: id,
+      })),
+      ...links.map(({ text, href }) => ({ text, link: href })),
+    ];
     this.#db.transaction((tx) => {
       tx.update(schema.turns).set({ reply }).where(eq(schema.turns.id, turnId)).run();
       bubbles.forEach((bubble, seq) => {
@@ -818,20 +1006,38 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           .values({ turnId, seq, text: bubble.text, delayMs: bubble.delayMs, status: "pending" })
           .run();
       });
-      notices.forEach(({ code, summary }, index) => {
+      notices.forEach((notice, index) => {
         tx.insert(schema.outbox)
           .values({
             turnId,
             seq: bubbles.length + index,
-            text: confirmationNotice(summary, code),
             delayMs: 0,
             status: "pending",
             notice: true,
+            ...notice,
           })
           .run();
       });
     });
+    await this.#awaitSteps(links);
     await this.#deliver(turnId, controller.signal);
+  }
+
+  /**
+   * Tells each agent whose setup link the reply sends that this conversation waits for the step
+   * behind it (#206), so the owner's finishing it is reported here. Best effort: a wait lost to an
+   * unreachable or slow object means the owner says "done" themselves, as before.
+   */
+  async #awaitSteps(links: readonly HostLink[]): Promise<void> {
+    for (const { awaits } of links) {
+      if (!awaits) continue;
+      this.#noteWait(awaits.agentId, awaits.step, awaits.until);
+      try {
+        await this.#ports.awaitSetup(awaits.agentId, this.name, awaits.step, awaits.until);
+      } catch (error) {
+        console.warn("ConversationAgent: a setup step's wait wasn't kept", errorName(error));
+      }
+    }
   }
 
   /**
@@ -862,13 +1068,20 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     // picked up after an eviction keeps the key its earlier rounds ran under: if the tools changed
     // since, its own calls go without their native output too.
     const toolsKey = specs.length === 0 ? null : await digest(JSON.stringify(specs));
-    if (this.#toolRounds(turn.id) === 0) {
-      this.#db.update(schema.turns).set({ toolsKey }).where(eq(schema.turns.id, turn.id)).run();
-    }
     const system =
       specs.length === 0
         ? `${settings.systemPrompt}\n\n${MEMORY_NOTE}`
         : `${settings.systemPrompt}\n\n${MEMORY_NOTE}\n\n${TOOLS_NOTE}`;
+    // The same goes for the system prompt and the checkpoint heading: their built-in text changes
+    // only with a deploy, and no prompt version tracks that (#211).
+    const promptKey = await digest(JSON.stringify([system, CHECKPOINT_HEADING]));
+    if (this.#toolRounds(turn.id) === 0) {
+      this.#db
+        .update(schema.turns)
+        .set({ toolsKey, promptKey })
+        .where(eq(schema.turns.id, turn.id))
+        .run();
+    }
     // Settings stored before the bound existed have none.
     const toolLoopMs = settings.toolLoopMs ?? DEFAULT_SETTINGS.toolLoopMs;
     let rounds = this.#toolRounds(turn.id);
@@ -882,7 +1095,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       step("thinking");
       const call = await this.#ports.generate(settings.tier, {
         system,
-        messages: this.#messages(turn.systemVersion, turn.checkpointId, toolsKey),
+        messages: this.#messages(turn.systemVersion, turn.checkpointId, toolsKey, promptKey),
         ...(specs.length === 0 ? {} : { tools: specs }),
         maxOutputTokens: settings.maxOutputTokens,
         // History rows never keep it; the turn does, for later requests (#137).
@@ -915,7 +1128,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         return {
           ...finish,
           reason: "stop",
-          message: { role: "assistant", parts: [{ type: "text", text: TOOL_LIMIT_TEXT }] },
+          message: {
+            role: "assistant",
+            parts: [{ type: "text", text: TOOL_LIMIT_TEXT[this.#locale()] }],
+          },
           usage,
         };
       }
@@ -956,6 +1172,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         if (!context) {
           const actor = this.#actor(turn, agentId);
           context = {
+            locale: this.#locale(),
             actor,
             agentId,
             scopes: turnScopes(turn, this.#destination()),
@@ -964,9 +1181,11 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
             source: this.#source(),
             signal: controller.signal,
             confirm: async (request) => this.#confirm(turn.id, actor.userId, request),
+            sendLink: (link) => this.#sendLink(turn.id, link),
           };
         }
-        step("tool", tools.get(toolCall.name)?.label);
+        const label = tools.get(toolCall.name)?.label;
+        step("tool", label === undefined ? undefined : labelIn(label, context.locale));
         progress.running = toolCall.id;
         const result = await this.#runWithin(tools, toolCall, context, remaining);
         progress.running = undefined;
@@ -1008,6 +1227,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           // A call the turn gave up on can't confirm, so it can't spend the owner's code either.
           confirm: (request) =>
             signal.aborted ? Promise.resolve(false) : context.confirm(request),
+          // Nor send a link, since the model never learns it did.
+          sendLink: (link) => {
+            if (!signal.aborted) context.sendLink(link);
+          },
         }),
         timedOut,
       ]);
@@ -1056,10 +1279,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
 
   /**
    * ADR-0013's gate. True once the requester replied, in a message of their own written after the
-   * code was made, with the code shown for exactly this command and input; the code is then used
-   * up. Otherwise the change waits, and this turn's reply shows its code: the same one while it
-   * lasts. A tool's output, the model's replies and its tool input are never the requester's
-   * messages, so none of them can confirm.
+   * code was made, with the code shown for exactly this command and input, typed or sent by the
+   * webchat's Confirm button (#186); the code is then used up. Otherwise the change waits, and this
+   * turn's reply shows its code: the same one while it lasts. A tool's output, the model's replies
+   * and its tool input are never the requester's messages, so none of them can confirm.
    */
   #confirm(turnId: number, userId: string, request: ConfirmationRequest): boolean {
     // A tool that ignored its signal, after its turn stopped, neither confirms nor shows anything.
@@ -1092,6 +1315,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           and(
             eq(schema.history.role, "user"),
             eq(schema.history.userId, userId),
+            // Kelpie's notes are authored as the owner, but never say yes for them (#206).
+            eq(schema.history.fromKelpie, false),
             gt(schema.history.id, pending.afterHistoryId),
           ),
         )
@@ -1137,6 +1362,36 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       })
       .run();
     return false;
+  }
+
+  /**
+   * Keeps a link a tool has Kelpie send after the turn's reply (#186), once per turn. Only an admin
+   * API page, as the formatter reads it in the text, can be one: those pages show only behind the
+   * owner's Access login, as replies may already link them (#188).
+   */
+  #sendLink(turnId: number, link: HostLink): void {
+    if (!this.#isRunning(turnId)) return;
+    if (!this.#linksAllowed(link.text, new Set()).includes(link.href)) {
+      throw new RangeError("A link Kelpie sends must be an admin API page in its text");
+    }
+    // One bubble, as a confirmation's notice is.
+    if (visible(link.text).length > MAX_SUMMARY_CHARS) {
+      throw new RangeError("A link's text is too long to show");
+    }
+    const links =
+      this.#db
+        .select({ links: schema.turns.links })
+        .from(schema.turns)
+        .where(eq(schema.turns.id, turnId))
+        .get()?.links ?? [];
+    if (links.some(({ href }) => href === link.href)) return;
+    const kept: HostLink = { text: link.text, href: link.href };
+    if (link.awaits) kept.awaits = link.awaits;
+    this.#db
+      .update(schema.turns)
+      .set({ links: [...links, kept] })
+      .where(eq(schema.turns.id, turnId))
+      .run();
   }
 
   /** How many rounds of tool calls the turn has in history. */
@@ -1320,7 +1575,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const lines = this.#db
       .select({ message: schema.history.message })
       .from(schema.history)
-      .where(gt(schema.history.id, this.#lastSeenReply()))
+      // Kelpie's notes ask nothing of memory (#206).
+      .where(
+        and(gt(schema.history.id, this.#lastSeenReply()), eq(schema.history.fromKelpie, false)),
+      )
       .orderBy(asc(schema.history.id))
       .all()
       .flatMap(({ message }) => withoutTypedStamps(messageText(message)).split("\n"))
@@ -1435,6 +1693,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           role: schema.history.role,
           userId: schema.history.userId,
           message: schema.history.message,
+          fromKelpie: schema.history.fromKelpie,
           createdAt: schema.history.createdAt,
         })
         .from(schema.history)
@@ -1454,8 +1713,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           threadId: destination.threadId,
           timeZone: this.#get<string | null>("timeZone", null),
           openKeys: this.#get<OpenKeys>("openKeys", {}),
+          // A session page records what the person said; Kelpie's notes aren't that (#206).
           lines: rows
-            .filter((row) => seen(row.message))
+            .filter((row) => seen(row.message) && !row.fromKelpie)
             .map((row) => ({
               role: row.role === "user" ? ("user" as const) : ("assistant" as const),
               speaker: row.role === "user" ? (row.userId ?? "someone") : agentId,
@@ -1582,8 +1842,14 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         silent: row.seq !== lastSeq,
         ...(previewUrl === undefined ? {} : { previewUrl }),
         // A reply is formatted, with its links from the turn's inputs or Kelpie's admin pages
-        // (#188); a notice is Kelpie's own text, shown as written.
-        ...(row.notice ? {} : { links: this.#linksAllowed(row.text, previewable) }),
+        // (#188). A notice is Kelpie's own text, shown as written, or formatted with its one link,
+        // and a confirmation's has a Confirm button where the channel shows one (#186).
+        ...(row.notice
+          ? row.link === null
+            ? {}
+            : { links: [row.link] }
+          : { links: this.#linksAllowed(row.text, previewable) }),
+        ...(row.confirmationId === null ? {} : { confirmation: row.confirmationId }),
       };
       if (!(await this.#sendBubble(turnId, agentId, destination, row, options, signal))) return;
       // If the turn was settled during the send, settling already counted this bubble as sent.
@@ -1614,7 +1880,13 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const inputs = this.#db
       .select({ message: schema.history.message })
       .from(schema.history)
-      .where(and(eq(schema.history.role, "user"), gte(schema.history.id, keptFrom)))
+      .where(
+        and(
+          eq(schema.history.role, "user"),
+          eq(schema.history.fromKelpie, false),
+          gte(schema.history.id, keptFrom),
+        ),
+      )
       .all()
       .map(({ message }) => messageText(message));
     if (turn.context !== null) {
@@ -1648,7 +1920,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     agentId: string,
     destination: Destination,
     bubble: { id: number; text: string },
-    options: { silent: boolean; previewUrl?: string; links?: readonly string[] },
+    options: Parameters<ConversationPorts["send"]>[3],
     signal: AbortSignal,
   ): Promise<boolean> {
     for (let attempt = 1; ; attempt += 1) {
@@ -1702,7 +1974,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .orderBy(asc(schema.outbox.seq))
       .all();
     const isSent = (row: { status: string }) => row.status === "sent" || row.status === "sending";
-    // History keeps what the person saw of the reply; a confirmation's notice isn't part of it.
+    // History keeps what the person saw of the reply; a notice isn't part of it.
     const replyRows = rows.filter((row) => !row.notice);
     const kept = turn.reply
       ? deliveredReply(
@@ -1756,7 +2028,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       }
       // History holds what was kept; the full reply and the settings aren't needed any more.
       tx.update(schema.turns)
-        .set({ status, reply: null, settings: null })
+        .set({ status, reply: null, settings: null, links: null })
         .where(eq(schema.turns.id, turnId))
         .run();
     });
@@ -1790,7 +2062,12 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (epoch !== this.#epoch() || this.#get("paused", false)) return;
     const pending = this.#pendingInbound();
     if (pending.length === 0) return;
-    const flushAt = pending.length >= LIMITS.maxBuffered ? now : await this.#planFlush(pending);
+    // The wait is the person's: Kelpie's notes neither start nor cap it (#206).
+    const written = pending.filter((row) => !row.fromKelpie);
+    const flushAt =
+      pending.length >= LIMITS.maxBuffered || written.length === 0
+        ? now
+        : await this.#planFlush(written);
     // A newer message arrived while the settings were awaited, and plans with the fuller buffer;
     // or a flush already claimed the buffer.
     if (epoch !== this.#epoch() || this.#pendingInbound().length === 0) return;
@@ -1822,7 +2099,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    */
   async #holdForTyping(): Promise<void> {
     const flushAt = this.#get<number | null>("flushAt", null);
-    const first = this.#pendingInbound()[0];
+    const first = this.#pendingInbound().find((row) => !row.fromKelpie);
     if (flushAt === null || !first) return;
     const epoch = this.#epoch();
     const { settings } = await this.#config();
@@ -1857,12 +2134,14 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
 
   /**
    * History for a request under `systemVersion` and a checkpoint: replies produced under another
-   * version or another checkpoint lose their native output, because the prompt before them changed.
+   * version, checkpoint, tool set or prompt key lose their native output, because the prompt before
+   * them changed. A reply with no prompt key, from before keys were kept, never matches.
    */
   #messages(
     systemVersion: number,
     checkpointId: number | null,
     toolsKey: string | null,
+    promptKey: string | null,
   ): ChatMessage[] {
     const checkpoint =
       checkpointId === null
@@ -1880,6 +2159,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         checkpointId: schema.history.checkpointId,
         context: schema.turns.context,
         toolsKey: schema.turns.toolsKey,
+        promptKey: schema.turns.promptKey,
       })
       .from(schema.history)
       .leftJoin(schema.turns, eq(schema.turns.id, schema.history.turnId))
@@ -1902,6 +2182,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         checkpointId: produced,
         context,
         toolsKey: tools,
+        promptKey: prompt,
       } = row;
       if (message.role === "user") {
         return context !== null && answered.has(row.turnId) && lastUser.get(row.turnId) === at
@@ -1910,8 +2191,14 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       }
       if (message.role !== "assistant") return message;
       // A reply's reasoning is bound to the system prompt, the tools and everything before it: under
-      // another prompt version, checkpoint or tool set it goes without its native output.
-      if (version === systemVersion && produced === checkpointId && (tools ?? null) === toolsKey) {
+      // another prompt version, checkpoint, tool set or prompt key it goes without its native output.
+      if (
+        version === systemVersion &&
+        produced === checkpointId &&
+        (tools ?? null) === toolsKey &&
+        prompt !== null &&
+        prompt === promptKey
+      ) {
         return message;
       }
       const { native: _native, ...neutral } = message;
@@ -1927,6 +2214,54 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const [first, ...rest] = messages;
     if (first?.role === "user") return [{ ...first, parts: [...lead, ...first.parts] }, ...rest];
     return [{ role: "user", parts: lead }, ...messages];
+  }
+
+  /**
+   * Notes what tells the conversation's language (#187): the device's, from a message that names
+   * one, and the language of the person's latest messages, kept while they say nothing clear.
+   */
+  #noteLanguage(device: string | null | undefined): void {
+    if (typeof device === "string" && device !== "") {
+      this.#setIfChanged("deviceLanguage", device.slice(0, MAX_LANGUAGE_CHARS));
+    }
+    // Newest first: the messages no turn has claimed yet, then history's.
+    const waiting = this.#db
+      .select({ text: schema.inbound.text })
+      .from(schema.inbound)
+      // Kelpie's notes are its own words, in English (#206).
+      .where(and(isNull(schema.inbound.turnId), eq(schema.inbound.fromKelpie, false)))
+      .orderBy(desc(schema.inbound.id))
+      .limit(LANGUAGE_WINDOW)
+      .all()
+      .map((row) => row.text);
+    const said = this.#db
+      .select({ message: schema.history.message })
+      .from(schema.history)
+      .where(and(eq(schema.history.role, "user"), eq(schema.history.fromKelpie, false)))
+      .orderBy(desc(schema.history.id))
+      .limit(LANGUAGE_WINDOW)
+      .all()
+      .map(({ message }) => withoutTypedStamps(messageText(message)));
+    const latest = [...waiting, ...said]
+      .slice(0, LANGUAGE_WINDOW)
+      .map((text) => text.slice(-LANGUAGE_SAMPLE_CHARS));
+    const detected = detectLocale(latest);
+    if (detected) this.#setIfChanged("language", detected);
+  }
+
+  /** Writes a state value only when it differs, so a message doesn't cost needless writes. */
+  #setIfChanged(key: string, value: string): void {
+    if (this.#get<unknown>(key, null) !== value) this.#set(key, value);
+  }
+
+  /**
+   * The conversation's language, for Kelpie's fixed texts (#187): what its person writes in, else
+   * what their device is set to, else English.
+   */
+  #locale(): Locale {
+    const written = this.#get<unknown>("language", null);
+    if (isLocale(written)) return written;
+    return localeOf(this.#get<string | null>("deviceLanguage", null)) ?? "en";
   }
 
   #pendingInbound() {
@@ -1997,6 +2332,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         message: schema.history.message,
         at: schema.history.createdAt,
         turnId: schema.history.turnId,
+        fromKelpie: schema.history.fromKelpie,
       })
       .from(schema.history)
       .orderBy(desc(schema.history.id))
@@ -2008,6 +2344,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         text: schema.outbox.text,
         at: schema.outbox.sentAt,
         notice: schema.outbox.notice,
+        link: schema.outbox.link,
+        confirmationId: schema.outbox.confirmationId,
         turnId: schema.outbox.turnId,
       })
       .from(schema.outbox)
@@ -2026,7 +2364,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       return { text, blocks: formatReply(text, new Set(this.#linksAllowed(text, inputs))) };
     };
     const rows: ShownMessage[] = [];
-    for (const { role, message, at, turnId } of window) {
+    for (const { role, message, at, turnId, fromKelpie } of window) {
+      // Kelpie's notes are for the model: never shown, and never the owner's links (#206).
+      if (fromKelpie) continue;
       if (role === "user") for (const link of webLinks(messageText(message))) said.add(link);
       if (!seen(message)) continue;
       rows.push(
@@ -2035,16 +2375,25 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           : { role: "assistant", ...formatted(shownText(message), turnId), at },
       );
     }
-    const sent = running.map(({ text, at, notice, turnId }) =>
+    // A notice shows as it went out (#186).
+    const sent = running.map(({ text, at, notice, link, confirmationId, turnId }) =>
       notice
-        ? { role: "assistant" as const, text, at: at ?? 0 }
+        ? {
+            role: "assistant" as const,
+            text,
+            ...(link === null ? {} : { blocks: formatReply(text, new Set([link])) }),
+            ...(confirmationId === null ? {} : { confirmation: confirmationId }),
+            at: at ?? 0,
+          }
         : { role: "assistant" as const, ...formatted(text, turnId), at: at ?? 0 },
     );
-    const waiting = this.#pendingInbound().map((row) => ({
-      role: "user" as const,
-      text: row.text,
-      at: row.receivedAt,
-    }));
+    const waiting = this.#pendingInbound()
+      .filter((row) => !row.fromKelpie)
+      .map((row) => ({
+        role: "user" as const,
+        text: row.text,
+        at: row.receivedAt,
+      }));
     return [...rows, ...sent, ...waiting].filter((message) => message.text !== "");
   }
 
@@ -2152,12 +2501,16 @@ function sameDestination(a: Destination, b: Destination): boolean {
  * Consecutive messages from one author become one history message, each keeping its author. Each
  * message starts with its stamp, unless the message before it in the same run has the same one.
  */
-function byAuthor(rows: readonly { userId: string; text: string; stamp: string | null }[]) {
-  const runs: { userId: string; lines: string[]; lastStamp: string | null }[] = [];
+function byAuthor(
+  rows: readonly { userId: string; text: string; stamp: string | null; fromKelpie: boolean }[],
+) {
+  const runs: { userId: string; fromKelpie: boolean; lines: string[]; lastStamp: string | null }[] =
+    [];
   for (const row of rows) {
     let run = runs.at(-1);
-    if (!run || run.userId !== row.userId) {
-      run = { userId: row.userId, lines: [], lastStamp: null };
+    // Kelpie's notes are authored as the owner but never share a row with the owner's own words.
+    if (!run || run.userId !== row.userId || run.fromKelpie !== row.fromKelpie) {
+      run = { userId: row.userId, fromKelpie: row.fromKelpie, lines: [], lastStamp: null };
       runs.push(run);
     }
     run.lines.push(
@@ -2165,7 +2518,11 @@ function byAuthor(rows: readonly { userId: string; text: string; stamp: string |
     );
     run.lastStamp = row.stamp;
   }
-  return runs.map((run) => ({ userId: run.userId, text: run.lines.join("\n") }));
+  return runs.map((run) => ({
+    userId: run.userId,
+    fromKelpie: run.fromKelpie,
+    text: run.lines.join("\n"),
+  }));
 }
 
 /** The last `max` characters of `text`, never starting on half of a surrogate pair. */

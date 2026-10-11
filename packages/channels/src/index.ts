@@ -30,6 +30,16 @@ export type {
 } from "./egress.ts";
 export { type CanonicalEvent, type ChannelId, dedupeKey, type MessagePart } from "./events.ts";
 export {
+  detectLocale,
+  isLocale,
+  LOCALES,
+  type Locale,
+  type Localized,
+  localeOf,
+  MAX_LANGUAGE_CHARS,
+  MAX_LANGUAGE_TAG_CHARS,
+} from "./locale.ts";
+export {
   type AllowedLinks,
   type Block,
   formatReply,

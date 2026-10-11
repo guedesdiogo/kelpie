@@ -7,6 +7,8 @@ import {
   type ChannelWebhooksContract,
   type DeliveryFailure,
   type EgressDestination,
+  isLocale,
+  type Localized,
   RecipientUnavailableError,
   type SendOptions,
   type SendOutcome,
@@ -248,17 +250,37 @@ export class ChannelWebhooks extends WorkerEntrypoint<Env> implements ChannelWeb
   }
 }
 
-/** The text of a notice, or null for one that isn't known or well formed. */
+/** The notices' texts (#187). */
+const NOTICES: Localized<{ paired: string; stranger: (who: string) => string }> = {
+  en: {
+    paired: "Paired. This Telegram account can now talk to this agent.",
+    stranger: (who) => `Someone who isn't paired messaged this bot: ${who}. They got no answer.`,
+  },
+  "pt-BR": {
+    paired: "Pareado. Esta conta do Telegram já pode falar com este agente.",
+    stranger: (who) =>
+      `Alguém que não está pareado mandou uma mensagem para este bot: ${who}. Não recebeu resposta.`,
+  },
+  es: {
+    paired: "Vinculado. Esta cuenta de Telegram ya puede hablar con este agente.",
+    stranger: (who) =>
+      `Alguien que no está vinculado escribió a este bot: ${who}. No recibió respuesta.`,
+  },
+};
+
+/**
+ * The text of a notice, in its locale or English, or null for one that isn't known or well
+ * formed.
+ */
 function noticeText(notice: WebhookNotice): string | null {
-  if (notice?.kind === "paired") {
-    return "Paired. This Telegram account can now talk to this agent.";
-  }
+  const texts = NOTICES[isLocale(notice?.locale) ? notice.locale : "en"];
+  if (notice?.kind === "paired") return texts.paired;
   if (notice?.kind !== "stranger" || !TELEGRAM_USER_ID.test(String(notice.senderId))) return null;
   const name = displayName(notice.displayName);
   const who = name
     ? `${name} (${maskIdentityValue(notice.senderId)})`
     : maskIdentityValue(notice.senderId);
-  return `Someone who isn't paired messaged this bot: ${who}. They got no answer.`;
+  return texts.stranger(who);
 }
 
 /**

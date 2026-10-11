@@ -9,6 +9,9 @@ import m0007 from "./0007_turn_tools_key.sql";
 import m0008 from "./0008_turn_kelpie_notes.sql";
 import m0009 from "./0009_turn_access.sql";
 import m0010 from "./0010_confirmations.sql";
+import m0011 from "./0011_host_notices.sql";
+import m0012 from "./0012_from_kelpie.sql";
+import m0013 from "./0013_turn_prompt_key.sql";
 import journal from "./meta/_journal.json";
 
 export default {
@@ -25,5 +28,8 @@ export default {
     m0008,
     m0009,
     m0010,
+    m0011,
+    m0012,
+    m0013,
   },
 };

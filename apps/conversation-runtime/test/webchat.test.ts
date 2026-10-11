@@ -46,6 +46,60 @@ async function open(name: string, admission: unknown = owner) {
 
 const ofType = (frames: Frame[], type: string) => frames.filter((frame) => frame.type === type);
 
+/** The code in a confirmation's notice, as the webchat shows it (#186). */
+const NOTICE_CODE = /\b(?:code|código) ([A-Z0-9]{6})\./;
+
+/** Every link's href in a bubble's blocks, in order. */
+function hrefsOf(blocks: unknown): string[] {
+  if (Array.isArray(blocks)) return blocks.flatMap(hrefsOf);
+  if (typeof blocks !== "object" || blocks === null) return [];
+  const node = blocks as { type?: unknown; href?: unknown; children?: unknown; items?: unknown };
+  return [
+    ...(node.type === "link" && typeof node.href === "string" ? [node.href] : []),
+    ...hrefsOf(node.children),
+    ...hrefsOf(node.items),
+  ];
+}
+
+/** A provider with one tool, `change`, gated on the owner's confirmation: it logs what ran. */
+function changing(world: FakeWorld): unknown[] {
+  const ran: unknown[] = [];
+  world.tools = [
+    {
+      async tools() {
+        return [
+          {
+            spec: { name: "change", description: "Changes.", inputSchema: { type: "object" } },
+            label: "Changing",
+            async run(input: unknown, context: ToolContext) {
+              const summary = `change the tier to ${JSON.stringify(input)}.`;
+              if (!(await context.confirm({ command: "change", input, summary }))) {
+                return { output: "Not done yet." };
+              }
+              ran.push(input);
+              return { output: "Done." };
+            },
+          },
+        ];
+      },
+    },
+  ];
+  return ran;
+}
+
+/** Opens a socket and asks for the change: the turn answers with a reply and the notice. */
+async function asked(name: string) {
+  const chat = await open(name);
+  chat.send({ type: "message", id: "c1", text: "mude o tier" });
+  await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
+  await agent(name).flush();
+  await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(2));
+  await vi.waitFor(async () =>
+    expect((await agent(name).turns()).at(-1)?.status).toBe("delivered"),
+  );
+  return chat;
+}
+
 /** When the conversation's flush schedules are due, in the SDK's whole seconds. */
 const flushTimes = (name: string) =>
   runInDurableObject(agent(name), (instance: ConversationAgent) =>
@@ -482,41 +536,22 @@ describe("a turn's steps in the webchat", () => {
         reply("Feito."),
       ]),
     );
-    const ran: unknown[] = [];
-    world.tools = [
-      {
-        async tools() {
-          return [
-            {
-              spec: { name: "change", description: "Changes.", inputSchema: { type: "object" } },
-              label: "Changing",
-              async run(input: unknown, context: ToolContext) {
-                const summary = `change the tier to ${JSON.stringify(input)}.`;
-                if (!(await context.confirm({ command: "change", input, summary }))) {
-                  return { output: "Not done yet." };
-                }
-                ran.push(input);
-                return { output: "Done." };
-              },
-            },
-          ];
-        },
-      },
-    ];
+    const ran = changing(world);
     const name = "assistant:webchat:confirm";
-    const chat = await open(name);
-    chat.send({ type: "message", id: "c1", text: "mude o tier" });
-    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
-    await agent(name).flush();
-    await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(2));
+    const chat = await asked(name);
 
-    const [answer, notice] = ofType(chat.frames, "bubble").map((frame) => String(frame.text));
-    expect(answer).toBe("Confirme, por favor.");
-    const code = /reply with just the code ([A-Z0-9]{6})\./.exec(notice ?? "")?.[1] ?? "";
-    expect(notice).toMatch(/^Confirm: change the tier to \{"to":"frontier"\}\.\n/);
-    // The notice is Kelpie's own text: shown as written, never formatted.
-    expect(ofType(chat.frames, "bubble")[1]).not.toHaveProperty("blocks");
-    expect(ofType(chat.frames, "bubble")[0]).toHaveProperty("blocks");
+    const [answer, notice] = ofType(chat.frames, "bubble");
+    expect(answer?.text).toBe("Confirme, por favor.");
+    const code = NOTICE_CODE.exec(String(notice?.text))?.[1] ?? "";
+    // In the conversation's language, Portuguese here, with the button's own word (#187).
+    expect(notice?.text).toBe(
+      `Confirme: change the tier to {"to":"frontier"}.\nPara seguir, toque em Confirmar, ou responda só com o código ${code}. Expira em 10 minutos.`,
+    );
+    // The notice is Kelpie's own text: shown as written, never formatted, with its button (#186).
+    expect(notice).not.toHaveProperty("blocks");
+    expect(notice?.confirmation).toEqual(expect.any(Number));
+    expect(answer).toHaveProperty("blocks");
+    expect(answer).not.toHaveProperty("confirmation");
     expect(world.sent).toEqual([]);
 
     // The notice isn't history: a new socket doesn't get it back.
@@ -528,6 +563,220 @@ describe("a turn's steps in the webchat", () => {
     await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(2));
     await agent(name).flush();
     await vi.waitFor(() => expect(ran).toEqual([{ to: "frontier" }]));
+  });
+
+  it("confirms with the notice's button: from the requester's socket only, while open, once (#186)", async () => {
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "change", input: { to: "frontier" } }),
+        reply("Confirme, por favor."),
+        toolCalls({ name: "change", input: { to: "frontier" } }),
+        reply("Feito."),
+      ]),
+    );
+    const ran = changing(world);
+    const name = "assistant:webchat:button";
+    const chat = await asked(name);
+    const id = Number(ofType(chat.frames, "bubble")[1]?.confirmation);
+    const turns = (await agent(name).turns()).length;
+
+    // Another user's socket, or an id with no open confirmation, presses nothing.
+    const other = await open(name, { ...owner, userId: "u-other" });
+    other.send({ type: "confirm", id });
+    chat.send({ type: "confirm", id: id + 1 });
+    await vi.waitFor(() =>
+      expect(ofType(other.frames, "confirmation")).toEqual([
+        { type: "confirmation", id, status: "refused" },
+      ]),
+    );
+    await vi.waitFor(() =>
+      expect(ofType(chat.frames, "confirmation")).toEqual([
+        { type: "confirmation", id: id + 1, status: "refused" },
+      ]),
+    );
+    await agent(name).flush();
+    expect(await agent(name).turns()).toHaveLength(turns);
+
+    // The owner's press replies with the code for them; a second press is that message again.
+    chat.send({ type: "confirm", id });
+    chat.send({ type: "confirm", id });
+    await vi.waitFor(() => expect(ofType(chat.frames, "confirmation")).toHaveLength(3));
+    expect(ofType(chat.frames, "confirmation").slice(1)).toEqual([
+      { type: "confirmation", id, status: "accepted" },
+      { type: "confirmation", id, status: "accepted" },
+    ]);
+    await agent(name).flush();
+    await vi.waitFor(async () =>
+      expect((await agent(name).turns()).at(-1)?.status).toBe("delivered"),
+    );
+    expect(ran).toEqual([{ to: "frontier" }]);
+    expect(await agent(name).turns()).toHaveLength(turns + 1);
+
+    // Once used, it takes no more presses.
+    chat.send({ type: "confirm", id });
+    await vi.waitFor(() =>
+      expect(ofType(chat.frames, "confirmation").at(-1)).toEqual({
+        type: "confirmation",
+        id,
+        status: "refused",
+      }),
+    );
+    await agent(name).flush();
+    expect(ran).toEqual([{ to: "frontier" }]);
+  });
+
+  it("falls back to the browser's language when the owner's words don't say (#187)", async () => {
+    const world = use(
+      fakeWorld([toolCalls({ name: "change", input: { to: "frontier" } }), reply("Vale.")]),
+    );
+    changing(world);
+    const name = "assistant:webchat:browser-language";
+    const chat = await open(name, { ...owner, language: "es-ES,es;q=0.9" });
+    chat.send({ type: "message", id: "c1", text: "ok" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
+    await agent(name).flush();
+    await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(2));
+    expect(String(ofType(chat.frames, "bubble")[1]?.text)).toMatch(
+      /^Confirma: .+\nPara seguir, presiona Confirmar, o responde solo con el código [A-Z0-9]{6}\. Expira en 10 minutos\.$/s,
+    );
+  });
+
+  it("never shows Kelpie's note about a finished setup step, and answers it (#206)", async () => {
+    const world = use(
+      fakeWorld([toolCalls({ name: "form" }), reply("Abra o link."), reply("Bot conectado!")]),
+    );
+    // The first turn sends the form's link, so the conversation waits for the bot.
+    world.tools = [
+      {
+        async tools() {
+          return [
+            {
+              spec: { name: "form", description: "Form.", inputSchema: { type: "object" } },
+              label: "Opening a form",
+              async run(_input: unknown, context: ToolContext) {
+                const href = "https://admin.example/forms/tok-2";
+                context.sendLink({
+                  href,
+                  text: `The secure form: ${href}`,
+                  awaits: {
+                    agentId: "lume",
+                    step: "telegram_connected",
+                    until: Date.now() + 60_000,
+                  },
+                });
+                return { output: "Kelpie sends the link." };
+              },
+            },
+          ];
+        },
+      },
+    ];
+    const name = "setup:webchat:u-owner-note";
+    const chat = await open(name, { ...owner, agentId: "setup" });
+    chat.send({ type: "message", id: "c1", text: "vamos conectar o bot" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
+    await agent(name).flush();
+    await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(2));
+    await vi.waitFor(async () =>
+      expect((await agent(name).turns()).at(-1)?.status).toBe("delivered"),
+    );
+
+    await agent(name).setupDone("lume", {
+      step: "telegram_connected",
+      userId: "u-owner",
+      bot: "LumeBot",
+      webhookRegistered: true,
+    });
+    await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(3));
+    expect(world.sent).toEqual([]);
+    expect(JSON.stringify(world.requests.at(-1)?.messages)).toContain("Kelpie, automatically");
+
+    const later = await open(name, { ...owner, agentId: "setup" });
+    await vi.waitFor(() => expect(later.frames[0]).toMatchObject({ type: "history" }));
+    const replay = JSON.stringify(later.frames[0]);
+    expect(replay).toContain("vamos conectar o bot");
+    expect(replay).toContain("Bot conectado!");
+    expect(replay).not.toContain("Kelpie, automatically");
+  });
+
+  it("refuses a press once the confirmation expired (#186)", async () => {
+    const world = use(
+      fakeWorld([toolCalls({ name: "change", input: { to: "frontier" } }), reply("Confirme.")]),
+    );
+    const ran = changing(world);
+    const name = "assistant:webchat:button-expired";
+    const chat = await asked(name);
+    const id = Number(ofType(chat.frames, "bubble")[1]?.confirmation);
+
+    world.clock += 10 * 60_000;
+    chat.send({ type: "confirm", id });
+    await vi.waitFor(() =>
+      expect(ofType(chat.frames, "confirmation")).toEqual([
+        { type: "confirmation", id, status: "refused" },
+      ]),
+    );
+    await agent(name).flush();
+    expect(ran).toEqual([]);
+  });
+
+  it("sends a tool's link after the reply as Kelpie's own bubble, linking only it (#186)", async () => {
+    const href = "https://admin.example/forms/to_k-1_x";
+    const world = use(fakeWorld([toolCalls({ name: "form" }), reply("Pronto.")]));
+    const locales: string[] = [];
+    world.tools = [
+      {
+        async tools() {
+          return [
+            {
+              spec: { name: "form", description: "Opens a form.", inputSchema: { type: "object" } },
+              label: {
+                en: "Opening a form",
+                "pt-BR": "Abrindo um formulário",
+                es: "Abriendo un formulario",
+              },
+              async run(_input: unknown, context: ToolContext) {
+                locales.push(context.locale);
+                context.sendLink({
+                  href,
+                  text: `The secure form for _bot_: ${href}\nAlso https://admin.example/other.`,
+                });
+                return { output: "Kelpie sends the link." };
+              },
+            },
+          ];
+        },
+      },
+    ];
+    const name = "assistant:webchat:link";
+    const chat = await open(name);
+    chat.send({ type: "message", id: "c1", text: "pode conectar o bot?" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
+    await agent(name).flush();
+    await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(2));
+
+    const [answer, notice] = ofType(chat.frames, "bubble");
+    expect(answer?.text).toBe("Pronto.");
+    expect(notice?.text).toBe(
+      `The secure form for _bot_: ${href}\nAlso https://admin.example/other.`,
+    );
+    expect(notice).not.toHaveProperty("confirmation");
+    // The tool and its label speak the conversation's language (#187).
+    expect(locales).toEqual(["pt-BR"]);
+    expect(ofType(chat.frames, "status")).toContainEqual({
+      type: "status",
+      status: "tool",
+      label: "Abrindo um formulário",
+    });
+    // Its own link only, exactly as the tool made it; the other admin page stays text.
+    expect(hrefsOf(notice?.blocks)).toEqual([href]);
+    expect(JSON.stringify(world.requests)).not.toContain("to_k-1_x");
+    await vi.waitFor(async () =>
+      expect((await agent(name).turns()).at(-1)?.status).toBe("delivered"),
+    );
+    expect(JSON.stringify(await agent(name).outbox())).not.toContain("to_k-1_x");
+    const later = await open(name);
+    await vi.waitFor(() => expect(later.frames[0]).toMatchObject({ type: "history" }));
+    expect(JSON.stringify(later.frames[0])).not.toContain("to_k-1_x");
   });
 
   it("clears the step when the turn stops without a reply", async () => {

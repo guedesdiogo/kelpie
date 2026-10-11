@@ -23,6 +23,13 @@
   // Bots' webhooks are checked by channel-egress, which holds their secrets; this entrypoint can
   // verify but not send.
   "services": [
+    // A finished pairing is reported to the agent, which tells the conversation that sent its link
+    // (#206). Only that: binding the AgentHost would let this Worker configure any agent.
+    {
+      "binding": "SETUP_EVENTS",
+      "service": "kelpie-conversation-runtime",
+      "entrypoint": "SetupEvents"
+    },
     {
       "binding": "CHANNEL_WEBHOOKS",
       "service": "kelpie-channel-egress",

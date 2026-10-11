@@ -36,6 +36,11 @@ export const identities = sqliteTable(
       .references(() => users.userId),
     /** Only enabled identities are admitted. Pairing moves an identity to enabled. */
     status: text("status", { enum: ["pending", "enabled", "disabled"] }).notNull(),
+    /**
+     * The language the account's app was last seen set to (Telegram's `language_code`), for the
+     * notices Kelpie sends it (#187); null until a message says.
+     */
+    languageCode: text("language_code"),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [

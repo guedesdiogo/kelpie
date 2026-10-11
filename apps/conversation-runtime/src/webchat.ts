@@ -9,13 +9,15 @@ import { chatTypeOf, roleOf } from "./turn-access.ts";
 // ingress verifies the owner's Cloudflare Access login and admits them before the upgrade.
 
 /**
- * What the browser sends: a message with an id of its own choosing, whether it is typing, or a
- * pause that holds every answer until the next message.
+ * What the browser sends: a message with an id of its own choosing, whether it is typing, a pause
+ * that holds every answer until the next message, or a press of a notice's Confirm button, by the
+ * confirmation's id (#186).
  */
 export type ClientFrame =
   | { type: "message"; id: string; text: string }
   | { type: "typing"; active: boolean }
-  | { type: "pause" };
+  | { type: "pause" }
+  | { type: "confirm"; id: number };
 
 /** One line of the conversation as the page shows it. */
 export interface ShownMessage {
@@ -24,6 +26,8 @@ export interface ShownMessage {
   at: number;
   /** A reply, formatted with the links it may show (#188); the page shows `text` without it. */
   blocks?: Block[];
+  /** A confirmation's notice: the id its Confirm button sends (#186). Never on a reply. */
+  confirmation?: number;
 }
 
 /** What the page receives. */
@@ -33,15 +37,20 @@ export type ServerFrame =
    * shows and resends only the ones it doesn't list.
    */
   | { type: "history"; messages: ShownMessage[]; received: string[]; paused: boolean }
-  /** A reply's bubble comes formatted (#188); Kelpie's own notices don't. */
-  | { type: "bubble"; text: string; blocks?: Block[] }
+  /**
+   * A reply's bubble comes formatted (#188). Kelpie's own notices come as written, a link notice
+   * formatted with its one link, and a confirmation's with the id its button sends (#186).
+   */
+  | { type: "bubble"; text: string; blocks?: Block[]; confirmation?: number }
   | { type: "typing"; active: boolean }
   /** What the turn is doing (#141); `idle` once it stopped without a reply. */
   | { type: "status"; status: TurnStep; label?: string }
   | { type: "paused" }
   | { type: "resumed" }
   | { type: "accepted"; id: string }
-  | { type: "rejected"; id: string; reason: string };
+  | { type: "rejected"; id: string; reason: string }
+  /** What a press of a Confirm button did: refused for a confirmation not open, or not theirs. */
+  | { type: "confirmation"; id: number; status: "accepted" | "refused" };
 
 /**
  * Who ingress admitted for a socket. The role and chat type are null when it named none, as before
@@ -67,6 +76,8 @@ export function parseAdmission(value: string | null): SocketAdmission | null {
         role: roleOf(parsed.role),
         chatType: chatTypeOf(parsed.chatType),
         timeZone: parsed.timeZone,
+        // The browser's language (#187); an older ingress names none.
+        language: typeof parsed.language === "string" ? parsed.language : null,
       };
     }
   } catch {
@@ -94,6 +105,9 @@ export function parseClientFrame(message: unknown): ClientFrame | null {
     return { type: "typing", active: frame.active };
   }
   if (frame?.type === "pause") return { type: "pause" };
+  if (frame?.type === "confirm" && Number.isSafeInteger(frame.id) && (frame.id as number) > 0) {
+    return { type: "confirm", id: frame.id as number };
+  }
   return null;
 }
 
@@ -109,7 +123,8 @@ export function shownText(message: ChatMessage): string {
 /**
  * The webchat's side of the channel ports: replies go to the conversation's open sockets. With
  * none open, a bubble still counts as delivered, because history keeps it and the next socket is
- * shown it.
+ * shown it. A notice isn't history: a socket opened once its turn has settled doesn't get it, and
+ * asking the agent again shows it again.
  */
 export function webchatEgress(
   sockets: () => Iterable<{ send(data: string): void }>,
@@ -126,11 +141,14 @@ export function webchatEgress(
   };
   return {
     async send(_agentId, _destination, text, options) {
-      broadcast(
-        options.links === undefined
-          ? { type: "bubble", text }
-          : { type: "bubble", text, blocks: formatReply(text, new Set(options.links)) },
-      );
+      broadcast({
+        type: "bubble",
+        text,
+        ...(options.links === undefined
+          ? {}
+          : { blocks: formatReply(text, new Set(options.links)) }),
+        ...(options.confirmation === undefined ? {} : { confirmation: options.confirmation }),
+      });
       return { ok: true, providerMessageId: `webchat:${crypto.randomUUID()}` };
     },
     async typing() {

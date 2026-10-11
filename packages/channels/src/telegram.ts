@@ -11,6 +11,7 @@ import {
 } from "./adapter.ts";
 import { CAPABILITIES } from "./capabilities.ts";
 import type { CanonicalEvent, MessagePart } from "./events.ts";
+import { MAX_LANGUAGE_TAG_CHARS } from "./locale.ts";
 import { fitsTelegram, formatReply, toTelegramHtml, toTelegramPlain } from "./markdown.ts";
 
 // Telegram through the Bot API (https://core.telegram.org/bots/api), webhooks only (ADR-0003).
@@ -42,7 +43,7 @@ interface TelegramFile {
 
 interface TelegramMessage {
   message_id: number;
-  from?: { id: number; is_bot: boolean; first_name?: string };
+  from?: { id: number; is_bot: boolean; first_name?: string; language_code?: string };
   chat: { id: number; type: "private" | "group" | "supergroup" | "channel" };
   /** Unix time, in seconds. */
   date: number;
@@ -225,6 +226,11 @@ export function normalizeTelegramUpdate(
     parts,
   };
   if (message.from.first_name) event.sender.displayName = message.from.first_name;
+  // Optional in Telegram's API, so a message without it is just as well formed.
+  const language = message.from.language_code;
+  if (typeof language === "string" && language.length <= MAX_LANGUAGE_TAG_CHARS) {
+    event.sender.languageCode = language;
+  }
   if (message.reply_to_message) {
     event.replyTo = { providerMessageId: String(message.reply_to_message.message_id) };
   }

@@ -116,15 +116,24 @@ export type RelinkResult =
   | { ok: true }
   | { ok: false; reason: "no_owner" | "token_spent" | "identity_taken" | "invalid_user" };
 
-/** Whether to tell the owner about a dropped stranger, and where: the owner's own account there. */
-export type StrangerNotice = { notify: true; ownerChannelUserId: string } | { notify: false };
+/**
+ * Whether to tell the owner about a dropped stranger, and where: the owner's own account there,
+ * with the language its app was last seen set to, for the notice's text (#187).
+ */
+export type StrangerNotice =
+  | { notify: true; ownerChannelUserId: string; ownerLanguage?: string }
+  | { notify: false };
 
 /**
  * The `Directory` methods other Workers call. The object implements it, and callers bind it as
  * `Remote<DirectoryContract>`, so a change on either side fails the type check.
  */
 export interface DirectoryContract {
-  admit(identity: ChannelIdentity, agentId: string): Admission;
+  /**
+   * Whether a sender may reach an agent. `language` is the language their app is set to, when the
+   * channel says, kept with the identity for Kelpie's notices to it (#187).
+   */
+  admit(identity: ChannelIdentity, agentId: string, language?: string): Admission;
   ownerExists(): boolean;
   bootstrapOwner(userId: string, accessSub: string): OwnerResult;
   relinkOwnerAccess(accessSub: string, tokenHash: string): RelinkResult;

@@ -79,6 +79,40 @@ describe("the webchat's socket", () => {
     });
   });
 
+  it("hands the conversation the browser's language, as the page names it or its header says (#187)", async () => {
+    const named = deps();
+    await handleWebchat(
+      socketRequest("/webchat/ws?agent=assistant&lang=es-AR", { "Accept-Language": "pt-BR" }),
+      named,
+    );
+    expect(named.connect).toHaveBeenCalledWith(
+      "assistant:webchat:u-owner",
+      expect.objectContaining({ language: "es-AR" }),
+    );
+    const header = deps();
+    await handleWebchat(socketRequest(undefined, { "Accept-Language": "pt-BR,pt;q=0.9" }), header);
+    expect(header.connect).toHaveBeenCalledWith(
+      "assistant:webchat:u-owner",
+      expect.objectContaining({ language: "pt-BR,pt;q=0.9" }),
+    );
+    // A browser that names no language sends an empty one: the header says instead.
+    const empty = deps();
+    await handleWebchat(
+      socketRequest("/webchat/ws?agent=assistant&lang=", { "Accept-Language": "es" }),
+      empty,
+    );
+    expect(empty.connect).toHaveBeenCalledWith(
+      "assistant:webchat:u-owner",
+      expect.objectContaining({ language: "es" }),
+    );
+    const long = deps();
+    await handleWebchat(socketRequest(`/webchat/ws?agent=assistant&lang=${"x".repeat(500)}`), long);
+    expect(long.connect).toHaveBeenCalledWith(
+      "assistant:webchat:u-owner",
+      expect.objectContaining({ language: "x".repeat(200) }),
+    );
+  });
+
   it("refuses a socket from another origin, or with no origin", async () => {
     const fakes = deps();
     const elsewhere = socketRequest(undefined, { Origin: "https://evil.example" });
