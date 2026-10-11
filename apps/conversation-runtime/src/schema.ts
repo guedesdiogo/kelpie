@@ -79,6 +79,12 @@ export const turns = sqliteTable("turns", {
    */
   toolsKey: text("tools_key"),
   /**
+   * A digest of the system prompt the turn's requests sent and the heading that leads a
+   * checkpoint's summary, null before it was kept (#211). A reply is replayed with its native
+   * output only to a turn with the same key, so a deploy that edits built-in text drops it.
+   */
+  promptKey: text("prompt_key"),
+  /**
    * The least-privileged role and chat type among the turn's messages, null where one wasn't
    * known (#131). Recall, the tools and the actor read them, so a retry sees the same memory.
    */

@@ -546,6 +546,28 @@ describe("a turn's tools and interruption", () => {
     });
   });
 
+  it("drops a recovered turn's native output when a deploy edited built-in prompt text meanwhile", async () => {
+    const world = use(fakeWorld([toolCalls({ name: "stuck" }), reply("Recovered.")]));
+    provide(world, { stuck: () => new Promise<ToolOutcome>(() => {}) });
+    const stub = agent("tools-evicted-deploy");
+    await stub.ingest(message("m1", "try the stuck one"));
+    await stub.flush();
+    await vi.waitFor(async () => expect(await history(stub)).toHaveLength(2));
+
+    // The first round ran under the built-in text of an earlier deploy.
+    await runInDurableObject(stub, (_instance: ConversationAgent, state) => {
+      state.storage.sql.exec("UPDATE turns SET prompt_key = ?", "an earlier deploy's key");
+    });
+    await evictDurableObject(stub);
+    await runDurableObjectAlarm(stub);
+    await vi.waitFor(() => expect(world.sent).toEqual(["Recovered."]));
+
+    expect(world.requests[1]?.messages[1]).toEqual({
+      role: "assistant",
+      parts: [{ type: "tool_call", id: "call-0", name: "stuck", input: {} }],
+    });
+  });
+
   it("keeps a refused turn's memory block once its calls are in history", async () => {
     const world = use(fakeWorld([toolCalls({ name: "lookup", input: { q: "a" } })]));
     world.memory = MEMORY;
