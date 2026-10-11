@@ -40,4 +40,8 @@ At the start of every story, before writing its plan, check how these projects s
 
 ## Repository state
 
-Design phase: no code, build or test gates exist yet. The viability study is `docs/viability-study.md`; research notes go in `docs/research/` and architecture decisions in `docs/adr/`.
+The viability study is `docs/viability-study.md`; research notes go in `docs/research/` and architecture decisions in `docs/adr/`.
+
+- A pull request merges only when `CI passed` is green: lint, typecheck, tests, the Workers' bundles, the migration gate, workflow lint and dependency review (`docs/deploy.md`).
+- A merge into `main` deploys all six Workers, watches production and rolls back by itself when it is unhealthy (ADR-0029). Never deploy production by hand. A rollback on request goes through the Rollback workflow, which needs the owner's request.
+- Migrations stay add-only, so production can roll back. A migration that drops, renames or rewrites data needs a `rollback-barrier` comment and the owner's agreement.

@@ -7,6 +7,7 @@
 | `packages/*` (domain modules, no Cloudflare imports) | Vitest | Node |
 | `packages/memory` | Vitest with `@cloudflare/vitest-plugin` | workerd, from a test-only Worker in `test/wrangler.jsonc` |
 | `apps/*` (Workers and Durable Objects) | Vitest with `@cloudflare/vitest-plugin` | workerd, configured from each Worker's `wrangler.jsonc` |
+| `tools/release` (deploys, rollbacks and the migration gate) | Vitest, with fakes for Cloudflare's API and production, and throwaway git repositories | Node |
 
 Domain modules stay runtime-agnostic (ADR-0002), so Node is enough for them. Anything that touches bindings, Durable Object storage or alarms runs inside workerd. No Cloudflare account or key is needed for either.
 
@@ -56,4 +57,5 @@ bun run test        # every workspace
 bun run typecheck   # generates Workers types, then runs tsc in every workspace
 bun run lint
 bun run --filter @kelpie/memory eval   # the memory evaluation (#108); half a minute, so not in `test`
+bun run --cwd tools/release release guard --base origin/main   # CI's migration gate (docs/deploy.md)
 ```

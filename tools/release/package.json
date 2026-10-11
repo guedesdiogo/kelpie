@@ -1,0 +1,13 @@
+{
+  "name": "@kelpie/release",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "release": "bun src/main.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.0"
+  }
+}
