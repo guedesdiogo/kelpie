@@ -50,14 +50,15 @@ async function storedOf(stub: ReturnType<typeof host>) {
 
 /**
  * Leaves the settings, the prompt version and the audit log as a deploy that stored the whole
- * settings would have, with no cleanup run yet and no built-in prompt kept (#210), then evicts the
- * object so the next call starts it again.
+ * settings would have, with no cleanup run yet and no built-in prompt kept (#210) unless one is
+ * given, then evicts the object so the next call starts it again.
  */
 async function seedStored(
   stub: ReturnType<typeof host>,
   settings: Record<string, unknown>,
   audited: string[][],
   promptVersion: number,
+  defaultPrompt?: string,
 ) {
   await stub.config();
   await runInDurableObject(stub, (_instance, state) => {
@@ -67,6 +68,7 @@ async function seedStored(
     for (const [key, value] of [
       ["settings", settings],
       ["promptVersion", promptVersion],
+      ...(defaultPrompt === undefined ? [] : [["defaultPrompt", defaultPrompt] as const]),
     ] as const) {
       state.storage.sql.exec(
         "INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)",
@@ -221,6 +223,17 @@ describe("AgentHost", () => {
     });
     await evictDurableObject(prompt);
     expect((await prompt.config()).promptVersion).toBe(3);
+
+    // #210 ran first and kept the built-in prompt while the copy replaced it: still one bump.
+    const after210 = host("frozen-older-prompt-after-210");
+    await seedStored(
+      after210,
+      { ...DEFAULT_SETTINGS, systemPrompt: "You are an older assistant." },
+      [["tier"]],
+      2,
+      DEFAULT_SETTINGS.systemPrompt,
+    );
+    expect((await after210.config()).promptVersion).toBe(3);
 
     const core = host("frozen-older-core");
     await seedStored(core, { ...DEFAULT_SETTINGS, memoryCore: true }, [["tier"]], 0);
