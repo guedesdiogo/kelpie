@@ -4,5 +4,5 @@
     "lib": ["ES2024", "DOM"],
     "types": []
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts"]
 }

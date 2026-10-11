@@ -8,14 +8,16 @@
   },
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "tools/*"
   ],
   "scripts": {
     "check:workspaces": "node scripts/check-workspace-scripts.mjs",
     "lint": "biome check .",
     "format": "biome check --write .",
     "typecheck": "bun run --filter '*' typecheck",
-    "test": "bun run --filter '*' test"
+    "test": "bun run --filter '*' test",
+    "test:coverage": "bun run --filter '*' test:coverage"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",

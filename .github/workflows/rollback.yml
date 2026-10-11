@@ -1,0 +1,82 @@
+name: Rollback
+
+# Rolls every Worker back to one earlier build, by the owner's request (docs/deploy.md):
+#   gh workflow run rollback.yml -f target=previous -f reason="..."
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: previous, a build (96), a tag (96-0c620f4) or a commit
+        default: previous
+        required: true
+        type: string
+      reason:
+        description: Why, for the deployment's message and the issue
+        required: true
+        type: string
+      force:
+        description: Also cross migrations the older code may not handle, or restore changed secrets
+        default: false
+        type: boolean
+      plan-only:
+        description: Only show what would change
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    name: Roll production back
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    # Shares the deploys' group: one deploy or rollback at a time.
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Rollback barriers are read from the target's commit to the live one.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Roll back
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TARGET: ${{ inputs.target }}
+          REASON: ${{ inputs.reason }}
+          FORCE: ${{ inputs.force }}
+          PLAN_ONLY: ${{ inputs.plan-only }}
+        run: |
+          args=(rollback --target "$TARGET" --reason "$REASON" --report "$RUNNER_TEMP/release.md")
+          if [ "$FORCE" = "true" ]; then args+=(--force); fi
+          if [ "$PLAN_ONLY" = "true" ]; then args+=(--plan); fi
+          bun run --cwd tools/release release "${args[@]}"
+      # Production now runs older code than main: the issue tracks the fix, which must land before
+      # the next merge deploys main again.
+      - name: Record the rollback on an issue
+        if: ${{ !cancelled() && !inputs.plan-only }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OUTCOME: ${{ job.status }}
+          TARGET: ${{ inputs.target }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          report="$RUNNER_TEMP/release.md"
+          # No report: the rollback was refused and nothing moved, as the run's error says.
+          [ -f "$report" ] || exit 0
+          printf '\n[The run](%s)\n' "$RUN_URL" >> "$report"
+          if [ "$OUTCOME" = "success" ]; then
+            title="Production rolled back to $TARGET"
+          else
+            title="Rollback of production to $TARGET failed"
+          fi
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$report"

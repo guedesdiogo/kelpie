@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Fetch and its types come from the DOM library; the Node APIs, from src/node.d.ts.
+    "lib": ["ES2024", "DOM"],
+    "types": []
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

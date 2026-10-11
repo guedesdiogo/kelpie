@@ -55,7 +55,7 @@ Webhooks point at ingress's public origin, which belongs to one deployment. Pass
 bunx wrangler deploy -c apps/channel-egress/wrangler.jsonc --var INGRESS_ORIGIN:https://<ingress hostname>
 ```
 
-Every later deploy needs the same flag. Without it, Wrangler sets `INGRESS_ORIGIN` back to empty. Webhooks already registered keep working, but no new one can be registered (`not_configured`).
+The deploy workflow carries it to later deploys (`docs/deploy.md`). A deploy by hand without the flag sets `INGRESS_ORIGIN` back to empty. Webhooks already registered keep working, but no new one can be registered (`not_configured`).
 
 After the ingress hostname changes, deploy with the new origin, then run `registerTelegramWebhook` for each agent with a bot.
 

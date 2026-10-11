@@ -164,7 +164,7 @@ The vault needs a GitHub App with access to the vault repository alone. Spike #2
      rm ~/.kelpie/context-store.secrets.json ~/.kelpie/github-app.pkcs8.pem && unset WEBHOOK_SECRET
      ```
 
-   Later deploys need the same three `--var` flags. Without them, Wrangler removes the vars and the vault is off again. The secrets stay.
+   The deploy workflow carries the three values to later deploys (`docs/deploy.md`). A deploy by hand without the `--var` flags removes them, and the vault is off again. The secrets stay.
 7. **Deploy the Workers after it:** `conversation-runtime` and `ingress`, in the order of [`admin-api.md`](admin-api.md).
 
 The secrets are Worker secrets on `context-store` ([ADR-0021](adr/0021-vault-app-secrets.md)).
