@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CloudflareError } from "../src/cloudflare.ts";
-import { type DeployDeps, deploy, planDeploy } from "../src/deploy.ts";
+import { type DeployDeps, deploy, deployedVersion, planDeploy } from "../src/deploy.ts";
+import { deployPlanReport, deployReport } from "../src/report.ts";
 import type { BuildTag } from "../src/tags.ts";
 import { WORKERS, type WorkerSpec } from "../src/workers.ts";
 import { fakeApi, fakeClock, fakeProduction, ORIGIN, quietGit, silentLog } from "./fakes.ts";
@@ -15,6 +16,8 @@ const options = {
 /** Production as deploys change it: ingress serves whichever build was deployed or restored last. */
 function harness(setup: {
   failWrangler?: string;
+  /** The failing Worker's new version went live before wrangler failed. */
+  liveBeforeFailing?: boolean;
   brokenAfterDeploy?: boolean;
   failRestore?: string;
   invocations?: Parameters<typeof fakeApi>[0]["invocations"];
@@ -46,7 +49,12 @@ function harness(setup: {
     mask: (value) => masked.push(value),
     async wranglerDeploy(spec, args) {
       wranglerCalls.push({ spec, args });
-      if (spec.script === setup.failWrangler) throw new Error("wrangler exited with 1");
+      if (spec.script === setup.failWrangler) {
+        if (setup.liveBeforeFailing) {
+          api.active.set(spec.script, [{ version_id: `${spec.app}-new`, percentage: 100 }]);
+        }
+        throw new Error("wrangler exited with 1");
+      }
       if (spec.script === "kelpie-ingress") production.serving = next;
       if (setup.brokenAfterDeploy) production.telegram = 503;
       return `${spec.app}-new`;
@@ -64,6 +72,38 @@ describe("planDeploy", () => {
     expect(plan.origin).toBe(ORIGIN);
     expect(plan.live.map((worker) => worker.tag)).toEqual(WORKERS.map(() => live));
     expect(plan.barriers).toEqual([]);
+  });
+
+  it("carries only the vars the owner set, not the repository's defaults", async () => {
+    const { deps } = harness({});
+    const gateway = "https://gateway.ai.cloudflare.com/v1/account/kelpie/openai";
+    deps.api = fakeApi({
+      live,
+      vars: {
+        "kelpie-llm-gateway": {
+          ANTHROPIC_BASE_URL: "https://api.anthropic.com",
+          OPENAI_BASE_URL: gateway,
+        },
+      },
+    });
+    const config = JSON.stringify({
+      vars: {
+        ANTHROPIC_BASE_URL: "https://api.anthropic.com",
+        OPENAI_BASE_URL: "https://api.openai.com/v1",
+      },
+    });
+    deps.git = (args) => (args[0] === "show" ? config : quietGit(args));
+    const plan = await planDeploy(deps);
+    expect(plan.live[0]?.vars).toEqual({ OPENAI_BASE_URL: gateway });
+  });
+
+  it("stops when the token can't read analytics", async () => {
+    const { deps } = harness({
+      invocations: () => {
+        throw new CloudflareError("Cloudflare GraphQL query failed (403)", []);
+      },
+    });
+    await expect(planDeploy(deps)).rejects.toThrow("Account Analytics Read");
   });
 
   it("refuses a working tree with changes", async () => {
@@ -97,7 +137,7 @@ describe("deploy", () => {
     ]);
     expect(masked).toContain(ORIGIN);
     expect(report.workers.every((worker) => worker.deployed?.endsWith("-new"))).toBe(true);
-    expect(api.deployments).toEqual([]);
+    expect(api.made).toEqual([]);
   });
 
   it("rolls back the Workers already deployed when one fails to deploy, in reverse order", async () => {
@@ -106,15 +146,30 @@ describe("deploy", () => {
 
     expect(report.outcome).toBe("rolled-back");
     expect(report.reason).toBe("kelpie-context-store didn't deploy: wrangler exited with 1");
-    expect(api.deployments.map((deployment) => deployment.script)).toEqual([
+    expect(api.made.map((deployment) => deployment.script)).toEqual([
       "kelpie-channel-egress",
       "kelpie-llm-gateway",
     ]);
-    expect(api.deployments[0]).toMatchObject({
+    expect(api.made[0]).toMatchObject({
       traffic: [{ version_id: "channel-egress-95-25c5076", percentage: 100 }],
       message: "Automatic rollback of 96-abc1234",
       force: false,
     });
+  });
+
+  it("rolls back a Worker that went live although wrangler failed", async () => {
+    const { deps, api } = harness({
+      failWrangler: "kelpie-context-store",
+      liveBeforeFailing: true,
+    });
+    const report = await deploy(deps, await planDeploy(deps), options);
+
+    expect(report.workers[2]?.deployed).toBe("context-store-new");
+    expect(api.made.map((deployment) => deployment.script)).toEqual([
+      "kelpie-context-store",
+      "kelpie-channel-egress",
+      "kelpie-llm-gateway",
+    ]);
   });
 
   it("rolls the whole release back when the probes fail, and checks the old build answers", async () => {
@@ -123,7 +178,7 @@ describe("deploy", () => {
 
     expect(report.outcome).toBe("rolled-back");
     expect(report.reason).toContain("telegram-webhook answered 503");
-    expect(api.deployments).toHaveLength(6);
+    expect(api.made).toHaveLength(6);
     expect(production.serving).toEqual(live);
     expect(report.probes.every((probe) => probe.outcome === "pass")).toBe(true);
   });
@@ -142,7 +197,7 @@ describe("deploy", () => {
     const report = await deploy(deps, await planDeploy(deps), options);
     expect(report.outcome).toBe("rolled-back");
     expect(report.errors).toEqual({ "kelpie-llm-gateway": 5 });
-    expect(api.deployments).toHaveLength(6);
+    expect(api.made).toHaveLength(6);
   });
 
   it("doesn't roll back across a barrier", async () => {
@@ -155,7 +210,7 @@ describe("deploy", () => {
 
     expect(report.outcome).toBe("failed");
     expect(report.reason).toContain("Not rolled back automatically");
-    expect(api.deployments).toEqual([]);
+    expect(api.made).toEqual([]);
   });
 
   it("reports the Workers a rollback couldn't restore", async () => {
@@ -176,6 +231,28 @@ describe("deploy", () => {
     const report = await deploy(blocked, plan, options);
     expect(report.outcome).toBe("failed");
     expect(report.reason).toContain("Nothing was rolled back");
-    expect(api.deployments).toEqual([]);
+    expect(api.made).toEqual([]);
+  });
+});
+
+describe("reports", () => {
+  it("name builds and versions, never the instance's hostnames or vars", async () => {
+    const { deps } = harness({ brokenAfterDeploy: true });
+    const plan = await planDeploy(deps);
+    const text = deployPlanReport(plan) + deployReport(await deploy(deps, plan, options));
+    expect(text).toContain("96-abc1234");
+    expect(text).not.toContain("example.com");
+  });
+});
+
+describe("deployedVersion", () => {
+  it("reads the version id from wrangler's output file", () => {
+    const ndjson = [
+      '{"type":"wrangler-session","version":1,"wrangler_version":"4.147.0"}',
+      '{"type":"deploy","version":1,"worker_name":"kelpie-ingress","version_id":"a1b2"}',
+      "",
+    ].join("\n");
+    expect(deployedVersion(ndjson)).toBe("a1b2");
+    expect(deployedVersion('{"type":"command-failed"}\n')).toBeUndefined();
   });
 });

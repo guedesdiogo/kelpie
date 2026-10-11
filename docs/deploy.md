@@ -50,7 +50,8 @@ CodeQL's default setup also runs on pull requests. The ruleset blocks new alerts
 
 After the gates pass on `main`, the `Deploy` job runs `tools/release`. It:
 
-1. **Reads each Worker's live version:** its build tag, its traffic, and its instance vars. Those are the values the owner set with `--var`: the Access values, the public origins, the vault's GitHub App values and the AI Gateway URLs.
+1. **Reads each Worker's live version:** its build tag, its traffic, and its instance vars. Those are the values the owner set with `--var`: the Access values, the public origins, the vault's GitHub App values and the AI Gateway URLs. A live value equal to the repository's default isn't carried, so a later change to the default applies.
+   - It also reads the analytics once. A token without Account Analytics Read stops the deploy here, before anything changes: the watch would otherwise judge by the probes alone.
 2. **Finds the rollback barriers** between the live commit and the new one.
 3. **Deploys the Workers in order** (`llm-gateway`, `channel-egress`, `context-store`, `conversation-runtime`, `ingress`, `admin-api`):
    - each is tagged `<build>-<sha>` and carries its instance vars;
@@ -88,9 +89,9 @@ The run's summary has the table of versions, the probes and the barriers. The pr
 - **One deploy or rollback runs at a time.** Others wait in the `production` group, and GitHub keeps only the newest waiting run.
 - **Don't deploy from a laptop.** A local `wrangler deploy` races the pipeline and skips its checks. Two exceptions:
   - **A new instance's first deploy** follows `docs/admin-api.md`, "Setting it up". The pipeline needs a live version to read the instance vars from.
-  - **Changing an instance var.** Deploy that one Worker by hand from a clean checkout of `main`, with the new value and the Worker's other vars:
+  - **Changing an instance var.** Deploy that one Worker by hand from a clean checkout of `main`. Pass a `--var` for each of its instance vars, the new value and the ones it keeps: any you leave out is removed. `bun run --cwd tools/release release deploy --plan` lists which each Worker carries.
     ```bash
-    bunx wrangler deploy -c apps/<worker>/wrangler.jsonc --tag "$(git rev-list --count --first-parent HEAD)-$(git rev-parse --short=7 HEAD)" --var NAME:value
+    bunx wrangler deploy -c apps/<worker>/wrangler.jsonc --tag "$(git rev-list --count --first-parent HEAD)-$(git rev-parse --short=7 HEAD)" --var NAME:value --var OTHER:value
     ```
     Later deploys carry the new value.
 
@@ -102,7 +103,7 @@ The run's summary has the table of versions, the probes and the barriers. The pr
   ```
   The Actions tab shows the same form (Rollback → Run workflow).
 - **`target`** takes one of:
-  - `previous`, the build before the live one;
+  - `previous`, the build production served before the live one, from ingress's deployment history. A build that was rolled back as unhealthy is never `previous`;
   - a build, such as `94`;
   - a tag, such as `94-cc8e179`;
   - a commit.
@@ -113,7 +114,7 @@ The run's summary has the table of versions, the probes and the barriers. The pr
 The rollback:
 - **Moves every Worker to the same build, or none.** A Worker that refuses undoes the ones moved before it.
 - **Refuses to cross a Durable Object class migration,** as Cloudflare does. Fix forward instead.
-- **Probes the target build, and opens an issue.**
+- **Probes the target build, and opens an issue.** A refused rollback changes nothing and opens no issue: the run's error says why.
 
 Fix or revert the change on `main` before the next merge, which deploys `main` again.
 

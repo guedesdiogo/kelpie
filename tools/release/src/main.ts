@@ -6,7 +6,7 @@ import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 import { migrationChanges } from "./changes.ts";
 import { cloudflareApi } from "./cloudflare.ts";
-import { type DeployDeps, deploy, planDeploy } from "./deploy.ts";
+import { type DeployDeps, deploy, deployedVersion, planDeploy } from "./deploy.ts";
 import { gitAt, repoRoot } from "./git.ts";
 import { readLive } from "./live.ts";
 import { maskCommands, redactor } from "./redact.ts";
@@ -114,11 +114,7 @@ function wranglerDeploy(root: string) {
       child.on("close", (code) => {
         let versionId: string | undefined;
         try {
-          versionId = readFileSync(output, "utf8")
-            .split("\n")
-            .filter(Boolean)
-            .map((line) => JSON.parse(line) as { type?: string; version_id?: string })
-            .find((entry) => entry.type === "deploy")?.version_id;
+          versionId = deployedVersion(readFileSync(output, "utf8"));
         } catch {
           // No output file: wrangler failed before deploying.
         }
@@ -286,7 +282,9 @@ main(process.argv.slice(2)).then(
     const file = process.argv.includes("--report")
       ? process.argv[process.argv.indexOf("--report") + 1]
       : undefined;
-    if (file) writeFileSync(file, `## Release tooling stopped\n\n${message}\n`);
+    // A rollback that changed nothing needs no issue: the run's error says why it stopped.
+    const unchanged = error instanceof RollbackRefused && !error.moved;
+    if (file && !unchanged) writeFileSync(file, `## Release tooling stopped\n\n${message}\n`);
     process.exit(1);
   },
 );

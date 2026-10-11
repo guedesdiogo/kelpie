@@ -3,6 +3,7 @@ import {
   parseTag,
   parseTarget,
   pickTag,
+  previousTag,
   sameTag,
   type TaggedVersion,
   versionWithTag,
@@ -48,26 +49,53 @@ describe("pickTag", () => {
     version("c", 18, "93-37c5f21"),
     version("d", 17, "93-37c5f21"),
   ];
-  const live = { build: 95, commit: "25c5076" };
-
-  it("takes the newest build before the live one for previous", () => {
-    expect(pickTag(versions, { kind: "previous" }, live)).toEqual({ build: 94, commit: "cc8e179" });
-  });
-
-  it("can't take previous without a live build", () => {
-    expect(pickTag(versions, { kind: "previous" }, null)).toBeNull();
-  });
 
   it("finds a build, a tag and a commit, by prefix either way", () => {
-    expect(pickTag(versions, { kind: "build", build: 93 }, live)?.commit).toBe("37c5f21");
-    expect(
-      pickTag(versions, { kind: "tag", tag: { build: 94, commit: "cc8e179" } }, live)?.build,
-    ).toBe(94);
-    expect(pickTag(versions, { kind: "commit", commit: "37c5f21aa" }, live)?.build).toBe(93);
+    expect(pickTag(versions, { kind: "build", build: 93 })?.commit).toBe("37c5f21");
+    expect(pickTag(versions, { kind: "tag", tag: { build: 94, commit: "cc8e179" } })?.build).toBe(
+      94,
+    );
+    expect(pickTag(versions, { kind: "commit", commit: "37c5f21aa" })?.build).toBe(93);
   });
 
   it("answers null when nothing matches", () => {
-    expect(pickTag(versions, { kind: "build", build: 50 }, live)).toBeNull();
+    expect(pickTag(versions, { kind: "build", build: 50 })).toBeNull();
+  });
+});
+
+describe("previousTag", () => {
+  const versions = [
+    version("v101", 4, "101-aaaaaaa"),
+    version("v100", 3, "100-bbbbbbb"),
+    version("v99", 2, "99-ccccccc"),
+  ];
+  const deployment = (...traffic: Array<[string, number]>) => ({
+    versions: traffic.map(([version_id, percentage]) => ({ version_id, percentage })),
+  });
+  const live = { build: 101, commit: "aaaaaaa" };
+
+  it("takes the build served before the live one, not the highest build below it", () => {
+    // 100 deployed, was rolled back to 99, then 101 deployed.
+    const history = [
+      deployment(["v101", 100]),
+      deployment(["v99", 100]),
+      deployment(["v100", 100]),
+    ];
+    expect(previousTag(history, versions, live)).toEqual({ build: 99, commit: "ccccccc" });
+  });
+
+  it("skips deployments of the live build and versions it can't name", () => {
+    const history = [
+      deployment(["v101", 100]),
+      deployment(["v101", 100]),
+      deployment(["gone", 100]),
+      deployment(["v100", 90], ["v99", 10]),
+    ];
+    expect(previousTag(history, versions, live)?.build).toBe(100);
+  });
+
+  it("answers null without an earlier build", () => {
+    expect(previousTag([deployment(["v101", 100])], versions, live)).toBeNull();
   });
 });
 

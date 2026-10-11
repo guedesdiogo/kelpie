@@ -43,6 +43,7 @@
 3. **Instance vars are carried from the live version.**
    - These are the vars the owner sets with `--var`: the Access values, the public origins, the vault's GitHub App values and the AI Gateway URLs.
    - Each deploy reads them from the version it replaces and passes them again, so their values stay out of the repository and out of GitHub.
+   - A value equal to the repository's default at the live commit isn't carried, so a later change to that default applies.
 4. **Migrations run as they do today, and stay add-only.**
    - `wrangler deploy` applies class migrations. Each object applies its SQL migrations when it wakes.
    - **Add-only.** A migration may add tables, nullable columns or columns with defaults, indexes and rows. Removing or rewriting data takes two releases:
@@ -61,12 +62,13 @@
      - a Telegram webhook with a wrong secret answers 401, through channel-egress and its `SecretStore`, which wakes and migrates;
      - a GitHub webhook with a wrong signature answers 401, through context-store.
    - **The watch.** For 10 minutes the probes repeat every minute. GraphQL analytics count the new versions' exceptions, exceeded limits and internal errors, Durable Objects included.
-   - **Unhealthy:** a probe failing three times in a row, or three failed invocations. Then every Worker deployed goes back to the version it replaced, and the old build is probed.
+   - **Unhealthy:** a probe failing three times in a row, or three failed invocations in the Workers or in their Durable Objects. The two are counted apart, because an object's exception also fails the Worker that called it.
+   - **Before deploying,** the deploy reads the analytics once. A token that can't read them stops it there: a watch without them would judge by the probes alone. Then every Worker deployed goes back to the version it replaced, and the old build is probed.
    - **No automatic rollback in two cases:**
      - **The release crosses a rollback barrier:** a class migration, a marked SQL migration, or a live version without a tag. It is fixed forward, or rolled back by request.
      - **The zone's security answered the probes** (`cf-mitigated`). Nothing is known about the Worker, so the deploy fails without a rollback.
    - Either way, a failed deploy opens an issue.
-6. **The owner rolls back on request** with the Rollback workflow, to `previous`, a build, a tag or a commit.
+6. **The owner rolls back on request** with the Rollback workflow, to `previous`, a build, a tag or a commit. `previous` is the build served before the live one, read from the deployment history, so a build rolled back as unhealthy is never chosen.
    - Every Worker moves to the same tag, or none does: a refusal undoes the Workers already moved.
    - **Barriers.**
      - A class migration is refused, as Cloudflare refuses it.

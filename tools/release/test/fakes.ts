@@ -35,21 +35,24 @@ export function workerVersion(
 
 export interface FakeApi extends CloudflareApi {
   /** Every deployment made through the API, as rollbacks make them. */
-  deployments: Array<{
-    script: string;
-    traffic: VersionTraffic[];
-    message: string;
-    force: boolean;
-  }>;
+  made: Array<{ script: string; traffic: VersionTraffic[]; message: string; force: boolean }>;
+  /** What each Worker serves now; deployments through the API change it. */
+  active: Map<string, VersionTraffic[]>;
 }
 
+const versionId = (script: string, tag: BuildTag) =>
+  `${script.replace("kelpie-", "")}-${formatTag(tag)}`;
+
 /**
- * Cloudflare with the six Workers live on one build. `failDeploy` makes the deployments API refuse
- * a Worker, with `force` or without.
+ * Cloudflare with the six Workers live on one build. `versions` are earlier builds still
+ * deployable, and by default each was deployed in turn, newest first; `history` replaces that
+ * order. `failDeploy` makes the deployments API refuse a Worker, with `force` or without.
  */
 export function fakeApi(options: {
   live: BuildTag;
   versions?: BuildTag[];
+  history?: BuildTag[];
+  vars?: Record<string, Record<string, string>>;
   missing?: { script: string; tag: BuildTag };
   failDeploy?: (script: string, force: boolean) => CloudflareError | undefined;
   invocations?: () => InvocationCount[] | Promise<InvocationCount[]>;
@@ -67,33 +70,41 @@ export function fakeApi(options: {
             ),
         )
         .map((tag, index) =>
-          workerVersion(
-            `${worker.app}-${formatTag(tag)}`,
-            100 - index,
-            tag,
-            worker.script === "kelpie-channel-egress" ? { INGRESS_ORIGIN: ORIGIN } : {},
-          ),
+          workerVersion(versionId(worker.script, tag), 100 - index, tag, {
+            ...(worker.script === "kelpie-channel-egress" ? { INGRESS_ORIGIN: ORIGIN } : {}),
+            ...options.vars?.[worker.script],
+          }),
         ),
     ]),
   );
-  const deployments: FakeApi["deployments"] = [];
+  const active = new Map(
+    WORKERS.map((worker) => [
+      worker.script,
+      [{ version_id: versionId(worker.script, options.live), percentage: 100 }],
+    ]),
+  );
+  const made: FakeApi["made"] = [];
+  const deployments = async (script: string) =>
+    [
+      active.get(script) ?? [],
+      ...(options.history ?? options.versions ?? []).map((tag) => [
+        { version_id: versionId(script, tag), percentage: 100 },
+      ]),
+    ].map((traffic, index) => ({
+      id: `deployment-${index}`,
+      created_on: "2026-10-10T00:00:00Z",
+      versions: traffic,
+    }));
   return {
+    made,
+    active,
     deployments,
     async activeDeployment(script) {
-      return {
-        id: `deployment-${script}`,
-        created_on: "2026-10-10T00:00:00Z",
-        versions: [
-          {
-            version_id: `${script.replace("kelpie-", "")}-${formatTag(options.live)}`,
-            percentage: 100,
-          },
-        ],
-      };
+      return (await deployments(script))[0] ?? null;
     },
-    async version(script, versionId) {
-      const found = versions.get(script)?.find((version) => version.id === versionId);
-      if (!found) throw new Error(`no version ${versionId}`);
+    async version(script, id) {
+      const found = versions.get(script)?.find((version) => version.id === id);
+      if (!found) throw new Error(`no version ${id}`);
       return found;
     },
     async deployableVersions(script) {
@@ -102,7 +113,8 @@ export function fakeApi(options: {
     async deployVersions(script, traffic, message, force) {
       const error = options.failDeploy?.(script, force);
       if (error) throw error;
-      deployments.push({ script, traffic: [...traffic], message, force });
+      made.push({ script, traffic: [...traffic], message, force });
+      active.set(script, [...traffic]);
     },
     async invocations() {
       return options.invocations ? options.invocations() : [];

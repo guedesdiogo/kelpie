@@ -144,6 +144,37 @@ describe("watch", () => {
     });
   });
 
+  it("judges Workers and Durable Objects apart, so one exception isn't counted twice", async () => {
+    const clock = fakeClock();
+    const api = fakeApi({
+      live: build,
+      invocations: () => [
+        {
+          dataset: "workers",
+          script: "kelpie-ingress",
+          status: "scriptThrewException",
+          requests: 2,
+        },
+        {
+          dataset: "durableObjects",
+          script: "kelpie-ingress",
+          status: "scriptThrewException",
+          requests: 2,
+        },
+      ],
+    });
+    const result = await watch(
+      { api, fetch: fakeProduction({ serving: build }), ...clock, log: silentLog },
+      ORIGIN,
+      build,
+      ["v1"],
+      clock.now(),
+      options,
+    );
+    expect(result.verdict.status).toBe("healthy");
+    expect(result.errors).toEqual({ "kelpie-ingress": 2, "kelpie-ingress (Durable Objects)": 2 });
+  });
+
   it("forgives a probe that fails twice in a row, not three times", async () => {
     const run = async (failures: number) => {
       const clock = fakeClock();

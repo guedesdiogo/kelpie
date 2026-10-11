@@ -1,5 +1,6 @@
 import type { VersionTraffic } from "./cloudflare.ts";
-import { buildTagOf, type Git, isClean, subjectOf } from "./git.ts";
+import { buildTagOf, type Git, hasCommit, isClean, show, subjectOf } from "./git.ts";
+import { parseJsonc } from "./jsonc.ts";
 import { type Barrier, barriersBetween, type LiveWorker, liveOrigin, readLive } from "./live.ts";
 import { type Restored, restore } from "./rollback.ts";
 import { type BuildTag, formatTag } from "./tags.ts";
@@ -22,6 +23,15 @@ export interface DeployDeps extends VerifyDeps {
   mask(value: string): void;
 }
 
+/** The version id in wrangler's output file (`WRANGLER_OUTPUT_FILE_PATH`), one JSON object a line. */
+export function deployedVersion(ndjson: string): string | undefined {
+  return ndjson
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { type?: string; version_id?: string })
+    .find((entry) => entry.type === "deploy")?.version_id;
+}
+
 export interface DeployPlan {
   tag: BuildTag;
   message: string;
@@ -31,8 +41,22 @@ export interface DeployPlan {
   origin: string;
 }
 
+/**
+ * The instance vars the owner set. A live value equal to the repository's default at the live
+ * commit is no setting: carrying it would pin that default after the repository changes it.
+ */
+function ownerSet(git: Git, worker: LiveWorker): Record<string, string> {
+  const ref = worker.tag && hasCommit(git, worker.tag.commit) ? worker.tag.commit : "HEAD";
+  const config = parseJsonc(show(git, ref, `apps/${worker.spec.app}/wrangler.jsonc`) || "{}") as {
+    vars?: Record<string, unknown>;
+  };
+  return Object.fromEntries(
+    Object.entries(worker.vars).filter(([name, value]) => value !== config.vars?.[name]),
+  );
+}
+
 export async function planDeploy(
-  deps: Pick<DeployDeps, "api" | "git">,
+  deps: Pick<DeployDeps, "api" | "git" | "now">,
   message?: string,
 ): Promise<DeployPlan> {
   if (!isClean(deps.git)) {
@@ -41,7 +65,23 @@ export async function planDeploy(
     );
   }
   const tag = buildTagOf(deps.git, "HEAD");
-  const live = await readLive(deps.api);
+  const live = (await readLive(deps.api)).map((worker) => ({
+    ...worker,
+    vars: ownerSet(deps.git, worker),
+  }));
+  // Without analytics the watch would judge by the probes alone, so a token without them stops here.
+  const now = deps.now();
+  try {
+    await deps.api.invocations(
+      live.map((worker) => worker.version.id),
+      new Date(now.getTime() - 60 * 60_000),
+      now,
+    );
+  } catch (error) {
+    throw new Error(
+      `The Cloudflare token can't read analytics, which the watch needs: give it Account Analytics Read (docs/deploy.md). ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   return {
     tag,
     message: (message ?? `${tag.commit} ${subjectOf(deps.git, "HEAD")}`).slice(0, 100),
@@ -116,10 +156,16 @@ export async function deploy(
       ...Object.entries(worker.vars).flatMap(([name, value]) => ["--var", `${name}:${value}`]),
     ];
     deps.log.info(`Deploying ${worker.spec.script} as ${formatTag(plan.tag)}`);
+    const entry = report.workers[index] as DeployReport["workers"][number];
     try {
-      (report.workers[index] as DeployReport["workers"][number]).deployed =
-        await deps.wranglerDeploy(worker.spec, args);
+      entry.deployed = await deps.wranglerDeploy(worker.spec, args);
     } catch (error) {
+      // Wrangler can fail in a step after the new version went live, so the live one decides.
+      const active = await deps.api.activeDeployment(worker.spec.script).catch(() => null);
+      const fresh = active?.versions.find(
+        (traffic) => !worker.traffic.some((before) => before.version_id === traffic.version_id),
+      );
+      if (fresh) entry.deployed = fresh.version_id;
       const reason = `${worker.spec.script} didn't deploy: ${error instanceof Error ? error.message : String(error)}`;
       return rollBack(deps, plan, report, reason, options);
     }

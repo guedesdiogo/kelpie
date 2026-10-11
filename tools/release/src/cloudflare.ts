@@ -12,6 +12,7 @@ export interface Deployment {
   id: string;
   created_on: string;
   versions: VersionTraffic[];
+  annotations?: Record<string, string | undefined>;
 }
 
 export interface Binding {
@@ -50,6 +51,8 @@ export class CloudflareError extends Error {
 export interface CloudflareApi {
   /** The deployment serving traffic now, or null for a Worker never deployed. */
   activeDeployment(script: string): Promise<Deployment | null>;
+  /** The most recent deployments, newest first: the one serving now, then what came before. */
+  deployments(script: string): Promise<Deployment[]>;
   version(script: string, versionId: string): Promise<WorkerVersion>;
   /** The versions a rollback can reach: the 100 most recent. */
   deployableVersions(script: string): Promise<WorkerVersion[]>;
@@ -99,12 +102,16 @@ export function cloudflareApi(
     return body.result;
   }
 
+  async function deployments(script: string): Promise<Deployment[]> {
+    const result = await call<{ deployments: Deployment[] }>(`${scripts}/${script}/deployments`);
+    return result.deployments;
+  }
+
   return {
+    deployments,
+
     async activeDeployment(script) {
-      const { deployments } = await call<{ deployments: Deployment[] }>(
-        `${scripts}/${script}/deployments`,
-      );
-      return deployments[0] ?? null;
+      return (await deployments(script))[0] ?? null;
     },
 
     version: (script, versionId) => call(`${scripts}/${script}/versions/${versionId}`),

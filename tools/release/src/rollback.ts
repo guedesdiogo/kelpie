@@ -19,6 +19,7 @@ import {
   parseTag,
   parseTarget,
   pickTag,
+  previousTag,
   type TaggedVersion,
   versionWithTag,
 } from "./tags.ts";
@@ -38,16 +39,20 @@ export interface Restored {
   detail?: string;
 }
 
-/** Serves earlier versions again, in reverse deploy order; one failure doesn't stop the others. */
+/**
+ * Serves earlier versions again, in reverse deploy order; one failure doesn't stop the others.
+ * `force` restores versions whose secrets differ from the live ones.
+ */
 export async function restore(
   api: CloudflareApi,
   moves: ReadonlyArray<{ script: string; traffic: readonly VersionTraffic[] }>,
   message: string,
+  force = false,
 ): Promise<Restored[]> {
   const results: Restored[] = [];
   for (const move of [...moves].reverse()) {
     try {
-      await api.deployVersions(move.script, move.traffic, message, false);
+      await api.deployVersions(move.script, move.traffic, message, force);
       results.unshift({ script: move.script, ok: true });
     } catch (error) {
       results.unshift({
@@ -60,9 +65,15 @@ export async function restore(
   return results;
 }
 
-/** A rollback that can't go ahead as asked. Nothing changed in production. */
+/** A rollback that can't go ahead as asked. `moved`: undoing it failed, so production changed. */
 export class RollbackRefused extends Error {
   override name = "RollbackRefused";
+  constructor(
+    message: string,
+    readonly moved = false,
+  ) {
+    super(message);
+  }
 }
 
 export interface RollbackPlan {
@@ -107,7 +118,19 @@ export async function planRollback(
     live.map(async (worker) => tagged(await deps.api.deployableVersions(worker.spec.script))),
   );
   const ingress = live.findIndex((worker) => worker.spec.script === INGRESS);
-  const chosen = pickTag(versions[ingress] ?? [], target, live[ingress]?.tag ?? null);
+  const chosen =
+    target.kind === "previous"
+      ? previousTag(
+          await deps.api.deployments(INGRESS),
+          versions[ingress] ?? [],
+          live[ingress]?.tag ?? null,
+        )
+      : pickTag(versions[ingress] ?? [], target);
+  if (!chosen && target.kind === "previous") {
+    throw new RollbackRefused(
+      `${INGRESS}'s recent deployments show no earlier build that a rollback can reach. Name a build instead.`,
+    );
+  }
   if (!chosen) {
     const recent = [...new Set((versions[ingress] ?? []).map((version) => formatTag(version.tag)))]
       .slice(0, 10)
@@ -198,14 +221,16 @@ export async function rollback(
         deps.api,
         moved.map((done) => ({ script: done.spec.script, traffic: done.from })),
         `Undo the partial rollback to ${formatTag(plan.target)}`,
+        options.force,
       );
       const stuck = undone.filter((result) => !result.ok).map((result) => result.script);
       const reason = error instanceof Error ? error.message : String(error);
-      throw new RollbackRefused(
-        stuck.length === 0
-          ? `${reason} Nothing was rolled back.`
-          : `${reason} Undoing the Workers already rolled back failed for ${stuck.join(", ")}: production mixes two builds now.`,
-      );
+      throw stuck.length === 0
+        ? new RollbackRefused(`${reason} Nothing was rolled back.`)
+        : new RollbackRefused(
+            `${reason} Undoing the Workers already rolled back failed for ${stuck.join(", ")}: production mixes two builds now.`,
+            true,
+          );
     }
   }
 

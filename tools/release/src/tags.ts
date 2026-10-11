@@ -54,20 +54,15 @@ export interface TaggedVersion {
 }
 
 /**
- * The tag a target names among a Worker's deployable versions. `previous` is the newest build
- * before the live one, so it needs the live tag.
+ * The tag a target names among a Worker's deployable versions. `previous` comes from the
+ * deployment history instead (`previousTag`).
  */
 export function pickTag(
   versions: readonly TaggedVersion[],
-  target: Target,
-  live: BuildTag | null,
+  target: Exclude<Target, { kind: "previous" }>,
 ): BuildTag | null {
   let candidates: TaggedVersion[];
   switch (target.kind) {
-    case "previous":
-      if (!live) return null;
-      candidates = versions.filter((version) => version.tag.build < live.build);
-      break;
     case "build":
       candidates = versions.filter((version) => version.tag.build === target.build);
       break;
@@ -88,6 +83,28 @@ export function pickTag(
     null,
   );
   return best?.tag ?? null;
+}
+
+/**
+ * The build production served before the live one, from a Worker's deployments, newest first. The
+ * history decides, not the build numbers: a build rolled back as unhealthy never came before.
+ */
+export function previousTag(
+  deployments: ReadonlyArray<{
+    versions: ReadonlyArray<{ version_id: string; percentage: number }>;
+  }>,
+  versions: readonly TaggedVersion[],
+  live: BuildTag | null,
+): BuildTag | null {
+  for (const deployment of deployments.slice(1)) {
+    const main = deployment.versions.reduce<{ version_id: string; percentage: number } | null>(
+      (best, traffic) => (best === null || traffic.percentage > best.percentage ? traffic : best),
+      null,
+    );
+    const tag = versions.find((version) => version.id === main?.version_id)?.tag ?? null;
+    if (tag && !sameTag(tag, live)) return tag;
+  }
+  return null;
 }
 
 /** The newest deployable version with exactly this tag. */

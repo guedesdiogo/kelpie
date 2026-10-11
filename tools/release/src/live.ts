@@ -24,8 +24,9 @@ export async function readLive(
   return Promise.all(
     workers.map(async (spec) => {
       const deployment = await api.activeDeployment(spec.script);
-      const main = deployment?.versions.reduce((best, traffic) =>
-        traffic.percentage > best.percentage ? traffic : best,
+      const main = deployment?.versions.reduce<VersionTraffic | null>(
+        (best, traffic) => (best === null || traffic.percentage > best.percentage ? traffic : best),
+        null,
       );
       if (!deployment || !main) {
         throw new Error(

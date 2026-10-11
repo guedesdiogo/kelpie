@@ -268,8 +268,19 @@ export async function watch(
       };
     }
 
+    let failed = 0;
     try {
-      errors = badInvocations(await deps.api.invocations(versionIds, since, deps.now()));
+      const rows = await deps.api.invocations(versionIds, since, deps.now());
+      errors = badInvocations(rows);
+      // A Durable Object's exception also fails the Worker that called it: the two datasets are
+      // judged apart, not added up.
+      failed = Math.max(
+        ...(["workers", "durableObjects"] as const).map((dataset) =>
+          rows
+            .filter((row) => row.dataset === dataset && BAD_STATUSES.has(row.status))
+            .reduce((sum, row) => sum + row.requests, 0),
+        ),
+      );
       analytics = true;
     } catch (error) {
       if (analytics) {
@@ -279,15 +290,14 @@ export async function watch(
       }
       analytics = false;
     }
-    const total = Object.values(errors).reduce((sum, count) => sum + count, 0);
-    if (total >= options.errorThreshold) {
+    if (failed >= options.errorThreshold) {
       const detail = Object.entries(errors)
         .map(([script, count]) => `${script}: ${count}`)
         .join(", ");
       return {
         verdict: {
           status: "unhealthy",
-          reason: `the new versions failed ${total} invocations (${detail})`,
+          reason: `the new versions failed ${failed} invocations (${detail})`,
         },
         probes,
         errors,

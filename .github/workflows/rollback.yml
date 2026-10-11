@@ -71,7 +71,8 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           report="$RUNNER_TEMP/release.md"
-          [ -f "$report" ] || echo "The rollback stopped before it wrote a report." > "$report"
+          # No report: the rollback was refused and nothing moved, as the run's error says.
+          [ -f "$report" ] || exit 0
           printf '\n[The run](%s)\n' "$RUN_URL" >> "$report"
           if [ "$OUTCOME" = "success" ]; then
             title="Production rolled back to $TARGET"
