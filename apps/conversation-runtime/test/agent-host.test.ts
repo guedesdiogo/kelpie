@@ -50,7 +50,8 @@ async function storedOf(stub: ReturnType<typeof host>) {
 
 /**
  * Leaves the settings, the prompt version and the audit log as a deploy that stored the whole
- * settings would have, then evicts the object so the next call starts it again.
+ * settings would have, with no cleanup run yet, then evicts the object so the next call starts it
+ * again.
  */
 async function seedStored(
   stub: ReturnType<typeof host>,
@@ -60,6 +61,7 @@ async function seedStored(
 ) {
   await stub.config();
   await runInDurableObject(stub, (_instance, state) => {
+    state.storage.sql.exec("DELETE FROM state WHERE key = 'settingsOverridesOnly'");
     for (const [key, value] of [
       ["settings", settings],
       ["promptVersion", promptVersion],
@@ -239,6 +241,13 @@ describe("AgentHost", () => {
       tier: DEFAULT_SETTINGS.tier,
       systemPrompt: "Fale como um pirata.",
     });
+
+    // The cleanup ran once: an audit log that lost its rows later changes nothing.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec("DELETE FROM audit_log");
+    });
+    await evictDurableObject(stub);
+    expect((await stub.config()).settings.systemPrompt).toBe("Fale como um pirata.");
   });
 
   it("drops the end-of-turn windows and the old cap from storage, even when a change named the cap", async () => {

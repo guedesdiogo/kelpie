@@ -87,10 +87,11 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
    * defaults beside its owner's choices, and a later edit to a default never reached it. This keeps
    * only the settings some change named, as the audit log records them; the others follow the
    * defaults again. A system prompt or memory core that changes by it starts a new prompt version.
+   * It runs once per agent, so the audit log decides nothing after it.
    */
   #dropUnnamedSettings(): void {
-    const raw = this.#get<StoredSettings | null>("settings", null);
-    if (raw === null) return;
+    if (this.#get("settingsOverridesOnly", false)) return;
+    const raw = this.#get<StoredSettings>("settings", {});
     const named = new Set(
       this.#db
         .select({ fields: schema.auditLog.fields })
@@ -102,7 +103,6 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     const kept: Partial<AgentSettings> = Object.fromEntries(
       Object.entries(before).filter(([key]) => named.has(key)),
     );
-    if (Object.keys(kept).length === Object.keys(raw).length) return;
     const was = { ...this.#defaults(), ...before };
     const now = { ...this.#defaults(), ...kept };
     const version = this.#get("promptVersion", 0);
@@ -114,6 +114,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       for (const [key, value] of [
         ["settings", kept],
         ["promptVersion", promptVersion],
+        ["settingsOverridesOnly", true],
       ] as const) {
         tx.insert(schema.state)
           .values({ key, value })
