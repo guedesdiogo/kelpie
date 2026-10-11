@@ -452,6 +452,7 @@ describe("ConversationAgent turns", () => {
     await stub.flush();
     await vi.waitFor(() => expect(world.sent).toEqual(["First."]));
     await setPromptKeys(stub, null);
+    expect(await stub.history()).toEqual([user("one?"), neutral("First.")]);
 
     await stub.ingest(message("m2", "two?"));
     await stub.flush();

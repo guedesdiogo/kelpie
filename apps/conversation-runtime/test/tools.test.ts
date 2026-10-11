@@ -269,6 +269,16 @@ describe("a turn's tools", () => {
       role: "assistant",
       parts: [{ type: "text", text: "Hi!" }],
     });
+    // TOOLS_NOTE joined the same configured prompt: built-in text reaches the turn's prompt key.
+    const [before, after] = await runInDurableObject(stub, (_instance: ConversationAgent, state) =>
+      state.storage.sql
+        .exec<{ prompt_key: string | null }>("SELECT prompt_key FROM turns ORDER BY id")
+        .toArray()
+        .map((row) => row.prompt_key),
+    );
+    expect(before).toEqual(expect.any(String));
+    expect(after).toEqual(expect.any(String));
+    expect(after).not.toBe(before);
     // The turn's own calls keep theirs from round to round.
     expect(world.requests[2]?.messages[3]).toEqual(
       toolUse([{ id: "call-0", name: "lookup", input: { q: "a" } }]),
