@@ -17,6 +17,7 @@ PR ──► gates ──► CI passed ──► merge ──► gates on main �
    ```bash
    gh secret set CLOUDFLARE_API_TOKEN --env production --repo guedesdiogo/kelpie
    ```
+   Keep deploy credentials in the environment, never as repository secrets. CI hands the deploy job its secrets with `secrets: inherit`, the only way the environment's secrets reach a called workflow, so any repository secret would reach it too.
 3. **The ruleset `main: CI must pass`** requires, with no bypass:
    - `CI passed`, on a branch up to date with `main`;
    - CodeQL's results, which block new high-severity alerts.
