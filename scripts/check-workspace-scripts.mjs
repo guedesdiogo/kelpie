@@ -17,13 +17,24 @@ const workspaces = root.workspaces.flatMap((pattern) => {
 
 const missing = workspaces.flatMap((dir) => {
   const { scripts = {} } = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
-  return REQUIRED.filter((name) => !scripts[name]).map(
+  const problems = REQUIRED.filter((name) => !scripts[name]).map(
     (name) => `${dir}: missing "${name}" script`,
   );
+  // A coverage run without thresholds would gate nothing.
+  const config = join(dir, "vitest.config.ts");
+  if (scripts["test:coverage"] && !scripts["test:coverage"].includes("--coverage")) {
+    problems.push(`${dir}: "test:coverage" doesn't pass --coverage`);
+  }
+  if (!existsSync(config) || !readFileSync(config, "utf8").includes("thresholds:")) {
+    problems.push(`${dir}: vitest.config.ts sets no coverage thresholds`);
+  }
+  return problems;
 });
 
 if (missing.length > 0) {
   console.error(missing.join("\n"));
   process.exit(1);
 }
-console.log(`${workspaces.length} workspace(s) define ${REQUIRED.join(" and ")}.`);
+console.log(
+  `${workspaces.length} workspace(s) define ${REQUIRED.join(", ")}, and coverage thresholds.`,
+);

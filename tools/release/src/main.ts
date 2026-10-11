@@ -10,6 +10,7 @@ import { type DeployDeps, deploy, deployedVersion, planDeploy } from "./deploy.t
 import { gitAt, repoRoot } from "./git.ts";
 import { guardVerdict } from "./guard.ts";
 import { readLive } from "./live.ts";
+import { bounded, exitCode, reportsFailure } from "./outcome.ts";
 import { maskCommands, redactor } from "./redact.ts";
 import {
   deployPlanReport,
@@ -131,15 +132,6 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 const now = () => new Date();
 const settleOptions = { attempts: 18, intervalMs: 10_000 };
 
-function bounded(value: string | undefined, fallback: number, name: string, max: number): number {
-  if (value === undefined) return fallback;
-  const number = Number(value);
-  if (!Number.isFinite(number) || number < 0 || number > max) {
-    throw new Error(`--${name} takes a number from 0 to ${max}.`);
-  }
-  return number;
-}
-
 async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args: argv,
@@ -174,7 +166,7 @@ async function main(argv: string[]): Promise<number> {
       console.log(
         `Migrations from ${base} to HEAD: ${report.problems.length} problem(s), ${report.findings.length} rollback barrier(s), ${blocking} blocking.`,
       );
-      return blocking === 0 ? 0 : 1;
+      return exitCode.guard(blocking);
     }
 
     case "status": {
@@ -225,7 +217,7 @@ async function main(argv: string[]): Promise<number> {
         },
       });
       publish(deployReport(report), values.report);
-      return report.outcome === "deployed" ? 0 : 1;
+      return exitCode.deploy(report);
     }
 
     case "rollback": {
@@ -244,7 +236,7 @@ async function main(argv: string[]): Promise<number> {
         settle: settleOptions,
       });
       publish(rollbackReport(report), values.report);
-      return report.verdict.status === "healthy" ? 0 : 1;
+      return exitCode.rollback(report);
     }
 
     default:
@@ -261,9 +253,8 @@ main(process.argv.slice(2)).then(
     const file = process.argv.includes("--report")
       ? process.argv[process.argv.indexOf("--report") + 1]
       : undefined;
-    // A rollback that changed nothing needs no issue: the run's error says why it stopped.
-    const unchanged = error instanceof RollbackRefused && !error.moved;
-    if (file && !unchanged) writeFileSync(file, `## Release tooling stopped\n\n${message}\n`);
+    if (file && reportsFailure(error))
+      writeFileSync(file, `## Release tooling stopped\n\n${message}\n`);
     process.exit(1);
   },
 );

@@ -56,11 +56,12 @@ The `ConversationAgent` reads its settings from a real `AgentHost` in the same t
 
 CI runs every workspace's tests once, with coverage (`bun run test:coverage`), and its summary shows a coverage table for each workspace.
 - **The provider is Istanbul.** V8's coverage doesn't work inside workerd, so every workspace uses Istanbul for the same numbers everywhere.
-- **What counts:** each workspace counts its own `src/**/*.ts`, covered by its own tests. A package's code exercised only by an app's tests doesn't count for the package, so tests belong in the workspace whose code they test.
+- **What counts:** each workspace counts its own `src/**/*.ts`, covered by its own tests. A package's code exercised only by an app's tests doesn't count for the package, so tests belong in the workspace whose code they test. The one exclusion is `tools/release/src/main.ts`, the CLI's wiring to the process, git, wrangler and Cloudflare. Its decisions live in tested modules.
 - **Thresholds.** Each workspace's `vitest.config.ts` sets thresholds for statements, branches, functions and lines.
-  - They sit one point under the coverage measured when they were set, so coverage can't drop.
+  - Each is the measured coverage rounded down to a whole number, minus one. Coverage can drop by up to about two points before a run fails.
   - None for statements, functions or lines is below 80%.
   - A run under any threshold fails CI, so the pull request can't merge.
+- **`check:workspaces`** fails a workspace without a `test:coverage` script that passes `--coverage`, or without thresholds in its `vitest.config.ts`.
 - **Raising them.** When tests cover more, raise that workspace's thresholds in the same pull request. Lowering one takes a reason in the pull request.
 - **New code:** aim for at least 80% coverage, with tests that check behavior rather than lines.
 

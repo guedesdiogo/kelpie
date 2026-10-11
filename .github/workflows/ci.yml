@@ -27,9 +27,10 @@ jobs:
       - run: bun run lint
       - run: bun run typecheck
       # The tests, once, with coverage: each workspace fails below its thresholds (docs/testing.md).
-      - run: bun run test:coverage
+      - id: tests
+        run: bun run test:coverage
       - name: Coverage summary
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.tests.conclusion != 'skipped' }}
         run: node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY"
 
   build:

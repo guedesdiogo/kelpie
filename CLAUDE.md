@@ -43,6 +43,6 @@ At the start of every story, before writing its plan, check how these projects s
 The viability study is `docs/viability-study.md`; research notes go in `docs/research/` and architecture decisions in `docs/adr/`.
 
 - A pull request merges only when `CI passed` is green, its branch is up to date with `main`, and CodeQL found no new high-severity alert. `CI passed` covers lint, typecheck, the tests with each workspace's coverage thresholds, the Workers' bundles, the migration gate, workflow lint and dependency review (`docs/deploy.md`, `docs/testing.md`).
-- Coverage can't drop. New code comes with tests; raise a workspace's thresholds in `vitest.config.ts` when its coverage rises.
+- Coverage can't drop below each workspace's thresholds, set just under its measured coverage. New code comes with tests; raise a workspace's thresholds in `vitest.config.ts` when its coverage rises.
 - A merge into `main` deploys all six Workers, watches production and rolls back by itself when it is unhealthy (ADR-0029). Never deploy production by hand. A rollback on request goes through the Rollback workflow, which needs the owner's request.
 - Migrations stay add-only, so production can roll back. A migration that drops, renames or rewrites data needs a `rollback-barrier` comment and the owner's agreement.
