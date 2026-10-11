@@ -42,7 +42,13 @@ The routine follows these steps, and so does a review run by hand.
    - Everything else goes in one `[Follow-up 4.14] ai-memory <version or date>: <subject>` issue with `type:follow-up` and `epic:4`, plus `security` when it touches secrets, scopes or personal data. It goes in the Kelpie project's Backlog, with the sections Context, Goal, Out of scope, Plan, Acceptance criteria, Planned verification, and Risks and rollback.
    - A finding that contradicts an ADR or an approved decision is a question to the owner. It never changes the design.
    - With nothing to adopt, adapt or consider, no issue is opened: the record says so.
-7. **Record the review:** a pull request from a fresh `main` that updates the last reviewed commit and adds a row to the table above. Its body links the issue and the comments, and lists what was ignored, by group. It doesn't close the issue.
+7. **Record the review:** a pull request from a fresh `main` that updates the last reviewed commit and adds a row to the table above. Its body links the issue and the comments, and lists what was ignored, by group.
+   - **It leaves the issue open.** Neither the body nor the commit puts a closing keyword (`close`, `fix` or `resolve`, in any tense) before an issue reference, not even in a negation: GitHub reads "doesn't close #N" as a link, and the merge closes the issue. That is how #204 shut #203 and #232 shut #230 (#247). The body says "The follow-up issue stays open." instead.
+   - **Before the pull request opens,** this finds nothing in its body, saved to `body.md`:
+
+     ```sh
+     grep -inE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b:?[[:space:]]+[^[:space:]]*(#|/issues/)[0-9]+' body.md
+     ```
 
 ## What the routine may do
 
