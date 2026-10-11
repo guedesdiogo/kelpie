@@ -83,10 +83,25 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   }
 
   /**
+   * The settings that differ from the built-in defaults, the only ones stored: a setting set back to
+   * its default follows the default again, later edits included (#218).
+   */
+  #overrides(settings: Partial<AgentSettings>): Partial<AgentSettings> {
+    const defaults = this.#defaults();
+    return Object.fromEntries(
+      Object.entries(settings).filter(
+        ([key, value]) =>
+          JSON.stringify(value) !== JSON.stringify(defaults[key as keyof AgentSettings]),
+      ),
+    );
+  }
+
+  /**
    * Until #212 a change stored the whole settings, so an agent changed before it holds that day's
    * defaults beside its owner's choices, and a later edit to a default never reached it. This keeps
-   * only the settings some change named, as the audit log records them; the others follow the
-   * defaults again. A system prompt or memory core that changes by it starts a new prompt version.
+   * only the settings some change named, as the audit log records them, and that differ from the
+   * defaults; the others follow the defaults again. A system prompt or memory core that changes by
+   * it starts a new prompt version.
    * A dropped copy of the prompt was the one in effect, so the built-in prompt is then recorded as
    * seen, and `#promptVersion` doesn't bump a second time. It runs once per agent, so the audit log
    * decides nothing after it.
@@ -102,8 +117,8 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
         .flatMap((row) => row.fields),
     );
     const before = current(raw);
-    const kept: Partial<AgentSettings> = Object.fromEntries(
-      Object.entries(before).filter(([key]) => named.has(key)),
+    const kept = this.#overrides(
+      Object.fromEntries(Object.entries(before).filter(([key]) => named.has(key))),
     );
     const was = { ...this.#defaults(), ...before };
     const now = { ...this.#defaults(), ...kept };
@@ -233,10 +248,10 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       settings.memoryCore === current.settings.memoryCore
         ? current.promptVersion
         : current.promptVersion + 1;
-    const stored = {
+    const stored = this.#overrides({
       ...this.#stored(),
       ...Object.fromEntries(fields.map((key) => [key, parsed[key]])),
-    };
+    });
     this.#db.transaction((tx) => {
       for (const [key, value] of [
         ["settings", stored],
