@@ -53,7 +53,10 @@ async function sameText(a: string, b: string): Promise<boolean> {
 async function openTelegramForm(env: Env, agentId: string) {
   if (!isAgentId(agentId)) return { ok: false as const, reason: "invalid_input" as const };
   try {
-    return { ok: true as const, ...(await store(env).createForm(agentId, "telegram")) };
+    // Named fields, not a spread: a stub's result is typed `& Disposable`, and spreading it copies
+    // `[Symbol.dispose]`, which the RPC types won't return, so callers' types would lose this branch.
+    const { token, expiresAt } = await store(env).createForm(agentId, "telegram");
+    return { ok: true as const, token, expiresAt };
   } catch (error) {
     console.error("channel-egress: creating a form failed", errorName(error));
     return unavailable;
