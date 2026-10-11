@@ -87,7 +87,9 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
    * defaults beside its owner's choices, and a later edit to a default never reached it. This keeps
    * only the settings some change named, as the audit log records them; the others follow the
    * defaults again. A system prompt or memory core that changes by it starts a new prompt version.
-   * It runs once per agent, so the audit log decides nothing after it.
+   * A dropped copy of the prompt was the one in effect, so the built-in prompt is then recorded as
+   * seen, and `#promptVersion` doesn't bump a second time. It runs once per agent, so the audit log
+   * decides nothing after it.
    */
   #dropUnnamedSettings(): void {
     if (this.#get("settingsOverridesOnly", false)) return;
@@ -110,12 +112,16 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       now.systemPrompt === was.systemPrompt && now.memoryCore === was.memoryCore
         ? version
         : version + 1;
+    const rows: [string, unknown][] = [
+      ["settings", kept],
+      ["promptVersion", promptVersion],
+      ["settingsOverridesOnly", true],
+    ];
+    if (before.systemPrompt !== undefined && kept.systemPrompt === undefined) {
+      rows.push(["defaultPrompt", now.systemPrompt]);
+    }
     this.#db.transaction((tx) => {
-      for (const [key, value] of [
-        ["settings", kept],
-        ["promptVersion", promptVersion],
-        ["settingsOverridesOnly", true],
-      ] as const) {
+      for (const [key, value] of rows) {
         tx.insert(schema.state)
           .values({ key, value })
           .onConflictDoUpdate({ target: schema.state.key, set: { value } })

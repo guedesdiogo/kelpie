@@ -50,8 +50,8 @@ async function storedOf(stub: ReturnType<typeof host>) {
 
 /**
  * Leaves the settings, the prompt version and the audit log as a deploy that stored the whole
- * settings would have, with no cleanup run yet, then evicts the object so the next call starts it
- * again.
+ * settings would have, with no cleanup run yet and no built-in prompt kept (#210), then evicts the
+ * object so the next call starts it again.
  */
 async function seedStored(
   stub: ReturnType<typeof host>,
@@ -61,7 +61,9 @@ async function seedStored(
 ) {
   await stub.config();
   await runInDurableObject(stub, (_instance, state) => {
-    state.storage.sql.exec("DELETE FROM state WHERE key = 'settingsOverridesOnly'");
+    state.storage.sql.exec(
+      "DELETE FROM state WHERE key IN ('settingsOverridesOnly', 'defaultPrompt')",
+    );
     for (const [key, value] of [
       ["settings", settings],
       ["promptVersion", promptVersion],
@@ -197,6 +199,7 @@ describe("AgentHost", () => {
     const stub = host("frozen-current");
     await seedStored(stub, { ...DEFAULT_SETTINGS, tier: "frontier" }, [["tier"]], 3);
 
+    // The prompt in effect is the same, so neither the cleanup nor the built-in check bumps.
     expect(await stub.config()).toEqual({
       settings: { ...DEFAULT_SETTINGS, tier: "frontier" },
       promptVersion: 3,
