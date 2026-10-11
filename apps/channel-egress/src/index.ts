@@ -34,6 +34,11 @@ const TELEGRAM_USER_ID = /^\d{1,20}$/;
 /** A stranger's display name, as the owner sees it in a notice. */
 const MAX_DISPLAY_NAME_LENGTH = 64;
 
+/**
+ * The secret store's stub. Its results are typed `& Disposable`, so a spread of one has
+ * `[Symbol.dispose]` in its type, which the RPC types won't return: an answer built from one names
+ * its fields, or callers' types lose that branch.
+ */
 const store = (env: Env) => env.SECRET_STORE.getByName(SECRET_STORE_NAME);
 
 const unavailable = { ok: false as const, reason: "store_unavailable" as const };
@@ -53,7 +58,8 @@ async function sameText(a: string, b: string): Promise<boolean> {
 async function openTelegramForm(env: Env, agentId: string) {
   if (!isAgentId(agentId)) return { ok: false as const, reason: "invalid_input" as const };
   try {
-    return { ok: true as const, ...(await store(env).createForm(agentId, "telegram")) };
+    const { token, expiresAt } = await store(env).createForm(agentId, "telegram");
+    return { ok: true as const, token, expiresAt };
   } catch (error) {
     console.error("channel-egress: creating a form failed", errorName(error));
     return unavailable;
@@ -84,7 +90,7 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
     try {
       const forms = store(this.env);
       const form = await forms.describeForm(token);
-      if (form) return { ok: true as const, ...form };
+      if (form) return { ok: true as const, agentId: form.agentId, kind: form.kind };
       const used = await this.#used(token);
       return used
         ? {
