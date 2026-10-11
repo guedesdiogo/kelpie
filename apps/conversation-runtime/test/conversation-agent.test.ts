@@ -1413,6 +1413,7 @@ describe("ConversationAgent memory", () => {
 
   it("asks once about every message still unanswered, with the agent's qualifier", async () => {
     const world = use(fakeWorld([reply("Os dois.")]));
+    const logged = vi.spyOn(console, "log");
     await configure("memory-jev", { qualifier: "jev" });
     world.recallHeld = true;
     const stub = agent("memory-unanswered");
@@ -1427,6 +1428,12 @@ describe("ConversationAgent memory", () => {
     world.recallHeld = false;
     await stub.flush();
     await vi.waitFor(() => expect(world.sent).toEqual(["Os dois."]));
+    // The interrupted turn's lookup may still be polling; once it answers, the turn stops. Each
+    // turn logs one recall line: without both, the late one would land in the next test, timed
+    // across both tests' clocks.
+    await vi.waitFor(() =>
+      expect(logged.mock.calls.filter(([line]) => line === "conversation: recall")).toHaveLength(2),
+    );
     expect(world.requests).toHaveLength(1);
     expect(world.recalls.map(({ question, options }) => [question, options.qualifier])).toEqual([
       ["onde a Ana mora?", "jev"],
