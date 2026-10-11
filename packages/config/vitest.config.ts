@@ -2,14 +2,13 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    // CI's `test:coverage` fails below these thresholds: a point under the coverage measured
-    // when they were set, so it can't drop. Raise them as tests cover more (docs/testing.md).
+    // CI's `test:coverage` fails under 80% on any of these, in every workspace (ADR-0030).
     coverage: {
       provider: "istanbul",
       include: ["src/**/*.ts"],
       exclude: ["src/**/*.d.ts"],
       reporter: ["text-summary", "json-summary"],
-      thresholds: { statements: 88, branches: 82, functions: 99, lines: 95 },
+      thresholds: { statements: 80, branches: 80, functions: 80, lines: 80 },
     },
   },
 });

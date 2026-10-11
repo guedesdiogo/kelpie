@@ -5,6 +5,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const REQUIRED = ["typecheck", "test", "test:coverage"];
+const COVERAGE_METRICS = ["statements", "branches", "functions", "lines"];
+const COVERAGE_FLOOR = 80;
 const root = JSON.parse(readFileSync("package.json", "utf8"));
 
 const workspaces = root.workspaces.flatMap((pattern) => {
@@ -20,13 +22,19 @@ const missing = workspaces.flatMap((dir) => {
   const problems = REQUIRED.filter((name) => !scripts[name]).map(
     (name) => `${dir}: missing "${name}" script`,
   );
-  // A coverage run without thresholds would gate nothing.
+  // A coverage run under the floor, or without thresholds, would gate nothing (ADR-0030).
   const config = join(dir, "vitest.config.ts");
   if (scripts["test:coverage"] && !scripts["test:coverage"].includes("--coverage")) {
     problems.push(`${dir}: "test:coverage" doesn't pass --coverage`);
   }
-  if (!existsSync(config) || !readFileSync(config, "utf8").includes("thresholds:")) {
-    problems.push(`${dir}: vitest.config.ts sets no coverage thresholds`);
+  const text = existsSync(config) ? readFileSync(config, "utf8") : "";
+  for (const metric of COVERAGE_METRICS) {
+    const threshold = Number(new RegExp(`\\b${metric}:\\s*(\\d+)`).exec(text)?.[1] ?? 0);
+    if (threshold < COVERAGE_FLOOR) {
+      problems.push(
+        `${dir}: vitest.config.ts needs a ${metric} threshold of at least ${COVERAGE_FLOOR}`,
+      );
+    }
   }
   return problems;
 });
@@ -36,5 +44,5 @@ if (missing.length > 0) {
   process.exit(1);
 }
 console.log(
-  `${workspaces.length} workspace(s) define ${REQUIRED.join(", ")}, and coverage thresholds.`,
+  `${workspaces.length} workspace(s) define ${REQUIRED.join(", ")}, and coverage thresholds of at least ${COVERAGE_FLOOR}%.`,
 );
