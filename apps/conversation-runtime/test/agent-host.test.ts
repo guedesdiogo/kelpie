@@ -1,4 +1,4 @@
-import { runInDurableObject } from "cloudflare:test";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { DEFAULT_SETTINGS, SETUP_AGENT_ID } from "@kelpie/config";
 import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
@@ -23,6 +23,21 @@ async function auditOf(stub: ReturnType<typeof host>) {
   );
 }
 
+/** Leaves state rows as an earlier deploy would have; `null` removes one. */
+async function seedState(stub: ReturnType<typeof host>, rows: Record<string, unknown>) {
+  await runInDurableObject(stub, (_instance, state) => {
+    for (const [key, value] of Object.entries(rows)) {
+      if (value === null) state.storage.sql.exec("DELETE FROM state WHERE key = ?", key);
+      else
+        state.storage.sql.exec(
+          "INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)",
+          key,
+          JSON.stringify(value),
+        );
+    }
+  });
+}
+
 describe("AgentHost", () => {
   it("starts from the default settings, at prompt version 0", async () => {
     expect(await host("fresh").config()).toEqual({ settings: DEFAULT_SETTINGS, promptVersion: 0 });
@@ -37,6 +52,64 @@ describe("AgentHost", () => {
 
     await stub.configure({ systemPrompt: "Fale como um pirata." }, owner);
     expect((await stub.config()).settings.systemPrompt).toBe("Fale como um pirata.");
+  });
+
+  it("starts a new prompt version once when a deploy changed the setup agent's built-in persona", async () => {
+    const stub = host(SETUP_AGENT_ID);
+    await stub.config();
+    // The last deploy ran an older persona, at version 4, and nothing configured replaces it.
+    await seedState(stub, { settings: null, promptVersion: 4, defaultPrompt: "An older persona." });
+
+    expect(await stub.config()).toEqual({
+      settings: { ...DEFAULT_SETTINGS, systemPrompt: SETUP_PROMPT },
+      promptVersion: 5,
+    });
+    expect((await stub.config()).promptVersion).toBe(5);
+    expect((await stub.turnConfig()).promptVersion).toBe(5);
+
+    // Only this id gets the persona: leave it as a new agent for the other test that uses it.
+    await seedState(stub, { promptVersion: null, defaultPrompt: SETUP_PROMPT });
+  });
+
+  it("does the same for any agent's built-in prompt, and a later change bumps only for its own", async () => {
+    const stub = host("default-changed");
+    await stub.config();
+    await seedState(stub, { defaultPrompt: "You are an older assistant." });
+
+    expect(await stub.config()).toEqual({ settings: DEFAULT_SETTINGS, promptVersion: 1 });
+    await stub.configure({ tier: "frontier" }, owner);
+    expect((await stub.config()).promptVersion).toBe(1);
+    await stub.configure({ systemPrompt: "You are terse." }, owner);
+    expect((await stub.config()).promptVersion).toBe(2);
+  });
+
+  it("keeps the prompt version when a configured prompt replaces the built-in one", async () => {
+    const stub = host("default-replaced");
+    await stub.configure({ systemPrompt: "Fale como um pirata." }, owner);
+    await seedState(stub, { defaultPrompt: "You are an older assistant." });
+
+    expect(await stub.config()).toMatchObject({
+      settings: { systemPrompt: "Fale como um pirata." },
+      promptVersion: 1,
+    });
+  });
+
+  it("starts a new prompt version once for an agent from before built-in prompts were tracked", async () => {
+    const stub = host("untracked");
+    await stub.config();
+    // A deploy before this one ran the agent and kept no built-in prompt.
+    await seedState(stub, { defaultPrompt: null });
+    await evictDurableObject(stub);
+
+    expect((await stub.config()).promptVersion).toBe(1);
+    expect((await stub.config()).promptVersion).toBe(1);
+
+    // One whose configured prompt replaces the built-in one keeps its version.
+    const configured = host("untracked-configured");
+    await configured.configure({ systemPrompt: "Fale como um pirata." }, owner);
+    await seedState(configured, { defaultPrompt: null });
+    await evictDurableObject(configured);
+    expect((await configured.config()).promptVersion).toBe(1);
   });
 
   it("drops the end-of-turn windows and the old 10 s cap from settings stored before ADR-0024", async () => {
