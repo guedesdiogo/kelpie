@@ -27,7 +27,7 @@ Every pull request runs these jobs. `CI passed` aggregates them, and it is the o
 
 | Job | What it proves |
 |---|---|
-| `Lint, typecheck and test` | `check:workspaces`, Biome, `tsc`, and every workspace's tests with coverage, each above its thresholds (`docs/testing.md`) |
+| `Lint, typecheck and test` | `check:workspaces`, Biome, `tsc`, and every workspace's tests with coverage, at least 80% in each (`docs/testing.md`) |
 | `Build Workers` | Each Worker bundles with its real `wrangler.jsonc` (`wrangler deploy --dry-run`). No account is needed. |
 | `Migrations` | Drizzle's migrations match each schema; journals are in date order; applied migrations are unchanged; rollback barriers are acknowledged |
 | `Workflow lint` | actionlint, with shellcheck on every `run:` block |
