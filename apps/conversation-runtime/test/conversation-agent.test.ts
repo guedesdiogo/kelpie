@@ -74,6 +74,13 @@ function use(world: FakeWorld): FakeWorld {
   return world;
 }
 
+/** Leaves every turn's prompt key as an earlier deploy would have; null for none. */
+async function setPromptKeys(stub: ReturnType<typeof agent>, key: string | null) {
+  await runInDurableObject(stub, (_instance: ConversationAgent, state) => {
+    state.storage.sql.exec("UPDATE turns SET prompt_key = ?", key);
+  });
+}
+
 async function statuses(stub: ReturnType<typeof agent>) {
   return (await stub.outbox()).map((row) => row.status);
 }
@@ -413,6 +420,43 @@ describe("ConversationAgent turns", () => {
 
     await vi.waitFor(() => expect(world.requests).toHaveLength(2));
     expect(world.requests[1]?.system).toBe(`You are terse.\n\n${MEMORY_NOTE}`);
+    expect(world.requests[1]?.messages[1]).toEqual(neutral("First."));
+  });
+
+  it("replays earlier replies without native output after a deploy edits built-in prompt text", async () => {
+    const world = use(fakeWorld([reply("First."), reply("Second."), reply("Third.")]));
+    const stub = agent("builtin-text");
+    await stub.ingest(message("m1", "one?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["First."]));
+    // The first reply was produced under the built-in text of an earlier deploy.
+    await setPromptKeys(stub, "an earlier deploy's key");
+
+    await stub.ingest(message("m2", "two?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["First.", "Second."]));
+    expect(world.requests[1]?.messages[1]).toEqual(neutral("First."));
+
+    // The reply produced under the current text keeps its native output.
+    await stub.ingest(message("m3", "three?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(3));
+    expect(world.requests[2]?.messages[1]).toEqual(neutral("First."));
+    expect(world.requests[2]?.messages[3]).toHaveProperty("native");
+  });
+
+  it("replays replies from before the built-in text was tracked without native output", async () => {
+    const world = use(fakeWorld([reply("First."), reply("Second.")]));
+    const stub = agent("builtin-text-untracked");
+    await stub.ingest(message("m1", "one?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["First."]));
+    await setPromptKeys(stub, null);
+    expect(await stub.history()).toEqual([user("one?"), neutral("First.")]);
+
+    await stub.ingest(message("m2", "two?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(2));
     expect(world.requests[1]?.messages[1]).toEqual(neutral("First."));
   });
 

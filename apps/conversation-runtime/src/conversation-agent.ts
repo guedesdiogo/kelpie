@@ -664,7 +664,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   async history(): Promise<ChatMessage[]> {
     if (!this.#get<string | null>("agentId", null)) return [];
     const latest = this.#db
-      .select({ toolsKey: schema.turns.toolsKey })
+      .select({ toolsKey: schema.turns.toolsKey, promptKey: schema.turns.promptKey })
       .from(schema.turns)
       .orderBy(desc(schema.turns.id))
       .limit(1)
@@ -673,6 +673,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       (await this.#config()).promptVersion,
       this.#latestCheckpoint()?.id ?? null,
       latest?.toolsKey ?? null,
+      latest?.promptKey ?? null,
     );
   }
 
@@ -1067,13 +1068,20 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     // picked up after an eviction keeps the key its earlier rounds ran under: if the tools changed
     // since, its own calls go without their native output too.
     const toolsKey = specs.length === 0 ? null : await digest(JSON.stringify(specs));
-    if (this.#toolRounds(turn.id) === 0) {
-      this.#db.update(schema.turns).set({ toolsKey }).where(eq(schema.turns.id, turn.id)).run();
-    }
     const system =
       specs.length === 0
         ? `${settings.systemPrompt}\n\n${MEMORY_NOTE}`
         : `${settings.systemPrompt}\n\n${MEMORY_NOTE}\n\n${TOOLS_NOTE}`;
+    // The same goes for the system prompt and the checkpoint heading: their built-in text changes
+    // only with a deploy, and no prompt version tracks that (#211).
+    const promptKey = await digest(JSON.stringify([system, CHECKPOINT_HEADING]));
+    if (this.#toolRounds(turn.id) === 0) {
+      this.#db
+        .update(schema.turns)
+        .set({ toolsKey, promptKey })
+        .where(eq(schema.turns.id, turn.id))
+        .run();
+    }
     // Settings stored before the bound existed have none.
     const toolLoopMs = settings.toolLoopMs ?? DEFAULT_SETTINGS.toolLoopMs;
     let rounds = this.#toolRounds(turn.id);
@@ -1087,7 +1095,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       step("thinking");
       const call = await this.#ports.generate(settings.tier, {
         system,
-        messages: this.#messages(turn.systemVersion, turn.checkpointId, toolsKey),
+        messages: this.#messages(turn.systemVersion, turn.checkpointId, toolsKey, promptKey),
         ...(specs.length === 0 ? {} : { tools: specs }),
         maxOutputTokens: settings.maxOutputTokens,
         // History rows never keep it; the turn does, for later requests (#137).
@@ -2126,12 +2134,14 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
 
   /**
    * History for a request under `systemVersion` and a checkpoint: replies produced under another
-   * version or another checkpoint lose their native output, because the prompt before them changed.
+   * version, checkpoint, tool set or prompt key lose their native output, because the prompt before
+   * them changed. A reply with no prompt key, from before keys were kept, never matches.
    */
   #messages(
     systemVersion: number,
     checkpointId: number | null,
     toolsKey: string | null,
+    promptKey: string | null,
   ): ChatMessage[] {
     const checkpoint =
       checkpointId === null
@@ -2149,6 +2159,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         checkpointId: schema.history.checkpointId,
         context: schema.turns.context,
         toolsKey: schema.turns.toolsKey,
+        promptKey: schema.turns.promptKey,
       })
       .from(schema.history)
       .leftJoin(schema.turns, eq(schema.turns.id, schema.history.turnId))
@@ -2171,6 +2182,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         checkpointId: produced,
         context,
         toolsKey: tools,
+        promptKey: prompt,
       } = row;
       if (message.role === "user") {
         return context !== null && answered.has(row.turnId) && lastUser.get(row.turnId) === at
@@ -2179,8 +2191,14 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       }
       if (message.role !== "assistant") return message;
       // A reply's reasoning is bound to the system prompt, the tools and everything before it: under
-      // another prompt version, checkpoint or tool set it goes without its native output.
-      if (version === systemVersion && produced === checkpointId && (tools ?? null) === toolsKey) {
+      // another prompt version, checkpoint, tool set or prompt key it goes without its native output.
+      if (
+        version === systemVersion &&
+        produced === checkpointId &&
+        (tools ?? null) === toolsKey &&
+        prompt !== null &&
+        prompt === promptKey
+      ) {
         return message;
       }
       const { native: _native, ...neutral } = message;

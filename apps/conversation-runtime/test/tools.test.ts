@@ -269,6 +269,16 @@ describe("a turn's tools", () => {
       role: "assistant",
       parts: [{ type: "text", text: "Hi!" }],
     });
+    // TOOLS_NOTE joined the same configured prompt: built-in text reaches the turn's prompt key.
+    const [before, after] = await runInDurableObject(stub, (_instance: ConversationAgent, state) =>
+      state.storage.sql
+        .exec<{ prompt_key: string | null }>("SELECT prompt_key FROM turns ORDER BY id")
+        .toArray()
+        .map((row) => row.prompt_key),
+    );
+    expect(before).toEqual(expect.any(String));
+    expect(after).toEqual(expect.any(String));
+    expect(after).not.toBe(before);
     // The turn's own calls keep theirs from round to round.
     expect(world.requests[2]?.messages[3]).toEqual(
       toolUse([{ id: "call-0", name: "lookup", input: { q: "a" } }]),
@@ -540,6 +550,28 @@ describe("a turn's tools and interruption", () => {
     await vi.waitFor(() => expect(world.sent).toEqual(["Recovered."]));
 
     expect(world.requests[1]?.tools).toHaveLength(2);
+    expect(world.requests[1]?.messages[1]).toEqual({
+      role: "assistant",
+      parts: [{ type: "tool_call", id: "call-0", name: "stuck", input: {} }],
+    });
+  });
+
+  it("drops a recovered turn's native output when a deploy edited built-in prompt text meanwhile", async () => {
+    const world = use(fakeWorld([toolCalls({ name: "stuck" }), reply("Recovered.")]));
+    provide(world, { stuck: () => new Promise<ToolOutcome>(() => {}) });
+    const stub = agent("tools-evicted-deploy");
+    await stub.ingest(message("m1", "try the stuck one"));
+    await stub.flush();
+    await vi.waitFor(async () => expect(await history(stub)).toHaveLength(2));
+
+    // The first round ran under the built-in text of an earlier deploy.
+    await runInDurableObject(stub, (_instance: ConversationAgent, state) => {
+      state.storage.sql.exec("UPDATE turns SET prompt_key = ?", "an earlier deploy's key");
+    });
+    await evictDurableObject(stub);
+    await runDurableObjectAlarm(stub);
+    await vi.waitFor(() => expect(world.sent).toEqual(["Recovered."]));
+
     expect(world.requests[1]?.messages[1]).toEqual({
       role: "assistant",
       parts: [{ type: "tool_call", id: "call-0", name: "stuck", input: {} }],
