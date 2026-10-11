@@ -136,5 +136,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-    # Its secrets come from the production environment, not from this caller.
     uses: ./.github/workflows/deploy.yml
+    # The called job's production environment gives it its secrets, but only through `inherit`:
+    # without it they arrive empty (#238). Deploy credentials live only in that environment.
+    secrets: inherit
