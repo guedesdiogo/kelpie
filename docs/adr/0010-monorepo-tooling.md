@@ -3,6 +3,7 @@
 - Status: Accepted (the owner merged #30 after the tooling question)
 - Date: 2026-10-03
 - Issue: [#23](https://github.com/guedesdiogo/kelpie/issues/23)
+- Amended by: [ADR-0029](0029-continuous-deployment-and-rollback.md), workspaces also live in `tools/*`
 
 ## Context
 

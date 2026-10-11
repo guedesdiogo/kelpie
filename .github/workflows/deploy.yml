@@ -1,0 +1,61 @@
+name: Deploy
+
+# Deploys main to production: CI calls it after every gate passes on a push to main, and it runs by
+# hand to deploy main again, for example after a rollback (docs/deploy.md).
+on:
+  workflow_call:
+    inputs:
+      watch-minutes:
+        description: Minutes to watch production before keeping the release
+        default: "10"
+        type: string
+  workflow_dispatch:
+    inputs:
+      watch-minutes:
+        description: Minutes to watch production before keeping the release
+        default: "10"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to production
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+    # One deploy or rollback at a time, and never cancelled halfway.
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The build number counts main's first-parent commits, and rollback barriers are read
+          # from the live commit to this one.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Deploy, verify, and roll back if production is unhealthy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: "false"
+          WATCH_MINUTES: ${{ inputs.watch-minutes }}
+        run: bun run --cwd tools/release release deploy --watch-minutes "${WATCH_MINUTES:-10}" --report "$RUNNER_TEMP/release.md"
+      - name: Open an issue for the failed deploy
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          report="$RUNNER_TEMP/release.md"
+          [ -f "$report" ] || echo "The deploy stopped before it wrote a report." > "$report"
+          printf '\n[The run](%s)\n' "$RUN_URL" >> "$report"
+          tag="$(git rev-list --count --first-parent HEAD)-$(git rev-parse --short=7 HEAD)"
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "Production deploy of $tag failed" --body-file "$report"

@@ -10,7 +10,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A new commit replaces a PR's run. Runs on main deploy, so they are never cancelled halfway.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   checks:
@@ -19,15 +20,121 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version-file: package.json
-      # The Vitest and Wrangler CLIs run on Node (ADR-0010).
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-      - run: bun install --frozen-lockfile
+          persist-credentials: false
+      - uses: ./.github/actions/setup
       - run: bun run check:workspaces
       - run: bun run lint
       - run: bun run typecheck
-      - run: bun run test
+      # The tests, once, with coverage: each workspace fails below its thresholds (docs/testing.md).
+      - id: tests
+        run: bun run test:coverage
+      - name: Coverage summary
+        if: ${{ !cancelled() && steps.tests.conclusion != 'skipped' }}
+        run: node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Build Workers
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      # Bundles each Worker with its real configuration, as a deploy does, with no account.
+      - name: Bundle every Worker
+        run: |
+          for config in apps/*/wrangler.jsonc; do
+            app="$(dirname "$config")"
+            echo "::group::$app"
+            (cd "$app" && ./node_modules/.bin/wrangler deploy --dry-run --outdir "$RUNNER_TEMP/bundles/${app#apps/}")
+            echo "::endgroup::"
+          done
+
+  migrations:
+    name: Migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # HEAD^1 is the base: main's tip for a PR's merge commit, the previous tip on main.
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Schemas match their migrations
+        run: |
+          for config in apps/*/drizzle*.config.ts; do
+            (
+              cd "$(dirname "$config")"
+              ./node_modules/.bin/drizzle-kit generate --config "$(basename "$config")" < /dev/null
+              ./node_modules/.bin/drizzle-kit check --config "$(basename "$config")"
+            )
+          done
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --porcelain
+            echo "::error::A schema changed without its migration. Run 'bun run db:generate' in that Worker and commit the result."
+            exit 1
+          fi
+      # Journals in order, applied migrations untouched, and rollback barriers acknowledged (ADR-0029).
+      - name: Migrations are safe to deploy and to roll back
+        run: bun run --cwd tools/release release guard --base HEAD^1
+
+  workflows:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actionlint runs shellcheck, preinstalled on the runner, over every run: block.
+      - name: actionlint
+        env:
+          VERSION: 1.7.12
+          SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/actionlint.tgz" "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
+          echo "${SHA256}  $RUNNER_TEMP/actionlint.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/actionlint.tgz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+
+  # The one check the ruleset requires, so a new gate needs no ruleset change.
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs: [checks, build, migrations, workflows, dependency-review]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      # Only Dependency review may be skipped, as it is outside pull requests.
+      - name: Every gate passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$NEEDS"
+          jq -e 'to_entries | all(.value.result == "success" or (.key == "dependency-review" and .value.result == "skipped"))' <<< "$NEEDS" > /dev/null
+
+  deploy:
+    name: Deploy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [checks, build, migrations, workflows]
+    permissions:
+      contents: read
+      issues: write
+    # Its secrets come from the production environment, not from this caller.
+    uses: ./.github/workflows/deploy.yml

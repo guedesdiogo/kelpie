@@ -147,7 +147,7 @@ Form pages are HTML:
 1. **Deploy the other Workers first, in this order.** Each one's bindings point only at Workers before it:
    1. `llm-gateway`, with a model key (`docs/secrets.md`). To send its calls through AI Gateway:
       - create a gateway with "Require provider credentials" (`byok_only`), so a missing key fails instead of billing Cloudflare credits;
-      - pass each provider's passthrough URL as a flag, for example `--var OPENAI_BASE_URL:https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/openai`. Later deploys need the same flag, or calls go straight to the provider without a warning;
+      - pass each provider's passthrough URL as a flag, for example `--var OPENAI_BASE_URL:https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/openai`. The deploy workflow carries it to later deploys (`docs/deploy.md`). A deploy by hand without it sends calls straight to the provider, without a warning;
       - if the gateway requires authentication, set `AI_GATEWAY_TOKEN` to a Cloudflare API token with only `AI Gateway Run`. Such a token works on every gateway in the account. The Worker sends it only to `gateway.ai.cloudflare.com`.
 
       **Qualifier.** The agent's typed decisions, such as the memory rerank (#110), go through the qualifier its `qualifier` setting picks. Change it with `configureAgent`.
@@ -169,8 +169,8 @@ Form pages are HTML:
       Each text is cut to its first 6,000 characters. Vectors are kept per model, so changing the var means every note is embedded again.
    2. `channel-egress`, with its `SECRETS_KEY` and `--var INGRESS_ORIGIN:https://<ingress hostname>` (`docs/secrets.md`);
    3. `context-store`, with the vault's GitHub App values and secrets (`docs/context-store.md`). Without them it runs with the vault off. It calls `llm-gateway` for memory's embeddings and rerank;
-   4. `conversation-runtime`, with `--var ADMIN_ORIGIN:https://<admin hostname>`, so the setup agent can link to the secure form and the pairing page ("Setup agent"). Later deploys need the same flag. Without it, the setup agent says it can't give those links;
-   5. `ingress`, with `--domain <ingress hostname>`. Telegram's and GitHub's webhooks reach it there; like the admin API, it has no `workers.dev` URL. Later deploys need the same flag, and the webchat's Access flags once it is set up ("Webchat").
+   4. `conversation-runtime`, with `--var ADMIN_ORIGIN:https://<admin hostname>`, so the setup agent can link to the secure form and the pairing page ("Setup agent"). The deploy workflow carries it to later deploys (`docs/deploy.md`). Without it, the setup agent says it can't give those links;
+   5. `ingress`, with `--domain <ingress hostname>`. Telegram's and GitHub's webhooks reach it there; like the admin API, it has no `workers.dev` URL. Later deploys keep the domain without the flag, and the deploy workflow carries the webchat's Access values once they are set ("Webchat").
 2. **Create a self-hosted Access application** for the admin API's hostname, with a policy that allows only the owner. Do this before step 4: whoever passes Access and holds the token becomes the owner. Note the team domain (`https://<team>.cloudflareaccess.com`) and the application's AUD tag.
 3. **Keep the instance's values out of the repository.** The hostname and the Access values belong to one deployment, so they go in as flags when deploying (step 5), and `wrangler.jsonc` stays the same for every instance:
    - `--domain <admin hostname>`: a custom domain on one of the owner's zones. Wrangler creates its DNS record. `workers_dev` and preview URLs stay off.
@@ -189,7 +189,7 @@ Form pages are HTML:
    ```bash
    rm /tmp/kelpie-admin-api.secrets
    ```
-   Later deploys need the same `--domain` and `--var` flags. Without them, Wrangler removes the vars that aren't in `wrangler.jsonc`, and every request is refused again.
+   The deploy workflow carries the `--var` values to later deploys, and Wrangler keeps the custom domain when a deploy names none (`docs/deploy.md`). A deploy by hand without the `--var` flags removes the vars, and every request is refused again.
 6. **Register as the owner.** `cloudflared access curl` opens the Access login and sends its token:
    ```bash
    cloudflared access curl https://<admin hostname>/bootstrap -X POST -H 'content-type: application/json' -d "{\"token\":\"$BOOTSTRAP_TOKEN\"}"
@@ -279,7 +279,7 @@ To set it up:
    ```bash
    bunx wrangler deploy -c apps/ingress/wrangler.jsonc --domain <ingress hostname> --var ACCESS_TEAM_DOMAIN:https://<team>.cloudflareaccess.com --var ACCESS_AUD:<aud>
    ```
-   Later deploys need the same flags. Without them, the webchat answers 404 again.
+   The deploy workflow carries them to later deploys (`docs/deploy.md`). A deploy by hand without them makes the webchat answer 404 again.
 3. **Open `https://<ingress hostname>/webchat/?agent=<agent id>`.**
    - Replies come as paced bubbles, and the page shows when the agent is typing.
    - While the owner types, buffered messages wait for the rest, up to the agent's `maxWaitMs`.
@@ -317,12 +317,12 @@ Whoever passes Access and holds a live recovery token becomes the owner's admin 
 - **`version` is `<release>.<build>`.**
   - The release is `KELPIE_RELEASE` in `packages/config/src/version.ts`. It is the delivery phase and changes by decision, with a phase or a notable release.
   - The build is main's first-parent commit count at the deployed commit. Every merged PR adds one, so a deploy with any change shows a new number.
-- **The build and `commit` come from the deploy's tag.** Deploy from a clean checkout of a commit on main, and give every `wrangler deploy` the same tag:
+- **The build and `commit` come from the deploy's tag.** The deploy workflow tags every deploy (`docs/deploy.md`). A deploy by hand, from a clean checkout of a commit on main, gives every `wrangler deploy` the same tag:
   ```bash
-  --tag "$(git rev-list --count --first-parent HEAD)-$(git rev-parse --short HEAD)"
+  --tag "$(git rev-list --count --first-parent HEAD)-$(git rev-parse --short=7 HEAD)"
   ```
   Without a tag, or with a tag that holds only the commit, `version` is the release alone and `build` is null.
-- **Deploy all six Workers each time, with the same tag.** Only `ingress` answers `/version`, so it names the live build only if it went out with every deploy.
+- **Every deploy covers all six Workers, with the same tag,** as the deploy workflow's does. Only `ingress` answers `/version`, so it names the live build only if it went out with every deploy.
 - **`deployment` and `deployedAt`** are `ingress`'s own Cloudflare version and when it was made, from the `version_metadata` binding.
 
 ## Known limits

@@ -1,0 +1,9 @@
+// A Worker that exists only for tests, so the Access JWT checks run on workerd's WebCrypto, as in
+// production: Node's imports some keys that workerd refuses. The package itself imports nothing
+// from Cloudflare.
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "kelpie-access-test",
+  "main": "worker.ts",
+  "compatibility_date": "2026-10-01"
+}
