@@ -38,6 +38,50 @@ async function seedState(stub: ReturnType<typeof host>, rows: Record<string, unk
   });
 }
 
+/** The settings row as stored, not as `config()` fills it in. */
+async function storedOf(stub: ReturnType<typeof host>) {
+  return runInDurableObject(stub, (_instance, state) => {
+    const [row] = state.storage.sql
+      .exec<{ value: string }>("SELECT value FROM state WHERE key = 'settings'")
+      .toArray();
+    return row ? JSON.parse(row.value) : undefined;
+  });
+}
+
+/**
+ * Leaves the settings, the prompt version and the audit log as a deploy that stored the whole
+ * settings would have, then evicts the object so the next call starts it again.
+ */
+async function seedStored(
+  stub: ReturnType<typeof host>,
+  settings: Record<string, unknown>,
+  audited: string[][],
+  promptVersion: number,
+) {
+  await stub.config();
+  await runInDurableObject(stub, (_instance, state) => {
+    for (const [key, value] of [
+      ["settings", settings],
+      ["promptVersion", promptVersion],
+    ] as const) {
+      state.storage.sql.exec(
+        "INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)",
+        key,
+        JSON.stringify(value),
+      );
+    }
+    for (const fields of audited) {
+      state.storage.sql.exec(
+        "INSERT INTO audit_log (at, action, user_id, via, fields, prompt_version) VALUES (?, 'settings.changed', 'u-owner', 'admin-api', ?, ?)",
+        Date.now(),
+        JSON.stringify(fields),
+        promptVersion,
+      );
+    }
+  });
+  await evictDurableObject(stub);
+}
+
 describe("AgentHost", () => {
   it("starts from the default settings, at prompt version 0", async () => {
     expect(await host("fresh").config()).toEqual({ settings: DEFAULT_SETTINGS, promptVersion: 0 });
@@ -130,6 +174,92 @@ describe("AgentHost", () => {
 
     const { settings } = await stub.config();
     expect(settings).toEqual({ ...DEFAULT_SETTINGS, tier: "frontier" });
+  });
+
+  it("stores only the settings a change sets, so the others keep following the defaults", async () => {
+    const stub = host("overrides");
+    await stub.configure({ tier: "frontier" }, owner);
+    expect(await storedOf(stub)).toEqual({ tier: "frontier" });
+
+    // A value the agent already has isn't stored, even beside one that changes.
+    await stub.configure({ conversational: true, maxOutputTokens: 2_000 }, owner);
+    expect(await storedOf(stub)).toEqual({ tier: "frontier", maxOutputTokens: 2_000 });
+    expect((await stub.config()).settings).toEqual({
+      ...DEFAULT_SETTINGS,
+      tier: "frontier",
+      maxOutputTokens: 2_000,
+    });
+  });
+
+  it("drops the defaults an earlier change stored, and keeps what a change named", async () => {
+    const stub = host("frozen-current");
+    await seedStored(stub, { ...DEFAULT_SETTINGS, tier: "frontier" }, [["tier"]], 3);
+
+    expect(await stub.config()).toEqual({
+      settings: { ...DEFAULT_SETTINGS, tier: "frontier" },
+      promptVersion: 3,
+    });
+    expect(await storedOf(stub)).toEqual({ tier: "frontier" });
+  });
+
+  it("starts a new prompt version when a dropped default prompt or memory core was another", async () => {
+    const prompt = host("frozen-older-prompt");
+    await seedStored(
+      prompt,
+      { ...DEFAULT_SETTINGS, systemPrompt: "You are an older assistant.", tier: "frontier" },
+      [["tier"]],
+      2,
+    );
+    expect(await prompt.config()).toEqual({
+      settings: { ...DEFAULT_SETTINGS, tier: "frontier" },
+      promptVersion: 3,
+    });
+    await evictDurableObject(prompt);
+    expect((await prompt.config()).promptVersion).toBe(3);
+
+    const core = host("frozen-older-core");
+    await seedStored(core, { ...DEFAULT_SETTINGS, memoryCore: true }, [["tier"]], 0);
+    expect(await core.config()).toEqual({ settings: DEFAULT_SETTINGS, promptVersion: 1 });
+  });
+
+  it("keeps a prompt a change named, and a setting a change set back to its default", async () => {
+    const stub = host("chosen");
+    await seedStored(
+      stub,
+      { ...DEFAULT_SETTINGS, systemPrompt: "Fale como um pirata." },
+      [["tier"], ["systemPrompt"], ["tier"]],
+      1,
+    );
+
+    expect(await stub.config()).toEqual({
+      settings: { ...DEFAULT_SETTINGS, systemPrompt: "Fale como um pirata." },
+      promptVersion: 1,
+    });
+    expect(await storedOf(stub)).toEqual({
+      tier: DEFAULT_SETTINGS.tier,
+      systemPrompt: "Fale como um pirata.",
+    });
+  });
+
+  it("drops the end-of-turn windows and the old cap from storage, even when a change named the cap", async () => {
+    const stub = host("legacy-stored");
+    await seedStored(
+      stub,
+      {
+        ...DEFAULT_SETTINGS,
+        tier: "frontier",
+        quietWindow: { finishedMs: 1_500, defaultMs: 3_000, unfinishedMs: 6_000 },
+        maxWaitMs: 10_000,
+      },
+      [["tier", "maxWaitMs", "quietWindow"]],
+      0,
+    );
+
+    expect(await stub.config()).toEqual({
+      settings: { ...DEFAULT_SETTINGS, tier: "frontier" },
+      promptVersion: 0,
+    });
+    expect(await storedOf(stub)).toEqual({ tier: "frontier" });
   });
 
   it("applies a change, and bumps the prompt version only when the system prompt changes", async () => {

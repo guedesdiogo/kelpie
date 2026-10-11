@@ -49,6 +49,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     void ctx.blockConcurrencyWhile(async () => {
       try {
         await migrate(this.#db, migrations);
+        this.#dropUnnamedSettings();
       } catch (error) {
         console.error("AgentHost migration failed", error instanceof Error ? error.name : error);
         throw error;
@@ -62,15 +63,64 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
    * prompt version, as a configured prompt change does.
    */
   config(): AgentConfig {
-    const defaults =
-      this.ctx.id.name === SETUP_AGENT_ID
-        ? { ...DEFAULT_SETTINGS, systemPrompt: SETUP_PROMPT }
-        : DEFAULT_SETTINGS;
-    const stored = current(this.#get<StoredSettings>("settings", {}));
+    const defaults = this.#defaults();
+    const stored = this.#stored();
     return {
       settings: { ...defaults, ...stored },
       promptVersion: this.#promptVersion(defaults.systemPrompt, stored.systemPrompt === undefined),
     };
+  }
+
+  #defaults(): AgentSettings {
+    return this.ctx.id.name === SETUP_AGENT_ID
+      ? { ...DEFAULT_SETTINGS, systemPrompt: SETUP_PROMPT }
+      : DEFAULT_SETTINGS;
+  }
+
+  /** Only the settings a change set: the others follow the defaults. */
+  #stored(): Partial<AgentSettings> {
+    return current(this.#get<StoredSettings>("settings", {}));
+  }
+
+  /**
+   * Until #212 a change stored the whole settings, so an agent changed before it holds that day's
+   * defaults beside its owner's choices, and a later edit to a default never reached it. This keeps
+   * only the settings some change named, as the audit log records them; the others follow the
+   * defaults again. A system prompt or memory core that changes by it starts a new prompt version.
+   */
+  #dropUnnamedSettings(): void {
+    const raw = this.#get<StoredSettings | null>("settings", null);
+    if (raw === null) return;
+    const named = new Set(
+      this.#db
+        .select({ fields: schema.auditLog.fields })
+        .from(schema.auditLog)
+        .all()
+        .flatMap((row) => row.fields),
+    );
+    const before = current(raw);
+    const kept: Partial<AgentSettings> = Object.fromEntries(
+      Object.entries(before).filter(([key]) => named.has(key)),
+    );
+    if (Object.keys(kept).length === Object.keys(raw).length) return;
+    const was = { ...this.#defaults(), ...before };
+    const now = { ...this.#defaults(), ...kept };
+    const version = this.#get("promptVersion", 0);
+    const promptVersion =
+      now.systemPrompt === was.systemPrompt && now.memoryCore === was.memoryCore
+        ? version
+        : version + 1;
+    this.#db.transaction((tx) => {
+      for (const [key, value] of [
+        ["settings", kept],
+        ["promptVersion", promptVersion],
+      ] as const) {
+        tx.insert(schema.state)
+          .values({ key, value })
+          .onConflictDoUpdate({ target: schema.state.key, set: { value } })
+          .run();
+      }
+    });
   }
 
   /**
@@ -176,9 +226,13 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       settings.memoryCore === current.settings.memoryCore
         ? current.promptVersion
         : current.promptVersion + 1;
+    const stored = {
+      ...this.#stored(),
+      ...Object.fromEntries(fields.map((key) => [key, parsed[key]])),
+    };
     this.#db.transaction((tx) => {
       for (const [key, value] of [
-        ["settings", settings],
+        ["settings", stored],
         ["promptVersion", promptVersion],
       ] as const) {
         tx.insert(schema.state)
@@ -301,8 +355,9 @@ function errorName(error: unknown): string {
 type StoredSettings = Partial<AgentSettings> & { quietWindow?: unknown };
 
 /**
- * A change stores the whole settings, so settings saved before ADR-0024 hold the old windows and
- * the old 10 s cap, which would cut the new fixed wait short: both give way to the defaults.
+ * A change stored the whole settings until #212, so settings saved before ADR-0024 hold the old
+ * windows and the old 10 s cap, which would cut the new fixed wait short: both give way to the
+ * defaults.
  */
 function current(stored: StoredSettings): Partial<AgentSettings> {
   if (!("quietWindow" in stored)) return stored;
