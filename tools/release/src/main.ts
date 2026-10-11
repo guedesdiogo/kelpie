@@ -8,6 +8,7 @@ import { migrationChanges } from "./changes.ts";
 import { cloudflareApi } from "./cloudflare.ts";
 import { type DeployDeps, deploy, deployedVersion, planDeploy } from "./deploy.ts";
 import { gitAt, repoRoot } from "./git.ts";
+import { guardVerdict } from "./guard.ts";
 import { readLive } from "./live.ts";
 import { maskCommands, redactor } from "./redact.ts";
 import {
@@ -167,33 +168,11 @@ async function main(argv: string[]): Promise<number> {
     case "guard": {
       const base = values.base ?? "HEAD^1";
       if (base.startsWith("-")) throw new Error("--base takes a git ref.");
-      const { problems, findings } = migrationChanges(git, base, "HEAD");
-      for (const problem of problems) annotate("error", problem);
-      let blocking = problems.length;
-      for (const finding of findings) {
-        if (finding.kind === "class-change") {
-          annotate(
-            "warning",
-            `${finding.detail}. Cloudflare can't roll production back past the deploy that applies it (ADR-0029).`,
-            finding.file,
-          );
-        } else if (finding.acknowledged) {
-          annotate("warning", `Rollback barrier, acknowledged: ${finding.detail}.`, finding.file);
-        } else {
-          blocking++;
-          const marker =
-            finding.kind === "destructive-sql"
-              ? "-- rollback-barrier: <reason>"
-              : "// rollback-barrier: <reason>";
-          annotate(
-            "error",
-            `This migration ${finding.detail}, so code from before it can't run on the migrated data and production can't roll back past it. Prefer an add-only change (ADR-0029). If it's intended, add the line "${marker}" to the file.`,
-            finding.file,
-          );
-        }
-      }
+      const report = migrationChanges(git, base, "HEAD");
+      const { annotations, blocking } = guardVerdict(report);
+      for (const { level, message, file } of annotations) annotate(level, message, file);
       console.log(
-        `Migrations from ${base} to HEAD: ${problems.length} problem(s), ${findings.length} rollback barrier(s), ${blocking} blocking.`,
+        `Migrations from ${base} to HEAD: ${report.problems.length} problem(s), ${report.findings.length} rollback barrier(s), ${blocking} blocking.`,
       );
       return blocking === 0 ? 0 : 1;
     }

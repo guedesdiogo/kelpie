@@ -29,7 +29,7 @@
 
 1. **One required check.**
    - `CI passed` aggregates every gate, so a new gate needs no ruleset change. The gates:
-     - `Lint, typecheck and test`;
+     - `Lint, typecheck and test`, with coverage: each workspace stays above thresholds set from its measured coverage, and none for statements, functions or lines is under 80% (`docs/testing.md`);
      - `Build Workers`: each Worker bundled with `wrangler deploy --dry-run`;
      - `Migrations`: Drizzle drift, journal order, append-only migrations and rollback safety;
      - `Workflow lint`: actionlint with shellcheck;

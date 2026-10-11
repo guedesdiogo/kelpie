@@ -5,13 +5,15 @@
 | Code | Runner | Runtime |
 |---|---|---|
 | `packages/*` (domain modules, no Cloudflare imports) | Vitest | Node |
-| `packages/memory` | Vitest with `@cloudflare/vitest-plugin` | workerd, from a test-only Worker in `test/wrangler.jsonc` |
+| `packages/memory` and `packages/access` | Vitest with `@cloudflare/vitest-plugin` | workerd, from a test-only Worker in `test/wrangler.jsonc` |
 | `apps/*` (Workers and Durable Objects) | Vitest with `@cloudflare/vitest-plugin` | workerd, configured from each Worker's `wrangler.jsonc` |
 | `tools/release` (deploys, rollbacks and the migration gate) | Vitest, with fakes for Cloudflare's API and production, and throwaway git repositories | Node |
 
 Domain modules stay runtime-agnostic (ADR-0002), so Node is enough for them. Anything that touches bindings, Durable Object storage or alarms runs inside workerd. No Cloudflare account or key is needed for either.
 
 `packages/memory` imports nothing from Cloudflare, but its index runs on a Durable Object's SQLite, with FTS5. Its tests run in workerd so the index is tested on that SQLite. The test Worker's only Durable Object hosts the storage that each test hands to the index through `runInDurableObject`.
+
+`packages/access` checks Cloudflare Access's JWTs with WebCrypto. Its tests run in workerd too, because Node's WebCrypto imports some keys that workerd refuses.
 
 ## Durable Objects and alarms
 
@@ -50,10 +52,23 @@ Fiber recovery after an eviction runs when the fiber's heartbeat alarm fires on 
 
 The `ConversationAgent` reads its settings from a real `AgentHost` in the same test Worker. A test that changes settings configures its own agent through `env.AGENT_HOST`, so settings don't leak between tests.
 
+## Coverage
+
+CI runs every workspace's tests once, with coverage (`bun run test:coverage`), and its summary shows a coverage table for each workspace.
+- **The provider is Istanbul.** V8's coverage doesn't work inside workerd, so every workspace uses Istanbul for the same numbers everywhere.
+- **What counts:** each workspace counts its own `src/**/*.ts`, covered by its own tests. A package's code exercised only by an app's tests doesn't count for the package, so tests belong in the workspace whose code they test.
+- **Thresholds.** Each workspace's `vitest.config.ts` sets thresholds for statements, branches, functions and lines.
+  - They sit one point under the coverage measured when they were set, so coverage can't drop.
+  - None for statements, functions or lines is below 80%.
+  - A run under any threshold fails CI, so the pull request can't merge.
+- **Raising them.** When tests cover more, raise that workspace's thresholds in the same pull request. Lowering one takes a reason in the pull request.
+- **New code:** aim for at least 80% coverage, with tests that check behavior rather than lines.
+
 ## Commands
 
 ```bash
 bun run test        # every workspace
+bun run test:coverage   # the same, with coverage and each workspace's thresholds, as CI runs it
 bun run typecheck   # generates Workers types, then runs tsc in every workspace
 bun run lint
 bun run --filter @kelpie/memory eval   # the memory evaluation (#108); half a minute, so not in `test`

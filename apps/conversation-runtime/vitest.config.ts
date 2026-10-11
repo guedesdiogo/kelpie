@@ -37,6 +37,15 @@ export default { fetch: () => new Response(null, { status: 404 }) };`,
     }),
   ],
   test: {
+    // CI's `test:coverage` fails below these thresholds: a point under the coverage measured
+    // when they were set, so it can't drop. Raise them as tests cover more (docs/testing.md).
+    coverage: {
+      provider: "istanbul",
+      include: ["src/**/*.ts"],
+      exclude: ["src/**/*.d.ts"],
+      reporter: ["text-summary", "json-summary"],
+      thresholds: { statements: 87, branches: 84, functions: 81, lines: 90 },
+    },
     // The first test of each file waits for the workerd runtime to start, which takes seconds on a
     // busy machine (#88). These budgets cover that start, not slow tests.
     testTimeout: 20_000,

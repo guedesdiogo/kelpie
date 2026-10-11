@@ -35,6 +35,15 @@ export default { fetch: () => new Response(null, { status: 404 }) };`,
   // The first test of each file waits for the workerd runtime to start, which takes seconds on a
   // busy machine (#88). These budgets cover that start, not slow tests.
   test: {
+    // CI's `test:coverage` fails below these thresholds: a point under the coverage measured
+    // when they were set, so it can't drop. Raise them as tests cover more (docs/testing.md).
+    coverage: {
+      provider: "istanbul",
+      include: ["src/**/*.ts"],
+      exclude: ["src/**/*.d.ts"],
+      reporter: ["text-summary", "json-summary"],
+      thresholds: { statements: 92, branches: 86, functions: 90, lines: 94 },
+    },
     testTimeout: 20_000,
     hookTimeout: 30_000,
   },

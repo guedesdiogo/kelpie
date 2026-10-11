@@ -1,5 +1,5 @@
-import { clearKeyCacheForTesting, remoteKeySet, verifyAccessJwt } from "@kelpie/access";
 import { afterEach, describe, expect, it } from "vitest";
+import { clearKeyCacheForTesting, remoteKeySet, verifyAccessJwt } from "../src/index.ts";
 import { AUD, claims, keySet, NOW, sign, signingKey, TEAM } from "./tokens.ts";
 
 const config = { teamDomain: TEAM, audience: AUD };

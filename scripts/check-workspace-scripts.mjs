@@ -1,9 +1,10 @@
 // `bun run --filter '*' <script>` silently skips workspaces that lack the script
-// (ADR-0010), so CI fails here instead when a workspace forgets one.
+// (ADR-0010), so CI fails here instead when a workspace forgets one. `test:coverage` is the
+// run CI makes, with each workspace's coverage thresholds (docs/testing.md).
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const REQUIRED = ["typecheck", "test"];
+const REQUIRED = ["typecheck", "test", "test:coverage"];
 const root = JSON.parse(readFileSync("package.json", "utf8"));
 
 const workspaces = root.workspaces.flatMap((pattern) => {

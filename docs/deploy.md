@@ -17,7 +17,9 @@ PR ──► gates ──► CI passed ──► merge ──► gates on main �
    ```bash
    gh secret set CLOUDFLARE_API_TOKEN --env production --repo guedesdiogo/kelpie
    ```
-3. **The ruleset `main: CI must pass`** requires `CI passed` and code scanning results.
+3. **The ruleset `main: CI must pass`** requires, with no bypass:
+   - `CI passed`, on a branch up to date with `main`;
+   - CodeQL's results, which block new high-severity alerts.
 
 ## The gates
 
@@ -25,7 +27,7 @@ Every pull request runs these jobs. `CI passed` aggregates them, and it is the o
 
 | Job | What it proves |
 |---|---|
-| `Lint, typecheck and test` | `check:workspaces`, Biome, `tsc` and every workspace's tests |
+| `Lint, typecheck and test` | `check:workspaces`, Biome, `tsc`, and every workspace's tests with coverage, each above its thresholds (`docs/testing.md`) |
 | `Build Workers` | Each Worker bundles with its real `wrangler.jsonc` (`wrangler deploy --dry-run`). No account is needed. |
 | `Migrations` | Drizzle's migrations match each schema; journals are in date order; applied migrations are unchanged; rollback barriers are acknowledged |
 | `Workflow lint` | actionlint, with shellcheck on every `run:` block |

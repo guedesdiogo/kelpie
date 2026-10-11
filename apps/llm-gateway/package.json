@@ -5,7 +5,8 @@
   "scripts": {
     "types": "wrangler types src/worker-configuration.d.ts",
     "typecheck": "bun run types > /dev/null && tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@kelpie/llm": "workspace:*",
@@ -13,6 +14,7 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.3.6",
+    "@vitest/coverage-istanbul": "^4.1.0",
     "vitest": "^4.1.0",
     "wrangler": "^4.147.0"
   }

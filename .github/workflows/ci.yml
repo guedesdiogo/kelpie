@@ -26,7 +26,11 @@ jobs:
       - run: bun run check:workspaces
       - run: bun run lint
       - run: bun run typecheck
-      - run: bun run test
+      # The tests, once, with coverage: each workspace fails below its thresholds (docs/testing.md).
+      - run: bun run test:coverage
+      - name: Coverage summary
+        if: ${{ !cancelled() }}
+        run: node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY"
 
   build:
     name: Build Workers
