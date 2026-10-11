@@ -1,4 +1,9 @@
-import { createExecutionContext, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import {
+  createExecutionContext,
+  reset,
+  runDurableObjectAlarm,
+  runInDurableObject,
+} from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,9 +16,12 @@ import { VAULT_README } from "../src/vault-readme.ts";
 
 const SECRET = "webhook-secret-for-tests";
 
-afterEach(() => {
+afterEach(async () => {
   replaceBackendForTesting(undefined);
   replaceGatewayForTesting(undefined);
+  // A test's vaults go, alarms and all (#223): one left with an alarm wakes in a later test, where
+  // it syncs with that test's backend and asks that test's model.
+  await reset();
 });
 
 /** A vault with a README already, so the first sync doesn't queue one. */
