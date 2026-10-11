@@ -25,7 +25,7 @@ export interface ChangedFile {
 }
 
 export function changedFiles(git: Git, from: string, to: string): ChangedFile[] {
-  return git(["diff", "--name-status", "--no-renames", from, to])
+  return git(["diff", "--name-status", "--no-renames", from, to, "--"])
     .split("\n")
     .filter(Boolean)
     .map((line) => {

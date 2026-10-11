@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { appendFileSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -9,6 +9,7 @@ import { cloudflareApi } from "./cloudflare.ts";
 import { type DeployDeps, deploy, planDeploy } from "./deploy.ts";
 import { gitAt, repoRoot } from "./git.ts";
 import { readLive } from "./live.ts";
+import { maskCommands, redactor } from "./redact.ts";
 import {
   deployPlanReport,
   deployReport,
@@ -35,21 +36,29 @@ wrangler login. See docs/deploy.md.`;
 
 const inActions = process.env.GITHUB_ACTIONS === "true";
 
+const secrets = redactor((value) => {
+  if (inActions) for (const command of maskCommands(value)) console.log(command);
+});
+const hide = secrets.hide;
+const redact = secrets.redact;
+
 const log: Log = {
-  info: (message) => console.log(message),
-  warn: (message) => console.log(inActions ? `::warning::${message}` : `Warning: ${message}`),
+  info: (message) => console.log(redact(message)),
+  warn: (message) =>
+    console.log(inActions ? `::warning::${redact(message)}` : `Warning: ${redact(message)}`),
 };
 
 function annotate(level: "error" | "warning", message: string, file?: string): void {
-  if (inActions) console.log(`::${level}${file ? ` file=${file}` : ""}::${message}`);
-  else
-    console.log(`${level === "error" ? "Error" : "Warning"}: ${file ? `${file}: ` : ""}${message}`);
+  const text = redact(message);
+  if (inActions) console.log(`::${level}${file ? ` file=${file}` : ""}::${text}`);
+  else console.log(`${level === "error" ? "Error" : "Warning"}: ${file ? `${file}: ` : ""}${text}`);
 }
 
 function publish(markdown: string, file: string | undefined): void {
-  console.log(markdown);
-  if (file) writeFileSync(file, markdown);
-  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown);
+  const text = redact(markdown);
+  console.log(text);
+  if (file) writeFileSync(file, text);
+  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, text);
 }
 
 function wranglerBin(root: string, spec: Pick<WorkerSpec, "app">): string {
@@ -59,6 +68,7 @@ function wranglerBin(root: string, spec: Pick<WorkerSpec, "app">): string {
 function api(root: string) {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   if (!accountId) throw new Error("Set CLOUDFLARE_ACCOUNT_ID to the account Kelpie runs in.");
+  hide(accountId);
   if (inActions && !process.env.CLOUDFLARE_API_TOKEN) {
     throw new Error(
       "The production environment has no CLOUDFLARE_API_TOKEN secret (docs/deploy.md, One-time setup).",
@@ -81,19 +91,23 @@ function api(root: string) {
 function wranglerDeploy(root: string) {
   return (spec: WorkerSpec, args: string[]) =>
     new Promise<string>((resolve, reject) => {
-      const output = join(
-        tmpdir(),
-        `kelpie-release-${spec.app}-${process.pid}-${Date.now()}.ndjson`,
-      );
+      const dir = mkdtempSync(join(tmpdir(), "kelpie-release-"));
+      const output = join(dir, "wrangler.ndjson");
       const child = spawn(wranglerBin(root, spec), args, {
         cwd: join(root, "apps", spec.app),
-        env: { ...process.env, WRANGLER_OUTPUT_FILE_PATH: output, FORCE_COLOR: "0" },
+        // Errors only: wrangler's other output lists each var with its value cut short, which the
+        // runner's masks miss, and can print the remote config with the custom domains.
+        env: {
+          ...process.env,
+          WRANGLER_OUTPUT_FILE_PATH: output,
+          WRANGLER_LOG: "error",
+          FORCE_COLOR: "0",
+        },
         stdio: ["ignore", "pipe", "pipe"],
       });
-      // Wrangler lists each var with its value; CI logs are public.
       for (const stream of [child.stdout, child.stderr]) {
         createInterface({ input: stream }).on("line", (line) => {
-          if (!line.includes("Environment Variable")) console.log(line);
+          if (!line.includes("Environment Variable")) console.log(redact(line));
         });
       }
       child.on("error", reject);
@@ -108,7 +122,7 @@ function wranglerDeploy(root: string) {
         } catch {
           // No output file: wrangler failed before deploying.
         }
-        rmSync(output, { force: true });
+        rmSync(dir, { recursive: true, force: true });
         if (code !== 0) reject(new Error(`wrangler exited with ${code}`));
         else if (!versionId) reject(new Error("wrangler reported no version id"));
         else resolve(versionId);
@@ -120,10 +134,12 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 const now = () => new Date();
 const settleOptions = { attempts: 18, intervalMs: 10_000 };
 
-function positive(value: string | undefined, fallback: number, name: string): number {
+function bounded(value: string | undefined, fallback: number, name: string, max: number): number {
   if (value === undefined) return fallback;
   const number = Number(value);
-  if (!Number.isFinite(number) || number < 0) throw new Error(`--${name} takes a number.`);
+  if (!Number.isFinite(number) || number < 0 || number > max) {
+    throw new Error(`--${name} takes a number from 0 to ${max}.`);
+  }
   return number;
 }
 
@@ -154,6 +170,7 @@ async function main(argv: string[]): Promise<number> {
   switch (command) {
     case "guard": {
       const base = values.base ?? "HEAD^1";
+      if (base.startsWith("-")) throw new Error("--base takes a git ref.");
       const { problems, findings } = migrationChanges(git, base, "HEAD");
       for (const problem of problems) annotate("error", problem);
       let blocking = problems.length;
@@ -213,11 +230,11 @@ async function main(argv: string[]): Promise<number> {
         now,
         log,
         wranglerDeploy: wranglerDeploy(root),
-        mask: (value) => {
-          if (inActions) console.log(`::add-mask::${value}`);
-        },
+        mask: hide,
       };
       const plan = await planDeploy(deps);
+      hide(plan.origin);
+      for (const worker of plan.live) for (const value of Object.values(worker.vars)) hide(value);
       if (values.plan) {
         publish(deployPlanReport(plan), values.report);
         return 0;
@@ -225,9 +242,10 @@ async function main(argv: string[]): Promise<number> {
       const report = await deploy(deps, plan, {
         settle: settleOptions,
         watch: {
-          minutes: positive(values["watch-minutes"], 10, "watch-minutes"),
+          // The deploy job has 45 minutes, and a killed watch leaves no rollback behind.
+          minutes: bounded(values["watch-minutes"], 10, "watch-minutes", 30),
           intervalMs: 60_000,
-          errorThreshold: positive(values["error-threshold"], 3, "error-threshold"),
+          errorThreshold: bounded(values["error-threshold"], 3, "error-threshold", 1000),
           failuresInARow: 3,
         },
       });
@@ -239,11 +257,12 @@ async function main(argv: string[]): Promise<number> {
       if (!values.target) throw new RollbackRefused("rollback needs --target.");
       const cloudflare = api(root);
       const plan = await planRollback({ api: cloudflare, git }, values.target);
+      hide(plan.origin);
+      for (const worker of plan.live) for (const value of Object.values(worker.vars)) hide(value);
       if (values.plan) {
         publish(rollbackPlanReport(plan), values.report);
         return 0;
       }
-      if (inActions) console.log(`::add-mask::${plan.origin}`);
       const report = await rollback({ api: cloudflare, fetch, sleep, log }, plan, {
         force: values.force,
         reason: values.reason ?? "requested by the owner",
@@ -262,7 +281,7 @@ async function main(argv: string[]): Promise<number> {
 main(process.argv.slice(2)).then(
   (code) => process.exit(code),
   (error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = redact(error instanceof Error ? error.message : String(error));
     annotate("error", message);
     const file = process.argv.includes("--report")
       ? process.argv[process.argv.indexOf("--report") + 1]

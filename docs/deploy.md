@@ -107,6 +107,7 @@ The run's summary has the table of versions, the probes and the barriers. The pr
   - a tag, such as `94-cc8e179`;
   - a commit.
 - **`plan-only`** shows the Workers that would move and the barriers they would cross, and changes nothing.
+- **`reason` and `target` are public:** they show on the run's page and in the issue, like everything in this repository's Actions.
 - **`force`** crosses a destructive SQL migration, and restores the secrets of a version whose secrets were changed since. Use it only after checking that the older code can run on today's data.
 
 The rollback:

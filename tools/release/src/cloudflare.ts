@@ -92,7 +92,7 @@ export function cloudflareApi(
       const detail = errors.map((error) => `${error.message} [${error.code}]`).join("; ");
       throw new CloudflareError(
         // Reports reach public issues, so the account id stays out of the path.
-        `Cloudflare API ${init.method ?? "GET"} ${new URL(url).pathname.replace(accountId, "<account>")} failed (${response.status})${detail ? `: ${detail}` : ""}`,
+        `Cloudflare API ${init.method ?? "GET"} ${new URL(url).pathname.replaceAll(accountId, "<account>")} failed (${response.status})${detail ? `: ${detail}` : ""}`,
         errors.map((error) => error.code),
       );
     }

@@ -32,6 +32,15 @@ describe("probes", () => {
     ]);
   });
 
+  it("repeat only a well-formed build from /version", async () => {
+    const production = (async () =>
+      Response.json({ build: "<script>", commit: "x" })) as unknown as typeof fetch;
+    const version = (await probeAll(production, ORIGIN, build)).find(
+      (result) => result.probe === "version",
+    );
+    expect(version?.detail).toBe("serves another build, expected 96-abc1234");
+  });
+
   it("keep the hostname out of a network failure", async () => {
     const [health] = await probeAll(fakeProduction({ serving: build, down: true }), ORIGIN, build);
     expect(health).toEqual({ probe: "health", outcome: "fail", detail: "no answer (TypeError)" });

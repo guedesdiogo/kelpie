@@ -116,17 +116,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      # Only Dependency review may be skipped, as it is outside pull requests.
       - name: Every gate passed
         env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
+          NEEDS: ${{ toJSON(needs) }}
         run: |
-          echo "Gates: $RESULTS"
-          for result in $RESULTS; do
-            case "$result" in
-              success | skipped) ;;
-              *) exit 1 ;;
-            esac
-          done
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$NEEDS"
+          jq -e 'to_entries | all(.value.result == "success" or (.key == "dependency-review" and .value.result == "skipped"))' <<< "$NEEDS" > /dev/null
 
   deploy:
     name: Deploy
@@ -135,5 +131,5 @@ jobs:
     permissions:
       contents: read
       issues: write
+    # Its secrets come from the production environment, not from this caller.
     uses: ./.github/workflows/deploy.yml
-    secrets: inherit

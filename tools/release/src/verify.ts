@@ -1,5 +1,5 @@
 import type { CloudflareApi, InvocationCount } from "./cloudflare.ts";
-import { type BuildTag, formatTag, sameCommit } from "./tags.ts";
+import { type BuildTag, formatTag, parseTag, sameCommit } from "./tags.ts";
 
 export interface Log {
   info(message: string): void;
@@ -65,11 +65,19 @@ function probes(expected: BuildTag | null): Probe[] {
         if (status !== 200) return `answered ${status}`;
         if (!expected) return null;
         const { build, commit } = (body ?? {}) as { build?: unknown; commit?: unknown };
-        return build === expected.build &&
+        if (
+          build === expected.build &&
           typeof commit === "string" &&
           sameCommit(commit, expected.commit)
-          ? null
-          : `serves ${String(build)}-${String(commit)}, expected ${formatTag(expected)}`;
+        ) {
+          return null;
+        }
+        // The answer goes into public reports, so only a well-formed build is repeated.
+        const served =
+          typeof build === "number" && typeof commit === "string"
+            ? parseTag(`${build}-${commit}`)
+            : null;
+        return `serves ${served ? formatTag(served) : "another build"}, expected ${formatTag(expected)}`;
       },
     },
     {
