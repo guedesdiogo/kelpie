@@ -102,6 +102,12 @@ describe("AgentHost", () => {
 
     await stub.configure({ systemPrompt: "Fale como um pirata." }, owner);
     expect((await stub.config()).settings.systemPrompt).toBe("Fale como um pirata.");
+
+    // Its default is its persona: the other agents' default is a prompt of its own, kept.
+    await stub.configure({ systemPrompt: DEFAULT_SETTINGS.systemPrompt }, owner);
+    expect(await storedOf(stub)).toEqual({ systemPrompt: DEFAULT_SETTINGS.systemPrompt });
+    await stub.configure({ systemPrompt: SETUP_PROMPT }, owner);
+    expect(await storedOf(stub)).toEqual({});
   });
 
   it("starts a new prompt version once when a deploy changed the setup agent's built-in persona", async () => {
@@ -197,6 +203,23 @@ describe("AgentHost", () => {
     });
   });
 
+  it("follows a default again once a change sets it back, the system prompt included", async () => {
+    const stub = host("back-to-default");
+    await stub.configure({ tier: "frontier", systemPrompt: "You are terse." }, owner);
+    expect((await stub.config()).promptVersion).toBe(1);
+
+    await stub.configure(
+      { tier: DEFAULT_SETTINGS.tier, systemPrompt: DEFAULT_SETTINGS.systemPrompt },
+      owner,
+    );
+    expect(await storedOf(stub)).toEqual({});
+    expect(await stub.config()).toEqual({ settings: DEFAULT_SETTINGS, promptVersion: 2 });
+
+    // A deploy that edits the built-in prompt reaches it now, with a new version (#210).
+    await seedState(stub, { defaultPrompt: "You are an older assistant." });
+    expect((await stub.config()).promptVersion).toBe(3);
+  });
+
   it("drops the defaults an earlier change stored, and keeps what a change named", async () => {
     const stub = host("frozen-current");
     await seedStored(stub, { ...DEFAULT_SETTINGS, tier: "frontier" }, [["tier"]], 3);
@@ -240,7 +263,7 @@ describe("AgentHost", () => {
     expect(await core.config()).toEqual({ settings: DEFAULT_SETTINGS, promptVersion: 1 });
   });
 
-  it("keeps a prompt a change named, and a setting a change set back to its default", async () => {
+  it("keeps a prompt a change named, and drops a named setting equal to its default", async () => {
     const stub = host("chosen");
     await seedStored(
       stub,
@@ -253,10 +276,13 @@ describe("AgentHost", () => {
       settings: { ...DEFAULT_SETTINGS, systemPrompt: "Fale como um pirata." },
       promptVersion: 1,
     });
-    expect(await storedOf(stub)).toEqual({
-      tier: DEFAULT_SETTINGS.tier,
-      systemPrompt: "Fale como um pirata.",
-    });
+    expect(await storedOf(stub)).toEqual({ systemPrompt: "Fale como um pirata." });
+
+    // A prompt a change set to the built-in text is dropped, and the prompt in effect is the same.
+    const builtIn = host("chosen-built-in");
+    await seedStored(builtIn, { ...DEFAULT_SETTINGS }, [["systemPrompt"]], 2);
+    expect(await builtIn.config()).toEqual({ settings: DEFAULT_SETTINGS, promptVersion: 2 });
+    expect(await storedOf(builtIn)).toEqual({});
 
     // The cleanup ran once: an audit log that lost its rows later changes nothing.
     await runInDurableObject(stub, (_instance, state) => {
