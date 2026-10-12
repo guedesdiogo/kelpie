@@ -1,4 +1,4 @@
-# ADR-0032: The deploy wakes the Directory, the Registry and every AgentHost through a signed deep probe
+# ADR-0033: The deploy wakes the Directory, the Registry and every AgentHost through a signed deep probe
 
 - Status: Accepted when the pull request for #234 merges
 - Date: 2026-10-12
