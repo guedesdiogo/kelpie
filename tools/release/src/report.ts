@@ -31,6 +31,14 @@ function barriers(list: readonly Barrier[]): string {
 }
 
 export function deployReport(report: DeployReport): string {
+  if (report.outcome === "skipped") {
+    return [
+      `## Deploy of ${formatTag(report.tag)}: skipped`,
+      "",
+      `${report.reason} \`deploy.yml\` by hand deploys anyway.`,
+      "",
+    ].join("\n");
+  }
   const title = {
     deployed: "deployed",
     "rolled-back": "rolled back automatically",
@@ -79,6 +87,7 @@ export function deployPlanReport(plan: DeployPlan): string {
     "",
     `Message: ${plan.message}`,
     "",
+    ...(plan.skip ? [`Skips: ${plan.skip}`, ""] : []),
     "| Worker | Live | Carried vars |",
     "|---|---|---|",
     ...plan.live.map(

@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  # A new commit replaces a PR's run. Runs on main can deploy, so they are never cancelled halfway.
+  # A new commit replaces a PR's run. Runs on main deploy, so they are never cancelled halfway.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -129,30 +129,11 @@ jobs:
           jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$NEEDS"
           jq -e 'to_entries | all(.value.result == "success" or (.key == "dependency-review" and .value.result == "skipped"))' <<< "$NEEDS" > /dev/null
 
-  # Not a gate: whether this push changes something that ships, so it deploys (ADR-0031).
-  changes:
-    name: Changes
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      deploy: ${{ steps.ships.outputs.deploy }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # HEAD^1 is the previous tip of main, after a merge commit or a squash merge.
-          fetch-depth: 2
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      - id: ships
-        name: Changed paths that ship
-        run: bun run --cwd tools/release release ships --base HEAD^1 >> "$GITHUB_OUTPUT"
-
+  # The deploy skips when nothing that ships changed since the builds production serves (ADR-0031).
   deploy:
     name: Deploy
-    # A push that ships nothing, such as docs only, skips it. deploy.yml by hand deploys regardless.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.deploy == 'true'
-    needs: [checks, build, migrations, workflows, changes]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [checks, build, migrations, workflows]
     permissions:
       contents: read
       issues: write

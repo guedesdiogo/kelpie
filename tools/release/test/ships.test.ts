@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ships, shipsVerdict } from "../src/ships.ts";
+import { ships } from "../src/ships.ts";
 
 describe("ships", () => {
   it.each([
@@ -37,24 +37,5 @@ describe("ships", () => {
 
   it("ships when any one path ships", () => {
     expect(ships(["docs/deploy.md", "apps/ingress/src/index.ts", "README.md"])).toBe(true);
-  });
-});
-
-describe("shipsVerdict", () => {
-  it("deploys, and counts the paths that ship", () => {
-    expect(
-      shipsVerdict(["docs/deploy.md", "apps/ingress/src/index.ts", "bun.lock"], "HEAD^1"),
-    ).toEqual({
-      output: "deploy=true",
-      summary: "Changed paths from HEAD^1 to HEAD: 3, of which 2 ship. Deploying.",
-    });
-  });
-
-  it("skips the deploy when nothing ships", () => {
-    expect(shipsVerdict(["docs/deploy.md"], "HEAD^1")).toEqual({
-      output: "deploy=false",
-      summary: "Changed paths from HEAD^1 to HEAD: 1, of which 0 ship. Skipping the deploy.",
-    });
-    expect(shipsVerdict([], "abc1234").output).toBe("deploy=false");
   });
 });

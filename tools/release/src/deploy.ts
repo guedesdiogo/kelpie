@@ -1,9 +1,10 @@
 import type { VersionTraffic } from "./cloudflare.ts";
-import { buildTagOf, type Git, hasCommit, isClean, show, subjectOf } from "./git.ts";
+import { buildTagOf, changedFiles, type Git, hasCommit, isClean, show, subjectOf } from "./git.ts";
 import { parseJsonc } from "./jsonc.ts";
 import { type Barrier, barriersBetween, type LiveWorker, liveOrigin, readLive } from "./live.ts";
 import { type Restored, restore } from "./rollback.ts";
-import { type BuildTag, formatTag } from "./tags.ts";
+import { ships } from "./ships.ts";
+import { type BuildTag, formatTag, sameTag } from "./tags.ts";
 import {
   type ProbeResult,
   type SettleOptions,
@@ -39,6 +40,25 @@ export interface DeployPlan {
   /** What an automatic rollback of this release would cross; any of them prevents one. */
   barriers: Barrier[];
   origin: string;
+  /** Why nothing deploys, when nothing that ships changed since the live builds. */
+  skip?: string;
+}
+
+/**
+ * Why HEAD needn't deploy: nothing that ships changed between it and any build production serves
+ * (ADR-0031). Undefined when it must deploy: a change that ships, or a live version without a tag
+ * or with a commit this checkout lacks, since nothing can be compared then.
+ */
+function nothingShips(git: Git, live: readonly LiveWorker[]): string | undefined {
+  const builds: BuildTag[] = [];
+  for (const { tag } of live) {
+    if (!tag || !hasCommit(git, tag.commit)) return undefined;
+    if (!builds.some((known) => sameTag(known, tag))) builds.push(tag);
+  }
+  for (const build of builds) {
+    if (ships(changedFiles(git, build.commit, "HEAD").map(({ path }) => path))) return undefined;
+  }
+  return `Nothing that ships changed since ${builds.map(formatTag).join(", ")}, which production serves.`;
 }
 
 /**
@@ -55,9 +75,13 @@ function ownerSet(git: Git, worker: LiveWorker): Record<string, string> {
   );
 }
 
+/**
+ * Reads production and plans the release of HEAD. Unless `always` is set, it plans to skip when
+ * nothing that ships changed since the live builds.
+ */
 export async function planDeploy(
   deps: Pick<DeployDeps, "api" | "git" | "now">,
-  message?: string,
+  options: { message?: string; always?: boolean } = {},
 ): Promise<DeployPlan> {
   if (!isClean(deps.git)) {
     throw new Error(
@@ -69,34 +93,39 @@ export async function planDeploy(
     ...worker,
     vars: ownerSet(deps.git, worker),
   }));
+  const skip = options.always ? undefined : nothingShips(deps.git, live);
   // Without analytics the watch would judge by the probes alone, so a token without them stops here.
-  const now = deps.now();
-  try {
-    await deps.api.invocations(
-      live.map((worker) => worker.version.id),
-      new Date(now.getTime() - 60 * 60_000),
-      now,
-    );
-  } catch (error) {
-    throw new Error(
-      `The Cloudflare token can't read analytics, which the watch needs: give it Account Analytics Read (docs/deploy.md). ${error instanceof Error ? error.message : String(error)}`,
-    );
+  // A skipped release watches nothing.
+  if (!skip) {
+    const now = deps.now();
+    try {
+      await deps.api.invocations(
+        live.map((worker) => worker.version.id),
+        new Date(now.getTime() - 60 * 60_000),
+        now,
+      );
+    } catch (error) {
+      throw new Error(
+        `The Cloudflare token can't read analytics, which the watch needs: give it Account Analytics Read (docs/deploy.md). ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
   return {
     tag,
-    message: (message ?? `${tag.commit} ${subjectOf(deps.git, "HEAD")}`).slice(0, 100),
+    message: (options.message ?? `${tag.commit} ${subjectOf(deps.git, "HEAD")}`).slice(0, 100),
     live,
     barriers: barriersBetween(
       deps.git,
       live.map((worker) => ({ spec: worker.spec, from: worker.tag, to: tag })),
     ),
     origin: liveOrigin(live),
+    ...(skip ? { skip } : {}),
   };
 }
 
 export interface DeployReport {
   tag: BuildTag;
-  outcome: "deployed" | "rolled-back" | "failed";
+  outcome: "deployed" | "skipped" | "rolled-back" | "failed";
   reason?: string;
   workers: Array<{
     script: string;
@@ -120,7 +149,7 @@ export interface DeployOptions {
  * Deploys every Worker in order, checks production, and rolls the release back when the checks
  * fail. Each Worker carries its instance vars from the live version. `wrangler deploy` applies the
  * Durable Object class migrations; each object applies its SQL migrations when it first wakes on
- * the new code.
+ * the new code. A plan that skips deploys nothing.
  */
 export async function deploy(
   deps: DeployDeps,
@@ -142,6 +171,7 @@ export async function deploy(
     analytics: true,
     rollback: [],
   };
+  if (plan.skip) return { ...report, outcome: "skipped", reason: plan.skip };
   deps.mask(plan.origin);
   for (const worker of plan.live) for (const value of Object.values(worker.vars)) deps.mask(value);
 
