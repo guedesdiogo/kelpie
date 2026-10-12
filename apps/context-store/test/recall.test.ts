@@ -15,8 +15,13 @@ import {
   replaceBackendForTesting,
   replaceGatewayForTesting,
 } from "../src/index.ts";
+import { VAULT_NAME } from "../src/vault.ts";
 
 const vault = (name: string) => env.VAULT.getByName(name);
+
+/** When the vault's alarm is next due. */
+const alarmAt = (stub: ReturnType<typeof vault>) =>
+  runInDurableObject(stub, (_instance, state) => state.storage.getAlarm());
 
 const person = (title: string, body: string, scope: MemoryInput["scope"] = "global") =>
   ({
@@ -137,9 +142,13 @@ describe("recall", () => {
   it("finds an edit made in Obsidian at the next recall, through the signed push webhook", async () => {
     const backend = await vaultOf([person("Ana Souza", "Irmã do Rafael. Mora em Lisboa.")]);
     fakeGateway();
-    const stub = vault("recall-obsidian");
+    // The vault the webhook reaches.
+    const stub = vault(VAULT_NAME);
     const path = memoryPath("global", "person", "Ana Souza");
     expect((await stub.recall("kelpie", "Onde a Ana Souza mora?", ALL)).text).toContain("Lisboa");
+    // Until a push comes, the next alarm, the embedding's, is more than a second away: every alarm
+    // syncs, so only the alarm's time shows what the webhook did (#244).
+    expect(((await alarmAt(stub)) ?? 0) - Date.now()).toBeGreaterThan(1_000);
 
     // obsidian-git commits the owner's edit and pushes it; GitHub calls the webhook.
     const edited = (backend.files()[path] ?? "").replace("Mora em Lisboa.", "Mudou para o Porto.");
@@ -158,6 +167,10 @@ describe("recall", () => {
     const signature = `sha256=${Array.from(mac, (b) => b.toString(16).padStart(2, "0")).join("")}`;
     const hooks = new GitHubWebhooks(createExecutionContext(), env);
     expect(await hooks.receive({ event: "push", signature, body })).toEqual({ status: 202 });
+    // The signed push brings the sync to a second away.
+    expect(((await alarmAt(stub)) ?? Number.POSITIVE_INFINITY) - Date.now()).toBeLessThanOrEqual(
+      1_000,
+    );
     expect(await runDurableObjectAlarm(stub)).toBe(true);
 
     const next = await stub.recall("kelpie", "Onde a Ana Souza mora?", ALL);
