@@ -376,7 +376,7 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
     - **What loads it again:**
       - a checkpoint;
       - a change to the persona, rules or skills, or a configured change to the agent's system prompt;
-      - turning `memoryCore` on or off, or a deploy that flips its built-in default for an agent that follows it (#224). Each starts a new prompt version.
+      - turning `memoryCore` on or off, or a deploy that flips its built-in default for an agent that follows it (#224). Each starts a new prompt version. An agent notes the default at its first turn after #224 without a new version, so a flip that comes before that turn reaches it at its next checkpoint instead.
     - **What doesn't:** a deploy that edits built-in text, the default system prompt included (#220). The turn's prompt key still drops earlier replies' native output when the text the model gets changes, and the core waits for one of the events above.
     - A note edited meanwhile shows from the next load.
   - **Where it goes:** first in the first message the model sees, ahead of a checkpoint's summary.

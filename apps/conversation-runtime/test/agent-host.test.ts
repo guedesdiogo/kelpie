@@ -124,7 +124,7 @@ describe("AgentHost", () => {
     });
     expect((await setup.turnConfig()).promptVersion).toBe(4);
     // Only this id gets the persona: leave it as a new agent for the other test that uses it.
-    await seedState(setup, { promptVersion: null, defaultPrompt: null });
+    await seedState(setup, { promptVersion: null, defaultPrompt: null, defaultMemoryCore: null });
 
     // Any agent's built-in prompt, and one from before #210, which kept none, alike.
     for (const [id, defaultPrompt] of [
@@ -192,7 +192,7 @@ describe("AgentHost", () => {
     const stub = host("frozen-current");
     await seedStored(stub, { ...DEFAULT_SETTINGS, tier: "frontier" }, [["tier"]], 3);
 
-    // The prompt in effect is the same, so neither the cleanup nor the built-in check bumps.
+    // The prompt in effect is the same, so the cleanup doesn't bump.
     expect(await stub.config()).toEqual({
       settings: { ...DEFAULT_SETTINGS, tier: "frontier" },
       promptVersion: 3,
@@ -475,5 +475,19 @@ describe("AgentHost with a vault", () => {
     await stub.configure({ systemPrompt: "Configured meanwhile." }, owner);
     expect((await pending).promptVersion).toBe(3);
     expect((await stub.config()).promptVersion).toBe(3);
+
+    // A flipped memory core default and a vault change, seen by racing turns, make one version.
+    await seedState(stub, { defaultMemoryCore: !DEFAULT_SETTINGS.memoryCore });
+    replaceContextStoreForTesting(slow("# V3"));
+    const [c, d] = await Promise.all([stub.turnConfig(), stub.turnConfig()]);
+    expect([c.promptVersion, d.promptVersion]).toEqual([4, 4]);
+    expect(await stateOf(stub, "defaultMemoryCore")).toBe(DEFAULT_SETTINGS.memoryCore);
+
+    // So does a configured change made while a turn waits on a flipped default.
+    await seedState(stub, { defaultMemoryCore: !DEFAULT_SETTINGS.memoryCore });
+    const waiting = stub.turnConfig();
+    await stub.configure({ systemPrompt: "Configured again." }, owner);
+    expect((await waiting).promptVersion).toBe(6);
+    expect((await stub.config()).promptVersion).toBe(6);
   });
 });
