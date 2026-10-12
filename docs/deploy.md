@@ -1,6 +1,6 @@
 # Deploying and rolling back
 
-A merge into `main` deploys itself: CI runs the gates, deploys all six Workers, watches production, and rolls the release back if it is unhealthy. The owner can also roll production back to an earlier build on request. [ADR-0029](adr/0029-continuous-deployment-and-rollback.md) records the decision; this page is the runbook.
+A merge into `main` deploys itself: CI runs the gates, deploys all six Workers, watches production, and rolls the release back if it is unhealthy. The deploy skips when nothing that ships changed since the builds production serves. The owner can also roll production back to an earlier build on request. [ADR-0029](adr/0029-continuous-deployment-and-rollback.md) and [ADR-0031](adr/0031-deploy-only-what-ships.md) record the decisions; this page is the runbook.
 
 ```
 PR ──► gates ──► CI passed ──► merge ──► gates on main ──► deploy ──► probes + 10 min watch ──► kept
@@ -54,18 +54,25 @@ CodeQL's default setup also runs on pull requests. The ruleset blocks new alerts
 After the gates pass on `main`, the `Deploy` job runs `tools/release`. It:
 
 1. **Reads each Worker's live version:** its build tag, its traffic, and its instance vars. Those are the values the owner set with `--var`: the Access values, the public origins, the vault's GitHub App values and the AI Gateway URLs. A live value equal to the repository's default isn't carried, so a later change to the default applies.
-   - It also reads the analytics once. A token without Account Analytics Read stops the deploy here, before anything changes: the watch would otherwise judge by the probes alone.
-2. **Finds the rollback barriers** between the live commit and the new one.
-3. **Deploys the Workers in order** (`llm-gateway`, `channel-egress`, `context-store`, `conversation-runtime`, `ingress`, `admin-api`):
+2. **Skips when nothing that ships changed since the live builds.** It compares each live commit with the one being deployed. Something ships when a changed path is:
+   - under `apps/`, `packages/`, `tools/release/` or `.github/actions/`;
+   - `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.base.json` or `.github/workflows/deploy.yml`.
+
+   A merge that changes only other paths, such as `docs/`, `ci.yml` or `scripts/`, deploys nothing, and the run's summary says why. So does a re-run of an older run whose commit production already contains. A live version without a tag, or a live commit the checkout lacks, always deploys.
+
+   The comparison is with production, not with the previous commit. A deploy that was missed, because its run failed or was replaced while it waited, goes out with the next merge, whatever that merge changes. `deploy.yml` by hand deploys regardless ([By hand](#by-hand)). `release deploy --plan` shows the decision.
+3. **Reads the analytics once.** A token without Account Analytics Read stops the deploy here, before anything changes: the watch would otherwise judge by the probes alone.
+4. **Finds the rollback barriers** between the live commit and the new one.
+5. **Deploys the Workers in order** (`llm-gateway`, `channel-egress`, `context-store`, `conversation-runtime`, `ingress`, `admin-api`):
    - each is tagged `<build>-<sha>` and carries its instance vars;
    - `wrangler deploy` applies the Durable Object class migrations;
    - each object applies its SQL migrations the first time it wakes on the new code.
-4. **Probes production** until the new build answers, for up to three minutes:
+6. **Probes production** until the new build answers, for up to three minutes:
    - `/health` answers;
    - `/version` serves the new build;
    - a Telegram webhook with a wrong secret answers 401. It goes through channel-egress, whose `SecretStore` wakes and migrates;
    - a GitHub webhook with a wrong signature answers 401, through context-store.
-5. **Watches for 10 minutes.**
+7. **Watches for 10 minutes.**
    - The probes repeat every minute.
    - The GraphQL Analytics API counts the new versions' exceptions, exceeded limits and internal errors, Durable Objects included.
 
@@ -81,7 +88,7 @@ The run's summary has the table of versions, the probes and the barriers. The pr
   - when the release crosses a rollback barrier: a class migration, a marked SQL migration, or a live version without a tag. Fix forward, or roll back by request;
   - when the zone's security answered the probes (`cf-mitigated`), so nothing is known about the Worker.
 - **A failed deploy opens an issue** with the report, whether it rolled back or not.
-- **`main` still has the change.** The next merge deploys it again. Revert or fix it first.
+- **`main` still has the change.** The next merge deploys it again, even one that changes only docs. Revert or fix it first.
 
 ### By hand
 
@@ -89,6 +96,7 @@ The run's summary has the table of versions, the probes and the barriers. The pr
   ```bash
   gh workflow run deploy.yml --repo guedesdiogo/kelpie
   ```
+  By hand it deploys even when nothing that ships changed. Add `-f always=false` to skip in that case, as a merge does.
 - **One deploy or rollback runs at a time.** Others wait in the `production` group, and GitHub keeps only the newest waiting run.
 - **Don't deploy from a laptop.** A local `wrangler deploy` races the pipeline and skips its checks. Two exceptions:
   - **A new instance's first deploy** follows `docs/admin-api.md`, "Setting it up". The pipeline needs a live version to read the instance vars from.

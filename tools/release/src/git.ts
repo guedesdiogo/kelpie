@@ -55,6 +55,16 @@ export function hasCommit(git: Git, commit: string): boolean {
   }
 }
 
+/** Whether `descendant` contains `ancestor`, the same commit included. */
+export function isAncestor(git: Git, ancestor: string, descendant: string): boolean {
+  try {
+    git(["merge-base", "--is-ancestor", ancestor, descendant]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** The tag a deploy of `ref` carries (docs/admin-api.md, "Versions"). */
 export function buildTagOf(git: Git, ref: string): BuildTag {
   return {
