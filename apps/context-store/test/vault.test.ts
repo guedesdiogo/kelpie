@@ -1,28 +1,16 @@
-import {
-  createExecutionContext,
-  reset,
-  runDurableObjectAlarm,
-  runInDurableObject,
-} from "cloudflare:test";
+import { createExecutionContext, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   GitHubWebhooks,
   replaceBackendForTesting,
   replaceGatewayForTesting,
 } from "../src/index.ts";
+import { VAULT_NAME } from "../src/vault.ts";
 import { VAULT_README } from "../src/vault-readme.ts";
 
 const SECRET = "webhook-secret-for-tests";
-
-afterEach(async () => {
-  replaceBackendForTesting(undefined);
-  replaceGatewayForTesting(undefined);
-  // A test's vaults go, alarms and all (#223): one left with an alarm wakes in a later test, where
-  // it syncs with that test's backend and asks that test's model.
-  await reset();
-});
 
 /** A vault with a README already, so the first sync doesn't queue one. */
 function vaultWith(files: Record<string, string>): FakeVaultBackend {
@@ -32,6 +20,10 @@ function vaultWith(files: Record<string, string>): FakeVaultBackend {
 }
 
 const vault = (name: string) => env.VAULT.getByName(name);
+
+/** When the vault's alarm is next due. */
+const alarmAt = (stub: ReturnType<typeof vault>) =>
+  runInDurableObject(stub, (_instance, state) => state.storage.getAlarm());
 
 async function signed(body: string): Promise<string> {
   const key = await crypto.subtle.importKey(
@@ -98,8 +90,13 @@ describe("Vault", () => {
 
   it("brings an edit made outside Kelpie to the next compile, through the signed webhook", async () => {
     const backend = vaultWith({ "agents/kelpie/SOUL.md": "# Before" });
-    const stub = vault("vault");
+    // The vault the webhook reaches.
+    const stub = vault(VAULT_NAME);
     expect((await stub.compile("kelpie")).persona).toBe("# Before");
+    // Until a push comes, the next sync is the reconcile, minutes away: every alarm syncs, so only
+    // the alarm's time shows what the webhook did (#244).
+    const reconcile = (await alarmAt(stub)) ?? 0;
+    expect(reconcile - Date.now()).toBeGreaterThan(60_000);
 
     const after = backend.push({ "agents/kelpie/SOUL.md": "# After, edited in Obsidian" });
     const body = JSON.stringify({ ref: "refs/heads/main", after, commits: [] });
@@ -107,10 +104,15 @@ describe("Vault", () => {
     expect(await hooks.receive({ event: "push", signature: "sha256=00", body })).toEqual({
       status: 401,
     });
+    expect(await alarmAt(stub)).toBe(reconcile);
     expect((await stub.compile("kelpie")).persona).toBe("# Before");
     expect(await hooks.receive({ event: "push", signature: await signed(body), body })).toEqual({
       status: 202,
     });
+    // The signed push brings the sync forward, to a second away at most.
+    expect(((await alarmAt(stub)) ?? Number.POSITIVE_INFINITY) - Date.now()).toBeLessThanOrEqual(
+      1_000,
+    );
     expect(await runDurableObjectAlarm(stub)).toBe(true);
     expect((await stub.compile("kelpie")).persona).toBe("# After, edited in Obsidian");
 

@@ -33,6 +33,7 @@ At the start of every story, before writing its plan, check how these projects s
 - Labels: one of `type:epic`, `type:story`, `type:follow-up` or `type:decision` per issue; `epic:N` on everything that belongs to an epic; `security` when the change touches authentication, authorization, secrets or personal data.
 - Issue body sections: Context, Goal, Out of scope, Plan, Acceptance criteria, Planned verification, Risks and rollback.
 - Pull requests: one `Closes #N` line per story and a **Verification** section: residuals first, then what ran with real numbers, then what did not run and why. The same verification goes as a comment on the issue.
+- Turn on Claude Code's CI **Auto-fix** for every pull request as soon as you open it. Then the session that opened it is woken to fix a CI failure, a merge conflict or a review comment. The owner made this the default (#259). It never merges.
 - Commits reference issues without closing keywords (`issue #N`).
 - The owner may merge a pull request from the GitHub UI at any time. Before pushing to a branch with an open PR, check that the PR is still open (`gh pr view N --json state`). If it was merged, push to a new branch and open a follow-up PR.
 - Don't stack pull requests: base every PR on a freshly fetched `main`, because the owner merges as soon as a PR looks right and `Closes` only applies to PRs into `main`. Work that depends on an open PR stays local until that PR merges.
