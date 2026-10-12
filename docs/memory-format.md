@@ -375,8 +375,9 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - **When it loads:** at the first request under a prompt version and checkpoint. It is kept as sent, and every later request under the same pair sends it byte for byte, since a reply's thinking is bound to everything sent before it (#137).
     - **What loads it again:**
       - a checkpoint;
-      - a change to the persona, rules or skills, or to the agent's system prompt, including a deploy that edits its built-in default;
-      - turning `memoryCore` on or off, which starts a new prompt version.
+      - a change to the persona, rules or skills, or a configured change to the agent's system prompt;
+      - turning `memoryCore` on or off, or a deploy that flips its built-in default for an agent that follows it (#224). Each starts a new prompt version.
+    - **What doesn't:** a deploy that edits built-in text, the default system prompt included (#220). The turn's prompt key still drops earlier replies' native output when the text the model gets changes, and the core waits for one of the events above.
     - A note edited meanwhile shows from the next load.
   - **Where it goes:** first in the first message the model sees, ahead of a checkpoint's summary.
     - The system prompt stays the agent's own, the same in every conversation.

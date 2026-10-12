@@ -38,37 +38,36 @@ async function seedState(stub: ReturnType<typeof host>, rows: Record<string, unk
   });
 }
 
-/** The settings row as stored, not as `config()` fills it in. */
-async function storedOf(stub: ReturnType<typeof host>) {
+/** A state row as stored, or undefined when there is none. */
+async function stateOf(stub: ReturnType<typeof host>, key: string) {
   return runInDurableObject(stub, (_instance, state) => {
     const [row] = state.storage.sql
-      .exec<{ value: string }>("SELECT value FROM state WHERE key = 'settings'")
+      .exec<{ value: string }>("SELECT value FROM state WHERE key = ?", key)
       .toArray();
     return row ? JSON.parse(row.value) : undefined;
   });
 }
 
+/** The settings row as stored, not as `config()` fills it in. */
+const storedOf = (stub: ReturnType<typeof host>) => stateOf(stub, "settings");
+
 /**
  * Leaves the settings, the prompt version and the audit log as a deploy that stored the whole
- * settings would have, with no cleanup run yet and no built-in prompt kept (#210) unless one is
- * given, then evicts the object so the next call starts it again.
+ * settings would have, with no cleanup run yet, then evicts the object so the next call starts it
+ * again.
  */
 async function seedStored(
   stub: ReturnType<typeof host>,
   settings: Record<string, unknown>,
   audited: string[][],
   promptVersion: number,
-  defaultPrompt?: string,
 ) {
   await stub.config();
   await runInDurableObject(stub, (_instance, state) => {
-    state.storage.sql.exec(
-      "DELETE FROM state WHERE key IN ('settingsOverridesOnly', 'defaultPrompt')",
-    );
+    state.storage.sql.exec("DELETE FROM state WHERE key = 'settingsOverridesOnly'");
     for (const [key, value] of [
       ["settings", settings],
       ["promptVersion", promptVersion],
-      ...(defaultPrompt === undefined ? [] : [["defaultPrompt", defaultPrompt] as const]),
     ] as const) {
       state.storage.sql.exec(
         "INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)",
@@ -110,62 +109,35 @@ describe("AgentHost", () => {
     expect(await storedOf(stub)).toEqual({});
   });
 
-  it("starts a new prompt version once when a deploy changed the setup agent's built-in persona", async () => {
-    const stub = host(SETUP_AGENT_ID);
-    await stub.config();
-    // The last deploy ran an older persona, at version 4, and nothing configured replaces it.
-    await seedState(stub, { settings: null, promptVersion: 4, defaultPrompt: "An older persona." });
-
-    expect(await stub.config()).toEqual({
+  it("keeps the prompt version when a deploy edits a built-in prompt: the prompt key marks it (#220)", async () => {
+    // The last deploy ran an older persona at version 4, and kept it as #210 did.
+    const setup = host(SETUP_AGENT_ID);
+    await setup.config();
+    await seedState(setup, {
+      settings: null,
+      promptVersion: 4,
+      defaultPrompt: "An older persona.",
+    });
+    expect(await setup.config()).toEqual({
       settings: { ...DEFAULT_SETTINGS, systemPrompt: SETUP_PROMPT },
-      promptVersion: 5,
+      promptVersion: 4,
     });
-    expect((await stub.config()).promptVersion).toBe(5);
-    expect((await stub.turnConfig()).promptVersion).toBe(5);
-
+    expect((await setup.turnConfig()).promptVersion).toBe(4);
     // Only this id gets the persona: leave it as a new agent for the other test that uses it.
-    await seedState(stub, { promptVersion: null, defaultPrompt: SETUP_PROMPT });
-  });
+    await seedState(setup, { promptVersion: null, defaultPrompt: null });
 
-  it("does the same for any agent's built-in prompt, and a later change bumps only for its own", async () => {
-    const stub = host("default-changed");
-    await stub.config();
-    await seedState(stub, { defaultPrompt: "You are an older assistant." });
-
-    expect(await stub.config()).toEqual({ settings: DEFAULT_SETTINGS, promptVersion: 1 });
-    await stub.configure({ tier: "frontier" }, owner);
-    expect((await stub.config()).promptVersion).toBe(1);
-    await stub.configure({ systemPrompt: "You are terse." }, owner);
-    expect((await stub.config()).promptVersion).toBe(2);
-  });
-
-  it("keeps the prompt version when a configured prompt replaces the built-in one", async () => {
-    const stub = host("default-replaced");
-    await stub.configure({ systemPrompt: "Fale como um pirata." }, owner);
-    await seedState(stub, { defaultPrompt: "You are an older assistant." });
-
-    expect(await stub.config()).toMatchObject({
-      settings: { systemPrompt: "Fale como um pirata." },
-      promptVersion: 1,
-    });
-  });
-
-  it("starts a new prompt version once for an agent from before built-in prompts were tracked", async () => {
-    const stub = host("untracked");
-    await stub.config();
-    // A deploy before this one ran the agent and kept no built-in prompt.
-    await seedState(stub, { defaultPrompt: null });
-    await evictDurableObject(stub);
-
-    expect((await stub.config()).promptVersion).toBe(1);
-    expect((await stub.config()).promptVersion).toBe(1);
-
-    // One whose configured prompt replaces the built-in one keeps its version.
-    const configured = host("untracked-configured");
-    await configured.configure({ systemPrompt: "Fale como um pirata." }, owner);
-    await seedState(configured, { defaultPrompt: null });
-    await evictDurableObject(configured);
-    expect((await configured.config()).promptVersion).toBe(1);
+    // Any agent's built-in prompt, and one from before #210, which kept none, alike.
+    for (const [id, defaultPrompt] of [
+      ["default-changed", "You are an older assistant."],
+      ["untracked", null],
+    ] as const) {
+      const stub = host(id);
+      await stub.config();
+      await seedState(stub, { promptVersion: 2, defaultPrompt });
+      await evictDurableObject(stub);
+      expect((await stub.config()).promptVersion).toBe(2);
+      expect((await stub.turnConfig()).promptVersion).toBe(2);
+    }
   });
 
   it("drops the end-of-turn windows and the old 10 s cap from settings stored before ADR-0024", async () => {
@@ -214,10 +186,6 @@ describe("AgentHost", () => {
     );
     expect(await storedOf(stub)).toEqual({});
     expect(await stub.config()).toEqual({ settings: DEFAULT_SETTINGS, promptVersion: 2 });
-
-    // A deploy that edits the built-in prompt reaches it now, with a new version (#210).
-    await seedState(stub, { defaultPrompt: "You are an older assistant." });
-    expect((await stub.config()).promptVersion).toBe(3);
   });
 
   it("drops the defaults an earlier change stored, and keeps what a change named", async () => {
@@ -246,17 +214,6 @@ describe("AgentHost", () => {
     });
     await evictDurableObject(prompt);
     expect((await prompt.config()).promptVersion).toBe(3);
-
-    // #210 ran first and kept the built-in prompt while the copy replaced it: still one bump.
-    const after210 = host("frozen-older-prompt-after-210");
-    await seedStored(
-      after210,
-      { ...DEFAULT_SETTINGS, systemPrompt: "You are an older assistant." },
-      [["tier"]],
-      2,
-      DEFAULT_SETTINGS.systemPrompt,
-    );
-    expect((await after210.config()).promptVersion).toBe(3);
 
     const core = host("frozen-older-core");
     await seedStored(core, { ...DEFAULT_SETTINGS, memoryCore: true }, [["tier"]], 0);
@@ -383,6 +340,42 @@ describe("AgentHost", () => {
     await stub.configure({ memoryCore: false, tier: "medium" }, owner);
     expect((await stub.config()).promptVersion).toBe(2);
   });
+
+  it("starts a new prompt version once, at the next turn, when a deploy flips the memory core's default (#224)", async () => {
+    const stub = host("core-default-flipped");
+    await stub.turnConfig();
+    expect(await stateOf(stub, "defaultMemoryCore")).toBe(DEFAULT_SETTINGS.memoryCore);
+    // The last deploy had the other default, and the agent follows it.
+    await seedState(stub, { defaultMemoryCore: !DEFAULT_SETTINGS.memoryCore });
+
+    // Reading the settings changes nothing: only a turn uses the core.
+    expect((await stub.config()).promptVersion).toBe(0);
+    expect(await stateOf(stub, "defaultMemoryCore")).toBe(!DEFAULT_SETTINGS.memoryCore);
+
+    expect((await stub.turnConfig()).promptVersion).toBe(1);
+    expect((await stub.turnConfig()).promptVersion).toBe(1);
+    expect((await stub.config()).promptVersion).toBe(1);
+    expect(await stateOf(stub, "defaultMemoryCore")).toBe(DEFAULT_SETTINGS.memoryCore);
+  });
+
+  it("keeps the prompt version when the agent's own memory core setting outlives a flipped default", async () => {
+    const stub = host("core-default-overridden");
+    await stub.configure({ memoryCore: !DEFAULT_SETTINGS.memoryCore }, owner);
+    await seedState(stub, { defaultMemoryCore: !DEFAULT_SETTINGS.memoryCore });
+
+    expect((await stub.turnConfig()).promptVersion).toBe(1);
+    expect(await stateOf(stub, "defaultMemoryCore")).toBe(DEFAULT_SETTINGS.memoryCore);
+  });
+
+  it("records the memory core's default at an agent's first turn after this deploy, without a bump", async () => {
+    const stub = host("core-default-unseen");
+    await stub.config();
+    await seedState(stub, { promptVersion: 3, defaultMemoryCore: null });
+    await evictDurableObject(stub);
+
+    expect((await stub.turnConfig()).promptVersion).toBe(3);
+    expect(await stateOf(stub, "defaultMemoryCore")).toBe(DEFAULT_SETTINGS.memoryCore);
+  });
 });
 
 describe("AgentHost with a vault", () => {
@@ -432,6 +425,19 @@ describe("AgentHost with a vault", () => {
     expect(await stub.turnConfig()).toMatchObject({
       settings: { systemPrompt: "# Kelpie\n\nNow playful." },
       promptVersion: 2,
+    });
+  });
+
+  it("keeps the version of an agent whose vault persona replaces an edited built-in prompt (#220)", async () => {
+    const stub = host("vault-persona-default-edited");
+    replaceContextStoreForTesting(vaultOf({ persona: "# Kelpie\n\nWarm and brief." }));
+    expect((await stub.turnConfig()).promptVersion).toBe(1);
+    // A deploy edited the built-in prompt the persona replaces, as #210 kept it.
+    await seedState(stub, { defaultPrompt: "You are an older assistant." });
+
+    expect(await stub.turnConfig()).toMatchObject({
+      settings: { systemPrompt: "# Kelpie\n\nWarm and brief." },
+      promptVersion: 1,
     });
   });
 
