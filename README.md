@@ -6,7 +6,7 @@
 
 Kelpie is a self-hosted, multi-agent AI assistant harness that connects chat channels (WhatsApp, Telegram, Discord, Slack and a web chat) to large language models. Think of it as Hermes Agent without the VPS: it runs on Cloudflare's developer platform (Workers, Durable Objects, Queues and Workflows), event-driven and without containers, so it starts cheap and scales. One instance serves one owner, a person or a team; each agent works like an extra colleague.
 
-> **Status: design phase.** There is no runnable code yet. Start with the [viability study](docs/viability-study.md); the architecture decisions are tracked on the [project board](https://github.com/users/guedesdiogo/projects/1).
+> **Status: Phase 2, memory and tools (release 0.2).** The six Workers deploy themselves on every merge to `main`: CI runs the gates, deploys, watches production and rolls back an unhealthy release ([deploying and rolling back](docs/deploy.md)). Every workspace keeps at least 80% test coverage ([testing](docs/testing.md)). Start with the [viability study](docs/viability-study.md); the work is tracked on the [project board](https://github.com/users/guedesdiogo/projects/1).
 
 ## Goals
 
