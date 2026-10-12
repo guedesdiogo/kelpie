@@ -73,6 +73,7 @@ function deployProbeDeps(env: Env): DeployProbeDeps {
   return {
     // Optional, unlike a secret in `secrets.required`: a deploy without it still works.
     token: (env as Env & { DEPLOY_PROBE_TOKEN?: string }).DEPLOY_PROBE_TOKEN,
+    now: () => Date.now(),
     pingDirectory: () => env.DIRECTORY.getByName(DIRECTORY_NAME).ping(),
     // A service binding to conversation-runtime's DeployProbe entrypoint, which only reports.
     probeRuntime: () => (env.DEPLOY_PROBE as unknown as DeployProbeContract).probe(),
@@ -94,7 +95,7 @@ export default {
       });
     }
 
-    // Without the deploy's token this falls through to the 404 below, as an unknown path does.
+    // Without a valid signature this falls through to the 404 below, as an unknown path does.
     if (request.method === "POST" && pathname === DEPLOY_PROBE_PATH) {
       const probed = await handleDeployProbe(request, deployProbeDeps(env));
       if (probed) return probed;
