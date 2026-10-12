@@ -24,6 +24,11 @@ on:
         description: Deploy even when nothing that ships changed since the live builds
         default: true
         type: boolean
+      # Merges never rotate: each upload is a secret change that rollbacks must force past.
+      rotate-probe-token:
+        description: Upload DEPLOY_PROBE_TOKEN to ingress even though it holds one (a rotation)
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -54,12 +59,18 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Optional: it signs the deep probe, which is skipped while it's unset, and goes to ingress
+          # when ingress has none, or on a rotation.
+          DEPLOY_PROBE_TOKEN: ${{ secrets.DEPLOY_PROBE_TOKEN }}
           WRANGLER_SEND_METRICS: "false"
           WATCH_MINUTES: ${{ inputs.watch-minutes }}
           ALWAYS: ${{ inputs.always }}
+          ROTATE_PROBE_TOKEN: ${{ inputs.rotate-probe-token }}
         run: |
           args=(--watch-minutes "${WATCH_MINUTES:-10}" --report "$RUNNER_TEMP/release.md")
           if [ "$ALWAYS" = "true" ]; then args+=(--always); fi
+          # A rotation deploys even when nothing ships, so the new token reaches ingress.
+          if [ "${ROTATE_PROBE_TOKEN:-false}" = "true" ]; then args+=(--rotate-probe-token --always); fi
           bun run --cwd tools/release release deploy "${args[@]}"
       - name: Open an issue for the failed deploy
         if: failure()

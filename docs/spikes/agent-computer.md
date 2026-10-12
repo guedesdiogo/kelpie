@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-12
 - **Issue:** [#267](https://github.com/guedesdiogo/kelpie/issues/267)
-- **Status:** both paths work. Remote Control and the approval relay in one session are still unverified, because the subscription's weekly limit was hit.
+- **Status:** both paths work, and Remote Control with the approval relay worked in one session. Still open: an approval answered in the Claude app while the hook waits.
 - **Source:** throwaway scripts in the session's scratch space, not committed. Everything the spike created was removed afterwards: the tmux sessions, the stub listeners, the tunnel and the VPC Service.
 
 ## Questions
@@ -43,6 +43,14 @@
 
 The account behind the claude.ai login hit its weekly limit after Remote Control came up ("resets 2pm America/Sao_Paulo"). The approval relay was then run on the setup-token session, without Remote Control.
 
+**Combined run, the same day.** The owner moved the stored claude.ai login to his second account (`claude auth login`, run by him, with `CLAUDE_CODE_OAUTH_TOKEN` unset). On that login:
+- Remote Control came up (`Opus 5.5 · Claude Max`, "/remote-control is active").
+- In the same session, a `PermissionRequest` for a Bash command was held by the stub, then allowed: "Allowed by PermissionRequest hook".
+- `Stop` carried the reply.
+- `Notification` didn't fire this time, as the stub answered within seconds.
+
+**Where the setup-token comes from.** It isn't set in any shell startup file. It seems to come from the Claude app's sessions on the VPS, carrying the account the owner is using there. Sessions the runner starts don't depend on it.
+
 ### Spike 2
 
 - **The path works:** Worker → VPC Service → Tunnel → `127.0.0.1:47832` on the VPS. No public port, no inbound rule.
@@ -51,6 +59,6 @@ The account behind the claude.ai login hit its weekly limit after Remote Control
 
 ## What's left
 
-- Remote Control and the approval relay in one session, once the weekly limit resets. That includes an approval answered in the Claude app while the hook waits.
+- An approval answered in the Claude app while the hook waits.
 - `Stop` when the turn ends on an API error.
 - Latency from a deployed Worker rather than `wrangler dev`.

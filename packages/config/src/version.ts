@@ -39,3 +39,19 @@ export function versionReport(metadata: WorkerVersionMetadata | undefined): Vers
     deployedAt: metadata?.timestamp || null,
   };
 }
+
+/** One part of the deploy's deep probe (#234): it answered, or it didn't. */
+export type DeployProbeStatus = "ok" | "failed";
+
+/** What conversation-runtime's `DeployProbe` tells ingress: a status per part, never ids or data. */
+export interface RuntimeProbeReport {
+  registry: DeployProbeStatus;
+  /** `ok` only when every agent's AgentHost answered. */
+  agentHosts: DeployProbeStatus;
+  gateway: DeployProbeStatus;
+}
+
+/** conversation-runtime's `DeployProbe` entrypoint, which only ingress binds (#234). */
+export interface DeployProbeContract {
+  probe(): Promise<RuntimeProbeReport>;
+}

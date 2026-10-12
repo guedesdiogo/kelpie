@@ -1,6 +1,6 @@
-# ADR-0033: Agents get a computer: a shell by default, and on request a Cloudflare Sandbox or the owner's VPS, where they code through Claude Code
+# ADR-0035: Agents get a computer: a shell by default, and on request a Cloudflare Sandbox or the owner's VPS, where they code through Claude Code
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-12
 - Issue: [#267](https://github.com/guedesdiogo/kelpie/issues/267)
 - Decided by the owner in the conversation of 2026-10-12; his answers are quoted on #267
@@ -92,7 +92,7 @@ This amends:
   - `wrangler tunnel` (experimental);
   - the Sandbox's snapshots (public beta).
 - **Anthropic's terms.** Driving Claude Code on a subscription from a bot conflicts with Anthropic's written policy, as ADR-0008 already notes. It is the owner's decision, and API keys remain the fallback.
-- **Still to verify:** Remote Control and the approval relay in one session, including an approval answered in the Claude app while the hook waits. The spike couldn't run it after the weekly limit was hit, and this ADR stays Proposed until it does.
+- **Verified together:** Remote Control and the approval relay worked in one session, once the claude.ai login moved to the owner's second account. **Still open:** what happens when the owner answers in the Claude app while the hook waits.
 - **Docs.** Setting up a VPS as Kelpie's computer is documented later (#268).
 
 ## Alternatives considered

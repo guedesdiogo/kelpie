@@ -76,7 +76,7 @@ export class Generation extends RpcTarget {
 /** Model access for Kelpie's other Workers, through a service binding. */
 export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
   generate(tier: ModelTier, request: RoutedRequest): Generation {
-    const router = new ModelRouter(parseRouteTable(this.env.MODEL_ROUTES), providers(this.env));
+    const router = modelRouter(this.env);
     const controller = new AbortController();
     const events = toNdjsonStream(
       router.stream(tier, request, { signal: controller.signal }),
@@ -107,6 +107,28 @@ export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
   embed(texts: string[]): Promise<EmbedOutcome> {
     return embedWith(this.env, texts);
   }
+
+  /** For the deploy's probe (#234), through conversation-runtime. See `pingWith`. */
+  ping(): { ok: true } {
+    return pingWith(this.env);
+  }
+}
+
+/**
+ * Loads what the calls use: the route table, each provider's settings and the embedding provider.
+ * A configuration that can't load throws, so the deploy's probe catches it before the first turn.
+ * It calls no provider and makes no request, so a probe costs nothing and sends nothing out.
+ */
+export function pingWith(env: GatewayEnv): { ok: true } {
+  modelRouter(env);
+  if (!isEmbeddingProvider(env.EMBEDDING_PROVIDER)) {
+    throw new Error(`Unknown EMBEDDING_PROVIDER: ${env.EMBEDDING_PROVIDER}`);
+  }
+  return { ok: true };
+}
+
+function modelRouter(env: GatewayEnv): ModelRouter {
+  return new ModelRouter(parseRouteTable(env.MODEL_ROUTES), providers(env));
 }
 
 /**
