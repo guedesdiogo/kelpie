@@ -41,18 +41,19 @@ export interface Restored {
 
 /**
  * Serves earlier versions again, in reverse deploy order; one failure doesn't stop the others.
- * `force` restores versions whose secrets differ from the live ones.
+ * `force` restores versions whose secrets differ from the live ones; a move's own `force` overrides
+ * it for that Worker.
  */
 export async function restore(
   api: CloudflareApi,
-  moves: ReadonlyArray<{ script: string; traffic: readonly VersionTraffic[] }>,
+  moves: ReadonlyArray<{ script: string; traffic: readonly VersionTraffic[]; force?: boolean }>,
   message: string,
   force = false,
 ): Promise<Restored[]> {
   const results: Restored[] = [];
   for (const move of [...moves].reverse()) {
     try {
-      await api.deployVersions(move.script, move.traffic, message, force);
+      await api.deployVersions(move.script, move.traffic, message, move.force ?? force);
       results.unshift({ script: move.script, ok: true });
     } catch (error) {
       results.unshift({
@@ -172,6 +173,8 @@ export interface RollbackReport {
   barriers: Barrier[];
   probes: ProbeResult[];
   verdict: Verdict;
+  /** What the owner should know that isn't a failure, such as a token the rollback restored. */
+  warnings: string[];
 }
 
 /**
@@ -199,6 +202,7 @@ export async function rollback(
 
   const message = `Rollback to ${formatTag(plan.target)}: ${options.reason}`;
   const moved: RollbackPlan["moves"] = [];
+  const warnings: string[] = [];
   for (const move of [...plan.moves].reverse()) {
     const traffic = [{ version_id: move.to, percentage: 100 }];
     try {
@@ -214,6 +218,12 @@ export async function rollback(
           );
         }
         await deps.api.deployVersions(move.spec.script, traffic, message, true);
+        // The deploy probe's token is one of ingress's secrets (#234).
+        if (move.spec.script === INGRESS) {
+          warnings.push(
+            `${INGRESS} now holds its secrets from ${formatTag(plan.target)}, DEPLOY_PROBE_TOKEN included. If that build had none, the next deploy uploads it; if the token was rotated since, deploy with rotate-probe-token, or the deep probe fails (docs/deploy.md).`,
+          );
+        }
       }
       moved.push(move);
     } catch (error) {
@@ -244,5 +254,6 @@ export async function rollback(
     barriers: plan.barriers,
     probes,
     verdict: verdictOf(probes),
+    warnings,
   };
 }

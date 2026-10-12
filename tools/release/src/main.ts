@@ -6,7 +6,7 @@ import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 import { migrationChanges } from "./changes.ts";
 import { cloudflareApi } from "./cloudflare.ts";
-import { type DeployDeps, deploy, deployedVersion, planDeploy } from "./deploy.ts";
+import { type DeployDeps, deepProbeToken, deploy, deployedVersion, planDeploy } from "./deploy.ts";
 import { gitAt, repoRoot } from "./git.ts";
 import { guardVerdict } from "./guard.ts";
 import { readLive } from "./live.ts";
@@ -28,7 +28,7 @@ const USAGE = `Usage, from tools/release: bun run release <command> [options]
 
   guard [--base <ref>]     Migration checks for CI, from <ref> (default HEAD^1) to HEAD.
   status                   What production serves, and the builds a rollback can reach.
-  deploy [--plan] [--always] [--watch-minutes 10] [--error-threshold 3] [--report <file>]
+  deploy [--plan] [--always] [--watch-minutes 10] [--error-threshold 3] [--rotate-probe-token] [--report <file>]
                            Deploys HEAD, verifies it and rolls it back if it's unhealthy. It
                            skips when nothing that ships changed since the live builds, unless
                            --always is given.
@@ -36,9 +36,15 @@ const USAGE = `Usage, from tools/release: bun run release <command> [options]
                            Rolls every Worker back to one earlier build.
 
 deploy, status and rollback need CLOUDFLARE_ACCOUNT_ID, and CLOUDFLARE_API_TOKEN or a
-wrangler login. See docs/deploy.md.`;
+wrangler login. deploy also takes DEPLOY_PROBE_TOKEN, for the deep probe, and uploads it to
+ingress when ingress has none or with --rotate-probe-token. See docs/deploy.md.`;
 
 const inActions = process.env.GITHUB_ACTIONS === "true";
+
+// Only ingress's deploy needs the deep probe's token, and it gets it in a file. Taken out of the
+// environment here, so no child process, wrangler included, inherits it.
+const probeTokenValue = process.env.DEPLOY_PROBE_TOKEN;
+delete process.env.DEPLOY_PROBE_TOKEN;
 
 const secrets = redactor((value) => {
   if (inActions) for (const command of maskCommands(value)) console.log(command);
@@ -148,6 +154,7 @@ async function main(argv: string[]): Promise<number> {
       report: { type: "string" },
       "watch-minutes": { type: "string" },
       "error-threshold": { type: "string" },
+      "rotate-probe-token": { type: "boolean", default: false },
       help: { type: "boolean", default: false },
     },
   });
@@ -191,6 +198,9 @@ async function main(argv: string[]): Promise<number> {
     }
 
     case "deploy": {
+      // Optional: without it the deploy uploads no token and skips the deep probe (docs/deploy.md).
+      const token = deepProbeToken(probeTokenValue, log.warn);
+      if (token) hide(token);
       const cloudflare = api(root);
       const deps: DeployDeps = {
         api: cloudflare,
@@ -218,6 +228,8 @@ async function main(argv: string[]): Promise<number> {
           errorThreshold: bounded(values["error-threshold"], 3, "error-threshold", 1000),
           failuresInARow: 3,
         },
+        ...(token ? { deepProbeToken: token } : {}),
+        rotateProbeToken: values["rotate-probe-token"],
       });
       publish(deployReport(report), values.report);
       return exitCode.deploy(report);

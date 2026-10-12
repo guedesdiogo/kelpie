@@ -52,6 +52,15 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   }
 
   /**
+   * Answers once the migrations ran: the constructor holds every call until then, and a failed
+   * migration fails this call. The deploy's probe calls it for every agent the Registry lists
+   * (#234).
+   */
+  ping(): { ok: true } {
+    return { ok: true };
+  }
+
+  /**
    * The agent's settings, defaults filled in, and its prompt version. The setup agent's default
    * prompt is its built-in persona. A deploy that edits a built-in prompt doesn't bump the version:
    * each turn's prompt key catches a change in the text the model gets (#220).
