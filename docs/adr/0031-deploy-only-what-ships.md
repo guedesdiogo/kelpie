@@ -29,14 +29,14 @@ The rest of ADR-0029 stands.
 
 - **A push that ships nothing** takes only the gates' time, and leaves the `production` group free.
 - **A path missing from the list** ships nothing until the next push that ships, or a deploy by hand. `ci.yml` is not on the list, so a change to its `Deploy` job alone, like #241's, takes effect with the next push that ships.
-- **Residual: a waiting run can be replaced by one that ships nothing.** If a push that ships nothing replaces the waiting CI run of one that ships, that change doesn't deploy until the next push that ships. ADR-0029's "only the newest deploys, and it contains the others" holds only when the newest ships. The Actions tab shows the replaced run as cancelled; `deploy.yml` by hand deploys it.
+- **Residual: a later push that ships nothing doesn't deploy an earlier one that didn't.** A push that ships may not deploy: a gate or `Changes` fails on `main`, or a newer push replaces its waiting CI run. If the next push ships nothing, that change still isn't deployed, under a green run, until a push that ships. ADR-0029's "only the newest deploys, and it contains the others" holds only when the newest ships. The Actions tab shows the earlier run as failed or cancelled. Re-running its failed jobs, or `deploy.yml` by hand, deploys it.
 - **Residual: a rebase merge of several commits is judged by its last commit.** `HEAD^1` is then the commit before it, not the previous tip of `main`. The repository allows rebase merges, but its merges so far are merge commits. The `Migrations` gate reads from `HEAD^1` the same way.
 
 ## Alternatives considered
 
 - **A `paths` filter on the push trigger,** as hermes-agent does for its site. It would skip the gates on `main` too, and it applies to a whole workflow, not to one job.
 - **A third-party paths-filter action.** It would run another vendor's code in CI for a rule of a few lines, without tests of its own here.
-- **Deciding inside the deploy, from the live build to the push.** It closes the residual above, since it compares with what production serves. But every push would still enter the `production` environment and wait in its group. It stays an option if the residual bites.
+- **Deciding inside the deploy, from the live build to the push.** It closes the first residual above, since it compares with what production serves. But every push would still enter the `production` environment and wait in its group. It stays an option if the residual bites.
 
 ## References
 

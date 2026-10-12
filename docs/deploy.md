@@ -58,7 +58,12 @@ CodeQL's default setup also runs on pull requests. The ruleset blocks new alerts
 
 A push that changes only other paths, such as `docs/`, `ci.yml` or `scripts/`, runs the gates and skips `Deploy`. `deploy.yml` by hand deploys regardless ([By hand](#by-hand)). To see the decision for a commit, check it out and run `bun run --cwd tools/release release ships`.
 
-GitHub keeps one waiting CI run on `main`. If a push that ships nothing replaces the waiting run of one that ships, shown as cancelled in the Actions tab, that change waits for the next push that ships: run `deploy.yml` by hand to deploy it now.
+A later push that ships nothing doesn't deploy an earlier one that didn't. A push that ships can miss its deploy in two ways:
+
+- a gate or `Changes` failed on `main`, and its run shows as failed;
+- GitHub keeps one waiting CI run on `main`, so a newer push replaced its waiting run, which shows as cancelled.
+
+That change waits for the next push that ships. To deploy it now, re-run the failed jobs, or run `deploy.yml` by hand.
 
 After the gates pass on a push that ships, the `Deploy` job runs `tools/release`. It:
 
