@@ -8,16 +8,20 @@ import {
   deployedVersion,
   planDeploy,
 } from "../src/deploy.ts";
+import { buildTagOf, type Git, gitAt } from "../src/git.ts";
 import { deployPlanReport, deployReport } from "../src/report.ts";
-import type { BuildTag } from "../src/tags.ts";
+import { type BuildTag, formatTag } from "../src/tags.ts";
 import { WORKERS, type WorkerSpec } from "../src/workers.ts";
 import {
+  type FakeApi,
   type FakeDeepProbe,
   fakeApi,
   fakeClock,
   fakeProduction,
   ORIGIN,
   quietGit,
+  silentLog,
+  tempRepo,
 } from "./fakes.ts";
 
 const live = { build: 95, commit: "25c5076" };
@@ -25,6 +29,12 @@ const next = { build: 96, commit: "abc1234" };
 const options = {
   settle: { attempts: 3, intervalMs: 10_000 },
   watch: { minutes: 2, intervalMs: 60_000, errorThreshold: 3, failuresInARow: 3 },
+};
+
+/** quietGit, with HEAD newer than the live build and a change that ships between them. */
+const shippingGit: Git = (args) => {
+  if (args[0] === "merge-base") throw new Error("git exited with 1");
+  return args[0] === "diff" ? "M\tapps/ingress/src/index.ts\n" : quietGit(args);
 };
 
 /**
@@ -80,7 +90,7 @@ function harness(setup: {
   const warnings: string[] = [];
   const deps: DeployDeps = {
     api,
-    git: quietGit,
+    git: shippingGit,
     fetch: fakeProduction(production),
     ...fakeClock(),
     log: { info: () => {}, warn: (message) => warnings.push(message) },
@@ -153,7 +163,7 @@ describe("planDeploy", () => {
         OPENAI_BASE_URL: "https://api.openai.com/v1",
       },
     });
-    deps.git = (args) => (args[0] === "show" ? config : quietGit(args));
+    deps.git = (args) => (args[0] === "show" ? config : shippingGit(args));
     const plan = await planDeploy(deps);
     expect(plan.live[0]?.vars).toEqual({ OPENAI_BASE_URL: gateway });
   });
@@ -174,6 +184,146 @@ describe("planDeploy", () => {
       git: (args: readonly string[]) => (args[0] === "status" ? " M x\n" : deps.git(args)),
     };
     await expect(planDeploy(dirty)).rejects.toThrow("clean checkout");
+  });
+});
+
+/** Makes one Worker's live version carry another tag, or none. */
+function serve(api: FakeApi, script: string, tag: BuildTag | null) {
+  const version = api.version.bind(api);
+  api.version = async (name, id) => {
+    const found = await version(name, id);
+    if (name !== script) return found;
+    return { ...found, annotations: tag ? { "workers/tag": formatTag(tag) } : {} };
+  };
+}
+
+// A real repository: each plan runs a few dozen git commands, which take seconds on a busy machine.
+describe("planDeploy's skip, against the builds production serves (ADR-0031)", {
+  timeout: 20_000,
+}, () => {
+  /** A repository whose first commit changes something that ships and something that doesn't. */
+  function history() {
+    const repo = tempRepo();
+    return {
+      repo,
+      base: repo.commit({ "apps/ingress/src/index.ts": "v1", "docs/deploy.md": "a" }),
+    };
+  }
+
+  /** HEAD as checked out in `dir`, with every Worker live on `liveCommit`'s build. */
+  function setup(
+    dir: string,
+    liveCommit: string,
+    overrides: Partial<Parameters<typeof fakeApi>[0]> = {},
+  ) {
+    const git = gitAt(dir);
+    const liveTag = buildTagOf(git, liveCommit);
+    const api = fakeApi({ live: liveTag, ...overrides });
+    const production: { serving: BuildTag | null } = { serving: liveTag };
+    const wranglerCalls: string[] = [];
+    const deps: DeployDeps = {
+      api,
+      git,
+      fetch: fakeProduction(production),
+      ...fakeClock(),
+      log: silentLog,
+      mask: () => {},
+      async wranglerDeploy(spec) {
+        wranglerCalls.push(spec.script);
+        if (spec.script === "kelpie-ingress") production.serving = buildTagOf(git, "HEAD");
+        return `${spec.app}-new`;
+      },
+    };
+    return { api, deps, liveTag, wranglerCalls };
+  }
+
+  it("skips when production already serves HEAD, and doesn't read the analytics", async () => {
+    const { repo, base } = history();
+    const { deps, liveTag } = setup(repo.dir, base, {
+      invocations: () => {
+        throw new CloudflareError("Cloudflare GraphQL query failed (403)", []);
+      },
+    });
+    const plan = await planDeploy(deps);
+    expect(plan.skip).toBe(
+      `Production serves ${formatTag(liveTag)}, which already contains this commit.`,
+    );
+  });
+
+  it("skips an older HEAD, as a re-run does, rather than go back on a change that ships", async () => {
+    const { repo, base } = history();
+    const newer = repo.commit({ "apps/ingress/src/index.ts": "v2" });
+    gitAt(repo.dir)(["checkout", "-q", base]);
+    const { deps, liveTag } = setup(repo.dir, newer);
+    expect((await planDeploy(deps)).skip).toBe(
+      `Production serves ${formatTag(liveTag)}, which already contains this commit.`,
+    );
+  });
+
+  it("skips when the Workers serve different builds that all differ from HEAD in docs only", async () => {
+    const { repo, base } = history();
+    const docs = repo.commit({ "docs/deploy.md": "b" });
+    repo.commit({ "docs/deploy.md": "c" });
+    const { api, deps, liveTag } = setup(repo.dir, docs);
+    const older = buildTagOf(deps.git, base);
+    serve(api, "kelpie-admin-api", older);
+    expect((await planDeploy(deps)).skip).toBe(
+      `Nothing that ships changed since ${formatTag(liveTag)}, ${formatTag(older)}, which production serves.`,
+    );
+  });
+
+  it("skips when only docs, the README or ci.yml changed since the live build", async () => {
+    const { repo, base } = history();
+    repo.commit({ "docs/deploy.md": "b" });
+    repo.commit({ "README.md": "x", ".github/workflows/ci.yml": "on: push" });
+    const { deps, wranglerCalls, api } = setup(repo.dir, base);
+    const plan = await planDeploy(deps);
+    expect(plan.skip).toContain("Nothing that ships changed since");
+    expect(deployPlanReport(plan)).toContain(`Skips: ${plan.skip}`);
+
+    const report = await deploy(deps, plan, options);
+    expect(report.outcome).toBe("skipped");
+    expect(report.reason).toBe(plan.skip);
+    expect(wranglerCalls).toEqual([]);
+    expect(api.made).toEqual([]);
+    expect(deployReport(report)).toContain(`## Deploy of ${formatTag(plan.tag)}: skipped`);
+  });
+
+  it("deploys a change that ships since the live build, even under later docs-only commits", async () => {
+    const { repo, base } = history();
+    repo.commit({ "apps/ingress/src/index.ts": "v2" }, "A: ships");
+    repo.commit({ "docs/deploy.md": "b" }, "B: docs only");
+    const { deps, wranglerCalls } = setup(repo.dir, base);
+    const plan = await planDeploy(deps);
+    expect(plan.skip).toBeUndefined();
+    expect((await deploy(deps, plan, options)).outcome).toBe("deployed");
+    expect(wranglerCalls).toEqual(WORKERS.map((worker) => worker.script));
+  });
+
+  it("deploys when any Worker serves an older build with a change that ships since", async () => {
+    const { repo, base } = history();
+    const shipped = repo.commit({ "packages/config/src/index.ts": "x" });
+    repo.commit({ "docs/deploy.md": "b" });
+    const { deps, api } = setup(repo.dir, shipped);
+    serve(api, "kelpie-admin-api", buildTagOf(deps.git, base));
+    expect((await planDeploy(deps)).skip).toBeUndefined();
+  });
+
+  it("deploys when a live version has no tag, or names a commit this checkout lacks", async () => {
+    const { repo, base } = history();
+    const untagged = setup(repo.dir, base);
+    serve(untagged.api, "kelpie-llm-gateway", null);
+    expect((await planDeploy(untagged.deps)).skip).toBeUndefined();
+
+    const unknown = setup(repo.dir, base);
+    serve(unknown.api, "kelpie-llm-gateway", { build: 1, commit: "1234567" });
+    expect((await planDeploy(unknown.deps)).skip).toBeUndefined();
+  });
+
+  it("deploys regardless with always, as deploy.yml by hand does", async () => {
+    const { repo, base } = history();
+    const { deps } = setup(repo.dir, base);
+    expect((await planDeploy(deps, { always: true })).skip).toBeUndefined();
   });
 });
 

@@ -28,8 +28,10 @@ const USAGE = `Usage, from tools/release: bun run release <command> [options]
 
   guard [--base <ref>]     Migration checks for CI, from <ref> (default HEAD^1) to HEAD.
   status                   What production serves, and the builds a rollback can reach.
-  deploy [--plan] [--watch-minutes 10] [--error-threshold 3] [--rotate-probe-token] [--report <file>]
-                           Deploys HEAD, verifies it and rolls it back if it's unhealthy.
+  deploy [--plan] [--always] [--watch-minutes 10] [--error-threshold 3] [--rotate-probe-token] [--report <file>]
+                           Deploys HEAD, verifies it and rolls it back if it's unhealthy. It
+                           skips when nothing that ships changed since the live builds, unless
+                           --always is given.
   rollback --target <previous|build|tag|commit> [--reason <text>] [--force] [--plan] [--report <file>]
                            Rolls every Worker back to one earlier build.
 
@@ -145,6 +147,7 @@ async function main(argv: string[]): Promise<number> {
     options: {
       base: { type: "string" },
       plan: { type: "boolean", default: false },
+      always: { type: "boolean", default: false },
       force: { type: "boolean", default: false },
       target: { type: "string" },
       reason: { type: "string" },
@@ -209,7 +212,7 @@ async function main(argv: string[]): Promise<number> {
         wranglerDeploy: wranglerDeploy(root),
         mask: hide,
       };
-      const plan = await planDeploy(deps);
+      const plan = await planDeploy(deps, { always: values.always });
       hide(plan.origin);
       for (const worker of plan.live) for (const value of Object.values(worker.vars)) hide(value);
       if (values.plan) {

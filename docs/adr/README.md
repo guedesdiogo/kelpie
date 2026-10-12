@@ -34,6 +34,8 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0028](0028-setup-step-notes.md) | A setup step the owner finishes is told to the conversation that sent its link, in a note Kelpie writes | [#206](https://github.com/guedesdiogo/kelpie/issues/206) |
 | [0029](0029-continuous-deployment-and-rollback.md) | Merges deploy themselves through gates, roll back when unhealthy, and migrations stay add-only | [#233](https://github.com/guedesdiogo/kelpie/issues/233) |
 | [0030](0030-coverage-floor.md) | Every workspace keeps at least 80% test coverage, and new code comes with tests | [#242](https://github.com/guedesdiogo/kelpie/issues/242) |
+| [0031](0031-deploy-only-what-ships.md) | A deploy skips when nothing that ships changed since the builds production serves | [#250](https://github.com/guedesdiogo/kelpie/issues/250) |
+| [0032](0032-file-bytes-in-r2.md) | Files that arrive on a channel keep their bytes in R2, behind a pointer note in the vault | [#156](https://github.com/guedesdiogo/kelpie/issues/156) |
 | [0033](0033-deploy-deep-probe.md) | The deploy wakes the Directory, the Registry and every AgentHost through a signed deep probe | [#234](https://github.com/guedesdiogo/kelpie/issues/234) |
 
 ## Format

@@ -1,7 +1,8 @@
 name: Deploy
 
 # Deploys main to production: CI calls it after every gate passes on a push to main, and it runs by
-# hand to deploy main again, for example after a rollback (docs/deploy.md).
+# hand to deploy main again, for example after a rollback (docs/deploy.md). It skips when nothing
+# that ships changed since the builds production serves, unless `always` is set (ADR-0031).
 on:
   workflow_call:
     inputs:
@@ -9,12 +10,20 @@ on:
         description: Minutes to watch production before keeping the release
         default: "10"
         type: string
+      always:
+        description: Deploy even when nothing that ships changed since the live builds
+        default: false
+        type: boolean
   workflow_dispatch:
     inputs:
       watch-minutes:
         description: Minutes to watch production before keeping the release
         default: "10"
         type: string
+      always:
+        description: Deploy even when nothing that ships changed since the live builds
+        default: true
+        type: boolean
       # Merges never rotate: each upload is a secret change that rollbacks must force past.
       rotate-probe-token:
         description: Upload DEPLOY_PROBE_TOKEN to ingress even though it holds one (a rotation)
@@ -41,8 +50,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The build number counts main's first-parent commits, and rollback barriers are read
-          # from the live commit to this one.
+          # The build number counts main's first-parent commits, and rollback barriers and the
+          # changes that ship are read from the live commit to this one.
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -55,11 +64,14 @@ jobs:
           DEPLOY_PROBE_TOKEN: ${{ secrets.DEPLOY_PROBE_TOKEN }}
           WRANGLER_SEND_METRICS: "false"
           WATCH_MINUTES: ${{ inputs.watch-minutes }}
+          ALWAYS: ${{ inputs.always }}
           ROTATE_PROBE_TOKEN: ${{ inputs.rotate-probe-token }}
         run: |
-          rotate=()
-          if [ "${ROTATE_PROBE_TOKEN:-false}" = "true" ]; then rotate=(--rotate-probe-token); fi
-          bun run --cwd tools/release release deploy --watch-minutes "${WATCH_MINUTES:-10}" "${rotate[@]}" --report "$RUNNER_TEMP/release.md"
+          args=(--watch-minutes "${WATCH_MINUTES:-10}" --report "$RUNNER_TEMP/release.md")
+          if [ "$ALWAYS" = "true" ]; then args+=(--always); fi
+          # A rotation deploys even when nothing ships, so the new token reaches ingress.
+          if [ "${ROTATE_PROBE_TOKEN:-false}" = "true" ]; then args+=(--rotate-probe-token --always); fi
+          bun run --cwd tools/release release deploy "${args[@]}"
       - name: Open an issue for the failed deploy
         if: failure()
         env:
