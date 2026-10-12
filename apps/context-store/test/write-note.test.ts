@@ -1,22 +1,14 @@
-import { reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { MemoryWriteInput } from "@kelpie/context-store/contract";
 import { writeMemory } from "@kelpie/memory";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   type MemoryGateway,
   replaceBackendForTesting,
   replaceGatewayForTesting,
 } from "../src/index.ts";
-
-afterEach(async () => {
-  replaceBackendForTesting(undefined);
-  replaceGatewayForTesting(undefined);
-  // A test's vaults go, alarms and all (#223): one left with an alarm wakes in a later test, where
-  // it syncs with that test's backend and asks that test's model.
-  await reset();
-});
 
 const vault = (name: string) => env.VAULT.getByName(name);
 

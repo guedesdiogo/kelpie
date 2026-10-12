@@ -1,4 +1,4 @@
-import { reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { type LlmEvent, type RoutedRequest, toNdjsonStream } from "@kelpie/llm";
 import {
@@ -15,21 +15,13 @@ import {
 } from "@kelpie/memory";
 import type { CommitOutcome, CommitRequest } from "@kelpie/vault";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { proposeAbstract } from "../src/dream.ts";
 import {
   type MemoryGateway,
   replaceBackendForTesting,
   replaceGatewayForTesting,
 } from "../src/index.ts";
-
-afterEach(async () => {
-  replaceBackendForTesting(undefined);
-  replaceGatewayForTesting(undefined);
-  // A test's vaults go, alarms and all (#223): one left with an alarm wakes in a later test, where
-  // it syncs with that test's backend and asks that test's model.
-  await reset();
-});
 
 describe("proposeAbstract", () => {
   it("asks the cheap tier, with the note as data, and returns what it used", async () => {

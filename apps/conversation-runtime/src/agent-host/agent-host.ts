@@ -35,16 +35,10 @@ const COMPILE_TIMEOUT_MS = 3_000;
  */
 export class AgentHost extends Agent<Env> implements AgentHostContract {
   readonly #db: DrizzleSqliteDODatabase<typeof schema>;
-  /** True when the agent's tables were already there: it ran before this instance. */
-  readonly #existed: boolean;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.#db = drizzle(ctx.storage, { schema });
-    this.#existed =
-      ctx.storage.sql
-        .exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'state'")
-        .toArray().length > 0;
     // If a migration fails the object resets, and the next request retries it.
     void ctx.blockConcurrencyWhile(async () => {
       try {
@@ -68,15 +62,13 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
 
   /**
    * The agent's settings, defaults filled in, and its prompt version. The setup agent's default
-   * prompt is its built-in persona. A deploy that changed the default prompt in effect bumps the
-   * prompt version, as a configured prompt change does.
+   * prompt is its built-in persona. A deploy that edits a built-in prompt doesn't bump the version:
+   * each turn's prompt key catches a change in the text the model gets (#220).
    */
   config(): AgentConfig {
-    const defaults = this.#defaults();
-    const stored = this.#stored();
     return {
-      settings: { ...defaults, ...stored },
-      promptVersion: this.#promptVersion(defaults.systemPrompt, stored.systemPrompt === undefined),
+      settings: { ...this.#defaults(), ...this.#stored() },
+      promptVersion: this.#get("promptVersion", 0),
     };
   }
 
@@ -110,10 +102,8 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
    * defaults beside its owner's choices, and a later edit to a default never reached it. This keeps
    * only the settings some change named, as the audit log records them, and that differ from the
    * defaults; the others follow the defaults again. A system prompt or memory core that changes by
-   * it starts a new prompt version.
-   * A dropped copy of the prompt was the one in effect, so the built-in prompt is then recorded as
-   * seen, and `#promptVersion` doesn't bump a second time. It runs once per agent, so the audit log
-   * decides nothing after it.
+   * it starts a new prompt version. It runs once per agent, so the audit log decides nothing after
+   * it.
    */
   #dropUnnamedSettings(): void {
     if (this.#get("settingsOverridesOnly", false)) return;
@@ -136,40 +126,11 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       now.systemPrompt === was.systemPrompt && now.memoryCore === was.memoryCore
         ? version
         : version + 1;
-    const rows: [string, unknown][] = [
-      ["settings", kept],
-      ["promptVersion", promptVersion],
-      ["settingsOverridesOnly", true],
-    ];
-    if (before.systemPrompt !== undefined && kept.systemPrompt === undefined) {
-      rows.push(["defaultPrompt", now.systemPrompt]);
-    }
-    this.#db.transaction((tx) => {
-      for (const [key, value] of rows) {
-        tx.insert(schema.state)
-          .values({ key, value })
-          .onConflictDoUpdate({ target: schema.state.key, set: { value } })
-          .run();
-      }
-    });
-  }
-
-  /**
-   * The prompt version, once the built-in default prompt is checked against the one last seen. A
-   * new default bumps it only while no configured prompt replaces it. With none seen yet, an agent
-   * this instance created records the default without a bump; one whose tables were already there
-   * can't tell whether its default changed since its replies, so it bumps once. The compare, the
-   * bump and the write are one synchronous step.
-   */
-  #promptVersion(builtIn: string, inEffect: boolean): number {
-    const version = this.#get("promptVersion", 0);
-    const seen = this.#get<string | null>("defaultPrompt", null);
-    if (seen === builtIn) return version;
-    const promptVersion = (seen !== null || this.#existed) && inEffect ? version + 1 : version;
     this.#db.transaction((tx) => {
       for (const [key, value] of [
-        ["defaultPrompt", builtIn],
+        ["settings", kept],
         ["promptVersion", promptVersion],
+        ["settingsOverridesOnly", true],
       ] as const) {
         tx.insert(schema.state)
           .values({ key, value })
@@ -177,13 +138,15 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
           .run();
       }
     });
-    return promptVersion;
   }
 
   /**
    * What a turn runs with: the settings, with the system prompt composed from the vault's persona,
    * rules and skills (ADR-0016). A change in the vault bumps the prompt version, as a configured
-   * prompt change does. When the Context Store can't answer, the last vault it compiled is used.
+   * prompt change does. So does a deploy that flips the built-in memory core while the agent
+   * follows it (#224): the core isn't in the prompt key, and only turns use it. The first default
+   * a turn sees is recorded without a bump. When the Context Store can't answer, the last vault it
+   * compiled is used.
    */
   async turnConfig(): Promise<AgentConfig> {
     const vault = await this.#vaultContext();
@@ -191,14 +154,20 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     // the bump and the write below are one synchronous step.
     const config = this.config();
     const key = hasVaultContext(vault) ? JSON.stringify(vault) : "";
-    let promptVersion = config.promptVersion;
-    if (key !== this.#get("vaultContext", "")) {
-      promptVersion += 1;
+    const vaultChanged = key !== this.#get("vaultContext", "");
+    const builtInCore = this.#defaults().memoryCore;
+    const seenCore = this.#get<boolean | null>("defaultMemoryCore", null);
+    const coreFlipped =
+      seenCore !== null && seenCore !== builtInCore && this.#stored().memoryCore === undefined;
+    const rows: [string, unknown][] = [];
+    if (vaultChanged) rows.push(["vaultContext", key]);
+    if (seenCore !== builtInCore) rows.push(["defaultMemoryCore", builtInCore]);
+    const bump = vaultChanged || coreFlipped;
+    const promptVersion = bump ? config.promptVersion + 1 : config.promptVersion;
+    if (bump) rows.push(["promptVersion", promptVersion]);
+    if (rows.length > 0) {
       this.#db.transaction((tx) => {
-        for (const [stateKey, value] of [
-          ["vaultContext", key],
-          ["promptVersion", promptVersion],
-        ] as const) {
+        for (const [stateKey, value] of rows) {
           tx.insert(schema.state)
             .values({ key: stateKey, value })
             .onConflictDoUpdate({ target: schema.state.key, set: { value } })
