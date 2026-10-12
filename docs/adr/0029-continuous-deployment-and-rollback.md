@@ -1,6 +1,6 @@
 # ADR-0029: Merges deploy themselves through gates, and migrations stay add-only so production can roll back
 
-- Status: Accepted when the pull request for #233 merges
+- Status: Accepted (the owner merged #236)
 - Date: 2026-10-10
 - Issue: [#233](https://github.com/guedesdiogo/kelpie/issues/233)
 - Amended by: [ADR-0030](0030-coverage-floor.md), coverage thresholds: an 80% floor
