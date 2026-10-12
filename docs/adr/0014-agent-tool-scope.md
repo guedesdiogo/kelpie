@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-03
 - Issue: [#18](https://github.com/guedesdiogo/kelpie/issues/18) (phase 2 epic, owner decision), with stories [#49](https://github.com/guedesdiogo/kelpie/issues/49) and [#50](https://github.com/guedesdiogo/kelpie/issues/50)
+- Amended by: [ADR-0033](0033-agent-computer.md), machine execution comes into scope through the `Computer` port: a shell by default, and on request a Cloudflare Sandbox or the owner's VPS, where agents code through Claude Code
 
 ## Context
 
