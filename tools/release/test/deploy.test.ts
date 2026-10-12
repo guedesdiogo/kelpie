@@ -29,8 +29,8 @@ const options = {
 
 /**
  * Production as deploys change it: ingress serves whichever build was deployed or restored last.
- * The new build has the deploy probe's route, with the token its deploy uploaded; the live one
- * doesn't.
+ * The new build has the deploy probe's route, with the token ingress holds: the one live ingress
+ * already had, or the one its deploy uploaded. The live build has no route.
  */
 function harness(setup: {
   failWrangler?: string;
@@ -39,6 +39,10 @@ function harness(setup: {
   brokenAfterDeploy?: boolean;
   /** What the new build's deploy probe answers for each part, `ok` by default. */
   deepParts?: Record<string, string>;
+  /** The DEPLOY_PROBE_TOKEN live ingress holds; none by default. */
+  liveToken?: string;
+  /** Workers Cloudflare restores only with force, since their secrets changed. */
+  secretsChanged?: string[];
   failRestore?: string;
   invocations?: Parameters<typeof fakeApi>[0]["invocations"];
 }) {
@@ -46,9 +50,12 @@ function harness(setup: {
     serving: live,
     telegram: 401,
   };
+  let ingressToken = setup.liveToken;
   const api = fakeApi({
     live,
     ...(setup.invocations ? { invocations: setup.invocations } : {}),
+    ...(setup.liveToken ? { secrets: { "kelpie-ingress": ["DEPLOY_PROBE_TOKEN"] } } : {}),
+    ...(setup.secretsChanged ? { secretsChanged: setup.secretsChanged } : {}),
     failDeploy: (script) =>
       script === setup.failRestore ? new CloudflareError("refused", [10000]) : undefined,
   });
@@ -56,7 +63,9 @@ function harness(setup: {
   api.deployVersions = async (script, traffic, message, force) => {
     await restore(script, traffic, message, force);
     if (script === "kelpie-ingress") {
+      // The old version, with its own secrets, and no probe route.
       production.serving = live;
+      ingressToken = setup.liveToken;
       delete production.deep;
     }
     production.telegram = 401;
@@ -97,9 +106,10 @@ function harness(setup: {
       }
       if (spec.script === "kelpie-ingress") {
         production.serving = next;
-        if (secrets?.content.DEPLOY_PROBE_TOKEN) {
+        ingressToken = secrets?.content.DEPLOY_PROBE_TOKEN ?? ingressToken;
+        if (ingressToken) {
           production.deep = {
-            token: secrets.content.DEPLOY_PROBE_TOKEN,
+            token: ingressToken,
             ...(setup.deepParts ? { parts: setup.deepParts } : {}),
           };
         }
@@ -318,8 +328,43 @@ describe("the deep probe", () => {
     expect(existsSync(ingress?.secrets?.path ?? "")).toBe(false);
   });
 
+  it("uploads nothing when ingress already holds a token, and still probes with it", async () => {
+    const { deps, wranglerCalls } = harness({ liveToken: TOKEN });
+    const report = await deploy(deps, await planDeploy(deps), withToken);
+
+    expect(report.outcome).toBe("deployed");
+    expect(wranglerCalls.some((call) => call.args.includes("--secrets-file"))).toBe(false);
+    expect(report.probes.find((probe) => probe.probe === "deep")?.outcome).toBe("pass");
+  });
+
+  it("uploads it again on a rotation", async () => {
+    const { deps, wranglerCalls } = harness({ liveToken: `${TOKEN}-old` });
+    const report = await deploy(deps, await planDeploy(deps), {
+      ...withToken,
+      rotateProbeToken: true,
+    });
+
+    expect(report.outcome).toBe("deployed");
+    const ingress = wranglerCalls.find((call) => call.spec.script === "kelpie-ingress");
+    expect(ingress?.secrets?.content).toEqual({ DEPLOY_PROBE_TOKEN: TOKEN });
+  });
+
+  it("says how to fix a token ingress doesn't hold, and rolls back without force", async () => {
+    const { deps, api } = harness({ liveToken: `${TOKEN}-old` });
+    const report = await deploy(deps, await planDeploy(deps), withToken);
+
+    expect(report.outcome).toBe("rolled-back");
+    expect(report.reason).toContain("rotate-probe-token");
+    expect(api.made.some((made) => made.force)).toBe(false);
+    expect(report.warnings).toEqual([]);
+  });
+
   it("rolls the release back when a part fails, then checks the old build without it", async () => {
-    const { deps, api, production } = harness({ deepParts: { agentHosts: "failed" } });
+    // Cloudflare refuses to restore a version from before a secret change, unless forced.
+    const { deps, api, production } = harness({
+      deepParts: { agentHosts: "failed" },
+      secretsChanged: ["kelpie-ingress"],
+    });
     const report = await deploy(deps, await planDeploy(deps), withToken);
 
     expect(report.outcome).toBe("rolled-back");
@@ -333,35 +378,89 @@ describe("the deep probe", () => {
       "github-webhook",
     ]);
     expect(report.probes.every((probe) => probe.outcome === "pass")).toBe(true);
-    // Ingress's secret changed with this deploy, so only its rollback is forced.
+    // This deploy uploaded ingress's token, so only its rollback is forced, and it goes through.
     expect(api.made.filter((made) => made.force).map((made) => made.script)).toEqual([
       "kelpie-ingress",
     ]);
+    expect(report.rollback.every((result) => result.ok)).toBe(true);
     expect(api.made).toHaveLength(6);
+    expect(report.warnings).toEqual([
+      "The rollback put ingress back on a version without DEPLOY_PROBE_TOKEN. The next deploy uploads it again.",
+    ]);
+    expect(deployReport(report)).toContain("**Warnings**");
+  });
+
+  it("restores ingress without force when this deploy uploaded nothing", async () => {
+    const { deps, api } = harness({ liveToken: TOKEN, deepParts: { gateway: "failed" } });
+    const report = await deploy(deps, await planDeploy(deps), withToken);
+
+    expect(report.outcome).toBe("rolled-back");
+    expect(api.made).toHaveLength(6);
+    expect(api.made.some((made) => made.force)).toBe(false);
+    expect(report.warnings).toEqual([]);
+  });
+
+  it("warns that a rolled-back rotation leaves the previous token on ingress", async () => {
+    const { deps } = harness({
+      liveToken: `${TOKEN}-old`,
+      deepParts: { registry: "failed" },
+      secretsChanged: ["kelpie-ingress"],
+    });
+    const report = await deploy(deps, await planDeploy(deps), {
+      ...withToken,
+      rotateProbeToken: true,
+    });
+
+    expect(report.outcome).toBe("rolled-back");
+    expect(report.warnings[0]).toContain("previous DEPLOY_PROBE_TOKEN");
+    expect(report.warnings[0]).toContain("rotate-probe-token");
   });
 
   it("is skipped with one warning when the token isn't set, and uploads nothing", async () => {
     const { deps, wranglerCalls, warnings, api } = harness({ brokenAfterDeploy: true });
-    const report = await deploy(deps, await planDeploy(deps), options);
+    const report = await deploy(deps, await planDeploy(deps), {
+      ...options,
+      rotateProbeToken: true,
+    });
 
     expect(wranglerCalls.some((call) => call.args.includes("--secrets-file"))).toBe(false);
     expect(warnings.filter((warning) => warning.includes("deep probe is skipped"))).toHaveLength(1);
+    expect(warnings).toContain(
+      "rotate-probe-token needs DEPLOY_PROBE_TOKEN, so nothing is uploaded.",
+    );
     expect(report.probes.map((probe) => probe.probe)).not.toContain("deep");
     expect(api.made.some((made) => made.force)).toBe(false);
+  });
+
+  it("goes only to an https origin", async () => {
+    const { deps, wranglerCalls, warnings } = harness({});
+    const plan = { ...(await planDeploy(deps)), origin: "http://ingress.example.com" };
+    const report = await deploy(deps, plan, withToken);
+
+    expect(warnings[0]).toContain("isn't https");
+    expect(wranglerCalls.some((call) => call.args.includes("--secrets-file"))).toBe(false);
+    expect(report.probes.map((probe) => probe.probe)).not.toContain("deep");
   });
 });
 
 describe("deepProbeToken", () => {
   it("is optional, and trimmed", () => {
-    expect(deepProbeToken(undefined)).toBeUndefined();
-    expect(deepProbeToken("")).toBeUndefined();
-    expect(deepProbeToken(" \n")).toBeUndefined();
-    expect(deepProbeToken(`${TOKEN}\n`)).toBe(TOKEN);
+    const warnings: string[] = [];
+    const warn = (message: string) => warnings.push(message);
+    expect(deepProbeToken(undefined, warn)).toBeUndefined();
+    expect(deepProbeToken("", warn)).toBeUndefined();
+    expect(deepProbeToken(" \n", warn)).toBeUndefined();
+    expect(deepProbeToken(`${TOKEN}\n`, warn)).toBe(TOKEN);
+    expect(warnings).toEqual([]);
   });
 
-  it("refuses a short token, or one with spaces, before anything deploys", () => {
-    expect(() => deepProbeToken("short")).toThrow("at least 32 printable characters");
-    expect(() => deepProbeToken(`${TOKEN} ${TOKEN}`)).toThrow("without spaces");
+  it("skips a short token, or one with spaces, with a warning instead of stopping the deploy", () => {
+    const warnings: string[] = [];
+    const warn = (message: string) => warnings.push(message);
+    expect(deepProbeToken("short", warn)).toBeUndefined();
+    expect(deepProbeToken(`${TOKEN} ${TOKEN}`, warn)).toBeUndefined();
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0]).toContain("at least 32 printable characters without spaces");
   });
 });
 

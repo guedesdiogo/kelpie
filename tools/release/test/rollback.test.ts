@@ -138,8 +138,33 @@ describe("rollback", () => {
           : undefined,
     });
     const forcedPlan = await planRollback({ api: forced, git: quietGit }, "previous");
-    await rollback(deps(forced), forcedPlan, { force: true, reason: "r", settle: settleOptions });
+    const report = await rollback(deps(forced), forcedPlan, {
+      force: true,
+      reason: "r",
+      settle: settleOptions,
+    });
     expect(forced.made.at(-1)).toMatchObject({ script: "kelpie-llm-gateway", force: true });
+    expect(report.warnings).toEqual([]);
+  });
+
+  it("warns that forcing ingress back restored that build's deploy probe token", async () => {
+    const api = fakeApi({ live, versions: [previous], secretsChanged: ["kelpie-ingress"] });
+    const plan = await planRollback({ api, git: quietGit }, "previous");
+    await expect(
+      rollback(deps(api), plan, { force: false, reason: "r", settle: settleOptions }),
+    ).rejects.toThrow("kelpie-ingress's secrets changed since 94-cc8e179");
+
+    const forced = fakeApi({ live, versions: [previous], secretsChanged: ["kelpie-ingress"] });
+    const forcedPlan = await planRollback({ api: forced, git: quietGit }, "previous");
+    const report = await rollback(deps(forced), forcedPlan, {
+      force: true,
+      reason: "r",
+      settle: settleOptions,
+    });
+    expect(report.warnings).toHaveLength(1);
+    expect(report.warnings[0]).toContain(
+      "kelpie-ingress now holds its secrets from 94-cc8e179, DEPLOY_PROBE_TOKEN included",
+    );
   });
 
   it("reports probes that still fail after the rollback", async () => {

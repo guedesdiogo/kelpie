@@ -26,6 +26,8 @@ interface Probe {
   method: "GET" | "POST";
   path: string;
   headers?: Record<string, string>;
+  /** Headers made when the request goes, such as a signature of the current time. */
+  signedHeaders?: () => Promise<Record<string, string>>;
   body?: string;
   /** Null when the answer is the expected one, otherwise what was wrong with it. */
   judge(status: number, body: unknown): string | null;
@@ -38,8 +40,28 @@ const DEEP_PROBE_HEADER = "x-kelpie-deploy-probe";
 const DEEP_PROBE_PARTS = ["directory", "registry", "agentHosts", "gateway"] as const;
 
 /**
- * The deploy's deep probe: with the `DEPLOY_PROBE_TOKEN` the deploy uploaded to ingress, ingress
- * wakes the Directory, the Registry, every AgentHost and llm-gateway. Only the deploy of a new build
+ * `<unix seconds>.<hex HMAC-SHA256 of those seconds, keyed with the token>`: ingress checks it
+ * against its own copy of the token, within two minutes of its clock. The token itself never
+ * travels, so a header that reaches a log soon stops working.
+ */
+export async function deepProbeSignature(token: string, nowMs: number): Promise<string> {
+  const seconds = String(Math.floor(nowMs / 1_000));
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(token),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = await crypto.subtle.sign("HMAC", key, encoder.encode(seconds));
+  const hex = [...new Uint8Array(mac)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${seconds}.${hex}`;
+}
+
+/**
+ * The deploy's deep probe: signed with `DEPLOY_PROBE_TOKEN`, which ingress holds, it has ingress
+ * wake the Directory, the Registry, every AgentHost and llm-gateway. Only the deploy of a new build
  * sends it; an older build has no such route, so a rollback is checked without it.
  */
 function deepProbe(token: string): Probe {
@@ -47,9 +69,13 @@ function deepProbe(token: string): Probe {
     name: "deep",
     method: "POST",
     path: DEEP_PROBE_PATH,
-    headers: { [DEEP_PROBE_HEADER]: token },
+    signedHeaders: async () => ({
+      [DEEP_PROBE_HEADER]: await deepProbeSignature(token, Date.now()),
+    }),
     judge(status, body) {
-      if (status === 404) return "answered 404 (no probe route, or another DEPLOY_PROBE_TOKEN)";
+      if (status === 404) {
+        return "answered 404: ingress may lack DEPLOY_PROBE_TOKEN or hold an older one, which running the Deploy workflow with rotate-probe-token fixes; or the build has no probe route";
+      }
       if (status !== 200) return `answered ${status}`;
       // Only the parts' names are repeated: the answer goes into public reports.
       const parts = (typeof body === "object" ? body : null) as Record<string, unknown> | null;
@@ -142,9 +168,10 @@ async function runProbe(
   probe: Probe,
 ): Promise<ProbeResult> {
   try {
+    const signed = probe.signedHeaders ? await probe.signedHeaders() : {};
     const response = await fetchImpl(new URL(probe.path, origin), {
       method: probe.method,
-      headers: { "user-agent": "kelpie-release", ...probe.headers },
+      headers: { "user-agent": "kelpie-release", ...probe.headers, ...signed },
       ...(probe.body === undefined ? {} : { body: probe.body }),
       redirect: "manual",
       signal: AbortSignal.timeout(10_000),

@@ -110,36 +110,51 @@ export interface DeployReport {
   errors: Record<string, number>;
   analytics: boolean;
   rollback: Restored[];
+  /** What the owner should know that isn't a failure, such as a token the rollback restored. */
+  warnings: string[];
 }
 
 export interface DeployOptions {
   settle: SettleOptions;
   watch: WatchOptions;
   /**
-   * `DEPLOY_PROBE_TOKEN` (#234). Ingress gets it as a secret with its deploy, and the deep probe
-   * sends it. Without it, neither happens.
+   * `DEPLOY_PROBE_TOKEN` (#234): the deep probe signs its requests with it. Ingress gets it as a
+   * secret when the live ingress has none, or on a rotation. Without it, neither happens.
    */
   deepProbeToken?: string;
+  /** Uploads the token even though ingress holds one: the Deploy workflow's rotate-probe-token. */
+  rotateProbeToken?: boolean;
 }
 
 /**
- * `DEPLOY_PROBE_TOKEN` from the environment, trimmed, or undefined when it's empty. It travels in a
- * header and is masked in logs, so anything shorter than 32 printable characters, or with spaces,
- * is refused before anything deploys.
+ * `DEPLOY_PROBE_TOKEN` from the environment, trimmed, or undefined when it's empty. Anything
+ * shorter than 32 printable characters, or with spaces, is skipped with a warning: ingress would
+ * refuse it, and the masks in the logs skip short values. A bad token never stops a deploy.
  */
-export function deepProbeToken(value: string | undefined): string | undefined {
+export function deepProbeToken(
+  value: string | undefined,
+  warn: (message: string) => void,
+): string | undefined {
   const token = value?.trim();
   if (!token) return undefined;
   if (!/^[\x21-\x7e]{32,}$/.test(token)) {
-    throw new Error(
-      "DEPLOY_PROBE_TOKEN must be at least 32 printable characters without spaces, as `openssl rand -hex 32` makes (docs/deploy.md).",
+    warn(
+      "DEPLOY_PROBE_TOKEN isn't at least 32 printable characters without spaces, as `openssl rand -hex 32` makes, so it isn't uploaded and the deep probe is skipped (docs/deploy.md).",
     );
+    return undefined;
   }
   return token;
 }
 
 /** The secret only ingress gets, for its deploy probe. */
 const DEEP_PROBE_SECRET = "DEPLOY_PROBE_TOKEN";
+
+/** Whether a live Worker's version holds the probe's token, as Cloudflare lists its secrets. */
+function holdsProbeToken(worker: LiveWorker | undefined): boolean {
+  return (worker?.version.resources?.bindings ?? []).some(
+    (binding) => binding.type === "secret_text" && binding.name === DEEP_PROBE_SECRET,
+  );
+}
 
 /**
  * Deploys every Worker in order, checks production, and rolls the release back when the checks
@@ -166,11 +181,26 @@ export async function deploy(
     errors: {},
     analytics: true,
     rollback: [],
+    warnings: [],
   };
   deps.mask(plan.origin);
   for (const worker of plan.live) for (const value of Object.values(worker.vars)) deps.mask(value);
-  const token = options.deepProbeToken;
+  let token = options.deepProbeToken;
   if (token) deps.mask(token);
+  if (token && new URL(plan.origin).protocol !== "https:") {
+    deps.log.warn(
+      "The probes' origin isn't https, so the deep probe is skipped and DEPLOY_PROBE_TOKEN isn't uploaded.",
+    );
+    token = undefined;
+  }
+  if (options.rotateProbeToken && !token) {
+    deps.log.warn("rotate-probe-token needs DEPLOY_PROBE_TOKEN, so nothing is uploaded.");
+  }
+  // Once is enough: each upload is a secret change, which a later rollback must force past.
+  const holdsToken = holdsProbeToken(plan.live.find((worker) => worker.spec.script === INGRESS));
+  const upload = token !== undefined && (options.rotateProbeToken === true || !holdsToken);
+  /** Ingress's deploy carried the token, so restoring the version it replaced needs force. */
+  let uploaded = false;
 
   const since = deps.now();
   for (const [index, worker] of plan.live.entries()) {
@@ -186,12 +216,17 @@ export async function deploy(
     const entry = report.workers[index] as DeployReport["workers"][number];
     try {
       // The token goes to ingress alone, in a file rather than an argument, which logs could show.
-      entry.deployed =
-        token && worker.spec.script === INGRESS
-          ? await withSecretsFile({ [DEEP_PROBE_SECRET]: token }, (file) =>
-              deps.wranglerDeploy(worker.spec, [...args, "--secrets-file", file]),
-            )
-          : await deps.wranglerDeploy(worker.spec, args);
+      if (token && upload && worker.spec.script === INGRESS) {
+        deps.log.info(
+          `Uploading DEPLOY_PROBE_TOKEN to ${INGRESS}: ${holdsToken ? "a rotation" : "it has none yet"}`,
+        );
+        entry.deployed = await withSecretsFile({ [DEEP_PROBE_SECRET]: token }, (file) => {
+          uploaded = true;
+          return deps.wranglerDeploy(worker.spec, [...args, "--secrets-file", file]);
+        });
+      } else {
+        entry.deployed = await deps.wranglerDeploy(worker.spec, args);
+      }
     } catch (error) {
       // Wrangler can fail in a step after the new version went live, so the live one decides.
       const active = await deps.api.activeDeployment(worker.spec.script).catch(() => null);
@@ -200,7 +235,7 @@ export async function deploy(
       );
       if (fresh) entry.deployed = fresh.version_id;
       const reason = `${worker.spec.script} didn't deploy: ${error instanceof Error ? error.message : String(error)}`;
-      return rollBack(deps, plan, report, reason, options);
+      return rollBack(deps, plan, report, reason, options, uploaded);
     }
   }
 
@@ -231,7 +266,7 @@ export async function deploy(
         reason: `${verdict.reason}. Nothing was rolled back: check production, and roll back by request if it's broken.`,
       };
     case "unhealthy":
-      return rollBack(deps, plan, report, verdict.reason, options);
+      return rollBack(deps, plan, report, verdict.reason, options, uploaded);
   }
 }
 
@@ -241,6 +276,7 @@ async function rollBack(
   report: DeployReport,
   reason: string,
   options: DeployOptions,
+  uploaded: boolean,
 ): Promise<DeployReport> {
   const deployed = report.workers.filter((worker) => worker.deployed !== null);
   if (deployed.length === 0) return { ...report, outcome: "failed", reason };
@@ -264,10 +300,17 @@ async function rollBack(
       // This deploy gave ingress its DEPLOY_PROBE_TOKEN, and Cloudflare refuses to roll back past a
       // secret change without force. The version restored is the one this deploy replaced, so the
       // only secret change it undoes is this deploy's own.
-      ...(options.deepProbeToken && worker.script === INGRESS ? { force: true } : {}),
+      ...(uploaded && worker.script === INGRESS ? { force: true } : {}),
     })),
     `Automatic rollback of ${formatTag(plan.tag)}`,
   );
+  if (uploaded && report.rollback.some((result) => result.ok && result.script === INGRESS)) {
+    report.warnings.push(
+      holdsProbeToken(plan.live.find((worker) => worker.spec.script === INGRESS))
+        ? "The rollback put ingress back on the previous DEPLOY_PROBE_TOKEN. Once main is fixed, deploy with rotate-probe-token: until then the deep probe fails (docs/deploy.md)."
+        : "The rollback put ingress back on a version without DEPLOY_PROBE_TOKEN. The next deploy uploads it again.",
+    );
+  }
   const stuck = report.rollback.filter((result) => !result.ok).map((result) => result.script);
   if (stuck.length > 0) {
     return {

@@ -23,6 +23,10 @@ function probes(list: readonly ProbeResult[]): string {
   return list.map((probe) => `- \`${probe.probe}\`: ${probe.outcome}, ${probe.detail}`).join("\n");
 }
 
+function warnings(list: readonly string[]): string[] {
+  return list.length === 0 ? [] : ["", "**Warnings**", list.map((text) => `- ${text}`).join("\n")];
+}
+
 function barriers(list: readonly Barrier[]): string {
   if (list.length === 0) return "- none";
   return list
@@ -69,6 +73,7 @@ export function deployReport(report: DeployReport): string {
             )
             .join("\n"),
         ]),
+    ...warnings(report.warnings),
     "",
   ].join("\n");
 }
@@ -124,6 +129,7 @@ export function rollbackReport(report: RollbackReport): string {
     "",
     "**Changes crossed**",
     barriers(report.barriers),
+    ...warnings(report.warnings),
     "",
   ].join("\n");
 }

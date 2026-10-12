@@ -173,6 +173,8 @@ export interface RollbackReport {
   barriers: Barrier[];
   probes: ProbeResult[];
   verdict: Verdict;
+  /** What the owner should know that isn't a failure, such as a token the rollback restored. */
+  warnings: string[];
 }
 
 /**
@@ -200,6 +202,7 @@ export async function rollback(
 
   const message = `Rollback to ${formatTag(plan.target)}: ${options.reason}`;
   const moved: RollbackPlan["moves"] = [];
+  const warnings: string[] = [];
   for (const move of [...plan.moves].reverse()) {
     const traffic = [{ version_id: move.to, percentage: 100 }];
     try {
@@ -215,6 +218,12 @@ export async function rollback(
           );
         }
         await deps.api.deployVersions(move.spec.script, traffic, message, true);
+        // The deploy probe's token is one of ingress's secrets (#234).
+        if (move.spec.script === INGRESS) {
+          warnings.push(
+            `${INGRESS} now holds its secrets from ${formatTag(plan.target)}, DEPLOY_PROBE_TOKEN included. If that build had none, the next deploy uploads it; if the token was rotated since, deploy with rotate-probe-token, or the deep probe fails (docs/deploy.md).`,
+          );
+        }
       }
       moved.push(move);
     } catch (error) {
@@ -245,5 +254,6 @@ export async function rollback(
     barriers: plan.barriers,
     probes,
     verdict: verdictOf(probes),
+    warnings,
   };
 }

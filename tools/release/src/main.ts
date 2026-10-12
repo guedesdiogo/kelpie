@@ -28,15 +28,21 @@ const USAGE = `Usage, from tools/release: bun run release <command> [options]
 
   guard [--base <ref>]     Migration checks for CI, from <ref> (default HEAD^1) to HEAD.
   status                   What production serves, and the builds a rollback can reach.
-  deploy [--plan] [--watch-minutes 10] [--error-threshold 3] [--report <file>]
+  deploy [--plan] [--watch-minutes 10] [--error-threshold 3] [--rotate-probe-token] [--report <file>]
                            Deploys HEAD, verifies it and rolls it back if it's unhealthy.
   rollback --target <previous|build|tag|commit> [--reason <text>] [--force] [--plan] [--report <file>]
                            Rolls every Worker back to one earlier build.
 
 deploy, status and rollback need CLOUDFLARE_ACCOUNT_ID, and CLOUDFLARE_API_TOKEN or a
-wrangler login. deploy also takes DEPLOY_PROBE_TOKEN, for the deep probe. See docs/deploy.md.`;
+wrangler login. deploy also takes DEPLOY_PROBE_TOKEN, for the deep probe, and uploads it to
+ingress when ingress has none or with --rotate-probe-token. See docs/deploy.md.`;
 
 const inActions = process.env.GITHUB_ACTIONS === "true";
+
+// Only ingress's deploy needs the deep probe's token, and it gets it in a file. Taken out of the
+// environment here, so no child process, wrangler included, inherits it.
+const probeTokenValue = process.env.DEPLOY_PROBE_TOKEN;
+delete process.env.DEPLOY_PROBE_TOKEN;
 
 const secrets = redactor((value) => {
   if (inActions) for (const command of maskCommands(value)) console.log(command);
@@ -145,6 +151,7 @@ async function main(argv: string[]): Promise<number> {
       report: { type: "string" },
       "watch-minutes": { type: "string" },
       "error-threshold": { type: "string" },
+      "rotate-probe-token": { type: "boolean", default: false },
       help: { type: "boolean", default: false },
     },
   });
@@ -189,7 +196,7 @@ async function main(argv: string[]): Promise<number> {
 
     case "deploy": {
       // Optional: without it the deploy uploads no token and skips the deep probe (docs/deploy.md).
-      const token = deepProbeToken(process.env.DEPLOY_PROBE_TOKEN);
+      const token = deepProbeToken(probeTokenValue, log.warn);
       if (token) hide(token);
       const cloudflare = api(root);
       const deps: DeployDeps = {
@@ -219,6 +226,7 @@ async function main(argv: string[]): Promise<number> {
           failuresInARow: 3,
         },
         ...(token ? { deepProbeToken: token } : {}),
+        rotateProbeToken: values["rotate-probe-token"],
       });
       publish(deployReport(report), values.report);
       return exitCode.deploy(report);

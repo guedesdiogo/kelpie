@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { CloudflareError } from "../src/cloudflare.ts";
-import { badInvocations, probeAll, settle, verdictOf, watch } from "../src/verify.ts";
+import {
+  badInvocations,
+  deepProbeSignature,
+  probeAll,
+  settle,
+  verdictOf,
+  watch,
+} from "../src/verify.ts";
 import { fakeApi, fakeClock, fakeProduction, noSleep, ORIGIN, silentLog } from "./fakes.ts";
 
 const build = { build: 96, commit: "abc1234" };
@@ -88,9 +95,32 @@ describe("the deep probe", () => {
     expect(missing?.detail).toBe("failed: directory");
   });
 
+  it("signs the time instead of sending the token", async () => {
+    const sent: string[] = [];
+    const production = fakeProduction({ serving: build, deep: { token: TOKEN } });
+    const recording = (async (input: string | URL | Request, init?: RequestInit) => {
+      sent.push(JSON.stringify(init?.headers ?? {}));
+      return production(input, init);
+    }) as typeof fetch;
+    const results = await probeAll(recording, ORIGIN, build, TOKEN);
+    expect(results.find((result) => result.probe === "deep")?.outcome).toBe("pass");
+    expect(sent.join("\n")).not.toContain(TOKEN);
+
+    const at = Date.UTC(2026, 9, 12, 12);
+    expect(await deepProbeSignature(TOKEN, at)).toMatch(
+      new RegExp(`^${at / 1_000}\\.[0-9a-f]{64}$`),
+    );
+    expect(await deepProbeSignature(TOKEN, at)).not.toBe(
+      await deepProbeSignature(TOKEN, at + 1_000),
+    );
+    expect(await deepProbeSignature(TOKEN, at)).not.toBe(
+      await deepProbeSignature(`${TOKEN}-other`, at),
+    );
+  });
+
   it("fails on a missing route, another token or an error, without repeating the body", async () => {
     expect((await deep({ serving: build }))?.detail).toBe(
-      "answered 404 (no probe route, or another DEPLOY_PROBE_TOKEN)",
+      "answered 404: ingress may lack DEPLOY_PROBE_TOKEN or hold an older one, which running the Deploy workflow with rotate-probe-token fixes; or the build has no probe route",
     );
     expect(
       (await deep({ serving: build, deep: { token: TOKEN } }, `${TOKEN}-rotated`))?.outcome,
