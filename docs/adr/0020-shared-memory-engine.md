@@ -4,6 +4,7 @@
 - Date: 2026-10-06
 - Issue: [#105](https://github.com/guedesdiogo/kelpie/issues/105)
 - Accepted by the owner in the conversation of 2026-10-05 and 2026-10-06; his answers are quoted on [#105](https://github.com/guedesdiogo/kelpie/issues/105#issuecomment-6009731665)
+- Amended by: [ADR-0032](0032-file-bytes-in-r2.md), memory spans the vault and the R2 bucket of channel files, and erasure and export cover both
 
 ## Context
 
