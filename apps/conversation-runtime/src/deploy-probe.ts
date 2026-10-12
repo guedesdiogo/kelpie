@@ -9,6 +9,9 @@ import {
   type RuntimeProbeReport,
 } from "@kelpie/config";
 
+/** How many AgentHosts the probe wakes at once, so a probe stays a small load however many agents. */
+export const AGENT_HOSTS_AT_ONCE = 10;
+
 /** What the probe calls. Each `ping()` answers once its object's migrations ran. */
 export interface ProbeTargets {
   registry: Pick<Remote<RegistryContract>, "ping" | "list">;
@@ -38,7 +41,14 @@ export async function probeRuntime(targets: ProbeTargets): Promise<RuntimeProbeR
     // Listing goes through the Registry too, so a broken Registry fails this part as well.
     status("agentHosts", async () => {
       const agents = await targets.registry.list();
-      await Promise.all(agents.map((agent) => targets.agentHost(agent.id).ping()));
+      // A few at a time: each wakes an object, which may run its migrations now.
+      for (let start = 0; start < agents.length; start += AGENT_HOSTS_AT_ONCE) {
+        await Promise.all(
+          agents
+            .slice(start, start + AGENT_HOSTS_AT_ONCE)
+            .map((agent) => targets.agentHost(agent.id).ping()),
+        );
+      }
     }),
     status("gateway", () => targets.gateway.ping()),
   ]);

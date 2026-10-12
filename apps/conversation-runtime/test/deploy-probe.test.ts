@@ -1,8 +1,10 @@
-import { listDurableObjectIds } from "cloudflare:test";
+import { listDurableObjectIds, runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { REGISTRY_NAME, SETUP_AGENT_ID } from "@kelpie/config";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type ProbeTargets, probeRuntime } from "../src/deploy-probe.ts";
+import agentHostMigrations from "../src/agent-host/migrations/migrations.js";
+import { AGENT_HOSTS_AT_ONCE, type ProbeTargets, probeRuntime } from "../src/deploy-probe.ts";
+import registryMigrations from "../src/registry/migrations/migrations.js";
 
 // The deploy's probe (#234): ingress calls the DeployProbe entrypoint, which wakes the Registry,
 // every agent's AgentHost and llm-gateway (a stub in vitest.config.ts), and reports a status each.
@@ -53,11 +55,54 @@ describe("DeployProbe", () => {
   });
 });
 
+describe("ping", () => {
+  /** Migrations the object recorded as applied. */
+  const applied = (_instance: unknown, state: DurableObjectState) =>
+    state.storage.sql.exec<{ n: number }>("SELECT count(*) AS n FROM __drizzle_migrations").one().n;
+
+  it("answers on the Registry only once its migrations ran", async () => {
+    const stub = env.REGISTRY.getByName("ping-waits-for-migrations");
+    expect(await stub.ping()).toEqual({ ok: true });
+    expect(await runInDurableObject(stub, applied)).toBe(registryMigrations.journal.entries.length);
+  });
+
+  it("answers on an AgentHost only once its migrations ran", async () => {
+    const stub = env.AGENT_HOST.getByName("ping-waits-for-migrations");
+    expect(await stub.ping()).toEqual({ ok: true });
+    expect(await runInDurableObject(stub, applied)).toBe(
+      agentHostMigrations.journal.entries.length,
+    );
+  });
+});
+
 describe("probeRuntime", () => {
   it("pings each AgentHost the Registry lists", async () => {
     const { fake, pinged } = targets();
     expect(await probeRuntime(fake)).toEqual({ registry: "ok", agentHosts: "ok", gateway: "ok" });
     expect(pinged.sort()).toEqual(["sales", SETUP_AGENT_ID]);
+  });
+
+  it("wakes at most ten AgentHosts at a time", async () => {
+    let awake = 0;
+    let most = 0;
+    const agents = Array.from({ length: 25 }, (_, index) => ({ id: `agent-${index}`, name: "A" }));
+    const pinged: string[] = [];
+    const { fake } = targets({
+      registry: { ping: async () => ({ ok: true }), list: async () => agents },
+      agentHost: (id) => ({
+        ping: async () => {
+          awake += 1;
+          most = Math.max(most, awake);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          awake -= 1;
+          pinged.push(id);
+          return { ok: true };
+        },
+      }),
+    });
+    expect((await probeRuntime(fake)).agentHosts).toBe("ok");
+    expect(most).toBe(AGENT_HOSTS_AT_ONCE);
+    expect(pinged).toHaveLength(25);
   });
 
   it("fails agentHosts when any one of them fails, and logs the part without the message", async () => {
