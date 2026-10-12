@@ -1,6 +1,6 @@
 # ADR-0030: Every workspace keeps at least 80% test coverage, and new code comes with tests
 
-- Status: Accepted when the pull request for #242 merges
+- Status: Accepted (the owner merged #246)
 - Date: 2026-10-11
 - Issue: [#242](https://github.com/guedesdiogo/kelpie/issues/242)
 - Amends: [ADR-0029](0029-continuous-deployment-and-rollback.md), its coverage thresholds
