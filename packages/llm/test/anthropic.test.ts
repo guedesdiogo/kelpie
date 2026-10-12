@@ -110,6 +110,8 @@ function finishOf(events: LlmEvent[]) {
 }
 
 describe("AnthropicMessagesProvider", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
   it("replays its own reply verbatim on the next turn", async () => {
     const { fetch, calls } = fakeFetch(sse(toolTurn), sse(toolTurn));
     const llm = provider(fetch);
@@ -194,6 +196,17 @@ describe("AnthropicMessagesProvider", () => {
     for (const absent of ["thinking", "temperature", "top_p", "top_k", "tool_choice", "betas"]) {
       expect(call.body).not.toHaveProperty(absent);
     }
+  });
+
+  it("sends the key alone, with no bearer from the environment", async () => {
+    // The SDK reads a bearer token from the environment unless told not to (issue #270).
+    vi.stubEnv("ANTHROPIC_AUTH_TOKEN", "sk-ant-oat-from-env");
+    const { fetch, calls } = fakeFetch(sse(toolTurn));
+    await collect(provider(fetch).stream(request()));
+
+    const call = requestAt(calls, 0);
+    expect(call.headers.get("x-api-key")).toBe("sk-ant-test");
+    expect(call.headers.has("authorization")).toBe(false);
   });
 
   it("sends a request's context after the conversation, and caches the conversation without it", async () => {

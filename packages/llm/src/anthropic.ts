@@ -66,6 +66,9 @@ export class AnthropicMessagesProvider implements LlmProvider {
     this.#aliases = config.aliasCache ?? ALIAS_CACHE;
     this.#client = new Anthropic({
       apiKey: config.apiKey,
+      // `null` keeps the SDK from taking ANTHROPIC_AUTH_TOKEN from `process.env`, which holds a
+      // Worker's vars and secrets, and sending it as a bearer beside the key (issue #270).
+      authToken: null,
       ...(config.baseURL ? { baseURL: config.baseURL } : {}),
       ...(config.headers ? { defaultHeaders: config.headers } : {}),
       ...(config.fetch ? { fetch: config.fetch } : {}),
