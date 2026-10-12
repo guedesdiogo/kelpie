@@ -1,4 +1,4 @@
-# ADR-0031: conversation-runtime runs on Agents SDK 0.28.0, and adopts none of its new features
+# ADR-0033: conversation-runtime runs on Agents SDK 0.28.0, and adopts none of its new features
 
 - Status: Accepted
 - Date: 2026-10-12

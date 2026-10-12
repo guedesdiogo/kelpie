@@ -3,7 +3,7 @@
 - Status: Accepted (the owner merged #236)
 - Date: 2026-10-10
 - Issue: [#233](https://github.com/guedesdiogo/kelpie/issues/233)
-- Amended by: [ADR-0030](0030-coverage-floor.md), coverage thresholds: an 80% floor
+- Amended by: [ADR-0030](0030-coverage-floor.md), coverage thresholds: an 80% floor; [ADR-0031](0031-deploy-only-what-ships.md), a deploy skips when nothing that ships changed since the builds production serves
 - Requested by the owner on 2026-10-10: «Quero que configure o repo do kelpie para fazer deploy automatico quando tiver merge e apenas permitir merge quando todos os testes passarem […] o deploy automático deve sempre rodar o migration tbm. Aplique inclusive formas de fazer rollback automático […] e tbm crie formas de voltar uma versao caso eu solicite»
 
 ## Context
