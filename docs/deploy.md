@@ -1,6 +1,6 @@
 # Deploying and rolling back
 
-A merge into `main` deploys itself: CI runs the gates, deploys all six Workers, watches production, and rolls the release back if it is unhealthy. The owner can also roll production back to an earlier build on request. [ADR-0029](adr/0029-continuous-deployment-and-rollback.md) records the decision; this page is the runbook.
+A merge into `main` that changes something that ships deploys itself: CI runs the gates, deploys all six Workers, watches production, and rolls the release back if it is unhealthy. The owner can also roll production back to an earlier build on request. [ADR-0029](adr/0029-continuous-deployment-and-rollback.md) and [ADR-0031](adr/0031-deploy-only-what-ships.md) record the decisions; this page is the runbook.
 
 ```
 PR ──► gates ──► CI passed ──► merge ──► gates on main ──► deploy ──► probes + 10 min watch ──► kept
@@ -51,7 +51,16 @@ CodeQL's default setup also runs on pull requests. The ruleset blocks new alerts
 
 ### On merge
 
-After the gates pass on `main`, the `Deploy` job runs `tools/release`. It:
+**A push to `main` deploys only when it changes something that ships.** The `Changes` job lists the paths changed from the push's first parent (`HEAD^1`), the previous tip of `main` after a merge commit or a squash merge. The push ships when any of them is:
+
+- under `apps/`, `packages/`, `tools/release/` or `.github/actions/`;
+- `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.base.json` or `.github/workflows/deploy.yml`.
+
+A push that changes only other paths, such as `docs/`, `ci.yml` or `scripts/`, runs the gates and skips `Deploy`. `deploy.yml` by hand deploys regardless ([By hand](#by-hand)). To see the decision for a commit, check it out and run `bun run --cwd tools/release release ships`.
+
+GitHub keeps one waiting CI run on `main`. If a push that ships nothing replaces the waiting run of one that ships, shown as cancelled in the Actions tab, that change waits for the next push that ships: run `deploy.yml` by hand to deploy it now.
+
+After the gates pass on a push that ships, the `Deploy` job runs `tools/release`. It:
 
 1. **Reads each Worker's live version:** its build tag, its traffic, and its instance vars. Those are the values the owner set with `--var`: the Access values, the public origins, the vault's GitHub App values and the AI Gateway URLs. A live value equal to the repository's default isn't carried, so a later change to the default applies.
    - It also reads the analytics once. A token without Account Analytics Read stops the deploy here, before anything changes: the watch would otherwise judge by the probes alone.
@@ -81,11 +90,11 @@ The run's summary has the table of versions, the probes and the barriers. The pr
   - when the release crosses a rollback barrier: a class migration, a marked SQL migration, or a live version without a tag. Fix forward, or roll back by request;
   - when the zone's security answered the probes (`cf-mitigated`), so nothing is known about the Worker.
 - **A failed deploy opens an issue** with the report, whether it rolled back or not.
-- **`main` still has the change.** The next merge deploys it again. Revert or fix it first.
+- **`main` still has the change.** The next merge that ships deploys it again. Revert or fix it first.
 
 ### By hand
 
-- **To deploy `main` again,** for example after a rollback once the fix is in:
+- **To deploy `main` again,** for example after a rollback once the fix is in, or for a change whose push skipped the deploy:
   ```bash
   gh workflow run deploy.yml --repo guedesdiogo/kelpie
   ```
@@ -119,7 +128,7 @@ The rollback:
 - **Refuses to cross a Durable Object class migration,** as Cloudflare does. Fix forward instead.
 - **Probes the target build, and opens an issue.** A refused rollback changes nothing and opens no issue: the run's error says why.
 
-Fix or revert the change on `main` before the next merge, which deploys `main` again.
+Fix or revert the change on `main` before the next merge that ships, which deploys `main` again.
 
 ### From a terminal
 
