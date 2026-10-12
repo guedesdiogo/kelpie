@@ -7,6 +7,7 @@ Everything in this repository is written in English: code, comments, commit mess
 ## Design rules
 
 - **Pluggable connectors.** Every external service (Postgres provider, Jev access path, model provider, channel, tool source) sits behind an interface and a config value. Ship one adapter first; adding another must be one new adapter plus configuration, with the provider's specific strengths still usable. Don't build extra adapters until they are asked for.
+- **Extra cost is opt-in.** A feature that generates cost beyond the Workers Paid plan ships turned off. It turns on only at the user's explicit request and with their approval. For example, no agent can code by default, not even on the Cloudflare Sandbox (owner, 2026-10-12).
 - Decisions recorded in `docs/adr/` are binding; changing one takes a new ADR.
 
 ## Reference projects
