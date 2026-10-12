@@ -1,7 +1,8 @@
 name: Deploy
 
 # Deploys main to production: CI calls it after every gate passes on a push to main, and it runs by
-# hand to deploy main again, for example after a rollback (docs/deploy.md).
+# hand to deploy main again, for example after a rollback (docs/deploy.md). It skips when nothing
+# that ships changed since the builds production serves, unless `always` is set (ADR-0031).
 on:
   workflow_call:
     inputs:
@@ -9,12 +10,20 @@ on:
         description: Minutes to watch production before keeping the release
         default: "10"
         type: string
+      always:
+        description: Deploy even when nothing that ships changed since the live builds
+        default: false
+        type: boolean
   workflow_dispatch:
     inputs:
       watch-minutes:
         description: Minutes to watch production before keeping the release
         default: "10"
         type: string
+      always:
+        description: Deploy even when nothing that ships changed since the live builds
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -36,8 +45,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The build number counts main's first-parent commits, and rollback barriers are read
-          # from the live commit to this one.
+          # The build number counts main's first-parent commits, and rollback barriers and the
+          # changes that ship are read from the live commit to this one.
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -47,7 +56,11 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           WRANGLER_SEND_METRICS: "false"
           WATCH_MINUTES: ${{ inputs.watch-minutes }}
-        run: bun run --cwd tools/release release deploy --watch-minutes "${WATCH_MINUTES:-10}" --report "$RUNNER_TEMP/release.md"
+          ALWAYS: ${{ inputs.always }}
+        run: |
+          args=(--watch-minutes "${WATCH_MINUTES:-10}" --report "$RUNNER_TEMP/release.md")
+          if [ "$ALWAYS" = "true" ]; then args+=(--always); fi
+          bun run --cwd tools/release release deploy "${args[@]}"
       - name: Open an issue for the failed deploy
         if: failure()
         env:
