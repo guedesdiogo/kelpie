@@ -31,6 +31,34 @@ interface Probe {
   judge(status: number, body: unknown): string | null;
 }
 
+/** Ingress's deploy probe (#234), in `apps/ingress/src/deploy-probe.ts`. */
+const DEEP_PROBE_PATH = "/deploy/probe";
+const DEEP_PROBE_HEADER = "x-kelpie-deploy-probe";
+/** What it wakes; each answers `ok` or `failed`. */
+const DEEP_PROBE_PARTS = ["directory", "registry", "agentHosts", "gateway"] as const;
+
+/**
+ * The deploy's deep probe: with the `DEPLOY_PROBE_TOKEN` the deploy uploaded to ingress, ingress
+ * wakes the Directory, the Registry, every AgentHost and llm-gateway. Only the deploy of a new build
+ * sends it; an older build has no such route, so a rollback is checked without it.
+ */
+function deepProbe(token: string): Probe {
+  return {
+    name: "deep",
+    method: "POST",
+    path: DEEP_PROBE_PATH,
+    headers: { [DEEP_PROBE_HEADER]: token },
+    judge(status, body) {
+      if (status === 404) return "answered 404 (no probe route, or another DEPLOY_PROBE_TOKEN)";
+      if (status !== 200) return `answered ${status}`;
+      // Only the parts' names are repeated: the answer goes into public reports.
+      const parts = (typeof body === "object" ? body : null) as Record<string, unknown> | null;
+      const failed = DEEP_PROBE_PARTS.filter((part) => parts?.[part] !== "ok");
+      return failed.length === 0 ? null : `failed: ${failed.join(", ")}`;
+    },
+  };
+}
+
 /**
  * What the probes reach from outside, without a login:
  * - `/health` and `/version`: ingress runs, and serves the expected build;
@@ -38,9 +66,10 @@ interface Probe {
  *   `SecretStore` object, so that object wakes and applies its migrations. A broken store answers
  *   503;
  * - a GitHub delivery with a wrong signature: ingress hands it to context-store.
- * The refusals change nothing: no agent is named, so no notice or conversation runs.
+ * The refusals change nothing: no agent is named, so no notice or conversation runs. With
+ * `deepToken`, the deep probe goes too; it only wakes objects, and changes nothing either.
  */
-function probes(expected: BuildTag | null): Probe[] {
+function probes(expected: BuildTag | null, deepToken?: string): Probe[] {
   const expectStatus =
     (want: number, explain: Record<number, string> = {}) =>
     (status: number) =>
@@ -103,6 +132,7 @@ function probes(expected: BuildTag | null): Probe[] {
       body: "{}",
       judge: expectStatus(401),
     },
+    ...(deepToken ? [deepProbe(deepToken)] : []),
   ];
 }
 
@@ -145,12 +175,16 @@ async function runProbe(
   }
 }
 
+/** Runs every probe; the deep one too when `deepToken` is given. */
 export function probeAll(
   fetchImpl: typeof fetch,
   origin: string,
   expected: BuildTag | null,
+  deepToken?: string,
 ): Promise<ProbeResult[]> {
-  return Promise.all(probes(expected).map((probe) => runProbe(fetchImpl, origin, probe)));
+  return Promise.all(
+    probes(expected, deepToken).map((probe) => runProbe(fetchImpl, origin, probe)),
+  );
 }
 
 export type Verdict =
@@ -179,16 +213,18 @@ export interface SettleOptions {
 /**
  * Probes until every probe passes or the attempts run out. A new version takes a little while to
  * reach every Cloudflare location, so the first answers may still come from the old one.
+ * `deepToken` adds the deep probe, for a deploy's new build only.
  */
 export async function settle(
   deps: Pick<VerifyDeps, "fetch" | "sleep" | "log">,
   origin: string,
   expected: BuildTag | null,
   options: SettleOptions,
+  deepToken?: string,
 ): Promise<ProbeResult[]> {
   let results: ProbeResult[] = [];
   for (let attempt = 1; attempt <= options.attempts; attempt++) {
-    results = await probeAll(deps.fetch, origin, expected);
+    results = await probeAll(deps.fetch, origin, expected, deepToken);
     if (results.every((result) => result.outcome === "pass")) return results;
     if (attempt < options.attempts) await deps.sleep(options.intervalMs);
   }
@@ -230,7 +266,10 @@ export interface WatchResult {
   analytics: boolean;
 }
 
-/** Watches the new versions for a while: the probes, and their failed invocations. */
+/**
+ * Watches the new versions for a while: the probes, and their failed invocations. `deepToken` adds
+ * the deep probe.
+ */
 export async function watch(
   deps: VerifyDeps,
   origin: string,
@@ -238,6 +277,7 @@ export async function watch(
   versionIds: readonly string[],
   since: Date,
   options: WatchOptions,
+  deepToken?: string,
 ): Promise<WatchResult> {
   const end = deps.now().getTime() + options.minutes * 60_000;
   const streaks = new Map<string, number>();
@@ -245,7 +285,7 @@ export async function watch(
   let errors: Record<string, number> = {};
   let analytics = true;
   for (;;) {
-    probes = await probeAll(deps.fetch, origin, expected);
+    probes = await probeAll(deps.fetch, origin, expected, deepToken);
     for (const result of probes) {
       streaks.set(
         result.probe,

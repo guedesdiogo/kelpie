@@ -45,6 +45,8 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Optional: uploaded to ingress for the deep probe, which is skipped while it's unset.
+          DEPLOY_PROBE_TOKEN: ${{ secrets.DEPLOY_PROBE_TOKEN }}
           WRANGLER_SEND_METRICS: "false"
           WATCH_MINUTES: ${{ inputs.watch-minutes }}
         run: bun run --cwd tools/release release deploy --watch-minutes "${WATCH_MINUTES:-10}" --report "$RUNNER_TEMP/release.md"

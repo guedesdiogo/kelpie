@@ -69,6 +69,13 @@ describe("rollback", () => {
     });
     expect(report.verdict).toEqual({ status: "healthy" });
     expect(report.moved.map((move) => move.script)).toEqual(WORKERS.map((worker) => worker.script));
+    // No deep probe: an older build may have no route for it (#234).
+    expect(report.probes.map((probe) => probe.probe)).toEqual([
+      "health",
+      "version",
+      "telegram-webhook",
+      "github-webhook",
+    ]);
   });
 
   it("refuses to cross a class migration, even with force", async () => {

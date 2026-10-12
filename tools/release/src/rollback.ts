@@ -41,18 +41,19 @@ export interface Restored {
 
 /**
  * Serves earlier versions again, in reverse deploy order; one failure doesn't stop the others.
- * `force` restores versions whose secrets differ from the live ones.
+ * `force` restores versions whose secrets differ from the live ones; a move's own `force` overrides
+ * it for that Worker.
  */
 export async function restore(
   api: CloudflareApi,
-  moves: ReadonlyArray<{ script: string; traffic: readonly VersionTraffic[] }>,
+  moves: ReadonlyArray<{ script: string; traffic: readonly VersionTraffic[]; force?: boolean }>,
   message: string,
   force = false,
 ): Promise<Restored[]> {
   const results: Restored[] = [];
   for (const move of [...moves].reverse()) {
     try {
-      await api.deployVersions(move.script, move.traffic, message, force);
+      await api.deployVersions(move.script, move.traffic, message, move.force ?? force);
       results.unshift({ script: move.script, ok: true });
     } catch (error) {
       results.unshift({

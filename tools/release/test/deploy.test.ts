@@ -1,10 +1,24 @@
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CloudflareError } from "../src/cloudflare.ts";
-import { type DeployDeps, deploy, deployedVersion, planDeploy } from "../src/deploy.ts";
+import {
+  type DeployDeps,
+  deepProbeToken,
+  deploy,
+  deployedVersion,
+  planDeploy,
+} from "../src/deploy.ts";
 import { deployPlanReport, deployReport } from "../src/report.ts";
 import type { BuildTag } from "../src/tags.ts";
 import { WORKERS, type WorkerSpec } from "../src/workers.ts";
-import { fakeApi, fakeClock, fakeProduction, ORIGIN, quietGit, silentLog } from "./fakes.ts";
+import {
+  type FakeDeepProbe,
+  fakeApi,
+  fakeClock,
+  fakeProduction,
+  ORIGIN,
+  quietGit,
+} from "./fakes.ts";
 
 const live = { build: 95, commit: "25c5076" };
 const next = { build: 96, commit: "abc1234" };
@@ -13,16 +27,22 @@ const options = {
   watch: { minutes: 2, intervalMs: 60_000, errorThreshold: 3, failuresInARow: 3 },
 };
 
-/** Production as deploys change it: ingress serves whichever build was deployed or restored last. */
+/**
+ * Production as deploys change it: ingress serves whichever build was deployed or restored last.
+ * The new build has the deploy probe's route, with the token its deploy uploaded; the live one
+ * doesn't.
+ */
 function harness(setup: {
   failWrangler?: string;
   /** The failing Worker's new version went live before wrangler failed. */
   liveBeforeFailing?: boolean;
   brokenAfterDeploy?: boolean;
+  /** What the new build's deploy probe answers for each part, `ok` by default. */
+  deepParts?: Record<string, string>;
   failRestore?: string;
   invocations?: Parameters<typeof fakeApi>[0]["invocations"];
 }) {
-  const production: { serving: BuildTag | null; telegram: number } = {
+  const production: { serving: BuildTag | null; telegram: number; deep?: FakeDeepProbe } = {
     serving: live,
     telegram: 401,
   };
@@ -35,33 +55,64 @@ function harness(setup: {
   const restore = api.deployVersions.bind(api);
   api.deployVersions = async (script, traffic, message, force) => {
     await restore(script, traffic, message, force);
-    if (script === "kelpie-ingress") production.serving = live;
+    if (script === "kelpie-ingress") {
+      production.serving = live;
+      delete production.deep;
+    }
     production.telegram = 401;
   };
-  const wranglerCalls: Array<{ spec: WorkerSpec; args: string[] }> = [];
+  const wranglerCalls: Array<{
+    spec: WorkerSpec;
+    args: string[];
+    /** The secrets file wrangler was given: where it was, what it held, and its permissions. */
+    secrets?: { path: string; content: Record<string, string>; mode: number };
+  }> = [];
   const masked: string[] = [];
+  const warnings: string[] = [];
   const deps: DeployDeps = {
     api,
     git: quietGit,
     fetch: fakeProduction(production),
     ...fakeClock(),
-    log: silentLog,
+    log: { info: () => {}, warn: (message) => warnings.push(message) },
     mask: (value) => masked.push(value),
     async wranglerDeploy(spec, args) {
-      wranglerCalls.push({ spec, args });
+      // Wrangler reads the secrets file while it runs; the test keeps what it found there.
+      const file = args.includes("--secrets-file")
+        ? args[args.indexOf("--secrets-file") + 1]
+        : undefined;
+      const secrets = file
+        ? {
+            path: file,
+            content: JSON.parse(readFileSync(file, "utf8")) as Record<string, string>,
+            mode: statSync(file).mode & 0o777,
+          }
+        : undefined;
+      wranglerCalls.push({ spec, args, ...(secrets ? { secrets } : {}) });
       if (spec.script === setup.failWrangler) {
         if (setup.liveBeforeFailing) {
           api.active.set(spec.script, [{ version_id: `${spec.app}-new`, percentage: 100 }]);
         }
         throw new Error("wrangler exited with 1");
       }
-      if (spec.script === "kelpie-ingress") production.serving = next;
+      if (spec.script === "kelpie-ingress") {
+        production.serving = next;
+        if (secrets?.content.DEPLOY_PROBE_TOKEN) {
+          production.deep = {
+            token: secrets.content.DEPLOY_PROBE_TOKEN,
+            ...(setup.deepParts ? { parts: setup.deepParts } : {}),
+          };
+        }
+      }
       if (setup.brokenAfterDeploy) production.telegram = 503;
       return `${spec.app}-new`;
     },
   };
-  return { api, deps, wranglerCalls, masked, production };
+  return { api, deps, wranglerCalls, masked, production, warnings };
 }
+
+const TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
+const withToken = { ...options, deepProbeToken: TOKEN };
 
 describe("planDeploy", () => {
   it("tags HEAD, reads the live versions and finds the probes' origin", async () => {
@@ -232,6 +283,85 @@ describe("deploy", () => {
     expect(report.outcome).toBe("failed");
     expect(report.reason).toContain("Nothing was rolled back");
     expect(api.made).toEqual([]);
+  });
+});
+
+describe("the deep probe", () => {
+  it("gives ingress alone the token, through a private file deleted after its deploy", async () => {
+    const { deps, wranglerCalls, masked } = harness({});
+    const report = await deploy(deps, await planDeploy(deps), withToken);
+
+    expect(report.outcome).toBe("deployed");
+    const withSecrets = wranglerCalls.filter((call) => call.secrets);
+    expect(withSecrets.map((call) => call.spec.script)).toEqual(["kelpie-ingress"]);
+    const secrets = withSecrets[0]?.secrets;
+    expect(secrets).toMatchObject({ content: { DEPLOY_PROBE_TOKEN: TOKEN }, mode: 0o600 });
+    expect(withSecrets[0]?.args).toEqual([
+      "deploy",
+      "--tag",
+      "96-abc1234",
+      "--message",
+      "abc1234 Add a feature (#300)",
+      "--secrets-file",
+      secrets?.path,
+    ]);
+    expect(existsSync(secrets?.path ?? "")).toBe(false);
+    expect(masked).toContain(TOKEN);
+    expect(report.probes.find((probe) => probe.probe === "deep")?.outcome).toBe("pass");
+  });
+
+  it("deletes the file when wrangler fails too", async () => {
+    const { deps, wranglerCalls } = harness({ failWrangler: "kelpie-ingress" });
+    await deploy(deps, await planDeploy(deps), withToken);
+    const ingress = wranglerCalls.find((call) => call.spec.script === "kelpie-ingress");
+    expect(ingress?.secrets?.content).toEqual({ DEPLOY_PROBE_TOKEN: TOKEN });
+    expect(existsSync(ingress?.secrets?.path ?? "")).toBe(false);
+  });
+
+  it("rolls the release back when a part fails, then checks the old build without it", async () => {
+    const { deps, api, production } = harness({ deepParts: { agentHosts: "failed" } });
+    const report = await deploy(deps, await planDeploy(deps), withToken);
+
+    expect(report.outcome).toBe("rolled-back");
+    expect(report.reason).toContain("deep failed: agentHosts");
+    expect(production.serving).toEqual(live);
+    // The old build has no probe route: its check is the four probes it can answer.
+    expect(report.probes.map((probe) => probe.probe)).toEqual([
+      "health",
+      "version",
+      "telegram-webhook",
+      "github-webhook",
+    ]);
+    expect(report.probes.every((probe) => probe.outcome === "pass")).toBe(true);
+    // Ingress's secret changed with this deploy, so only its rollback is forced.
+    expect(api.made.filter((made) => made.force).map((made) => made.script)).toEqual([
+      "kelpie-ingress",
+    ]);
+    expect(api.made).toHaveLength(6);
+  });
+
+  it("is skipped with one warning when the token isn't set, and uploads nothing", async () => {
+    const { deps, wranglerCalls, warnings, api } = harness({ brokenAfterDeploy: true });
+    const report = await deploy(deps, await planDeploy(deps), options);
+
+    expect(wranglerCalls.some((call) => call.args.includes("--secrets-file"))).toBe(false);
+    expect(warnings.filter((warning) => warning.includes("deep probe is skipped"))).toHaveLength(1);
+    expect(report.probes.map((probe) => probe.probe)).not.toContain("deep");
+    expect(api.made.some((made) => made.force)).toBe(false);
+  });
+});
+
+describe("deepProbeToken", () => {
+  it("is optional, and trimmed", () => {
+    expect(deepProbeToken(undefined)).toBeUndefined();
+    expect(deepProbeToken("")).toBeUndefined();
+    expect(deepProbeToken(" \n")).toBeUndefined();
+    expect(deepProbeToken(`${TOKEN}\n`)).toBe(TOKEN);
+  });
+
+  it("refuses a short token, or one with spaces, before anything deploys", () => {
+    expect(() => deepProbeToken("short")).toThrow("at least 32 printable characters");
+    expect(() => deepProbeToken(`${TOKEN} ${TOKEN}`)).toThrow("without spaces");
   });
 });
 

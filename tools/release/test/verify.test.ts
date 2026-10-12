@@ -56,7 +56,106 @@ describe("probes", () => {
   });
 });
 
+describe("the deep probe", () => {
+  const TOKEN = "0123456789abcdef0123456789abcdef";
+  const deep = async (state: Parameters<typeof fakeProduction>[0], token = TOKEN) =>
+    (await probeAll(fakeProduction(state), ORIGIN, build, token)).find(
+      (result) => result.probe === "deep",
+    );
+
+  it("goes only with a token, and passes when every part is ok", async () => {
+    const without = await probeAll(fakeProduction({ serving: build }), ORIGIN, build);
+    expect(without.map((result) => result.probe)).not.toContain("deep");
+
+    expect(await deep({ serving: build, deep: { token: TOKEN } })).toEqual({
+      probe: "deep",
+      outcome: "pass",
+      detail: "answered 200",
+    });
+  });
+
+  it("names the parts that failed, and nothing else from the answer", async () => {
+    const result = await deep({
+      serving: build,
+      deep: { token: TOKEN, parts: { agentHosts: "failed", gateway: "<b>broken</b>" } },
+    });
+    expect(result).toMatchObject({ outcome: "fail", detail: "failed: agentHosts, gateway" });
+
+    const missing = await deep({
+      serving: build,
+      deep: { token: TOKEN, parts: { directory: undefined } },
+    });
+    expect(missing?.detail).toBe("failed: directory");
+  });
+
+  it("fails on a missing route, another token or an error, without repeating the body", async () => {
+    expect((await deep({ serving: build }))?.detail).toBe(
+      "answered 404 (no probe route, or another DEPLOY_PROBE_TOKEN)",
+    );
+    expect(
+      (await deep({ serving: build, deep: { token: TOKEN } }, `${TOKEN}-rotated`))?.outcome,
+    ).toBe("fail");
+    expect(
+      await deep({ serving: build, deep: { token: TOKEN, status: 500, parts: { why: "x" } } }),
+    ).toMatchObject({ outcome: "fail", detail: "answered 500" });
+
+    const text = (async () =>
+      new Response("secret stack trace", { status: 200 })) as unknown as typeof fetch;
+    const [result] = (await probeAll(text, ORIGIN, build, TOKEN)).filter(
+      (probe) => probe.probe === "deep",
+    );
+    expect(result?.detail).toBe("failed: directory, registry, agentHosts, gateway");
+  });
+
+  it("counts in the watch: failing three times in a row makes the release unhealthy", async () => {
+    const clock = fakeClock();
+    const result = await watch(
+      {
+        api: fakeApi({ live: build }),
+        fetch: fakeProduction({
+          serving: build,
+          deep: { token: TOKEN, parts: { registry: "failed" } },
+        }),
+        ...clock,
+        log: silentLog,
+      },
+      ORIGIN,
+      build,
+      ["v1"],
+      clock.now(),
+      options,
+      TOKEN,
+    );
+    expect(result.verdict).toEqual({
+      status: "unhealthy",
+      reason: "probes failed 3 times in a row: deep failed: registry",
+    });
+  });
+});
+
 describe("settle", () => {
+  it("waits for the deep probe's route when given the token", async () => {
+    const token = "0123456789abcdef0123456789abcdef";
+    const state: Parameters<typeof fakeProduction>[0] = { serving: build };
+    let sleeps = 0;
+    const results = await settle(
+      {
+        fetch: fakeProduction(state),
+        sleep: async () => {
+          if (++sleeps === 1) state.deep = { token };
+        },
+        log: silentLog,
+      },
+      ORIGIN,
+      build,
+      { attempts: 3, intervalMs: 10 },
+      token,
+    );
+    expect(sleeps).toBe(1);
+    expect(results.map((result) => result.probe)).toContain("deep");
+    expect(verdictOf(results).status).toBe("healthy");
+  });
+
   it("probes again until the new version answers", async () => {
     const state = { serving: { build: 95, commit: "25c5076" } };
     let sleeps = 0;

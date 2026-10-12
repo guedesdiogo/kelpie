@@ -3,6 +3,7 @@ import { buildTagOf, type Git, hasCommit, isClean, show, subjectOf } from "./git
 import { parseJsonc } from "./jsonc.ts";
 import { type Barrier, barriersBetween, type LiveWorker, liveOrigin, readLive } from "./live.ts";
 import { type Restored, restore } from "./rollback.ts";
+import { withSecretsFile } from "./secrets-file.ts";
 import { type BuildTag, formatTag } from "./tags.ts";
 import {
   type ProbeResult,
@@ -114,7 +115,31 @@ export interface DeployReport {
 export interface DeployOptions {
   settle: SettleOptions;
   watch: WatchOptions;
+  /**
+   * `DEPLOY_PROBE_TOKEN` (#234). Ingress gets it as a secret with its deploy, and the deep probe
+   * sends it. Without it, neither happens.
+   */
+  deepProbeToken?: string;
 }
+
+/**
+ * `DEPLOY_PROBE_TOKEN` from the environment, trimmed, or undefined when it's empty. It travels in a
+ * header and is masked in logs, so anything shorter than 32 printable characters, or with spaces,
+ * is refused before anything deploys.
+ */
+export function deepProbeToken(value: string | undefined): string | undefined {
+  const token = value?.trim();
+  if (!token) return undefined;
+  if (!/^[\x21-\x7e]{32,}$/.test(token)) {
+    throw new Error(
+      "DEPLOY_PROBE_TOKEN must be at least 32 printable characters without spaces, as `openssl rand -hex 32` makes (docs/deploy.md).",
+    );
+  }
+  return token;
+}
+
+/** The secret only ingress gets, for its deploy probe. */
+const DEEP_PROBE_SECRET = "DEPLOY_PROBE_TOKEN";
 
 /**
  * Deploys every Worker in order, checks production, and rolls the release back when the checks
@@ -144,6 +169,8 @@ export async function deploy(
   };
   deps.mask(plan.origin);
   for (const worker of plan.live) for (const value of Object.values(worker.vars)) deps.mask(value);
+  const token = options.deepProbeToken;
+  if (token) deps.mask(token);
 
   const since = deps.now();
   for (const [index, worker] of plan.live.entries()) {
@@ -158,7 +185,13 @@ export async function deploy(
     deps.log.info(`Deploying ${worker.spec.script} as ${formatTag(plan.tag)}`);
     const entry = report.workers[index] as DeployReport["workers"][number];
     try {
-      entry.deployed = await deps.wranglerDeploy(worker.spec, args);
+      // The token goes to ingress alone, in a file rather than an argument, which logs could show.
+      entry.deployed =
+        token && worker.spec.script === INGRESS
+          ? await withSecretsFile({ [DEEP_PROBE_SECRET]: token }, (file) =>
+              deps.wranglerDeploy(worker.spec, [...args, "--secrets-file", file]),
+            )
+          : await deps.wranglerDeploy(worker.spec, args);
     } catch (error) {
       // Wrangler can fail in a step after the new version went live, so the live one decides.
       const active = await deps.api.activeDeployment(worker.spec.script).catch(() => null);
@@ -171,13 +204,18 @@ export async function deploy(
     }
   }
 
+  if (!token) {
+    deps.log.warn(
+      "DEPLOY_PROBE_TOKEN isn't set, so the deep probe is skipped: the Directory, the Registry, the AgentHosts and llm-gateway aren't checked (docs/deploy.md).",
+    );
+  }
   deps.log.info("Probing production");
-  report.probes = await settle(deps, plan.origin, plan.tag, options.settle);
+  report.probes = await settle(deps, plan.origin, plan.tag, options.settle, token);
   let verdict = verdictOf(report.probes);
   if (verdict.status === "healthy") {
     deps.log.info(`Watching the new versions for ${options.watch.minutes} minutes`);
     const deployed = report.workers.flatMap((worker) => (worker.deployed ? [worker.deployed] : []));
-    const watched = await watch(deps, plan.origin, plan.tag, deployed, since, options.watch);
+    const watched = await watch(deps, plan.origin, plan.tag, deployed, since, options.watch, token);
     report.probes = watched.probes;
     report.errors = watched.errors;
     report.analytics = watched.analytics;
@@ -220,7 +258,14 @@ async function rollBack(
   deps.log.warn(`Rolling back ${formatTag(plan.tag)}: ${reason}`);
   report.rollback = await restore(
     deps.api,
-    deployed.map((worker) => ({ script: worker.script, traffic: worker.previous })),
+    deployed.map((worker) => ({
+      script: worker.script,
+      traffic: worker.previous,
+      // This deploy gave ingress its DEPLOY_PROBE_TOKEN, and Cloudflare refuses to roll back past a
+      // secret change without force. The version restored is the one this deploy replaced, so the
+      // only secret change it undoes is this deploy's own.
+      ...(options.deepProbeToken && worker.script === INGRESS ? { force: true } : {}),
+    })),
     `Automatic rollback of ${formatTag(plan.tag)}`,
   );
   const stuck = report.rollback.filter((result) => !result.ok).map((result) => result.script);
@@ -232,6 +277,7 @@ async function rollBack(
     };
   }
 
+  // Without the deep probe: the build rolled back to may have no probe route.
   const previous = plan.live.find((worker) => worker.spec.script === INGRESS)?.tag ?? null;
   report.probes = await settle(deps, plan.origin, previous, options.settle);
   const after = verdictOf(report.probes);

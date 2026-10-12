@@ -122,19 +122,40 @@ export function fakeApi(options: {
   };
 }
 
+/**
+ * Ingress's deploy probe (#234): the token the Worker holds, and what each part answers, `ok` by
+ * default. Without it the build has no probe route.
+ */
+export interface FakeDeepProbe {
+  token: string;
+  parts?: Record<string, unknown>;
+  status?: number;
+}
+
 /** Ingress as the probes see it, serving one build. */
 export function fakeProduction(state: {
   serving: BuildTag | null;
   telegram?: number;
   down?: boolean;
   mitigated?: boolean;
+  deep?: FakeDeepProbe | undefined;
 }): typeof fetch {
-  return (async (input: string | URL | Request) => {
+  return (async (input: string | URL | Request, init?: RequestInit) => {
     if (state.down) throw new TypeError("fetch failed");
     if (state.mitigated) {
       return new Response("", { status: 403, headers: { "cf-mitigated": "challenge" } });
     }
     switch (new URL(String(input)).pathname) {
+      case "/deploy/probe": {
+        const presented = new Headers(init?.headers).get("x-kelpie-deploy-probe");
+        if (!state.deep || presented !== state.deep.token) {
+          return new Response("Not found", { status: 404 });
+        }
+        return Response.json(
+          { directory: "ok", registry: "ok", agentHosts: "ok", gateway: "ok", ...state.deep.parts },
+          { status: state.deep.status ?? 200 },
+        );
+      }
       case "/health":
         return Response.json({ status: "ok" });
       case "/version":
