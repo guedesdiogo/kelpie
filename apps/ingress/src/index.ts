@@ -2,6 +2,7 @@ import { DIRECTORY_NAME, type Remote, remoteKeySet, verifyAccessJwt } from "@kel
 import type { ChannelWebhooksContract } from "@kelpie/channels";
 import { TELEGRAM_WEBHOOK_PATH } from "@kelpie/channels/telegram";
 import {
+  type DeployProbeContract,
   REGISTRY_NAME,
   type RegistryContract,
   type SetupEventsContract,
@@ -9,6 +10,7 @@ import {
 } from "@kelpie/config";
 import type { ConversationContract } from "@kelpie/conversation/contract";
 import { admitSender } from "./admission.ts";
+import { DEPLOY_PROBE_PATH, type DeployProbeDeps, handleDeployProbe } from "./deploy-probe.ts";
 import {
   GITHUB_WEBHOOK_PATH,
   type GitHubWebhookDeps,
@@ -67,6 +69,16 @@ function webchatDeps(env: Env): WebchatDeps {
   };
 }
 
+function deployProbeDeps(env: Env): DeployProbeDeps {
+  return {
+    // Optional, unlike a secret in `secrets.required`: a deploy without it still works.
+    token: (env as Env & { DEPLOY_PROBE_TOKEN?: string }).DEPLOY_PROBE_TOKEN,
+    pingDirectory: () => env.DIRECTORY.getByName(DIRECTORY_NAME).ping(),
+    // A service binding to conversation-runtime's DeployProbe entrypoint, which only reports.
+    probeRuntime: () => (env.DEPLOY_PROBE as unknown as DeployProbeContract).probe(),
+  };
+}
+
 export default {
   async fetch(request, env): Promise<Response> {
     const { pathname } = new URL(request.url);
@@ -80,6 +92,12 @@ export default {
       return Response.json(versionReport(env.CF_VERSION_METADATA), {
         headers: { "cache-control": "no-store" },
       });
+    }
+
+    // Without the deploy's token this falls through to the 404 below, as an unknown path does.
+    if (request.method === "POST" && pathname === DEPLOY_PROBE_PATH) {
+      const probed = await handleDeployProbe(request, deployProbeDeps(env));
+      if (probed) return probed;
     }
 
     if (request.method === "POST" && pathname === GITHUB_WEBHOOK_PATH) {

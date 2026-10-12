@@ -89,6 +89,14 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     );
   }
 
+  /**
+   * Answers once the migrations ran: the constructor holds every call until then, and a failed
+   * migration fails this call. The deploy's probe calls it (#234).
+   */
+  ping(): { ok: true } {
+    return { ok: true };
+  }
+
   list(): AgentSummary[] {
     return this.#db
       .select({ id: schema.agents.id, name: schema.agents.name })

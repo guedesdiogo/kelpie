@@ -63,6 +63,8 @@ export interface RegistryContract {
   rename(id: string, name: string, actor: Actor): RenameAgentResult;
   get(id: string): AgentSummary | null;
   list(): AgentSummary[];
+  /** Answers once the object's migrations ran; the deploy's probe calls it (#234). */
+  ping(): { ok: true };
 }
 
 /**
@@ -90,6 +92,8 @@ export interface AgentHostContract {
   awaitSetup(conversation: string, step: SetupStep, until: number): void;
   /** Tells each conversation still waiting for the event's step that the owner finished it. */
   setupDone(event: SetupEvent): Promise<void>;
+  /** Answers once the object's migrations ran; the deploy's probe calls it (#234). */
+  ping(): { ok: true };
 }
 
 /** conversation-runtime's `SetupEvents` entrypoint: ingress reports a finished pairing (#206). */

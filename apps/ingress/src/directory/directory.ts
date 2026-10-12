@@ -62,6 +62,15 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
     });
   }
 
+  /**
+   * Answers once the migrations ran: the constructor holds every call until then, and a failed
+   * migration fails this call. The deploy's probe calls it (#234), so a broken migration shows
+   * during the deploy, not on the first real request.
+   */
+  ping(): { ok: true } {
+    return { ok: true };
+  }
+
   /** Registers the owner. Repeating it with the same id is a no-op; a second owner is refused. */
   registerOwner(userId: string): OwnerResult {
     if (!isNonEmpty(userId)) return { ok: false, reason: "invalid_user" };

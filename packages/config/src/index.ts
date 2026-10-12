@@ -26,7 +26,10 @@ export {
   SETUP_AGENT_ID,
 } from "./settings.ts";
 export {
+  type DeployProbeContract,
+  type DeployProbeStatus,
   KELPIE_RELEASE,
+  type RuntimeProbeReport,
   type VersionReport,
   versionReport,
   type WorkerVersionMetadata,

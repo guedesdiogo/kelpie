@@ -5,12 +5,14 @@ export default defineConfig({
   plugins: [
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
-      // Ingress binds channel-egress's webhook checks, context-store's GitHub webhook and
-      // conversation-runtime's conversations.
+      // Ingress binds channel-egress's webhook checks, context-store's GitHub webhook, and
+      // conversation-runtime's conversations and deploy probe.
       // Most tests pass fakes to `handleTelegramWebhook()`. These stubs let the routing tests run
-      // the production wiring: egress accepts one secret, and a conversation keeps what it gets and
-      // echoes the headers of a webchat upgrade.
+      // the production wiring: egress accepts one secret, a conversation keeps what it gets and
+      // echoes the headers of a webchat upgrade, and the deploy's probe finds every part ok.
       miniflare: {
+        // The deploy probe's token, as the deploy workflow uploads it (#234).
+        bindings: { DEPLOY_PROBE_TOKEN: "deploy-probe-token-for-tests-0123456789" },
         workers: [
           {
             name: "kelpie-channel-egress",
@@ -65,6 +67,11 @@ export class Registry extends DurableObject {
 }
 export class SetupEvents extends WorkerEntrypoint {
   setupDone() {}
+}
+export class DeployProbe extends WorkerEntrypoint {
+  probe() {
+    return { registry: "ok", agentHosts: "ok", gateway: "ok" };
+  }
 }
 export default { fetch: () => new Response(null, { status: 404 }) };`,
             durableObjects: { CONVERSATION_AGENT: "ConversationAgent", REGISTRY: "Registry" },
