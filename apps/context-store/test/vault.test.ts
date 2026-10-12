@@ -109,7 +109,7 @@ describe("Vault", () => {
     expect(await hooks.receive({ event: "push", signature: await signed(body), body })).toEqual({
       status: 202,
     });
-    // The signed push brings the sync to a second away.
+    // The signed push brings the sync forward, to a second away at most.
     expect(((await alarmAt(stub)) ?? Number.POSITIVE_INFINITY) - Date.now()).toBeLessThanOrEqual(
       1_000,
     );

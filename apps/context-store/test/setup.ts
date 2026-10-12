@@ -1,5 +1,5 @@
-// Runs before every test file (vitest.config.ts `setupFiles`), so each one, a new one too, cleans up
-// after its tests the same way (#245).
+// Runs before every test file (vitest.config.ts `setupFiles`), so each one, a new one too, cleans
+// up after its tests the same way (#245).
 import { reset } from "cloudflare:test";
 import { afterEach } from "vitest";
 import { replaceBackendForTesting, replaceGatewayForTesting } from "../src/index.ts";

@@ -148,7 +148,8 @@ describe("recall", () => {
     expect((await stub.recall("kelpie", "Onde a Ana Souza mora?", ALL)).text).toContain("Lisboa");
     // Until a push comes, the next alarm, the embedding's, is more than a second away: every alarm
     // syncs, so only the alarm's time shows what the webhook did (#244).
-    expect(((await alarmAt(stub)) ?? 0) - Date.now()).toBeGreaterThan(1_000);
+    const embedding = (await alarmAt(stub)) ?? 0;
+    expect(embedding - Date.now()).toBeGreaterThan(1_000);
 
     // obsidian-git commits the owner's edit and pushes it; GitHub calls the webhook.
     const edited = (backend.files()[path] ?? "").replace("Mora em Lisboa.", "Mudou para o Porto.");
@@ -167,10 +168,11 @@ describe("recall", () => {
     const signature = `sha256=${Array.from(mac, (b) => b.toString(16).padStart(2, "0")).join("")}`;
     const hooks = new GitHubWebhooks(createExecutionContext(), env);
     expect(await hooks.receive({ event: "push", signature, body })).toEqual({ status: 202 });
-    // The signed push brings the sync to a second away.
-    expect(((await alarmAt(stub)) ?? Number.POSITIVE_INFINITY) - Date.now()).toBeLessThanOrEqual(
-      1_000,
-    );
+    // The signed push brings the sync forward, to a second away at most. Earlier than the
+    // embedding's alarm too: a stall past that alarm can't pass for the webhook's work.
+    const synced = (await alarmAt(stub)) ?? Number.POSITIVE_INFINITY;
+    expect(synced - Date.now()).toBeLessThanOrEqual(1_000);
+    expect(synced).toBeLessThan(embedding);
     expect(await runDurableObjectAlarm(stub)).toBe(true);
 
     const next = await stub.recall("kelpie", "Onde a Ana Souza mora?", ALL);
