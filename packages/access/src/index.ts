@@ -145,6 +145,8 @@ export interface DirectoryContract {
   disableIdentity(identity: ChannelIdentity): IdentityResult;
   listIdentities(): (ChannelIdentity & { status: IdentityStatus })[];
   setTimeZone(userId: string, timeZone: string): TimeZoneResult;
+  /** Answers once the object's migrations ran; the deploy's probe calls it (#234). */
+  ping(): { ok: true };
 }
 
 export {

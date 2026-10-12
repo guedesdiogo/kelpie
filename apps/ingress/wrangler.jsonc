@@ -40,6 +40,15 @@
       "binding": "GITHUB_WEBHOOKS",
       "service": "kelpie-context-store",
       "entrypoint": "GitHubWebhooks"
+    },
+    // The deploy's probe (#234): it wakes the Registry, each AgentHost and llm-gateway, and answers
+    // with statuses only. A binding is an authorization, so this one can probe and nothing more.
+    // POST /deploy/probe calls it only with a fresh signature made with the DEPLOY_PROBE_TOKEN
+    // secret, which the deploy workflow uploads (docs/deploy.md). Otherwise the route answers 404.
+    {
+      "binding": "DEPLOY_PROBE",
+      "service": "kelpie-conversation-runtime",
+      "entrypoint": "DeployProbe"
     }
   ],
   "durable_objects": {
