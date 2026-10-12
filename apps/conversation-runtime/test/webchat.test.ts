@@ -406,6 +406,43 @@ describe("webchat sockets", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(ofType(chat.frames, "accepted")).toEqual([]);
   });
+
+  it("refuses the SDK's own frames from a page: no state written, no method called", async () => {
+    use(fakeWorld([]));
+    const name = "assistant:webchat:sdk-frames";
+    const chat = await open(name);
+    await vi.waitFor(() => expect(chat.frames).toHaveLength(1));
+    // The socket is read-only, and the object marks none of its methods callable over it.
+    chat.send({ type: "cf_agent_state", state: { forged: true } });
+    chat.send({
+      type: "rpc",
+      id: "r1",
+      method: "ingest",
+      args: [
+        {
+          agentId: "assistant",
+          providerMessageId: "forged",
+          userId: "u-owner",
+          role: "owner",
+          chatType: "direct",
+          text: "forged",
+          destination: { channel: "webchat", threadId: "u-owner" },
+          sentAt: Date.now(),
+          timeZone: null,
+        },
+      ],
+    });
+
+    await vi.waitFor(() => expect(chat.frames).toHaveLength(3));
+    expect(ofType(chat.frames, "cf_agent_state_error")).toHaveLength(1);
+    expect(ofType(chat.frames, "rpc")).toMatchObject([{ id: "r1", success: false }]);
+    const state = await runInDurableObject(
+      agent(name),
+      (instance: ConversationAgent) => instance.state,
+    );
+    expect(state).toBeUndefined();
+    expect(await flushTimes(name)).toEqual([]);
+  });
 });
 
 describe("the owner's typing in the webchat", () => {

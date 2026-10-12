@@ -17,7 +17,7 @@
     "@kelpie/conversation": "workspace:*",
     "@kelpie/llm": "workspace:*",
     "@kelpie/memory": "workspace:*",
-    "agents": "0.26.0",
+    "agents": "0.28.0",
     "drizzle-orm": "0.45.3"
   },
   "devDependencies": {
