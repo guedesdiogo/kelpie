@@ -22,9 +22,9 @@ PR ──► gates ──► CI passed ──► merge ──► gates on main �
    ```bash
    openssl rand -hex 32 | gh secret set DEPLOY_PROBE_TOKEN --env production --repo guedesdiogo/kelpie
    ```
-   - The next deploy uploads it to ingress as a Worker secret, and the deep probe sends it ("On merge"). It lives only in GitHub and in the Worker; nobody needs a copy.
+   - The next deploy uploads it to ingress as a Worker secret, once, and the deep probe signs its requests with it ("On merge"). It lives only in GitHub and in the Worker; nobody needs a copy.
    - Without it, deploys still work: they upload nothing, skip the deep probe, and warn.
-   - The deploy refuses a token shorter than 32 characters, or with spaces.
+   - A token shorter than 32 characters, or with spaces, is treated the same way, with a warning; ingress would refuse it anyway.
 4. **The ruleset `main: CI must pass`** requires, with no bypass:
    - `CI passed`, on a branch up to date with `main`;
    - CodeQL's results, which block new high-severity alerts.
@@ -65,7 +65,7 @@ After the gates pass on `main`, the `Deploy` job runs `tools/release`. It:
 2. **Finds the rollback barriers** between the live commit and the new one.
 3. **Deploys the Workers in order** (`llm-gateway`, `channel-egress`, `context-store`, `conversation-runtime`, `ingress`, `admin-api`):
    - each is tagged `<build>-<sha>` and carries its instance vars;
-   - ingress also gets `DEPLOY_PROBE_TOKEN`, when the environment has it, through `wrangler deploy --secrets-file`. The file sits in a private temporary folder and is deleted right after; the token is masked in the logs;
+   - ingress also gets `DEPLOY_PROBE_TOKEN` when the environment has it and the live ingress doesn't, or on a rotation ("The deep probe's token"). It goes through `wrangler deploy --secrets-file`: the file sits in a private temporary folder and is deleted right after, no other process gets the token, and it is masked in the logs. Uploading once matters: each upload is a secret change, which a rollback can cross only with `force`;
    - `wrangler deploy` applies the Durable Object class migrations;
    - each object applies its SQL migrations the first time it wakes on the new code.
 4. **Probes production** until the new build answers, for up to three minutes:
@@ -73,12 +73,12 @@ After the gates pass on `main`, the `Deploy` job runs `tools/release`. It:
    - `/version` serves the new build;
    - a Telegram webhook with a wrong secret answers 401. It goes through channel-egress, whose `SecretStore` wakes and migrates;
    - a GitHub webhook with a wrong signature answers 401, through context-store;
-   - **the deep probe**, with the token: `POST /deploy/probe` answers 200 with `{ directory, registry, agentHosts, gateway }`, each `ok`. It wakes:
+   - **the deep probe**, signed with the token and sent only to an https origin: `POST /deploy/probe` answers 200 with `{ directory, registry, agentHosts, gateway }`, each `ok`. It wakes:
      - ingress's `Directory`;
-     - through conversation-runtime's `DeployProbe` entrypoint, the `Registry` and the `AgentHost` of every agent it lists;
+     - through conversation-runtime's `DeployProbe` entrypoint, the `Registry` and the `AgentHost` of every agent it lists, ten at a time;
      - llm-gateway, which loads its route table and provider settings without calling a model.
 
-     Each object answers once its migrations ran, so a migration that fails shows now, not on the first real request. A part that answers `failed` fails the probe, and the report names the part.
+     Each object answers once its migrations ran, so a migration that fails shows now, not on the first real request. A part that answers `failed` fails the probe, and the report names the part. A 404 means ingress lacks the token or holds another one, or the build has no route; the report says so.
 5. **Watches for 10 minutes.**
    - The probes repeat every minute.
    - The GraphQL Analytics API counts the new versions' exceptions, exceeded limits and internal errors, Durable Objects included.
@@ -92,7 +92,9 @@ The run's summary has the table of versions, the probes and the barriers. The pr
   - the new versions failed three invocations;
   - a Worker didn't deploy.
 - **The old build is probed without the deep probe:** it may have no route for it.
-- **Ingress goes back with `force`** when the deploy uploaded the token. Cloudflare refuses to roll back past a secret change without it, and the version restored is the one this deploy replaced, so the only secret change undone is the deploy's own.
+- **Ingress goes back with `force` only when this deploy uploaded the token.** Cloudflare refuses to roll back past a secret change without it, and the version restored is the one this deploy replaced, so the only secret change undone is the deploy's own. The report warns that ingress now holds its previous token, or none:
+  - none: the next deploy uploads it again;
+  - a previous one, after a rotation: once `main` is fixed, deploy with `rotate-probe-token`. Until then the deep probe answers 404 and fails every deploy.
 - **It doesn't roll back:**
   - when the release crosses a rollback barrier: a class migration, a marked SQL migration, or a live version without a tag. Fix forward, or roll back by request;
   - when the zone's security answered the probes (`cf-mitigated`), so nothing is known about the Worker.
@@ -134,7 +136,9 @@ The rollback:
 - **Moves every Worker to the same build, or none.** A Worker that refuses undoes the ones moved before it.
 - **Refuses to cross a Durable Object class migration,** as Cloudflare does. Fix forward instead.
 - **Probes the target build, and opens an issue.** A refused rollback changes nothing and opens no issue: the run's error says why. The deep probe isn't used: an older build may have no route for it.
-- **Needs `force` for a build from before the token reached ingress, or before it was rotated:** ingress's secrets changed since. Forcing it restores that build's token, or none; the next deploy uploads the current one again.
+- **Needs `force` for a build from before the token reached ingress, or before it was rotated:** ingress's secrets changed since. Forcing it restores that build's token, or none, and the report warns:
+  - if that build had none, the next deploy uploads it;
+  - if the token was rotated since, deploy with `rotate-probe-token`, or the deep probe fails.
 
 Fix or revert the change on `main` before the next merge, which deploys `main` again.
 
@@ -154,14 +158,25 @@ bun run --cwd tools/release release rollback --target 94 --reason "replies come 
 
 ## The deep probe's token
 
-- **What it guards.** `POST /deploy/probe` on ingress answers only with the `x-kelpie-deploy-probe` header equal to ingress's `DEPLOY_PROBE_TOKEN`, compared in constant time. Without the secret, without the header or with another value, it answers 404, as any unknown path does, and wakes nothing.
+- **What it guards.** `POST /deploy/probe` on ingress answers only to an `x-kelpie-deploy-probe` header of `<unix seconds>.<hex HMAC-SHA256 of those seconds, keyed with DEPLOY_PROBE_TOKEN>`.
+  - Ingress accepts a time within two minutes of its clock, and compares the MAC in constant time.
+  - The token itself never travels, so a header that reaches a log stops working two minutes later.
+  - Without the secret, with a secret under 32 characters, or with any other header, the route answers 404, as any unknown path does, and wakes nothing.
 - **What a leaked token gives.** Whoever holds it can wake the objects and learn whether each part answers. The answer has no ids and no data, and the probe changes nothing.
-- **Rotating it.** Set a new value in the environment (One-time setup, step 3). The next deploy uploads it, so trigger one if no merge is coming:
-  ```bash
-  gh workflow run deploy.yml --repo guedesdiogo/kelpie
-  ```
-  Until then, the old value stays valid on ingress.
-- **Deleting it from the environment** makes deploys skip the deep probe, but ingress keeps the last value it got, and the route keeps answering it. To revoke a leaked token, rotate it instead.
+- **Its lifecycle.**
+  - **Upload, once.** The first deploy after the environment gets the token uploads it to ingress. Later deploys see that ingress holds a `DEPLOY_PROBE_TOKEN` and upload nothing.
+  - **Rotation, by dispatch.** Set a new value in the environment (One-time setup, step 3), then run the Deploy workflow with `rotate-probe-token`, which uploads it even though ingress holds one:
+    ```bash
+    gh workflow run deploy.yml --repo guedesdiogo/kelpie -f rotate-probe-token=true
+    ```
+    Merges never rotate. Until the rotation runs, ingress keeps the old value, and the deep probe fails every deploy with a 404 that says so.
+  - **Immediate revoke.** For a leaked token, delete it on ingress at once; this deploys ingress's live code without the secret:
+    ```bash
+    bunx wrangler secret delete DEPLOY_PROBE_TOKEN --name kelpie-ingress
+    ```
+    Then set a new value in the environment. The next deploy uploads it, since ingress holds none.
+  - **Rollbacks restore secrets.** A rollback past an upload, automatic or on request, puts ingress back on that version's token, or on none. The report warns, and says what to run.
+- **Deleting it from the environment** makes deploys skip the deep probe, but ingress keeps the last value it got, and the route keeps answering it.
 
 ## Limits
 

@@ -324,7 +324,7 @@ Whoever passes Access and holds a live recovery token becomes the owner's admin 
   Without a tag, or with a tag that holds only the commit, `version` is the release alone and `build` is null.
 - **Every deploy covers all six Workers, with the same tag,** as the deploy workflow's does. Only `ingress` answers `/version`, so it names the live build only if it went out with every deploy.
 - **`deployment` and `deployedAt`** are `ingress`'s own Cloudflare version and when it was made, from the `version_metadata` binding.
-- **`POST /deploy/probe` is the deploy's deep probe** (#234, `docs/deploy.md`). It wakes the `Directory`, the `Registry`, every `AgentHost` and llm-gateway, and answers `{ directory, registry, agentHosts, gateway }`, each `ok` or `failed`. It needs the `x-kelpie-deploy-probe` header equal to ingress's `DEPLOY_PROBE_TOKEN` secret, which the deploy workflow uploads. Without it, the route answers 404, as any unknown path does.
+- **`POST /deploy/probe` is the deploy's deep probe** (#234, `docs/deploy.md`). It wakes the `Directory`, the `Registry`, every `AgentHost` and llm-gateway, and answers `{ directory, registry, agentHosts, gateway }`, each `ok` or `failed`. It needs an `x-kelpie-deploy-probe` header that signs the current time with ingress's `DEPLOY_PROBE_TOKEN` secret, which the deploy workflow uploads. Without it, the route answers 404, as any unknown path does.
 
 ## Known limits
 
