@@ -2,7 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { fromNdjsonStream, type LlmEvent, type RoutedRequest } from "@kelpie/llm";
 import type { Question } from "@kelpie/qualifier";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { embedWith, providerConfig, qualifyWith } from "../src/index.ts";
+import { embedWith, pingWith, providerConfig, qualifyWith } from "../src/index.ts";
 
 // The Worker runs in the test's isolate, so stubbing the global fetch stands in for the provider.
 // The stream is built from Anthropic's documented event format, not recorded.
@@ -502,5 +502,27 @@ describe("providerConfig", () => {
 
   it("refuses a base URL without https", () => {
     expect(() => providerConfig("key", "http://api.anthropic.com")).toThrow(/https/);
+  });
+});
+
+describe("ping", () => {
+  type GatewayEnv = Parameters<typeof pingWith>[0];
+
+  it("loads the configuration over RPC and calls no provider", async () => {
+    const fetched = vi.spyOn(globalThis, "fetch");
+    expect(await exports.LlmGateway.ping()).toEqual({ ok: true });
+    expect(fetched).not.toHaveBeenCalled();
+  });
+
+  it("throws when a route, a provider's base URL or the embedding provider can't load", () => {
+    const base = env as GatewayEnv;
+    const broken: Record<string, unknown>[] = [
+      { MODEL_ROUTES: { cheap: [{ provider: "mistral", model: "x" }] } },
+      { ANTHROPIC_BASE_URL: "http://api.anthropic.com" },
+      { EMBEDDING_PROVIDER: "cohere" },
+    ];
+    for (const change of broken) {
+      expect(() => pingWith({ ...base, ...change } as GatewayEnv)).toThrow();
+    }
   });
 });

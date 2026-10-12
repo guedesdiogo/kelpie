@@ -10,7 +10,8 @@ Kelpie keeps two kinds of secret (ADR-0013).
   - the bootstrap token, on `admin-api` (`docs/admin-api.md`);
   - the recovery token, on `admin-api`, only while the owner recovers a changed Access login, then deleted (`docs/admin-api.md`, "Recovering access");
   - the store's encryption key, `SECRETS_KEY` on `channel-egress`;
-  - on `context-store`, the vault's GitHub App private key and webhook secret (ADR-0021, `docs/context-store.md`). Without them the vault is off.
+  - on `context-store`, the vault's GitHub App private key and webhook secret (ADR-0021, `docs/context-store.md`). Without them the vault is off;
+  - `DEPLOY_PROBE_TOKEN` on `ingress`, for the deploy's deep probe (#234). The owner sets it in GitHub's `production` environment, not with `wrangler secret put`. A deploy uploads it when ingress has none, and on a rotation (`docs/deploy.md`). Without it the probe's route answers 404.
 - **Everything else** (a bot token, a tool's API key) goes into Kelpie's secret store through a one-time secure form, never through chat.
 
 ## The secret store
