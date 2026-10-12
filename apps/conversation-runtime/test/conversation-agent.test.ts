@@ -5,7 +5,7 @@ import { stampOf } from "@kelpie/conversation";
 import type { Usage } from "@kelpie/llm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentHost } from "../src/agent-host/agent-host.ts";
-import { type ConversationAgent, MEMORY_NOTE } from "../src/conversation-agent.ts";
+import { ConversationAgent, MEMORY_NOTE } from "../src/conversation-agent.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import {
   FAKE_USAGE,
@@ -294,6 +294,42 @@ describe("ConversationAgent buffering", () => {
 
     await stub.flush();
     await vi.waitFor(() => expect(world.sent).toEqual(["Got it."]));
+  });
+});
+
+describe("ConversationAgent schedules", () => {
+  // Flushes, session closes, checkpoints and notes share the object's one alarm (ADR-0002).
+  it("runs every due schedule on the one alarm in time order, and re-arms it for the next", async () => {
+    use(fakeWorld([]));
+    const stub = agent("one-alarm");
+    const ran: string[] = [];
+    for (const callback of ["answerNotes", "closeSession", "compact"] as const) {
+      vi.spyOn(ConversationAgent.prototype, callback).mockImplementation(async () => {
+        ran.push(callback);
+      });
+    }
+    // Two schedules are already due, armed against their time order; the third is an hour away.
+    const now = Date.now();
+    const later = new Date(now + 3_600_000);
+    await runInDurableObject(stub, (instance: ConversationAgent, state) =>
+      state.blockConcurrencyWhile(async () => {
+        await instance.schedule(new Date(now - 1_000), "closeSession");
+        await instance.schedule(new Date(now - 2_000), "compact");
+        await instance.schedule(later, "answerNotes");
+      }),
+    );
+
+    await runDurableObjectAlarm(stub);
+    await vi.waitFor(() => expect(ran).toEqual(["compact", "closeSession"]));
+    const left = await runInDurableObject(stub, async (instance: ConversationAgent, state) => ({
+      callbacks: instance.getSchedules().map((schedule) => schedule.callback),
+      alarm: await state.storage.getAlarm(),
+    }));
+    // The SDK keeps schedule times in whole seconds.
+    expect(left).toEqual({
+      callbacks: ["answerNotes"],
+      alarm: Math.floor(later.getTime() / 1_000) * 1_000,
+    });
   });
 });
 
