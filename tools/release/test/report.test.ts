@@ -35,6 +35,7 @@ describe("reports", () => {
         { script: "kelpie-ingress", ok: true },
         { script: "kelpie-llm-gateway", ok: false, detail: "refused" },
       ],
+      warnings: [],
     });
     expect(text).toContain("## Deploy of 96-abc1234: rolled back automatically");
     expect(text).toContain(
@@ -68,7 +69,9 @@ describe("reports", () => {
       barriers: [],
       probes: [],
       verdict: { status: "unhealthy", reason: "probes failed: health answered 500" },
+      warnings: ["kelpie-ingress now holds its secrets from 94-cc8e179"],
     });
+    expect(text).toContain("**Warnings**\n- kelpie-ingress now holds its secrets from 94-cc8e179");
     expect(text).toContain("## Rollback to 94-cc8e179: done, but the probes don't pass");
     expect(text).toContain("Why: replies come out empty");
     expect(text).toContain("probes failed: health answered 500");

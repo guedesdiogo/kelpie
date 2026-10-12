@@ -2,12 +2,13 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type {
-  CloudflareApi,
+import {
+  type CloudflareApi,
   CloudflareError,
-  InvocationCount,
-  VersionTraffic,
-  WorkerVersion,
+  type InvocationCount,
+  SECRETS_CHANGED,
+  type VersionTraffic,
+  type WorkerVersion,
 } from "../src/cloudflare.ts";
 import type { Git } from "../src/git.ts";
 import type { BuildTag } from "../src/tags.ts";
@@ -16,19 +17,24 @@ import { WORKERS } from "../src/workers.ts";
 
 export const ORIGIN = "https://ingress.example.com";
 
-/** A version of a Worker, tagged, with the instance vars it was deployed with. */
+/** A version of a Worker, tagged, with the instance vars it was deployed with, and its secrets. */
 export function workerVersion(
   id: string,
   number: number,
   tag: BuildTag | null,
   vars: Record<string, string> = {},
+  secrets: readonly string[] = [],
 ): WorkerVersion {
   return {
     id,
     number,
     annotations: tag ? { "workers/tag": formatTag(tag) } : {},
     resources: {
-      bindings: Object.entries(vars).map(([name, text]) => ({ type: "plain_text", name, text })),
+      bindings: [
+        ...Object.entries(vars).map(([name, text]) => ({ type: "plain_text", name, text })),
+        // Cloudflare lists a secret by its name only.
+        ...secrets.map((name) => ({ type: "secret_text", name })),
+      ],
     },
   };
 }
@@ -47,6 +53,8 @@ const versionId = (script: string, tag: BuildTag) =>
  * Cloudflare with the six Workers live on one build. `versions` are earlier builds still
  * deployable, and by default each was deployed in turn, newest first; `history` replaces that
  * order. `failDeploy` makes the deployments API refuse a Worker, with `force` or without.
+ * `secrets` names each Worker's secrets. `secretsChanged` lists Workers whose secrets changed since
+ * their other versions, which Cloudflare restores only with `force`, as it answers 10220.
  */
 export function fakeApi(options: {
   live: BuildTag;
@@ -55,6 +63,8 @@ export function fakeApi(options: {
   vars?: Record<string, Record<string, string>>;
   missing?: { script: string; tag: BuildTag };
   failDeploy?: (script: string, force: boolean) => CloudflareError | undefined;
+  secrets?: Record<string, string[]>;
+  secretsChanged?: string[];
   invocations?: () => InvocationCount[] | Promise<InvocationCount[]>;
 }): FakeApi {
   const builds = [options.live, ...(options.versions ?? [])];
@@ -70,10 +80,16 @@ export function fakeApi(options: {
             ),
         )
         .map((tag, index) =>
-          workerVersion(versionId(worker.script, tag), 100 - index, tag, {
-            ...(worker.script === "kelpie-channel-egress" ? { INGRESS_ORIGIN: ORIGIN } : {}),
-            ...options.vars?.[worker.script],
-          }),
+          workerVersion(
+            versionId(worker.script, tag),
+            100 - index,
+            tag,
+            {
+              ...(worker.script === "kelpie-channel-egress" ? { INGRESS_ORIGIN: ORIGIN } : {}),
+              ...options.vars?.[worker.script],
+            },
+            options.secrets?.[worker.script],
+          ),
         ),
     ]),
   );
@@ -113,6 +129,11 @@ export function fakeApi(options: {
     async deployVersions(script, traffic, message, force) {
       const error = options.failDeploy?.(script, force);
       if (error) throw error;
+      if (!force && options.secretsChanged?.includes(script)) {
+        throw new CloudflareError("The following secrets have changed: DEPLOY_PROBE_TOKEN", [
+          SECRETS_CHANGED,
+        ]);
+      }
       made.push({ script, traffic: [...traffic], message, force });
       active.set(script, [...traffic]);
     },
@@ -122,19 +143,65 @@ export function fakeApi(options: {
   };
 }
 
+/**
+ * Ingress's deploy probe (#234): the token the Worker holds, and what each part answers, `ok` by
+ * default. Without it the build has no probe route.
+ */
+export interface FakeDeepProbe {
+  token: string;
+  parts?: Record<string, unknown>;
+  status?: number;
+}
+
+/**
+ * Whether a deploy probe header signs the current time with `token`, as ingress checks it: an
+ * HMAC-SHA256 of the unix seconds, in hex, within two minutes.
+ */
+async function signedWith(header: string, token: string): Promise<boolean> {
+  const [seconds = "", mac = ""] = header.split(".");
+  if (!/^\d+$/.test(seconds) || Math.abs(Date.now() / 1_000 - Number(seconds)) > 120) return false;
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(token),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"],
+  );
+  const bytes = mac.match(/^[0-9a-f]{64}$/)
+    ? mac.match(/../g)?.map((pair) => parseInt(pair, 16))
+    : [];
+  return crypto.subtle.verify(
+    "HMAC",
+    key,
+    new Uint8Array(bytes ?? []),
+    new TextEncoder().encode(seconds),
+  );
+}
+
 /** Ingress as the probes see it, serving one build. */
 export function fakeProduction(state: {
   serving: BuildTag | null;
   telegram?: number;
   down?: boolean;
   mitigated?: boolean;
+  deep?: FakeDeepProbe | undefined;
 }): typeof fetch {
-  return (async (input: string | URL | Request) => {
+  return (async (input: string | URL | Request, init?: RequestInit) => {
     if (state.down) throw new TypeError("fetch failed");
     if (state.mitigated) {
       return new Response("", { status: 403, headers: { "cf-mitigated": "challenge" } });
     }
     switch (new URL(String(input)).pathname) {
+      case "/deploy/probe": {
+        const presented = new Headers(init?.headers).get("x-kelpie-deploy-probe") ?? "";
+        if (!state.deep || !(await signedWith(presented, state.deep.token))) {
+          return new Response("Not found", { status: 404 });
+        }
+        return Response.json(
+          { directory: "ok", registry: "ok", agentHosts: "ok", gateway: "ok", ...state.deep.parts },
+          { status: state.deep.status ?? 200 },
+        );
+      }
       case "/health":
         return Response.json({ status: "ok" });
       case "/version":

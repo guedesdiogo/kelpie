@@ -6,13 +6,12 @@ export default defineConfig({
   plugins: [
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
-      // Tests replace the model and channel ports with fakes, so llm-gateway and channel-egress
-      // are never called; the bindings only have to exist for the runtime to start.
+      // Tests replace the model and channel ports with fakes, so channel-egress and llm-gateway's
+      // model calls are never made; the bindings only have to exist for the runtime to start.
       miniflare: {
         // The admin API's origin, as a deploy sets it: links to it are Kelpie's own (#188).
         bindings: { ADMIN_ORIGIN: "https://admin.example" },
         serviceBindings: {
-          LLM_GATEWAY: () => new Response("llm-gateway is not available in tests", { status: 503 }),
           CHANNEL_EGRESS: () =>
             new Response("channel-egress is not available in tests", { status: 503 }),
           SETUP_FORMS: () =>
@@ -28,6 +27,20 @@ export default defineConfig({
 export class ContextStore extends WorkerEntrypoint {
   compile() {
     return { persona: null, rules: [], skills: [] };
+  }
+}
+export default { fetch: () => new Response(null, { status: 404 }) };`,
+          },
+          // llm-gateway answers only the deploy probe's ping (#234). It has no other method, so a
+          // model call is refused by the runtime, as the fetch-only stub before it refused one.
+          {
+            name: "kelpie-llm-gateway",
+            modules: true,
+            compatibilityDate: "2026-10-01",
+            script: `import { WorkerEntrypoint } from "cloudflare:workers";
+export class LlmGateway extends WorkerEntrypoint {
+  ping() {
+    return { ok: true };
   }
 }
 export default { fetch: () => new Response(null, { status: 404 }) };`,

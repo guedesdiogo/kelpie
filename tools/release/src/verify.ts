@@ -26,9 +26,63 @@ interface Probe {
   method: "GET" | "POST";
   path: string;
   headers?: Record<string, string>;
+  /** Headers made when the request goes, such as a signature of the current time. */
+  signedHeaders?: () => Promise<Record<string, string>>;
   body?: string;
   /** Null when the answer is the expected one, otherwise what was wrong with it. */
   judge(status: number, body: unknown): string | null;
+}
+
+/** Ingress's deploy probe (#234), in `apps/ingress/src/deploy-probe.ts`. */
+const DEEP_PROBE_PATH = "/deploy/probe";
+const DEEP_PROBE_HEADER = "x-kelpie-deploy-probe";
+/** What it wakes; each answers `ok` or `failed`. */
+const DEEP_PROBE_PARTS = ["directory", "registry", "agentHosts", "gateway"] as const;
+
+/**
+ * `<unix seconds>.<hex HMAC-SHA256 of those seconds, keyed with the token>`: ingress checks it
+ * against its own copy of the token, within two minutes of its clock. The token itself never
+ * travels, so a header that reaches a log soon stops working.
+ */
+export async function deepProbeSignature(token: string, nowMs: number): Promise<string> {
+  const seconds = String(Math.floor(nowMs / 1_000));
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(token),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = await crypto.subtle.sign("HMAC", key, encoder.encode(seconds));
+  const hex = [...new Uint8Array(mac)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${seconds}.${hex}`;
+}
+
+/**
+ * The deploy's deep probe: signed with `DEPLOY_PROBE_TOKEN`, which ingress holds, it has ingress
+ * wake the Directory, the Registry, every AgentHost and llm-gateway. Only the deploy of a new build
+ * sends it; an older build has no such route, so a rollback is checked without it.
+ */
+function deepProbe(token: string): Probe {
+  return {
+    name: "deep",
+    method: "POST",
+    path: DEEP_PROBE_PATH,
+    signedHeaders: async () => ({
+      [DEEP_PROBE_HEADER]: await deepProbeSignature(token, Date.now()),
+    }),
+    judge(status, body) {
+      if (status === 404) {
+        return "answered 404: ingress may lack DEPLOY_PROBE_TOKEN or hold an older one, which running the Deploy workflow with rotate-probe-token fixes; or the build has no probe route";
+      }
+      if (status !== 200) return `answered ${status}`;
+      // Only the parts' names are repeated: the answer goes into public reports.
+      const parts = (typeof body === "object" ? body : null) as Record<string, unknown> | null;
+      const failed = DEEP_PROBE_PARTS.filter((part) => parts?.[part] !== "ok");
+      return failed.length === 0 ? null : `failed: ${failed.join(", ")}`;
+    },
+  };
 }
 
 /**
@@ -38,9 +92,10 @@ interface Probe {
  *   `SecretStore` object, so that object wakes and applies its migrations. A broken store answers
  *   503;
  * - a GitHub delivery with a wrong signature: ingress hands it to context-store.
- * The refusals change nothing: no agent is named, so no notice or conversation runs.
+ * The refusals change nothing: no agent is named, so no notice or conversation runs. With
+ * `deepToken`, the deep probe goes too; it only wakes objects, and changes nothing either.
  */
-function probes(expected: BuildTag | null): Probe[] {
+function probes(expected: BuildTag | null, deepToken?: string): Probe[] {
   const expectStatus =
     (want: number, explain: Record<number, string> = {}) =>
     (status: number) =>
@@ -103,6 +158,7 @@ function probes(expected: BuildTag | null): Probe[] {
       body: "{}",
       judge: expectStatus(401),
     },
+    ...(deepToken ? [deepProbe(deepToken)] : []),
   ];
 }
 
@@ -112,9 +168,10 @@ async function runProbe(
   probe: Probe,
 ): Promise<ProbeResult> {
   try {
+    const signed = probe.signedHeaders ? await probe.signedHeaders() : {};
     const response = await fetchImpl(new URL(probe.path, origin), {
       method: probe.method,
-      headers: { "user-agent": "kelpie-release", ...probe.headers },
+      headers: { "user-agent": "kelpie-release", ...probe.headers, ...signed },
       ...(probe.body === undefined ? {} : { body: probe.body }),
       redirect: "manual",
       signal: AbortSignal.timeout(10_000),
@@ -145,12 +202,16 @@ async function runProbe(
   }
 }
 
+/** Runs every probe; the deep one too when `deepToken` is given. */
 export function probeAll(
   fetchImpl: typeof fetch,
   origin: string,
   expected: BuildTag | null,
+  deepToken?: string,
 ): Promise<ProbeResult[]> {
-  return Promise.all(probes(expected).map((probe) => runProbe(fetchImpl, origin, probe)));
+  return Promise.all(
+    probes(expected, deepToken).map((probe) => runProbe(fetchImpl, origin, probe)),
+  );
 }
 
 export type Verdict =
@@ -179,16 +240,18 @@ export interface SettleOptions {
 /**
  * Probes until every probe passes or the attempts run out. A new version takes a little while to
  * reach every Cloudflare location, so the first answers may still come from the old one.
+ * `deepToken` adds the deep probe, for a deploy's new build only.
  */
 export async function settle(
   deps: Pick<VerifyDeps, "fetch" | "sleep" | "log">,
   origin: string,
   expected: BuildTag | null,
   options: SettleOptions,
+  deepToken?: string,
 ): Promise<ProbeResult[]> {
   let results: ProbeResult[] = [];
   for (let attempt = 1; attempt <= options.attempts; attempt++) {
-    results = await probeAll(deps.fetch, origin, expected);
+    results = await probeAll(deps.fetch, origin, expected, deepToken);
     if (results.every((result) => result.outcome === "pass")) return results;
     if (attempt < options.attempts) await deps.sleep(options.intervalMs);
   }
@@ -230,7 +293,10 @@ export interface WatchResult {
   analytics: boolean;
 }
 
-/** Watches the new versions for a while: the probes, and their failed invocations. */
+/**
+ * Watches the new versions for a while: the probes, and their failed invocations. `deepToken` adds
+ * the deep probe.
+ */
 export async function watch(
   deps: VerifyDeps,
   origin: string,
@@ -238,6 +304,7 @@ export async function watch(
   versionIds: readonly string[],
   since: Date,
   options: WatchOptions,
+  deepToken?: string,
 ): Promise<WatchResult> {
   const end = deps.now().getTime() + options.minutes * 60_000;
   const streaks = new Map<string, number>();
@@ -245,7 +312,7 @@ export async function watch(
   let errors: Record<string, number> = {};
   let analytics = true;
   for (;;) {
-    probes = await probeAll(deps.fetch, origin, expected);
+    probes = await probeAll(deps.fetch, origin, expected, deepToken);
     for (const result of probes) {
       streaks.set(
         result.probe,

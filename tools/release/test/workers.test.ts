@@ -9,7 +9,7 @@ const apps = join(import.meta.dirname, "..", "..", "..", "apps");
 interface Config {
   name: string;
   vars?: Record<string, unknown>;
-  services?: Array<{ service: string }>;
+  services?: Array<{ binding: string; service: string; entrypoint?: string }>;
   durable_objects?: { bindings?: Array<{ script_name?: string }> };
 }
 
@@ -47,5 +47,24 @@ describe("WORKERS", () => {
       for (const script of named)
         expect(earlier, `${worker.app} binds ${script}`).toContain(script);
     });
+  });
+
+  // A binding to a missing entrypoint deploys, and fails only when called: ingress's DEPLOY_PROBE,
+  // for one, is called only by the deploy's deep probe (#234). Tests stub these Workers, so the
+  // names are checked here against the real ones.
+  it("binds only entrypoints the bound Worker exports", () => {
+    for (const worker of WORKERS) {
+      for (const { binding, service, entrypoint } of configs.get(worker.app)?.services ?? []) {
+        if (!entrypoint) continue;
+        const target = WORKERS.find((candidate) => candidate.script === service);
+        const index = readFileSync(join(apps, target?.app ?? "", "src", "index.ts"), "utf8");
+        const exported = new RegExp(
+          `export (class ${entrypoint}\\b|\\{[^}]*\\b${entrypoint}\\b[^}]*\\})`,
+        );
+        expect(index, `${worker.app}'s ${binding} names ${service}#${entrypoint}`).toMatch(
+          exported,
+        );
+      }
+    }
   });
 });

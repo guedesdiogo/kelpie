@@ -1,5 +1,6 @@
 export { AgentHost } from "./agent-host/agent-host.ts";
 export { ConversationAgent } from "./conversation-agent.ts";
+export { DeployProbe } from "./deploy-probe.ts";
 export { Registry } from "./registry/registry.ts";
 export { SetupEvents } from "./setup-events.ts";
 
