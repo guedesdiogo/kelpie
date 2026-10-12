@@ -58,7 +58,7 @@ After the gates pass on `main`, the `Deploy` job runs `tools/release`. It:
    - under `apps/`, `packages/`, `tools/release/` or `.github/actions/`;
    - `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.base.json` or `.github/workflows/deploy.yml`.
 
-   A merge that changes only other paths, such as `docs/`, `ci.yml` or `scripts/`, deploys nothing, and the run's summary says why. A live version without a tag, or a live commit the checkout lacks, always deploys.
+   A merge that changes only other paths, such as `docs/`, `ci.yml` or `scripts/`, deploys nothing, and the run's summary says why. So does a re-run of an older run whose commit production already contains. A live version without a tag, or a live commit the checkout lacks, always deploys.
 
    The comparison is with production, not with the previous commit. A deploy that was missed, because its run failed or was replaced while it waited, goes out with the next merge, whatever that merge changes. `deploy.yml` by hand deploys regardless ([By hand](#by-hand)). `release deploy --plan` shows the decision.
 3. **Reads the analytics once.** A token without Account Analytics Read stops the deploy here, before anything changes: the watch would otherwise judge by the probes alone.

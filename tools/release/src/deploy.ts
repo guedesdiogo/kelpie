@@ -1,5 +1,14 @@
 import type { VersionTraffic } from "./cloudflare.ts";
-import { buildTagOf, changedFiles, type Git, hasCommit, isClean, show, subjectOf } from "./git.ts";
+import {
+  buildTagOf,
+  changedFiles,
+  type Git,
+  hasCommit,
+  isAncestor,
+  isClean,
+  show,
+  subjectOf,
+} from "./git.ts";
 import { parseJsonc } from "./jsonc.ts";
 import { type Barrier, barriersBetween, type LiveWorker, liveOrigin, readLive } from "./live.ts";
 import { type Restored, restore } from "./rollback.ts";
@@ -45,9 +54,11 @@ export interface DeployPlan {
 }
 
 /**
- * Why HEAD needn't deploy: nothing that ships changed between it and any build production serves
- * (ADR-0031). Undefined when it must deploy: a change that ships, or a live version without a tag
- * or with a commit this checkout lacks, since nothing can be compared then.
+ * Why HEAD needn't deploy (ADR-0031): every build production serves already contains it, or
+ * differs from it in nothing that ships. A build that contains HEAD, as when an older run is
+ * re-run, would only go back by deploying it. Undefined when it must deploy: a change that ships,
+ * or a live version without a tag or with a commit this checkout lacks, since nothing can be
+ * compared then.
  */
 function nothingShips(git: Git, live: readonly LiveWorker[]): string | undefined {
   const builds: BuildTag[] = [];
@@ -55,10 +66,13 @@ function nothingShips(git: Git, live: readonly LiveWorker[]): string | undefined
     if (!tag || !hasCommit(git, tag.commit)) return undefined;
     if (!builds.some((known) => sameTag(known, tag))) builds.push(tag);
   }
-  for (const build of builds) {
+  const behind = builds.filter((build) => !isAncestor(git, "HEAD", build.commit));
+  for (const build of behind) {
     if (ships(changedFiles(git, build.commit, "HEAD").map(({ path }) => path))) return undefined;
   }
-  return `Nothing that ships changed since ${builds.map(formatTag).join(", ")}, which production serves.`;
+  return behind.length === 0
+    ? `Production serves ${builds.map(formatTag).join(", ")}, which already contains this commit.`
+    : `Nothing that ships changed since ${behind.map(formatTag).join(", ")}, which production serves.`;
 }
 
 /**

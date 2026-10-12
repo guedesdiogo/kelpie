@@ -20,6 +20,8 @@
    - `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.base.json` or `.github/workflows/deploy.yml`.
 
    Anything else, such as the docs, `ci.yml` or the CI scripts, ships nothing. The comparison is between trees, so the commits in between don't matter.
+
+   A live build that already contains the commit, as when an older run is re-run, needs nothing from it. Deploying it would only go back.
 2. **When it can't compare, it deploys.** That happens with a live version without a tag, or a live commit that the checkout lacks.
 3. **A skipped deploy changes nothing.** It reads no analytics, writes a one-line summary and succeeds.
 4. **The gates and the `Deploy` job still run on every push to `main`.** `CI passed` doesn't depend on the decision.

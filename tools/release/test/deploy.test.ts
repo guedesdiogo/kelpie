@@ -23,9 +23,11 @@ const options = {
   watch: { minutes: 2, intervalMs: 60_000, errorThreshold: 3, failuresInARow: 3 },
 };
 
-/** quietGit, with a change that ships between the live build and HEAD. */
-const shippingGit: Git = (args) =>
-  args[0] === "diff" ? "M\tapps/ingress/src/index.ts\n" : quietGit(args);
+/** quietGit, with HEAD newer than the live build and a change that ships between them. */
+const shippingGit: Git = (args) => {
+  if (args[0] === "merge-base") throw new Error("git exited with 1");
+  return args[0] === "diff" ? "M\tapps/ingress/src/index.ts\n" : quietGit(args);
+};
 
 /** Production as deploys change it: ingress serves whichever build was deployed or restored last. */
 function harness(setup: {
@@ -189,7 +191,29 @@ describe("planDeploy's skip, against the builds production serves (ADR-0031)", {
     });
     const plan = await planDeploy(deps);
     expect(plan.skip).toBe(
-      `Nothing that ships changed since ${formatTag(liveTag)}, which production serves.`,
+      `Production serves ${formatTag(liveTag)}, which already contains this commit.`,
+    );
+  });
+
+  it("skips an older HEAD, as a re-run does, rather than go back on a change that ships", async () => {
+    const { repo, base } = history();
+    const newer = repo.commit({ "apps/ingress/src/index.ts": "v2" });
+    gitAt(repo.dir)(["checkout", "-q", base]);
+    const { deps, liveTag } = setup(repo.dir, newer);
+    expect((await planDeploy(deps)).skip).toBe(
+      `Production serves ${formatTag(liveTag)}, which already contains this commit.`,
+    );
+  });
+
+  it("skips when the Workers serve different builds that all differ from HEAD in docs only", async () => {
+    const { repo, base } = history();
+    const docs = repo.commit({ "docs/deploy.md": "b" });
+    repo.commit({ "docs/deploy.md": "c" });
+    const { api, deps, liveTag } = setup(repo.dir, docs);
+    const older = buildTagOf(deps.git, base);
+    serve(api, "kelpie-admin-api", older);
+    expect((await planDeploy(deps)).skip).toBe(
+      `Nothing that ships changed since ${formatTag(liveTag)}, ${formatTag(older)}, which production serves.`,
     );
   });
 
