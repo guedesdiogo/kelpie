@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { LlmError } from "../src/errors.ts";
 import { OpenAIResponsesProvider } from "../src/openai.ts";
 import type { ChatMessage, LlmEvent, LlmRequest } from "../src/types.ts";
@@ -122,6 +122,11 @@ function finishOf(events: LlmEvent[]) {
 }
 
 describe("OpenAIResponsesProvider", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
   it("replays its own output items verbatim on the next turn", async () => {
     const { fetch, calls } = fakeFetch(sse(toolTurn), sse(toolTurn));
     const llm = provider(fetch);
@@ -170,6 +175,51 @@ describe("OpenAIResponsesProvider", () => {
     expect(finish.usage).toEqual([
       { model: "gpt-6.1-sol", inputUncached: 500, cacheRead: 6000, cacheWrite: 2500, output: 300 },
     ]);
+  });
+
+  it("refuses to start with request headers from the environment, without quoting them", async () => {
+    // The SDK applies these after its own auth headers, and no option turns them off (issue #276).
+    vi.stubEnv("OPENAI_CUSTOM_HEADERS", "Authorization: Bearer from-env");
+    const { fetch } = fakeFetch(sse(toolTurn));
+    expect(() => provider(fetch)).toThrow(
+      /^OPENAI_CUSTOM_HEADERS is set, and Kelpie takes no request headers from the environment$/,
+    );
+
+    // Blank counts as unset, as it does for the SDK.
+    vi.stubEnv("OPENAI_CUSTOM_HEADERS", " ");
+    expect(finishOf(await collect(provider(fetch).stream(request()))).reason).toBe("tool_calls");
+  });
+
+  it("logs nothing, whatever OPENAI_LOG asks for", async () => {
+    // At debug the SDK logs each request's headers and body, the gateway token included (issue #276).
+    // The spy goes in first: the SDK binds console's methods when it builds its logger.
+    vi.stubEnv("OPENAI_LOG", "debug");
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    const { fetch } = fakeFetch(sse(toolTurn));
+    await collect(provider(fetch).stream(request()));
+
+    expect(debug).not.toHaveBeenCalled();
+  });
+
+  it("calls OpenAI's API when given no base URL, whatever OPENAI_BASE_URL says", async () => {
+    vi.stubEnv("OPENAI_BASE_URL", "https://elsewhere.example/v1");
+    const { fetch, calls } = fakeFetch(sse(toolTurn));
+    await collect(
+      new OpenAIResponsesProvider({ apiKey: "sk-openai-test", fetch }).stream(request()),
+    );
+
+    expect(requestAt(calls, 0).url).toBe("https://api.openai.com/v1/responses");
+  });
+
+  it("sends no organization or project from the environment", async () => {
+    vi.stubEnv("OPENAI_ORG_ID", "org-from-env");
+    vi.stubEnv("OPENAI_PROJECT_ID", "proj-from-env");
+    const { fetch, calls } = fakeFetch(sse(toolTurn));
+    await collect(provider(fetch).stream(request()));
+
+    const call = requestAt(calls, 0);
+    expect(call.headers.has("openai-organization")).toBe(false);
+    expect(call.headers.has("openai-project")).toBe(false);
   });
 
   it("sends a stateless request through the gateway", async () => {

@@ -1,6 +1,7 @@
 import OpenAI from "openai";
+import { refuseEnvironmentHeaders } from "./env.ts";
 import { LlmError } from "./errors.ts";
-import { toLlmError } from "./openai.ts";
+import { pinnedClientOptions, toLlmError } from "./openai.ts";
 
 /** The embedding services an instance can choose between (issue #110). */
 export const EMBEDDING_PROVIDERS = ["workers-ai", "openai"] as const;
@@ -141,10 +142,11 @@ export class OpenAIEmbedder implements Embedder {
   readonly #client: OpenAI;
 
   constructor(config: OpenAIEmbedderConfig) {
+    refuseEnvironmentHeaders("OPENAI_CUSTOM_HEADERS");
     this.model = config.model ?? "text-embedding-3-small";
     this.#client = new OpenAI({
       apiKey: config.apiKey,
-      ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+      ...pinnedClientOptions(config.baseURL),
       ...(config.headers ? { defaultHeaders: config.headers } : {}),
       ...(config.fetch ? { fetch: config.fetch } : {}),
       maxRetries: 1,

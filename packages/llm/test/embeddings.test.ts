@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   EMBEDDING_BATCH_CHARS,
   EMBEDDING_INPUT_CHARS,
@@ -115,6 +115,11 @@ describe("OpenAIEmbedder", () => {
       { headers: { "content-type": "application/json" } },
     );
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
   it("asks the embeddings endpoint through AI Gateway, in batches, as floats", async () => {
     const { fetch, calls } = fakeFetch(
       () => answer(256),
@@ -135,6 +140,30 @@ describe("OpenAIEmbedder", () => {
     expect(first.body).toMatchObject({ model: "text-embedding-3-small", encoding_format: "float" });
     expect((first.body.input as string[]).length).toBe(256);
     expect(embedder.model).toBe("text-embedding-3-small");
+  });
+
+  it("refuses to start with request headers from the environment", () => {
+    // As the Responses provider does (issue #276).
+    vi.stubEnv("OPENAI_CUSTOM_HEADERS", "Authorization: Bearer from-env");
+    expect(() => new OpenAIEmbedder({ apiKey: "test-key" })).toThrow(
+      /^OPENAI_CUSTOM_HEADERS is set, and Kelpie takes no request headers from the environment$/,
+    );
+  });
+
+  it("takes no host, organization, project or log level from the environment", async () => {
+    vi.stubEnv("OPENAI_BASE_URL", "https://elsewhere.example/v1");
+    vi.stubEnv("OPENAI_ORG_ID", "org-from-env");
+    vi.stubEnv("OPENAI_PROJECT_ID", "proj-from-env");
+    vi.stubEnv("OPENAI_LOG", "debug");
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    const { fetch, calls } = fakeFetch(() => answer(1));
+    await new OpenAIEmbedder({ apiKey: "test-key", fetch }).embed(["texto"]);
+
+    const call = requestAt(calls, 0);
+    expect(call.url).toBe("https://api.openai.com/v1/embeddings");
+    expect(call.headers.has("openai-organization")).toBe(false);
+    expect(call.headers.has("openai-project")).toBe(false);
+    expect(debug).not.toHaveBeenCalled();
   });
 
   it("keeps each request under a character budget, whatever the count", async () => {
