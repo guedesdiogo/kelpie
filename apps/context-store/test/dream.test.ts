@@ -1461,13 +1461,16 @@ describe("Vault Dream", () => {
   });
 
   it("merges duplicates once let: the survivor, its stubs and the marks that led to them, in one commit", async () => {
+    // One instant for every note: groups written at the same time go in their survivors' path
+    // order, so the café's merge commits first however long the setup takes.
+    const at = daysAgo(0);
     const note = async (
       title: string,
       body: string,
       path: string,
       extra: Partial<MemoryInput> = {},
     ) => ({
-      ...(await kelpieNote({ title, body, abstract: `${title}.`, ...extra })),
+      ...(await kelpieNote({ title, body, abstract: `${title}.`, at, ...extra })),
       path,
     });
     const cafe = await note("Café", "Sem açúcar.", "memory/notes/cafe.md", { entities: ["Ana"] });
