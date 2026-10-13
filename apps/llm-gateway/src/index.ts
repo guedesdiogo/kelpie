@@ -7,13 +7,16 @@ import {
   type EmbedOutcome,
   LlmError,
   type LlmProvider,
+  MODEL_TIERS,
   ModelRouter,
   type ModelTier,
+  modelAliasDescription,
   OpenAIEmbedder,
   OpenAIResponsesProvider,
   type ProviderId,
   parseRouteTable,
   type RoutedRequest,
+  type RouteModel,
   toNdjsonStream,
   WorkersAiEmbedder,
 } from "@kelpie/llm";
@@ -108,10 +111,30 @@ export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
     return embedWith(this.env, texts);
   }
 
+  /** The models each tier would use now, for an agent's own prompt (#283). See `routesWith`. */
+  routes(): Record<ModelTier, RouteModel[]> {
+    return routesWith(this.env);
+  }
+
   /** For the deploy's probe (#234), through conversation-runtime. See `pingWith`. */
   ping(): { ok: true } {
     return pingWith(this.env);
   }
+}
+
+/**
+ * For each tier, its candidates whose provider has a key, in the order they are tried, an alias
+ * with what it stands for. Like `ping`, it calls no provider: an alias isn't resolved.
+ */
+export function routesWith(env: GatewayEnv): Record<ModelTier, RouteModel[]> {
+  const router = modelRouter(env);
+  const describe = ({ provider, model }: RouteModel): RouteModel => {
+    const standsFor = provider === "anthropic" ? modelAliasDescription(model) : undefined;
+    return { provider, model, ...(standsFor ? { standsFor } : {}) };
+  };
+  return Object.fromEntries(
+    MODEL_TIERS.map((tier) => [tier, router.route(tier).map(describe)]),
+  ) as Record<ModelTier, RouteModel[]>;
 }
 
 /**

@@ -1,19 +1,23 @@
+import type { Remote } from "@kelpie/access";
 import type {
   Actor,
   AgentConfig,
   AgentHostContract,
   AgentSettings,
   ConfigureResult,
+  RegistryContract,
   SetupEvent,
   SetupStep,
 } from "@kelpie/config";
-import { DEFAULT_SETTINGS, parseSettings, SETUP_AGENT_ID } from "@kelpie/config";
+import { DEFAULT_SETTINGS, parseSettings, REGISTRY_NAME, SETUP_AGENT_ID } from "@kelpie/config";
 import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
+import type { ModelTier, RouteModel } from "@kelpie/llm/router";
 import { Agent } from "agents";
 import { and, eq, lte } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import { SETUP_PROMPT } from "../setup-agent.ts";
+import { identitySection } from "./identity.ts";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
 import { composeSystemPrompt, hasVaultContext } from "./system-prompt.ts";
@@ -27,6 +31,23 @@ export function replaceContextStoreForTesting(store: ContextStoreContract | unde
 
 /** A vault the Context Store can't read in time is replaced by the last one it compiled. */
 const COMPILE_TIMEOUT_MS = 3_000;
+
+/** Where a turn's identity comes from (#283): the agent's name in the Registry, llm-gateway's routes. */
+export interface IdentitySources {
+  /** The agent's name, or null while the Registry doesn't list it. */
+  name(id: string): Promise<string | null>;
+  routes(): Promise<Record<ModelTier, RouteModel[]>>;
+}
+
+let identitySourcesForTesting: IdentitySources | undefined;
+
+/** Tests run in the Worker's isolate and swap the identity's sources with this. Production never calls it. */
+export function replaceIdentitySourcesForTesting(sources: IdentitySources | undefined): void {
+  identitySourcesForTesting = sources;
+}
+
+/** A name or route not read in time is replaced by the last one seen. */
+const IDENTITY_TIMEOUT_MS = 1_000;
 
 /**
  * One agent (ADR-0002): its configuration now; its MCP connections, schedules, budget and task
@@ -141,15 +162,23 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   }
 
   /**
-   * What a turn runs with: the settings, with the system prompt composed from the vault's persona,
-   * rules and skills (ADR-0016). A change in the vault bumps the prompt version, as a configured
-   * prompt change does. So does a deploy that flips the built-in memory core while the agent
-   * follows it (#224): the core isn't in the prompt key, and only turns use it. The first default
-   * a turn sees is recorded without a bump. When the Context Store can't answer, the last vault it
-   * compiled is used.
+   * What a turn runs with: the settings, with the system prompt composed from the agent's identity
+   * (#283), then the vault's persona, rules and skills (ADR-0016). A change in the vault bumps the
+   * prompt version, as a configured prompt change does. So does a deploy that flips the built-in
+   * memory core while the agent follows it (#224): the core isn't in the prompt key, and only turns
+   * use it. The first default a turn sees is recorded without a bump. When the Context Store can't
+   * answer, the last vault it compiled is used; when the Registry or llm-gateway can't, the last
+   * name and routes seen are. A new name or route needs no bump: each turn's prompt key catches the
+   * change in the text, as it does a deploy's (#220).
    */
   async turnConfig(): Promise<AgentConfig> {
-    const vault = await this.#vaultContext();
+    const id = this.ctx.id.name ?? "";
+    const sources = this.#identitySources();
+    const [vault, name, routes] = await Promise.all([
+      this.#vaultContext(),
+      this.#lookup("identityName", async () => (await sources.name(id)) ?? id),
+      this.#lookup("identityRoutes", () => sources.routes()),
+    ]);
     // Read after the await: another call or a configure may have run meanwhile, and the compare,
     // the bump and the write below are one synchronous step.
     const config = this.config();
@@ -161,6 +190,13 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       seenCore !== null && seenCore !== builtInCore && this.#stored().memoryCore === undefined;
     const rows: [string, unknown][] = [];
     if (vaultChanged) rows.push(["vaultContext", key]);
+    for (const [stateKey, looked] of [
+      ["identityName", name],
+      ["identityRoutes", routes],
+    ] as const) {
+      const changed = JSON.stringify(looked.value) !== JSON.stringify(this.#get(stateKey, null));
+      if (looked.fresh && changed) rows.push([stateKey, looked.value]);
+    }
     if (seenCore !== builtInCore) rows.push(["defaultMemoryCore", builtInCore]);
     const bump = vaultChanged || coreFlipped;
     const promptVersion = bump ? config.promptVersion + 1 : config.promptVersion;
@@ -175,13 +211,58 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
         }
       });
     }
+    const { tier } = config.settings;
+    const identity = identitySection({
+      id,
+      name: name.value ?? id,
+      tier,
+      route: routes.value?.[tier] ?? null,
+    });
     return {
       settings: {
         ...config.settings,
-        systemPrompt: composeSystemPrompt(config.settings.systemPrompt, vault),
+        systemPrompt: `${identity}\n\n${composeSystemPrompt(config.settings.systemPrompt, vault)}`,
       },
       promptVersion,
     };
+  }
+
+  #identitySources(): IdentitySources {
+    if (identitySourcesForTesting) return identitySourcesForTesting;
+    const registry = this.env.REGISTRY.getByName(
+      REGISTRY_NAME,
+    ) as unknown as Remote<RegistryContract>;
+    const gateway = this.env.LLM_GATEWAY as unknown as Pick<IdentitySources, "routes">;
+    return {
+      name: async (id) => (await registry.get(id))?.name ?? null,
+      routes: () => gateway.routes(),
+    };
+  }
+
+  /**
+   * One fact of the identity (#283), and whether it was just read. A source that fails, or takes
+   * longer than IDENTITY_TIMEOUT_MS, gives the last value seen, or null if it never answered: a
+   * turn neither fails nor waits for it, as when a partial rollback leaves an older llm-gateway.
+   */
+  async #lookup<T>(
+    key: string,
+    read: () => Promise<T>,
+  ): Promise<{ value: T | null; fresh: boolean }> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const value = await Promise.race([
+        read(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("timed out")), IDENTITY_TIMEOUT_MS);
+        }),
+      ]);
+      return { value, fresh: true };
+    } catch (error) {
+      console.error(`AgentHost: reading ${key} failed; using the last one`, errorName(error));
+      return { value: this.#get<T | null>(key, null), fresh: false };
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   async #vaultContext(): Promise<CompiledContext | null> {

@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AnthropicMessagesProvider, type ResolvedAlias } from "../src/anthropic.ts";
+import {
+  AnthropicMessagesProvider,
+  modelAliasDescription,
+  type ResolvedAlias,
+} from "../src/anthropic.ts";
 import { LlmError } from "../src/errors.ts";
 import type { ChatMessage, LlmEvent, LlmRequest } from "../src/types.ts";
 import { collect, fakeFetch, hangingSse, httpError, json, requestAt, sse } from "./fake-fetch.ts";
@@ -700,6 +704,11 @@ describe("the haiku alias", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("is described for a model's prompt, and a pinned id has no description", () => {
+    expect(modelAliasDescription("haiku")).toBe("the newest Claude Haiku");
+    expect(modelAliasDescription("claude-haiku-5-5")).toBeUndefined();
   });
 
   it("sends and reports the newest Claude Haiku the Models API lists", async () => {

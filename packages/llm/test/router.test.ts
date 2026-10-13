@@ -176,6 +176,28 @@ describe("ModelRouter input from RPC", () => {
     await collect(router.stream("medium", sneaky as never));
     expect(anthropic.requests).toEqual([{ ...request, model: "claude-sonnet-5-5" }]);
   });
+
+  it("lists a tier's candidates whose provider is configured, in order, without calling one", () => {
+    const anthropic = scripted("anthropic", {});
+    const openai = scripted("openai", {});
+    const both = new ModelRouter(routes, {
+      anthropic: anthropic.provider,
+      openai: openai.provider,
+    });
+
+    expect(both.route("frontier")).toEqual(routes.frontier);
+    expect(new ModelRouter(routes, { openai: openai.provider }).route("cheap")).toEqual([
+      { provider: "openai", model: "gpt-6-luna" },
+    ]);
+    expect(new ModelRouter(routes, { openai: openai.provider }).route("medium")).toEqual([]);
+    expect(anthropic.requests).toEqual([]);
+    expect(openai.requests).toEqual([]);
+  });
+
+  it("refuses to list a tier it doesn't know", () => {
+    const router = new ModelRouter(routes, {});
+    expect(() => router.route("huge" as never)).toThrow(LlmError);
+  });
 });
 
 describe("parseRouteTable", () => {

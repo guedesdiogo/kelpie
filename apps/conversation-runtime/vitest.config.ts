@@ -31,8 +31,9 @@ export class ContextStore extends WorkerEntrypoint {
 }
 export default { fetch: () => new Response(null, { status: 404 }) };`,
           },
-          // llm-gateway answers only the deploy probe's ping (#234). It has no other method, so a
-          // model call is refused by the runtime, as the fetch-only stub before it refused one.
+          // llm-gateway answers the deploy probe's ping (#234), and describes each tier's route for an
+          // agent's prompt (#283) as `withIdentity` in test/prompts.ts expects it. It has no other
+          // method, so a model call is refused by the runtime.
           {
             name: "kelpie-llm-gateway",
             modules: true,
@@ -41,6 +42,10 @@ export default { fetch: () => new Response(null, { status: 404 }) };`,
 export class LlmGateway extends WorkerEntrypoint {
   ping() {
     return { ok: true };
+  }
+  routes() {
+    const route = (tier) => [{ provider: "anthropic", model: "claude-test-" + tier }];
+    return { cheap: route("cheap"), medium: route("medium"), frontier: route("frontier") };
   }
 }
 export default { fetch: () => new Response(null, { status: 404 }) };`,
