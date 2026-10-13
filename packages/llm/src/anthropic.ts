@@ -52,9 +52,19 @@ const ANTHROPIC_API = "https://api.anthropic.com";
 
 // The API has no alias for a model family (`claude-haiku-latest` and `haiku` answer 404), so Kelpie
 // resolves these itself: each stands for the newest release whose id has the prefix (issue #199).
-const MODEL_ALIASES = new Map([["haiku", "claude-haiku-"]]);
+const MODEL_ALIASES = new Map([
+  ["haiku", { prefix: "claude-haiku-", description: "the newest Claude Haiku" }],
+]);
 const ALIAS_TTL_MS = 60 * 60 * 1000;
 const ALIAS_CACHE = new Map<string, ResolvedAlias>();
+
+/**
+ * What an alias stands for, for a model's own prompt (#283), or undefined for a pinned id. Fixed
+ * text, never the resolved id: the prompt must not change when the alias cache does.
+ */
+export function modelAliasDescription(model: string): string | undefined {
+  return MODEL_ALIASES.get(model)?.description;
+}
 
 // Models that accept server-side refusal fallback. On a policy decline the API retries the same
 // request on a substitute model chosen by refusal category, inside the same call.
@@ -135,7 +145,7 @@ export class AnthropicMessagesProvider implements LlmProvider {
    * tries the tier's next candidate: a gateway that doesn't serve the list answers 404.
    */
   async #resolve(model: string, signal: AbortSignal | undefined): Promise<string> {
-    const prefix = MODEL_ALIASES.get(model);
+    const prefix = MODEL_ALIASES.get(model)?.prefix;
     if (prefix === undefined) return model;
     const cached = this.#aliases.get(model);
     if (cached && cached.expires > Date.now()) return cached.model;

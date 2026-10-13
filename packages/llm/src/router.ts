@@ -20,6 +20,16 @@ export interface RouteCandidate {
 /** For each tier, the models to try in order. */
 export type RouteTable = Record<ModelTier, RouteCandidate[]>;
 
+/**
+ * A model a tier would use, as llm-gateway's `route` describes it for an agent's own prompt (#283).
+ * `standsFor` spells out an alias, such as `haiku`.
+ */
+export interface RouteModel {
+  provider: ProviderId;
+  model: string;
+  standsFor?: string;
+}
+
 /** A request without the model choice, which the router makes. */
 export type RoutedRequest = Omit<LlmRequest, "model" | "effort">;
 
@@ -44,9 +54,7 @@ export class ModelRouter {
     options: StreamOptions = {},
   ): AsyncIterable<LlmEvent> {
     // RPC callers aren't type-checked, so the tier and the request fields are taken explicitly.
-    if (!MODEL_TIERS.includes(tier)) {
-      throw new LlmError(`Unknown tier: ${String(tier)}`, "bad_request", false);
-    }
+    checkTier(tier);
     let lastError: LlmError | undefined;
     for (const candidate of this.#routes[tier]) {
       const provider = this.#providers[candidate.provider];
@@ -76,6 +84,18 @@ export class ModelRouter {
       lastError ??
       new LlmError(`No provider is configured for the ${tier} tier`, "unavailable", false)
     );
+  }
+
+  /** The tier's candidates `stream` would try, in order: those whose provider is configured. */
+  route(tier: ModelTier): RouteCandidate[] {
+    checkTier(tier);
+    return this.#routes[tier].filter((candidate) => this.#providers[candidate.provider]);
+  }
+}
+
+function checkTier(tier: ModelTier): void {
+  if (!MODEL_TIERS.includes(tier)) {
+    throw new LlmError(`Unknown tier: ${String(tier)}`, "bad_request", false);
   }
 }
 

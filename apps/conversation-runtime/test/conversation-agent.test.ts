@@ -1,6 +1,6 @@
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import type { AgentSettings } from "@kelpie/config";
+import { type AgentSettings, DEFAULT_SETTINGS, REGISTRY_NAME } from "@kelpie/config";
 import { stampOf } from "@kelpie/conversation";
 import type { Usage } from "@kelpie/llm";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -20,6 +20,7 @@ import {
   reply,
   truncate,
 } from "./fakes.ts";
+import { withIdentity } from "./prompts.ts";
 
 // The fake clock starts a minute ahead, so a flush schedule never comes due on its own: tests call
 // flush() the way the schedule would, except the one that checks the schedule itself.
@@ -455,7 +456,29 @@ describe("ConversationAgent turns", () => {
     await stub.flush();
 
     await vi.waitFor(() => expect(world.requests).toHaveLength(2));
-    expect(world.requests[1]?.system).toBe(`You are terse.\n\n${MEMORY_NOTE}`);
+    expect(world.requests[1]?.system).toBe(
+      `${withIdentity("prompt-change", "You are terse.")}\n\n${MEMORY_NOTE}`,
+    );
+    expect(world.requests[1]?.messages[1]).toEqual(neutral("First."));
+  });
+
+  it("replays earlier replies without native output after the agent is renamed (#283)", async () => {
+    const world = use(fakeWorld([reply("First."), reply("Second.")]));
+    const registry = env.REGISTRY.getByName(REGISTRY_NAME);
+    await registry.add("renamed", "Bia", owner);
+    const stub = agent("renamed");
+    await stub.ingest(message("m1", "one?", { agentId: "renamed" }));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["First."]));
+
+    await registry.rename("renamed", "Bia Assistente", owner);
+    await stub.ingest(message("m2", "two?", { agentId: "renamed" }));
+    await stub.flush();
+
+    await vi.waitFor(() => expect(world.requests).toHaveLength(2));
+    expect(world.requests[1]?.system).toBe(
+      `${withIdentity("renamed", DEFAULT_SETTINGS.systemPrompt, { name: "Bia Assistente" })}\n\n${MEMORY_NOTE}`,
+    );
     expect(world.requests[1]?.messages[1]).toEqual(neutral("First."));
   });
 
@@ -511,8 +534,9 @@ describe("ConversationAgent turns", () => {
     await stub.flush();
 
     await vi.waitFor(() => expect(world.requests).toHaveLength(2));
-    expect(world.requests[0]?.system).not.toBe(`You are terse.\n\n${MEMORY_NOTE}`);
-    expect(world.requests[1]?.system).toBe(`You are terse.\n\n${MEMORY_NOTE}`);
+    const terse = `${withIdentity("prompt-mid-turn", "You are terse.")}\n\n${MEMORY_NOTE}`;
+    expect(world.requests[0]?.system).not.toBe(terse);
+    expect(world.requests[1]?.system).toBe(terse);
   });
 
   it("starts a turn with the agent's settings as they are at the flush", async () => {
@@ -525,7 +549,7 @@ describe("ConversationAgent turns", () => {
 
     await vi.waitFor(() => expect(world.requests).toHaveLength(1));
     expect(world.requests[0]).toMatchObject({
-      system: `Be brief.\n\n${MEMORY_NOTE}`,
+      system: `${withIdentity("flush-settings", "Be brief.")}\n\n${MEMORY_NOTE}`,
       maxOutputTokens: 64,
     });
   });

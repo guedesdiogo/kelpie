@@ -2,7 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { fromNdjsonStream, type LlmEvent, type RoutedRequest } from "@kelpie/llm";
 import type { Question } from "@kelpie/qualifier";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { embedWith, pingWith, providerConfig, qualifyWith } from "../src/index.ts";
+import { embedWith, pingWith, providerConfig, qualifyWith, routesWith } from "../src/index.ts";
 
 // The Worker runs in the test's isolate, so stubbing the global fetch stands in for the provider.
 // The stream is built from Anthropic's documented event format, not recorded.
@@ -524,5 +524,32 @@ describe("ping", () => {
     for (const change of broken) {
       expect(() => pingWith({ ...base, ...change } as GatewayEnv)).toThrow();
     }
+  });
+});
+
+describe("routes", () => {
+  type GatewayEnv = Parameters<typeof routesWith>[0];
+
+  it("lists each tier's models over RPC, an alias spelled out, and calls no provider", async () => {
+    const fetched = vi.spyOn(globalThis, "fetch");
+    // Only Anthropic has a key in the tests, so the OpenAI candidates are left out.
+    expect(await exports.LlmGateway.routes()).toEqual({
+      cheap: [{ provider: "anthropic", model: "haiku", standsFor: "the newest Claude Haiku" }],
+      medium: [{ provider: "anthropic", model: "claude-sonnet-5-5" }],
+      frontier: [{ provider: "anthropic", model: "claude-opus-5-5" }],
+    });
+    expect(fetched).not.toHaveBeenCalled();
+  });
+
+  it("lists every configured provider in the route's order", () => {
+    const both = { ...(env as GatewayEnv), OPENAI_API_KEY: "sk-test" };
+    expect(routesWith(both).frontier).toEqual([
+      { provider: "anthropic", model: "claude-opus-5-5" },
+      { provider: "openai", model: "gpt-6-astra" },
+    ]);
+    const { ANTHROPIC_API_KEY: _key, ...openaiOnly } = both;
+    expect(routesWith(openaiOnly as GatewayEnv).cheap).toEqual([
+      { provider: "openai", model: "gpt-6-luna" },
+    ]);
   });
 });

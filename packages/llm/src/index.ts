@@ -1,6 +1,7 @@
 export {
   type AnthropicConfig,
   AnthropicMessagesProvider,
+  modelAliasDescription,
   type ResolvedAlias,
 } from "./anthropic.ts";
 export {
@@ -25,6 +26,7 @@ export {
   parseRouteTable,
   type RouteCandidate,
   type RoutedRequest,
+  type RouteModel,
   type RouteTable,
 } from "./router.ts";
 export type * from "./types.ts";

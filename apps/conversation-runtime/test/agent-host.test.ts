@@ -1,10 +1,14 @@
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { DEFAULT_SETTINGS, SETUP_AGENT_ID } from "@kelpie/config";
+import { DEFAULT_SETTINGS, REGISTRY_NAME, SETUP_AGENT_ID } from "@kelpie/config";
 import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
 import { afterEach, describe, expect, it } from "vitest";
-import { replaceContextStoreForTesting } from "../src/agent-host/agent-host.ts";
+import {
+  replaceContextStoreForTesting,
+  replaceIdentitySourcesForTesting,
+} from "../src/agent-host/agent-host.ts";
 import { SETUP_PROMPT } from "../src/setup-agent.ts";
+import { withIdentity } from "./prompts.ts";
 
 const host = (id: string) => env.AGENT_HOST.getByName(id);
 const owner = { userId: "u-owner", role: "owner", via: "admin-api" } as const;
@@ -391,11 +395,72 @@ describe("AgentHost with a vault", () => {
     writeNote: async () => ({ ok: false, reason: "vault_off" }),
   });
 
-  afterEach(() => replaceContextStoreForTesting(undefined));
+  afterEach(() => {
+    replaceContextStoreForTesting(undefined);
+    replaceIdentitySourcesForTesting(undefined);
+  });
+
+  it("opens the prompt with who the agent is: its Registry name, its role, tier and route (#283)", async () => {
+    const stub = host("named-agent");
+    // Until the Registry lists it, the agent goes by its id.
+    expect((await stub.turnConfig()).settings.systemPrompt).toBe(
+      withIdentity("named-agent", DEFAULT_SETTINGS.systemPrompt),
+    );
+
+    const registry = env.REGISTRY.getByName(REGISTRY_NAME);
+    await registry.add("named-agent", "Bia", owner);
+    await stub.configure({ tier: "medium" }, owner);
+    const named = (await stub.turnConfig()).settings.systemPrompt;
+    expect(named).toBe(
+      withIdentity("named-agent", DEFAULT_SETTINGS.systemPrompt, { name: "Bia", tier: "medium" }),
+    );
+    expect(named).toContain("You run on Kelpie's medium tier: anthropic claude-test-medium.");
+
+    // A rename reaches the next turn, and the owner's settings still hold only their prompt.
+    await registry.rename("named-agent", "Bia Assistente", owner);
+    expect((await stub.turnConfig()).settings.systemPrompt).toContain(
+      "You are Bia Assistente, one of the owner's agents on Kelpie",
+    );
+    expect((await stub.config()).settings.systemPrompt).toBe(DEFAULT_SETTINGS.systemPrompt);
+  });
+
+  it("keeps the last name and route when the Registry or llm-gateway fails, and still answers", async () => {
+    const stub = host("identity-outage");
+    await env.REGISTRY.getByName(REGISTRY_NAME).add("identity-outage", "Bia", owner);
+    const seen = (await stub.turnConfig()).settings.systemPrompt;
+    expect(seen).toBe(
+      withIdentity("identity-outage", DEFAULT_SETTINGS.systemPrompt, { name: "Bia" }),
+    );
+
+    // A partial rollback leaves an llm-gateway without `routes`, and the Registry may be resetting.
+    replaceIdentitySourcesForTesting({
+      name: async () => {
+        throw new Error("Durable Object reset because its code was updated");
+      },
+      routes: async () => {
+        throw new TypeError('The RPC receiver does not implement the method "routes".');
+      },
+    });
+    expect((await stub.turnConfig()).settings.systemPrompt).toBe(seen);
+
+    // An agent whose sources never answered goes by its id, with no model named.
+    const never = (await host("identity-never").turnConfig()).settings.systemPrompt;
+    expect(never).toContain("You are identity-never, one of the owner's agents on Kelpie");
+    expect(never).not.toContain("You run on");
+  });
+
+  it("tells the setup agent its own role, under its seeded name", async () => {
+    expect((await host(SETUP_AGENT_ID).turnConfig()).settings.systemPrompt).toBe(
+      withIdentity(SETUP_AGENT_ID, SETUP_PROMPT, { name: "Setup" }),
+    );
+  });
 
   it("runs on the configured prompt while the vault has nothing for the agent", async () => {
     expect(await host("empty-vault").turnConfig()).toEqual({
-      settings: DEFAULT_SETTINGS,
+      settings: {
+        ...DEFAULT_SETTINGS,
+        systemPrompt: withIdentity("empty-vault", DEFAULT_SETTINGS.systemPrompt),
+      },
       promptVersion: 0,
     });
   });
@@ -413,7 +478,10 @@ describe("AgentHost with a vault", () => {
     );
     const first = await stub.turnConfig();
     expect(first.settings.systemPrompt).toBe(
-      "# Kelpie\n\nWarm and brief.\n\n# Rules (AGENTS.md)\n\nReply in PT-BR.\n\n# Skills in your vault\n\n- recipes: Finds recipes.",
+      withIdentity(
+        "vault-agent",
+        "# Kelpie\n\nWarm and brief.\n\n# Rules (AGENTS.md)\n\nReply in PT-BR.\n\n# Skills in your vault\n\n- recipes: Finds recipes.",
+      ),
     );
     expect(first.promptVersion).toBe(1);
     expect((await stub.turnConfig()).promptVersion).toBe(1);
@@ -423,7 +491,7 @@ describe("AgentHost with a vault", () => {
     // An edit to the persona, made outside Kelpie, reaches the next turn with a new version.
     replaceContextStoreForTesting(vaultOf({ persona: "# Kelpie\n\nNow playful." }));
     expect(await stub.turnConfig()).toMatchObject({
-      settings: { systemPrompt: "# Kelpie\n\nNow playful." },
+      settings: { systemPrompt: withIdentity("vault-agent", "# Kelpie\n\nNow playful.") },
       promptVersion: 2,
     });
   });
@@ -436,7 +504,9 @@ describe("AgentHost with a vault", () => {
     await seedState(stub, { defaultPrompt: "You are an older assistant." });
 
     expect(await stub.turnConfig()).toMatchObject({
-      settings: { systemPrompt: "# Kelpie\n\nWarm and brief." },
+      settings: {
+        systemPrompt: withIdentity("vault-persona-default-edited", "# Kelpie\n\nWarm and brief."),
+      },
       promptVersion: 1,
     });
   });
@@ -452,7 +522,7 @@ describe("AgentHost with a vault", () => {
       },
     });
     expect(await stub.turnConfig()).toMatchObject({
-      settings: { systemPrompt: "# Steady" },
+      settings: { systemPrompt: withIdentity("vault-outage", "# Steady") },
       promptVersion: 1,
     });
   });
