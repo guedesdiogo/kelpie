@@ -83,8 +83,11 @@ export class AnthropicMessagesProvider implements LlmProvider {
       ...config.headers,
     };
     this.#client = new Anthropic({
-      // `null` keeps the SDK from reading an API key from the environment beside the token.
-      ...(subscription ? { apiKey: null, authToken: config.authToken } : { apiKey: config.apiKey }),
+      // `null` keeps the SDK from reading the other credential from `process.env`, which holds a
+      // Worker's vars and secrets, and sending it beside this one (issue #270).
+      ...(subscription
+        ? { apiKey: null, authToken: config.authToken }
+        : { apiKey: config.apiKey, authToken: null }),
       ...(config.baseURL ? { baseURL: config.baseURL } : {}),
       ...(Object.keys(headers).length > 0 ? { defaultHeaders: headers } : {}),
       ...(config.fetch ? { fetch: config.fetch } : {}),

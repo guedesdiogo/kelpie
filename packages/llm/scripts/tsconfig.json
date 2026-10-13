@@ -1,0 +1,5 @@
+{
+  // The package's settings, so the scripts compile against the same libraries as src/.
+  "extends": "../tsconfig.json",
+  "include": ["./**/*.ts"]
+}
