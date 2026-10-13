@@ -110,7 +110,10 @@ function finishOf(events: LlmEvent[]) {
 }
 
 describe("AnthropicMessagesProvider", () => {
-  afterEach(() => vi.unstubAllEnvs());
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
 
   it("replays its own reply verbatim on the next turn", async () => {
     const { fetch, calls } = fakeFetch(sse(toolTurn), sse(toolTurn));
@@ -207,6 +210,40 @@ describe("AnthropicMessagesProvider", () => {
     const call = requestAt(calls, 0);
     expect(call.headers.get("x-api-key")).toBe("sk-ant-test");
     expect(call.headers.has("authorization")).toBe(false);
+  });
+
+  it("refuses to start with request headers from the environment, without quoting them", async () => {
+    // The SDK applies these after its own auth headers, and no option turns them off (issue #276).
+    vi.stubEnv("ANTHROPIC_CUSTOM_HEADERS", "Authorization: Bearer from-env");
+    const { fetch } = fakeFetch(sse(toolTurn));
+    expect(() => provider(fetch)).toThrow(
+      /^ANTHROPIC_CUSTOM_HEADERS is set, and Kelpie takes no request headers from the environment$/,
+    );
+
+    // Blank counts as unset, as it does for the SDK.
+    vi.stubEnv("ANTHROPIC_CUSTOM_HEADERS", " ");
+    expect(finishOf(await collect(provider(fetch).stream(request()))).reason).toBe("tool_calls");
+  });
+
+  it("logs nothing, whatever ANTHROPIC_LOG asks for", async () => {
+    // At debug the SDK logs each request's headers and body, the gateway token included (issue #276).
+    // The spy goes in first: the SDK binds console's methods when it builds its logger.
+    vi.stubEnv("ANTHROPIC_LOG", "debug");
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    const { fetch } = fakeFetch(sse(toolTurn));
+    await collect(provider(fetch).stream(request()));
+
+    expect(debug).not.toHaveBeenCalled();
+  });
+
+  it("calls Anthropic's API when given no base URL, whatever ANTHROPIC_BASE_URL says", async () => {
+    vi.stubEnv("ANTHROPIC_BASE_URL", "https://elsewhere.example");
+    const { fetch, calls } = fakeFetch(sse(toolTurn));
+    await collect(
+      new AnthropicMessagesProvider({ apiKey: "sk-ant-test", fetch }).stream(request()),
+    );
+
+    expect(requestAt(calls, 0).url).toBe("https://api.anthropic.com/v1/messages?beta=true");
   });
 
   it("sends a request's context after the conversation, and caches the conversation without it", async () => {

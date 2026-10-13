@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { BetaMessageStreamParams } from "@anthropic-ai/sdk/resources/beta/messages/messages";
+import { refuseEnvironmentHeaders } from "./env.ts";
 import { errorFromStatus, LlmError } from "./errors.ts";
 import type {
   AssistantMessage,
@@ -27,7 +28,10 @@ export type AnthropicConfig = (
    */
   | { authToken: string; apiKey?: never }
 ) & {
-  /** AI Gateway passthrough: `https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/anthropic`. */
+  /**
+   * AI Gateway passthrough: `https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/anthropic`.
+   * Defaults to the Anthropic API.
+   */
   baseURL?: string;
   /** Extra headers, such as `cf-aig-authorization` for an authenticated gateway. */
   headers?: Record<string, string>;
@@ -43,6 +47,8 @@ export interface ResolvedAlias {
   model: string;
   expires: number;
 }
+
+const ANTHROPIC_API = "https://api.anthropic.com";
 
 // The API has no alias for a model family (`claude-haiku-latest` and `haiku` answer 404), so Kelpie
 // resolves these itself: each stands for the newest release whose id has the prefix (issue #199).
@@ -75,6 +81,7 @@ export class AnthropicMessagesProvider implements LlmProvider {
   readonly #betas: readonly string[];
 
   constructor(config: AnthropicConfig) {
+    refuseEnvironmentHeaders("ANTHROPIC_CUSTOM_HEADERS");
     this.#aliases = config.aliasCache ?? ALIAS_CACHE;
     const subscription = config.authToken !== undefined;
     this.#betas = subscription ? [OAUTH_BETA] : [];
@@ -88,11 +95,15 @@ export class AnthropicMessagesProvider implements LlmProvider {
       ...(subscription
         ? { apiKey: null, authToken: config.authToken }
         : { apiKey: config.apiKey, authToken: null }),
-      ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+      // Explicit, so ANTHROPIC_BASE_URL can't send the credential elsewhere (issue #276).
+      baseURL: config.baseURL || ANTHROPIC_API,
       ...(Object.keys(headers).length > 0 ? { defaultHeaders: headers } : {}),
       ...(config.fetch ? { fetch: config.fetch } : {}),
       // The router falls back to another provider, so one SDK retry is enough.
       maxRetries: config.maxRetries ?? 1,
+      // Off, so ANTHROPIC_LOG can't log requests' headers and bodies, nor the SDK quote a stream it
+      // can't parse. The gateway logs failures itself (issue #276).
+      logLevel: "off",
     });
   }
 

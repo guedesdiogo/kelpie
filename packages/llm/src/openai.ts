@@ -3,6 +3,7 @@ import type {
   Response as OpenAIResponse,
   ResponseInputItem,
 } from "openai/resources/responses/responses";
+import { refuseEnvironmentHeaders } from "./env.ts";
 import { errorFromStatus, LlmError } from "./errors.ts";
 import type {
   AssistantMessage,
@@ -28,6 +29,22 @@ export interface OpenAIConfig {
   fetch?: typeof fetch;
 }
 
+const OPENAI_API = "https://api.openai.com/v1";
+
+/**
+ * Options the SDK would otherwise take from `process.env`, which holds a Worker's vars and secrets
+ * (issue #276). OPENAI_BASE_URL could send the key elsewhere, OPENAI_ORG_ID and OPENAI_PROJECT_ID
+ * add headers to every call, and OPENAI_LOG at debug logs requests' headers and bodies.
+ */
+export function pinnedClientOptions(baseURL: string | undefined) {
+  return {
+    baseURL: baseURL || OPENAI_API,
+    organization: null,
+    project: null,
+    logLevel: "off",
+  } as const;
+}
+
 /**
  * OpenAI Responses, streamed and stateless: nothing is stored at OpenAI, so each turn resends the
  * previous output items, including the encrypted reasoning.
@@ -37,9 +54,10 @@ export class OpenAIResponsesProvider implements LlmProvider {
   readonly #client: OpenAI;
 
   constructor(config: OpenAIConfig) {
+    refuseEnvironmentHeaders("OPENAI_CUSTOM_HEADERS");
     this.#client = new OpenAI({
       apiKey: config.apiKey,
-      ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+      ...pinnedClientOptions(config.baseURL),
       ...(config.headers ? { defaultHeaders: config.headers } : {}),
       ...(config.fetch ? { fetch: config.fetch } : {}),
       // The router falls back to another provider, so one SDK retry is enough.
