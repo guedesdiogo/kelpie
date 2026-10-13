@@ -37,7 +37,9 @@ declare module "node:child_process" {
 
 declare module "node:fs" {
   export function readFileSync(path: string, encoding: "utf8"): string;
-  export function writeFileSync(path: string, data: string): void;
+  export function writeFileSync(path: string, data: string, options?: { mode?: number }): void;
+  export function existsSync(path: string): boolean;
+  export function statSync(path: string): { mode: number };
   export function appendFileSync(path: string, data: string): void;
   export function rmSync(path: string, options?: { force?: boolean; recursive?: boolean }): void;
   export function mkdtempSync(prefix: string): string;

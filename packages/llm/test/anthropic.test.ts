@@ -327,6 +327,18 @@ describe("AnthropicMessagesProvider", () => {
     expect(requestAt(calls, 0).headers.has("anthropic-beta")).toBe(false);
   });
 
+  it("retries a retryable failure once with an API key, before the router falls back", async () => {
+    const limited = () =>
+      Response.json(
+        { type: "error", error: { type: "rate_limit_error", message: "Slow down" } },
+        { status: 429, headers: { "retry-after-ms": "1" } },
+      );
+    const { fetch, calls } = fakeFetch(limited, sse(toolTurn));
+    await collect(provider(fetch).stream(request()));
+
+    expect(calls).toHaveLength(2);
+  });
+
   it("replays a reply kept without its native output as neutral text", async () => {
     const { fetch, calls } = fakeFetch(sse(toolTurn));
     const messages: ChatMessage[] = [
@@ -548,6 +560,62 @@ describe("AnthropicMessagesProvider", () => {
 
     await expect(run).rejects.toMatchObject({ code: "aborted", retryable: false });
     expect(seen).toEqual([{ type: "text", delta: "Hi" }]);
+  });
+});
+
+// Only the smoke script uses a subscription token, to check whether Anthropic accepts one from
+// Kelpie (#258). Kelpie says who it is: nothing it sends names Claude Code.
+describe("a Claude subscription token", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  function subscribed(fetchFn: typeof fetch, maxRetries?: number) {
+    return new AnthropicMessagesProvider({
+      authToken: "sk-ant-oat-test",
+      fetch: fetchFn,
+      ...(maxRetries === undefined ? {} : { maxRetries }),
+    });
+  }
+
+  it("goes as a bearer with the OAuth beta, and nothing that names Claude Code", async () => {
+    // The SDK reads an API key from the environment unless told not to.
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-from-env");
+    const { fetch, calls } = fakeFetch(sse(toolTurn));
+    await collect(subscribed(fetch).stream(request({ model: "claude-haiku-5-5" })));
+
+    const call = requestAt(calls, 0);
+    expect(call.headers.get("authorization")).toBe("Bearer sk-ant-oat-test");
+    expect(call.headers.has("x-api-key")).toBe(false);
+    expect(call.headers.get("anthropic-beta")).toBe("oauth-2025-04-20");
+    const sent = [...call.headers.entries()].map(([name, value]) => `${name}: ${value}`);
+    expect([...sent, JSON.stringify(call.body)].join("\n")).not.toMatch(/claude[ -]?(code|cli)/i);
+  });
+
+  it("keeps the OAuth beta beside the refusal fallback's", async () => {
+    const { fetch, calls } = fakeFetch(sse(toolTurn));
+    await collect(subscribed(fetch).stream(request()));
+
+    expect(requestAt(calls, 0).headers.get("anthropic-beta")?.split(",")).toEqual([
+      "server-side-fallback-2026-07-01",
+      "oauth-2025-04-20",
+    ]);
+  });
+
+  it("reports a refusal from its only request when retries are off", async () => {
+    // A 429 the SDK would otherwise retry: no `x-should-retry: false`.
+    const refused = () =>
+      Response.json(
+        { type: "error", error: { type: "rate_limit_error", message: "Error" } },
+        { status: 429, headers: { "request-id": "req_test" } },
+      );
+    const { fetch, calls } = fakeFetch(refused, refused);
+    const failure = collect(subscribed(fetch, 0).stream(request({ model: "claude-haiku-5-5" })));
+
+    await expect(failure).rejects.toMatchObject({
+      code: "rate_limited",
+      status: 429,
+      message: expect.stringContaining("rate_limit_error"),
+    });
+    expect(calls).toHaveLength(1);
   });
 });
 

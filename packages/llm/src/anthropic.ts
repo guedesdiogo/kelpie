@@ -18,8 +18,15 @@ type ContentBlock = Anthropic.Beta.BetaContentBlock;
 type ContentBlockParam = Anthropic.Beta.BetaContentBlockParam;
 type MessageParam = Anthropic.Beta.BetaMessageParam;
 
-export interface AnthropicConfig {
-  apiKey: string;
+export type AnthropicConfig = (
+  | { apiKey: string; authToken?: never }
+  /**
+   * A Claude subscription token instead of an API key, sent as a bearer with the OAuth beta. Only
+   * the smoke script sets it, to check whether Anthropic accepts one from Kelpie (#258): ADR-0008
+   * reaches models with API keys.
+   */
+  | { authToken: string; apiKey?: never }
+) & {
   /** AI Gateway passthrough: `https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/anthropic`. */
   baseURL?: string;
   /** Extra headers, such as `cf-aig-authorization` for an authenticated gateway. */
@@ -27,7 +34,9 @@ export interface AnthropicConfig {
   fetch?: typeof fetch;
   /** Where resolved aliases are kept. Defaults to one cache per isolate. */
   aliasCache?: Map<string, ResolvedAlias>;
-}
+  /** The SDK's retries of a retryable failure: 1 unless set. */
+  maxRetries?: number;
+};
 
 /** A model alias resolved to a model id, trusted until `expires` (epoch milliseconds). */
 export interface ResolvedAlias {
@@ -50,6 +59,8 @@ const REFUSAL_FALLBACK_MODELS = new Set([
   "claude-sonnet-5-5",
 ]);
 const REFUSAL_FALLBACK_BETA = "server-side-fallback-2026-07-01";
+// What the API asks of a request that carries a subscription token as its bearer (#258).
+const OAUTH_BETA = "oauth-2025-04-20";
 
 /**
  * Anthropic Messages, streamed. Thinking is left at the model default (adaptive where available),
@@ -61,19 +72,27 @@ export class AnthropicMessagesProvider implements LlmProvider {
   readonly id = "anthropic";
   readonly #client: Anthropic;
   readonly #aliases: Map<string, ResolvedAlias>;
+  readonly #betas: readonly string[];
 
   constructor(config: AnthropicConfig) {
     this.#aliases = config.aliasCache ?? ALIAS_CACHE;
+    const subscription = config.authToken !== undefined;
+    this.#betas = subscription ? [OAUTH_BETA] : [];
+    const headers = {
+      ...(subscription ? { "anthropic-beta": OAUTH_BETA } : {}),
+      ...config.headers,
+    };
     this.#client = new Anthropic({
-      apiKey: config.apiKey,
-      // `null` keeps the SDK from taking ANTHROPIC_AUTH_TOKEN from `process.env`, which holds a
-      // Worker's vars and secrets, and sending it as a bearer beside the key (issue #270).
-      authToken: null,
+      // `null` keeps the SDK from reading the other credential from `process.env`, which holds a
+      // Worker's vars and secrets, and sending it beside this one (issue #270).
+      ...(subscription
+        ? { apiKey: null, authToken: config.authToken }
+        : { apiKey: config.apiKey, authToken: null }),
       ...(config.baseURL ? { baseURL: config.baseURL } : {}),
-      ...(config.headers ? { defaultHeaders: config.headers } : {}),
+      ...(Object.keys(headers).length > 0 ? { defaultHeaders: headers } : {}),
       ...(config.fetch ? { fetch: config.fetch } : {}),
       // The router falls back to another provider, so one SDK retry is enough.
-      maxRetries: 1,
+      maxRetries: config.maxRetries ?? 1,
     });
   }
 
@@ -81,9 +100,12 @@ export class AnthropicMessagesProvider implements LlmProvider {
     const model = await this.#resolve(request.model, options.signal);
     let final: Anthropic.Beta.BetaMessage;
     try {
-      const stream = this.#client.beta.messages.stream(toParams({ ...request, model }), {
-        ...(options.signal ? { signal: options.signal } : {}),
-      });
+      const stream = this.#client.beta.messages.stream(
+        toParams({ ...request, model }, this.#betas),
+        {
+          ...(options.signal ? { signal: options.signal } : {}),
+        },
+      );
       for await (const event of stream) {
         if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
           yield { type: "text", delta: event.delta.text };
@@ -136,8 +158,13 @@ export class AnthropicMessagesProvider implements LlmProvider {
   }
 }
 
-function toParams(request: LlmRequest): BetaMessageStreamParams {
+/**
+ * The request's parameters. `betas` are the provider's own, such as the OAuth beta: the SDK sends a
+ * request's betas as the `anthropic-beta` header, which replaces the client's default one.
+ */
+function toParams(request: LlmRequest, betas: readonly string[]): BetaMessageStreamParams {
   const fallback = REFUSAL_FALLBACK_MODELS.has(request.model);
+  const allBetas = [...(fallback ? [REFUSAL_FALLBACK_BETA] : []), ...betas];
   const messages = request.messages.flatMap((message) => {
     const param = toMessageParam(message);
     // Anthropic rejects an empty turn, such as a refusal that returned nothing.
@@ -162,7 +189,8 @@ function toParams(request: LlmRequest): BetaMessageStreamParams {
         }
       : {}),
     ...(request.effort ? { output_config: { effort: request.effort } } : {}),
-    ...(fallback ? { fallbacks: "default", betas: [REFUSAL_FALLBACK_BETA] } : {}),
+    ...(fallback ? { fallbacks: "default" } : {}),
+    ...(allBetas.length > 0 ? { betas: allBetas } : {}),
   };
 }
 
