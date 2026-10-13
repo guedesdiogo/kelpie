@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-03
 - Issue: [#3](https://github.com/guedesdiogo/kelpie/issues/3)
+- Amended by: [ADR-0037](0037-conversations-through-claude-code.md), the Anthropic subscription goes through Claude Code on the owner's VPS, and the API key may spend a plan's monthly API credits
 
 ## Context
 
