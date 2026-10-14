@@ -675,6 +675,29 @@ describe("ConversationAgent recovery", () => {
     expect(await stub.turns()).toMatchObject([{ status: "delivered", attempts: 2 }]);
   });
 
+  it("resumes a turn started before #286 on its stored tier, the conversation's", async () => {
+    const world = use(fakeWorld([hang(), reply("Again.")]));
+    const stub = agent("recover-old-turn");
+    await stub.ingest(message("m1", "anyone?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(1));
+    // A turn row as a build before #286 wrote it: its settings have a tier and no model.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE turns SET settings = json_remove(json_set(settings, '$.tier', 'medium'), '$.model')",
+      );
+    });
+
+    await evictDurableObject(stub);
+    await runDurableObjectAlarm(stub);
+
+    await vi.waitFor(() => expect(world.sent).toEqual(["Again."]));
+    expect(world.selections.at(-1)).toEqual({
+      area: "conversation",
+      agent: { conversation: { tier: "medium" } },
+    });
+  });
+
   it("gives up after a second eviction before the reply", async () => {
     const world = use(fakeWorld([hang(), hang()]));
     const stub = agent("recover-give-up");

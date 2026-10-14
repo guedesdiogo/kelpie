@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   describeWith,
   embedWith,
+  generateWith,
   pingWith,
   providerConfig,
   qualifyWith,
@@ -629,9 +630,27 @@ describe("model choice (#286)", () => {
     });
   });
 
-  it("keeps the route table's order when ModelDefaults fails, and logs only the error's name", async () => {
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    const broken = {
+  it("sends a basic instance's conversation what a tier alone sent before #286", async () => {
+    await seed({});
+    const bodies: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      anthropic((init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return sseResponse([start, ...text, ...end]);
+      }),
+    );
+    for (const call of ["cheap", { area: "conversation", agent: {} }] as const) {
+      using generation = await exports.LlmGateway.generate(call, request);
+      for await (const _event of fromNdjsonStream(await generation.events())) {
+        // Read to the end.
+      }
+    }
+    expect(bodies[1]).toEqual(bodies[0]);
+    expect(bodies[0]).not.toHaveProperty("output_config");
+  });
+
+  const broken = () =>
+    ({
       ...(env as GatewayEnv),
       MODEL_DEFAULTS: {
         getByName: () => ({
@@ -640,15 +659,27 @@ describe("model choice (#286)", () => {
           },
         }),
       },
-    } as unknown as GatewayEnv;
-    expect(await describeWith(broken, "conversation")).toMatchObject({
-      provider: null,
-      tier: "cheap",
-    });
+    }) as unknown as GatewayEnv;
+
+  it("goes on in the route table's order when ModelDefaults fails, and logs only the error's name", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(anthropic(() => sseResponse([start, ...text, ...end])));
+
+    const generation = generateWith(broken(), { area: "conversation" }, request);
+    const events: LlmEvent[] = [];
+    for await (const event of fromNdjsonStream(generation.events())) events.push(event);
+    expect(events.at(-1)).toMatchObject({ type: "finish", reason: "stop" });
+    expect(fetchSpy.mock.calls.some(isMessages)).toBe(true);
     expect(logged).toHaveBeenCalledWith(
       "llm-gateway: ModelDefaults failed; using the route table's order",
       "TypeError",
     );
+  });
+
+  it("fails a description when ModelDefaults fails, so the agent keeps its last one", async () => {
+    await expect(describeWith(broken(), "conversation")).rejects.toThrow(TypeError);
   });
 
   it("refuses an unknown area, tier or agent setting instead of guessing", async () => {

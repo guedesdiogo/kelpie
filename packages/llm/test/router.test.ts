@@ -207,6 +207,10 @@ describe("ModelRouter input from RPC", () => {
       "anthropic",
       "openai",
     ]);
+    const anthropicOnly = new ModelRouter(routes, { anthropic: anthropic.provider });
+    expect(anthropicOnly.route("cheap", "openai").map((candidate) => candidate.provider)).toEqual([
+      "anthropic",
+    ]);
   });
 
   it("sends the chosen effort before the candidate's own, lowered to what the model takes", async () => {

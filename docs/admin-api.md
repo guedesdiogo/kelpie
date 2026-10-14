@@ -70,7 +70,7 @@ Identity values in answers are masked.
   - `memory` covers its history checkpoints.
 - **What each scope sets:** tier and effort are set per area, so a costlier conversation never makes the agent's memory costlier. `provider` covers both areas, and an area may name its own.
 - **Unset fields** come from the instance's settings, which Story 5.5's tools set, then the defaults:
-  - the provider is the first one llm-gateway saw with a key, pinned then;
+  - the provider is the first one llm-gateway saw with a key, in the cheap tier's order, pinned then. The pin leads every tier, so a route table that lists another provider first in `medium` or `frontier` follows the pin there too;
   - the tier is `cheap`;
   - the effort is the model's own.
 - **An effort a model doesn't take** is lowered to the nearest one it does.

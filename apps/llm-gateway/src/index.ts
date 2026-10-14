@@ -90,19 +90,7 @@ export class Generation extends RpcTarget {
 /** Model access for Kelpie's other Workers, through a service binding. */
 export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
   generate(call: ModelSelection, request: RoutedRequest): Generation {
-    const env = this.env;
-    const router = modelRouter(env);
-    const controller = new AbortController();
-    async function* routed() {
-      const choice = await choiceFor(env, router, call);
-      yield* router.stream(choice, request, { signal: controller.signal });
-    }
-    const events = toNdjsonStream(
-      routed(),
-      () => controller.abort(),
-      (error) => logFailure("generate", error),
-    );
-    return new Generation(events, controller);
+    return generateWith(this.env, call, request);
   }
 
   /**
@@ -147,6 +135,29 @@ export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
 }
 
 /**
+ * One model call. When ModelDefaults can't answer, the call goes on with no instance settings, in
+ * the route table's order, as before #286: a model call never fails for them.
+ */
+export function generateWith(
+  env: GatewayEnv,
+  call: ModelSelection,
+  request: RoutedRequest,
+): Generation {
+  const router = modelRouter(env);
+  const controller = new AbortController();
+  async function* routed() {
+    const choice = await choiceFor(call, () => defaultsOrNone(env, router));
+    yield* router.stream(choice, request, { signal: controller.signal });
+  }
+  const events = toNdjsonStream(
+    routed(),
+    () => controller.abort(),
+    (error) => logFailure("generate", error),
+  );
+  return new Generation(events, controller);
+}
+
+/**
  * For each tier, its candidates whose provider has a key, in the order they are tried, an alias
  * with what it stands for. Like `ping`, it calls no provider: an alias isn't resolved.
  */
@@ -157,7 +168,11 @@ export function routesWith(env: GatewayEnv): Record<ModelTier, RouteModel[]> {
   ) as Record<ModelTier, RouteModel[]>;
 }
 
-/** The trio `area` resolves to, and the models it would try in order. It calls no provider. */
+/**
+ * The trio `area` resolves to, and the models it would try in order. It calls no provider. When
+ * ModelDefaults can't answer, it throws, so the caller keeps the last description it had rather
+ * than one that would change its prompt for a turn.
+ */
 export async function describeWith(
   env: GatewayEnv,
   area: ModelArea,
@@ -165,11 +180,8 @@ export async function describeWith(
   tier?: ModelTier,
 ): Promise<ModelDescription> {
   const router = modelRouter(env);
-  const choice = await choiceFor(env, router, {
-    area,
-    ...(agent ? { agent } : {}),
-    ...(tier ? { tier } : {}),
-  });
+  const call = { area, ...(agent ? { agent } : {}), ...(tier ? { tier } : {}) };
+  const choice = await choiceFor(call, () => defaultsOf(env, router));
   return {
     provider: choice.provider ?? null,
     tier: choice.tier,
@@ -189,9 +201,8 @@ function describeModel({ provider, model }: RouteModel): RouteModel {
  * send it, keeps the route table's order and the candidates' efforts.
  */
 async function choiceFor(
-  env: GatewayEnv,
-  router: ModelRouter,
   call: ModelSelection,
+  defaults: () => Promise<InstanceDefaults>,
 ): Promise<RouteChoice> {
   if (typeof call === "string") return { tier: call };
   const invalid = (what: string) => new LlmError(`Unknown ${what}`, "bad_request", false);
@@ -199,25 +210,29 @@ async function choiceFor(
   if (call.tier !== undefined && !MODEL_TIERS.includes(call.tier)) throw invalid("tier");
   const agent = call.agent === undefined ? undefined : parseModelSettings(call.agent);
   if (agent === null) throw invalid("model setting");
-  const { instance, pinned } = await defaultsFor(env, router);
-  const resolved = resolveModel({
+  const { instance, pinned } = await defaults();
+  return resolveModel({
     area: call.area,
     ...(agent ? { agent } : {}),
     instance,
     pinned,
     ...(call.tier ? { tier: call.tier } : {}),
   });
-  return resolved;
 }
 
 /**
- * The instance's settings and pinned provider. When ModelDefaults can't answer, the call goes on
- * with none, in the route table's order, as before #286: a model call never fails for them.
+ * The instance's settings and pinned provider. With nothing pinned yet, ModelDefaults pins the
+ * first provider with a key in the cheap tier's order, and that pin then leads every tier.
  */
-async function defaultsFor(env: GatewayEnv, router: ModelRouter): Promise<InstanceDefaults> {
+function defaultsOf(env: GatewayEnv, router: ModelRouter): Promise<InstanceDefaults> {
   const withKey = router.route("cheap")[0]?.provider ?? null;
+  return env.MODEL_DEFAULTS.getByName("instance").defaults(withKey);
+}
+
+/** `defaultsOf`, or none when ModelDefaults can't answer, logged by the error's name only. */
+async function defaultsOrNone(env: GatewayEnv, router: ModelRouter): Promise<InstanceDefaults> {
   try {
-    return await env.MODEL_DEFAULTS.getByName("instance").defaults(withKey);
+    return await defaultsOf(env, router);
   } catch (error) {
     console.error(
       "llm-gateway: ModelDefaults failed; using the route table's order",

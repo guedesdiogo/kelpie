@@ -723,6 +723,24 @@ describe("the haiku alias", () => {
     ]);
   });
 
+  it("sends only an effort the resolved model takes, whatever the alias was asked with (#286)", async () => {
+    const oldHaiku = [
+      messageStart("claude-haiku-4-5-20251001", { input_tokens: 10 }),
+      ...textBlock(0, "Hi"),
+      ...messageEnd("end_turn", { output_tokens: 2 }),
+    ];
+    const { fetch, calls } = fakeFetch(
+      modelsPage([["claude-haiku-4-5-20251001", "2025-10-01T00:00:00Z"]]),
+      sse(oldHaiku),
+    );
+    await collect(aliased(fetch).stream(request({ model: "haiku", effort: "low" })));
+
+    const body = requestAt(calls, 1).body as Record<string, unknown>;
+    expect(body).toMatchObject({ model: "claude-haiku-4-5-20251001" });
+    // Haiku 4.5 takes no effort: sending one would be a 400.
+    expect(body).not.toHaveProperty("output_config");
+  });
+
   it("goes by release date, not by the list's order, across pages", async () => {
     const { fetch, calls } = fakeFetch(
       modelsPage(
