@@ -41,6 +41,9 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0035](0035-agent-computer.md) | Agents get a computer: a shell by default, and on request a Cloudflare Sandbox or the owner's VPS, where they code through Claude Code | [#267](https://github.com/guedesdiogo/kelpie/issues/267) |
 | [0036](0036-agent-roles-models-and-subagents.md) | Agents have roles and owners, a model trio per agent and area, and temporary subagents that never exceed their creator | [#282](https://github.com/guedesdiogo/kelpie/issues/282) |
 | [0037](0037-conversations-through-claude-code.md) | Conversations reach Claude through the API key's plan credits first, then through Claude Code on the owner's subscription | [#278](https://github.com/guedesdiogo/kelpie/issues/278) |
+| [0039](0039-routines-as-vault-files.md) | An agent's routines are Markdown files in its vault folder, and each fire creates a task on its board | [#306](https://github.com/guedesdiogo/kelpie/issues/306) |
+| [0040](0040-continue-at-the-tool-bound.md) | When a turn reaches its tool bound, Kelpie offers to continue, and the owner's press grants one more bound | [#307](https://github.com/guedesdiogo/kelpie/issues/307) |
+| [0041](0041-auto-tier-by-qualifier.md) | An agent's tier may be `auto`, and its qualifier then picks the tier for each turn | [#308](https://github.com/guedesdiogo/kelpie/issues/308) |
 
 ## Format
 

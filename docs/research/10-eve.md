@@ -1,5 +1,12 @@
 > Research note written on 2026-10-13 for [#300](https://github.com/guedesdiogo/kelpie/issues/300). It compares Vercel's eve with Kelpie at [`1b1d945`](https://github.com/guedesdiogo/kelpie/tree/1b1d945).
 
+> **Outcome (2026-10-13).** The owner answered the three questions of §6, and the decisions are recorded in three ADRs:
+> - Q1, «sim»: routines are files in the agent's vault folder ([ADR-0039](../adr/0039-routines-as-vault-files.md)).
+> - Q2, «sim»: Kelpie offers to continue at the tool bound ([ADR-0040](../adr/0040-continue-at-the-tool-bound.md)).
+> - Q3: the owner chose an `auto` setting in which the agent's qualifier, Jev or Clef, picks the model, where the note had recommended waiting. The qualifier picks the tier for each turn ([ADR-0041](../adr/0041-auto-tier-by-qualifier.md)).
+>
+> The analysis below is kept as the historical record.
+
 # 10 — eve: what an agent-as-a-directory framework teaches Kelpie
 
 > **Read-only research, done on 2026-10-13.** Nothing was installed or run. eve's source was read at commit [`624be47`](https://github.com/vercel/eve/tree/624be476e38cb40a4a21ec1ff7ed397cb389c047) (npm `eve` 0.79.0, Apache-2.0, public beta since 2026-06-17).

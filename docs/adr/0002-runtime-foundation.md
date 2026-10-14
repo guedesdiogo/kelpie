@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-03
 - Issue: [#8](https://github.com/guedesdiogo/kelpie/issues/8)
+- Amended by: [ADR-0039](0039-routines-as-vault-files.md), `AgentHost` holds a routine's timer and its state, and the routine itself is a file in the vault
 
 ## Context
 
