@@ -142,5 +142,11 @@ export interface ChannelFormsContract {
   >;
 }
 
-/** What the setup agent's Worker calls (Story 3.11): it only opens a form. */
-export type SetupFormsContract = Pick<ChannelFormsContract, "createTelegramForm">;
+/**
+ * What the setup agent's Worker calls (Story 3.11): it opens a form, and reads the runner's state,
+ * which holds no secret. Describing, redeeming and registering stay with the admin API.
+ */
+export type SetupFormsContract = Pick<
+  ChannelFormsContract,
+  "createTelegramForm" | "createRunnerForm" | "describeRunner"
+>;

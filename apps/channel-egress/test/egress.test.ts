@@ -53,7 +53,7 @@ afterEach(() => {
 });
 
 describe("SetupForms", () => {
-  it("only opens a Telegram form, which the admin API's entrypoint then serves", async () => {
+  it("only opens forms, which the admin API's entrypoint then serves", async () => {
     const form = await exports.SetupForms.createTelegramForm("sales");
     if (!form.ok) throw new Error("form refused");
     expect(await exports.ChannelForms.describeForm(form.token)).toEqual({
@@ -65,10 +65,11 @@ describe("SetupForms", () => {
       ok: false,
       reason: "invalid_input",
     });
-    // The setup agent's Worker binds it: it can't describe, redeem or register anything.
+    // The setup agent's Worker binds it: it can't describe, redeem or register anything. It opens the
+    // runner's form too, and reads the runner's state, which holds no secret (#294).
     expect(
       Object.getOwnPropertyNames(SetupForms.prototype).filter((name) => name !== "constructor"),
-    ).toEqual(["createTelegramForm"]);
+    ).toEqual(["createTelegramForm", "createRunnerForm", "describeRunner"]);
   });
 });
 

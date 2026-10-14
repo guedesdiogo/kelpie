@@ -198,6 +198,23 @@ describe("the runner's secure form", () => {
   });
 });
 
+describe("the setup agent's entrypoint", () => {
+  it("opens the runner's form, which the admin API then serves, and reads the runner's state", async () => {
+    const form = await exports.SetupForms.createRunnerForm();
+    if (!form.ok) throw new Error(`form refused: ${form.reason}`);
+    expect(await exports.ChannelForms.describeForm(form.token)).toEqual({
+      ok: true,
+      agentId: "vps",
+      kind: "runner",
+    });
+    await storeRunnerSecret(READY);
+    expect(await exports.SetupForms.describeRunner()).toEqual({
+      ok: true,
+      runner: { state: "ready", version: "0.1.0", protocol: RUNNER_PROTOCOL },
+    });
+  });
+});
+
 describe("without the runner's binding", () => {
   // As channel-egress is deployed when the instance has no RUNNER_VPC_SERVICE_ID (#294).
   const unbound = () =>

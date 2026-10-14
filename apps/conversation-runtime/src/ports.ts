@@ -153,7 +153,8 @@ function productionPorts(env: Env): ConversationPorts {
   const egress = env.CHANNEL_EGRESS as unknown as ChannelEgressContract;
   // A service binding to context-store's ContextStore entrypoint.
   const contextStore = env.CONTEXT_STORE as unknown as ContextStoreContract;
-  // A service binding to channel-egress's SetupForms entrypoint, which only opens a form.
+  // A service binding to channel-egress's SetupForms entrypoint, which only opens a form and reads
+  // the runner's state, which holds no secret.
   const forms = env.SETUP_FORMS as unknown as SetupFormsContract;
   // Typed as the contracts the admin API binds, so both clients of the commands match.
   const registry = env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<RegistryContract>;
@@ -176,8 +177,8 @@ function productionPorts(env: Env): ConversationPorts {
       createTelegramForm: (agentId) => forms.createTelegramForm(agentId),
       registerTelegramWebhook: notBound,
       describeTelegramBot: notBound,
-      createRunnerForm: notBound,
-      describeRunner: notBound,
+      createRunnerForm: () => forms.createRunnerForm(),
+      describeRunner: () => forms.describeRunner(),
     },
     models: {
       providers: () => gatewayAdmin.providers(),
@@ -279,8 +280,8 @@ function productionPorts(env: Env): ConversationPorts {
 
 /**
  * What the setup agent's tools never call: the commands that need the Directory, the vault's admin
- * entrypoint, or channel-egress beyond opening a form. Binding the Directory here would make ingress
- * and this Worker bind each other.
+ * entrypoint, or channel-egress beyond opening a form and reading the runner's state. Binding the
+ * Directory here would make ingress and this Worker bind each other.
  */
 function notBound(): Promise<never> {
   return Promise.reject(new Error("not bound in conversation-runtime"));
