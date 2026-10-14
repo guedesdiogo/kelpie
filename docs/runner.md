@@ -1,0 +1,84 @@
+# The runner
+
+The runner is the process on the owner's VPS that Kelpie's Workers call to use that machine ([ADR-0035](adr/0035-agent-computer.md)). Its code is in `tools/runner`. It runs with Bun, from a checkout of this repository, and needs no `bun install`.
+
+- **It listens on `127.0.0.1` only.** The server opens no port: Workers reach it through a Cloudflare Tunnel and a Workers VPC Service.
+- **Every request needs its secret**, as `Authorization: Bearer <secret>`. Without it the runner answers 401, on any path.
+- **It never calls Kelpie.** Its answers go back on the requests Workers make (#294).
+- **What it serves today:** `GET /health`, which answers its version and protocol version:
+
+  ```json
+  { "ok": true, "version": "0.1.0", "protocol": 1 }
+  ```
+
+## Setting it up
+
+On the VPS, as the user whose claude.ai login Claude Code uses:
+
+1. **Install Bun** and clone this repository into `~/kelpie`:
+
+   ```bash
+   curl -fsSL https://bun.sh/install | bash
+   git clone https://github.com/guedesdiogo/kelpie.git ~/kelpie
+   ```
+
+2. **Create the secret.** It is 32 random bytes, in a file only this user can read. The runner refuses to start on a file others can read, or without a secret.
+
+   ```bash
+   mkdir -p ~/.config/kelpie-runner
+   (umask 077; openssl rand -hex 32 > ~/.config/kelpie-runner/secret)
+   ```
+
+3. **Install the service.** It restarts on failure, but not on a setting to fix (exit 78). It sets `NoNewPrivileges`, which every process the runner starts inherits.
+
+   ```bash
+   mkdir -p ~/.config/systemd/user
+   cp ~/kelpie/tools/runner/kelpie-runner.service ~/.config/systemd/user/
+   systemctl --user daemon-reload
+   systemctl --user enable --now kelpie-runner
+   sudo loginctl enable-linger "$USER"
+   ```
+
+   Lingering keeps user services running when nobody is logged in.
+
+4. **Check it** on the server:
+
+   ```bash
+   curl -s -H "Authorization: Bearer $(cat ~/.config/kelpie-runner/secret)" http://127.0.0.1:47832/health
+   ```
+
+### Settings
+
+The service reads these from its environment, through `Environment=` lines in the unit:
+
+| Variable | Default | What it sets |
+|---|---|---|
+| `KELPIE_RUNNER_PORT` | `47832` | the loopback port, which the VPC Service points at |
+| `KELPIE_RUNNER_SECRET_FILE` | `~/.config/kelpie-runner/secret` | the secret file |
+
+## The tunnel and the VPC Service
+
+Cloudflare's [Workers VPC](https://developers.cloudflare.com/workers-vpc/) is in beta, and free during it.
+
+1. **Create a remotely managed tunnel** in the Cloudflare dashboard, under Networking, Tunnels. `wrangler tunnel` works too, but its commands are experimental.
+2. **Run `cloudflared` as a system service** on the VPS, version 2025.7.0 or later:
+
+   ```bash
+   sudo cloudflared service install <TUNNEL_TOKEN>
+   ```
+
+   It connects out over QUIC, on outbound UDP port 7844. The tunnel needs no ingress rules for Workers VPC.
+3. **Create the VPC Service**, pointing at the runner:
+
+   ```bash
+   bunx wrangler vpc service create kelpie-runner --type http --tunnel-id <TUNNEL_ID> --ipv4 127.0.0.1 --http-port 47832
+   ```
+
+## Operating it
+
+- **Logs:** `journalctl --user -u kelpie-runner`. Each request logs its method, path and status, never its headers.
+- **Updating:** `git -C ~/kelpie pull --ff-only`, then `systemctl --user restart kelpie-runner`. A merge into `main` doesn't deploy the runner: it is the owner's server.
+- **Rotating the secret:**
+  1. Add the new secret as a second line of the file, and restart the runner. It now accepts both.
+  2. Give Kelpie the new secret.
+  3. Remove the old line, and restart again.
