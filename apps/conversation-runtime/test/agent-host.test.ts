@@ -412,7 +412,11 @@ describe("AgentHost with a vault", () => {
     await stub.configure({ tier: "medium" }, owner);
     const named = (await stub.turnConfig()).settings.systemPrompt;
     expect(named).toBe(
-      withIdentity("named-agent", DEFAULT_SETTINGS.systemPrompt, { name: "Bia", tier: "medium" }),
+      withIdentity("named-agent", DEFAULT_SETTINGS.systemPrompt, {
+        name: "Bia",
+        role: "specialist",
+        tier: "medium",
+      }),
     );
     expect(named).toContain("You run on Kelpie's medium tier: anthropic claude-test-medium.");
 
@@ -426,7 +430,7 @@ describe("AgentHost with a vault", () => {
     // A rename reaches the next turn, and the owner's settings still hold only their prompt.
     await registry.rename("named-agent", "Bia Assistente", owner);
     expect((await stub.turnConfig()).settings.systemPrompt).toContain(
-      "You are Bia Assistente, one of the owner's agents on Kelpie",
+      "You are Bia Assistente, a specialist agent on Kelpie",
     );
     expect((await stub.config()).settings.systemPrompt).toBe(DEFAULT_SETTINGS.systemPrompt);
   });
@@ -436,12 +440,15 @@ describe("AgentHost with a vault", () => {
     await env.REGISTRY.getByName(REGISTRY_NAME).add("identity-outage", "Bia", owner);
     const seen = (await stub.turnConfig()).settings.systemPrompt;
     expect(seen).toBe(
-      withIdentity("identity-outage", DEFAULT_SETTINGS.systemPrompt, { name: "Bia" }),
+      withIdentity("identity-outage", DEFAULT_SETTINGS.systemPrompt, {
+        name: "Bia",
+        role: "specialist",
+      }),
     );
 
     // A partial rollback leaves an llm-gateway without `routes`, and the Registry may be resetting.
     replaceIdentitySourcesForTesting({
-      name: async () => {
+      agent: async () => {
         throw new Error("Durable Object reset because its code was updated");
       },
       describe: async () => {
