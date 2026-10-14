@@ -110,7 +110,14 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
         .run();
       tx.update(schema.agents)
         .set({ ownerId: id, updatedAt: now })
-        .where(and(eq(schema.agents.role, "specialist"), ne(schema.agents.id, id)))
+        // Admin's row is stored as a specialist; its role is the setup agent's, by its id.
+        .where(
+          and(
+            eq(schema.agents.role, "specialist"),
+            ne(schema.agents.id, id),
+            ne(schema.agents.id, SETUP_AGENT_ID),
+          ),
+        )
         .run();
       tx.update(schema.agents)
         .set({ role: "main", ownerId: null, chat: true, updatedAt: now })

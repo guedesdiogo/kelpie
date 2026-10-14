@@ -16,7 +16,7 @@ export interface WebchatDeps {
   /** Verifies the Cloudflare Access token on the request. */
   authenticate(request: Request): Promise<Verification>;
   admit(identity: ChannelIdentity, agentId: string): Promise<Admission>;
-  /** Whether the agent is in the registry: the Directory admits the owner for any agent id. */
+  /** Whether the agent is in the registry: the Directory admits the owner to any id it doesn't know. */
   agentExists(agentId: string): Promise<boolean>;
   /** The static page, from Workers assets. */
   page(request: Request): Promise<Response>;
@@ -40,7 +40,8 @@ const pageHeaders = (host: string) => ({
  * the admin API. Access covers the path at the edge, and this checks its token again on every
  * request: the page, and the socket's upgrade. The owner's Access identity, which the first-run
  * bootstrap registered, is what the Directory admits; the webchat has no pairing of its own. The
- * Directory admits the owner for any agent, so the agent must also be in the registry.
+ * Directory refuses an agent whose chat is off (#288), and admits the owner to an id it doesn't
+ * know, so the agent must also be in the registry.
  * While Access isn't configured, the webchat answers 404.
  */
 export async function handleWebchat(request: Request, deps: WebchatDeps): Promise<Response> {

@@ -159,6 +159,53 @@ describe("Registry roles (#288)", () => {
     ).toHaveLength(2);
   });
 
+  it("picks a main agent on an instance that has none, as this one after the deploy", async () => {
+    const stub = registry("no-main");
+    // As an instance with agents from before roles: no main agent, and no seed.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec("DELETE FROM agents WHERE id = 'kelpie'");
+      state.storage.sql.exec(
+        "INSERT INTO agents (id, name, created_at, updated_at) VALUES ('assistant', 'Assistant', 0, 0), ('sales', 'Sales', 0, 0)",
+      );
+    });
+    // A new agent with no main agent to own it has no owner yet.
+    await stub.add("ops", "Ops", owner);
+    expect(await stub.get("ops")).toEqual({ ...specialist("ops", "Ops"), owner: null });
+
+    expect(await stub.setMain("assistant", owner)).toEqual({ ok: true });
+    expect(await stub.list()).toEqual([
+      { id: "assistant", name: "Assistant", role: "main", owner: null, chat: true },
+      { ...specialist("ops", "Ops"), owner: "assistant" },
+      { ...specialist("sales", "Sales", true), owner: "assistant" },
+      SETUP,
+    ]);
+    // Admin's row is left as it was: its role is the setup agent's, by its id.
+    const setupRow = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql.exec("SELECT owner_id FROM agents WHERE id = 'setup'").one(),
+    );
+    expect(setupRow).toEqual({ owner_id: null });
+  });
+
+  it("holds the roles' rules whatever a row says, and refuses a subagent's changes", async () => {
+    const stub = registry("clamps");
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec("UPDATE agents SET chat = 0 WHERE id = 'kelpie'");
+      state.storage.sql.exec(
+        "INSERT INTO agents (id, name, created_at, updated_at, role, owner_id, chat) VALUES ('helper', 'Helper', 0, 0, 'subagent', 'kelpie', 1)",
+      );
+    });
+    expect(await stub.get("kelpie")).toEqual(KELPIE);
+    expect(await stub.get("helper")).toEqual({
+      id: "helper",
+      name: "Helper",
+      role: "subagent",
+      owner: "kelpie",
+      chat: false,
+    });
+    expect(await stub.setMain("helper", owner)).toEqual({ ok: false, reason: "not_allowed" });
+    expect(await stub.setChat("helper", true, owner)).toEqual({ ok: false, reason: "not_allowed" });
+  });
+
   it("seeds the main agent only where no agent but setup exists; older agents keep chatting", async () => {
     const stub = registry("before-roles");
     const ids = () =>

@@ -29,7 +29,9 @@ const owner: Actor = { userId: "u-owner", role: "owner", via: `agent:${SETUP_AGE
 const roleOf = (id: string) =>
   id === SETUP_AGENT_ID
     ? ({ role: "admin", owner: null, chat: true } as const)
-    : ({ role: "specialist", owner: "kelpie", chat: false } as const);
+    : id === "kelpie"
+      ? ({ role: "main", owner: null, chat: true } as const)
+      : ({ role: "specialist", owner: "kelpie", chat: false } as const);
 
 /** Commands over an in-memory registry; every call is logged. */
 function fakeCommands() {
@@ -259,30 +261,59 @@ describe("the setup agent's tools", () => {
       output: "The agent ana is now the main agent: the one the owner talks to.",
     });
     expect(
-      await run(tools, "set_agent_chat", { id: "ana", chat: false }, confirmed.context),
+      await run(tools, "set_agent_chat", { id: "ana", chat: true }, confirmed.context),
     ).toEqual({
-      output: "The owner can no longer chat with the agent ana.",
+      output: "The owner can now chat with the agent ana.",
     });
     expect(confirmed.asked.map((request) => request.summary)).toEqual([
       'make the agent "Ana" (ana) the main agent, the one you talk to.',
-      'stop you chatting with the agent "Ana" (ana).',
+      'let you chat with the agent "Ana" (ana).',
     ]);
-    expect(calls).toEqual(['setMainAgent {"id":"ana"}', 'setAgentChat {"id":"ana","chat":false}']);
+    expect(calls).toEqual(['setMainAgent {"id":"ana"}', 'setAgentChat {"id":"ana","chat":true}']);
+  });
 
-    // Roles that don't take the change are refused in words the model can act on.
-    const refused = await run(
-      tools,
-      "set_agent_chat",
-      { id: SETUP_AGENT_ID, chat: false },
-      confirmed.context,
-    );
-    expect(refused).toMatchObject({ isError: true });
-    expect(refused.output).toContain("Only a specialist's chat can change");
-    expect(
-      await run(tools, "set_agent_chat", { id: "ana", chat: "yes" }, confirmed.context),
-    ).toMatchObject({
+  it("refuses a role that can't take the change, or says it's done, before asking anything", async () => {
+    const { commands, agents, calls } = fakeCommands();
+    agents.set("ana", "Ana");
+    agents.set("kelpie", "Kelpie");
+    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const { context, asked } = contextOf(true);
+
+    const admin = await run(tools, "set_main_agent", { id: SETUP_AGENT_ID }, context);
+    expect(admin).toMatchObject({ isError: true });
+    expect(admin.output).toContain("Admin can't be the main agent");
+    for (const id of [SETUP_AGENT_ID, "kelpie"]) {
+      const refused = await run(tools, "set_agent_chat", { id, chat: false }, context);
+      expect(refused).toMatchObject({ isError: true });
+      expect(refused.output).toContain("Only a specialist's chat can change");
+    }
+    expect(await run(tools, "set_main_agent", { id: "kelpie" }, context)).toEqual({
+      output: "The agent kelpie is already the main agent; nothing changed.",
+    });
+    expect(await run(tools, "set_agent_chat", { id: "ana", chat: false }, context)).toEqual({
+      output: "The agent ana's chat is already off; nothing changed.",
+    });
+    expect(await run(tools, "set_agent_chat", { id: "ana", chat: "yes" }, context)).toMatchObject({
       isError: true,
     });
+    expect(asked).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
+  it("tells the model a new agent's chat is off, and when a bot is connected to it (#288)", async () => {
+    const { commands } = fakeCommands();
+    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const { context } = contextOf(true);
+
+    const created = await run(tools, "create_agent", { id: "ana", name: "Ana" }, context);
+    expect(created.output).toContain("its chat is off");
+    const connected = await run(tools, "connect_telegram", { agentId: "ana" }, context);
+    expect(connected.output).toContain("Its chat is off");
+    const paired = await run(tools, "pair_telegram", { agentId: "ana" }, context);
+    expect(paired.output).toContain("Its chat is off");
+    expect(
+      (await run(tools, "connect_telegram", { agentId: SETUP_AGENT_ID }, context)).output,
+    ).not.toContain("chat is off");
   });
 
   it("asks the owner to confirm a settings change, for its parsed input, and runs it only then", async () => {

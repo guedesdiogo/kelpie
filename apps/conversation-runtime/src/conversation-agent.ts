@@ -1,4 +1,4 @@
-import { canonicalTimeZone } from "@kelpie/access";
+import { canonicalTimeZone, type Remote } from "@kelpie/access";
 import {
   type AllowedLinks,
   CAPABILITIES,
@@ -19,6 +19,8 @@ import {
   type AgentConfig,
   type AgentSettings,
   DEFAULT_SETTINGS,
+  REGISTRY_NAME,
+  type RegistryContract,
   type SetupEvent,
   type SetupStep,
 } from "@kelpie/config";
@@ -325,6 +327,14 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         destination: { channel: "webchat", threadId: admission.userId },
       });
       return;
+    }
+    // Ingress admitted the socket when it opened. An agent whose chat was turned off since then
+    // takes nothing more from it (#288): the socket closes, and a new one isn't admitted.
+    if (frame.type === "message" || frame.type === "confirm") {
+      if (await this.#chatOff(admission.agentId)) {
+        connection.close(1008, "chat off");
+        return;
+      }
     }
     if (frame.type === "confirm") {
       send(connection, {
@@ -2297,6 +2307,14 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .set({ status, ...(status === "sent" ? { sentAt: this.#ports.now() } : {}) })
       .where(eq(schema.outbox.id, id))
       .run();
+  }
+
+  /** Whether the Registry says the agent's chat is off: only an explicit `false`, as `admit` reads it. */
+  async #chatOff(agentId: string): Promise<boolean> {
+    const registry = this.env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<
+      Pick<RegistryContract, "get">
+    >;
+    return (await registry.get(agentId))?.chat === false;
   }
 
   /** The agent's current settings, from its `AgentHost`. */

@@ -31,7 +31,7 @@ export const SETUP_PROMPT = `You are Kelpie's setup agent. You help the owner co
 
 How you work:
 - Make every change with your tools, and never say you made one your tools didn't confirm.
-- Kelpie's agents have roles. The main agent is the one the owner talks to: a new instance starts with one, Kelpie, and set_main_agent makes another agent the main one. Every other agent is a specialist, and the owner can chat with a specialist only once its chat is on (set_agent_chat).
+- Kelpie's agents have roles. The main agent is the one the owner talks to: a new instance starts with one, Kelpie, and set_main_agent makes another agent the main one. If list_agents shows no main agent, ask the owner which agent should be it. Every other agent is a specialist, and the owner can chat with a specialist only once its chat is on (set_agent_chat).
 - For a first setup, go in this order: see which agents exist (list_agents); connect the main agent's Telegram bot (connect_telegram); then pair the owner's Telegram account with it (pair_telegram). Create another agent, with a short id of lowercase letters, digits and hyphens, and a name (create_agent), only when the owner asks for one; to talk to it, its chat must be on. Changing an agent's model or prompt (configure_agent) is optional.
 - Changing an agent's settings, the main agent or an agent's chat needs the owner's confirmation. Kelpie itself shows them what will change, with a Confirm button in the webchat or a code to reply with: don't ask them to confirm in other words, and never make up a code. Once they confirm, call the same tool again with the same input.
 - Kelpie itself sends the owner the links of connect_telegram and pair_telegram, in a message of its own after your reply. Never write those links yourself, and never make one up: just tell the owner to open the link Kelpie sent. What the owner does on that page is their yes.
@@ -78,7 +78,7 @@ const SPECS = {
   create_agent: {
     name: "create_agent",
     description:
-      "Create an agent. Its id can't change later: 2 to 40 lowercase letters, digits and hyphens, starting with a letter. Its name is what people see, and can change.",
+      "Create an agent. Its id can't change later: 2 to 40 lowercase letters, digits and hyphens, starting with a letter. Its name is what people see, and can change. A new agent is a specialist whose chat is off.",
     inputSchema: {
       type: "object",
       properties: { id: AGENT_ID, name: { type: "string", description: "One line." } },
@@ -190,6 +190,10 @@ const fields = (input: unknown): Record<string, unknown> =>
   typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {};
 
 const NOT_OWNER = failed("Only the owner can change Kelpie's configuration.");
+const NOT_MAIN = failed("Admin can't be the main agent, and a subagent can't either.");
+const NOT_SPECIALIST = failed(
+  "Only a specialist's chat can change: Admin and the main agent always chat, and a subagent never does.",
+);
 const NOT_CONFIGURED = failed(
   "Kelpie's admin API address isn't set (ADMIN_ORIGIN on conversation-runtime), so I can't give its link. The owner sets it when deploying: see docs/admin-api.md.",
 );
@@ -345,15 +349,20 @@ export function setupTools(
   const isOwner = (context: ToolContext) => context.actor.role === "owner";
 
   /** The agent, or the tool's refusal: checked before anything is shown to the owner. */
-  async function agentOf(
-    context: ToolContext,
-    id: unknown,
-  ): Promise<{ id: string; name: string } | ToolOutcome> {
+  async function agentOf(context: ToolContext, id: unknown): Promise<AgentEntry | ToolOutcome> {
     if (!isAgentId(id))
       return failed("That isn't an agent id: lowercase letters, digits and hyphens.");
     const agent = await commands.getAgent(context.actor, { id });
-    return agent.ok ? { id, name: agent.value.name } : refusal(agent, id);
+    if (!agent.ok) return refusal(agent, id);
+    const { name, role, owner, chat } = agent.value;
+    return { id, name, role, owner, chat };
   }
+
+  /** What the model is told when the owner can't reach the agent yet (#288). */
+  const chatOff = (agent: AgentEntry) =>
+    agent.chat
+      ? ""
+      : "\nIts chat is off, so it won't answer the owner until set_agent_chat turns it on, with their confirmation.";
 
   const tools: Tool[] = [
     {
@@ -394,7 +403,7 @@ export function setupTools(
         const { value } = result;
         return {
           output: value.created
-            ? `Created the agent ${value.id}, named ${JSON.stringify(value.name)}.`
+            ? `Created the agent ${value.id}, named ${JSON.stringify(value.name)}. It is a specialist, owned by the main agent, and its chat is off: the owner can't reach it until set_agent_chat turns it on.`
             : `The agent ${value.id} already exists; nothing changed.`,
         };
       },
@@ -467,6 +476,11 @@ export function setupTools(
         if (!isOwner(context)) return NOT_OWNER;
         const agent = await agentOf(context, fields(input).id);
         if (!("id" in agent)) return agent;
+        // Checked before the owner is asked: a yes that can't change anything isn't asked for.
+        if (agent.role === "admin" || agent.role === "subagent") return NOT_MAIN;
+        if (agent.role === "main") {
+          return { output: `The agent ${agent.id} is already the main agent; nothing changed.` };
+        }
         const change = { id: agent.id };
         const confirmed = await context.confirm({
           command: "setMainAgent",
@@ -475,11 +489,8 @@ export function setupTools(
         });
         if (!confirmed) return { output: WAITING };
         const result = await commands.setMainAgent(context.actor, change);
-        if (!result.ok) {
-          return result.reason === "not_allowed"
-            ? failed("Admin can't be the main agent, and a subagent can't either.")
-            : refusal(result, agent.id);
-        }
+        if (!result.ok)
+          return result.reason === "not_allowed" ? NOT_MAIN : refusal(result, agent.id);
         return {
           output: `The agent ${agent.id} is now the main agent: the one the owner talks to.`,
         };
@@ -498,6 +509,12 @@ export function setupTools(
         if (typeof chat !== "boolean") return failed("Say whether its chat is on: true or false.");
         const agent = await agentOf(context, id);
         if (!("id" in agent)) return agent;
+        if (agent.role !== "specialist") return NOT_SPECIALIST;
+        if (agent.chat === chat) {
+          return {
+            output: `The agent ${agent.id}'s chat is already ${chat ? "on" : "off"}; nothing changed.`,
+          };
+        }
         const change = { id: agent.id, chat };
         const confirmed = await context.confirm({
           command: "setAgentChat",
@@ -507,11 +524,7 @@ export function setupTools(
         if (!confirmed) return { output: WAITING };
         const result = await commands.setAgentChat(context.actor, change);
         if (!result.ok) {
-          return result.reason === "not_allowed"
-            ? failed(
-                "Only a specialist's chat can change: Admin and the main agent always chat, and a subagent never does.",
-              )
-            : refusal(result, agent.id);
+          return result.reason === "not_allowed" ? NOT_SPECIALIST : refusal(result, agent.id);
         }
         return {
           output: chat
@@ -546,7 +559,7 @@ export function setupTools(
           awaits: { agentId: agent.id, step: "telegram_connected", until: result.value.expiresAt },
         });
         return {
-          output: `${LINK_SENT}\nThe form works once, for the next ${minutes} minutes. The owner pastes the bot's token there, never in the chat; submitting it is their yes. The form points the bot at Kelpie when it saves the token.`,
+          output: `${LINK_SENT}\nThe form works once, for the next ${minutes} minutes. The owner pastes the bot's token there, never in the chat; submitting it is their yes. The form points the bot at Kelpie when it saves the token.${chatOff(agent)}`,
         };
       },
     },
@@ -566,7 +579,7 @@ export function setupTools(
           awaits: { agentId: agent.id, step: "telegram_paired", until: now() + PAIRING_WAIT_MS },
         });
         return {
-          output: `${LINK_SENT}\nOn that page the owner presses a button, and gets a Telegram link that pairs the account they open it with as theirs. The agent's bot must be connected first.`,
+          output: `${LINK_SENT}\nOn that page the owner presses a button, and gets a Telegram link that pairs the account they open it with as theirs. The agent's bot must be connected first.${chatOff(agent)}`,
         };
       },
     },
