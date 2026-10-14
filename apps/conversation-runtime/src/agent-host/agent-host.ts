@@ -10,6 +10,7 @@ import type {
   SetupStep,
 } from "@kelpie/config";
 import {
+  type AgentRole,
   agentModel,
   DEFAULT_SETTINGS,
   parseSettings,
@@ -39,12 +40,12 @@ export function replaceContextStoreForTesting(store: ContextStoreContract | unde
 const COMPILE_TIMEOUT_MS = 3_000;
 
 /**
- * Where a turn's identity comes from (#283): the agent's name in the Registry, and its conversation's
- * trio as llm-gateway resolves it (#286).
+ * Where a turn's identity comes from (#283): the agent's name and role in the Registry (#314), and
+ * its conversation's trio as llm-gateway resolves it (#286).
  */
 export interface IdentitySources {
-  /** The agent's name, or null while the Registry doesn't list it. */
-  name(id: string): Promise<string | null>;
+  /** The agent's name and role, or null while the Registry doesn't list it. */
+  agent(id: string): Promise<{ name: string; role: AgentRole } | null>;
   describe(agent: ModelSettings): Promise<ModelDescription>;
 }
 
@@ -186,9 +187,12 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     const sources = this.#identitySources();
     // The stored settings, read before the await: the trio is described for them.
     const model = agentModel(this.#stored());
-    const [vault, name, described] = await Promise.all([
+    const [vault, listed, described] = await Promise.all([
       this.#vaultContext(),
-      this.#lookup("identityName", async () => (await sources.name(id)) ?? id),
+      this.#lookup(
+        "identityAgent",
+        async () => (await sources.agent(id)) ?? { name: id, role: null },
+      ),
       this.#lookup("identityModel", () => sources.describe(model)),
     ]);
     // Read after the await: another call or a configure may have run meanwhile, and the compare,
@@ -203,7 +207,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     const rows: [string, unknown][] = [];
     if (vaultChanged) rows.push(["vaultContext", key]);
     for (const [stateKey, looked] of [
-      ["identityName", name],
+      ["identityAgent", listed],
       ["identityModel", described],
     ] as const) {
       const changed = JSON.stringify(looked.value) !== JSON.stringify(this.#get(stateKey, null));
@@ -223,7 +227,12 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
         }
       });
     }
-    const identity = identitySection({ id, name: name.value ?? id, model: described.value });
+    const identity = identitySection({
+      id,
+      name: listed.value?.name ?? id,
+      role: listed.value?.role ?? null,
+      model: described.value,
+    });
     return {
       settings: {
         ...config.settings,
@@ -243,7 +252,10 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       describe(area: "conversation", agent: ModelSettings): Promise<ModelDescription>;
     };
     return {
-      name: async (id) => (await registry.get(id))?.name ?? null,
+      agent: async (id) => {
+        const entry = await registry.get(id);
+        return entry ? { name: entry.name, role: entry.role } : null;
+      },
       describe: (agent) => gateway.describe("conversation", agent),
     };
   }

@@ -24,18 +24,22 @@ export interface ChangedFile {
   path: string;
 }
 
+/**
+ * With `-z`, git writes each path as it is, NUL-terminated. Without it, git quotes a path with
+ * non-ASCII or control characters, quotes included, so no prefix or pattern would match it.
+ */
 export function changedFiles(git: Git, from: string, to: string): ChangedFile[] {
-  return git(["diff", "--name-status", "--no-renames", from, to, "--"])
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      const [status = "", path = ""] = line.split("\t");
-      return { status: status.charAt(0), path };
-    });
+  const fields = git(["diff", "-z", "--name-status", "--no-renames", from, to, "--"]).split("\0");
+  const files: ChangedFile[] = [];
+  // Each record is a status and a path; the output ends with a NUL, so the last field is empty.
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    files.push({ status: (fields[i] as string).charAt(0), path: fields[i + 1] as string });
+  }
+  return files;
 }
 
 export function listFiles(git: Git, ref: string): string[] {
-  return git(["ls-tree", "-r", "--name-only", ref]).split("\n").filter(Boolean);
+  return git(["ls-tree", "-r", "-z", "--name-only", ref]).split("\0").filter(Boolean);
 }
 
 export function show(git: Git, ref: string, path: string): string | null {

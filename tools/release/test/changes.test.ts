@@ -106,6 +106,31 @@ describe("migrationChanges", () => {
     expect(migrationChanges(git, base, edited).problems).toHaveLength(1);
   });
 
+  it("checks a migration whose name git would quote", () => {
+    const { repo, base, git } = baseRepo();
+    const added = repo.commit({
+      [`${DIR}/0001_drop_é.sql`]: "DROP TABLE `turns`;",
+      [`${DIR}/meta/_journal.json`]: journal(["0000_init", 100], ["0001_drop_é", 200]),
+      [`${DIR}/migrations.js`]: imports("0000_init", "0001_drop_é"),
+    });
+    expect(migrationChanges(git, base, added)).toEqual({
+      problems: [],
+      findings: [
+        {
+          app: "conversation-runtime",
+          file: `${DIR}/0001_drop_é.sql`,
+          kind: "destructive-sql",
+          detail: "drops a table",
+          acknowledged: false,
+        },
+      ],
+    });
+    const edited = repo.commit({ [`${DIR}/0001_drop_é.sql`]: "DROP TABLE `other`;" });
+    expect(migrationChanges(git, added, edited).problems).toEqual([
+      `${DIR}/0001_drop_é.sql: an applied migration was edited. Migrations are append-only; add a new one instead.`,
+    ]);
+  });
+
   it("keeps to the Workers asked for", () => {
     const { repo, base, git } = baseRepo();
     const head = repo.commit({

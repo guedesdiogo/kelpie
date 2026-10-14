@@ -36,7 +36,7 @@ const options = {
 /** quietGit, with HEAD newer than the live build and a change that ships between them. */
 const shippingGit: Git = (args) => {
   if (args[0] === "merge-base") throw new Error("git exited with 1");
-  return args[0] === "diff" ? "M\tapps/ingress/src/index.ts\n" : quietGit(args);
+  return args[0] === "diff" ? "M\0apps/ingress/src/index.ts\0" : quietGit(args);
 };
 
 /**
@@ -306,6 +306,13 @@ describe("planDeploy's skip, against the builds production serves (ADR-0031)", {
     expect(plan.skip).toBeUndefined();
     expect((await deploy(deps, plan, options)).outcome).toBe("deployed");
     expect(wranglerCalls).toEqual(WORKERS.map((worker) => worker.script));
+  });
+
+  it("deploys a change to a path git would quote", async () => {
+    const { repo, base } = history();
+    repo.commit({ "apps/ingress/src/olá.ts": "x" });
+    const { deps } = setup(repo.dir, base);
+    expect((await planDeploy(deps)).skip).toBeUndefined();
   });
 
   it("deploys when any Worker serves an older build with a change that ships since", async () => {
