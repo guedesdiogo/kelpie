@@ -3,7 +3,7 @@
 // (`crates/ai-memory-hooks/src/synth.rs`): a title from the first message, a metadata line, then
 // the messages, with the first and last kept when there are too many.
 import { memoryPath, type Scope, slugify } from "./layout.ts";
-import { sanitizeSecrets, visibleText } from "./sanitize.ts";
+import { type Sanitized, sanitizeSecrets, visibleText } from "./sanitize.ts";
 import { writeMemory } from "./write.ts";
 
 export interface SessionLine {
@@ -42,12 +42,15 @@ export interface SessionPage {
   openKeys: OpenKeys;
 }
 
-/** Each message is cut to this many characters, after its secrets are replaced. */
-const EXCERPT_CHARS = 280;
 /**
- * Only a message's start is read, cut back to a space: the page shows at most its first 280
- * characters, and the cut can't leave a secret's first characters behind. It bounds the
- * sanitizer's work on long messages.
+ * Each message is cut to this many characters, after its secrets are replaced. #297 measured 280
+ * losing every answer past the cut; this keeps most replies whole (#326).
+ */
+const EXCERPT_CHARS = 2_000;
+/**
+ * Only a message's start is read, cut back to a space: the page shows at most its first
+ * EXCERPT_CHARS characters, and the cut can't leave a secret's first characters behind. It bounds
+ * the sanitizer's work on long messages.
  */
 const READ_CHARS = 8_192;
 const BEGIN_KEY = /-----BEGIN [A-Z ]{0,40}PRIVATE KEY(?: BLOCK)?-----/g;
@@ -59,8 +62,13 @@ const END_KEY = /-----END [A-Z ]{0,40}PRIVATE KEY(?: BLOCK)?-----/g;
  */
 const KEY_CARRY_MS = 10 * 60_000;
 /** A longer session keeps its first and last messages. */
-const HEAD_LINES = 30;
-const TAIL_LINES = 30;
+const HEAD_LINES = 100;
+const TAIL_LINES = 100;
+/**
+ * A page's messages stay under this many characters, so the index, which reads a body's first
+ * 262,144, searches a long day whole (#326).
+ */
+const MAX_PAGE_CHARS = 60_000;
 /**
  * How much of a stretch of conversation its page keeps. Pages use `SESSION_LIMITS`; the session
  * recall evaluation (#297) measures others. A message is read up to READ_CHARS whatever the cut.
@@ -71,12 +79,15 @@ export interface SessionLimits {
   /** A session longer than both keeps only its first `headLines` and last `tailLines` messages. */
   headLines: number;
   tailLines: number;
+  /** The messages a page shows stay under this many characters; the middle ones go first. */
+  maxChars: number;
 }
 
 export const SESSION_LIMITS: SessionLimits = {
   excerptChars: EXCERPT_CHARS,
   headLines: HEAD_LINES,
   tailLines: TAIL_LINES,
+  maxChars: MAX_PAGE_CHARS,
 };
 
 /** How sure a session page is: what the owner said alone, or with others in a group (#109). */
@@ -205,8 +216,8 @@ function plainName(name: string): string {
 
 /**
  * The session page for a stretch of conversation, or null when no person spoke in it. Secrets are
- * replaced before anything is cut, so a cut can't split one past the sanitizer; only the messages
- * the page shows are sanitized.
+ * replaced before anything is cut, so a cut can't split one past the sanitizer. Only the messages
+ * the page shows, and the first one past its size, are sanitized, and only those it shows count.
  */
 export async function sessionPage(
   input: SessionInput,
@@ -220,17 +231,14 @@ export async function sessionPage(
 
   const timeZone = zoneOf(input.timeZone);
   const { texts, carried, openKeys } = carryKeys(lines, input.openKeys ?? {});
-  let redactions = carried;
-  const sanitized = new Map<SessionLine, string>();
+  const sanitized = new Map<SessionLine, Sanitized>();
   const cleanText = (line: SessionLine) => {
-    let text = sanitized.get(line);
-    if (text === undefined) {
-      const result = sanitizeSecrets(texts[lines.indexOf(line)] ?? "");
-      redactions += result.redactions;
-      text = result.text;
-      sanitized.set(line, text);
+    let result = sanitized.get(line);
+    if (result === undefined) {
+      result = sanitizeSecrets(texts[lines.indexOf(line)] ?? "");
+      sanitized.set(line, result);
     }
-    return text;
+    return result.text;
   };
 
   const start = clock(first.at, timeZone);
@@ -243,19 +251,38 @@ export async function sessionPage(
     lines.filter((line) => line.role === "user").map((line) => line.speaker),
   );
 
-  const shown =
-    lines.length > limits.headLines + limits.tailLines
-      ? [...lines.slice(0, limits.headLines), null, ...lines.slice(lines.length - limits.tailLines)]
-      : lines;
-  const omitted = lines.length - limits.headLines - limits.tailLines;
+  const row = (line: SessionLine) =>
+    `- **${clock(line.at, timeZone).time} ${plainName(line.speaker)}:** ${inert(excerpt(cleanText(line), limits.excerptChars))}`;
+  // The first and last messages, taken in turn from both ends until the page's size, so a long
+  // page loses its middle; a session within the line limits splits at its middle. The first
+  // message always stays, so a page is never empty.
+  const cut = lines.length > limits.headLines + limits.tailLines;
+  const headMax = cut ? limits.headLines : Math.ceil(lines.length / 2);
+  const tailMax = cut ? limits.tailLines : lines.length - headMax;
+  const head: string[] = [];
+  const tail: string[] = [];
+  // The first person's message names the page, so its secrets count too.
+  const shownLines = new Set<SessionLine>([firstUser]);
+  let size = 0;
+  while (head.length < headMax || tail.length < tailMax) {
+    const fromTail = tail.length < tailMax && (head.length >= headMax || tail.length < head.length);
+    const line = lines[fromTail ? lines.length - 1 - tail.length : head.length] as SessionLine;
+    const shown = row(line);
+    if (size + shown.length + 1 > limits.maxChars && head.length > 0) break;
+    size += shown.length + 1;
+    shownLines.add(line);
+    if (fromTail) tail.unshift(shown);
+    else head.push(shown);
+  }
+  let redactions = carried;
+  for (const [line, result] of sanitized) if (shownLines.has(line)) redactions += result.redactions;
+  const omitted = lines.length - head.length - tail.length;
   const body = [
     `${input.channel} · ${start.date} ${start.time}–${end.time} (${timeZone}) · ${lines.length} messages`,
     "",
-    ...shown.map((line) =>
-      line === null
-        ? `- … ${omitted} messages omitted …`
-        : `- **${clock(line.at, timeZone).time} ${plainName(line.speaker)}:** ${inert(excerpt(cleanText(line), limits.excerptChars))}`,
-    ),
+    ...head,
+    ...(omitted > 0 ? [`- … ${omitted} messages omitted …`] : []),
+    ...tail,
   ].join("\n");
 
   const { text } = await writeMemory(

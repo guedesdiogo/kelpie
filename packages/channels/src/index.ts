@@ -23,6 +23,7 @@ export type {
   EgressDestination,
   SendOutcome,
   SetupFormsContract,
+  TelegramDisconnection,
   TypingOutcome,
   WebhookNotice,
   WebhookRegistration,

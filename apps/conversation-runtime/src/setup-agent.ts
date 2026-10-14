@@ -4,6 +4,7 @@ import {
   type AgentSettings,
   type CommandResult,
   type ConfigCommands,
+  type DeletedAgents,
   isAgentId,
   parseSettings,
   SETUP_AGENT_ID,
@@ -35,7 +36,8 @@ How you work:
 - Make every change with your tools, and never say you made one your tools didn't confirm.
 - Kelpie's agents have roles. The main agent is the one the owner talks to: a new instance starts with one, Kelpie, and set_main_agent makes another agent the main one. If list_agents shows no main agent, ask the owner which agent should be it. Every other agent is a specialist, and the owner can chat with a specialist only once its chat is on (set_agent_chat).
 - For a first setup, go in this order: see which agents exist (list_agents); connect the main agent's Telegram bot (connect_telegram); then pair the owner's Telegram account with it (pair_telegram). Create another agent, with a short id of lowercase letters, digits and hyphens, and a name (create_agent), only when the owner asks for one; to talk to it, its chat must be on. Changing an agent's model or prompt (configure_agent) is optional.
-- Changing an agent's settings, the main agent or an agent's chat needs the owner's confirmation. Kelpie itself shows them what will change, with a Confirm button in the webchat or a code to reply with: don't ask them to confirm in other words, and never make up a code. Once they confirm, call the same tool again with the same input.
+- Delete an agent (delete_agent) only when the owner asks for it: its subagents go with it, and nothing it held can be recovered. Admin and the main agent can't be deleted.
+- Changing an agent's settings, the main agent or an agent's chat, or deleting an agent, needs the owner's confirmation. Kelpie itself shows them what will change, with a Confirm button in the webchat or a code to reply with: don't ask them to confirm in other words, and never make up a code. Once they confirm, call the same tool again with the same input.
 - Kelpie itself sends the owner the links of connect_telegram and pair_telegram, in a message of its own after your reply. Never write those links yourself, and never make one up: just tell the owner to open the link Kelpie sent. What the owner does on that page is their yes.
 - When the owner finishes on one of those pages, Kelpie tells you in this conversation, in a note that starts "Kelpie, automatically". Don't ask them to tell you when they're done: when the note comes, go on with the next step.
 - Never ask for a secret in the chat, such as a bot token, the runner's secret or an API key. A bot token goes only into the secure form connect_telegram has Kelpie send, and the runner's secret only into connect_runner's. If the owner pastes a secret in the chat anyway, tell them to revoke it and make a new one: for the runner, a new secret in its file on the server (docs/runner.md).
@@ -55,6 +57,7 @@ export type SetupCommands = Pick<
   | "configureModels"
   | "setMainAgent"
   | "setAgentChat"
+  | "deleteAgent"
   | "connectTelegram"
   | "connectRunner"
   | "describeRunner"
@@ -186,6 +189,17 @@ const SPECS = {
       additionalProperties: false,
     },
   },
+  delete_agent: {
+    name: "delete_agent",
+    description:
+      "Delete an agent, and its subagents with it, for good: their settings, their conversations with all their history, and any Telegram bot connected to them. Admin and the main agent can't be deleted. Its files in the owner's vault stay. It needs the owner's confirmation, as set_main_agent does.",
+    inputSchema: {
+      type: "object",
+      properties: { id: AGENT_ID },
+      required: ["id"],
+      additionalProperties: false,
+    },
+  },
   connect_telegram: {
     name: "connect_telegram",
     description:
@@ -234,6 +248,7 @@ const NOT_MAIN = failed("Admin can't be the main agent, and a subagent can't eit
 const NOT_SPECIALIST = failed(
   "Only a specialist's chat can change: Admin and the main agent always chat, and a subagent never does.",
 );
+const NOT_DELETABLE = failed("Admin and the main agent can't be deleted.");
 const NOT_CONFIGURED = failed(
   "Kelpie's admin API address isn't set (ADMIN_ORIGIN on conversation-runtime), so I can't give its link. The owner sets it when deploying: see docs/admin-api.md.",
 );
@@ -332,6 +347,8 @@ const TEXTS: Localized<{
   mainAgent: (agent: string, id: string) => string;
   models: (before: string, after: string) => string;
   chat: (agent: string, id: string, on: boolean) => string;
+  /** `subagents` are already formatted, as `"Name" (id)`. */
+  deleteAgent: (agent: string, id: string, subagents: string[]) => string;
   form: (id: string, href: string, minutes: number) => string;
   pairing: (id: string, href: string) => string;
   runnerForm: (href: string, minutes: number) => string;
@@ -349,6 +366,10 @@ const TEXTS: Localized<{
       on
         ? `let you chat with the agent ${agent} (${id}).`
         : `stop you chatting with the agent ${agent} (${id}).`,
+    deleteAgent: (agent, id, subagents) =>
+      subagents.length === 0
+        ? `delete, for good, the agent ${agent} (${id}): its settings, its conversations with all their history, and Kelpie's connection to its Telegram bot. The bot itself stays yours: revoke its token with BotFather if you no longer want it. The files under agents/${id}/ in your vault stay.`
+        : `delete, for good, the agent ${agent} (${id}) and its ${subagents.length === 1 ? "subagent" : "subagents"} ${subagents.join(", ")}: their settings, their conversations with all their history, and Kelpie's connection to their Telegram bots. A bot itself stays yours: revoke its token with BotFather if you no longer want it. The files under agents/${id}/ in your vault stay.`,
     form: (id, href, minutes) =>
       `The secure form to connect the Telegram bot of the agent ${id}: ${href}\nIt works once, for the next ${minutes} minutes. Paste the bot's token there, never in the chat.`,
     pairing: (id, href) =>
@@ -369,6 +390,10 @@ const TEXTS: Localized<{
       on
         ? `permitir que você converse com o agente ${agent} (${id}).`
         : `deixar de permitir que você converse com o agente ${agent} (${id}).`,
+    deleteAgent: (agent, id, subagents) =>
+      subagents.length === 0
+        ? `excluir de vez o agente ${agent} (${id}): as configurações, as conversas com todo o histórico e a conexão do Kelpie com o bot do Telegram dele. O bot continua seu: revogue o token no BotFather se não quiser mais ele. Os arquivos em agents/${id}/ no seu vault ficam.`
+        : `excluir de vez o agente ${agent} (${id}) e ${subagents.length === 1 ? "o subagente dele" : "os subagentes dele"} ${subagents.join(", ")}: as configurações, as conversas com todo o histórico e a conexão do Kelpie com os bots do Telegram deles. Cada bot continua seu: revogue o token no BotFather se não quiser mais ele. Os arquivos em agents/${id}/ no seu vault ficam.`,
     form: (id, href, minutes) =>
       `O formulário seguro para conectar o bot do Telegram do agente ${id}: ${href}\nFunciona uma vez, nos próximos ${minutes} minutos. Cole o token do bot lá, nunca no chat.`,
     pairing: (id, href) =>
@@ -389,6 +414,10 @@ const TEXTS: Localized<{
       on
         ? `permitir que converses con el agente ${agent} (${id}).`
         : `dejar de permitir que converses con el agente ${agent} (${id}).`,
+    deleteAgent: (agent, id, subagents) =>
+      subagents.length === 0
+        ? `eliminar para siempre el agente ${agent} (${id}): su configuración, sus conversaciones con todo su historial y la conexión de Kelpie con su bot de Telegram. El bot sigue siendo tuyo: revoca su token con BotFather si ya no lo quieres. Los archivos en agents/${id}/ de tu vault se quedan.`
+        : `eliminar para siempre el agente ${agent} (${id}) y ${subagents.length === 1 ? "su subagente" : "sus subagentes"} ${subagents.join(", ")}: su configuración, sus conversaciones con todo su historial y la conexión de Kelpie con sus bots de Telegram. Cada bot sigue siendo tuyo: revoca su token con BotFather si ya no lo quieres. Los archivos en agents/${id}/ de tu vault se quedan.`,
     form: (id, href, minutes) =>
       `El formulario seguro para conectar el bot de Telegram del agente ${id}: ${href}\nFunciona una vez, durante los próximos ${minutes} minutos. Pega allí el token del bot, nunca en el chat.`,
     pairing: (id, href) =>
@@ -415,6 +444,50 @@ function describe(
         : `${key} ${settingTo} ${JSON.stringify(value)}`,
     )
     .join(", ");
+}
+
+/** What the model is told of a deletion (#303), from the command's result. */
+function deletedReport(id: string, { deleted, webhooksLeft, everyThread }: DeletedAgents): string {
+  const below = deleted.filter((one) => one !== id);
+  const along =
+    below.length === 0
+      ? ""
+      : ` and its ${below.length === 1 ? "subagent" : "subagents"} ${below.join(", ")}`;
+  const lines = [
+    below.length === 0
+      ? `Deleted the agent ${id}: its settings, conversations and Kelpie's connection to its Telegram bot are gone.`
+      : `Deleted the agent ${id}${along}: their settings, conversations and Kelpie's connection to their Telegram bots are gone.`,
+  ];
+  for (const left of webhooksLeft) {
+    lines.push(
+      `Telegram refused to take down the webhook of ${left}'s bot: Kelpie no longer holds its token, so it refuses that bot's messages. The owner can revoke the token with BotFather.`,
+    );
+  }
+  if (!everyThread) {
+    lines.push(
+      `One gap: a Telegram conversation with it from before Kelpie began recording conversations, with no message since, may remain where nothing reaches it, and an agent created again with the id ${id} would get it back. Suggest another id if the owner creates a new agent.`,
+    );
+  }
+  lines.push(
+    `Its files in the vault, under agents/${id}/, stay: the owner can remove them from their vault's repository, and the admin API's forgetVaultPaths drops Kelpie's copy.`,
+  );
+  return lines.join(" ");
+}
+
+/** The agents `id` owns, and theirs in turn: the subagents deleting it deletes (#303). */
+function ownedBy(agents: AgentEntry[], id: string): AgentEntry[] {
+  const owned: AgentEntry[] = [];
+  const seen = new Set([id]);
+  for (let i = -1; i < owned.length; i++) {
+    const owner = i < 0 ? id : owned[i]?.id;
+    for (const agent of agents) {
+      if (agent.owner === owner && !seen.has(agent.id)) {
+        seen.add(agent.id);
+        owned.push(agent);
+      }
+    }
+  }
+  return owned;
 }
 
 /** An admin page's link, in the conversation's language, so the page opens in it too (#187). */
@@ -685,6 +758,54 @@ export function setupTools(
             ? `The owner can now chat with the agent ${agent.id}.`
             : `The owner can no longer chat with the agent ${agent.id}.`,
         };
+      },
+    },
+    {
+      spec: SPECS.delete_agent,
+      label: {
+        en: "Deleting an agent",
+        "pt-BR": "Excluindo um agente",
+        es: "Eliminando un agente",
+      },
+      async run(input, context) {
+        if (!isOwner(context)) return NOT_OWNER;
+        const agent = await agentOf(context, fields(input).id);
+        if (!("id" in agent)) return agent;
+        if (agent.role === "admin" || agent.role === "main") return NOT_DELETABLE;
+        // The owner sees every agent that goes, and the input names them, so the yes deletes
+        // that set: the command refuses one that changed meanwhile.
+        const listed = await commands.listAgents(context.actor);
+        if (!listed.ok) return refusal(listed);
+        const owned = ownedBy(listed.value, agent.id);
+        const change = { id: agent.id, ids: [agent.id, ...owned.map((one) => one.id)].sort() };
+        const summary = TEXTS[context.locale].deleteAgent(
+          JSON.stringify(agent.name),
+          agent.id,
+          owned.map((one) => `${JSON.stringify(one.name)} (${one.id})`),
+        );
+        if (visible(summary).length > MAX_SUMMARY_CHARS) {
+          return failed(
+            "That deletion names too many agents to show the owner for confirmation here: delete it through the admin API.",
+          );
+        }
+        const confirmed = await context.confirm({ command: "deleteAgent", input: change, summary });
+        if (!confirmed) return { output: WAITING };
+        const result = await commands.deleteAgent(context.actor, change);
+        if (!result.ok) {
+          if (result.reason === "forbidden" || result.reason === "unknown_agent") {
+            return refusal(result, agent.id);
+          }
+          if (result.reason === "not_allowed") {
+            return failed(
+              `The deletion stopped: what it deletes changed since the owner was asked, such as a new subagent or a new role. Anything already deleted stays deleted. Call delete_agent again with the same input, so the owner confirms what it deletes now.`,
+            );
+          }
+          // Whatever went is gone; the rest waits, the agent listed with its chat off.
+          return failed(
+            `The deletion didn't finish: a Kelpie service didn't answer. What was deleted stays deleted, and the agent ${agent.id} is still listed, with its chat off. Call delete_agent again with the same input to finish; the owner confirms it again.`,
+          );
+        }
+        return { output: deletedReport(agent.id, result.value) };
       },
     },
     {

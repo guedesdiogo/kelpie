@@ -575,3 +575,95 @@ describe("AgentHost with a vault", () => {
     expect((await stub.config()).promptVersion).toBe(6);
   });
 });
+
+describe("Deleting an agent's storage (#303)", () => {
+  const conversation = (name: string) => env.CONVERSATION_AGENT.getByName(name);
+  /** Keeps a value in a conversation, as its first message would. */
+  const seedConversation = (name: string) =>
+    runInDurableObject(conversation(name), (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO state (key, value) VALUES ('agentId', ?)",
+        JSON.stringify(name.split(":")[0]),
+      );
+    });
+  const conversationsOf = (stub: ReturnType<typeof host>) =>
+    runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql
+        .exec<{ name: string }>("SELECT name FROM conversations ORDER BY name")
+        .toArray()
+        .map((row) => row.name),
+    );
+  /**
+   * Reads an object again once its destroyed instance is gone: the SDK ends it on the next tick,
+   * and a call that lands before that is refused with "destroyed".
+   */
+  async function afterDestroy<T>(read: () => Promise<T>): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await read();
+      } catch (error) {
+        if (attempt >= 20 || !String(error).includes("destroyed")) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    }
+  }
+
+  it("records the conversations of its own agent that start a turn, once each", async () => {
+    const stub = host("recorder");
+    await stub.turnConfig("recorder:webchat:u-owner");
+    await stub.turnConfig("recorder:webchat:u-owner");
+    await stub.turnConfig("recorder:telegram:1001");
+    // Another agent's conversation, or a caller from before this release, records nothing.
+    await stub.turnConfig("other:webchat:u-owner");
+    await stub.turnConfig();
+
+    expect(await conversationsOf(stub)).toEqual([
+      "recorder:telegram:1001",
+      "recorder:webchat:u-owner",
+    ]);
+  });
+
+  it("erases each recorded or named conversation, then itself", async () => {
+    const stub = host("leaving");
+    expect(await stub.configure({ systemPrompt: "Leaving." }, owner)).toMatchObject({ ok: true });
+    await stub.turnConfig("leaving:webchat:u-owner");
+    await seedConversation("leaving:webchat:u-owner");
+    await seedConversation("leaving:telegram:1001");
+
+    expect(await stub.erase(["leaving:telegram:1001", "leaving:webchat:u-owner"])).toEqual({
+      ok: true,
+      conversations: 2,
+    });
+
+    const left = (name: string) =>
+      afterDestroy(() =>
+        runInDurableObject(conversation(name), (_instance, state) =>
+          state.storage.sql.exec("SELECT key FROM state").toArray(),
+        ),
+      );
+    expect(await left("leaving:webchat:u-owner")).toEqual([]);
+    expect(await left("leaving:telegram:1001")).toEqual([]);
+    const after = await afterDestroy(() => host("leaving").config());
+    expect(after).toEqual({ settings: DEFAULT_SETTINGS, promptVersion: 0 });
+    expect(await afterDestroy(() => auditOf(host("leaving")))).toEqual([]);
+    expect(await conversationsOf(host("leaving"))).toEqual([]);
+  });
+
+  it("takes only names of its own agent's conversations, and then erases nothing", async () => {
+    const stub = host("strict");
+    await stub.configure({ systemPrompt: "Strict." }, owner);
+    await seedConversation("other:webchat:u-owner");
+    const invalid = { ok: false, reason: "invalid_input" };
+
+    expect(await stub.erase(["other:webchat:u-owner"])).toEqual(invalid);
+    expect(await stub.erase(["strict"])).toEqual(invalid);
+    expect(await stub.erase("strict:webchat:u-owner" as never)).toEqual(invalid);
+    expect(await stub.erase([7] as never)).toEqual(invalid);
+    expect((await stub.config()).settings.systemPrompt).toBe("Strict.");
+    expect(
+      await runInDurableObject(conversation("other:webchat:u-owner"), (_instance, state) =>
+        state.storage.sql.exec("SELECT key FROM state").toArray(),
+      ),
+    ).toEqual([{ key: "agentId" }]);
+  });
+});

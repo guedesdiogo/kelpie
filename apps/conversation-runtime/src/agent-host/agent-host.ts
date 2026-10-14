@@ -5,6 +5,7 @@ import type {
   AgentHostContract,
   AgentSettings,
   ConfigureResult,
+  EraseResult,
   RegistryContract,
   SetupEvent,
   SetupStep,
@@ -13,6 +14,7 @@ import {
   type AgentRole,
   agentModel,
   DEFAULT_SETTINGS,
+  isAgentId,
   parseSettings,
   REGISTRY_NAME,
   SETUP_AGENT_ID,
@@ -54,6 +56,20 @@ let identitySourcesForTesting: IdentitySources | undefined;
 /** Tests run in the Worker's isolate and swap the identity's sources with this. Production never calls it. */
 export function replaceIdentitySourcesForTesting(sources: IdentitySources | undefined): void {
   identitySourcesForTesting = sources;
+}
+
+/** At most this many conversation names come with an `erase`: the owner's, one per channel. */
+const MAX_NAMED_CONVERSATIONS = 32;
+
+/** A conversation object's name of this agent's: its id, a colon, then the channel and thread. */
+function isConversationOf(id: string, name: unknown): name is string {
+  return (
+    isAgentId(id) &&
+    typeof name === "string" &&
+    name.length <= MAX_CONVERSATION_NAME &&
+    name.startsWith(`${id}:`) &&
+    name.length > id.length + 1
+  );
 }
 
 /** A name or trio not read in time is replaced by the last one seen. */
@@ -182,8 +198,9 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
    * included (`agentModel`). A new name or route needs no bump: each turn's prompt key catches the
    * change in the text, as it does a deploy's (#220).
    */
-  async turnConfig(): Promise<AgentConfig> {
+  async turnConfig(conversation?: string): Promise<AgentConfig> {
     const id = this.ctx.id.name ?? "";
+    this.#record(id, conversation);
     const sources = this.#identitySources();
     // The stored settings, read before the await: the trio is described for them.
     const model = agentModel(this.#stored());
@@ -241,6 +258,45 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       },
       promptVersion,
     };
+  }
+
+  /**
+   * Notes a conversation of this agent's that starts a turn, so deleting the agent erases it
+   * (#303). A caller from before this release names none.
+   */
+  #record(id: string, conversation: string | undefined): void {
+    if (!isConversationOf(id, conversation)) return;
+    this.#db
+      .insert(schema.conversations)
+      .values({ name: conversation })
+      .onConflictDoNothing()
+      .run();
+  }
+
+  /**
+   * Deletes everything this agent holds, before its Registry row goes (#303): each conversation it
+   * recorded or the caller names, which only this agent's may be, then its own storage. The SDK's
+   * `destroy` clears the alarm and the storage, then ends the object; a later call finds it empty.
+   * A failure leaves this object as it was, with its list, so erasing again finishes the job.
+   */
+  async erase(names: string[]): Promise<EraseResult> {
+    const id = this.ctx.id.name ?? "";
+    if (
+      !Array.isArray(names) ||
+      names.length > MAX_NAMED_CONVERSATIONS ||
+      !names.every((name) => isConversationOf(id, name))
+    ) {
+      return { ok: false, reason: "invalid_input" };
+    }
+    const recorded = this.#db
+      .select({ name: schema.conversations.name })
+      .from(schema.conversations)
+      .all()
+      .map((row) => row.name);
+    const all = new Set([...recorded, ...names]);
+    for (const name of all) await this.env.CONVERSATION_AGENT.getByName(name).destroy();
+    await this.destroy();
+    return { ok: true, conversations: all.size };
   }
 
   #identitySources(): IdentitySources {

@@ -38,3 +38,11 @@ export const setupWaits = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.conversation, table.step] })],
 );
+
+/**
+ * This agent's conversations, by their object's name (#303): each records itself when it starts a
+ * turn, so deleting the agent erases them. Nothing else lists them.
+ */
+export const conversations = sqliteTable("conversations", {
+  name: text("name").primaryKey(),
+});

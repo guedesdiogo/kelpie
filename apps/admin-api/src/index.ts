@@ -56,6 +56,7 @@ export function depsFor(env: Env): AdminDeps {
       agents: {
         configure: (id, changes, actor) => agentHost(id).configure(changes, actor),
         config: (id) => agentHost(id).config(),
+        erase: (id, conversations) => agentHost(id).erase(conversations),
       },
       directory,
       channels: {
@@ -64,6 +65,7 @@ export function depsFor(env: Env): AdminDeps {
         describeTelegramBot: (agentId) => forms.describeTelegramBot(agentId),
         createRunnerForm: () => forms.createRunnerForm(),
         describeRunner: () => forms.describeRunner(),
+        disconnectTelegram: (agentId) => forms.disconnectTelegram(agentId),
       },
       models: {
         providers: () => gateway.providers(),

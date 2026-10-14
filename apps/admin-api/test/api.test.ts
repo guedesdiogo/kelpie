@@ -41,6 +41,8 @@ function world({
     identities.set(`${ACCESS_SOURCE}:${OWNER_SUB}`, { userId: ownerId, status: "enabled" });
   }
   const agents = new Map<string, string>();
+  /** The agents whose chat `setChat` turned off. */
+  const chatOff = new Set<string>();
   const ran: string[] = [];
   const reported: { agentId: string; event: SetupEvent }[] = [];
   const ports: ConfigPorts = {
@@ -56,19 +58,31 @@ function world({
       },
       async get(id) {
         const name = agents.get(id);
-        return name ? { id, name, ...SPECIALIST } : null;
+        return name ? { id, name, ...SPECIALIST, chat: !chatOff.has(id) } : null;
       },
       async list() {
         ran.push("registry.list");
-        return [...agents].map(([id, name]) => ({ id, name, ...SPECIALIST }));
+        return [...agents].map(([id, name]) => ({
+          id,
+          name,
+          ...SPECIALIST,
+          chat: !chatOff.has(id),
+        }));
       },
       async setMain(id) {
         ran.push(`registry.setMain ${id}`);
         return agents.has(id) ? { ok: true } : { ok: false, reason: "unknown_agent" };
       },
-      async setChat(id) {
+      async setChat(id, chat) {
         ran.push(`registry.setChat ${id}`);
-        return id === "setup" ? { ok: false, reason: "not_allowed" } : { ok: true };
+        if (id === "setup") return { ok: false, reason: "not_allowed" };
+        if (chat) chatOff.delete(id);
+        else chatOff.add(id);
+        return { ok: true };
+      },
+      async remove(id) {
+        ran.push(`registry.remove ${id}`);
+        return agents.delete(id) ? { ok: true } : { ok: false, reason: "unknown_agent" };
       },
     },
     models: {
@@ -89,6 +103,10 @@ function world({
       },
       async config() {
         return { settings: DEFAULT_SETTINGS, promptVersion: 0 };
+      },
+      async erase(id, conversations) {
+        ran.push(`agents.erase ${id} ${conversations.join(",")}`);
+        return { ok: true, conversations: conversations.length };
       },
     },
     directory: {
@@ -128,6 +146,10 @@ function world({
       },
       async describeRunner() {
         return { ok: true, runner: { state: "ready", version: "0.1.0", protocol: 1 } };
+      },
+      async disconnectTelegram(agentId) {
+        ran.push(`channels.disconnectTelegram ${agentId}`);
+        return { ok: true, webhook: "removed" };
       },
     },
     vault: {
@@ -324,6 +346,27 @@ describe("admin API commands", () => {
       body: { ok: false, reason: "not_allowed" },
     });
     expect(ran).toContain("registry.setMain sales");
+  });
+
+  it("deletes an agent, its chat off first and its row last, and answers 404 once it is gone (#303)", async () => {
+    const { deps, ran } = world();
+    await call(deps, "/commands/createAgent", { id: "sales", name: "Sales" });
+    expect(await call(deps, "/commands/deleteAgent", { id: "sales" })).toEqual({
+      status: 200,
+      body: { ok: true, value: { deleted: ["sales"], webhooksLeft: [], everyThread: true } },
+    });
+    expect(
+      ran.filter((step) => !step.startsWith("registry.list") && step !== "registry.add"),
+    ).toEqual([
+      "registry.setChat sales",
+      "channels.disconnectTelegram sales",
+      "agents.erase sales sales:webchat:u-owner",
+      "registry.remove sales",
+    ]);
+    expect(await call(deps, "/commands/deleteAgent", { id: "sales" })).toEqual({
+      status: 404,
+      body: { ok: false, reason: "unknown_agent" },
+    });
   });
 
   it("refuses a request whose Access JWT doesn't verify, before running anything", async () => {

@@ -1,7 +1,8 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
+import { SETUP_AGENT_ID } from "@kelpie/config";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SetupForms } from "../src/index.ts";
+import { SecretStore, SetupForms } from "../src/index.ts";
 import { telegramWebhookUrl } from "../src/telegram-secret.ts";
 
 // The Worker runs in the test's isolate, so a stubbed global fetch stands in for the Bot API. It
@@ -69,7 +70,7 @@ describe("SetupForms", () => {
     // runner's form too, and reads the runner's state, which holds no secret (#294).
     expect(
       Object.getOwnPropertyNames(SetupForms.prototype).filter((name) => name !== "constructor"),
-    ).toEqual(["createTelegramForm", "createRunnerForm", "describeRunner"]);
+    ).toEqual(["createTelegramForm", "createRunnerForm", "describeRunner", "disconnectTelegram"]);
   });
 });
 
@@ -304,6 +305,133 @@ describe("Telegram webhooks", () => {
       ok: false,
     });
     expect(await exports.ChannelWebhooks.verifyTelegram("rotated", current)).toEqual({ ok: true });
+  });
+});
+
+describe("Disconnecting a deleted agent's bot (#303)", () => {
+  const registeredSecret = (calls: Call[]) =>
+    String(calls.findLast((call) => call.method === "setWebhook")?.body.secret_token);
+
+  it("removes the webhook, then the secret and the agent's open forms; again finds nothing", async () => {
+    const calls = botApi();
+    await connect("leaving");
+    const secret = registeredSecret(calls);
+    const open = await exports.ChannelForms.createTelegramForm("leaving");
+    if (!open.ok) throw new Error("form refused");
+    calls.length = 0;
+
+    expect(await exports.ChannelForms.disconnectTelegram("leaving")).toEqual({
+      ok: true,
+      webhook: "removed",
+    });
+    expect(calls).toEqual([
+      {
+        method: "deleteWebhook",
+        url: `https://api.telegram.org/bot${BOT_TOKEN}/deleteWebhook`,
+        body: { drop_pending_updates: true },
+      },
+    ]);
+    expect(await exports.ChannelWebhooks.verifyTelegram("leaving", secret)).toEqual({
+      ok: false,
+      reason: "refused",
+    });
+    expect(await exports.ChannelForms.describeTelegramBot("leaving")).toEqual({
+      ok: false,
+      reason: "not_connected",
+    });
+    // A form opened before the delete can't connect the bot again for an agent that is gone.
+    expect(await exports.ChannelForms.describeForm(open.token)).toEqual({
+      ok: false,
+      reason: "unknown_form",
+    });
+
+    calls.length = 0;
+    expect(await exports.SetupForms.disconnectTelegram("leaving")).toEqual({
+      ok: true,
+      webhook: "none",
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("deletes the secret when Telegram refuses, as for a revoked token", async () => {
+    const answers: Record<string, () => Response> = {};
+    botApi((method) => answers[method]?.() ?? defaultAnswer(method));
+    await connect("revoked");
+    answers.deleteWebhook = () => Response.json({ ok: false, error_code: 401 }, { status: 401 });
+
+    expect(await exports.ChannelForms.disconnectTelegram("revoked")).toEqual({
+      ok: true,
+      webhook: "refused",
+    });
+    expect(await exports.ChannelForms.describeTelegramBot("revoked")).toMatchObject({
+      reason: "not_connected",
+    });
+  });
+
+  it("keeps the secret when Telegram fails for now, so running it again removes the webhook", async () => {
+    const answers: Record<string, () => Response> = {};
+    botApi((method) => answers[method]?.() ?? defaultAnswer(method));
+    await connect("blip");
+    for (const failure of [
+      () => Response.json({ ok: false, error_code: 502 }, { status: 502 }),
+      () => Response.json({ ok: false, error_code: 429, parameters: { retry_after: 3 } }),
+      () => new Response("not json", { status: 200 }),
+    ]) {
+      answers.deleteWebhook = failure;
+      expect(await exports.ChannelForms.disconnectTelegram("blip")).toEqual({
+        ok: false,
+        reason: "channel_unavailable",
+      });
+      expect(await exports.ChannelForms.describeTelegramBot("blip")).toMatchObject({ ok: true });
+    }
+    delete answers.deleteWebhook;
+    expect(await exports.ChannelForms.disconnectTelegram("blip")).toEqual({
+      ok: true,
+      webhook: "removed",
+    });
+  });
+
+  it("never disconnects Admin's bot: Admin can't be deleted", async () => {
+    const calls = botApi();
+    await connect(SETUP_AGENT_ID);
+    calls.length = 0;
+    expect(await exports.SetupForms.disconnectTelegram(SETUP_AGENT_ID)).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(calls).toEqual([]);
+    expect(await exports.ChannelForms.describeTelegramBot(SETUP_AGENT_ID)).toMatchObject({
+      ok: true,
+    });
+  });
+
+  it("keeps the other agents' bots and the runner's secret", async () => {
+    const calls = botApi();
+    await connect("staying");
+    const secret = registeredSecret(calls);
+    await connect("going");
+
+    await exports.ChannelForms.disconnectTelegram("going");
+    expect(await exports.ChannelWebhooks.verifyTelegram("staying", secret)).toEqual({ ok: true });
+  });
+
+  it("refuses an id that can't exist, and leaves the store alone while it can't be read", async () => {
+    const calls = botApi();
+    expect(await exports.ChannelForms.disconnectTelegram("Not An Agent")).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    await connect("locked");
+    calls.length = 0;
+    vi.spyOn(SecretStore.prototype, "read").mockResolvedValue({
+      ok: false,
+      reason: "store_unavailable",
+    });
+    expect(await exports.ChannelForms.disconnectTelegram("locked")).toEqual({
+      ok: false,
+      reason: "store_unavailable",
+    });
+    expect(calls).toEqual([]);
   });
 });
 

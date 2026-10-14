@@ -172,11 +172,13 @@ Every conversation's history becomes session pages (#109), with no model call:
 - **What:**
   - a title, from the time and the first message from a person;
   - a line with the channel, the date, the times and the number of messages;
-  - each message as one line, with its time and speaker;
-  - a session of more than 60 messages keeps the first 30 and the last 30.
+  - each message as one line, with its time and speaker, up to 2,000 characters;
+  - a session of more than 200 messages keeps the first 100 and the last 100;
+  - the messages take at most 60,000 characters in all, the metadata line aside: past that, the ones nearest the middle go first, so a long day keeps its start and its end. Full-text search covers every message a page keeps; the embedder reads a page's first 6,000 characters.
+  - **Why these limits (#326):** #297's measurement found that a page of 280 characters a message, keeping the first and last 30, lost every answer past its cut, and that these limits reach most of them ([memory-eval.md](spikes/memory-eval.md#session-recall-297)).
 - **Time zone:** the latest one a person in the conversation gave, or UTC.
 - **Inert in Obsidian:** a message can't act when the owner opens the page. HTML, embedded images, inline code (which plugins such as Dataview run) and `%%` comments (which hide text from the owner but not from the agent) are escaped, and `[[` is broken, so a message adds no links to the vault.
-- **Secrets:** each message is normalized to NFC and stripped of invisible characters: terminal escapes, controls, Unicode's default-ignorable characters (zero-width spaces and joiners, bidirectional controls, variation selectors, tag characters) and the Braille blank. Emoji joined by a zero-width joiner come apart. Only the first 8,192 characters are read, cut back to a space. Secrets are replaced with `[REDACTED:<kind>]` before each message is cut to 280 characters. Nothing else is filtered: other people's data stays (ADR-0020 §4).
+- **Secrets:** each message is normalized to NFC and stripped of invisible characters: terminal escapes, controls, Unicode's default-ignorable characters (zero-width spaces and joiners, bidirectional controls, variation selectors, tag characters) and the Braille blank. Emoji joined by a zero-width joiner come apart. Only the first 8,192 characters are read, cut back to a space. Secrets are replaced with `[REDACTED:<kind>]` before each message is cut to 2,000 characters. Nothing else is filtered: other people's data stays (ADR-0020 §4).
   - **Covered:**
     - API keys and tokens with a known prefix: OpenAI, Anthropic, xAI, Groq, Stripe, GitHub, GitLab, AWS, Google, Meta, npm, Hugging Face, SendGrid, Slack, Cloudflare, DigitalOcean, Shopify, PyPI, Supabase, Linear, Notion, Postman, Twilio, GoHighLevel, and webhook secrets;
     - Telegram bot tokens, JWTs, and Slack and Discord webhook URLs;

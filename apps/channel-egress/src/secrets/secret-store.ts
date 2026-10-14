@@ -157,6 +157,21 @@ export class SecretStore extends DurableObject<Env> {
     return claimed ? { ok: true, agentId: form.agentId } : { ok: false, reason: "unknown_form" };
   }
 
+  /**
+   * Deletes one agent's secret of a kind and every form for it, open or used, so a form opened
+   * before its agent was deleted can't store the secret again (#303). Needs no key.
+   */
+  async remove(kind: FormKind, agentId: string): Promise<void> {
+    this.#db.transaction((tx) => {
+      tx.delete(schema.secrets)
+        .where(eq(schema.secrets.slot, slotFor(kind, agentId)))
+        .run();
+      tx.delete(schema.forms)
+        .where(and(eq(schema.forms.kind, kind), eq(schema.forms.agentId, agentId)))
+        .run();
+    });
+  }
+
   /** The plaintext of one slot. Only channel-egress calls this. */
   async read(kind: FormKind, agentId: string): Promise<ReadResult> {
     const key = await this.#loadKey();
