@@ -1,5 +1,6 @@
 import type { Locale, Localized } from "@kelpie/channels";
 import {
+  type AgentEntry,
   type AgentSettings,
   type CommandResult,
   type ConfigCommands,
@@ -30,8 +31,9 @@ export const SETUP_PROMPT = `You are Kelpie's setup agent. You help the owner co
 
 How you work:
 - Make every change with your tools, and never say you made one your tools didn't confirm.
-- For a first setup, go in this order: see which agents exist (list_agents); create the first agent, with a short id of lowercase letters, digits and hyphens, and a name (create_agent); connect its Telegram bot (connect_telegram); then pair the owner's Telegram account with it (pair_telegram). Changing an agent's model or prompt (configure_agent) is optional.
-- Changing an agent's settings needs the owner's confirmation. Kelpie itself shows them what will change, with a Confirm button in the webchat or a code to reply with: don't ask them to confirm in other words, and never make up a code. Once they confirm, call the same tool again with the same input.
+- Kelpie's agents have roles. The main agent is the one the owner talks to: a new instance starts with one, Kelpie, and set_main_agent makes another agent the main one. Every other agent is a specialist, and the owner can chat with a specialist only once its chat is on (set_agent_chat).
+- For a first setup, go in this order: see which agents exist (list_agents); connect the main agent's Telegram bot (connect_telegram); then pair the owner's Telegram account with it (pair_telegram). Create another agent, with a short id of lowercase letters, digits and hyphens, and a name (create_agent), only when the owner asks for one; to talk to it, its chat must be on. Changing an agent's model or prompt (configure_agent) is optional.
+- Changing an agent's settings, the main agent or an agent's chat needs the owner's confirmation. Kelpie itself shows them what will change, with a Confirm button in the webchat or a code to reply with: don't ask them to confirm in other words, and never make up a code. Once they confirm, call the same tool again with the same input.
 - Kelpie itself sends the owner the links of connect_telegram and pair_telegram, in a message of its own after your reply. Never write those links yourself, and never make one up: just tell the owner to open the link Kelpie sent. What the owner does on that page is their yes.
 - When the owner finishes on one of those pages, Kelpie tells you in this conversation, in a note that starts "Kelpie, automatically". Don't ask them to tell you when they're done: when the note comes, go on with the next step.
 - Never ask for a secret in the chat, such as a bot token or an API key. A bot token goes only into the secure form connect_telegram has Kelpie send. If the owner pastes a secret in the chat anyway, tell them to revoke it and make a new one.
@@ -41,7 +43,14 @@ How you work:
 /** The commands the setup agent's tools run; the identity and vault commands stay off them. */
 export type SetupCommands = Pick<
   ConfigCommands,
-  "listAgents" | "getAgent" | "createAgent" | "renameAgent" | "configureAgent" | "connectTelegram"
+  | "listAgents"
+  | "getAgent"
+  | "createAgent"
+  | "renameAgent"
+  | "configureAgent"
+  | "setMainAgent"
+  | "setAgentChat"
+  | "connectTelegram"
 >;
 
 const AGENT_ID = {
@@ -52,7 +61,8 @@ const AGENT_ID = {
 const SPECS = {
   list_agents: {
     name: "list_agents",
-    description: "List Kelpie's agents, by id and name.",
+    description:
+      "List Kelpie's agents, by id and name, with each one's role and whether the owner can chat with it.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   get_agent: {
@@ -126,6 +136,28 @@ const SPECS = {
         },
       },
       required: ["id", "settings"],
+      additionalProperties: false,
+    },
+  },
+  set_main_agent: {
+    name: "set_main_agent",
+    description:
+      "Make an agent the main agent: the one the owner talks to, which owns the specialists. The previous main agent becomes a specialist and keeps its chat. It needs the owner's confirmation: the first call shows them the change; call it again with the same input once they confirm.",
+    inputSchema: {
+      type: "object",
+      properties: { id: AGENT_ID },
+      required: ["id"],
+      additionalProperties: false,
+    },
+  },
+  set_agent_chat: {
+    name: "set_agent_chat",
+    description:
+      "Turn a specialist's chat on or off: whether the owner can reach it on its channels. Admin and the main agent always chat. It needs the owner's confirmation, as set_main_agent does.",
+    inputSchema: {
+      type: "object",
+      properties: { id: AGENT_ID, chat: { type: "boolean" } },
+      required: ["id", "chat"],
       additionalProperties: false,
     },
   },
@@ -217,6 +249,8 @@ function refusal(result: Extract<CommandResult<unknown>, { ok: false }>, id?: st
 const TEXTS: Localized<{
   settingTo: string;
   changeSettings: (agent: string, id: string, changes: string) => string;
+  mainAgent: (agent: string, id: string) => string;
+  chat: (agent: string, id: string, on: boolean) => string;
   form: (id: string, href: string, minutes: number) => string;
   pairing: (id: string, href: string) => string;
 }> = {
@@ -224,6 +258,12 @@ const TEXTS: Localized<{
     settingTo: "to",
     changeSettings: (agent, id, changes) =>
       `change the settings of the agent ${agent} (${id}): ${changes}.`,
+    mainAgent: (agent, id) =>
+      `make the agent ${agent} (${id}) the main agent, the one you talk to.`,
+    chat: (agent, id, on) =>
+      on
+        ? `let you chat with the agent ${agent} (${id}).`
+        : `stop you chatting with the agent ${agent} (${id}).`,
     form: (id, href, minutes) =>
       `The secure form to connect the Telegram bot of the agent ${id}: ${href}\nIt works once, for the next ${minutes} minutes. Paste the bot's token there, never in the chat.`,
     pairing: (id, href) =>
@@ -233,6 +273,12 @@ const TEXTS: Localized<{
     settingTo: "para",
     changeSettings: (agent, id, changes) =>
       `alterar as configurações do agente ${agent} (${id}): ${changes}.`,
+    mainAgent: (agent, id) =>
+      `tornar o agente ${agent} (${id}) o agente principal, o que conversa com você.`,
+    chat: (agent, id, on) =>
+      on
+        ? `permitir que você converse com o agente ${agent} (${id}).`
+        : `deixar de permitir que você converse com o agente ${agent} (${id}).`,
     form: (id, href, minutes) =>
       `O formulário seguro para conectar o bot do Telegram do agente ${id}: ${href}\nFunciona uma vez, nos próximos ${minutes} minutos. Cole o token do bot lá, nunca no chat.`,
     pairing: (id, href) =>
@@ -242,6 +288,12 @@ const TEXTS: Localized<{
     settingTo: "a",
     changeSettings: (agent, id, changes) =>
       `cambiar la configuración del agente ${agent} (${id}): ${changes}.`,
+    mainAgent: (agent, id) =>
+      `convertir el agente ${agent} (${id}) en el agente principal, el que conversa contigo.`,
+    chat: (agent, id, on) =>
+      on
+        ? `permitir que converses con el agente ${agent} (${id}).`
+        : `dejar de permitir que converses con el agente ${agent} (${id}).`,
     form: (id, href, minutes) =>
       `El formulario seguro para conectar el bot de Telegram del agente ${id}: ${href}\nFunciona una vez, durante los próximos ${minutes} minutos. Pega allí el token del bot, nunca en el chat.`,
     pairing: (id, href) =>
@@ -310,7 +362,9 @@ export function setupTools(
       async run(_input, context) {
         const result = await commands.listAgents(context.actor);
         if (!result.ok) return refusal(result);
-        return { output: result.value.map(({ id, name }) => `- ${id}: ${name}`).join("\n") };
+        const line = ({ id, name, role, chat }: AgentEntry) =>
+          `- ${id}: ${name} (${role}${role === "specialist" && !chat ? ", chat off" : ""})`;
+        return { output: result.value.map(line).join("\n") };
       },
     },
     {
@@ -400,6 +454,70 @@ export function setupTools(
         const result = await commands.configureAgent(context.actor, change);
         if (!result.ok) return refusal(result, change.id);
         return { output: `Changed the settings of the agent ${change.id}.` };
+      },
+    },
+    {
+      spec: SPECS.set_main_agent,
+      label: {
+        en: "Choosing the main agent",
+        "pt-BR": "Escolhendo o agente principal",
+        es: "Eligiendo el agente principal",
+      },
+      async run(input, context) {
+        if (!isOwner(context)) return NOT_OWNER;
+        const agent = await agentOf(context, fields(input).id);
+        if (!("id" in agent)) return agent;
+        const change = { id: agent.id };
+        const confirmed = await context.confirm({
+          command: "setMainAgent",
+          input: change,
+          summary: TEXTS[context.locale].mainAgent(JSON.stringify(agent.name), agent.id),
+        });
+        if (!confirmed) return { output: WAITING };
+        const result = await commands.setMainAgent(context.actor, change);
+        if (!result.ok) {
+          return result.reason === "not_allowed"
+            ? failed("Admin can't be the main agent, and a subagent can't either.")
+            : refusal(result, agent.id);
+        }
+        return {
+          output: `The agent ${agent.id} is now the main agent: the one the owner talks to.`,
+        };
+      },
+    },
+    {
+      spec: SPECS.set_agent_chat,
+      label: {
+        en: "Changing an agent's chat",
+        "pt-BR": "Alterando o chat de um agente",
+        es: "Cambiando el chat de un agente",
+      },
+      async run(input, context) {
+        if (!isOwner(context)) return NOT_OWNER;
+        const { id, chat } = fields(input);
+        if (typeof chat !== "boolean") return failed("Say whether its chat is on: true or false.");
+        const agent = await agentOf(context, id);
+        if (!("id" in agent)) return agent;
+        const change = { id: agent.id, chat };
+        const confirmed = await context.confirm({
+          command: "setAgentChat",
+          input: change,
+          summary: TEXTS[context.locale].chat(JSON.stringify(agent.name), agent.id, chat),
+        });
+        if (!confirmed) return { output: WAITING };
+        const result = await commands.setAgentChat(context.actor, change);
+        if (!result.ok) {
+          return result.reason === "not_allowed"
+            ? failed(
+                "Only a specialist's chat can change: Admin and the main agent always chat, and a subagent never does.",
+              )
+            : refusal(result, agent.id);
+        }
+        return {
+          output: chat
+            ? `The owner can now chat with the agent ${agent.id}.`
+            : `The owner can no longer chat with the agent ${agent.id}.`,
+        };
       },
     },
     {

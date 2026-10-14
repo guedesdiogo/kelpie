@@ -10,6 +10,9 @@ import { describe, expect, it, vi } from "vitest";
 import { type AdminDeps, handle } from "../src/api.ts";
 import { PAGES } from "../src/texts.ts";
 
+/** What the fake Registry answers for every agent it holds (ADR-0036 §1). */
+const SPECIALIST = { role: "specialist", owner: null, chat: true } as const;
+
 const OWNER_SUB = "sub-owner";
 const GOOD_BOT_TOKEN = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw-test";
 const NOW_MS = 1_791_000_000_000;
@@ -45,11 +48,19 @@ function world({
       },
       async get(id) {
         const name = agents.get(id);
-        return name ? { id, name } : null;
+        return name ? { id, name, ...SPECIALIST } : null;
       },
       async list() {
         ran.push("registry.list");
-        return [...agents].map(([id, name]) => ({ id, name }));
+        return [...agents].map(([id, name]) => ({ id, name, ...SPECIALIST }));
+      },
+      async setMain(id) {
+        ran.push(`registry.setMain ${id}`);
+        return agents.has(id) ? { ok: true } : { ok: false, reason: "unknown_agent" };
+      },
+      async setChat(id) {
+        ran.push(`registry.setChat ${id}`);
+        return id === "setup" ? { ok: false, reason: "not_allowed" } : { ok: true };
       },
     },
     agents: {
@@ -226,8 +237,22 @@ describe("admin API commands", () => {
     });
     expect(await call(deps, "/commands/listAgents")).toEqual({
       status: 200,
-      body: { ok: true, value: [{ id: "sales", name: "Sales" }] },
+      body: { ok: true, value: [{ id: "sales", name: "Sales", ...SPECIALIST }] },
     });
+  });
+
+  it("chooses the main agent and a specialist's chat, and answers 409 for a role that can't (#288)", async () => {
+    const { deps, ran } = world();
+    await call(deps, "/commands/createAgent", { id: "sales", name: "Sales" });
+    expect(await call(deps, "/commands/setMainAgent", { id: "sales" })).toEqual({
+      status: 200,
+      body: { ok: true, value: {} },
+    });
+    expect(await call(deps, "/commands/setAgentChat", { id: "setup", chat: false })).toEqual({
+      status: 409,
+      body: { ok: false, reason: "not_allowed" },
+    });
+    expect(ran).toContain("registry.setMain sales");
   });
 
   it("refuses a request whose Access JWT doesn't verify, before running anything", async () => {

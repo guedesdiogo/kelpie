@@ -133,7 +133,7 @@ export interface DirectoryContract {
    * Whether a sender may reach an agent. `language` is the language their app is set to, when the
    * channel says, kept with the identity for Kelpie's notices to it (#187).
    */
-  admit(identity: ChannelIdentity, agentId: string, language?: string): Admission;
+  admit(identity: ChannelIdentity, agentId: string, language?: string): Promise<Admission>;
   ownerExists(): boolean;
   bootstrapOwner(userId: string, accessSub: string): OwnerResult;
   relinkOwnerAccess(accessSub: string, tokenHash: string): RelinkResult;

@@ -5,6 +5,8 @@ import { type Actor, type ConfigPorts, createConfigCommands } from "../src/comma
 import { type AgentSettings, DEFAULT_SETTINGS, SETUP_AGENT_ID } from "../src/settings.ts";
 
 const owner: Actor = { userId: "u-owner", role: "owner", via: "admin-api" };
+/** What the fake Registry answers for every agent it holds (ADR-0036 §1). */
+const SPECIALIST = { role: "specialist", owner: null, chat: true } as const;
 const member: Actor = { userId: "u-member", role: "member", via: "admin-api" };
 
 function fakePorts() {
@@ -35,10 +37,19 @@ function fakePorts() {
       },
       async get(id) {
         const agent = agents.get(id);
-        return agent ? { id, name: agent.name } : null;
+        return agent ? { id, name: agent.name, ...SPECIALIST } : null;
       },
       async list() {
-        return [...agents].map(([id, { name }]) => ({ id, name }));
+        return [...agents].map(([id, { name }]) => ({ id, name, ...SPECIALIST }));
+      },
+      async setMain(id) {
+        calls.push(`setMain ${id}`);
+        return agents.has(id) ? { ok: true } : { ok: false, reason: "unknown_agent" };
+      },
+      async setChat(id, chat) {
+        calls.push(`setChat ${id} ${chat}`);
+        if (id === SETUP_AGENT_ID) return { ok: false, reason: "not_allowed" };
+        return agents.has(id) ? { ok: true } : { ok: false, reason: "unknown_agent" };
       },
     },
     agents: {
@@ -162,7 +173,45 @@ describe("configuration commands", () => {
     });
     expect(await commands.listAgents(owner)).toEqual({
       ok: true,
-      value: [{ id: "sales", name: "Vendas" }],
+      value: [{ id: "sales", name: "Vendas", ...SPECIALIST }],
+    });
+  });
+
+  it("lets the owner choose the main agent and a specialist's chat access (#288)", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+    await commands.createAgent(owner, { id: "sales", name: "Sales" });
+
+    expect(await commands.setMainAgent(owner, { id: "sales" })).toEqual({ ok: true, value: {} });
+    expect(await commands.setAgentChat(owner, { id: "sales", chat: false })).toEqual({
+      ok: true,
+      value: {},
+    });
+    expect(calls).toContain("setMain sales");
+    expect(calls).toContain("setChat sales false");
+
+    expect(await commands.setMainAgent(owner, { id: "ghost" })).toEqual({
+      ok: false,
+      reason: "unknown_agent",
+    });
+    expect(await commands.setAgentChat(owner, { id: SETUP_AGENT_ID, chat: false })).toEqual({
+      ok: false,
+      reason: "not_allowed",
+    });
+    for (const input of [{ id: "Sales" }, { id: "sales", chat: "no" }, null]) {
+      expect(await commands.setAgentChat(owner, input)).toEqual({
+        ok: false,
+        reason: "invalid_input",
+      });
+    }
+    expect(await commands.setMainAgent(owner, { id: "Sales" })).toMatchObject({
+      reason: "invalid_input",
+    });
+    expect(await commands.setMainAgent(member, { id: "sales" })).toMatchObject({
+      reason: "forbidden",
+    });
+    expect(await commands.setAgentChat(member, { id: "sales", chat: true })).toMatchObject({
+      reason: "forbidden",
     });
   });
 
