@@ -80,7 +80,7 @@ Cloudflare's [Workers VPC](https://developers.cloudflare.com/workers-vpc/) is in
 
 `channel-egress` is the only Worker that calls the runner, and it keeps the runner's secret in Kelpie's secret store (`docs/secrets.md`).
 
-1. **Give the deploy the VPC Service's id,** as a variable of GitHub's `production` environment ([ADR-0039](adr/0039-runner-vpc-service-id-in-github.md)):
+1. **Give the deploy the VPC Service's id,** as a variable of GitHub's `production` environment ([ADR-0042](adr/0042-runner-vpc-service-id-in-github.md)):
 
    ```bash
    gh variable set RUNNER_VPC_SERVICE_ID --env production --repo guedesdiogo/kelpie --body <VPC_SERVICE_ID>

@@ -1,4 +1,4 @@
-# ADR-0039: The runner's VPC Service id is a variable of GitHub's production environment
+# ADR-0042: The runner's VPC Service id is a variable of GitHub's production environment
 
 - Status: Accepted when the pull request for #294 merges
 - Date: 2026-10-14
