@@ -1,6 +1,6 @@
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
-import { INJECTED_FAILURE } from "./test/fakes.ts";
+import { INJECTED_FAILURE } from "./test/injected-failure.ts";
 
 export default defineConfig({
   plugins: [
