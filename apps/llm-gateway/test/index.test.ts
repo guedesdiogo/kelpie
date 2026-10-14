@@ -4,9 +4,12 @@ import { fromNdjsonStream, type RoutedRequest, type RouterEvent } from "@kelpie/
 import type { Question } from "@kelpie/qualifier";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  configureDefaultsWith,
   describeWith,
   embedWith,
   generateWith,
+  LlmGateway,
+  LlmGatewayAdmin,
   pingWith,
   providerConfig,
   qualifyWith,
@@ -749,5 +752,76 @@ describe("model choice (#286)", () => {
     await runInDurableObject(defaults(), (_instance, state) => {
       expect(state.storage.kv.get("pinnedProvider")).toBeUndefined();
     });
+  });
+});
+
+describe("the instance's model settings (#289)", () => {
+  type GatewayEnv = Parameters<typeof describeWith>[0];
+  const defaults = () => env.MODEL_DEFAULTS.getByName("instance");
+  const owner = { userId: "u-owner", role: "owner", via: "agent:setup" } as const;
+
+  async function reset() {
+    await runInDurableObject(defaults(), (_instance, state) => state.storage.deleteAll());
+  }
+
+  it("lists the providers that have a key, on the admin entrypoint only", async () => {
+    expect(await exports.LlmGatewayAdmin.providers()).toEqual(["anthropic"]);
+    // A Worker that binds the model calls alone can't read or change the instance's settings.
+    for (const method of ["providers", "instanceModels", "configureDefaults"]) {
+      expect(method in LlmGateway.prototype).toBe(false);
+      expect(method in LlmGatewayAdmin.prototype).toBe(true);
+    }
+  });
+
+  it("sets the instance's settings, audits them with their actor, and every call resolves against them", async () => {
+    await reset();
+    const settings = { conversation: { tier: "medium", effort: "low" } } as const;
+    expect(await exports.LlmGatewayAdmin.configureDefaults(settings, owner)).toEqual({ ok: true });
+    expect(await exports.LlmGatewayAdmin.instanceModels()).toEqual({
+      settings,
+      pinned: null,
+      providers: ["anthropic"],
+    });
+    expect(await exports.LlmGateway.describe("conversation")).toMatchObject({
+      tier: "medium",
+      effort: "low",
+    });
+    const audit = await runInDurableObject(defaults(), (_instance, state) =>
+      [...state.storage.kv.list({ prefix: "audit:" })].map(([, value]) => value),
+    );
+    expect(audit).toEqual([
+      expect.objectContaining({ userId: "u-owner", via: "agent:setup", settings }),
+    ]);
+  });
+
+  it("refuses settings it doesn't know, or a provider without a key, and changes nothing", async () => {
+    await reset();
+    for (const settings of [{ conversation: { model: "x" } }, { provider: "openai" }]) {
+      expect(await exports.LlmGatewayAdmin.configureDefaults(settings as never, owner)).toEqual({
+        ok: false,
+        reason: "invalid_input",
+      });
+    }
+    expect((await exports.LlmGatewayAdmin.instanceModels()).settings).toEqual({});
+    const both = { ...(env as GatewayEnv), OPENAI_API_KEY: "sk-test" };
+    expect(await configureDefaultsWith(both, { provider: "openai" }, owner)).toEqual({ ok: true });
+    // A write replaces the settings whole, and each is audited, in order, its actor bounded.
+    const long = { ...owner, via: "x".repeat(500) };
+    expect(await configureDefaultsWith(both, { memory: { tier: "medium" } }, long)).toEqual({
+      ok: true,
+    });
+    expect((await exports.LlmGatewayAdmin.instanceModels()).settings).toEqual({
+      memory: { tier: "medium" },
+    });
+    const audit = await runInDurableObject(defaults(), (_instance, state) =>
+      [...state.storage.kv.list({ prefix: "audit:" })].map(
+        ([, value]) => value as { via: string; settings: unknown },
+      ),
+    );
+    expect(audit.map((entry) => entry.settings)).toEqual([
+      { provider: "openai" },
+      { memory: { tier: "medium" } },
+    ]);
+    expect(audit[1]?.via).toHaveLength(128);
   });
 });

@@ -10,6 +10,7 @@ import {
 } from "@kelpie/channels";
 import {
   type AgentHostContract,
+  type ConfigPorts,
   createConfigCommands,
   REGISTRY_NAME,
   type RegistryContract,
@@ -29,6 +30,7 @@ import {
   type RoutedRequest,
   type RouterEvent,
 } from "@kelpie/llm";
+import { mainAgentTools } from "./main-agent.ts";
 import { memoryTools } from "./memory-tools.ts";
 import { setupTools } from "./setup-agent.ts";
 import type { ToolProvider } from "./tools.ts";
@@ -126,6 +128,13 @@ interface LlmGatewayBinding {
   }>;
 }
 
+/** llm-gateway's admin entrypoint: the instance's model settings, for the setup agent (#289). */
+interface LlmGatewayAdminBinding {
+  providers: ConfigPorts["models"]["providers"];
+  instanceModels: ConfigPorts["models"]["view"];
+  configureDefaults: ConfigPorts["models"]["configure"];
+}
+
 let portsForTesting: ConversationPorts | undefined;
 
 /** Tests run in the Worker's isolate and swap the ports with this. Production never calls it. */
@@ -139,6 +148,7 @@ export function portsFor(env: Env): ConversationPorts {
 
 function productionPorts(env: Env): ConversationPorts {
   const gateway = env.LLM_GATEWAY as unknown as LlmGatewayBinding;
+  const gatewayAdmin = env.LLM_GATEWAY_ADMIN as unknown as LlmGatewayAdminBinding;
   // A service binding to channel-egress's ChannelEgress entrypoint, which answers with values.
   const egress = env.CHANNEL_EGRESS as unknown as ChannelEgressContract;
   // A service binding to context-store's ContextStore entrypoint.
@@ -149,6 +159,33 @@ function productionPorts(env: Env): ConversationPorts {
   const registry = env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<RegistryContract>;
   const agentHost = (id: string) =>
     env.AGENT_HOST.getByName(id) as unknown as Remote<AgentHostContract>;
+  const commands = createConfigCommands({
+    registry,
+    agents: {
+      configure: (id, changes, actor) => agentHost(id).configure(changes, actor),
+      config: (id) => agentHost(id).config(),
+    },
+    directory: {
+      issuePairingCode: notBound,
+      enableIdentity: notBound,
+      disableIdentity: notBound,
+      listIdentities: notBound,
+      setTimeZone: notBound,
+    },
+    channels: {
+      createTelegramForm: (agentId) => forms.createTelegramForm(agentId),
+      registerTelegramWebhook: notBound,
+      describeTelegramBot: notBound,
+      createRunnerForm: notBound,
+      describeRunner: notBound,
+    },
+    models: {
+      providers: () => gatewayAdmin.providers(),
+      view: () => gatewayAdmin.instanceModels(),
+      configure: (settings, actor) => gatewayAdmin.configureDefaults(settings, actor),
+    },
+    vault: { held: notBound, forget: notBound, setDream: notBound },
+  });
   return {
     async generate(selection, request) {
       const generation = await gateway.generate(selection, request);
@@ -187,31 +224,9 @@ function productionPorts(env: Env): ConversationPorts {
       // The setup agent's (#48): the same commands as the admin API, minus the ones that need the
       // Directory, the vault's admin entrypoint or more of channel-egress than opening a form,
       // which this Worker doesn't bind.
-      setupTools(
-        createConfigCommands({
-          registry,
-          agents: {
-            configure: (id, changes, actor) => agentHost(id).configure(changes, actor),
-            config: (id) => agentHost(id).config(),
-          },
-          directory: {
-            issuePairingCode: notBound,
-            enableIdentity: notBound,
-            disableIdentity: notBound,
-            listIdentities: notBound,
-            setTimeZone: notBound,
-          },
-          channels: {
-            createTelegramForm: (agentId) => forms.createTelegramForm(agentId),
-            registerTelegramWebhook: notBound,
-            describeTelegramBot: notBound,
-            createRunnerForm: notBound,
-            describeRunner: notBound,
-          },
-          vault: { held: notBound, forget: notBound, setDream: notBound },
-        }),
-        { adminOrigin: env.ADMIN_ORIGIN },
-      ),
+      setupTools(commands, { adminOrigin: env.ADMIN_ORIGIN }),
+      // The main agent's (#289): other agents' model trios, behind the owner's confirmation.
+      mainAgentTools(commands, async (id) => (await registry.get(id))?.role ?? null),
     ],
     awaitSetup: (agentId, conversation, step, until) =>
       withTimeout(agentHost(agentId).awaitSetup(conversation, step, until), AWAIT_SETUP_TIMEOUT_MS),

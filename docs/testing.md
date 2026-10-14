@@ -47,11 +47,11 @@ A `Response` created in a test can't have its body read inside a Worker call eit
 
 Fiber recovery after an eviction runs when the fiber's heartbeat alarm fires on the new instance. To test it, call `evictDurableObject(stub)`, then `runDurableObjectAlarm(stub)`.
 
-`llm-gateway` and `channel-egress` are service bindings that don't exist in tests, so `vitest.config.ts` replaces them with stubs; the fake model and channel ports mean they're never called. The `llm-gateway` stub answers only `ping()`, which the deploy probe's tests call (#234).
+`llm-gateway` and `channel-egress` are service bindings that don't exist in tests, so `vitest.config.ts` replaces them with stubs; the fake model and channel ports mean they're never called. The `llm-gateway` stub answers `ping()`, which the deploy probe's tests call (#234), and `describe()`, which a turn's identity section reads (#286); its `LlmGatewayAdmin` entrypoint is empty (#289).
 
 `ingress`'s `vitest.config.ts` does the same for the Workers it binds: stub Workers with the entrypoints and objects it calls, among them a `DeployProbe` that finds every part ok, and the probe's token as a binding.
 
-`admin-api` binds Durable Objects that live in other Workers. Its `vitest.config.ts` adds stub Workers that only declare those classes, so the runtime starts; its tests pass fakes to `handle()` and never call the objects.
+`admin-api` binds Durable Objects and entrypoints that live in other Workers. Its `vitest.config.ts` adds stub Workers that only declare those classes, so the runtime starts; its tests pass fakes to `handle()` and never call the objects. The one exception is `llm-gateway`'s `LlmGatewayAdmin` stub, which answers the Worker's own test of the model commands' wiring (#289).
 
 The `ConversationAgent` reads its settings from a real `AgentHost` in the same test Worker. A test that changes settings configures its own agent through `env.AGENT_HOST`, so settings don't leak between tests.
 
