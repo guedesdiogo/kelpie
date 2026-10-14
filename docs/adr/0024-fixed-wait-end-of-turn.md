@@ -4,6 +4,7 @@
 - Date: 2026-10-06
 - Issue: [#133](https://github.com/guedesdiogo/kelpie/issues/133)
 - Accepted by the owner on 2026-10-06: «Não vamos usar o qualificador para isso. Vamos usar um "timeout" de 10 segundos (permitir ser configurável)»
+- Amended by: [ADR-0041](0041-auto-tier-by-qualifier.md), the qualifier's typed decisions include the tier of a turn on `auto`
 
 ## Context
 
