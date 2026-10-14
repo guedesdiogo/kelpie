@@ -63,6 +63,18 @@ function world({
         return id === "setup" ? { ok: false, reason: "not_allowed" } : { ok: true };
       },
     },
+    models: {
+      async providers() {
+        return ["anthropic"];
+      },
+      async view() {
+        return { settings: {}, pinned: "anthropic", providers: ["anthropic"] };
+      },
+      async configure(settings) {
+        ran.push(`models.configure ${JSON.stringify(settings)}`);
+        return { ok: true };
+      },
+    },
     agents: {
       async configure() {
         return { ok: true, value: { settings: DEFAULT_SETTINGS, promptVersion: 0 } };
@@ -238,6 +250,26 @@ describe("admin API commands", () => {
     expect(await call(deps, "/commands/listAgents")).toEqual({
       status: 200,
       body: { ok: true, value: [{ id: "sales", name: "Sales", ...SPECIALIST }] },
+    });
+  });
+
+  it("reads and sets the instance's model settings, and answers 409 for a provider without a key (#289)", async () => {
+    const { deps, ran } = world();
+    expect(await call(deps, "/commands/getModels")).toEqual({
+      status: 200,
+      body: { ok: true, value: { settings: {}, pinned: "anthropic", providers: ["anthropic"] } },
+    });
+    const settings = { memory: { tier: "medium" } };
+    expect(await call(deps, "/commands/configureModels", { settings })).toEqual({
+      status: 200,
+      body: { ok: true, value: {} },
+    });
+    expect(ran).toContain(`models.configure ${JSON.stringify(settings)}`);
+    expect(
+      await call(deps, "/commands/configureModels", { settings: { provider: "openai" } }),
+    ).toEqual({
+      status: 409,
+      body: { ok: false, reason: "no_key" },
     });
   });
 

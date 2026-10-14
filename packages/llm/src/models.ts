@@ -5,6 +5,8 @@ import { EFFORTS } from "./efforts.ts";
 import { MODEL_TIERS, type ModelTier, PROVIDERS, type RouteModel } from "./router.ts";
 import type { Effort, ProviderId } from "./types.ts";
 
+export type { Effort, ProviderId };
+
 export const MODEL_AREAS = ["conversation", "memory"] as const;
 /** `conversation`: the agent's turns. `memory`: the history checkpoint, Dream and conflict resolve. */
 export type ModelArea = (typeof MODEL_AREAS)[number];

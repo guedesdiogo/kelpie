@@ -36,6 +36,25 @@ export default defineConfig({
           }),
           stubWorker("kelpie-channel-egress", {}, ["ChannelForms"]),
           stubWorker("kelpie-context-store", {}, ["ContextStoreAdmin"]),
+          // The instance's model settings (#289), which the worker test reads through the commands.
+          {
+            name: "kelpie-llm-gateway",
+            modules: true,
+            compatibilityDate: "2026-10-01",
+            script: `import { WorkerEntrypoint } from "cloudflare:workers";
+export class LlmGateway extends WorkerEntrypoint {
+  providers() {
+    return ["anthropic"];
+  }
+  instanceModels() {
+    return { settings: {}, pinned: "anthropic", providers: ["anthropic"] };
+  }
+  configureDefaults() {
+    return { ok: true };
+  }
+}
+export default { fetch: () => new Response(null, { status: 404 }) };`,
+          },
         ],
       },
     }),

@@ -4,6 +4,7 @@ import { fromNdjsonStream, type LlmEvent, type RoutedRequest } from "@kelpie/llm
 import type { Question } from "@kelpie/qualifier";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  configureDefaultsWith,
   describeWith,
   embedWith,
   generateWith,
@@ -704,5 +705,53 @@ describe("model choice (#286)", () => {
     await runInDurableObject(defaults(), (_instance, state) => {
       expect(state.storage.kv.get("pinnedProvider")).toBeUndefined();
     });
+  });
+});
+
+describe("the instance's model settings (#289)", () => {
+  type GatewayEnv = Parameters<typeof describeWith>[0];
+  const defaults = () => env.MODEL_DEFAULTS.getByName("instance");
+  const owner = { userId: "u-owner", role: "owner", via: "agent:setup" } as const;
+
+  async function reset() {
+    await runInDurableObject(defaults(), (_instance, state) => state.storage.deleteAll());
+  }
+
+  it("lists the providers that have a key, in the route table's order", async () => {
+    expect(await exports.LlmGateway.providers()).toEqual(["anthropic"]);
+  });
+
+  it("sets the instance's settings, audits them with their actor, and every call resolves against them", async () => {
+    await reset();
+    const settings = { conversation: { tier: "medium", effort: "low" } } as const;
+    expect(await exports.LlmGateway.configureDefaults(settings, owner)).toEqual({ ok: true });
+    expect(await exports.LlmGateway.instanceModels()).toEqual({
+      settings,
+      pinned: null,
+      providers: ["anthropic"],
+    });
+    expect(await exports.LlmGateway.describe("conversation")).toMatchObject({
+      tier: "medium",
+      effort: "low",
+    });
+    const audit = await runInDurableObject(defaults(), (_instance, state) =>
+      [...state.storage.kv.list({ prefix: "audit:" })].map(([, value]) => value),
+    );
+    expect(audit).toEqual([
+      expect.objectContaining({ userId: "u-owner", via: "agent:setup", settings }),
+    ]);
+  });
+
+  it("refuses settings it doesn't know, or a provider without a key, and changes nothing", async () => {
+    await reset();
+    for (const settings of [{ conversation: { model: "x" } }, { provider: "openai" }]) {
+      expect(await exports.LlmGateway.configureDefaults(settings as never, owner)).toEqual({
+        ok: false,
+        reason: "invalid_input",
+      });
+    }
+    const both = { ...(env as GatewayEnv), OPENAI_API_KEY: "sk-test" };
+    expect(await configureDefaultsWith(both, { provider: "openai" }, owner)).toEqual({ ok: true });
+    expect((await exports.LlmGateway.instanceModels()).settings).toEqual({ provider: "openai" });
   });
 });

@@ -18,6 +18,7 @@ import {
   modelAliasDescription,
   OpenAIEmbedder,
   OpenAIResponsesProvider,
+  PROVIDERS,
   type ProviderId,
   parseModelSettings,
   parseRouteTable,
@@ -37,7 +38,7 @@ import {
   type QualifierBackend,
   type Question,
 } from "@kelpie/qualifier";
-import type { InstanceDefaults } from "./model-defaults.ts";
+import type { DefaultsActor, InstanceDefaults } from "./model-defaults.ts";
 
 export { ModelDefaults } from "./model-defaults.ts";
 
@@ -128,6 +129,24 @@ export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
     return routesWith(this.env);
   }
 
+  /** The providers with a key, in the route table's order (#289). */
+  providers(): ProviderId[] {
+    return providersWith(this.env);
+  }
+
+  /** The instance's model settings, its pinned provider and the providers with a key (#289). */
+  instanceModels(): Promise<InstanceModels> {
+    return instanceModelsWith(this.env);
+  }
+
+  /** Replaces the instance's model settings (#289). See `configureDefaultsWith`. */
+  configureDefaults(
+    settings: ModelSettings,
+    actor: DefaultsActor,
+  ): Promise<ConfigureDefaultsResult> {
+    return configureDefaultsWith(this.env, settings, actor);
+  }
+
   /** For the deploy's probe (#234), through conversation-runtime. See `pingWith`. */
   ping(): Promise<{ ok: true }> {
     return pingWith(this.env);
@@ -155,6 +174,51 @@ export function generateWith(
     (error) => logFailure("generate", error),
   );
   return new Generation(events, controller);
+}
+
+/** The instance's model settings as Admin's tools show them. */
+export interface InstanceModels {
+  settings: ModelSettings;
+  pinned: ProviderId | null;
+  providers: ProviderId[];
+}
+
+export type ConfigureDefaultsResult = { ok: true } | { ok: false; reason: "invalid_input" };
+
+/** The providers whose key is set, in the route table's provider order. */
+export function providersWith(env: GatewayEnv): ProviderId[] {
+  const configured = providers(env);
+  return (PROVIDERS as readonly ProviderId[]).filter((id) => configured[id] !== undefined);
+}
+
+export async function instanceModelsWith(env: GatewayEnv): Promise<InstanceModels> {
+  const { instance, pinned } = await env.MODEL_DEFAULTS.getByName("instance").view();
+  return { settings: instance, pinned, providers: providersWith(env) };
+}
+
+/**
+ * Replaces the instance's model settings (ADR-0036 §2), audited with `actor`. The configuration
+ * commands are its callers and authorize the actor (ADR-0013); this validates the settings again,
+ * because it is an RPC boundary, and refuses a provider that has no key.
+ */
+export async function configureDefaultsWith(
+  env: GatewayEnv,
+  settings: ModelSettings,
+  actor: DefaultsActor,
+): Promise<ConfigureDefaultsResult> {
+  const parsed = parseModelSettings(settings);
+  if (!parsed || !keyedProviders(env, parsed)) return { ok: false, reason: "invalid_input" };
+  const who = { userId: String(actor?.userId ?? ""), via: String(actor?.via ?? "") };
+  await env.MODEL_DEFAULTS.getByName("instance").configure(parsed, who);
+  return { ok: true };
+}
+
+/** Whether every provider `settings` names has a key. */
+function keyedProviders(env: GatewayEnv, settings: ModelSettings): boolean {
+  const keyed = providersWith(env);
+  return [settings.provider, settings.conversation?.provider, settings.memory?.provider].every(
+    (provider) => provider === undefined || keyed.includes(provider),
+  );
 }
 
 /**

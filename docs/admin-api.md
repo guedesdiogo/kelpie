@@ -30,6 +30,8 @@ Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`
 | `/commands/renameAgent` | `{ "id": "sales", "name": "Sales team" }` |
 | `/commands/getAgent` | `{ "id": "sales" }` |
 | `/commands/configureAgent` | `{ "id": "sales", "settings": { "systemPrompt": "…", "quietMs": 5000, "qualifier": "jev" } }` |
+| `/commands/getModels` | none; the instance's model settings, the provider pinned as the default, and the providers with a key (#289) |
+| `/commands/configureModels` | `{ "settings": { "conversation": { "tier": "medium" }, "memory": { "tier": "cheap" } } }`; replaces the instance's model settings, which every agent follows unless it has its own. A provider without a key answers `409 no_key` |
 | `/commands/setMainAgent` | `{ "id": "sales" }`; makes the agent the main agent, the one the owner talks to (ADR-0036 §1). The previous one becomes a specialist that keeps its chat |
 | `/commands/setAgentChat` | `{ "id": "sales", "chat": true }`; lets the owner reach a specialist on its channels, or stops it. Admin and the main agent always chat |
 | `/commands/listIdentities` | none |
@@ -55,7 +57,7 @@ Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`
 | 401 | `unauthenticated` |
 | 403 | `forbidden`, `no_owner`, `invalid_bootstrap_token`, `invalid_recovery_token`, `cross_origin` (sent from another origin's page) |
 | 404 | `unknown_agent`, `unknown_identity`, `unknown_user`, `not_found` |
-| 409 | `not_paired` (a pending identity; pair it instead), `not_connected` (the agent has no bot), `identity_taken` (a recovery to a login another user holds), `not_allowed` (the agent's role doesn't take the change, such as Admin as the main agent) |
+| 409 | `not_paired` (a pending identity; pair it instead), `not_connected` (the agent has no bot), `identity_taken` (a recovery to a login another user holds), `not_allowed` (the agent's role doesn't take the change, such as Admin as the main agent), `no_key` (a model setting names a provider llm-gateway has no key for) |
 | 410 | `bootstrap_disabled`, `recovery_token_spent` |
 | 413 | `too_large` |
 | 415 | `not_json` (a `Content-Type` other than `application/json`) |
@@ -71,7 +73,7 @@ Identity values in answers are masked.
   - `conversation` covers the agent's turns;
   - `memory` covers its history checkpoints.
 - **What each scope sets:** tier and effort are set per area, so a costlier conversation never makes the agent's memory costlier. `provider` covers both areas, and an area may name its own.
-- **Unset fields** come from the instance's settings, which Story 5.5's tools set, then the defaults:
+- **Unset fields** come from the instance's settings (`configureModels`), then the defaults:
   - the provider is the first one llm-gateway saw with a key, in the cheap tier's order, pinned then. The pin leads every tier, so a route table that lists another provider first in `medium` or `frontier` follows the pin there too;
   - the tier is `cheap`;
   - the effort is the model's own.
@@ -226,6 +228,7 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
 - **`specialist`:** every other agent, owned by the main agent.
   - One created now doesn't chat until `setAgentChat` turns its chat on.
   - Agents that existed before roles keep their chat.
+- **The main agent's own tool:** `set_agent_model` changes another agent's model settings, when the owner asks or agrees with its suggestion, behind the same confirmation (#289). No agent changes its own model, except Admin, through `configure_agent`.
 - **The check is at `admit`:** a chat its role doesn't allow answers `no_grant`, so a specialist whose chat is off doesn't answer its bot or the webchat.
 
 - **Where it comes from.**
@@ -235,7 +238,8 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
   - **Before deploying it to an existing instance,** check with `listAgents` that no agent already uses the id `setup`. Such an agent would keep its name and gain the setup tools.
 - **Its tools** run the commands above, as the owner, through the agent (`via: agent:setup`), and only the setup agent has them:
   - `list_agents`, `get_agent`, `create_agent` and `rename_agent` run directly;
-  - `configure_agent`, `set_main_agent` and `set_agent_chat` wait for the owner's confirmation (below);
+  - `get_models` reads the instance's model settings, and `configure_models` replaces them;
+  - `configure_agent` (its `model` included), `configure_models`, `set_main_agent` and `set_agent_chat` wait for the owner's confirmation (below);
   - `connect_telegram` opens a secure form ("Secure forms"), and `pair_telegram` leads to the pairing page ("Pairing"). Kelpie sends each link itself (below), and the owner's submitting that page is their yes (ADR-0026).
 
   The identity, time zone and vault commands stay on this API. `conversation-runtime` binds no `Directory`, which would make it and `ingress` bind each other. Of `channel-egress`, it binds only `SetupForms`, which opens a form and nothing more (`docs/secrets.md`).

@@ -8,6 +8,7 @@ import {
 import type { ChannelFormsContract } from "@kelpie/channels";
 import {
   type AgentHostContract,
+  type ConfigPorts,
   createConfigCommands,
   REGISTRY_NAME,
   type RegistryContract,
@@ -15,7 +16,15 @@ import {
 import type { ContextStoreAdminContract } from "@kelpie/context-store/contract";
 import { type AdminDeps, handle } from "./api.ts";
 
-function depsFor(env: Env): AdminDeps {
+/** The part of llm-gateway's RPC surface the model commands use (#289). */
+type ModelsGateway = {
+  providers: ConfigPorts["models"]["providers"];
+  instanceModels: ConfigPorts["models"]["view"];
+  configureDefaults: ConfigPorts["models"]["configure"];
+};
+
+/** The admin API's dependencies on this Worker's bindings; exported for the Worker's own test. */
+export function depsFor(env: Env): AdminDeps {
   // The bindings point at objects in other Workers, which `wrangler types` can't type; the
   // objects implement these contracts, so the casts can't drift from them.
   const directory = env.DIRECTORY.getByName(DIRECTORY_NAME) as unknown as Remote<DirectoryContract>;
@@ -26,6 +35,7 @@ function depsFor(env: Env): AdminDeps {
   const forms = env.CHANNEL_FORMS as unknown as ChannelFormsContract;
   // A service binding to context-store's ContextStoreAdmin entrypoint, which only admin-api binds.
   const vault = env.CONTEXT_STORE_ADMIN as unknown as ContextStoreAdminContract;
+  const gateway = env.LLM_GATEWAY as unknown as ModelsGateway;
   // A trailing slash would never match the token's issuer.
   const config = {
     teamDomain: env.ACCESS_TEAM_DOMAIN.replace(/\/+$/, ""),
@@ -52,6 +62,11 @@ function depsFor(env: Env): AdminDeps {
         createTelegramForm: (agentId) => forms.createTelegramForm(agentId),
         registerTelegramWebhook: (agentId) => forms.registerTelegramWebhook(agentId),
         describeTelegramBot: (agentId) => forms.describeTelegramBot(agentId),
+      },
+      models: {
+        providers: () => gateway.providers(),
+        view: () => gateway.instanceModels(),
+        configure: (settings, actor) => gateway.configureDefaults(settings, actor),
       },
       vault: {
         held: () => vault.held(),

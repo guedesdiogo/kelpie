@@ -11,6 +11,7 @@ export {
   type ConfigPorts,
   type ConfigureResult,
   createConfigCommands,
+  type InstanceModels,
   type RegistryContract,
   type RenameAgentResult,
   type SetAgentResult,

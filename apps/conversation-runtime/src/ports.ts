@@ -10,6 +10,7 @@ import {
 } from "@kelpie/channels";
 import {
   type AgentHostContract,
+  type ConfigPorts,
   createConfigCommands,
   REGISTRY_NAME,
   type RegistryContract,
@@ -29,6 +30,7 @@ import {
   type ModelSelection,
   type RoutedRequest,
 } from "@kelpie/llm";
+import { mainAgentTools } from "./main-agent.ts";
 import { memoryTools } from "./memory-tools.ts";
 import { setupTools } from "./setup-agent.ts";
 import type { ToolProvider } from "./tools.ts";
@@ -124,6 +126,10 @@ interface LlmGatewayBinding {
     events(): Promise<ReadableStream<Uint8Array>>;
     cancel(): Promise<void>;
   }>;
+  /** The instance's model settings, for the setup agent's tools (#289). */
+  providers: ConfigPorts["models"]["providers"];
+  instanceModels: ConfigPorts["models"]["view"];
+  configureDefaults: ConfigPorts["models"]["configure"];
 }
 
 let portsForTesting: ConversationPorts | undefined;
@@ -149,6 +155,31 @@ function productionPorts(env: Env): ConversationPorts {
   const registry = env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<RegistryContract>;
   const agentHost = (id: string) =>
     env.AGENT_HOST.getByName(id) as unknown as Remote<AgentHostContract>;
+  const commands = createConfigCommands({
+    registry,
+    agents: {
+      configure: (id, changes, actor) => agentHost(id).configure(changes, actor),
+      config: (id) => agentHost(id).config(),
+    },
+    directory: {
+      issuePairingCode: notBound,
+      enableIdentity: notBound,
+      disableIdentity: notBound,
+      listIdentities: notBound,
+      setTimeZone: notBound,
+    },
+    channels: {
+      createTelegramForm: (agentId) => forms.createTelegramForm(agentId),
+      registerTelegramWebhook: notBound,
+      describeTelegramBot: notBound,
+    },
+    models: {
+      providers: () => gateway.providers(),
+      view: () => gateway.instanceModels(),
+      configure: (settings, actor) => gateway.configureDefaults(settings, actor),
+    },
+    vault: { held: notBound, forget: notBound, setDream: notBound },
+  });
   return {
     async generate(selection, request) {
       const generation = await gateway.generate(selection, request);
@@ -187,29 +218,9 @@ function productionPorts(env: Env): ConversationPorts {
       // The setup agent's (#48): the same commands as the admin API, minus the ones that need the
       // Directory, the vault's admin entrypoint or more of channel-egress than opening a form,
       // which this Worker doesn't bind.
-      setupTools(
-        createConfigCommands({
-          registry,
-          agents: {
-            configure: (id, changes, actor) => agentHost(id).configure(changes, actor),
-            config: (id) => agentHost(id).config(),
-          },
-          directory: {
-            issuePairingCode: notBound,
-            enableIdentity: notBound,
-            disableIdentity: notBound,
-            listIdentities: notBound,
-            setTimeZone: notBound,
-          },
-          channels: {
-            createTelegramForm: (agentId) => forms.createTelegramForm(agentId),
-            registerTelegramWebhook: notBound,
-            describeTelegramBot: notBound,
-          },
-          vault: { held: notBound, forget: notBound, setDream: notBound },
-        }),
-        { adminOrigin: env.ADMIN_ORIGIN },
-      ),
+      setupTools(commands, { adminOrigin: env.ADMIN_ORIGIN }),
+      // The main agent's (#289): other agents' model trios, behind the owner's confirmation.
+      mainAgentTools(commands, async (id) => (await registry.get(id))?.role ?? null),
     ],
     awaitSetup: (agentId, conversation, step, until) =>
       withTimeout(agentHost(agentId).awaitSetup(conversation, step, until), AWAIT_SETUP_TIMEOUT_MS),
