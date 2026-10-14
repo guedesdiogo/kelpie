@@ -27,13 +27,16 @@ jobs:
       workflows: ${{ steps.gates.outputs.workflows }}
       dependency-review: ${{ steps.gates.outputs.dependency-review }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # A push to main asks no rule, so it needs neither the checkout nor Bun.
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # HEAD^1 is the base: main's tip for a PR's merge commit.
           fetch-depth: 2
           persist-credentials: false
       # tools/release needs no dependencies to run, only Bun.
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - if: github.event_name == 'pull_request'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: package.json
       - id: gates
@@ -46,7 +49,9 @@ jobs:
           elif ! git diff --quiet HEAD^1 HEAD -- tools/release .github/workflows/ci.yml; then
             echo "This change touches \`tools/release\` or \`ci.yml\`, so every gate runs." >> "$GITHUB_STEP_SUMMARY"
           else
-            bun run --cwd tools/release release gates --base HEAD^1
+            # Not `bun run`: it would put the checkout's node_modules/.bin, which a pull request
+            # could commit, ahead of git and bun on the PATH.
+            cd tools/release && bun src/main.ts gates --base HEAD^1
           fi
 
   checks:

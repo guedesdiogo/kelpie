@@ -18,6 +18,11 @@ describe("planGates", () => {
   it.each([
     ["a Worker's code", ["apps/ingress/src/index.ts"], ["checks", "build", "migrations"]],
     ["a Worker's README", ["apps/ingress/README.md"], ["checks", "build", "migrations"]],
+    [
+      "a JSON file under docs, which Biome checks",
+      ["docs/spikes/memory-eval-baseline.json"],
+      ["checks"],
+    ],
     ["a package", ["packages/config/src/defaults.ts"], ["checks", "build", "migrations"]],
     ["the CI scripts", ["scripts/coverage-summary.mjs"], ["checks"]],
     ["Biome's configuration", ["biome.json"], ["checks"]],
@@ -58,6 +63,16 @@ describe("planGates", () => {
 
   it("runs every gate for an empty change, which it can't judge", () => {
     expect(running([])).toEqual([
+      "checks",
+      "build",
+      "migrations",
+      "workflows",
+      "dependency-review",
+    ]);
+  });
+
+  it("runs every gate for a path git quotes, which no rule can read", () => {
+    expect(running(["docs/x.md", '"apps/x/caf\\303\\251.ts"'])).toEqual([
       "checks",
       "build",
       "migrations",
@@ -113,7 +128,7 @@ describe("gatesReport", () => {
 
   it("says why an empty change runs everything", () => {
     expect(gatesReport(planGates([]), 0)).toContain(
-      "| `Build Workers` | runs | no changed paths, so every gate runs |",
+      "| `Build Workers` | runs | the rule can't judge this change, so every gate runs |",
     );
   });
 });

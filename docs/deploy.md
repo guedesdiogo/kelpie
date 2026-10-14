@@ -41,7 +41,7 @@ PR ──► gates ──► CI passed ──► merge ──► gates on main �
 | `Workflow lint` | actionlint, with shellcheck on every `run:` block | anything under `.github/` |
 | `Dependency review` | A new dependency has no known high-severity vulnerability | a `package.json`, `bun.lock`, or anything under `.github/` |
 
-- **`Detect changes` decides,** before the gates, with `release gates` in `tools/release`. Its summary lists each gate, whether it runs, and the paths behind it. The docs are `docs/`, the root `*.md` files and `LICENSE`; a docs-only pull request runs no gate. A path no rule names runs lint and tests.
+- **`Detect changes` decides,** before the gates, with `release gates` in `tools/release`. Its summary lists each gate, whether it runs, and the paths behind it. The docs are the Markdown files under `docs/` and at the root, and `LICENSE`; a docs-only pull request runs no gate. A path no rule names runs lint and tests, and a path git quotes for its unusual characters runs every gate.
 - **Every gate runs** on a push to `main`, and on a pull request that changes `tools/release/` or `ci.yml`: the rule never judges a change to itself.
 - **`CI passed` accepts only the skips `Detect changes` decided.** It fails when `Detect changes` fails, and when a gate that had to run didn't succeed.
 - **`release gates --base origin/main`**, from `tools/release`, shows the decision for a local branch.

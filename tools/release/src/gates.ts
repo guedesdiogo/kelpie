@@ -17,9 +17,11 @@ export type Gate = keyof typeof GATES;
 
 const CI_WORKFLOW = ".github/workflows/ci.yml";
 
-/** The docs: Biome skips Markdown, and no test, bundle or migration reads these. */
-const isDocs = (path: string) =>
-  path.startsWith("docs/") || /^[^/]+\.md$/.test(path) || path === "LICENSE";
+/**
+ * The docs: Biome skips Markdown, and no test, bundle or migration reads these. Biome does check
+ * the JSON results under docs/, so only Markdown counts.
+ */
+const isDocs = (path: string) => /^(docs\/.+|[^/]+)\.md$/.test(path) || path === "LICENSE";
 
 /** Dependabot's config and the workflows other than CI, which only GitHub reads. */
 const isGitHubOnly = (path: string) =>
@@ -42,14 +44,17 @@ export interface GatePlan {
   gate: Gate;
   job: string;
   runs: boolean;
-  /** The changed paths that make it run: all of them when there are none, which it can't judge. */
+  /** The changed paths that make it run; none when the rule can't judge the change. */
   because: string[];
 }
 
 export function planGates(paths: readonly string[]): GatePlan[] {
+  // Nothing to judge, or a path git quotes for its unusual characters ("caf\303\251.ts"), which
+  // no rule can read: every gate runs.
+  const judged = paths.length > 0 && !paths.some((path) => path.startsWith('"'));
   return (Object.keys(GATES) as Gate[]).map((gate) => {
-    const because = paths.filter(needs[gate]);
-    return { gate, job: GATES[gate], runs: paths.length === 0 || because.length > 0, because };
+    const because = judged ? paths.filter(needs[gate]) : [];
+    return { gate, job: GATES[gate], runs: !judged || because.length > 0, because };
   });
 }
 
@@ -70,7 +75,7 @@ export function gatesReport(plans: readonly GatePlan[], changed: number): string
             .map((path) => `\`${path}\``)
             .join(", ") + (because.length > SHOWN ? ` and ${because.length - SHOWN} more` : "")
         : runs
-          ? "no changed paths, so every gate runs"
+          ? "the rule can't judge this change, so every gate runs"
           : "nothing it checks changed";
     return `| \`${job}\` | ${runs ? "runs" : "skips"} | ${why} |`;
   });
