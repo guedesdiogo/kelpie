@@ -91,38 +91,59 @@ describe("sessionPage", () => {
     expect(page?.redactions).toBe(1);
   });
 
-  it("bounds a long session: short excerpts, the first and last messages", async () => {
-    const lines = Array.from({ length: 200 }, (_, i) =>
-      owner(
-        `1${Math.floor(i / 60)}:${String(i % 60).padStart(2, "0")}`,
-        `mensagem ${i} ${"x".repeat(600)}`,
-      ),
+  it("bounds a long session: 2,000 characters a message, the first and last 100, 60,000 a page (#326)", async () => {
+    const at = (i: number) => `1${Math.floor(i / 60)}:${String(i % 60).padStart(2, "0")}`;
+    const page = (lines: SessionLine[]) =>
+      sessionPage({ key: "s1", channel: "telegram", threadId: "1", timeZone: "UTC", lines });
+    const kept = (text = "") => (text.match(/^- \*\*/gm) ?? []).length;
+
+    // Past 200 messages, the first and last 100 stay.
+    const many = await page(
+      Array.from({ length: 250 }, (_, i) => owner(at(i), `mensagem ${i} fim`)),
     );
-    const page = await sessionPage({
-      key: "s1",
-      channel: "telegram",
-      threadId: "1",
-      timeZone: "UTC",
-      lines,
-    });
-    expect(page?.text).toContain("mensagem 0 ");
-    expect(page?.text).toContain("mensagem 199 ");
-    expect(page?.text).not.toContain("mensagem 100 ");
-    expect(page?.text).toContain("… 140 messages omitted …");
-    expect((page?.text.length ?? 0) < 24_000).toBe(true);
+    expect(many?.text).toContain("mensagem 99 fim");
+    expect(many?.text).toContain("mensagem 150 fim");
+    expect(many?.text).not.toContain("mensagem 100 fim");
+    expect(many?.text).toContain("… 50 messages omitted …");
+
+    // Each message keeps 2,000 characters; past the page's 60,000, the middle goes, not the end.
+    const long = await page(
+      Array.from({ length: 300 }, (_, i) => owner(at(i), `mensagem ${i} ${"x".repeat(2_500)}`)),
+    );
+    expect(long?.text).toContain("x".repeat(1_900));
+    expect(long?.text).not.toContain("x".repeat(2_001));
+    expect(long?.text).toContain("mensagem 0 ");
+    expect(long?.text).toContain("mensagem 299 ");
+    expect(long?.text).not.toContain("mensagem 150 ");
+    expect(long?.text).toContain(`… ${300 - kept(long?.text)} messages omitted …`);
+    expect(long?.text.length ?? 0).toBeLessThan(62_000);
+
+    // Within the line limits but past the size, it still loses its middle.
+    const day = await page(
+      Array.from({ length: 150 }, (_, i) => owner(at(i), `mensagem ${i} ${"y".repeat(1_000)}`)),
+    );
+    expect(day?.text).toContain("mensagem 0 ");
+    expect(day?.text).toContain("mensagem 149 ");
+    expect(day?.text).not.toContain("mensagem 75 ");
+    expect(day?.text).toContain(`… ${150 - kept(day?.text)} messages omitted …`);
   });
 
-  it("keeps more of a session under other limits, as the session recall evaluation asks (#297)", async () => {
+  it("keeps a session within its limits whole, and the limits #297 measured cut it", async () => {
     const lines = Array.from({ length: 70 }, (_, i) =>
       owner(`10:${String(i % 60).padStart(2, "0")}`, `mensagem ${i} ${"y".repeat(500)} fim ${i}`),
     );
     const input = { key: "s1", channel: "telegram", threadId: "1", timeZone: "UTC", lines };
-    const kept = await sessionPage(input, { excerptChars: 2_000, headLines: 50, tailLines: 50 });
-    expect(kept?.text).toContain("mensagem 35 ");
-    expect(kept?.text).toContain("fim 35");
-    expect(kept?.text).not.toContain("omitted");
-    // The default limits cut the same session as before.
-    const cut = await sessionPage(input);
+    const whole = await sessionPage(input);
+    expect(whole?.text).toContain("mensagem 35 ");
+    expect(whole?.text).toContain("fim 35");
+    expect(whole?.text).not.toContain("omitted");
+    // The limits before #326, which #297's evaluation compares with.
+    const cut = await sessionPage(input, {
+      excerptChars: 280,
+      headLines: 30,
+      tailLines: 30,
+      maxChars: Number.MAX_SAFE_INTEGER,
+    });
     expect(cut?.text).not.toContain("fim 0");
     expect(cut?.text).toContain("… 10 messages omitted …");
   });

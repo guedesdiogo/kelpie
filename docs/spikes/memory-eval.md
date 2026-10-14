@@ -340,17 +340,17 @@ ai-memory's LongMemEval-S measurement found that its session pages, which kept l
   - 6 in a short message near the start, which every page keeps: the control.
 - **Two conversations per case** on the same topic, a week before and after, without the answer. All 72 pages go into the 1k vault, so they also compete with its notes.
 - **Two pages for each conversation:**
-  - today's;
-  - one that keeps each message whole up to 2,000 characters, with no middle cut up to 200 messages.
+  - with the limits until #326: 280 characters a message, the first and last 30 messages;
+  - with the limits #326 set, which production uses now: each message whole up to 2,000 characters, the first and last 100 messages, and 60,000 characters in all, which no page here reaches.
 - **Retrieval as a turn asks it,** with no vectors and no rerank, packed at 1,000 tokens.
 - **The answer is reached** when its page ranks in the top 5 and holds the answer: one `memory_read` away. **It is shown** when the answer itself is in the packed block.
 
 | 24 questions | hit@1 | hit@5 | hit@10 | MRR | Answer reached | Answer shown |
 |---|---|---|---|---|---|---|
-| Today's pages | 0.333 | 0.625 | 0.708 | 0.446 | 0.208 | 0.208 |
-| Whole pages | 0.542 | 0.833 | 0.917 | 0.665 | 0.833 | 0.708 |
+| Pages until #326 | 0.333 | 0.625 | 0.708 | 0.446 | 0.208 | 0.208 |
+| Pages since #326 | 0.542 | 0.833 | 0.917 | 0.665 | 0.833 | 0.708 |
 
-| Answer reached, by place | Today's pages | Whole pages |
+| Answer reached, by place | Until #326 | Since #326 |
 |---|---|---|
 | Past a reply's 280th character | 0 of 6 | 5 of 6 |
 | Past an owner message's 280th character | 0 of 6 | 6 of 6 |
@@ -358,8 +358,8 @@ ai-memory's LongMemEval-S measurement found that its session pages, which kept l
 | Near the start (control) | 5 of 6 | 5 of 6 |
 
 What the numbers show:
-- **Today's page loses every answer past its cut,** and holds it nowhere else memory searches: none of the 18 is reached.
-- **Whole pages reach 15 of the 18,** and the control doesn't move.
+- **The page until #326 lost every answer past its cut,** and held it nowhere else memory searches: none of the 18 is reached.
+- **The pages since #326 reach 15 of the 18,** and the control doesn't move. The run of 2026-10-14 gave the same numbers before and after #326 made these limits production's.
 - **The page of a long session ranks, but the block shows only its start:** its answer is reached by a read, never shown in the block.
 - **The cost on this slice:**
   - the mean page grows from 1,616 to 1,885 characters, and the p95 from 3,295 to 4,252;
@@ -368,9 +368,9 @@ What the numbers show:
 - **Not measured:**
   - **Vectors and the rerank:** the embedder reads a note's first 6,000 characters, so FTS carries the rest of a longer page.
   - **Real conversations:** the owner's chats may be shorter than these, and the 24 questions are synthetic.
-  - **The questions reuse the answer's words.** With full-text search only, that favors the whole pages; vectors would match paraphrases too.
+  - **The questions reuse the answer's words.** With full-text search only, that favors the longer pages; vectors would match paraphrases too.
   - **Scopes:** retrieval ran over every scope. A turn that lists its scopes (#131) reads only its own conversation's pages, so "one read away" is an upper bound there.
-  - **Ties:** a case's page and its two companions differ only where the answer is, so today's hit@k partly reflects how equal scores are ordered. Only the reached and shown columns depend on the page alone.
+  - **Ties:** a case's page and its two companions differ only where the answer is, so the hit@k of the pages until #326 partly reflects how equal scores are ordered. Only the reached and shown columns depend on the page alone.
 
 ## How to re-run
 
