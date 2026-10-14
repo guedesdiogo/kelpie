@@ -25,17 +25,17 @@ import type {
 import type { Destination } from "@kelpie/conversation/contract";
 import {
   fromNdjsonStream,
-  type LlmEvent,
   type ModelSelection,
   type RoutedRequest,
+  type RouterEvent,
 } from "@kelpie/llm";
 import { memoryTools } from "./memory-tools.ts";
 import { setupTools } from "./setup-agent.ts";
 import type { ToolProvider } from "./tools.ts";
 
-/** One model call: its events, and a way to stop it on the gateway's side. */
+/** One model call: its events, the router's fallbacks among them, and a way to stop it. */
 export interface ModelCall {
-  events: AsyncIterable<LlmEvent>;
+  events: AsyncIterable<RouterEvent>;
   cancel(): void;
 }
 

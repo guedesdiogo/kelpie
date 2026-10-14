@@ -586,6 +586,40 @@ describe("AnthropicMessagesProvider", () => {
     await expect(failure).rejects.toMatchObject({ code, retryable });
   });
 
+  it.each([
+    [402, { type: "billing_error", message: "Check your payment details" }],
+    [
+      400,
+      {
+        type: "invalid_request_error",
+        message:
+          "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.",
+      },
+    ],
+    [
+      429,
+      {
+        type: "rate_limit_error",
+        message: "You have reached your API usage limits.",
+        details: { error_code: "enforced_spend_limit_reached" },
+      },
+    ],
+  ])(
+    "classifies the documented HTTP %i for spent credits as out of credits (#293)",
+    async (status, error) => {
+      const { fetch } = fakeFetch(
+        httpError(status, { type: "error", error }),
+        httpError(status, { type: "error", error }),
+      );
+      const failure = collect(provider(fetch).stream(request()));
+      await expect(failure).rejects.toMatchObject({
+        code: "out_of_credits",
+        retryable: true,
+        status,
+      });
+    },
+  );
+
   it("stops the request when the caller aborts", async () => {
     const { fetch } = fakeFetch(
       hangingSse([messageStart("claude-opus-5-5", { input_tokens: 10 }), ...textBlock(0, "Hi")]),
