@@ -39,6 +39,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0033](0033-deploy-deep-probe.md) | The deploy wakes the Directory, the Registry and every AgentHost through a signed deep probe | [#234](https://github.com/guedesdiogo/kelpie/issues/234) |
 | [0034](0034-agents-sdk-0-28.md) | conversation-runtime runs on Agents SDK 0.28.0, and adopts none of its new features | [#266](https://github.com/guedesdiogo/kelpie/issues/266) |
 | [0035](0035-agent-computer.md) | Agents get a computer: a shell by default, and on request a Cloudflare Sandbox or the owner's VPS, where they code through Claude Code | [#267](https://github.com/guedesdiogo/kelpie/issues/267) |
+| [0037](0037-conversations-through-claude-code.md) | Conversations reach Claude through the API key's plan credits first, then through Claude Code on the owner's subscription | [#278](https://github.com/guedesdiogo/kelpie/issues/278) |
 
 ## Format
 
