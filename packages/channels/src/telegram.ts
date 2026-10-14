@@ -153,6 +153,11 @@ export class TelegramAdapter implements ChannelAdapter {
     });
   }
 
+  /** Stops the bot's updates, and drops the ones still waiting, when its agent is deleted (#303). */
+  async deleteWebhook(): Promise<void> {
+    await this.#call("deleteWebhook", { drop_pending_updates: true });
+  }
+
   async #call<T>(method: string, body: Record<string, unknown>): Promise<T> {
     let response: Response;
     try {

@@ -1,7 +1,12 @@
 import type { ChannelIdentity, IdentityStatus } from "@kelpie/access";
 import type { ChannelFormsContract, WebhookRegistrationFailure } from "@kelpie/channels";
 import { describe, expect, it } from "vitest";
-import { type Actor, type ConfigPorts, createConfigCommands } from "../src/commands.ts";
+import {
+  type Actor,
+  type AgentEntry,
+  type ConfigPorts,
+  createConfigCommands,
+} from "../src/commands.ts";
 import { type AgentSettings, DEFAULT_SETTINGS, SETUP_AGENT_ID } from "../src/settings.ts";
 
 const owner: Actor = { userId: "u-owner", role: "owner", via: "admin-api" };
@@ -60,6 +65,10 @@ function fakePorts() {
         if (id === SETUP_AGENT_ID) return { ok: false, reason: "not_allowed" };
         return agents.has(id) ? { ok: true } : { ok: false, reason: "unknown_agent" };
       },
+      async remove(id) {
+        calls.push(`remove ${id}`);
+        return agents.delete(id) ? { ok: true } : { ok: false, reason: "unknown_agent" };
+      },
     },
     models: {
       async providers() {
@@ -92,6 +101,10 @@ function fakePorts() {
         const agent = agents.get(id);
         if (!agent) throw new Error("unknown agent");
         return { settings: agent.settings, promptVersion: agent.promptVersion };
+      },
+      async erase(id, conversations) {
+        calls.push(`erase ${id} ${conversations.join(",")}`);
+        return { ok: true, conversations: conversations.length };
       },
     },
     directory: {
@@ -142,6 +155,12 @@ function fakePorts() {
       async describeRunner() {
         calls.push("describeRunner");
         return runner.described;
+      },
+      async disconnectTelegram(agentId) {
+        calls.push(`disconnectTelegram ${agentId}`);
+        return agentId === "broken"
+          ? { ok: false, reason: "store_unavailable" }
+          : { ok: true, webhook: "removed" };
       },
       async registerTelegramWebhook(agentId) {
         calls.push(`registerTelegramWebhook ${agentId}`);
@@ -716,5 +735,146 @@ describe("configuration commands", () => {
       });
     }
     expect(calls).toEqual(["forget memory/people/ana.md", "forget off.md"]);
+  });
+});
+
+describe("deleteAgent (#303)", () => {
+  /** ADR-0036 §1's roster: a specialist with a subagent, which has one of its own. */
+  const ROSTER: AgentEntry[] = [
+    { id: SETUP_AGENT_ID, name: "Setup", role: "admin", owner: null, chat: true },
+    { id: "kelpie", name: "Kelpie", role: "main", owner: null, chat: true },
+    { id: "sales", name: "Sales", role: "specialist", owner: "kelpie", chat: true },
+    { id: "scout", name: "Scout", role: "subagent", owner: "sales", chat: false },
+    { id: "runner", name: "Runner", role: "subagent", owner: "scout", chat: false },
+    { id: "quiet", name: "Quiet", role: "specialist", owner: "kelpie", chat: false },
+  ];
+
+  function withRoster() {
+    const { ports, calls } = fakePorts();
+    const roster = new Map(ROSTER.map((entry) => [entry.id, { ...entry }]));
+    ports.registry.list = async () => [...roster.values()];
+    ports.registry.get = async (id) => roster.get(id) ?? null;
+    ports.registry.setChat = async (id, chat) => {
+      calls.push(`setChat ${id} ${chat}`);
+      const entry = roster.get(id);
+      if (entry) entry.chat = chat;
+      return { ok: true };
+    };
+    ports.registry.remove = async (id) => {
+      calls.push(`remove ${id}`);
+      return roster.delete(id) ? { ok: true } : { ok: false, reason: "unknown_agent" };
+    };
+    return { commands: createConfigCommands(ports), ports, calls, roster };
+  }
+  const steps = (calls: string[]) =>
+    calls.filter((call) => /^(setChat|disconnectTelegram|erase|remove) /.test(call));
+  /** The owner's conversations with an agent, by their object's names (`conversationName`). */
+  const named = (id: string) =>
+    `${id}:webchat:u-owner,${id}:whatsapp:+5511987654321,${id}:telegram:1001`;
+
+  it("deletes the subagents deepest first, then the agent, each stopped before its storage goes", async () => {
+    const { commands, calls, roster } = withRoster();
+
+    expect(await commands.deleteAgent(owner, { id: "sales" })).toEqual({
+      ok: true,
+      value: { deleted: ["runner", "scout", "sales"] },
+    });
+    expect(steps(calls)).toEqual([
+      "disconnectTelegram runner",
+      `erase runner ${named("runner")}`,
+      "remove runner",
+      "disconnectTelegram scout",
+      `erase scout ${named("scout")}`,
+      "remove scout",
+      // Its chat goes off first, so no channel reaches it while its storage goes.
+      "setChat sales false",
+      "disconnectTelegram sales",
+      `erase sales ${named("sales")}`,
+      "remove sales",
+    ]);
+    expect([...roster.keys()]).toEqual([SETUP_AGENT_ID, "kelpie", "quiet"]);
+  });
+
+  it("deletes a specialist with nothing below it, whose chat is already off", async () => {
+    const { commands, calls } = withRoster();
+    expect(await commands.deleteAgent(owner, { id: "quiet" })).toEqual({
+      ok: true,
+      value: { deleted: ["quiet"] },
+    });
+    expect(steps(calls)).toEqual([
+      "disconnectTelegram quiet",
+      `erase quiet ${named("quiet")}`,
+      "remove quiet",
+    ]);
+  });
+
+  it("never deletes Admin or the main agent, and refuses what it can't check", async () => {
+    const { commands, calls } = withRoster();
+    for (const id of [SETUP_AGENT_ID, "kelpie"]) {
+      expect(await commands.deleteAgent(owner, { id })).toEqual({
+        ok: false,
+        reason: "not_allowed",
+      });
+    }
+    expect(await commands.deleteAgent(owner, { id: "ghost" })).toEqual({
+      ok: false,
+      reason: "unknown_agent",
+    });
+    for (const input of [{ id: "Not An Agent" }, {}, null, "sales"]) {
+      expect(await commands.deleteAgent(owner, input)).toEqual({
+        ok: false,
+        reason: "invalid_input",
+      });
+    }
+    expect(await commands.deleteAgent(member, { id: "sales" })).toEqual({
+      ok: false,
+      reason: "forbidden",
+    });
+    expect(steps(calls)).toEqual([]);
+  });
+
+  it("stops at a failure with the agent still listed, its chat off, and finishes when run again", async () => {
+    const { commands, ports, calls, roster } = withRoster();
+    const disconnect = ports.channels.disconnectTelegram;
+    ports.channels.disconnectTelegram = async (agentId) =>
+      agentId === "sales" ? { ok: false, reason: "store_unavailable" } : disconnect(agentId);
+
+    expect(await commands.deleteAgent(owner, { id: "sales" })).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+    expect(roster.get("sales")).toMatchObject({ chat: false });
+    expect(roster.has("scout")).toBe(false);
+    expect(steps(calls).at(-1)).toBe("setChat sales false");
+
+    ports.channels.disconnectTelegram = disconnect;
+    calls.length = 0;
+    expect(await commands.deleteAgent(owner, { id: "sales" })).toEqual({
+      ok: true,
+      value: { deleted: ["sales"] },
+    });
+    expect(steps(calls)).toEqual([
+      "disconnectTelegram sales",
+      `erase sales ${named("sales")}`,
+      "remove sales",
+    ]);
+  });
+
+  it("names only the owner's webchat conversation where the Directory isn't bound", async () => {
+    const { commands, ports, calls } = withRoster();
+    ports.directory.listIdentities = async () => {
+      throw new Error("conversation-runtime binds no Directory");
+    };
+    await commands.deleteAgent(owner, { id: "quiet" });
+    expect(steps(calls)).toContain("erase quiet quiet:webchat:u-owner");
+  });
+
+  it("passes on a refusal of the Registry's, as an agent created under it meanwhile", async () => {
+    const { commands, ports } = withRoster();
+    ports.registry.remove = async () => ({ ok: false, reason: "not_allowed" });
+    expect(await commands.deleteAgent(owner, { id: "quiet" })).toEqual({
+      ok: false,
+      reason: "not_allowed",
+    });
   });
 });

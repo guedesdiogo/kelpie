@@ -13,6 +13,7 @@ import {
   type SendOptions,
   type SendOutcome,
   type SetupFormsContract,
+  type TelegramDisconnection,
   type TypingOutcome,
   type WebhookNotice,
   type WebhookRegistration,
@@ -101,8 +102,9 @@ async function describeRunnerOf(env: Env) {
 
 /**
  * What the setup agent's Worker binds (Story 3.11): it opens a form, whose link the owner then
- * opens on the admin API, and reads the runner's state, which holds no secret. Binding
- * `ChannelForms` there would also let a model-driven Worker describe, redeem and register.
+ * opens on the admin API, and reads the runner's state, which holds no secret. It also disconnects
+ * a deleted agent's bot (#303), which reads nothing back. Binding `ChannelForms` there would also
+ * let a model-driven Worker describe, redeem and register.
  */
 export class SetupForms extends WorkerEntrypoint<Env> implements SetupFormsContract {
   async createTelegramForm(agentId: string) {
@@ -115,6 +117,10 @@ export class SetupForms extends WorkerEntrypoint<Env> implements SetupFormsContr
 
   async describeRunner() {
     return describeRunnerOf(this.env);
+  }
+
+  async disconnectTelegram(agentId: string) {
+    return disconnectTelegramOf(this.env, agentId);
   }
 }
 
@@ -311,6 +317,10 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
     return describeRunnerOf(this.env);
   }
 
+  async disconnectTelegram(agentId: string) {
+    return disconnectTelegramOf(this.env, agentId);
+  }
+
   async describeTelegramBot(agentId: string) {
     if (!isAgentId(agentId)) return { ok: false as const, reason: "invalid_input" as const };
     const found = await telegramSecret(this.env, agentId);
@@ -467,6 +477,34 @@ export class ChannelEgress extends WorkerEntrypoint<Env> implements ChannelEgres
 }
 
 /** The agent's stored bot. A secret that doesn't decrypt or parse counts as no bot. */
+/**
+ * Removes a deleted agent's bot (#303): its webhook first, while the token is there to do it, then
+ * the secret and forms. A webhook Telegram refuses to remove, as with a revoked token, doesn't keep
+ * the secret: without it ingress refuses every update for the agent.
+ */
+async function disconnectTelegramOf(env: Env, agentId: string): Promise<TelegramDisconnection> {
+  if (!isAgentId(agentId)) return { ok: false, reason: "invalid_input" };
+  const found = await telegramSecret(env, agentId);
+  if (!found.ok && found.reason === "store_unavailable") return unavailable;
+  let webhook: "removed" | "refused" | "none" = "none";
+  if (found.ok) {
+    try {
+      await new TelegramAdapter(found.secret).deleteWebhook();
+      webhook = "removed";
+    } catch (error) {
+      console.warn("channel-egress: Telegram refused to remove a webhook", errorName(error));
+      webhook = "refused";
+    }
+  }
+  try {
+    await store(env).remove("telegram", agentId);
+  } catch (error) {
+    console.error("channel-egress: the secret store failed", errorName(error));
+    return unavailable;
+  }
+  return { ok: true, webhook };
+}
+
 async function telegramSecret(
   env: Env,
   agentId: string,

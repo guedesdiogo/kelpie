@@ -71,6 +71,10 @@ export type SetAgentResult =
   | { ok: true }
   | { ok: false; reason: "unknown_agent" | "invalid_input" | "not_allowed" };
 
+export type EraseResult =
+  | { ok: true; conversations: number }
+  | { ok: false; reason: "invalid_input" };
+
 /**
  * The `Registry` and `AgentHost` methods other Workers call. The objects implement them, and
  * callers bind them as `Remote<…>`, so a change on either side fails the type check.
@@ -87,6 +91,11 @@ export interface RegistryContract {
   setMain(id: string, actor: Actor): SetAgentResult;
   /** Turns a specialist's chat on or off. Admin and the main agent always chat; subagents never do. */
   setChat(id: string, chat: boolean, actor: Actor): SetAgentResult;
+  /**
+   * Removes a deleted agent's row, the last step of `deleteAgent` (#303). Admin, the main agent and
+   * an agent that still owns another are `not_allowed` (ADR-0036 §1).
+   */
+  remove(id: string, actor: Actor): SetAgentResult;
   /** Answers once the object's migrations ran; the deploy's probe calls it (#234). */
   ping(): { ok: true };
 }
@@ -116,6 +125,11 @@ export interface AgentHostContract {
   awaitSetup(conversation: string, step: SetupStep, until: number): void;
   /** Tells each conversation still waiting for the event's step that the owner finished it. */
   setupDone(event: SetupEvent): Promise<void>;
+  /**
+   * Deletes the agent's storage (#303): each conversation it recorded or `conversations` names,
+   * which must all be its own, then itself. Safe to repeat.
+   */
+  erase(conversations: string[]): Promise<EraseResult>;
   /** Answers once the object's migrations ran; the deploy's probe calls it (#234). */
   ping(): { ok: true };
 }
@@ -146,6 +160,29 @@ const MAX_DREAM_OPERATIONS = 10;
 const MAX_FORGET_PATHS = 1_000;
 const MAX_PATH_LENGTH = 300;
 
+/** The most of the owner's threads `deleteAgent` names, within what `AgentHost.erase` takes. */
+const MAX_OWNER_THREADS = 32;
+
+const isChannelId = (channel: string): channel is ChannelId =>
+  (CHANNEL_IDS as readonly string[]).includes(channel);
+
+/**
+ * The agents `deleteAgent` deletes, in order: those the agent owns, deepest first, then the agent.
+ * Only subagents are owned by an agent that can be deleted (ADR-0036 §1).
+ */
+function deletionOrder(agents: AgentEntry[], agent: AgentEntry): AgentEntry[] {
+  const order: AgentEntry[] = [];
+  const seen = new Set<string>();
+  const visit = (current: AgentEntry) => {
+    if (seen.has(current.id)) return;
+    seen.add(current.id);
+    for (const owned of agents) if (owned.owner === current.id) visit(owned);
+    order.push(current);
+  };
+  visit(agent);
+  return order;
+}
+
 /** The instance's model settings (ADR-0036 §2), as llm-gateway holds them (#289). */
 export interface InstanceModels {
   settings: ModelSettings;
@@ -164,6 +201,7 @@ export interface ConfigPorts {
     list(): Promise<AgentEntry[]>;
     setMain(id: string, actor: Actor): Promise<SetAgentResult>;
     setChat(id: string, chat: boolean, actor: Actor): Promise<SetAgentResult>;
+    remove(id: string, actor: Actor): Promise<SetAgentResult>;
   };
   /** llm-gateway's model settings for the whole instance (#289). */
   models: {
@@ -177,6 +215,7 @@ export interface ConfigPorts {
   agents: {
     configure(id: string, changes: Partial<AgentSettings>, actor: Actor): Promise<ConfigureResult>;
     config(id: string): Promise<AgentConfig>;
+    erase(id: string, conversations: string[]): Promise<EraseResult>;
   };
   directory: {
     issuePairingCode(userId: string, channel: ChannelId): Promise<PairingCodeResult>;
@@ -193,6 +232,7 @@ export interface ConfigPorts {
     | "describeTelegramBot"
     | "createRunnerForm"
     | "describeRunner"
+    | "disconnectTelegram"
   >;
   /** The vault's Context Store (#114). */
   vault: {
@@ -246,6 +286,28 @@ export function createConfigCommands(ports: ConfigPorts) {
     if (named.every((provider) => provider === undefined)) return true;
     const providers = await ports.models.providers();
     return named.every((provider) => provider === undefined || providers.includes(provider));
+  };
+  const unavailable = { ok: false, reason: "unavailable" } as const;
+  /**
+   * The owner's threads with any agent, as `<channel>:<thread>` (#303): the webchat's is their user
+   * id, and a channel's their account's, since only direct chats are admitted. They name the
+   * conversations an agent had before its AgentHost recorded them. The setup agent's Worker binds
+   * no Directory, so there it is the webchat's alone.
+   */
+  const ownerThreads = async (actor: Actor) => {
+    const threads = [`webchat:${actor.userId}`];
+    let identities: ChannelIdentity[];
+    try {
+      identities = await ports.directory.listIdentities();
+    } catch {
+      return threads;
+    }
+    for (const identity of identities) {
+      if (isChannelId(identity.channel)) {
+        threads.push(`${identity.channel}:${identity.channelUserId}`);
+      }
+    }
+    return threads.slice(0, MAX_OWNER_THREADS);
   };
   const show = (identity: ChannelIdentity, status: IdentityStatus): ShownIdentity => ({
     channel: identity.channel,
@@ -335,6 +397,44 @@ export function createConfigCommands(ports: ConfigPorts) {
       if (!isAgentId(id) || typeof chat !== "boolean") return invalid;
       const result = await ports.registry.setChat(id, chat, actor);
       return result.ok ? { ok: true, value: {} } : result;
+    },
+
+    /**
+     * Deletes an agent and, before it, its subagents, deepest first (ADR-0036 §1, #303). For each:
+     * its chat goes off, its Telegram bot is disconnected, its `AgentHost` erases its conversations
+     * and itself, and its Registry row goes last. A failure leaves the rest listed, chat off, and
+     * running the command again finishes the job. Admin and the main agent can't be deleted. Data
+     * goes for good, so the setup agent asks for the owner's confirmation first.
+     */
+    async deleteAgent(actor: Actor, input: unknown): Promise<CommandResult<{ deleted: string[] }>> {
+      if (!isOwner(actor)) return forbidden;
+      const { id } = (input ?? {}) as { id?: unknown };
+      if (!isAgentId(id)) return invalid;
+      const agents = await ports.registry.list();
+      const agent = agents.find((entry) => entry.id === id);
+      if (!agent) return { ok: false, reason: "unknown_agent" };
+      if (agent.role === "admin" || agent.role === "main") {
+        return { ok: false, reason: "not_allowed" };
+      }
+      const threads = await ownerThreads(actor);
+      const deleted: string[] = [];
+      for (const target of deletionOrder(agents, agent)) {
+        if (target.chat) {
+          const off = await ports.registry.setChat(target.id, false, actor);
+          if (!off.ok) return off;
+        }
+        const bot = await ports.channels.disconnectTelegram(target.id);
+        if (!bot.ok) return bot.reason === "invalid_input" ? invalid : unavailable;
+        const erased = await ports.agents.erase(
+          target.id,
+          threads.map((thread) => `${target.id}:${thread}`),
+        );
+        if (!erased.ok) return erased;
+        const removed = await ports.registry.remove(target.id, actor);
+        if (!removed.ok) return removed;
+        deleted.push(target.id);
+      }
+      return { ok: true, value: { deleted } };
     },
 
     async listIdentities(actor: Actor): Promise<CommandResult<ShownIdentity[]>> {

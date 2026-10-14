@@ -31,7 +31,9 @@ const roleOf = (id: string) =>
     ? ({ role: "admin", owner: null, chat: true } as const)
     : id === "kelpie"
       ? ({ role: "main", owner: null, chat: true } as const)
-      : ({ role: "specialist", owner: "kelpie", chat: false } as const);
+      : id === "scout"
+        ? ({ role: "subagent", owner: "ana", chat: false } as const)
+        : ({ role: "specialist", owner: "kelpie", chat: false } as const);
 
 /** Commands over an in-memory registry; every call is logged. */
 function fakeCommands() {
@@ -118,6 +120,19 @@ function fakeCommands() {
       if (id === SETUP_AGENT_ID) return { ok: false, reason: "not_allowed" };
       return agents.has(id) ? { ok: true, value: {} } : { ok: false, reason: "unknown_agent" };
     },
+    async deleteAgent(actor, input) {
+      calls.push(`deleteAgent ${JSON.stringify(input)}`);
+      if (actor.role !== "owner") return forbidden;
+      const { id } = input as { id: string };
+      if (id === "stuck") return { ok: false, reason: "unavailable" };
+      if (!agents.has(id)) return { ok: false, reason: "unknown_agent" };
+      if (roleOf(id).role === "admin" || roleOf(id).role === "main") {
+        return { ok: false, reason: "not_allowed" };
+      }
+      const deleted = [...agents.keys()].filter((other) => roleOf(other).owner === id);
+      for (const gone of [...deleted, id]) agents.delete(gone);
+      return { ok: true, value: { deleted: [...deleted, id] } };
+    },
     async connectTelegram(actor, input) {
       calls.push(`connectTelegram ${JSON.stringify(input)}`);
       if (actor.role !== "owner") return forbidden;
@@ -195,6 +210,7 @@ describe("the setup agent's tools", () => {
       "configure_models",
       "set_main_agent",
       "set_agent_chat",
+      "delete_agent",
       "connect_telegram",
       "pair_telegram",
       "connect_runner",
@@ -263,6 +279,7 @@ describe("the setup agent's tools", () => {
       ["create_agent", { id: "ana", name: "Ana" }],
       ["set_main_agent", { id: SETUP_AGENT_ID }],
       ["set_agent_chat", { id: SETUP_AGENT_ID, chat: true }],
+      ["delete_agent", { id: "ana" }],
     ] as const) {
       expect(await run(tools, name, input, context), name).toEqual({
         output: "Only the owner can change Kelpie's configuration.",
@@ -424,6 +441,74 @@ describe("the setup agent's tools", () => {
     });
     expect(asked).toEqual([]);
     expect(calls).toEqual([]);
+  });
+
+  it("asks the owner to confirm a deletion, naming its subagents and what stays, and runs it only then (#303)", async () => {
+    const { commands, agents, calls } = fakeCommands();
+    agents.set("ana", "Ana");
+    agents.set("scout", "Scout");
+    agents.set("bia", "Bia");
+    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+
+    const waiting = contextOf(false);
+    expect((await run(tools, "delete_agent", { id: "ana" }, waiting.context)).output).toContain(
+      "Not done yet",
+    );
+    await run(tools, "delete_agent", { id: "bia" }, contextOf(false, owner, "pt-BR").context);
+    expect(waiting.asked).toEqual([
+      {
+        command: "deleteAgent",
+        input: { id: "ana" },
+        summary:
+          'delete, for good, the agent "Ana" (ana) and its subagent "Scout" (scout): their settings, their conversations with all their history, and any Telegram bot connected to them. The files under agents/ana/ in your vault stay.',
+      },
+    ]);
+    const summaries = async (locale: Locale, id: string) => {
+      const { context, asked } = contextOf(false, owner, locale);
+      await run(tools, "delete_agent", { id }, context);
+      return asked[0]?.summary;
+    };
+    expect(await summaries("pt-BR", "bia")).toBe(
+      'excluir de vez o agente "Bia" (bia): as configurações, as conversas com todo o histórico e qualquer bot do Telegram conectado a ele. Os arquivos em agents/bia/ no seu vault ficam.',
+    );
+    expect(await summaries("es", "ana")).toBe(
+      'eliminar para siempre el agente "Ana" (ana) y su subagente "Scout" (scout): su configuración, sus conversaciones con todo su historial y cualquier bot de Telegram conectado a ellos. Los archivos en agents/ana/ de tu vault se quedan.',
+    );
+    expect(calls).toEqual([]);
+
+    const confirmed = contextOf(true);
+    expect(await run(tools, "delete_agent", { id: "ana" }, confirmed.context)).toEqual({
+      output:
+        "Deleted the agent ana and its subagent scout: their settings, conversations and Telegram connections are gone. Its files in the vault, under agents/ana/, stay: the owner can remove them from their vault's repository.",
+    });
+    expect(calls).toEqual(['deleteAgent {"id":"ana"}']);
+    expect([...agents.keys()]).toEqual([SETUP_AGENT_ID, "bia"]);
+  });
+
+  it("never deletes Admin or the main agent, and says how to finish a deletion cut short", async () => {
+    const { commands, agents, calls } = fakeCommands();
+    agents.set("kelpie", "Kelpie");
+    agents.set("stuck", "Stuck");
+    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const { context, asked } = contextOf(true);
+
+    for (const id of [SETUP_AGENT_ID, "kelpie"]) {
+      expect(await run(tools, "delete_agent", { id }, context)).toEqual({
+        output: "Admin and the main agent can't be deleted.",
+        isError: true,
+      });
+    }
+    expect(await run(tools, "delete_agent", { id: "ghost" }, context)).toEqual({
+      output: "There is no agent with the id ghost.",
+      isError: true,
+    });
+    expect(asked).toEqual([]);
+    expect(calls).toEqual([]);
+
+    const cut = await run(tools, "delete_agent", { id: "stuck" }, context);
+    expect(cut).toMatchObject({ isError: true });
+    expect(cut.output).toContain("still listed, with its chat off");
+    expect(cut.output).toContain("Call delete_agent again");
   });
 
   it("tells the model a new agent's chat is off, and when a bot is connected to it (#288)", async () => {

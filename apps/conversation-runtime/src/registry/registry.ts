@@ -159,6 +159,39 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     return { ok: true };
   }
 
+  /**
+   * Removes a deleted agent's row and audits it (#303): `deleteAgent` calls it once the agent's
+   * storage is gone. Admin, the main agent and an agent that still owns another, such as its
+   * subagents, aren't removed (ADR-0036 §1).
+   */
+  remove(id: string, actor: Actor): SetAgentResult {
+    if (!isAgentId(id)) return { ok: false, reason: "invalid_input" };
+    const agent = this.get(id);
+    if (!agent) return { ok: false, reason: "unknown_agent" };
+    const owns = this.#db
+      .select({ id: schema.agents.id })
+      .from(schema.agents)
+      .where(eq(schema.agents.ownerId, id))
+      .get();
+    if (agent.role === "admin" || agent.role === "main" || owns) {
+      return { ok: false, reason: "not_allowed" };
+    }
+    const now = Date.now();
+    this.#db.transaction((tx) => {
+      tx.delete(schema.agents).where(eq(schema.agents.id, id)).run();
+      tx.insert(schema.auditLog)
+        .values({
+          at: now,
+          action: "agent.deleted",
+          agentId: id,
+          userId: actor.userId,
+          via: actor.via,
+        })
+        .run();
+    });
+    return { ok: true };
+  }
+
   #mainId(): string | null {
     return (
       this.#db

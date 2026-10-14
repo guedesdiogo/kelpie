@@ -34,6 +34,7 @@ Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`
 | `/commands/configureModels` | `{ "settings": { "conversation": { "tier": "medium" }, "memory": { "tier": "cheap" } } }`; replaces the instance's model settings, which every agent follows unless it has its own. A provider without a key answers `409 no_key` |
 | `/commands/setMainAgent` | `{ "id": "sales" }`; makes the agent the main agent, the one the owner talks to (ADR-0036 §1). The previous one becomes a specialist that keeps its chat |
 | `/commands/setAgentChat` | `{ "id": "sales", "chat": true }`; lets the owner reach a specialist on its channels, or stops it. Admin and the main agent always chat |
+| `/commands/deleteAgent` | `{ "id": "sales" }`; deletes the agent and its subagents for good ("Deleting an agent"). Admin and the main agent answer `409 not_allowed`; a deletion cut short answers `503 unavailable`, and running it again finishes it |
 | `/commands/listIdentities` | none |
 | `/commands/enableIdentity` | `{ "channel": "telegram", "channelUserId": "…" }`; re-enables a disabled identity, never a pending one |
 | `/commands/disableIdentity` | same as `enableIdentity` |
@@ -244,6 +245,16 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
 - **The main agent's own tool:** `set_agent_model` changes another agent's model settings, when the owner asks or agrees with its suggestion, behind the same confirmation (#289). No agent changes its own model, except Admin, through `configure_agent`.
 - **The check is at `admit`:** a chat its role doesn't allow answers `no_grant`, so a specialist whose chat is off doesn't answer its bot or the webchat.
 
+**Deleting an agent** (ADR-0036 §1, #303). `deleteAgent`, or the setup agent's `delete_agent` after the owner's confirmation, deletes an agent and every subagent it owns. The subagents go first, deepest first. For each agent, in order:
+1. Its chat goes off, so no channel reaches it.
+2. channel-egress removes its Telegram bot's webhook and deletes the bot's token and open forms. A webhook Telegram refuses to remove, as with a revoked token, doesn't stop the rest: without the token, ingress refuses the bot's updates.
+3. Its `AgentHost` erases its conversations and then itself.
+   - The conversations it erases are the ones it recorded at their first turn since #303, plus the owner's threads with it: the webchat's, and each channel identity the `Directory` lists.
+   - The setup agent's Worker binds no `Directory`, so `delete_agent` names only the owner's webchat thread. A Telegram conversation with no turn since #303 stays: delete the agent through this API to cover it.
+4. Its `Registry` row goes, and the `Registry`'s audit records `agent.deleted`.
+
+Admin and the main agent can't be deleted, and the `Registry` refuses to remove an agent that still owns another. A deletion cut short leaves the agent listed with its chat off, and running it again finishes it. The vault's `agents/<id>/` folder stays: it is the owner's repository, which Kelpie never deletes from. `forgetVaultPaths` drops Kelpie's copy, and the owner deletes the files in the repository.
+
 - **Where it comes from.**
   - A migration of the `Registry` adds it, on new instances and on ones bootstrapped before it.
   - `createAgent` refuses its id.
@@ -252,11 +263,11 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
 - **Its tools** run the commands above, as the owner, through the agent (`via: agent:setup`), and only the setup agent has them:
   - `list_agents`, `get_agent`, `create_agent` and `rename_agent` run directly;
   - `get_models` reads the instance's model settings, and `configure_models` replaces them;
-  - `configure_agent` (its `model` included), `configure_models`, `set_main_agent` and `set_agent_chat` wait for the owner's confirmation (below);
+  - `configure_agent` (its `model` included), `configure_models`, `set_main_agent`, `set_agent_chat` and `delete_agent` wait for the owner's confirmation (below);
   - `connect_telegram` opens a secure form ("Secure forms"), and `pair_telegram` leads to the pairing page ("Pairing"). Kelpie sends each link itself (below), and the owner's submitting that page is their yes (ADR-0026).
   - `connect_runner` opens the VPS runner's secure form, whose link Kelpie sends as well, and `runner_status` reads the runner's state, as `describeRunner` does ([runner.md](runner.md)). The form's end isn't reported to the conversation, so the agent checks `runner_status` once the owner says it's done.
 
-  The identity, time zone and vault commands stay on this API. `conversation-runtime` binds no `Directory`, which would make it and `ingress` bind each other. Of `channel-egress`, it binds only `SetupForms`, which opens a form and reads the runner's state, which holds no secret (`docs/secrets.md`).
+  The identity, time zone and vault commands stay on this API. `conversation-runtime` binds no `Directory`, which would make it and `ingress` bind each other. Of `channel-egress`, it binds only `SetupForms`, which opens a form, reads the runner's state, which holds no secret, and disconnects a deleted agent's bot, which reads nothing back (`docs/secrets.md`).
 - **Confirmation.** A change to an agent's settings (`configure_agent`) waits for the owner's yes, gated in code:
   1. The first call doesn't run. After the agent's reply, Kelpie itself sends one more bubble, written from the change's validated input, not by the model: `Confirm: <the change>`, and a 6-character code. The bubble is in the conversation's language ("Languages").
      - Invisible and control characters in the change are written out as `\u{…}`, so what the owner reads is all there is.

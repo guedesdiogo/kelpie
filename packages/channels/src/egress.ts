@@ -46,6 +46,14 @@ export type WebhookRegistrationFailure =
 export type WebhookRegistration = { ok: true } | { ok: false; reason: WebhookRegistrationFailure };
 
 /**
+ * What disconnecting a deleted agent's bot did (#303). Its secret is gone in every `ok` case; the
+ * webhook was removed at Telegram, refused there (as with a revoked token), or there was no bot.
+ */
+export type TelegramDisconnection =
+  | { ok: true; webhook: "removed" | "refused" | "none" }
+  | { ok: false; reason: "invalid_input" | "store_unavailable" };
+
+/**
  * A fixed notice ingress may have the bot send (Story 3.6): "paired" to an account that just paired,
  * or "stranger" to the owner about a sender who was dropped. channel-egress writes the text, in
  * `locale` (#187), or in English when an older ingress names none.
@@ -104,6 +112,11 @@ export interface ChannelFormsContract {
   >;
   /** Points the agent's bot at ingress again: safe to repeat, as after a hostname change. */
   registerTelegramWebhook(agentId: string): Promise<WebhookRegistration>;
+  /**
+   * For a deleted agent (#303): removes its bot's webhook at Telegram, then its secret and forms.
+   * Safe to repeat; an agent without a bot answers `none`.
+   */
+  disconnectTelegram(agentId: string): Promise<TelegramDisconnection>;
   /** The agent's bot, for its `t.me` link. Never its token. */
   describeTelegramBot(
     agentId: string,
@@ -144,9 +157,10 @@ export interface ChannelFormsContract {
 
 /**
  * What the setup agent's Worker calls (Story 3.11): it opens a form, and reads the runner's state,
- * which holds no secret. Describing, redeeming and registering stay with the admin API.
+ * which holds no secret. It disconnects a deleted agent's bot (#303), which reads nothing back.
+ * Describing, redeeming and registering stay with the admin API.
  */
 export type SetupFormsContract = Pick<
   ChannelFormsContract,
-  "createTelegramForm" | "createRunnerForm" | "describeRunner"
+  "createTelegramForm" | "createRunnerForm" | "describeRunner" | "disconnectTelegram"
 >;
