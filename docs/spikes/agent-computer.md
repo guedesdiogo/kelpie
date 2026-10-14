@@ -57,8 +57,23 @@ The account behind the claude.ai login hit its weekly limit after Remote Control
 - **Shared secret:** 200 with it, 401 without it.
 - **Latency:** 33, 36, 69, 32 and 57 ms per call. That includes this machine's hop to Cloudflare, because the remote binding runs at the edge.
 
+### From a deployed Worker (#294, 2026-10-14)
+
+The runner of #294 was running on the VPS, behind a remotely managed tunnel and a VPC Service.
+- **The setup:** a throwaway Worker, deployed to the account, called it through the VPC Service. A stub on another loopback port, behind a second VPC Service on the same tunnel, stood in for long answers. Both were deleted afterwards.
+- **Where it ran:** the Worker ran in São Paulo (GRU), and the tunnel's four connections landed there too.
+
+| Measurement | Result |
+|---|---|
+| `/health`, the first call of a batch | 101 ms and 369 ms, in two batches |
+| `/health`, the 19 calls after it | median 25 ms and 42 ms; p90 30 ms and 59 ms; 18–75 ms overall |
+| An answer after an idle wait of 30 s, 2 min, 5 min and 10 min | all four arrived whole |
+| A 10-minute stream, a line every 10 s | 61 lines, whole, in 600.3 s |
+| A 10-minute stream, a line every 2 min | 6 lines, whole, in 600.0 s |
+
+So, up to 10 minutes, Workers VPC cut neither an idle request nor a quiet stream. Story 5.10's stream needs no heartbeat shorter than 2 minutes for the VPC's sake. The 20 minutes a runtime update grants an open connection remain the bound.
+
 ## What's left
 
 - An approval answered in the Claude app while the hook waits.
 - `Stop` when the turn ends on an API error.
-- Latency from a deployed Worker rather than `wrangler dev`.

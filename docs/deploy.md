@@ -13,6 +13,7 @@ PR ──► gates ──► CI passed ──► merge ──► gates on main �
 1. **Create a Cloudflare API token** for the account Kelpie runs in.
    - Use the "Edit Cloudflare Workers" template, scoped to that account and to the zone of Kelpie's hostnames.
    - Add **Account → Account Analytics → Read**: the watch reads error counts from the GraphQL Analytics API.
+   - With a VPS runner ([runner.md](runner.md)), add the account's **Connectivity Directory Bind** permission too: without it, binding the runner's VPC Service fails with `code: 10196`, and every deploy rolls back at `channel-egress`.
 2. **Store it in the `production` environment.** The `production` environment and its `CLOUDFLARE_ACCOUNT_ID` secret already exist; only `main` can use it.
    ```bash
    gh secret set CLOUDFLARE_API_TOKEN --env production --repo guedesdiogo/kelpie
