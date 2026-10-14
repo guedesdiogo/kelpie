@@ -1,4 +1,4 @@
-import type { Locale, Localized } from "@kelpie/channels";
+import type { Locale, Localized, RunnerState } from "@kelpie/channels";
 import {
   type AgentEntry,
   type AgentSettings,
@@ -38,8 +38,9 @@ How you work:
 - Changing an agent's settings, the main agent or an agent's chat needs the owner's confirmation. Kelpie itself shows them what will change, with a Confirm button in the webchat or a code to reply with: don't ask them to confirm in other words, and never make up a code. Once they confirm, call the same tool again with the same input.
 - Kelpie itself sends the owner the links of connect_telegram and pair_telegram, in a message of its own after your reply. Never write those links yourself, and never make one up: just tell the owner to open the link Kelpie sent. What the owner does on that page is their yes.
 - When the owner finishes on one of those pages, Kelpie tells you in this conversation, in a note that starts "Kelpie, automatically". Don't ask them to tell you when they're done: when the note comes, go on with the next step.
-- Never ask for a secret in the chat, such as a bot token or an API key. A bot token goes only into the secure form connect_telegram has Kelpie send. If the owner pastes a secret in the chat anyway, tell them to revoke it and make a new one.
+- Never ask for a secret in the chat, such as a bot token, the runner's secret or an API key. A bot token goes only into the secure form connect_telegram has Kelpie send, and the runner's secret only into connect_runner's. If the owner pastes a secret in the chat anyway, tell them to revoke it and make a new one: for the runner, a new secret in its file on the server (docs/runner.md).
 - To make a Telegram bot, the owner sends /newbot to BotFather on Telegram, which answers with the bot's token. Have them do that first, and only then call connect_telegram: its form works once and only for a few minutes. Tell them to submit the form once and wait for its page; a page that says the link was already used means the bot is connected.
+- The owner's VPS runner is the computer Kelpie's agents use. To connect it, call connect_runner: Kelpie sends a secure form where the owner pastes the runner's secret from their server, never in the chat. Kelpie isn't told when the form is done, so call runner_status once the owner says they submitted it.
 - Some steps are outside what you can do: deploying Kelpie's Workers, their bindings and secrets, Cloudflare Access, and the model keys. For those, point the owner to the setup checklist in docs/admin-api.md.`;
 
 /** The commands the setup agent's tools run; the identity and vault commands stay off them. */
@@ -55,6 +56,8 @@ export type SetupCommands = Pick<
   | "setMainAgent"
   | "setAgentChat"
   | "connectTelegram"
+  | "connectRunner"
+  | "describeRunner"
 >;
 
 const AGENT_ID = {
@@ -205,6 +208,18 @@ const SPECS = {
       additionalProperties: false,
     },
   },
+  connect_runner: {
+    name: "connect_runner",
+    description:
+      "Start connecting the owner's VPS runner, the computer Kelpie's agents use: Kelpie sends the owner a one-time link to a secure form, where they paste the runner's secret from their server. Submitting the form is their yes.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  runner_status: {
+    name: "runner_status",
+    description:
+      "Check the owner's VPS runner: whether Kelpie reaches it with the secret it holds, and its version.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
 } satisfies Record<string, Tool["spec"]>;
 
 const failed = (output: string): ToolOutcome => ({ output, isError: true });
@@ -222,6 +237,28 @@ const NOT_SPECIALIST = failed(
 const NOT_CONFIGURED = failed(
   "Kelpie's admin API address isn't set (ADMIN_ORIGIN on conversation-runtime), so I can't give its link. The owner sets it when deploying: see docs/admin-api.md.",
 );
+const NO_RUNNER = failed(
+  "Kelpie was deployed without the runner's VPC Service, so there's no runner to connect yet. The owner sets up the server and the tunnel first: see docs/runner.md.",
+);
+
+/** What the model is told of the runner's state (#294): never its secret, which Kelpie keeps. */
+function runnerStatus(runner: RunnerState): string {
+  switch (runner.state) {
+    case "ready":
+      return `The runner is ready, version ${runner.version}: Kelpie reaches it with the secret it holds.`;
+    case "outdated":
+      return `The runner answers, version ${runner.version}, but speaks another protocol version than this Kelpie: the owner should update it on the server (docs/runner.md).`;
+    case "refused":
+      return "The runner no longer takes the secret Kelpie holds: the owner should connect it again with connect_runner, pasting the secret now in the server's file.";
+    case "unreachable":
+      return "Kelpie couldn't reach the runner: the owner should check that it and cloudflared are running on the server (docs/runner.md).";
+    case "not_connected":
+      return "Kelpie has no secret for the runner yet. Once the runner runs on the owner's server (docs/runner.md), call connect_runner.";
+    case "not_configured":
+      return "Kelpie was deployed without the runner's VPC Service: the owner sets up the server and the tunnel first (docs/runner.md).";
+  }
+}
+
 const WAITING =
   "Not done yet: Kelpie showed the owner this change, and how to confirm it. Tell them it waits for their confirmation. Once they confirm, call this tool again with the same input.";
 /** What a tool whose link the host sends says about it: never the link. */
@@ -286,6 +323,7 @@ const TEXTS: Localized<{
   chat: (agent: string, id: string, on: boolean) => string;
   form: (id: string, href: string, minutes: number) => string;
   pairing: (id: string, href: string) => string;
+  runnerForm: (href: string, minutes: number) => string;
 }> = {
   en: {
     settingTo: "to",
@@ -304,6 +342,8 @@ const TEXTS: Localized<{
       `The secure form to connect the Telegram bot of the agent ${id}: ${href}\nIt works once, for the next ${minutes} minutes. Paste the bot's token there, never in the chat.`,
     pairing: (id, href) =>
       `To pair your own Telegram account with the bot of the agent ${id}, open ${href} and press its button.`,
+    runnerForm: (href, minutes) =>
+      `The secure form to connect the runner: ${href}\nIt works once, for the next ${minutes} minutes. Paste the secret from ~/.config/kelpie-runner/secret on your server there, one line only, never in the chat.`,
   },
   "pt-BR": {
     settingTo: "para",
@@ -322,6 +362,8 @@ const TEXTS: Localized<{
       `O formulário seguro para conectar o bot do Telegram do agente ${id}: ${href}\nFunciona uma vez, nos próximos ${minutes} minutos. Cole o token do bot lá, nunca no chat.`,
     pairing: (id, href) =>
       `Para parear sua própria conta do Telegram com o bot do agente ${id}, abra ${href} e toque no botão da página.`,
+    runnerForm: (href, minutes) =>
+      `O formulário seguro para conectar o runner: ${href}\nFunciona uma vez, nos próximos ${minutes} minutos. Cole lá o segredo de ~/.config/kelpie-runner/secret do seu servidor, uma linha só, nunca no chat.`,
   },
   es: {
     settingTo: "a",
@@ -340,6 +382,8 @@ const TEXTS: Localized<{
       `El formulario seguro para conectar el bot de Telegram del agente ${id}: ${href}\nFunciona una vez, durante los próximos ${minutes} minutos. Pega allí el token del bot, nunca en el chat.`,
     pairing: (id, href) =>
       `Para vincular tu propia cuenta de Telegram con el bot del agente ${id}, abre ${href} y presiona el botón de la página.`,
+    runnerForm: (href, minutes) =>
+      `El formulario seguro para conectar el runner: ${href}\nFunciona una vez, durante los próximos ${minutes} minutos. Pega allí el secreto de ~/.config/kelpie-runner/secret de tu servidor, una sola línea, nunca en el chat.`,
   },
 };
 
@@ -680,6 +724,44 @@ export function setupTools(
         return {
           output: `${LINK_SENT}\nOn that page the owner presses a button, and gets a Telegram link that pairs the account they open it with as theirs. The agent's bot must be connected first.${chatOff(agent)}`,
         };
+      },
+    },
+    {
+      spec: SPECS.connect_runner,
+      label: {
+        en: "Connecting the runner",
+        "pt-BR": "Conectando o runner",
+        es: "Conectando el runner",
+      },
+      async run(_input, context) {
+        if (!isOwner(context)) return NOT_OWNER;
+        if (adminOrigin === "") return NOT_CONFIGURED;
+        // As for a bot's token: the form, behind Access and the owner check, is the yes (ADR-0026),
+        // and Kelpie sends its link, so the model can't alter it.
+        const result = await commands.connectRunner(context.actor);
+        if (!result.ok) {
+          return result.reason === "not_configured" ? NO_RUNNER : refusal(result);
+        }
+        const href = pageLink(adminOrigin, result.value.path, context.locale);
+        const minutes = Math.max(Math.round((result.value.expiresAt - now()) / 60_000), 1);
+        context.sendLink({ href, text: TEXTS[context.locale].runnerForm(href, minutes) });
+        return {
+          output: `Kelpie sends the owner the link in a message of its own, right after your reply: don't write a link yourself. The form works once, for the next ${minutes} minutes. The owner pastes the runner's secret there, never in the chat, and the form checks it with the runner before saving it. Kelpie isn't told when they finish: once they say they submitted it, call runner_status.`,
+        };
+      },
+    },
+    {
+      spec: SPECS.runner_status,
+      label: {
+        en: "Checking the runner",
+        "pt-BR": "Verificando o runner",
+        es: "Comprobando el runner",
+      },
+      async run(_input, context) {
+        if (!isOwner(context)) return NOT_OWNER;
+        const result = await commands.describeRunner(context.actor);
+        if (!result.ok) return refusal(result);
+        return { output: runnerStatus(result.value) };
       },
     },
   ];

@@ -74,14 +74,47 @@ async function openTelegramForm(env: Env, agentId: string) {
   }
 }
 
+/** Opens a one-time form for the runner's secret (#294). Without the runner's binding, there is none to check. */
+async function openRunnerForm(env: Env) {
+  if (!runnerOf(env)) return { ok: false as const, reason: "not_configured" as const };
+  try {
+    const { token, expiresAt } = await store(env).createForm(RUNNER_NAME, "runner");
+    return { ok: true as const, token, expiresAt };
+  } catch (error) {
+    console.error("channel-egress: creating a form failed", errorName(error));
+    return unavailable;
+  }
+}
+
+/** The runner's state, from its `/health` with the stored secret. Never the secret. */
+async function describeRunnerOf(env: Env) {
+  const runner = runnerOf(env);
+  if (!runner) return { ok: true as const, runner: { state: "not_configured" as const } };
+  const found = await runnerSecret(env);
+  if (!found.ok) {
+    return found.reason === "store_unavailable"
+      ? unavailable
+      : { ok: true as const, runner: { state: "not_connected" as const } };
+  }
+  return { ok: true as const, runner: await checkRunner(runner, found.secret) };
+}
+
 /**
- * What the setup agent's Worker binds (Story 3.11): it only opens a form, whose link the owner then
- * opens on the admin API. Binding `ChannelForms` there would also let a model-driven Worker
- * describe, redeem and register.
+ * What the setup agent's Worker binds (Story 3.11): it opens a form, whose link the owner then
+ * opens on the admin API, and reads the runner's state, which holds no secret. Binding
+ * `ChannelForms` there would also let a model-driven Worker describe, redeem and register.
  */
 export class SetupForms extends WorkerEntrypoint<Env> implements SetupFormsContract {
   async createTelegramForm(agentId: string) {
     return openTelegramForm(this.env, agentId);
+  }
+
+  async createRunnerForm() {
+    return openRunnerForm(this.env);
+  }
+
+  async describeRunner() {
+    return describeRunnerOf(this.env);
   }
 }
 
@@ -201,16 +234,8 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
     };
   }
 
-  /** Opens a one-time form for the runner's secret (#294). Without the runner's binding, there is none to check. */
   async createRunnerForm() {
-    if (!runnerOf(this.env)) return { ok: false as const, reason: "not_configured" as const };
-    try {
-      const { token, expiresAt } = await store(this.env).createForm(RUNNER_NAME, "runner");
-      return { ok: true as const, token, expiresAt };
-    } catch (error) {
-      console.error("channel-egress: creating a form failed", errorName(error));
-      return unavailable;
-    }
+    return openRunnerForm(this.env);
   }
 
   /**
@@ -282,17 +307,8 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
         };
   }
 
-  /** The runner's state, from its `/health` with the stored secret. Never the secret. */
   async describeRunner() {
-    const runner = runnerOf(this.env);
-    if (!runner) return { ok: true as const, runner: { state: "not_configured" as const } };
-    const found = await runnerSecret(this.env);
-    if (!found.ok) {
-      return found.reason === "store_unavailable"
-        ? unavailable
-        : { ok: true as const, runner: { state: "not_connected" as const } };
-    }
-    return { ok: true as const, runner: await checkRunner(runner, found.secret) };
+    return describeRunnerOf(this.env);
   }
 
   async describeTelegramBot(agentId: string) {

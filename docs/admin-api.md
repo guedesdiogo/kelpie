@@ -254,8 +254,9 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
   - `get_models` reads the instance's model settings, and `configure_models` replaces them;
   - `configure_agent` (its `model` included), `configure_models`, `set_main_agent` and `set_agent_chat` wait for the owner's confirmation (below);
   - `connect_telegram` opens a secure form ("Secure forms"), and `pair_telegram` leads to the pairing page ("Pairing"). Kelpie sends each link itself (below), and the owner's submitting that page is their yes (ADR-0026).
+  - `connect_runner` opens the VPS runner's secure form, whose link Kelpie sends as well, and `runner_status` reads the runner's state, as `describeRunner` does ([runner.md](runner.md)). The form's end isn't reported to the conversation, so the agent checks `runner_status` once the owner says it's done.
 
-  The identity, time zone and vault commands stay on this API. `conversation-runtime` binds no `Directory`, which would make it and `ingress` bind each other. Of `channel-egress`, it binds only `SetupForms`, which opens a form and nothing more (`docs/secrets.md`).
+  The identity, time zone and vault commands stay on this API. `conversation-runtime` binds no `Directory`, which would make it and `ingress` bind each other. Of `channel-egress`, it binds only `SetupForms`, which opens a form and reads the runner's state, which holds no secret (`docs/secrets.md`).
 - **Confirmation.** A change to an agent's settings (`configure_agent`) waits for the owner's yes, gated in code:
   1. The first call doesn't run. After the agent's reply, Kelpie itself sends one more bubble, written from the change's validated input, not by the model: `Confirm: <the change>`, and a 6-character code. The bubble is in the conversation's language ("Languages").
      - Invisible and control characters in the change are written out as `\u{…}`, so what the owner reads is all there is.
@@ -274,9 +275,9 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
   - the model's replies, and what it passes to tools.
 
   The model's text can't show a Confirm button: only Kelpie's own bubble carries one. The model never sees a code before the owner sends it. The bubble isn't part of the conversation's history, so it doesn't come back when the webchat reloads: asking the agent again shows it again.
-- **Links Kelpie sends itself.** `connect_telegram` and `pair_telegram` don't give the model their links (#186, ADR-0026):
+- **Links Kelpie sends itself.** `connect_telegram`, `pair_telegram` and `connect_runner` don't give the model their links (#186, ADR-0026):
   - After the agent's reply, Kelpie sends its own bubble with the link. The secure form's link carries the form's one-time token.
-  - The bubble names the agent by its id, never by its name, which the model chose.
+  - The bubble names the agent by its id, never by its name, which the model chose. The runner's names no agent.
   - Its one link is the admin API page. Any other address in it shows as text.
   - The model learns only that the link was sent. History, later requests and the outbox's inspection never hold the link.
   - As with a confirmation, the bubble doesn't come back once its turn has settled and the webchat reloads. If the owner says they didn't get it, the agent calls the tool again for a new link.
@@ -292,7 +293,7 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
   - **How the turn runs:** the note is authored as the owner who finished the step, so its turn can run the next step's tools. Confirmations still need the code or the button.
   - **What the note never counts as:** the owner's words. It confirms no code, allows no link, doesn't show in the webchat, stays out of session pages and recall, and doesn't change the conversation's language.
   - **A webhook that failed:** the note says Telegram couldn't be pointed at Kelpie. The agent tells the owner to run `registerTelegramWebhook` on this API, since it can't.
-- **Secrets.** The bot's token goes into the secure form ("Secure forms"), never into the chat. If the owner pastes one in the chat anyway, it stays in the conversation: revoke it in BotFather and make a new one.
+- **Secrets.** The bot's token goes into the secure form ("Secure forms"), never into the chat. If the owner pastes one in the chat anyway, it stays in the conversation: revoke it in BotFather and make a new one. The runner's secret goes into its own form the same way. One pasted in the chat is revoked by writing a new secret to its file on the server ([runner.md](runner.md), "Rotating the secret").
 - **Its context** is any agent's: the vault's persona and rules, recall, and the memory tools. A note in the vault could steer it toward a change that runs directly, such as creating or renaming an agent. The confirmed changes still need the owner's yes: the code or the button, or their own submission on the form or the pairing page.
 
 What the setup agent can't do, because it holds no Cloudflare token (ADR-0013):

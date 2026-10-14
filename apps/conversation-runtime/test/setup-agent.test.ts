@@ -1,6 +1,6 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import type { Locale } from "@kelpie/channels";
+import type { Locale, RunnerState } from "@kelpie/channels";
 import { type Actor, type AgentSettings, DEFAULT_SETTINGS, SETUP_AGENT_ID } from "@kelpie/config";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
@@ -37,6 +37,11 @@ const roleOf = (id: string) =>
 function fakeCommands() {
   const agents = new Map<string, string>([[SETUP_AGENT_ID, "Setup"]]);
   const calls: string[] = [];
+  /** The VPS runner as channel-egress would see it (#294); a test changes it. */
+  const runner: { configured: boolean; state: RunnerState } = {
+    configured: true,
+    state: { state: "ready", version: "0.1.0", protocol: 1 },
+  };
   const forbidden = { ok: false, reason: "forbidden" } as const;
   const commands: SetupCommands = {
     async listAgents(actor) {
@@ -118,8 +123,20 @@ function fakeCommands() {
       if (actor.role !== "owner") return forbidden;
       return { ok: true, value: { path: "/forms/tok123", expiresAt: Date.UTC(2026, 9, 6, 20) } };
     },
+    async connectRunner(actor) {
+      calls.push("connectRunner");
+      if (actor.role !== "owner") return forbidden;
+      return runner.configured
+        ? { ok: true, value: { path: "/forms/run456", expiresAt: Date.UTC(2026, 9, 6, 20) } }
+        : { ok: false, reason: "not_configured" };
+    },
+    async describeRunner(actor) {
+      calls.push("describeRunner");
+      if (actor.role !== "owner") return forbidden;
+      return { ok: true, value: runner.state };
+    },
   };
-  return { commands, agents, calls };
+  return { commands, agents, calls, runner };
 }
 
 /** A context whose `confirm` answers `confirmed`, and logs what it was asked and the links sent. */
@@ -180,6 +197,8 @@ describe("the setup agent's tools", () => {
       "set_agent_chat",
       "connect_telegram",
       "pair_telegram",
+      "connect_runner",
+      "runner_status",
     ]);
     for (const tool of tools.values()) {
       // In each language Kelpie speaks (#187).
@@ -239,6 +258,8 @@ describe("the setup agent's tools", () => {
       ["configure_agent", { id: SETUP_AGENT_ID, settings: { tier: "frontier" } }],
       ["connect_telegram", { agentId: SETUP_AGENT_ID }],
       ["pair_telegram", { agentId: SETUP_AGENT_ID }],
+      ["connect_runner", {}],
+      ["runner_status", {}],
       ["create_agent", { id: "ana", name: "Ana" }],
       ["set_main_agent", { id: SETUP_AGENT_ID }],
       ["set_agent_chat", { id: SETUP_AGENT_ID, chat: true }],
@@ -421,6 +442,60 @@ describe("the setup agent's tools", () => {
     ).not.toContain("chat is off");
   });
 
+  it("sends the runner's secure form as a link of Kelpie's own, in the owner's language (#294)", async () => {
+    const { commands } = fakeCommands();
+    const now = () => Date.UTC(2026, 9, 6, 19, 45);
+    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN, now }));
+    const { context, links } = contextOf(true, owner, "pt-BR");
+
+    const sent = await run(tools, "connect_runner", {}, context);
+    expect(sent.isError).toBeUndefined();
+    expect(sent.output).toContain("runner_status");
+    // The model never sees the link, nor the form's one-time token (ADR-0026).
+    expect(sent.output).not.toContain("/forms/");
+    expect(sent.output).not.toContain("run456");
+    expect(links).toEqual([
+      {
+        href: `${ADMIN}/forms/run456?lang=pt-BR`,
+        text: `O formulário seguro para conectar o runner: ${ADMIN}/forms/run456?lang=pt-BR\nFunciona uma vez, nos próximos 15 minutos. Cole lá o segredo de ~/.config/kelpie-runner/secret do seu servidor, uma linha só, nunca no chat.`,
+      },
+    ]);
+  });
+
+  it("says a Kelpie service didn't answer when the runner's state can't be read", async () => {
+    const { commands } = fakeCommands();
+    commands.describeRunner = async () => ({ ok: false, reason: "unavailable" });
+    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const { context } = contextOf(true);
+    expect(await run(tools, "runner_status", {}, context)).toMatchObject({ isError: true });
+  });
+
+  it("says what to set up when Kelpie was deployed without the runner's VPC Service", async () => {
+    const { commands, runner } = fakeCommands();
+    runner.configured = false;
+    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const { context, links } = contextOf(true);
+    const refused = await run(tools, "connect_runner", {}, context);
+    expect(refused).toMatchObject({ isError: true });
+    expect(refused.output).toContain("docs/runner.md");
+    expect(links).toEqual([]);
+  });
+
+  it.each([
+    [{ state: "ready", version: "0.1.0", protocol: 1 }, "is ready, version 0.1.0"],
+    [{ state: "outdated", version: "0.0.9", protocol: 2 }, "update it on the server"],
+    [{ state: "refused" }, "no longer takes the secret"],
+    [{ state: "unreachable" }, "cloudflared"],
+    [{ state: "not_connected" }, "has no secret for the runner yet"],
+    [{ state: "not_configured" }, "docs/runner.md"],
+  ] as const)("tells the model the runner's state: %o", async (state, words) => {
+    const { commands, runner } = fakeCommands();
+    runner.state = state;
+    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const { context } = contextOf(true);
+    expect((await run(tools, "runner_status", {}, context)).output).toContain(words);
+  });
+
   it("asks the owner to confirm a settings change, for its parsed input, and runs it only then", async () => {
     const { commands, calls } = fakeCommands();
     const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
@@ -576,7 +651,7 @@ describe("the setup agent's tools", () => {
       const tools = await toolsOf(setupTools(commands, { adminOrigin }));
       const { context, asked, links } = contextOf(true);
 
-      for (const name of ["connect_telegram", "pair_telegram"]) {
+      for (const name of ["connect_telegram", "pair_telegram", "connect_runner"]) {
         const answer = await run(tools, name, { agentId: SETUP_AGENT_ID }, context);
         expect(answer.isError, `${name} ${adminOrigin}`).toBe(true);
         expect(answer.output, name).toContain("ADMIN_ORIGIN");
