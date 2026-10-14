@@ -24,6 +24,7 @@ import {
   type RouteChoice,
   type RoutedRequest,
   type RouteModel,
+  type RouterOptions,
   resolveModel,
   toNdjsonStream,
   WorkersAiEmbedder,
@@ -60,8 +61,8 @@ const MAX_EMBED_TEXTS = 256;
 const EMBED_TIMEOUT_MS = 30_000;
 
 /** Vars a deploy may set to any string, whatever the generated types say (`docs/admin-api.md`). */
-type GatewayEnv = Omit<Env, "EMBEDDING_PROVIDER" | "OPENAI_BASE_URL"> &
-  Secrets & { EMBEDDING_PROVIDER: string; OPENAI_BASE_URL: string };
+type GatewayEnv = Omit<Env, "EMBEDDING_PROVIDER" | "OPENAI_BASE_URL" | "MODEL_FALLBACK"> &
+  Secrets & { EMBEDDING_PROVIDER: string; OPENAI_BASE_URL: string; MODEL_FALLBACK: string };
 
 /**
  * One model call. Read `events()` once, as newline-delimited JSON (decode it with
@@ -258,7 +259,12 @@ export async function pingWith(env: GatewayEnv): Promise<{ ok: true }> {
 }
 
 function modelRouter(env: GatewayEnv): ModelRouter {
-  return new ModelRouter(parseRouteTable(env.MODEL_ROUTES), providers(env));
+  return new ModelRouter(parseRouteTable(env.MODEL_ROUTES), providers(env), routerOptions(env));
+}
+
+/** Only "off" stops at the first failed route: a typo keeps the default, falling back (#293). */
+export function routerOptions(env: Pick<GatewayEnv, "MODEL_FALLBACK">): RouterOptions {
+  return { fallback: env.MODEL_FALLBACK !== "off" };
 }
 
 /**

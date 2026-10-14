@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LlmError } from "../src/errors.ts";
 import { fromNdjsonStream, toNdjsonStream } from "../src/ndjson.ts";
+import type { RouterEvent } from "../src/router.ts";
 import type { LlmEvent } from "../src/types.ts";
 import { collect } from "./fake-fetch.ts";
 
@@ -32,6 +33,38 @@ async function rechunk(stream: ReadableStream<Uint8Array>, size: number) {
 }
 
 describe("NDJSON stream", () => {
+  it("carries a router's fallback event, and an out-of-credits error with a fixed message (#293)", async () => {
+    const fallback: RouterEvent = {
+      type: "fallback",
+      failed: { provider: "anthropic", model: "claude-haiku-5-5", code: "out_of_credits" },
+      next: { provider: "openai", model: "gpt-6-luna" },
+    };
+    const spent = new LlmError(
+      "400 Your credit balance is too low: org abc",
+      "out_of_credits",
+      true,
+    );
+    const decoded: RouterEvent[] = [];
+    const failure = (async () => {
+      for await (const event of fromNdjsonStream(
+        toNdjsonStream(
+          (async function* () {
+            yield fallback;
+            throw spent;
+          })(),
+          () => {},
+        ),
+      )) {
+        decoded.push(event);
+      }
+    })();
+    await expect(failure).rejects.toMatchObject({ code: "out_of_credits", retryable: true });
+    await expect(failure).rejects.not.toMatchObject({
+      message: expect.stringContaining("org abc"),
+    });
+    expect(decoded).toEqual([fallback]);
+  });
+
   it("round-trips events, even when chunks split frames and characters", async () => {
     const sent: LlmEvent[] = [
       { type: "text", delta: "Olá, " },
@@ -63,7 +96,7 @@ describe("NDJSON stream", () => {
       () => {},
       (error) => logged.push(error),
     );
-    const received: LlmEvent[] = [];
+    const received: RouterEvent[] = [];
 
     await expect(
       (async () => {

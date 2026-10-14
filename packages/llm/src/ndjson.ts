@@ -1,14 +1,15 @@
 import { LlmError, type LlmErrorCode } from "./errors.ts";
-import type { LlmEvent } from "./types.ts";
+import type { RouterEvent } from "./router.ts";
 
 /** One line of the stream between llm-gateway and its callers. */
 export type WireFrame =
-  | LlmEvent
+  | RouterEvent
   | { type: "error"; code: LlmErrorCode; retryable: boolean; message: string };
 
 // Provider error messages can quote request details or part of a key, so only these go out.
 const WIRE_MESSAGES: Record<LlmErrorCode, string> = {
   rate_limited: "The provider is rate limiting requests",
+  out_of_credits: "The provider's credits or spend limit ran out",
   server_error: "The provider failed",
   connection: "The provider could not be reached",
   auth: "The provider rejected the credentials",
@@ -26,7 +27,7 @@ const WIRE_MESSAGES: Record<LlmErrorCode, string> = {
  * provider request.
  */
 export function toNdjsonStream(
-  events: AsyncIterable<LlmEvent>,
+  events: AsyncIterable<RouterEvent>,
   onCancel: () => void,
   onError?: (error: unknown) => void,
 ): ReadableStream<Uint8Array> {
@@ -71,7 +72,7 @@ function toErrorFrame(error: unknown): WireFrame {
 export async function* fromNdjsonStream(
   stream: ReadableStream<Uint8Array>,
   onStop?: () => unknown,
-): AsyncIterable<LlmEvent> {
+): AsyncIterable<RouterEvent> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";

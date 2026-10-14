@@ -41,13 +41,15 @@ import {
   type PauseTarget,
   WEBCHAT_ADMISSION_HEADER,
 } from "@kelpie/conversation/contract";
-import type {
-  AssistantMessage,
-  ChatMessage,
-  LlmEvent,
-  ToolCallPart,
-  ToolResult,
-  Usage,
+import {
+  type AssistantMessage,
+  type ChatMessage,
+  type FallbackEvent,
+  LlmError,
+  type LlmEvent,
+  type ToolCallPart,
+  type ToolResult,
+  type Usage,
 } from "@kelpie/llm";
 import {
   conversationSource,
@@ -82,6 +84,7 @@ import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlit
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
 import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
+import { failureNotice, routeNotice } from "./route-notices.ts";
 import * as schema from "./schema.ts";
 import { bareHttpsOrigin, setupNote } from "./setup-agent.ts";
 import {
@@ -229,6 +232,8 @@ interface TurnInFlight {
   call?: { cancel(): void };
   /** The round of tool calls running: the results so far, and the call running now. */
   tools?: ToolProgress | undefined;
+  /** The routes that failed during the turn's model calls, and the ones tried next (#293). */
+  fallbacks?: FallbackEvent[];
 }
 
 interface ToolProgress {
@@ -873,6 +878,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       await step(flight.controller);
     } catch (error) {
       console.error("ConversationAgent: turn failed", { turnId, error: errorName(error) });
+      // No model answered: the person learns why instead of waiting (ADR-0037 §4, #293).
+      if (error instanceof LlmError && error.code !== "aborted") {
+        await this.#tellFailure(turnId, flight, error);
+      }
       this.#settle(turnId, "failed");
     } finally {
       if (this.#inFlight.get(turnId) === flight) this.#inFlight.delete(turnId);
@@ -880,6 +889,42 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     await this.#scheduleSessionClose(SESSION_IDLE_MS);
     // A note of Kelpie's that came while this turn ran waited for it (#206).
     await this.#serialized(() => this.#answerKelpieNotes());
+  }
+
+  /**
+   * Sends the notice for a turn no route answered, in place of a reply. Best effort: a channel that
+   * doesn't take it leaves the turn failed, as before.
+   */
+  async #tellFailure(turnId: number, flight: TurnInFlight, error: LlmError): Promise<void> {
+    if (!this.#isRunning(turnId)) return;
+    try {
+      const text = failureNotice(flight.fallbacks ?? [], error.code, this.#locale());
+      const last =
+        this.#db
+          .select({ value: max(schema.outbox.seq) })
+          .from(schema.outbox)
+          .where(eq(schema.outbox.turnId, turnId))
+          .get()?.value ?? -1;
+      const row = this.#db
+        .insert(schema.outbox)
+        .values({ turnId, seq: last + 1, text, delayMs: 0, status: "pending", notice: true })
+        .returning({ id: schema.outbox.id })
+        .get();
+      const sent = await this.#sendBubble(
+        turnId,
+        this.#agentId(),
+        this.#destination(),
+        { id: row.id, text },
+        { silent: false },
+        flight.controller.signal,
+      );
+      if (sent && this.#isRunning(turnId)) this.#setBubble(row.id, "sent");
+    } catch (sendError) {
+      console.error("ConversationAgent: the failure notice wasn't sent", {
+        turnId,
+        error: errorName(sendError),
+      });
+    }
   }
 
   async #call(turnId: number, controller: AbortController): Promise<void> {
@@ -1007,7 +1052,16 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         .from(schema.turns)
         .where(eq(schema.turns.id, turnId))
         .get()?.links ?? [];
+    // A route that failed during the turn is named first, unless the conversation heard of it in
+    // the last day (#293).
+    const routes = routeNotice(
+      this.#inFlight.get(turnId)?.fallbacks ?? [],
+      this.#get<Record<string, number>>("routeNotices", {}),
+      this.#ports.now(),
+      locale,
+    );
     const notices = [
+      ...(routes.text === null ? [] : [{ text: routes.text }]),
       ...confirmations.map(({ id, code, summary }) => ({
         text: confirmationNotice(summary, code, button, locale),
         confirmationId: id,
@@ -1034,6 +1088,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           .run();
       });
     });
+    if (routes.text !== null) this.#set("routeNotices", routes.announced);
     await this.#awaitSteps(links);
     await this.#deliver(turnId, controller.signal);
   }
@@ -1131,6 +1186,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       let finish: Extract<LlmEvent, { type: "finish" }> | undefined;
       for await (const event of call.events) {
         if (event.type === "finish") finish = event;
+        else if (event.type === "fallback" && flight) {
+          flight.fallbacks ??= [];
+          flight.fallbacks.push(event);
+        }
       }
       if (!this.#isRunning(turn.id)) return null;
       if (!finish) throw new Error("The model stream ended without a reply");

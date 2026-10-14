@@ -88,9 +88,46 @@ describe("ModelRouter", () => {
     });
 
     expect(await collect(router.stream({ tier: "cheap" }, request))).toEqual([
+      {
+        type: "fallback",
+        failed: { provider: "anthropic", model: "claude-haiku-4-5", code: "server_error" },
+        next: { provider: "openai", model: "gpt-6-luna" },
+      },
       finish("gpt-6-luna"),
     ]);
     expect(openai.requests[0]).toEqual({ ...request, model: "gpt-6-luna" });
+  });
+
+  it("falls back when a route's credits are spent, and says so (#293)", async () => {
+    const spent = new LlmError("credit balance is too low", "out_of_credits", true, 400);
+    const anthropic = scripted("anthropic", { "claude-haiku-4-5": { events: [], error: spent } });
+    const openai = scripted("openai", {});
+    const router = new ModelRouter(routes, {
+      anthropic: anthropic.provider,
+      openai: openai.provider,
+    });
+
+    const events = await collect(router.stream({ tier: "cheap" }, request));
+    expect(events[0]).toMatchObject({
+      type: "fallback",
+      failed: { provider: "anthropic", code: "out_of_credits" },
+    });
+    expect(events.at(-1)).toEqual(finish("gpt-6-luna"));
+  });
+
+  it("stops at the first failure when fallback is off, and tries no other route", async () => {
+    const anthropic = scripted("anthropic", {
+      "claude-haiku-4-5": { events: [], error: overloaded },
+    });
+    const openai = scripted("openai", {});
+    const router = new ModelRouter(
+      routes,
+      { anthropic: anthropic.provider, openai: openai.provider },
+      { fallback: false },
+    );
+
+    await expect(collect(router.stream({ tier: "cheap" }, request))).rejects.toBe(overloaded);
+    expect(openai.requests).toEqual([]);
   });
 
   it("doesn't fall back once an event has gone out", async () => {
@@ -147,7 +184,20 @@ describe("ModelRouter", () => {
       openai: openai.provider,
     });
 
-    await expect(collect(router.stream({ tier: "cheap" }, request))).rejects.toBe(lastError);
+    const seen: unknown[] = [];
+    await expect(
+      (async () => {
+        for await (const event of router.stream({ tier: "cheap" }, request)) seen.push(event);
+      })(),
+    ).rejects.toBe(lastError);
+    // The failure before the last is reported; the last one is the error itself.
+    expect(seen).toEqual([
+      {
+        type: "fallback",
+        failed: { provider: "anthropic", model: "claude-haiku-4-5", code: "server_error" },
+        next: { provider: "openai", model: "gpt-6-luna" },
+      },
+    ]);
   });
 
   it("skips candidates whose provider isn't configured", async () => {
@@ -194,6 +244,11 @@ describe("ModelRouter input from RPC", () => {
     });
 
     expect(await collect(router.stream({ tier: "cheap", provider: "openai" }, request))).toEqual([
+      {
+        type: "fallback",
+        failed: { provider: "openai", model: "gpt-6-luna", code: "server_error" },
+        next: { provider: "anthropic", model: "claude-haiku-4-5" },
+      },
       finish("claude-haiku-4-5"),
     ]);
     expect(openai.requests.map((sent) => sent.model)).toEqual(["gpt-6-luna"]);

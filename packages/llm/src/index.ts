@@ -32,6 +32,7 @@ export {
 export { fromNdjsonStream, toNdjsonStream, type WireFrame } from "./ndjson.ts";
 export { type OpenAIConfig, OpenAIResponsesProvider } from "./openai.ts";
 export {
+  type FallbackEvent,
   MODEL_TIERS,
   ModelRouter,
   type ModelTier,
@@ -41,6 +42,8 @@ export {
   type RouteChoice,
   type RoutedRequest,
   type RouteModel,
+  type RouterEvent,
+  type RouterOptions,
   type RouteTable,
 } from "./router.ts";
 export type * from "./types.ts";

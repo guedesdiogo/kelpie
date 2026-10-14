@@ -12,9 +12,11 @@ import {
   type FakeWorld,
   fail,
   fakeWorld,
+  fellBack,
   hang,
   held,
   INJECTED_FAILURE,
+  noRoute,
   OVER_BUDGET,
   refuse,
   reply,
@@ -419,6 +421,90 @@ describe("ConversationAgent turns", () => {
     await stub.flush();
     await vi.waitFor(() => expect(world.sent).toEqual(["Back."]));
     expect(world.requests[1]?.messages).toEqual([user("first?"), user("second?")]);
+  });
+
+  describe("a route that fails (#293)", () => {
+    const spent = {
+      type: "fallback" as const,
+      failed: {
+        provider: "anthropic" as const,
+        model: "claude-haiku-5-5",
+        code: "out_of_credits" as const,
+      },
+      next: { provider: "openai" as const, model: "gpt-6-luna" },
+    };
+    const NOTE =
+      "Note: Anthropic (claude-haiku-5-5) ran out of credits, or reached its spend limit, so OpenAI (gpt-6-luna) answered.";
+
+    it("is named after the reply, with the route that answered, and stays out of history", async () => {
+      const world = use(fakeWorld([fellBack([spent], "Here it is.")]));
+      const stub = agent("route-fell-back");
+      await stub.ingest(message("m1", "what is the plan?"));
+      await stub.flush();
+
+      await vi.waitFor(() => expect(world.sent).toEqual(["Here it is.", NOTE]));
+      await vi.waitFor(async () =>
+        expect(await stub.turns()).toMatchObject([{ status: "delivered" }]),
+      );
+      // The reply, with what the model sent; the notice is Kelpie's, so the model never sees it.
+      const history = await stub.history();
+      expect(history).toMatchObject([user("what is the plan?"), neutral("Here it is.")]);
+      expect(history).toHaveLength(2);
+    });
+
+    it("isn't named again in the same conversation within a day", async () => {
+      const world = use(
+        fakeWorld([
+          fellBack([spent], "One."),
+          fellBack([spent], "Two."),
+          fellBack([spent], "Three."),
+        ]),
+      );
+      const stub = agent("route-fell-back-daily");
+      await stub.ingest(message("m1", "first question?"));
+      await stub.flush();
+      await vi.waitFor(() => expect(world.sent).toEqual(["One.", NOTE]));
+
+      await stub.ingest(message("m2", "second question?"));
+      await stub.flush();
+      await vi.waitFor(() => expect(world.sent).toEqual(["One.", NOTE, "Two."]));
+
+      world.clock += 24 * 60 * 60_000;
+      await stub.ingest(message("m3", "third question?"));
+      await stub.flush();
+      await vi.waitFor(() => expect(world.sent).toEqual(["One.", NOTE, "Two.", "Three.", NOTE]));
+    });
+
+    it("tells the person when no route answered, in place of a reply, then answers the next message", async () => {
+      const world = use(fakeWorld([noRoute("rate_limited", [spent]), reply("Back.")]));
+      const stub = agent("no-route");
+      await stub.ingest(message("m1", "are you there?"));
+      await stub.flush();
+
+      await vi.waitFor(async () =>
+        expect(await stub.turns()).toMatchObject([{ status: "failed" }]),
+      );
+      expect(world.sent).toEqual([
+        "I couldn't answer this message: Anthropic (claude-haiku-5-5) ran out of credits, or reached its spend limit; OpenAI (gpt-6-luna) is rate limiting requests.",
+      ]);
+      expect(await stub.history()).toEqual([user("are you there?")]);
+
+      await stub.ingest(message("m2", "and now?"));
+      await stub.flush();
+      await vi.waitFor(() => expect(world.sent.at(-1)).toBe("Back."));
+    });
+
+    it("names the model when the only route failed, or fallback is off", async () => {
+      const world = use(fakeWorld([noRoute("out_of_credits")]));
+      const stub = agent("no-route-alone");
+      await stub.ingest(message("m1", "hello there?"));
+      await stub.flush();
+      await vi.waitFor(() =>
+        expect(world.sent).toEqual([
+          "I couldn't answer this message: the model ran out of credits, or reached its spend limit.",
+        ]),
+      );
+    });
   });
 
   it("fails the turn when a send fails, keeping what was already sent", async () => {

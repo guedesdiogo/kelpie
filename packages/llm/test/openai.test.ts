@@ -470,6 +470,18 @@ describe("OpenAIResponsesProvider", () => {
     await expect(failure).rejects.toMatchObject({ code, retryable });
   });
 
+  it.each([
+    "credit_balance_exhausted",
+    "organization_spend_limit_exceeded",
+    "project_spend_limit_exceeded",
+  ])("classifies a 429 with the code %s as out of credits (#293)", async (errorCode) => {
+    const { fetch } = fakeFetch(
+      httpError(429, { error: { message: "nope", type: "insufficient_quota", code: errorCode } }),
+    );
+    const failure = collect(provider(fetch).stream(request()));
+    await expect(failure).rejects.toMatchObject({ code: "out_of_credits", retryable: true });
+  });
+
   it("stops the request when the caller aborts", async () => {
     const { fetch } = fakeFetch(hangingSse(toolTurn.slice(0, 5)));
     const controller = new AbortController();

@@ -1,6 +1,6 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
-import { fromNdjsonStream, type LlmEvent, type RoutedRequest } from "@kelpie/llm";
+import { fromNdjsonStream, type RoutedRequest, type RouterEvent } from "@kelpie/llm";
 import type { Question } from "@kelpie/qualifier";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -10,6 +10,7 @@ import {
   pingWith,
   providerConfig,
   qualifyWith,
+  routerOptions,
   routesWith,
 } from "../src/index.ts";
 
@@ -123,7 +124,7 @@ describe("llm-gateway", () => {
       .mockImplementation(anthropic(() => sseResponse([start, ...text, ...end])));
 
     using generation = await exports.LlmGateway.generate("cheap", request);
-    const events: LlmEvent[] = [];
+    const events: RouterEvent[] = [];
     for await (const event of fromNdjsonStream(await generation.events())) events.push(event);
 
     expect(events[0]).toEqual({ type: "text", delta: "Olá!" });
@@ -536,6 +537,18 @@ describe("ping", () => {
   });
 });
 
+describe("routerOptions (#293)", () => {
+  it("falls back unless MODEL_FALLBACK is off, a typo included", () => {
+    expect(routerOptions({ MODEL_FALLBACK: "on" })).toEqual({ fallback: true });
+    expect(routerOptions({ MODEL_FALLBACK: "of" })).toEqual({ fallback: true });
+    expect(routerOptions({ MODEL_FALLBACK: "off" })).toEqual({ fallback: false });
+  });
+
+  it("is on in the committed configuration", () => {
+    expect(routerOptions(env as Parameters<typeof routerOptions>[0])).toEqual({ fallback: true });
+  });
+});
+
 describe("routes", () => {
   type GatewayEnv = Parameters<typeof routesWith>[0];
 
@@ -668,7 +681,7 @@ describe("model choice (#286)", () => {
       .mockImplementation(anthropic(() => sseResponse([start, ...text, ...end])));
 
     const generation = generateWith(broken(), { area: "conversation" }, request);
-    const events: LlmEvent[] = [];
+    const events: RouterEvent[] = [];
     for await (const event of fromNdjsonStream(generation.events())) events.push(event);
     expect(events.at(-1)).toMatchObject({ type: "finish", reason: "stop" });
     expect(fetchSpy.mock.calls.some(isMessages)).toBe(true);
