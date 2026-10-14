@@ -559,8 +559,10 @@ describe("Directory pairing", () => {
       state.storage.sql.exec("SELECT * FROM audit_log").toArray(),
     );
     expect(JSON.stringify(rows)).not.toContain(code);
-    expect(JSON.stringify(rows)).not.toContain(stranger.channelUserId);
-    expect(JSON.stringify(rows)).not.toContain(telegram.channelUserId);
+    // Every column but `at`: a millisecond timestamp can hold a numeric id's digits by chance.
+    const logged = JSON.stringify(rows.map(({ at: _at, ...columns }) => columns));
+    expect(logged).not.toContain(stranger.channelUserId);
+    expect(logged).not.toContain(telegram.channelUserId);
   });
 });
 
