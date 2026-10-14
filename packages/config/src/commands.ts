@@ -10,6 +10,7 @@ import {
   type TimeZoneResult,
 } from "@kelpie/access";
 import type { ChannelFormsContract, ChannelId, RunnerState } from "@kelpie/channels";
+import { type ModelSettings, type ProviderId, parseModelSettings } from "@kelpie/llm/models";
 import {
   type AgentSettings,
   isAgentId,
@@ -145,6 +146,14 @@ const MAX_DREAM_OPERATIONS = 10;
 const MAX_FORGET_PATHS = 1_000;
 const MAX_PATH_LENGTH = 300;
 
+/** The instance's model settings (ADR-0036 §2), as llm-gateway holds them (#289). */
+export interface InstanceModels {
+  settings: ModelSettings;
+  pinned: ProviderId | null;
+  /** The providers with a key, in Kelpie's provider order. */
+  providers: ProviderId[];
+}
+
 /** What the commands need from the objects that hold configuration. */
 export interface ConfigPorts {
   registry: {
@@ -155,6 +164,15 @@ export interface ConfigPorts {
     list(): Promise<AgentEntry[]>;
     setMain(id: string, actor: Actor): Promise<SetAgentResult>;
     setChat(id: string, chat: boolean, actor: Actor): Promise<SetAgentResult>;
+  };
+  /** llm-gateway's model settings for the whole instance (#289). */
+  models: {
+    providers(): Promise<ProviderId[]>;
+    view(): Promise<InstanceModels>;
+    configure(
+      settings: ModelSettings,
+      actor: Actor,
+    ): Promise<{ ok: true } | { ok: false; reason: "invalid_input" }>;
   };
   agents: {
     configure(id: string, changes: Partial<AgentSettings>, actor: Actor): Promise<ConfigureResult>;
@@ -201,6 +219,7 @@ export type CommandResult<T> =
         | "not_configured"
         | "channel_refused"
         | "not_allowed"
+        | "no_key"
         | Extract<IdentityResult, { ok: false }>["reason"];
     };
 
@@ -220,6 +239,14 @@ export function createConfigCommands(ports: ConfigPorts) {
   const forbidden = { ok: false, reason: "forbidden" } as const;
   const invalid = { ok: false, reason: "invalid_input" } as const;
   const isOwner = (actor: Actor) => actor.role === "owner";
+  const noKey = { ok: false, reason: "no_key" } as const;
+  /** Whether every provider the settings name has a key in llm-gateway (#289). */
+  const keyed = async (settings: ModelSettings) => {
+    const named = [settings.provider, settings.conversation?.provider, settings.memory?.provider];
+    if (named.every((provider) => provider === undefined)) return true;
+    const providers = await ports.models.providers();
+    return named.every((provider) => provider === undefined || providers.includes(provider));
+  };
   const show = (identity: ChannelIdentity, status: IdentityStatus): ShownIdentity => ({
     channel: identity.channel,
     value: maskIdentityValue(identity.channelUserId),
@@ -269,7 +296,27 @@ export function createConfigCommands(ports: ConfigPorts) {
       const changes = parseSettings(settings);
       if (!changes) return invalid;
       if (!(await ports.registry.get(id))) return { ok: false, reason: "unknown_agent" };
+      if (changes.model && !(await keyed(changes.model))) return noKey;
       return ports.agents.configure(id, changes, actor);
+    },
+
+    /** The instance's model settings, its pinned provider and the providers with a key (#289). */
+    async getModels(actor: Actor): Promise<CommandResult<InstanceModels>> {
+      if (!isOwner(actor)) return forbidden;
+      return { ok: true, value: await ports.models.view() };
+    },
+
+    /**
+     * Replaces the instance's model settings (ADR-0036 §2): what agents leave unset comes from
+     * them. It changes cost, so the setup agent asks for the owner's confirmation first.
+     */
+    async configureModels(actor: Actor, input: unknown): Promise<CommandResult<object>> {
+      if (!isOwner(actor)) return forbidden;
+      const settings = parseModelSettings((input as { settings?: unknown } | null)?.settings);
+      if (!settings) return invalid;
+      if (!(await keyed(settings))) return noKey;
+      const result = await ports.models.configure(settings, actor);
+      return result.ok ? { ok: true, value: {} } : result;
     },
 
     /** Makes an agent the main agent, the user's front door (ADR-0036 §1). It changes access. */

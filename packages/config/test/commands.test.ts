@@ -21,6 +21,7 @@ function fakePorts() {
   ];
   const identities = new Map(seeded.map((entry) => [key(entry.identity), entry]));
   const calls: string[] = [];
+  const models: { settings: object } = { settings: {} };
   /** What channel-egress answers about the runner; a test changes it to another case. */
   const runner: {
     form: Awaited<ReturnType<ChannelFormsContract["createRunnerForm"]>>;
@@ -58,6 +59,20 @@ function fakePorts() {
         calls.push(`setChat ${id} ${chat}`);
         if (id === SETUP_AGENT_ID) return { ok: false, reason: "not_allowed" };
         return agents.has(id) ? { ok: true } : { ok: false, reason: "unknown_agent" };
+      },
+    },
+    models: {
+      async providers() {
+        calls.push("models.providers");
+        return ["anthropic"];
+      },
+      async view() {
+        return { settings: models.settings, pinned: "anthropic", providers: ["anthropic"] };
+      },
+      async configure(settings, actor) {
+        calls.push(`models.configure ${JSON.stringify(settings)} ${actor.via}`);
+        models.settings = settings;
+        return { ok: true };
       },
     },
     agents: {
@@ -191,6 +206,63 @@ describe("configuration commands", () => {
       ok: true,
       value: [{ id: "sales", name: "Vendas", ...SPECIALIST }],
     });
+  });
+
+  it("lets the owner read and set the instance's model settings (#289)", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+    const settings = { conversation: { tier: "medium", effort: "low" } };
+
+    expect(await commands.configureModels(owner, { settings })).toEqual({ ok: true, value: {} });
+    expect(calls).toContain(`models.configure ${JSON.stringify(settings)} admin-api`);
+    expect(await commands.getModels(owner)).toEqual({
+      ok: true,
+      value: { settings, pinned: "anthropic", providers: ["anthropic"] },
+    });
+    expect(await commands.configureModels(owner, { settings: { tier: "medium" } })).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(await commands.configureModels(member, { settings })).toMatchObject({
+      reason: "forbidden",
+    });
+    expect(await commands.getModels(member)).toMatchObject({ reason: "forbidden" });
+  });
+
+  it("refuses a provider without a key, for the instance or an agent (#289)", async () => {
+    const { ports } = fakePorts();
+    const commands = createConfigCommands(ports);
+    await commands.createAgent(owner, { id: "sales", name: "Sales" });
+    const noKey = { ok: false, reason: "no_key" };
+
+    expect(await commands.configureModels(owner, { settings: { provider: "openai" } })).toEqual(
+      noKey,
+    );
+    expect(
+      await commands.configureAgent(owner, {
+        id: "sales",
+        settings: { model: { memory: { provider: "openai" } } },
+      }),
+    ).toEqual(noKey);
+    expect(
+      await commands.configureAgent(owner, {
+        id: "sales",
+        settings: { model: { provider: "anthropic", conversation: { tier: "frontier" } } },
+      }),
+    ).toMatchObject({ ok: true });
+  });
+
+  it("asks llm-gateway for its keys only when a change names a provider", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+    await commands.createAgent(owner, { id: "sales", name: "Sales" });
+
+    await commands.configureAgent(owner, {
+      id: "sales",
+      settings: { model: { conversation: { tier: "frontier", effort: "high" } } },
+    });
+    await commands.configureModels(owner, { settings: { memory: { tier: "medium" } } });
+    expect(calls).not.toContain("models.providers");
   });
 
   it("lets the owner choose the main agent and a specialist's chat access (#288)", async () => {

@@ -9,8 +9,10 @@ import {
   SETUP_AGENT_ID,
   type SetupEvent,
 } from "@kelpie/config";
+import { type ModelSettings, parseModelSettings } from "@kelpie/llm/models";
 // The router module only: the package root also loads the provider SDKs.
 import { MODEL_TIERS } from "@kelpie/llm/router";
+import { MODEL_SETTINGS_SCHEMA } from "./model-schema.ts";
 import {
   MAX_SUMMARY_CHARS,
   type Tool,
@@ -48,6 +50,8 @@ export type SetupCommands = Pick<
   | "createAgent"
   | "renameAgent"
   | "configureAgent"
+  | "getModels"
+  | "configureModels"
   | "setMainAgent"
   | "setAgentChat"
   | "connectTelegram"
@@ -131,11 +135,29 @@ const SPECS = {
             maxWaitMs: { type: "integer", minimum: 0, maximum: 120_000 },
             qualifier: { type: "string", enum: ["clef", "jev"] },
             toolLoopMs: { type: "integer", minimum: 120_000, maximum: 600_000 },
+            model: MODEL_SETTINGS_SCHEMA,
           },
           additionalProperties: false,
         },
       },
       required: ["id", "settings"],
+      additionalProperties: false,
+    },
+  },
+  get_models: {
+    name: "get_models",
+    description:
+      "Show the instance's model settings, which every agent follows unless it has its own, the provider pinned as the default, and the providers that have a key.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  configure_models: {
+    name: "configure_models",
+    description:
+      "Replace the instance's model settings: pass them whole, as get_models shows them, with the change. It needs the owner's confirmation, as configure_agent does.",
+    inputSchema: {
+      type: "object",
+      properties: { settings: MODEL_SETTINGS_SCHEMA },
+      required: ["settings"],
       additionalProperties: false,
     },
   },
@@ -190,6 +212,9 @@ const fields = (input: unknown): Record<string, unknown> =>
   typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {};
 
 const NOT_OWNER = failed("Only the owner can change Kelpie's configuration.");
+const NO_KEY = failed(
+  "That provider has no key in llm-gateway, so it can't serve: the owner sets one as a deploy secret (docs/secrets.md). get_models lists the providers that have one.",
+);
 const NOT_MAIN = failed("Admin can't be the main agent, and a subagent can't either.");
 const NOT_SPECIALIST = failed(
   "Only a specialist's chat can change: Admin and the main agent always chat, and a subagent never does.",
@@ -241,6 +266,8 @@ function refusal(result: Extract<CommandResult<unknown>, { ok: false }>, id?: st
       return failed(`There is no agent with the id ${id}.`);
     case "invalid_input":
       return failed("That input isn't valid.");
+    case "no_key":
+      return NO_KEY;
     default:
       return failed("That didn't work: a Kelpie service didn't answer. Try again in a moment.");
   }
@@ -252,18 +279,23 @@ function refusal(result: Extract<CommandResult<unknown>, { ok: false }>, id?: st
  */
 const TEXTS: Localized<{
   settingTo: string;
+  settingFrom: string;
   changeSettings: (agent: string, id: string, changes: string) => string;
   mainAgent: (agent: string, id: string) => string;
+  models: (before: string, after: string) => string;
   chat: (agent: string, id: string, on: boolean) => string;
   form: (id: string, href: string, minutes: number) => string;
   pairing: (id: string, href: string) => string;
 }> = {
   en: {
     settingTo: "to",
+    settingFrom: "from",
     changeSettings: (agent, id, changes) =>
       `change the settings of the agent ${agent} (${id}): ${changes}.`,
     mainAgent: (agent, id) =>
       `make the agent ${agent} (${id}) the main agent, the one you talk to.`,
+    models: (before, after) =>
+      `set the models every agent uses unless it has its own, from ${before} to ${after}.`,
     chat: (agent, id, on) =>
       on
         ? `let you chat with the agent ${agent} (${id}).`
@@ -275,10 +307,13 @@ const TEXTS: Localized<{
   },
   "pt-BR": {
     settingTo: "para",
+    settingFrom: "de",
     changeSettings: (agent, id, changes) =>
       `alterar as configurações do agente ${agent} (${id}): ${changes}.`,
     mainAgent: (agent, id) =>
       `tornar o agente ${agent} (${id}) o agente principal, o que conversa com você.`,
+    models: (before, after) =>
+      `definir os modelos que todo agente usa quando não tem os seus, de ${before} para ${after}.`,
     chat: (agent, id, on) =>
       on
         ? `permitir que você converse com o agente ${agent} (${id}).`
@@ -290,10 +325,13 @@ const TEXTS: Localized<{
   },
   es: {
     settingTo: "a",
+    settingFrom: "de",
     changeSettings: (agent, id, changes) =>
       `cambiar la configuración del agente ${agent} (${id}): ${changes}.`,
     mainAgent: (agent, id) =>
       `convertir el agente ${agent} (${id}) en el agente principal, el que conversa contigo.`,
+    models: (before, after) =>
+      `definir los modelos que usa todo agente que no tenga los suyos, de ${before} a ${after}.`,
     chat: (agent, id, on) =>
       on
         ? `permitir que converses con el agente ${agent} (${id}).`
@@ -305,10 +343,22 @@ const TEXTS: Localized<{
   },
 };
 
-/** The setting changes, for the owner's confirmation: each as its key and its exact value. */
-function describe(settings: Partial<AgentSettings>, locale: Locale): string {
+/**
+ * The setting changes, for the owner's confirmation: each as its key and its exact value. `model`
+ * replaces the agent's whole model settings, so it shows what they were too (#289).
+ */
+function describe(
+  settings: Partial<AgentSettings>,
+  locale: Locale,
+  modelBefore?: ModelSettings,
+): string {
+  const { settingTo, settingFrom } = TEXTS[locale];
   return Object.entries(settings)
-    .map(([key, value]) => `${key} ${TEXTS[locale].settingTo} ${JSON.stringify(value)}`)
+    .map(([key, value]) =>
+      key === "model" && modelBefore !== undefined
+        ? `model ${settingFrom} ${JSON.stringify(modelBefore)} ${settingTo} ${JSON.stringify(value)}`
+        : `${key} ${settingTo} ${JSON.stringify(value)}`,
+    )
     .join(", ");
 }
 
@@ -443,10 +493,17 @@ export function setupTools(
         const agent = await agentOf(context, id);
         if (!("id" in agent)) return agent;
         const change = { id: agent.id, settings: parsed };
+        const current = parsed.model
+          ? await commands.getAgent(context.actor, { id: agent.id })
+          : null;
         const summary = TEXTS[context.locale].changeSettings(
           JSON.stringify(agent.name),
           agent.id,
-          describe(parsed, context.locale),
+          describe(
+            parsed,
+            context.locale,
+            current?.ok ? (current.value.settings.model ?? {}) : undefined,
+          ),
         );
         // The owner confirms what they see, and one bubble shows the whole change, or nothing.
         if (visible(summary).length > MAX_SUMMARY_CHARS) {
@@ -463,6 +520,48 @@ export function setupTools(
         const result = await commands.configureAgent(context.actor, change);
         if (!result.ok) return refusal(result, change.id);
         return { output: `Changed the settings of the agent ${change.id}.` };
+      },
+    },
+    {
+      spec: SPECS.get_models,
+      label: { en: "Reading the models", "pt-BR": "Lendo os modelos", es: "Leyendo los modelos" },
+      async run(_input, context) {
+        const result = await commands.getModels(context.actor);
+        if (!result.ok) return refusal(result);
+        return { output: JSON.stringify(result.value, null, 2) };
+      },
+    },
+    {
+      spec: SPECS.configure_models,
+      label: {
+        en: "Changing the models",
+        "pt-BR": "Alterando os modelos",
+        es: "Cambiando los modelos",
+      },
+      async run(input, context) {
+        if (!isOwner(context)) return NOT_OWNER;
+        const settings = parseModelSettings(fields(input).settings);
+        if (!settings) {
+          return failed(
+            "Those model settings aren't valid: a provider, and each area's provider, tier and effort, from the allowed values.",
+          );
+        }
+        // They replace what the instance has, so the owner sees what that was.
+        const current = await commands.getModels(context.actor);
+        if (!current.ok) return refusal(current);
+        const change = { settings };
+        const confirmed = await context.confirm({
+          command: "configureModels",
+          input: change,
+          summary: TEXTS[context.locale].models(
+            JSON.stringify(current.value.settings),
+            JSON.stringify(settings),
+          ),
+        });
+        if (!confirmed) return { output: WAITING };
+        const result = await commands.configureModels(context.actor, change);
+        if (!result.ok) return refusal(result);
+        return { output: "Changed the models every agent uses unless it has its own." };
       },
     },
     {

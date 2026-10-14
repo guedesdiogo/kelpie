@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { lowerEffort } from "../src/efforts.ts";
-import { parseModelSettings, resolveModel } from "../src/models.ts";
+import { mergeModelSettings, parseModelSettings, resolveModel } from "../src/models.ts";
 
 describe("resolveModel", () => {
   it("falls back to the pinned provider, the cheap tier and the model's own effort", () => {
@@ -106,5 +106,29 @@ describe("lowerEffort", () => {
     expect(lowerEffort("claude-haiku-4-5", "low")).toBeUndefined();
     expect(lowerEffort("claude-haiku-4-5-20251001", "high")).toBeUndefined();
     expect(lowerEffort("claude-sonnet-4-5", "medium")).toBeUndefined();
+  });
+});
+
+describe("mergeModelSettings", () => {
+  it("changes only the fields a change names, area by area (#289)", () => {
+    const current = {
+      provider: "anthropic" as const,
+      conversation: { tier: "cheap" as const },
+      memory: { tier: "medium" as const, effort: "low" as const },
+    };
+    expect(
+      mergeModelSettings(current, { conversation: { tier: "frontier", effort: "high" } }),
+    ).toEqual({
+      provider: "anthropic",
+      conversation: { tier: "frontier", effort: "high" },
+      memory: { tier: "medium", effort: "low" },
+    });
+    expect(mergeModelSettings(current, { provider: "openai", memory: { effort: "max" } })).toEqual({
+      provider: "openai",
+      conversation: { tier: "cheap" },
+      memory: { tier: "medium", effort: "max" },
+    });
+    expect(mergeModelSettings({}, {})).toEqual({});
+    expect(mergeModelSettings({}, { memory: {} })).toEqual({});
   });
 });

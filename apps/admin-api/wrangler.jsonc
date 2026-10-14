@@ -28,6 +28,12 @@
       "binding": "CONTEXT_STORE_ADMIN",
       "service": "kelpie-context-store",
       "entrypoint": "ContextStoreAdmin"
+    },
+    // The instance's model settings (#289), which llm-gateway holds.
+    {
+      "binding": "LLM_GATEWAY_ADMIN",
+      "service": "kelpie-llm-gateway",
+      "entrypoint": "LlmGatewayAdmin"
     }
   ],
   // The objects that hold configuration live in the Workers that run them.
