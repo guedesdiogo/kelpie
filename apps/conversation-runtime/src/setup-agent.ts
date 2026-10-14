@@ -4,6 +4,7 @@ import {
   type AgentSettings,
   type CommandResult,
   type ConfigCommands,
+  type DeletedAgents,
   isAgentId,
   parseSettings,
   SETUP_AGENT_ID,
@@ -356,8 +357,8 @@ const TEXTS: Localized<{
         : `stop you chatting with the agent ${agent} (${id}).`,
     deleteAgent: (agent, id, subagents) =>
       subagents.length === 0
-        ? `delete, for good, the agent ${agent} (${id}): its settings, its conversations with all their history, and any Telegram bot connected to it. The files under agents/${id}/ in your vault stay.`
-        : `delete, for good, the agent ${agent} (${id}) and its ${subagents.length === 1 ? "subagent" : "subagents"} ${subagents.join(", ")}: their settings, their conversations with all their history, and any Telegram bot connected to them. The files under agents/${id}/ in your vault stay.`,
+        ? `delete, for good, the agent ${agent} (${id}): its settings, its conversations with all their history, and Kelpie's connection to its Telegram bot. The bot itself stays yours: revoke its token with BotFather if you no longer want it. The files under agents/${id}/ in your vault stay.`
+        : `delete, for good, the agent ${agent} (${id}) and its ${subagents.length === 1 ? "subagent" : "subagents"} ${subagents.join(", ")}: their settings, their conversations with all their history, and Kelpie's connection to their Telegram bots. A bot itself stays yours: revoke its token with BotFather if you no longer want it. The files under agents/${id}/ in your vault stay.`,
     form: (id, href, minutes) =>
       `The secure form to connect the Telegram bot of the agent ${id}: ${href}\nIt works once, for the next ${minutes} minutes. Paste the bot's token there, never in the chat.`,
     pairing: (id, href) =>
@@ -380,8 +381,8 @@ const TEXTS: Localized<{
         : `deixar de permitir que você converse com o agente ${agent} (${id}).`,
     deleteAgent: (agent, id, subagents) =>
       subagents.length === 0
-        ? `excluir de vez o agente ${agent} (${id}): as configurações, as conversas com todo o histórico e qualquer bot do Telegram conectado a ele. Os arquivos em agents/${id}/ no seu vault ficam.`
-        : `excluir de vez o agente ${agent} (${id}) e ${subagents.length === 1 ? "o subagente dele" : "os subagentes dele"} ${subagents.join(", ")}: as configurações, as conversas com todo o histórico e qualquer bot do Telegram conectado a eles. Os arquivos em agents/${id}/ no seu vault ficam.`,
+        ? `excluir de vez o agente ${agent} (${id}): as configurações, as conversas com todo o histórico e a conexão do Kelpie com o bot do Telegram dele. O bot continua seu: revogue o token no BotFather se não quiser mais ele. Os arquivos em agents/${id}/ no seu vault ficam.`
+        : `excluir de vez o agente ${agent} (${id}) e ${subagents.length === 1 ? "o subagente dele" : "os subagentes dele"} ${subagents.join(", ")}: as configurações, as conversas com todo o histórico e a conexão do Kelpie com os bots do Telegram deles. Cada bot continua seu: revogue o token no BotFather se não quiser mais ele. Os arquivos em agents/${id}/ no seu vault ficam.`,
     form: (id, href, minutes) =>
       `O formulário seguro para conectar o bot do Telegram do agente ${id}: ${href}\nFunciona uma vez, nos próximos ${minutes} minutos. Cole o token do bot lá, nunca no chat.`,
     pairing: (id, href) =>
@@ -404,8 +405,8 @@ const TEXTS: Localized<{
         : `dejar de permitir que converses con el agente ${agent} (${id}).`,
     deleteAgent: (agent, id, subagents) =>
       subagents.length === 0
-        ? `eliminar para siempre el agente ${agent} (${id}): su configuración, sus conversaciones con todo su historial y cualquier bot de Telegram conectado a él. Los archivos en agents/${id}/ de tu vault se quedan.`
-        : `eliminar para siempre el agente ${agent} (${id}) y ${subagents.length === 1 ? "su subagente" : "sus subagentes"} ${subagents.join(", ")}: su configuración, sus conversaciones con todo su historial y cualquier bot de Telegram conectado a ellos. Los archivos en agents/${id}/ de tu vault se quedan.`,
+        ? `eliminar para siempre el agente ${agent} (${id}): su configuración, sus conversaciones con todo su historial y la conexión de Kelpie con su bot de Telegram. El bot sigue siendo tuyo: revoca su token con BotFather si ya no lo quieres. Los archivos en agents/${id}/ de tu vault se quedan.`
+        : `eliminar para siempre el agente ${agent} (${id}) y ${subagents.length === 1 ? "su subagente" : "sus subagentes"} ${subagents.join(", ")}: su configuración, sus conversaciones con todo su historial y la conexión de Kelpie con sus bots de Telegram. Cada bot sigue siendo tuyo: revoca su token con BotFather si ya no lo quieres. Los archivos en agents/${id}/ de tu vault se quedan.`,
     form: (id, href, minutes) =>
       `El formulario seguro para conectar el bot de Telegram del agente ${id}: ${href}\nFunciona una vez, durante los próximos ${minutes} minutos. Pega allí el token del bot, nunca en el chat.`,
     pairing: (id, href) =>
@@ -432,6 +433,34 @@ function describe(
         : `${key} ${settingTo} ${JSON.stringify(value)}`,
     )
     .join(", ");
+}
+
+/** What the model is told of a deletion (#303), from the command's result. */
+function deletedReport(id: string, { deleted, webhooksLeft, everyThread }: DeletedAgents): string {
+  const below = deleted.filter((one) => one !== id);
+  const along =
+    below.length === 0
+      ? ""
+      : ` and its ${below.length === 1 ? "subagent" : "subagents"} ${below.join(", ")}`;
+  const lines = [
+    below.length === 0
+      ? `Deleted the agent ${id}: its settings, conversations and Kelpie's connection to its Telegram bot are gone.`
+      : `Deleted the agent ${id}${along}: their settings, conversations and Kelpie's connection to their Telegram bots are gone.`,
+  ];
+  for (const left of webhooksLeft) {
+    lines.push(
+      `Telegram refused to take down the webhook of ${left}'s bot: Kelpie no longer holds its token, so it refuses that bot's messages. The owner can revoke the token with BotFather.`,
+    );
+  }
+  if (!everyThread) {
+    lines.push(
+      `One gap: a Telegram conversation with it from before Kelpie began recording conversations, with no message since, may remain where nothing reaches it, and an agent created again with the id ${id} would get it back. Suggest another id if the owner creates a new agent.`,
+    );
+  }
+  lines.push(
+    `Its files in the vault, under agents/${id}/, stay: the owner can remove them from their vault's repository, and the admin API's forgetVaultPaths drops Kelpie's copy.`,
+  );
+  return lines.join(" ");
 }
 
 /** The agents `id` owns, and theirs in turn: the subagents deleting it deletes (#303). */
@@ -732,41 +761,40 @@ export function setupTools(
         const agent = await agentOf(context, fields(input).id);
         if (!("id" in agent)) return agent;
         if (agent.role === "admin" || agent.role === "main") return NOT_DELETABLE;
-        // The owner sees every agent that goes: the command deletes what the agent owns too.
+        // The owner sees every agent that goes, and the input names them, so the yes deletes
+        // that set: the command refuses one that changed meanwhile.
         const listed = await commands.listAgents(context.actor);
         if (!listed.ok) return refusal(listed);
-        const subagents = ownedBy(listed.value, agent.id).map(
-          (owned) => `${JSON.stringify(owned.name)} (${owned.id})`,
+        const owned = ownedBy(listed.value, agent.id);
+        const change = { id: agent.id, ids: [agent.id, ...owned.map((one) => one.id)].sort() };
+        const summary = TEXTS[context.locale].deleteAgent(
+          JSON.stringify(agent.name),
+          agent.id,
+          owned.map((one) => `${JSON.stringify(one.name)} (${one.id})`),
         );
-        const change = { id: agent.id };
-        const confirmed = await context.confirm({
-          command: "deleteAgent",
-          input: change,
-          summary: TEXTS[context.locale].deleteAgent(
-            JSON.stringify(agent.name),
-            agent.id,
-            subagents,
-          ),
-        });
+        if (visible(summary).length > MAX_SUMMARY_CHARS) {
+          return failed(
+            "That deletion names too many agents to show the owner for confirmation here: delete it through the admin API.",
+          );
+        }
+        const confirmed = await context.confirm({ command: "deleteAgent", input: change, summary });
         if (!confirmed) return { output: WAITING };
         const result = await commands.deleteAgent(context.actor, change);
         if (!result.ok) {
           if (result.reason === "forbidden" || result.reason === "unknown_agent") {
             return refusal(result, agent.id);
           }
+          if (result.reason === "not_allowed") {
+            return failed(
+              `The deletion stopped: what it deletes changed since the owner was asked, such as a new subagent or a new role. Anything already deleted stays deleted. Call delete_agent again with the same input, so the owner confirms what it deletes now.`,
+            );
+          }
           // Whatever went is gone; the rest waits, the agent listed with its chat off.
           return failed(
-            `The deletion didn't finish: ${result.reason === "not_allowed" ? "an agent it owns appeared meanwhile" : "a Kelpie service didn't answer"}. What was deleted stays deleted, and the agent ${agent.id} is still listed, with its chat off. Call delete_agent again with the same input to finish; the owner confirms it again.`,
+            `The deletion didn't finish: a Kelpie service didn't answer. What was deleted stays deleted, and the agent ${agent.id} is still listed, with its chat off. Call delete_agent again with the same input to finish; the owner confirms it again.`,
           );
         }
-        const [, ...below] = [...result.value.deleted].reverse();
-        const along =
-          below.length === 0
-            ? ""
-            : ` and its ${below.length === 1 ? "subagent" : "subagents"} ${below.join(", ")}`;
-        return {
-          output: `Deleted the agent ${agent.id}${along}: ${below.length === 0 ? "its settings, conversations and Telegram connection are" : "their settings, conversations and Telegram connections are"} gone. Its files in the vault, under agents/${agent.id}/, stay: the owner can remove them from their vault's repository.`,
-        };
+        return { output: deletedReport(agent.id, result.value) };
       },
     },
     {

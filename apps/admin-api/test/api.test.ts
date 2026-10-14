@@ -41,6 +41,8 @@ function world({
     identities.set(`${ACCESS_SOURCE}:${OWNER_SUB}`, { userId: ownerId, status: "enabled" });
   }
   const agents = new Map<string, string>();
+  /** The agents whose chat `setChat` turned off. */
+  const chatOff = new Set<string>();
   const ran: string[] = [];
   const reported: { agentId: string; event: SetupEvent }[] = [];
   const ports: ConfigPorts = {
@@ -56,19 +58,27 @@ function world({
       },
       async get(id) {
         const name = agents.get(id);
-        return name ? { id, name, ...SPECIALIST } : null;
+        return name ? { id, name, ...SPECIALIST, chat: !chatOff.has(id) } : null;
       },
       async list() {
         ran.push("registry.list");
-        return [...agents].map(([id, name]) => ({ id, name, ...SPECIALIST }));
+        return [...agents].map(([id, name]) => ({
+          id,
+          name,
+          ...SPECIALIST,
+          chat: !chatOff.has(id),
+        }));
       },
       async setMain(id) {
         ran.push(`registry.setMain ${id}`);
         return agents.has(id) ? { ok: true } : { ok: false, reason: "unknown_agent" };
       },
-      async setChat(id) {
+      async setChat(id, chat) {
         ran.push(`registry.setChat ${id}`);
-        return id === "setup" ? { ok: false, reason: "not_allowed" } : { ok: true };
+        if (id === "setup") return { ok: false, reason: "not_allowed" };
+        if (chat) chatOff.delete(id);
+        else chatOff.add(id);
+        return { ok: true };
       },
       async remove(id) {
         ran.push(`registry.remove ${id}`);
@@ -343,7 +353,7 @@ describe("admin API commands", () => {
     await call(deps, "/commands/createAgent", { id: "sales", name: "Sales" });
     expect(await call(deps, "/commands/deleteAgent", { id: "sales" })).toEqual({
       status: 200,
-      body: { ok: true, value: { deleted: ["sales"] } },
+      body: { ok: true, value: { deleted: ["sales"], webhooksLeft: [], everyThread: true } },
     });
     expect(
       ran.filter((step) => !step.startsWith("registry.list") && step !== "registry.add"),

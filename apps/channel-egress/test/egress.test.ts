@@ -1,5 +1,6 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
+import { SETUP_AGENT_ID } from "@kelpie/config";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SecretStore, SetupForms } from "../src/index.ts";
 import { telegramWebhookUrl } from "../src/telegram-secret.ts";
@@ -364,6 +365,43 @@ describe("Disconnecting a deleted agent's bot (#303)", () => {
     });
     expect(await exports.ChannelForms.describeTelegramBot("revoked")).toMatchObject({
       reason: "not_connected",
+    });
+  });
+
+  it("keeps the secret when Telegram fails for now, so running it again removes the webhook", async () => {
+    const answers: Record<string, () => Response> = {};
+    botApi((method) => answers[method]?.() ?? defaultAnswer(method));
+    await connect("blip");
+    for (const failure of [
+      () => Response.json({ ok: false, error_code: 502 }, { status: 502 }),
+      () => Response.json({ ok: false, error_code: 429, parameters: { retry_after: 3 } }),
+      () => new Response("not json", { status: 200 }),
+    ]) {
+      answers.deleteWebhook = failure;
+      expect(await exports.ChannelForms.disconnectTelegram("blip")).toEqual({
+        ok: false,
+        reason: "channel_unavailable",
+      });
+      expect(await exports.ChannelForms.describeTelegramBot("blip")).toMatchObject({ ok: true });
+    }
+    delete answers.deleteWebhook;
+    expect(await exports.ChannelForms.disconnectTelegram("blip")).toEqual({
+      ok: true,
+      webhook: "removed",
+    });
+  });
+
+  it("never disconnects Admin's bot: Admin can't be deleted", async () => {
+    const calls = botApi();
+    await connect(SETUP_AGENT_ID);
+    calls.length = 0;
+    expect(await exports.SetupForms.disconnectTelegram(SETUP_AGENT_ID)).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(calls).toEqual([]);
+    expect(await exports.ChannelForms.describeTelegramBot(SETUP_AGENT_ID)).toMatchObject({
+      ok: true,
     });
   });
 

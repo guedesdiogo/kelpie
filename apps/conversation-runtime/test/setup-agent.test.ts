@@ -123,15 +123,21 @@ function fakeCommands() {
     async deleteAgent(actor, input) {
       calls.push(`deleteAgent ${JSON.stringify(input)}`);
       if (actor.role !== "owner") return forbidden;
-      const { id } = input as { id: string };
+      const { id, ids } = input as { id: string; ids?: string[] };
       if (id === "stuck") return { ok: false, reason: "unavailable" };
       if (!agents.has(id)) return { ok: false, reason: "unknown_agent" };
       if (roleOf(id).role === "admin" || roleOf(id).role === "main") {
         return { ok: false, reason: "not_allowed" };
       }
-      const deleted = [...agents.keys()].filter((other) => roleOf(other).owner === id);
-      for (const gone of [...deleted, id]) agents.delete(gone);
-      return { ok: true, value: { deleted: [...deleted, id] } };
+      const below = [...agents.keys()].filter((other) => roleOf(other).owner === id);
+      const deleted = [...below, id];
+      if (ids && [...ids].sort().join() !== [...deleted].sort().join()) {
+        return { ok: false, reason: "not_allowed" };
+      }
+      for (const gone of deleted) agents.delete(gone);
+      // The setup agent's Worker binds no Directory, so only the webchat's thread is named.
+      const webhooksLeft = id === "revoked" ? [id] : [];
+      return { ok: true, value: { deleted, webhooksLeft, everyThread: false } };
     },
     async connectTelegram(actor, input) {
       calls.push(`connectTelegram ${JSON.stringify(input)}`);
@@ -454,13 +460,13 @@ describe("the setup agent's tools", () => {
     expect((await run(tools, "delete_agent", { id: "ana" }, waiting.context)).output).toContain(
       "Not done yet",
     );
-    await run(tools, "delete_agent", { id: "bia" }, contextOf(false, owner, "pt-BR").context);
+    // The input names every agent the owner sees, so the yes deletes that set and no other.
     expect(waiting.asked).toEqual([
       {
         command: "deleteAgent",
-        input: { id: "ana" },
+        input: { id: "ana", ids: ["ana", "scout"] },
         summary:
-          'delete, for good, the agent "Ana" (ana) and its subagent "Scout" (scout): their settings, their conversations with all their history, and any Telegram bot connected to them. The files under agents/ana/ in your vault stay.',
+          'delete, for good, the agent "Ana" (ana) and its subagent "Scout" (scout): their settings, their conversations with all their history, and Kelpie\'s connection to their Telegram bots. A bot itself stays yours: revoke its token with BotFather if you no longer want it. The files under agents/ana/ in your vault stay.',
       },
     ]);
     const summaries = async (locale: Locale, id: string) => {
@@ -468,27 +474,40 @@ describe("the setup agent's tools", () => {
       await run(tools, "delete_agent", { id }, context);
       return asked[0]?.summary;
     };
+    expect(await summaries("en", "bia")).toBe(
+      'delete, for good, the agent "Bia" (bia): its settings, its conversations with all their history, and Kelpie\'s connection to its Telegram bot. The bot itself stays yours: revoke its token with BotFather if you no longer want it. The files under agents/bia/ in your vault stay.',
+    );
     expect(await summaries("pt-BR", "bia")).toBe(
-      'excluir de vez o agente "Bia" (bia): as configurações, as conversas com todo o histórico e qualquer bot do Telegram conectado a ele. Os arquivos em agents/bia/ no seu vault ficam.',
+      'excluir de vez o agente "Bia" (bia): as configurações, as conversas com todo o histórico e a conexão do Kelpie com o bot do Telegram dele. O bot continua seu: revogue o token no BotFather se não quiser mais ele. Os arquivos em agents/bia/ no seu vault ficam.',
+    );
+    expect(await summaries("pt-BR", "ana")).toBe(
+      'excluir de vez o agente "Ana" (ana) e o subagente dele "Scout" (scout): as configurações, as conversas com todo o histórico e a conexão do Kelpie com os bots do Telegram deles. Cada bot continua seu: revogue o token no BotFather se não quiser mais ele. Os arquivos em agents/ana/ no seu vault ficam.',
+    );
+    expect(await summaries("es", "bia")).toBe(
+      'eliminar para siempre el agente "Bia" (bia): su configuración, sus conversaciones con todo su historial y la conexión de Kelpie con su bot de Telegram. El bot sigue siendo tuyo: revoca su token con BotFather si ya no lo quieres. Los archivos en agents/bia/ de tu vault se quedan.',
     );
     expect(await summaries("es", "ana")).toBe(
-      'eliminar para siempre el agente "Ana" (ana) y su subagente "Scout" (scout): su configuración, sus conversaciones con todo su historial y cualquier bot de Telegram conectado a ellos. Los archivos en agents/ana/ de tu vault se quedan.',
+      'eliminar para siempre el agente "Ana" (ana) y su subagente "Scout" (scout): su configuración, sus conversaciones con todo su historial y la conexión de Kelpie con sus bots de Telegram. Cada bot sigue siendo tuyo: revoca su token con BotFather si ya no lo quieres. Los archivos en agents/ana/ de tu vault se quedan.',
     );
     expect(calls).toEqual([]);
 
     const confirmed = contextOf(true);
-    expect(await run(tools, "delete_agent", { id: "ana" }, confirmed.context)).toEqual({
-      output:
-        "Deleted the agent ana and its subagent scout: their settings, conversations and Telegram connections are gone. Its files in the vault, under agents/ana/, stay: the owner can remove them from their vault's repository.",
-    });
-    expect(calls).toEqual(['deleteAgent {"id":"ana"}']);
+    const done = await run(tools, "delete_agent", { id: "ana" }, confirmed.context);
+    expect(done.output).toMatch(
+      /^Deleted the agent ana and its subagent scout: their settings, conversations and Kelpie's connection to their Telegram bots are gone\. /,
+    );
+    // Through this Worker only the webchat's thread is named, and the model is told what may stay.
+    expect(done.output).toContain("an agent created again with the id ana would get it back");
+    expect(done.output).toContain("Its files in the vault, under agents/ana/, stay");
+    expect(calls).toEqual(['deleteAgent {"id":"ana","ids":["ana","scout"]}']);
     expect([...agents.keys()]).toEqual([SETUP_AGENT_ID, "bia"]);
   });
 
-  it("never deletes Admin or the main agent, and says how to finish a deletion cut short", async () => {
+  it("never deletes Admin or the main agent, and says what to do when a deletion stops", async () => {
     const { commands, agents, calls } = fakeCommands();
     agents.set("kelpie", "Kelpie");
     agents.set("stuck", "Stuck");
+    agents.set("revoked", "Revoked");
     const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
     const { context, asked } = contextOf(true);
 
@@ -509,6 +528,27 @@ describe("the setup agent's tools", () => {
     expect(cut).toMatchObject({ isError: true });
     expect(cut.output).toContain("still listed, with its chat off");
     expect(cut.output).toContain("Call delete_agent again");
+
+    const revoked = await run(tools, "delete_agent", { id: "revoked" }, context);
+    expect(revoked.output).toContain("Telegram refused to take down the webhook of revoked's bot");
+  });
+
+  it("asks again when what a deletion would delete changed since the owner was shown it", async () => {
+    const { commands, agents } = fakeCommands();
+    agents.set("ana", "Ana");
+    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const shown = contextOf(false);
+    await run(tools, "delete_agent", { id: "ana" }, shown.context);
+    expect(shown.asked[0]?.input).toEqual({ id: "ana", ids: ["ana"] });
+
+    // Scout appears under Ana before the owner's yes: the confirmed set no longer matches.
+    agents.set("scout", "Scout");
+    const stale = await commands.deleteAgent(owner, shown.asked[0]?.input);
+    expect(stale).toEqual({ ok: false, reason: "not_allowed" });
+    expect([...agents.keys()]).toContain("ana");
+
+    const changed = await run(tools, "delete_agent", { id: "ana" }, contextOf(true).context);
+    expect(changed.output).toMatch(/^Deleted the agent ana and its subagent scout/);
   });
 
   it("tells the model a new agent's chat is off, and when a bot is connected to it (#288)", async () => {

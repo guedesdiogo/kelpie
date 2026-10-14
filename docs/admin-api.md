@@ -34,7 +34,7 @@ Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`
 | `/commands/configureModels` | `{ "settings": { "conversation": { "tier": "medium" }, "memory": { "tier": "cheap" } } }`; replaces the instance's model settings, which every agent follows unless it has its own. A provider without a key answers `409 no_key` |
 | `/commands/setMainAgent` | `{ "id": "sales" }`; makes the agent the main agent, the one the owner talks to (ADR-0036 §1). The previous one becomes a specialist that keeps its chat |
 | `/commands/setAgentChat` | `{ "id": "sales", "chat": true }`; lets the owner reach a specialist on its channels, or stops it. Admin and the main agent always chat |
-| `/commands/deleteAgent` | `{ "id": "sales" }`; deletes the agent and its subagents for good ("Deleting an agent"). Admin and the main agent answer `409 not_allowed`; a deletion cut short answers `503 unavailable`, and running it again finishes it |
+| `/commands/deleteAgent` | `{ "id": "sales" }`, or with `"ids": ["sales", …]`, the agents you expect it to delete; deletes the agent and its subagents for good ("Deleting an agent"). It answers `{ "deleted", "webhooksLeft", "everyThread" }`. Admin, the main agent and an `ids` that no longer matches answer `409 not_allowed`; a deletion cut short answers `503 unavailable`, and running it again finishes it |
 | `/commands/listIdentities` | none |
 | `/commands/enableIdentity` | `{ "channel": "telegram", "channelUserId": "…" }`; re-enables a disabled identity, never a pending one |
 | `/commands/disableIdentity` | same as `enableIdentity` |
@@ -245,15 +245,17 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
 - **The main agent's own tool:** `set_agent_model` changes another agent's model settings, when the owner asks or agrees with its suggestion, behind the same confirmation (#289). No agent changes its own model, except Admin, through `configure_agent`.
 - **The check is at `admit`:** a chat its role doesn't allow answers `no_grant`, so a specialist whose chat is off doesn't answer its bot or the webchat.
 
-**Deleting an agent** (ADR-0036 §1, #303). `deleteAgent`, or the setup agent's `delete_agent` after the owner's confirmation, deletes an agent and every subagent it owns. The subagents go first, deepest first. For each agent, in order:
-1. Its chat goes off, so no channel reaches it.
-2. channel-egress removes its Telegram bot's webhook and deletes the bot's token and open forms. A webhook Telegram refuses to remove, as with a revoked token, doesn't stop the rest: without the token, ingress refuses the bot's updates.
+**Deleting an agent** (ADR-0036 §1, #303). `deleteAgent`, or the setup agent's `delete_agent` after the owner's confirmation, deletes an agent and every subagent it owns. The agent's chat goes off first, so no channel reaches it. Then the subagents go, deepest first, and the agent last. For each agent, in order:
+1. Its role is read again: an agent that became Admin or the main agent meanwhile stops the deletion.
+2. channel-egress removes its Telegram bot's webhook and deletes Kelpie's copy of the bot's token and its open forms. The bot itself stays the owner's, who can revoke its token with BotFather.
+   - A webhook Telegram refuses to remove for good, as with a revoked token, doesn't stop the rest. Without the token, ingress refuses the bot's updates, and the result lists the agent under `webhooksLeft`.
+   - A failure for now, such as a 429 or a 5xx, keeps the token and stops the deletion, so running it again removes the webhook.
 3. Its `AgentHost` erases its conversations and then itself.
    - The conversations it erases are the ones it recorded at their first turn since #303, plus the owner's threads with it: the webchat's, and each channel identity the `Directory` lists.
-   - The setup agent's Worker binds no `Directory`, so `delete_agent` names only the owner's webchat thread. A Telegram conversation with no turn since #303 stays: delete the agent through this API to cover it.
+   - The setup agent's Worker binds no `Directory`, so `delete_agent` names only the owner's webchat thread, and the result's `everyThread` is false. A Telegram conversation with no turn since #303 then stays where nothing reaches it, and an agent created again with the same id would get it back. To cover it, delete the agent through this API instead.
 4. Its `Registry` row goes, and the `Registry`'s audit records `agent.deleted`.
 
-Admin and the main agent can't be deleted, and the `Registry` refuses to remove an agent that still owns another. A deletion cut short leaves the agent listed with its chat off, and running it again finishes it. The vault's `agents/<id>/` folder stays: it is the owner's repository, which Kelpie never deletes from. `forgetVaultPaths` drops Kelpie's copy, and the owner deletes the files in the repository.
+Admin and the main agent can't be deleted, and the `Registry` refuses to remove an agent that still owns another. The setup agent's confirmation names every agent that goes, and its input carries their ids, so a subagent created before the owner's yes stops the deletion until they confirm again. A deletion cut short leaves the agent listed with its chat off, and running it again finishes it. The vault's `agents/<id>/` folder stays: it is the owner's repository, which Kelpie never deletes from. `forgetVaultPaths` drops Kelpie's copy, and the owner deletes the files in the repository.
 
 - **Where it comes from.**
   - A migration of the `Registry` adds it, on new instances and on ones bootstrapped before it.

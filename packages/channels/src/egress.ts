@@ -47,11 +47,12 @@ export type WebhookRegistration = { ok: true } | { ok: false; reason: WebhookReg
 
 /**
  * What disconnecting a deleted agent's bot did (#303). Its secret is gone in every `ok` case; the
- * webhook was removed at Telegram, refused there (as with a revoked token), or there was no bot.
+ * webhook was removed at Telegram, refused there for good (as with a revoked token), or there was
+ * no bot. `channel_unavailable`: Telegram failed for now, so the secret is kept for another try.
  */
 export type TelegramDisconnection =
   | { ok: true; webhook: "removed" | "refused" | "none" }
-  | { ok: false; reason: "invalid_input" | "store_unavailable" };
+  | { ok: false; reason: "invalid_input" | "store_unavailable" | "channel_unavailable" };
 
 /**
  * A fixed notice ingress may have the bot send (Story 3.6): "paired" to an account that just paired,
@@ -114,7 +115,7 @@ export interface ChannelFormsContract {
   registerTelegramWebhook(agentId: string): Promise<WebhookRegistration>;
   /**
    * For a deleted agent (#303): removes its bot's webhook at Telegram, then its secret and forms.
-   * Safe to repeat; an agent without a bot answers `none`.
+   * Safe to repeat; an agent without a bot answers `none`. Admin's id is `invalid_input`.
    */
   disconnectTelegram(agentId: string): Promise<TelegramDisconnection>;
   /** The agent's bot, for its `t.me` link. Never its token. */

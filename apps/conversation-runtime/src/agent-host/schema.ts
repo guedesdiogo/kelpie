@@ -43,6 +43,4 @@ export const setupWaits = sqliteTable(
  */
 export const conversations = sqliteTable("conversations", {
   name: text("name").primaryKey(),
-  /** When it first started a turn. */
-  seenAt: integer("seen_at").notNull(),
 });

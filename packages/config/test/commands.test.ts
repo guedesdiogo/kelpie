@@ -771,23 +771,26 @@ describe("deleteAgent (#303)", () => {
   /** The owner's conversations with an agent, by their object's names (`conversationName`). */
   const named = (id: string) =>
     `${id}:webchat:u-owner,${id}:whatsapp:+5511987654321,${id}:telegram:1001`;
+  const done = (deleted: string[]) => ({
+    ok: true,
+    value: { deleted, webhooksLeft: [], everyThread: true },
+  });
 
-  it("deletes the subagents deepest first, then the agent, each stopped before its storage goes", async () => {
+  it("turns the agent's chat off, then deletes its subagents deepest first and the agent last", async () => {
     const { commands, calls, roster } = withRoster();
 
-    expect(await commands.deleteAgent(owner, { id: "sales" })).toEqual({
-      ok: true,
-      value: { deleted: ["runner", "scout", "sales"] },
-    });
+    expect(await commands.deleteAgent(owner, { id: "sales" })).toEqual(
+      done(["runner", "scout", "sales"]),
+    );
     expect(steps(calls)).toEqual([
+      // No channel reaches it from here on, whatever fails below.
+      "setChat sales false",
       "disconnectTelegram runner",
       `erase runner ${named("runner")}`,
       "remove runner",
       "disconnectTelegram scout",
       `erase scout ${named("scout")}`,
       "remove scout",
-      // Its chat goes off first, so no channel reaches it while its storage goes.
-      "setChat sales false",
       "disconnectTelegram sales",
       `erase sales ${named("sales")}`,
       "remove sales",
@@ -797,10 +800,7 @@ describe("deleteAgent (#303)", () => {
 
   it("deletes a specialist with nothing below it, whose chat is already off", async () => {
     const { commands, calls } = withRoster();
-    expect(await commands.deleteAgent(owner, { id: "quiet" })).toEqual({
-      ok: true,
-      value: { deleted: ["quiet"] },
-    });
+    expect(await commands.deleteAgent(owner, { id: "quiet" })).toEqual(done(["quiet"]));
     expect(steps(calls)).toEqual([
       "disconnectTelegram quiet",
       `erase quiet ${named("quiet")}`,
@@ -820,7 +820,14 @@ describe("deleteAgent (#303)", () => {
       ok: false,
       reason: "unknown_agent",
     });
-    for (const input of [{ id: "Not An Agent" }, {}, null, "sales"]) {
+    for (const input of [
+      { id: "Not An Agent" },
+      {},
+      null,
+      "sales",
+      { id: "sales", ids: "sales" },
+      { id: "sales", ids: ["Not An Agent"] },
+    ]) {
       expect(await commands.deleteAgent(owner, input)).toEqual({
         ok: false,
         reason: "invalid_input",
@@ -833,40 +840,81 @@ describe("deleteAgent (#303)", () => {
     expect(steps(calls)).toEqual([]);
   });
 
+  it("deletes only the agents the owner was shown, when it is told which", async () => {
+    const { commands, calls } = withRoster();
+    // The confirmation showed Sales and Scout; Runner appeared since.
+    expect(await commands.deleteAgent(owner, { id: "sales", ids: ["scout", "sales"] })).toEqual({
+      ok: false,
+      reason: "not_allowed",
+    });
+    expect(steps(calls)).toEqual([]);
+    expect(
+      await commands.deleteAgent(owner, { id: "sales", ids: ["sales", "scout", "runner"] }),
+    ).toEqual(done(["runner", "scout", "sales"]));
+  });
+
+  it("stops before an agent that became Admin's or the main one's meanwhile", async () => {
+    const { commands, ports, calls } = withRoster();
+    const get = ports.registry.get;
+    ports.registry.get = async (id) => {
+      const entry = await get(id);
+      return entry && id === "quiet" ? { ...entry, role: "main" } : entry;
+    };
+    expect(await commands.deleteAgent(owner, { id: "quiet" })).toEqual({
+      ok: false,
+      reason: "not_allowed",
+    });
+    expect(steps(calls)).toEqual([]);
+  });
+
   it("stops at a failure with the agent still listed, its chat off, and finishes when run again", async () => {
     const { commands, ports, calls, roster } = withRoster();
     const disconnect = ports.channels.disconnectTelegram;
     ports.channels.disconnectTelegram = async (agentId) =>
-      agentId === "sales" ? { ok: false, reason: "store_unavailable" } : disconnect(agentId);
+      agentId === "scout" ? { ok: false, reason: "channel_unavailable" } : disconnect(agentId);
 
     expect(await commands.deleteAgent(owner, { id: "sales" })).toEqual({
       ok: false,
       reason: "unavailable",
     });
     expect(roster.get("sales")).toMatchObject({ chat: false });
-    expect(roster.has("scout")).toBe(false);
-    expect(steps(calls).at(-1)).toBe("setChat sales false");
+    expect(roster.has("scout")).toBe(true);
+    expect(roster.has("runner")).toBe(false);
 
     ports.channels.disconnectTelegram = disconnect;
     calls.length = 0;
-    expect(await commands.deleteAgent(owner, { id: "sales" })).toEqual({
-      ok: true,
-      value: { deleted: ["sales"] },
-    });
+    expect(await commands.deleteAgent(owner, { id: "sales" })).toEqual(done(["scout", "sales"]));
     expect(steps(calls)).toEqual([
+      "disconnectTelegram scout",
+      `erase scout ${named("scout")}`,
+      "remove scout",
       "disconnectTelegram sales",
       `erase sales ${named("sales")}`,
       "remove sales",
     ]);
   });
 
-  it("names only the owner's webchat conversation where the Directory isn't bound", async () => {
+  it("says which webhooks Telegram refused to remove, and when only the webchat was named", async () => {
     const { commands, ports, calls } = withRoster();
+    ports.channels.disconnectTelegram = async () => ({ ok: true, webhook: "refused" });
     ports.directory.listIdentities = async () => {
       throw new Error("conversation-runtime binds no Directory");
     };
-    await commands.deleteAgent(owner, { id: "quiet" });
+    expect(await commands.deleteAgent(owner, { id: "quiet" })).toEqual({
+      ok: true,
+      value: { deleted: ["quiet"], webhooksLeft: ["quiet"], everyThread: false },
+    });
     expect(steps(calls)).toContain("erase quiet quiet:webchat:u-owner");
+  });
+
+  it("leaves out a name too long to be a conversation's, rather than fail every time", async () => {
+    const { commands, ports, calls } = withRoster();
+    ports.directory.listIdentities = async () => [
+      { channel: "telegram", channelUserId: "1001", status: "enabled" },
+      { channel: "telegram", channelUserId: "9".repeat(250), status: "disabled" },
+    ];
+    expect(await commands.deleteAgent(owner, { id: "quiet" })).toEqual(done(["quiet"]));
+    expect(steps(calls)).toContain("erase quiet quiet:webchat:u-owner,quiet:telegram:1001");
   });
 
   it("passes on a refusal of the Registry's, as an agent created under it meanwhile", async () => {

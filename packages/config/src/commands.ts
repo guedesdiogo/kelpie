@@ -162,6 +162,26 @@ const MAX_PATH_LENGTH = 300;
 
 /** The most of the owner's threads `deleteAgent` names, within what `AgentHost.erase` takes. */
 const MAX_OWNER_THREADS = 32;
+/** The longest conversation object's name `AgentHost.erase` takes. */
+const MAX_CONVERSATION_NAME = 256;
+
+/**
+ * What `deleteAgent` deleted (#303): the agents, in order; those whose bot's webhook Telegram
+ * refused to remove, whose updates ingress refuses since the token is gone; and whether every
+ * thread of the owner's was named. Where the Directory isn't bound, only the webchat's is, so a
+ * conversation on another channel with no turn since #303 may remain.
+ */
+export interface DeletedAgents {
+  deleted: string[];
+  webhooksLeft: string[];
+  everyThread: boolean;
+}
+
+/** Whether `ids` names exactly the agents in `order`, in any order. */
+function sameIds(ids: string[], order: AgentEntry[]): boolean {
+  const wanted = new Set(ids);
+  return wanted.size === order.length && order.every((agent) => wanted.has(agent.id));
+}
 
 const isChannelId = (channel: string): channel is ChannelId =>
   (CHANNEL_IDS as readonly string[]).includes(channel);
@@ -300,14 +320,14 @@ export function createConfigCommands(ports: ConfigPorts) {
     try {
       identities = await ports.directory.listIdentities();
     } catch {
-      return threads;
+      return { threads, everyThread: false };
     }
     for (const identity of identities) {
       if (isChannelId(identity.channel)) {
         threads.push(`${identity.channel}:${identity.channelUserId}`);
       }
     }
-    return threads.slice(0, MAX_OWNER_THREADS);
+    return { threads: threads.slice(0, MAX_OWNER_THREADS), everyThread: true };
   };
   const show = (identity: ChannelIdentity, status: IdentityStatus): ShownIdentity => ({
     channel: identity.channel,
@@ -400,41 +420,57 @@ export function createConfigCommands(ports: ConfigPorts) {
     },
 
     /**
-     * Deletes an agent and, before it, its subagents, deepest first (ADR-0036 §1, #303). For each:
-     * its chat goes off, its Telegram bot is disconnected, its `AgentHost` erases its conversations
-     * and itself, and its Registry row goes last. A failure leaves the rest listed, chat off, and
-     * running the command again finishes the job. Admin and the main agent can't be deleted. Data
-     * goes for good, so the setup agent asks for the owner's confirmation first.
+     * Deletes an agent and, before it, its subagents, deepest first (ADR-0036 §1, #303). The
+     * agent's chat goes off first. Then, for each: its Telegram bot is disconnected, its
+     * `AgentHost` erases its conversations and itself, and its Registry row goes last. A failure
+     * leaves the rest listed, the agent's chat off, and running the command again finishes the job.
+     * Admin and the main agent can't be deleted. With `ids`, the agents the owner was shown, it
+     * deletes only that set. Data goes for good, so the setup agent asks for the owner's
+     * confirmation first.
      */
-    async deleteAgent(actor: Actor, input: unknown): Promise<CommandResult<{ deleted: string[] }>> {
+    async deleteAgent(actor: Actor, input: unknown): Promise<CommandResult<DeletedAgents>> {
       if (!isOwner(actor)) return forbidden;
-      const { id } = (input ?? {}) as { id?: unknown };
+      const { id, ids } = (input ?? {}) as { id?: unknown; ids?: unknown };
       if (!isAgentId(id)) return invalid;
+      if (ids !== undefined && !(Array.isArray(ids) && ids.every(isAgentId))) return invalid;
       const agents = await ports.registry.list();
       const agent = agents.find((entry) => entry.id === id);
       if (!agent) return { ok: false, reason: "unknown_agent" };
-      if (agent.role === "admin" || agent.role === "main") {
-        return { ok: false, reason: "not_allowed" };
+      const order = deletionOrder(agents, agent);
+      const notAllowed = { ok: false, reason: "not_allowed" } as const;
+      if (order.some((target) => target.role === "admin" || target.role === "main")) {
+        return notAllowed;
       }
-      const threads = await ownerThreads(actor);
+      if (ids !== undefined && !sameIds(ids, order)) return notAllowed;
+      if (agent.chat) {
+        const off = await ports.registry.setChat(agent.id, false, actor);
+        if (!off.ok) return off;
+      }
+      const { threads, everyThread } = await ownerThreads(actor);
       const deleted: string[] = [];
-      for (const target of deletionOrder(agents, agent)) {
-        if (target.chat) {
-          const off = await ports.registry.setChat(target.id, false, actor);
+      const webhooksLeft: string[] = [];
+      for (const target of order) {
+        // Its role and chat now, not the list's: either may have changed meanwhile.
+        const live = await ports.registry.get(target.id);
+        if (!live) continue;
+        if (live.role === "admin" || live.role === "main") return notAllowed;
+        if (live.chat) {
+          const off = await ports.registry.setChat(live.id, false, actor);
           if (!off.ok) return off;
         }
-        const bot = await ports.channels.disconnectTelegram(target.id);
+        const bot = await ports.channels.disconnectTelegram(live.id);
         if (!bot.ok) return bot.reason === "invalid_input" ? invalid : unavailable;
-        const erased = await ports.agents.erase(
-          target.id,
-          threads.map((thread) => `${target.id}:${thread}`),
-        );
+        if (bot.webhook === "refused") webhooksLeft.push(live.id);
+        const names = threads
+          .map((thread) => `${live.id}:${thread}`)
+          .filter((name) => name.length <= MAX_CONVERSATION_NAME);
+        const erased = await ports.agents.erase(live.id, names);
         if (!erased.ok) return erased;
-        const removed = await ports.registry.remove(target.id, actor);
+        const removed = await ports.registry.remove(live.id, actor);
         if (!removed.ok) return removed;
-        deleted.push(target.id);
+        deleted.push(live.id);
       }
-      return { ok: true, value: { deleted } };
+      return { ok: true, value: { deleted, webhooksLeft, everyThread } };
     },
 
     async listIdentities(actor: Actor): Promise<CommandResult<ShownIdentity[]>> {

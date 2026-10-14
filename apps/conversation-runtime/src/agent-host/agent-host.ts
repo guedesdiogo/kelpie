@@ -14,6 +14,7 @@ import {
   type AgentRole,
   agentModel,
   DEFAULT_SETTINGS,
+  isAgentId,
   parseSettings,
   REGISTRY_NAME,
   SETUP_AGENT_ID,
@@ -63,6 +64,7 @@ const MAX_NAMED_CONVERSATIONS = 32;
 /** A conversation object's name of this agent's: its id, a colon, then the channel and thread. */
 function isConversationOf(id: string, name: unknown): name is string {
   return (
+    isAgentId(id) &&
     typeof name === "string" &&
     name.length <= MAX_CONVERSATION_NAME &&
     name.startsWith(`${id}:`) &&
@@ -266,7 +268,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     if (!isConversationOf(id, conversation)) return;
     this.#db
       .insert(schema.conversations)
-      .values({ name: conversation, seenAt: Date.now() })
+      .values({ name: conversation })
       .onConflictDoNothing()
       .run();
   }
