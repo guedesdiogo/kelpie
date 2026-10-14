@@ -575,9 +575,9 @@ describe("routerOptions (#293)", () => {
       route: { provider: "anthropic" },
     });
     expect(events).toEqual([]);
-    expect(fetchSpy.mock.calls.some(([input]) => String(input).includes("api.openai.com"))).toBe(
-      false,
-    );
+    expect(
+      fetchSpy.mock.calls.some(([input]) => new URL(String(input)).hostname === "api.openai.com"),
+    ).toBe(false);
   });
 });
 
