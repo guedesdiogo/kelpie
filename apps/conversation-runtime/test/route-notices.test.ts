@@ -51,7 +51,16 @@ describe("routeNotice", () => {
   it("forgets what it announced more than a day ago", () => {
     const old = routeNotice([busy], {}, NOW, "en").announced;
     const { announced } = routeNotice([spent], old, NOW + ROUTE_NOTICE_REPEAT_MS + 1, "en");
-    expect(Object.keys(announced)).toEqual(["anthropic:claude-haiku-5-5:out_of_credits"]);
+    expect(Object.keys(announced)).toEqual(["anthropic:claude-haiku-5-5:credits"]);
+  });
+
+  it("counts two codes worded alike as one reason", () => {
+    const down = (code: "server_error" | "connection") => ({
+      ...spent,
+      failed: { ...spent.failed, code },
+    });
+    const first = routeNotice([down("server_error")], {}, NOW, "en");
+    expect(routeNotice([down("connection")], first.announced, NOW + 1, "en").text).toBeNull();
   });
 
   it("is null without a fallback", () => {
@@ -61,30 +70,40 @@ describe("routeNotice", () => {
 
 describe("failureNotice", () => {
   it("says no route answered, naming each one when the turn fell back", () => {
-    expect(failureNotice([spent], "rate_limited", "en")).toBe(
+    expect(failureNotice([spent], { code: "rate_limited" }, "en")).toBe(
       "I couldn't answer this message: Anthropic (claude-haiku-5-5) ran out of credits, or reached its spend limit; OpenAI (gpt-6-luna) is rate limiting requests.",
     );
   });
 
-  it("speaks of the model when the only route failed, or fallback is off", () => {
-    expect(failureNotice([], "out_of_credits", "en")).toBe(
-      "I couldn't answer this message: the model ran out of credits, or reached its spend limit.",
+  it("names the route the error names, when the call never fell back", () => {
+    const anthropic = { provider: "anthropic" as const, model: "claude-haiku-5-5" };
+    expect(failureNotice([], { code: "out_of_credits", route: anthropic }, "en")).toBe(
+      "I couldn't answer this message: Anthropic (claude-haiku-5-5) ran out of credits, or reached its spend limit.",
     );
-    expect(failureNotice([], "auth", "pt-BR")).toBe(
-      "Não consegui responder a esta mensagem: o modelo recusou a chave do Kelpie.",
+    expect(failureNotice([], { code: "auth", route: anthropic }, "pt-BR")).toBe(
+      "Não consegui responder a esta mensagem: Anthropic (claude-haiku-5-5) recusou a chave do Kelpie.",
     );
-    expect(failureNotice([], "server_error", "es")).toBe(
+  });
+
+  it("names each route once, however many times the call fell back from it", () => {
+    expect(failureNotice([spent, spent], { code: "rate_limited", route: spent.next }, "en")).toBe(
+      "I couldn't answer this message: Anthropic (claude-haiku-5-5) ran out of credits, or reached its spend limit; OpenAI (gpt-6-luna) is rate limiting requests.",
+    );
+  });
+
+  it("speaks of the model only when no route is known, as for a tier with none", () => {
+    expect(failureNotice([], { code: "unavailable" }, "es")).toBe(
       "No pude responder a este mensaje: el modelo no está disponible.",
     );
   });
 
   it.each([
     ["connection", "is unavailable"],
-    ["unavailable", "isn't configured"],
+    ["unavailable", "is unavailable"],
     ["protocol", "answered in a way Kelpie can't read"],
     ["bad_request", "refused the request"],
     ["internal", "failed"],
   ] as const)("words %s", (code, words) => {
-    expect(failureNotice([], code, "en")).toContain(words);
+    expect(failureNotice([], { code }, "en")).toContain(words);
   });
 });

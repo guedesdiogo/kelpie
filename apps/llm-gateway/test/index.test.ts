@@ -547,6 +547,38 @@ describe("routerOptions (#293)", () => {
   it("is on in the committed configuration", () => {
     expect(routerOptions(env as Parameters<typeof routerOptions>[0])).toEqual({ fallback: true });
   });
+
+  it("reaches the router: off, a failed route ends the call with its route and no other is tried", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(
+        anthropic(() =>
+          Response.json(
+            { type: "error", error: { type: "overloaded_error", message: "Overloaded" } },
+            { status: 529 },
+          ),
+        ),
+      );
+    const withOpenAI = (fallback: string) =>
+      ({ ...env, OPENAI_API_KEY: "sk-test", MODEL_FALLBACK: fallback }) as unknown as Parameters<
+        typeof generateWith
+      >[0];
+
+    const generation = generateWith(withOpenAI("off"), { area: "conversation" }, request);
+    const events: RouterEvent[] = [];
+    const failure = (async () => {
+      for await (const event of fromNdjsonStream(generation.events())) events.push(event);
+    })();
+    await expect(failure).rejects.toMatchObject({
+      code: "server_error",
+      route: { provider: "anthropic" },
+    });
+    expect(events).toEqual([]);
+    expect(fetchSpy.mock.calls.some(([input]) => String(input).includes("api.openai.com"))).toBe(
+      false,
+    );
+  });
 });
 
 describe("routes", () => {

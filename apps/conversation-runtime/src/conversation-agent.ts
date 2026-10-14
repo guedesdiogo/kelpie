@@ -234,6 +234,8 @@ interface TurnInFlight {
   tools?: ToolProgress | undefined;
   /** The routes that failed during the turn's model calls, and the ones tried next (#293). */
   fallbacks?: FallbackEvent[];
+  /** The same, for the model call running now: a failed call's notice names only its own. */
+  callFallbacks?: FallbackEvent[];
 }
 
 interface ToolProgress {
@@ -898,7 +900,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   async #tellFailure(turnId: number, flight: TurnInFlight, error: LlmError): Promise<void> {
     if (!this.#isRunning(turnId)) return;
     try {
-      const text = failureNotice(flight.fallbacks ?? [], error.code, this.#locale());
+      const text = failureNotice(flight.callFallbacks ?? [], error, this.#locale());
       const last =
         this.#db
           .select({ value: max(schema.outbox.seq) })
@@ -1088,9 +1090,23 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           .run();
       });
     });
-    if (routes.text !== null) this.#set("routeNotices", routes.announced);
     await this.#awaitSteps(links);
     await this.#deliver(turnId, controller.signal);
+    // Only a notice that went out counts toward the daily bound: one cut off by an interruption or a
+    // failed send is said again next time.
+    if (routes.text !== null && this.#bubbleSent(turnId, bubbles.length)) {
+      this.#set("routeNotices", routes.announced);
+    }
+  }
+
+  #bubbleSent(turnId: number, seq: number): boolean {
+    return (
+      this.#db
+        .select({ status: schema.outbox.status })
+        .from(schema.outbox)
+        .where(and(eq(schema.outbox.turnId, turnId), eq(schema.outbox.seq, seq)))
+        .get()?.status === "sent"
+    );
   }
 
   /**
@@ -1178,7 +1194,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       );
       pendingContext = null;
       const flight = this.#inFlight.get(turn.id);
-      if (flight) flight.call = call;
+      if (flight) {
+        flight.call = call;
+        flight.callFallbacks = [];
+      }
       if (controller.signal.aborted) {
         call.cancel();
         return null;
@@ -1189,6 +1208,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         else if (event.type === "fallback" && flight) {
           flight.fallbacks ??= [];
           flight.fallbacks.push(event);
+          flight.callFallbacks?.push(event);
         }
       }
       if (!this.#isRunning(turn.id)) return null;

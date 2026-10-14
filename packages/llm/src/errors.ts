@@ -1,3 +1,5 @@
+import type { ProviderId } from "./types.ts";
+
 export type LlmErrorCode =
   | "rate_limited"
   | "out_of_credits"
@@ -13,6 +15,8 @@ export type LlmErrorCode =
 /** A provider failure. `retryable` decides whether the router may try the next candidate. */
 export class LlmError extends Error {
   override readonly name = "LlmError";
+  /** The route that failed, set by the router, so a notice can name it (#293). */
+  route?: { provider: ProviderId; model: string };
 
   constructor(
     message: string,
@@ -40,9 +44,8 @@ const FATAL_KINDS = new Set([
  * it reached a spend limit (#293). Another route may still serve it.
  */
 const OUT_OF_CREDITS_KINDS = new Set([
-  // Anthropic: billing, and the 429 of a tier's spend cap, by its `details.error_code`.
+  // Anthropic's billing error. Its tier spend cap is a 429 known by its text, below.
   "billing_error",
-  "enforced_spend_limit_reached",
   // OpenAI's codes, and the type some of them come with.
   "credit_balance_exhausted",
   "organization_spend_limit_exceeded",

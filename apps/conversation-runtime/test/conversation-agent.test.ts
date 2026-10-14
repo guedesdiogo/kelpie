@@ -494,16 +494,42 @@ describe("ConversationAgent turns", () => {
       await vi.waitFor(() => expect(world.sent.at(-1)).toBe("Back."));
     });
 
-    it("names the model when the only route failed, or fallback is off", async () => {
-      const world = use(fakeWorld([noRoute("out_of_credits")]));
+    it("names the route the error names when the turn never fell back, as with fallback off", async () => {
+      const world = use(fakeWorld([noRoute("out_of_credits", [], spent.failed)]));
       const stub = agent("no-route-alone");
       await stub.ingest(message("m1", "hello there?"));
       await stub.flush();
       await vi.waitFor(() =>
         expect(world.sent).toEqual([
-          "I couldn't answer this message: the model ran out of credits, or reached its spend limit.",
+          "I couldn't answer this message: Anthropic (claude-haiku-5-5) ran out of credits, or reached its spend limit.",
         ]),
       );
+    });
+
+    it("says nothing for a call that was stopped", async () => {
+      const world = use(fakeWorld([noRoute("aborted", [], spent.failed)]));
+      const stub = agent("no-route-aborted");
+      await stub.ingest(message("m1", "hello again?"));
+      await stub.flush();
+      await vi.waitFor(async () =>
+        expect(await stub.turns()).toMatchObject([{ status: "failed" }]),
+      );
+      expect(world.sent).toEqual([]);
+    });
+
+    it("says a notice again when it didn't go out", async () => {
+      const world = use(fakeWorld([fellBack([spent], "One."), fellBack([spent], "Two.")]));
+      world.failSends.add(1);
+      const stub = agent("route-notice-unsent");
+      await stub.ingest(message("m1", "first question?"));
+      await stub.flush();
+      await vi.waitFor(async () =>
+        expect(await stub.turns()).toMatchObject([{ status: "failed" }]),
+      );
+
+      await stub.ingest(message("m2", "second question?"));
+      await stub.flush();
+      await vi.waitFor(() => expect(world.sent).toEqual(["One.", "Two.", NOTE]));
     });
   });
 

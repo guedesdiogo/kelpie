@@ -33,11 +33,22 @@ type ModelScript =
   /** The stream ends without a finish event. */
   | { kind: "truncate" }
   /** Asks for these tool calls, after `text` if any; ids are `call-0`, `call-1`… across the world. */
-  | { kind: "tools"; calls: { name: string; input: unknown }[]; text?: string }
+  | {
+      kind: "tools";
+      calls: { name: string; input: unknown }[];
+      text?: string;
+      /** The router's fallbacks before the answer (#293). */
+      fallbacks?: FallbackEvent[];
+    }
   /** The router fell back from these routes, then `text` answered (#293). */
   | { kind: "fellBack"; fallbacks: FallbackEvent[]; text: string }
-  /** The router fell back from these routes, then the last one failed with `code` (#293). */
-  | { kind: "noRoute"; fallbacks: FallbackEvent[]; code: LlmErrorCode };
+  /** The router fell back from these routes, then `route` failed with `code` (#293). */
+  | {
+      kind: "noRoute";
+      fallbacks: FallbackEvent[];
+      code: LlmErrorCode;
+      route?: { provider: "anthropic" | "openai"; model: string };
+    };
 
 export const reply = (text: string, usage?: Usage[]): ModelScript =>
   usage ? { kind: "reply", text, usage } : { kind: "reply", text };
@@ -51,14 +62,22 @@ export const fellBack = (fallbacks: FallbackEvent[], text: string): ModelScript 
   fallbacks,
   text,
 });
-export const noRoute = (code: LlmErrorCode, fallbacks: FallbackEvent[] = []): ModelScript => ({
-  kind: "noRoute",
-  fallbacks,
-  code,
-});
+export const noRoute = (
+  code: LlmErrorCode,
+  fallbacks: FallbackEvent[] = [],
+  route?: { provider: "anthropic" | "openai"; model: string },
+): ModelScript => ({ kind: "noRoute", fallbacks, code, ...(route ? { route } : {}) });
 export const toolCalls = (...calls: { name: string; input?: unknown }[]): ModelScript => ({
   kind: "tools",
   calls: calls.map(({ name, input }) => ({ name, input: input ?? {} })),
+});
+/** Asks for the tool calls after the router fell back from these routes (#293). */
+export const toolCallsAfter = (
+  fallbacks: FallbackEvent[],
+  ...calls: { name: string; input?: unknown }[]
+): ModelScript => ({
+  ...(toolCalls(...calls) as Extract<ModelScript, { kind: "tools" }>),
+  fallbacks,
 });
 /** Says something, then asks for the tool calls in the same reply. */
 export const sayThenCall = (text: string, ...calls: { name: string; input?: unknown }[]) => ({
@@ -266,6 +285,7 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
               };
               return;
             case "tools":
+              yield* script.fallbacks ?? [];
               yield {
                 type: "finish",
                 reason: "tool_calls",
@@ -276,9 +296,12 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
                 usage: FAKE_USAGE,
               };
               return;
-            case "noRoute":
+            case "noRoute": {
               yield* script.fallbacks;
-              throw new LlmError("no route answered", script.code, false);
+              const error = new LlmError("no route answered", script.code, false);
+              if (script.route) error.route = script.route;
+              throw error;
+            }
             case "fellBack":
               yield* script.fallbacks;
               yield { type: "text", delta: script.text };

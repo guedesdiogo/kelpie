@@ -44,6 +44,7 @@ describe("NDJSON stream", () => {
       "out_of_credits",
       true,
     );
+    spent.route = { provider: "openai", model: "gpt-6-luna" };
     const decoded: RouterEvent[] = [];
     const failure = (async () => {
       for await (const event of fromNdjsonStream(
@@ -58,7 +59,11 @@ describe("NDJSON stream", () => {
         decoded.push(event);
       }
     })();
-    await expect(failure).rejects.toMatchObject({ code: "out_of_credits", retryable: true });
+    await expect(failure).rejects.toMatchObject({
+      code: "out_of_credits",
+      retryable: true,
+      route: { provider: "openai", model: "gpt-6-luna" },
+    });
     await expect(failure).rejects.not.toMatchObject({
       message: expect.stringContaining("org abc"),
     });

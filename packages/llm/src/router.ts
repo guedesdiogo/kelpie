@@ -96,7 +96,6 @@ export class ModelRouter {
     // RPC callers aren't type-checked, so the choice and the request fields are taken explicitly.
     const { tier } = choice;
     const candidates = this.route(tier, choice.provider);
-    let lastError: LlmError | undefined;
     for (const [index, candidate] of candidates.entries()) {
       const provider = this.#providers[candidate.provider] as LlmProvider;
       const effort = lowerEffort(candidate.model, choice.effort ?? candidate.effort);
@@ -117,10 +116,10 @@ export class ModelRouter {
         }
         return;
       } catch (error) {
-        if (started || !(error instanceof LlmError) || !error.retryable) throw error;
+        if (!(error instanceof LlmError)) throw error;
+        error.route ??= { provider: candidate.provider, model: candidate.model };
         const next = candidates[index + 1];
-        if (!this.#fallback || !next) throw error;
-        lastError = error;
+        if (started || !error.retryable || !this.#fallback || !next) throw error;
         yield {
           type: "fallback",
           failed: { provider: candidate.provider, model: candidate.model, code: error.code },
@@ -128,10 +127,8 @@ export class ModelRouter {
         };
       }
     }
-    throw (
-      lastError ??
-      new LlmError(`No provider is configured for the ${tier} tier`, "unavailable", false)
-    );
+    // Every candidate that ran either answered or threw: only an empty route gets here.
+    throw new LlmError(`No provider is configured for the ${tier} tier`, "unavailable", false);
   }
 
   /**

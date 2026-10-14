@@ -1,10 +1,18 @@
 import { LlmError, type LlmErrorCode } from "./errors.ts";
 import type { RouterEvent } from "./router.ts";
+import type { ProviderId } from "./types.ts";
 
 /** One line of the stream between llm-gateway and its callers. */
 export type WireFrame =
   | RouterEvent
-  | { type: "error"; code: LlmErrorCode; retryable: boolean; message: string };
+  | {
+      type: "error";
+      code: LlmErrorCode;
+      retryable: boolean;
+      message: string;
+      /** The route that failed, which Kelpie's notice names (#293). */
+      route?: { provider: ProviderId; model: string };
+    };
 
 // Provider error messages can quote request details or part of a key, so only these go out.
 const WIRE_MESSAGES: Record<LlmErrorCode, string> = {
@@ -61,7 +69,14 @@ export function toNdjsonStream(
 function toErrorFrame(error: unknown): WireFrame {
   const code = error instanceof LlmError ? error.code : "internal";
   const retryable = error instanceof LlmError && error.retryable;
-  return { type: "error", code, retryable, message: WIRE_MESSAGES[code] };
+  const route = error instanceof LlmError ? error.route : undefined;
+  return {
+    type: "error",
+    code,
+    retryable,
+    message: WIRE_MESSAGES[code],
+    ...(route ? { route: { provider: route.provider, model: route.model } } : {}),
+  };
 }
 
 /**
@@ -86,7 +101,11 @@ export async function* fromNdjsonStream(
       buffer = lines.pop() ?? "";
       for (const text of lines) {
         const frame = parseFrame(text);
-        if (frame.type === "error") throw new LlmError(frame.message, frame.code, frame.retryable);
+        if (frame.type === "error") {
+          const error = new LlmError(frame.message, frame.code, frame.retryable);
+          if (frame.route) error.route = frame.route;
+          throw error;
+        }
         if (frame.type === "finish") finished = true;
         yield frame;
       }

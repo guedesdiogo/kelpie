@@ -9,15 +9,7 @@ export const ROUTE_NOTICE_REPEAT_MS = 24 * 60 * 60_000;
 
 const PROVIDERS: Record<ProviderId, string> = { anthropic: "Anthropic", openai: "OpenAI" };
 
-type Reason =
-  | "credits"
-  | "rate"
-  | "auth"
-  | "down"
-  | "unconfigured"
-  | "unreadable"
-  | "refused"
-  | "failed";
+type Reason = "credits" | "rate" | "auth" | "down" | "unreadable" | "refused" | "failed";
 
 const REASONS: Localized<Record<Reason, string>> = {
   en: {
@@ -25,7 +17,6 @@ const REASONS: Localized<Record<Reason, string>> = {
     rate: "is rate limiting requests",
     auth: "refused Kelpie's key",
     down: "is unavailable",
-    unconfigured: "isn't configured",
     unreadable: "answered in a way Kelpie can't read",
     refused: "refused the request",
     failed: "failed",
@@ -35,7 +26,6 @@ const REASONS: Localized<Record<Reason, string>> = {
     rate: "está limitando as requisições",
     auth: "recusou a chave do Kelpie",
     down: "está fora do ar",
-    unconfigured: "não está configurado",
     unreadable: "respondeu de um jeito que o Kelpie não consegue ler",
     refused: "recusou o pedido",
     failed: "falhou",
@@ -45,7 +35,6 @@ const REASONS: Localized<Record<Reason, string>> = {
     rate: "está limitando las solicitudes",
     auth: "rechazó la clave de Kelpie",
     down: "no está disponible",
-    unconfigured: "no está configurado",
     unreadable: "respondió de una forma que Kelpie no puede leer",
     refused: "rechazó la solicitud",
     failed: "falló",
@@ -82,11 +71,11 @@ function reasonOf(code: LlmErrorCode): Reason {
       return "rate";
     case "auth":
       return "auth";
+    // `unavailable` also covers a model alias that couldn't be resolved, not only a missing key.
     case "server_error":
     case "connection":
-      return "down";
     case "unavailable":
-      return "unconfigured";
+      return "down";
     case "protocol":
       return "unreadable";
     case "bad_request":
@@ -99,7 +88,9 @@ function reasonOf(code: LlmErrorCode): Reason {
 const route = ({ provider, model }: { provider: ProviderId; model: string }) =>
   `${PROVIDERS[provider] ?? provider} (${model})`;
 
-const keyOf = ({ failed }: FallbackEvent) => `${failed.provider}:${failed.model}:${failed.code}`;
+/** A route and the reason the person reads: two codes worded alike are one notice. */
+const keyOf = ({ failed }: FallbackEvent) =>
+  `${failed.provider}:${failed.model}:${reasonOf(failed.code)}`;
 
 /**
  * The notice for a turn's fallbacks: one line for each route and reason not announced in the
@@ -134,20 +125,25 @@ export function routeNotice(
 }
 
 /**
- * The notice for a turn no route answered: each route it fell back from, then the last one, which
- * is the model itself when the turn never fell back (one route, or fallback off). Always sent: it
- * stands in for the reply.
+ * The notice for a model call no route answered: each route the call fell back from, once, then the
+ * route that failed last, as the error names it. Only a tier with no route at all is "the model".
+ * Always sent: it stands in for the reply.
  */
 export function failureNotice(
   fallbacks: readonly FallbackEvent[],
-  code: LlmErrorCode,
+  error: { code: LlmErrorCode; route?: { provider: ProviderId; model: string } | undefined },
   locale: Locale,
 ): string {
   const reasons = REASONS[locale];
-  const parts = fallbacks.map(
-    (fallback) => `${route(fallback.failed)} ${reasons[reasonOf(fallback.failed.code)]}`,
-  );
-  const last = fallbacks.at(-1)?.next;
-  parts.push(`${last ? route(last) : TEXTS[locale].theModel} ${reasons[reasonOf(code)]}`);
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const fallback of fallbacks) {
+    const key = keyOf(fallback);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    parts.push(`${route(fallback.failed)} ${reasons[reasonOf(fallback.failed.code)]}`);
+  }
+  const last = error.route ?? fallbacks.at(-1)?.next;
+  parts.push(`${last ? route(last) : TEXTS[locale].theModel} ${reasons[reasonOf(error.code)]}`);
   return TEXTS[locale].failed(parts.join("; "));
 }

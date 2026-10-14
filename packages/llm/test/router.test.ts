@@ -126,7 +126,10 @@ describe("ModelRouter", () => {
       { fallback: false },
     );
 
-    await expect(collect(router.stream({ tier: "cheap" }, request))).rejects.toBe(overloaded);
+    await expect(collect(router.stream({ tier: "cheap" }, request))).rejects.toMatchObject({
+      code: "server_error",
+      route: { provider: "anthropic", model: "claude-haiku-4-5" },
+    });
     expect(openai.requests).toEqual([]);
   });
 

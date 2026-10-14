@@ -80,9 +80,9 @@ Identity values in answers are masked.
 
 **When a route fails** (ADR-0037 §4, #293), the conversation hears it from Kelpie, in its language:
 - **Fallback.** A route that fails before answering hands the turn to the tier's next one: on a rate limit, an outage, or credits that ran out or a spend limit reached. A refused key ends the turn. After the reply, a notice names the route that failed, why, and the one that answered. A conversation hears the same route and reason at most once a day.
-- **No route answered.** The person gets a notice with each route's reason in place of a reply, and the next message is answered as usual.
+- **No route answered.** The person gets a notice in place of a reply, naming each route the call tried and its reason. The next message is answered as usual.
 - **Stopping instead.** `MODEL_FALLBACK: "off"` in `llm-gateway`'s `wrangler.jsonc` ends a turn at the first failed route, with the notice. Any other value falls back.
-- Calls that aren't a conversation's, such as history checkpoints and Dream, follow the same setting without a notice. Their failures are logged.
+- Calls that aren't a conversation's, such as history checkpoints and Dream, follow the same setting without a notice. Only a call that ends in a failure is logged, never a fallback along the way.
 
 **Tools.** A turn may run the agent's tools for up to 5 rounds, within `toolLoopMs`: 120 s by default, the floor, up to 600 000 (ADR-0025). Past either bound, one last model call answers with what it has. In the webchat, the turn shows its step once the wait is over: reading memory, thinking, or the tool it runs. Telegram shows "typing".
 
