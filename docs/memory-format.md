@@ -328,11 +328,13 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
   - It logs the time, the number of notes and their tokens, never text.
 - **The agent's tools** (#126): beyond the turn's block, the agent can search memory and read a note, inside the turn's tool loop (#141).
   - **`memory_search(query, k)`:** the same retrieval as a turn's, with the vector and the agent's qualifier's rerank.
-    - It lists the hits in #110's fence: title and path, then kind, scope, validity and whether Kelpie wrote the note, then its abstract or its body's first 240 characters. "Not written by Kelpie" isn't "written by the owner": Kelpie records its own commits only from #126 on, and other clients write to the vault too.
+    - It lists the hits in #110's fence: title and path, then kind, scope, validity, whether Kelpie wrote the note and its version, then its abstract or its body's first 240 characters. "Not written by Kelpie" isn't "written by the owner": Kelpie records its own commits only from #126 on, and other clients write to the vault too.
+    - A hit gives no version when it shows a version the vault has replaced, or one a queued write is about to replace (#297): the note must be read first.
     - It returns 3 hits by default and 10 at most, best first, with no score, within 9,500 characters; hits that don't fit are counted.
     - Memory that is off or failing says so, rather than finding nothing.
   - **`memory_read(path, offset)`:** a note of memory's index, a page at a time, each page under 9,500 characters, fence included.
     - A page is never cut inside an emoji, and says where the next one starts.
+    - **It shows the note as a write would find it** (#297): a write still queued for its commit, and that version. A note whose removal is queued is "not found".
     - The first page also lists the note's links, resolved among the notes the scopes allow, up to 50 within 2,000 characters, and counts as one access.
   - **Scopes and the qualifier** come from the turn, never from the model: the same scopes as its recall. The calls act for the turn's latest author with the turn's role, and a turn without one acts as a member. A note outside the scopes, or outside memory's index (persona, rules, skills, root files), gets the same "not found" as a missing one.
   - **`memory_write(title, body, kind, level, …)`:** saves one memory through the Context Store's single writer.
@@ -349,6 +351,11 @@ What a turn sees of memory (#110), built on the index. It follows ai-memory's hy
       - its pin and evergreen flag.
 
       The turn's source joins the note's sources, 20 at most. A carried value the writer can't take, such as a source with a tab, is dropped rather than refusing the update. A carried `invalid_at` can't be cleared, only replaced.
+    - **A found note changes only from the version the model read** (#297, after ai-memory 3.0's `expected_page_id`):
+      - **The version** is the first 12 hex digits of the file's git blob SHA. `memory_read` and `memory_search` show it, and every save, or "already in memory", gives the note's version now.
+      - **`version` is required with `path`.** When the note changed since that version, the write is refused and nothing is written: an edit the owner made in Obsidian, another conversation's write or a Dream merge stays. The tool asks the model to read the note again, keep what still holds and save with the version it shows now.
+      - **Why:** the body is the model's, written from what it read. Without the check, a write rendered on the current version's metadata would still replace a body written since.
+      - **No news stays safe:** the same memory again is "already in memory", whatever version it names.
     - **Where it can write:** any note the turn sees, for a new version. A new memory goes to the owner's global memory by default, or to the agent's own scope, when the turn sees every scope. When the turn lists its scopes, a new memory goes only to those. A turn that sees only its own conversation (#131) saves a new memory there unless the model names a scope, and a refusal says where it can save.
     - **No news changes nothing,** so a retried call is safe:
       - a new version that differs only in its `updated` stamp;

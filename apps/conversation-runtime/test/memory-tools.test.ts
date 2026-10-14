@@ -28,6 +28,7 @@ function fakeStore(
     ok: true,
     action: "written",
     path: "memory/notes/x.md",
+    version: "0123456789ab",
   }),
 ) {
   const calls: { method: string; agentId: string; arg: string; options: unknown }[] = [];
@@ -127,7 +128,7 @@ describe("memory tools", () => {
   it("reads a note's pages, and says so when there is none", async () => {
     const { store, calls } = fakeStore((path, offset) =>
       path === "memory/people/ana.md"
-        ? { ok: true, path, text: `${PAGE} ${offset}`, nextOffset: null }
+        ? { ok: true, path, text: `${PAGE} ${offset}`, nextOffset: null, version: "0123456789ab" }
         : notFound,
     );
     const read = (await toolsOf(store)).get("memory_read");
@@ -178,12 +179,15 @@ describe("memory_write", () => {
     let given: MemoryWriteInput | undefined;
     const { store, calls } = fakeStore(undefined, (input) => {
       given = input;
-      return { ok: true, action: "written", path: "memory/notes/x.md" };
+      return { ok: true, action: "written", path: "memory/notes/x.md", version: "0123456789ab" };
     });
     const write = (await toolsOf(store)).get("memory_write");
     expect(
       await write?.run({ ...note, scope: "conversation/familia", sources: ["fake"] }, context()),
-    ).toEqual({ output: "Saved to memory/notes/x.md. This is done; don't save it again." });
+    ).toEqual({
+      output:
+        "Saved to memory/notes/x.md, version 0123456789ab. This is done; don't save it again.",
+    });
     expect(calls).toEqual([
       {
         method: "writeNote",
@@ -207,7 +211,12 @@ describe("memory_write", () => {
     let given: MemoryWriteInput | undefined;
     const { store } = fakeStore(undefined, (input) => {
       given = input;
-      return { ok: true, action: "written", path: "conversations/familia/notes/x.md" };
+      return {
+        ok: true,
+        action: "written",
+        path: "conversations/familia/notes/x.md",
+        version: "0123456789ab",
+      };
     });
     const write = (await toolsOf(store)).get("memory_write");
     await write?.run(note, context());
@@ -215,9 +224,9 @@ describe("memory_write", () => {
     // The scope the model names stands, for the store to allow or refuse.
     await write?.run({ ...note, scope: "global" }, context());
     expect(given).toEqual({ ...note, scope: "global" });
-    // A found note's new version keeps the note's own scope.
-    await write?.run({ ...note, path: "memory/notes/cafe.md" }, context());
-    expect(given).toEqual({ ...note, path: "memory/notes/cafe.md" });
+    // A found note's new version keeps the note's own scope, and names the version it was read at.
+    await write?.run({ ...note, path: "memory/notes/cafe.md", version: "0123456789ab" }, context());
+    expect(given).toEqual({ ...note, path: "memory/notes/cafe.md", version: "0123456789ab" });
     // A turn that sees every scope leaves it to the store: the owner's global memory.
     await write?.run(note, { ...context(), scopes: "all" });
     expect(given).toEqual(note);
@@ -240,8 +249,19 @@ describe("memory_write", () => {
   it("tells the model what happened, in words it can act on", async () => {
     const cases: [WriteNoteResult, { output: string; isError?: boolean }][] = [
       [
-        { ok: true, action: "unchanged", path: "memory/notes/cafe.md" },
-        { output: "Already in memory, at memory/notes/cafe.md. Nothing was saved." },
+        { ok: true, action: "unchanged", path: "memory/notes/cafe.md", version: "0123456789ab" },
+        {
+          output:
+            "Already in memory, at memory/notes/cafe.md, version 0123456789ab. Nothing was saved.",
+        },
+      ],
+      [
+        { ok: false, reason: "changed" },
+        {
+          output:
+            "Not saved: the note changed since that version. Read it again with memory_read, keep what still holds, and save with the version it shows now.",
+          isError: true,
+        },
       ],
       [
         { ok: false, reason: "invalid", problems: ["`kind` is invalid", "`body` is empty"] },
@@ -395,6 +415,7 @@ describe("memory tools in a turn", () => {
       path,
       text: PAGE,
       nextOffset: null,
+      version: "0123456789ab",
     }));
     world.tools = [memoryTools(store)];
     replacePortsForTesting(world.ports);

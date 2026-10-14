@@ -25,6 +25,16 @@ const ALL = { scopes: "all" as const, sources: SOURCES };
 const memory = (title: string, body: string, extra: Partial<MemoryWriteInput> = {}) =>
   ({ title, body, kind: "note", level: "explicit", ...extra }) as MemoryWriteInput;
 
+/** A note's version, as `readNote` shows it and `writeNote` takes it back (#297). */
+const VERSION = expect.stringMatching(/^[0-9a-f]{12}$/);
+
+/** The version a note shows now: what a write to its path names. */
+async function versionOf(stub: ReturnType<typeof vault>, path: string): Promise<string> {
+  const page = await stub.readNote("kelpie", path, { scopes: "all" });
+  if (!page.ok) throw new Error(`no note at ${path}: ${page.reason}`);
+  return page.version;
+}
+
 describe("writeNote", () => {
   it("writes a new memory where its title puts it, sanitized, with the turn's sources", async () => {
     const backend = vaultWith();
@@ -36,7 +46,12 @@ describe("writeNote", () => {
       }),
       ALL,
     );
-    expect(written).toEqual({ ok: true, action: "written", path: "memory/notes/cafe-da-ana.md" });
+    expect(written).toEqual({
+      ok: true,
+      action: "written",
+      path: "memory/notes/cafe-da-ana.md",
+      version: VERSION,
+    });
     await runDurableObjectAlarm(stub);
     const file = backend.files()["memory/notes/cafe-da-ana.md"] ?? "";
     expect(file).toContain("# Café da Ana");
@@ -61,6 +76,7 @@ describe("writeNote", () => {
       ok: true,
       action: "unchanged",
       path: "memory/notes/cafe-da-ana.md",
+      version: VERSION,
     });
     await runDurableObjectAlarm(stub);
     expect(await stub.writeNote("kelpie", input, ALL)).toMatchObject({ action: "unchanged" });
@@ -76,6 +92,7 @@ describe("writeNote", () => {
       ok: true,
       action: "written",
       path: "memory/notes/cafe-da-ana-2.md",
+      version: VERSION,
     });
     await runDurableObjectAlarm(stub);
     expect(backend.files()["memory/notes/cafe-da-ana.md"]).toBe("# Café da Ana\n\nCom leite.\n");
@@ -118,10 +135,14 @@ describe("writeNote", () => {
     expect(
       await stub.writeNote(
         "kelpie",
-        memory("Ana Souza", "Mora no Porto.", { kind: "person", path: ana }),
+        memory("Ana Souza", "Mora no Porto.", {
+          kind: "person",
+          path: ana,
+          version: await versionOf(stub, ana),
+        }),
         { scopes: ["global"], sources: SOURCES },
       ),
-    ).toEqual({ ok: true, action: "written", path: ana });
+    ).toEqual({ ok: true, action: "written", path: ana, version: VERSION });
     await runDurableObjectAlarm(stub);
     const file = backend.files()[ana] ?? "";
     expect(file).toContain("id: 0123456789abcdef");
@@ -190,7 +211,12 @@ describe("writeNote", () => {
       memory("Café", ["Sem açúcar.", "Com canela.", "Coado."][first] ?? ""),
       ALL,
     );
-    expect(retried).toEqual({ ok: true, action: "unchanged", path: "memory/notes/cafe-2.md" });
+    expect(retried).toEqual({
+      ok: true,
+      action: "unchanged",
+      path: "memory/notes/cafe-2.md",
+      version: VERSION,
+    });
     await runDurableObjectAlarm(stub);
     expect(
       Object.keys(backend.files())
@@ -228,13 +254,13 @@ describe("writeNote", () => {
       ].join("\n"),
     });
     const stub = vault("write-carry");
-    expect(
-      await stub.writeNote(
-        "kelpie",
-        memory("Casa da Ana", "Porto.", { path: ana, level: "explicit" }),
-        ALL,
-      ),
-    ).toMatchObject({ ok: true, action: "written" });
+    const read = await versionOf(stub, ana);
+    const first = await stub.writeNote(
+      "kelpie",
+      memory("Casa da Ana", "Porto.", { path: ana, level: "explicit", version: read }),
+      ALL,
+    );
+    expect(first).toMatchObject({ ok: true, action: "written" });
     await runDurableObjectAlarm(stub);
     const file = backend.files()[ana] ?? "";
     for (const kept of [
@@ -250,11 +276,97 @@ describe("writeNote", () => {
     ]) {
       expect(file, kept).toContain(kept);
     }
-    // Only a change is a change; the same version again isn't.
-    const again = memory("Casa da Ana", "Porto.", { path: ana, level: "explicit" });
+    // Only a change is a change; the same version again isn't, whatever version it names.
+    const again = memory("Casa da Ana", "Porto.", { path: ana, level: "explicit", version: read });
     expect(await stub.writeNote("kelpie", again, ALL)).toMatchObject({ action: "unchanged" });
-    expect(await stub.writeNote("kelpie", { ...again, confidence: 0.5 }, ALL)).toMatchObject({
-      action: "written",
+    // A change needs the version the last write gave back: the one it read is gone.
+    expect(await stub.writeNote("kelpie", { ...again, confidence: 0.5 }, ALL)).toEqual({
+      ok: false,
+      reason: "changed",
+    });
+    expect(
+      await stub.writeNote(
+        "kelpie",
+        { ...again, confidence: 0.5, version: first.ok ? first.version : "" },
+        ALL,
+      ),
+    ).toMatchObject({ action: "written" });
+  });
+
+  it("writes a found note only from the version it was read at, so an edit made since stays (#297)", async () => {
+    const cafe = "memory/notes/cafe.md";
+    const cha = "memory/notes/cha.md";
+    const backend = vaultWith({ [cafe]: "# Café\n\nCoado.\n", [cha]: "# Chá\n\nVerde.\n" });
+    const stub = vault("write-version");
+    const read = await versionOf(stub, cafe);
+    const change = (body: string, version?: string) =>
+      memory("Café", body, { path: cafe, ...(version === undefined ? {} : { version }) });
+    // Without a version nothing changes, and the model is told which one to pass.
+    const missing = await stub.writeNote("kelpie", change("Sem açúcar."), ALL);
+    expect(missing).toMatchObject({ ok: false, reason: "invalid" });
+    expect(missing.ok === false && missing.reason === "invalid" && missing.problems[0]).toContain(
+      "`version` is required with `path`",
+    );
+    // Another note's version isn't this one's.
+    expect(
+      await stub.writeNote("kelpie", change("Sem açúcar.", await versionOf(stub, cha)), ALL),
+    ).toEqual({ ok: false, reason: "changed" });
+
+    // The owner edits the note in Obsidian after the agent read it: the edit stays.
+    backend.push({ [cafe]: "# Café\n\nCoado, com canela.\n" });
+    await stub.requestSync("refs/heads/main");
+    await runDurableObjectAlarm(stub);
+    expect(await stub.writeNote("kelpie", change("Sem açúcar.", read), ALL)).toEqual({
+      ok: false,
+      reason: "changed",
+    });
+    expect(backend.files()[cafe]).toBe("# Café\n\nCoado, com canela.\n");
+
+    // Read again, it writes, and the version it gives back takes the next write before the commit.
+    const first = await stub.writeNote(
+      "kelpie",
+      change("Coado, com canela, sem açúcar.", await versionOf(stub, cafe)),
+      ALL,
+    );
+    expect(first).toMatchObject({ ok: true, action: "written", version: VERSION });
+    const queued = first.ok ? first.version : "";
+    // A read before the commit shows the queued version, and names it.
+    const page = await stub.readNote("kelpie", cafe, { scopes: "all" });
+    expect(page).toMatchObject({ ok: true, version: queued });
+    expect(page.ok && page.text).toContain("sem açúcar");
+    expect(page.ok && page.text).toContain(`version ${queued}`);
+    const second = await stub.writeNote(
+      "kelpie",
+      change("Coado, com canela, sem açúcar, de manhã.", queued),
+      ALL,
+    );
+    expect(second).toMatchObject({ ok: true, action: "written" });
+    // The same memory retried with the version it was read at changes nothing.
+    expect(
+      await stub.writeNote(
+        "kelpie",
+        change("Coado, com canela, sem açúcar, de manhã.", queued),
+        ALL,
+      ),
+    ).toMatchObject({ ok: true, action: "unchanged", version: second.ok ? second.version : "" });
+
+    // Another conversation's write lands in between: the version the agent holds is gone.
+    await stub.write("kelpie", [{ path: cafe, content: "# Café\n\nCoado.\n" }], "x");
+    expect(
+      await stub.writeNote(
+        "kelpie",
+        change("Coado, com canela, sem açúcar, à tarde.", second.ok ? second.version : ""),
+        ALL,
+      ),
+    ).toEqual({ ok: false, reason: "changed" });
+    await runDurableObjectAlarm(stub);
+    expect(backend.files()[cafe]).toBe("# Café\n\nCoado.\n");
+
+    // A removal waiting in the queue: the note is gone for a read too.
+    await stub.write("kelpie", [{ path: cha, content: null }], "x");
+    expect(await stub.readNote("kelpie", cha, { scopes: "all" })).toEqual({
+      ok: false,
+      reason: "not_found",
     });
   });
 
@@ -267,6 +379,7 @@ describe("writeNote", () => {
         memory("Caio", "Primo, mora em Faro.", {
           kind: "person",
           path: "conversations/familia/people/caio.md",
+          version: await versionOf(stub, "conversations/familia/people/caio.md"),
         }),
         ALL,
       ),
@@ -365,7 +478,11 @@ describe("writeNote", () => {
     });
     const stub = vault("write-carry-clean");
     expect(
-      await stub.writeNote("kelpie", memory("Casa", "Porto.", { path: casa }), ALL),
+      await stub.writeNote(
+        "kelpie",
+        memory("Casa", "Porto.", { path: casa, version: await versionOf(stub, casa) }),
+        ALL,
+      ),
     ).toMatchObject({ ok: true, action: "written" });
     await runDurableObjectAlarm(stub);
     const file = backend.files()[casa] ?? "";
@@ -383,7 +500,7 @@ describe("writeNote", () => {
     });
     expect(
       await stub.writeNote("kelpie", memory("Chá", "Verde.", { confidence: 0.5 }), ALL),
-    ).toEqual({ ok: true, action: "unchanged", path: "memory/notes/cha.md" });
+    ).toEqual({ ok: true, action: "unchanged", path: "memory/notes/cha.md", version: VERSION });
     await runDurableObjectAlarm(stub);
     expect(Object.keys(backend.files()).filter((path) => path.startsWith("memory/"))).toEqual([
       "memory/notes/cha.md",
@@ -409,7 +526,11 @@ describe("writeNote", () => {
     expect(
       await stub.writeNote(
         "kelpie",
-        memory("Diário", "Texto.", { path: "memory/notes/diario.md", confidence: 0.8 }),
+        memory("Diário", "Texto.", {
+          path: "memory/notes/diario.md",
+          confidence: 0.8,
+          version: await versionOf(stub, "memory/notes/diario.md"),
+        }),
         { scopes: "all", sources: [] },
       ),
     ).toMatchObject({ action: "written" });
@@ -441,13 +562,23 @@ describe("writeNote", () => {
     expect(
       await stub.writeNote(
         "kelpie",
-        memory("Café", "Com leite.", { path: "conversations/telegram-1/notes/cafe.md" }),
+        memory("Café", "Com leite.", {
+          path: "conversations/telegram-1/notes/cafe.md",
+          version: await versionOf(stub, "conversations/telegram-1/notes/cafe.md"),
+        }),
         { scopes: ["conversation/telegram-1"], sources: SOURCES },
       ),
     ).toMatchObject({ ok: true, action: "written" });
     // A mark that leads nowhere merges nothing: the note takes the write, and loses the mark.
     expect(
-      await stub.writeNote("kelpie", memory("Chá", "Verde.", { path: "memory/notes/cha.md" }), ALL),
+      await stub.writeNote(
+        "kelpie",
+        memory("Chá", "Verde.", {
+          path: "memory/notes/cha.md",
+          version: await versionOf(stub, "memory/notes/cha.md"),
+        }),
+        ALL,
+      ),
     ).toMatchObject({ ok: true, action: "written", path: "memory/notes/cha.md" });
   });
 
@@ -487,7 +618,11 @@ describe("writeNote", () => {
       ["areas/work/notes/pauta.md", "Pauta"],
     ] as const) {
       expect(
-        await stub.writeNote("kelpie", memory(title, "Outro.", { path }), ALL),
+        await stub.writeNote(
+          "kelpie",
+          memory(title, "Outro.", { path, version: await versionOf(stub, path) }),
+          ALL,
+        ),
         path,
       ).toMatchObject({ ok: true, action: "written" });
     }
@@ -538,7 +673,11 @@ describe("writeNote", () => {
     expect(
       await stub.writeNote(
         "kelpie",
-        memory("Ana", "Mora no Porto.", { path: ana, kind: "person" }),
+        memory("Ana", "Mora no Porto.", {
+          path: ana,
+          kind: "person",
+          version: await versionOf(stub, ana),
+        }),
         ALL,
       ),
     ).toMatchObject({ ok: true, action: "written" });
@@ -606,7 +745,15 @@ describe("writeNote", () => {
       }
       // What the person says now does change it.
       expect(
-        await stub.writeNote("kelpie", memory(title, "Outro.", { path, level: "explicit" }), ALL),
+        await stub.writeNote(
+          "kelpie",
+          memory(title, "Outro.", {
+            path,
+            level: "explicit",
+            version: await versionOf(stub, path),
+          }),
+          ALL,
+        ),
       ).toMatchObject({ ok: true, action: "written" });
     }
     // A note Kelpie wrote without a level isn't the owner's word.
@@ -619,7 +766,11 @@ describe("writeNote", () => {
     expect(
       await stub.writeNote(
         "kelpie",
-        memory("Pão", "Sem glúten.", { path: "memory/notes/pao.md", level: "inferred" }),
+        memory("Pão", "Sem glúten.", {
+          path: "memory/notes/pao.md",
+          level: "inferred",
+          version: await versionOf(stub, "memory/notes/pao.md"),
+        }),
         ALL,
       ),
     ).toMatchObject({ ok: true, action: "written" });
@@ -646,7 +797,11 @@ describe("writeNote", () => {
     expect(
       await stub.writeNote(
         "kelpie",
-        memory("Sal", "Quase nenhum.", { path: "memory/notes/sal.md", level: "inferred" }),
+        memory("Sal", "Quase nenhum.", {
+          path: "memory/notes/sal.md",
+          level: "inferred",
+          version: await versionOf(stub, "memory/notes/sal.md"),
+        }),
         ALL,
       ),
     ).toMatchObject({ ok: true, action: "written" });
@@ -701,7 +856,7 @@ describe("writeNote", () => {
           ...ALL,
           qualifier: "jev",
         }),
-      ).toEqual({ ok: true, action: "written", path: "memory/notes/cafe-2.md" });
+      ).toEqual({ ok: true, action: "written", path: "memory/notes/cafe-2.md", version: VERSION });
       await runDurableObjectAlarm(stub);
       hold = false;
       await vi.waitFor(() =>
