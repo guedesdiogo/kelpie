@@ -237,4 +237,48 @@ describe("Registry roles (#288)", () => {
     expect(await ids()).toEqual([{ id: "kelpie" }, { id: SETUP_AGENT_ID }]);
     expect(await stub.get("kelpie")).toEqual(KELPIE);
   });
+
+  it("removes an agent and audits it, and refuses Admin, the main agent and unknown ids (#303)", async () => {
+    const stub = registry("remove");
+    await stub.add("sales", "Sales", owner);
+
+    expect(await stub.remove("sales", owner)).toEqual({ ok: true });
+    expect(await stub.get("sales")).toBeNull();
+    expect(await stub.list()).toEqual([KELPIE, SETUP]);
+    expect((await auditOf(stub)).at(-1)).toEqual({
+      action: "agent.deleted",
+      agent_id: "sales",
+      user_id: "u-owner",
+      via: "admin-api",
+    });
+
+    for (const id of [SETUP_AGENT_ID, "kelpie"]) {
+      expect(await stub.remove(id, owner)).toEqual({ ok: false, reason: "not_allowed" });
+    }
+    expect(await stub.remove("sales", owner)).toEqual({ ok: false, reason: "unknown_agent" });
+    expect(await stub.remove("Not An Agent", owner)).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(await stub.list()).toEqual([KELPIE, SETUP]);
+  });
+
+  it("removes an agent only once nothing is owned by it, so no subagent loses its owner", async () => {
+    const stub = registry("remove-owner");
+    await stub.add("sales", "Sales", owner);
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO agents (id, name, created_at, updated_at, role, owner_id, chat) VALUES ('helper', 'Helper', 0, 0, 'subagent', 'sales', 0)",
+      );
+    });
+
+    expect(await stub.remove("sales", owner)).toEqual({ ok: false, reason: "not_allowed" });
+    expect(await stub.remove("helper", owner)).toEqual({ ok: true });
+    expect(await stub.remove("sales", owner)).toEqual({ ok: true });
+    expect(
+      (await auditOf(stub))
+        .filter((row) => row.action === "agent.deleted")
+        .map((row) => row.agent_id),
+    ).toEqual(["helper", "sales"]);
+  });
 });

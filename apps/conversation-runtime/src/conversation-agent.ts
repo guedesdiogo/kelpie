@@ -2417,7 +2417,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   async #turnConfig(): Promise<AgentConfig> {
     const agentId = this.#get<string | null>("agentId", null);
     if (!agentId) throw new Error("The conversation has no agent yet");
-    return this.env.AGENT_HOST.getByName(agentId).turnConfig();
+    return this.env.AGENT_HOST.getByName(agentId).turnConfig(this.name);
   }
 
   #generation(): number {

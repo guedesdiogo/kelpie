@@ -95,6 +95,7 @@ const COMMANDS: Record<string, Command> = {
   configureAgent: (commands, actor, input) => commands.configureAgent(actor, input),
   setMainAgent: (commands, actor, input) => commands.setMainAgent(actor, input),
   setAgentChat: (commands, actor, input) => commands.setAgentChat(actor, input),
+  deleteAgent: (commands, actor, input) => commands.deleteAgent(actor, input),
   getModels: (commands, actor) => commands.getModels(actor),
   configureModels: (commands, actor, input) => commands.configureModels(actor, input),
   listIdentities: (commands, actor) => commands.listIdentities(actor),

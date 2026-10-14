@@ -20,7 +20,7 @@ export const auditLog = sqliteTable("audit_log", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   at: integer("at").notNull(),
   action: text("action", {
-    enum: ["agent.created", "agent.renamed", "agent.main_set", "agent.chat_set"],
+    enum: ["agent.created", "agent.renamed", "agent.main_set", "agent.chat_set", "agent.deleted"],
   }).notNull(),
   agentId: text("agent_id").notNull(),
   userId: text("user_id").notNull(),

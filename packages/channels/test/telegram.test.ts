@@ -338,6 +338,21 @@ describe("Telegram sending", () => {
     );
   });
 
+  it("removes the webhook and drops the updates still waiting (#303)", async () => {
+    const { adapter, calls } = botApi(() => okResult(true));
+    await adapter.deleteWebhook();
+    expect(calls).toEqual([
+      {
+        url: `https://api.telegram.org/bot${TOKEN}/deleteWebhook`,
+        method: "deleteWebhook",
+        body: { drop_pending_updates: true },
+      },
+    ]);
+
+    const revoked = botApi(() => failure(401));
+    await expect(revoked.adapter.deleteWebhook()).rejects.toBeInstanceOf(ChannelRequestError);
+  });
+
   it("turns a 429 into a wait, in milliseconds", async () => {
     const { adapter } = botApi(() => failure(429, { parameters: { retry_after: 7 } }));
     const error = await adapter.send({ threadId: "1001" }, "hi").catch((caught) => caught);

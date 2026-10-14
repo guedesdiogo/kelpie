@@ -4,6 +4,7 @@ import {
   type ChannelEgressContract,
   type ChannelFormsContract,
   ChannelRateLimitedError,
+  ChannelRequestError,
   type ChannelWebhooksContract,
   type DeliveryFailure,
   type EgressDestination,
@@ -13,12 +14,13 @@ import {
   type SendOptions,
   type SendOutcome,
   type SetupFormsContract,
+  type TelegramDisconnection,
   type TypingOutcome,
   type WebhookNotice,
   type WebhookRegistration,
 } from "@kelpie/channels";
 import { TELEGRAM_SECRET_HEADER, TelegramAdapter } from "@kelpie/channels/telegram";
-import { isAgentId } from "@kelpie/config";
+import { isAgentId, SETUP_AGENT_ID } from "@kelpie/config";
 import {
   checkRunner,
   parseRunnerSecret,
@@ -101,8 +103,9 @@ async function describeRunnerOf(env: Env) {
 
 /**
  * What the setup agent's Worker binds (Story 3.11): it opens a form, whose link the owner then
- * opens on the admin API, and reads the runner's state, which holds no secret. Binding
- * `ChannelForms` there would also let a model-driven Worker describe, redeem and register.
+ * opens on the admin API, and reads the runner's state, which holds no secret. It also disconnects
+ * a deleted agent's bot (#303), which reads nothing back. Binding `ChannelForms` there would also
+ * let a model-driven Worker describe, redeem and register.
  */
 export class SetupForms extends WorkerEntrypoint<Env> implements SetupFormsContract {
   async createTelegramForm(agentId: string) {
@@ -115,6 +118,10 @@ export class SetupForms extends WorkerEntrypoint<Env> implements SetupFormsContr
 
   async describeRunner() {
     return describeRunnerOf(this.env);
+  }
+
+  async disconnectTelegram(agentId: string) {
+    return disconnectTelegramOf(this.env, agentId);
   }
 }
 
@@ -311,6 +318,10 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
     return describeRunnerOf(this.env);
   }
 
+  async disconnectTelegram(agentId: string) {
+    return disconnectTelegramOf(this.env, agentId);
+  }
+
   async describeTelegramBot(agentId: string) {
     if (!isAgentId(agentId)) return { ok: false as const, reason: "invalid_input" as const };
     const found = await telegramSecret(this.env, agentId);
@@ -467,6 +478,56 @@ export class ChannelEgress extends WorkerEntrypoint<Env> implements ChannelEgres
 }
 
 /** The agent's stored bot. A secret that doesn't decrypt or parse counts as no bot. */
+/**
+ * Removes a deleted agent's bot (#303): its webhook first, while the token is there to do it, then
+ * the secret and forms. A webhook Telegram refuses to remove for good, as with a revoked token,
+ * doesn't keep the secret: without it ingress refuses every update for the agent. A failure for
+ * now keeps it, so the deletion's next run removes the webhook. Admin can't be deleted, so its bot
+ * is never disconnected.
+ */
+async function disconnectTelegramOf(env: Env, agentId: string): Promise<TelegramDisconnection> {
+  if (!isAgentId(agentId) || agentId === SETUP_AGENT_ID) {
+    return { ok: false, reason: "invalid_input" };
+  }
+  const found = await telegramSecret(env, agentId);
+  if (!found.ok && found.reason === "store_unavailable") return unavailable;
+  let webhook: "removed" | "refused" | "none" = "none";
+  if (found.ok) {
+    try {
+      await new TelegramAdapter(found.secret).deleteWebhook();
+      webhook = "removed";
+    } catch (error) {
+      if (!refusedForGood(error)) {
+        console.warn("channel-egress: Telegram didn't remove a webhook, for now", errorName(error));
+        return { ok: false, reason: "channel_unavailable" };
+      }
+      console.warn("channel-egress: Telegram refused to remove a webhook", errorName(error));
+      webhook = "refused";
+    }
+  }
+  try {
+    await store(env).remove("telegram", agentId);
+  } catch (error) {
+    console.error("channel-egress: the secret store failed", errorName(error));
+    return unavailable;
+  }
+  return { ok: true, webhook };
+}
+
+/**
+ * A refusal that asking again won't change: the bot's token revoked, or the bot gone (4xx). A 429
+ * comes as a `ChannelRateLimitedError`, a failure for now.
+ */
+function refusedForGood(error: unknown): boolean {
+  if (error instanceof RecipientUnavailableError) return true;
+  return (
+    error instanceof ChannelRequestError &&
+    error.status !== null &&
+    error.status >= 400 &&
+    error.status < 500
+  );
+}
+
 async function telegramSecret(
   env: Env,
   agentId: string,

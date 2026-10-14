@@ -153,8 +153,8 @@ function productionPorts(env: Env): ConversationPorts {
   const egress = env.CHANNEL_EGRESS as unknown as ChannelEgressContract;
   // A service binding to context-store's ContextStore entrypoint.
   const contextStore = env.CONTEXT_STORE as unknown as ContextStoreContract;
-  // A service binding to channel-egress's SetupForms entrypoint, which only opens a form and reads
-  // the runner's state, which holds no secret.
+  // A service binding to channel-egress's SetupForms entrypoint, which only opens a form, reads the
+  // runner's state, which holds no secret, and disconnects a deleted agent's bot (#303).
   const forms = env.SETUP_FORMS as unknown as SetupFormsContract;
   // Typed as the contracts the admin API binds, so both clients of the commands match.
   const registry = env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<RegistryContract>;
@@ -165,6 +165,7 @@ function productionPorts(env: Env): ConversationPorts {
     agents: {
       configure: (id, changes, actor) => agentHost(id).configure(changes, actor),
       config: (id) => agentHost(id).config(),
+      erase: (id, conversations) => agentHost(id).erase(conversations),
     },
     directory: {
       issuePairingCode: notBound,
@@ -179,6 +180,7 @@ function productionPorts(env: Env): ConversationPorts {
       describeTelegramBot: notBound,
       createRunnerForm: () => forms.createRunnerForm(),
       describeRunner: () => forms.describeRunner(),
+      disconnectTelegram: (agentId) => forms.disconnectTelegram(agentId),
     },
     models: {
       providers: () => gatewayAdmin.providers(),
