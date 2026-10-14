@@ -34,6 +34,18 @@ export interface AgentSummary {
   name: string;
 }
 
+/** An agent's role (ADR-0036 §1). Admin is the setup agent's, by its id. */
+export type AgentRole = "admin" | "main" | "specialist" | "subagent";
+
+/** An agent as the Registry holds it (ADR-0036 §1, #288). */
+export interface AgentEntry extends AgentSummary {
+  role: AgentRole;
+  /** The main agent for a specialist, its creator for a subagent; null for Admin and the main agent. */
+  owner: string | null;
+  /** Whether the user can reach it on a channel: always Admin and the main agent, never a subagent. */
+  chat: boolean;
+}
+
 export interface AgentConfig {
   settings: AgentSettings;
   /** Bumped by every system prompt change. */
@@ -53,6 +65,10 @@ export type AddAgentResult =
 export type RenameAgentResult =
   | { ok: true }
   | { ok: false; reason: "unknown_agent" | "invalid_input" };
+/** `not_allowed`: the agent's role doesn't take the change, such as turning Admin's chat off. */
+export type SetAgentResult =
+  | { ok: true }
+  | { ok: false; reason: "unknown_agent" | "invalid_input" | "not_allowed" };
 
 /**
  * The `Registry` and `AgentHost` methods other Workers call. The objects implement them, and
@@ -61,8 +77,15 @@ export type RenameAgentResult =
 export interface RegistryContract {
   add(id: string, name: string, actor: Actor): AddAgentResult;
   rename(id: string, name: string, actor: Actor): RenameAgentResult;
-  get(id: string): AgentSummary | null;
-  list(): AgentSummary[];
+  get(id: string): AgentEntry | null;
+  list(): AgentEntry[];
+  /**
+   * Makes the agent the main agent (ADR-0036 §1). The previous one becomes a specialist, and every
+   * specialist is then owned by the new one.
+   */
+  setMain(id: string, actor: Actor): SetAgentResult;
+  /** Turns a specialist's chat on or off. Admin and the main agent always chat; subagents never do. */
+  setChat(id: string, chat: boolean, actor: Actor): SetAgentResult;
   /** Answers once the object's migrations ran; the deploy's probe calls it (#234). */
   ping(): { ok: true };
 }
@@ -128,8 +151,10 @@ export interface ConfigPorts {
     /** Idempotent: adding an existing agent reports `created: false` and changes nothing. */
     add(id: string, name: string, actor: Actor): Promise<AddAgentResult>;
     rename(id: string, name: string, actor: Actor): Promise<RenameAgentResult>;
-    get(id: string): Promise<AgentSummary | null>;
-    list(): Promise<AgentSummary[]>;
+    get(id: string): Promise<AgentEntry | null>;
+    list(): Promise<AgentEntry[]>;
+    setMain(id: string, actor: Actor): Promise<SetAgentResult>;
+    setChat(id: string, chat: boolean, actor: Actor): Promise<SetAgentResult>;
   };
   agents: {
     configure(id: string, changes: Partial<AgentSettings>, actor: Actor): Promise<ConfigureResult>;
@@ -171,6 +196,7 @@ export type CommandResult<T> =
         | "not_connected"
         | "not_configured"
         | "channel_refused"
+        | "not_allowed"
         | Extract<IdentityResult, { ok: false }>["reason"];
     };
 
@@ -197,7 +223,7 @@ export function createConfigCommands(ports: ConfigPorts) {
   });
 
   return {
-    async listAgents(actor: Actor): Promise<CommandResult<AgentSummary[]>> {
+    async listAgents(actor: Actor): Promise<CommandResult<AgentEntry[]>> {
       if (!isOwner(actor)) return forbidden;
       return { ok: true, value: await ports.registry.list() };
     },
@@ -223,10 +249,7 @@ export function createConfigCommands(ports: ConfigPorts) {
       return result.ok ? { ok: true, value: { id, name: name.trim() } } : result;
     },
 
-    async getAgent(
-      actor: Actor,
-      input: unknown,
-    ): Promise<CommandResult<AgentSummary & AgentConfig>> {
+    async getAgent(actor: Actor, input: unknown): Promise<CommandResult<AgentEntry & AgentConfig>> {
       if (!isOwner(actor)) return forbidden;
       const { id } = (input ?? {}) as { id?: unknown };
       if (!isAgentId(id)) return invalid;
@@ -243,6 +266,24 @@ export function createConfigCommands(ports: ConfigPorts) {
       if (!changes) return invalid;
       if (!(await ports.registry.get(id))) return { ok: false, reason: "unknown_agent" };
       return ports.agents.configure(id, changes, actor);
+    },
+
+    /** Makes an agent the main agent, the user's front door (ADR-0036 §1). It changes access. */
+    async setMainAgent(actor: Actor, input: unknown): Promise<CommandResult<object>> {
+      if (!isOwner(actor)) return forbidden;
+      const { id } = (input ?? {}) as { id?: unknown };
+      if (!isAgentId(id)) return invalid;
+      const result = await ports.registry.setMain(id, actor);
+      return result.ok ? { ok: true, value: {} } : result;
+    },
+
+    /** Turns a specialist's chat on or off (ADR-0036 §1). It changes access. */
+    async setAgentChat(actor: Actor, input: unknown): Promise<CommandResult<object>> {
+      if (!isOwner(actor)) return forbidden;
+      const { id, chat } = (input ?? {}) as { id?: unknown; chat?: unknown };
+      if (!isAgentId(id) || typeof chat !== "boolean") return invalid;
+      const result = await ports.registry.setChat(id, chat, actor);
+      return result.ok ? { ok: true, value: {} } : result;
     },
 
     async listIdentities(actor: Actor): Promise<CommandResult<ShownIdentity[]>> {

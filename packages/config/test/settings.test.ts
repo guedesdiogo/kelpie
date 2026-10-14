@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS, isAgentId, parseSettings } from "../src/settings.ts";
+import { agentModel, DEFAULT_SETTINGS, isAgentId, parseSettings } from "../src/settings.ts";
 
 describe("parseSettings", () => {
   it("keeps only the given, known settings", () => {
@@ -32,7 +32,15 @@ describe("parseSettings", () => {
     expect(parseSettings({ memoryCore: true })).toEqual({ memoryCore: true });
   });
 
+  it("takes the agent's model settings per area, none by default (ADR-0036 §2)", () => {
+    expect(DEFAULT_SETTINGS.model).toEqual({});
+    const model = { provider: "openai", memory: { tier: "medium", effort: "low" } };
+    expect(parseSettings({ model })).toEqual({ model });
+  });
+
   it.each([
+    [{ model: { provider: "mistral" } }],
+    [{ model: { conversation: { model: "gpt-6-astra" } } }],
     [{ tier: "gpt-9" }],
     [{ memoryCore: "yes" }],
     [{ toolLoopMs: 119_999 }],
@@ -51,6 +59,22 @@ describe("parseSettings", () => {
     ["settings"],
   ])("refuses %j", (input) => {
     expect(parseSettings(input)).toBeNull();
+  });
+});
+
+describe("agentModel", () => {
+  it("counts a tier stored before #286 as the conversation's tier, unless the area sets one", () => {
+    expect(agentModel({})).toEqual({});
+    expect(agentModel({ tier: "frontier" })).toEqual({ conversation: { tier: "frontier" } });
+    expect(
+      agentModel({
+        tier: "frontier",
+        model: { provider: "openai", conversation: { effort: "high" } },
+      }),
+    ).toEqual({ provider: "openai", conversation: { tier: "frontier", effort: "high" } });
+    expect(agentModel({ tier: "frontier", model: { conversation: { tier: "medium" } } })).toEqual({
+      conversation: { tier: "medium" },
+    });
   });
 });
 

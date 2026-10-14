@@ -39,7 +39,7 @@ function marked(mine: string, theirs: string, frontmatter = ""): string {
  * runs while it answers, as an owner's push could.
  */
 function fakeModel(answers: (string | Error)[], meanwhile?: () => void) {
-  const requests: { tier: string; request: RoutedRequest }[] = [];
+  const requests: { selection: unknown; request: RoutedRequest }[] = [];
   const gateway: MemoryGateway = {
     async embed() {
       return { ok: false, reason: "failed" };
@@ -47,8 +47,8 @@ function fakeModel(answers: (string | Error)[], meanwhile?: () => void) {
     async qualify() {
       return { ok: false, reason: "failed" };
     },
-    async generate(tier, request) {
-      requests.push({ tier, request });
+    async generate(selection, request) {
+      requests.push({ selection, request });
       meanwhile?.();
       const answer = answers.shift() ?? new Error("no answer left");
       async function* events(): AsyncIterable<LlmEvent> {
@@ -104,7 +104,8 @@ describe("Vault conflict resolution", () => {
     // The resolution, with Kelpie's own change on a line the conflict didn't touch.
     expect(backend.files()["memory/people/ana.md"]).toBe(resolved.replace("café", "chá"));
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.tier).toBe("medium");
+    // The memory area, on `medium` until the instance sets the area's tier (ADR-0036 §2).
+    expect(requests[0]?.selection).toEqual({ area: "memory", tier: "medium" });
     const asked = JSON.stringify(requests[0]?.request.messages);
     expect(asked).toContain("Mora em Lisboa.");
     expect(asked).toContain("<<<<<<< HEAD");

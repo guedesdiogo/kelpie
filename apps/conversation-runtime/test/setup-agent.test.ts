@@ -25,6 +25,14 @@ import { type FakeWorld, fakeWorld, held, reply, toolCalls } from "./fakes.ts";
 const ADMIN = "https://admin.example.com";
 const owner: Actor = { userId: "u-owner", role: "owner", via: `agent:${SETUP_AGENT_ID}` };
 
+/** The Registry's answer for an agent's role (ADR-0036 §1): Admin for setup, else a specialist. */
+const roleOf = (id: string) =>
+  id === SETUP_AGENT_ID
+    ? ({ role: "admin", owner: null, chat: true } as const)
+    : id === "kelpie"
+      ? ({ role: "main", owner: null, chat: true } as const)
+      : ({ role: "specialist", owner: "kelpie", chat: false } as const);
+
 /** Commands over an in-memory registry; every call is logged. */
 function fakeCommands() {
   const agents = new Map<string, string>([[SETUP_AGENT_ID, "Setup"]]);
@@ -33,14 +41,17 @@ function fakeCommands() {
   const commands: SetupCommands = {
     async listAgents(actor) {
       if (actor.role !== "owner") return forbidden;
-      return { ok: true, value: [...agents].map(([id, name]) => ({ id, name })) };
+      return { ok: true, value: [...agents].map(([id, name]) => ({ id, name, ...roleOf(id) })) };
     },
     async getAgent(actor, input) {
       if (actor.role !== "owner") return forbidden;
       const { id } = input as { id: string };
       const name = agents.get(id);
       if (name === undefined) return { ok: false, reason: "unknown_agent" };
-      return { ok: true, value: { id, name, settings: DEFAULT_SETTINGS, promptVersion: 0 } };
+      return {
+        ok: true,
+        value: { id, name, ...roleOf(id), settings: DEFAULT_SETTINGS, promptVersion: 0 },
+      };
     },
     async createAgent(actor, input) {
       calls.push(`createAgent ${JSON.stringify(input)}`);
@@ -67,6 +78,20 @@ function fakeCommands() {
         ok: true,
         value: { settings: { ...DEFAULT_SETTINGS, ...settings }, promptVersion: 1 },
       };
+    },
+    async setMainAgent(actor, input) {
+      calls.push(`setMainAgent ${JSON.stringify(input)}`);
+      if (actor.role !== "owner") return forbidden;
+      const { id } = input as { id: string };
+      if (id === SETUP_AGENT_ID) return { ok: false, reason: "not_allowed" };
+      return agents.has(id) ? { ok: true, value: {} } : { ok: false, reason: "unknown_agent" };
+    },
+    async setAgentChat(actor, input) {
+      calls.push(`setAgentChat ${JSON.stringify(input)}`);
+      if (actor.role !== "owner") return forbidden;
+      const { id } = input as { id: string };
+      if (id === SETUP_AGENT_ID) return { ok: false, reason: "not_allowed" };
+      return agents.has(id) ? { ok: true, value: {} } : { ok: false, reason: "unknown_agent" };
     },
     async connectTelegram(actor, input) {
       calls.push(`connectTelegram ${JSON.stringify(input)}`);
@@ -129,6 +154,8 @@ describe("the setup agent's tools", () => {
       "create_agent",
       "rename_agent",
       "configure_agent",
+      "set_main_agent",
+      "set_agent_chat",
       "connect_telegram",
       "pair_telegram",
     ]);
@@ -152,8 +179,9 @@ describe("the setup agent's tools", () => {
       (await run(tools, "rename_agent", { id: "ana", name: "Ana Souza" }, context)).isError,
     ).toBe(undefined);
     const listed = await run(tools, "list_agents", {}, context);
-    expect(listed.output).toContain("ana: Ana Souza");
-    expect(listed.output).toContain(`${SETUP_AGENT_ID}: Setup`);
+    // With each agent's role, and whether the owner can chat with it (#288).
+    expect(listed.output).toContain("ana: Ana Souza (specialist, chat off)");
+    expect(listed.output).toContain(`${SETUP_AGENT_ID}: Setup (admin)`);
     expect(asked).toEqual([]);
     expect(calls).toEqual([
       'createAgent {"id":"ana","name":"Ana"}',
@@ -190,6 +218,8 @@ describe("the setup agent's tools", () => {
       ["connect_telegram", { agentId: SETUP_AGENT_ID }],
       ["pair_telegram", { agentId: SETUP_AGENT_ID }],
       ["create_agent", { id: "ana", name: "Ana" }],
+      ["set_main_agent", { id: SETUP_AGENT_ID }],
+      ["set_agent_chat", { id: SETUP_AGENT_ID, chat: true }],
     ] as const) {
       expect(await run(tools, name, input, context), name).toEqual({
         output: "Only the owner can change Kelpie's configuration.",
@@ -198,6 +228,92 @@ describe("the setup agent's tools", () => {
     }
     expect(asked).toEqual([]);
     expect(calls.filter((call) => !call.startsWith("createAgent"))).toEqual([]);
+  });
+
+  it("asks the owner to confirm a new main agent or a chat change, and runs it only then (#288)", async () => {
+    const { commands, agents, calls } = fakeCommands();
+    agents.set("ana", "Ana");
+    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+
+    const waiting = contextOf(false, owner, "pt-BR");
+    expect((await run(tools, "set_main_agent", { id: "ana" }, waiting.context)).output).toContain(
+      "Not done yet",
+    );
+    expect(
+      (await run(tools, "set_agent_chat", { id: "ana", chat: true }, waiting.context)).output,
+    ).toContain("Not done yet");
+    expect(waiting.asked).toEqual([
+      {
+        command: "setMainAgent",
+        input: { id: "ana" },
+        summary: 'tornar o agente "Ana" (ana) o agente principal, o que conversa com você.',
+      },
+      {
+        command: "setAgentChat",
+        input: { id: "ana", chat: true },
+        summary: 'permitir que você converse com o agente "Ana" (ana).',
+      },
+    ]);
+    expect(calls).toEqual([]);
+
+    const confirmed = contextOf(true);
+    expect(await run(tools, "set_main_agent", { id: "ana" }, confirmed.context)).toEqual({
+      output: "The agent ana is now the main agent: the one the owner talks to.",
+    });
+    expect(
+      await run(tools, "set_agent_chat", { id: "ana", chat: true }, confirmed.context),
+    ).toEqual({
+      output: "The owner can now chat with the agent ana.",
+    });
+    expect(confirmed.asked.map((request) => request.summary)).toEqual([
+      'make the agent "Ana" (ana) the main agent, the one you talk to.',
+      'let you chat with the agent "Ana" (ana).',
+    ]);
+    expect(calls).toEqual(['setMainAgent {"id":"ana"}', 'setAgentChat {"id":"ana","chat":true}']);
+  });
+
+  it("refuses a role that can't take the change, or says it's done, before asking anything", async () => {
+    const { commands, agents, calls } = fakeCommands();
+    agents.set("ana", "Ana");
+    agents.set("kelpie", "Kelpie");
+    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const { context, asked } = contextOf(true);
+
+    const admin = await run(tools, "set_main_agent", { id: SETUP_AGENT_ID }, context);
+    expect(admin).toMatchObject({ isError: true });
+    expect(admin.output).toContain("Admin can't be the main agent");
+    for (const id of [SETUP_AGENT_ID, "kelpie"]) {
+      const refused = await run(tools, "set_agent_chat", { id, chat: false }, context);
+      expect(refused).toMatchObject({ isError: true });
+      expect(refused.output).toContain("Only a specialist's chat can change");
+    }
+    expect(await run(tools, "set_main_agent", { id: "kelpie" }, context)).toEqual({
+      output: "The agent kelpie is already the main agent; nothing changed.",
+    });
+    expect(await run(tools, "set_agent_chat", { id: "ana", chat: false }, context)).toEqual({
+      output: "The agent ana's chat is already off; nothing changed.",
+    });
+    expect(await run(tools, "set_agent_chat", { id: "ana", chat: "yes" }, context)).toMatchObject({
+      isError: true,
+    });
+    expect(asked).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
+  it("tells the model a new agent's chat is off, and when a bot is connected to it (#288)", async () => {
+    const { commands } = fakeCommands();
+    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const { context } = contextOf(true);
+
+    const created = await run(tools, "create_agent", { id: "ana", name: "Ana" }, context);
+    expect(created.output).toContain("its chat is off");
+    const connected = await run(tools, "connect_telegram", { agentId: "ana" }, context);
+    expect(connected.output).toContain("Its chat is off");
+    const paired = await run(tools, "pair_telegram", { agentId: "ana" }, context);
+    expect(paired.output).toContain("Its chat is off");
+    expect(
+      (await run(tools, "connect_telegram", { agentId: SETUP_AGENT_ID }, context)).output,
+    ).not.toContain("chat is off");
   });
 
   it("asks the owner to confirm a settings change, for its parsed input, and runs it only then", async () => {

@@ -12,10 +12,12 @@ import {
   type PairingCodeResult,
   type PairingResult,
   type RelinkResult,
+  type Remote,
   type StrangerNotice,
   type TimeZoneResult,
 } from "@kelpie/access";
 import { type ChannelId, MAX_LANGUAGE_TAG_CHARS } from "@kelpie/channels";
+import { REGISTRY_NAME, type RegistryContract } from "@kelpie/config";
 import { and, count, eq, gt, isNull, lt, or } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
@@ -425,10 +427,12 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
   }
 
   /**
-   * Decides whether a sender may reach an agent. The owner reaches every agent. Other roles don't
-   * exist until multi-user lands; then they'll need a grant for `agentId` (ADR-0015).
+   * Decides whether a sender may reach an agent. The owner reaches every agent whose chat is on:
+   * Admin, the main agent and the specialists the owner opened (ADR-0036 §1, #288). The admin API's
+   * `*` names no agent. Other roles don't exist until multi-user lands; then they'll need a grant
+   * for `agentId` (ADR-0015).
    */
-  admit(identity: ChannelIdentity, _agentId: string, language?: string): Admission {
+  async admit(identity: ChannelIdentity, agentId: string, language?: string): Promise<Admission> {
     const user = this.#db
       .select({
         userId: schema.users.userId,
@@ -448,6 +452,15 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
       .get();
     if (!user) return { admitted: false, reason: "unknown_identity" };
     if (user.role !== "owner") return { admitted: false, reason: "no_grant" };
+    if (agentId !== "*") {
+      const registry = this.env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<
+        Pick<RegistryContract, "get">
+      >;
+      // Only an explicit `false`: a Registry from before #288, left by a partial rollback, has no
+      // `chat` at all, and its agents are reached as before.
+      const agent = await registry.get(agentId);
+      if (agent?.chat === false) return { admitted: false, reason: "no_grant" };
+    }
     // Written only when it changed, so a message doesn't cost a write.
     if (
       typeof language === "string" &&

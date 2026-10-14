@@ -1,6 +1,6 @@
 // Dream (#112): memory's consolidation, off the hot path. A step is one model call. The Context
 // Store keeps the run, picks the notes and decides what is written (docs/memory-format.md).
-import type { ModelTier, RoutedRequest, Usage } from "@kelpie/llm";
+import type { ModelSelection, RoutedRequest, Usage } from "@kelpie/llm";
 import {
   ABSTRACT_PROMPT,
   abstractInput,
@@ -14,7 +14,8 @@ import {
 } from "@kelpie/memory";
 import { complete, type ModelGateway } from "./model.ts";
 
-const DREAM_TIER: ModelTier = "cheap";
+/** The vault-wide steps run on the instance's memory trio, `cheap` by default (ADR-0036 §2). */
+const DREAM_MODEL: ModelSelection = { area: "memory" };
 /** Room for a model that thinks before it answers; the answer itself is one short line. */
 const ABSTRACT_OUTPUT_TOKENS = 2_000;
 
@@ -32,7 +33,7 @@ export async function proposeAbstract(
     messages: [{ role: "user", parts: [{ type: "text", text: abstractInput(note) }] }],
     maxOutputTokens: ABSTRACT_OUTPUT_TOKENS,
   };
-  const { text, usage } = await complete(gateway, DREAM_TIER, request, timeoutMs);
+  const { text, usage } = await complete(gateway, DREAM_MODEL, request, timeoutMs);
   return { abstract: abstractOf(text), usage };
 }
 
@@ -55,7 +56,7 @@ export async function proposeSummary(
     messages: [{ role: "user", parts: [{ type: "text", text: input }] }],
     maxOutputTokens: SUMMARY_OUTPUT_TOKENS,
   };
-  const { text, usage } = await complete(gateway, DREAM_TIER, request, timeoutMs);
+  const { text, usage } = await complete(gateway, DREAM_MODEL, request, timeoutMs);
   return { summary: summaryOf(text), usage };
 }
 
@@ -79,6 +80,6 @@ export async function proposeMerge(
     messages: [{ role: "user", parts: [{ type: "text", text: input }] }],
     maxOutputTokens: MERGE_OUTPUT_TOKENS,
   };
-  const { text, usage } = await complete(gateway, DREAM_TIER, request, timeoutMs);
+  const { text, usage } = await complete(gateway, DREAM_MODEL, request, timeoutMs);
   return { answer: mergeOf(text), usage };
 }

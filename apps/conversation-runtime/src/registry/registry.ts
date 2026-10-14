@@ -2,13 +2,15 @@ import { DurableObject } from "cloudflare:workers";
 import {
   type Actor,
   type AddAgentResult,
-  type AgentSummary,
+  type AgentEntry,
   isAgentId,
   isAgentName,
   type RegistryContract,
   type RenameAgentResult,
+  SETUP_AGENT_ID,
+  type SetAgentResult,
 } from "@kelpie/config";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, ne } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
@@ -42,8 +44,12 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     if (!isAgentId(id) || !isAgentName(name)) return { ok: false, reason: "invalid_input" };
     if (this.get(id)) return { ok: true, created: false };
     const now = Date.now();
+    // A specialist the main agent owns, which doesn't chat until the user turns it on (ADR-0036).
+    const owner = this.#mainId();
     this.#db.transaction((tx) => {
-      tx.insert(schema.agents).values({ id, name, createdAt: now, updatedAt: now }).run();
+      tx.insert(schema.agents)
+        .values({ id, name, createdAt: now, updatedAt: now, ownerId: owner, chat: false })
+        .run();
       tx.insert(schema.auditLog)
         .values({
           at: now,
@@ -79,13 +85,87 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     return { ok: true };
   }
 
-  get(id: string): AgentSummary | null {
+  get(id: string): AgentEntry | null {
+    const row = this.#db.select().from(schema.agents).where(eq(schema.agents.id, id)).get();
+    return row ? entryOf(row) : null;
+  }
+
+  /**
+   * Makes the agent the main agent (ADR-0036 §1). The previous one becomes a specialist that keeps
+   * chatting, and every specialist is owned by the new one. Admin and subagents can't be it.
+   */
+  setMain(id: string, actor: Actor): SetAgentResult {
+    if (!isAgentId(id)) return { ok: false, reason: "invalid_input" };
+    const agent = this.get(id);
+    if (!agent) return { ok: false, reason: "unknown_agent" };
+    if (agent.role === "admin" || agent.role === "subagent") {
+      return { ok: false, reason: "not_allowed" };
+    }
+    if (agent.role === "main") return { ok: true };
+    const now = Date.now();
+    this.#db.transaction((tx) => {
+      tx.update(schema.agents)
+        .set({ role: "specialist", chat: true, updatedAt: now })
+        .where(eq(schema.agents.role, "main"))
+        .run();
+      tx.update(schema.agents)
+        .set({ ownerId: id, updatedAt: now })
+        // Admin's row is stored as a specialist; its role is the setup agent's, by its id.
+        .where(
+          and(
+            eq(schema.agents.role, "specialist"),
+            ne(schema.agents.id, id),
+            ne(schema.agents.id, SETUP_AGENT_ID),
+          ),
+        )
+        .run();
+      tx.update(schema.agents)
+        .set({ role: "main", ownerId: null, chat: true, updatedAt: now })
+        .where(eq(schema.agents.id, id))
+        .run();
+      tx.insert(schema.auditLog)
+        .values({
+          at: now,
+          action: "agent.main_set",
+          agentId: id,
+          userId: actor.userId,
+          via: actor.via,
+        })
+        .run();
+    });
+    return { ok: true };
+  }
+
+  /** Turns a specialist's chat on or off. Admin and the main agent always chat; subagents never do. */
+  setChat(id: string, chat: boolean, actor: Actor): SetAgentResult {
+    if (!isAgentId(id) || typeof chat !== "boolean") return { ok: false, reason: "invalid_input" };
+    const agent = this.get(id);
+    if (!agent) return { ok: false, reason: "unknown_agent" };
+    if (agent.role !== "specialist") return { ok: false, reason: "not_allowed" };
+    if (agent.chat === chat) return { ok: true };
+    const now = Date.now();
+    this.#db.transaction((tx) => {
+      tx.update(schema.agents).set({ chat, updatedAt: now }).where(eq(schema.agents.id, id)).run();
+      tx.insert(schema.auditLog)
+        .values({
+          at: now,
+          action: "agent.chat_set",
+          agentId: id,
+          userId: actor.userId,
+          via: actor.via,
+        })
+        .run();
+    });
+    return { ok: true };
+  }
+
+  #mainId(): string | null {
     return (
       this.#db
-        .select({ id: schema.agents.id, name: schema.agents.name })
+        .select({ id: schema.agents.id })
         .from(schema.agents)
-        .where(eq(schema.agents.id, id))
-        .get() ?? null
+        .where(eq(schema.agents.role, "main"))
+        .get()?.id ?? null
     );
   }
 
@@ -97,11 +177,19 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     return { ok: true };
   }
 
-  list(): AgentSummary[] {
-    return this.#db
-      .select({ id: schema.agents.id, name: schema.agents.name })
-      .from(schema.agents)
-      .orderBy(asc(schema.agents.id))
-      .all();
+  list(): AgentEntry[] {
+    return this.#db.select().from(schema.agents).orderBy(asc(schema.agents.id)).all().map(entryOf);
   }
+}
+
+/**
+ * An agent as callers see it. Admin is the setup agent, by its id, whatever its row holds, and the
+ * roles' rules hold whatever the row says: Admin and the main agent chat, a subagent never does.
+ */
+function entryOf(row: typeof schema.agents.$inferSelect): AgentEntry {
+  if (row.id === SETUP_AGENT_ID) {
+    return { id: row.id, name: row.name, role: "admin", owner: null, chat: true };
+  }
+  const chat = row.role === "main" || (row.role === "specialist" && row.chat);
+  return { id: row.id, name: row.name, role: row.role, owner: row.ownerId, chat };
 }

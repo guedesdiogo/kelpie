@@ -30,6 +30,8 @@ Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`
 | `/commands/renameAgent` | `{ "id": "sales", "name": "Sales team" }` |
 | `/commands/getAgent` | `{ "id": "sales" }` |
 | `/commands/configureAgent` | `{ "id": "sales", "settings": { "systemPrompt": "…", "quietMs": 5000, "qualifier": "jev" } }` |
+| `/commands/setMainAgent` | `{ "id": "sales" }`; makes the agent the main agent, the one the owner talks to (ADR-0036 §1). The previous one becomes a specialist that keeps its chat |
+| `/commands/setAgentChat` | `{ "id": "sales", "chat": true }`; lets the owner reach a specialist on its channels, or stops it. Admin and the main agent always chat |
 | `/commands/listIdentities` | none |
 | `/commands/enableIdentity` | `{ "channel": "telegram", "channelUserId": "…" }`; re-enables a disabled identity, never a pending one |
 | `/commands/disableIdentity` | same as `enableIdentity` |
@@ -53,7 +55,7 @@ Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`
 | 401 | `unauthenticated` |
 | 403 | `forbidden`, `no_owner`, `invalid_bootstrap_token`, `invalid_recovery_token`, `cross_origin` (sent from another origin's page) |
 | 404 | `unknown_agent`, `unknown_identity`, `unknown_user`, `not_found` |
-| 409 | `not_paired` (a pending identity; pair it instead), `not_connected` (the agent has no bot), `identity_taken` (a recovery to a login another user holds) |
+| 409 | `not_paired` (a pending identity; pair it instead), `not_connected` (the agent has no bot), `identity_taken` (a recovery to a login another user holds), `not_allowed` (the agent's role doesn't take the change, such as Admin as the main agent) |
 | 410 | `bootstrap_disabled`, `recovery_token_spent` |
 | 413 | `too_large` |
 | 415 | `not_json` (a `Content-Type` other than `application/json`) |
@@ -63,6 +65,18 @@ Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`
 Identity values in answers are masked.
 
 **Waiting for the rest of a message.** An agent answers `quietMs` after the owner's latest message, 10 s by default, and each new message starts the wait again. Its `maxWaitMs`, 60 s by default, caps the wait from the first buffered message; a `quietMs` above it is cut to the cap. `quietMs: 0` removes the wait: each message is processed at once. Nothing else starts before the wait ends, the memory recall included (ADR-0024). No end-of-turn decision is asked of a qualifier (ADR-0024). `conversational: false` answers each message at once.
+
+**The model.** `model` sets the agent's provider, tier and effort (ADR-0036 §2), for example `{ "provider": "openai", "conversation": { "tier": "frontier", "effort": "high" }, "memory": { "tier": "cheap" } }`.
+- **Areas:**
+  - `conversation` covers the agent's turns;
+  - `memory` covers its history checkpoints.
+- **What each scope sets:** tier and effort are set per area, so a costlier conversation never makes the agent's memory costlier. `provider` covers both areas, and an area may name its own.
+- **Unset fields** come from the instance's settings, which Story 5.5's tools set, then the defaults:
+  - the provider is the first one llm-gateway saw with a key, in the cheap tier's order, pinned then. The pin leads every tier, so a route table that lists another provider first in `medium` or `frontier` follows the pin there too;
+  - the tier is `cheap`;
+  - the effort is the model's own.
+- **An effort a model doesn't take** is lowered to the nearest one it does.
+- **The older `tier` setting** still counts as `model.conversation.tier` when `model` doesn't set one.
 
 **Tools.** A turn may run the agent's tools for up to 5 rounds, within `toolLoopMs`: 120 s by default, the floor, up to 600 000 (ADR-0025). Past either bound, one last model call answers with what it has. In the webchat, the turn shows its step once the wait is over: reading memory, thinking, or the tool it runs. Telegram shows "typing".
 
@@ -201,7 +215,18 @@ Form pages are HTML:
 
 ## Setup agent
 
-Every instance has a built-in agent, `setup`, to configure Kelpie by talking to it: open `https://<ingress hostname>/webchat/?agent=setup` once the webchat is set up ("Webchat"). It guides a first setup: it creates the first agent, connects that agent's Telegram bot, and pairs the owner's Telegram account (Story 3.11, ADR-0013).
+Every instance has a built-in agent, `setup`, to configure Kelpie by talking to it: open `https://<ingress hostname>/webchat/?agent=setup` once the webchat is set up ("Webchat"). It guides a first setup: it connects the main agent's Telegram bot, and pairs the owner's Telegram account (Story 3.11, ADR-0013).
+
+**Roles** (ADR-0036 §1, #288). Each agent has a role, which `listAgents` shows:
+- **`admin`:** the setup agent, by its id.
+- **`main`:** the agent the owner talks to.
+  - A new instance starts with one, `kelpie`, named Kelpie.
+  - An instance that already had agents has none until the owner picks one with `setMainAgent`.
+  - The previous main agent becomes a specialist that keeps its chat.
+- **`specialist`:** every other agent, owned by the main agent.
+  - One created now doesn't chat until `setAgentChat` turns its chat on.
+  - Agents that existed before roles keep their chat.
+- **The check is at `admit`:** a chat its role doesn't allow answers `no_grant`, so a specialist whose chat is off doesn't answer its bot or the webchat.
 
 - **Where it comes from.**
   - A migration of the `Registry` adds it, on new instances and on ones bootstrapped before it.
@@ -210,7 +235,7 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
   - **Before deploying it to an existing instance,** check with `listAgents` that no agent already uses the id `setup`. Such an agent would keep its name and gain the setup tools.
 - **Its tools** run the commands above, as the owner, through the agent (`via: agent:setup`), and only the setup agent has them:
   - `list_agents`, `get_agent`, `create_agent` and `rename_agent` run directly;
-  - `configure_agent` waits for the owner's confirmation (below);
+  - `configure_agent`, `set_main_agent` and `set_agent_chat` wait for the owner's confirmation (below);
   - `connect_telegram` opens a secure form ("Secure forms"), and `pair_telegram` leads to the pairing page ("Pairing"). Kelpie sends each link itself (below), and the owner's submitting that page is their yes (ADR-0026).
 
   The identity, time zone and vault commands stay on this API. `conversation-runtime` binds no `Directory`, which would make it and `ingress` bind each other. Of `channel-egress`, it binds only `SetupForms`, which opens a form and nothing more (`docs/secrets.md`).

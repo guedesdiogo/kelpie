@@ -9,6 +9,11 @@
   "preview_urls": false,
   // Clef, the default end-of-turn qualifier, runs on Workers AI and needs no key (issue #118).
   "ai": { "binding": "AI" },
+  // The instance's model settings and its pinned provider (ADR-0036 §2, #286).
+  "durable_objects": {
+    "bindings": [{ "name": "MODEL_DEFAULTS", "class_name": "ModelDefaults" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ModelDefaults"] }],
   "vars": {
     // To go through AI Gateway, override these with --var when deploying (docs/admin-api.md),
     // so the instance's account id stays out of the repository:

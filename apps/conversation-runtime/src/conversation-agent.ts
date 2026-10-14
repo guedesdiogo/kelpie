@@ -1,4 +1,4 @@
-import { canonicalTimeZone } from "@kelpie/access";
+import { canonicalTimeZone, type Remote } from "@kelpie/access";
 import {
   type AllowedLinks,
   CAPABILITIES,
@@ -19,6 +19,8 @@ import {
   type AgentConfig,
   type AgentSettings,
   DEFAULT_SETTINGS,
+  REGISTRY_NAME,
+  type RegistryContract,
   type SetupEvent,
   type SetupStep,
 } from "@kelpie/config";
@@ -325,6 +327,14 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         destination: { channel: "webchat", threadId: admission.userId },
       });
       return;
+    }
+    // Ingress admitted the socket when it opened. An agent whose chat was turned off since then
+    // takes nothing more from it (#288): the socket closes, and a new one isn't admitted.
+    if (frame.type === "message" || frame.type === "confirm") {
+      if (await this.#chatOff(admission.agentId)) {
+        connection.close(1008, "chat off");
+        return;
+      }
     }
     if (frame.type === "confirm") {
       send(connection, {
@@ -714,16 +724,21 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     let summary = "";
     let usage: Usage[] = [];
     try {
-      const call = await this.#ports.generate("cheap", {
-        system: CHECKPOINT_SUMMARIZER,
-        messages: [
-          {
-            role: "user",
-            parts: [{ type: "text", text: summaryInput(current?.summary ?? null, rows) }],
-          },
-        ],
-        maxOutputTokens: CHECKPOINT_SUMMARY_TOKENS,
-      });
+      // The memory area: the agent's own settings for it, `cheap` unless they set its tier (#286).
+      const { model } = (await this.#config()).settings;
+      const call = await this.#ports.generate(
+        { area: "memory", agent: model },
+        {
+          system: CHECKPOINT_SUMMARIZER,
+          messages: [
+            {
+              role: "user",
+              parts: [{ type: "text", text: summaryInput(current?.summary ?? null, rows) }],
+            },
+          ],
+          maxOutputTokens: CHECKPOINT_SUMMARY_TOKENS,
+        },
+      );
       for await (const event of call.events) {
         if (event.type !== "finish") continue;
         usage = event.usage;
@@ -1093,14 +1108,19 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     let pendingContext = memory;
     for (;;) {
       step("thinking");
-      const call = await this.#ports.generate(settings.tier, {
-        system,
-        messages: this.#messages(turn.systemVersion, turn.checkpointId, toolsKey, promptKey),
-        ...(specs.length === 0 ? {} : { tools: specs }),
-        maxOutputTokens: settings.maxOutputTokens,
-        // History rows never keep it; the turn does, for later requests (#137).
-        ...(pendingContext === null ? {} : { context: pendingContext }),
-      });
+      // A turn's settings from before #286 have no `model`, and their tier was the conversation's.
+      const agent = settings.model ?? { conversation: { tier: settings.tier } };
+      const call = await this.#ports.generate(
+        { area: "conversation", agent },
+        {
+          system,
+          messages: this.#messages(turn.systemVersion, turn.checkpointId, toolsKey, promptKey),
+          ...(specs.length === 0 ? {} : { tools: specs }),
+          maxOutputTokens: settings.maxOutputTokens,
+          // History rows never keep it; the turn does, for later requests (#137).
+          ...(pendingContext === null ? {} : { context: pendingContext }),
+        },
+      );
       pendingContext = null;
       const flight = this.#inFlight.get(turn.id);
       if (flight) flight.call = call;
@@ -2297,6 +2317,14 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .set({ status, ...(status === "sent" ? { sentAt: this.#ports.now() } : {}) })
       .where(eq(schema.outbox.id, id))
       .run();
+  }
+
+  /** Whether the Registry says the agent's chat is off: only an explicit `false`, as `admit` reads it. */
+  async #chatOff(agentId: string): Promise<boolean> {
+    const registry = this.env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<
+      Pick<RegistryContract, "get">
+    >;
+    return (await registry.get(agentId))?.chat === false;
   }
 
   /** The agent's current settings, from its `AgentHost`. */

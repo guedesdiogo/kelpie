@@ -61,9 +61,9 @@ function webchatDeps(env: Env): WebchatDeps {
     admit: (identity, agentId) => env.DIRECTORY.getByName(DIRECTORY_NAME).admit(identity, agentId),
     // The registry lives in conversation-runtime; its Registry implements this contract.
     agentExists: async (agentId) =>
-      (await (env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<RegistryContract>).get(
-        agentId,
-      )) !== null,
+      (await (
+        env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<Pick<RegistryContract, "get">>
+      ).get(agentId)) !== null,
     page: (request) => env.ASSETS.fetch(request),
     connect: (name, admission) => connectWebchat(env, name, admission),
   };

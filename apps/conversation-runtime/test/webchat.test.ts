@@ -1,5 +1,6 @@
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import { REGISTRY_NAME } from "@kelpie/config";
 import { WEBCHAT_ADMISSION_HEADER } from "@kelpie/conversation/contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
@@ -164,6 +165,24 @@ describe("webchat sockets", () => {
     const chat = await open("assistant:webchat:stranger", null);
     await vi.waitFor(() => expect(chat.closedWith()).toBe(1008));
     expect(chat.frames).toEqual([]);
+  });
+
+  it("closes an open socket once its agent's chat is off, before taking the message (#288)", async () => {
+    use(fakeWorld([reply("Never.")]));
+    const owned = { userId: "u-owner", role: "owner", via: "test" } as const;
+    // A specialist created now starts with its chat off; the socket was admitted while it was on.
+    const registry = env.REGISTRY.getByName(REGISTRY_NAME);
+    await registry.add("quiet", "Quiet", owned);
+    await registry.setChat("quiet", true, owned);
+    const name = "quiet:webchat:u-owner";
+    const chat = await open(name, { ...owner, agentId: "quiet" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "history")).toHaveLength(1));
+
+    await registry.setChat("quiet", false, owned);
+    chat.send({ type: "message", id: "q1", text: "still there?" });
+    await vi.waitFor(() => expect(chat.closedWith()).toBe(1008));
+    expect(ofType(chat.frames, "accepted")).toEqual([]);
+    expect(await agent(name).turns()).toEqual([]);
   });
 
   it("buffers a message from the socket and answers with paced bubbles over it", async () => {

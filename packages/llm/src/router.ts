@@ -1,3 +1,4 @@
+import { EFFORTS, lowerEffort } from "./efforts.ts";
 import { LlmError } from "./errors.ts";
 import type {
   Effort,
@@ -34,10 +35,20 @@ export interface RouteModel {
 export type RoutedRequest = Omit<LlmRequest, "model" | "effort">;
 
 /**
- * Streams a tier's first candidate. When a provider fails with a retryable error before it has sent
- * anything, the next candidate takes over. Once an event has gone out, a failure ends the turn:
- * another model would start the reply again, and reasoning doesn't carry across providers.
- * Candidates whose provider isn't configured are skipped.
+ * Which tier to use, and optionally the provider to try first and the effort to send (ADR-0036 §2):
+ * a trio `resolveModel` resolved.
+ */
+export interface RouteChoice {
+  tier: ModelTier;
+  provider?: ProviderId | null;
+  effort?: Effort;
+}
+
+/**
+ * Streams the choice's first candidate: the chosen provider's, or the tier's first. When a provider
+ * fails with a retryable error before it has sent anything, the next candidate takes over. Once an
+ * event has gone out, a failure ends the turn: another model would start the reply again, and
+ * reasoning doesn't carry across providers. Candidates whose provider isn't configured are skipped.
  */
 export class ModelRouter {
   readonly #routes: RouteTable;
@@ -49,23 +60,23 @@ export class ModelRouter {
   }
 
   async *stream(
-    tier: ModelTier,
+    choice: RouteChoice,
     request: RoutedRequest,
     options: StreamOptions = {},
   ): AsyncIterable<LlmEvent> {
-    // RPC callers aren't type-checked, so the tier and the request fields are taken explicitly.
-    checkTier(tier);
+    // RPC callers aren't type-checked, so the choice and the request fields are taken explicitly.
+    const { tier } = choice;
     let lastError: LlmError | undefined;
-    for (const candidate of this.#routes[tier]) {
-      const provider = this.#providers[candidate.provider];
-      if (!provider) continue;
+    for (const candidate of this.route(tier, choice.provider)) {
+      const provider = this.#providers[candidate.provider] as LlmProvider;
+      const effort = lowerEffort(candidate.model, choice.effort ?? candidate.effort);
       const routed: LlmRequest = {
         model: candidate.model,
         system: request.system,
         messages: request.messages,
         ...(request.tools ? { tools: request.tools } : {}),
         maxOutputTokens: request.maxOutputTokens,
-        ...(candidate.effort ? { effort: candidate.effort } : {}),
+        ...(effort ? { effort } : {}),
         ...(typeof request.context === "string" ? { context: request.context } : {}),
       };
       let started = false;
@@ -86,10 +97,19 @@ export class ModelRouter {
     );
   }
 
-  /** The tier's candidates `stream` would try, in order: those whose provider is configured. */
-  route(tier: ModelTier): RouteCandidate[] {
+  /**
+   * The tier's candidates `stream` would try, in order: those whose provider is configured, the
+   * chosen provider's first.
+   */
+  route(tier: ModelTier, provider?: ProviderId | null): RouteCandidate[] {
     checkTier(tier);
-    return this.#routes[tier].filter((candidate) => this.#providers[candidate.provider]);
+    const configured = this.#routes[tier].filter(
+      (candidate) => this.#providers[candidate.provider],
+    );
+    return [
+      ...configured.filter((candidate) => candidate.provider === provider),
+      ...configured.filter((candidate) => candidate.provider !== provider),
+    ];
   }
 }
 
@@ -99,8 +119,7 @@ function checkTier(tier: ModelTier): void {
   }
 }
 
-const PROVIDERS: readonly string[] = ["anthropic", "openai"] satisfies ProviderId[];
-const EFFORTS: readonly string[] = ["low", "medium", "high", "xhigh", "max"] satisfies Effort[];
+export const PROVIDERS: readonly string[] = ["anthropic", "openai"] satisfies ProviderId[];
 
 /** Checks a route table read from configuration. */
 export function parseRouteTable(value: unknown): RouteTable {
