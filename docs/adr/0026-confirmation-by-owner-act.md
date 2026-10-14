@@ -4,6 +4,7 @@
 - Date: 2026-10-09
 - Issue: [#186](https://github.com/guedesdiogo/kelpie/issues/186)
 - Accepted by the owner on 2026-10-07, on #48: «Link/botão como o sim»
+- Amended by: [ADR-0040](0040-continue-at-the-tool-bound.md), a separate Continue button, under the same rules, continues a turn past its tool bound
 
 ## Context
 
