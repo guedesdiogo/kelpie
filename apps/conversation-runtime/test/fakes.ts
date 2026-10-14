@@ -2,17 +2,24 @@ import type { SendOutcome } from "@kelpie/channels";
 import type { SetupStep } from "@kelpie/config";
 import type { RecallOptions } from "@kelpie/context-store/contract";
 import type { Destination } from "@kelpie/conversation/contract";
-import type { AssistantMessage, LlmEvent, ModelSelection, RoutedRequest, Usage } from "@kelpie/llm";
+import {
+  type AssistantMessage,
+  type FallbackEvent,
+  LlmError,
+  type LlmErrorCode,
+  type ModelSelection,
+  type RoutedRequest,
+  type RouterEvent,
+  type Usage,
+} from "@kelpie/llm";
 import type { ConversationPorts, ModelCall } from "../src/ports.ts";
 import type { ToolProvider } from "../src/tools.ts";
 
 // The Worker runs in the test's isolate, so these fakes replace the ConversationAgent's ports.
 
-/**
- * The message of failures tests inject into a Durable Object. workerd reports a rejected RPC method
- * as unhandled even when its caller handles it, so `vitest.config.ts` ignores errors with it.
- */
-export const INJECTED_FAILURE = "injected test failure";
+import { INJECTED_FAILURE } from "./injected-failure.ts";
+
+export { INJECTED_FAILURE };
 
 type ModelScript =
   | { kind: "reply"; text: string; usage?: Usage[] }
@@ -26,7 +33,22 @@ type ModelScript =
   /** The stream ends without a finish event. */
   | { kind: "truncate" }
   /** Asks for these tool calls, after `text` if any; ids are `call-0`, `call-1`… across the world. */
-  | { kind: "tools"; calls: { name: string; input: unknown }[]; text?: string };
+  | {
+      kind: "tools";
+      calls: { name: string; input: unknown }[];
+      text?: string;
+      /** The router's fallbacks before the answer (#293). */
+      fallbacks?: FallbackEvent[];
+    }
+  /** The router fell back from these routes, then `text` answered (#293). */
+  | { kind: "fellBack"; fallbacks: FallbackEvent[]; text: string }
+  /** The router fell back from these routes, then `route` failed with `code` (#293). */
+  | {
+      kind: "noRoute";
+      fallbacks: FallbackEvent[];
+      code: LlmErrorCode;
+      route?: { provider: "anthropic" | "openai"; model: string };
+    };
 
 export const reply = (text: string, usage?: Usage[]): ModelScript =>
   usage ? { kind: "reply", text, usage } : { kind: "reply", text };
@@ -35,9 +57,27 @@ export const refuse = (): ModelScript => ({ kind: "refuse" });
 export const hang = (): ModelScript => ({ kind: "hang" });
 export const fail = (): ModelScript => ({ kind: "fail" });
 export const truncate = (): ModelScript => ({ kind: "truncate" });
+export const fellBack = (fallbacks: FallbackEvent[], text: string): ModelScript => ({
+  kind: "fellBack",
+  fallbacks,
+  text,
+});
+export const noRoute = (
+  code: LlmErrorCode,
+  fallbacks: FallbackEvent[] = [],
+  route?: { provider: "anthropic" | "openai"; model: string },
+): ModelScript => ({ kind: "noRoute", fallbacks, code, ...(route ? { route } : {}) });
 export const toolCalls = (...calls: { name: string; input?: unknown }[]): ModelScript => ({
   kind: "tools",
   calls: calls.map(({ name, input }) => ({ name, input: input ?? {} })),
+});
+/** Asks for the tool calls after the router fell back from these routes (#293). */
+export const toolCallsAfter = (
+  fallbacks: FallbackEvent[],
+  ...calls: { name: string; input?: unknown }[]
+): ModelScript => ({
+  ...(toolCalls(...calls) as Extract<ModelScript, { kind: "tools" }>),
+  fallbacks,
 });
 /** Says something, then asks for the tool calls in the same reply. */
 export const sayThenCall = (text: string, ...calls: { name: string; input?: unknown }[]) => ({
@@ -215,7 +255,7 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
         const cancelledPromise = new Promise<void>((resolve) => {
           release = resolve;
         });
-        async function* events(): AsyncIterable<LlmEvent> {
+        async function* events(): AsyncIterable<RouterEvent> {
           switch (script.kind) {
             case "hang":
               await cancelledPromise;
@@ -245,6 +285,7 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
               };
               return;
             case "tools":
+              yield* script.fallbacks ?? [];
               yield {
                 type: "finish",
                 reason: "tool_calls",
@@ -252,6 +293,22 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
                   script.calls.map((call) => ({ id: `call-${calls++}`, ...call })),
                   script.text,
                 ),
+                usage: FAKE_USAGE,
+              };
+              return;
+            case "noRoute": {
+              yield* script.fallbacks;
+              const error = new LlmError("no route answered", script.code, false);
+              if (script.route) error.route = script.route;
+              throw error;
+            }
+            case "fellBack":
+              yield* script.fallbacks;
+              yield { type: "text", delta: script.text };
+              yield {
+                type: "finish",
+                reason: "stop",
+                message: assistant(script.text),
                 usage: FAKE_USAGE,
               };
               return;
