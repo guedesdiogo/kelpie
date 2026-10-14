@@ -31,9 +31,10 @@ export class ContextStore extends WorkerEntrypoint {
 }
 export default { fetch: () => new Response(null, { status: 404 }) };`,
           },
-          // llm-gateway answers the deploy probe's ping (#234), and describes each tier's route for an
-          // agent's prompt (#283) as `withIdentity` in test/prompts.ts expects it. It has no other
-          // method, so a model call is refused by the runtime.
+          // llm-gateway answers the deploy probe's ping (#234), and describes an area's trio for an
+          // agent's prompt (#286) as `withIdentity` in test/prompts.ts expects it: the agent's
+          // area tier and effort, cheap by default, on one model named after the tier. It has no
+          // other method, so a model call is refused by the runtime.
           {
             name: "kelpie-llm-gateway",
             modules: true,
@@ -43,9 +44,15 @@ export class LlmGateway extends WorkerEntrypoint {
   ping() {
     return { ok: true };
   }
-  routes() {
-    const route = (tier) => [{ provider: "anthropic", model: "claude-test-" + tier }];
-    return { cheap: route("cheap"), medium: route("medium"), frontier: route("frontier") };
+  describe(area, agent) {
+    const tier = agent?.[area]?.tier ?? "cheap";
+    const effort = agent?.[area]?.effort;
+    return {
+      provider: "anthropic",
+      tier,
+      ...(effort ? { effort } : {}),
+      route: [{ provider: "anthropic", model: "claude-test-" + tier }],
+    };
   }
 }
 export default { fetch: () => new Response(null, { status: 404 }) };`,

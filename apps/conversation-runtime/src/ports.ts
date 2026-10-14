@@ -23,7 +23,12 @@ import type {
   WriteResult,
 } from "@kelpie/context-store/contract";
 import type { Destination } from "@kelpie/conversation/contract";
-import { fromNdjsonStream, type LlmEvent, type ModelTier, type RoutedRequest } from "@kelpie/llm";
+import {
+  fromNdjsonStream,
+  type LlmEvent,
+  type ModelSelection,
+  type RoutedRequest,
+} from "@kelpie/llm";
 import { memoryTools } from "./memory-tools.ts";
 import { setupTools } from "./setup-agent.ts";
 import type { ToolProvider } from "./tools.ts";
@@ -42,7 +47,8 @@ export type TurnStep = "memory" | "thinking" | "tool" | "idle";
 
 /** Everything the ConversationAgent needs from outside, so tests can replace it (ADR-0002). */
 export interface ConversationPorts {
-  generate(tier: ModelTier, request: RoutedRequest): Promise<ModelCall>;
+  /** One model call, for an area with the agent's model settings (ADR-0036 §2). */
+  generate(selection: ModelSelection, request: RoutedRequest): Promise<ModelCall>;
   /** The providers of the agents' tools (ADR-0014). */
   tools: readonly ToolProvider[];
   /**
@@ -112,7 +118,7 @@ export interface ConversationPorts {
 /** The part of llm-gateway's RPC surface this Worker uses. */
 interface LlmGatewayBinding {
   generate(
-    tier: ModelTier,
+    selection: ModelSelection,
     request: RoutedRequest,
   ): Promise<{
     events(): Promise<ReadableStream<Uint8Array>>;
@@ -144,8 +150,8 @@ function productionPorts(env: Env): ConversationPorts {
   const agentHost = (id: string) =>
     env.AGENT_HOST.getByName(id) as unknown as Remote<AgentHostContract>;
   return {
-    async generate(tier, request) {
-      const generation = await gateway.generate(tier, request);
+    async generate(selection, request) {
+      const generation = await gateway.generate(selection, request);
       const dispose = () => (generation as Partial<Disposable>)[Symbol.dispose]?.();
       // Cancelling the stream doesn't cross RPC, so stopping early calls cancel() explicitly.
       const cancel = () => {

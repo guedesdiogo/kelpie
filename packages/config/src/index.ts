@@ -18,6 +18,7 @@ export {
 } from "./commands.ts";
 export {
   type AgentSettings,
+  agentModel,
   DEFAULT_SETTINGS,
   isAgentId,
   isAgentName,
