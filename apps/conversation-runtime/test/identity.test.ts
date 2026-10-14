@@ -60,6 +60,25 @@ describe("identitySection", () => {
     expect(text).toContain("You are Bia, one of the owner's agents on Kelpie");
   });
 
+  it("states the role the Registry gives it (#314)", () => {
+    const line = (role: "admin" | "main" | "specialist" | "subagent") =>
+      identitySection({ id: "bia", name: "Bia", role, model: runsOn([haiku]) });
+    expect(line("main")).toContain(
+      "You are Bia, the owner's main agent on Kelpie, the one they talk to.",
+    );
+    expect(line("specialist")).toContain(
+      "You are Bia, a specialist agent on Kelpie, owned by the owner's main agent.",
+    );
+    expect(line("subagent")).toContain(
+      "You are Bia, a temporary subagent on Kelpie, working on one demand of the agent that created you.",
+    );
+    expect(line("admin")).toContain("You are Bia, Kelpie's setup agent, which configures Kelpie.");
+    // An agent the Registry doesn't list keeps the plain line.
+    expect(identitySection({ id: "bia", name: "Bia", role: null, model: null })).toContain(
+      "You are Bia, one of the owner's agents on Kelpie",
+    );
+  });
+
   it("gives the setup agent its own role", () => {
     const text = identitySection({ id: SETUP_AGENT_ID, name: "Setup", model: runsOn([]) });
     expect(text).toContain("You are Setup, Kelpie's setup agent, which configures Kelpie.");
