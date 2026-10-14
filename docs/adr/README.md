@@ -40,6 +40,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0034](0034-agents-sdk-0-28.md) | conversation-runtime runs on Agents SDK 0.28.0, and adopts none of its new features | [#266](https://github.com/guedesdiogo/kelpie/issues/266) |
 | [0035](0035-agent-computer.md) | Agents get a computer: a shell by default, and on request a Cloudflare Sandbox or the owner's VPS, where they code through Claude Code | [#267](https://github.com/guedesdiogo/kelpie/issues/267) |
 | [0036](0036-agent-roles-models-and-subagents.md) | Agents have roles and owners, a model trio per agent and area, and temporary subagents that never exceed their creator | [#282](https://github.com/guedesdiogo/kelpie/issues/282) |
+| [0037](0037-conversations-through-claude-code.md) | Conversations reach Claude through the API key's plan credits first, then through Claude Code on the owner's subscription | [#278](https://github.com/guedesdiogo/kelpie/issues/278) |
 
 ## Format
 
