@@ -62,6 +62,9 @@ jobs:
           # Optional: it signs the deep probe, which is skipped while it's unset, and goes to ingress
           # when ingress has none, or on a rotation.
           DEPLOY_PROBE_TOKEN: ${{ secrets.DEPLOY_PROBE_TOKEN }}
+          # Optional: the VPC Service that reaches the owner's runner, an environment variable. It
+          # becomes channel-egress's RUNNER binding; while it's unset, the runner is off (docs/runner.md).
+          RUNNER_VPC_SERVICE_ID: ${{ vars.RUNNER_VPC_SERVICE_ID }}
           WRANGLER_SEND_METRICS: "false"
           WATCH_MINUTES: ${{ inputs.watch-minutes }}
           ALWAYS: ${{ inputs.always }}

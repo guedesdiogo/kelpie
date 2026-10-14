@@ -9,7 +9,7 @@ import {
   type Role,
   type TimeZoneResult,
 } from "@kelpie/access";
-import type { ChannelFormsContract, ChannelId } from "@kelpie/channels";
+import type { ChannelFormsContract, ChannelId, RunnerState } from "@kelpie/channels";
 import {
   type AgentSettings,
   isAgentId,
@@ -167,10 +167,14 @@ export interface ConfigPorts {
     listIdentities(): Promise<(ChannelIdentity & { status: IdentityStatus })[]>;
     setTimeZone(userId: string, timeZone: string): Promise<TimeZoneResult>;
   };
-  /** The secure forms that take a channel's secrets, in channel-egress (ADR-0013). */
+  /** The secure forms that take a channel's or the runner's secrets, in channel-egress (ADR-0013). */
   channels: Pick<
     ChannelFormsContract,
-    "createTelegramForm" | "registerTelegramWebhook" | "describeTelegramBot"
+    | "createTelegramForm"
+    | "registerTelegramWebhook"
+    | "describeTelegramBot"
+    | "createRunnerForm"
+    | "describeRunner"
   >;
   /** The vault's Context Store (#114). */
   vault: {
@@ -387,6 +391,32 @@ export function createConfigCommands(ports: ConfigPorts) {
         ok: false,
         reason: result.reason === "store_unavailable" ? "unavailable" : result.reason,
       };
+    },
+
+    /**
+     * Starts connecting the VPS runner (#294): returns the path of a one-time secure form on the
+     * admin API, where the owner pastes the runner's secret. `channel-egress` checks it with the
+     * runner before storing it. `not_configured`: it was deployed without the runner's VPC Service.
+     */
+    async connectRunner(actor: Actor): Promise<CommandResult<{ path: string; expiresAt: number }>> {
+      if (!isOwner(actor)) return forbidden;
+      const form = await ports.channels.createRunnerForm();
+      if (!form.ok) {
+        return {
+          ok: false,
+          reason: form.reason === "not_configured" ? "not_configured" : "unavailable",
+        };
+      }
+      return { ok: true, value: { path: `/forms/${form.token}`, expiresAt: form.expiresAt } };
+    },
+
+    /** The VPS runner's state, from its `/health` (#294). Never its secret. */
+    async describeRunner(actor: Actor): Promise<CommandResult<RunnerState>> {
+      if (!isOwner(actor)) return forbidden;
+      const described = await ports.channels.describeRunner();
+      return described.ok
+        ? { ok: true, value: described.runner }
+        : { ok: false, reason: "unavailable" };
     },
 
     /**

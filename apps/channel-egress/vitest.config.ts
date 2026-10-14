@@ -1,6 +1,26 @@
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
 
+const RUNNER_SECRETS: Record<string, { version: string; protocol: number }> = {
+  ["r".repeat(64)]: { version: "0.1.0", protocol: 1 },
+  ["o".repeat(64)]: { version: "0.0.9", protocol: 2 },
+};
+
+/**
+ * A stand-in for the VPS runner behind its VPC Service (#294). Its answer depends on the secret, so
+ * each test picks one (test/runner.test.ts): a known secret gets its health, `b…` a server error,
+ * and any other a 401.
+ */
+function fakeRunner(request: Request): Response {
+  const secret = (request.headers.get("authorization") ?? "").replace(/^Bearer /, "");
+  if (new URL(request.url).pathname !== "/health") return new Response(null, { status: 404 });
+  if (secret === "b".repeat(64)) return new Response("boom", { status: 500 });
+  const health = RUNNER_SECRETS[secret];
+  return health
+    ? Response.json({ ok: true, ...health })
+    : Response.json({ ok: false }, { status: 401 });
+}
+
 export default defineConfig({
   plugins: [
     cloudflareTest({
@@ -11,6 +31,8 @@ export default defineConfig({
           SECRETS_KEY: "KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio=",
           INGRESS_ORIGIN: "https://ingress.test",
         },
+        // The release tool adds the real binding when the instance has a runner (docs/deploy.md).
+        serviceBindings: { RUNNER: fakeRunner },
       },
     }),
   ],

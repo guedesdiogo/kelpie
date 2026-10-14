@@ -1,12 +1,14 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CloudflareError } from "../src/cloudflare.ts";
+import type { ConfigAdditions } from "../src/config-additions.ts";
 import {
   type DeployDeps,
   deepProbeToken,
   deploy,
   deployedVersion,
   planDeploy,
+  runnerVpcService,
 } from "../src/deploy.ts";
 import { buildTagOf, type Git, gitAt } from "../src/git.ts";
 import { deployPlanReport, deployReport } from "../src/report.ts";
@@ -85,6 +87,7 @@ function harness(setup: {
     args: string[];
     /** The secrets file wrangler was given: where it was, what it held, and its permissions. */
     secrets?: { path: string; content: Record<string, string>; mode: number };
+    additions?: ConfigAdditions;
   }> = [];
   const masked: string[] = [];
   const warnings: string[] = [];
@@ -95,7 +98,7 @@ function harness(setup: {
     ...fakeClock(),
     log: { info: () => {}, warn: (message) => warnings.push(message) },
     mask: (value) => masked.push(value),
-    async wranglerDeploy(spec, args) {
+    async wranglerDeploy(spec, args, additions) {
       // Wrangler reads the secrets file while it runs; the test keeps what it found there.
       const file = args.includes("--secrets-file")
         ? args[args.indexOf("--secrets-file") + 1]
@@ -107,7 +110,12 @@ function harness(setup: {
             mode: statSync(file).mode & 0o777,
           }
         : undefined;
-      wranglerCalls.push({ spec, args, ...(secrets ? { secrets } : {}) });
+      wranglerCalls.push({
+        spec,
+        args,
+        ...(secrets ? { secrets } : {}),
+        ...(additions ? { additions } : {}),
+      });
       if (spec.script === setup.failWrangler) {
         if (setup.liveBeforeFailing) {
           api.active.set(spec.script, [{ version_id: `${spec.app}-new`, percentage: 100 }]);
@@ -597,6 +605,51 @@ describe("the deep probe", () => {
     expect(warnings[0]).toContain("isn't https");
     expect(wranglerCalls.some((call) => call.args.includes("--secrets-file"))).toBe(false);
     expect(report.probes.map((probe) => probe.probe)).not.toContain("deep");
+  });
+});
+
+describe("the runner's VPC Service (#294)", () => {
+  const SERVICE = "e6a0817c-79c5-40ca-9776-a1c019defe70";
+
+  it("goes to channel-egress alone, as its RUNNER binding, with the id kept out of the logs", async () => {
+    const { deps, wranglerCalls, masked } = harness({});
+    const report = await deploy(deps, await planDeploy(deps), {
+      ...options,
+      runnerVpcService: SERVICE,
+    });
+
+    expect(report.outcome).toBe("deployed");
+    const added = wranglerCalls.filter((call) => call.additions);
+    expect(added.map((call) => call.spec.script)).toEqual(["kelpie-channel-egress"]);
+    expect(added[0]?.additions).toEqual({
+      vpc_services: [{ binding: "RUNNER", service_id: SERVICE }],
+    });
+    expect(masked).toContain(SERVICE);
+  });
+
+  it("adds no binding to any Worker without it", async () => {
+    const { deps, wranglerCalls } = harness({});
+    await deploy(deps, await planDeploy(deps), options);
+    expect(wranglerCalls.some((call) => call.additions)).toBe(false);
+  });
+});
+
+describe("runnerVpcService", () => {
+  it("is optional, and trimmed", () => {
+    const warnings: string[] = [];
+    const warn = (message: string) => warnings.push(message);
+    expect(runnerVpcService(undefined, warn)).toBeUndefined();
+    expect(runnerVpcService(" \n", warn)).toBeUndefined();
+    expect(runnerVpcService(" E6A0817C-79C5-40CA-9776-A1C019DEFE70\n", warn)).toBe(
+      "E6A0817C-79C5-40CA-9776-A1C019DEFE70",
+    );
+    expect(warnings).toEqual([]);
+  });
+
+  it("skips what isn't a VPC Service id, with a warning instead of stopping the deploy", () => {
+    const warnings: string[] = [];
+    expect(runnerVpcService("kelpie-runner", (message) => warnings.push(message))).toBeUndefined();
+    expect(warnings[0]).toContain("without the runner's binding");
   });
 });
 

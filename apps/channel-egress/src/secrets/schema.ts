@@ -3,7 +3,7 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 // Kelpie's secret store (ADR-0013), in its SecretStore's SQLite. Values are encrypted at the
 // application level; nothing here is readable without the Worker secret.
 
-/** One secret per slot, such as `telegram:<agentId>`. */
+/** One secret per slot, such as `telegram:<agentId>` or `runner:vps`. */
 export const secrets = sqliteTable("secrets", {
   slot: text("slot").primaryKey(),
   keyVersion: integer("key_version").notNull(),
@@ -19,7 +19,7 @@ export const secrets = sqliteTable("secrets", {
 export const forms = sqliteTable("forms", {
   tokenHash: text("token_hash").primaryKey(),
   agentId: text("agent_id").notNull(),
-  kind: text("kind", { enum: ["telegram"] }).notNull(),
+  kind: text("kind", { enum: ["telegram", "runner"] }).notNull(),
   expiresAt: integer("expires_at").notNull(),
   /** Values refused so far; the form closes after a few, so a link can't probe tokens forever. */
   refusals: integer("refusals").notNull().default(0),

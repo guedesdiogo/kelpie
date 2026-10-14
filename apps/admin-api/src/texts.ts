@@ -42,6 +42,21 @@ export interface PageTexts {
   };
   noBot: { title: string; body: string };
   noAgent: { title: string; body: string };
+  /** The secure form for the VPS runner's secret (#294). */
+  runner: {
+    title: string;
+    intro: string;
+    label: string;
+    button: string;
+    empty: string;
+    invalid: string;
+    refused: string;
+    unreachable: string;
+    notConfigured: { title: string; body: string };
+    connected: string;
+    done: (version: string) => string;
+    outdated: (version: string) => string;
+  };
 }
 
 export const PAGES: Localized<PageTexts> = {
@@ -97,6 +112,28 @@ export const PAGES: Localized<PageTexts> = {
     noAgent: {
       title: "No such agent",
       body: "Check the link, or ask the setup agent for a new one.",
+    },
+    runner: {
+      title: "Connect the runner",
+      intro:
+        "Paste the secret in <code>~/.config/kelpie-runner/secret</code> on your server. Kelpie checks it with the runner, then keeps it in its secret store.",
+      label: "Runner secret",
+      button: "Connect",
+      empty: "Paste the runner's secret first.",
+      invalid:
+        "That isn't a runner secret: it has at least 32 characters and no spaces. Copy it again from the server.",
+      refused: "The runner didn't accept that secret. Copy it again from the server.",
+      unreachable:
+        "Kelpie couldn't reach the runner. Check that it and cloudflared are running on the server, then try again.",
+      notConfigured: {
+        title: "No runner configured",
+        body: "Kelpie was deployed without the runner's VPC Service, so it can't check a secret. <code>docs/runner.md</code> says how to set it up.",
+      },
+      connected: "Runner connected",
+      done: (version) =>
+        `The runner, version ${version}, now answers Kelpie. You can close this page.`,
+      outdated: (version) =>
+        `The secret is stored, but the runner (version ${version}) speaks another protocol version than this Kelpie. Update it on the server, as <code>docs/runner.md</code> says.`,
     },
   },
   "pt-BR": {
@@ -155,6 +192,28 @@ export const PAGES: Localized<PageTexts> = {
       title: "Esse agente não existe",
       body: "Confira o link, ou peça um novo ao agente de configuração.",
     },
+    runner: {
+      title: "Conectar o runner",
+      intro:
+        "Cole o segredo que está em <code>~/.config/kelpie-runner/secret</code> no seu servidor. O Kelpie confere com o runner e depois o guarda no cofre de segredos.",
+      label: "Segredo do runner",
+      button: "Conectar",
+      empty: "Cole o segredo do runner primeiro.",
+      invalid:
+        "Isso não é um segredo do runner: ele tem pelo menos 32 caracteres e nenhum espaço. Copie de novo do servidor.",
+      refused: "O runner não aceitou esse segredo. Copie de novo do servidor.",
+      unreachable:
+        "O Kelpie não conseguiu falar com o runner. Confira se ele e o cloudflared estão rodando no servidor e tente de novo.",
+      notConfigured: {
+        title: "Nenhum runner configurado",
+        body: "O Kelpie foi publicado sem o VPC Service do runner, então não tem como conferir um segredo. O <code>docs/runner.md</code> explica como configurar.",
+      },
+      connected: "Runner conectado",
+      done: (version) =>
+        `O runner, versão ${version}, agora responde ao Kelpie. Pode fechar esta página.`,
+      outdated: (version) =>
+        `O segredo foi guardado, mas o runner (versão ${version}) fala outra versão do protocolo que este Kelpie. Atualize-o no servidor, como diz o <code>docs/runner.md</code>.`,
+    },
   },
   es: {
     signIn: { title: "Inicia sesión primero", body: "Abre este enlace de nuevo en tu navegador." },
@@ -211,6 +270,28 @@ export const PAGES: Localized<PageTexts> = {
     noAgent: {
       title: "Ese agente no existe",
       body: "Revisa el enlace, o pide uno nuevo al agente de configuración.",
+    },
+    runner: {
+      title: "Conectar el runner",
+      intro:
+        "Pega el secreto que está en <code>~/.config/kelpie-runner/secret</code> en tu servidor. Kelpie lo comprueba con el runner y luego lo guarda en su almacén de secretos.",
+      label: "Secreto del runner",
+      button: "Conectar",
+      empty: "Pega primero el secreto del runner.",
+      invalid:
+        "Eso no es un secreto del runner: tiene al menos 32 caracteres y ningún espacio. Cópialo de nuevo desde el servidor.",
+      refused: "El runner no aceptó ese secreto. Cópialo de nuevo desde el servidor.",
+      unreachable:
+        "Kelpie no pudo hablar con el runner. Comprueba que él y cloudflared están en marcha en el servidor e inténtalo de nuevo.",
+      notConfigured: {
+        title: "Ningún runner configurado",
+        body: "Kelpie se publicó sin el VPC Service del runner, así que no puede comprobar un secreto. <code>docs/runner.md</code> explica cómo configurarlo.",
+      },
+      connected: "Runner conectado",
+      done: (version) =>
+        `El runner, versión ${version}, ya responde a Kelpie. Puedes cerrar esta página.`,
+      outdated: (version) =>
+        `El secreto quedó guardado, pero el runner (versión ${version}) habla otra versión del protocolo que este Kelpie. Actualízalo en el servidor, como dice <code>docs/runner.md</code>.`,
     },
   },
 };

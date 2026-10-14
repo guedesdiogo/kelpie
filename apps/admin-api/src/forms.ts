@@ -1,11 +1,14 @@
 import type { ChannelFormsContract, Locale } from "@kelpie/channels";
 import { PAGES } from "./texts.ts";
 
-// The one-time secure forms (ADR-0013) where the owner pastes a channel's secret, such as a
-// Telegram bot token. The page is served by the admin API behind Access; the secret goes straight
+// The one-time secure forms (ADR-0013) where the owner pastes a secret: a Telegram bot token, or
+// the VPS runner's secret. The page is served by the admin API behind Access; the secret goes straight
 // to channel-egress and never into a conversation, a log or a response.
 
-export type FormDeps = Pick<ChannelFormsContract, "describeForm" | "redeemTelegramForm">;
+export type FormDeps = Pick<
+  ChannelFormsContract,
+  "describeForm" | "redeemTelegramForm" | "redeemRunnerForm"
+>;
 
 /** A form token as channel-egress issues it: base64url, at most 64 characters. */
 const FORM_TOKEN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -20,6 +23,9 @@ export function formTokenOf(pathname: string): string | null {
 export async function showForm(token: string, forms: FormDeps, locale: Locale): Promise<Response> {
   const form = await forms.describeForm(token);
   if (!form.ok) return formGone(form, locale);
+  if (form.kind === "runner") {
+    return page(200, PAGES[locale].runner.title, runnerForm(null, locale), locale);
+  }
   return page(200, PAGES[locale].connect.title, tokenForm(form.agentId, null, locale), locale);
 }
 
@@ -88,6 +94,46 @@ export async function submitForm(
     return page(400, texts.connect.title, tokenForm(form.agentId, message, locale), locale);
   }
   return result.reason === "unknown_form" ? closedPage(locale) : unavailablePage(locale);
+}
+
+/**
+ * Submits the runner's secret (#294). `channel-egress` checks it with the runner's `/health` before
+ * storing it; a runner that can't answer leaves the form open for another try.
+ */
+export async function submitRunnerForm(
+  token: string,
+  secret: string,
+  forms: FormDeps,
+  locale: Locale,
+): Promise<Response> {
+  const texts = PAGES[locale].runner;
+  const again = async (status: number, message: string) => {
+    const form = await forms.describeForm(token);
+    if (!form.ok) return formGone(form, locale);
+    return page(status, texts.title, runnerForm(message, locale), locale);
+  };
+  // Nothing to check: an empty submission doesn't count against the form's attempts.
+  if (secret.trim() === "") return again(400, texts.empty);
+  const result = await forms.redeemRunnerForm(token, secret);
+  if (result.ok) {
+    const version = `<code>${escapeHtml(result.runner.version)}</code>`;
+    const body = result.runner.state === "ready" ? texts.done(version) : texts.outdated(version);
+    return page(200, texts.connected, `<p>${body}</p>`, locale);
+  }
+  switch (result.reason) {
+    case "invalid_secret":
+      return again(400, texts.invalid);
+    case "secret_refused":
+      return again(400, texts.refused);
+    case "unreachable":
+      return again(502, texts.unreachable);
+    case "not_configured":
+      return page(503, texts.notConfigured.title, `<p>${texts.notConfigured.body}</p>`, locale);
+    case "unknown_form":
+      return closedPage(locale);
+    default:
+      return unavailablePage(locale);
+  }
 }
 
 /** Runs `work`, waits for it at most `ms`, and never fails: a report is a courtesy. */
@@ -173,6 +219,18 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 <form method="post">
   <label for="botToken">${texts.label}</label>
   <input id="botToken" name="botToken" type="password" autocomplete="off" spellcheck="false" maxlength="128" required>
+  <button type="submit">${texts.button}</button>
+</form>`;
+}
+
+/** The runner's form, which posts to its own URL, as the bot token's does. */
+function runnerForm(error: string | null, locale: Locale): string {
+  const texts = PAGES[locale].runner;
+  return `<p>${texts.intro}</p>
+${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+<form method="post">
+  <label for="runnerSecret">${texts.label}</label>
+  <input id="runnerSecret" name="runnerSecret" type="password" autocomplete="off" spellcheck="false" maxlength="256" required>
   <button type="submit">${texts.button}</button>
 </form>`;
 }

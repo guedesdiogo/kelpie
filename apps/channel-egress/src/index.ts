@@ -19,6 +19,14 @@ import {
 } from "@kelpie/channels";
 import { TELEGRAM_SECRET_HEADER, TelegramAdapter } from "@kelpie/channels/telegram";
 import { isAgentId } from "@kelpie/config";
+import {
+  checkRunner,
+  parseRunnerSecret,
+  RUNNER_NAME,
+  RUNNER_SECRET,
+  type RunnerCheck,
+  runnerOf,
+} from "./runner.ts";
 import { randomToken } from "./secrets/crypto.ts";
 import { type ReadResult, SECRET_STORE_NAME, SecretStore } from "./secrets/secret-store.ts";
 import { parseTelegramSecret, type TelegramSecret, telegramWebhookUrl } from "./telegram-secret.ts";
@@ -191,6 +199,100 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
       bot: { id: used.secret.botId, username: used.secret.username },
       webhook: webhook.ok ? ("registered" as const) : webhook.reason,
     };
+  }
+
+  /** Opens a one-time form for the runner's secret (#294). Without the runner's binding, there is none to check. */
+  async createRunnerForm() {
+    if (!runnerOf(this.env)) return { ok: false as const, reason: "not_configured" as const };
+    try {
+      const { token, expiresAt } = await store(this.env).createForm(RUNNER_NAME, "runner");
+      return { ok: true as const, token, expiresAt };
+    } catch (error) {
+      console.error("channel-egress: creating a form failed", errorName(error));
+      return unavailable;
+    }
+  }
+
+  /**
+   * Checks the secret with the runner's `/health`, then stores it, as a bot token is checked with
+   * `getMe`. A refused secret counts against the form; a runner that can't answer doesn't, since the
+   * fault is elsewhere. The same secret sent again, as a double click sends it, gets the same answer.
+   */
+  async redeemRunnerForm(token: string, secret: string) {
+    const work = this.#redeemRunnerForm(token, secret);
+    this.ctx.waitUntil(work);
+    return work;
+  }
+
+  async #redeemRunnerForm(token: string, secret: string) {
+    try {
+      const runner = runnerOf(this.env);
+      if (!runner) return { ok: false as const, reason: "not_configured" as const };
+      const forms = store(this.env);
+      const form = await forms.describeForm(token);
+      const candidate = typeof secret === "string" ? secret.trim() : "";
+      if (!form) return await this.#redeemRunnerAgain(token, candidate, runner);
+      if (form.kind !== "runner") return { ok: false as const, reason: "unknown_form" as const };
+      if (!RUNNER_SECRET.test(candidate)) {
+        await forms.refuseValue(token);
+        return { ok: false as const, reason: "invalid_secret" as const };
+      }
+      // A closed store couldn't keep the secret, so it isn't sent to the runner either.
+      if (!(await forms.ready())) return unavailable;
+      const check = await checkRunner(runner, candidate);
+      if (!answered(check)) {
+        if (check.state === "unreachable") {
+          return { ok: false as const, reason: "unreachable" as const };
+        }
+        await forms.refuseValue(token);
+        return { ok: false as const, reason: "secret_refused" as const };
+      }
+      const stored = await forms.redeemForm(token, JSON.stringify({ secret: candidate }));
+      // Another submission of the same link claimed it meanwhile: answer as for a resubmission.
+      if (!stored.ok) {
+        return stored.reason === "unknown_form"
+          ? await this.#redeemRunnerAgain(token, candidate, runner)
+          : stored;
+      }
+      return { ok: true as const, runner: check };
+    } catch (error) {
+      console.error("channel-egress: redeeming a form failed", errorName(error));
+      return unavailable;
+    }
+  }
+
+  /** The answer for a runner form just used, when its own secret comes again. */
+  async #redeemRunnerAgain(token: string, candidate: string, runner: Fetcher) {
+    const used = await store(this.env).redeemedForm(token);
+    const found = used?.kind === "runner" ? await runnerSecret(this.env) : null;
+    // The caller answers an unreachable store as such, not as a closed link, as for Telegram.
+    if (found?.ok === false && found.reason === "store_unavailable") {
+      throw new Error("The secret store is unavailable");
+    }
+    if (!found?.ok || !(await sameText(found.secret, candidate))) {
+      return { ok: false as const, reason: "unknown_form" as const };
+    }
+    const check = await checkRunner(runner, candidate);
+    return answered(check)
+      ? { ok: true as const, runner: check }
+      : {
+          ok: false as const,
+          reason:
+            check.state === "refused" ? ("secret_refused" as const) : ("unreachable" as const),
+        };
+  }
+
+  /** The runner's state, from its `/health` with the stored secret. Never the secret. */
+  async describeRunner() {
+    const runner = runnerOf(this.env);
+    if (!runner) return { ok: true as const, runner: { state: "not_configured" as const } };
+    const found = await runnerSecret(this.env);
+    if (!found.ok) {
+      return found.reason === "store_unavailable"
+        ? unavailable
+        : { ok: true as const, runner: { state: "not_connected" as const } };
+    }
+    return { ok: true as const, runner: await checkRunner(runner, found.secret) };
   }
 
   async describeTelegramBot(agentId: string) {
@@ -371,6 +473,33 @@ async function telegramSecret(
   }
   const secret = parseTelegramSecret(read.value);
   return secret ? { ok: true, secret } : { ok: false, reason: "not_connected" };
+}
+
+/** The runner's stored secret. A value that doesn't decrypt or parse counts as none. */
+async function runnerSecret(
+  env: Env,
+): Promise<
+  { ok: true; secret: string } | { ok: false; reason: "not_connected" | "store_unavailable" }
+> {
+  let read: ReadResult;
+  try {
+    read = await store(env).read("runner", RUNNER_NAME);
+  } catch (error) {
+    console.error("channel-egress: the secret store failed", errorName(error));
+    return unavailable;
+  }
+  if (!read.ok) {
+    if (read.reason !== "missing") console.error("channel-egress: secret unreadable", read.reason);
+    return read.reason === "store_unavailable"
+      ? unavailable
+      : { ok: false, reason: "not_connected" };
+  }
+  const secret = parseRunnerSecret(read.value);
+  return secret ? { ok: true, secret } : { ok: false, reason: "not_connected" };
+}
+
+function answered(check: RunnerCheck): check is Extract<RunnerCheck, { version: string }> {
+  return check.state === "ready" || check.state === "outdated";
 }
 
 /** A thread id is a short string; so is a reply id, when there is one. */

@@ -1,5 +1,5 @@
 import type { ChannelIdentity, IdentityStatus } from "@kelpie/access";
-import type { WebhookRegistrationFailure } from "@kelpie/channels";
+import type { ChannelFormsContract, WebhookRegistrationFailure } from "@kelpie/channels";
 import { describe, expect, it } from "vitest";
 import { type Actor, type ConfigPorts, createConfigCommands } from "../src/commands.ts";
 import { type AgentSettings, DEFAULT_SETTINGS, SETUP_AGENT_ID } from "../src/settings.ts";
@@ -21,6 +21,14 @@ function fakePorts() {
   ];
   const identities = new Map(seeded.map((entry) => [key(entry.identity), entry]));
   const calls: string[] = [];
+  /** What channel-egress answers about the runner; a test changes it to another case. */
+  const runner: {
+    form: Awaited<ReturnType<ChannelFormsContract["createRunnerForm"]>>;
+    described: Awaited<ReturnType<ChannelFormsContract["describeRunner"]>>;
+  } = {
+    form: { ok: true, token: "runner-token", expiresAt: 3_000 },
+    described: { ok: true, runner: { state: "ready", version: "0.1.0", protocol: 1 } },
+  };
   const ports: ConfigPorts = {
     registry: {
       async add(id, name) {
@@ -112,6 +120,14 @@ function fakePorts() {
         if (agentId === "broken") return { ok: false, reason: "store_unavailable" };
         return { ok: true, username: "kelpie_bot" };
       },
+      async createRunnerForm() {
+        calls.push("createRunnerForm");
+        return runner.form;
+      },
+      async describeRunner() {
+        calls.push("describeRunner");
+        return runner.described;
+      },
       async registerTelegramWebhook(agentId) {
         calls.push(`registerTelegramWebhook ${agentId}`);
         const failures: Record<string, WebhookRegistrationFailure> = {
@@ -143,7 +159,7 @@ function fakePorts() {
       },
     },
   };
-  return { ports, calls };
+  return { ports, calls, runner };
 }
 
 describe("configuration commands", () => {
@@ -519,6 +535,49 @@ describe("configuration commands", () => {
       ok: false,
       reason: "unavailable",
     });
+  });
+
+  it("starts connecting the runner with a one-time form", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+    expect(await commands.connectRunner(owner)).toEqual({
+      ok: true,
+      value: { path: "/forms/runner-token", expiresAt: 3_000 },
+    });
+    expect(calls).toEqual(["createRunnerForm"]);
+  });
+
+  it.each([
+    ["not_configured", "not_configured"],
+    ["store_unavailable", "unavailable"],
+  ] as const)("says why the runner's form didn't open: %s", async (cause, reason) => {
+    const { ports, runner } = fakePorts();
+    runner.form = { ok: false, reason: cause };
+    expect(await createConfigCommands(ports).connectRunner(owner)).toEqual({ ok: false, reason });
+  });
+
+  it("describes the runner as channel-egress sees it", async () => {
+    const { ports, runner } = fakePorts();
+    const commands = createConfigCommands(ports);
+    expect(await commands.describeRunner(owner)).toEqual({
+      ok: true,
+      value: { state: "ready", version: "0.1.0", protocol: 1 },
+    });
+    runner.described = { ok: true, runner: { state: "not_configured" } };
+    expect(await commands.describeRunner(owner)).toEqual({
+      ok: true,
+      value: { state: "not_configured" },
+    });
+    runner.described = { ok: false, reason: "store_unavailable" };
+    expect(await commands.describeRunner(owner)).toEqual({ ok: false, reason: "unavailable" });
+  });
+
+  it("keeps the runner's commands to the owner", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+    expect(await commands.connectRunner(member)).toEqual({ ok: false, reason: "forbidden" });
+    expect(await commands.describeRunner(member)).toEqual({ ok: false, reason: "forbidden" });
+    expect(calls).toEqual([]);
   });
 
   it("lists the vault's files held with conflict markers", async () => {

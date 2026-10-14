@@ -1,0 +1,21 @@
+# Kelpie's runner, as a systemd user service (docs/runner.md). Copy it to
+# ~/.config/systemd/user/ and adjust the two paths if the checkout or Bun live elsewhere.
+[Unit]
+Description=Kelpie's runner
+
+[Service]
+Type=simple
+WorkingDirectory=%h/kelpie
+ExecStart=%h/.bun/bin/bun tools/runner/src/main.ts
+Restart=on-failure
+RestartSec=5
+# Exit 78 is a setting to fix, such as a missing secret: restarting wouldn't help.
+RestartPreventExitStatus=78
+# Every process the runner starts inherits it: none can gain privileges, through sudo or setuid.
+NoNewPrivileges=true
+# Files the runner writes are its user's alone.
+UMask=0077
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target

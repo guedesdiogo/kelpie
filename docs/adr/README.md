@@ -45,6 +45,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0039](0039-routines-as-vault-files.md) | An agent's routines are Markdown files in its vault folder, and each fire creates a task on its board | [#306](https://github.com/guedesdiogo/kelpie/issues/306) |
 | [0040](0040-continue-at-the-tool-bound.md) | When a turn reaches its tool bound, Kelpie offers to continue, and the owner's press grants one more bound | [#307](https://github.com/guedesdiogo/kelpie/issues/307) |
 | [0041](0041-auto-tier-by-qualifier.md) | An agent's tier may be `auto`, and its qualifier then picks the tier for each turn | [#308](https://github.com/guedesdiogo/kelpie/issues/308) |
+| [0042](0042-runner-vpc-service-id-in-github.md) | The runner's VPC Service id is a variable of GitHub's production environment | [#294](https://github.com/guedesdiogo/kelpie/issues/294) |
 
 ## Format
 

@@ -15,6 +15,14 @@ const SPECIALIST = { role: "specialist", owner: null, chat: true } as const;
 
 const OWNER_SUB = "sub-owner";
 const GOOD_BOT_TOKEN = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw-test";
+/** Runner secrets the fake channel-egress answers each its own way. */
+const RUNNER = {
+  good: "g".repeat(64),
+  outdated: "o".repeat(64),
+  down: "d".repeat(64),
+  unconfigured: "u".repeat(64),
+  wrong: "w".repeat(64),
+};
 const NOW_MS = 1_791_000_000_000;
 const TOKEN = `${NOW_MS / 1_000 + 3_600}.${"c0ffee".repeat(6)}`;
 const RECOVERY = `${NOW_MS / 1_000 + 3_600}.${"5eed".repeat(8)}`;
@@ -103,6 +111,12 @@ function world({
       async registerTelegramWebhook(agentId) {
         return agentId === "unwired" ? { ok: false, reason: "not_connected" } : { ok: true };
       },
+      async createRunnerForm() {
+        return { ok: true, token: "runner-form", expiresAt: NOW_MS + 900_000 };
+      },
+      async describeRunner() {
+        return { ok: true, runner: { state: "ready", version: "0.1.0", protocol: 1 } };
+      },
     },
     vault: {
       async held() {
@@ -120,12 +134,17 @@ function world({
   const relinks: { accessSub: string; tokenHash: string }[] = [];
   const spentTokens = new Set<string>();
   /** Open forms by token; a redeemed or burned form disappears. */
-  const forms = new Map<string, { agentId: string; refusals: number }>([
+  const forms = new Map<
+    string,
+    { agentId: string; refusals: number; kind?: "telegram" | "runner" }
+  >([
     ["form-token-1", { agentId: "sales", refusals: 0 }],
+    ["runner-form", { agentId: "vps", refusals: 0, kind: "runner" }],
     ["form-odd", { agentId: "<i>odd</i>", refusals: 0 }],
     ["form-unhooked", { agentId: "unhooked", refusals: 0 }],
   ]);
   const redeemed: { token: string; botToken: string }[] = [];
+  const runnerSecrets: string[] = [];
   /** Forms used a moment ago, by token, with their agent. */
   const used = new Map<string, string>();
   const deps: AdminDeps = {
@@ -173,8 +192,28 @@ function world({
         if (done)
           return { ok: false, reason: "redeemed", agentId: done, username: "kelpie_<b>bot" };
         return form
-          ? { ok: true, agentId: form.agentId, kind: "telegram" }
+          ? { ok: true, agentId: form.agentId, kind: form.kind ?? "telegram" }
           : { ok: false, reason: "unknown_form" };
+      },
+      async redeemRunnerForm(token, secret) {
+        const form = forms.get(token);
+        if (form?.kind !== "runner") return { ok: false, reason: "unknown_form" };
+        runnerSecrets.push(secret);
+        if (secret === RUNNER.down) return { ok: false, reason: "unreachable" };
+        if (secret === RUNNER.unconfigured) return { ok: false, reason: "not_configured" };
+        if (secret === RUNNER.good || secret === RUNNER.outdated) {
+          forms.delete(token);
+          return {
+            ok: true,
+            runner:
+              secret === RUNNER.good
+                ? { state: "ready", version: "0.1.0<b>", protocol: 1 }
+                : { state: "outdated", version: "0.0.9", protocol: 2 },
+          };
+        }
+        form.refusals += 1;
+        if (form.refusals >= 2) forms.delete(token);
+        return { ok: false, reason: secret.length < 32 ? "invalid_secret" : "secret_refused" };
       },
       async redeemTelegramForm(token, botToken) {
         const form = forms.get(token);
@@ -214,7 +253,7 @@ function world({
     now: () => NOW_MS,
     newUserId: () => "u-new",
   };
-  return { deps, ran, bootstraps, redeemed, relinks, reported };
+  return { deps, ran, bootstraps, redeemed, relinks, reported, runnerSecrets };
 }
 
 function post(path: string, body?: unknown) {
@@ -957,6 +996,118 @@ describe("admin API secure forms", () => {
     ).text();
     expect(html).toContain("<code>&lt;i&gt;odd&lt;/i&gt;</code>");
     expect(html).not.toContain("<i>odd</i>");
+  });
+});
+
+describe("admin API runner form (#294)", () => {
+  const formUrl = "https://admin.example/forms/runner-form";
+  const submit = (runnerSecret: string, url = formUrl) =>
+    new Request(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "sec-fetch-site": "same-origin",
+      },
+      body: new URLSearchParams({ runnerSecret }).toString(),
+    });
+
+  it("opens the form with a command, and describes the runner with another", async () => {
+    const { deps } = world();
+    expect(await call(deps, "/commands/connectRunner")).toEqual({
+      status: 200,
+      body: { ok: true, value: { path: "/forms/runner-form", expiresAt: NOW_MS + 900_000 } },
+    });
+    expect(await call(deps, "/commands/describeRunner")).toEqual({
+      status: 200,
+      body: { ok: true, value: { state: "ready", version: "0.1.0", protocol: 1 } },
+    });
+  });
+
+  it("shows a password field for the runner's secret, not a bot token's", async () => {
+    const { deps } = world();
+    const response = await handle(new Request(formUrl), deps);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('name="runnerSecret"');
+    expect(html).toContain('type="password"');
+    expect(html).toContain("~/.config/kelpie-runner/secret");
+    expect(html).not.toContain('name="botToken"');
+  });
+
+  it("stores a secret the runner accepts, says which version answered, and escapes it", async () => {
+    const { deps, runnerSecrets } = world();
+    const response = await handle(submit(RUNNER.good), deps);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("<code>0.1.0&lt;b&gt;</code>");
+    expect(html).toContain("now answers Kelpie");
+    expect(html).not.toContain(RUNNER.good);
+    expect(runnerSecrets).toEqual([RUNNER.good]);
+  });
+
+  it("stores an outdated runner's secret, and asks for an update", async () => {
+    const { deps } = world();
+    const response = await handle(submit(RUNNER.outdated), deps);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("another protocol version");
+  });
+
+  it.each([
+    ["refused", RUNNER.wrong, 400, "didn&#39;t accept"],
+    ["malformed", "short", 400, "at least 32 characters"],
+    ["for a runner that can't answer", RUNNER.down, 502, "couldn&#39;t reach the runner"],
+  ])("shows the form again for a secret %s", async (_, secret, status, text) => {
+    const { deps } = world();
+    const response = await handle(submit(secret), deps);
+    expect(response.status).toBe(status);
+    const html = await response.text();
+    expect(html).toContain(text);
+    expect(html).toContain('name="runnerSecret"');
+    expect(html).not.toContain(secret);
+  });
+
+  it("closes the link after the refusals channel-egress counts", async () => {
+    const { deps } = world();
+    await handle(submit(RUNNER.wrong), deps);
+    const second = await handle(submit(RUNNER.wrong), deps);
+    expect(second.status).toBe(404);
+  });
+
+  it("asks for the secret again on an empty submission, without checking anything", async () => {
+    const { deps, runnerSecrets } = world();
+    const response = await handle(submit("  "), deps);
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("Paste the runner&#39;s secret first");
+    expect(runnerSecrets).toEqual([]);
+  });
+
+  it("says when Kelpie was deployed without the runner's VPC Service", async () => {
+    const { deps } = world();
+    const response = await handle(submit(RUNNER.unconfigured), deps);
+    expect(response.status).toBe(503);
+    expect(await response.text()).toContain("docs/runner.md");
+  });
+
+  it("answers a runner secret sent to a Telegram form as a closed link", async () => {
+    const { deps, runnerSecrets } = world();
+    const response = await handle(
+      submit(RUNNER.good, "https://admin.example/forms/form-token-1"),
+      deps,
+    );
+    expect(response.status).toBe(404);
+    expect(runnerSecrets).toEqual([]);
+  });
+
+  it.each([
+    ["pt-BR", "Conectar o runner", "agora responde", "outra versão do protocolo"],
+    ["es", "Conectar el runner", "ya responde", "otra versión del protocolo"],
+  ])("speaks the link's language: %s", async (lang, title, done, outdated) => {
+    const url = `${formUrl}?lang=${lang}`;
+    expect(await (await handle(new Request(url), world().deps)).text()).toContain(title);
+    expect(await (await handle(submit(RUNNER.good, url), world().deps)).text()).toContain(done);
+    expect(await (await handle(submit(RUNNER.outdated, url), world().deps)).text()).toContain(
+      outdated,
+    );
   });
 });
 
