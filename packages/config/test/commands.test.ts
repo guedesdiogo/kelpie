@@ -55,6 +55,7 @@ function fakePorts() {
     },
     models: {
       async providers() {
+        calls.push("models.providers");
         return ["anthropic"];
       },
       async view() {
@@ -233,6 +234,19 @@ describe("configuration commands", () => {
         settings: { model: { provider: "anthropic", conversation: { tier: "frontier" } } },
       }),
     ).toMatchObject({ ok: true });
+  });
+
+  it("asks llm-gateway for its keys only when a change names a provider", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+    await commands.createAgent(owner, { id: "sales", name: "Sales" });
+
+    await commands.configureAgent(owner, {
+      id: "sales",
+      settings: { model: { conversation: { tier: "frontier", effort: "high" } } },
+    });
+    await commands.configureModels(owner, { settings: { memory: { tier: "medium" } } });
+    expect(calls).not.toContain("models.providers");
   });
 
   it("lets the owner choose the main agent and a specialist's chat access (#288)", async () => {

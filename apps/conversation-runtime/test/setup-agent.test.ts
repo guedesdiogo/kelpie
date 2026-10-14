@@ -1,7 +1,7 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { Locale } from "@kelpie/channels";
-import { type Actor, DEFAULT_SETTINGS, SETUP_AGENT_ID } from "@kelpie/config";
+import { type Actor, type AgentSettings, DEFAULT_SETTINGS, SETUP_AGENT_ID } from "@kelpie/config";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
@@ -73,7 +73,8 @@ function fakeCommands() {
     async configureAgent(actor, input) {
       calls.push(`configureAgent ${JSON.stringify(input)}`);
       if (actor.role !== "owner") return forbidden;
-      const { settings } = input as { settings: object };
+      const { settings } = input as { settings: Partial<AgentSettings> };
+      if (settings.model?.provider === "openai") return { ok: false, reason: "no_key" };
       return {
         ok: true,
         value: { settings: { ...DEFAULT_SETTINGS, ...settings }, promptVersion: 1 },
@@ -313,7 +314,7 @@ describe("the setup agent's tools", () => {
       {
         command: "configureModels",
         input: { settings },
-        summary: `set the models every agent uses unless it has its own: ${JSON.stringify(settings)}.`,
+        summary: `set the models every agent uses unless it has its own, from ${JSON.stringify({ memory: { tier: "cheap" } })} to ${JSON.stringify(settings)}.`,
       },
     ]);
     expect(calls).toEqual([]);
@@ -335,6 +336,45 @@ describe("the setup agent's tools", () => {
     ).toMatchObject({
       isError: true,
     });
+  });
+
+  it("changes an agent's model, its own included, showing the owner what it had (#289)", async () => {
+    const { commands, calls } = fakeCommands();
+    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const model = { conversation: { tier: "frontier" } };
+
+    const waiting = contextOf(false);
+    await run(
+      tools,
+      "configure_agent",
+      { id: SETUP_AGENT_ID, settings: { model } },
+      waiting.context,
+    );
+    expect(waiting.asked).toEqual([
+      {
+        command: "configureAgent",
+        input: { id: SETUP_AGENT_ID, settings: { model } },
+        summary: `change the settings of the agent "Setup" (${SETUP_AGENT_ID}): model from {} to ${JSON.stringify(model)}.`,
+      },
+    ]);
+    const confirmed = contextOf(true);
+    expect(
+      await run(
+        tools,
+        "configure_agent",
+        { id: SETUP_AGENT_ID, settings: { model } },
+        confirmed.context,
+      ),
+    ).toEqual({ output: `Changed the settings of the agent ${SETUP_AGENT_ID}.` });
+    const noKey = await run(
+      tools,
+      "configure_agent",
+      { id: SETUP_AGENT_ID, settings: { model: { provider: "openai" } } },
+      confirmed.context,
+    );
+    expect(noKey).toMatchObject({ isError: true });
+    expect(noKey.output).toContain("has no key");
+    expect(calls.filter((call) => call.startsWith("configureAgent"))).toHaveLength(2);
   });
 
   it("refuses a role that can't take the change, or says it's done, before asking anything", async () => {

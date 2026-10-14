@@ -35,7 +35,7 @@ export function depsFor(env: Env): AdminDeps {
   const forms = env.CHANNEL_FORMS as unknown as ChannelFormsContract;
   // A service binding to context-store's ContextStoreAdmin entrypoint, which only admin-api binds.
   const vault = env.CONTEXT_STORE_ADMIN as unknown as ContextStoreAdminContract;
-  const gateway = env.LLM_GATEWAY as unknown as ModelsGateway;
+  const gateway = env.LLM_GATEWAY_ADMIN as unknown as ModelsGateway;
   // A trailing slash would never match the token's issuer.
   const config = {
     teamDomain: env.ACCESS_TEAM_DOMAIN.replace(/\/+$/, ""),

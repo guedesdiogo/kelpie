@@ -55,6 +55,7 @@ export class LlmGateway extends WorkerEntrypoint {
     };
   }
 }
+export class LlmGatewayAdmin extends WorkerEntrypoint {}
 export default { fetch: () => new Response(null, { status: 404 }) };`,
           },
         ],

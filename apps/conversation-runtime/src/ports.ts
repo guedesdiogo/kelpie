@@ -126,7 +126,10 @@ interface LlmGatewayBinding {
     events(): Promise<ReadableStream<Uint8Array>>;
     cancel(): Promise<void>;
   }>;
-  /** The instance's model settings, for the setup agent's tools (#289). */
+}
+
+/** llm-gateway's admin entrypoint: the instance's model settings, for the setup agent (#289). */
+interface LlmGatewayAdminBinding {
   providers: ConfigPorts["models"]["providers"];
   instanceModels: ConfigPorts["models"]["view"];
   configureDefaults: ConfigPorts["models"]["configure"];
@@ -145,6 +148,7 @@ export function portsFor(env: Env): ConversationPorts {
 
 function productionPorts(env: Env): ConversationPorts {
   const gateway = env.LLM_GATEWAY as unknown as LlmGatewayBinding;
+  const gatewayAdmin = env.LLM_GATEWAY_ADMIN as unknown as LlmGatewayAdminBinding;
   // A service binding to channel-egress's ChannelEgress entrypoint, which answers with values.
   const egress = env.CHANNEL_EGRESS as unknown as ChannelEgressContract;
   // A service binding to context-store's ContextStore entrypoint.
@@ -174,9 +178,9 @@ function productionPorts(env: Env): ConversationPorts {
       describeTelegramBot: notBound,
     },
     models: {
-      providers: () => gateway.providers(),
-      view: () => gateway.instanceModels(),
-      configure: (settings, actor) => gateway.configureDefaults(settings, actor),
+      providers: () => gatewayAdmin.providers(),
+      view: () => gatewayAdmin.instanceModels(),
+      configure: (settings, actor) => gatewayAdmin.configureDefaults(settings, actor),
     },
     vault: { held: notBound, forget: notBound, setDream: notBound },
   });

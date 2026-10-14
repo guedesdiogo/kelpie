@@ -1,5 +1,6 @@
 // The JSON schema of an agent's or the instance's model settings (ADR-0036 §2), for the tools that
 // change them (#289). The values are checked again by `parseModelSettings` before anything runs.
+import { EFFORTS } from "@kelpie/llm/models";
 import { MODEL_TIERS, PROVIDERS } from "@kelpie/llm/router";
 
 const AREA = {
@@ -9,7 +10,7 @@ const AREA = {
     tier: { type: "string", enum: [...MODEL_TIERS], description: "A higher tier costs more." },
     effort: {
       type: "string",
-      enum: ["low", "medium", "high", "xhigh", "max"],
+      enum: [...EFFORTS],
       description: "How much the model thinks; more costs more. Unset is the model's own.",
     },
   },

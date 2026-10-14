@@ -150,7 +150,7 @@ const MAX_PATH_LENGTH = 300;
 export interface InstanceModels {
   settings: ModelSettings;
   pinned: ProviderId | null;
-  /** The providers with a key, in the route table's order. */
+  /** The providers with a key, in Kelpie's provider order. */
   providers: ProviderId[];
 }
 

@@ -25,8 +25,8 @@ export default defineConfig({
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
       // The bindings point at objects in ingress and conversation-runtime, and at entrypoints in
-      // channel-egress and context-store. Tests never call them:
-      // they pass fakes to `handle()`, so these stubs only let the runtime start.
+      // channel-egress, context-store and llm-gateway. The API's tests pass fakes to `handle()`, so
+      // most stubs only let the runtime start; llm-gateway's answers the Worker's own test.
       miniflare: {
         workers: [
           stubWorker("kelpie-ingress", { DIRECTORY: "Directory" }),
@@ -42,7 +42,7 @@ export default defineConfig({
             modules: true,
             compatibilityDate: "2026-10-01",
             script: `import { WorkerEntrypoint } from "cloudflare:workers";
-export class LlmGateway extends WorkerEntrypoint {
+export class LlmGatewayAdmin extends WorkerEntrypoint {
   providers() {
     return ["anthropic"];
   }

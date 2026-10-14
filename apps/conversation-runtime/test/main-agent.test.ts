@@ -6,6 +6,7 @@ import type { ConfirmationRequest, Tool, ToolContext } from "../src/tools.ts";
 
 const owner: Actor = { userId: "u-owner", role: "owner", via: "agent:kelpie" };
 const ROLES: Record<string, AgentRole> = { kelpie: "main", setup: "admin", ana: "specialist" };
+const ANA_MODEL = { memory: { tier: "medium" } } as const;
 
 function fakeCommands() {
   const calls: string[] = [];
@@ -24,7 +25,8 @@ function fakeCommands() {
           role,
           owner: null,
           chat: true,
-          settings: DEFAULT_SETTINGS,
+          // Ana keeps a memory tier of her own, which a conversation change must leave alone.
+          settings: id === "ana" ? { ...DEFAULT_SETTINGS, model: ANA_MODEL } : DEFAULT_SETTINGS,
           promptVersion: 0,
         },
       };
@@ -77,20 +79,25 @@ describe("the main agent's tools (#289)", () => {
     }
   });
 
-  it("changes another agent's trio once the owner confirms, and only then", async () => {
+  it("changes only what the owner asked of another agent's trio, once they confirm, and only then", async () => {
     const { commands, calls } = fakeCommands();
     const tool = (await setAgentModel(commands)) as Tool;
     const model = { conversation: { tier: "frontier", effort: "high" } };
+    const merged = {
+      conversation: { tier: "frontier", effort: "high" },
+      memory: { tier: "medium" },
+    };
 
     const waiting = contextOf(false);
     expect((await tool.run({ id: "ana", model }, waiting.context)).output).toContain(
       "Not done yet",
     );
+    // The owner sees what the agent had and what it gets; what wasn't asked stays.
     expect(waiting.asked).toEqual([
       {
         command: "configureAgent",
-        input: { id: "ana", settings: { model } },
-        summary: `change the model of the agent "ANA" (ana): ${JSON.stringify(model)}.`,
+        input: { id: "ana", settings: { model: merged } },
+        summary: `change the model of the agent "ANA" (ana) from ${JSON.stringify(ANA_MODEL)} to ${JSON.stringify(merged)}.`,
       },
     ]);
     expect(calls).toEqual([]);
@@ -99,7 +106,21 @@ describe("the main agent's tools (#289)", () => {
     expect(await tool.run({ id: "ana", model }, confirmed.context)).toEqual({
       output: "Changed the model of the agent ana.",
     });
-    expect(calls).toEqual([`configureAgent ${JSON.stringify({ id: "ana", settings: { model } })}`]);
+    expect(calls).toEqual([
+      `configureAgent ${JSON.stringify({ id: "ana", settings: { model: merged } })}`,
+    ]);
+  });
+
+  it("checks it is still the main agent when it runs, not only when listed", async () => {
+    const { commands, calls } = fakeCommands();
+    let role: AgentRole = "main";
+    const tools = await mainAgentTools(commands, async () => role).tools("kelpie");
+    const tool = tools[0] as Tool;
+    role = "specialist";
+    const refused = await tool.run({ id: "ana", model: {} }, contextOf(true).context);
+    expect(refused).toMatchObject({ isError: true });
+    expect(refused.output).toContain("isn't the main agent");
+    expect(calls).toEqual([]);
   });
 
   it("never changes its own trio, and refuses what it can't do before asking", async () => {

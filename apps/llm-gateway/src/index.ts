@@ -129,27 +129,35 @@ export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
     return routesWith(this.env);
   }
 
-  /** The providers with a key, in the route table's order (#289). */
+  /** For the deploy's probe (#234), through conversation-runtime. See `pingWith`. */
+  ping(): Promise<{ ok: true }> {
+    return pingWith(this.env);
+  }
+}
+
+/**
+ * The instance's model settings, for the configuration commands only (#289): bound by admin-api
+ * and conversation-runtime, which run them behind the owner's check and confirmation. A Worker
+ * that reads outside content, as context-store does, binds `LlmGateway` alone, so it can't change
+ * what every agent costs.
+ */
+export class LlmGatewayAdmin extends WorkerEntrypoint<GatewayEnv> {
+  /** The providers with a key, in Kelpie's provider order. */
   providers(): ProviderId[] {
     return providersWith(this.env);
   }
 
-  /** The instance's model settings, its pinned provider and the providers with a key (#289). */
+  /** The instance's model settings, its pinned provider and the providers with a key. */
   instanceModels(): Promise<InstanceModels> {
     return instanceModelsWith(this.env);
   }
 
-  /** Replaces the instance's model settings (#289). See `configureDefaultsWith`. */
+  /** Replaces the instance's model settings. See `configureDefaultsWith`. */
   configureDefaults(
     settings: ModelSettings,
     actor: DefaultsActor,
   ): Promise<ConfigureDefaultsResult> {
     return configureDefaultsWith(this.env, settings, actor);
-  }
-
-  /** For the deploy's probe (#234), through conversation-runtime. See `pingWith`. */
-  ping(): Promise<{ ok: true }> {
-    return pingWith(this.env);
   }
 }
 
@@ -176,6 +184,8 @@ export function generateWith(
   return new Generation(events, controller);
 }
 
+const AUDIT_FIELD_CHARS = 128;
+
 /** The instance's model settings as Admin's tools show them. */
 export interface InstanceModels {
   settings: ModelSettings;
@@ -185,7 +195,7 @@ export interface InstanceModels {
 
 export type ConfigureDefaultsResult = { ok: true } | { ok: false; reason: "invalid_input" };
 
-/** The providers whose key is set, in the route table's provider order. */
+/** The providers whose key is set, in Kelpie's provider order (`PROVIDERS`). */
 export function providersWith(env: GatewayEnv): ProviderId[] {
   const configured = providers(env);
   return (PROVIDERS as readonly ProviderId[]).filter((id) => configured[id] !== undefined);
@@ -208,7 +218,11 @@ export async function configureDefaultsWith(
 ): Promise<ConfigureDefaultsResult> {
   const parsed = parseModelSettings(settings);
   if (!parsed || !keyedProviders(env, parsed)) return { ok: false, reason: "invalid_input" };
-  const who = { userId: String(actor?.userId ?? ""), via: String(actor?.via ?? "") };
+  // Bounded: the audit keeps who asked, not whatever a caller sends as such.
+  const who = {
+    userId: String(actor?.userId ?? "").slice(0, AUDIT_FIELD_CHARS),
+    via: String(actor?.via ?? "").slice(0, AUDIT_FIELD_CHARS),
+  };
   await env.MODEL_DEFAULTS.getByName("instance").configure(parsed, who);
   return { ok: true };
 }

@@ -6,6 +6,7 @@ import { MODEL_TIERS, type ModelTier, PROVIDERS, type RouteModel } from "./route
 import type { Effort, ProviderId } from "./types.ts";
 
 export type { Effort, ProviderId };
+export { EFFORTS };
 
 export const MODEL_AREAS = ["conversation", "memory"] as const;
 /** `conversation`: the agent's turns. `memory`: the history checkpoint, Dream and conflict resolve. */
@@ -70,6 +71,21 @@ export function resolveModel(input: {
   const tier = agent?.[area]?.tier ?? instance?.[area]?.tier ?? input.tier ?? "cheap";
   const effort = agent?.[area]?.effort ?? instance?.[area]?.effort;
   return { provider, tier, ...(effort ? { effort } : {}) };
+}
+
+/**
+ * `current` with only what `change` names changed, area by area (#289): a tier asked for one area
+ * leaves the other area and the effort as they were. An area left empty is dropped.
+ */
+export function mergeModelSettings(current: ModelSettings, change: ModelSettings): ModelSettings {
+  const merged: ModelSettings = {};
+  const provider = change.provider ?? current.provider;
+  if (provider) merged.provider = provider;
+  for (const area of MODEL_AREAS) {
+    const choice = { ...current[area], ...change[area] };
+    if (Object.keys(choice).length > 0) merged[area] = choice;
+  }
+  return merged;
 }
 
 /** Accepts only known keys with known values; anything else invalidates the whole value. */

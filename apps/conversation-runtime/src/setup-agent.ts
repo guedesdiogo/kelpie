@@ -9,7 +9,7 @@ import {
   SETUP_AGENT_ID,
   type SetupEvent,
 } from "@kelpie/config";
-import { parseModelSettings } from "@kelpie/llm/models";
+import { type ModelSettings, parseModelSettings } from "@kelpie/llm/models";
 // The router module only: the package root also loads the provider SDKs.
 import { MODEL_TIERS } from "@kelpie/llm/router";
 import { MODEL_SETTINGS_SCHEMA } from "./model-schema.ts";
@@ -279,20 +279,23 @@ function refusal(result: Extract<CommandResult<unknown>, { ok: false }>, id?: st
  */
 const TEXTS: Localized<{
   settingTo: string;
+  settingFrom: string;
   changeSettings: (agent: string, id: string, changes: string) => string;
   mainAgent: (agent: string, id: string) => string;
-  models: (settings: string) => string;
+  models: (before: string, after: string) => string;
   chat: (agent: string, id: string, on: boolean) => string;
   form: (id: string, href: string, minutes: number) => string;
   pairing: (id: string, href: string) => string;
 }> = {
   en: {
     settingTo: "to",
+    settingFrom: "from",
     changeSettings: (agent, id, changes) =>
       `change the settings of the agent ${agent} (${id}): ${changes}.`,
     mainAgent: (agent, id) =>
       `make the agent ${agent} (${id}) the main agent, the one you talk to.`,
-    models: (settings) => `set the models every agent uses unless it has its own: ${settings}.`,
+    models: (before, after) =>
+      `set the models every agent uses unless it has its own, from ${before} to ${after}.`,
     chat: (agent, id, on) =>
       on
         ? `let you chat with the agent ${agent} (${id}).`
@@ -304,12 +307,13 @@ const TEXTS: Localized<{
   },
   "pt-BR": {
     settingTo: "para",
+    settingFrom: "de",
     changeSettings: (agent, id, changes) =>
       `alterar as configurações do agente ${agent} (${id}): ${changes}.`,
     mainAgent: (agent, id) =>
       `tornar o agente ${agent} (${id}) o agente principal, o que conversa com você.`,
-    models: (settings) =>
-      `definir os modelos que todo agente usa quando não tem os seus: ${settings}.`,
+    models: (before, after) =>
+      `definir os modelos que todo agente usa quando não tem os seus, de ${before} para ${after}.`,
     chat: (agent, id, on) =>
       on
         ? `permitir que você converse com o agente ${agent} (${id}).`
@@ -321,12 +325,13 @@ const TEXTS: Localized<{
   },
   es: {
     settingTo: "a",
+    settingFrom: "de",
     changeSettings: (agent, id, changes) =>
       `cambiar la configuración del agente ${agent} (${id}): ${changes}.`,
     mainAgent: (agent, id) =>
       `convertir el agente ${agent} (${id}) en el agente principal, el que conversa contigo.`,
-    models: (settings) =>
-      `definir los modelos que usa todo agente que no tenga los suyos: ${settings}.`,
+    models: (before, after) =>
+      `definir los modelos que usa todo agente que no tenga los suyos, de ${before} a ${after}.`,
     chat: (agent, id, on) =>
       on
         ? `permitir que converses con el agente ${agent} (${id}).`
@@ -338,10 +343,22 @@ const TEXTS: Localized<{
   },
 };
 
-/** The setting changes, for the owner's confirmation: each as its key and its exact value. */
-function describe(settings: Partial<AgentSettings>, locale: Locale): string {
+/**
+ * The setting changes, for the owner's confirmation: each as its key and its exact value. `model`
+ * replaces the agent's whole model settings, so it shows what they were too (#289).
+ */
+function describe(
+  settings: Partial<AgentSettings>,
+  locale: Locale,
+  modelBefore?: ModelSettings,
+): string {
+  const { settingTo, settingFrom } = TEXTS[locale];
   return Object.entries(settings)
-    .map(([key, value]) => `${key} ${TEXTS[locale].settingTo} ${JSON.stringify(value)}`)
+    .map(([key, value]) =>
+      key === "model" && modelBefore !== undefined
+        ? `model ${settingFrom} ${JSON.stringify(modelBefore)} ${settingTo} ${JSON.stringify(value)}`
+        : `${key} ${settingTo} ${JSON.stringify(value)}`,
+    )
     .join(", ");
 }
 
@@ -476,10 +493,17 @@ export function setupTools(
         const agent = await agentOf(context, id);
         if (!("id" in agent)) return agent;
         const change = { id: agent.id, settings: parsed };
+        const current = parsed.model
+          ? await commands.getAgent(context.actor, { id: agent.id })
+          : null;
         const summary = TEXTS[context.locale].changeSettings(
           JSON.stringify(agent.name),
           agent.id,
-          describe(parsed, context.locale),
+          describe(
+            parsed,
+            context.locale,
+            current?.ok ? (current.value.settings.model ?? {}) : undefined,
+          ),
         );
         // The owner confirms what they see, and one bubble shows the whole change, or nothing.
         if (visible(summary).length > MAX_SUMMARY_CHARS) {
@@ -522,11 +546,17 @@ export function setupTools(
             "Those model settings aren't valid: a provider, and each area's provider, tier and effort, from the allowed values.",
           );
         }
+        // They replace what the instance has, so the owner sees what that was.
+        const current = await commands.getModels(context.actor);
+        if (!current.ok) return refusal(current);
         const change = { settings };
         const confirmed = await context.confirm({
           command: "configureModels",
           input: change,
-          summary: TEXTS[context.locale].models(JSON.stringify(settings)),
+          summary: TEXTS[context.locale].models(
+            JSON.stringify(current.value.settings),
+            JSON.stringify(settings),
+          ),
         });
         if (!confirmed) return { output: WAITING };
         const result = await commands.configureModels(context.actor, change);

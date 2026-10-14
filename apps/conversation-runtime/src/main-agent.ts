@@ -6,6 +6,7 @@ import {
   isAgentId,
   parseSettings,
 } from "@kelpie/config";
+import { mergeModelSettings } from "@kelpie/llm/models";
 import { MODEL_SETTINGS_SCHEMA } from "./model-schema.ts";
 import type { Tool, ToolOutcome, ToolProvider } from "./tools.ts";
 
@@ -19,7 +20,7 @@ export type MainAgentCommands = Pick<ConfigCommands, "getAgent" | "configureAgen
 const SET_AGENT_MODEL = {
   name: "set_agent_model",
   description:
-    "Change another agent's model settings: its provider, and each area's tier and effort. Use it when the owner asks, or when they agree with your suggestion. Never for yourself: only Admin changes your own model. It needs the owner's confirmation: the first call shows them the change; call it again with the same input once they confirm.",
+    "Change another agent's model settings: its provider, and each area's tier and effort. Only the fields you pass change; the others stay as they are (to clear one, the owner asks Admin). Use it when the owner asks, or when they agree with your suggestion. Never for yourself: only Admin changes your own model. It needs the owner's confirmation: the first call shows them the change; call it again with the same input once they confirm.",
   inputSchema: {
     type: "object",
     properties: {
@@ -37,10 +38,13 @@ const WAITING =
   "Not done yet: Kelpie showed the owner this change, and how to confirm it. Tell them it waits for their confirmation. Once they confirm, call this tool again with the same input.";
 
 /** The confirmation's summary, in the conversation's language (ADR-0027). */
-const SUMMARY: Localized<(agent: string, id: string, model: string) => string> = {
-  en: (agent, id, model) => `change the model of the agent ${agent} (${id}): ${model}.`,
-  "pt-BR": (agent, id, model) => `alterar o modelo do agente ${agent} (${id}): ${model}.`,
-  es: (agent, id, model) => `cambiar el modelo del agente ${agent} (${id}): ${model}.`,
+const SUMMARY: Localized<(agent: string, id: string, before: string, after: string) => string> = {
+  en: (agent, id, before, after) =>
+    `change the model of the agent ${agent} (${id}) from ${before} to ${after}.`,
+  "pt-BR": (agent, id, before, after) =>
+    `alterar o modelo do agente ${agent} (${id}) de ${before} para ${after}.`,
+  es: (agent, id, before, after) =>
+    `cambiar el modelo del agente ${agent} (${id}) de ${before} a ${after}.`,
 };
 
 function refusal(result: Extract<CommandResult<unknown>, { ok: false }>, id: string): ToolOutcome {
@@ -74,6 +78,10 @@ export function mainAgentTools(
       if (context.actor.role !== "owner") {
         return failed("Only the owner can change an agent's model.");
       }
+      // Again when it runs: a turn that listed the tool may outlive the agent's role.
+      if ((await roleOf(context.agentId)) !== "main") {
+        return failed("This agent isn't the main agent any more, so it can't change models.");
+      }
       const { id, model } = (typeof input === "object" && input !== null ? input : {}) as {
         id?: unknown;
         model?: unknown;
@@ -93,14 +101,18 @@ export function mainAgentTools(
       }
       const agent = await commands.getAgent(context.actor, { id });
       if (!agent.ok) return refusal(agent, id);
-      const change = { id, settings: { model: parsed } };
+      // What was asked, over what the agent has: the owner confirms the whole result.
+      const before = agent.value.settings.model ?? {};
+      const merged = mergeModelSettings(before, parsed);
+      const change = { id, settings: { model: merged } };
       const confirmed = await context.confirm({
         command: "configureAgent",
         input: change,
         summary: SUMMARY[context.locale](
           JSON.stringify(agent.value.name),
           id,
-          JSON.stringify(parsed),
+          JSON.stringify(before),
+          JSON.stringify(merged),
         ),
       });
       if (!confirmed) return { output: WAITING };
