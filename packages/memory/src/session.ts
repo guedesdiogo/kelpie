@@ -245,7 +245,7 @@ export async function sessionPage(
 
   const shown =
     lines.length > limits.headLines + limits.tailLines
-      ? [...lines.slice(0, limits.headLines), null, ...lines.slice(-limits.tailLines)]
+      ? [...lines.slice(0, limits.headLines), null, ...lines.slice(lines.length - limits.tailLines)]
       : lines;
   const omitted = lines.length - limits.headLines - limits.tailLines;
   const body = [

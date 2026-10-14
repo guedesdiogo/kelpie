@@ -97,7 +97,7 @@ const WRITE: Tool["spec"] = {
       version: {
         type: "string",
         description:
-          "Required with path: the version memory_read or memory_search showed for the note, or the one your last save of it returned. A note changed since isn't overwritten.",
+          "Required with path: the version memory_read or memory_search showed for the note, or the one your last change to it returned. A note changed since isn't overwritten.",
       },
     },
     required: ["title", "body", "kind", "level"],

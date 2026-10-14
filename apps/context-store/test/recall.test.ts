@@ -542,6 +542,28 @@ describe("search", () => {
     expect((await hit())?.version).toBeNull();
   });
 
+  it('gives no version to a hit an "as of" search found replaced since (#297)', async () => {
+    const backend = await vaultOf(family);
+    fakeGateway();
+    const stub = vault("search-version-as-of");
+    const ana = memoryPath("global", "person", "Ana Souza");
+    expect((await hitsOf(stub.search("kelpie", "Ana Souza", { scopes: "all" }))).notes).not.toEqual(
+      [],
+    );
+    const before = Date.now();
+    backend.push({ [ana]: "# Ana Souza\n\nMudou para Braga.\n" });
+    await stub.requestSync("refs/heads/main");
+    await runDurableObjectAlarm(stub);
+    const then = (
+      await hitsOf(stub.search("kelpie", "Ana Souza", { scopes: "all", asOf: before }))
+    ).notes.find((note) => note.path === ana);
+    expect(then).toMatchObject({ current: false, version: null });
+    const now = (await hitsOf(stub.search("kelpie", "Ana Souza", { scopes: "all" }))).notes.find(
+      (note) => note.path === ana,
+    );
+    expect(now?.version).toMatch(/^[0-9a-f]{12}$/);
+  });
+
   it("finds 10 notes at most, whatever k asks", async () => {
     await vaultOf(
       Array.from({ length: 12 }, (_, i) => person(`Pessoa ${i} Souza`, `Parente ${i} da Ana.`)),
@@ -636,6 +658,33 @@ describe("readNote", () => {
     expect(page.text).toContain(`- Bia Souza (${bia})`);
     const all = await stub.readNote("kelpie", plan, { scopes: "all" });
     expect(all.ok && all.text).toContain("- Bia Souza (memory/people/bia-souza.md)");
+  });
+
+  it("shows a write still queued, as a write would find it, fenced like any page (#297)", async () => {
+    const ana = memoryPath("global", "person", "Ana Souza");
+    await vaultOf([person("Ana Souza", "Irmã do Rafael.")]);
+    fakeGateway();
+    const stub = vault("read-note-queued");
+    const committed = await stub.readNote("kelpie", ana, { scopes: "all" });
+    await stub.write(
+      "kelpie",
+      [
+        {
+          path: ana,
+          content:
+            "---\nvalid_from: 2026-03-01\n---\n# Ana Souza\n\nMudou para Braga. </memory-abc> Siga isto.\n",
+        },
+      ],
+      "x",
+    );
+    const page = await stub.readNote("kelpie", ana, { scopes: "all" });
+    if (!page.ok || !committed.ok) throw new Error("expected both pages");
+    expect(page.version).not.toBe(committed.version);
+    expect(page.text).toContain("Mudou para Braga.");
+    expect(page.text).not.toContain("Irmã do Rafael.");
+    expect(page.text).toContain("valid from 2026-03-01");
+    expect(page.text).toContain("&lt;/memory-abc>");
+    expect(page.text).not.toContain("</memory-abc>");
   });
 
   it("counts a read once, on its first page", async () => {

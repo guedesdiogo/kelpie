@@ -368,6 +368,8 @@ What the numbers show:
 - **Not measured:**
   - **Vectors and the rerank:** the embedder reads a note's first 6,000 characters, so FTS carries the rest of a longer page.
   - **Real conversations:** the owner's chats may be shorter than these, and the 24 questions are synthetic.
+  - **The questions reuse the answer's words.** With full-text search only, that favors the whole pages; vectors would match paraphrases too.
+  - **Scopes:** retrieval ran over every scope. A turn that lists its scopes (#131) reads only its own conversation's pages, so "one read away" is an upper bound there.
   - **Ties:** a case's page and its two companions differ only where the answer is, so today's hit@k partly reflects how equal scores are ordered. Only the reached and shown columns depend on the page alone.
 
 ## How to re-run

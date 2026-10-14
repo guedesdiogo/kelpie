@@ -370,6 +370,67 @@ describe("writeNote", () => {
     });
   });
 
+  it("lets one of two writes from the same version through, and tells the other it changed (#297)", async () => {
+    const cafe = "memory/notes/cafe.md";
+    const backend = vaultWith({ [cafe]: "# Café\n\nCoado.\n" });
+    const stub = vault("write-version-race");
+    const read = await versionOf(stub, cafe);
+    const bodies = ["Coado, sem açúcar.", "Coado, com leite."];
+    const results = await Promise.all(
+      bodies.map((body) =>
+        stub.writeNote("kelpie", memory("Café", body, { path: cafe, version: read }), ALL),
+      ),
+    );
+    expect(results.filter((result) => result.ok && result.action === "written")).toHaveLength(1);
+    expect(results.filter((result) => !result.ok && result.reason === "changed")).toHaveLength(1);
+    await runDurableObjectAlarm(stub);
+    const winner = bodies[results.findIndex((result) => result.ok)] ?? "";
+    expect(backend.files()[cafe]).toContain(winner);
+    expect(backend.files()[cafe]).not.toContain(bodies.find((body) => body !== winner));
+  });
+
+  it("refuses a version that can't be one as invalid, for the model to fix at once (#297)", async () => {
+    const cafe = "memory/notes/cafe.md";
+    vaultWith({ [cafe]: "# Café\n\nCoado.\n" });
+    const stub = vault("write-version-shape");
+    const read = await versionOf(stub, cafe);
+    for (const version of [`version ${read}`, ` ${read}`, `${read}0`, 7, { read }]) {
+      expect(
+        await stub.writeNote(
+          "kelpie",
+          memory("Café", "Sem açúcar.", { path: cafe, version: version as string }),
+          ALL,
+        ),
+        JSON.stringify(version),
+      ).toMatchObject({ ok: false, reason: "invalid" });
+    }
+    expect(
+      await stub.writeNote(
+        "kelpie",
+        memory("Café", "Sem açúcar.", { path: cafe, version: read }),
+        ALL,
+      ),
+    ).toMatchObject({ ok: true, action: "written" });
+  });
+
+  it("writes a memory again when its twin's removal waits in the queue", async () => {
+    vaultWith({ "memory/notes/cafe.md": "# Café\n\nSem açúcar.\n" });
+    const stub = vault("write-twin-removed");
+    expect(await stub.writeNote("kelpie", memory("Café", "Sem açúcar."), ALL)).toMatchObject({
+      ok: true,
+      action: "unchanged",
+      path: "memory/notes/cafe.md",
+      version: VERSION,
+    });
+    await stub.write("kelpie", [{ path: "memory/notes/cafe.md", content: null }], "x");
+    expect(await stub.writeNote("kelpie", memory("Café", "Sem açúcar."), ALL)).toMatchObject({
+      ok: true,
+      action: "written",
+      path: "memory/notes/cafe.md",
+      version: VERSION,
+    });
+  });
+
   it("updates any note the turn sees, and writes new ones only where the turn may", async () => {
     vaultWith({ "conversations/familia/people/caio.md": "# Caio\n\nPrimo.\n" });
     const stub = vault("write-seen");

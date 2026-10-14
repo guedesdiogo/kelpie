@@ -95,7 +95,7 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - With the vault off, or on any failure, it answers an empty block, and the turn goes on without memory.
   - **`search(agent, query, {scopes, k?, asOf?, validAt?, qualifier?})`,** for the agent's `memory_search` (#126).
     - It is recall's retrieval and rerank, answered as hits instead of a packed block, in #110's fence: 3 by default, 10 at most.
-    - It returns each hit's scope, validity, provenance and version too, and counts no access. A hit that shows a replaced version, or one a queued write is about to replace, has no version (#297).
+    - It returns each hit's scope, validity, provenance and version too, and counts no access. A hit has a version only while the note's file is still the text the hit shows (#297).
     - It answers `vault_off` or `unavailable` instead of an empty list, so the model doesn't take a failing memory for an empty one.
   - **`readNote(agent, path, {scopes, offset?})`,** for the agent's `memory_read` (#126).
     - **What opens:** only a current note of memory's index within the scopes. Anything else is "not found", the same answer whether the file exists or not.

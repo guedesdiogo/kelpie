@@ -614,12 +614,6 @@ export class Vault extends DurableObject<VaultEnv> {
     )[0];
   }
 
-  /** The version a note shows now (#297), queued writes included; a removed one has none. */
-  async #versionOf(path: string): Promise<string> {
-    const text = this.#visible(path);
-    return text === null ? "" : noteVersion(text);
-  }
-
   /** A file as Kelpie sees it: its latest queued write, else the synced head's. */
   #visible(path: string): string | null {
     const queued = this.#queuedWrite(path);
@@ -2282,12 +2276,11 @@ export class Vault extends DurableObject<VaultEnv> {
           hits.map(async (hit) => {
             const version = this.#memory.versionOf(hit.path, hit.commit);
             if (version === null) return [];
-            // The version of the text the hit shows (#297): none for a replaced one, or one a
-            // queued write is about to replace, which must be read first.
-            const shown =
-              hit.current && this.#queuedWrite(hit.path) === undefined
-                ? this.#visible(hit.path)
-                : null;
+            // The version of the text the hit shows (#297), only while the file is still that
+            // text: a replaced version, a queued write, or a sync during the rerank's wait gives
+            // none, and the note must be read first.
+            const file = this.#visible(hit.path);
+            const blob = file === null ? null : await gitBlobSha(file);
             const note: MemoryHit = {
               path: hit.path,
               title: hit.title,
@@ -2298,7 +2291,7 @@ export class Vault extends DurableObject<VaultEnv> {
               invalidAt: version.invalidAt,
               current: hit.current,
               byKelpie: hit.current && kelpie.has(hit.path),
-              version: shown === null ? null : await noteVersion(shown),
+              version: blob === version.blobSha ? blob.slice(0, 12) : null,
             };
             return [{ note, start: bodyWithoutHeading(version.title, version.body).slice(0, 400) }];
           }),
@@ -2342,27 +2335,24 @@ export class Vault extends DurableObject<VaultEnv> {
       await this.#catchUp();
       const version = this.#memory.current(path);
       if (version === null || !sees(version.scope)) return notFound;
-      // The note as a write would find it (#297): a queued write is shown before its commit, so
-      // the version the page gives is the one `writeNote` compares, and a queued removal is gone.
+      // The note as a write would find it (#297): its file now, a write still queued for its
+      // commit included, so the page and its version come from one text, the one `writeNote`
+      // compares. A queued removal is gone.
       const text = this.#visible(path);
-      if (text === null) return notFound;
-      let shown: PageVersion = version;
-      if (this.#queuedWrite(path) !== undefined) {
-        const note = parseNote(path, text);
-        if (note === null) return notFound;
-        shown = {
-          path,
-          title: note.title,
-          kind: note.kind,
-          scope: note.scope,
-          validFrom: note.validFrom === null ? null : instantOf(note.validFrom),
-          invalidAt: note.invalidAt === null ? null : instantOf(note.invalidAt),
-          level: note.level,
-          pinned: note.pinned,
-          body: note.body,
-          frontmatter: note.frontmatter,
-        };
-      }
+      const note = text === null ? null : parseNote(path, text);
+      if (text === null || note === null) return notFound;
+      const shown: PageVersion = {
+        path,
+        title: note.title,
+        kind: note.kind,
+        scope: note.scope,
+        validFrom: note.validFrom === null ? null : instantOf(note.validFrom),
+        invalidAt: note.invalidAt === null ? null : instantOf(note.invalidAt),
+        level: note.level,
+        pinned: note.pinned,
+        body: note.body,
+        frontmatter: note.frontmatter,
+      };
       const offset = Math.max(Math.floor(Number(options.offset ?? 0)) || 0, 0);
       const links: { title: string; path: string }[] = [];
       if (offset === 0) {
@@ -2383,14 +2373,20 @@ export class Vault extends DurableObject<VaultEnv> {
           Date.now(),
         );
       }
-      const noted = await noteVersion(text);
+      const shownVersion = await noteVersion(text);
       const page = readPage(shown, {
         offset,
         byKelpie: this.#byKelpie([path]).has(path),
         links,
-        version: noted,
+        version: shownVersion,
       });
-      return { ok: true, path, text: page.text, nextOffset: page.nextOffset, version: noted };
+      return {
+        ok: true,
+        path,
+        text: page.text,
+        nextOffset: page.nextOffset,
+        version: shownVersion,
+      };
     } catch (error) {
       console.error("Vault: reading a note failed", errorName(error));
       return { ok: false, reason: "unavailable" };
@@ -2587,6 +2583,16 @@ export class Vault extends DurableObject<VaultEnv> {
               ],
             };
           }
+          // A version that can't be one is the model's slip, not a change: it can fix it at once.
+          if (!/^[0-9a-f]{12}$/.test(expected)) {
+            return {
+              ok: false,
+              reason: "invalid",
+              problems: [
+                "`version` must be the 12 letters and digits memory_read or memory_search showed, as shown",
+              ],
+            };
+          }
           if (expected !== shownVersion) return { ok: false, reason: "changed" };
           target = found.path;
         }
@@ -2600,12 +2606,14 @@ export class Vault extends DurableObject<VaultEnv> {
           qualifier: null,
           ownersWord: (note) => this.#ownersWord(note),
         });
-        if (decision.action === "NOOP") {
+        // A twin whose removal waits in the queue is gone: the memory is written again.
+        const twin = decision.action === "NOOP" ? this.#visible(decision.path) : null;
+        if (decision.action === "NOOP" && twin !== null) {
           return {
             ok: true,
             action: "unchanged",
             path: decision.path,
-            version: await this.#versionOf(decision.path),
+            version: await noteVersion(twin),
           };
         }
         // From here to the queue, nothing pauses: no other write can take the path meanwhile.
