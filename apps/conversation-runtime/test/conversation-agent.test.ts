@@ -589,7 +589,7 @@ describe("ConversationAgent turns", () => {
 
     await vi.waitFor(() => expect(world.requests).toHaveLength(2));
     expect(world.requests[1]?.system).toBe(
-      `${withIdentity("renamed", DEFAULT_SETTINGS.systemPrompt, { name: "Bia Assistente" })}\n\n${MEMORY_NOTE}`,
+      `${withIdentity("renamed", DEFAULT_SETTINGS.systemPrompt, { role: "specialist", name: "Bia Assistente" })}\n\n${MEMORY_NOTE}`,
     );
     expect(world.requests[1]?.messages[1]).toEqual(neutral("First."));
   });
