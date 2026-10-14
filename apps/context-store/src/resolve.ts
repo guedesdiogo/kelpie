@@ -1,4 +1,4 @@
-import type { ModelTier, RoutedRequest } from "@kelpie/llm";
+import type { ModelSelection, RoutedRequest } from "@kelpie/llm";
 import { splitFrontmatter } from "@kelpie/memory";
 import { parseDocument } from "yaml";
 import { type ConflictedFile, conflictsOf, hasStrayMarkers, keepsProvenance } from "./conflicts.ts";
@@ -8,7 +8,11 @@ export type ResolveGateway = ModelGateway;
 
 /** Larger files stay held for the owner: the whole file comes back as the answer. */
 export const RESOLVE_MAX_CHARS = 48_000;
-const RESOLVE_TIER: ModelTier = "medium";
+/**
+ * The instance's memory trio, on `medium`, as before #286, until the instance sets the memory area's
+ * tier (ADR-0036 §2): a merge is worth more care than Dream's one-line steps.
+ */
+const RESOLVE_MODEL: ModelSelection = { area: "memory", tier: "medium" };
 const RESOLVE_OUTPUT_TOKENS = 16_000;
 
 const RESOLVER = `You resolve a merge conflict that someone committed unresolved, in one Markdown file of a person's knowledge vault, kept in git.
@@ -47,7 +51,7 @@ export async function resolveConflict(
     messages: [{ role: "user", parts: [{ type: "text", text: sections.join("\n\n---\n\n") }] }],
     maxOutputTokens: RESOLVE_OUTPUT_TOKENS,
   };
-  const { text } = await complete(gateway, RESOLVE_TIER, request, timeoutMs);
+  const { text } = await complete(gateway, RESOLVE_MODEL, request, timeoutMs);
   return checked(unfenced(text), conflicted, file.marked);
 }
 

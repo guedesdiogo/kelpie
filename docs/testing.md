@@ -56,7 +56,7 @@ The `ConversationAgent` reads its settings from a real `AgentHost` in the same t
 
 ## Coverage
 
-CI runs every workspace's tests once, with coverage (`bun run test:coverage`), and its summary shows a coverage table for each workspace.
+CI runs every workspace's tests once, with coverage (`bun run test:coverage`), and its summary shows a coverage table for each workspace. A pull request that changes only docs skips them ([ADR-0038](adr/0038-pull-requests-run-affected-gates.md)).
 - **The provider is Istanbul.** V8's coverage doesn't work inside workerd, so every workspace uses Istanbul for the same numbers everywhere.
 - **What counts:** each workspace counts its own `src/**/*.ts`, covered by its own tests. A package's code exercised only by an app's tests doesn't count for the package, so tests belong in the workspace whose code they test. The one exclusion is `tools/release/src/main.ts`, the CLI's wiring to the process, git, wrangler and Cloudflare. Its decisions live in tested modules.
 - **The floor ([ADR-0030](adr/0030-coverage-floor.md)).** Every workspace's `vitest.config.ts` sets 80% for statements, branches, functions and lines.
@@ -74,4 +74,5 @@ bun run typecheck   # generates Workers types, then runs tsc in every workspace
 bun run lint
 bun run --filter @kelpie/memory eval   # the memory evaluation (#108); half a minute, so not in `test`
 bun run --cwd tools/release release guard --base origin/main   # CI's migration gate (docs/deploy.md)
+bun run --cwd tools/release release gates --base origin/main   # the gates CI runs for this branch
 ```

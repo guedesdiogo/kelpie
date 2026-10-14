@@ -3,7 +3,7 @@
 import {
   fromNdjsonStream,
   type LlmEvent,
-  type ModelTier,
+  type ModelSelection,
   type RoutedRequest,
   type Usage,
 } from "@kelpie/llm";
@@ -15,7 +15,7 @@ export interface Generation {
 }
 
 export interface ModelGateway {
-  generate(tier: ModelTier, request: RoutedRequest): Promise<Generation>;
+  generate(selection: ModelSelection, request: RoutedRequest): Promise<Generation>;
 }
 
 /**
@@ -24,11 +24,11 @@ export interface ModelGateway {
  */
 export async function complete(
   gateway: ModelGateway,
-  tier: ModelTier,
+  selection: ModelSelection,
   request: RoutedRequest,
   timeoutMs: number,
 ): Promise<{ text: string; usage: Usage[] }> {
-  const generation = await gateway.generate(tier, request);
+  const generation = await gateway.generate(selection, request);
   try {
     return await within(finished(generation), timeoutMs, () => {
       generation.cancel().catch(() => undefined);

@@ -66,6 +66,18 @@ Identity values in answers are masked.
 
 **Waiting for the rest of a message.** An agent answers `quietMs` after the owner's latest message, 10 s by default, and each new message starts the wait again. Its `maxWaitMs`, 60 s by default, caps the wait from the first buffered message; a `quietMs` above it is cut to the cap. `quietMs: 0` removes the wait: each message is processed at once. Nothing else starts before the wait ends, the memory recall included (ADR-0024). No end-of-turn decision is asked of a qualifier (ADR-0024). `conversational: false` answers each message at once.
 
+**The model.** `model` sets the agent's provider, tier and effort (ADR-0036 §2), for example `{ "provider": "openai", "conversation": { "tier": "frontier", "effort": "high" }, "memory": { "tier": "cheap" } }`.
+- **Areas:**
+  - `conversation` covers the agent's turns;
+  - `memory` covers its history checkpoints.
+- **What each scope sets:** tier and effort are set per area, so a costlier conversation never makes the agent's memory costlier. `provider` covers both areas, and an area may name its own.
+- **Unset fields** come from the instance's settings, which Story 5.5's tools set, then the defaults:
+  - the provider is the first one llm-gateway saw with a key, in the cheap tier's order, pinned then. The pin leads every tier, so a route table that lists another provider first in `medium` or `frontier` follows the pin there too;
+  - the tier is `cheap`;
+  - the effort is the model's own.
+- **An effort a model doesn't take** is lowered to the nearest one it does.
+- **The older `tier` setting** still counts as `model.conversation.tier` when `model` doesn't set one.
+
 **Tools.** A turn may run the agent's tools for up to 5 rounds, within `toolLoopMs`: 120 s by default, the floor, up to 600 000 (ADR-0025). Past either bound, one last model call answers with what it has. In the webchat, the turn shows its step once the wait is over: reading memory, thinking, or the tool it runs. Telegram shows "typing".
 
 **The memory core.** `memoryCore: true` carries the agent's always-loaded core into every turn, and it is off by default (#112, [memory-format.md](memory-format.md#retrieval)).

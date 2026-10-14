@@ -7,7 +7,8 @@ import { parseArgs } from "node:util";
 import { migrationChanges } from "./changes.ts";
 import { cloudflareApi } from "./cloudflare.ts";
 import { type DeployDeps, deepProbeToken, deploy, deployedVersion, planDeploy } from "./deploy.ts";
-import { gitAt, repoRoot } from "./git.ts";
+import { gatesOutput, gatesReport, planGates } from "./gates.ts";
+import { changedFiles, gitAt, repoRoot } from "./git.ts";
 import { guardVerdict } from "./guard.ts";
 import { readLive } from "./live.ts";
 import { bounded, exitCode, reportsFailure } from "./outcome.ts";
@@ -27,6 +28,8 @@ import { INGRESS, type WorkerSpec } from "./workers.ts";
 const USAGE = `Usage, from tools/release: bun run release <command> [options]
 
   guard [--base <ref>]     Migration checks for CI, from <ref> (default HEAD^1) to HEAD.
+  gates [--base <ref>]     Which CI gates a pull request runs, from what changed between <ref>
+                           (default HEAD^1) and HEAD. In Actions, it writes them to GITHUB_OUTPUT.
   status                   What production serves, and the builds a rollback can reach.
   deploy [--plan] [--always] [--watch-minutes 10] [--error-threshold 3] [--rotate-probe-token] [--report <file>]
                            Deploys HEAD, verifies it and rolls it back if it's unhealthy. It
@@ -177,6 +180,16 @@ async function main(argv: string[]): Promise<number> {
         `Migrations from ${base} to HEAD: ${report.problems.length} problem(s), ${report.findings.length} rollback barrier(s), ${blocking} blocking.`,
       );
       return exitCode.guard(blocking);
+    }
+
+    case "gates": {
+      const base = values.base ?? "HEAD^1";
+      if (base.startsWith("-")) throw new Error("--base takes a git ref.");
+      const paths = changedFiles(git, base, "HEAD").map((file) => file.path);
+      const plans = planGates(paths);
+      if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, gatesOutput(plans));
+      publish(gatesReport(plans, paths.length), values.report);
+      return 0;
     }
 
     case "status": {

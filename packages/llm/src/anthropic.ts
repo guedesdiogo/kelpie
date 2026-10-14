@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { BetaMessageStreamParams } from "@anthropic-ai/sdk/resources/beta/messages/messages";
+import { lowerEffort } from "./efforts.ts";
 import { refuseEnvironmentHeaders } from "./env.ts";
 import { errorFromStatus, LlmError } from "./errors.ts";
 import type {
@@ -119,10 +120,13 @@ export class AnthropicMessagesProvider implements LlmProvider {
 
   async *stream(request: LlmRequest, options: StreamOptions = {}): AsyncIterable<LlmEvent> {
     const model = await this.#resolve(request.model, options.signal);
+    // Lowered again for the resolved model: an alias may stand for one that takes fewer (#286).
+    const { effort: asked, ...rest } = request;
+    const effort = lowerEffort(model, asked);
     let final: Anthropic.Beta.BetaMessage;
     try {
       const stream = this.#client.beta.messages.stream(
-        toParams({ ...request, model }, this.#betas),
+        toParams({ ...rest, model, ...(effort ? { effort } : {}) }, this.#betas),
         {
           ...(options.signal ? { signal: options.signal } : {}),
         },
