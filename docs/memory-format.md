@@ -174,7 +174,7 @@ Every conversation's history becomes session pages (#109), with no model call:
   - a line with the channel, the date, the times and the number of messages;
   - each message as one line, with its time and speaker, up to 2,000 characters;
   - a session of more than 200 messages keeps the first 100 and the last 100;
-  - the messages stay under 60,000 characters in all: past that, the ones nearest the middle go first, so a long day keeps its start and its end. The index reads a body's first 262,144 characters, so it searches every message a page keeps.
+  - the messages take at most 60,000 characters in all, the metadata line aside: past that, the ones nearest the middle go first, so a long day keeps its start and its end. Full-text search covers every message a page keeps; the embedder reads a page's first 6,000 characters.
   - **Why these limits (#326):** #297's measurement found that a page of 280 characters a message, keeping the first and last 30, lost every answer past its cut, and that these limits reach most of them ([memory-eval.md](spikes/memory-eval.md#session-recall-297)).
 - **Time zone:** the latest one a person in the conversation gave, or UTC.
 - **Inert in Obsidian:** a message can't act when the owner opens the page. HTML, embedded images, inline code (which plugins such as Dataview run) and `%%` comments (which hide text from the owner but not from the agent) are escaped, and `[[` is broken, so a message adds no links to the vault.

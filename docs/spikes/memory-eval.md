@@ -330,7 +330,7 @@ What the numbers show:
 
 ## Session recall (#297)
 
-ai-memory's LongMemEval-S measurement found that its session pages, which kept little of what was said, cost it most of its score: hit@5 0.662 with them, 0.968 with pages holding the captured text ([decomposition report](https://github.com/akitaonrails/ai-memory/blob/ca7b9bb25382210d4d906ea0a29cea4ce2c6fd2b/docs/benchmarks/longmemeval-s-decomposition-2026-10-12.md?plain=1#L62-L80)). Kelpie's page cuts each message to 280 characters, and a session over 60 messages keeps only its first and last 30 (`sessionPage`). This slice measures what that costs.
+ai-memory's LongMemEval-S measurement found that its session pages, which kept little of what was said, cost it most of its score: hit@5 0.662 with them, 0.968 with pages holding the captured text ([decomposition report](https://github.com/akitaonrails/ai-memory/blob/ca7b9bb25382210d4d906ea0a29cea4ce2c6fd2b/docs/benchmarks/longmemeval-s-decomposition-2026-10-12.md?plain=1#L62-L80)). Until #326, Kelpie's page cut each message to 280 characters, and a session over 60 messages kept only its first and last 30 (`sessionPage`). This slice measured what that cost, and #326 then changed the limits.
 
 **The run** (`eval/sessions.eval.ts`, 2026-10-14):
 - **24 conversations in Portuguese** (`eval/session-recall.ts`), each with a question whose answer sits in one place:

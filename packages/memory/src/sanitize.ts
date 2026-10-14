@@ -164,11 +164,18 @@ const RULES: readonly Rule[] = [
     markers: ["private key"],
   },
   // A key's body pasted without its header: DER keys start "MII" in base64, OpenSSH ones
-  // "openssh-key-v1".
-  { kind: "private_key", pattern: /MII[A-Za-z0-9+/]{60,}={0,2}/g, markers: ["mii"] },
+  // "openssh-key-v1". The lines it wraps onto go with it, each one all base64, up to 100: a
+  // session page shows 2,000 characters of a message (#326), most of a key.
   {
     kind: "private_key",
-    pattern: /b3BlbnNzaC1rZXktdjE[A-Za-z0-9+/]{20,}={0,2}/g,
+    pattern:
+      /MII[A-Za-z0-9+/]{60,}={0,2}(?:[ \t]*\r?\n[ \t]*[A-Za-z0-9+/]{4,}={0,2}(?=[ \t]*(?:\r?\n|$))){0,100}/g,
+    markers: ["mii"],
+  },
+  {
+    kind: "private_key",
+    pattern:
+      /b3BlbnNzaC1rZXktdjE[A-Za-z0-9+/]{20,}={0,2}(?:[ \t]*\r?\n[ \t]*[A-Za-z0-9+/]{4,}={0,2}(?=[ \t]*(?:\r?\n|$))){0,100}/g,
     markers: ["b3blbnnzac1rzxktdje"],
   },
   {

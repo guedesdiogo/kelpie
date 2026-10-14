@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { conversationScope, readNote, type SessionLine, sessionPage } from "../src/index.ts";
+import {
+  conversationScope,
+  readNote,
+  SESSION_LIMITS,
+  type SessionLine,
+  sessionPage,
+} from "../src/index.ts";
 
 const at = (time: string) => Date.parse(`2026-10-06T${time}:00Z`);
 const owner = (time: string, text: string): SessionLine => ({
@@ -126,6 +132,66 @@ describe("sessionPage", () => {
     expect(day?.text).toContain("mensagem 149 ");
     expect(day?.text).not.toContain("mensagem 75 ");
     expect(day?.text).toContain(`… ${150 - kept(day?.text)} messages omitted …`);
+  });
+
+  it("cuts at the limits' edges, and keeps the first message under any size (#326)", async () => {
+    const at = (i: number) => `1${Math.floor(i / 60)}:${String(i % 60).padStart(2, "0")}`;
+    const input = (lines: SessionLine[]) => ({
+      key: "s1",
+      channel: "telegram",
+      threadId: "1",
+      timeZone: "UTC",
+      lines,
+    });
+    const messages = (n: number) => Array.from({ length: n }, (_, i) => owner(at(i), `msg ${i}.`));
+    expect((await sessionPage(input(messages(200))))?.text).not.toContain("omitted");
+    const over = await sessionPage(input(messages(201)));
+    expect(over?.text).toContain("msg 99.");
+    expect(over?.text).not.toContain("msg 100.");
+    expect(over?.text).toContain("msg 101.");
+    expect(over?.text).toContain("… 1 messages omitted …");
+    // A size below one message keeps the first one only.
+    const tiny = await sessionPage(input(messages(3)), { ...SESSION_LIMITS, maxChars: 10 });
+    expect(tiny?.text).toContain("msg 0.");
+    expect(tiny?.text).not.toContain("msg 2.");
+    expect(tiny?.text).toContain("… 2 messages omitted …");
+  });
+
+  it("replaces a secret across a message's 2,000th character, and keeps the cut inert (#326)", async () => {
+    const token = ["sk", "-", "a".repeat(40)].join("");
+    const page = await sessionPage({
+      key: "s1",
+      channel: "telegram",
+      threadId: "1",
+      timeZone: "UTC",
+      lines: [
+        owner("10:00", `${"x".repeat(1_990)} ${token}`),
+        owner("10:01", `${"y".repeat(1_995)} <script>alert(1)</script>`),
+        owner("10:02", `${"z".repeat(1_997)} [[nota]] \`código\``),
+      ],
+    });
+    // The marker is what the cut reaches; none of the key is.
+    expect(page?.text).toContain("[REDACTE…");
+    expect(page?.text).not.toContain("a".repeat(10));
+    expect(page?.text).not.toContain("<script");
+    expect(page?.text).not.toContain("[[");
+    expect(page?.redactions).toBe(1);
+  });
+
+  it("counts only the secrets of the messages the page keeps", async () => {
+    const token = ["sk", "-", "b".repeat(40)].join("");
+    const lines = [
+      owner("10:00", "Oi."),
+      kelpie("10:01", "Olá."),
+      owner("10:02", `Guarda isto: ${token}`),
+      kelpie("10:03", "Guardado."),
+      owner("10:04", "Valeu."),
+    ];
+    const input = { key: "s1", channel: "telegram", threadId: "1", timeZone: "UTC", lines };
+    expect((await sessionPage(input))?.redactions).toBe(1);
+    const small = await sessionPage(input, { ...SESSION_LIMITS, maxChars: 80 });
+    expect(small?.text).not.toContain("Guarda isto");
+    expect(small?.redactions).toBe(0);
   });
 
   it("keeps a session within its limits whole, and the limits #297 measured cut it", async () => {

@@ -1,5 +1,5 @@
-// The session recall slice (#297): conversations in Portuguese whose answer sits where today's
-// session page may not keep it, each with a question that needs that detail and two conversations
+// The session recall slice (#297): conversations in Portuguese whose answer sits where the
+// session page before #326 didn't keep it, each with a question that needs that detail and two conversations
 // on the same topic that don't hold it. ai-memory found its session pages, which kept little of
 // what was said, cost most of its LongMemEval-S score (0.662 against 0.968 hit@5 with the captured
 // text); this measures whether Kelpie's pages lose answers the same way.
@@ -9,7 +9,7 @@ import type { SessionInput, SessionLine } from "../src/index.ts";
  * Where the answer sits:
  * - `reply-tail`: in one of Kelpie's replies, past its 280th character;
  * - `owner-tail`: in one of the owner's messages, past its 280th character;
- * - `middle`: in a short message in the middle of an 80-message session, which today's page omits;
+ * - `middle`: in a short message in the middle of an 80-message session, which the page before #326 omitted;
  * - `head`: in a short message near the start, which every page keeps: the control.
  */
 export const PLACES = ["reply-tail", "owner-tail", "middle", "head"] as const;
