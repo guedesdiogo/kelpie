@@ -7,16 +7,24 @@ import {
   type EmbedOutcome,
   LlmError,
   type LlmProvider,
+  MODEL_AREAS,
   MODEL_TIERS,
+  type ModelArea,
+  type ModelDescription,
   ModelRouter,
+  type ModelSelection,
+  type ModelSettings,
   type ModelTier,
   modelAliasDescription,
   OpenAIEmbedder,
   OpenAIResponsesProvider,
   type ProviderId,
+  parseModelSettings,
   parseRouteTable,
+  type RouteChoice,
   type RoutedRequest,
   type RouteModel,
+  resolveModel,
   toNdjsonStream,
   WorkersAiEmbedder,
 } from "@kelpie/llm";
@@ -29,6 +37,9 @@ import {
   type QualifierBackend,
   type Question,
 } from "@kelpie/qualifier";
+import type { InstanceDefaults } from "./model-defaults.ts";
+
+export { ModelDefaults } from "./model-defaults.ts";
 
 /** Set by the owner with `wrangler secret put`. A provider is used only when its key is set. */
 interface Secrets {
@@ -78,15 +89,8 @@ export class Generation extends RpcTarget {
 
 /** Model access for Kelpie's other Workers, through a service binding. */
 export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
-  generate(tier: ModelTier, request: RoutedRequest): Generation {
-    const router = modelRouter(this.env);
-    const controller = new AbortController();
-    const events = toNdjsonStream(
-      router.stream(tier, request, { signal: controller.signal }),
-      () => controller.abort(),
-      (error) => logFailure("generate", error),
-    );
-    return new Generation(events, controller);
+  generate(call: ModelSelection, request: RoutedRequest): Generation {
+    return generateWith(this.env, call, request);
   }
 
   /**
@@ -111,15 +115,46 @@ export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
     return embedWith(this.env, texts);
   }
 
-  /** The models each tier would use now, for an agent's own prompt (#283). See `routesWith`. */
+  /** The trio an area resolves to now, and its route, for an agent's own prompt. See `describeWith`. */
+  describe(area: ModelArea, agent?: ModelSettings, tier?: ModelTier): Promise<ModelDescription> {
+    return describeWith(this.env, area, agent, tier);
+  }
+
+  /**
+   * Each tier's route, for builds of conversation-runtime before #286, which describe themselves
+   * with it during a rollout or a rollback. See `routesWith`.
+   */
   routes(): Record<ModelTier, RouteModel[]> {
     return routesWith(this.env);
   }
 
   /** For the deploy's probe (#234), through conversation-runtime. See `pingWith`. */
-  ping(): { ok: true } {
+  ping(): Promise<{ ok: true }> {
     return pingWith(this.env);
   }
+}
+
+/**
+ * One model call. When ModelDefaults can't answer, the call goes on with no instance settings, in
+ * the route table's order, as before #286: a model call never fails for them.
+ */
+export function generateWith(
+  env: GatewayEnv,
+  call: ModelSelection,
+  request: RoutedRequest,
+): Generation {
+  const router = modelRouter(env);
+  const controller = new AbortController();
+  async function* routed() {
+    const choice = await choiceFor(call, () => defaultsOrNone(env, router));
+    yield* router.stream(choice, request, { signal: controller.signal });
+  }
+  const events = toNdjsonStream(
+    routed(),
+    () => controller.abort(),
+    (error) => logFailure("generate", error),
+  );
+  return new Generation(events, controller);
 }
 
 /**
@@ -128,25 +163,97 @@ export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
  */
 export function routesWith(env: GatewayEnv): Record<ModelTier, RouteModel[]> {
   const router = modelRouter(env);
-  const describe = ({ provider, model }: RouteModel): RouteModel => {
-    const standsFor = provider === "anthropic" ? modelAliasDescription(model) : undefined;
-    return { provider, model, ...(standsFor ? { standsFor } : {}) };
-  };
   return Object.fromEntries(
-    MODEL_TIERS.map((tier) => [tier, router.route(tier).map(describe)]),
+    MODEL_TIERS.map((tier) => [tier, router.route(tier).map(describeModel)]),
   ) as Record<ModelTier, RouteModel[]>;
 }
 
 /**
- * Loads what the calls use: the route table, each provider's settings and the embedding provider.
- * A configuration that can't load throws, so the deploy's probe catches it before the first turn.
- * It calls no provider and makes no request, so a probe costs nothing and sends nothing out.
+ * The trio `area` resolves to, and the models it would try in order. It calls no provider. When
+ * ModelDefaults can't answer, it throws, so the caller keeps the last description it had rather
+ * than one that would change its prompt for a turn.
  */
-export function pingWith(env: GatewayEnv): { ok: true } {
+export async function describeWith(
+  env: GatewayEnv,
+  area: ModelArea,
+  agent?: ModelSettings,
+  tier?: ModelTier,
+): Promise<ModelDescription> {
+  const router = modelRouter(env);
+  const call = { area, ...(agent ? { agent } : {}), ...(tier ? { tier } : {}) };
+  const choice = await choiceFor(call, () => defaultsOf(env, router));
+  return {
+    provider: choice.provider ?? null,
+    tier: choice.tier,
+    ...(choice.effort ? { effort: choice.effort } : {}),
+    route: router.route(choice.tier, choice.provider).map(describeModel),
+  };
+}
+
+function describeModel({ provider, model }: RouteModel): RouteModel {
+  const standsFor = provider === "anthropic" ? modelAliasDescription(model) : undefined;
+  return { provider, model, ...(standsFor ? { standsFor } : {}) };
+}
+
+/**
+ * Resolves a call's trio (ADR-0036 §2). RPC callers aren't type-checked, so an area, tier or
+ * setting Kelpie doesn't know is refused rather than guessed. A tier alone, as callers before #286
+ * send it, keeps the route table's order and the candidates' efforts.
+ */
+async function choiceFor(
+  call: ModelSelection,
+  defaults: () => Promise<InstanceDefaults>,
+): Promise<RouteChoice> {
+  if (typeof call === "string") return { tier: call };
+  const invalid = (what: string) => new LlmError(`Unknown ${what}`, "bad_request", false);
+  if (!(MODEL_AREAS as readonly string[]).includes(call?.area)) throw invalid("model area");
+  if (call.tier !== undefined && !MODEL_TIERS.includes(call.tier)) throw invalid("tier");
+  const agent = call.agent === undefined ? undefined : parseModelSettings(call.agent);
+  if (agent === null) throw invalid("model setting");
+  const { instance, pinned } = await defaults();
+  return resolveModel({
+    area: call.area,
+    ...(agent ? { agent } : {}),
+    instance,
+    pinned,
+    ...(call.tier ? { tier: call.tier } : {}),
+  });
+}
+
+/**
+ * The instance's settings and pinned provider. With nothing pinned yet, ModelDefaults pins the
+ * first provider with a key in the cheap tier's order, and that pin then leads every tier.
+ */
+function defaultsOf(env: GatewayEnv, router: ModelRouter): Promise<InstanceDefaults> {
+  const withKey = router.route("cheap")[0]?.provider ?? null;
+  return env.MODEL_DEFAULTS.getByName("instance").defaults(withKey);
+}
+
+/** `defaultsOf`, or none when ModelDefaults can't answer, logged by the error's name only. */
+async function defaultsOrNone(env: GatewayEnv, router: ModelRouter): Promise<InstanceDefaults> {
+  try {
+    return await defaultsOf(env, router);
+  } catch (error) {
+    console.error(
+      "llm-gateway: ModelDefaults failed; using the route table's order",
+      errorName(error),
+    );
+    return { instance: {}, pinned: null };
+  }
+}
+
+/**
+ * Loads what the calls use: the route table, each provider's settings and the embedding provider,
+ * and wakes ModelDefaults. A configuration that can't load throws, so the deploy's probe catches it
+ * before the first turn. It calls no provider, makes no request and pins nothing, so a probe costs
+ * nothing and sends nothing out.
+ */
+export async function pingWith(env: GatewayEnv): Promise<{ ok: true }> {
   modelRouter(env);
   if (!isEmbeddingProvider(env.EMBEDDING_PROVIDER)) {
     throw new Error(`Unknown EMBEDDING_PROVIDER: ${env.EMBEDDING_PROVIDER}`);
   }
+  await env.MODEL_DEFAULTS.getByName("instance").ping();
   return { ok: true };
 }
 

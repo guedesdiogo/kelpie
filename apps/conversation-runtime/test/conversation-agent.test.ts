@@ -539,6 +539,27 @@ describe("ConversationAgent turns", () => {
     expect(world.requests[1]?.system).toBe(terse);
   });
 
+  it("asks for the conversation's model with the agent's settings, a tier set before #286 included", async () => {
+    const world = use(fakeWorld([reply("One."), reply("Two.")]));
+    const stub = agent("trio");
+    await configure("trio", { tier: "medium" });
+    await stub.ingest(message("m1", "one?", { agentId: "trio" }));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["One."]));
+
+    await configure("trio", { model: { provider: "openai", conversation: { effort: "high" } } });
+    await stub.ingest(message("m2", "two?", { agentId: "trio" }));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.selections).toHaveLength(2));
+    expect(world.selections).toEqual([
+      { area: "conversation", agent: { conversation: { tier: "medium" } } },
+      {
+        area: "conversation",
+        agent: { provider: "openai", conversation: { tier: "medium", effort: "high" } },
+      },
+    ]);
+  });
+
   it("starts a turn with the agent's settings as they are at the flush", async () => {
     const world = use(fakeWorld([reply("Short.")]));
     const stub = agent("flush-settings");
@@ -652,6 +673,29 @@ describe("ConversationAgent recovery", () => {
 
     await vi.waitFor(() => expect(world.sent).toEqual(["Again."]));
     expect(await stub.turns()).toMatchObject([{ status: "delivered", attempts: 2 }]);
+  });
+
+  it("resumes a turn started before #286 on its stored tier, the conversation's", async () => {
+    const world = use(fakeWorld([hang(), reply("Again.")]));
+    const stub = agent("recover-old-turn");
+    await stub.ingest(message("m1", "anyone?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(1));
+    // A turn row as a build before #286 wrote it: its settings have a tier and no model.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE turns SET settings = json_remove(json_set(settings, '$.tier', 'medium'), '$.model')",
+      );
+    });
+
+    await evictDurableObject(stub);
+    await runDurableObjectAlarm(stub);
+
+    await vi.waitFor(() => expect(world.sent).toEqual(["Again."]));
+    expect(world.selections.at(-1)).toEqual({
+      area: "conversation",
+      agent: { conversation: { tier: "medium" } },
+    });
   });
 
   it("gives up after a second eviction before the reply", async () => {
@@ -1041,7 +1085,8 @@ describe("ConversationAgent checkpoints", () => {
 
     await stub.compact();
     expect(await pendingCheckpoints(stub)).toEqual([]);
-    expect(world.tiers.at(-1)).toBe("cheap");
+    // The memory area, with the agent's settings: `cheap` unless they set its tier (#286).
+    expect(world.selections.at(-1)).toEqual({ area: "memory", agent: {} });
     const summarized = JSON.stringify(world.requests.at(-1)?.messages);
     for (const text of ["q0", "r0", "q2", "r2"]) expect(summarized).toContain(text);
     for (const text of ["q3", "r3", "q5", "r5"]) expect(summarized).not.toContain(text);

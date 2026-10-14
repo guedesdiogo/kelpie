@@ -31,15 +31,20 @@ PR ──► gates ──► CI passed ──► merge ──► gates on main �
 
 ## The gates
 
-Every pull request runs these jobs. `CI passed` aggregates them, and it is the one check the ruleset requires.
+`CI passed` aggregates these jobs, and it is the one check the ruleset requires. A pull request runs only the gates its changes can affect, and the others show as skipped ([ADR-0038](adr/0038-pull-requests-run-affected-gates.md)).
 
-| Job | What it proves |
-|---|---|
-| `Lint, typecheck and test` | `check:workspaces`, Biome, `tsc`, and every workspace's tests with coverage, at least 80% in each (`docs/testing.md`) |
-| `Build Workers` | Each Worker bundles with its real `wrangler.jsonc` (`wrangler deploy --dry-run`). No account is needed. |
-| `Migrations` | Drizzle's migrations match each schema; journals are in date order; applied migrations are unchanged; rollback barriers are acknowledged |
-| `Workflow lint` | actionlint, with shellcheck on every `run:` block |
-| `Dependency review` | A new dependency has no known high-severity vulnerability |
+| Job | What it proves | Runs on a pull request that changes |
+|---|---|---|
+| `Lint, typecheck and test` | `check:workspaces`, Biome, `tsc`, and every workspace's tests with coverage, at least 80% in each (`docs/testing.md`) | anything but the docs and the files under `.github/` that only GitHub reads |
+| `Build Workers` | Each Worker bundles with its real `wrangler.jsonc` (`wrangler deploy --dry-run`). No account is needed. | something that ships ("On merge"), or `ci.yml` |
+| `Migrations` | Drizzle's migrations match each schema; journals are in date order; applied migrations are unchanged; rollback barriers are acknowledged | something that ships, or `ci.yml` |
+| `Workflow lint` | actionlint, with shellcheck on every `run:` block | anything under `.github/` |
+| `Dependency review` | A new dependency has no known high-severity vulnerability | a `package.json`, `bun.lock`, or anything under `.github/` |
+
+- **`Detect changes` decides,** before the gates, with `release gates` in `tools/release`. Its summary lists each gate, whether it runs, and the paths behind it. The docs are the Markdown files under `docs/` and at the root, and `LICENSE`; a docs-only pull request runs no gate. A path no rule names runs lint and tests, and a path git quotes for its unusual characters runs every gate.
+- **Every gate runs** on a push to `main`, and on a pull request that changes `tools/release/` or `ci.yml`: the rule never judges a change to itself.
+- **`CI passed` accepts only the skips `Detect changes` decided.** It fails when `Detect changes` fails, and when a gate that had to run didn't succeed.
+- **`release gates --base origin/main`**, from `tools/release`, shows the decision for a local branch.
 
 CodeQL's default setup also runs on pull requests. The ruleset blocks new alerts of high severity.
 
@@ -83,7 +88,7 @@ After the gates pass on `main`, the `Deploy` job runs `tools/release`. It:
    - **the deep probe**, signed with the token and sent only to an https origin: `POST /deploy/probe` answers 200 with `{ directory, registry, agentHosts, gateway }`, each `ok`. It wakes:
      - ingress's `Directory`;
      - through conversation-runtime's `DeployProbe` entrypoint, the `Registry` and the `AgentHost` of every agent it lists, ten at a time;
-     - llm-gateway, which loads its route table and provider settings without calling a model.
+     - llm-gateway, which loads its route table and provider settings without calling a model, and wakes its `ModelDefaults` object (#286).
 
      Each object answers once its migrations ran, so a migration that fails shows now, not on the first real request. A part that answers `failed` fails the probe, and the report names the part. A 404 means ingress lacks the token or holds another one, or the build has no route; the report says so.
 7. **Watches for 10 minutes.**

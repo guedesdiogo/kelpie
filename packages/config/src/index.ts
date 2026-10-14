@@ -2,7 +2,9 @@ export {
   type Actor,
   type AddAgentResult,
   type AgentConfig,
+  type AgentEntry,
   type AgentHostContract,
+  type AgentRole,
   type AgentSummary,
   type CommandResult,
   type ConfigCommands,
@@ -11,6 +13,7 @@ export {
   createConfigCommands,
   type RegistryContract,
   type RenameAgentResult,
+  type SetAgentResult,
   type SetupEvent,
   type SetupEventsContract,
   type SetupStep,
@@ -18,6 +21,7 @@ export {
 } from "./commands.ts";
 export {
   type AgentSettings,
+  agentModel,
   DEFAULT_SETTINGS,
   isAgentId,
   isAgentName,

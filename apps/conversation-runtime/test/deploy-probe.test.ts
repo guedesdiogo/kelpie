@@ -15,16 +15,17 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** An agent as the Registry lists it; the probe reads only its id. */
+const entry = (id: string, name: string) =>
+  ({ id, name, role: "specialist", owner: null, chat: true }) as const;
+
 /** Targets that answer, with the AgentHosts they were asked for. */
 function targets(overrides: Partial<ProbeTargets> = {}) {
   const pinged: string[] = [];
   const fake: ProbeTargets = {
     registry: {
       ping: async () => ({ ok: true }),
-      list: async () => [
-        { id: "sales", name: "Sales" },
-        { id: SETUP_AGENT_ID, name: "Setup" },
-      ],
+      list: async () => [entry("sales", "Sales"), entry(SETUP_AGENT_ID, "Setup")],
     },
     agentHost: (id) => ({
       ping: async () => {
@@ -50,7 +51,10 @@ describe("DeployProbe", () => {
     });
     const woken = (await listDurableObjectIds(env.AGENT_HOST)).map((id) => id.toString()).sort();
     expect(woken).toEqual(
-      ["sales", SETUP_AGENT_ID].map((name) => env.AGENT_HOST.idFromName(name).toString()).sort(),
+      // The main agent a new instance starts with (#288), the setup agent and the one added.
+      ["kelpie", "sales", SETUP_AGENT_ID]
+        .map((name) => env.AGENT_HOST.idFromName(name).toString())
+        .sort(),
     );
   });
 });
@@ -85,7 +89,7 @@ describe("probeRuntime", () => {
   it("wakes at most ten AgentHosts at a time", async () => {
     let awake = 0;
     let most = 0;
-    const agents = Array.from({ length: 25 }, (_, index) => ({ id: `agent-${index}`, name: "A" }));
+    const agents = Array.from({ length: 25 }, (_, index) => entry(`agent-${index}`, "A"));
     const pinged: string[] = [];
     const { fake } = targets({
       registry: { ping: async () => ({ ok: true }), list: async () => agents },

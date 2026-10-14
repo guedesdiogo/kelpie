@@ -49,6 +49,18 @@ describe("Directory", () => {
     }
   });
 
+  it("refuses the owner an agent whose chat is off, with no_grant, and names none for the admin API (#288)", async () => {
+    const stub = await withEnabledOwner("chat-off");
+
+    expect(await stub.admit(telegram, "quiet")).toEqual({ admitted: false, reason: "no_grant" });
+    expect(await stub.admit(telegram, "assistant")).toMatchObject({ admitted: true });
+    // The admin API's "*" names no agent, so no chat applies.
+    expect(await stub.admit(telegram, "*")).toMatchObject({ admitted: true });
+    // A Registry from before #288, as a partial rollback leaves it, answers no chat at all: the
+    // agent is reached as before, not refused.
+    expect(await stub.admit(telegram, "legacy")).toMatchObject({ admitted: true });
+  });
+
   it("drops a sender it doesn't know", async () => {
     const stub = await withEnabledOwner("unknown");
 

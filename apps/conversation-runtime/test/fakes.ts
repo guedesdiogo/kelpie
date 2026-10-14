@@ -2,7 +2,7 @@ import type { SendOutcome } from "@kelpie/channels";
 import type { SetupStep } from "@kelpie/config";
 import type { RecallOptions } from "@kelpie/context-store/contract";
 import type { Destination } from "@kelpie/conversation/contract";
-import type { AssistantMessage, LlmEvent, RoutedRequest, Usage } from "@kelpie/llm";
+import type { AssistantMessage, LlmEvent, ModelSelection, RoutedRequest, Usage } from "@kelpie/llm";
 import type { ConversationPorts, ModelCall } from "../src/ports.ts";
 import type { ToolProvider } from "../src/tools.ts";
 
@@ -98,7 +98,8 @@ export interface FakeWorld {
   clock: number;
   requests: RoutedRequest[];
   /** The tier of each model call, in call order. */
-  tiers: string[];
+  /** What each model call asked for: its area and the agent's model settings (#286). */
+  selections: ModelSelection[];
   /** While set, a `held` script waits before it replies. */
   modelHeld: boolean;
   cancelled: number;
@@ -169,7 +170,7 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
     expireDeadlines: false,
     clock: Date.now() + 60_000,
     requests: [],
-    tiers: [],
+    selections: [],
     modelHeld: false,
     cancelled: 0,
     sent: [],
@@ -206,9 +207,9 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
         world.awaits.push({ agentId, conversation, step, until });
         await world.onAwait?.({ agentId, conversation, step, until });
       },
-      async generate(tier, request): Promise<ModelCall> {
+      async generate(selection, request): Promise<ModelCall> {
         world.requests.push(structuredClone(request));
-        world.tiers.push(tier);
+        world.selections.push(structuredClone(selection));
         const script = scripts.shift() ?? reply("(no script left)");
         let release: (() => void) | undefined;
         const cancelledPromise = new Promise<void>((resolve) => {

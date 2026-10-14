@@ -60,9 +60,18 @@ export class ConversationAgent extends DurableObject {
     return (await this.ctx.storage.get("received")) ?? null;
   }
 }
+// Agents as the Registry holds them (#288): one that chats, and one whose chat is off.
 export class Registry extends DurableObject {
   get(id) {
-    return id === "assistant" ? { id, name: "Assistant" } : null;
+    if (id === "assistant") {
+      return { id, name: "Assistant", role: "specialist", owner: "kelpie", chat: true };
+    }
+    if (id === "quiet") {
+      return { id, name: "Quiet", role: "specialist", owner: "kelpie", chat: false };
+    }
+    // As a Registry from before #288 answers, during a partial rollback: no role, no chat.
+    if (id === "legacy") return { id, name: "Legacy" };
+    return null;
   }
 }
 export class SetupEvents extends WorkerEntrypoint {

@@ -416,6 +416,13 @@ describe("AgentHost with a vault", () => {
     );
     expect(named).toContain("You run on Kelpie's medium tier: anthropic claude-test-medium.");
 
+    // The trio comes from the agent's model settings, resolved by llm-gateway (#286).
+    await stub.configure({ model: { conversation: { tier: "frontier", effort: "high" } } }, owner);
+    expect((await stub.turnConfig()).settings.systemPrompt).toContain(
+      "You run on Kelpie's frontier tier, at high effort: anthropic claude-test-frontier.",
+    );
+    await stub.configure({ model: {} }, owner);
+
     // A rename reaches the next turn, and the owner's settings still hold only their prompt.
     await registry.rename("named-agent", "Bia Assistente", owner);
     expect((await stub.turnConfig()).settings.systemPrompt).toContain(
@@ -437,8 +444,8 @@ describe("AgentHost with a vault", () => {
       name: async () => {
         throw new Error("Durable Object reset because its code was updated");
       },
-      routes: async () => {
-        throw new TypeError('The RPC receiver does not implement the method "routes".');
+      describe: async () => {
+        throw new TypeError('The RPC receiver does not implement the method "describe".');
       },
     });
     expect((await stub.turnConfig()).settings.systemPrompt).toBe(seen);
