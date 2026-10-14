@@ -28,6 +28,7 @@ export type {
   WebhookRegistration,
   WebhookRegistrationFailure,
 } from "./egress.ts";
+export { RUNNER_PROTOCOL, type RunnerAnswered, type RunnerState } from "./runner.ts";
 export { type CanonicalEvent, type ChannelId, dedupeKey, type MessagePart } from "./events.ts";
 export {
   detectLocale,

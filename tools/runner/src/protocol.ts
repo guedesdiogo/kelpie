@@ -1,8 +1,6 @@
 /** The runner's own version, which `/health` reports. */
 export const VERSION = "0.1.0";
 
-/**
- * The version of what Kelpie and the runner say to each other. It changes when a request or an answer
- * changes shape, and Kelpie refuses a runner on another one.
- */
-export const PROTOCOL = 1;
+// By path, not through the workspace: the runner runs from a checkout without `bun install`. The
+// file imports nothing, so Kelpie's side and the runner can't disagree on it.
+export { RUNNER_PROTOCOL as PROTOCOL } from "../../../packages/channels/src/runner.ts";
