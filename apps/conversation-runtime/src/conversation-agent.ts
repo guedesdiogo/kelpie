@@ -714,16 +714,21 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     let summary = "";
     let usage: Usage[] = [];
     try {
-      const call = await this.#ports.generate("cheap", {
-        system: CHECKPOINT_SUMMARIZER,
-        messages: [
-          {
-            role: "user",
-            parts: [{ type: "text", text: summaryInput(current?.summary ?? null, rows) }],
-          },
-        ],
-        maxOutputTokens: CHECKPOINT_SUMMARY_TOKENS,
-      });
+      // The memory area: the agent's own settings for it, `cheap` unless they set its tier (#286).
+      const { model } = (await this.#config()).settings;
+      const call = await this.#ports.generate(
+        { area: "memory", agent: model },
+        {
+          system: CHECKPOINT_SUMMARIZER,
+          messages: [
+            {
+              role: "user",
+              parts: [{ type: "text", text: summaryInput(current?.summary ?? null, rows) }],
+            },
+          ],
+          maxOutputTokens: CHECKPOINT_SUMMARY_TOKENS,
+        },
+      );
       for await (const event of call.events) {
         if (event.type !== "finish") continue;
         usage = event.usage;
@@ -1093,14 +1098,19 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     let pendingContext = memory;
     for (;;) {
       step("thinking");
-      const call = await this.#ports.generate(settings.tier, {
-        system,
-        messages: this.#messages(turn.systemVersion, turn.checkpointId, toolsKey, promptKey),
-        ...(specs.length === 0 ? {} : { tools: specs }),
-        maxOutputTokens: settings.maxOutputTokens,
-        // History rows never keep it; the turn does, for later requests (#137).
-        ...(pendingContext === null ? {} : { context: pendingContext }),
-      });
+      // A turn's settings from before #286 have no `model`, and their tier was the conversation's.
+      const agent = settings.model ?? { conversation: { tier: settings.tier } };
+      const call = await this.#ports.generate(
+        { area: "conversation", agent },
+        {
+          system,
+          messages: this.#messages(turn.systemVersion, turn.checkpointId, toolsKey, promptKey),
+          ...(specs.length === 0 ? {} : { tools: specs }),
+          maxOutputTokens: settings.maxOutputTokens,
+          // History rows never keep it; the turn does, for later requests (#137).
+          ...(pendingContext === null ? {} : { context: pendingContext }),
+        },
+      );
       pendingContext = null;
       const flight = this.#inFlight.get(turn.id);
       if (flight) flight.call = call;

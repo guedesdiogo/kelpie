@@ -1,8 +1,16 @@
+import { runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { fromNdjsonStream, type LlmEvent, type RoutedRequest } from "@kelpie/llm";
 import type { Question } from "@kelpie/qualifier";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { embedWith, pingWith, providerConfig, qualifyWith, routesWith } from "../src/index.ts";
+import {
+  describeWith,
+  embedWith,
+  pingWith,
+  providerConfig,
+  qualifyWith,
+  routesWith,
+} from "../src/index.ts";
 
 // The Worker runs in the test's isolate, so stubbing the global fetch stands in for the provider.
 // The stream is built from Anthropic's documented event format, not recorded.
@@ -514,7 +522,7 @@ describe("ping", () => {
     expect(fetched).not.toHaveBeenCalled();
   });
 
-  it("throws when a route, a provider's base URL or the embedding provider can't load", () => {
+  it("throws when a route, a provider's base URL or the embedding provider can't load", async () => {
     const base = env as GatewayEnv;
     const broken: Record<string, unknown>[] = [
       { MODEL_ROUTES: { cheap: [{ provider: "mistral", model: "x" }] } },
@@ -522,7 +530,7 @@ describe("ping", () => {
       { EMBEDDING_PROVIDER: "cohere" },
     ];
     for (const change of broken) {
-      expect(() => pingWith({ ...base, ...change } as GatewayEnv)).toThrow();
+      await expect(pingWith({ ...base, ...change } as GatewayEnv)).rejects.toThrow();
     }
   });
 });
@@ -551,5 +559,119 @@ describe("routes", () => {
     expect(routesWith(openaiOnly as GatewayEnv).cheap).toEqual([
       { provider: "openai", model: "gpt-6-luna" },
     ]);
+  });
+});
+
+describe("model choice (#286)", () => {
+  type GatewayEnv = Parameters<typeof describeWith>[0];
+  const defaults = () => env.MODEL_DEFAULTS.getByName("instance");
+
+  /** Leaves ModelDefaults as a test needs it; nothing stored means nothing pinned yet. */
+  async function seed(values: { pinnedProvider?: string; instance?: unknown }) {
+    await runInDurableObject(defaults(), (_instance, state) => {
+      state.storage.kv.delete("pinnedProvider");
+      state.storage.kv.delete("instance");
+      for (const [key, value] of Object.entries(values)) state.storage.kv.put(key, value);
+    });
+  }
+
+  it("resolves an area's trio, and sends its tier's model and its effort", async () => {
+    await seed({});
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(anthropic(() => sseResponse([start, ...text, ...end])));
+
+    using generation = await exports.LlmGateway.generate(
+      { area: "conversation", agent: { conversation: { tier: "medium", effort: "high" } } },
+      request,
+    );
+    for await (const _event of fromNdjsonStream(await generation.events())) {
+      // Read to the end.
+    }
+    const [, init] = fetchSpy.mock.calls.find(isMessages) ?? [];
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      model: "claude-sonnet-5-5",
+      output_config: { effort: "high" },
+    });
+  });
+
+  it("pins the first provider with a key, in the cheap tier's order, and keeps it", async () => {
+    await seed({});
+    expect(await exports.LlmGateway.describe("memory")).toEqual({
+      provider: "anthropic",
+      tier: "cheap",
+      route: [{ provider: "anthropic", model: "haiku", standsFor: "the newest Claude Haiku" }],
+    });
+    // A key added later doesn't move the pin: its provider only joins the route as a fallback.
+    await seed({ pinnedProvider: "openai" });
+    const both = { ...(env as GatewayEnv), OPENAI_API_KEY: "sk-test" };
+    expect(await describeWith(both, "conversation")).toEqual({
+      provider: "openai",
+      tier: "cheap",
+      route: [
+        { provider: "openai", model: "gpt-6-luna" },
+        { provider: "anthropic", model: "haiku", standsFor: "the newest Claude Haiku" },
+      ],
+    });
+  });
+
+  it("takes the instance's settings below the agent's, and the caller's tier as the built-in", async () => {
+    await seed({ pinnedProvider: "anthropic", instance: { memory: { effort: "low" } } });
+    const both = { ...(env as GatewayEnv), OPENAI_API_KEY: "sk-test" };
+    expect(await describeWith(both, "memory", { provider: "openai" }, "medium")).toEqual({
+      provider: "openai",
+      tier: "medium",
+      effort: "low",
+      route: [
+        { provider: "openai", model: "gpt-6.1-sol" },
+        { provider: "anthropic", model: "claude-sonnet-5-5" },
+      ],
+    });
+  });
+
+  it("keeps the route table's order when ModelDefaults fails, and logs only the error's name", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const broken = {
+      ...(env as GatewayEnv),
+      MODEL_DEFAULTS: {
+        getByName: () => ({
+          defaults: async () => {
+            throw new TypeError("Durable Object reset because its code was updated");
+          },
+        }),
+      },
+    } as unknown as GatewayEnv;
+    expect(await describeWith(broken, "conversation")).toMatchObject({
+      provider: null,
+      tier: "cheap",
+    });
+    expect(logged).toHaveBeenCalledWith(
+      "llm-gateway: ModelDefaults failed; using the route table's order",
+      "TypeError",
+    );
+  });
+
+  it("refuses an unknown area, tier or agent setting instead of guessing", async () => {
+    for (const call of [
+      { area: "tasks" },
+      { area: "memory", tier: "huge" },
+      { area: "conversation", agent: { conversation: { model: "gpt-6-astra" } } },
+    ]) {
+      using generation = await exports.LlmGateway.generate(call as never, request);
+      const read = async () => {
+        for await (const _event of fromNdjsonStream(await generation.events())) {
+          // Read to the end.
+        }
+      };
+      await expect(read()).rejects.toMatchObject({ code: "bad_request" });
+    }
+  });
+
+  it("wakes ModelDefaults on the deploy's ping, and pins nothing", async () => {
+    await seed({});
+    expect(await exports.LlmGateway.ping()).toEqual({ ok: true });
+    await runInDurableObject(defaults(), (_instance, state) => {
+      expect(state.storage.kv.get("pinnedProvider")).toBeUndefined();
+    });
   });
 });

@@ -1,4 +1,5 @@
 // The router module only: the package root also loads the provider SDKs.
+import { type ModelSettings, parseModelSettings } from "@kelpie/llm/models";
 import { MODEL_TIERS, type ModelTier } from "@kelpie/llm/router";
 import { QUALIFIER_BACKENDS, type QualifierBackend } from "@kelpie/qualifier";
 
@@ -15,7 +16,16 @@ export const SETUP_AGENT_ID = "setup";
 export interface AgentSettings {
   /** Merge fragments and split replies into paced bubbles; off answers each message at once. */
   conversational: boolean;
+  /**
+   * The conversation's tier, as set before #286: `agentModel` counts a stored one as
+   * `model.conversation.tier`. New changes go to `model`.
+   */
   tier: ModelTier;
+  /**
+   * The agent's provider, tier and effort per area (ADR-0036 §2). What it leaves unset comes from
+   * the instance, then the built-in defaults, in llm-gateway.
+   */
+  model: ModelSettings;
   /** Changing it starts a new prompt version: earlier replies replay without native output. */
   systemPrompt: string;
   maxOutputTokens: number;
@@ -41,6 +51,7 @@ export interface AgentSettings {
 export const DEFAULT_SETTINGS: AgentSettings = {
   conversational: true,
   tier: "cheap",
+  model: {},
   systemPrompt: "You are a helpful assistant. Reply in the language the user writes in.",
   maxOutputTokens: 1_024,
   quietMs: 10_000,
@@ -79,6 +90,12 @@ export function parseSettings(input: unknown): Partial<AgentSettings> | null {
         if (!MODEL_TIERS.includes(value as ModelTier)) return null;
         parsed.tier = value as ModelTier;
         break;
+      case "model": {
+        const model = parseModelSettings(value);
+        if (!model) return null;
+        parsed.model = model;
+        break;
+      }
       case "systemPrompt":
         if (typeof value !== "string" || value.trim() === "" || value.length > 20_000) return null;
         parsed.systemPrompt = value;
@@ -112,4 +129,14 @@ export function parseSettings(input: unknown): Partial<AgentSettings> | null {
     }
   }
   return parsed;
+}
+
+/**
+ * The agent's model settings from what its owner set: `stored` holds only the settings a change set
+ * (#218), so a tier there was chosen, and counts as the conversation's unless `model` sets one.
+ */
+export function agentModel(stored: Partial<AgentSettings>): ModelSettings {
+  const model = stored.model ?? {};
+  if (stored.tier === undefined || model.conversation?.tier !== undefined) return model;
+  return { ...model, conversation: { ...model.conversation, tier: stored.tier } };
 }

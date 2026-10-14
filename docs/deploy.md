@@ -83,7 +83,7 @@ After the gates pass on `main`, the `Deploy` job runs `tools/release`. It:
    - **the deep probe**, signed with the token and sent only to an https origin: `POST /deploy/probe` answers 200 with `{ directory, registry, agentHosts, gateway }`, each `ok`. It wakes:
      - ingress's `Directory`;
      - through conversation-runtime's `DeployProbe` entrypoint, the `Registry` and the `AgentHost` of every agent it lists, ten at a time;
-     - llm-gateway, which loads its route table and provider settings without calling a model.
+     - llm-gateway, which loads its route table and provider settings without calling a model, and wakes its `ModelDefaults` object (#286).
 
      Each object answers once its migrations ran, so a migration that fails shows now, not on the first real request. A part that answers `failed` fails the probe, and the report names the part. A 404 means ingress lacks the token or holds another one, or the build has no route; the report says so.
 7. **Watches for 10 minutes.**

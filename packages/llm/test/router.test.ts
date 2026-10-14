@@ -57,7 +57,9 @@ describe("ModelRouter", () => {
     const anthropic = scripted("anthropic", {});
     const router = new ModelRouter(routes, { anthropic: anthropic.provider });
 
-    expect(await collect(router.stream("frontier", request))).toEqual([finish("claude-opus-5-5")]);
+    expect(await collect(router.stream({ tier: "frontier" }, request))).toEqual([
+      finish("claude-opus-5-5"),
+    ]);
     expect(anthropic.requests).toEqual([{ ...request, model: "claude-opus-5-5", effort: "high" }]);
   });
 
@@ -65,9 +67,9 @@ describe("ModelRouter", () => {
     const anthropic = scripted("anthropic", {});
     const router = new ModelRouter(routes, { anthropic: anthropic.provider });
 
-    await collect(router.stream("medium", { ...request, context: "<memory/>" }));
+    await collect(router.stream({ tier: "medium" }, { ...request, context: "<memory/>" }));
     await collect(
-      router.stream("medium", { ...request, context: 42 } as unknown as typeof request),
+      router.stream({ tier: "medium" }, { ...request, context: 42 } as unknown as typeof request),
     );
     expect(anthropic.requests).toEqual([
       { ...request, model: "claude-sonnet-5-5", context: "<memory/>" },
@@ -85,7 +87,9 @@ describe("ModelRouter", () => {
       openai: openai.provider,
     });
 
-    expect(await collect(router.stream("cheap", request))).toEqual([finish("gpt-6-luna")]);
+    expect(await collect(router.stream({ tier: "cheap" }, request))).toEqual([
+      finish("gpt-6-luna"),
+    ]);
     expect(openai.requests[0]).toEqual({ ...request, model: "gpt-6-luna" });
   });
 
@@ -99,7 +103,7 @@ describe("ModelRouter", () => {
       openai: openai.provider,
     });
 
-    await expect(collect(router.stream("cheap", request))).rejects.toBe(overloaded);
+    await expect(collect(router.stream({ tier: "cheap" }, request))).rejects.toBe(overloaded);
     expect(openai.requests).toEqual([]);
   });
 
@@ -115,7 +119,7 @@ describe("ModelRouter", () => {
       openai: openai.provider,
     });
 
-    await expect(collect(router.stream("cheap", request))).rejects.toBe(error);
+    await expect(collect(router.stream({ tier: "cheap" }, request))).rejects.toBe(error);
     expect(openai.requests).toEqual([]);
   });
 
@@ -128,7 +132,7 @@ describe("ModelRouter", () => {
       openai: openai.provider,
     });
 
-    expect(await collect(router.stream("cheap", request))).toEqual([refusal]);
+    expect(await collect(router.stream({ tier: "cheap" }, request))).toEqual([refusal]);
     expect(openai.requests).toEqual([]);
   });
 
@@ -143,15 +147,17 @@ describe("ModelRouter", () => {
       openai: openai.provider,
     });
 
-    await expect(collect(router.stream("cheap", request))).rejects.toBe(lastError);
+    await expect(collect(router.stream({ tier: "cheap" }, request))).rejects.toBe(lastError);
   });
 
   it("skips candidates whose provider isn't configured", async () => {
     const openai = scripted("openai", {});
     const router = new ModelRouter(routes, { openai: openai.provider });
 
-    expect(await collect(router.stream("cheap", request))).toEqual([finish("gpt-6-luna")]);
-    await expect(collect(router.stream("medium", request))).rejects.toMatchObject({
+    expect(await collect(router.stream({ tier: "cheap" }, request))).toEqual([
+      finish("gpt-6-luna"),
+    ]);
+    await expect(collect(router.stream({ tier: "medium" }, request))).rejects.toMatchObject({
       code: "unavailable",
       retryable: false,
     });
@@ -162,7 +168,9 @@ describe("ModelRouter input from RPC", () => {
   it("rejects an unknown tier", async () => {
     const router = new ModelRouter(routes, { anthropic: scripted("anthropic", {}).provider });
 
-    await expect(collect(router.stream("constructor" as never, request))).rejects.toMatchObject({
+    await expect(
+      collect(router.stream({ tier: "constructor" as never }, request)),
+    ).rejects.toMatchObject({
       code: "bad_request",
       retryable: false,
     });
@@ -173,8 +181,46 @@ describe("ModelRouter input from RPC", () => {
     const router = new ModelRouter(routes, { anthropic: anthropic.provider });
     const sneaky = { ...request, model: "claude-fable-5-1", effort: "max", baseURL: "https://x" };
 
-    await collect(router.stream("medium", sneaky as never));
+    await collect(router.stream({ tier: "medium" }, sneaky as never));
     expect(anthropic.requests).toEqual([{ ...request, model: "claude-sonnet-5-5" }]);
+  });
+
+  it("tries the chosen provider's candidates first, then the tier's others in order", async () => {
+    const anthropic = scripted("anthropic", {});
+    const openai = scripted("openai", { "gpt-6-luna": { events: [], error: overloaded } });
+    const router = new ModelRouter(routes, {
+      anthropic: anthropic.provider,
+      openai: openai.provider,
+    });
+
+    expect(await collect(router.stream({ tier: "cheap", provider: "openai" }, request))).toEqual([
+      finish("claude-haiku-4-5"),
+    ]);
+    expect(openai.requests.map((sent) => sent.model)).toEqual(["gpt-6-luna"]);
+    expect(anthropic.requests.map((sent) => sent.model)).toEqual(["claude-haiku-4-5"]);
+    // No choice, or a provider without a key, keeps the table's order.
+    expect(router.route("cheap", "openai").map((candidate) => candidate.provider)).toEqual([
+      "openai",
+      "anthropic",
+    ]);
+    expect(router.route("cheap", null).map((candidate) => candidate.provider)).toEqual([
+      "anthropic",
+      "openai",
+    ]);
+  });
+
+  it("sends the chosen effort before the candidate's own, lowered to what the model takes", async () => {
+    const anthropic = scripted("anthropic", {});
+    const withOld: RouteTable = {
+      ...routes,
+      medium: [{ provider: "anthropic", model: "claude-opus-4-6" }],
+    };
+    const router = new ModelRouter(withOld, { anthropic: anthropic.provider });
+
+    await collect(router.stream({ tier: "frontier", effort: "max" }, request));
+    await collect(router.stream({ tier: "frontier" }, request));
+    await collect(router.stream({ tier: "medium", effort: "xhigh" }, request));
+    expect(anthropic.requests.map((sent) => sent.effort)).toEqual(["max", "high", "high"]);
   });
 
   it("lists a tier's candidates whose provider is configured, in order, without calling one", () => {
