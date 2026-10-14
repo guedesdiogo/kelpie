@@ -12,7 +12,7 @@ try {
   const secrets = loadSecrets(config.secretFile);
   const fetch = createHandler({ secrets, log: (entry) => console.log(JSON.stringify(entry)) });
   // Loopback only: the tunnel's connector reaches the runner there, and nothing else should.
-  Bun.serve({ hostname: "127.0.0.1", port: config.port, fetch });
+  Bun.serve({ hostname: "127.0.0.1", port: config.port, development: false, fetch });
   console.log(`kelpie-runner ${VERSION} (protocol ${PROTOCOL}) on 127.0.0.1:${config.port}`);
 } catch (error) {
   if (!(error instanceof RunnerConfigError)) throw error;

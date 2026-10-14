@@ -130,6 +130,8 @@ The run's summary has the table of versions, the probes and the barriers. The pr
     ```
     Later deploys carry the new value.
 
+    This deploys the committed config, so `channel-egress` loses the runner's `RUNNER` binding until the next deploy through the pipeline ([runner.md](runner.md)). Run `deploy.yml` by hand right after, or the runner reads as `not_configured` meanwhile.
+
 ## Rolling back by request
 
 - **From GitHub:**

@@ -30,6 +30,23 @@ describe("the runner's handler", () => {
     }
   });
 
+  it("answers a URL that doesn't parse, as a malformed Host makes, with 401, or 400 once authorized", () => {
+    const logs: LogEntry[] = [];
+    const handle = createHandler({ secrets: [SECRET], log: (entry) => logs.push(entry) });
+    const broken = (authorization: string) =>
+      ({
+        url: "http://a b/health",
+        method: "GET",
+        headers: new Headers({ authorization }),
+      }) as unknown as Request;
+    expect(handle(broken("Bearer guess")).status).toBe(401);
+    expect(handle(broken(`Bearer ${SECRET}`)).status).toBe(400);
+    expect(logs).toEqual([
+      { method: "GET", path: "?", status: 401 },
+      { method: "GET", path: "?", status: 400 },
+    ]);
+  });
+
   it("answers 404 for an unknown path once authorized", async () => {
     const { call, auth } = setup();
     expect((await call("/nope", { headers: auth })).status).toBe(404);

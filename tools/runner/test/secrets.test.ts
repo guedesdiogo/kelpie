@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -59,5 +59,21 @@ describe("loadSecrets", () => {
 
   it.each([0o640, 0o604, 0o644])("refuses a file others can read (mode %o)", (mode) => {
     expect(() => loadSecrets(write(CURRENT, mode))).toThrow(/chmod 600/);
+  });
+
+  it("refuses a symlink, even to a good secret file", () => {
+    const link = join(dir, "link");
+    symlinkSync(write(CURRENT), link);
+    expect(() => loadSecrets(link)).toThrow(/symlink/);
+  });
+
+  it("refuses a directory", () => {
+    const folder = join(dir, "folder");
+    mkdirSync(folder);
+    expect(() => loadSecrets(folder)).toThrow(/isn't a file/);
+  });
+
+  it("refuses a file that belongs to another user", () => {
+    expect(() => loadSecrets(write(CURRENT), process.getuid() + 1)).toThrow(/another user/);
   });
 });

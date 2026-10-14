@@ -16,18 +16,28 @@ export interface HandlerOptions {
 /** The runner's HTTP handler. Bun's server calls it for each request that reaches loopback. */
 export function createHandler({ secrets, log }: HandlerOptions): (request: Request) => Response {
   return (request) => {
-    const path = new URL(request.url).pathname;
+    const path = pathOf(request.url);
     const response = route(request, path, secrets);
-    log({ method: request.method, path, status: response.status });
+    log({ method: request.method, path: path ?? "?", status: response.status });
     return response;
   };
 }
 
-function route(request: Request, path: string, secrets: readonly string[]): Response {
+/** The request's path, or null when its URL doesn't parse, as with a malformed `Host`. */
+function pathOf(url: string): string | null {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return null;
+  }
+}
+
+function route(request: Request, path: string | null, secrets: readonly string[]): Response {
   // The secret comes first, so a caller without it learns nothing, not even which paths exist.
   if (!isAuthorized(request.headers.get("authorization"), secrets)) {
     return Response.json({ ok: false }, { status: 401 });
   }
+  if (path === null) return Response.json({ ok: false }, { status: 400 });
   if (path === "/health") {
     if (request.method !== "GET")
       return new Response(null, { status: 405, headers: { allow: "GET" } });

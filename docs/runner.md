@@ -25,11 +25,13 @@ On the VPS, as the user whose claude.ai login Claude Code uses:
 2. **Create the secret.** It is 32 random bytes, in a file only this user can read. The runner refuses to start on a file others can read, or without a secret.
 
    ```bash
-   mkdir -p ~/.config/kelpie-runner
+   install -d -m 700 ~/.config/kelpie-runner
    (umask 077; openssl rand -hex 32 > ~/.config/kelpie-runner/secret)
    ```
 
-3. **Install the service.** It restarts on failure, but not on a setting to fix (exit 78). It sets `NoNewPrivileges`, which every process the runner starts inherits.
+   It must be a regular file of this user, not a symlink.
+
+3. **Install the service.** It restarts on failure, but not on a setting to fix (exit 78). It sets `NoNewPrivileges`, which every process the runner starts inherits, and `NODE_ENV=production`, so an error never answers with Bun's page of source.
 
    ```bash
    mkdir -p ~/.config/systemd/user
@@ -41,10 +43,10 @@ On the VPS, as the user whose claude.ai login Claude Code uses:
 
    Lingering keeps user services running when nobody is logged in.
 
-4. **Check it** on the server:
+4. **Check it** on the server. The header goes through standard input, so the secret never shows in the process list:
 
    ```bash
-   curl -s -H "Authorization: Bearer $(cat ~/.config/kelpie-runner/secret)" http://127.0.0.1:47832/health
+   printf 'Authorization: Bearer %s' "$(cat ~/.config/kelpie-runner/secret)" | curl -s -H @- http://127.0.0.1:47832/health
    ```
 
 ### Settings
@@ -67,7 +69,7 @@ Cloudflare's [Workers VPC](https://developers.cloudflare.com/workers-vpc/) is in
    sudo cloudflared service install <TUNNEL_TOKEN>
    ```
 
-   It connects out over QUIC, on outbound UDP port 7844. The tunnel needs no ingress rules for Workers VPC.
+   It connects out over QUIC, on outbound UDP port 7844. The tunnel needs no ingress rules for Workers VPC. **Don't give it a public hostname for the runner:** the secret would then be the runner's only protection.
 3. **Create the VPC Service**, pointing at the runner:
 
    ```bash
@@ -78,17 +80,21 @@ Cloudflare's [Workers VPC](https://developers.cloudflare.com/workers-vpc/) is in
 
 `channel-egress` is the only Worker that calls the runner, and it keeps the runner's secret in Kelpie's secret store (`docs/secrets.md`).
 
-1. **Give the deploy the VPC Service's id,** as a variable of GitHub's `production` environment:
+1. **Give the deploy the VPC Service's id,** as a variable of GitHub's `production` environment ([ADR-0039](adr/0039-runner-vpc-service-id-in-github.md)):
 
    ```bash
    gh variable set RUNNER_VPC_SERVICE_ID --env production --repo guedesdiogo/kelpie --body <VPC_SERVICE_ID>
    ```
 
-   The next deploy gives `channel-egress` its `RUNNER` binding (`docs/deploy.md`). A merge that ships nothing deploys nothing, so the first time it takes a deploy by hand, with `always` (`docs/deploy.md`, "By hand").
+   The next deploy gives `channel-egress` its `RUNNER` binding (`docs/deploy.md`). A merge that ships nothing deploys nothing, so the first time it takes a deploy by hand, with `always` (`docs/deploy.md`, "By hand"). Its log says "kelpie-channel-egress gets the runner's VPC Service as its RUNNER binding".
+
+   If that deploy fails on `channel-egress`, every later one will too. Delete the variable (`gh variable delete RUNNER_VPC_SERVICE_ID --env production`), then check the id against `wrangler vpc service list`, and check that the deploy's API token may bind a VPC Service.
 2. **Give Kelpie the secret.** The `connectRunner` command answers a one-time form's path (`docs/admin-api.md`). Open it, and paste the content of `~/.config/kelpie-runner/secret`. `channel-egress` checks it with the runner's `/health` before storing it.
 3. **Check it** with the `describeRunner` command. It answers `ready`, with the runner's version, when everything works.
 
-A rollback to a build deployed before the variable was set leaves `channel-egress` without the binding until the next deploy.
+A rollback to a build deployed before the variable was set leaves `channel-egress` without the binding until the next deploy. So does a deploy of `channel-egress` by hand (`docs/deploy.md`).
+
+**One user on the server.** The secret file guards the runner from other users, and the loopback port doesn't. On a server shared with other users, one of them could take the port while the runner is down, and receive Kelpie's calls with the secret. Run the runner on a server that only its owner uses.
 
 ## Operating it
 

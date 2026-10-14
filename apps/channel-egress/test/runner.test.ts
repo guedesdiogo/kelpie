@@ -1,6 +1,8 @@
+import { createExecutionContext } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { RUNNER_PROTOCOL } from "@kelpie/channels";
 import { describe, expect, it } from "vitest";
+import { ChannelForms } from "../src/index.ts";
 import { checkRunner } from "../src/runner.ts";
 
 // vitest.config.ts binds RUNNER to a fake runner whose answer depends on the secret it gets.
@@ -67,6 +69,11 @@ describe("checkRunner", () => {
     ["text", () => new Response("hello")],
     ["another shape", () => Response.json({ ok: true, version: 1, protocol: "1" })],
     ["a version too long", () => Response.json({ ok: true, version: "v".repeat(65), protocol: 1 })],
+    ["a version with markup", () => Response.json({ ok: true, version: "<b>1</b>", protocol: 1 })],
+    [
+      "a redirect",
+      () => new Response(null, { status: 302, headers: { location: "https://x.example" } }),
+    ],
   ])("is unreachable on %s", async (_, answer) => {
     expect(await checkRunner(fetcher(answer), READY)).toEqual({ state: "unreachable" });
   });
@@ -188,6 +195,26 @@ describe("the runner's secure form", () => {
         "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw-test",
       ),
     ).toEqual({ ok: false, reason: "unknown_form" });
+  });
+});
+
+describe("without the runner's binding", () => {
+  // As channel-egress is deployed when the instance has no RUNNER_VPC_SERVICE_ID (#294).
+  const unbound = () =>
+    new ChannelForms(createExecutionContext(), { ...env, RUNNER: undefined } as unknown as Env);
+
+  it("opens no form, takes no secret, and reads as not configured", async () => {
+    const forms = unbound();
+    expect(await forms.createRunnerForm()).toEqual({ ok: false, reason: "not_configured" });
+    const token = await runnerForm();
+    expect(await forms.redeemRunnerForm(token, READY)).toEqual({
+      ok: false,
+      reason: "not_configured",
+    });
+    expect(await forms.describeRunner()).toEqual({
+      ok: true,
+      runner: { state: "not_configured" },
+    });
   });
 });
 

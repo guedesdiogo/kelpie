@@ -8,6 +8,7 @@
 | `packages/memory` and `packages/access` | Vitest with `@cloudflare/vitest-plugin` | workerd, from a test-only Worker in `test/wrangler.jsonc` |
 | `apps/*` (Workers and Durable Objects) | Vitest with `@cloudflare/vitest-plugin` | workerd, configured from each Worker's `wrangler.jsonc` |
 | `tools/release` (deploys, rollbacks and the migration gate) | Vitest, with fakes for Cloudflare's API and production, and throwaway git repositories | Node |
+| `tools/runner` (the VPS runner, [runner.md](runner.md)) | Vitest, with its handler called directly and secret files in a throwaway folder | Node; the runner itself runs on Bun |
 
 Domain modules stay runtime-agnostic (ADR-0002), so Node is enough for them. Anything that touches bindings, Durable Object storage or alarms runs inside workerd. No Cloudflare account or key is needed for either.
 
@@ -58,7 +59,7 @@ The `ConversationAgent` reads its settings from a real `AgentHost` in the same t
 
 CI runs every workspace's tests once, with coverage (`bun run test:coverage`), and its summary shows a coverage table for each workspace. A pull request that changes only docs skips them ([ADR-0038](adr/0038-pull-requests-run-affected-gates.md)).
 - **The provider is Istanbul.** V8's coverage doesn't work inside workerd, so every workspace uses Istanbul for the same numbers everywhere.
-- **What counts:** each workspace counts its own `src/**/*.ts`, covered by its own tests. A package's code exercised only by an app's tests doesn't count for the package, so tests belong in the workspace whose code they test. The one exclusion is `tools/release/src/main.ts`, the CLI's wiring to the process, git, wrangler and Cloudflare. Its decisions live in tested modules.
+- **What counts:** each workspace counts its own `src/**/*.ts`, covered by its own tests. A package's code exercised only by an app's tests doesn't count for the package, so tests belong in the workspace whose code they test. Two files are excluded: `tools/release/src/main.ts`, the CLI's wiring to the process, git, wrangler and Cloudflare, and `tools/runner/src/main.ts`, the runner's wiring to the process and Bun's server. Their decisions live in tested modules.
 - **The floor ([ADR-0030](adr/0030-coverage-floor.md)).** Every workspace's `vitest.config.ts` sets 80% for statements, branches, functions and lines.
   - A run under any of them fails CI, so the pull request can't merge.
   - Above 80%, coverage may move without failing CI. The summary's table shows each workspace's numbers, so a drop is visible in review.

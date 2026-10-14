@@ -2,8 +2,8 @@ import { RUNNER_PROTOCOL, type RunnerAnswered } from "@kelpie/channels";
 
 /** How long a health check waits for the runner. */
 const HEALTH_TIMEOUT_MS = 5_000;
-/** The longest version a runner may report; anything longer isn't the runner's answer. */
-const MAX_VERSION_LENGTH = 64;
+/** A version as the runner reports it, such as `0.1.0`; anything else isn't the runner's answer. */
+const VERSION = /^[0-9A-Za-z.+-]{1,64}$/;
 
 /**
  * The runner's secret: printable, without spaces, between 32 and 256 characters. `openssl rand -hex
@@ -28,6 +28,8 @@ export async function checkRunner(runner: Fetcher, secret: string): Promise<Runn
     // The VPC Service sets the host and the port; only the path matters.
     response = await runner.fetch("http://runner/health", {
       headers: { authorization: `Bearer ${secret}` },
+      // The runner never redirects: an answer that does isn't the runner's.
+      redirect: "manual",
       signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
     });
   } catch (error) {
@@ -52,7 +54,7 @@ function isHealth(value: unknown): value is { version: string; protocol: number 
   return (
     health?.ok === true &&
     typeof health.version === "string" &&
-    health.version.length <= MAX_VERSION_LENGTH &&
+    VERSION.test(health.version) &&
     Number.isInteger(health.protocol)
   );
 }

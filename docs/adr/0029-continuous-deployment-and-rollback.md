@@ -3,7 +3,7 @@
 - Status: Accepted (the owner merged #236)
 - Date: 2026-10-10
 - Issue: [#233](https://github.com/guedesdiogo/kelpie/issues/233)
-- Amended by: [ADR-0030](0030-coverage-floor.md), coverage thresholds: an 80% floor; [ADR-0031](0031-deploy-only-what-ships.md), a deploy skips when nothing that ships changed since the builds production serves; [ADR-0033](0033-deploy-deep-probe.md), a signed deep probe, and the automatic rollback of ingress after a token upload; [ADR-0038](0038-pull-requests-run-affected-gates.md), a pull request runs only the gates its changes can affect
+- Amended by: [ADR-0030](0030-coverage-floor.md), coverage thresholds: an 80% floor; [ADR-0031](0031-deploy-only-what-ships.md), a deploy skips when nothing that ships changed since the builds production serves; [ADR-0033](0033-deploy-deep-probe.md), a signed deep probe, and the automatic rollback of ingress after a token upload; [ADR-0038](0038-pull-requests-run-affected-gates.md), a pull request runs only the gates its changes can affect; [ADR-0039](0039-runner-vpc-service-id-in-github.md), the runner's VPC Service id lives in GitHub's `production` environment
 - Requested by the owner on 2026-10-10: «Quero que configure o repo do kelpie para fazer deploy automatico quando tiver merge e apenas permitir merge quando todos os testes passarem […] o deploy automático deve sempre rodar o migration tbm. Aplique inclusive formas de fazer rollback automático […] e tbm crie formas de voltar uma versao caso eu solicite»
 
 ## Context

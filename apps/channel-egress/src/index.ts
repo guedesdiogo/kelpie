@@ -265,6 +265,10 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
   async #redeemRunnerAgain(token: string, candidate: string, runner: Fetcher) {
     const used = await store(this.env).redeemedForm(token);
     const found = used?.kind === "runner" ? await runnerSecret(this.env) : null;
+    // The caller answers an unreachable store as such, not as a closed link, as for Telegram.
+    if (found?.ok === false && found.reason === "store_unavailable") {
+      throw new Error("The secret store is unavailable");
+    }
     if (!found?.ok || !(await sameText(found.secret, candidate))) {
       return { ok: false as const, reason: "unknown_form" as const };
     }
