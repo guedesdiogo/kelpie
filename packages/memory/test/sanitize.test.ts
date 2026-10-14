@@ -241,6 +241,22 @@ describe("sanitizeSecrets", () => {
   });
 
   it.each([
+    ["a key body", "MII", "EvQIBADANBgkqhkiG9w0BAQEFAASC", 64],
+    ["an OpenSSH key body", "b3BlbnNzaC1", "rZXktdjE", 70],
+  ])("redacts %s with no header across the lines it wraps onto (#326)", (_label, a, b, width) => {
+    const body = join(a, b, tail(26 * width));
+    const wrapped = (body.match(new RegExp(`.{1,${width}}`, "g")) ?? []).join("\n");
+    const last = `${tail(9)}==`;
+    const { text } = sanitizeSecrets(`colei a chave:\n${wrapped}\n${last}\nObrigado, até amanhã.`);
+    expect(text).toContain("[REDACTED:private_key]");
+    // No line of the key is left, the short last one included; the sentence after it stays.
+    expect(text).not.toMatch(/[A-Za-z0-9+/]{16,}/);
+    expect(text).not.toContain(last);
+    expect(text).toContain("colei a chave:");
+    expect(text).toContain("até amanhã.");
+  });
+
+  it.each([
     ["a zero-width joiner", "\u200d"],
     ["a combining grapheme joiner", "\u034f"],
     ["a variation selector", "\ufe0f"],

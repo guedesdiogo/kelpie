@@ -1,8 +1,9 @@
 // The session recall slice (#297), over the 1,000-memory vault: 24 conversations whose answer sits
 // past a message's 280th character or in a long session's omitted middle, plus a control, each
-// with two conversations on its topic. Their pages are written twice: as today's `sessionPage`
-// writes them, and keeping each message whole up to 2,000 characters, with no middle cut up to 200
-// messages. The same questions go to retrieval (#110), as a turn asks them, with no vectors.
+// with two conversations on its topic. Their pages are written twice: with the limits #297
+// measured before #326, 280 characters a message and the first and last 30 messages, and as
+// `sessionPage` writes them now. The same questions go to retrieval (#110), as a turn asks them,
+// with no vectors.
 // Run it with `bun run --filter @kelpie/memory eval`; docs/spikes/memory-eval.md records the run.
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -28,8 +29,8 @@ const BUDGET_TOKENS = 1_000;
 const READABLE_RANK = 5;
 
 const VARIANTS: Record<string, SessionLimits> = {
+  before: { excerptChars: 280, headLines: 30, tailLines: 30, maxChars: Number.MAX_SAFE_INTEGER },
   today: SESSION_LIMITS,
-  whole: { excerptChars: 2_000, headLines: 100, tailLines: 100 },
 };
 
 declare module "vitest" {
@@ -59,7 +60,7 @@ async function pagesCommit(limits: SessionLimits, after: number) {
 }
 
 describe("session recall", () => {
-  it(`finds what a conversation said, over ${SIZE} memories, with today's pages and whole ones`, async ({
+  it(`finds what a conversation said, over ${SIZE} memories, before #326 and today`, async ({
     task,
   }) => {
     const vault = await buildVault(SIZE);
@@ -67,10 +68,10 @@ describe("session recall", () => {
     const report: Record<string, unknown> = {};
     for (const [variant, limits] of Object.entries(VARIANTS)) {
       const { commit, pages, gold } = await pagesCommit(limits, last);
-      // The slice tests what it says: today's pages keep only the control's facts.
+      // The slice tests what it says: the pages before #326 kept only the control's facts.
       for (const c of CASES) {
         const text = pages.get(gold.get(c.id) ?? "") ?? "";
-        const kept = variant === "whole" || c.place === "head";
+        const kept = variant === "today" || c.place === "head";
         expect(text.includes(c.fact), `${variant} ${c.id}`).toBe(kept);
       }
       report[variant] = await runInDurableObject(
