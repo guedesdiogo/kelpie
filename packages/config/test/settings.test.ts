@@ -27,6 +27,15 @@ describe("parseSettings", () => {
     expect(parseSettings({ toolLoopMs: 300_000 })).toEqual({ toolLoopMs: 300_000 });
   });
 
+  it("runs three tasks at once by default, and at most ten (#54)", () => {
+    expect(DEFAULT_SETTINGS.maxConcurrentTasks).toBe(3);
+    expect(parseSettings({ maxConcurrentTasks: 1 })).toEqual({ maxConcurrentTasks: 1 });
+    expect(parseSettings({ maxConcurrentTasks: 10 })).toEqual({ maxConcurrentTasks: 10 });
+    for (const value of [0, 11, 2.5, "3"]) {
+      expect(parseSettings({ maxConcurrentTasks: value })).toBeNull();
+    }
+  });
+
   it("leaves the memory core off until the owner turns it on", () => {
     expect(DEFAULT_SETTINGS.memoryCore).toBe(false);
     expect(parseSettings({ memoryCore: true })).toEqual({ memoryCore: true });

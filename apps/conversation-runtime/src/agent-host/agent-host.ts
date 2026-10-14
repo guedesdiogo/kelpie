@@ -6,16 +6,30 @@ import type {
   AgentSettings,
   ConfigureResult,
   EraseResult,
+  NewTask,
   RegistryContract,
+  RunOutcome,
   SetupEvent,
   SetupStep,
+  TaskDetail,
+  TaskEdit,
+  TaskResult,
+  TaskStatus,
+  TaskSummary,
+  TaskView,
 } from "@kelpie/config";
 import {
   type AgentRole,
   agentModel,
   DEFAULT_SETTINGS,
   isAgentId,
+  isTaskId,
+  isTaskStatus,
+  parseCommentText,
+  parseNewTask,
+  parseRunOutcome,
   parseSettings,
+  parseTaskEdit,
   REGISTRY_NAME,
   SETUP_AGENT_ID,
 } from "@kelpie/config";
@@ -30,6 +44,7 @@ import { identitySection } from "./identity.ts";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
 import { composeSystemPrompt, hasVaultContext } from "./system-prompt.ts";
+import { TaskBoard } from "./tasks.ts";
 
 let contextStoreForTesting: ContextStoreContract | undefined;
 
@@ -37,6 +52,27 @@ let contextStoreForTesting: ContextStoreContract | undefined;
 export function replaceContextStoreForTesting(store: ContextStoreContract | undefined): void {
   contextStoreForTesting = store;
 }
+
+/**
+ * Starts a run of a task the agent claimed (#54). The run reports back through `heartbeatTask` and
+ * `finishTask`; `start` returns once it began. #335 brings the task conversation that runs tasks.
+ */
+export interface TaskRunner {
+  start(agentId: string, task: TaskView, run: number): Promise<void>;
+}
+
+let taskRunnerForTesting: TaskRunner | null = null;
+
+/**
+ * Tests run in the Worker's isolate and give the board a runner with this. Production has none
+ * until #335, so pickup claims nothing: no task waits on a run that can't start.
+ */
+export function replaceTaskRunnerForTesting(runner: TaskRunner | null): void {
+  taskRunnerForTesting = runner;
+}
+
+/** While a task runs, the board wakes at least this often: ADR-0011's heartbeat backstop. */
+const TASK_BACKSTOP_MS = 15 * 60_000;
 
 /** A vault the Context Store can't read in time is replaced by the last one it compiled. */
 const COMPILE_TIMEOUT_MS = 3_000;
@@ -82,10 +118,12 @@ const IDENTITY_TIMEOUT_MS = 1_000;
  */
 export class AgentHost extends Agent<Env> implements AgentHostContract {
   readonly #db: DrizzleSqliteDODatabase<typeof schema>;
+  readonly #tasks: TaskBoard;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.#db = drizzle(ctx.storage, { schema });
+    this.#tasks = new TaskBoard(this.#db, ctx.id.name ?? "");
     // If a migration fails the object resets, and the next request retries it.
     void ctx.blockConcurrencyWhile(async () => {
       try {
@@ -299,6 +337,136 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     return { ok: true, conversations: all.size };
   }
 
+  /**
+   * The task board (ADR-0011, #54). The commands authorize the actor (ADR-0013); these methods
+   * parse their input again, because they are an RPC boundary. Every change that may free a slot
+   * or queue a task picks up eligible ones and sets the next wake.
+   */
+  async createTask(input: NewTask, actor: Actor): Promise<TaskResult<TaskView>> {
+    const now = Date.now();
+    const task = parseNewTask(input, now);
+    if (!task || !isActor(actor)) return invalidTask;
+    const created = this.#tasks.create(task, actor, crypto.randomUUID(), now);
+    await this.#tasksChanged();
+    return created;
+  }
+
+  async editTask(id: string, changes: TaskEdit, actor: Actor): Promise<TaskResult<TaskView>> {
+    const edit = parseTaskEdit(changes, Date.now());
+    if (!isTaskId(id) || !edit || !isActor(actor)) return invalidTask;
+    const edited = this.#tasks.edit(id, edit, actor, Date.now());
+    await this.#tasksChanged();
+    return edited;
+  }
+
+  async moveTask(
+    id: string,
+    status: "backlog" | "todo",
+    actor: Actor,
+  ): Promise<TaskResult<TaskView>> {
+    if (!isTaskId(id) || (status !== "backlog" && status !== "todo") || !isActor(actor)) {
+      return invalidTask;
+    }
+    const moved = this.#tasks.move(id, status, actor, Date.now());
+    await this.#tasksChanged();
+    return moved;
+  }
+
+  commentTask(id: string, text: string, actor: Actor): TaskResult<TaskView> {
+    const comment = parseCommentText(text);
+    if (!isTaskId(id) || comment === null || !isActor(actor)) return invalidTask;
+    return this.#tasks.comment(id, comment, actor, Date.now());
+  }
+
+  async requestStop(id: string, actor: Actor): Promise<TaskResult<TaskView>> {
+    if (!isTaskId(id) || !isActor(actor)) return invalidTask;
+    const stopped = this.#tasks.requestStop(id, actor, Date.now());
+    await this.#tasksChanged();
+    return stopped;
+  }
+
+  listTasks(status?: TaskStatus): TaskSummary[] {
+    return this.#tasks.list(isTaskStatus(status) ? status : undefined);
+  }
+
+  getTask(id: string): TaskResult<TaskDetail> {
+    return isTaskId(id) ? this.#tasks.get(id) : invalidTask;
+  }
+
+  /** A run's heartbeat (#335 calls it): extends its lease, and says whether to stop. */
+  heartbeatTask(id: string, run: number) {
+    if (!isTaskId(id) || !Number.isInteger(run))
+      return { ok: false as const, reason: "not_running" as const };
+    return this.#tasks.heartbeat(id, run, Date.now());
+  }
+
+  /** A run's end (#335 calls it). Done needs a result. */
+  async finishTask(id: string, run: number, outcome: RunOutcome): Promise<TaskResult<TaskView>> {
+    const parsed = parseRunOutcome(outcome);
+    if (!isTaskId(id) || !Number.isInteger(run) || !parsed) return invalidTask;
+    const finished = this.#tasks.finish(id, run, parsed, Date.now());
+    await this.#tasksChanged();
+    return finished;
+  }
+
+  /** The board's wake, as the SDK schedules it: sweeps leases, picks up tasks, sets the next one. */
+  async wakeTasks(): Promise<void> {
+    await this.#tasksChanged();
+  }
+
+  /**
+   * Sweeps the leases that ran out, claims eligible tasks while slots are free, and sets the next
+   * wake. Each claim checks the slots again, so concurrent calls never run more than the limit.
+   * Without a runner nothing is claimed, and no model is ever called for an empty board.
+   */
+  async #tasksChanged(): Promise<void> {
+    const agentId = this.ctx.id.name ?? "";
+    const runner = taskRunnerForTesting;
+    this.#tasks.sweep(Date.now());
+    while (runner) {
+      const claimed = this.#tasks.claimNext(this.config().settings.maxConcurrentTasks, Date.now());
+      if (!claimed) break;
+      try {
+        await runner.start(agentId, claimed.task, claimed.run);
+      } catch (error) {
+        console.error("AgentHost: a task's run didn't start", errorName(error));
+        this.#tasks.finish(
+          claimed.task.id,
+          claimed.run,
+          { status: "failed" },
+          Date.now(),
+          "start_failed",
+        );
+      }
+    }
+    await this.#scheduleTaskWake(runner !== null);
+  }
+
+  /** One SDK schedule for the board's next wake, moved when that time changes. */
+  async #scheduleTaskWake(canRun: boolean): Promise<void> {
+    const now = Date.now();
+    let due = this.#tasks.nextWake(now, canRun);
+    if (canRun && this.#tasks.list("in_progress").length > 0) {
+      due = Math.min(due ?? Number.POSITIVE_INFINITY, now + TASK_BACKSTOP_MS);
+    }
+    // The SDK keeps schedule times in whole seconds: the next one, so a wake is never early.
+    const next = due === null ? null : Math.ceil(due / 1_000) * 1_000;
+    const wake = this.#get<{ id: string; at: number } | null>("taskWake", null);
+    if (wake && next !== null && wake.at === next && (await this.getScheduleById(wake.id))) return;
+    if (wake) await this.cancelSchedule(wake.id);
+    if (next === null) {
+      this.#db.delete(schema.state).where(eq(schema.state.key, "taskWake")).run();
+      return;
+    }
+    const schedule = await this.schedule(new Date(next), "wakeTasks");
+    const value = { id: schedule.id, at: next };
+    this.#db
+      .insert(schema.state)
+      .values({ key: "taskWake", value })
+      .onConflictDoUpdate({ target: schema.state.key, set: { value } })
+      .run();
+  }
+
   #identitySources(): IdentitySources {
     if (identitySourcesForTesting) return identitySourcesForTesting;
     const registry = this.env.REGISTRY.getByName(
@@ -504,6 +672,22 @@ const MAX_SETUP_WAIT_MS = 24 * 60 * 60_000;
 const SETUP_WAIT_GRACE_MS = 5 * 60_000;
 /** A conversation object's name is an agent id, a channel and a thread id. */
 const MAX_CONVERSATION_NAME = 256;
+
+const invalidTask = { ok: false, reason: "invalid_input" } as const;
+
+/** An actor as the commands build it: a user id, a role and a channel, never empty. */
+function isActor(actor: unknown): actor is Actor {
+  const { userId, role, via } = (actor ?? {}) as Partial<Actor>;
+  return (
+    typeof userId === "string" &&
+    userId !== "" &&
+    userId.length <= 128 &&
+    typeof role === "string" &&
+    typeof via === "string" &&
+    via !== "" &&
+    via.length <= 128
+  );
+}
 
 function errorName(error: unknown): string {
   return error instanceof Error ? error.name : "unknown error";
