@@ -205,6 +205,8 @@ function productionPorts(env: Env): ConversationPorts {
             createTelegramForm: (agentId) => forms.createTelegramForm(agentId),
             registerTelegramWebhook: notBound,
             describeTelegramBot: notBound,
+            createRunnerForm: notBound,
+            describeRunner: notBound,
           },
           vault: { held: notBound, forget: notBound, setDream: notBound },
         }),

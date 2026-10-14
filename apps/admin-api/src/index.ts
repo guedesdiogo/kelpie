@@ -52,6 +52,8 @@ function depsFor(env: Env): AdminDeps {
         createTelegramForm: (agentId) => forms.createTelegramForm(agentId),
         registerTelegramWebhook: (agentId) => forms.registerTelegramWebhook(agentId),
         describeTelegramBot: (agentId) => forms.describeTelegramBot(agentId),
+        createRunnerForm: () => forms.createRunnerForm(),
+        describeRunner: () => forms.describeRunner(),
       },
       vault: {
         held: () => vault.held(),
