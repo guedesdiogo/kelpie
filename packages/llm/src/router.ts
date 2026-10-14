@@ -1,5 +1,5 @@
 import { EFFORTS, lowerEffort } from "./efforts.ts";
-import { LlmError } from "./errors.ts";
+import { LlmError, type LlmErrorCode } from "./errors.ts";
 import type {
   Effort,
   LlmEvent,
@@ -45,29 +45,58 @@ export interface RouteChoice {
 }
 
 /**
+ * A route that failed before sending anything, and the one tried next (#293). The router sends it
+ * before the next route's events, so the caller can tell the owner: no route fails silently
+ * (ADR-0037 §4).
+ */
+export interface FallbackEvent {
+  type: "fallback";
+  failed: { provider: ProviderId; model: string; code: LlmErrorCode };
+  next: { provider: ProviderId; model: string };
+}
+
+/** What the router streams: a provider's events, and the fallbacks between them. */
+export type RouterEvent = LlmEvent | FallbackEvent;
+
+export interface RouterOptions {
+  /**
+   * Whether a failed route hands the request to the next one (`MODEL_FALLBACK`). Off, the first
+   * failure ends the request with its error. On by default.
+   */
+  fallback?: boolean;
+}
+
+/**
  * Streams the choice's first candidate: the chosen provider's, or the tier's first. When a provider
  * fails with a retryable error before it has sent anything, the next candidate takes over. Once an
  * event has gone out, a failure ends the turn: another model would start the reply again, and
  * reasoning doesn't carry across providers. Candidates whose provider isn't configured are skipped.
+ * Each fallback is announced with a `fallback` event; with fallback off, the first failure ends it.
  */
 export class ModelRouter {
   readonly #routes: RouteTable;
   readonly #providers: Partial<Record<ProviderId, LlmProvider>>;
+  readonly #fallback: boolean;
 
-  constructor(routes: RouteTable, providers: Partial<Record<ProviderId, LlmProvider>>) {
+  constructor(
+    routes: RouteTable,
+    providers: Partial<Record<ProviderId, LlmProvider>>,
+    { fallback = true }: RouterOptions = {},
+  ) {
     this.#routes = routes;
     this.#providers = providers;
+    this.#fallback = fallback;
   }
 
   async *stream(
     choice: RouteChoice,
     request: RoutedRequest,
     options: StreamOptions = {},
-  ): AsyncIterable<LlmEvent> {
+  ): AsyncIterable<RouterEvent> {
     // RPC callers aren't type-checked, so the choice and the request fields are taken explicitly.
     const { tier } = choice;
-    let lastError: LlmError | undefined;
-    for (const candidate of this.route(tier, choice.provider)) {
+    const candidates = this.route(tier, choice.provider);
+    for (const [index, candidate] of candidates.entries()) {
       const provider = this.#providers[candidate.provider] as LlmProvider;
       const effort = lowerEffort(candidate.model, choice.effort ?? candidate.effort);
       const routed: LlmRequest = {
@@ -87,14 +116,19 @@ export class ModelRouter {
         }
         return;
       } catch (error) {
-        if (started || !(error instanceof LlmError) || !error.retryable) throw error;
-        lastError = error;
+        if (!(error instanceof LlmError)) throw error;
+        error.route ??= { provider: candidate.provider, model: candidate.model };
+        const next = candidates[index + 1];
+        if (started || !error.retryable || !this.#fallback || !next) throw error;
+        yield {
+          type: "fallback",
+          failed: { provider: candidate.provider, model: candidate.model, code: error.code },
+          next: { provider: next.provider, model: next.model },
+        };
       }
     }
-    throw (
-      lastError ??
-      new LlmError(`No provider is configured for the ${tier} tier`, "unavailable", false)
-    );
+    // Every candidate that ran either answered or threw: only an empty route gets here.
+    throw new LlmError(`No provider is configured for the ${tier} tier`, "unavailable", false);
   }
 
   /**

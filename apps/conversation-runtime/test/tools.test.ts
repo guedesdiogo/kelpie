@@ -17,10 +17,12 @@ import {
 import {
   type FakeWorld,
   fakeWorld,
+  noRoute,
   OVER_BUDGET,
   reply,
   sayThenCall,
   toolCalls,
+  toolCallsAfter,
   toolUse,
 } from "./fakes.ts";
 
@@ -117,6 +119,33 @@ afterEach(() => {
 });
 
 describe("a turn's tools", () => {
+  it("names only the failed call's routes when a later round finds no route (#293)", async () => {
+    const spent = {
+      type: "fallback" as const,
+      failed: {
+        provider: "anthropic" as const,
+        model: "claude-haiku-5-5",
+        code: "out_of_credits" as const,
+      },
+      next: { provider: "openai" as const, model: "gpt-6-luna" },
+    };
+    const world = use(
+      fakeWorld([
+        toolCallsAfter([spent], { name: "lookup", input: { q: "ana" } }),
+        noRoute("auth", [], spent.failed),
+      ]),
+    );
+    provide(world, { lookup: answer });
+    const stub = agent("tools-no-route");
+    await stub.ingest(message("m1", "where does Ana live?"));
+    await stub.flush();
+    await vi.waitFor(() =>
+      expect(world.sent).toEqual([
+        "I couldn't answer this message: Anthropic (claude-haiku-5-5) refused Kelpie's key.",
+      ]),
+    );
+  });
+
   it("carries the memory core in every round of a turn (#112)", async () => {
     const owner = { userId: "u-owner", role: "owner", via: "test" } as const;
     expect(
