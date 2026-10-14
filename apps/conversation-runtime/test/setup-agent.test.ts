@@ -450,7 +450,9 @@ describe("the setup agent's tools", () => {
 
     const sent = await run(tools, "connect_runner", {}, context);
     expect(sent.isError).toBeUndefined();
-    expect(sent.output).toContain("runner_status");
+    // Kelpie tells the conversation when the form is used: the model doesn't wait for "done" (#328).
+    expect(sent.output).toContain("don't ask them to say when they're done");
+    expect(sent.output).not.toContain("runner_status");
     // The model never sees the link, nor the form's one-time token (ADR-0026).
     expect(sent.output).not.toContain("/forms/");
     expect(sent.output).not.toContain("run456");
@@ -458,6 +460,12 @@ describe("the setup agent's tools", () => {
       {
         href: `${ADMIN}/forms/run456?lang=pt-BR`,
         text: `O formulário seguro para conectar o runner: ${ADMIN}/forms/run456?lang=pt-BR\nFunciona uma vez, nos próximos 15 minutos. Cole lá o segredo de ~/.config/kelpie-runner/secret do seu servidor, uma linha só, nunca no chat.`,
+        // The setup agent's AgentHost keeps the wait, until the form expires (#328).
+        awaits: {
+          agentId: SETUP_AGENT_ID,
+          step: "runner_connected",
+          until: Date.UTC(2026, 9, 6, 20),
+        },
       },
     ]);
   });

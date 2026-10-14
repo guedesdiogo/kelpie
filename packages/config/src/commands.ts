@@ -94,17 +94,20 @@ export interface RegistryContract {
 /**
  * A setup step the owner finishes on an admin page or in Telegram, behind a link Kelpie sent
  * (#206): connecting the agent's Telegram bot through the secure form, or pairing their own
- * Telegram account with it.
+ * Telegram account with it; or connecting the instance's runner through its own form (#328), which
+ * the setup agent's AgentHost reports.
  */
-export type SetupStep = "telegram_connected" | "telegram_paired";
+export type SetupStep = "telegram_connected" | "telegram_paired" | "runner_connected";
 
 /**
- * A finished step, as the place that saw it reports it: the owner who finished it, and for a
- * connected bot its username and whether Telegram was pointed at Kelpie.
+ * A finished step, as the place that saw it reports it: the owner who finished it, for a connected
+ * bot its username and whether Telegram was pointed at Kelpie, and for the runner how it answered
+ * the secret.
  */
 export type SetupEvent =
   | { step: "telegram_connected"; userId: string; bot: string; webhookRegistered: boolean }
-  | { step: "telegram_paired"; userId: string };
+  | { step: "telegram_paired"; userId: string }
+  | { step: "runner_connected"; userId: string; state: "ready" | "outdated"; version: string };
 
 export interface AgentHostContract {
   configure(changes: Partial<AgentSettings>, actor: Actor): ConfigureResult;

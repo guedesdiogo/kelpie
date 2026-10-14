@@ -1084,6 +1084,47 @@ describe("admin API runner form (#294)", () => {
     expect(await response.text()).toContain("another protocol version");
   });
 
+  it("reports the connected runner to the setup agent's conversations, and answers whatever the report does (#328)", async () => {
+    const { deps, reported } = world();
+    await handle(submit(RUNNER.good), deps);
+    expect(reported).toEqual([
+      {
+        agentId: "setup",
+        event: { step: "runner_connected", userId: "u-owner", state: "ready", version: "0.1.0<b>" },
+      },
+    ]);
+    const outdated = world();
+    await handle(submit(RUNNER.outdated), outdated.deps);
+    expect(outdated.reported).toEqual([
+      {
+        agentId: "setup",
+        event: { step: "runner_connected", userId: "u-owner", state: "outdated", version: "0.0.9" },
+      },
+    ]);
+    // A check that fails stores nothing, and reports nothing.
+    for (const secret of [RUNNER.wrong, RUNNER.down, RUNNER.unconfigured]) {
+      const failed = world();
+      await handle(submit(secret), failed.deps);
+      expect(failed.reported).toEqual([]);
+    }
+
+    // A report that fails, or doesn't answer, never costs the owner the page.
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const setupDone of [
+      async () => {
+        throw new Error("AgentHost down");
+      },
+      () => new Promise<void>(() => {}),
+    ]) {
+      const broken = world();
+      broken.deps.setupDone = setupDone;
+      const response = await handle(submit(RUNNER.good), broken.deps);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain("now answers Kelpie");
+    }
+    vi.restoreAllMocks();
+  });
+
   it.each([
     ["refused", RUNNER.wrong, 400, "didn&#39;t accept"],
     ["malformed", "short", 400, "at least 32 characters"],
