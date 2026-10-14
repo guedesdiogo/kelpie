@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-03
 - Issue: [#44](https://github.com/guedesdiogo/kelpie/issues/44)
-- Amended by: [ADR-0015](0015-single-player-first.md), until multi-user lands (single-player); [ADR-0036](0036-agent-roles-models-and-subagents.md), agents also create tasks for other agents, and a task records the agent that created it
+- Amended by: [ADR-0015](0015-single-player-first.md), until multi-user lands (single-player); [ADR-0036](0036-agent-roles-models-and-subagents.md), agents also create tasks for other agents, and a task records the agent that created it; [ADR-0039](0039-routines-as-vault-files.md), routines settle the open point: each fire of a routine in the vault creates a task
 
 ## Context
 
