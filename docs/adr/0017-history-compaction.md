@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-05
 - Issue: [#64](https://github.com/guedesdiogo/kelpie/issues/64)
-- Amended by: [ADR-0020](0020-shared-memory-engine.md), the reference to an erasure workflow no longer applies
+- Amended by: [ADR-0020](0020-shared-memory-engine.md), the reference to an erasure workflow no longer applies; [ADR-0036](0036-agent-roles-models-and-subagents.md), the checkpoint's summaries run on the agent's memory trio, `cheap` by default
 
 ## Context
 
