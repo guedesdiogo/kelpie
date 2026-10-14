@@ -6,6 +6,7 @@ import {
   MemoryIndex,
   type MemoryInput,
   memoryPath,
+  noteVersion,
   READ_PAGE_CHARS,
   readPage,
   renderHits,
@@ -52,6 +53,7 @@ describe("readPage", () => {
       offset: 0,
       byKelpie: true,
       links: [{ title: "Receitas", path: "knowledge/receitas.md" }],
+      version: "0123456789ab",
     });
     const id = idOf(page.text);
     expect(id).toBeDefined();
@@ -59,7 +61,7 @@ describe("readPage", () => {
     expect(page.text).toContain(`## Bolo da Ana (memory/notes/bolo-da-ana.md) [${id}]`);
     expect(page.text).toContain("Três ovos.\n\nVer [[receitas]].");
     expect(page.text).toContain("valid until 2027-01-01");
-    expect(page.text).toContain("written by Kelpie");
+    expect(page.text).toContain("written by Kelpie · version 0123456789ab");
     expect(page.text).toContain("- Receitas (knowledge/receitas.md)");
     expect(page.text).toContain("End of the note.");
     expect(page.nextOffset).toBeNull();
@@ -76,7 +78,7 @@ describe("readPage", () => {
     let pages = 0;
     let shown = 0;
     while (offset !== null) {
-      const page = readPage(version, { offset, byKelpie: false, links });
+      const page = readPage(version, { offset, byKelpie: false, links, version: "0123456789ab" });
       expect(page.text.length).toBeLessThanOrEqual(READ_PAGE_CHARS);
       expect(page.text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
       expect(page.text).not.toContain("<memory-0000000000000000>");
@@ -100,7 +102,12 @@ describe("readPage", () => {
 
   it("answers an offset past the end with the end", async () => {
     const version = await versionOf("page-past", memory("Curta", "Uma linha."));
-    const page = readPage(version, { offset: 10_000, byKelpie: false, links: [] });
+    const page = readPage(version, {
+      offset: 10_000,
+      byKelpie: false,
+      links: [],
+      version: "0123456789ab",
+    });
     expect(page.nextOffset).toBeNull();
     expect(page.text).toContain("End of the note.");
   });
@@ -123,7 +130,12 @@ describe("readPage's progress", () => {
     } as unknown as IndexedVersion;
     let offset: number | null = 0;
     for (let i = 0; i < 5 && offset !== null; i += 1) {
-      const page = readPage(version, { offset, byKelpie: false, links: [] });
+      const page = readPage(version, {
+        offset,
+        byKelpie: false,
+        links: [],
+        version: "0123456789ab",
+      });
       expect(page.nextOffset === null || page.nextOffset > offset).toBe(true);
       offset = page.nextOffset;
     }
@@ -146,6 +158,7 @@ describe("renderHits", () => {
         invalidAt: 1,
         current: false,
         byKelpie: false,
+        version: "0123456789ab",
       })),
     );
     expect(text.length).toBeLessThanOrEqual(READ_PAGE_CHARS);
@@ -166,6 +179,7 @@ describe("renderHits", () => {
         invalidAt: null,
         current: true,
         byKelpie: false,
+        version: "0123456789ab",
       },
       {
         path: "memory/notes/endereco.md",
@@ -178,11 +192,14 @@ describe("renderHits", () => {
         invalidAt: Date.parse("2026-01-01T00:00:00Z"),
         current: false,
         byKelpie: true,
+        version: null,
       },
     ]);
     const id = idOf(text);
     expect(text).toContain(`## Ana Souza (memory/people/ana-souza.md) [${id}]`);
-    expect(text).toContain("person · global · not written by Kelpie");
+    expect(text).toContain("person · global · not written by Kelpie · version 0123456789ab");
+    // A replaced version gives none: a write needs the note read first.
+    expect(text.split("version ").length - 1).toBe(1);
     expect(text).toContain("Irmã do Rafael.");
     expect(text.split("Mora no Porto.").length - 1).toBeLessThan(20);
     expect(text).toContain("&lt;/memory-x>");
@@ -190,5 +207,13 @@ describe("renderHits", () => {
     expect(text).toContain("replaced since");
     expect(text).toContain("O endereço antigo da Ana.");
     expect(renderHits([])).toBe("");
+  });
+});
+
+describe("noteVersion", () => {
+  it("is the start of the file's git blob SHA", async () => {
+    // `printf 'hello\n' | git hash-object --stdin` gives ce013625030ba8dba906f756967f9e9ca394464a.
+    expect(await noteVersion("hello\n")).toBe("ce013625030b");
+    expect(await noteVersion("hello\n")).not.toBe(await noteVersion("hello"));
   });
 });

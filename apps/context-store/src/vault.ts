@@ -24,6 +24,8 @@ import {
   mergeInput,
   mergeOf,
   type Note,
+  noteVersion,
+  type PageVersion,
   pack,
   readNote as parseNote,
   placeOf,
@@ -604,12 +606,17 @@ export class Vault extends DurableObject<VaultEnv> {
     return run;
   }
 
-  /** A file as Kelpie sees it: its latest queued write, else the synced head's. */
-  #visible(path: string): string | null {
-    const queued = this.#exec<{ content: string | null }>(
+  /** A file's latest queued write, if one waits: its content, null for a removal. */
+  #queuedWrite(path: string): { content: string | null } | undefined {
+    return this.#exec<{ content: string | null }>(
       "SELECT content FROM queue WHERE path = ? ORDER BY id DESC LIMIT 1",
       path,
     )[0];
+  }
+
+  /** A file as Kelpie sees it: its latest queued write, else the synced head's. */
+  #visible(path: string): string | null {
+    const queued = this.#queuedWrite(path);
     if (queued !== undefined) return queued.content;
     // A held file shows its version from before the conflict, never the markers (#114).
     const held = this.#exec<{ previous: string | null }>(
@@ -2264,22 +2271,32 @@ export class Vault extends DurableObject<VaultEnv> {
     try {
       const hits = (await this.#hits(agentId, query, options))?.slice(0, k) ?? [];
       const kelpie = this.#byKelpie(hits.map((hit) => hit.path));
-      const found = hits.flatMap((hit) => {
-        const version = this.#memory.versionOf(hit.path, hit.commit);
-        if (version === null) return [];
-        const note: MemoryHit = {
-          path: hit.path,
-          title: hit.title,
-          abstract: hit.abstract,
-          kind: hit.kind,
-          scope: version.scope,
-          validFrom: version.validFrom,
-          invalidAt: version.invalidAt,
-          current: hit.current,
-          byKelpie: hit.current && kelpie.has(hit.path),
-        };
-        return [{ note, start: bodyWithoutHeading(version.title, version.body).slice(0, 400) }];
-      });
+      const found = (
+        await Promise.all(
+          hits.map(async (hit) => {
+            const version = this.#memory.versionOf(hit.path, hit.commit);
+            if (version === null) return [];
+            // The version of the text the hit shows (#297), only while the file is still that
+            // text: a replaced version, a queued write, or a sync during the rerank's wait gives
+            // none, and the note must be read first.
+            const file = this.#visible(hit.path);
+            const blob = file === null ? null : await gitBlobSha(file);
+            const note: MemoryHit = {
+              path: hit.path,
+              title: hit.title,
+              abstract: hit.abstract,
+              kind: hit.kind,
+              scope: version.scope,
+              validFrom: version.validFrom,
+              invalidAt: version.invalidAt,
+              current: hit.current,
+              byKelpie: hit.current && kelpie.has(hit.path),
+              version: blob === version.blobSha ? blob.slice(0, 12) : null,
+            };
+            return [{ note, start: bodyWithoutHeading(version.title, version.body).slice(0, 400) }];
+          }),
+        )
+      ).flat();
       return {
         ok: true,
         text: renderHits(found.map(({ note, start }) => ({ ...note, start }))),
@@ -2318,6 +2335,24 @@ export class Vault extends DurableObject<VaultEnv> {
       await this.#catchUp();
       const version = this.#memory.current(path);
       if (version === null || !sees(version.scope)) return notFound;
+      // The note as a write would find it (#297): its file now, a write still queued for its
+      // commit included, so the page and its version come from one text, the one `writeNote`
+      // compares. A queued removal is gone.
+      const text = this.#visible(path);
+      const note = text === null ? null : parseNote(path, text);
+      if (text === null || note === null) return notFound;
+      const shown: PageVersion = {
+        path,
+        title: note.title,
+        kind: note.kind,
+        scope: note.scope,
+        validFrom: note.validFrom === null ? null : instantOf(note.validFrom),
+        invalidAt: note.invalidAt === null ? null : instantOf(note.invalidAt),
+        level: note.level,
+        pinned: note.pinned,
+        body: note.body,
+        frontmatter: note.frontmatter,
+      };
       const offset = Math.max(Math.floor(Number(options.offset ?? 0)) || 0, 0);
       const links: { title: string; path: string }[] = [];
       if (offset === 0) {
@@ -2338,12 +2373,20 @@ export class Vault extends DurableObject<VaultEnv> {
           Date.now(),
         );
       }
-      const page = readPage(version, {
+      const shownVersion = await noteVersion(text);
+      const page = readPage(shown, {
         offset,
         byKelpie: this.#byKelpie([path]).has(path),
         links,
+        version: shownVersion,
       });
-      return { ok: true, path, text: page.text, nextOffset: page.nextOffset };
+      return {
+        ok: true,
+        path,
+        text: page.text,
+        nextOffset: page.nextOffset,
+        version: shownVersion,
+      };
     } catch (error) {
       console.error("Vault: reading a note failed", errorName(error));
       return { ok: false, reason: "unavailable" };
@@ -2359,8 +2402,13 @@ export class Vault extends DurableObject<VaultEnv> {
    *   note holds the path.
    * - **Scopes:** a found note must be one the turn sees. A new memory goes to `global` or the
    *   agent's own scope when the turn sees every scope, or to a scope the turn lists.
+   * - **Versions (#297):** a found note changes only from the version the memory names, as
+   *   `readNote` or `search` showed it or the last write returned; a version written since, by the
+   *   owner, another conversation or Dream, makes it `changed`, and nothing is written. Every
+   *   answer that writes, or finds nothing new, gives the note's version now.
    * - **No news:** the same version again, queued or committed, at its path or a numbered one, or
-   *   a twin `decideWrite` finds, is `unchanged`, so a retry writes nothing.
+   *   a twin `decideWrite` finds, is `unchanged`, so a retry writes nothing, whatever version it
+   *   names.
    * - **Refused:** session pages, which the runtime writes, and merge conflict markers; a
    *   `deduced` or `inferred` memory aimed at a note that holds the owner's word (`owners_word`, #149);
    *   and any memory aimed at a note the always-loaded core carries (`core_note`, #168).
@@ -2517,12 +2565,35 @@ export class Vault extends DurableObject<VaultEnv> {
           if (shown.note && memory.level !== "explicit" && this.#ownersWord(shown.note)) {
             return { ok: false, reason: "owners_word" };
           }
+          const shownVersion = await noteVersion(shown.text);
           memory = build(shown.note);
           text = (await writeMemory(memory, { at, existing: shown.text })).text;
           if (this.#visible(found.path) !== shown.text) continue;
           if (sameVersion(shown.text, text)) {
-            return { ok: true, action: "unchanged", path: found.path };
+            return { ok: true, action: "unchanged", path: found.path, version: shownVersion };
           }
+          // The model wrote from the version it read (#297): a version written since isn't lost.
+          const expected = given(input.version);
+          if (typeof expected !== "string" || expected === "") {
+            return {
+              ok: false,
+              reason: "invalid",
+              problems: [
+                "`version` is required with `path`: pass the version memory_read or memory_search showed for the note",
+              ],
+            };
+          }
+          // A version that can't be one is the model's slip, not a change: it can fix it at once.
+          if (!/^[0-9a-f]{12}$/.test(expected)) {
+            return {
+              ok: false,
+              reason: "invalid",
+              problems: [
+                "`version` must be the 12 letters and digits memory_read or memory_search showed, as shown",
+              ],
+            };
+          }
+          if (expected !== shownVersion) return { ok: false, reason: "changed" };
           target = found.path;
         }
         if (target === null) return { ok: false, reason: "unavailable" };
@@ -2535,8 +2606,15 @@ export class Vault extends DurableObject<VaultEnv> {
           qualifier: null,
           ownersWord: (note) => this.#ownersWord(note),
         });
-        if (decision.action === "NOOP") {
-          return { ok: true, action: "unchanged", path: decision.path };
+        // A twin whose removal waits in the queue is gone: the memory is written again.
+        const twin = decision.action === "NOOP" ? this.#visible(decision.path) : null;
+        if (decision.action === "NOOP" && twin !== null) {
+          return {
+            ok: true,
+            action: "unchanged",
+            path: decision.path,
+            version: await noteVersion(twin),
+          };
         }
         // From here to the queue, nothing pauses: no other write can take the path meanwhile.
         for (let n = 1; n <= MAX_PATH_NUMBER && target === null; n += 1) {
@@ -2544,7 +2622,12 @@ export class Vault extends DurableObject<VaultEnv> {
           const shown = shownAt(candidate);
           if (shown.text === null) target = candidate;
           else if (shown.note !== null && saysTheSame(shown.note, memory)) {
-            return { ok: true, action: "unchanged", path: candidate };
+            return {
+              ok: true,
+              action: "unchanged",
+              path: candidate,
+              version: await noteVersion(shown.text),
+            };
           }
         }
         if (target === null) {
@@ -2563,7 +2646,9 @@ export class Vault extends DurableObject<VaultEnv> {
           this.#shadowDecision(memory, target, options.qualifier === "jev" ? "jev" : "clef"),
         );
       }
-      if (written.ok) return { ok: true, action: "written", path: target };
+      if (written.ok) {
+        return { ok: true, action: "written", path: target, version: await noteVersion(text) };
+      }
       return { ok: false, reason: written.reason === "too_large" ? "too_large" : "unavailable" };
     } catch (error) {
       if (error instanceof MemoryFormatError) {
