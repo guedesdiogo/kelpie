@@ -12,7 +12,7 @@ Kelpie keeps two kinds of secret (ADR-0013).
   - the store's encryption key, `SECRETS_KEY` on `channel-egress`;
   - on `context-store`, the vault's GitHub App private key and webhook secret (ADR-0021, `docs/context-store.md`). Without them the vault is off;
   - `DEPLOY_PROBE_TOKEN` on `ingress`, for the deploy's deep probe (#234). The owner sets it in GitHub's `production` environment, not with `wrangler secret put`. A deploy uploads it when ingress has none, and on a rotation (`docs/deploy.md`). Without it the probe's route answers 404.
-- **Everything else** (a bot token, a tool's API key) goes into Kelpie's secret store through a one-time secure form, never through chat.
+- **Everything else** (a bot token, the VPS runner's secret, a tool's API key) goes into Kelpie's secret store through a one-time secure form, never through chat.
 
 ## The secret store
 
@@ -22,7 +22,7 @@ Kelpie keeps two kinds of secret (ADR-0013).
   - The slot's name (for example `telegram:sales`) is the additional authenticated data, so a value copied into another slot doesn't decrypt.
   - Each value records the version of the key that sealed it.
 - **Who reads it.** Only `channel-egress` binds the store, because reading returns plaintext. Other Workers reach it through `channel-egress`'s entrypoints, which return no secret:
-  - `ChannelForms`, for the admin API, creates, describes and redeems forms, and registers webhooks;
+  - `ChannelForms`, for the admin API, creates, describes and redeems forms, registers webhooks, and reports the VPS runner's state;
   - `SetupForms`, for the setup agent in the conversation runtime, only creates a Telegram form. The owner opens its link on the admin API, so the Worker a model drives can't describe, redeem or register anything (Story 3.11);
   - `ChannelEgress`, for the conversation runtime, sends and shows typing;
   - `ChannelWebhooks`, for ingress, checks the secret a webhook presents and sends two fixed notices: "paired", and a stranger notice to the owner (`docs/admin-api.md`, "Pairing"). The Worker that takes public requests can't send text of its own: `channel-egress` writes both notices, with a stranger's name cleaned up and cut to 64 characters.
@@ -32,6 +32,9 @@ Kelpie keeps two kinds of secret (ADR-0013).
   - A Telegram bot token is checked with `getMe` before it is stored, so a refused token leaves the form open for another try. Five refused values close it.
   - The link's token sits in the URL path, so the admin API turns off invocation logs. Cloudflare Access may still log the path; a logged link token is useless once the form is closed or expired, or 15 minutes after it was used. Until then it only shows which bot it connected, and registers the bot's webhook again if the bot's token is also known. Only the owner can open it.
   - The value is encrypted before the form is claimed, and claiming and storing happen in one transaction, so two submissions can't both store and a failure can't spend the form.
+- **The runner** (#294, [runner.md](runner.md)).
+  - Its secret is in the slot `runner:vps`. `channel-egress` is the only Worker bound to the runner's VPC Service, so it is the only one that calls the runner, and the secret never leaves it.
+  - A form checks the secret with the runner's `/health` before storing it. A refused secret counts against the form; a runner that can't answer doesn't.
 - **Webhooks.**
   - Each stored bot gets a new random webhook secret.
   - Right after storing, `channel-egress` registers the bot's webhook (`setWebhook`) at `<INGRESS_ORIGIN>/webhooks/telegram/<agentId>`, with that secret and only new messages.

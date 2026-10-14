@@ -1,6 +1,7 @@
 import type { SendOptions } from "./adapter.ts";
 import type { ChannelId } from "./events.ts";
 import type { Locale } from "./locale.ts";
+import type { RunnerAnswered, RunnerState } from "./runner.ts";
 
 // The contracts of the channel-egress Worker (ADR-0002), the only place that reads a channel's
 // secrets. Other Workers reach it through service bindings, and every answer is a value: thrown
@@ -81,7 +82,7 @@ export interface ChannelFormsContract {
   describeForm(
     token: string,
   ): Promise<
-    | { ok: true; agentId: string; kind: "telegram" }
+    | { ok: true; agentId: string; kind: "telegram" | "runner" }
     | { ok: false; reason: "redeemed"; agentId: string; username: string }
     | { ok: false; reason: "unknown_form" | "store_unavailable" }
   >;
@@ -109,6 +110,35 @@ export interface ChannelFormsContract {
   ): Promise<
     | { ok: true; username: string }
     | { ok: false; reason: "invalid_input" | "not_connected" | "store_unavailable" }
+  >;
+  /** Opens a one-time form for the runner's secret, when `channel-egress` has the runner's binding. */
+  createRunnerForm(): Promise<
+    | { ok: true; token: string; expiresAt: number }
+    | { ok: false; reason: "not_configured" | "store_unavailable" }
+  >;
+  /**
+   * Checks the secret against the runner's `/health`, then stores it. A runner that can't be
+   * reached leaves the form open, without counting the attempt.
+   */
+  redeemRunnerForm(
+    token: string,
+    secret: string,
+  ): Promise<
+    | { ok: true; runner: RunnerAnswered }
+    | {
+        ok: false;
+        reason:
+          | "unknown_form"
+          | "invalid_secret"
+          | "secret_refused"
+          | "unreachable"
+          | "not_configured"
+          | "store_unavailable";
+      }
+  >;
+  /** The runner's state, from its `/health` with the stored secret. */
+  describeRunner(): Promise<
+    { ok: true; runner: RunnerState } | { ok: false; reason: "store_unavailable" }
   >;
 }
 

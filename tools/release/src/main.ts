@@ -6,7 +6,15 @@ import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 import { migrationChanges } from "./changes.ts";
 import { cloudflareApi } from "./cloudflare.ts";
-import { type DeployDeps, deepProbeToken, deploy, deployedVersion, planDeploy } from "./deploy.ts";
+import { type ConfigAdditions, withAdditions } from "./config-additions.ts";
+import {
+  type DeployDeps,
+  deepProbeToken,
+  deploy,
+  deployedVersion,
+  planDeploy,
+  runnerVpcService,
+} from "./deploy.ts";
 import { gatesOutput, gatesReport, planGates } from "./gates.ts";
 import { changedFiles, gitAt, repoRoot } from "./git.ts";
 import { guardVerdict } from "./guard.ts";
@@ -100,30 +108,49 @@ function api(root: string) {
   return cloudflareApi(token, accountId);
 }
 
-/** Runs `wrangler deploy` in the Worker's directory and returns the version it made. */
+/** The config with a deploy's additions, beside the committed one so its relative paths still work. */
+const ADDED_CONFIG = ".wrangler-release.jsonc";
+
+/**
+ * Runs `wrangler deploy` in the Worker's directory and returns the version it made. With
+ * `additions`, it deploys the committed config with them merged in, from a file deleted after.
+ */
 function wranglerDeploy(root: string) {
-  return (spec: WorkerSpec, args: string[]) =>
+  return (spec: WorkerSpec, args: string[], additions?: ConfigAdditions) =>
     new Promise<string>((resolve, reject) => {
       const dir = mkdtempSync(join(tmpdir(), "kelpie-release-"));
       const output = join(dir, "wrangler.ndjson");
-      const child = spawn(wranglerBin(root, spec), args, {
-        cwd: join(root, "apps", spec.app),
-        // Errors only: wrangler's other output lists each var with its value cut short, which the
-        // runner's masks miss, and can print the remote config with the custom domains.
-        env: {
-          ...process.env,
-          WRANGLER_OUTPUT_FILE_PATH: output,
-          WRANGLER_LOG: "error",
-          FORCE_COLOR: "0",
+      const appDir = join(root, "apps", spec.app);
+      const added = additions ? join(appDir, ADDED_CONFIG) : undefined;
+      if (added && additions) {
+        const committed = readFileSync(join(appDir, "wrangler.jsonc"), "utf8");
+        writeFileSync(added, withAdditions(committed, additions));
+      }
+      const child = spawn(
+        wranglerBin(root, spec),
+        added ? [...args, "--config", ADDED_CONFIG] : args,
+        {
+          cwd: appDir,
+          // Errors only: wrangler's other output lists each var with its value cut short, which the
+          // runner's masks miss, and can print the remote config with the custom domains.
+          env: {
+            ...process.env,
+            WRANGLER_OUTPUT_FILE_PATH: output,
+            WRANGLER_LOG: "error",
+            FORCE_COLOR: "0",
+          },
+          stdio: ["ignore", "pipe", "pipe"],
         },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      );
       for (const stream of [child.stdout, child.stderr]) {
         createInterface({ input: stream }).on("line", (line) => {
           if (!line.includes("Environment Variable")) console.log(redact(line));
         });
       }
-      child.on("error", reject);
+      child.on("error", (error) => {
+        if (added) rmSync(added, { force: true });
+        reject(error);
+      });
       child.on("close", (code) => {
         let versionId: string | undefined;
         try {
@@ -132,6 +159,7 @@ function wranglerDeploy(root: string) {
           // No output file: wrangler failed before deploying.
         }
         rmSync(dir, { recursive: true, force: true });
+        if (added) rmSync(added, { force: true });
         if (code !== 0) reject(new Error(`wrangler exited with ${code}`));
         else if (!versionId) reject(new Error("wrangler reported no version id"));
         else resolve(versionId);
@@ -214,6 +242,9 @@ async function main(argv: string[]): Promise<number> {
       // Optional: without it the deploy uploads no token and skips the deep probe (docs/deploy.md).
       const token = deepProbeToken(probeTokenValue, log.warn);
       if (token) hide(token);
+      // Optional: without it channel-egress has no runner binding, and the runner is off (#294).
+      const runnerService = runnerVpcService(process.env.RUNNER_VPC_SERVICE_ID, log.warn);
+      if (runnerService) hide(runnerService);
       const cloudflare = api(root);
       const deps: DeployDeps = {
         api: cloudflare,
@@ -242,6 +273,7 @@ async function main(argv: string[]): Promise<number> {
           failuresInARow: 3,
         },
         ...(token ? { deepProbeToken: token } : {}),
+        ...(runnerService ? { runnerVpcService: runnerService } : {}),
         rotateProbeToken: values["rotate-probe-token"],
       });
       publish(deployReport(report), values.report);

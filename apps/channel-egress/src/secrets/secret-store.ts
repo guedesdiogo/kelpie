@@ -16,7 +16,7 @@ const MAX_REFUSALS = 5;
 /** A used form is kept this long, so its own value sent again is answered with what it stored. */
 const REDEEMED_GRACE_MS = 15 * 60_000;
 
-export type FormKind = "telegram";
+export type FormKind = "telegram" | "runner";
 
 export type ReadResult =
   | { ok: true; value: string }
@@ -44,7 +44,10 @@ export class SecretStore extends DurableObject<Env> {
     });
   }
 
-  /** Opens a one-time form for one secret of one agent. The token is only in the returned link. */
+  /**
+   * Opens a one-time form for one secret of one agent, or of the runner, whose name takes the
+   * agent's place. The token is only in the returned link.
+   */
   async createForm(agentId: string, kind: FormKind): Promise<{ token: string; expiresAt: number }> {
     const token = randomToken();
     const tokenHash = await sha256(token);

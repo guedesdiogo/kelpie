@@ -47,6 +47,7 @@ export {
   linksOf,
   webLinks,
 } from "./markdown.ts";
+export { RUNNER_PROTOCOL, type RunnerAnswered, type RunnerState } from "./runner.ts";
 
 // Adapters have their own entry points (`@kelpie/channels/telegram`): they need the runtime's fetch
 // and crypto, which packages that only use the types above don't declare.

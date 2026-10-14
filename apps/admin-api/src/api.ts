@@ -21,6 +21,7 @@ import {
   page,
   showForm,
   submitForm,
+  submitRunnerForm,
   unavailablePage,
 } from "./forms.ts";
 import {
@@ -104,6 +105,8 @@ const COMMANDS: Record<string, Command> = {
   pairTelegram: (commands, actor, input) => commands.pairTelegram(actor, input),
   registerTelegramWebhook: (commands, actor, input) =>
     commands.registerTelegramWebhook(actor, input),
+  connectRunner: (commands, actor) => commands.connectRunner(actor),
+  describeRunner: (commands, actor) => commands.describeRunner(actor),
   listHeldFiles: (commands, actor) => commands.listHeldFiles(actor),
   forgetVaultPaths: (commands, actor, input) => commands.forgetVaultPaths(actor, input),
   setDream: (commands, actor, input) => commands.setDream(actor, input),
@@ -191,7 +194,13 @@ async function handleForm(request: Request, pathname: string, deps: AdminDeps): 
     }
     const body = await readBody(request);
     if (!body.ok) return answer(body.status, texts.tooLarge, texts.tooLarge.body);
-    const botToken = new URLSearchParams(body.text).get("botToken") ?? "";
+    const fields = new URLSearchParams(body.text);
+    // The runner's page names its field `runnerSecret`; channel-egress refuses it on any other form.
+    const runnerSecret = fields.get("runnerSecret");
+    if (runnerSecret !== null) {
+      return await submitRunnerForm(token, runnerSecret, deps.forms, locale);
+    }
+    const botToken = fields.get("botToken") ?? "";
     // The conversation that sent the form learns the bot is connected (#206).
     const { userId } = admission;
     return await submitForm(token, botToken, deps.forms, locale, (agentId, bot, registered) =>
