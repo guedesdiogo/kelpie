@@ -39,6 +39,8 @@ Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`
 | `/commands/connectTelegram` | `{ "agentId": "sales" }`; answers `{ "path": "/forms/<token>", "expiresAt": … }` |
 | `/commands/pairTelegram` | `{ "agentId": "sales" }`; answers `{ "link": "https://t.me/<bot>?start=<code>", "expiresAt": … }` (see "Pairing") |
 | `/commands/registerTelegramWebhook` | `{ "agentId": "sales" }`; points the agent's bot at ingress again, after a failed registration or a new ingress hostname |
+| `/commands/connectRunner` | none; answers `{ "path": "/forms/<token>", "expiresAt": … }`, a secure form for the VPS runner's secret ([runner.md](runner.md)). `503 not_configured` when `channel-egress` was deployed without the runner's VPC Service |
+| `/commands/describeRunner` | none; the runner's state, as `{ "state" }` with its `version` and `protocol` once it answered: `ready`, `outdated` (it speaks another protocol version), `refused` (it no longer takes the stored secret), `unreachable`, `not_connected` (no secret given yet) or `not_configured` |
 | `/commands/listHeldFiles` | none; the vault's files pushed with conflict markers that still wait, as `{ "path", "state": "held" \| "proposed", "attempts", "at" }` ([context-store.md](context-store.md)) |
 | `/commands/forgetVaultPaths` | `{ "paths": ["memory/people/ana.md", "memory/old/"] }`, at most 1,000; a path ending in `/` names a folder. After you rewrote the vault's history, Kelpie forgets its copies of them; answers `{ "forgotten": <rows>, "stillInVault": [<named files the vault still has>] }` (see "Erasing content" in [context-store.md](context-store.md#erasing-content)) |
 | `/commands/setDream` | `{ "mode": "off" }`, or `{ "mode": "dry", "writes": ["abstracts"] }`, where `dry` is the default and `writes` is optional. Turns Dream, memory's consolidation, off or on. `writes` names the operations that may write: only `abstracts` for now, since `summaries` and `merges` wait on #182's measurement. The others only propose: the daily memory report shows the abstracts' plan, and `memory/_lint/dream.md` the day summaries and merges. Off forgets `writes`, so each operation is dry again until named, and deletes what Dream proposed. It answers `{ "mode", "writes" }` ([memory-format.md](memory-format.md#dream)) |
@@ -150,6 +152,11 @@ The link expires after 15 minutes, works once, and closes after five refused tok
 - **The link opened again** says which bot it connected, instead of "This link no longer works".
 
 The token is stored, and the webhook registered, even when the browser drops the request.
+
+**The runner's form** works the same way, from `connectRunner`. The owner pastes the secret from the runner's server ([runner.md](runner.md)), and `channel-egress` checks it with the runner's `/health` before storing it:
+- a secret the runner refuses counts against the form, as a refused bot token does;
+- a runner that can't be reached leaves the form open, and doesn't count;
+- an outdated runner's secret is stored, and the page asks for an update.
 
 Form pages are HTML:
 - they are sent with `Cache-Control: no-store`, `Referrer-Policy: same-origin` and a Content-Security-Policy that forbids framing and scripts;

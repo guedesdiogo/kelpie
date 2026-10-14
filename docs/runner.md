@@ -4,7 +4,7 @@ The runner is the process on the owner's VPS that Kelpie's Workers call to use t
 
 - **It listens on `127.0.0.1` only.** The server opens no port: Workers reach it through a Cloudflare Tunnel and a Workers VPC Service.
 - **Every request needs its secret**, as `Authorization: Bearer <secret>`. Without it the runner answers 401, on any path.
-- **It never calls Kelpie.** Its answers go back on the requests Workers make (#294).
+- **It never calls Kelpie.** Its answers go back on the requests `channel-egress` makes (#294).
 - **What it serves today:** `GET /health`, which answers its version and protocol version:
 
   ```json
@@ -74,11 +74,27 @@ Cloudflare's [Workers VPC](https://developers.cloudflare.com/workers-vpc/) is in
    bunx wrangler vpc service create kelpie-runner --type http --tunnel-id <TUNNEL_ID> --ipv4 127.0.0.1 --http-port 47832
    ```
 
+## Kelpie's side
+
+`channel-egress` is the only Worker that calls the runner, and it keeps the runner's secret in Kelpie's secret store (`docs/secrets.md`).
+
+1. **Give the deploy the VPC Service's id,** as a variable of GitHub's `production` environment:
+
+   ```bash
+   gh variable set RUNNER_VPC_SERVICE_ID --env production --repo guedesdiogo/kelpie --body <VPC_SERVICE_ID>
+   ```
+
+   The next deploy gives `channel-egress` its `RUNNER` binding (`docs/deploy.md`). A merge that ships nothing deploys nothing, so the first time it takes a deploy by hand, with `always` (`docs/deploy.md`, "By hand").
+2. **Give Kelpie the secret.** The `connectRunner` command answers a one-time form's path (`docs/admin-api.md`). Open it, and paste the content of `~/.config/kelpie-runner/secret`. `channel-egress` checks it with the runner's `/health` before storing it.
+3. **Check it** with the `describeRunner` command. It answers `ready`, with the runner's version, when everything works.
+
+A rollback to a build deployed before the variable was set leaves `channel-egress` without the binding until the next deploy.
+
 ## Operating it
 
 - **Logs:** `journalctl --user -u kelpie-runner`. Each request logs its method, path and status, never its headers.
 - **Updating:** `git -C ~/kelpie pull --ff-only`, then `systemctl --user restart kelpie-runner`. A merge into `main` doesn't deploy the runner: it is the owner's server.
 - **Rotating the secret:**
   1. Add the new secret as a second line of the file, and restart the runner. It now accepts both.
-  2. Give Kelpie the new secret.
+  2. Give Kelpie the new secret, through a new `connectRunner` form.
   3. Remove the old line, and restart again.

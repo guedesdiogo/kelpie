@@ -42,6 +42,9 @@ export const WORKERS: readonly WorkerSpec[] = [
   },
 ];
 
+/** The only Worker that calls the VPS runner, so the only one with its binding (#294). */
+export const CHANNEL_EGRESS = "kelpie-channel-egress";
+
 /** The Worker that answers the post-deploy probes. */
 export const INGRESS = "kelpie-ingress";
 

@@ -1,7 +1,7 @@
-import type { RunnerAnswered, RunnerState } from "./runner.ts";
 import type { SendOptions } from "./adapter.ts";
 import type { ChannelId } from "./events.ts";
 import type { Locale } from "./locale.ts";
+import type { RunnerAnswered, RunnerState } from "./runner.ts";
 
 // The contracts of the channel-egress Worker (ADR-0002), the only place that reads a channel's
 // secrets. Other Workers reach it through service bindings, and every answer is a value: thrown

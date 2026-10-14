@@ -78,6 +78,7 @@ After the gates pass on `main`, the `Deploy` job runs `tools/release`. It:
 5. **Deploys the Workers in order** (`llm-gateway`, `channel-egress`, `context-store`, `conversation-runtime`, `ingress`, `admin-api`):
    - each is tagged `<build>-<sha>` and carries its instance vars;
    - ingress also gets `DEPLOY_PROBE_TOKEN` when the environment has it and the live ingress doesn't, or on a rotation ("The deep probe's token"). It goes through `wrangler deploy --secrets-file`: the file sits in a private temporary folder and is deleted right after, no other process gets the token, and it is masked in the logs. Uploading once matters: each upload is a secret change, which a rollback can cross only with `force`;
+   - channel-egress also gets the runner's VPC Service as its `RUNNER` binding when the environment has the variable `RUNNER_VPC_SERVICE_ID` ([runner.md](runner.md)). `wrangler deploy` takes no binding as a flag, so the release tool deploys channel-egress's config with the binding merged in, from a file it deletes right after;
    - `wrangler deploy` applies the Durable Object class migrations;
    - each object applies its SQL migrations the first time it wakes on the new code.
 6. **Probes production** until the new build answers, for up to three minutes:

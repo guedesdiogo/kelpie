@@ -1,4 +1,5 @@
 import type { VersionTraffic } from "./cloudflare.ts";
+import type { ConfigAdditions } from "./config-additions.ts";
 import {
   buildTagOf,
   changedFiles,
@@ -24,12 +25,15 @@ import {
   type WatchOptions,
   watch,
 } from "./verify.ts";
-import { INGRESS, type WorkerSpec } from "./workers.ts";
+import { CHANNEL_EGRESS, INGRESS, type WorkerSpec } from "./workers.ts";
 
 export interface DeployDeps extends VerifyDeps {
   git: Git;
-  /** Runs `wrangler deploy` with these arguments for one Worker; returns the version it made. */
-  wranglerDeploy(spec: WorkerSpec, args: string[]): Promise<string>;
+  /**
+   * Runs `wrangler deploy` with these arguments for one Worker, on its committed config with
+   * `additions` merged in when given; returns the version it made.
+   */
+  wranglerDeploy(spec: WorkerSpec, args: string[], additions?: ConfigAdditions): Promise<string>;
   /** Keeps a value out of CI logs. */
   mask(value: string): void;
 }
@@ -167,6 +171,11 @@ export interface DeployOptions {
   deepProbeToken?: string;
   /** Uploads the token even though ingress holds one: the Deploy workflow's rotate-probe-token. */
   rotateProbeToken?: boolean;
+  /**
+   * `RUNNER_VPC_SERVICE_ID` (#294): the VPC Service that reaches the owner's runner. `channel-egress`
+   * gets it as its `RUNNER` binding; without it, it has none, and the runner is off.
+   */
+  runnerVpcService?: string;
 }
 
 /**
@@ -187,6 +196,25 @@ export function deepProbeToken(
     return undefined;
   }
   return token;
+}
+
+/**
+ * `RUNNER_VPC_SERVICE_ID` from the environment, trimmed, or undefined when it's empty. Anything but
+ * a VPC Service's id is skipped with a warning: the deploy goes on without the runner's binding.
+ */
+export function runnerVpcService(
+  value: string | undefined,
+  warn: (message: string) => void,
+): string | undefined {
+  const id = value?.trim();
+  if (!id) return undefined;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    warn(
+      "RUNNER_VPC_SERVICE_ID isn't a VPC Service id, so channel-egress deploys without the runner's binding (docs/runner.md).",
+    );
+    return undefined;
+  }
+  return id;
 }
 
 /** The secret only ingress gets, for its deploy probe. */
@@ -231,6 +259,10 @@ export async function deploy(
   for (const worker of plan.live) for (const value of Object.values(worker.vars)) deps.mask(value);
   let token = options.deepProbeToken;
   if (token) deps.mask(token);
+  if (options.runnerVpcService) deps.mask(options.runnerVpcService);
+  const runnerBinding: ConfigAdditions | undefined = options.runnerVpcService
+    ? { vpc_services: [{ binding: "RUNNER", service_id: options.runnerVpcService }] }
+    : undefined;
   if (token && new URL(plan.origin).protocol !== "https:") {
     deps.log.warn(
       "The probes' origin isn't https, so the deep probe is skipped and DEPLOY_PROBE_TOKEN isn't uploaded.",
@@ -268,6 +300,9 @@ export async function deploy(
           uploaded = true;
           return deps.wranglerDeploy(worker.spec, [...args, "--secrets-file", file]);
         });
+      } else if (runnerBinding && worker.spec.script === CHANNEL_EGRESS) {
+        deps.log.info(`${CHANNEL_EGRESS} gets the runner's VPC Service as its RUNNER binding`);
+        entry.deployed = await deps.wranglerDeploy(worker.spec, args, runnerBinding);
       } else {
         entry.deployed = await deps.wranglerDeploy(worker.spec, args);
       }
