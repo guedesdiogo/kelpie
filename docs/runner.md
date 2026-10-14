@@ -63,11 +63,40 @@ The service reads these from its environment, through `Environment=` lines in th
 Cloudflare's [Workers VPC](https://developers.cloudflare.com/workers-vpc/) is in beta, and free during it.
 
 1. **Create a remotely managed tunnel** in the Cloudflare dashboard, under Networking, Tunnels. `wrangler tunnel` works too, but its commands are experimental.
-2. **Run `cloudflared` as a system service** on the VPS, version 2025.7.0 or later:
+2. **Run `cloudflared` as a system service** on the VPS, version 2025.7.0 or later.
+   - **The token:** put the tunnel's token, from its install command in the dashboard, in `/etc/cloudflared/kelpie-runner.token`, owned by root, mode `0600`.
+   - **The service:** this unit gives the token to `cloudflared` as a systemd credential, so it never shows in the process list, as it would with `cloudflared service install <TUNNEL_TOKEN>`. It runs `cloudflared` as a throwaway unprivileged user.
+
+   ```ini
+   # /etc/systemd/system/cloudflared-kelpie-runner.service
+   [Unit]
+   Description=Cloudflare Tunnel for Kelpie's runner
+   After=network-online.target
+   Wants=network-online.target
+
+   [Service]
+   Type=notify
+   TimeoutStartSec=30
+   DynamicUser=yes
+   LoadCredential=token:/etc/cloudflared/kelpie-runner.token
+   ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run --token-file ${CREDENTIALS_DIRECTORY}/token
+   Restart=on-failure
+   RestartSec=5s
+   NoNewPrivileges=yes
+   ProtectSystem=strict
+   ProtectHome=yes
+   PrivateTmp=yes
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
 
    ```bash
-   sudo cloudflared service install <TUNNEL_TOKEN>
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now cloudflared-kelpie-runner
    ```
+
+   Its journal shows "Registered tunnel connection" four times. Warnings about ICMP and `ping_group_range` are harmless: the runner needs no ping.
 
    It connects out over QUIC, on outbound UDP port 7844. The tunnel needs no ingress rules for Workers VPC. **Don't give it a public hostname for the runner:** the secret would then be the runner's only protection.
 3. **Create the VPC Service**, pointing at the runner:
@@ -80,7 +109,8 @@ Cloudflare's [Workers VPC](https://developers.cloudflare.com/workers-vpc/) is in
 
 `channel-egress` is the only Worker that calls the runner, and it keeps the runner's secret in Kelpie's secret store (`docs/secrets.md`).
 
-1. **Give the deploy the VPC Service's id,** as a variable of GitHub's `production` environment ([ADR-0042](adr/0042-runner-vpc-service-id-in-github.md)):
+1. **Let the deploy bind it.** The deploy's API token needs the account's **Connectivity Directory Bind** permission (`docs/deploy.md`, "One-time setup"). Without it, binding fails with `code: 10196`, and the deploy rolls back.
+2. **Give the deploy the VPC Service's id,** as a variable of GitHub's `production` environment ([ADR-0042](adr/0042-runner-vpc-service-id-in-github.md)):
 
    ```bash
    gh variable set RUNNER_VPC_SERVICE_ID --env production --repo guedesdiogo/kelpie --body <VPC_SERVICE_ID>
@@ -89,8 +119,8 @@ Cloudflare's [Workers VPC](https://developers.cloudflare.com/workers-vpc/) is in
    The next deploy gives `channel-egress` its `RUNNER` binding (`docs/deploy.md`). A merge that ships nothing deploys nothing, so the first time it takes a deploy by hand, with `always` (`docs/deploy.md`, "By hand"). Its log says "kelpie-channel-egress gets the runner's VPC Service as its RUNNER binding".
 
    If that deploy fails on `channel-egress`, every later one will too. Delete the variable (`gh variable delete RUNNER_VPC_SERVICE_ID --env production`), then check the id against `wrangler vpc service list`, and check that the deploy's API token may bind a VPC Service.
-2. **Give Kelpie the secret.** The `connectRunner` command answers a one-time form's path (`docs/admin-api.md`). Open it, and paste the content of `~/.config/kelpie-runner/secret`. `channel-egress` checks it with the runner's `/health` before storing it.
-3. **Check it** with the `describeRunner` command. It answers `ready`, with the runner's version, when everything works.
+3. **Give Kelpie the secret.** The `connectRunner` command answers a one-time form's path (`docs/admin-api.md`). Open it, and paste the content of `~/.config/kelpie-runner/secret`. `channel-egress` checks it with the runner's `/health` before storing it.
+4. **Check it** with the `describeRunner` command. It answers `ready`, with the runner's version, when everything works.
 
 A rollback to a build deployed before the variable was set leaves `channel-egress` without the binding until the next deploy. So does a deploy of `channel-egress` by hand (`docs/deploy.md`).
 
