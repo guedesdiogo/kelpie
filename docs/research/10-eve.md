@@ -295,6 +295,6 @@ Each of these would amend an ADR, so none changes the design until the owner ans
 
 ## 7. Next steps
 
-- **Adopt 1 and 2** become one follow-up of [#300](https://github.com/guedesdiogo/kelpie/issues/300): skills that load on demand, and broken skills reported in the lint report.
-- **Adopt 4 and 5** go to [#290](https://github.com/guedesdiogo/kelpie/issues/290) as a comment. **Adapt 1** goes to [#54](https://github.com/guedesdiogo/kelpie/issues/54) as a pointer to Q1.
+- **Adopt 1 and 2** are follow-up [#305](https://github.com/guedesdiogo/kelpie/issues/305): skills that load on demand, and broken skills reported in the lint report.
+- **Adopt 4 and 5** are a comment on [#290](https://github.com/guedesdiogo/kelpie/issues/290). **Adapt 1** is a pointer to Q1 on [#54](https://github.com/guedesdiogo/kelpie/issues/54).
 - **Adopt 3** waits for the connections story. No issue exists for it yet.
