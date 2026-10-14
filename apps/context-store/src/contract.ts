@@ -117,6 +117,11 @@ export interface MemoryHit {
   current: boolean;
   /** As in `RecallResult.notes`. */
   byKelpie: boolean;
+  /**
+   * The version `writeNote` takes back to change the note (#297). Null when the hit shows a version
+   * the vault has replaced, or a queued write is about to: the note must be read first.
+   */
+  version: string | null;
 }
 
 /** The hits, or why there are none to give: memory off, or failing, isn't empty memory. */
@@ -139,10 +144,11 @@ export interface ReadNoteOptions {
 
 /**
  * A page of a note, fenced, under 10,000 characters, and where the next one starts. A note outside
- * the scopes, outside memory's index, or missing is the same "not found".
+ * the scopes, outside memory's index, or missing is the same "not found". `version` is the
+ * version the page shows, which `writeNote` takes back (#297).
  */
 export type ReadNoteResult =
-  | { ok: true; path: string; text: string; nextOffset: number | null }
+  | { ok: true; path: string; text: string; nextOffset: number | null; version: string }
   | { ok: false; reason: "not_found" | "vault_off" | "unavailable" };
 
 /** A memory as the agent's `memory_write` gives it (#126). */
@@ -164,6 +170,11 @@ export interface MemoryWriteInput {
   abstract?: string;
   /** A note found with search or read: the memory becomes its new version. */
   path?: string;
+  /**
+   * Required with `path`: the version search or read showed, or the last write returned (#297). A
+   * note changed since is `changed`, and nothing is written.
+   */
+  version?: string;
 }
 
 export interface WriteNoteOptions {
@@ -176,21 +187,23 @@ export interface WriteNoteOptions {
 }
 
 /**
- * What `writeNote` did. `unchanged` names the note that already says it. `invalid` lists what the
- * memory gets wrong, for the model to fix; a path the turn can't see, outside memory, or missing
- * is `not_found`.
+ * What `writeNote` did. `unchanged` names the note that already says it. Either way, `version` is
+ * the note's version now, for the next write to it. `invalid` lists what the memory gets wrong,
+ * for the model to fix; a path the turn can't see, outside memory, or missing is `not_found`.
  */
 export type WriteNoteResult =
-  | { ok: true; action: "written" | "unchanged"; path: string }
+  | { ok: true; action: "written" | "unchanged"; path: string; version: string }
   | { ok: false; reason: "invalid"; problems: string[] }
   | {
       ok: false;
       /**
        * `owners_word`: a deduced or inferred memory can't change a note the person stated.
        * `core_note`: no memory changes a note the always-loaded core carries (#168).
+       * `changed`: the note changed since the version the memory names (#297).
        */
       reason:
         | "not_found"
+        | "changed"
         | "scope_not_allowed"
         | "owners_word"
         | "core_note"

@@ -112,6 +112,21 @@ describe("sessionPage", () => {
     expect((page?.text.length ?? 0) < 24_000).toBe(true);
   });
 
+  it("keeps more of a session under other limits, as the session recall evaluation asks (#297)", async () => {
+    const lines = Array.from({ length: 70 }, (_, i) =>
+      owner(`10:${String(i % 60).padStart(2, "0")}`, `mensagem ${i} ${"y".repeat(500)} fim ${i}`),
+    );
+    const input = { key: "s1", channel: "telegram", threadId: "1", timeZone: "UTC", lines };
+    const kept = await sessionPage(input, { excerptChars: 2_000, headLines: 50, tailLines: 50 });
+    expect(kept?.text).toContain("mensagem 35 ");
+    expect(kept?.text).toContain("fim 35");
+    expect(kept?.text).not.toContain("omitted");
+    // The default limits cut the same session as before.
+    const cut = await sessionPage(input);
+    expect(cut?.text).not.toContain("fim 0");
+    expect(cut?.text).toContain("… 10 messages omitted …");
+  });
+
   it("writes nothing for a session without a message from a person", async () => {
     expect(
       await sessionPage({

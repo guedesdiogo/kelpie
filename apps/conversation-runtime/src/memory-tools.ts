@@ -65,7 +65,7 @@ const turns = new Map<string, { writes: number; failures: number }>();
 const WRITE: Tool["spec"] = {
   name: "memory_write",
   description:
-    "Save something worth keeping to the owner's memory, as one note: a fact, a preference, a commitment, a person, a decision. Write it in the owner's language. To change a note found with memory_search or memory_read, pass its path: what you write becomes its new version, so keep what still holds. Saving the same memory again changes nothing.",
+    "Save something worth keeping to the owner's memory, as one note: a fact, a preference, a commitment, a person, a decision. Write it in the owner's language. To change a note found with memory_search or memory_read, pass its path and the version they showed: what you write becomes its new version, so keep what still holds. Saving the same memory again changes nothing.",
   inputSchema: {
     type: "object",
     properties: {
@@ -94,6 +94,11 @@ const WRITE: Tool["spec"] = {
           "Where to save it. Left out: the owner's global memory, or this conversation's own scope when that is all it sees.",
       },
       path: { type: "string", description: "A found note's path, to write its new version." },
+      version: {
+        type: "string",
+        description:
+          "Required with path: the version memory_read or memory_search showed for the note, or the one your last change to it returned. A note changed since isn't overwritten.",
+      },
     },
     required: ["title", "body", "kind", "level"],
     additionalProperties: false,
@@ -113,6 +118,7 @@ const WRITE_FIELDS = [
   "abstract",
   "scope",
   "path",
+  "version",
 ] as const;
 
 const invalid = (output: string): ToolOutcome => ({ output, isError: true });
@@ -241,8 +247,8 @@ export function memoryTools(store: MemoryStore): ToolProvider {
       return {
         output:
           result.action === "written"
-            ? `Saved to ${result.path}. This is done; don't save it again.`
-            : `Already in memory, at ${result.path}. Nothing was saved.`,
+            ? `Saved to ${result.path}, version ${result.version}. This is done; don't save it again.`
+            : `Already in memory, at ${result.path}, version ${result.version}. Nothing was saved.`,
       };
     }
     switch (result.reason) {
@@ -251,6 +257,10 @@ export function memoryTools(store: MemoryStore): ToolProvider {
       case "not_found":
         return invalid(
           "Not saved: there is no note at that path in the memory this conversation can see.",
+        );
+      case "changed":
+        return invalid(
+          "Not saved: the note changed since that version. Read it again with memory_read, keep what still holds, and save with the version it shows now.",
         );
       case "scope_not_allowed":
         return invalid(

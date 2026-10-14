@@ -1,7 +1,7 @@
 export { ABSTRACT_PROMPT, abstractInput, abstractOf, withAbstract } from "./abstract.ts";
 export { type Core, type CoreOptions, coreBlock, coreCarries } from "./core.ts";
 export { type Entity, foldKey, MAX_ENTITIES, normalizeEntities } from "./entities.ts";
-export { gitBlobSha } from "./hash.ts";
+export { gitBlobSha, noteVersion } from "./hash.ts";
 export {
   defaultTier,
   isReservedPath,
@@ -71,6 +71,7 @@ export {
   type HitView,
   type Page,
   type PageLink,
+  type PageVersion,
   READ_PAGE_CHARS,
   type ReadPageOptions,
   readPage,
@@ -102,7 +103,9 @@ export {
   conversationScope,
   conversationSource,
   type OpenKeys,
+  SESSION_LIMITS,
   type SessionInput,
+  type SessionLimits,
   type SessionLine,
   type SessionPage,
   sessionPage,

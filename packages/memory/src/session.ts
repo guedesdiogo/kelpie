@@ -61,6 +61,24 @@ const KEY_CARRY_MS = 10 * 60_000;
 /** A longer session keeps its first and last messages. */
 const HEAD_LINES = 30;
 const TAIL_LINES = 30;
+/**
+ * How much of a stretch of conversation its page keeps. Pages use `SESSION_LIMITS`; the session
+ * recall evaluation (#297) measures others. A message is read up to READ_CHARS whatever the cut.
+ */
+export interface SessionLimits {
+  /** Each message is cut to this many characters, after its secrets are replaced. */
+  excerptChars: number;
+  /** A session longer than both keeps only its first `headLines` and last `tailLines` messages. */
+  headLines: number;
+  tailLines: number;
+}
+
+export const SESSION_LIMITS: SessionLimits = {
+  excerptChars: EXCERPT_CHARS,
+  headLines: HEAD_LINES,
+  tailLines: TAIL_LINES,
+};
+
 /** How sure a session page is: what the owner said alone, or with others in a group (#109). */
 const PRIVATE_CONFIDENCE = 0.9;
 const GROUP_CONFIDENCE = 0.6;
@@ -190,7 +208,10 @@ function plainName(name: string): string {
  * replaced before anything is cut, so a cut can't split one past the sanitizer; only the messages
  * the page shows are sanitized.
  */
-export async function sessionPage(input: SessionInput): Promise<SessionPage | null> {
+export async function sessionPage(
+  input: SessionInput,
+  limits: SessionLimits = SESSION_LIMITS,
+): Promise<SessionPage | null> {
   const lines = [...input.lines].sort((a, b) => a.at - b.at);
   const firstUser = lines.find((line) => line.role === "user");
   const first = lines[0];
@@ -223,17 +244,17 @@ export async function sessionPage(input: SessionInput): Promise<SessionPage | nu
   );
 
   const shown =
-    lines.length > HEAD_LINES + TAIL_LINES
-      ? [...lines.slice(0, HEAD_LINES), null, ...lines.slice(-TAIL_LINES)]
+    lines.length > limits.headLines + limits.tailLines
+      ? [...lines.slice(0, limits.headLines), null, ...lines.slice(lines.length - limits.tailLines)]
       : lines;
-  const omitted = lines.length - HEAD_LINES - TAIL_LINES;
+  const omitted = lines.length - limits.headLines - limits.tailLines;
   const body = [
     `${input.channel} · ${start.date} ${start.time}–${end.time} (${timeZone}) · ${lines.length} messages`,
     "",
     ...shown.map((line) =>
       line === null
         ? `- … ${omitted} messages omitted …`
-        : `- **${clock(line.at, timeZone).time} ${plainName(line.speaker)}:** ${inert(excerpt(cleanText(line), EXCERPT_CHARS))}`,
+        : `- **${clock(line.at, timeZone).time} ${plainName(line.speaker)}:** ${inert(excerpt(cleanText(line), limits.excerptChars))}`,
     ),
   ].join("\n");
 
