@@ -328,6 +328,48 @@ What the numbers show:
   - **The tier:** `gpt-6-luna` stands in for the cheap tier's first model, Claude Haiku 4.5.
   - **Real use:** whether abstracts help real recall. The owner judges that from the dry run's proposals.
 
+## Session recall (#297)
+
+ai-memory's LongMemEval-S measurement found that its session pages, which kept little of what was said, cost it most of its score: hit@5 0.662 with them, 0.968 with pages holding the captured text ([decomposition report](https://github.com/akitaonrails/ai-memory/blob/ca7b9bb25382210d4d906ea0a29cea4ce2c6fd2b/docs/benchmarks/longmemeval-s-decomposition-2026-10-12.md?plain=1#L62-L80)). Kelpie's page cuts each message to 280 characters, and a session over 60 messages keeps only its first and last 30 (`sessionPage`). This slice measures what that costs.
+
+**The run** (`eval/sessions.eval.ts`, 2026-10-14):
+- **24 conversations in Portuguese** (`eval/session-recall.ts`), each with a question whose answer sits in one place:
+  - 6 past the 280th character of one of Kelpie's replies;
+  - 6 past the 280th character of one of the owner's messages;
+  - 6 in a short message in the middle of an 80-message session;
+  - 6 in a short message near the start, which every page keeps: the control.
+- **Two conversations per case** on the same topic, a week before and after, without the answer. All 72 pages go into the 1k vault, so they also compete with its notes.
+- **Two pages for each conversation:**
+  - today's;
+  - one that keeps each message whole up to 2,000 characters, with no middle cut up to 200 messages.
+- **Retrieval as a turn asks it,** with no vectors and no rerank, packed at 1,000 tokens.
+- **The answer is reached** when its page ranks in the top 5 and holds the answer: one `memory_read` away. **It is shown** when the answer itself is in the packed block.
+
+| 24 questions | hit@1 | hit@5 | hit@10 | MRR | Answer reached | Answer shown |
+|---|---|---|---|---|---|---|
+| Today's pages | 0.333 | 0.625 | 0.708 | 0.446 | 0.208 | 0.208 |
+| Whole pages | 0.542 | 0.833 | 0.917 | 0.665 | 0.833 | 0.708 |
+
+| Answer reached, by place | Today's pages | Whole pages |
+|---|---|---|
+| Past a reply's 280th character | 0 of 6 | 5 of 6 |
+| Past an owner message's 280th character | 0 of 6 | 6 of 6 |
+| In a long session's middle | 0 of 6 | 4 of 6 |
+| Near the start (control) | 5 of 6 | 5 of 6 |
+
+What the numbers show:
+- **Today's page loses every answer past its cut,** and holds it nowhere else memory searches: none of the 18 is reached.
+- **Whole pages reach 15 of the 18,** and the control doesn't move.
+- **The page of a long session ranks, but the block shows only its start:** its answer is reached by a read, never shown in the block.
+- **The cost on this slice:**
+  - the mean page grows from 1,616 to 1,885 characters, and the p95 from 3,295 to 4,252;
+  - the index's database from 2.11 to 2.14 MB;
+  - the packed block from 871 to 920 tokens on average, within its 1,000.
+- **Not measured:**
+  - **Vectors and the rerank:** the embedder reads a note's first 6,000 characters, so FTS carries the rest of a longer page.
+  - **Real conversations:** the owner's chats may be shorter than these, and the 24 questions are synthetic.
+  - **Ties:** a case's page and its two companions differ only where the answer is, so today's hit@k partly reflects how equal scores are ordered. Only the reached and shown columns depend on the page alone.
+
 ## How to re-run
 
 ```bash
