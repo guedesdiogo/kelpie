@@ -51,6 +51,26 @@ export interface AgentSettings {
    * cost, so the setup agent asks for the owner's confirmation, as for any setting.
    */
   maxConcurrentTasks: number;
+  /**
+   * Whether the agent creates and deletes temporary subagents (ADR-0036 §5, #290). The main agent
+   * has it by its role; any other agent only when Admin turns it on. A subagent never has it.
+   */
+  spawn: boolean;
+  /** The agent's remit, one line: what it is for, as its identity tells it (ADR-0036 §4). */
+  remit: string;
+  /**
+   * Skills kept on the agent's AgentHost, not in the vault: a subagent's, which last only as long
+   * as it does (ADR-0036 §5).
+   */
+  skills: AgentSkill[];
+  /** The tools the agent may use, by name; null for every tool it is given (ADR-0036 §3). */
+  tools: string[] | null;
+}
+
+/** A skill kept with the agent's settings: its name, and what it tells the agent to do. */
+export interface AgentSkill {
+  name: string;
+  instructions: string;
 }
 
 export const DEFAULT_SETTINGS: AgentSettings = {
@@ -65,7 +85,37 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   toolLoopMs: 120_000,
   memoryCore: false,
   maxConcurrentTasks: 3,
+  spawn: false,
+  remit: "",
+  skills: [],
+  tools: null,
 };
+
+/** The most skills one agent keeps, and the longest one. */
+const MAX_SKILLS = 10;
+const MAX_SKILL_CHARS = 4_000;
+/** The most tools an allowlist names. */
+const MAX_TOOLS = 32;
+const isToolName = (value: unknown): value is string =>
+  typeof value === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(value);
+/** One line of printable text, as a remit or a skill's name. */
+const isLine = (value: unknown, max: number): value is string =>
+  typeof value === "string" && value.length <= max && !/\p{C}/u.test(value);
+
+function parseSkills(value: unknown): AgentSkill[] | null {
+  if (!Array.isArray(value) || value.length > MAX_SKILLS) return null;
+  const skills: AgentSkill[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) return null;
+    const { name, instructions, ...rest } = entry as Record<string, unknown>;
+    if (Object.keys(rest).length > 0) return null;
+    if (!isLine(name, 80) || name.trim() === "") return null;
+    if (typeof instructions !== "string" || instructions.trim() === "") return null;
+    if (instructions.length > MAX_SKILL_CHARS) return null;
+    skills.push({ name: name.trim(), instructions });
+  }
+  return skills;
+}
 
 /** Agent ids become object names and URL segments: lowercase letters, digits and hyphens. */
 export function isAgentId(value: unknown): value is string {
@@ -129,6 +179,30 @@ export function parseSettings(input: unknown): Partial<AgentSettings> | null {
       case "memoryCore":
         if (typeof value !== "boolean") return null;
         parsed.memoryCore = value;
+        break;
+      case "spawn":
+        if (typeof value !== "boolean") return null;
+        parsed.spawn = value;
+        break;
+      case "remit":
+        if (!isLine(value, 200)) return null;
+        parsed.remit = value.trim();
+        break;
+      case "skills": {
+        const skills = parseSkills(value);
+        if (!skills) return null;
+        parsed.skills = skills;
+        break;
+      }
+      case "tools":
+        if (value === null) {
+          parsed.tools = null;
+          break;
+        }
+        if (!Array.isArray(value) || value.length > MAX_TOOLS || !value.every(isToolName)) {
+          return null;
+        }
+        parsed.tools = [...new Set(value)];
         break;
       case "maxConcurrentTasks":
         // 0 runs none of the agent's tasks: they wait in To do (#335).

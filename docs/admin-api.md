@@ -279,6 +279,19 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
 - **The main agent's own tool:** `set_agent_model` changes another agent's model settings, when the owner asks or agrees with its suggestion, behind the same confirmation (#289). No agent changes its own model, except Admin, through `configure_agent`.
 - **The check is at `admit`:** a chat its role doesn't allow answers `no_grant`, so a specialist whose chat is off doesn't answer its bot or the webchat.
 
+**Subagents** (ADR-0036 §5, #290). An agent with `spawn` creates temporary subagents for a demand, with `create_subagent`, and hands them work with `create_task`. The main agent has `spawn` by its role. Any other agent has it only when Admin's `configure_agent` turns it on, which takes the owner's confirmation. A subagent never has it.
+- **What a creator gives one:** a name, a soul, a one-line remit and up to 10 skills, kept on its own `AgentHost`, not in the vault. Kelpie picks its id, from the creator's.
+- **What it can never exceed:** its creator's tier and effort, on the creator's route, checked when it is created and at every turn.
+- **What it holds:**
+  - a subagent's tools only: `memory_search`, `memory_read` and its task tools;
+  - read-only memory, on its creator's scopes;
+  - no channel, and no capture.
+- **How many:** three live per creator at most; a fourth is refused.
+- **How it ends:** it lives until its creator deletes it with `delete_subagent`, or the owner through Admin. Deleting its creator deletes it too, and its results stay on the creator's tasks.
+- **The skill:** every agent with `spawn` gets the built-in `create-subagent` skill in its prompt. It covers when a subagent is worth it, how to brief one, and to delete it when the demand ends.
+
+`configure_agent` also takes `spawn`, a one-line `remit`, and `tools`, the tools an agent may use by name, or `null` for all it is given. Each change waits for the owner's confirmation.
+
 **Deleting an agent** (ADR-0036 §1, #303). `deleteAgent`, or the setup agent's `delete_agent` after the owner's confirmation, deletes an agent and every subagent it owns. The agent's chat goes off first, so no channel reaches it. Then the subagents go, deepest first, and the agent last. For each agent, in order:
 1. Its role is read again: an agent that became Admin or the main agent meanwhile stops the deletion.
 2. channel-egress removes its Telegram bot's webhook and deletes Kelpie's copy of the bot's token and its open forms. The bot itself stays the owner's, who can revoke its token with BotFather.

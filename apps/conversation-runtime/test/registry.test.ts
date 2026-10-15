@@ -282,3 +282,55 @@ describe("Registry roles (#288)", () => {
     ).toEqual(["helper", "sales"]);
   });
 });
+
+describe("Registry subagents (#290)", () => {
+  const subagent = (id: string, name: string, creator: string) => ({
+    id,
+    name,
+    role: "subagent",
+    owner: creator,
+    chat: false,
+  });
+
+  it("adds a creator's subagents, at most three live, with no chat", async () => {
+    const stub = registry("subagents");
+    for (const id of ["kelpie-sub-1", "kelpie-sub-2", "kelpie-sub-3"]) {
+      expect(await stub.addSubagent(id, "Helper", "kelpie", owner)).toEqual({ ok: true });
+    }
+    expect(await stub.get("kelpie-sub-1")).toEqual(subagent("kelpie-sub-1", "Helper", "kelpie"));
+    expect(await stub.addSubagent("kelpie-sub-4", "Helper", "kelpie", owner)).toEqual({
+      ok: false,
+      reason: "not_allowed",
+    });
+    // A deleted one frees its place.
+    expect(await stub.remove("kelpie-sub-1", owner)).toEqual({ ok: true });
+    expect(await stub.addSubagent("kelpie-sub-4", "Helper", "kelpie", owner)).toEqual({ ok: true });
+    expect((await auditOf(stub)).filter((row) => row.action === "agent.created").at(-1)).toEqual({
+      action: "agent.created",
+      agent_id: "kelpie-sub-4",
+      user_id: "u-owner",
+      via: "admin-api",
+    });
+  });
+
+  it("refuses a creator it doesn't know, a subagent as creator, and an id taken", async () => {
+    const stub = registry("subagents-refused");
+    expect(await stub.addSubagent("ghost-sub-1", "Helper", "ghost", owner)).toEqual({
+      ok: false,
+      reason: "unknown_agent",
+    });
+    await stub.addSubagent("kelpie-sub-1", "Helper", "kelpie", owner);
+    expect(await stub.addSubagent("kelpie-sub-1-sub-1", "Deeper", "kelpie-sub-1", owner)).toEqual({
+      ok: false,
+      reason: "not_allowed",
+    });
+    expect(await stub.addSubagent("kelpie", "Taken", "kelpie", owner)).toEqual({
+      ok: false,
+      reason: "not_allowed",
+    });
+    expect(await stub.addSubagent("Not An Id", "Helper", "kelpie", owner)).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+  });
+});

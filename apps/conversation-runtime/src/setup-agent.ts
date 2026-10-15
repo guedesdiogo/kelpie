@@ -141,6 +141,17 @@ const SPECS = {
             maxWaitMs: { type: "integer", minimum: 0, maximum: 120_000 },
             qualifier: { type: "string", enum: ["clef", "jev"] },
             toolLoopMs: { type: "integer", minimum: 120_000, maximum: 600_000 },
+            spawn: {
+              type: "boolean",
+              description:
+                "Whether the agent creates temporary subagents. The main agent always does; a subagent never.",
+            },
+            remit: { type: "string", description: "What the agent is for, one line." },
+            tools: {
+              type: ["array", "null"],
+              items: { type: "string" },
+              description: "The tools it may use, by name; null for all it is given.",
+            },
             maxConcurrentTasks: {
               type: "integer",
               minimum: 0,

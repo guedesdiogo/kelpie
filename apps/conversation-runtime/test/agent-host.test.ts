@@ -4,6 +4,7 @@ import { DEFAULT_SETTINGS, REGISTRY_NAME, SETUP_AGENT_ID } from "@kelpie/config"
 import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  CREATE_SUBAGENT_SKILL,
   replaceContextStoreForTesting,
   replaceIdentitySourcesForTesting,
 } from "../src/agent-host/agent-host.ts";
@@ -476,6 +477,8 @@ describe("AgentHost with a vault", () => {
         systemPrompt: withIdentity("empty-vault", DEFAULT_SETTINGS.systemPrompt),
       },
       promptVersion: 0,
+      // What a turn's limits read (#290): an agent the Registry doesn't list has no role.
+      agent: { role: null, owner: null, spawn: false },
     });
   });
 
@@ -665,5 +668,95 @@ describe("Deleting an agent's storage (#303)", () => {
         state.storage.sql.exec("SELECT key FROM state").toArray(),
       ),
     ).toEqual([{ key: "agentId" }]);
+  });
+});
+
+describe("AgentHost and subagents (#290)", () => {
+  /** Identity sources where each agent's role and owner are given, and a trio is its own tier. */
+  function roster(
+    entries: Record<string, { role: "main" | "specialist" | "subagent"; owner?: string }>,
+  ) {
+    replaceIdentitySourcesForTesting({
+      agent: async (id) => {
+        const entry = entries[id];
+        return entry ? { name: id, role: entry.role, owner: entry.owner ?? null } : null;
+      },
+      describe: async (model) => ({
+        provider: model.provider ?? "anthropic",
+        tier: model.conversation?.tier ?? "cheap",
+        ...(model.conversation?.effort ? { effort: model.conversation.effort } : {}),
+        route: [],
+      }),
+    });
+  }
+  afterEach(() => {
+    replaceIdentitySourcesForTesting(undefined);
+  });
+
+  it("teaches create-subagent to the main agent and to an agent with spawn, never a subagent", async () => {
+    roster({
+      "sub-main": { role: "main" },
+      "sub-specialist": { role: "specialist" },
+      "sub-spawner": { role: "specialist" },
+      "sub-child": { role: "subagent", owner: "sub-main" },
+    });
+    await host("sub-spawner").configure({ spawn: true }, owner);
+    await host("sub-child").configure({ spawn: true }, owner);
+    const taught = async (id: string) => {
+      const config = await host(id).turnConfig();
+      return {
+        prompt: config.settings.systemPrompt.includes(CREATE_SUBAGENT_SKILL),
+        agent: config.agent,
+      };
+    };
+    expect(await taught("sub-main")).toEqual({
+      prompt: true,
+      agent: { role: "main", owner: null, spawn: true },
+    });
+    expect(await taught("sub-specialist")).toMatchObject({
+      prompt: false,
+      agent: { spawn: false },
+    });
+    expect(await taught("sub-spawner")).toMatchObject({ prompt: true, agent: { spawn: true } });
+    expect(await taught("sub-child")).toEqual({
+      prompt: false,
+      agent: { role: "subagent", owner: "sub-main", spawn: false },
+    });
+  });
+
+  it("puts a subagent's soul, skills and remit in its prompt, and its creator in its identity", async () => {
+    roster({ "sub-briefed": { role: "subagent", owner: "kelpie" } });
+    await host("sub-briefed").configure(
+      {
+        systemPrompt: "You find flights.",
+        remit: "Flights to Lisbon.",
+        skills: [{ name: "Fares", instructions: "Compare three fares." }],
+      },
+      owner,
+    );
+    const prompt = (await host("sub-briefed").turnConfig()).settings.systemPrompt;
+    expect(prompt).toContain(
+      "a temporary subagent on Kelpie, working on one demand of the agent that created you, the agent kelpie. Your remit: Flights to Lisbon.",
+    );
+    expect(prompt).toContain("You find flights.");
+    expect(prompt).toContain("# Your skills\n\n## Fares\n\nCompare three fares.");
+  });
+
+  it("runs a subagent on its creator's trio once its own is above it", async () => {
+    roster({
+      "sub-maker": { role: "main" },
+      "sub-climber": { role: "subagent", owner: "sub-maker" },
+    });
+    await host("sub-maker").configure({ model: { conversation: { tier: "medium" } } }, owner);
+    await host("sub-climber").configure({ model: { conversation: { tier: "frontier" } } }, owner);
+    const climbed = await host("sub-climber").turnConfig();
+    expect(climbed.settings.model).toEqual({ conversation: { tier: "medium" } });
+    expect(climbed.settings.systemPrompt).toContain("You run on Kelpie's medium tier");
+
+    // Within its creator's, it keeps its own.
+    await host("sub-climber").configure({ model: { conversation: { tier: "cheap" } } }, owner);
+    expect((await host("sub-climber").turnConfig()).settings.model).toEqual({
+      conversation: { tier: "cheap" },
+    });
   });
 });

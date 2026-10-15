@@ -10,6 +10,7 @@ import {
 } from "@kelpie/channels";
 import {
   type AgentHostContract,
+  agentModel,
   type ConfigPorts,
   createConfigCommands,
   REGISTRY_NAME,
@@ -30,9 +31,11 @@ import {
   type RoutedRequest,
   type RouterEvent,
 } from "@kelpie/llm";
+import type { ModelDescription, ModelSettings } from "@kelpie/llm/models";
 import { mainAgentTools } from "./main-agent.ts";
 import { memoryTools } from "./memory-tools.ts";
 import { setupTools } from "./setup-agent.ts";
+import { subagentTools } from "./subagent-tools.ts";
 import { taskTools } from "./task-tools.ts";
 import type { ToolProvider } from "./tools.ts";
 
@@ -241,6 +244,28 @@ function productionPorts(env: Env): ConversationPorts {
       setupTools(commands, { adminOrigin: env.ADMIN_ORIGIN }),
       // The main agent's (#289): other agents' model trios, behind the owner's confirmation.
       mainAgentTools(commands, async (id) => (await registry.get(id))?.role ?? null),
+      // Temporary subagents (#290): an agent with spawn creates them, within its own limits.
+      subagentTools({
+        canSpawn: async (id) => {
+          const entry = await registry.get(id);
+          if (!entry || entry.role === "subagent") return false;
+          return entry.role === "main" || (await agentHost(id).config()).settings.spawn;
+        },
+        ceiling: async (id) => {
+          const model = agentModel((await agentHost(id).config()).settings);
+          const described = await (
+            env.LLM_GATEWAY as unknown as {
+              describe(area: "conversation", agent: ModelSettings): Promise<ModelDescription>;
+            }
+          ).describe("conversation", model);
+          return { model, described };
+        },
+        add: (id, name, creator, actor) => registry.addSubagent(id, name, creator, actor),
+        configure: (id, settings, actor) => agentHost(id).configure(settings, actor),
+        owned: async (creator) =>
+          (await registry.list()).filter((agent) => agent.owner === creator),
+        remove: (actor, id) => commands.deleteAgent(actor, { id }),
+      }),
       // The task tools (#335): a run ends its task, and an agent hands work to those it owns.
       taskTools({
         owned: async (id) =>

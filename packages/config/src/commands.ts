@@ -65,6 +65,11 @@ export interface AgentConfig {
   settings: AgentSettings;
   /** Bumped by every system prompt change. */
   promptVersion: number;
+  /**
+   * The agent as a turn's limits read it (#290), when `turnConfig` built this: its role, its
+   * owner, and whether it creates subagents.
+   */
+  agent?: { role: AgentRole | null; owner: string | null; spawn: boolean };
 }
 
 /**
@@ -105,6 +110,8 @@ export interface RegistryContract {
   setMain(id: string, actor: Actor): SetAgentResult;
   /** Turns a specialist's chat on or off. Admin and the main agent always chat; subagents never do. */
   setChat(id: string, chat: boolean, actor: Actor): SetAgentResult;
+  /** Adds a temporary subagent of `creator`'s, owned by it, with no chat (ADR-0036 §5, #290). */
+  addSubagent(id: string, name: string, creator: string, actor: Actor): SetAgentResult;
   /**
    * Removes a deleted agent's row, the last step of `deleteAgent` (#303). Admin, the main agent and
    * an agent that still owns another are `not_allowed` (ADR-0036 §1).

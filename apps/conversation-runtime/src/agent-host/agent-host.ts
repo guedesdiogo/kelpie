@@ -4,6 +4,7 @@ import type {
   AgentConfig,
   AgentHostContract,
   AgentSettings,
+  AgentSkill,
   ConfigureResult,
   EraseResult,
   NewTask,
@@ -111,8 +112,8 @@ const COMPILE_TIMEOUT_MS = 3_000;
  * its conversation's trio as llm-gateway resolves it (#286).
  */
 export interface IdentitySources {
-  /** The agent's name and role, or null while the Registry doesn't list it. */
-  agent(id: string): Promise<{ name: string; role: AgentRole } | null>;
+  /** The agent's name, role and owner, or null while the Registry doesn't list it. */
+  agent(id: string): Promise<{ name: string; role: AgentRole; owner?: string | null } | null>;
   describe(agent: ModelSettings): Promise<ModelDescription>;
 }
 
@@ -275,7 +276,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       this.#vaultContext(),
       this.#lookup(
         "identityAgent",
-        async () => (await sources.agent(id)) ?? { name: id, role: null },
+        async () => (await sources.agent(id)) ?? { name: id, role: null, owner: null },
       ),
       this.#lookup("identityModel", () => sources.describe(model)),
     ]);
@@ -311,20 +312,65 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
         }
       });
     }
+    const role = listed.value?.role ?? null;
+    const owner = listed.value?.owner ?? null;
+    // A subagent never runs above its creator (ADR-0036 §5): past its trio, it runs on the creator's.
+    const ceiling =
+      role === "subagent" && owner ? await this.#ceiling(owner, described.value) : null;
+    const spawn = role === "main" || (role !== "subagent" && config.settings.spawn);
     const identity = identitySection({
       id,
       name: listed.value?.name ?? id,
-      role: listed.value?.role ?? null,
-      model: described.value,
+      role,
+      creator: owner,
+      remit: config.settings.remit,
+      model: ceiling?.described ?? described.value,
     });
+    const prompt = [
+      identity,
+      composeSystemPrompt(config.settings.systemPrompt, vault),
+      ...storedSkills(config.settings.skills),
+      ...(spawn ? [CREATE_SUBAGENT_SKILL] : []),
+    ];
     return {
       settings: {
         ...config.settings,
-        model,
-        systemPrompt: `${identity}\n\n${composeSystemPrompt(config.settings.systemPrompt, vault)}`,
+        model: ceiling?.model ?? model,
+        systemPrompt: prompt.join("\n\n"),
       },
       promptVersion,
+      agent: { role, owner, spawn },
     };
+  }
+
+  /**
+   * The creator's trio when a subagent's would run above it (#290), in tier or effort; null when
+   * it doesn't, or the creator can't be read in time, since creation already held it to it.
+   */
+  async #ceiling(
+    creator: string,
+    own: ModelDescription | null,
+  ): Promise<{ model: ModelSettings; described: ModelDescription } | null> {
+    if (own === null) return null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const work = (async () => {
+        const model = agentModel((await this.env.AGENT_HOST.getByName(creator).config()).settings);
+        return { model, described: await this.#identitySources().describe(model) };
+      })();
+      const theirs = await Promise.race([
+        work,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("timed out")), IDENTITY_TIMEOUT_MS);
+        }),
+      ]);
+      return above(own, theirs.described) ? theirs : null;
+    } catch (error) {
+      console.warn("AgentHost: a subagent's creator wasn't read", errorName(error));
+      return null;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   /**
@@ -741,7 +787,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     return {
       agent: async (id) => {
         const entry = await registry.get(id);
-        return entry ? { name: entry.name, role: entry.role } : null;
+        return entry ? { name: entry.name, role: entry.role, owner: entry.owner } : null;
       },
       describe: (agent) => gateway.describe("conversation", agent),
     };
@@ -937,6 +983,37 @@ const SETUP_WAIT_GRACE_MS = 5 * 60_000;
 const MAX_CONVERSATION_NAME = 256;
 
 const invalidTask = { ok: false, reason: "invalid_input" } as const;
+
+const TIER_RANK: Record<string, number> = { cheap: 0, medium: 1, frontier: 2 };
+const EFFORT_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, xhigh: 3, max: 4 };
+
+/** Whether a trio runs above another: a higher tier, or an effort the other doesn't reach. */
+function above(own: ModelDescription, theirs: ModelDescription): boolean {
+  if ((TIER_RANK[own.tier] ?? 0) > (TIER_RANK[theirs.tier] ?? 0)) return true;
+  if (own.effort === undefined) return false;
+  if (theirs.effort === undefined) return true;
+  return (EFFORT_RANK[own.effort] ?? 0) > (EFFORT_RANK[theirs.effort] ?? 0);
+}
+
+/** The skills kept with the agent's settings (#290), as its prompt lists them. */
+function storedSkills(skills: AgentSkill[]): string[] {
+  if (skills.length === 0) return [];
+  return [
+    `# Your skills\n\n${skills.map((skill) => `## ${skill.name}\n\n${skill.instructions.trim()}`).join("\n\n")}`,
+  ];
+}
+
+/**
+ * The built-in `create-subagent` skill (ADR-0036 §5, #290), for every agent with `spawn`: when a
+ * subagent is worth it, how to brief one, and to delete it once the demand ends.
+ */
+export const CREATE_SUBAGENT_SKILL = `# Skill: create-subagent
+
+You can create temporary subagents with create_subagent, and hand them work with create_task.
+- Worth it: a demand that would crowd this conversation, or work that can run while you go on. Not for anything that needs the owner: a subagent can't talk to them, can't confirm, and can't write memory.
+- Brief it completely. It knows nothing of this conversation: give it a soul and skills for the work, and put in the task every fact, constraint and the result you want back.
+- Its result is its own report, not a verified fact. Check what matters before you rely on it, and write to memory yourself what is worth keeping.
+- You have at most three live at once. Delete each one with delete_subagent once its demand ends: it lives until you do.`;
 
 const isUserId = (value: unknown): value is string =>
   typeof value === "string" && value !== "" && value.length <= 128;

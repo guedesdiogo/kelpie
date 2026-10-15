@@ -10,11 +10,14 @@ import {
   SETUP_AGENT_ID,
   type SetAgentResult,
 } from "@kelpie/config";
-import { and, asc, eq, ne } from "drizzle-orm";
+import { and, asc, count, eq, ne } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
+
+/** The most subagents one creator has live at once (ADR-0036 §5). */
+export const MAX_LIVE_SUBAGENTS = 3;
 
 /**
  * Which agents exist, so commands and the management UI can list them (ADR-0015 left this to
@@ -61,6 +64,50 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
         .run();
     });
     return { ok: true, created: true };
+  }
+
+  /**
+   * Adds a temporary subagent of `creator`'s (ADR-0036 §5, #290): owned by it, with no chat. A
+   * subagent creates none, and a creator has at most MAX_LIVE_SUBAGENTS live at once. The creator's
+   * `spawn` is checked before this is called.
+   */
+  addSubagent(id: string, name: string, creator: string, actor: Actor): SetAgentResult {
+    if (!isAgentId(id) || !isAgentName(name) || !isAgentId(creator)) {
+      return { ok: false, reason: "invalid_input" };
+    }
+    const owner = this.get(creator);
+    if (!owner) return { ok: false, reason: "unknown_agent" };
+    if (owner.role === "subagent" || this.get(id)) return { ok: false, reason: "not_allowed" };
+    const live = this.#db
+      .select({ n: count() })
+      .from(schema.agents)
+      .where(and(eq(schema.agents.ownerId, creator), eq(schema.agents.role, "subagent")))
+      .get();
+    if ((live?.n ?? 0) >= MAX_LIVE_SUBAGENTS) return { ok: false, reason: "not_allowed" };
+    const now = Date.now();
+    this.#db.transaction((tx) => {
+      tx.insert(schema.agents)
+        .values({
+          id,
+          name,
+          createdAt: now,
+          updatedAt: now,
+          role: "subagent",
+          ownerId: creator,
+          chat: false,
+        })
+        .run();
+      tx.insert(schema.auditLog)
+        .values({
+          at: now,
+          action: "agent.created",
+          agentId: id,
+          userId: actor.userId,
+          via: actor.via,
+        })
+        .run();
+    });
+    return { ok: true };
   }
 
   /** Renaming to the current name changes nothing, so it isn't audited. */
