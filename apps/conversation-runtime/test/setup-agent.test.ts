@@ -461,7 +461,9 @@ describe("the setup agent's tools", () => {
     for (const id of [SETUP_AGENT_ID, "kelpie"]) {
       const refused = await run(tools, "set_agent_chat", { id, chat: false }, context);
       expect(refused).toMatchObject({ isError: true });
-      expect(refused.output).toContain("Only a specialist's chat can change");
+      expect(refused.output).toContain(
+        "Only a specialist's chat can change: Admin and Master always chat",
+      );
     }
     expect(await run(tools, "set_main_agent", { id: "kelpie" }, context)).toEqual({
       output: "The agent kelpie is already Master; nothing changed.",
@@ -584,7 +586,7 @@ describe("the setup agent's tools", () => {
     const { context } = contextOf(true);
 
     const created = await run(tools, "create_agent", { id: "ana", name: "Ana" }, context);
-    expect(created.output).toContain("its chat is off");
+    expect(created.output).toContain("It is a specialist, owned by Master, and its chat is off");
     const connected = await run(tools, "connect_telegram", { agentId: "ana" }, context);
     expect(connected.output).toContain("Its chat is off");
     const paired = await run(tools, "pair_telegram", { agentId: "ana" }, context);

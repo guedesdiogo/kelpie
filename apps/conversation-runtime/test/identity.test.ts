@@ -66,7 +66,7 @@ describe("identitySection", () => {
     // The role the Registry calls `main` is Master in every text (#343).
     expect(line("main")).toContain("You are Bia, Master on Kelpie, the agent the owner talks to.");
     expect(line("specialist")).toContain(
-      "You are Bia, a specialist agent on Kelpie, owned by Master.",
+      "You are Bia, a specialist agent on Kelpie, owned by Master, the agent the owner talks to.",
     );
     expect(line("subagent")).toContain(
       "You are Bia, a temporary subagent on Kelpie, working on one demand of the agent that created you.",
@@ -103,6 +103,6 @@ describe("identitySection", () => {
         remit: "Sales.",
         model: null,
       }),
-    ).toContain("owned by Master. Your remit: Sales.");
+    ).toContain("owned by Master, the agent the owner talks to. Your remit: Sales.");
   });
 });

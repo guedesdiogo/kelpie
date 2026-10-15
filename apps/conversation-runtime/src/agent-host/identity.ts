@@ -22,7 +22,7 @@ const ROLE_LINES: Record<AgentRole, string> = {
   admin: "Kelpie's setup agent, which configures Kelpie",
   // The role `main` is called Master (#343).
   main: "Master on Kelpie, the agent the owner talks to",
-  specialist: "a specialist agent on Kelpie, owned by Master",
+  specialist: "a specialist agent on Kelpie, owned by Master, the agent the owner talks to",
   subagent: "a temporary subagent on Kelpie, working on one demand of the agent that created you",
 };
 const UNLISTED_ROLE_LINE = "one of the owner's agents on Kelpie, their personal agent platform";
