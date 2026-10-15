@@ -258,13 +258,12 @@ Frequent.
 
 Moment. The owner's press is the yes ([ADR-0026](adr/0026-confirmation-by-owner-act.md)). A confirmation nobody answers expires after its 10 minutes (ADR-0026 §3), and its card collapses into an "expired" receipt with a neutral icon.
 
-- **Decide in place.** The card names the agent that asks and its task ("Agenda asks, on the task *Invite Ana*"). It carries what the owner needs to decide without leaving it: the event, the diff, the cost. For a write to memory, that is the operation, the note's path, its text, and a warning when it replaces an existing note.
+- **Decide in place.** The card names the agent that asks by its id, and its task by number ("`agenda` asks, on task #123"). A task's title, written by the agent, may follow only as quoted data. It carries what the owner needs to decide without leaving it: the event, the diff, the cost. For a write to memory, that is the operation, the note's path, its text, and a warning when it replaces an existing note.
 - **Three answers** ([ADR-0044](adr/0044-design-system-review.md)):
   - **Confirm**, the primary button;
   - **Deny this call**, beside it. It closes the confirmation, and the agent goes on without that change;
   - **Hold to pause this conversation**, a smaller control under them. It uses the hold of 5.4 and runs the existing pause (#134): the next answer waits for the owner's next message, and background tasks keep running.
 - **What the card shows is bounded** (ADR-0044 §1). The agent is named by its id. The evidence comes from the tool call's typed fields, appears as quoted data marked as written by the agent, and never carries a link or a control.
-
 - **The press.** The button scales to `--scale-press` and grows to the card's full width (width and position, `--spring-moment`). The other button leaves as it grows (exit, `--scale-in-moment`).
 - **Working.** Its label rolls to a spinner and what is happening ("Creating the event"). The spinner follows rule 8: after 5 s, a still ring and the elapsed time take its place.
 - **Success:**
@@ -275,12 +274,12 @@ Moment. The owner's press is the yes ([ADR-0026](adr/0026-confirmation-by-owner-
 - **Denied,** the button grows the same way, then the card folds into a neutral receipt: a `--muted` icon, no check, no pop and no ring, in `--dur-fade`.
 - **The receipt.**
   - The card collapses into it: its content fades (exit), its height goes to the receipt's (`--spring-moment`), and the receipt rises 4px.
-  - The receipt says who decided what and when, in the owner's time zone: "You confirmed at 14:32" or "You denied at 14:32. Agenda goes on without it."
+  - The receipt says who decided what and when, in the owner's time zone: "You confirmed at 14:32" or "You denied at 14:32. `agenda` goes on without it."
   - A polite live region announces it.
 - **From the keyboard:**
   - Enter or Space acts only with focus on a button. Enter in the composer sends a message; it never confirms or denies.
   - A key already held down when the card appeared doesn't count.
-  - A keyboard confirm or deny skips the grow, the pop and the ring: the label goes to the spinner, then to the result, then to the receipt.
+  - A keyboard confirm or deny skips the grow, the pop and the ring. A confirm goes from the label to the spinner, to the check, to the receipt; a deny, which runs nothing, goes straight to the receipt.
 - **Reduced motion:** the grow, the pop and the ring go. The color change, the check and the receipt stay, each with a fade.
 
 ### 5.4 Turn on something that costs
@@ -553,7 +552,7 @@ The rules above cite these. The first set was read on 2026-10-15; a source added
   - [WCAG 2.3.3 Animation from Interactions](https://www.w3.org/WAI/WCAG22/Understanding/animation-from-interactions.html);
   - [web.dev on prefers-reduced-motion](https://web.dev/articles/prefers-reduced-motion).
 - The first review (ADR-0044), read on 2026-10-15; the findings and the reference-project check are on #358:
-  - [the Webby Awards 2026 winners](https://www.webbyawards.com/press/press-releases/30th-annual-webby-awards-announce-2026-winners/) and [Claude Code's agent view](https://code.claude.com/docs/en/agent-view);
+  - [the Webby Awards 2026 winners](https://www.webbyawards.com/press/press-releases/30th-annual-webby-awards-announce-2026-winners/), and [Claude Code's agent view](https://code.claude.com/docs/en/agent-view), the source of the state glyphs and of counting what waits in the tab title;
   - Apple Design Award winners: [Crouton](https://developer.apple.com/news/?id=9x75y43e), [Pine Hearts](https://developer.apple.com/news/?id=p9gxlwd0), [Guitar Wiz](https://developer.apple.com/news/?id=5zi5a25j), [grug](https://developer.apple.com/news/?id=ux44ymcr), [Tide Guide](https://developer.apple.com/news/?id=4r9b23wx);
   - [iA Writer's Authorship](https://ia.net/writer/support/editor/authorship), [Moonlock at Red Dot 2026](https://macpaw.com/news/moonlock-wins-red-dot-award-2026), [Google at Fast Company 2026](https://fastcompanybrasil.com/design/google-adidas-e-nordeste-vencem-premio-de-design-da-fast-company/);
   - craft: [Primer on loading](https://primer.style/product/ui-patterns/loading) and [degraded experiences](https://primer.style/product/ui-patterns/degraded-experiences), [Sonner](https://emilkowal.ski/ui/building-a-toast-component), [Vaul](https://emilkowal.ski/ui/building-a-drawer-component), [Atlassian on drag and drop](https://atlassian.design/components/pragmatic-drag-and-drop/design-guidelines), [MUI X Chat on scrolling](https://mui.com/x/react-chat/behavior/scrolling), [NumberFlow](https://number-flow.barvian.me), [Chrome on View Transitions](https://developer.chrome.com/docs/web-platform/view-transitions/same-document).

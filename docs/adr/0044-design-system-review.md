@@ -102,7 +102,7 @@ Crossing 90% of a free tier (#269) is a decision the owner has to make: whether 
 - **Leave denial to the 10-minute expiry.** It keeps the owner waiting and the agent stalled for a decision he has already made.
 - **A Deny that also stops the agent.** It merges two intents. Most of the time the owner refuses one action, not the task.
 - **A new color for cost alerts.** It would dilute the one meaning amber has. The owner's decision is exactly what amber signals.
-- **Haptics through the iOS trick.** Apple patched it in iOS 26.5, and it only ever worked on iPhones.
+- **Haptics through the iOS trick.** Apple patched it in iOS 26.5.
 
 ## References
 
@@ -111,4 +111,4 @@ Crossing 90% of a free tier (#269) is a decision the owner has to make: whether 
 - [ADR-0024](0024-fixed-wait-end-of-turn.md) and [ADR-0025](0025-turn-tool-loop.md): the pause.
 - [ADR-0043](0043-design-system.md): the design system and its research rule.
 - [`docs/design-system.md`](../design-system.md): the patterns this ADR adds.
-- [Claude Code's agent view](https://code.claude.com/docs/en/agent-view) and [the Webby Awards 2026 winners](https://www.webbyawards.com/press/press-releases/30th-annual-webby-awards-announce-2026-winners/).
+- [Hermes Agent's approvals](https://github.com/NousResearch/hermes-agent/blob/60f56a6b13c8eb9a9e088c6fc1165257c92f7e11/tools/approval.py#L701-L724), the precedent for deny-and-continue, and [the Webby Awards 2026 winners](https://www.webbyawards.com/press/press-releases/30th-annual-webby-awards-announce-2026-winners/), part of the review's research.
