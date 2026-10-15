@@ -1,7 +1,7 @@
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { TaskView } from "@kelpie/config";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type AgentHost,
   replaceTaskRunnerForTesting,
@@ -88,8 +88,12 @@ const wakes = (stub: ReturnType<typeof host>) =>
       .map((schedule) => ("time" in schedule ? schedule.time * 1_000 : null)),
   );
 
-afterEach(() => {
+// Each test picks its runner; none by default, as before #335 brought the task conversations.
+beforeEach(() => {
   replaceTaskRunnerForTesting(null);
+});
+afterEach(() => {
+  replaceTaskRunnerForTesting(undefined);
 });
 
 describe("the task board's rules for people (ADR-0011)", () => {

@@ -1,5 +1,5 @@
-import type { Locale, Localized } from "@kelpie/channels";
-import type { Actor, SetupStep } from "@kelpie/config";
+import type { ChannelId, Locale, Localized } from "@kelpie/channels";
+import type { Actor, RunOutcome, SetupStep } from "@kelpie/config";
 import type { RecallOptions } from "@kelpie/context-store/contract";
 import { withoutTypedStamps } from "@kelpie/conversation";
 import type { ToolCallPart, ToolResult, ToolSpec } from "@kelpie/llm";
@@ -216,6 +216,8 @@ export interface ToolContext {
    * `text`, or a `text` too long for one bubble, makes it throw.
    */
   sendLink(link: HostLink): void;
+  /** In a task's conversation, its run (#335); elsewhere, none. */
+  task?: TaskRunHandle;
 }
 
 /**
@@ -242,9 +244,27 @@ export interface ToolProvider {
   /**
    * The tools this provider gives an agent, none when it serves others. A turn asks once and keeps
    * the list for all its rounds; it should stay the same from turn to turn too, because a change
-   * starts the provider's cache over.
+   * starts the provider's cache over. `place` is where the turn runs: a task's conversation (#335)
+   * takes only the tools that work without a person.
    */
-  tools(agentId: string): Promise<Tool[]>;
+  tools(agentId: string, place?: ToolPlace): Promise<Tool[]>;
+}
+
+/** Where a turn runs, for a provider whose tools fit only some conversations. */
+export interface ToolPlace {
+  channel: ChannelId;
+}
+
+/**
+ * A task's run, as its conversation's tools reach it (#335): its own task only, by a token the
+ * tool never sees. Each answers false once the run no longer holds the task.
+ */
+export interface TaskRunHandle {
+  id: string;
+  /** Ends the run: Done with a result, Waiting with a reason, Cancelled, or failed. */
+  finish(outcome: RunOutcome): Promise<boolean>;
+  /** Adds the agent's comment to the task, as a question or a note on its progress. */
+  comment(text: string): Promise<boolean>;
 }
 
 /** A tool's label in `locale`. */

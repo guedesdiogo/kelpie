@@ -42,6 +42,15 @@ export const CAPABILITIES = {
     maxBubblesPerReply: 5,
     formatting: "telegram-html",
   },
+  // A task's conversation (#335): its replies go to no one, so they are one bubble, unpaced.
+  task: {
+    maxMessageLength: 16_000,
+    typing: { supported: false, ttlMs: null },
+    status: false,
+    minGapMs: 0,
+    maxBubblesPerReply: 1,
+    formatting: "markdown",
+  },
 } as const satisfies Partial<Record<ChannelId, ChannelCapabilities>>;
 
 /** Re-send "typing" after this fraction of its lifetime, so it never lapses between renewals. */

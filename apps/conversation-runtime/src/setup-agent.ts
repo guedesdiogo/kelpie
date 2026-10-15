@@ -894,8 +894,9 @@ export function setupTools(
   ];
 
   return {
-    async tools(agentId) {
-      return agentId === SETUP_AGENT_ID ? tools : [];
+    // A task's conversation has no owner to confirm anything (#335).
+    async tools(agentId, place) {
+      return agentId === SETUP_AGENT_ID && place?.channel !== "task" ? tools : [];
     },
   };
 }

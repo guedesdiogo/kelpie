@@ -1,0 +1,1 @@
+ALTER TABLE `conversations` ADD `last_turn_at` integer;
