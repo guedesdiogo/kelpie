@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { EMBEDDING_INPUT_CHARS, type EmbedOutcome, LlmError } from "@kelpie/llm";
 import {
+  abstractOf,
   bodyWithoutHeading,
   coreBlock,
   coreCarries,
@@ -975,11 +976,12 @@ export class Vault extends DurableObject<VaultEnv> {
       // any other failure, or the last, is kept as no answer, so one note can't fail every run.
       // Nothing is kept once Dream was turned off, or the note changed, was forgotten or stopped
       // being Kelpie's, during the call.
+      // The count comes last: a call whose note went, or whose Dream was turned off, counts nothing.
       if (
-        !this.#tryLater("abstract", note.path, note.blobSha, proposed === null, failure) &&
         this.#get("dream_mode") !== "off" &&
         this.#asRead([note.path], note.blobSha) &&
-        this.#byKelpie([note.path]).has(note.path)
+        this.#byKelpie([note.path]).has(note.path) &&
+        !this.#tryLater("abstract", note.path, note.blobSha, proposed === null, failure)
       ) {
         this.#exec(
           "INSERT OR REPLACE INTO dream_proposals (path, blob_sha, abstract, at) VALUES (?, ?, ?, ?)",
@@ -1286,9 +1288,9 @@ export class Vault extends DurableObject<VaultEnv> {
       // other, or the last, is kept as no answer, so one day can't fail every run. A page forgotten
       // or changed during the call leaves nothing behind: the summary read what's gone.
       if (
-        !this.#tryLater("day", day.path, day.key, proposed === null, failure) &&
         this.#get("dream_mode") !== "off" &&
-        this.#asRead(sources, day.key)
+        this.#asRead(sources, day.key) &&
+        !this.#tryLater("day", day.path, day.key, proposed === null, failure)
       ) {
         this.#exec(
           "INSERT OR REPLACE INTO dream_summaries (path, key, summary, sources, at) VALUES (?, ?, ?, ?, ?)",
@@ -1449,10 +1451,10 @@ export class Vault extends DurableObject<VaultEnv> {
       // forgotten or stopped being Kelpie's, or Dream was turned off, during the call.
       const failed = !group.same && proposed === null;
       if (
-        !this.#tryLater("merge", group.sources[0] ?? "", group.key, failed, failure) &&
         this.#get("dream_mode") !== "off" &&
         this.#asRead(group.sources, group.key) &&
-        this.#byKelpie(group.sources).size === group.sources.length
+        this.#byKelpie(group.sources).size === group.sources.length &&
+        !this.#tryLater("merge", group.sources[0] ?? "", group.key, failed, failure)
       ) {
         // A group that grew or shrank replaces what was proposed for its notes.
         this.#exec(
@@ -1800,15 +1802,20 @@ export class Vault extends DurableObject<VaultEnv> {
    * only while the note is as it was proposed for: its version, Kelpie's, not merged into the
    * owner's edit, not held, with no write waiting. The version it writes isn't proposed for again.
    */
-  async #writeAbstract(note: { path: string; blobSha: string }, abstract: string): Promise<void> {
+  async #writeAbstract(note: { path: string; blobSha: string }, proposal: string): Promise<void> {
     const content = this.#exec<{ content: string }>(
       "SELECT content FROM files WHERE path = ? AND blob_sha = ?",
       note.path,
       note.blobSha,
     )[0]?.content;
-    const next = content === undefined ? null : withAbstract(content, abstract);
+    // Read again, as a model's answer is, as summaries and merges are: one kept under older rules
+    // may hold what they let through (#112).
+    const abstract = abstractOf(JSON.stringify({ abstract: proposal }));
+    const next =
+      content === undefined || abstract === null ? null : withAbstract(content, abstract);
     if (content !== undefined && (next === null || next === content)) {
-      // Nothing to write: the note already says it, or its frontmatter can't be read.
+      // Nothing to write: the note already says it, its frontmatter can't be read, or the proposal
+      // no longer passes an abstract's rules.
       this.#exec(
         "UPDATE dream_proposals SET abstract = NULL WHERE path = ? AND blob_sha = ?",
         note.path,
@@ -2009,6 +2016,9 @@ export class Vault extends DurableObject<VaultEnv> {
           rows += this.#exec<{ n: number }>(`SELECT count(*) AS n ${derived}`, named)[0]?.n ?? 0;
           this.#exec(`DELETE ${derived}`, named);
         }
+        // Dream's retry counts name a day's path or a group's first note, not every page they
+        // read, so they all go: the worst it costs is a few more tries.
+        this.#exec("DELETE FROM dream_failures");
         // A memory report or Dream's page waiting in the queue, set aside, merged with the
         // owner's edit or held may name what is being erased: they go, and the next alarm, soon,
         // writes them again from what is left.

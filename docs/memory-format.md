@@ -459,7 +459,7 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
   - When a run ends, the report is written again on the next alarm.
 - **Cost:** each call's usage is kept with its run for 30 days. The logs count calls and output tokens, never text.
   - **A failed call ends the run** (#112), in every operation.
-    - **A failure another try may clear** leaves the version for a later run, three tries in all. That is a model error the gateway marks retryable, such as a rate limit, a provider's 5xx, a 408 or 425, or a dropped connection, or a call that ran out of time.
+    - **A failure another try may clear** leaves the version for a later run, three tries in all. That is a model error the gateway marks retryable, such as a rate limit, a provider's 5xx, a 408 or 425, a provider out of credits, or a dropped connection, or a call that ran out of time.
     - **Any other failure is kept as no answer,** and so is the third try, so one item can't fail every run. That covers an answer cut at its output budget, a refusal, or a key the provider refused.
     - **The logs** give a model error's code and whether it may clear, never its text.
   - With nothing to do, Dream looks again after another 30 minutes of quiet, not on every wake.

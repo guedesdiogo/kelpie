@@ -82,6 +82,10 @@ describe("Vault forget", () => {
         );
         state.storage.sql.exec("INSERT INTO dream_written (path, at) VALUES (?, 1)", path);
         state.storage.sql.exec(
+          "INSERT INTO dream_failures (operation, path, key, failures) VALUES ('abstract', ?, 'sha', 1)",
+          path,
+        );
+        state.storage.sql.exec(
           "INSERT INTO dream_landing (path, blob_sha, day) VALUES (?, 'sha', 0)",
           path,
         );
@@ -107,7 +111,7 @@ describe("Vault forget", () => {
     // The owner rewrote the history, so the leaked version is gone from git.
     // Its current files changed too: forgetting syncs before it rebuilds.
     backend.forcePush({ "README.md": "# Vault", [ana]: clean, [bia]: "# Bia\n\nNova.\n" });
-    expect(await stub.forget([ana])).toEqual({ ok: true, forgotten: 12, stillInVault: [ana] });
+    expect(await stub.forget([ana])).toEqual({ ok: true, forgotten: 13, stillInVault: [ana] });
 
     expect(await sql("SELECT path FROM versions ORDER BY path")).toEqual([
       { path: ana },
@@ -138,6 +142,8 @@ describe("Vault forget", () => {
         { n: 0 },
       ]);
     }
+    // Dream's retry counts all go: they name a day or a group's first note, not all they read.
+    expect(await sql("SELECT count(*) AS n FROM dream_failures")).toEqual([{ n: 0 }]);
     for (const table of named) {
       expect(await sql(`SELECT path FROM ${table}`)).toEqual([{ path: bia }]);
     }

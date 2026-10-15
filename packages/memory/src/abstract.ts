@@ -10,6 +10,8 @@ import { printableLine } from "./write.ts";
 const ABSTRACT_INPUT_CHARS = 6_000;
 /** The writer's limit for an abstract. */
 const ABSTRACT_MAX_CHARS = 300;
+/** A longer answer isn't read: it bounds the sanitizer's work, and no abstract needs it. */
+const ABSTRACT_ANSWER_CHARS = 2_000;
 
 export const ABSTRACT_PROMPT = `You write the abstract of one note from a person's knowledge vault: a single line that sums the note up, so it can be recognized and found later.
 
@@ -48,7 +50,7 @@ export function abstractOf(answer: string): string | null {
   const { abstract } = parsed as { abstract: unknown };
   // One printable line as the model wrote it, controls and bidirectional marks refused; then its
   // secrets go, and the limit holds for what is kept.
-  if (!printableLine(abstract, Number.MAX_SAFE_INTEGER)) return null;
+  if (!printableLine(abstract, ABSTRACT_ANSWER_CHARS)) return null;
   const text = sanitizeSecrets(abstract).text.trim();
   return printableLine(text, ABSTRACT_MAX_CHARS) ? text : null;
 }

@@ -451,10 +451,69 @@ describe("Vault Dream", () => {
         code: "rate_limited",
         retryable: true,
       });
-      expect(JSON.stringify(log.mock.calls)).not.toContain("busy");
+      // The gateway's wire text for a rate limit doesn't reach the log either.
+      expect(JSON.stringify(log.mock.calls)).not.toContain("rate limiting");
     } finally {
       log.mockRestore();
     }
+  });
+
+  it("counts a version's failures afresh once the note changes, and forgets them when turned off (#112)", async () => {
+    const note = await kelpieNote({ title: "A" });
+    replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
+    const busy = () => new LlmError("busy", "rate_limited", true);
+    fakeModel([busy(), busy()]);
+    const stub = vault("dream-transient-reset");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", [note], "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    await runDurableObjectAlarm(stub);
+    const counts = () => rows(stub, "SELECT failures FROM dream_failures");
+    expect(await counts()).toEqual([{ failures: 1 }]);
+    await stub.write("kelpie", [await kelpieNote({ title: "A", body: "A, de novo." })], "x");
+    await runDurableObjectAlarm(stub);
+    await quiet(stub);
+    await runDurableObjectAlarm(stub);
+    expect(await counts()).toEqual([{ failures: 1 }]);
+    await stub.setDream("off");
+    expect(await counts()).toEqual([]);
+  });
+
+  it("tries a day's summary and a group's merge again after such a failure, three times in all (#112)", async () => {
+    const day = daysAgo(2).slice(0, 10);
+    const page = await kelpieNote({
+      kind: "session",
+      title: "Café",
+      scope: "conversation/telegram-1",
+      date: day,
+      body: "- **10:00 u-owner:** Café",
+    });
+    const first = await kelpieNote({ title: "Chá", body: "Verde.", abstract: "Chá." });
+    const second = {
+      ...(await kelpieNote({ title: "Chá", body: "Preto.", abstract: "Chá." })),
+      path: first.path.replace(/\.md$/, "-2.md"),
+    };
+    replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
+    const busy = () => new LlmError("busy", "server_error", true);
+    // The session page's abstract first; then the day and the group take turns, failing.
+    const requests = fakeModel([abstract("Café."), ...Array.from({ length: 6 }, busy)]);
+    const stub = vault("dream-day-merge-transient");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", [page, first, second], "x");
+    await runDurableObjectAlarm(stub);
+    // Each run asks the abstract, if any is left, then fails on the next step.
+    for (let run = 0; run < 6; run++) {
+      await quiet(stub);
+      await runDurableObjectAlarm(stub);
+      if (run === 0) await runDurableObjectAlarm(stub);
+    }
+    expect(requests).toHaveLength(7);
+    expect(await rows(stub, "SELECT summary FROM dream_summaries")).toEqual([{ summary: null }]);
+    expect(await rows(stub, "SELECT verdict, body FROM dream_merges")).toEqual([
+      { verdict: null, body: null },
+    ]);
+    expect(await rows(stub, "SELECT * FROM dream_failures")).toEqual([]);
   });
 
   it("asks no version again after an answer cut short or a failure that won't clear (#112)", async () => {
