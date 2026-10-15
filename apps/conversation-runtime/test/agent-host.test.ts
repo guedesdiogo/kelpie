@@ -456,6 +456,9 @@ describe("AgentHost with a vault", () => {
       describe: async () => {
         throw new TypeError('The RPC receiver does not implement the method "describe".');
       },
+      specialists: async () => {
+        throw new Error("Durable Object reset because its code was updated");
+      },
     });
     expect((await stub.turnConfig()).settings.systemPrompt).toBe(seen);
 
@@ -688,6 +691,7 @@ describe("AgentHost and subagents (#290)", () => {
         ...(model.conversation?.effort ? { effort: model.conversation.effort } : {}),
         route: [],
       }),
+      specialists: async () => [],
     });
   }
   afterEach(() => {
@@ -786,12 +790,47 @@ describe("AgentHost and subagents (#290)", () => {
         if (model.conversation?.tier === "frontier") throw new Error("down");
         return { provider: "anthropic", tier: model.conversation?.tier ?? "cheap", route: [] };
       },
+      specialists: async () => [],
     });
     await host("sub-silent").configure({ model: { conversation: { tier: "frontier" } } }, owner);
     await host("sub-orphan").configure({ model: { conversation: { tier: "medium" } } }, owner);
     expect((await host("sub-orphan").turnConfig()).settings.model).toEqual({
       conversation: { tier: "cheap" },
     });
+  });
+});
+
+describe("the specialists in an agent's prompt (#287)", () => {
+  afterEach(() => {
+    replaceIdentitySourcesForTesting(undefined);
+  });
+
+  it("lists the specialists it owns with their remits, and keeps the last list when it can't be read", async () => {
+    let specialists: () => Promise<{ id: string; name: string; remit: string }[]> = async () => [
+      { id: "sales", name: "Sales", remit: "Quotes for wholesale clients." },
+      { id: "docs", name: "Docs", remit: "" },
+    ];
+    replaceIdentitySourcesForTesting({
+      agent: async (id) => ({ name: id, role: "main", owner: null }),
+      describe: async () => ({ provider: "anthropic", tier: "cheap", route: [] }),
+      specialists: () => specialists(),
+    });
+    const stub = host("roster-main");
+    const listed = (await stub.turnConfig()).settings.systemPrompt;
+    expect(listed).toContain("# Your specialists");
+    expect(listed).toContain(
+      '- sales ("Sales"): Quotes for wholesale clients.\n- docs ("Docs"): no remit set',
+    );
+    expect(listed).toContain("even when the owner didn't name it");
+
+    specialists = async () => {
+      throw new Error("Durable Object reset because its code was updated");
+    };
+    expect((await stub.turnConfig()).settings.systemPrompt).toBe(listed);
+
+    // An agent that owns none has no such section.
+    specialists = async () => [];
+    expect((await stub.turnConfig()).settings.systemPrompt).not.toContain("# Your specialists");
   });
 });
 

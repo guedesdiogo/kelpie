@@ -69,6 +69,7 @@ const context = (fields: Partial<ToolContext> = {}): ToolContext => ({
   signal: new AbortController().signal,
   confirm: async () => false,
   sendLink: () => undefined,
+  handOff: () => undefined,
   ...fields,
 });
 

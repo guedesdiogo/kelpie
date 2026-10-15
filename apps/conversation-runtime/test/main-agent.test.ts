@@ -58,6 +58,7 @@ function contextOf(confirmed: boolean, actor: Actor = owner) {
       return confirmed;
     },
     sendLink() {},
+    handOff() {},
   };
   return { context, asked };
 }

@@ -122,6 +122,15 @@ export interface IdentitySources {
   /** The agent's name, role and owner, or null while the Registry doesn't list it. */
   agent(id: string): Promise<{ name: string; role: AgentRole; owner?: string | null } | null>;
   describe(agent: ModelSettings): Promise<ModelDescription>;
+  /** The specialists the agent owns, with their remits (ADR-0036 §4, #287). */
+  specialists(id: string): Promise<Specialist[]>;
+}
+
+/** One of the specialists an agent owns, as its prompt lists it (#287); an empty remit is none. */
+export interface Specialist {
+  id: string;
+  name: string;
+  remit: string;
 }
 
 let identitySourcesForTesting: IdentitySources | undefined;
@@ -279,13 +288,14 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     const sources = this.#identitySources();
     // The stored settings, read before the await: the trio is described for them.
     const model = agentModel(this.#stored());
-    const [vault, listed, described] = await Promise.all([
+    const [vault, listed, described, specialists] = await Promise.all([
       this.#vaultContext(),
       this.#lookup(
         "identityAgent",
         async () => (await sources.agent(id)) ?? { name: id, role: null, owner: null },
       ),
       this.#lookup("identityModel", () => sources.describe(model)),
+      this.#lookup("identitySpecialists", () => sources.specialists(id)),
     ]);
     // Read after the await: another call or a configure may have run meanwhile, and the compare,
     // the bump and the write below are one synchronous step.
@@ -301,6 +311,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     for (const [stateKey, looked] of [
       ["identityAgent", listed],
       ["identityModel", described],
+      ["identitySpecialists", specialists],
     ] as const) {
       const changed = JSON.stringify(looked.value) !== JSON.stringify(this.#get(stateKey, null));
       if (looked.fresh && changed) rows.push([stateKey, looked.value]);
@@ -344,6 +355,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       identity,
       composeSystemPrompt(config.settings.systemPrompt, vault),
       ...storedSkills(config.settings.skills),
+      ...specialistsSection(specialists.value ?? []),
       ...(spawn ? [CREATE_SUBAGENT_SKILL] : []),
     ];
     return {
@@ -828,6 +840,19 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
         return entry ? { name: entry.name, role: entry.role, owner: entry.owner } : null;
       },
       describe: (agent) => gateway.describe("conversation", agent),
+      // Each remit is its specialist's own setting; one that can't be read keeps the last list.
+      specialists: async (id) => {
+        const owned = (await registry.list()).filter(
+          (entry) => entry.owner === id && entry.role === "specialist",
+        );
+        return Promise.all(
+          owned.map(async ({ id: specialist, name }) => ({
+            id: specialist,
+            name,
+            remit: (await this.env.AGENT_HOST.getByName(specialist).config()).settings.remit,
+          })),
+        );
+      },
     };
   }
 
@@ -1076,6 +1101,26 @@ function storedSkills(skills: AgentSkill[]): string[] {
   if (skills.length === 0) return [];
   return [
     `# Your skills\n\n${skills.map((skill) => `## ${skill.name}\n\n${skill.instructions.trim()}`).join("\n\n")}`,
+  ];
+}
+
+/**
+ * The specialists the agent owns and the mandatory handoff (ADR-0036 §4, #287): a demand within a
+ * specialist's remit becomes its task, even when the owner didn't name it.
+ */
+function specialistsSection(specialists: readonly Specialist[]): string[] {
+  if (specialists.length === 0) return [];
+  const lines = specialists.map(
+    ({ id, name, remit }) => `- ${id} (${JSON.stringify(name)}): ${remit || "no remit set"}`,
+  );
+  return [
+    `# Your specialists
+
+These agents are yours, each with a remit. When a demand falls within a specialist's remit, hand it to that specialist with create_task, even when the owner didn't name it, instead of doing it yourself. It knows nothing of this conversation: put in the task's body every fact and constraint it needs, and the result you want back. Say in your reply that you handed it off; Kelpie also tells the owner who has it. When the task ends or asks something, Kelpie tells you: relay its result, naming the specialist that did the work, or ask the owner its question.
+
+A demand within no remit is yours to do. A specialist with no remit set takes work only when the owner names it. Only the owner's own turns in a direct conversation hand work off.
+
+${lines.join("\n")}`,
   ];
 }
 

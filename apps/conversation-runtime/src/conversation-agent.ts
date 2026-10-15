@@ -85,6 +85,7 @@ import {
 } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
+import { type Handoff, handoffNotice } from "./handoff-notices.ts";
 import migrations from "./migrations/migrations.js";
 import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
 import { failureNotice, routeNotice } from "./route-notices.ts";
@@ -138,6 +139,8 @@ const WEBCHAT_ID_PREFIX = "webchat:";
 const WEBCHAT_RECEIVED_IDS = 100;
 /** While the owner types in the webchat, buffered messages wait at least this long for the rest. */
 const TYPING_HOLD_MS = 4_000;
+/** The most handoffs a conversation keeps for its next reply's notice (#287); the oldest go first. */
+const MAX_UNSAID_HANDOFFS = 20;
 /** What the owner is told on a channel when they pause a conversation (issue #134, #187). */
 export const PAUSED_TEXT: Localized = {
   en: "Paused. I'll answer after your next message.",
@@ -1384,8 +1387,12 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       this.#ports.now(),
       locale,
     );
+    // Then who has the work its tools handed off, with any an earlier turn left unsaid (#287).
+    const handoffs = this.#get<Handoff[]>("handoffs", []);
+    const handedOff = handoffNotice(handoffs, locale);
     const notices = [
       ...(routes.text === null ? [] : [{ text: routes.text }]),
+      ...(handedOff === null ? [] : [{ text: handedOff }]),
       ...confirmations.map(({ id, code, summary }) => ({
         text: confirmationNotice(summary, code, button, locale),
         confirmationId: id,
@@ -1419,6 +1426,28 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (routes.text !== null && this.#bubbleSent(turnId, bubbles.length)) {
       this.#set("routeNotices", routes.announced);
     }
+    const handoffSeq = bubbles.length + (routes.text === null ? 0 : 1);
+    if (handedOff !== null && this.#bubbleSent(turnId, handoffSeq)) {
+      // Only those it named: a late call may have added one since.
+      const said = new Set(handoffs.map(({ taskId }) => taskId));
+      this.#set(
+        "handoffs",
+        this.#get<Handoff[]>("handoffs", []).filter(({ taskId }) => !said.has(taskId)),
+      );
+    }
+  }
+
+  /**
+   * Keeps a handoff for Kelpie's notice after the next reply this conversation sends (#287). It
+   * outlives the turn that made it, since the task does: a turn stopped before its reply leaves it
+   * for the next one.
+   */
+  #handOff(handoff: Handoff): void {
+    const kept = this.#get<Handoff[]>("handoffs", []).filter(
+      ({ taskId }) => taskId !== handoff.taskId,
+    );
+    const { taskId, agentId, name } = handoff;
+    this.#set("handoffs", [...kept, { taskId, agentId, name }].slice(-MAX_UNSAID_HANDOFFS));
   }
 
   #bubbleSent(turnId: number, seq: number): boolean {
@@ -1607,6 +1636,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
                 ? false
                 : this.#confirm(turn.id, actor.userId, request),
             sendLink: (link) => this.#sendLink(turn.id, link),
+            handOff: (handoff) => this.#handOff(handoff),
             memoryAgentId: this.#memoryAgentId(),
           };
           const task = this.#taskHandle();

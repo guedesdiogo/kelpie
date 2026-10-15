@@ -180,6 +180,7 @@ function contextOf(confirmed: boolean, actor: Actor = owner, locale: Locale = "e
     sendLink(link) {
       links.push(link);
     },
+    handOff() {},
   };
   return { context, asked, links };
 }
