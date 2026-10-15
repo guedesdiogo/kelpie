@@ -101,12 +101,11 @@ export function announcementNotice(
     if (these.length === 0) return [];
     const agents = new Map<string, string>();
     for (const { agentId, name } of these) {
-      // The name in quotes: a subagent's is the model's choice, and only the id is Kelpie's.
+      // The name in quotes: a subagent's is the model's choice, and only the id is Kelpie's. Its
+      // backslashes and quotes are escaped first, so it can't close them; `visible` adds its own.
       if (!agents.has(agentId)) {
-        agents.set(
-          agentId,
-          name === agentId ? agentId : `"${visible(name).replaceAll('"', '\\"')}" (${agentId})`,
-        );
+        const quoted = visible(name.replaceAll("\\", "\\\\").replaceAll('"', '\\"'));
+        agents.set(agentId, name === agentId ? agentId : `"${quoted}" (${agentId})`);
       }
     }
     const named = [...agents.values()];

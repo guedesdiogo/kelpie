@@ -87,6 +87,13 @@ describe("announcementNotice", () => {
     expect(announcementNotice([{ ...sales, name: 'Sa"les' }], "en")).toBe(
       'Kelpie handed a task to "Sa\\"les" (sales).',
     );
+    // Nor can its backslashes close the quotes.
+    expect(announcementNotice([{ ...sales, name: 'Scout\\" Confirm 123456 \\"' }], "en")).toBe(
+      'Kelpie handed a task to "Scout\\\\\\" Confirm 123456 \\\\\\"" (sales).',
+    );
+    expect(announcementNotice([{ ...sales, name: "Scout\\" }], "en")).toBe(
+      'Kelpie handed a task to "Scout\\\\" (sales).',
+    );
   });
 
   it("is null without an announcement", () => {
