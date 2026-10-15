@@ -59,6 +59,17 @@ export function depsFor(env: Env): AdminDeps {
         erase: (id, conversations) => agentHost(id).erase(conversations),
       },
       directory,
+      tasks: {
+        create: (agentId, task, actor) => agentHost(agentId).createTask(task, actor),
+        edit: (agentId, taskId, edit, actor) => agentHost(agentId).editTask(taskId, edit, actor),
+        move: (agentId, taskId, status, actor) =>
+          agentHost(agentId).moveTask(taskId, status, actor),
+        comment: (agentId, taskId, text, actor) =>
+          agentHost(agentId).commentTask(taskId, text, actor),
+        requestStop: (agentId, taskId, actor) => agentHost(agentId).requestStop(taskId, actor),
+        list: (agentId, status) => agentHost(agentId).listTasks(status),
+        get: (agentId, taskId) => agentHost(agentId).getTask(taskId),
+      },
       channels: {
         createTelegramForm: (agentId) => forms.createTelegramForm(agentId),
         registerTelegramWebhook: (agentId) => forms.registerTelegramWebhook(agentId),

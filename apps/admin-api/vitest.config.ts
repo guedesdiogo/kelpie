@@ -30,10 +30,29 @@ export default defineConfig({
       miniflare: {
         workers: [
           stubWorker("kelpie-ingress", { DIRECTORY: "Directory" }),
-          stubWorker("kelpie-conversation-runtime", {
-            REGISTRY: "Registry",
-            AGENT_HOST: "AgentHost",
-          }),
+          // The Registry knows every agent, and each task method of the AgentHost answers with its
+          // name and arguments, so the Worker's own test checks the task commands' wiring (#54).
+          {
+            name: "kelpie-conversation-runtime",
+            modules: true,
+            compatibilityDate: "2026-10-01",
+            script: `import { DurableObject } from "cloudflare:workers";
+export class Registry extends DurableObject {
+  get(id) {
+    return { id, name: id, role: "specialist", owner: "kelpie", chat: false };
+  }
+}
+const echo = (method) =>
+  function (...args) {
+    return method === "listTasks" ? [{ method, args }] : { ok: true, value: { method, args } };
+  };
+export class AgentHost extends DurableObject {}
+for (const method of ["createTask", "editTask", "moveTask", "commentTask", "requestStop", "listTasks", "getTask"]) {
+  AgentHost.prototype[method] = echo(method);
+}
+export default { fetch: () => new Response(null, { status: 404 }) };`,
+            durableObjects: { REGISTRY: "Registry", AGENT_HOST: "AgentHost" },
+          },
           stubWorker("kelpie-channel-egress", {}, ["ChannelForms"]),
           stubWorker("kelpie-context-store", {}, ["ContextStoreAdmin"]),
           // The instance's model settings (#289), which the worker test reads through the commands.

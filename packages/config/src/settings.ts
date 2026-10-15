@@ -46,6 +46,11 @@ export interface AgentSettings {
    * prompt does, since a reply's reasoning is bound to the core it was sent with.
    */
   memoryCore: boolean;
+  /**
+   * How many of its tasks the agent runs at once (ADR-0011, #54). Raising it raises cost, so the
+   * setup agent asks for the owner's confirmation, as for any setting.
+   */
+  maxConcurrentTasks: number;
 }
 
 export const DEFAULT_SETTINGS: AgentSettings = {
@@ -59,6 +64,7 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   qualifier: "clef",
   toolLoopMs: 120_000,
   memoryCore: false,
+  maxConcurrentTasks: 3,
 };
 
 /** Agent ids become object names and URL segments: lowercase letters, digits and hyphens. */
@@ -123,6 +129,10 @@ export function parseSettings(input: unknown): Partial<AgentSettings> | null {
       case "memoryCore":
         if (typeof value !== "boolean") return null;
         parsed.memoryCore = value;
+        break;
+      case "maxConcurrentTasks":
+        if (!isInteger(value, 1, 10)) return null;
+        parsed.maxConcurrentTasks = value;
         break;
       default:
         return null;
