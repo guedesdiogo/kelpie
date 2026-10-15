@@ -47,6 +47,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0041](0041-auto-tier-by-qualifier.md) | An agent's tier may be `auto`, and its qualifier then picks the tier for each turn | [#308](https://github.com/guedesdiogo/kelpie/issues/308) |
 | [0042](0042-runner-vpc-service-id-in-github.md) | The runner's VPC Service id is a variable of GitHub's production environment | [#294](https://github.com/guedesdiogo/kelpie/issues/294) |
 | [0043](0043-design-system.md) | Kelpie's interface follows one design system: the Mistura identity, with motion chosen by how often an interaction happens | [#356](https://github.com/guedesdiogo/kelpie/issues/356) |
+| [0044](0044-design-system-review.md) | The owner can deny one action without stopping its agent, and the design system adds the patterns of its first review | [#358](https://github.com/guedesdiogo/kelpie/issues/358) |
 
 ## Format
 

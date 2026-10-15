@@ -5,6 +5,7 @@
 - Issue: [#186](https://github.com/guedesdiogo/kelpie/issues/186)
 - Accepted by the owner on 2026-10-07, on #48: «Link/botão como o sim»
 - Amended by: [ADR-0040](0040-continue-at-the-tool-bound.md), a separate Continue button, under the same rules, continues a turn past its tool bound
+- Amended by: [ADR-0044](0044-design-system-review.md), a Deny button, under the same rules, closes a confirmation at once, and the agent goes on without that change
 
 ## Context
 
