@@ -367,7 +367,7 @@ Moment grammar: the roster is where Kelpie spends its novelty.
 - **Finished work leaves; failures stay.** A subagent or task that succeeded leaves a list at once. One that failed stays 30 s with its `--danger` ring, and can be dismissed.
 - **An agent is compared with itself.** Its numbers sit against its own last 30 days, never in a ranking of agents.
 - **The roster never reorders** when a state changes: a list that jumps under the pointer costs a misclick.
-- **How the agent itself looks:** a plush mascot the owner customizes (ADR-0045). Its section lands with its code; until then, agents keep the avatar.
+- **How the agent itself looks:** a plush mascot the owner customizes (5.19, ADR-0045). It replaces the avatar where it ships: so far the webchat's header.
 - **Reduced motion:** rings and halos are still; color, shape and the status text carry the state. The elapsed time shows minutes only ("2 min") and updates once a minute. The strip and an opening row appear with a fade, and counts change with a fade.
 
 ### 5.10 Following the chat
@@ -474,6 +474,74 @@ Moment.
 - **The summary** lists the real vault paths the work used, as links.
 - **Reduced motion:** a fade.
 
+### 5.19 The agent's mascot
+
+Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent-mascot.md)). Each agent is a soft, furry drop of water that stays alive where it is. The engine is `apps/ingress/public/webchat/mascot*.js`: plain modules, SVG and the Web Animations API, with no library.
+
+**Anatomy and axes.** Five axes, 374,400 combinations. Each is an agent setting (`mascot`), set through the configuration commands and validated against these ids:
+
+| Axis | Options |
+|---|---|
+| Shape | `mark`, `bubble`, `drop`, `pebble`, `buoy`, `jellyfish`, `cloud`, `dune`, `star`, `heart`, `bean`, `block` |
+| Color | `kelp`, `lagoon`, `tide`, `sky`, `indigo`, `anemone`, `pink`, `fawn`, `cocoa`, `moss`, `lime`, `slate` |
+| Eyes | `dots`, `pills`, `shine`, `marbles`, `cyclops`, `half-moon`, `frog`, `stars`, `big`, `buttons`; `cheeks` on or off |
+| Head | `none`; `ears`: `pointed`, `floppy`, `round`; `horns`: `two`, `one`, `antennae`; `hair`: `strands`, `curl`, `mohawk`; `leaves`: `one`, `two`, `kelp` |
+| Accessory | `none`; `glasses`: `round`, `dark`; `bow`: `tie`, `head`; `hat`: `beret`, `top`, `beanie`; `belt`: `belt`, `collar` |
+
+- **The main agent starts as Kelpie:** `mark`, `kelp`, `shine`, pointed ears and a collar. Every other agent starts with a mascot derived from its id, until the owner picks one. Each list only grows at its end: reordering it would change every derived mascot.
+- **A hat hides what sits in the middle of the head:** one horn, antennae, hair and leaves. Ears and two horns stay.
+- **Body colors are tokens with one value in both themes,** since they color the figure, not the page. None is amber, which means the owner needs to act.
+
+| Token | Value | Token | Value | Token | Value |
+|---|---|---|---|---|---|
+| `--mascot-kelp` | `#2E9E8E` | `--mascot-indigo` | `#777CE2` | `--mascot-cocoa` | `#A47458` |
+| `--mascot-lagoon` | `#2FB3C6` | `--mascot-anemone` | `#B07CCF` | `--mascot-moss` | `#8AAA45` |
+| `--mascot-tide` | `#4F8FD6` | `--mascot-pink` | `#E58BB0` | `--mascot-lime` | `#B3CC3E` |
+| `--mascot-sky` | `#7EBDE9` | `--mascot-fawn` | `#B8916E` | `--mascot-slate` | `#7F95A5` |
+
+- **The plush.** Soft parts (the body, ears, hair, leaves, felt and knit hats, mittens) are painted once per piece and size on a canvas: the shape shaded as a volume lit from the top left, then short strands in three layers. The painting is kept as an image, and motion only moves finished images and vectors. Until it is painted, the flat vector shows.
+- **Hard parts** (eyes, mouth, glasses, bow tie, horns, antennae, tag, buckle) are crisp vectors with gloss and a soft shadow on the fur.
+
+**States.** Each state has a pose that reads when still, a short announcement when it starts, and a repertoire while it lasts. In Alive the mascot breathes all the time, and draws a gesture from its state's repertoire by weight, never one of the last two (with only two, never the last one).
+
+| State | Shown when | Pose | Announcement | Repertoire |
+|---|---|---|---|---|
+| Idle | 5.9 Idle | eyes open | a hop and a smile when a reply lands | blinks, glances, looks around and at the owner, wiggles, twitches an ear, hops (12 s apart), stretches, scratches its head, yawns; waves when the pointer arrives; claps when tapped |
+| Dozing | Idle, after 45 s without an event | eyes closed, a hand as a pillow, "z" | drifts off with `--spring-slow` | snores, stirs; every 20 s at most, wakes bored, rubs its eyes, yawns, rests its chin and dozes again |
+| Listening | the wait of 5.1, where its bar shows | head tilted, hand cupped at the ear | its ears twitch | twitches an ear, tilts the other way, blinks, nods |
+| Typing | 5.1's typing bubble | mouth open, hands on the keys | talks for about 4 s | talks, blinks |
+| Working | 5.9 Working | the task's object and the hands | the object pops out of the body | the activity's loop, blinks, nods |
+| Waiting for the owner | 5.9 Waiting; in the webchat, a confirmation's notice (5.3), until it is answered or expires | big eyes, brows up, the amber bubble with `?` | a hop, and the bubble pops and pulses three times | waves, sways, drums on its chin, points at the card, pulses the bubble |
+| Approved | the owner's yes, for 1.1 s, then what comes next | arched eyes, a smile, thumbs up | a happy jump with sparks | none |
+| Error | 5.9 Error; in the webchat, the notice of a turn no route answered, until the next message or turn | worried brows, hands on its cheeks, the red bubble with `!` | one shake, and the bubble pops | wipes its brow, trembles, pleads, sighs, waves for help, looks down |
+| No response | Working, with nothing from the model for 60 s outside a tool call | proposed on #366, for the owner's approval: the task's object rests, and it looks up at the owner beside a still, dashed `--muted` bubble with `…` | the bubble pops | none |
+
+- **The activity is always true.** It follows the tool the conversation names: a magnifier to search, paper and a pencil for the vault, a laptop for code, a calendar for the agenda, an envelope for email. A tool without its own object, and the model between tools, show thinking: bubbles over the head. Reading memory before a turn is the vault. While a tool runs, Working takes precedence over Typing.
+- **Listening needs the bar.** The webchat doesn't show the wait's bar yet (#140), so its mascot doesn't listen there.
+- **Springs.** A state change moves the pose with `--spring-moment`, and the bubble pops with `--spring-pop`. Gestures use `--spring-fast`, `--spring-base` and `--spring-slow`.
+
+**Hands and bubbles.**
+- Floating plush mittens, a shade lighter than the body, with a soft shadow; no arms. They rest docked below the face, small, and appear where a pose or gesture puts them.
+- At work, the task's object comes out of the body and the mittens use it.
+- Waiting and error show a glossy 3D speech bubble beside the head, in `--warm` and `--danger` from the theme, with a glyph, so the state never rides on color alone. It pops out, floats, and pulses when the mascot calls the owner.
+
+**Sizes.**
+
+| Where | Size | What changes |
+|---|---|---|
+| Roster | 36 px | no mouth or brows, eyes 15% larger, no mittens; a glossy badge with a `--surface` ring takes the bubble's place: `--warm` for waiting, `--danger` for error, `--accent` with the tool's icon for working. One gesture at a time across the list, every 7 to 16 s, never a hop |
+| Conversation header | 48 px | its home. Everything happens inside its box; the box is kept before the figure arrives, so nothing in the layout moves |
+| Empty conversation, profile | 160 px | gestures a little more often |
+
+**Reduced motion and the pause.**
+- **The pause** (WCAG 2.2.2) is a setting with three values: Alive, States only, Still. Before a mascot first moves, the webchat asks for it under the header, and the mascot stays still until the owner answers. The footer keeps it, in the browser. The first run's comfort step and settings (5.17) will hold it too.
+- **States only** plays the announcements and nothing else, and cuts each to end within 5 s of the state's start. The mascot doesn't breathe.
+- **Still** shows the state's pose: no breathing, no announcement, no repertoire. A change is a 150 ms crossfade. The poses of listening, typing, working, approved, error and dozing keep their hands, and the task's object stays in front of the mascot.
+- **Reduced motion means Still.** Under `prefers-reduced-motion` or the less-motion switch, the setting can't pick Alive or States only, and the webchat doesn't ask.
+- **Reading comes first.** While the owner types, the conversation's mascot only breathes and blinks.
+- **Nothing moves off screen or in a hidden tab.** One shared timer, every 400 ms, schedules every mascot, and an `IntersectionObserver` stops those out of view.
+- **The mascot makes no sound.**
+
 ## 6. Implementation notes
 
 - **CSS first.** Tokens are custom properties. Springs are the `linear()` values above, supported in every current browser. Enter and exit use transitions with `@starting-style`. Choreographed sequences use the Web Animations API, which takes the same easings.
@@ -548,6 +616,10 @@ The rules above cite these. The first set was read on 2026-10-15; a source added
   - [Material 3's motion tokens](https://github.com/androidx/androidx/tree/androidx-main/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/tokens), the source of six of the seven springs;
   - [IBM Carbon motion](https://carbondesignsystem.com/elements/motion/overview/), for productive versus expressive motion.
 - Streaming: [Streamdown animation](https://streamdown.ai/docs/animation).
+- The mascot ([ADR-0045](adr/0045-agent-mascot.md)), read on 2026-10-15; the findings are on #364:
+  - [OpenAI's dots documentation](https://learn.chatgpt.com/docs/dots);
+  - the Apple Design Awards [2024](https://www.apple.com/newsroom/2024/06/apple-announces-winners-of-the-2024-apple-design-awards/) and [2026](https://www.apple.com/newsroom/2026/06/apple-reveals-winners-of-the-2026-apple-design-awards/);
+  - [Hermes Agent's StatusPulse](https://github.com/NousResearch/hermes-agent/blob/b51e8b850494e0a95a4b410c3d9b9a26df9ae261/apps/desktop/src/components/ui/status-pulse.tsx#L1-L130).
 - Accessibility:
   - [WCAG 2.2.2 Pause, Stop, Hide](https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html);
   - [WCAG 2.3.3 Animation from Interactions](https://www.w3.org/WAI/WCAG22/Understanding/animation-from-interactions.html);
