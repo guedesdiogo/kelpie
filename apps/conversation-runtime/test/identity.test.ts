@@ -63,11 +63,10 @@ describe("identitySection", () => {
   it("states the role the Registry gives it (#314)", () => {
     const line = (role: "admin" | "main" | "specialist" | "subagent") =>
       identitySection({ id: "bia", name: "Bia", role, model: runsOn([haiku]) });
-    expect(line("main")).toContain(
-      "You are Bia, the owner's main agent on Kelpie, the one they talk to.",
-    );
+    // The role the Registry calls `main` is Master in every text (#343).
+    expect(line("main")).toContain("You are Bia, Master on Kelpie, the agent the owner talks to.");
     expect(line("specialist")).toContain(
-      "You are Bia, a specialist agent on Kelpie, owned by the owner's main agent.",
+      "You are Bia, a specialist agent on Kelpie, owned by Master, the agent the owner talks to.",
     );
     expect(line("subagent")).toContain(
       "You are Bia, a temporary subagent on Kelpie, working on one demand of the agent that created you.",
@@ -104,6 +103,6 @@ describe("identitySection", () => {
         remit: "Sales.",
         model: null,
       }),
-    ).toContain("owned by the owner's main agent. Your remit: Sales.");
+    ).toContain("owned by Master, the agent the owner talks to. Your remit: Sales.");
   });
 });
