@@ -20,8 +20,9 @@ export interface Identity {
 /** What each role says about the agent. Admin stays the setup agent until #274 renames it. */
 const ROLE_LINES: Record<AgentRole, string> = {
   admin: "Kelpie's setup agent, which configures Kelpie",
-  main: "the owner's main agent on Kelpie, the one they talk to",
-  specialist: "a specialist agent on Kelpie, owned by the owner's main agent",
+  // The role `main` is called Master (#343).
+  main: "Master on Kelpie, the agent the owner talks to",
+  specialist: "a specialist agent on Kelpie, owned by Master",
   subagent: "a temporary subagent on Kelpie, working on one demand of the agent that created you",
 };
 const UNLISTED_ROLE_LINE = "one of the owner's agents on Kelpie, their personal agent platform";
