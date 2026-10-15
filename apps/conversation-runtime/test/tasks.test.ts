@@ -258,8 +258,9 @@ describe("pickup, the limit and scheduled starts (#54)", () => {
     await new Promise((resolve) =>
       setTimeout(resolve, Math.ceil(at / 1_000) * 1_000 - Date.now() + 50),
     );
+    // Run here, unless the runtime already ran it on its own and is still running it (#351).
     await runDurableObjectAlarm(stub);
-    expect(started.map((run) => run.task)).toEqual(["later"]);
+    await vi.waitFor(() => expect(started.map((run) => run.task)).toEqual(["later"]));
   });
 });
 
