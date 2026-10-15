@@ -4,6 +4,7 @@
 - Date: 2026-10-15
 - Issue: [#364](https://github.com/guedesdiogo/kelpie/issues/364)
 - Decided by the owner on 2026-10-15, after seven rounds on a live concept page: «Ficou bom. Aprovo as dez decisões do conceito de mascote.»
+- On the review of this ADR, the owner chose that the working activity shows only what is true: «Só o que é verdade»
 - Amends: [ADR-0043](0043-design-system.md), how an agent looks (§6) and an exception to motion rule 8 for the mascot; [ADR-0024](0024-fixed-wait-end-of-turn.md), the mascot also listens during the wait where its bar shows (§5); and `docs/design-system.md` §4.4 rule 8 and §5.9, an idle agent in the roster
 
 ## Context
@@ -167,7 +168,10 @@
   - a calendar for the agenda;
   - an envelope for email;
   - bubbles to think.
-- **The activity follows the tool the agent is calling,** through ADR-0025's tool loop. When no tool is known, or several are running, it changes every 5 to 8 s, never repeating.
+- **The activity is always true,** since progress is never faked (rule 7).
+  - It follows the tool the agent is calling. ADR-0025's loop runs one at a time.
+  - Between tools, while the model thinks or writes, the mascot alternates between thinking (bubbles) and writing (paper and pencil) every 5 to 8 s.
+  - It never shows a tool that isn't in use.
 - **In other states, the mittens gesture** as §6's table lists. A click or tap on an idle mascot makes it clap.
 - **In the poses for listening, typing, working, approved, error and dozing, the hands stay under reduced motion,** so the pose still reads.
 - **Waiting and error show a glossy 3D speech bubble beside the head:**
@@ -197,6 +201,7 @@
 - **A continuous loop, like the dots' 6 s "Ambient".** It repeats one animation, and it breaks rule 8 and WCAG 2.2.2 without a pause.
 - **Objects floating without hands.** The concept page kept this as a comparison, and the owner chose the hands.
 - **Flat badges for waiting and error.** They didn't match the plush. 3D bubbles replace them.
+- **Every activity in turn when no tool is known.** The concept did this, but it shows work that isn't happening, against rule 7. The owner chose to show only what is true.
 
 ## References
 
