@@ -1,8 +1,8 @@
 # Design system
 
-Kelpie's interface follows one visual identity and one motion system, decided in [ADR-0043](adr/0043-design-system.md). This document holds the values. A page, component or animation takes its colors, type, spacing, radii and motion from the tokens below and never from literal values.
+Kelpie's interface follows one visual identity and one motion system, decided in [ADR-0043](adr/0043-design-system.md). This document holds the values. A page, component or animation takes its colors, type, spacing, radii and motion from the tokens below. A literal number is allowed only where a pattern in section 5 sets it.
 
-The direction is called **Mistura** ("mix"): the identity of the water spirit (kelp colors, shapes that change) with the discipline of the herding dog (fast, grouped, no bounce). What the owner does a hundred times a day moves quickly and plainly. The moments that matter (approving, spending, delegating, remembering) get the expressive motion.
+The direction is called **Mistura** ("mix"): the identity of the water spirit (kelp colors, shapes that change) with the discipline of the herding dog (Pastoreio, "herding": fast, grouped, no bounce). What the owner does a hundred times a day moves quickly and plainly. The moments that matter (approving, spending, delegating, remembering) get the expressive motion.
 
 A live reference with every interaction below runs in the owner's motion lab (a private page). This document is the source of truth when the two differ.
 
@@ -17,7 +17,7 @@ Every color is a token with a light and a dark value. The theme follows the oper
 | `--sunken` | `#DAE5E2` | `#0B1918` | Wells, agent bubbles, tracks, hover |
 | `--fg` | `#0C2523` | `#DBEAE6` | Text |
 | `--muted` | `#4C6663` | `#88A39E` | Secondary text, meta, idle icons |
-| `--line` | `#C2D2CE` | `#21403B` | Borders and dividers (decorative, never the only boundary of a control) |
+| `--line` | `#C2D2CE` | `#21403B` | Borders and dividers. Decorative: a control's boundary uses `--muted` |
 | `--accent` | `#0A7469` | `#3BC3AE` | Kelp: primary actions, the owner's bubbles, focus, links, progress |
 | `--on-accent` | `#F0FAF8` | `#03201B` | Text and icons on `--accent` |
 | `--warm` | `#915708` | `#EEAE4A` | Attention: an agent is waiting for the owner. Nothing else uses it |
@@ -25,6 +25,7 @@ Every color is a token with a light and a dark value. The theme follows the oper
 | `--danger` | `#BA3A27` | `#F07461` | Errors, refusals that need action |
 
 - **Text on `--ok`** uses `--surface`, so it inverts with the theme.
+- **Text on a tint** (a highlight, a hold fill) is `--fg`.
 - **Tints** come from `color-mix()` with a token, never from a new literal: a focus halo is `--accent` at 18%, a hold-to-confirm fill `--accent` at 28%, a text highlight `--accent` at 24%, a receipt icon well `--ok` at 16%, a scrim `--fg` at 16%.
 - **Shadows** are black at low alpha in both themes: `--shadow` is `0 1px 2px rgb(0 0 0 / .06), 0 14px 30px -18px rgb(0 0 0 / .38)`, and `--shadow-pop` (palettes, menus) is `0 18px 40px -16px rgb(0 0 0 / .5)`.
 
@@ -39,12 +40,13 @@ WCAG 2 contrast ratios, measured on 2026-10-15 from the hex values above. AA ask
 | `--on-accent` on `--accent` | 5.31 | 7.83 |
 | `--accent` on `--bg` / `--surface` / `--sunken` (links) | 4.80 / 5.38 / 4.38 | 8.51 / 7.78 / 8.23 |
 | `--warm` on `--bg` / `--surface` / `--sunken` | 5.00 / 5.60 / 4.56 | 9.56 / 8.74 / 9.25 |
-| `--ok` on `--surface`, and `--surface` on `--ok` | 4.98 | 7.86 |
-| `--danger` on `--surface` | 5.37 | 5.97 |
+| `--ok` on `--bg` / `--surface` / `--sunken` | 4.44 / 4.98 / 4.06 | 8.60 / 7.86 / 8.33 |
+| `--surface` on `--ok` | 4.98 | 7.86 |
+| `--danger` on `--bg` / `--surface` / `--sunken` | 4.79 / 5.37 / 4.38 | 6.53 / 5.97 / 6.32 |
 
-`--accent` as text stays off `--sunken`: 4.38 in light misses AA. On `--sunken`, links and accent text use `--fg` with an underline.
+Four pairs miss AA in light, so text never uses them: `--accent`, `--ok` and `--danger` on `--sunken`, and `--ok` on `--bg`. There, the text is `--fg`, and the color moves to an underline or an icon (icons need 3:1, which all four pass).
 
-`--line` on `--surface` is 1.49 in light and 1.51 in dark. That is why a border never carries meaning alone: an input also has its fill or label, and a selected item also changes its fill.
+`--line` on `--surface` is 1.49 in light and 1.51 in dark, below the 3:1 a control's boundary needs (WCAG 1.4.11). Inputs, checkboxes and the hold button draw their boundary in `--muted` (5.90 and 6.30 on `--surface`), and a selected item also changes its fill.
 
 ## 2. Type
 
@@ -92,24 +94,31 @@ Motion depends on how often an interaction happens, not on which screen it is in
 
 | Grammar | Applies to | Character |
 |---|---|---|
-| **Frequent** | Messages, streaming, tool rows, the task board, lists, menus, the palette, navigation | Fast, no overshoot, small distances, tight stagger |
-| **Moment** | Approving, turning on something that costs, delegating to subagents, saving to memory, agent presence changes | Springs that pass their target a little, larger distances, one signature effect each |
+| **Frequent** | Messages, streaming, tool rows, the task board, lists, menus, the palette, navigation | Fast, no visible overshoot, small distances, tight stagger |
+| **Moment** | Confirming an action, turning on something that costs, delegating to subagents, saving to memory, agent presence changes | Springs that pass their target a little, larger distances, and a signature: the drop of a subagent, the ring of a confirmation, the arc into the vault |
 
-Anything triggered from the keyboard does not animate in either grammar.
+**From the keyboard**, anything opened, moved or navigated appears at once. What shows progress or a result still shows: a hold fill grows while the key is held, and a confirmation still turns `--ok` and shows its check, without the grow, the pop or the ring.
 
 ### 4.2 Springs
 
-A spring is given as stiffness and damping ratio, at mass 1. The Motion library takes the damping coefficient `c = 2 · ratio · √stiffness`. In CSS, a spring is a `linear()` easing over its settle time (the time it takes to stay within 0.1% of its target), sampled at 21 points.
+A spring is given as stiffness and damping ratio, at mass 1. The Motion library takes the damping coefficient `c = 2 · ratio · √stiffness`.
 
-| Token | Stiffness / ratio | Motion `damping` | Settles | Overshoot | Use |
-|---|---|---|---|---|---|
-| `--spring-fast` | 1400 / 0.9 | 67.3 | 194 ms | 0.1% | Chips, labels that roll, the palette, highlights |
-| `--spring-base` | 700 / 0.9 | 47.6 | 266 ms | 0.1% | Bubbles, cards, lists, panels |
-| `--spring-slow` | 300 / 0.9 | 31.2 | 394 ms | 0.1% | Large surfaces, drawers |
-| `--spring-moment-fast` | 800 / 0.6 | 33.9 | 393 ms | 9.2% | A released hold, small moment feedback |
-| `--spring-moment` | 380 / 0.8 | 31.2 | 457 ms | 1.4% | Moment layout: a button that grows, a card that collapses |
-| `--spring-moment-slow` | 200 / 0.8 | 22.6 | 611 ms | 1.4% | Travel: subagents leaving their parent, links drawing |
-| `--spring-pop` | 800 / 0.55 | 31.1 | 471 ms | 12.3% | Confirmations: a check, a vault that receives, an avatar that changes state |
+The other columns come from simulating each spring with semi-implicit Euler, in 1 ms steps:
+- **90%** is when it first covers 90% of its distance, which is roughly how long it feels;
+- **settles** is the first moment, after 40 ms, when it is within 0.1% of its target and moving slower than 0.02 per second. The CSS `linear()` easing runs over this time, sampled at 21 points;
+- **overshoot** is the simulated peak past the target. The exact values are slightly higher: 0.15% at a ratio of 0.9, 1.5% at 0.8, 9.5% at 0.6 and 12.6% at 0.55.
+
+| Token | Stiffness / ratio | Motion `damping` | 90% | Settles | Overshoot | Use |
+|---|---|---|---|---|---|---|
+| `--spring-fast` | 1400 / 0.9 | 67.3 | 91 ms | 194 ms | 0.1% | Chips, labels that roll, the palette, highlights |
+| `--spring-base` | 700 / 0.9 | 47.6 | 129 ms | 266 ms | 0.1% | Bubbles, cards, lists, panels |
+| `--spring-slow` | 300 / 0.9 | 31.2 | 197 ms | 394 ms | 0.1% | Large surfaces, drawers |
+| `--spring-moment-fast` | 800 / 0.6 | 33.9 | 83 ms | 393 ms | 9.2% | A released hold, small moment feedback |
+| `--spring-moment` | 380 / 0.8 | 31.2 | 153 ms | 457 ms | 1.4% | Moment layout: a button that grows, a card that collapses |
+| `--spring-moment-slow` | 200 / 0.8 | 22.6 | 211 ms | 611 ms | 1.4% | Travel: subagents leaving their parent, links drawing |
+| `--spring-pop` | 800 / 0.55 | 31.1 | 79 ms | 471 ms | 12.3% | Confirmations: a check, a vault that receives, an avatar that changes state |
+
+The first six are Material 3's standard and expressive spatial springs. `--spring-pop` is Kelpie's own, a little bouncier than Material 3's expressive fast spring.
 
 ```css
 :root {
@@ -130,7 +139,7 @@ A spring is given as stiffness and damping ratio, at mass 1. The Motion library 
 }
 ```
 
-A spring's numbers come from simulating it, not from guessing: changing one means re-running the simulation and updating its row, its `linear()` and its duration together.
+Changing a spring means simulating it again the same way, and updating its row, its `linear()` and its duration together.
 
 ### 4.3 Durations, curves and distances
 
@@ -147,101 +156,138 @@ A spring's numbers come from simulating it, not from guessing: changing one mean
 | `--ease-fade` | `cubic-bezier(0, 0, .2, 1)` | Opacity and color |
 | `--ease-exit` | `cubic-bezier(.4, 0, 1, 1)` | Exits |
 | `--ease-travel` | `cubic-bezier(.55, 0, .25, 1)` | Travel |
-| `--stagger` / `--stagger-moment` | 30ms / 60ms | Delay between siblings entering |
+| `--stagger` / `--stagger-moment` | 30ms / 60ms | Delay between siblings entering. A stagger stops at 300 ms: the siblings after the tenth arrive with the tenth |
 | `--rise` / `--rise-moment` | 8px / 18px | Distance an element rises as it enters |
 | `--scale-in` / `--scale-in-moment` | 0.97 / 0.92 | Scale an element enters from; never from 0 |
 | `--scale-press` | 0.97 | Pressed controls |
 
 ### 4.4 Rules
 
-1. **Frequency decides.** What happens more than a hundred times a day (the palette, shortcuts, arrow keys, filtering) does not animate. Tens of times a day: at most 160 ms. Occasional: 200 to 300 ms. Rare: the moment grammar.
+1. **Frequency decides.** What happens more than a hundred times a day does not animate: the palette opened from the keyboard, shortcuts, arrow keys, filtering. What happens tens of times a day reaches 90% of its distance within 160 ms (`--spring-fast` 91 ms, `--spring-base` 129 ms). What happens occasionally does within 200 ms (`--spring-slow`, 197 ms). Rare actions use the moment grammar.
 2. **Respond before animating.** Feedback within 100 ms. A control highlights when pressed and commits when released.
 3. **Springs move things; curves change color.** Position and size use springs. Color and opacity never overshoot.
 4. **Everything can be interrupted.** A released hold goes back from where it is, at the speed it had. Nothing blocks input while it animates.
 5. **Things come from where they start.** A popover grows from its trigger, a task comes out of its routine, a note leaves the sentence and enters the vault. A dialog stays centered.
-6. **One element carries the states.** The same button goes from "Approve" to "Creating" to a receipt; the same bubble goes from typing to the reply. Nothing is swapped for a different element in another place.
+6. **One element carries the states.** The same button goes from "Confirm" to "Creating" to a receipt; the same bubble goes from typing to the reply. Nothing is swapped for a different element in another place.
 7. **Streaming is calm.** Only new words appear, with opacity alone, in `--dur-word`. Nothing animates layout per token, and the word wrappers are removed when the stream ends. Phases have their real names, the elapsed time appears after 3 s, and progress is never faked.
-8. **Motion announces a change; a state stays still.** A loop stops within 5 s (WCAG 2.2.2), and from then on a state shows through color, shape and text: an elapsed time shows that an agent is still working. A spinner appears only after 150 to 300 ms of waiting and stays at least 300 ms.
+8. **Motion announces a change; a state stays still.**
+   - A loop stops within 5 s. From then on, a state shows through color, shape and text.
+   - An elapsed time shows that an agent is still working. It updates once a second, or once a minute under the less-motion switch: that is the control WCAG 2.2.2 asks of information that updates by itself.
+   - A spinner appears only after 150 to 300 ms of waiting and stays at least 300 ms.
 9. **Leaving is faster than arriving.** Entries use springs; exits use `--dur-exit` or `--dur-exit-moment` with `--ease-exit`.
-10. **Reduced motion replaces, it doesn't erase.** With `prefers-reduced-motion: reduce`, movement and scale become opacity in at most `--dur-fade`; colors, focus, confirmations and progress stay. Loops are static. The interface offers the same switch for people who want less motion without changing their system.
+10. **Reduced motion replaces, it doesn't erase.**
+    - The trigger is `prefers-reduced-motion: reduce`, or Kelpie's own switch for less motion, for people who don't want to change their system.
+    - Movement and scale become opacity, in at most `--dur-fade`. Colors, focus, confirmations and progress stay. Loops are still.
+    - This also meets WCAG 2.3.3 (level AAA): motion from interactions can be turned off.
 
-Two engineering rules come with them: animate only `transform`, `opacity` and color in anything that runs daily (a small, contained `width` or `height` is the exception, as in 5.3), and never write `transition: all`.
+Two engineering rules come with them:
+- in anything that runs daily, animate only `transform`, `opacity` and color; the contained size changes in 5.1, 5.2 and 5.3 are the only exceptions;
+- never write `transition: all`.
 
 ## 5. Patterns
 
-Each pattern names its grammar and its numbers. "Exit" means the grammar's exit duration and curve.
+Each pattern names its grammar, its numbers and what it becomes under reduced motion. "Exit" means the grammar's exit duration and curve.
 
 ### 5.1 Paced replies
 
 Frequent. Kelpie waits `quietMs` after the owner's latest message before answering ([ADR-0024](adr/0024-fixed-wait-end-of-turn.md)).
 
-- Each message the owner sends enters from below the composer (`--rise`, `--scale-in`, `--spring-base`, origin at the bottom right), and the bubbles above slide up with it (FLIP, `--spring-base`).
-- A 3px bar under the thread shows the wait: it drains linearly over `quietMs`, and a new message refills it in the first 7% of the time.
-- When the wait ends, a typing bubble appears; its dots blink in steps, 0.8 s per cycle.
-- The reply takes the typing bubble's place in the same element: its width and height go to the reply's size (`--spring-base`), and the text fades in after 70 ms.
+- **The owner's message.** It enters from below the composer (`--rise`, `--scale-in`, `--spring-base`, origin at the bottom right), and the bubbles above slide up with it (FLIP, `--spring-base`).
+- **The wait.** A 3px bar under the thread shows it, wherever the interface knows the buffer's deadline. ADR-0043 amends ADR-0024 for this; before, nothing showed during the wait.
+  - The bar follows the buffer's real deadline: `quietMs` after the latest message, capped by `maxWaitMs` from the first.
+  - A new message refills it in the first 7% of the time, then it drains linearly.
+  - While the webchat holds the answer because the owner is still typing, the bar stays full.
+  - With `quietMs: 0` there is no wait and no bar.
+- **Typing.** When the wait ends, a typing bubble appears. Its dots blink in steps, 0.8 s per cycle, for five cycles. Then they rest at 60% opacity until the reply comes.
+- **The reply.** It takes the typing bubble's place in the same element: its width and height go to the reply's size (`--spring-base`), and the text fades in after 70 ms.
+- **Reduced motion:**
+  - bubbles fade in where they land;
+  - the bar still drains, since it is progress;
+  - the dots rest at 60% from the start.
 
 ### 5.2 Tool calls and streaming
 
 Frequent.
 
-- A tool row appears when a call starts, with the call's real name. Each new action replaces the label above it: the old label leaves upward (exit, 75% of its height), and the new one rises with `--spring-fast`.
-- Done, the row becomes a one-line summary ("3 steps · 2.6 s") with a check. A click opens it: height with `--spring-base`, rows entering with `--stagger`.
-- Streamed text follows rule 7.
+- **The row.** It appears when a call starts, with the call's real name.
+- **Each new action** replaces the label above it: the old label leaves upward (exit, 75% of its height), and the new one rises with `--spring-fast`.
+- **The spinner** follows rule 8, and turns for at most 5 s. After that, a still ring and the elapsed time (shown from 3 s) say the call is running.
+- **Done**, the row becomes a one-line summary ("3 steps · 2.6 s") with a check. A click opens it: height with `--spring-base`, rows entering with `--stagger`.
+- **Streamed text** follows rule 7.
+- **Reduced motion:**
+  - labels swap with a fade;
+  - the spinner is a still ring;
+  - the summary opens at once.
 
-### 5.3 Approve an action
+### 5.3 Confirm an action
 
-Moment. The owner's press is the yes ([ADR-0026](adr/0026-confirmation-by-owner-act.md)).
+Moment. A confirmation's notice carries one Confirm button, and the owner's press is the yes ([ADR-0026](adr/0026-confirmation-by-owner-act.md)). A confirmation nobody presses expires after its 10 minutes ([ADR-0013](adr/0013-self-configuration.md)), and its card collapses into an "expired" receipt with a neutral icon.
 
-- The pressed button scales to `--scale-press`. The other button leaves (exit, scale 0.92), and the chosen one grows into the row: width and position with `--spring-moment`.
-- Its label rolls to a spinner and what is happening ("Creating the event").
-- On success, its fill turns `--ok` (`--dur-fade`), the check draws in 280 ms, the button pops (`scale` 1.03 to 1, `--spring-pop`), and a ring leaves its edge (650 ms, opacity 0.7 to 0, scale 1 to 1.5).
-- The card then collapses into a receipt: its content fades (exit), its height goes to the receipt's (`--spring-moment`), and the receipt rises 4px. The receipt says who decided and when, in the owner's time zone, and a polite live region announces it.
-- A key that was already held down when the request appeared doesn't approve or refuse it. Enter and Escape count only when pressed after the card is shown.
+- **The press.** The button scales to `--scale-press` and grows to the card's full width (width and position, `--spring-moment`). Should a notice ever offer a second choice, that button leaves as the chosen one grows (exit, `--scale-in-moment`). No notice does today.
+- **Working.** Its label rolls to a spinner and what is happening ("Creating the event").
+- **Success:**
+  - its fill turns `--ok` (`--dur-fade`);
+  - the check draws in 280 ms;
+  - the button pops (`scale` 1.03 to 1, `--spring-pop`);
+  - a ring leaves its edge (650 ms, opacity 0.7 to 0, scale 1 to 1.5).
+- **The receipt.**
+  - The card collapses into it: its content fades (exit), its height goes to the receipt's (`--spring-moment`), and the receipt rises 4px.
+  - The receipt says who confirmed and when, in the owner's time zone.
+  - A polite live region announces it.
+- **From the keyboard:**
+  - Enter or Space confirms only with focus on the button. Enter in the composer sends a message; it never confirms.
+  - A key already held down when the card appeared doesn't count.
+  - A keyboard confirm skips the grow, the pop and the ring: the label goes to the spinner, then to the check, then to the receipt.
+- **Reduced motion:** the grow, the pop and the ring go. The color change, the check and the receipt stay, each with a fade.
 
 ### 5.4 Turn on something that costs
 
 Moment. A feature that costs beyond the Workers Paid plan turns on only at the owner's request (CLAUDE.md).
 
-- The owner holds the button: a fill (`--accent` at 28%) grows from the left, linearly, over `--dur-hold`. Space and Enter hold it too.
-- Released early, the fill goes back from where it is with `--spring-moment-fast`, and the label returns.
-- Complete, the button turns `--ok`, pops, and rings as in 5.3.
-- Typing the confirmation code in the chat ([ADR-0026](adr/0026-confirmation-by-owner-act.md)) stays as the alternative for anyone who can't hold.
+- **The hold.** The owner holds the button: a fill (`--accent` at 28%, under a label in `--fg`) grows from the left, linearly, over `--dur-hold`. Space and Enter hold it too, with focus on the button, and the fill grows for them as well, since it is progress.
+- **Released early**, the fill goes back from where it is with `--spring-moment-fast`, and the label returns.
+- **Complete**, the button turns `--ok`, pops, and rings as in 5.3.
+- **The typed confirmation code** in the chat ([ADR-0026](adr/0026-confirmation-by-owner-act.md)) stays as the alternative for anyone who can't hold.
+- **Reduced motion:** the fill still grows and empties, without the spring. Completion changes the color and shows the check, without the pop and the ring.
 
 ### 5.5 A routine becomes a task
 
 Frequent. Each fire of a routine creates a task ([ADR-0039](adr/0039-routines-as-vault-files.md)).
 
-- The routine's chip pops (`scale` 1.05 to 1) and the new card leaves it: from the chip's position at scale 0.7 to its slot at the top of its column (FLIP, `--spring-base`). The cards below move down with it.
-- Column counts roll like labels (5.2).
-- When an agent takes the task, its avatar pops onto the card, and the card travels to the next column (FLIP). A progress bar fills only from real progress.
-- Done, the check draws and the title turns `--muted`.
+- **The routine fires.** Its chip pulses once (`scale` 1.05 to 1, `--spring-fast`), and the new card leaves it: from the chip's position at scale 0.7 to its slot at the top of its column (FLIP, `--spring-base`). The cards below move down with it.
+- **Column counts** roll like labels (5.2).
+- **An agent takes the task.** Its avatar enters on the card (`--scale-in`, `--spring-fast`), and the card travels to the next column (FLIP, `--spring-base`). A progress bar fills only from real progress.
+- **Done**, the check draws and the title turns `--muted`.
+- **Reduced motion:** a card fades out of one column and into the next, and counts change with a fade.
 
 ### 5.6 Subagents
 
 Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0036-agent-roles-models-and-subagents.md)).
 
-- The parent pulses (`scale` 0.9 to 1, `--spring-pop`).
-- Each subagent leaves the parent as a drop, under an SVG "goo" filter (Gaussian blur 7, alpha matrix 20 / −9). It travels to its place with `--spring-moment-slow`, `--stagger-moment` apart.
-- A link draws from the parent (stroke offset, `--spring-moment-slow`, 60 ms later), and the label enters from the left 140 ms later.
-- When it is done, it travels back and fades into the parent; the link retracts, and the parent swallows it (`scale` 1.12 to 1, `--spring-pop`, at 55% of the return).
-- Under reduced motion, subagents fade in and out at their places.
+- **The parent pulses** (`scale` 0.9 to 1, `--spring-pop`).
+- **Each subagent leaves the parent as a drop**, under an SVG "goo" filter on one layer (Gaussian blur 7, alpha matrix 20 / −9). It travels to its place with `--spring-moment-slow`, `--stagger-moment` apart.
+- **A link draws** from the parent (stroke offset, `--spring-moment-slow`, 60 ms later), and the label enters 8px from the left, 140 ms later.
+- **When it is done**, it travels back and fades into the parent. The link retracts, and the parent swallows it (`scale` 1.12 to 1, `--spring-pop`, at 55% of the return).
+- **Reduced motion:** subagents and links fade in and out at their places, without the goo.
 
 ### 5.7 Saved to memory
 
 Moment.
 
-- The learned phrase gets a highlight that grows from its start (`--accent` at 24%, `--spring-moment`). It is not `--warm`: remembering asks nothing of the owner.
-- A chip with the real file path, such as `people/ana-souza.md`, lifts from the phrase (`--rise`, scale 0.9). It travels in `--dur-travel` (`--ease-travel`) along an arc 60px above the straight line to the vault, shrinking to 0.35 and fading over the last 18%.
-- The vault pops (`scale` 1.14 to 1, `--spring-pop`), its count rolls, and "Saved to `<path>`" stays for 2.6 s.
+- **The highlight.** The learned phrase gets a highlight that grows from its start (`--accent` at 24%, `--spring-moment`). It is not `--warm`: remembering asks nothing of the owner.
+- **The chip.** A chip with the real file path, such as `people/ana-souza.md`, lifts from the phrase (`--rise-moment`, `--scale-in-moment`). It travels in `--dur-travel` (`--ease-travel`) along an arc 60px above the straight line to the vault, shrinking to 0.35 and fading over the last 18%.
+- **The vault** pops (`scale` 1.14 to 1, `--spring-pop`), its count rolls, and "Saved to `<path>`" stays for 2.6 s.
+- **Reduced motion:** the highlight fades in, the chip fades out where it is, and the count changes with a fade.
 
 ### 5.8 Command palette
 
 Frequent, and the clearest case of rule 1.
 
-- Opened by a click, it grows from its trigger: `scale` 0.97 and 6px above, to 1, with `--spring-fast`. The scrim fades in `--dur-fade`.
-- Opened with ⌘K or Ctrl K, it appears at once. Arrow keys, filtering, Enter and Escape are instant too.
-- Only the pointer animates: hovering moves the highlight with `--spring-fast`. A pointer that hasn't moved since the palette opened doesn't move the highlight.
-- Closed by a click, it leaves in `--dur-exit`.
+- **Opened by a click**, it grows from its trigger: `scale` 0.97 and 6px above, to 1, with `--spring-fast`. The scrim fades in `--dur-fade`.
+- **Opened with ⌘K or Ctrl K**, it appears at once. Arrow keys, filtering, Enter and Escape are instant too.
+- **Only the pointer animates.** Hovering moves the highlight with `--spring-fast`. A pointer that hasn't moved since the palette opened doesn't move the highlight.
+- **Closed by a click**, it leaves in `--dur-exit`.
+- **Reduced motion:** a click opens and closes it with a fade, and the highlight jumps.
 
 ### 5.9 Agent presence
 
@@ -254,31 +300,57 @@ Moment grammar: the roster is where Kelpie spends its novelty.
 | Idle | Avatar at 45% opacity, grayscale | None |
 | Error | `--danger` ring, what failed | One shake, 380 ms |
 
-On a change, the avatar pops (`scale` 0.86 to 1, `--spring-pop`) and the status line rolls. The roster never reorders when a state changes: a list that jumps under the pointer costs a misclick. How the agent itself looks (avatar or mascot) is still open (ADR-0043 §5).
+- **On a change**, the avatar pops (`scale` 0.86 to 1, `--spring-pop`), and the status line rolls.
+- **The roster never reorders** when a state changes: a list that jumps under the pointer costs a misclick.
+- **How the agent itself looks** (avatar or mascot) is still open (ADR-0043 §6).
+- **Reduced motion:** rings and halos are still; color, shape and the status text carry the state.
 
 ## 6. Implementation notes
 
 - **CSS first.** Tokens are custom properties. Springs are the `linear()` values above, supported in every current browser. Enter and exit use transitions with `@starting-style`. Choreographed sequences use the Web Animations API, which takes the same easings.
 - **View Transitions** fit navigation between views. They never wrap a list that streams.
 - **The Motion library** fits only where the owner drags something with velocity, such as reordering the board. It is loaded with the page that needs it.
-- **An entrance plays once.** It is keyed to the element, so a streaming update never replays it, and it never leaves content at opacity 0 if the animation doesn't run (a background tab pauses timelines). A list animates entries only up to 60 rows; past that, rows appear at once.
-- **Heavy effects stay off the DOM's per-frame path.** The goo is one SVG filter on one layer. Anything heavier belongs in a shader or not at all.
-- These choices guide whatever UI stack Kelpie picks; the stack itself is still open ([viability study](viability-study.md), open questions).
+- **An entrance plays once.** It is keyed to the element, so a streaming update never replays it. It never leaves content at opacity 0 if the animation doesn't run, which happens when a background tab pauses timelines. A list animates entries only up to 60 rows; past that, rows appear at once.
+- **Heavy effects stay off the DOM's per-frame path.** The goo is one SVG filter on one layer, during a moment. Anything heavier belongs in a shader scoped to its element, or nowhere. Full-screen WebGL stays out of the product.
+- **The stack is still open.** These choices guide whatever UI stack Kelpie picks; the [viability study](viability-study.md) lists it among its open questions.
 
 ## 7. Review checklist
 
 A pull request that changes the interface answers yes to each line:
 
-- [ ] Every color, size, radius, duration and easing comes from a token.
-- [ ] Only `transform`, `opacity` and color animate, apart from the contained cases in 5.1 and 5.3; no `transition: all`.
-- [ ] Keyboard-triggered actions don't animate.
+- [ ] Every color, size, radius, duration and easing comes from a token, unless a pattern in section 5 sets the number.
+- [ ] Only `transform`, `opacity` and color animate, apart from the contained sizes in 5.1, 5.2 and 5.3; no `transition: all`.
+- [ ] Keyboard-triggered actions don't animate their way in or out; progress and results still show.
 - [ ] Loops stop within 5 s, and the steady state reads without motion.
-- [ ] Exits are faster than entries.
+- [ ] Exits are faster than entries, and staggers stop at 300 ms.
 - [ ] Interrupting an animation leaves no element stuck halfway.
 - [ ] Under reduced motion, every movement becomes a short fade, and no feedback disappears.
-- [ ] New text meets the contrast in section 1, in both themes.
+- [ ] New text meets the contrast in section 1, in both themes, and controls draw their boundary in `--muted`.
 
-## 8. Sources
+## 8. Designing what isn't here yet
+
+A component, screen, state or interaction this document doesn't define is designed from award-winning work, never from a library's default look (owner, 2026-10-15; ADR-0043 §7).
+
+1. **Research first.** Find how award-winning UX and UI work solves the same problem, newest editions first:
+   - the Apple Design Awards;
+   - Awwwards, including its product sites;
+   - the CSS Design Awards;
+   - the Webby Awards;
+   - the Red Dot and iF interface categories;
+   - teams known for interaction craft.
+
+   Read the product, its video or its write-up, not only the award's page. Check the reference projects in `CLAUDE.md` too.
+2. **Look at two things.** How it moves in the interaction, with numbers where the source gives them, and how usable it is: speed, keyboard, errors, accessibility.
+3. **Post the findings on the issue,** each as adopt, adapt or avoid, with a link and one line on why.
+4. **Design it in Kelpie's terms.**
+   - Pick its grammar (frequent or moment), its springs and its tokens.
+   - Check it against the ten rules.
+   - Say what it becomes under reduced motion.
+   - Give a moment its signature; keep a frequent pattern quick and quiet.
+5. **Show it live when motion is the point.** A lab page lets the owner judge an animation before it is built.
+6. **Add it to section 5** in the same pull request as the code, with its sources in section 9.
+
+## 9. Sources
 
 Research done on 2026-10-15. The rules above cite these:
 
@@ -293,9 +365,9 @@ Research done on 2026-10-15. The rules above cite these:
   - [Benji Taylor, Family Values](https://benji.org/family-values);
   - [Emil Kowalski's animation rules](https://github.com/emilkowalski/skills);
   - [Vercel's interface guidelines](https://vercel.com/design/guidelines);
-  - [Linear's agent interaction model](https://linear.app/developers/agent-interaction).
+  - [Linear's agent interaction guidelines](https://linear.app/developers/agent-interaction), the source of the activity states behind tool rows and presence.
 - Design systems:
-  - [Material 3's motion tokens](https://github.com/androidx/androidx/tree/androidx-main/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/tokens), the source of the spring values;
+  - [Material 3's motion tokens](https://github.com/androidx/androidx/tree/androidx-main/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/tokens), the source of six of the seven springs;
   - [IBM Carbon motion](https://carbondesignsystem.com/elements/motion/overview/), for productive versus expressive motion.
 - Streaming: [Streamdown animation](https://streamdown.ai/docs/animation).
 - Accessibility:
