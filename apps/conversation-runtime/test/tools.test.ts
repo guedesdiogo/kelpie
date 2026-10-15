@@ -260,6 +260,8 @@ describe("a turn's tools", () => {
           source: expect.stringMatching(/^telegram:chat-1, \d{4}-\d{2}-\d{2}$/),
           confirm: expect.any(Function),
           sendLink: expect.any(Function),
+          // Its own memory: only a subagent reads its creator's (#290).
+          memoryAgentId: "assistant",
           locale: "en",
         },
       },

@@ -90,6 +90,7 @@ import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
 import { failureNotice, routeNotice } from "./route-notices.ts";
 import * as schema from "./schema.ts";
 import { bareHttpsOrigin, setupNote } from "./setup-agent.ts";
+import { SUBAGENT_TOOLS } from "./subagent-limits.ts";
 import {
   CONFIRMATION_MS,
   type ConfirmationRequest,
@@ -786,6 +787,41 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     return this.env.AGENT_HOST.getByName(this.#agentId());
   }
 
+  /**
+   * Whose memory the agent reads (#290): a subagent reads only its creator's, read-only (ADR-0036
+   * §5); any other agent, its own.
+   */
+  #memoryAgentId(): string {
+    const roster = this.#get<AgentConfig["agent"] | null>("roster", null);
+    return roster?.role === "subagent" && roster.owner ? roster.owner : this.#agentId();
+  }
+
+  /**
+   * The tools a turn may use (#290): a subagent never gets those that create agents or tasks,
+   * write memory, or configure Kelpie, whatever it was granted; and an agent whose settings name
+   * its tools gets only those.
+   */
+  #allowed(tools: Map<string, Tool>, settings: AgentSettings): Map<string, Tool> {
+    const roster = this.#get<AgentConfig["agent"] | null>("roster", null);
+    const subagent = roster?.role === "subagent";
+    const named = settings.tools === null ? null : new Set(settings.tools);
+    // A subagent's tools also stay within its creator's allowlist (ADR-0036 §5).
+    const creators =
+      subagent && roster?.creatorTools !== undefined && roster.creatorTools !== null
+        ? new Set(roster.creatorTools)
+        : null;
+    for (const name of [...tools.keys()]) {
+      if (
+        (subagent && !SUBAGENT_TOOLS.has(name)) ||
+        (named !== null && !named.has(name)) ||
+        (creators !== null && !creators.has(name))
+      ) {
+        tools.delete(name);
+      }
+    }
+    return tools;
+  }
+
   /** The latest person in this conversation's history, whom a note of Kelpie's is written as. */
   #lastUserId(): string | null {
     return (
@@ -898,6 +934,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (this.#pendingInbound().length === 0) return;
     await this.#cancelFlushSchedule();
     this.#set("resumedAt", null);
+    // What this turn's limits read (#290): a subagent's tools and memory follow its creator's.
+    this.#set("roster", config.agent ?? null);
     const pending = this.#pendingInbound();
     const access = leastAccess([...pending, ...this.#unansweredAccess()]);
     const now = this.#ports.now();
@@ -1431,7 +1469,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     step: (name: TurnStep, label?: string) => void,
   ): Promise<Extract<LlmEvent, { type: "finish" }> | null> {
     const agentId = this.#agentId();
-    const tools = await this.#tools(agentId);
+    const tools = this.#allowed(await this.#tools(agentId), settings);
     if (controller.signal.aborted || !this.#isRunning(turn.id)) return null;
     const specs = [...tools.values()].map((tool) => tool.spec);
     // Earlier replies are replayed with their native output only under the same tools. A turn
@@ -1569,6 +1607,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
                 ? false
                 : this.#confirm(turn.id, actor.userId, request),
             sendLink: (link) => this.#sendLink(turn.id, link),
+            memoryAgentId: this.#memoryAgentId(),
           };
           const task = this.#taskHandle();
           if (task) context.task = task;
@@ -1882,7 +1921,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     try {
       const question = this.#question();
       if (question === "") return null;
-      const recalled = await this.#ports.recall(this.#agentId(), question, {
+      const recalled = await this.#ports.recall(this.#memoryAgentId(), question, {
         scopes,
         budgetTokens: RECALL_BUDGET_TOKENS,
         qualifier: settings.qualifier,
@@ -1929,7 +1968,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     // Settings stored before the core existed have no such field.
     if (!(settings.memoryCore ?? DEFAULT_SETTINGS.memoryCore)) return "";
     try {
-      const core = await this.#ports.core(this.#agentId(), CORE_BUDGET_TOKENS);
+      const core = await this.#ports.core(this.#memoryAgentId(), CORE_BUDGET_TOKENS);
       if (typeof core.text !== "string" || core.text.length > CORE_MAX_CHARS) {
         throw new TypeError("the core answered past its budget");
       }
@@ -2071,8 +2110,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    *   one bad session can't hold back the ones after it. Its messages stay in the history.
    */
   async closeSession(): Promise<void> {
-    // A task's conversation isn't captured: the task holds its record (#335).
+    // A task's conversation isn't captured: the task holds its record (#335); nor is any of a
+    // subagent's (ADR-0036 §5).
     if (this.#get<Destination | null>("destination", null)?.channel === "task") return;
+    if (this.#get<AgentConfig["agent"] | null>("roster", null)?.role === "subagent") return;
     if (this.#closingSession) return;
     if (this.#turnRunning() || this.#pendingInbound().length > 0) {
       await this.#scheduleSessionClose(SESSION_RETRY_MS);
