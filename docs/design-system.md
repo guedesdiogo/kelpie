@@ -1,6 +1,6 @@
 # Design system
 
-Kelpie's interface follows one visual identity and one motion system, decided in [ADR-0043](adr/0043-design-system.md). This document holds the values. A page, component or animation takes its colors, type, spacing, radii and motion from the tokens below. A literal number is allowed only where a pattern in section 5 sets it.
+Kelpie's interface follows one visual identity and one motion system, decided in [ADR-0043](adr/0043-design-system.md) and extended by its first review in [ADR-0044](adr/0044-design-system-review.md). This document holds the values. A page, component or animation takes its colors, type, spacing, radii and motion from the tokens below. A literal number is allowed only where a pattern in section 5 sets it.
 
 The direction is called **Mistura** ("mix"): the identity of the water spirit (kelp colors, shapes that change) with the discipline of the herding dog (Pastoreio, "herding": fast, grouped, no bounce). What the owner does a hundred times a day moves quickly and plainly. The moments that matter (approving, spending, delegating, remembering) get the expressive motion.
 
@@ -20,14 +20,27 @@ Every color is a token with a light and a dark value. The theme follows the oper
 | `--line` | `#C2D2CE` | `#21403B` | Borders and dividers. Decorative: a control's boundary uses `--muted` |
 | `--accent` | `#0A7469` | `#3BC3AE` | Kelp: primary actions, the owner's bubbles, focus, links, progress |
 | `--on-accent` | `#F0FAF8` | `#03201B` | Text and icons on `--accent` |
-| `--warm` | `#915708` | `#EEAE4A` | Attention: an agent is waiting for the owner. Nothing else uses it |
+| `--warm` | `#915708` | `#EEAE4A` | Attention: the owner needs to act (an agent is waiting, a free tier is near its end). Nothing else uses it |
 | `--ok` | `#1B7C45` | `#55C585` | Done, approved, turned on |
 | `--danger` | `#BA3A27` | `#F07461` | Errors, refusals that need action |
 
 - **Text on `--ok`** uses `--surface`, so it inverts with the theme.
-- **Text on a tint** (a highlight, a hold fill) is `--fg`.
-- **Tints** come from `color-mix()` with a token, never from a new literal: a focus halo is `--accent` at 18%, a hold-to-confirm fill `--accent` at 28%, a text highlight `--accent` at 24%, a receipt icon well `--ok` at 16%, a scrim `--fg` at 16%.
+- **Text on a tint** (a highlight, a hold fill) is `--fg`. Text on a solid fill uses that fill's own text color: `--on-accent` on `--accent`, `--surface` on `--ok`.
+- **Tints** come from `color-mix()` with a token, never from a new literal: a focus halo is `--accent` at 18%, a hold-to-confirm fill `--accent` at 28%, a card that just landed `--accent` at 22%, a text highlight `--accent` at 24%, a receipt icon well `--ok` at 16%, a scrim `--fg` at 16%.
 - **Shadows** are black at low alpha in both themes: `--shadow` is `0 1px 2px rgb(0 0 0 / .06), 0 14px 30px -18px rgb(0 0 0 / .38)`, and `--shadow-pop` (palettes, menus) is `0 18px 40px -16px rgb(0 0 0 / .5)`.
+
+### Higher contrast
+
+With `prefers-contrast: more`, or Kelpie's own contrast setting (5.17), two tokens change, and tints give way to solid fills and borders:
+
+| Token | Light | Dark | Measured |
+|---|---|---|---|
+| `--line` | `#6B8480` | `#557570` | 3.41 / 3.82 / 3.11 in light, 3.69 / 3.37 / 3.57 in dark, on `--bg` / `--surface` / `--sunken` |
+| `--muted` | `#344B48` | `#A5BEB9` | 7.94 / 8.90 / 7.25 in light, 9.45 / 8.64 / 9.14 in dark |
+
+Every boundary then reaches 3:1, and secondary text 7:1. `--accent`, `--warm`, `--ok` and `--danger` keep their AA values (section 1's table), so text in those colors stays at 4.5:1, not 7:1.
+
+With `prefers-reduced-transparency: reduce`, scrims and tints become solid fills. In `forced-colors` mode the system's colors replace the tokens, and the state glyphs of 5.9 carry the meaning that color would.
 
 ### Measured contrast
 
@@ -70,6 +83,17 @@ Only the weights listed are loaded, with `font-synthesis-weight: none`. All thre
 | `--text-h1` | `clamp(46px, 7.4vw, 88px)` | 0.94 | Page titles |
 
 Digits that change or line up (timers, counts, prices, times) use `font-variant-numeric: tabular-nums`. Running text stays near 65 characters per line.
+
+### Voice
+
+Kelpie writes the way a capable colleague talks.
+- **Say what happened, then what to do.** "No connection. Trying again in 8 s." Not "Oops! Something went wrong."
+- **Name things by what the owner knows.** A routine, a task, the vault. Never a table, a Durable Object or a queue.
+- **No apologies, no exclamation marks, no whimsical verbs.** A phase says what is being done: "Reading people/ana-souza.md".
+- **Empty states explain in one sentence why they are empty**, and offer the one action that fills them.
+- **Receipts say who did what and when,** in the owner's time zone.
+
+The fixed texts follow [ADR-0027](adr/0027-fixed-texts-in-three-languages.md): English, Brazilian Portuguese and Spanish.
 
 ## 3. Space, radius and layering
 
@@ -181,8 +205,17 @@ Changing a spring means simulating it again the same way, and updating its row, 
     - This also meets WCAG 2.3.3 (level AAA): motion from interactions can be turned off.
 
 Two engineering rules come with them:
-- in anything that runs daily, animate only `transform`, `opacity` and color; the contained size changes in 5.1, 5.2 and 5.3 are the only exceptions;
+- in anything that runs daily, animate only `transform`, `opacity` and color. The exceptions are the contained size changes in 5.1, 5.2, 5.3, 5.9, 5.17 and 5.18, and the one mask reveal in 5.7;
 - never write `transition: all`.
+
+### 4.5 Sound
+
+Sound is opt-in and off by default ([ADR-0044](adr/0044-design-system-review.md) §4).
+- **Only three sounds:** an action was confirmed, something was saved to memory, an agent needs the owner. Each lasts under 300 ms.
+- **They have a setting of their own,** separate from the less-motion switch.
+- **A frequent action never makes a sound.**
+- **Browser notifications** are opt-in the same way. Only "an agent needs you" raises one, and only while Kelpie's tab is hidden.
+- **No vibration.**
 
 ## 5. Patterns
 
@@ -193,6 +226,7 @@ Each pattern names its grammar, its numbers and what it becomes under reduced mo
 Frequent. Kelpie waits `quietMs` after the owner's latest message before answering ([ADR-0024](adr/0024-fixed-wait-end-of-turn.md)).
 
 - **The owner's message.** It enters from below the composer (`--rise`, `--scale-in`, `--spring-base`, origin at the bottom right), and the bubbles above slide up with it (FLIP, `--spring-base`).
+- **Held messages.** While the buffer holds them, each of the owner's messages carries a small clock in `--muted` under it, "held". The bubble itself doesn't change, so its text keeps its contrast. The mark fades out (`--dur-fade`) when the turn starts reading them.
 - **The wait.** A 3px bar under the thread shows it, wherever the interface knows the buffer's deadline. The webchat learns it from one new socket message, added with its redesign (#140). ADR-0043 amends ADR-0024 for this; before, nothing showed during the wait.
   - The bar follows the buffer's real deadline: `quietMs` after the latest message, capped by `maxWaitMs` from the first.
   - A new message refills it in the first 7% of the time, then it drains linearly.
@@ -209,10 +243,11 @@ Frequent. Kelpie waits `quietMs` after the owner's latest message before answeri
 
 Frequent.
 
-- **The row.** It appears when a call starts, with the call's real name.
+- **The row.** It appears when a call starts, with the call's real name. A call that changes something carries a "changes" tag beside its name; a call that only reads carries none.
 - **Each new action** replaces the label above it: the old label leaves upward (exit, 75% of its height), and the new one rises with `--spring-fast`.
 - **The spinner** follows rule 8, and turns for at most 5 s. After that, a still ring and the elapsed time (shown from 3 s) say the call is running.
 - **Done**, the row becomes a one-line summary ("3 steps · 2.6 s") with a check. A click opens it: height with `--spring-base`, rows entering with `--stagger`.
+- **Typed results.** A result with a known type (an event, a file, a table, a link) shows as a card of that type, not as running text. The card enters with `--rise` and `--spring-base`, or with a fade under reduced motion.
 - **Streamed text** follows rule 7.
 - **Reduced motion:**
   - labels swap with a fade;
@@ -221,23 +256,30 @@ Frequent.
 
 ### 5.3 Confirm an action
 
-Moment. A confirmation's notice carries one Confirm button, and the owner's press is the yes ([ADR-0026](adr/0026-confirmation-by-owner-act.md)). A confirmation nobody presses expires after its 10 minutes ([ADR-0026](adr/0026-confirmation-by-owner-act.md) §3), and its card collapses into an "expired" receipt with a neutral icon.
+Moment. The owner's press is the yes ([ADR-0026](adr/0026-confirmation-by-owner-act.md)). A confirmation nobody answers expires after its 10 minutes (ADR-0026 §3), and its card collapses into an "expired" receipt with a neutral icon.
 
-- **The press.** The button scales to `--scale-press` and grows to the card's full width (width and position, `--spring-moment`). Should a notice ever offer a second choice, that button leaves as the chosen one grows (exit, `--scale-in-moment`). No notice does today.
+- **Decide in place.** The card names the agent that asks by its id, and its task by number ("`agenda` asks, on task #123"). A task's title, written by the agent, may follow only as quoted data. It carries what the owner needs to decide without leaving it: the event, the diff, the cost. For a write to memory, that is the operation, the note's path, its text, and a warning when it replaces an existing note.
+- **Three answers** ([ADR-0044](adr/0044-design-system-review.md)):
+  - **Confirm**, the primary button;
+  - **Deny this call**, beside it. It closes the confirmation, and the agent goes on without that change;
+  - **Hold to pause this conversation**, a smaller control under them. It uses the hold of 5.4 and runs the existing pause (#134): the next answer waits for the owner's next message, and background tasks keep running.
+- **What the card shows is bounded** (ADR-0044 §1). The agent is named by its id. The evidence comes from the tool call's typed fields, appears as quoted data marked as written by the agent, and never carries a link or a control.
+- **The press.** The button scales to `--scale-press` and grows to the card's full width (width and position, `--spring-moment`). The other button leaves as it grows (exit, `--scale-in-moment`).
 - **Working.** Its label rolls to a spinner and what is happening ("Creating the event"). The spinner follows rule 8: after 5 s, a still ring and the elapsed time take its place.
 - **Success:**
   - its fill turns `--ok` (`--dur-fade`);
   - the check draws in 280 ms;
   - the button pops (`scale` 1.03 to 1, `--spring-pop`);
   - a ring leaves its edge (650 ms, opacity 0.7 to 0, scale 1 to 1.5).
+- **Denied,** the button grows the same way, then the card folds into a neutral receipt: a `--muted` icon, no check, no pop and no ring, in `--dur-fade`.
 - **The receipt.**
   - The card collapses into it: its content fades (exit), its height goes to the receipt's (`--spring-moment`), and the receipt rises 4px.
-  - The receipt says who confirmed and when, in the owner's time zone.
+  - The receipt says who decided what and when, in the owner's time zone: "You confirmed at 14:32" or "You denied at 14:32. `agenda` goes on without it."
   - A polite live region announces it.
 - **From the keyboard:**
-  - Enter or Space confirms only with focus on the button. Enter in the composer sends a message; it never confirms.
+  - Enter or Space acts only with focus on a button. Enter in the composer sends a message; it never confirms or denies.
   - A key already held down when the card appeared doesn't count.
-  - A keyboard confirm skips the grow, the pop and the ring: the label goes to the spinner, then to the check, then to the receipt.
+  - A keyboard confirm or deny skips the grow, the pop and the ring. A confirm goes from the label to the spinner, to the check, to the receipt; a deny, which runs nothing, goes straight to the receipt.
 - **Reduced motion:** the grow, the pop and the ring go. The color change, the check and the receipt stay, each with a fade.
 
 ### 5.4 Turn on something that costs
@@ -257,8 +299,16 @@ Frequent. Each fire of a routine creates a task ([ADR-0039](adr/0039-routines-as
 - **The routine fires.** Its chip pulses once (`scale` 1.05 to 1, `--spring-fast`), and the new card leaves it: from the chip's position at scale 0.7 to its slot at the top of its column (FLIP, `--spring-base`). The cards below move down with it.
 - **Column counts** roll like labels (5.2).
 - **An agent takes the task.** Its avatar enters on the card (`--scale-in`, `--spring-fast`), and the card travels to the next column (FLIP, `--spring-base`). A progress bar fills only from real progress.
-- **Done**, the check draws and the title turns `--muted`.
-- **Reduced motion:** a card fades out of one column and into the next, and counts change with a fade.
+- **Done**, the check draws and the title turns `--muted`. The card carries the evidence of the work (a link, a file, a screenshot) and its duration in the past tense: "Ran 4 min 12 s".
+- **Delegation shows.** A task the owner gave an agent carries "Delegated by you": the owner stays accountable, the agent does the work.
+- **Dragging a card.** People move a task only between Backlog and To do; from In progress on, the agent owns its status ([ADR-0011](adr/0011-agent-task-board.md)). So only cards in those two columns lift, and only those columns accept a drop. Other cards and columns show a no-drop cursor and don't lift.
+  - Picked up, it scales to 1.03 with `--spring-fast` and takes `--shadow-pop`.
+  - Its slot keeps a dashed outline at 40%, and the other cards open the gap (FLIP, `--spring-base`).
+  - Released, it settles with `--spring-base`, and a tint of `--accent` at 22% fades from it in 400 ms.
+  - A move is optimistic. If the server refuses it, the card returns to its slot with `--spring-base`, and a toast says why.
+  - Every Backlog and To do card also has a Move menu.
+  - From the keyboard, Space lifts it, the arrows move it at once, Space drops it and Escape cancels. A live region says where it landed: "Moved to To do, position 1".
+- **Reduced motion:** a card fades out of one column and into the next, and counts change with a fade. A dragged card follows the pointer without the lift, and the landing tint fades in `--dur-fade`.
 
 ### 5.6 Subagents
 
@@ -276,8 +326,12 @@ Moment.
 
 - **The highlight.** The learned phrase gets a highlight that grows from its start (`--accent` at 24%, `--spring-moment`). It is not `--warm`: remembering asks nothing of the owner.
 - **The chip.** A chip with the real file path, such as `people/ana-souza.md`, lifts from the phrase (`--rise-moment`, `--scale-in-moment`). It travels in `--dur-travel` (`--ease-travel`) along an arc 60px above the straight line to the vault, shrinking to 0.35 and fading over the last 18%.
-- **The vault** pops (`scale` 1.14 to 1, `--spring-pop`), its count rolls, and "Saved to `<path>`" stays for 2.6 s.
-- **Reduced motion:** the highlight fades in, the chip fades out where it is, and the count changes with a fade.
+- **The vault** pops (`scale` 1.14 to 1, `--spring-pop`), and its count rolls.
+- **The toast** (5.13) says where the note went, from which conversation, when and by which agent: "Saved to `people/ana-souza.md` · From this conversation, today at 14:32 · by Kelpie". It offers Open and Undo for 10 s. Undo sends the chip back along the same arc and takes the highlight away. In the vault, Undo writes a new version that removes the note; history keeps both.
+- **Each note keeps its origin.** The vault shows who wrote each passage, from a write log rather than markers in the file: the owner, an agent or an import.
+- **Off the record.** A conversation can be marked so nothing from it enters the vault.
+- **A new note appears as ink.** Its text reveals left to right under a mask, over `--dur-travel`. Only a new note does this; chat keeps rule 7.
+- **Reduced motion:** the highlight fades in, the chip fades out where it is, the count changes with a fade, and a new note appears whole.
 
 ### 5.8 Command palette
 
@@ -299,11 +353,125 @@ Moment grammar: the roster is where Kelpie spends its novelty.
 | Waiting for the owner | `--warm` ring, "waiting for you", time since | A halo pulses three times, 1.6 s each, then stops |
 | Idle | Avatar at 45% opacity, grayscale | None |
 | Error | `--danger` ring, what failed | One shake, 380 ms |
+| No response | Dashed `--muted` ring, "no response for 1 min" | None |
 
+- **Each state has a glyph** beside its label, so it reads without color or motion: a half-filled circle for working, a diamond for waiting, a hollow circle for idle, a dashed circle for no response, a triangle for error. The glyphs are drawn as SVG, since Geist has no such characters, and are hidden from screen readers, which read the label.
+- **No response** is a working agent from which nothing has arrived for 60 s: no streamed token, and no tool call starting or ending. A tool call still within its time bound counts as activity.
 - **On a change**, the avatar pops (`scale` 0.86 to 1, `--spring-pop`), and the status line rolls.
+- **What waits for the owner is counted, not moved.**
+  - A strip above the roster counts the agents waiting, in `--warm`. Its count rolls. It enters with `--rise`, and leaves when nothing waits. Its slot above the roster is reserved, so the rows never move when it appears.
+  - The browser tab's title starts with the count, "(2) Kelpie", and the favicon gets a `--warm` dot.
+  - A free tier past 90% joins the count (5.16).
+- **A row opens in place.** Pressing a waiting agent's row grows its request under the row (height, `--spring-moment`), with the card of 5.3. From the keyboard it appears at once.
+- **Finished work leaves; failures stay.** A subagent or task that succeeded leaves a list at once. One that failed stays 30 s with its `--danger` ring, and can be dismissed.
+- **An agent is compared with itself.** Its numbers sit against its own last 30 days, never in a ranking of agents.
 - **The roster never reorders** when a state changes: a list that jumps under the pointer costs a misclick.
 - **How the agent itself looks** (avatar or mascot) is still open (ADR-0043 §6).
-- **Reduced motion:** rings and halos are still; color, shape and the status text carry the state. The elapsed time shows minutes only ("2 min") and updates once a minute.
+- **Reduced motion:** rings and halos are still; color, shape and the status text carry the state. The elapsed time shows minutes only ("2 min") and updates once a minute. The strip and an opening row appear with a fade, and counts change with a fade.
+
+### 5.10 Following the chat
+
+Frequent.
+
+- **It follows the end only near it.** The thread follows new content while the reader is within 150px of its end. Scrolling up, by wheel, touch or key, stops the follow.
+- **New messages below** show a pill at the bottom, "↓ 3 new". It enters with `--rise` and `--spring-fast`, and its count rolls.
+  - A press scrolls to the end with `--spring-base`.
+  - End jumps at once.
+  - Reaching the end by hand removes the pill (exit).
+- **When an approval waits below,** the pill reads "↓ Approval waiting" instead.
+- **Selecting text** pauses the follow until the selection ends.
+- **Sending a message** always returns to the end.
+- **An approval never forces a scroll.** It counts in the pill and in the strip of 5.9.
+- **Reduced motion:** the scroll jumps, and the pill fades.
+
+### 5.11 Loading
+
+Frequent.
+
+- **The first 200 ms show nothing new.** The old content stays.
+- **A skeleton.** Past 200 ms, a skeleton in the final layout's shape replaces it, and stays at least 400 ms. It never shimmers.
+- **The content** replaces the skeleton with a `--dur-fade` fade in the same place, without moving the layout. A group announces itself once (`role="status"`).
+- **Past 10 s,** the work becomes a background task with real progress, and the screen is free again.
+- **Reduced motion:** the same, since it is all fades.
+
+### 5.12 A lost connection
+
+Frequent.
+
+- **The first 2 s change nothing.**
+- **The banner.** Then a banner enters at the top (from 8px above, `--spring-base`): what happened, when the next try is ("No connection. Trying again in 8 s", digits in Geist Mono), and "Try now".
+- **Queued messages.** What the owner sends meanwhile shows in `--sunken` with a clock and "queued". It goes out in order when the connection is back.
+- **Back,** the banner turns `--ok`, "Back. 1 message sent.", for 2.6 s, then leaves. Alerts stay quiet for the first 4 s after reconnecting, so a backlog doesn't arrive as a burst.
+- **An expired login** opens a centered dialog to sign in again, and keeps the draft.
+- **Reduced motion:** the banner fades. Under the less-motion switch it says "Trying again shortly" without a counting number.
+
+### 5.13 Toasts and undo
+
+Frequent.
+
+- **A result shows where it happened first:** a receipt, a row, a count. A toast is only for what finished out of sight, or for an action that offers Undo.
+- **Placement.** Toasts sit at the bottom center, at most three stacked, each lower one at a scale of 1 − 0.05 per step. They enter with `--rise` and `--spring-base`, and leave with an exit.
+- **Timing.**
+  - A toast stays 5 s, or 10 s with Undo. An error stays until it is dismissed.
+  - Its timer pauses on hover, on focus and while the tab is hidden, and a thin bar shows the time left.
+- **Undo.** Inside Kelpie (the vault, tasks), Undo reverses the change. For anything with effects outside Kelpie, the action waits for the toast to end, and Undo cancels it. That delay never applies to a confirmed change (5.3), which already has the owner's yes.
+- **A polite live region** announces each toast.
+- **Reduced motion:** toasts fade in and out, without the stack offset. The time-left bar still shrinks, since it is progress.
+
+### 5.14 Moving between views
+
+Frequent.
+
+- **From a list to a detail,** the agent's avatar and name travel to their new place with a View Transition (`--spring-base`), and the rest crossfades.
+- **Back** reverses the direction.
+- **From the keyboard,** and in a browser without View Transitions, the view changes at once.
+- **A streaming chat** is never part of the transition.
+- **Reduced motion:** a crossfade only.
+
+### 5.15 The phone
+
+Frequent.
+
+- **The composer stays above the keyboard,** following `visualViewport`, with safe-area padding.
+- **Sheets.**
+  - They rise with `--spring-slow` and stop at 40% and 90% of the height.
+  - They follow the finger and close on a flick.
+  - Dragging starts only when the sheet's content is at its top.
+- **Targets.** They are at least 44px. Primary actions sit in the bottom third, and a hold button's label stays visible above the finger.
+- **Inputs** use 16px text on a phone, a size of their own since `--text-base` is 15px, so the page doesn't zoom on focus.
+- **Reduced motion:** sheets fade in place.
+
+### 5.16 Numbers and trends
+
+Frequent; crossing a limit is a moment.
+
+- **Changing digits** roll with `--spring-fast`, at most once a second, in Geist Mono with tabular figures.
+- **A sparkline** is 24px tall, a 1.5px `--accent` line, with a dot on its last point. It draws once (`--spring-slow`), then gains points.
+- **Crossing 90% of a free tier** (#269), such as R2's 10 GB or Browser Run's 10 hours a month:
+  - the card's border and icon turn `--warm`, and its text, in `--fg`, says so;
+  - it joins the count of 5.9;
+  - it pops once (`--spring-pop`);
+  - it offers to show what used it. #269 sets no spend limit, so turning a feature off stays in that feature's own setting.
+- **Reduced motion:** values change with a fade, and the line appears whole.
+
+### 5.17 The first run
+
+Moment.
+
+- **Comfort comes first.** Before anything else, one step sets motion (full or less), text size and contrast. That is where the less-motion switch of rule 10 lives. The step can be reopened in settings.
+- **The first agent.**
+  - Until it exists, the empty state says in one sentence why the roster is empty, and offers one button.
+  - When it is created, its avatar enters its slot with `--spring-pop`, and the empty block collapses with `--spring-moment`.
+- **Channels and secrets** are asked at the step that needs them, not up front.
+- **Reduced motion:** fades.
+
+### 5.18 Finished work folds into its receipt
+
+Moment.
+
+- **When a conversation or task finishes,** its detail folds into a summary in one movement: height, and a vertical scale to 0.98, with `--spring-moment`.
+- **The summary** lists the real vault paths the work used, as links.
+- **Reduced motion:** a fade.
 
 ## 6. Implementation notes
 
@@ -319,13 +487,15 @@ Moment grammar: the roster is where Kelpie spends its novelty.
 A pull request that changes the interface answers yes to each line:
 
 - [ ] Every color, size, radius, duration and easing comes from a token, unless a pattern in section 5 sets the number.
-- [ ] Only `transform`, `opacity` and color animate, apart from the contained sizes in 5.1, 5.2 and 5.3; no `transition: all`.
+- [ ] Only `transform`, `opacity` and color animate, apart from the contained sizes in 5.1, 5.2, 5.3, 5.9, 5.17 and 5.18 and the mask reveal in 5.7; no `transition: all`.
 - [ ] Keyboard-triggered actions don't animate their way in or out; progress and results still show.
 - [ ] Loops stop within 5 s, and the steady state reads without motion.
 - [ ] Exits are faster than entries, and staggers stop at 300 ms.
 - [ ] Interrupting an animation leaves no element stuck halfway.
 - [ ] Under reduced motion, every movement becomes a short fade, and no feedback disappears.
-- [ ] New text meets the contrast in section 1, in both themes, and controls draw their boundary in `--muted`.
+- [ ] New text meets the contrast in section 1, in both themes and in higher contrast, and controls draw their boundary in `--muted`.
+- [ ] `--warm` appears only where the owner must act, and a toast only where 5.13 allows one.
+- [ ] Copy follows the voice in section 2.
 
 ## 8. Designing what isn't here yet
 
@@ -349,6 +519,13 @@ A component, screen, state or interaction this document doesn't define is design
    - Give a moment its signature; keep a frequent pattern quick and quiet.
 5. **Show it live when motion is the point.** A lab page lets the owner judge an animation before it is built.
 6. **Add it to section 5** in the same pull request as the code, with its sources in section 9.
+
+**Already rejected.** Research turned these down; a new design doesn't bring them back without a new decision:
+- glass or blur over content;
+- glows or ambient motion that loop;
+- a character that wanders the screen;
+- playful verbs in place of real phase names;
+- a roster that regroups itself by state.
 
 ## 9. Sources
 
@@ -374,3 +551,8 @@ The rules above cite these. The first set was read on 2026-10-15; a source added
   - [WCAG 2.2.2 Pause, Stop, Hide](https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html);
   - [WCAG 2.3.3 Animation from Interactions](https://www.w3.org/WAI/WCAG22/Understanding/animation-from-interactions.html);
   - [web.dev on prefers-reduced-motion](https://web.dev/articles/prefers-reduced-motion).
+- The first review (ADR-0044), read on 2026-10-15; the findings and the reference-project check are on #358:
+  - [the Webby Awards 2026 winners](https://www.webbyawards.com/press/press-releases/30th-annual-webby-awards-announce-2026-winners/), and [Claude Code's agent view](https://code.claude.com/docs/en/agent-view), the source of the state glyphs and of counting what waits in the tab title;
+  - Apple Design Award winners: [Crouton](https://developer.apple.com/news/?id=9x75y43e), [Pine Hearts](https://developer.apple.com/news/?id=p9gxlwd0), [Guitar Wiz](https://developer.apple.com/news/?id=5zi5a25j), [grug](https://developer.apple.com/news/?id=ux44ymcr), [Tide Guide](https://developer.apple.com/news/?id=4r9b23wx);
+  - [iA Writer's Authorship](https://ia.net/writer/support/editor/authorship), [Moonlock at Red Dot 2026](https://macpaw.com/news/moonlock-wins-red-dot-award-2026), [Google at Fast Company 2026](https://fastcompanybrasil.com/design/google-adidas-e-nordeste-vencem-premio-de-design-da-fast-company/);
+  - craft: [Primer on loading](https://primer.style/product/ui-patterns/loading) and [degraded experiences](https://primer.style/product/ui-patterns/degraded-experiences), [Sonner](https://emilkowal.ski/ui/building-a-toast-component), [Vaul](https://emilkowal.ski/ui/building-a-drawer-component), [Atlassian on drag and drop](https://atlassian.design/components/pragmatic-drag-and-drop/design-guidelines), [MUI X Chat on scrolling](https://mui.com/x/react-chat/behavior/scrolling), [NumberFlow](https://number-flow.barvian.me), [Chrome on View Transitions](https://developer.chrome.com/docs/web-platform/view-transitions/same-document).
