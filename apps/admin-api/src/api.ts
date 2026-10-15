@@ -12,6 +12,7 @@ import {
   type CommandResult,
   type ConfigCommands,
   isAgentId,
+  SETUP_AGENT_ID,
   type SetupEvent,
 } from "@kelpie/config";
 import {
@@ -204,14 +205,17 @@ async function handleForm(request: Request, pathname: string, deps: AdminDeps): 
     const body = await readBody(request);
     if (!body.ok) return answer(body.status, texts.tooLarge, texts.tooLarge.body);
     const fields = new URLSearchParams(body.text);
+    const { userId } = admission;
     // The runner's page names its field `runnerSecret`; channel-egress refuses it on any other form.
     const runnerSecret = fields.get("runnerSecret");
     if (runnerSecret !== null) {
-      return await submitRunnerForm(token, runnerSecret, deps.forms, locale);
+      // The setup conversation that sent the form learns the runner is connected (#328).
+      return await submitRunnerForm(token, runnerSecret, deps.forms, locale, ({ state, version }) =>
+        deps.setupDone(SETUP_AGENT_ID, { step: "runner_connected", userId, state, version }),
+      );
     }
     const botToken = fields.get("botToken") ?? "";
     // The conversation that sent the form learns the bot is connected (#206).
-    const { userId } = admission;
     return await submitForm(token, botToken, deps.forms, locale, (agentId, bot, registered) =>
       deps.setupDone(agentId, {
         step: "telegram_connected",

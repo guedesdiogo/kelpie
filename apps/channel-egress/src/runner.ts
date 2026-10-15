@@ -1,9 +1,7 @@
-import { RUNNER_PROTOCOL, type RunnerAnswered } from "@kelpie/channels";
+import { RUNNER_PROTOCOL, RUNNER_VERSION, type RunnerAnswered } from "@kelpie/channels";
 
 /** How long a health check waits for the runner. */
 const HEALTH_TIMEOUT_MS = 5_000;
-/** A version as the runner reports it, such as `0.1.0`; anything else isn't the runner's answer. */
-const VERSION = /^[0-9A-Za-z.+-]{1,64}$/;
 
 /**
  * The runner's secret: printable, without spaces, between 32 and 256 characters. `openssl rand -hex
@@ -54,7 +52,7 @@ function isHealth(value: unknown): value is { version: string; protocol: number 
   return (
     health?.ok === true &&
     typeof health.version === "string" &&
-    VERSION.test(health.version) &&
+    RUNNER_VERSION.test(health.version) &&
     Number.isInteger(health.protocol)
   );
 }

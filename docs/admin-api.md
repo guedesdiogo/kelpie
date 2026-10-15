@@ -293,7 +293,7 @@ Admin and the main agent can't be deleted, and the `Registry` refuses to remove 
   - `get_models` reads the instance's model settings, and `configure_models` replaces them;
   - `configure_agent` (its `model` included), `configure_models`, `set_main_agent`, `set_agent_chat` and `delete_agent` wait for the owner's confirmation (below);
   - `connect_telegram` opens a secure form ("Secure forms"), and `pair_telegram` leads to the pairing page ("Pairing"). Kelpie sends each link itself (below), and the owner's submitting that page is their yes (ADR-0026).
-  - `connect_runner` opens the VPS runner's secure form, whose link Kelpie sends as well, and `runner_status` reads the runner's state, as `describeRunner` does ([runner.md](runner.md)). The form's end isn't reported to the conversation, so the agent checks `runner_status` once the owner says it's done.
+  - `connect_runner` opens the VPS runner's secure form, whose link Kelpie sends as well, and `runner_status` reads the runner's state, as `describeRunner` does ([runner.md](runner.md)). When the runner accepts the secret, the conversation learns it, as for a bot's form ("Steps the owner finishes", #328).
 
   The identity, time zone and vault commands stay on this API. `conversation-runtime` binds no `Directory`, which would make it and `ingress` bind each other. Of `channel-egress`, it binds only `SetupForms`, which opens a form, reads the runner's state, which holds no secret, and disconnects a deleted agent's bot, which reads nothing back (`docs/secrets.md`).
 - **Confirmation.** A change to an agent's settings (`configure_agent`) waits for the owner's yes, gated in code:
@@ -320,10 +320,10 @@ Admin and the main agent can't be deleted, and the `Registry` refuses to remove 
   - Its one link is the admin API page. Any other address in it shows as text.
   - The model learns only that the link was sent. History, later requests and the outbox's inspection never hold the link.
   - As with a confirmation, the bubble doesn't come back once its turn has settled and the webchat reloads. If the owner says they didn't get it, the agent calls the tool again for a new link.
-- **Steps the owner finishes.** When the owner submits the secure form, or pairs by pressing Start in the bot, the conversation that sent the link learns it without being told (#206, ADR-0028):
-  - **The wait:** the conversation waits for the step while its link lasts, the form's 15 minutes or a day for pairing, with a few minutes' grace. Both the conversation and the agent's `AgentHost` keep the wait.
-  - **The report:** the admin API reports a stored token and `ingress` a redeemed pairing code, through conversation-runtime's `SetupEvents` entrypoint, which does nothing else. Each report is bounded and best effort, so the page or the webhook answers whatever happens to it.
-  - **The note:** each waiting conversation gets a note Kelpie writes in fixed words, "Kelpie, automatically (the owner didn't write this): …", naming the bot or the pairing. A conversation takes a report only for a step it waits for, and only once. The agent answers the note.
+- **Steps the owner finishes.** When the owner submits a secure form, the bot's or the runner's, or pairs by pressing Start in the bot, the conversation that sent the link learns it without being told (#206, #328, ADR-0028):
+  - **The wait:** the conversation waits for the step while its link lasts, the form's 15 minutes or a day for pairing, with a few minutes' grace. Both the conversation and the agent's `AgentHost` keep the wait. The runner is the instance's, and only the setup agent connects it, so the setup agent's `AgentHost` keeps its wait.
+  - **The report:** the admin API reports a stored token or runner secret to the `AgentHost` it already binds, and `ingress` a redeemed pairing code through conversation-runtime's `SetupEvents` entrypoint, which does nothing else. Each report is bounded and best effort, so the page or the webhook answers whatever happens to it.
+  - **The note:** each waiting conversation gets a note Kelpie writes in fixed words, "Kelpie, automatically (the owner didn't write this): …", naming the bot, the pairing, or the runner's version. A conversation takes a report only for a step it waits for, and only once. The agent answers the note.
   - **When the turn starts:**
     - while a turn runs, the note waits for that turn to end and doesn't interrupt it;
     - with the owner's messages waiting, it joins them;
@@ -332,6 +332,8 @@ Admin and the main agent can't be deleted, and the `Registry` refuses to remove 
   - **How the turn runs:** the note is authored as the owner who finished the step, so its turn can run the next step's tools. Confirmations still need the code or the button.
   - **What the note never counts as:** the owner's words. It confirms no code, allows no link, doesn't show in the webchat, stays out of session pages and recall, and doesn't change the conversation's language.
   - **A webhook that failed:** the note says Telegram couldn't be pointed at Kelpie. The agent tells the owner to run `registerTelegramWebhook` on this API, since it can't.
+  - **An outdated runner:** the note says the runner speaks another protocol version. The agent tells the owner to update it on the server.
+  - **A refused secret, or a runner that can't be reached:** nothing is stored and nothing is reported. The form page says why and stays open.
 - **Secrets.** The bot's token goes into the secure form ("Secure forms"), never into the chat. If the owner pastes one in the chat anyway, it stays in the conversation: revoke it in BotFather and make a new one. The runner's secret goes into its own form the same way. One pasted in the chat is revoked by writing a new secret to its file on the server ([runner.md](runner.md), "Rotating the secret").
 - **Its context** is any agent's: the vault's persona and rules, recall, and the memory tools. A note in the vault could steer it toward a change that runs directly, such as creating or renaming an agent. The confirmed changes still need the owner's yes: the code or the button, or their own submission on the form or the pairing page.
 

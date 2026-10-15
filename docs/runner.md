@@ -120,7 +120,7 @@ Cloudflare's [Workers VPC](https://developers.cloudflare.com/workers-vpc/) is in
 
    If that deploy fails on `channel-egress`, every later one will too. Delete the variable (`gh variable delete RUNNER_VPC_SERVICE_ID --env production`), then check the id against `wrangler vpc service list`, and check that the deploy's API token may bind a VPC Service.
 3. **Give Kelpie the secret.** Ask the setup agent, in the webchat, to connect the runner: Kelpie sends a one-time link to a secure form. Open it, and paste the content of `~/.config/kelpie-runner/secret`, which `cat` shows on the server. `channel-egress` checks it with the runner's `/health` before storing it. The admin API's `connectRunner` command answers the same form's path (`docs/admin-api.md`).
-4. **Check it:** ask the setup agent how the runner is, or use the `describeRunner` command. It answers `ready`, with the runner's version, when everything works.
+4. **Kelpie tells you.** Once the runner accepts the secret, the setup agent says in the same conversation that the runner is connected, and its version, without you telling it (#328). Later, ask it how the runner is, or use the `describeRunner` command: it answers `ready`, with the runner's version, when everything works.
 
 A rollback to a build deployed before the variable was set leaves `channel-egress` without the binding until the next deploy. So does a deploy of `channel-egress` by hand (`docs/deploy.md`).
 
