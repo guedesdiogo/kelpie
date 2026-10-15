@@ -805,6 +805,28 @@ describe("AgentHost and subagents (#290)", () => {
     });
   });
 
+  it("names no model in a subagent's prompt when its clamped trio can't be described (#344)", async () => {
+    replaceIdentitySourcesForTesting({
+      agent: async (id) =>
+        id === "unread-main"
+          ? { name: id, role: "main", owner: null }
+          : { name: id, role: "subagent", owner: "unread-main" },
+      describe: async (model) => {
+        // The clamped trio is the only one pinned to a provider: llm-gateway fails on it.
+        if (model.provider !== undefined) throw new Error("down");
+        return { provider: "anthropic", tier: model.conversation?.tier ?? "cheap", route: [] };
+      },
+      specialists: async () => [],
+    });
+    await host("unread-main").configure({ model: { conversation: { tier: "medium" } } }, owner);
+    expect(await host("unread-sub").bindCreator("unread-main")).toEqual({ ok: true });
+    await host("unread-sub").configure({ model: { conversation: { tier: "frontier" } } }, owner);
+    const { settings } = await host("unread-sub").turnConfig();
+    expect(settings.model.conversation).toEqual({ tier: "medium" });
+    // Not its own frontier tier, which it doesn't run on.
+    expect(settings.systemPrompt).not.toContain("You run on");
+  });
+
   it("gives a subagent's calls outside a turn its creator's limits too (#344)", async () => {
     roster({ "own-maker": { role: "main" } });
     await host("own-maker").configure(

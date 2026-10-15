@@ -206,7 +206,9 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   /**
    * The model settings the agent's calls resolve from (#344): its stored ones, a tier set before
    * #286 included, so an area it leaves unset follows the instance's default rather than `cheap`.
-   * A subagent's are held to its creator's, as each of its turns' are.
+   * A subagent's are held to its creator's, as each of its turns' are. Only a pinned creator
+   * counts here, without the Registry's role that a turn also reads: every subagent is pinned
+   * before the Registry lists it.
    */
   async ownModel(): Promise<ModelSettings> {
     const model = agentModel(this.#stored());
@@ -415,8 +417,6 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
           tools: settings.tools,
         };
       })();
-      // The race's loser must not reject unhandled.
-      work.catch(() => undefined);
       const limits = await Promise.race([
         work,
         new Promise<never>((_, reject) => {
