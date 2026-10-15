@@ -1,10 +1,11 @@
+import { evictDurableObject, runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { REGISTRY_NAME } from "@kelpie/config";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { replaceTaskRunnerForTesting } from "../src/agent-host/agent-host.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import { taskTools } from "../src/task-tools.ts";
-import { type FakeWorld, fakeWorld, refuse, reply, toolCalls } from "./fakes.ts";
+import { type FakeWorld, fakeWorld, refuse, reply, toolCalls, toolCallsAfter } from "./fakes.ts";
 
 // The mandatory handoff (ADR-0036 §4, #287): the main agent's prompt lists the specialists it owns
 // with their remits, and Kelpie, not the model, announces each task the main agent hands one.
@@ -117,6 +118,70 @@ describe("the mandatory handoff (#287)", () => {
     await main.flush();
     await vi.waitFor(() =>
       expect(world.sent).toEqual(["Here.", "Kelpie handed a task to Sales (hf-sales).", "Again."]),
+    );
+  });
+  it("follows a route's notice when the turn fell back, and isn't said again", async () => {
+    const spent = {
+      type: "fallback" as const,
+      failed: {
+        provider: "anthropic" as const,
+        model: "claude-haiku-5-5",
+        code: "out_of_credits" as const,
+      },
+      next: { provider: "openai" as const, model: "gpt-6-luna" },
+    };
+    const world = use(
+      fakeWorld([
+        toolCallsAfter([spent], {
+          name: "create_task",
+          input: { agentId: "hf-sales", title: "Quote", body: "Padaria Silva." },
+        }),
+        reply("Sales is on it."),
+        reply("Next."),
+      ]),
+    );
+    const main = agent("kelpie:telegram:handoff-route");
+    await main.ingest(message("handoff-route", "m1", "Quote the Silva bakery."));
+    await main.flush();
+    await vi.waitFor(() =>
+      expect(world.sent).toEqual([
+        "Sales is on it.",
+        "Note: Anthropic (claude-haiku-5-5) ran out of credits, or reached its spend limit, so OpenAI (gpt-6-luna) answered.",
+        "Kelpie handed a task to Sales (hf-sales).",
+      ]),
+    );
+    await main.ingest(message("handoff-route", "m2", "Thanks."));
+    await main.flush();
+    await vi.waitFor(() => expect(world.sent.at(-1)).toBe("Next."));
+    expect(world.sent).toHaveLength(4);
+  });
+
+  it("isn't said again after an eviction cut its delivery short", async () => {
+    const world = use(fakeWorld([handOff("Resumed"), reply("Sales is on it."), reply("Next.")]));
+    // The notice's first send never completes: the eviction ends it, and recovery sends it again.
+    world.hangSends.add(1);
+    const main = agent("kelpie:telegram:handoff-evicted");
+    await main.ingest(message("handoff-evicted", "m1", "Quote the Silva bakery."));
+    await main.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Sales is on it."]));
+
+    await evictDurableObject(main);
+    expect(await runDurableObjectAlarm(main)).toBe(true);
+    await vi.waitFor(() =>
+      expect(world.sent).toEqual(["Sales is on it.", "Kelpie handed a task to Sales (hf-sales)."]),
+    );
+    await vi.waitFor(async () =>
+      expect(await main.turns()).toMatchObject([{ status: "delivered" }]),
+    );
+
+    await main.ingest(message("handoff-evicted", "m2", "Thanks."));
+    await main.flush();
+    await vi.waitFor(() =>
+      expect(world.sent).toEqual([
+        "Sales is on it.",
+        "Kelpie handed a task to Sales (hf-sales).",
+        "Next.",
+      ]),
     );
   });
 });
