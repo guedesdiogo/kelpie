@@ -36,7 +36,7 @@ import { memoryTools } from "./memory-tools.ts";
 import { setupTools } from "./setup-agent.ts";
 import { subagentTools } from "./subagent-tools.ts";
 import { taskTools } from "./task-tools.ts";
-import type { ToolProvider } from "./tools.ts";
+import type { ToolActivity, ToolProvider } from "./tools.ts";
 
 /** One model call: its events, the router's fallbacks among them, and a way to stop it. */
 export interface ModelCall {
@@ -62,7 +62,9 @@ export interface ConversationPorts {
    * link in the bubble the channel may preview (#130); without it, none is. `links` makes the
    * bubble a formatted reply that may link those URLs (#188); without it, the text goes as typed.
    * `confirmation` makes it a confirmation's notice with a Confirm button, where the channel has
-   * one (#186): the webchat; channel-egress never gets it.
+   * one (#186): the webchat; channel-egress never gets it. `failure` marks the notice of a turn
+   * no route answered, which the webchat's mascot shows as an error (ADR-0045 §6); channel-egress
+   * never gets it either.
    */
   send(
     agentId: string,
@@ -73,6 +75,7 @@ export interface ConversationPorts {
       previewUrl?: string;
       links?: readonly string[];
       confirmation?: number;
+      failure?: true;
     },
   ): Promise<SendOutcome>;
   /**
@@ -88,7 +91,13 @@ export interface ConversationPorts {
    * Shows the turn's step, on channels whose capabilities say they can (the webchat); the others
    * keep "typing" up instead. A courtesy, like "typing".
    */
-  status(agentId: string, destination: Destination, step: TurnStep, label?: string): Promise<void>;
+  status(
+    agentId: string,
+    destination: Destination,
+    step: TurnStep,
+    label?: string,
+    activity?: ToolActivity,
+  ): Promise<void>;
   /**
    * Writes memory files to the vault through the Context Store (ADR-0020 §3). A refusal is a value;
    * a store that is unreachable, or doesn't answer in time, throws.
@@ -288,8 +297,9 @@ function productionPorts(env: Env): ConversationPorts {
     ],
     awaitSetup: (agentId, conversation, step, until) =>
       withTimeout(agentHost(agentId).awaitSetup(conversation, step, until), AWAIT_SETUP_TIMEOUT_MS),
-    // A Confirm button is the webchat's alone (#186): channel-egress takes only what it sends.
-    send: (agentId, destination, text, { confirmation: _button, ...options }) =>
+    // A Confirm button and a failure's mark are the webchat's alone (#186, ADR-0045):
+    // channel-egress takes only what it sends.
+    send: (agentId, destination, text, { confirmation: _button, failure: _failure, ...options }) =>
       egress.send(agentId, destination, text, options),
     remember: (agentId, changes, summary) =>
       withTimeout(contextStore.write(agentId, changes, summary), REMEMBER_TIMEOUT_MS),

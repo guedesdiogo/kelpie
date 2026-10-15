@@ -247,8 +247,16 @@ export interface Tool {
    * language (#187), or one text for all.
    */
   label: string | Localized;
+  /**
+   * What the agent's mascot does while the tool runs (ADR-0045 §10): the object it holds. A tool
+   * without one shows thinking.
+   */
+  activity?: ToolActivity;
   run(input: unknown, context: ToolContext): Promise<ToolOutcome>;
 }
+
+/** The work a tool does, as the webchat's mascot shows it. */
+export type ToolActivity = "search" | "vault" | "code" | "calendar" | "email";
 
 export interface ToolProvider {
   /**

@@ -95,6 +95,8 @@ describe("memory tools", () => {
       "pt-BR": "Lendo uma nota",
       es: "Leyendo una nota",
     });
+    // Each reads or writes the vault: the mascot holds paper and a pencil (ADR-0045 §10).
+    expect([...tools.values()].map((tool) => tool.activity)).toEqual(["vault", "vault", "vault"]);
     // The same specs every time: a turn keys its tools by them.
     expect(
       JSON.stringify([...(await toolsOf(fakeStore().store)).values()].map((t) => t.spec)),
