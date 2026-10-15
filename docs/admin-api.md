@@ -292,6 +292,7 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
 - **How many:** three live per creator at most, and ten made a day; past either, a new one is refused. Its soul and skills together hold at most 24,000 characters.
 - **What pins it:** its own `AgentHost` records its creator, so it stays a subagent whatever the Registry answers.
 - **How it ends:** it lives until its creator deletes it with `delete_subagent`, or the owner through Admin, and deleting its creator deletes it too. What it already reported reached its creator as Kelpie's news; a task it hadn't finished goes with it.
+- **Kelpie announces them** (ADR-0036 §6, #342). After the reply, Kelpie names each subagent created or deleted, by name and id, in the conversation's language: "Kelpie created the subagent Scout (kelpie-sub-a1b2c3)." Like the handoff notice, the text is Kelpie's own, so the model can't change or omit it, and a turn that sends no reply leaves it for the next one.
 - **The skill:** every agent with `spawn` gets the built-in `create-subagent` skill in its prompt. It covers when a subagent is worth it, how to brief one, and to delete it when the demand ends.
 
 `configure_agent` also takes `spawn`, a one-line `remit`, and `tools`, the tools an agent may use by name, or `null` for all it is given. Each change waits for the owner's confirmation.

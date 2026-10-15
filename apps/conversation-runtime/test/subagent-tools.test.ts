@@ -65,6 +65,9 @@ function world({
   return { provider: subagentTools(ports), calls, configured };
 }
 
+/** What the tools had Kelpie announce, as `kind id name` (#342). */
+const announced: string[] = [];
+
 const context = (fields: Partial<ToolContext> = {}): ToolContext => ({
   locale: "en",
   actor: { userId: "u-owner", role: "owner", via: "agent:kelpie" },
@@ -76,7 +79,11 @@ const context = (fields: Partial<ToolContext> = {}): ToolContext => ({
   signal: new AbortController().signal,
   confirm: async () => false,
   sendLink: () => undefined,
-  handOff: () => undefined,
+  announce: (one) => {
+    announced.push(
+      `${one.kind} ${one.agentId.startsWith("kelpie-sub-") && one.kind === "created" ? "sub" : one.agentId} ${one.name}`,
+    );
+  },
   ...fields,
 });
 
@@ -99,6 +106,7 @@ describe("the subagent tools (#290)", () => {
 
   it("create a subagent on its creator's route and limits, with only a subagent's tools", async () => {
     const { provider, calls, configured } = world();
+    announced.length = 0;
     const created = await (await tool(provider, "create_subagent")).run(
       { ...brief, skills: [{ name: "Fares", instructions: "Compare three." }], tier: "cheap" },
       context(),
@@ -106,6 +114,8 @@ describe("the subagent tools (#290)", () => {
     expect(created.output).toMatch(/^Created the subagent kelpie-sub-[0-9a-f]{6}, named "Scout"\./);
     // Pinned first, so the Registry never lists it without its limits (#344).
     expect(calls).toEqual(["bind sub to kelpie", "add Scout by kelpie"]);
+    // Kelpie, not the model, tells the owner it exists (#342).
+    expect(announced).toEqual(["created sub Scout"]);
     expect(configured).toEqual([
       {
         systemPrompt: "You find flights.",
@@ -199,6 +209,7 @@ describe("the subagent tools (#290)", () => {
       { id: "sales", name: "Sales", role: "specialist", owner: "kelpie", chat: true },
     ];
     const { provider, calls } = world({ live });
+    announced.length = 0;
     const remove = await tool(provider, "delete_subagent");
     expect(await remove.run({ id: "kelpie-sub-aaaaaa" }, context())).toEqual({
       output:
@@ -208,6 +219,8 @@ describe("the subagent tools (#290)", () => {
       expect(await remove.run({ id }, context()), String(id)).toMatchObject({ isError: true });
     }
     expect(calls).toEqual(["remove kelpie-sub-aaaaaa"]);
+    // Only the deletion that happened is announced (#342).
+    expect(announced).toEqual(["deleted kelpie-sub-aaaaaa Scout"]);
   });
 
   it("default a subagent to the cheapest tier and a low effort, and cap its brief", async () => {

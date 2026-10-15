@@ -1,4 +1,4 @@
-import { evictDurableObject, runDurableObjectAlarm } from "cloudflare:test";
+import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { REGISTRY_NAME } from "@kelpie/config";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -214,6 +214,25 @@ describe("the mandatory handoff (#287)", () => {
         "Kelpie handed a task to Sales (hf-sales).",
         "Next.",
       ]),
+    );
+  });
+  it("announces a handoff kept by the release before #342, which had no kind", async () => {
+    const world = use(fakeWorld([reply("Hello."), reply("Hi.")]));
+    const main = agent("kelpie:telegram:handoff-legacy");
+    await main.ingest(message("handoff-legacy", "m1", "Hello?"));
+    await main.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Hello."]));
+    // A handoff as #287 kept it, left unsaid when the deploy came.
+    await runInDurableObject(main, (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO state (key, value) VALUES ('handoffs', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        JSON.stringify([{ taskId: "legacy-1", agentId: "hf-sales", name: "Sales" }]),
+      );
+    });
+    await main.ingest(message("handoff-legacy", "m2", "Anything?"));
+    await main.flush();
+    await vi.waitFor(() =>
+      expect(world.sent).toEqual(["Hello.", "Hi.", "Kelpie handed a task to Sales (hf-sales)."]),
     );
   });
 });
