@@ -26,10 +26,12 @@ export interface WebchatDeps {
 
 /**
  * The page holds no secret, but it renders model output, so it may run only its own code. Some
- * Safari versions don't match 'self' to wss:, so the socket's origin is named.
+ * Safari versions don't match 'self' to wss:, so the socket's origin is named. The mascot's fur
+ * is painted in the page and shown as blob: images (ADR-0045 §8); model output never makes one,
+ * since it reaches the page only as text.
  */
 const pageHeaders = (host: string) => ({
-  "content-security-policy": `default-src 'self'; connect-src 'self' wss://${host}; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+  "content-security-policy": `default-src 'self'; connect-src 'self' wss://${host}; img-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
   "cache-control": "no-store",

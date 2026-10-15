@@ -2,7 +2,18 @@
 // the socket's upgrade carries the same login. Model output is never parsed as HTML: text goes
 // through text nodes, and a reply's formatting (#188) comes as blocks the runtime read, built here
 // with createElement. Its links are the ones the runtime allowed, and only web links. A Confirm
-// button shows only on a confirmation's notice, which the runtime marks with its id (#186).
+// button shows only on a confirmation's notice, which the runtime marks with its id (#186). The
+// header shows the agent's mascot, whose state follows the conversation's (ADR-0045).
+
+import { Mascot, ownerTyping, setMotion } from "./mascot.js";
+import {
+  APPROVED_MS,
+  effectiveMotion,
+  IDLE,
+  MOTIONS,
+  NO_RESPONSE_MS,
+  presenceAfter,
+} from "./mascot-states.js";
 
 const agent = new URLSearchParams(location.search).get("agent") ?? "";
 
@@ -26,6 +37,10 @@ const TEXTS = {
     cantConnect: "Can't connect. If your login expired, reload the page.",
     reconnecting: "Reconnecting…",
     noAgent: "Open this page with ?agent=<agent id>",
+    motionAsk: "Mascots can move in place: they blink, breathe and hop. How should they move?",
+    motion: "Mascot",
+    motions: { alive: "Alive", states: "States only", still: "Still" },
+    reducedMotion: "Still, because your system asks for reduced motion",
   },
   "pt-BR": {
     connecting: "Conectando…",
@@ -45,6 +60,11 @@ const TEXTS = {
     cantConnect: "Não foi possível conectar. Se o seu login expirou, recarregue a página.",
     reconnecting: "Reconectando…",
     noAgent: "Abra esta página com ?agent=<id do agente>",
+    motionAsk:
+      "Os mascotes podem se mexer sem sair do lugar: piscam, respiram e dão pulinhos. Como eles devem se mexer?",
+    motion: "Mascote",
+    motions: { alive: "Vivos", states: "Só estados", still: "Parados" },
+    reducedMotion: "Parado, porque o seu sistema pede menos movimento",
   },
   es: {
     connecting: "Conectando…",
@@ -68,6 +88,11 @@ const TEXTS = {
     cantConnect: "No se puede conectar. Si tu sesión expiró, recarga la página.",
     reconnecting: "Reconectando…",
     noAgent: "Abre esta página con ?agent=<id del agente>",
+    motionAsk:
+      "Las mascotas pueden moverse sin salir de su lugar: parpadean, respiran y saltan. ¿Cómo deben moverse?",
+    motion: "Mascota",
+    motions: { alive: "Vivas", states: "Solo estados", still: "Quietas" },
+    reducedMotion: "Quieta, porque tu sistema pide menos movimiento",
   },
 };
 
@@ -84,6 +109,10 @@ const status = document.getElementById("status");
 const form = document.getElementById("composer");
 const input = document.getElementById("text");
 const pause = document.getElementById("pause");
+const mascotHost = document.getElementById("mascot");
+const motionAsk = document.getElementById("motion-ask");
+const motionLabel = document.getElementById("motion-label");
+const motionSelect = document.getElementById("motion");
 
 /** Messages sent but not yet accepted, by id, so a reconnect resends them. */
 const unconfirmed = new Map();
@@ -245,8 +274,95 @@ function setActivity(text, shownMs = TYPING_SHOWN_MS) {
   typing.hidden = text === null;
   if (text !== null) {
     typing.textContent = text;
-    typingTimer = setTimeout(() => setActivity(null), shownMs);
+    typingTimer = setTimeout(() => {
+      setActivity(null);
+      present({ type: "status", status: "idle" });
+    }, shownMs);
   }
+}
+
+// The mascot (ADR-0045): it shows once the conversation names it, and its state follows what the
+// page shows. The motion setting is this browser's; until the owner picks one, it stays still.
+
+/** A notice waits for the owner's press until it expires (ADR-0026 §3). */
+const CONFIRMATION_MS = 10 * 60_000;
+const MOTION_KEY = "kelpie.mascotMotion";
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+let mascot = null;
+let presence = IDLE;
+/** What arrived during the approval's pose, shown when it ends. */
+let afterApproval = null;
+let presenceTimer = null;
+
+function present(event) {
+  if (presence.state === "approved") {
+    afterApproval = presenceAfter(afterApproval, event);
+    return;
+  }
+  showPresence(presenceAfter(presence, event));
+}
+
+function showPresence(next) {
+  clearTimeout(presenceTimer);
+  presence = next;
+  mascot?.setState(presence.state, { activity: presence.activity });
+  if (presence.state === "approved") {
+    afterApproval = IDLE;
+    presenceTimer = setTimeout(() => showPresence(afterApproval), APPROVED_MS);
+  } else if (presence.state === "working" && !presence.tool) {
+    // Nothing from the model for a minute, outside a tool call: no response (ADR-0044).
+    presenceTimer = setTimeout(
+      () => showPresence({ ...presence, state: "noResponse" }),
+      NO_RESPONSE_MS,
+    );
+  } else if (presence.state === "waiting") {
+    presenceTimer = setTimeout(() => showPresence(IDLE), CONFIRMATION_MS);
+  }
+}
+
+function showMascot(config) {
+  if (mascot) {
+    mascot.change(config);
+    return;
+  }
+  mascot = new Mascot(mascotHost, { mascot: config, px: 48, mode: "header", quietable: true });
+  mascot.setState(presence.state, { activity: presence.activity, instant: true });
+}
+
+function readMotion() {
+  try {
+    const stored = localStorage.getItem(MOTION_KEY);
+    return MOTIONS.includes(stored) ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Applies the setting. Reduced motion means Still and needs no question; otherwise, until the
+ * owner picks one, the page asks, and the mascot doesn't move before they answer.
+ */
+function applyMotion() {
+  const chosen = readMotion();
+  const reduced = reducedMotion.matches;
+  motionAsk.hidden = chosen !== null || reduced;
+  motionLabel.hidden = chosen === null && !reduced;
+  motionSelect.disabled = reduced;
+  motionSelect.value = effectiveMotion(chosen, reduced);
+  motionLabel.title = reduced ? T.reducedMotion : "";
+  setMotion(chosen === null ? "still" : effectiveMotion(chosen, reduced));
+}
+
+function chooseMotion(value) {
+  try {
+    localStorage.setItem(MOTION_KEY, value);
+  } catch {
+    // Without storage the choice lasts until the page closes.
+  }
+  setMotion(effectiveMotion(value, reducedMotion.matches));
+  motionAsk.hidden = true;
+  motionLabel.hidden = false;
+  motionSelect.value = value;
 }
 
 function setTyping(active) {
@@ -265,6 +381,7 @@ function send(frame) {
 function receive(frame) {
   switch (frame.type) {
     case "history":
+      present(frame);
       setPaused(frame.paused);
       list.replaceChildren();
       for (const message of frame.messages) {
@@ -278,22 +395,31 @@ function receive(frame) {
         send({ type: "message", id, text });
       }
       break;
+    case "agent":
+      if (frame.mascot) showMascot(frame.mascot);
+      break;
     case "bubble":
       setTyping(false);
       show("assistant", frame.text, undefined, frame.blocks, frame.confirmation);
+      present(frame);
+      if (presence.state === "idle") mascot?.arrive();
       break;
     case "confirmation":
       if (Number.isSafeInteger(frame.id)) pressed(frame.id, frame.status);
+      present(frame);
       break;
     case "typing":
       setTyping(frame.active);
+      present(frame);
       break;
     case "status":
       setStep(frame.status, typeof frame.label === "string" ? frame.label : undefined);
+      present(frame);
       break;
     case "paused":
       setTyping(false);
       setPaused(true);
+      present(frame);
       break;
     case "resumed":
       setPaused(false);
@@ -354,6 +480,8 @@ form.addEventListener("submit", (event) => {
   unconfirmed.set(id, text);
   show("user", text, id);
   send({ type: "message", id, text });
+  present({ type: "sent" });
+  mascot?.touch();
   // The next message ends a pause.
   if (paused) setPaused(false);
   send({ type: "typing", active: false });
@@ -373,6 +501,9 @@ input.addEventListener("keydown", (event) => {
 });
 
 input.addEventListener("input", () => {
+  // Reading comes first: while the owner types, the mascot only breathes and blinks.
+  ownerTyping();
+  mascot?.watch();
   const now = Date.now();
   if (input.value.trim() && now - lastTypingSentAt >= TYPING_SENT_EVERY_MS) {
     lastTypingSentAt = now;
@@ -404,10 +535,23 @@ function translatePage() {
   form.querySelector('button[type="submit"]').textContent = T.send;
   pause.textContent = T.pause;
   pause.title = T.pauseTitle;
+  document.getElementById("motion-ask-text").textContent = T.motionAsk;
+  for (const button of motionAsk.querySelectorAll("button")) {
+    button.textContent = T.motions[button.dataset.motion];
+  }
+  motionLabel.querySelector("span").textContent = T.motion;
+  for (const option of motionSelect.options) option.textContent = T.motions[option.value];
 }
 
 translatePage();
 showVersion();
+applyMotion();
+reducedMotion.addEventListener("change", applyMotion);
+for (const button of motionAsk.querySelectorAll("button")) {
+  button.addEventListener("click", () => chooseMotion(button.dataset.motion));
+}
+motionSelect.addEventListener("change", () => chooseMotion(motionSelect.value));
+mascotHost.addEventListener("click", () => mascot?.pet());
 
 if (agent) {
   connect();

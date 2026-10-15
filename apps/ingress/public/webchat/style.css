@@ -11,12 +11,53 @@ body {
 }
 header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
+  gap: 0.75rem;
   padding: 0 1rem;
 }
 h1 {
   font-size: 1.25rem;
+}
+/* The agent's mascot (ADR-0045): its 48 px box is kept from the start, so nothing moves when it
+ * arrives, and everything it does happens inside it. */
+.agent {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.mascot-host {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  line-height: 0;
+}
+/* Asked before a mascot first moves, so the owner can keep it still (WCAG 2.2.2). */
+#motion-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin: 0 1rem 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  font-size: 0.875rem;
+}
+#motion-ask[hidden] {
+  display: none;
+}
+#motion-ask p {
+  margin: 0;
+  flex: 1 1 16rem;
+}
+#motion-ask .choices {
+  display: flex;
+  gap: 0.5rem;
+}
+#motion-ask button {
+  font: inherit;
+  padding: 0.25rem 0.75rem;
 }
 #status {
   font-size: 0.875rem;
@@ -132,9 +173,26 @@ textarea {
   resize: vertical;
 }
 footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
   padding: 0 1rem 0.75rem;
   font-size: 0.75rem;
+}
+#version {
   opacity: 0.5;
+}
+footer label {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+footer label[hidden] {
+  display: none;
+}
+footer select {
+  font: inherit;
 }
 .visually-hidden {
   position: absolute;
