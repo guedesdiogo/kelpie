@@ -119,7 +119,7 @@ describe("the main agent's tools (#289)", () => {
     role = "specialist";
     const refused = await tool.run({ id: "ana", model: {} }, contextOf(true).context);
     expect(refused).toMatchObject({ isError: true });
-    expect(refused.output).toContain("isn't the main agent");
+    expect(refused.output).toContain("isn't Master any more");
     expect(calls).toEqual([]);
   });
 

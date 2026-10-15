@@ -80,7 +80,7 @@ export function mainAgentTools(
       }
       // Again when it runs: a turn that listed the tool may outlive the agent's role.
       if ((await roleOf(context.agentId)) !== "main") {
-        return failed("This agent isn't the main agent any more, so it can't change models.");
+        return failed("This agent isn't Master any more, so it can't change models.");
       }
       const { id, model } = (typeof input === "object" && input !== null ? input : {}) as {
         id?: unknown;
