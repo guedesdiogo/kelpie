@@ -2,6 +2,7 @@
 // (#114) and Dream's steps (#112).
 import {
   fromNdjsonStream,
+  LlmError,
   type LlmEvent,
   type ModelSelection,
   type RoutedRequest,
@@ -63,13 +64,27 @@ async function finished(generation: Generation): Promise<{ text: string; usage: 
   };
 }
 
+/** A model call that hadn't finished in its time, and was cancelled. */
+export class ModelTimeoutError extends Error {
+  override readonly name = "ModelTimeoutError";
+}
+
+/**
+ * Whether a call's failure may clear on another try (#112): a model error the gateway marks
+ * retryable (a rate limit, a provider's 5xx, a dropped connection), or a call that ran out of time.
+ * An answer cut short or refused is no failure of that kind: the same prompt would get it again.
+ */
+export function transient(error: unknown): boolean {
+  return (error instanceof LlmError && error.retryable) || error instanceof ModelTimeoutError;
+}
+
 /** `call`'s answer, or a rejection after `ms`, when `onLate` stops it. */
 async function within<T>(call: Promise<T>, ms: number, onLate: () => void): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
       onLate();
-      reject(new Error(`no answer after ${ms} ms`));
+      reject(new ModelTimeoutError(`no answer after ${ms} ms`));
     }, ms);
   });
   try {

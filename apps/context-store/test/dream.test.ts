@@ -1,6 +1,6 @@
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { type LlmEvent, type RoutedRequest, toNdjsonStream } from "@kelpie/llm";
+import { LlmError, type LlmEvent, type RoutedRequest, toNdjsonStream } from "@kelpie/llm";
 import {
   DREAM_PAGE_PATH,
   LIFECYCLE_REPORT_PATH,
@@ -15,13 +15,14 @@ import {
 } from "@kelpie/memory";
 import type { CommitOutcome, CommitRequest } from "@kelpie/vault";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { proposeAbstract } from "../src/dream.ts";
 import {
   type MemoryGateway,
   replaceBackendForTesting,
   replaceGatewayForTesting,
 } from "../src/index.ts";
+import { complete, ModelTimeoutError, transient } from "../src/model.ts";
 
 describe("proposeAbstract", () => {
   it("asks for the memory area's model, with the note as data, and returns what it used", async () => {
@@ -63,7 +64,12 @@ const vault = (name: string) => env.VAULT.getByName(name);
 const USAGE = [{ model: "m", inputUncached: 100, cacheRead: 0, cacheWrite: 0, output: 20 }];
 
 /** A gateway whose model answers each call with the next of `answers`, or fails. */
-function fakeModel(answers: (string | Error)[]) {
+/** An answer the model cut at its output budget. */
+interface Cut {
+  cut: string;
+}
+
+function fakeModel(answers: (string | Error | Cut)[]) {
   const requests: { selection: unknown; request: RoutedRequest }[] = [];
   const gateway: MemoryGateway = {
     async embed() {
@@ -77,10 +83,14 @@ function fakeModel(answers: (string | Error)[]) {
       const answer = answers.shift() ?? new Error("no answer left");
       async function* events(): AsyncIterable<LlmEvent> {
         if (answer instanceof Error) throw answer;
+        const cut = typeof answer === "object";
         yield {
           type: "finish",
-          reason: "stop",
-          message: { role: "assistant", parts: [{ type: "text", text: answer }] },
+          reason: cut ? "length" : "stop",
+          message: {
+            role: "assistant",
+            parts: [{ type: "text", text: cut ? answer.cut : answer }],
+          },
           usage: USAGE,
         };
       }
@@ -386,6 +396,88 @@ describe("Vault Dream", () => {
     await quiet(stub);
     await runDurableObjectAlarm(stub);
     expect(requests).toHaveLength(2);
+  });
+
+  it("tries a version again on later runs after a failure another try may clear, three times in all (#112)", async () => {
+    const notes = await Promise.all(["A", "B"].map((title) => kelpieNote({ title })));
+    replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
+    const busy = () => new LlmError("busy", "rate_limited", true);
+    // Written together, A comes first by path: it fails three times, B once and then answers.
+    const requests = fakeModel([busy(), busy(), busy(), busy(), abstract("B.")]);
+    const log = vi.spyOn(console, "error");
+    try {
+      const stub = vault("dream-transient");
+      await stub.compile("kelpie");
+      await stub.write("kelpie", notes, "x");
+      await runDurableObjectAlarm(stub);
+      const proposals = () =>
+        rows(stub, "SELECT path, abstract FROM dream_proposals ORDER BY path");
+      // Each failure ends its run, and leaves the version for a later one.
+      for (let run = 1; run <= 2; run++) {
+        await quiet(stub);
+        await runDurableObjectAlarm(stub);
+        expect(requests).toHaveLength(run);
+        expect(await proposals()).toEqual([]);
+      }
+      // The third failure of that version is kept as no answer, so it can't fail every run.
+      await quiet(stub);
+      await runDurableObjectAlarm(stub);
+      expect(await proposals()).toEqual([
+        { path: memoryPath("global", "note", "A"), abstract: null },
+      ]);
+      // The other note fails once, then answers; nothing about it is counted after.
+      await quiet(stub);
+      await runDurableObjectAlarm(stub);
+      await quiet(stub);
+      await runDurableObjectAlarm(stub);
+      expect(requests).toHaveLength(5);
+      expect(await proposals()).toEqual([
+        { path: memoryPath("global", "note", "A"), abstract: null },
+        { path: memoryPath("global", "note", "B"), abstract: "B." },
+      ]);
+      expect(await rows(stub, "SELECT * FROM dream_failures")).toEqual([]);
+      // The run that got the answer ends at the next wake, with nothing left to ask.
+      await runDurableObjectAlarm(stub);
+      expect(await rows(stub, "SELECT outcome FROM dream_runs ORDER BY id")).toEqual([
+        { outcome: "failed" },
+        { outcome: "failed" },
+        { outcome: "failed" },
+        { outcome: "failed" },
+        { outcome: "done" },
+      ]);
+      // The log names the error's code and whether it may clear, never its text.
+      expect(log).toHaveBeenCalledWith("Vault: a Dream step failed", {
+        error: "LlmError",
+        code: "rate_limited",
+        retryable: true,
+      });
+      expect(JSON.stringify(log.mock.calls)).not.toContain("busy");
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("asks no version again after an answer cut short or a failure that won't clear (#112)", async () => {
+    const notes = await Promise.all(["A", "B"].map((title) => kelpieNote({ title })));
+    replaceBackendForTesting(new FakeVaultBackend({ "README.md": "# Vault" }));
+    const requests = fakeModel([
+      { cut: '{"abstract": "A.' },
+      new LlmError("bad key", "auth", false),
+    ]);
+    const stub = vault("dream-final");
+    await stub.compile("kelpie");
+    await stub.write("kelpie", notes, "x");
+    await runDurableObjectAlarm(stub);
+    for (let run = 0; run < 3; run++) {
+      await quiet(stub);
+      await runDurableObjectAlarm(stub);
+    }
+    expect(requests).toHaveLength(2);
+    expect(await rows(stub, "SELECT abstract FROM dream_proposals")).toEqual([
+      { abstract: null },
+      { abstract: null },
+    ]);
+    expect(await rows(stub, "SELECT * FROM dream_failures")).toEqual([]);
   });
 
   it("stays off when the owner turns it off, and takes only off or dry", async () => {
@@ -2015,5 +2107,26 @@ describe("Vault Dream", () => {
     await quiet(stub);
     for (let i = 0; i < 8; i++) await runDurableObjectAlarm(stub);
     expect(asked()).toBe(2);
+  });
+});
+
+describe("a model call's failure", () => {
+  it("may clear on another try when the gateway marks it so, or when the call ran out of time", async () => {
+    expect(transient(new LlmError("busy", "rate_limited", true))).toBe(true);
+    expect(transient(new LlmError("down", "server_error", true))).toBe(true);
+    expect(transient(new LlmError("bad key", "auth", false))).toBe(false);
+    expect(transient(new Error("no complete answer"))).toBe(false);
+    const late = complete(
+      {
+        async generate() {
+          return { events: async () => new ReadableStream<Uint8Array>(), cancel: async () => {} };
+        },
+      },
+      "cheap",
+      { system: "", messages: [], maxOutputTokens: 10 },
+      20,
+    );
+    await expect(late).rejects.toBeInstanceOf(ModelTimeoutError);
+    expect(transient(await late.catch((error: unknown) => error))).toBe(true);
   });
 });

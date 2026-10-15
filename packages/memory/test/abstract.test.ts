@@ -13,6 +13,18 @@ describe("abstractOf", () => {
     expect(abstractOf('```json\n{"abstract": " Café. "}\n```')).toBe("Café.");
   });
 
+  it("replaces secrets before it counts the 300 characters (#112)", () => {
+    const secret = "PW_SALT=abcd";
+    const answer = (text: string) => JSON.stringify({ abstract: text });
+    // 12 characters become [REDACTED:env_secret]'s 21: a line that fit before no longer does.
+    const near = `${"a".repeat(285)} ${secret}`;
+    expect(near.length).toBeLessThanOrEqual(300);
+    expect(abstractOf(answer(near))).toBeNull();
+    const short = abstractOf(answer(`Senha do cofre: ${secret}`));
+    expect(short).toContain("[REDACTED:");
+    expect(short).not.toContain("abcd");
+  });
+
   it.each([
     ["not JSON", "Conversa sobre café."],
     ["an array", '["Café."]'],

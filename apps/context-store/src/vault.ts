@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { EMBEDDING_INPUT_CHARS, type EmbedOutcome } from "@kelpie/llm";
+import { EMBEDDING_INPUT_CHARS, type EmbedOutcome, LlmError } from "@kelpie/llm";
 import {
   bodyWithoutHeading,
   coreBlock,
@@ -81,6 +81,7 @@ import type {
 } from "./contract.ts";
 import { proposeAbstract, proposeMerge, proposeSummary } from "./dream.ts";
 import { mergeOwnerWins } from "./merge.ts";
+import { transient } from "./model.ts";
 import {
   agentRulesPath,
   isAgentId,
@@ -201,6 +202,11 @@ const DREAM_QUIET_MS = 30 * 60_000;
 const DREAM_LOOKBACK_MS = 7 * 24 * 60 * 60_000;
 const DREAM_MAX_CALLS = 8;
 const DREAM_TIMEOUT_MS = 30_000;
+/**
+ * A step that fails in a way another try may clear is tried again on later runs, this many times
+ * in all for one version, then kept as no answer (#112).
+ */
+const DREAM_TRIES = 3;
 /** While a run is on, the alarm comes back this soon for its next step. */
 const DREAM_STEP_MS = 5_000;
 /** Ended runs are kept this long, with what they used. */
@@ -275,6 +281,7 @@ const PATH_TABLES = [
   "dream_merges",
   "dream_written",
   "dream_landing",
+  "dream_failures",
 ] as const;
 /** A held file's resolution, queued as the owner's text with a conflict settled (#114). */
 const RESOLVE_SUMMARY = "Resolve a pushed merge conflict, with the model";
@@ -342,6 +349,13 @@ CREATE TABLE IF NOT EXISTS dream_proposals (
   blob_sha TEXT NOT NULL,
   abstract TEXT,
   at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS dream_failures (
+  operation TEXT NOT NULL,
+  path TEXT NOT NULL,
+  key TEXT NOT NULL,
+  failures INTEGER NOT NULL,
+  PRIMARY KEY (operation, path)
 );
 CREATE TABLE IF NOT EXISTS dream_summaries (
   path TEXT PRIMARY KEY NOT NULL,
@@ -458,6 +472,16 @@ function backendFor(env: VaultEnv): VaultBackend | null {
 /** An error's name for the logs, never its message: GitHub's and memory's can quote a note (#132). */
 function errorName(error: unknown): string {
   return error instanceof Error ? error.name : "unknown error";
+}
+
+/**
+ * A failed model call for the logs (#112): its error's name and, for a model error, its code and
+ * whether another try may clear it. Never its message.
+ */
+function callFailure(error: unknown): { error: string; code?: string; retryable?: boolean } {
+  return error instanceof LlmError
+    ? { error: error.name, code: error.code, retryable: error.retryable }
+    : { error: errorName(error) };
 }
 
 interface QueuedRow extends Record<string, SqlStorageValue> {
@@ -934,23 +958,25 @@ export class Vault extends DurableObject<VaultEnv> {
       return true;
     }
     let proposed: Awaited<ReturnType<typeof proposeAbstract>> | null = null;
+    let failure: unknown;
     try {
       proposed = await proposeAbstract(gateway, note, DREAM_TIMEOUT_MS);
     } catch (error) {
-      console.error("Vault: a Dream step failed", errorName(error));
+      failure = error;
+      console.error("Vault: a Dream step failed", callFailure(error));
     }
     const used = proposed?.usage ?? [];
-    // A model wrote it: secrets go, as they go from what the agent saves.
-    const proposedAbstract =
-      proposed?.abstract == null ? null : sanitizeSecrets(proposed.abstract).text;
+    // `abstractOf` removed its secrets, as they go from what the agent saves.
+    const proposedAbstract = proposed?.abstract ?? null;
     const usage = [...(JSON.parse(run.usage) as unknown[]), ...used];
     this.ctx.storage.transactionSync(() => {
       // Kept with the version it was made from: a later version is a note to propose for again.
-      // A failure is kept as no answer too, so one note can't fail every run; an outage costs it
-      // this version's proposal.
+      // A failure another try may clear leaves the version for a later run, DREAM_TRIES in all;
+      // any other failure, or the last, is kept as no answer, so one note can't fail every run.
       // Nothing is kept once Dream was turned off, or the note changed, was forgotten or stopped
       // being Kelpie's, during the call.
       if (
+        !this.#tryLater("abstract", note.path, note.blobSha, proposed === null, failure) &&
         this.#get("dream_mode") !== "off" &&
         this.#asRead([note.path], note.blobSha) &&
         this.#byKelpie([note.path]).has(note.path)
@@ -979,6 +1005,38 @@ export class Vault extends DurableObject<VaultEnv> {
       proposed: proposedAbstract !== null,
       output: used.reduce((sum, call) => sum + (Number(call.output) || 0), 0),
     });
+    return true;
+  }
+
+  /**
+   * Whether a step's work waits for a later run (#112): its call failed in a way another try may
+   * clear, and this version hasn't failed DREAM_TRIES times yet. Counts the failure, and forgets the
+   * count once the step keeps an answer, or no answer, for good. Inside the step's transaction.
+   */
+  #tryLater(
+    operation: "abstract" | "day" | "merge",
+    path: string,
+    key: string,
+    failed: boolean,
+    failure: unknown,
+  ): boolean {
+    const row = this.#exec<{ key: string; failures: number }>(
+      "SELECT key, failures FROM dream_failures WHERE operation = ? AND path = ?",
+      operation,
+      path,
+    )[0];
+    const failures = failed && transient(failure) ? (row?.key === key ? row.failures : 0) + 1 : 0;
+    if (failures === 0 || failures >= DREAM_TRIES) {
+      this.#exec("DELETE FROM dream_failures WHERE operation = ? AND path = ?", operation, path);
+      return false;
+    }
+    this.#exec(
+      "INSERT OR REPLACE INTO dream_failures (operation, path, key, failures) VALUES (?, ?, ?, ?)",
+      operation,
+      path,
+      key,
+      failures,
+    );
     return true;
   }
 
@@ -1101,6 +1159,7 @@ export class Vault extends DurableObject<VaultEnv> {
         this.#exec("DELETE FROM dream_proposals");
         this.#exec("DELETE FROM dream_summaries");
         this.#exec("DELETE FROM dream_merges");
+        this.#exec("DELETE FROM dream_failures");
         // Dream's page, wherever it waits, holds the summaries too.
         this.#dropPage(DREAM_PAGE_PATH);
         this.#set("lifecycle_after", "0");
@@ -1211,19 +1270,26 @@ export class Vault extends DurableObject<VaultEnv> {
     day: DayCandidate,
   ): Promise<boolean> {
     let proposed: Awaited<ReturnType<typeof proposeSummary>> | null = null;
+    let failure: unknown;
     try {
       proposed = await proposeSummary(gateway, day, DREAM_TIMEOUT_MS);
     } catch (error) {
-      console.error("Vault: a Dream step failed", errorName(error));
+      failure = error;
+      console.error("Vault: a Dream step failed", callFailure(error));
     }
     const used = proposed?.usage ?? [];
     const summary = proposed?.summary ?? null;
     const usage = [...(JSON.parse(run.usage) as unknown[]), ...used];
     const sources = day.pages.map((page) => page.path);
     this.ctx.storage.transactionSync(() => {
-      // A failure is kept as no answer too, so one day can't fail every run. A page forgotten or
-      // changed during the call leaves nothing behind: the summary read what's gone.
-      if (this.#get("dream_mode") !== "off" && this.#asRead(sources, day.key)) {
+      // As for an abstract: a failure another try may clear leaves the day for a later run, and any
+      // other, or the last, is kept as no answer, so one day can't fail every run. A page forgotten
+      // or changed during the call leaves nothing behind: the summary read what's gone.
+      if (
+        !this.#tryLater("day", day.path, day.key, proposed === null, failure) &&
+        this.#get("dream_mode") !== "off" &&
+        this.#asRead(sources, day.key)
+      ) {
         this.#exec(
           "INSERT OR REPLACE INTO dream_summaries (path, key, summary, sources, at) VALUES (?, ?, ?, ?, ?)",
           day.path,
@@ -1364,11 +1430,13 @@ export class Vault extends DurableObject<VaultEnv> {
     group: MergeCandidate,
   ): Promise<boolean> {
     let proposed: Awaited<ReturnType<typeof proposeMerge>> | null = null;
+    let failure: unknown;
     if (!group.same) {
       try {
         proposed = await proposeMerge(gateway, group.notes, DREAM_TIMEOUT_MS);
       } catch (error) {
-        console.error("Vault: a Dream step failed", errorName(error));
+        failure = error;
+        console.error("Vault: a Dream step failed", callFailure(error));
       }
     }
     const used = proposed?.usage ?? [];
@@ -1376,10 +1444,12 @@ export class Vault extends DurableObject<VaultEnv> {
     const body = proposed?.answer?.verdict === "merge" ? proposed.answer.body : null;
     const usage = [...(JSON.parse(run.usage) as unknown[]), ...used];
     this.ctx.storage.transactionSync(() => {
-      // As for a summary: a failure is kept as no answer, so one group can't fail every run, and
-      // nothing is kept once a note changed, was forgotten or stopped being Kelpie's, or Dream was
-      // turned off, during the call.
+      // As for a summary: a failure another try may clear leaves the group for a later run, any
+      // other, or the last, is kept as no answer, and nothing is kept once a note changed, was
+      // forgotten or stopped being Kelpie's, or Dream was turned off, during the call.
+      const failed = !group.same && proposed === null;
       if (
+        !this.#tryLater("merge", group.sources[0] ?? "", group.key, failed, failure) &&
         this.#get("dream_mode") !== "off" &&
         this.#asRead(group.sources, group.key) &&
         this.#byKelpie(group.sources).size === group.sources.length
