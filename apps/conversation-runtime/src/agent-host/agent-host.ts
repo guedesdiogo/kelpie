@@ -386,12 +386,22 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
 
   /**
    * Pins this agent as `creator`'s subagent (#290), once, as it is made: from then on it is one,
-   * with that creator's limits, whatever the Registry answers.
+   * with that creator's limits, whatever the Registry answers. Only a new object is pinned: one
+   * already pinned, configured, or holding a conversation or a task is an agent already, whose id a
+   * new subagent never takes over (#344).
    */
   bindCreator(creator: string): { ok: boolean } {
     if (!isAgentId(creator)) return { ok: false };
-    const pinned = this.#get<string | null>("creator", null);
-    if (pinned !== null) return { ok: pinned === creator };
+    const has = (
+      table: typeof schema.auditLog | typeof schema.conversations | typeof schema.tasks,
+    ) => this.#db.select().from(table).limit(1).get() !== undefined;
+    const inUse =
+      this.#get<string | null>("creator", null) !== null ||
+      Object.keys(this.#stored()).length > 0 ||
+      has(schema.auditLog) ||
+      has(schema.conversations) ||
+      has(schema.tasks);
+    if (inUse) return { ok: false };
     this.#db.insert(schema.state).values({ key: "creator", value: creator }).run();
     return { ok: true };
   }

@@ -774,6 +774,11 @@ describe("AgentHost and subagents (#290)", () => {
     roster({});
     expect(await host("sub-pinned").bindCreator("kelpie")).toEqual({ ok: true });
     expect(await host("sub-pinned").bindCreator("someone-else")).toEqual({ ok: false });
+    // A new subagent whose id collides with a live agent's never takes that agent over (#344).
+    expect(await host("sub-pinned").bindCreator("kelpie")).toEqual({ ok: false });
+    await host("sub-in-use").configure({ remit: "Quotes." }, owner);
+    expect(await host("sub-in-use").bindCreator("kelpie")).toEqual({ ok: false });
+    expect((await host("sub-in-use").config()).settings.remit).toBe("Quotes.");
     expect((await host("sub-pinned").turnConfig()).agent).toMatchObject({
       role: "subagent",
       owner: "kelpie",
