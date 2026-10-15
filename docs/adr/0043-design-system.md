@@ -15,9 +15,9 @@
 
 **The owner asked for style and motion first, learned from award-winning work.** Motion in interactions is what he cares about most. Research on 2026-10-15 found:
 - **Award-winning websites reward spectacle.**
-  - The Awwwards sites of the year we looked at (Lusion, 2023; Igloo Inc, 2024; Lando Norris, 2025) run on full-screen WebGL, smooth-scroll hijacking or slow transitions.
+  - The Awwwards sites of the year we looked at ([Lusion, 2023](https://www.awwwards.com/annual-awards/hall-of-fame/2023); [Igloo Inc, 2024](https://www.awwwards.com/annual-awards/hall-of-fame/2024); [Lando Norris, 2025](https://www.awwwards.com/annual-awards/winners)) run on full-screen WebGL, smooth-scroll hijacking or slow transitions.
   - In the winner we read closely, usability came lowest among the jury's scores: Lando Norris, site of the year 2025, scored [7.9 for usability](https://www.awwwards.com/sites/lando-norris), below design, creativity and content, and 7.00 for accessibility.
-  - The exception was Dropbox Brand, the [CSS Design Awards' website of the year](https://www.cssdesignawards.com/woty-award-winners) and the [Webby for best user experience](https://winners.webbyawards.com/winners/websites-and-mobile-sites/features-design/best-user-experience) in 2025. It layers motion that explains cause and effect over a calm base.
+  - The exception was Dropbox Brand, the [CSS Design Awards' website of the year](https://www.cssdesignawards.com/blog/2025-website-of-the-year-winners/430/) and the [Webby for best user experience](https://winners.webbyawards.com/winners/websites-and-mobile-sites/features-design/best-user-experience) in 2025. It layers motion that explains cause and effect over a calm base.
 - **Apple's Interaction awards (2024 to 2026) go to interfaces that keep attention on the task.** Apple keeps delight in a separate category.
 - **Practitioners tie motion to how often something happens.**
   - Emil Kowalski's rules remove animation from what is used a hundred times a day and from anything triggered by the keyboard.
