@@ -5,15 +5,19 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 
-const name = process.argv[2];
-if (name !== "ANTHROPIC_API_KEY" && name !== "OPENAI_API_KEY") process.exit(1);
+/** Each key this script reads, with the line that holds it. */
+const KEYS = new Map([
+  ["ANTHROPIC_API_KEY", /^\s*(?:export\s+)?ANTHROPIC_API_KEY\s*=\s*(.*)$/],
+  ["OPENAI_API_KEY", /^\s*(?:export\s+)?OPENAI_API_KEY\s*=\s*(.*)$/],
+]);
+const pattern = KEYS.get(process.argv[2] ?? "");
+if (!pattern) process.exit(1);
 let text = "";
 try {
   text = readFileSync(`${homedir()}/.kelpie/.env`, "utf8");
 } catch {
   process.exit(0);
 }
-const pattern = new RegExp(`^\\s*(?:export\\s+)?${name}\\s*=\\s*(.*)$`);
 const values = text
   .split(/\r?\n/)
   .map((line) => pattern.exec(line)?.[1])
