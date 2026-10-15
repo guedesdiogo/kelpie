@@ -92,7 +92,7 @@ import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
 import { failureNotice, routeNotice } from "./route-notices.ts";
 import * as schema from "./schema.ts";
 import { bareHttpsOrigin, setupNote } from "./setup-agent.ts";
-import { RUN_TOOLS, SUBAGENT_TOOLS } from "./subagent-limits.ts";
+import { SUBAGENT_TOOLS } from "./subagent-limits.ts";
 import {
   CONFIRMATION_MS,
   type ConfirmationRequest,
@@ -810,7 +810,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   /**
    * The tools a turn may use (#290): a subagent never gets those that create agents or tasks,
    * write memory, or configure Kelpie, whatever it was granted; and an agent whose settings name
-   * its tools gets only those. A task's run always keeps the tools that end its task (#344).
+   * its tools gets only those.
    */
   #allowed(tools: Map<string, Tool>, settings: AgentSettings): Map<string, Tool> {
     const roster = this.#get<AgentConfig["agent"] | null>("roster", null);
@@ -822,9 +822,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       subagent && roster?.creatorTools !== undefined && roster.creatorTools !== null
         ? new Set(roster.creatorTools)
         : null;
-    const inTask = this.#destination().channel === "task";
     for (const name of [...tools.keys()]) {
-      if (inTask && RUN_TOOLS.has(name)) continue;
       if (
         (subagent && !SUBAGENT_TOOLS.has(name)) ||
         (named !== null && !named.has(name)) ||

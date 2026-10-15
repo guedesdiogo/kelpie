@@ -294,7 +294,7 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
 - **How it ends:** it lives until its creator deletes it with `delete_subagent`, or the owner through Admin, and deleting its creator deletes it too. What it already reported reached its creator as Kelpie's news; a task it hadn't finished goes with it.
 - **The skill:** every agent with `spawn` gets the built-in `create-subagent` skill in its prompt. It covers when a subagent is worth it, how to brief one, and to delete it when the demand ends.
 
-`configure_agent` also takes `spawn`, a one-line `remit`, and `tools`, the tools an agent may use by name, or `null` for all it is given. A task's run always keeps the tools that end or comment on its own task, `complete_task`, `wait_on_task`, `cancel_task` and `comment_task`, whatever `tools` names (#344). Each change waits for the owner's confirmation.
+`configure_agent` also takes `spawn`, a one-line `remit`, and `tools`, the tools an agent may use by name, or `null` for all it is given. Each change waits for the owner's confirmation.
 
 **Deleting an agent** (ADR-0036 §1, #303). `deleteAgent`, or the setup agent's `delete_agent` after the owner's confirmation, deletes an agent and every subagent it owns. The agent's chat goes off first, so no channel reaches it. Then the subagents go, deepest first, and the agent last. For each agent, in order:
 1. Its role is read again: an agent that became Admin or Master meanwhile stops the deletion.

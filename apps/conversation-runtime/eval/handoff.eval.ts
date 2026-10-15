@@ -102,6 +102,7 @@ const TOOLS: ToolProvider[] = [
     }),
     add: async () => ({ ok: false, reason: "not_allowed" }),
     bindCreator: async () => ({ ok: false }),
+    discard: async () => undefined,
     configure: async () => ({ ok: false, reason: "invalid_input" }),
     owned: async () => [],
     remove: async () => ({ ok: false, reason: "forbidden" }),

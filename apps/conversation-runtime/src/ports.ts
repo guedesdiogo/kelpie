@@ -264,6 +264,7 @@ function productionPorts(env: Env): ConversationPorts {
           return { model, described, tools: settings.tools };
         },
         bindCreator: (id, creator) => env.AGENT_HOST.getByName(id).bindCreator(creator),
+        discard: (id) => agentHost(id).erase([]),
         add: (id, name, creator, actor) => registry.addSubagent(id, name, creator, actor),
         configure: (id, settings, actor) => agentHost(id).configure(settings, actor),
         owned: async (creator) =>

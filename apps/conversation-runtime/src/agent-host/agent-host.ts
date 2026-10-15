@@ -397,8 +397,8 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   /**
    * A subagent's creator's limits (#290): its trio as it resolves now, from its own settings rather
    * than the defaults (#344), and its tool allowlist. The last ones read stand in when the creator
-   * can't be read in time; without any, the cheapest tier and no tools but a task run's own, so a
-   * subagent never runs above it by failing open.
+   * can't be read in time; without any, the cheapest tier and no tools, so a subagent never runs
+   * above it by failing open.
    */
   async #creatorLimits(creator: string): Promise<CreatorLimits> {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1076,10 +1076,7 @@ interface CreatorLimits {
   tools: string[] | null;
 }
 
-/**
- * The limits when nothing of the creator's was ever read: the cheapest tier, no effort, and no
- * tools but those a task's run always keeps.
- */
+/** The limits when nothing of the creator's was ever read: the cheapest tier, no effort, no tools. */
 const CHEAPEST_LIMITS: CreatorLimits = { tier: "cheap", provider: null, tools: [] };
 
 const TIER_RANK: Record<string, number> = { cheap: 0, medium: 1, frontier: 2 };
