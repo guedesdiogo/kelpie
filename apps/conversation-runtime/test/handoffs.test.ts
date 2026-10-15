@@ -43,6 +43,19 @@ const message = (thread: string, id: string, text: string) => ({
   timeZone: null,
 });
 
+/** A fallback before the turn's first call, and Kelpie's notice of it (#293). */
+const SPENT = {
+  type: "fallback" as const,
+  failed: {
+    provider: "anthropic" as const,
+    model: "claude-haiku-5-5",
+    code: "out_of_credits" as const,
+  },
+  next: { provider: "openai" as const, model: "gpt-6-luna" },
+};
+const ROUTE_NOTE =
+  "Note: Anthropic (claude-haiku-5-5) ran out of credits, or reached its spend limit, so OpenAI (gpt-6-luna) answered.";
+
 const handOff = (title: string) =>
   toolCalls({ name: "create_task", input: { agentId: "hf-sales", title, body: "Padaria Silva." } });
 
@@ -121,18 +134,9 @@ describe("the mandatory handoff (#287)", () => {
     );
   });
   it("follows a route's notice when the turn fell back, and isn't said again", async () => {
-    const spent = {
-      type: "fallback" as const,
-      failed: {
-        provider: "anthropic" as const,
-        model: "claude-haiku-5-5",
-        code: "out_of_credits" as const,
-      },
-      next: { provider: "openai" as const, model: "gpt-6-luna" },
-    };
     const world = use(
       fakeWorld([
-        toolCallsAfter([spent], {
+        toolCallsAfter([SPENT], {
           name: "create_task",
           input: { agentId: "hf-sales", title: "Quote", body: "Padaria Silva." },
         }),
@@ -146,7 +150,7 @@ describe("the mandatory handoff (#287)", () => {
     await vi.waitFor(() =>
       expect(world.sent).toEqual([
         "Sales is on it.",
-        "Note: Anthropic (claude-haiku-5-5) ran out of credits, or reached its spend limit, so OpenAI (gpt-6-luna) answered.",
+        ROUTE_NOTE,
         "Kelpie handed a task to Sales (hf-sales).",
       ]),
     );
@@ -154,6 +158,34 @@ describe("the mandatory handoff (#287)", () => {
     await main.flush();
     await vi.waitFor(() => expect(world.sent.at(-1)).toBe("Next."));
     expect(world.sent).toHaveLength(4);
+  });
+
+  it("is said with the next reply when its own send failed after the route's notice went out", async () => {
+    const world = use(
+      fakeWorld([
+        toolCallsAfter([SPENT], {
+          name: "create_task",
+          input: { agentId: "hf-sales", title: "Retried", body: "Padaria Silva." },
+        }),
+        reply("Sales is on it."),
+        reply("Next."),
+      ]),
+    );
+    // The reply and the route's notice go out; the handoff's notice, the third send, fails.
+    world.failSends.add(2);
+    const main = agent("kelpie:telegram:handoff-failed-send");
+    await main.ingest(message("handoff-failed-send", "m1", "Quote the Silva bakery."));
+    await main.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Sales is on it.", ROUTE_NOTE]));
+    await vi.waitFor(async () =>
+      expect((await main.turns()).every((turn) => turn.status !== "running")).toBe(true),
+    );
+
+    await main.ingest(message("handoff-failed-send", "m2", "Thanks."));
+    await main.flush();
+    await vi.waitFor(() =>
+      expect(world.sent.slice(-2)).toEqual(["Next.", "Kelpie handed a task to Sales (hf-sales)."]),
+    );
   });
 
   it("isn't said again after an eviction cut its delivery short", async () => {
