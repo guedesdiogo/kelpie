@@ -9,10 +9,7 @@ import {
   REGISTRY_NAME,
 } from "@kelpie/config";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  replaceIdentitySourcesForTesting,
-  replaceTaskRunnerForTesting,
-} from "../src/agent-host/agent-host.ts";
+import { replaceTaskRunnerForTesting } from "../src/agent-host/agent-host.ts";
 import { memoryTools } from "../src/memory-tools.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import { SUBAGENT_TOOLS } from "../src/subagent-limits.ts";
@@ -113,18 +110,6 @@ async function afterDestroy<T>(read: () => Promise<T>): Promise<T> {
 
 beforeEach(() => {
   replaceTaskRunnerForTesting(undefined);
-  // The model's route, as llm-gateway would describe it: the tier its settings name.
-  replaceIdentitySourcesForTesting({
-    agent: async (id) => {
-      const entry = await registry().get(id);
-      return entry ? { name: entry.name, role: entry.role, owner: entry.owner } : null;
-    },
-    describe: async (model) => ({
-      provider: "anthropic",
-      tier: model.conversation?.tier ?? "medium",
-      route: [],
-    }),
-  });
 });
 /**
  * Waits until no conversation of the subagents' or theirs runs a turn: a run's last round can
@@ -152,7 +137,6 @@ async function quiet() {
 afterEach(async () => {
   await quiet();
   replacePortsForTesting(undefined);
-  replaceIdentitySourcesForTesting(undefined);
 });
 
 describe("a temporary subagent (#290)", () => {
