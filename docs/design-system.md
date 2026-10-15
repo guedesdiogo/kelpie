@@ -156,7 +156,7 @@ Changing a spring means simulating it again the same way, and updating its row, 
 | `--ease-fade` | `cubic-bezier(0, 0, .2, 1)` | Opacity and color |
 | `--ease-exit` | `cubic-bezier(.4, 0, 1, 1)` | Exits |
 | `--ease-travel` | `cubic-bezier(.55, 0, .25, 1)` | Travel |
-| `--stagger` / `--stagger-moment` | 30ms / 60ms | Delay between siblings entering. A stagger stops at 300 ms: the siblings after the tenth arrive with the tenth |
+| `--stagger` / `--stagger-moment` | 30ms / 60ms | Delay between siblings entering. A stagger stops at 300 ms: after the tenth sibling at 30 ms, after the fifth at 60 ms. The rest arrive with the last staggered one |
 | `--rise` / `--rise-moment` | 8px / 18px | Distance an element rises as it enters |
 | `--scale-in` / `--scale-in-moment` | 0.97 / 0.92 | Scale an element enters from; never from 0 |
 | `--scale-press` | 0.97 | Pressed controls |
@@ -193,10 +193,10 @@ Each pattern names its grammar, its numbers and what it becomes under reduced mo
 Frequent. Kelpie waits `quietMs` after the owner's latest message before answering ([ADR-0024](adr/0024-fixed-wait-end-of-turn.md)).
 
 - **The owner's message.** It enters from below the composer (`--rise`, `--scale-in`, `--spring-base`, origin at the bottom right), and the bubbles above slide up with it (FLIP, `--spring-base`).
-- **The wait.** A 3px bar under the thread shows it, wherever the interface knows the buffer's deadline. ADR-0043 amends ADR-0024 for this; before, nothing showed during the wait.
+- **The wait.** A 3px bar under the thread shows it, wherever the interface knows the buffer's deadline. The webchat learns it from one new socket message, added with its redesign (#140). ADR-0043 amends ADR-0024 for this; before, nothing showed during the wait.
   - The bar follows the buffer's real deadline: `quietMs` after the latest message, capped by `maxWaitMs` from the first.
   - A new message refills it in the first 7% of the time, then it drains linearly.
-  - While the webchat holds the answer because the owner is still typing, the bar stays full.
+  - While the webchat holds the answer because the owner is still typing, the bar stays full. It drains toward the `maxWaitMs` deadline once that comes first.
   - With `quietMs: 0` there is no wait and no bar.
 - **Typing.** When the wait ends, a typing bubble appears. Its dots blink in steps, 0.8 s per cycle, for five cycles. Then they rest at 60% opacity until the reply comes.
 - **The reply.** It takes the typing bubble's place in the same element: its width and height go to the reply's size (`--spring-base`), and the text fades in after 70 ms.
@@ -221,10 +221,10 @@ Frequent.
 
 ### 5.3 Confirm an action
 
-Moment. A confirmation's notice carries one Confirm button, and the owner's press is the yes ([ADR-0026](adr/0026-confirmation-by-owner-act.md)). A confirmation nobody presses expires after its 10 minutes ([ADR-0013](adr/0013-self-configuration.md)), and its card collapses into an "expired" receipt with a neutral icon.
+Moment. A confirmation's notice carries one Confirm button, and the owner's press is the yes ([ADR-0026](adr/0026-confirmation-by-owner-act.md)). A confirmation nobody presses expires after its 10 minutes ([ADR-0026](adr/0026-confirmation-by-owner-act.md) §3), and its card collapses into an "expired" receipt with a neutral icon.
 
 - **The press.** The button scales to `--scale-press` and grows to the card's full width (width and position, `--spring-moment`). Should a notice ever offer a second choice, that button leaves as the chosen one grows (exit, `--scale-in-moment`). No notice does today.
-- **Working.** Its label rolls to a spinner and what is happening ("Creating the event").
+- **Working.** Its label rolls to a spinner and what is happening ("Creating the event"). The spinner follows rule 8: after 5 s, a still ring and the elapsed time take its place.
 - **Success:**
   - its fill turns `--ok` (`--dur-fade`);
   - the check draws in 280 ms;
@@ -303,7 +303,7 @@ Moment grammar: the roster is where Kelpie spends its novelty.
 - **On a change**, the avatar pops (`scale` 0.86 to 1, `--spring-pop`), and the status line rolls.
 - **The roster never reorders** when a state changes: a list that jumps under the pointer costs a misclick.
 - **How the agent itself looks** (avatar or mascot) is still open (ADR-0043 §6).
-- **Reduced motion:** rings and halos are still; color, shape and the status text carry the state.
+- **Reduced motion:** rings and halos are still; color, shape and the status text carry the state. The elapsed time shows minutes only ("2 min") and updates once a minute.
 
 ## 6. Implementation notes
 
@@ -341,7 +341,7 @@ A component, screen, state or interaction this document doesn't define is design
 
    Read the product, its video or its write-up, not only the award's page. Check the reference projects in `CLAUDE.md` too.
 2. **Look at two things.** How it moves in the interaction, with numbers where the source gives them, and how usable it is: speed, keyboard, errors, accessibility.
-3. **Post the findings on the issue,** each as adopt, adapt or avoid, with a link and one line on why.
+3. **Post the findings on the issue,** each as adopt, adapt or avoid, with a link and one line on why. If nothing relevant turns up, say so in one line.
 4. **Design it in Kelpie's terms.**
    - Pick its grammar (frequent or moment), its springs and its tokens.
    - Check it against the ten rules.
@@ -352,7 +352,7 @@ A component, screen, state or interaction this document doesn't define is design
 
 ## 9. Sources
 
-Research done on 2026-10-15. The rules above cite these:
+The rules above cite these. The first set was read on 2026-10-15; a source added later says when it was read.
 
 - Award winners studied:
   - [Awwwards annual awards](https://www.awwwards.com/annual-awards/winners);

@@ -15,9 +15,9 @@
 
 **The owner asked for style and motion first, learned from award-winning work.** Motion in interactions is what he cares about most. Research on 2026-10-15 found:
 - **Award-winning websites reward spectacle.**
-  - Awwwards' sites of the year 2023 to 2025 run on full-screen WebGL, smooth-scroll hijacking and slow transitions.
-  - Usability came lowest among the jury's scores in the winners read. Lando Norris, site of the year 2025, scored [7.9 for usability](https://www.awwwards.com/sites/lando-norris), below design, creativity and content, and 7.00 for accessibility.
-  - The exception was Dropbox Brand (CSS Design Awards and Webby, 2025). It layers motion that explains cause and effect over a calm base.
+  - The Awwwards sites of the year we looked at (Lusion, 2023; Igloo Inc, 2024; Lando Norris, 2025) run on full-screen WebGL, smooth-scroll hijacking or slow transitions.
+  - In the winner we read closely, usability came lowest among the jury's scores: Lando Norris, site of the year 2025, scored [7.9 for usability](https://www.awwwards.com/sites/lando-norris), below design, creativity and content, and 7.00 for accessibility.
+  - The exception was Dropbox Brand, the [CSS Design Awards' website of the year](https://www.cssdesignawards.com/woty-award-winners) and the [Webby for best user experience](https://winners.webbyawards.com/winners/websites-and-mobile-sites/features-design/best-user-experience) in 2025. It layers motion that explains cause and effect over a calm base.
 - **Apple's Interaction awards (2024 to 2026) go to interfaces that keep attention on the task.** Apple keeps delight in a separate category.
 - **Practitioners tie motion to how often something happens.**
   - Emil Kowalski's rules remove animation from what is used a hundred times a day and from anything triggered by the keyboard.
@@ -86,7 +86,7 @@ These choices hold for whichever stack the management UI picks. This ADR doesn't
 ADR-0024 says nothing shows during the wait. The owner approved the lab's version instead: a thin bar that drains until Kelpie answers.
 - **Where it shows.** Wherever the interface knows the buffer's deadline: the webchat and the management UI.
 - **What it follows.** The real deadline: `quietMs` after the latest message, capped by `maxWaitMs` from the first.
-- **During the webchat's typing hold**, the bar stays full.
+- **During the webchat's typing hold**, the bar stays full until the owner stops typing, or drains toward the `maxWaitMs` deadline once that comes first.
 - **With `quietMs: 0`**, there is no bar.
 
 The rest of ADR-0024 stands: nothing starts before the wait ends, and "typing" appears when the model starts answering.
@@ -120,7 +120,10 @@ The steps are in `docs/design-system.md` §8, and the rule is in `CLAUDE.md`.
   - The webchat's policy, `default-src 'self'`, already does.
   - The secure forms' policy starts from `default-src 'none'` and needs `font-src 'self'`.
   - The files cost nothing beyond the Workers Paid plan.
-- **Showing the wait needs its deadline on the webchat's socket.** The socket gains one message for it, which #140's plan has to include; the rest of its protocol stays as it is.
+- **Showing the wait needs its deadline on the webchat's socket.**
+  - The conversation sends the buffer's deadline to the page in one new server-to-client message.
+  - The webchat redesign (#140) includes that message, which amends #140's constraint that the socket protocol stays the same.
+  - Until that ships, nothing shows during the wait, as before.
 - **Pull requests that change the interface answer the review checklist** in `docs/design-system.md` §7.
 - **Award-site traits stay out of the product:** scroll hijacking, full-screen WebGL and slow in-and-out easing. A future landing page may use them.
 - **The spring values come from a simulation** (`docs/design-system.md` §4.2). Changing one means simulating it again the same way and updating its row, its `linear()` and its duration together.
