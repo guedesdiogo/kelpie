@@ -165,6 +165,25 @@ function inert(text: string): string {
     .replace(/%(?=%)/g, "%\\");
 }
 
+/** A title is cut to this before it is made inert; `writeMemory` takes one of 200 at most. */
+const TITLE_CHARS = 120;
+const TITLE_MAX_CHARS = 200;
+
+/**
+ * A title made inert within `writeMemory`'s 200 characters (#330). Escaping can double a mark, so
+ * the excerpt shrinks by what overflows until the escaped title fits, and no escape is ever cut in
+ * two. Escaping at most doubles a title, so this ends above 80 characters.
+ */
+function inertTitle(text: string): string {
+  let max = TITLE_CHARS;
+  let title = inert(excerpt(text, max));
+  while (title.length > TITLE_MAX_CHARS) {
+    max -= title.length - TITLE_MAX_CHARS;
+    title = inert(excerpt(text, max));
+  }
+  return title;
+}
+
 /** Whether the text leaves a private key open: its last header has no end after it. */
 function opensKey(text: string): boolean {
   const last = (pattern: RegExp) =>
@@ -244,7 +263,7 @@ export async function sessionPage(
   const start = clock(first.at, timeZone);
   const end = clock(last.at, timeZone);
   const opening = excerpt(cleanText(firstUser), 200);
-  const title = inert(excerpt(`${clock(firstUser.at, timeZone).time} ${opening}`, 120));
+  const title = inertTitle(`${clock(firstUser.at, timeZone).time} ${opening}`);
   const source = conversationSource(input.channel, input.threadId);
   const scope = conversationScope(input.channel, input.threadId);
   const speakers = new Set(

@@ -214,6 +214,23 @@ describe("sessionPage", () => {
     expect(cut?.text).toContain("… 10 messages omitted …");
   });
 
+  it("names a session whose first message is full of markup within a title's 200 characters (#330)", async () => {
+    for (const mark of ["`", "\\", "<"]) {
+      const page = await sessionPage({
+        key: "s1",
+        channel: "telegram",
+        threadId: "1",
+        timeZone: "UTC",
+        lines: [owner("10:00", mark.repeat(150)), kelpie("10:01", "Entendi.")],
+      });
+      const note = readNote(page?.path ?? "", page?.text ?? "");
+      expect(note?.title.startsWith("10:00 "), mark).toBe(true);
+      expect(note?.title.length, mark).toBeLessThanOrEqual(200);
+      // Escaped whole: every mark in the title keeps its backslash.
+      expect(note?.title.replaceAll(`\\${mark}`, ""), mark).not.toContain(mark);
+    }
+  });
+
   it("writes nothing for a session without a message from a person", async () => {
     expect(
       await sessionPage({
