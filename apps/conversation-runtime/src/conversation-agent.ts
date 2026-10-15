@@ -148,8 +148,10 @@ const WEBCHAT_RECEIVED_IDS = 100;
 const TYPING_HOLD_MS = 4_000;
 /** The most announcements a conversation keeps for its next reply's notice; the oldest go first. */
 const MAX_UNSAID_ANNOUNCEMENTS = 20;
-/** Where a conversation keeps them, a name from when they were all handoffs (#287). */
-const ANNOUNCEMENTS = "handoffs";
+/** Where a conversation keeps its unsaid handoffs, in #287's shape, so a rollback still reads them. */
+const HANDOFFS = "handoffs";
+/** Where it keeps the subagents created or deleted (#342), which a release before it never reads. */
+const SUBAGENT_CHANGES = "subagentChanges";
 
 /**
  * Kelpie's last notice of them (#287): its outbox row, and the keys of what it named (`keyOf`); a
@@ -1468,7 +1470,27 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
 
   /** What the turn's tools had Kelpie announce that no notice said yet (#287, #342). */
   #announcements(): Announcement[] {
-    return stored(this.#get<StoredAnnouncement[]>(ANNOUNCEMENTS, []));
+    return [
+      ...stored(this.#get<StoredAnnouncement[]>(HANDOFFS, [])),
+      ...this.#get<Announcement[]>(SUBAGENT_CHANGES, []),
+    ];
+  }
+
+  /** Keeps these unsaid, the newest MAX_UNSAID_ANNOUNCEMENTS of them, each kind in its own key. */
+  #keepAnnouncements(all: readonly Announcement[]): void {
+    const kept = all.slice(-MAX_UNSAID_ANNOUNCEMENTS);
+    this.#set(
+      HANDOFFS,
+      kept.flatMap((one) =>
+        one.kind === "handoff"
+          ? [{ taskId: one.taskId, agentId: one.agentId, name: one.name }]
+          : [],
+      ),
+    );
+    this.#set(
+      SUBAGENT_CHANGES,
+      kept.filter((one) => one.kind !== "handoff"),
+    );
   }
 
   /**
@@ -1488,10 +1510,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (status === "pending" || status === "sending") return;
     if (status === "sent") {
       const said = new Set(notice.taskIds);
-      this.#set(
-        ANNOUNCEMENTS,
-        this.#announcements().filter((one) => !said.has(keyOf(one))),
-      );
+      this.#keepAnnouncements(this.#announcements().filter((one) => !said.has(keyOf(one))));
     }
     this.#set("handoffNotice", null);
   }
@@ -1509,7 +1528,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       kind === "handoff"
         ? { kind, taskId: announcement.taskId, agentId, name }
         : { kind, agentId, name };
-    this.#set(ANNOUNCEMENTS, [...kept, one].slice(-MAX_UNSAID_ANNOUNCEMENTS));
+    this.#keepAnnouncements([...kept, one]);
   }
 
   #bubbleSent(turnId: number, seq: number): boolean {

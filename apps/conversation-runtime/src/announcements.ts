@@ -101,8 +101,12 @@ export function announcementNotice(
     if (these.length === 0) return [];
     const agents = new Map<string, string>();
     for (const { agentId, name } of these) {
+      // The name in quotes: a subagent's is the model's choice, and only the id is Kelpie's.
       if (!agents.has(agentId)) {
-        agents.set(agentId, name === agentId ? agentId : `${visible(name)} (${agentId})`);
+        agents.set(
+          agentId,
+          name === agentId ? agentId : `"${visible(name).replaceAll('"', '\\"')}" (${agentId})`,
+        );
       }
     }
     const named = [...agents.values()];

@@ -15,6 +15,7 @@ function world({
   failConfigure = false,
   failBind = false,
   failAdd = false,
+  failRemove = false,
   creatorTools = null as string[] | null,
 }: {
   spawn?: boolean;
@@ -23,6 +24,7 @@ function world({
   failConfigure?: boolean;
   failBind?: boolean;
   failAdd?: boolean;
+  failRemove?: boolean;
   creatorTools?: string[] | null;
 } = {}) {
   const calls: string[] = [];
@@ -59,6 +61,7 @@ function world({
     },
     async remove(_actor, id) {
       calls.push(`remove ${id}`);
+      if (failRemove) return { ok: false, reason: "unavailable" };
       return { ok: true, value: { deleted: [id], webhooksLeft: [], everyThread: false } };
     },
   };
@@ -166,6 +169,7 @@ describe("the subagent tools (#290)", () => {
       owner: "kelpie",
       chat: false,
     }));
+    announced.length = 0;
     const full = world({ live });
     expect(
       await (await tool(full.provider, "create_subagent")).run(brief, context()),
@@ -201,6 +205,14 @@ describe("the subagent tools (#290)", () => {
       await (await tool(unlisted.provider, "create_subagent")).run(brief, context()),
     ).toMatchObject({ isError: true, output: expect.stringContaining("most subagents a day") });
     expect(unlisted.calls).toEqual(["bind sub to kelpie", "add Scout by kelpie", "discard sub"]);
+    // None of these exists, so Kelpie announces none (#342).
+    expect(announced).toEqual([]);
+    // One whose undo failed is still listed: Kelpie announces it, as it would any other.
+    const stuck = world({ failConfigure: true, failRemove: true });
+    expect(
+      await (await tool(stuck.provider, "create_subagent")).run(brief, context()),
+    ).toMatchObject({ isError: true, output: expect.stringContaining("half-made subagent") });
+    expect(announced).toEqual(["created sub Scout"]);
   });
 
   it("delete only the creator's own subagents", async () => {
@@ -220,6 +232,15 @@ describe("the subagent tools (#290)", () => {
     }
     expect(calls).toEqual(["remove kelpie-sub-aaaaaa"]);
     // Only the deletion that happened is announced (#342).
+    expect(announced).toEqual(["deleted kelpie-sub-aaaaaa Scout"]);
+    // One that didn't finish isn't.
+    const unfinished = world({ live, failRemove: true });
+    expect(
+      await (await tool(unfinished.provider, "delete_subagent")).run(
+        { id: "kelpie-sub-aaaaaa" },
+        context(),
+      ),
+    ).toMatchObject({ isError: true });
     expect(announced).toEqual(["deleted kelpie-sub-aaaaaa Scout"]);
   });
 

@@ -232,6 +232,8 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
       // Half made, it goes, so nothing runs without its limits.
       const undo = async (why: string) => {
         const removed = await ports.remove(context.actor, id).catch(() => null);
+        // Still listed, it exists: the owner hears of it from Kelpie as of any other (#342).
+        if (!removed?.ok) context.announce({ kind: "created", agentId: id, name: name.trim() });
         return failed(
           removed?.ok
             ? why
