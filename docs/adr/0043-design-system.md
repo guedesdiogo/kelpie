@@ -5,6 +5,7 @@
 - Issue: [#356](https://github.com/guedesdiogo/kelpie/issues/356)
 - Decided by the owner on 2026-10-15, after comparing three directions and a mix in a live motion lab: «podemos seguir 100% com o que definiu para mistura»
 - Amends: [ADR-0024](0024-fixed-wait-end-of-turn.md), the wait before a reply shows where the interface knows its deadline (§5)
+- Amended by: [ADR-0044](0044-design-system-review.md), the first review adds patterns and a fifth presence state, "no response"
 
 ## Context
 
