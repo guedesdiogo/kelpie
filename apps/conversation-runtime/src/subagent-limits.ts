@@ -13,3 +13,14 @@ export const SUBAGENT_TOOLS: ReadonlySet<string> = new Set([
   "cancel_task",
   "comment_task",
 ]);
+
+/**
+ * The tools a task's run always keeps, whatever an allowlist names (#344): the ones it ends or
+ * comments on its own task with. Without them a run can never finish.
+ */
+export const RUN_TOOLS: ReadonlySet<string> = new Set([
+  "complete_task",
+  "wait_on_task",
+  "cancel_task",
+  "comment_task",
+]);

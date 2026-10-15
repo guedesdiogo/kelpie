@@ -781,6 +781,54 @@ describe("AgentHost and subagents (#290)", () => {
     });
   });
 
+  it("holds a subagent to the tier its creator runs on, the instance's when it sets none (#344)", async () => {
+    // The instance's conversation tier is frontier: an agent that sets none runs on it.
+    replaceIdentitySourcesForTesting({
+      agent: async (id) =>
+        id === "inherit-main"
+          ? { name: id, role: "main", owner: null }
+          : { name: id, role: "subagent", owner: "inherit-main" },
+      describe: async (model) => ({
+        provider: "anthropic",
+        tier: model.conversation?.tier ?? "frontier",
+        route: [],
+      }),
+      specialists: async () => [],
+    });
+    expect(await host("inherit-sub").bindCreator("inherit-main")).toEqual({ ok: true });
+    await host("inherit-sub").configure({ model: { conversation: { tier: "medium" } } }, owner);
+    // The creator's own model has no tier: not the defaults' cheap.
+    expect(await host("inherit-main").ownModel()).toEqual({});
+    expect((await host("inherit-sub").turnConfig()).settings.model).toEqual({
+      provider: "anthropic",
+      conversation: { tier: "medium" },
+    });
+  });
+
+  it("gives a subagent's calls outside a turn its creator's limits too (#344)", async () => {
+    roster({ "own-maker": { role: "main" } });
+    await host("own-maker").configure(
+      { model: { conversation: { tier: "medium" }, memory: { tier: "cheap" } } },
+      owner,
+    );
+    expect(await host("own-sub").bindCreator("own-maker")).toEqual({ ok: true });
+    await host("own-sub").configure(
+      { model: { conversation: { tier: "frontier" }, memory: { tier: "frontier" } } },
+      owner,
+    );
+    // A checkpoint's summary runs on the memory area: its creator's, not its own frontier.
+    expect(await host("own-sub").ownModel()).toEqual({
+      provider: "anthropic",
+      memory: { tier: "cheap" },
+      conversation: { tier: "medium" },
+    });
+    // Any other agent's are its own settings, unclamped.
+    expect(await host("own-maker").ownModel()).toEqual({
+      conversation: { tier: "medium" },
+      memory: { tier: "cheap" },
+    });
+  });
+
   it("falls back to the cheapest tier when its creator was never read", async () => {
     replaceIdentitySourcesForTesting({
       agent: async (id) =>

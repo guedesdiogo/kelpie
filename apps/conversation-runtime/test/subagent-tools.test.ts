@@ -13,12 +13,14 @@ function world({
   described = { provider: "anthropic", tier: "medium", effort: "high", route: [] },
   live = [] as AgentEntry[],
   failConfigure = false,
+  failBind = false,
   creatorTools = null as string[] | null,
 }: {
   spawn?: boolean;
   described?: ModelDescription;
   live?: AgentEntry[];
   failConfigure?: boolean;
+  failBind?: boolean;
   creatorTools?: string[] | null;
 } = {}) {
   const calls: string[] = [];
@@ -32,7 +34,7 @@ function world({
     },
     async bindCreator(id, creator) {
       calls.push(`bind ${id.startsWith(`${creator}-sub-`) ? "sub" : id} to ${creator}`);
-      return { ok: true };
+      return { ok: !failBind };
     },
     async add(id, name, creator) {
       calls.push(`add ${name} by ${creator}`);
@@ -97,7 +99,8 @@ describe("the subagent tools (#290)", () => {
       context(),
     );
     expect(created.output).toMatch(/^Created the subagent kelpie-sub-[0-9a-f]{6}, named "Scout"\./);
-    expect(calls).toEqual(["add Scout by kelpie", "bind sub to kelpie"]);
+    // Pinned first, so the Registry never lists it without its limits (#344).
+    expect(calls).toEqual(["bind sub to kelpie", "add Scout by kelpie"]);
     expect(configured).toEqual([
       {
         systemPrompt: "You find flights.",
@@ -153,7 +156,10 @@ describe("the subagent tools (#290)", () => {
       await (await tool(full.provider, "create_subagent")).run(brief, context()),
     ).toMatchObject({
       isError: true,
-      output: expect.stringContaining("three live subagents"),
+      // Named, so a creator that lost their ids can still delete one (#344).
+      output: expect.stringContaining(
+        "three live subagents, kelpie-sub-a, kelpie-sub-b, kelpie-sub-c",
+      ),
     });
     const member = context({ actor: { userId: "u-x", role: "member", via: "x" } });
     expect(
@@ -168,6 +174,12 @@ describe("the subagent tools (#290)", () => {
       isError: true,
     });
     expect(broken.calls.at(-1)).toMatch(/^remove kelpie-sub-/);
+    // One that can't be pinned is never added.
+    const unpinned = world({ failBind: true });
+    expect(
+      await (await tool(unpinned.provider, "create_subagent")).run(brief, context()),
+    ).toMatchObject({ isError: true });
+    expect(unpinned.calls).toEqual(["bind sub to kelpie"]);
   });
 
   it("delete only the creator's own subagents", async () => {
@@ -230,6 +242,10 @@ describe("the subagent tools (#290)", () => {
     expect(
       await (await tool(provider, "delete_subagent")).run({ id: "kelpie-sub-aaaaaa" }, member),
     ).toMatchObject({ isError: true });
+    // Nor deleted from one (#344).
+    expect(
+      await (await tool(provider, "delete_subagent")).run({ id: "kelpie-sub-aaaaaa" }, narrow),
+    ).toMatchObject({ isError: true, output: expect.stringContaining("direct conversation") });
     expect(calls).toEqual([]);
   });
 });

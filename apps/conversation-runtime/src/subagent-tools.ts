@@ -198,10 +198,14 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
       const live = (await ports.owned(context.agentId)).filter((one) => one.role === "subagent");
       if (live.length >= 3) {
         return failed(
-          "You already have three live subagents: delete one with delete_subagent first.",
+          `You already have three live subagents, ${live.map((one) => one.id).join(", ")}: delete one with delete_subagent first.`,
         );
       }
       const id = subagentId(context.agentId);
+      // Pinned before the Registry lists it, so it is never an agent without its limits (#344).
+      if (!(await ports.bindCreator(id, context.agentId).catch(() => ({ ok: false }))).ok) {
+        return failed("Kelpie couldn't set it up: try again.");
+      }
       const added = await ports.add(id, name.trim(), context.agentId, context.actor);
       if (!added.ok) {
         return failed(
@@ -220,9 +224,6 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
         );
       };
       try {
-        if (!(await ports.bindCreator(id, context.agentId)).ok) {
-          return await undo("Kelpie couldn't set it up: try again.");
-        }
         const configured = await ports.configure(id, settings, context.actor);
         if (!configured.ok) return await undo("Kelpie couldn't set it up: try again.");
       } catch {
@@ -241,8 +242,9 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
       es: "Eliminando un subagente",
     },
     async run(input, context) {
-      if (context.actor.role !== "owner")
-        return failed("Only the owner's own turns delete subagents.");
+      if (context.actor.role !== "owner" || context.scopes !== "all") {
+        return failed("Only the owner's own turns, in a direct conversation, delete subagents.");
+      }
       const { id } = fields(input);
       const mine = (await ports.owned(context.agentId)).find(
         (agent) => agent.id === id && agent.role === "subagent",

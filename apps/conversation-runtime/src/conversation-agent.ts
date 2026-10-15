@@ -49,6 +49,7 @@ import {
   type FallbackEvent,
   LlmError,
   type LlmEvent,
+  type ModelSettings,
   type ToolCallPart,
   type ToolResult,
   type Usage,
@@ -91,7 +92,7 @@ import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
 import { failureNotice, routeNotice } from "./route-notices.ts";
 import * as schema from "./schema.ts";
 import { bareHttpsOrigin, setupNote } from "./setup-agent.ts";
-import { SUBAGENT_TOOLS } from "./subagent-limits.ts";
+import { RUN_TOOLS, SUBAGENT_TOOLS } from "./subagent-limits.ts";
 import {
   CONFIRMATION_MS,
   type ConfirmationRequest,
@@ -809,18 +810,21 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   /**
    * The tools a turn may use (#290): a subagent never gets those that create agents or tasks,
    * write memory, or configure Kelpie, whatever it was granted; and an agent whose settings name
-   * its tools gets only those.
+   * its tools gets only those. A task's run always keeps the tools that end its task (#344).
    */
   #allowed(tools: Map<string, Tool>, settings: AgentSettings): Map<string, Tool> {
     const roster = this.#get<AgentConfig["agent"] | null>("roster", null);
     const subagent = roster?.role === "subagent";
-    const named = settings.tools === null ? null : new Set(settings.tools);
+    // A turn stored before #290 has no allowlist in its settings: it has none (#344).
+    const named = settings.tools == null ? null : new Set(settings.tools);
     // A subagent's tools also stay within its creator's allowlist (ADR-0036 §5).
     const creators =
       subagent && roster?.creatorTools !== undefined && roster.creatorTools !== null
         ? new Set(roster.creatorTools)
         : null;
+    const inTask = this.#destination().channel === "task";
     for (const name of [...tools.keys()]) {
+      if (inTask && RUN_TOOLS.has(name)) continue;
       if (
         (subagent && !SUBAGENT_TOOLS.has(name)) ||
         (named !== null && !named.has(name)) ||
@@ -1055,8 +1059,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     let summary = "";
     let usage: Usage[] = [];
     try {
-      // The memory area: the agent's own settings for it, `cheap` unless they set its tier (#286).
-      const { model } = (await this.#config()).settings;
+      // The memory area: the agent's own settings for it, `cheap` unless they set its tier (#286),
+      // and a subagent's held to its creator's, as on its turns (#344).
+      const model = await this.#ownModel();
       const call = await this.#ports.generate(
         { area: "memory", agent: model },
         {
@@ -2816,6 +2821,13 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const agentId = this.#get<string | null>("agentId", null);
     if (!agentId) throw new Error("The conversation has no agent yet");
     return this.env.AGENT_HOST.getByName(agentId).config();
+  }
+
+  /** The agent's own model settings, held to its creator's for a subagent (#344). */
+  async #ownModel(): Promise<ModelSettings> {
+    const agentId = this.#get<string | null>("agentId", null);
+    if (!agentId) throw new Error("The conversation has no agent yet");
+    return this.env.AGENT_HOST.getByName(agentId).ownModel();
   }
 
   /** What a new turn runs with: the settings, and the system prompt from the agent's vault. */

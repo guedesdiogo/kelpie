@@ -203,6 +203,17 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     };
   }
 
+  /**
+   * The model settings the agent's calls resolve from (#344): its stored ones, a tier set before
+   * #286 included, so an area it leaves unset follows the instance's default rather than `cheap`.
+   * A subagent's are held to its creator's, as each of its turns' are.
+   */
+  async ownModel(): Promise<ModelSettings> {
+    const model = agentModel(this.#stored());
+    const creator = this.#get<string | null>("creator", null);
+    return creator === null ? model : clampModel(model, await this.#creatorLimits(creator));
+  }
+
   #defaults(): AgentSettings {
     return this.ctx.id.name === SETUP_AGENT_ID
       ? { ...DEFAULT_SETTINGS, systemPrompt: SETUP_PROMPT }
@@ -340,7 +351,9 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     const effective = limits ? clampModel(model, limits) : model;
     let runsOn = described.value;
     if (limits && JSON.stringify(effective) !== JSON.stringify(model)) {
-      runsOn = await sources.describe(effective).catch(() => described.value);
+      // Bounded like the other lookups; unread, the prompt names no model rather than a wrong one.
+      runsOn = (await this.#lookup("identityModelClamped", () => sources.describe(effective)))
+        .value;
     }
     const spawn = role === "main" || (role === "specialist" && config.settings.spawn);
     const identity = identitySection({
@@ -382,16 +395,17 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   }
 
   /**
-   * A subagent's creator's limits (#290): its trio as it resolves now, and its tool allowlist. The
-   * last ones read stand in when the creator can't be read in time; without any, the cheapest
-   * tier and no tools beyond a subagent's, so a subagent never runs above it by failing open.
+   * A subagent's creator's limits (#290): its trio as it resolves now, from its own settings rather
+   * than the defaults (#344), and its tool allowlist. The last ones read stand in when the creator
+   * can't be read in time; without any, the cheapest tier and no tools but a task run's own, so a
+   * subagent never runs above it by failing open.
    */
   async #creatorLimits(creator: string): Promise<CreatorLimits> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const work = (async (): Promise<CreatorLimits> => {
-        const { settings } = await this.env.AGENT_HOST.getByName(creator).config();
-        const model = agentModel(settings);
+        const host = this.env.AGENT_HOST.getByName(creator);
+        const [{ settings }, model] = await Promise.all([host.config(), host.ownModel()]);
         const described = await this.#identitySources().describe(model);
         return {
           tier: described.tier,
@@ -401,6 +415,8 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
           tools: settings.tools,
         };
       })();
+      // The race's loser must not reject unhandled.
+      work.catch(() => undefined);
       const limits = await Promise.race([
         work,
         new Promise<never>((_, reject) => {
@@ -1060,7 +1076,10 @@ interface CreatorLimits {
   tools: string[] | null;
 }
 
-/** The limits when nothing of the creator's was ever read: the cheapest tier, no effort. */
+/**
+ * The limits when nothing of the creator's was ever read: the cheapest tier, no effort, and no
+ * tools but those a task's run always keeps.
+ */
 const CHEAPEST_LIMITS: CreatorLimits = { tier: "cheap", provider: null, tools: [] };
 
 const TIER_RANK: Record<string, number> = { cheap: 0, medium: 1, frontier: 2 };

@@ -1185,6 +1185,28 @@ describe("ConversationAgent checkpoints", () => {
   const replies = (count: number) => Array.from({ length: count }, (_, i) => reply(`r${i}`));
   const questions = (count: number) => Array.from({ length: count }, (_, i) => `q${i}`);
 
+  it("summarizes a subagent's history on its creator's memory area, not its own (#344)", async () => {
+    await configure("ckpt-maker", { model: { memory: { tier: "cheap" } } });
+    expect(await env.AGENT_HOST.getByName("ckpt-sub").bindCreator("ckpt-maker")).toEqual({
+      ok: true,
+    });
+    await configure("ckpt-sub", { model: { memory: { tier: "frontier" } } });
+    const world = use(fakeWorld([...replies(5), reply("r5", OVER_BUDGET), reply("THE SUMMARY")]));
+    const stub = agent("checkpoint-subagent");
+    for (const [index, text] of questions(6).entries()) {
+      await stub.ingest(message(`m${index}`, text, { agentId: "ckpt-sub" }));
+      await stub.flush();
+      await vi.waitFor(async () => expect((await stub.turns()).at(-1)?.status).toBe("delivered"));
+    }
+    expect(await pendingCheckpoints(stub)).toHaveLength(1);
+
+    await stub.compact();
+    expect(world.selections.at(-1)).toMatchObject({
+      area: "memory",
+      agent: { memory: { tier: "cheap" } },
+    });
+  });
+
   it("summarizes all but the latest rows once a turn's prompt crosses the budget", async () => {
     const world = use(
       fakeWorld([...replies(5), reply("r5", OVER_BUDGET), reply("THE SUMMARY"), reply("r6")]),

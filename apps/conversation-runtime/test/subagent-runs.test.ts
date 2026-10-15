@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { replaceTaskRunnerForTesting } from "../src/agent-host/agent-host.ts";
 import { memoryTools } from "../src/memory-tools.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
-import { SUBAGENT_TOOLS } from "../src/subagent-limits.ts";
+import { RUN_TOOLS, SUBAGENT_TOOLS } from "../src/subagent-limits.ts";
 import { subagentTools } from "../src/subagent-tools.ts";
 import { taskTools } from "../src/task-tools.ts";
 import { type FakeWorld, fakeWorld, reply, toolCalls } from "./fakes.ts";
@@ -270,16 +270,17 @@ describe("a temporary subagent (#290)", () => {
       return new Set(world.requests[0]?.tools?.map((spec) => spec.name) ?? []);
     };
 
-    // An ordinary agent whose settings name its tools gets only those. It is one no agent owns, so
-    // its task's news goes to no other conversation.
-    await host("allow-plain").configure({ tools: ["complete_task", "comment_task"] }, owner);
+    // An ordinary agent whose settings name its tools gets only those, and a task's run keeps the
+    // tools that end its task (#344). It is one no agent owns, so its task's news goes to no other
+    // conversation.
+    await host("allow-plain").configure({ tools: ["memory_search"] }, owner);
     const plain = use(
       fakeWorld([toolCalls({ name: "complete_task", input: { result: "ok" } }), reply("ok")]),
     );
-    expect(await offered(plain, "allow-plain")).toEqual(new Set(["complete_task", "comment_task"]));
+    expect(await offered(plain, "allow-plain")).toEqual(new Set(["memory_search", ...RUN_TOOLS]));
 
     // A subagent whose allowlist Admin cleared still gets only a subagent's tools, and only those
-    // its creator may use.
+    // its creator may use, besides the tools that end its task.
     await host("allow-maker").configure({ tools: ["complete_task", "memory_search"] }, owner);
     await registry().addSubagent("allow-maker-sub-aaaaaa", "Sub", "kelpie", owner);
     await host("allow-maker-sub-aaaaaa").bindCreator("allow-maker");
@@ -288,7 +289,7 @@ describe("a temporary subagent (#290)", () => {
       fakeWorld([toolCalls({ name: "complete_task", input: { result: "ok" } }), reply("ok")]),
     );
     expect(await offered(child, "allow-maker-sub-aaaaaa")).toEqual(
-      new Set(["complete_task", "memory_search"]),
+      new Set(["memory_search", ...RUN_TOOLS]),
     );
   });
 });
