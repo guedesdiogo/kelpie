@@ -111,4 +111,15 @@ describe("errorFromStatus", () => {
   ])("leaves %s as it was", (_, status, message, kind, code) => {
     expect(errorFromStatus(status, message, kind)).toMatchObject({ code });
   });
+
+  it.each([
+    [408, "Request Timeout"],
+    [425, "Too Early"],
+  ])("takes %i as a failure another try clears (#203)", (status, message) => {
+    expect(errorFromStatus(status, message, null)).toMatchObject({
+      code: "server_error",
+      retryable: true,
+      status,
+    });
+  });
 });

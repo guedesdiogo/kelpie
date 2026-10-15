@@ -3,12 +3,15 @@
 import { isMap, parseDocument } from "yaml";
 import { splitFrontmatter } from "./markdown.ts";
 import { blockId, HEADING_PATH_CHARS, oneLine } from "./retrieve.ts";
+import { sanitizeSecrets } from "./sanitize.ts";
 import { printableLine } from "./write.ts";
 
 /** As much of a note as is sent, ai-memory's limit for a page. */
 const ABSTRACT_INPUT_CHARS = 6_000;
 /** The writer's limit for an abstract. */
 const ABSTRACT_MAX_CHARS = 300;
+/** A longer answer isn't read: it bounds the sanitizer's work, and no abstract needs it. */
+const ABSTRACT_ANSWER_CHARS = 2_000;
 
 export const ABSTRACT_PROMPT = `You write the abstract of one note from a person's knowledge vault: a single line that sums the note up, so it can be recognized and found later.
 
@@ -29,7 +32,8 @@ export function abstractInput(note: { path: string; title: string; body: string 
 
 /**
  * The abstract an answer holds: JSON with the one key `abstract`, one printable line of at most
- * 300 characters, the writer's rule. A code fence around the whole of it is tolerated, as models
+ * 300 characters, the writer's rule, once its secrets are replaced: a redaction can lengthen it,
+ * and nothing cuts it after (#112). A code fence around the whole of it is tolerated, as models
  * add one despite being told. Anything else is null.
  */
 export function abstractOf(answer: string): string | null {
@@ -44,7 +48,11 @@ export function abstractOf(answer: string): string | null {
   const keys = Object.keys(parsed);
   if (keys.length !== 1 || keys[0] !== "abstract") return null;
   const { abstract } = parsed as { abstract: unknown };
-  return printableLine(abstract, ABSTRACT_MAX_CHARS) ? abstract.trim() : null;
+  // One printable line as the model wrote it, controls and bidirectional marks refused; then its
+  // secrets go, and the limit holds for what is kept.
+  if (!printableLine(abstract, ABSTRACT_ANSWER_CHARS)) return null;
+  const text = sanitizeSecrets(abstract).text.trim();
+  return printableLine(text, ABSTRACT_MAX_CHARS) ? text : null;
 }
 
 /**

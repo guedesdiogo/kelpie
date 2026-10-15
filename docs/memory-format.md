@@ -452,13 +452,16 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
   - **The model:**
     - the cheap tier, through llm-gateway;
     - the note goes as data, up to 6,000 characters, between `BEGIN NOTE` and `END NOTE` lines that carry a random id for each call, so the note can't close the block;
-    - its answer must be JSON with one key, `abstract`: one printable line of at most 300 characters, the writer's rule. Any other answer is kept as no answer, so that version isn't asked about again.
+    - its answer must be JSON with one key, `abstract`: one printable line, with no control or bidirectional mark, of at most 300 characters once its secrets are replaced, the writer's rule. A redaction can lengthen it, and nothing cuts it after. Any other answer is kept as no answer, so that version isn't asked about again.
   - **One proposal per version:** a proposal is kept with the version it was made from. A note gets one proposal per version, and a newer version drops it.
 - **The plan:** the report's "Dream's plan" section lists each proposed abstract beside its note.
   - A model wrote the abstract, so it is shown as code: no link, tag or markup in it renders.
   - When a run ends, the report is written again on the next alarm.
 - **Cost:** each call's usage is kept with its run for 30 days. The logs count calls and output tokens, never text.
-  - A failed call ends the run, and that version gets no proposal, so one note can't fail every run.
+  - **A failed call ends the run** (#112), in every operation.
+    - **A failure another try may clear** leaves the version for a later run, three tries in all. That is a model error the gateway marks retryable, such as a rate limit, a provider's 5xx, a 408 or 425, a provider out of credits, or a dropped connection, or a call that ran out of time.
+    - **Any other failure is kept as no answer,** and so is the third try, so one item can't fail every run. That covers an answer cut at its output budget, a refusal, or a key the provider refused.
+    - **The logs** give a model error's code and whether it may clear, never its text.
   - With nothing to do, Dream looks again after another 30 minutes of quiet, not on every wake.
 - **The switch:** `/commands/setDream` takes `off`, or `dry`, the default ([admin-api.md](admin-api.md)).
   - **`writes`** names the operations that may write, such as `["abstracts"]`. An operation not named only proposes, so one deployed later is dry until the owner names it.
@@ -547,7 +550,7 @@ Memory's consolidation (#112), off the hot path, on the Context Store's alarm. E
 
       An image split across lines, spelled with entities, or named by a reference behind a list marker would get past a rule that reads Markdown. So would a fence an HTML block swallows. These rules don't read Markdown at all.
     - **Outside code,** it may hold no title heading, behind a list or quote marker or a task's checkbox too. In code, a `#` line is a comment.
-    - Any other answer, or a failed or late call, is kept as no answer, so those versions aren't asked about again. A failed or late call also ends the run.
+    - Any other answer is kept as no answer, so those versions aren't asked about again. A failed or late call ends the run, and is tried again or kept as no answer as "Cost" says above.
     - **The cost of these rules:** a body the rules refuse is kept as no answer too, so the group isn't merged, and isn't asked about again until one of its notes changes. A note with a `<` right before a letter, `!`, `?` or `/` in its code, such as `List<String>`, can't merge; the report keeps listing its group.
   - **Kept only while its notes are:** a proposal is kept with the versions of its notes, and a change to any of them proposes the group again.
     - A forgotten note takes the proposal with it right away. A note changed or removed in the vault takes it at the next daily report.

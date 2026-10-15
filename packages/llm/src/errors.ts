@@ -90,7 +90,10 @@ export function errorFromStatus(
   if (outOfCredits(status, message, kind)) {
     return new LlmError(message, "out_of_credits", true, status);
   }
-  if (status >= 500) return new LlmError(message, "server_error", true, status);
+  // A timeout (408) or "too early" (425) clears on another try, as a 5xx does (#203).
+  if (status >= 500 || status === 408 || status === 425) {
+    return new LlmError(message, "server_error", true, status);
+  }
   if (status === 429) return new LlmError(message, "rate_limited", true, status);
   if (status === 401 || status === 403) return new LlmError(message, "auth", false, status);
   return new LlmError(message, "bad_request", false, status);

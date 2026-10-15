@@ -69,6 +69,7 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
     - **What it keeps:** its proposals in `dream_proposals`, and its runs, with what each call used, in `dream_runs`.
     - **What it writes:** an abstract, for an operation the owner lets write, goes through the queue (`dream_writes` keeps what it wrote for a week).
     - **Day summaries and merges,** while dry, are kept in `dream_summaries` and `dream_merges` and shown on Dream's page, `memory/_lint/dream.md`.
+    - **Retry counts:** `dream_failures` counts the failures another try may clear, for each version a step is retried for, up to three (#112). A step that keeps an answer, or no answer, deletes its count, and turning Dream off deletes them all.
       - Once their operation may write, each goes in a commit of Dream's own, outside the queue, so a merge lands whole or not at all.
       - The commit is made only while what it read is as it read it, and what it writes over is Kelpie's, not held and with no write waiting. If the vault moved, it syncs and checks again, and writes nothing if any of that changed.
       - A write an agent queued meanwhile goes on top, as on the owner's edit.
@@ -214,6 +215,7 @@ Git keeps every version, so erasing content means rewriting the vault's history.
      - it syncs to the rewritten head;
      - it rebuilds memory's index from the vault as it is now, which drops every old version, of every file, with the vectors of content no version holds anymore;
      - it deletes the rows that name the paths in `queue`, `conflicts`, `held`, `proposals`, `recall_counts`, `authored`, `owner_changes`, `owner_merges`, `dream_proposals`, `dream_writes`, `dream_summaries`, `dream_merges`, `dream_written` and `dream_landing`, and a day summary or a merge that read a forgotten path;
+     - it clears `dream_failures`, Dream's retry counts, whole: they name a day or a group's first note, not every page they read (#112);
      - it drops a memory report or Dream's page wherever a copy waits: in the queue, set aside in `conflicts`, merged with the owner's edit in `owner_merges`, or held. A conflict the owner left on one of these pages goes too; git history keeps it. It wakes within seconds, or at a retry already pending, and the next two alarms write the pages again from what is left, one queuing and one committing, while GitHub answers.
 
      It never touches git.
