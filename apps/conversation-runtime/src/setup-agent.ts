@@ -143,9 +143,10 @@ const SPECS = {
             toolLoopMs: { type: "integer", minimum: 120_000, maximum: 600_000 },
             maxConcurrentTasks: {
               type: "integer",
-              minimum: 1,
+              minimum: 0,
               maximum: 10,
-              description: "How many of its tasks the agent runs at once; more costs more.",
+              description:
+                "How many of its tasks the agent runs at once; 0 runs none, and more costs more.",
             },
             model: MODEL_SETTINGS_SCHEMA,
           },

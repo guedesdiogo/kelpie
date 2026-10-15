@@ -1,3 +1,4 @@
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { REGISTRY_NAME, type TaskView } from "@kelpie/config";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,12 +31,16 @@ function use(world: FakeWorld): FakeWorld {
   return world;
 }
 
+/** The conversations a test started, which `afterEach` lets finish before the next one. */
+const started: string[] = [];
+
 async function queue(agentId: string, title: string, body = ""): Promise<TaskView> {
   const created = await host(agentId).createTask(
     { title, body, status: "todo", scheduledStartAt: null },
     owner,
   );
   if (!created.ok) throw new Error(created.reason);
+  started.push(`${agentId}:task:${created.value.id}`);
   return created.value;
 }
 
@@ -46,6 +51,20 @@ async function statusOf(agentId: string, taskId: string) {
 }
 
 const until = (check: () => Promise<void>) => vi.waitFor(check, { timeout: 5_000 });
+
+/**
+ * Waits until none of these conversations runs a turn: a run's last round can outlive its task's
+ * end, and would take the next test's model scripts.
+ */
+async function quiet(...names: string[]) {
+  await until(async () => {
+    for (const name of names) {
+      const turns = await agent(name).turns();
+      expect(turns.every((turn) => turn.status !== "running")).toBe(true);
+    }
+  });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+}
 
 /** The tools the latest model call was given. */
 const offered = (world: FakeWorld) => (world.requests.at(-1)?.tools ?? []).map((tool) => tool.name);
@@ -61,7 +80,8 @@ const userTexts = (world: FakeWorld) =>
 beforeEach(() => {
   replaceTaskRunnerForTesting(undefined);
 });
-afterEach(() => {
+afterEach(async () => {
+  await quiet(...started.splice(0));
   replacePortsForTesting(undefined);
 });
 
@@ -111,11 +131,89 @@ describe("a task's run (#335)", () => {
         attempt: 2,
       });
     });
+    // Exactly one nudge a run: two runs, two turns each.
+    expect(world.requests).toHaveLength(4);
     expect(
-      userTexts(world).some((text) =>
+      userTexts(world).filter((text) =>
         text.includes("your turn ended, but the task is still running"),
       ),
-    ).toBe(true);
+    ).toHaveLength(4);
+  });
+
+  it("nudges a turn that ended with no reply at all, as one that said something", async () => {
+    use(fakeWorld([reply(""), toolCalls({ name: "complete_task", input: { result: "Done." } })]));
+    const task = await queue("runs-silent", "Quiet");
+    await until(async () => {
+      expect(await statusOf("runs-silent", task.id)).toMatchObject({ status: "done" });
+    });
+  });
+
+  it("can't confirm, isn't captured, and goes with its agent when it is deleted", async () => {
+    const answers: boolean[] = [];
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "ask_yes" }),
+        toolCalls({ name: "complete_task", input: { result: "Asked." } }),
+        reply("Done."),
+      ]),
+    );
+    world.tools.push({
+      async tools() {
+        return [
+          {
+            spec: { name: "ask_yes", description: "Asks.", inputSchema: { type: "object" } },
+            label: "Asking",
+            async run(_input, context) {
+              answers.push(await context.confirm({ command: "x", input: {}, summary: "do x." }));
+              return { output: "asked" };
+            },
+          },
+        ];
+      },
+    });
+    const task = await queue("runs-sealed", "Sealed");
+    const name = `runs-sealed:task:${task.id}`;
+    await until(async () => {
+      expect(await statusOf("runs-sealed", task.id)).toMatchObject({ status: "done" });
+    });
+    expect(answers).toEqual([false]);
+    // No notice for a confirmation was written, and nothing went to a channel.
+    expect(
+      await runInDurableObject(agent(name), (_instance, state) =>
+        state.storage.sql.exec("SELECT id FROM confirmations").toArray(),
+      ),
+    ).toEqual([]);
+    expect(world.sendAttempts).toBe(0);
+    await agent(name).closeSession();
+    expect(world.remembered).toEqual([]);
+
+    // Deleting the agent erases the run's conversation too.
+    expect(await host("runs-sealed").erase([])).toMatchObject({ ok: true });
+    await until(async () => {
+      expect(await agent(name).turns()).toEqual([]);
+    });
+  });
+
+  it("keeps a task waiting when its run comments right after it asked", async () => {
+    use(
+      fakeWorld([
+        toolCalls(
+          { name: "wait_on_task", input: { reason: "needs_input", question: "Which date?" } },
+          { name: "comment_task", input: { text: "The owner said May." } },
+        ),
+        reply("Waiting."),
+      ]),
+    );
+    const task = await queue("runs-parked", "Ask");
+    await until(async () => {
+      expect(await statusOf("runs-parked", task.id)).toMatchObject({
+        status: "waiting",
+        waitingReason: "needs_input",
+        attempt: 1,
+      });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(await statusOf("runs-parked", task.id)).toMatchObject({ status: "waiting", attempt: 1 });
   });
 
   it("stops at once on the owner's stop: the turn ends, and the task is cancelled", async () => {
@@ -166,6 +264,7 @@ describe("a task's run (#335)", () => {
 describe("tasks between agents (#335)", () => {
   /** The main agent's conversation with the owner, with one turn done, so it is its latest. */
   async function mainConversation(world: FakeWorld, name: string) {
+    started.push(name);
     const stub = agent(name);
     await stub.ingest({
       agentId: "kelpie",
@@ -186,52 +285,90 @@ describe("tasks between agents (#335)", () => {
     return stub;
   }
 
-  it("asks the owner through the main agent, whose answer resumes the task to its end", async () => {
+  it("asks the owner through the main agent, and the owner's reply resumes the task", async () => {
     await registry().add("runs-helper", "Helper", owner);
     const scripts = [reply("Oi!")];
     const world = use(fakeWorld(scripts));
     const main = await mainConversation(world, "kelpie:telegram:runs-asks");
 
-    // The specialist asks; Kelpie tells the main agent, which answers on the task.
+    // The specialist asks; Kelpie tells the main agent, which asks the owner on Telegram.
     scripts.push(
       toolCalls({
         name: "wait_on_task",
         input: { reason: "needs_input", question: "Which date?" },
       }),
       reply("Asked."),
+      reply("The helper asks: which date?"),
     );
     const task = await queue("runs-helper", "Book");
+    await until(async () => {
+      expect(world.sent.at(-1)).toBe("The helper asks: which date?");
+    });
+    expect(await statusOf("runs-helper", task.id)).toMatchObject({
+      status: "waiting",
+      waitingReason: "needs_input",
+    });
+    const note = userTexts(world).at(-1) ?? "";
+    expect(note).toContain("It waits for an answer.");
+    expect(note).toContain("Which date?");
+
+    // The owner answers in the chat; the main agent puts the answer on the task, which runs again.
     scripts.push(
       toolCalls({
         name: "comment_task",
         input: { agentId: "runs-helper", taskId: task.id, text: "May 3rd." },
       }),
-      reply("I answered it."),
+      reply("I told the helper."),
       toolCalls({ name: "complete_task", input: { result: "Booked for May 3rd." } }),
       reply("Done."),
-      reply("The helper booked it."),
+      reply("The helper booked it for May 3rd."),
     );
+    await main.ingest({
+      agentId: "kelpie",
+      providerMessageId: "runs-asks:m2",
+      userId: "u-owner",
+      role: "owner",
+      chatType: "direct",
+      text: "Dia 3 de maio.",
+      destination: { channel: "telegram", threadId: "kelpie:telegram:runs-asks" },
+      sentAt: Date.now(),
+      timeZone: null,
+    });
+    await main.flush();
 
     await until(async () => {
-      expect(await statusOf("runs-helper", task.id)).toMatchObject({
-        status: "done",
-        result: "Booked for May 3rd.",
-      });
-    });
-    const texts = userTexts(world);
-    expect(
-      texts.some((text) => text.includes("waits for an answer") && text.includes("Which date?")),
-    ).toBe(true);
-    expect(
-      texts.some((text) => text.includes("the owner commented") || text.includes("May 3rd.")),
-    ).toBe(true);
-    // The result reaches the main agent too, which relays it.
-    await until(async () => {
-      expect(world.sent.at(-1)).toBe("The helper booked it.");
+      expect(world.sent.at(-1)).toBe("The helper booked it for May 3rd.");
     });
     const detail = await statusOf("runs-helper", task.id);
-    expect(await main.turns()).not.toHaveLength(1);
-    expect(detail.attempt).toBe(2);
+    expect(detail).toMatchObject({ status: "done", result: "Booked for May 3rd.", attempt: 2 });
+    // The answer is on the task, from the chat, by the main agent.
+    expect(detail.comments).toEqual([
+      expect.objectContaining({
+        author: { kind: "agent", id: "runs-helper" },
+        text: "Which date?",
+      }),
+      expect.objectContaining({
+        author: { kind: "agent", id: "kelpie" },
+        source: "chat",
+        text: "May 3rd.",
+      }),
+    ]);
+    // The second run had the answer as data, in Kelpie's note.
+    expect(
+      userTexts(world).some(
+        (text) => text.includes("The agent kelpie:") && text.includes("May 3rd."),
+      ),
+    ).toBe(true);
+  });
+
+  it("takes Kelpie's notes only in the agent's own conversations with a person", async () => {
+    const unbound = agent("runs-note-unbound:telegram:x");
+    expect(await unbound.kelpieNote("runs-note-unbound", "u-owner", "Hello.")).toBe(false);
+    const world = use(fakeWorld([reply("Oi!")]));
+    const main = await mainConversation(world, "kelpie:telegram:runs-notes");
+    expect(await main.kelpieNote("someone-else", "u-owner", "Hello.")).toBe(false);
+    expect(await main.kelpieNote("kelpie", "", "Hello.")).toBe(false);
+    expect(await main.kelpieNote("kelpie", "u-owner", "")).toBe(false);
   });
 
   it("lets only the owning agent hand an agent work, and records both", async () => {

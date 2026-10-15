@@ -29,6 +29,10 @@ export const STOP_GRACE_MS = 2 * 60_000;
 export const MAX_FAILURES = 2;
 /** Tasks not yet Done or Cancelled an agent holds; a full board refuses new ones. */
 export const MAX_OPEN_TASKS = 500;
+/** Of those, the most other agents may have open on it (#335): the rest of the board is the owner's. */
+export const MAX_OPEN_AGENT_TASKS = 20;
+/** The most times a task goes to Waiting: one more ends it in Cancelled, so no loop runs on. */
+export const MAX_WAITS = 5;
 export const MAX_COMMENTS = 500;
 /** The most a list returns, most recently changed first. */
 export const LIST_LIMIT = 200;
@@ -76,6 +80,14 @@ export class TaskBoard {
       .where(inArray(schema.tasks.status, OPEN))
       .get();
     if ((open?.n ?? 0) >= MAX_OPEN_TASKS) return notAllowed;
+    if (writer.author.kind === "agent") {
+      const byAgents = this.#db
+        .select({ n: count() })
+        .from(schema.tasks)
+        .where(and(inArray(schema.tasks.status, OPEN), eq(schema.tasks.creatorKind, "agent")))
+        .get();
+      if ((byAgents?.n ?? 0) >= MAX_OPEN_AGENT_TASKS) return notAllowed;
+    }
     const step = stepOf(writer);
     this.#db.transaction((tx) => {
       tx.insert(schema.tasks)
@@ -136,7 +148,9 @@ export class TaskBoard {
       .get();
     if ((comments?.n ?? 0) >= MAX_COMMENTS) return notAllowed;
     const step = stepOf(writer);
-    const resumes = task.status === "waiting";
+    // Its answer comes from someone else: the agent's own comment never resumes its task.
+    const own = writer.author.kind === "agent" && this.#agent.actor?.id === writer.author.id;
+    const resumes = task.status === "waiting" && !own;
     this.#db.transaction((tx) => {
       tx.insert(schema.taskComments)
         .values({
@@ -462,6 +476,8 @@ export class TaskBoard {
       changes.result = outcome.status === "cancelled" ? (outcome.result ?? null) : null;
     } else if (outcome.status === "done") {
       changes = { ...changes, status: "done", result: outcome.result };
+    } else if (outcome.status === "waiting" && task.waits >= MAX_WAITS) {
+      changes = { ...changes, status: "cancelled", result: "It waited too many times." };
     } else if (outcome.status === "waiting") {
       changes = { status: "waiting", waitingReason: outcome.reason, waits: task.waits + 1 };
     } else if (outcome.status === "cancelled") {

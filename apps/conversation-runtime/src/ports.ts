@@ -247,8 +247,11 @@ function productionPorts(env: Env): ConversationPorts {
           (await registry.list()).filter((agent) => agent.owner === id).map((agent) => agent.id),
         create: (assignee, task, creator) =>
           env.AGENT_HOST.getByName(assignee).createTaskFor(task, creator),
-        comment: (assignee, taskId, text, by) =>
-          env.AGENT_HOST.getByName(assignee).commentTaskAs(taskId, text, by, "chat"),
+        // Only an agent the Registry lists: a model-named id makes no object.
+        comment: async (assignee, taskId, text, by) =>
+          (await registry.get(assignee))
+            ? env.AGENT_HOST.getByName(assignee).commentTaskAs(taskId, text, by, "chat")
+            : { ok: false, reason: "unknown_task" },
       }),
     ],
     awaitSetup: (agentId, conversation, step, until) =>

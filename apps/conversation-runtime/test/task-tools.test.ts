@@ -1,5 +1,8 @@
-import type { NewTask, RunOutcome, TaskView } from "@kelpie/config";
+import { type NewTask, type RunOutcome, SETUP_AGENT_ID, type TaskView } from "@kelpie/config";
 import { describe, expect, it } from "vitest";
+import { mainAgentTools } from "../src/main-agent.ts";
+import { memoryTools } from "../src/memory-tools.ts";
+import { setupTools } from "../src/setup-agent.ts";
 import { type TaskToolPorts, taskTools } from "../src/task-tools.ts";
 import type { TaskRunHandle, Tool, ToolContext } from "../src/tools.ts";
 
@@ -193,5 +196,67 @@ describe("the task tools (#335)", () => {
       `comment helper ${TASK} May 3rd. by kelpie`,
       `comment stranger ${TASK} Hi. by kelpie`,
     ]);
+  });
+});
+
+describe("what a task's run is given (#335)", () => {
+  const none = () => {
+    throw new Error("not called");
+  };
+
+  it("leaves Admin's and the main agent's tools out of it, and memory writes", async () => {
+    const setup = setupTools({} as never, { adminOrigin: "https://admin.example" });
+    expect(await setup.tools(SETUP_AGENT_ID, { channel: "task" })).toEqual([]);
+    expect((await setup.tools(SETUP_AGENT_ID, { channel: "webchat" })).length).toBeGreaterThan(0);
+
+    const main = mainAgentTools({} as never, async () => "main");
+    expect(await main.tools("kelpie", { channel: "task" })).toEqual([]);
+    expect(names(await main.tools("kelpie", { channel: "telegram" }))).toEqual(["set_agent_model"]);
+
+    const memory = memoryTools({ search: none, readNote: none, writeNote: none });
+    expect(names(await memory.tools("helper", { channel: "task" }))).toEqual([
+      "memory_search",
+      "memory_read",
+    ]);
+    expect(names(await memory.tools("helper", { channel: "webchat" }))).toContain("memory_write");
+  });
+
+  it("refuses a handoff from a turn that isn't the owner's, and more than three in one turn", async () => {
+    const { provider, calls } = world();
+    const create = byName(await provider.tools("kelpie", { channel: "telegram" }), "create_task");
+    const member = {
+      ...contextOf("kelpie"),
+      actor: { userId: "u-x", role: "member", via: "x" },
+    } as ToolContext;
+    expect(await create.run({ agentId: "helper", title: "Book", body: "x" }, member)).toMatchObject(
+      {
+        isError: true,
+      },
+    );
+    const owner = contextOf("kelpie");
+    for (let i = 0; i < 3; i++) {
+      expect(
+        await create.run({ agentId: "helper", title: `T${i}`, body: "x" }, owner),
+      ).not.toHaveProperty("isError");
+    }
+    expect(await create.run({ agentId: "helper", title: "T3", body: "x" }, owner)).toMatchObject({
+      isError: true,
+      output: expect.stringContaining("at most 3"),
+    });
+    // Another turn starts its own count.
+    expect(
+      await create.run({ agentId: "helper", title: "T4", body: "x" }, { ...owner, turn: "2" }),
+    ).not.toHaveProperty("isError");
+    expect(calls).toHaveLength(4);
+  });
+
+  it("keeps a run to its own task: no comment on another task by its ids", async () => {
+    const { provider, calls } = world();
+    const comment = byName(await provider.tools("helper", { channel: "task" }), "comment_task");
+    const run = contextOf("helper", handle().task);
+    expect(
+      await comment.run({ agentId: "helper", taskId: TASK, text: "Elsewhere." }, run),
+    ).toMatchObject({ isError: true, output: expect.stringContaining("only on your own task") });
+    expect(calls).toEqual([]);
   });
 });

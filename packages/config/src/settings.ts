@@ -47,8 +47,8 @@ export interface AgentSettings {
    */
   memoryCore: boolean;
   /**
-   * How many of its tasks the agent runs at once (ADR-0011, #54). Raising it raises cost, so the
-   * setup agent asks for the owner's confirmation, as for any setting.
+   * How many of its tasks the agent runs at once (ADR-0011, #54); 0 runs none. Raising it raises
+   * cost, so the setup agent asks for the owner's confirmation, as for any setting.
    */
   maxConcurrentTasks: number;
 }
@@ -131,7 +131,8 @@ export function parseSettings(input: unknown): Partial<AgentSettings> | null {
         parsed.memoryCore = value;
         break;
       case "maxConcurrentTasks":
-        if (!isInteger(value, 1, 10)) return null;
+        // 0 runs none of the agent's tasks: they wait in To do (#335).
+        if (!isInteger(value, 0, 10)) return null;
         parsed.maxConcurrentTasks = value;
         break;
       default:

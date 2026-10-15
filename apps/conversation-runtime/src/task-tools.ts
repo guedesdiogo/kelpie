@@ -30,6 +30,8 @@ export interface TaskToolPorts {
 }
 
 const MAX_WORDS = 8_000;
+/** The most tasks one turn hands off: a burst of them is a loop, not a plan. */
+const MAX_CREATES_PER_TURN = 3;
 
 const SPECS = {
   complete_task: {
@@ -190,6 +192,11 @@ export function taskTools(ports: TaskToolPorts): ToolProvider {
         if (!context.task) return NO_TASK;
         return (await context.task.comment(text)) ? { output: "Commented on your task." } : GONE;
       }
+      // A run comments only on its own task.
+      if (context.task)
+        return failed(
+          "In a task's run, comment only on your own task: leave out agentId and taskId.",
+        );
       if (!isAgentId(agentId) || !isTaskId(taskId)) {
         return failed("Name the task by the agentId and taskId Kelpie gave you.");
       }
@@ -209,13 +216,21 @@ export function taskTools(ports: TaskToolPorts): ToolProvider {
       );
     },
   };
+  const created = new Map<string, number>();
   const create: Tool = {
     spec: SPECS.create_task,
     label: { en: "Handing off a task", "pt-BR": "Passando uma tarefa", es: "Pasando una tarea" },
     async run(input, context) {
       const { agentId, title, body } = fields(input);
+      if (context.actor.role !== "owner") return failed("Only the owner's turns hand off tasks.");
       if (!isAgentId(agentId) || typeof title !== "string" || typeof body !== "string") {
         return failed("Give the agentId, a one-line title and the body.");
+      }
+      // A turn's calls share it; a turn's id alone repeats across conversations.
+      const turnKey = `${context.agentId}\n${context.source}\n${context.turn}`;
+      const count = created.get(turnKey) ?? 0;
+      if (count >= MAX_CREATES_PER_TURN) {
+        return failed(`One turn hands off at most ${MAX_CREATES_PER_TURN} tasks.`);
       }
       if (!(await ports.owned(context.agentId)).includes(agentId)) {
         return failed(`You don't own an agent ${agentId}: hand tasks only to agents you own.`);
@@ -224,19 +239,22 @@ export function taskTools(ports: TaskToolPorts): ToolProvider {
       if (task.title === "" || task.title.length > MAX_TASK_TITLE) {
         return failed("The title is one line of up to 200 characters.");
       }
-      const created = await ports.create(agentId, task, {
+      const made = await ports.create(agentId, task, {
         agentId: context.agentId,
         actingUserId: context.actor.userId,
       });
-      if (!created.ok) {
+      if (!made.ok) {
         return failed(
-          created.reason === "not_allowed"
+          made.reason === "not_allowed"
             ? `The agent ${agentId} can't take it: you don't own it, or its board is full.`
             : "That task isn't valid: a title of one line, and a body of up to 20,000 characters.",
         );
       }
+      // Kept for the last few turns only.
+      created.set(turnKey, count + 1);
+      if (created.size > 50) created.delete(created.keys().next().value ?? "");
       return {
-        output: `Created the task ${created.value.id} for the agent ${agentId}. Kelpie tells you when it ends or asks something.`,
+        output: `Created the task ${made.value.id} for the agent ${agentId}. Kelpie tells you when it ends or asks something.`,
       };
     },
   };

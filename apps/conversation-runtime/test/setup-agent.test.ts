@@ -668,9 +668,10 @@ describe("the setup agent's tools", () => {
     };
     expect(schema.properties.settings.properties).toHaveProperty("maxConcurrentTasks", {
       type: "integer",
-      minimum: 1,
+      minimum: 0,
       maximum: 10,
-      description: "How many of its tasks the agent runs at once; more costs more.",
+      description:
+        "How many of its tasks the agent runs at once; 0 runs none, and more costs more.",
     });
     const input = { id: SETUP_AGENT_ID, settings: { maxConcurrentTasks: 5 } };
     const waiting = contextOf(false);
