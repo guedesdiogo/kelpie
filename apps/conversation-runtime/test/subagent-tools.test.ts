@@ -13,12 +13,16 @@ function world({
   described = { provider: "anthropic", tier: "medium", effort: "high", route: [] },
   live = [] as AgentEntry[],
   failConfigure = false,
+  failBind = false,
+  failAdd = false,
   creatorTools = null as string[] | null,
 }: {
   spawn?: boolean;
   described?: ModelDescription;
   live?: AgentEntry[];
   failConfigure?: boolean;
+  failBind?: boolean;
+  failAdd?: boolean;
   creatorTools?: string[] | null;
 } = {}) {
   const calls: string[] = [];
@@ -32,14 +36,17 @@ function world({
     },
     async bindCreator(id, creator) {
       calls.push(`bind ${id.startsWith(`${creator}-sub-`) ? "sub" : id} to ${creator}`);
-      return { ok: true };
+      return { ok: !failBind };
     },
     async add(id, name, creator) {
       calls.push(`add ${name} by ${creator}`);
-      if (live.length >= 3) return { ok: false, reason: "not_allowed" };
+      if (live.length >= 3 || failAdd) return { ok: false, reason: "not_allowed" };
       return id.startsWith(`${creator}-sub-`)
         ? { ok: true }
         : { ok: false, reason: "invalid_input" };
+    },
+    async discard(id) {
+      calls.push(`discard ${id.startsWith("kelpie-sub-") ? "sub" : id}`);
     },
     async configure(_id, settings) {
       configured.push(settings);
@@ -97,7 +104,8 @@ describe("the subagent tools (#290)", () => {
       context(),
     );
     expect(created.output).toMatch(/^Created the subagent kelpie-sub-[0-9a-f]{6}, named "Scout"\./);
-    expect(calls).toEqual(["add Scout by kelpie", "bind sub to kelpie"]);
+    // Pinned first, so the Registry never lists it without its limits (#344).
+    expect(calls).toEqual(["bind sub to kelpie", "add Scout by kelpie"]);
     expect(configured).toEqual([
       {
         systemPrompt: "You find flights.",
@@ -153,7 +161,10 @@ describe("the subagent tools (#290)", () => {
       await (await tool(full.provider, "create_subagent")).run(brief, context()),
     ).toMatchObject({
       isError: true,
-      output: expect.stringContaining("three live subagents"),
+      // Named, so a creator that lost their ids can still delete one (#344).
+      output: expect.stringContaining(
+        "three live subagents, kelpie-sub-a, kelpie-sub-b, kelpie-sub-c",
+      ),
     });
     const member = context({ actor: { userId: "u-x", role: "member", via: "x" } });
     expect(
@@ -168,6 +179,18 @@ describe("the subagent tools (#290)", () => {
       isError: true,
     });
     expect(broken.calls.at(-1)).toMatch(/^remove kelpie-sub-/);
+    // One that can't be pinned is never added.
+    const unpinned = world({ failBind: true });
+    expect(
+      await (await tool(unpinned.provider, "create_subagent")).run(brief, context()),
+    ).toMatchObject({ isError: true });
+    expect(unpinned.calls).toEqual(["bind sub to kelpie"]);
+    // One the Registry refuses leaves no pinned object behind (#344).
+    const unlisted = world({ failAdd: true });
+    expect(
+      await (await tool(unlisted.provider, "create_subagent")).run(brief, context()),
+    ).toMatchObject({ isError: true, output: expect.stringContaining("most subagents a day") });
+    expect(unlisted.calls).toEqual(["bind sub to kelpie", "add Scout by kelpie", "discard sub"]);
   });
 
   it("delete only the creator's own subagents", async () => {
@@ -219,6 +242,30 @@ describe("the subagent tools (#290)", () => {
     expect(configured.at(-1)?.tools).toEqual(["complete_task"]);
   });
 
+  it("refuse a subagent that could never finish a task (#344)", async () => {
+    // A creator that may not use complete_task makes none.
+    const without = world({ creatorTools: ["create_subagent", "memory_search"] });
+    expect(
+      await (await tool(without.provider, "create_subagent")).run(brief, context()),
+    ).toMatchObject({
+      isError: true,
+      output: expect.stringContaining("could never finish a task"),
+    });
+    expect(without.calls).toEqual([]);
+    // Nor does a model that leaves it out of the subagent's tools.
+    const { provider, calls } = world();
+    expect(
+      await (await tool(provider, "create_subagent")).run(
+        { ...brief, tools: ["memory_search"] },
+        context(),
+      ),
+    ).toMatchObject({
+      isError: true,
+      output: expect.stringContaining("must include complete_task"),
+    });
+    expect(calls).toEqual([]);
+  });
+
   it("are refused to a turn that doesn't read all the owner's memory", async () => {
     const { provider, calls } = world();
     const narrow = context({ scopes: ["conversation/telegram-group"] });
@@ -230,6 +277,10 @@ describe("the subagent tools (#290)", () => {
     expect(
       await (await tool(provider, "delete_subagent")).run({ id: "kelpie-sub-aaaaaa" }, member),
     ).toMatchObject({ isError: true });
+    // Nor deleted from one (#344).
+    expect(
+      await (await tool(provider, "delete_subagent")).run({ id: "kelpie-sub-aaaaaa" }, narrow),
+    ).toMatchObject({ isError: true, output: expect.stringContaining("direct conversation") });
     expect(calls).toEqual([]);
   });
 });

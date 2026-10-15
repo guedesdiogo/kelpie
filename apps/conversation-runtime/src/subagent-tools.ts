@@ -29,6 +29,8 @@ export interface SubagentPorts {
   }>;
   /** Pins the new subagent's creator on its own object, so it stays a subagent whatever happens. */
   bindCreator(id: string, creator: string): Promise<{ ok: boolean }>;
+  /** Erases the object of a subagent the Registry never listed (#344). */
+  discard(id: string): Promise<unknown>;
   add(
     id: string,
     name: string,
@@ -138,9 +140,20 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
       const allowed = [...SUBAGENT_TOOLS].filter(
         (tool) => creatorTools === null || creatorTools.includes(tool),
       );
+      // Without complete_task, a subagent could never finish a task (#344).
+      if (!allowed.includes("complete_task")) {
+        return failed(
+          "You may not use complete_task, so a subagent of yours could never finish a task: ask the owner to allow it through Admin.",
+        );
+      }
       const tools = optional("tools") ?? allowed;
       if (!Array.isArray(tools) || tools.some((tool) => !allowed.includes(String(tool)))) {
         return failed(`A subagent's tools can only be these: ${allowed.join(", ") || "none"}.`);
+      }
+      if (!tools.includes("complete_task")) {
+        return failed(
+          "A subagent's tools must include complete_task, or it can't finish its task.",
+        );
       }
       if (tier !== undefined && !TIERS.includes(tier as never)) return failed("Unknown tier.");
       if (effort !== undefined && !EFFORTS.includes(effort as never))
@@ -198,12 +211,18 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
       const live = (await ports.owned(context.agentId)).filter((one) => one.role === "subagent");
       if (live.length >= 3) {
         return failed(
-          "You already have three live subagents: delete one with delete_subagent first.",
+          `You already have three live subagents, ${live.map((one) => one.id).join(", ")}: delete one with delete_subagent first.`,
         );
       }
       const id = subagentId(context.agentId);
+      // Pinned before the Registry lists it, so it is never an agent without its limits (#344).
+      if (!(await ports.bindCreator(id, context.agentId).catch(() => ({ ok: false }))).ok) {
+        return failed("Kelpie couldn't set it up: try again.");
+      }
       const added = await ports.add(id, name.trim(), context.agentId, context.actor);
       if (!added.ok) {
+        // Pinned but never listed: its object goes, so nothing is left behind.
+        await ports.discard(id).catch(() => undefined);
         return failed(
           added.reason === "not_allowed"
             ? "Kelpie didn't create it: you made the most subagents a day allows, or have three live."
@@ -220,9 +239,6 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
         );
       };
       try {
-        if (!(await ports.bindCreator(id, context.agentId)).ok) {
-          return await undo("Kelpie couldn't set it up: try again.");
-        }
         const configured = await ports.configure(id, settings, context.actor);
         if (!configured.ok) return await undo("Kelpie couldn't set it up: try again.");
       } catch {
@@ -241,8 +257,9 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
       es: "Eliminando un subagente",
     },
     async run(input, context) {
-      if (context.actor.role !== "owner")
-        return failed("Only the owner's own turns delete subagents.");
+      if (context.actor.role !== "owner" || context.scopes !== "all") {
+        return failed("Only the owner's own turns, in a direct conversation, delete subagents.");
+      }
       const { id } = fields(input);
       const mine = (await ports.owned(context.agentId)).find(
         (agent) => agent.id === id && agent.role === "subagent",

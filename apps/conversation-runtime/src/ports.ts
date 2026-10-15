@@ -10,7 +10,6 @@ import {
 } from "@kelpie/channels";
 import {
   type AgentHostContract,
-  agentModel,
   type ConfigPorts,
   createConfigCommands,
   REGISTRY_NAME,
@@ -252,8 +251,11 @@ function productionPorts(env: Env): ConversationPorts {
           return entry?.role === "specialist" && (await agentHost(id).config()).settings.spawn;
         },
         creator: async (id) => {
-          const { settings } = await agentHost(id).config();
-          const model = agentModel(settings);
+          // Its own model, not the defaults: an unset tier follows the instance's (#344).
+          const [{ settings }, model] = await Promise.all([
+            agentHost(id).config(),
+            agentHost(id).ownModel(),
+          ]);
           const described = await (
             env.LLM_GATEWAY as unknown as {
               describe(area: "conversation", agent: ModelSettings): Promise<ModelDescription>;
@@ -262,6 +264,7 @@ function productionPorts(env: Env): ConversationPorts {
           return { model, described, tools: settings.tools };
         },
         bindCreator: (id, creator) => env.AGENT_HOST.getByName(id).bindCreator(creator),
+        discard: (id) => agentHost(id).erase([]),
         add: (id, name, creator, actor) => registry.addSubagent(id, name, creator, actor),
         configure: (id, settings, actor) => agentHost(id).configure(settings, actor),
         owned: async (creator) =>

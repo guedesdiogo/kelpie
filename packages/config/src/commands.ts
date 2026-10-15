@@ -149,6 +149,11 @@ export interface AgentHostContract {
   configure(changes: Partial<AgentSettings>, actor: Actor): ConfigureResult;
   config(): AgentConfig;
   /**
+   * The model settings the agent's calls resolve from (#344): its own, not the defaults, so an
+   * area it leaves unset follows the instance's; a subagent's held to its creator's.
+   */
+  ownModel(): Promise<ModelSettings>;
+  /**
    * Notes that a conversation, by its object's name, waits for a step of this agent until `until`
    * (#206): it sent the owner the link to it.
    */

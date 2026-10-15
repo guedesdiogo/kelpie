@@ -774,10 +774,97 @@ describe("AgentHost and subagents (#290)", () => {
     roster({});
     expect(await host("sub-pinned").bindCreator("kelpie")).toEqual({ ok: true });
     expect(await host("sub-pinned").bindCreator("someone-else")).toEqual({ ok: false });
+    // A new subagent whose id collides with a live agent's never takes that agent over (#344).
+    expect(await host("sub-pinned").bindCreator("kelpie")).toEqual({ ok: false });
+    await host("sub-in-use").configure({ remit: "Quotes." }, owner);
+    expect(await host("sub-in-use").bindCreator("kelpie")).toEqual({ ok: false });
+    expect((await host("sub-in-use").config()).settings.remit).toBe("Quotes.");
+    // Nor one configured back to its defaults, one with a task, or one with a conversation.
+    await host("sub-reset").configure({ remit: "Quotes." }, owner);
+    await host("sub-reset").configure({ remit: "" }, owner);
+    expect(await host("sub-reset").bindCreator("kelpie")).toEqual({ ok: false });
+    const task = await host("sub-tasked").createTask(
+      { title: "Later", body: "", status: "backlog", scheduledStartAt: null },
+      owner,
+    );
+    expect(task.ok).toBe(true);
+    expect(await host("sub-tasked").bindCreator("kelpie")).toEqual({ ok: false });
+    await host("sub-talked").turnConfig("sub-talked:telegram:1");
+    expect(await host("sub-talked").bindCreator("kelpie")).toEqual({ ok: false });
     expect((await host("sub-pinned").turnConfig()).agent).toMatchObject({
       role: "subagent",
       owner: "kelpie",
       spawn: false,
+    });
+  });
+
+  it("holds a subagent to the tier its creator runs on, the instance's when it sets none (#344)", async () => {
+    // The instance's conversation tier is frontier: an agent that sets none runs on it.
+    replaceIdentitySourcesForTesting({
+      agent: async (id) =>
+        id === "inherit-main"
+          ? { name: id, role: "main", owner: null }
+          : { name: id, role: "subagent", owner: "inherit-main" },
+      describe: async (model) => ({
+        provider: "anthropic",
+        tier: model.conversation?.tier ?? "frontier",
+        route: [],
+      }),
+      specialists: async () => [],
+    });
+    expect(await host("inherit-sub").bindCreator("inherit-main")).toEqual({ ok: true });
+    await host("inherit-sub").configure({ model: { conversation: { tier: "medium" } } }, owner);
+    // The creator's own model has no tier: not the defaults' cheap.
+    expect(await host("inherit-main").ownModel()).toEqual({});
+    expect((await host("inherit-sub").turnConfig()).settings.model).toEqual({
+      provider: "anthropic",
+      conversation: { tier: "medium" },
+    });
+  });
+
+  it("names no model in a subagent's prompt when its clamped trio can't be described (#344)", async () => {
+    replaceIdentitySourcesForTesting({
+      agent: async (id) =>
+        id === "unread-main"
+          ? { name: id, role: "main", owner: null }
+          : { name: id, role: "subagent", owner: "unread-main" },
+      describe: async (model) => {
+        // The clamped trio is the only one pinned to a provider: llm-gateway fails on it.
+        if (model.provider !== undefined) throw new Error("down");
+        return { provider: "anthropic", tier: model.conversation?.tier ?? "cheap", route: [] };
+      },
+      specialists: async () => [],
+    });
+    await host("unread-main").configure({ model: { conversation: { tier: "medium" } } }, owner);
+    expect(await host("unread-sub").bindCreator("unread-main")).toEqual({ ok: true });
+    await host("unread-sub").configure({ model: { conversation: { tier: "frontier" } } }, owner);
+    const { settings } = await host("unread-sub").turnConfig();
+    expect(settings.model.conversation).toEqual({ tier: "medium" });
+    // Not its own frontier tier, which it doesn't run on.
+    expect(settings.systemPrompt).not.toContain("You run on");
+  });
+
+  it("gives a subagent's calls outside a turn its creator's limits too (#344)", async () => {
+    roster({ "own-maker": { role: "main" } });
+    await host("own-maker").configure(
+      { model: { conversation: { tier: "medium" }, memory: { tier: "cheap" } } },
+      owner,
+    );
+    expect(await host("own-sub").bindCreator("own-maker")).toEqual({ ok: true });
+    await host("own-sub").configure(
+      { model: { conversation: { tier: "frontier" }, memory: { tier: "frontier" } } },
+      owner,
+    );
+    // A checkpoint's summary runs on the memory area: its creator's, not its own frontier.
+    expect(await host("own-sub").ownModel()).toEqual({
+      provider: "anthropic",
+      memory: { tier: "cheap" },
+      conversation: { tier: "medium" },
+    });
+    // Any other agent's are its own settings, unclamped.
+    expect(await host("own-maker").ownModel()).toEqual({
+      conversation: { tier: "medium" },
+      memory: { tier: "cheap" },
     });
   });
 

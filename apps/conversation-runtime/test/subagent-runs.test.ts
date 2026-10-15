@@ -55,6 +55,7 @@ function use(world: FakeWorld): FakeWorld {
       },
       add: (id, name, creator, actor) => registry().addSubagent(id, name, creator, actor),
       bindCreator: (id, creator) => host(id).bindCreator(creator),
+      discard: (id) => host(id).erase([]),
       configure: (id, settings, actor) => host(id).configure(settings, actor),
       owned: async (creator) =>
         (await registry().list()).filter((entry) => entry.owner === creator),
