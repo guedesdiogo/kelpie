@@ -36,6 +36,39 @@ describe("parseSettings", () => {
     }
   });
 
+  it("takes spawn, a remit, stored skills and a tool allowlist, none by default (#290)", () => {
+    expect(DEFAULT_SETTINGS).toMatchObject({ spawn: false, remit: "", skills: [], tools: null });
+    const skills = [{ name: "Fact check", instructions: "Check each claim twice." }];
+    expect(
+      parseSettings({
+        spawn: true,
+        remit: "Flights and hotels.",
+        skills,
+        tools: ["memory_search", "complete_task"],
+      }),
+    ).toEqual({
+      spawn: true,
+      remit: "Flights and hotels.",
+      skills,
+      tools: ["memory_search", "complete_task"],
+    });
+    expect(parseSettings({ tools: null })).toEqual({ tools: null });
+    for (const input of [
+      { spawn: "yes" },
+      { remit: "Two\nlines" },
+      { remit: "a".repeat(201) },
+      { skills: [{ name: "", instructions: "x" }] },
+      { skills: [{ name: "x", instructions: "a".repeat(4_001) }] },
+      { skills: Array.from({ length: 11 }, (_, i) => ({ name: `s${i}`, instructions: "x" })) },
+      { skills: [{ name: "x", instructions: "y", extra: 1 }] },
+      { tools: ["Not A Tool"] },
+      { tools: "memory_search" },
+      { tools: Array.from({ length: 33 }, (_, i) => `tool_${i}`) },
+    ]) {
+      expect(parseSettings(input), JSON.stringify(input)).toBeNull();
+    }
+  });
+
   it("leaves the memory core off until the owner turns it on", () => {
     expect(DEFAULT_SETTINGS.memoryCore).toBe(false);
     expect(parseSettings({ memoryCore: true })).toEqual({ memoryCore: true });

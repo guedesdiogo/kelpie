@@ -3,6 +3,7 @@ import type { Actor, RunOutcome, SetupStep } from "@kelpie/config";
 import type { RecallOptions } from "@kelpie/context-store/contract";
 import { withoutTypedStamps } from "@kelpie/conversation";
 import type { ToolCallPart, ToolResult, ToolSpec } from "@kelpie/llm";
+import type { Announcement } from "./announcements.ts";
 
 // The tool layer (ADR-0014, issue #141): providers offer an agent tools, and the conversation's
 // turn runs the calls its model asks for. The setup agent's configuration commands (#48) and the
@@ -216,8 +217,17 @@ export interface ToolContext {
    * `text`, or a `text` too long for one bubble, makes it throw.
    */
   sendLink(link: HostLink): void;
+  /**
+   * Has Kelpie announce, after a reply, what the turn's tools did (ADR-0036 §4 and §6), in its own
+   * fixed words: a task handed to another agent (#287), a subagent created or deleted (#342). What
+   * it announces stands whatever becomes of the turn, so a call the turn gave up on still announces
+   * it, and a turn that sends no reply leaves it for the next one.
+   */
+  announce(announcement: Announcement): void;
   /** In a task's conversation, its run (#335); elsewhere, none. */
   task?: TaskRunHandle;
+  /** Whose memory the turn reads: a subagent's creator's (#290), else the agent's own. */
+  memoryAgentId?: string;
 }
 
 /**

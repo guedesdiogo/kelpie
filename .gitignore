@@ -10,4 +10,5 @@ coverage/
 .DS_Store
 worker-configuration.d.ts
 packages/memory/eval/last-run.json
+apps/conversation-runtime/eval/last-run.json
 .wrangler-release.jsonc

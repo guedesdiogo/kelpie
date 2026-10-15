@@ -1,7 +1,7 @@
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { TaskView } from "@kelpie/config";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type AgentHost,
   replaceTaskRunnerForTesting,
@@ -258,8 +258,9 @@ describe("pickup, the limit and scheduled starts (#54)", () => {
     await new Promise((resolve) =>
       setTimeout(resolve, Math.ceil(at / 1_000) * 1_000 - Date.now() + 50),
     );
+    // Run here, unless the runtime already ran it on its own and is still running it (#351).
     await runDurableObjectAlarm(stub);
-    expect(started.map((run) => run.task)).toEqual(["later"]);
+    await vi.waitFor(() => expect(started.map((run) => run.task)).toEqual(["later"]));
   });
 });
 
@@ -282,9 +283,10 @@ describe("leases, runs and stops (#54)", () => {
     await stub.wakeTasks();
     expect(await wakes(stub)).toEqual([Math.ceil(soon / 1_000) * 1_000]);
     await sleepUntil(Math.ceil(soon / 1_000) * 1_000);
-    expect(await runDurableObjectAlarm(stub)).toBe(true);
+    // The alarm sweeps it: run here, unless the runtime already ran it on its own (#351).
+    await runDurableObjectAlarm(stub);
     // The expired attempt goes back to To do and is claimed again at once.
-    expect(started.map((run) => run.run)).toHaveLength(2);
+    await vi.waitFor(() => expect(started.map((run) => run.run)).toHaveLength(2));
     await expireLease(stub, task);
     await stub.wakeTasks();
 

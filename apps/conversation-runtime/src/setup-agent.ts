@@ -34,10 +34,10 @@ export const SETUP_PROMPT = `You are Kelpie's setup agent. You help the owner co
 
 How you work:
 - Make every change with your tools, and never say you made one your tools didn't confirm.
-- Kelpie's agents have roles. The main agent is the one the owner talks to: a new instance starts with one, Kelpie, and set_main_agent makes another agent the main one. If list_agents shows no main agent, ask the owner which agent should be it. Every other agent is a specialist, and the owner can chat with a specialist only once its chat is on (set_agent_chat).
-- For a first setup, go in this order: see which agents exist (list_agents); connect the main agent's Telegram bot (connect_telegram); then pair the owner's Telegram account with it (pair_telegram). Create another agent, with a short id of lowercase letters, digits and hyphens, and a name (create_agent), only when the owner asks for one; to talk to it, its chat must be on. Changing an agent's model or prompt (configure_agent) is optional.
-- Delete an agent (delete_agent) only when the owner asks for it: its subagents go with it, and nothing it held can be recovered. Admin and the main agent can't be deleted.
-- Changing an agent's settings, the main agent or an agent's chat, or deleting an agent, needs the owner's confirmation. Kelpie itself shows them what will change, with a Confirm button in the webchat or a code to reply with: don't ask them to confirm in other words, and never make up a code. Once they confirm, call the same tool again with the same input.
+- Kelpie's agents have roles. Master, the role \`main\` in list_agents, is the agent the owner talks to: a new instance starts with one, Kelpie, and set_main_agent makes another agent Master. If list_agents shows no agent with the role \`main\`, ask the owner which agent should be Master. Every other agent is a specialist, and the owner can chat with a specialist only once its chat is on (set_agent_chat).
+- For a first setup, go in this order: see which agents exist (list_agents); connect Master's Telegram bot (connect_telegram); then pair the owner's Telegram account with it (pair_telegram). Create another agent, with a short id of lowercase letters, digits and hyphens, and a name (create_agent), only when the owner asks for one; to talk to it, its chat must be on. Changing an agent's model or prompt (configure_agent) is optional.
+- Delete an agent (delete_agent) only when the owner asks for it: its subagents go with it, and nothing it held can be recovered. Admin and Master can't be deleted.
+- Changing an agent's settings, which agent is Master or an agent's chat, or deleting an agent, needs the owner's confirmation. Kelpie itself shows them what will change, with a Confirm button in the webchat or a code to reply with: don't ask them to confirm in other words, and never make up a code. Once they confirm, call the same tool again with the same input.
 - Kelpie itself sends the owner the links of connect_telegram and pair_telegram, in a message of its own after your reply. Never write those links yourself, and never make one up: just tell the owner to open the link Kelpie sent. What the owner does on that page is their yes.
 - When the owner finishes on one of those pages, Kelpie tells you in this conversation, in a note that starts "Kelpie, automatically". Don't ask them to tell you when they're done: when the note comes, go on with the next step.
 - Never ask for a secret in the chat, such as a bot token, the runner's secret or an API key. A bot token goes only into the secure form connect_telegram has Kelpie send, and the runner's secret only into connect_runner's. If the owner pastes a secret in the chat anyway, tell them to revoke it and make a new one: for the runner, a new secret in its file on the server (docs/runner.md).
@@ -141,6 +141,17 @@ const SPECS = {
             maxWaitMs: { type: "integer", minimum: 0, maximum: 120_000 },
             qualifier: { type: "string", enum: ["clef", "jev"] },
             toolLoopMs: { type: "integer", minimum: 120_000, maximum: 600_000 },
+            spawn: {
+              type: "boolean",
+              description:
+                "Whether the agent creates temporary subagents. Master always does; a subagent never.",
+            },
+            remit: { type: "string", description: "What the agent is for, one line." },
+            tools: {
+              type: ["array", "null"],
+              items: { type: "string" },
+              description: "The tools it may use, by name; null for all it is given.",
+            },
             maxConcurrentTasks: {
               type: "integer",
               minimum: 0,
@@ -177,7 +188,7 @@ const SPECS = {
   set_main_agent: {
     name: "set_main_agent",
     description:
-      "Make an agent the main agent: the one the owner talks to, which owns the specialists. The previous main agent becomes a specialist and keeps its chat. It needs the owner's confirmation: the first call shows them the change; call it again with the same input once they confirm.",
+      "Make an agent Master: the one the owner talks to, which owns the specialists. The previous Master becomes a specialist and keeps its chat. It needs the owner's confirmation: the first call shows them the change; call it again with the same input once they confirm.",
     inputSchema: {
       type: "object",
       properties: { id: AGENT_ID },
@@ -188,7 +199,7 @@ const SPECS = {
   set_agent_chat: {
     name: "set_agent_chat",
     description:
-      "Turn a specialist's chat on or off: whether the owner can reach it on its channels. Admin and the main agent always chat. It needs the owner's confirmation, as set_main_agent does.",
+      "Turn a specialist's chat on or off: whether the owner can reach it on its channels. Admin and Master always chat. It needs the owner's confirmation, as set_main_agent does.",
     inputSchema: {
       type: "object",
       properties: { id: AGENT_ID, chat: { type: "boolean" } },
@@ -199,7 +210,7 @@ const SPECS = {
   delete_agent: {
     name: "delete_agent",
     description:
-      "Delete an agent, and its subagents with it, for good: their settings, their conversations with all their history, and any Telegram bot connected to them. Admin and the main agent can't be deleted. Its files in the owner's vault stay. It needs the owner's confirmation, as set_main_agent does.",
+      "Delete an agent, and its subagents with it, for good: their settings, their conversations with all their history, and any Telegram bot connected to them. Admin and Master can't be deleted. Its files in the owner's vault stay. It needs the owner's confirmation, as set_main_agent does.",
     inputSchema: {
       type: "object",
       properties: { id: AGENT_ID },
@@ -251,11 +262,11 @@ const NOT_OWNER = failed("Only the owner can change Kelpie's configuration.");
 const NO_KEY = failed(
   "That provider has no key in llm-gateway, so it can't serve: the owner sets one as a deploy secret (docs/secrets.md). get_models lists the providers that have one.",
 );
-const NOT_MAIN = failed("Admin can't be the main agent, and a subagent can't either.");
+const NOT_MAIN = failed("Admin can't be Master, and a subagent can't either.");
 const NOT_SPECIALIST = failed(
-  "Only a specialist's chat can change: Admin and the main agent always chat, and a subagent never does.",
+  "Only a specialist's chat can change: Admin and Master always chat, and a subagent never does.",
 );
-const NOT_DELETABLE = failed("Admin and the main agent can't be deleted.");
+const NOT_DELETABLE = failed("Admin and Master can't be deleted.");
 const NOT_CONFIGURED = failed(
   "Kelpie's admin API address isn't set (ADMIN_ORIGIN on conversation-runtime), so I can't give its link. The owner sets it when deploying: see docs/admin-api.md.",
 );
@@ -365,8 +376,7 @@ const TEXTS: Localized<{
     settingFrom: "from",
     changeSettings: (agent, id, changes) =>
       `change the settings of the agent ${agent} (${id}): ${changes}.`,
-    mainAgent: (agent, id) =>
-      `make the agent ${agent} (${id}) the main agent, the one you talk to.`,
+    mainAgent: (agent, id) => `make the agent ${agent} (${id}) Master, the one you talk to.`,
     models: (before, after) =>
       `set the models every agent uses unless it has its own, from ${before} to ${after}.`,
     chat: (agent, id, on) =>
@@ -389,8 +399,7 @@ const TEXTS: Localized<{
     settingFrom: "de",
     changeSettings: (agent, id, changes) =>
       `alterar as configurações do agente ${agent} (${id}): ${changes}.`,
-    mainAgent: (agent, id) =>
-      `tornar o agente ${agent} (${id}) o agente principal, o que conversa com você.`,
+    mainAgent: (agent, id) => `tornar o agente ${agent} (${id}) o Master, o que conversa com você.`,
     models: (before, after) =>
       `definir os modelos que todo agente usa quando não tem os seus, de ${before} para ${after}.`,
     chat: (agent, id, on) =>
@@ -414,7 +423,7 @@ const TEXTS: Localized<{
     changeSettings: (agent, id, changes) =>
       `cambiar la configuración del agente ${agent} (${id}): ${changes}.`,
     mainAgent: (agent, id) =>
-      `convertir el agente ${agent} (${id}) en el agente principal, el que conversa contigo.`,
+      `convertir el agente ${agent} (${id}) en el Master, el que conversa contigo.`,
     models: (before, after) =>
       `definir los modelos que usa todo agente que no tenga los suyos, de ${before} a ${after}.`,
     chat: (agent, id, on) =>
@@ -588,7 +597,7 @@ export function setupTools(
         const { value } = result;
         return {
           output: value.created
-            ? `Created the agent ${value.id}, named ${JSON.stringify(value.name)}. It is a specialist, owned by the main agent, and its chat is off: the owner can't reach it until set_agent_chat turns it on.`
+            ? `Created the agent ${value.id}, named ${JSON.stringify(value.name)}. It is a specialist, owned by Master, and its chat is off: the owner can't reach it until set_agent_chat turns it on.`
             : `The agent ${value.id} already exists; nothing changed.`,
         };
       },
@@ -702,9 +711,9 @@ export function setupTools(
     {
       spec: SPECS.set_main_agent,
       label: {
-        en: "Choosing the main agent",
-        "pt-BR": "Escolhendo o agente principal",
-        es: "Eligiendo el agente principal",
+        en: "Choosing Master",
+        "pt-BR": "Escolhendo o Master",
+        es: "Eligiendo el Master",
       },
       async run(input, context) {
         if (!isOwner(context)) return NOT_OWNER;
@@ -713,7 +722,7 @@ export function setupTools(
         // Checked before the owner is asked: a yes that can't change anything isn't asked for.
         if (agent.role === "admin" || agent.role === "subagent") return NOT_MAIN;
         if (agent.role === "main") {
-          return { output: `The agent ${agent.id} is already the main agent; nothing changed.` };
+          return { output: `The agent ${agent.id} is already Master; nothing changed.` };
         }
         const change = { id: agent.id };
         const confirmed = await context.confirm({
@@ -726,7 +735,7 @@ export function setupTools(
         if (!result.ok)
           return result.reason === "not_allowed" ? NOT_MAIN : refusal(result, agent.id);
         return {
-          output: `The agent ${agent.id} is now the main agent: the one the owner talks to.`,
+          output: `The agent ${agent.id} is now Master: the one the owner talks to.`,
         };
       },
     },

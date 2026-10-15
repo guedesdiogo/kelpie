@@ -63,11 +63,10 @@ describe("identitySection", () => {
   it("states the role the Registry gives it (#314)", () => {
     const line = (role: "admin" | "main" | "specialist" | "subagent") =>
       identitySection({ id: "bia", name: "Bia", role, model: runsOn([haiku]) });
-    expect(line("main")).toContain(
-      "You are Bia, the owner's main agent on Kelpie, the one they talk to.",
-    );
+    // The role the Registry calls `main` is Master in every text (#343).
+    expect(line("main")).toContain("You are Bia, Master on Kelpie, the agent the owner talks to.");
     expect(line("specialist")).toContain(
-      "You are Bia, a specialist agent on Kelpie, owned by the owner's main agent.",
+      "You are Bia, a specialist agent on Kelpie, owned by Master, the agent the owner talks to.",
     );
     expect(line("subagent")).toContain(
       "You are Bia, a temporary subagent on Kelpie, working on one demand of the agent that created you.",
@@ -82,5 +81,28 @@ describe("identitySection", () => {
   it("gives the setup agent its own role", () => {
     const text = identitySection({ id: SETUP_AGENT_ID, name: "Setup", model: runsOn([]) });
     expect(text).toContain("You are Setup, Kelpie's setup agent, which configures Kelpie.");
+  });
+
+  it("names a subagent's creator, and any agent's remit (#290)", () => {
+    const text = identitySection({
+      id: "kelpie-sub-a1b2",
+      name: "Scout",
+      role: "subagent",
+      creator: "kelpie",
+      remit: "Find flights to Lisbon.",
+      model: null,
+    });
+    expect(text).toContain(
+      "You are Scout, a temporary subagent on Kelpie, working on one demand of the agent that created you, the agent kelpie. Your remit: Find flights to Lisbon.",
+    );
+    expect(
+      identitySection({
+        id: "sales",
+        name: "Sales",
+        role: "specialist",
+        remit: "Sales.",
+        model: null,
+      }),
+    ).toContain("owned by Master, the agent the owner talks to. Your remit: Sales.");
   });
 });

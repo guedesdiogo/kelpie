@@ -4,6 +4,8 @@ import { DEFAULT_SETTINGS, REGISTRY_NAME, SETUP_AGENT_ID } from "@kelpie/config"
 import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  CREATE_SUBAGENT_SKILL,
+  clampModel,
   replaceContextStoreForTesting,
   replaceIdentitySourcesForTesting,
 } from "../src/agent-host/agent-host.ts";
@@ -454,6 +456,9 @@ describe("AgentHost with a vault", () => {
       describe: async () => {
         throw new TypeError('The RPC receiver does not implement the method "describe".');
       },
+      specialists: async () => {
+        throw new Error("Durable Object reset because its code was updated");
+      },
     });
     expect((await stub.turnConfig()).settings.systemPrompt).toBe(seen);
 
@@ -476,6 +481,8 @@ describe("AgentHost with a vault", () => {
         systemPrompt: withIdentity("empty-vault", DEFAULT_SETTINGS.systemPrompt),
       },
       promptVersion: 0,
+      // What a turn's limits read (#290): an agent the Registry doesn't list has no role.
+      agent: { role: null, owner: null, spawn: false, creatorTools: null },
     });
   });
 
@@ -665,5 +672,286 @@ describe("Deleting an agent's storage (#303)", () => {
         state.storage.sql.exec("SELECT key FROM state").toArray(),
       ),
     ).toEqual([{ key: "agentId" }]);
+  });
+});
+
+describe("AgentHost and subagents (#290)", () => {
+  /** Identity sources where each agent's role and owner are given, and a trio is its own tier. */
+  function roster(
+    entries: Record<string, { role: "main" | "specialist" | "subagent"; owner?: string }>,
+  ) {
+    replaceIdentitySourcesForTesting({
+      agent: async (id) => {
+        const entry = entries[id];
+        return entry ? { name: id, role: entry.role, owner: entry.owner ?? null } : null;
+      },
+      describe: async (model) => ({
+        provider: model.provider ?? "anthropic",
+        tier: model.conversation?.tier ?? "cheap",
+        ...(model.conversation?.effort ? { effort: model.conversation.effort } : {}),
+        route: [],
+      }),
+      specialists: async () => [],
+    });
+  }
+  afterEach(() => {
+    replaceIdentitySourcesForTesting(undefined);
+  });
+
+  it("teaches create-subagent to the main agent and to an agent with spawn, never a subagent", async () => {
+    roster({
+      "sub-main": { role: "main" },
+      "sub-specialist": { role: "specialist" },
+      "sub-spawner": { role: "specialist" },
+      "sub-child": { role: "subagent", owner: "sub-main" },
+    });
+    await host("sub-spawner").configure({ spawn: true }, owner);
+    await host("sub-child").configure({ spawn: true }, owner);
+    const taught = async (id: string) => {
+      const config = await host(id).turnConfig();
+      return {
+        prompt: config.settings.systemPrompt.includes(CREATE_SUBAGENT_SKILL),
+        agent: config.agent,
+      };
+    };
+    expect(await taught("sub-main")).toEqual({
+      prompt: true,
+      agent: { role: "main", owner: null, spawn: true, creatorTools: null },
+    });
+    expect(await taught("sub-specialist")).toMatchObject({
+      prompt: false,
+      agent: { spawn: false },
+    });
+    expect(await taught("sub-spawner")).toMatchObject({ prompt: true, agent: { spawn: true } });
+    expect(await taught("sub-child")).toEqual({
+      prompt: false,
+      agent: { role: "subagent", owner: "sub-main", spawn: false, creatorTools: null },
+    });
+  });
+
+  it("puts a subagent's soul, skills and remit in its prompt, and its creator in its identity", async () => {
+    roster({ "sub-briefed": { role: "subagent", owner: "kelpie" } });
+    await host("sub-briefed").configure(
+      {
+        systemPrompt: "You find flights.",
+        remit: "Flights to Lisbon.",
+        skills: [{ name: "Fares", instructions: "Compare three fares." }],
+      },
+      owner,
+    );
+    const prompt = (await host("sub-briefed").turnConfig()).settings.systemPrompt;
+    expect(prompt).toContain(
+      "a temporary subagent on Kelpie, working on one demand of the agent that created you, the agent kelpie. Your remit: Flights to Lisbon.",
+    );
+    expect(prompt).toContain("You find flights.");
+    expect(prompt).toContain("# Your skills\n\n## Fares\n\nCompare three fares.");
+  });
+
+  it("runs a subagent on its creator's trio once its own is above it", async () => {
+    roster({
+      "sub-maker": { role: "main" },
+      "sub-climber": { role: "subagent", owner: "sub-maker" },
+    });
+    await host("sub-maker").configure({ model: { conversation: { tier: "medium" } } }, owner);
+    await host("sub-climber").configure({ model: { conversation: { tier: "frontier" } } }, owner);
+    const climbed = await host("sub-climber").turnConfig();
+    // Held to its creator's tier, on its creator's route.
+    expect(climbed.settings.model).toEqual({
+      provider: "anthropic",
+      conversation: { tier: "medium" },
+    });
+    expect(climbed.settings.systemPrompt).toContain("You run on Kelpie's medium tier");
+
+    // Within its creator's, it keeps its own.
+    await host("sub-climber").configure({ model: { conversation: { tier: "cheap" } } }, owner);
+    expect((await host("sub-climber").turnConfig()).settings.model).toEqual({
+      provider: "anthropic",
+      conversation: { tier: "cheap" },
+    });
+  });
+
+  it("stays a subagent once its creator is pinned, whatever the Registry answers", async () => {
+    roster({});
+    expect(await host("sub-pinned").bindCreator("kelpie")).toEqual({ ok: true });
+    expect(await host("sub-pinned").bindCreator("someone-else")).toEqual({ ok: false });
+    // A new subagent whose id collides with a live agent's never takes that agent over (#344).
+    expect(await host("sub-pinned").bindCreator("kelpie")).toEqual({ ok: false });
+    await host("sub-in-use").configure({ remit: "Quotes." }, owner);
+    expect(await host("sub-in-use").bindCreator("kelpie")).toEqual({ ok: false });
+    expect((await host("sub-in-use").config()).settings.remit).toBe("Quotes.");
+    // Nor one configured back to its defaults, one with a task, or one with a conversation.
+    await host("sub-reset").configure({ remit: "Quotes." }, owner);
+    await host("sub-reset").configure({ remit: "" }, owner);
+    expect(await host("sub-reset").bindCreator("kelpie")).toEqual({ ok: false });
+    const task = await host("sub-tasked").createTask(
+      { title: "Later", body: "", status: "backlog", scheduledStartAt: null },
+      owner,
+    );
+    expect(task.ok).toBe(true);
+    expect(await host("sub-tasked").bindCreator("kelpie")).toEqual({ ok: false });
+    await host("sub-talked").turnConfig("sub-talked:telegram:1");
+    expect(await host("sub-talked").bindCreator("kelpie")).toEqual({ ok: false });
+    expect((await host("sub-pinned").turnConfig()).agent).toMatchObject({
+      role: "subagent",
+      owner: "kelpie",
+      spawn: false,
+    });
+  });
+
+  it("holds a subagent to the tier its creator runs on, the instance's when it sets none (#344)", async () => {
+    // The instance's conversation tier is frontier: an agent that sets none runs on it.
+    replaceIdentitySourcesForTesting({
+      agent: async (id) =>
+        id === "inherit-main"
+          ? { name: id, role: "main", owner: null }
+          : { name: id, role: "subagent", owner: "inherit-main" },
+      describe: async (model) => ({
+        provider: "anthropic",
+        tier: model.conversation?.tier ?? "frontier",
+        route: [],
+      }),
+      specialists: async () => [],
+    });
+    expect(await host("inherit-sub").bindCreator("inherit-main")).toEqual({ ok: true });
+    await host("inherit-sub").configure({ model: { conversation: { tier: "medium" } } }, owner);
+    // The creator's own model has no tier: not the defaults' cheap.
+    expect(await host("inherit-main").ownModel()).toEqual({});
+    expect((await host("inherit-sub").turnConfig()).settings.model).toEqual({
+      provider: "anthropic",
+      conversation: { tier: "medium" },
+    });
+  });
+
+  it("names no model in a subagent's prompt when its clamped trio can't be described (#344)", async () => {
+    replaceIdentitySourcesForTesting({
+      agent: async (id) =>
+        id === "unread-main"
+          ? { name: id, role: "main", owner: null }
+          : { name: id, role: "subagent", owner: "unread-main" },
+      describe: async (model) => {
+        // The clamped trio is the only one pinned to a provider: llm-gateway fails on it.
+        if (model.provider !== undefined) throw new Error("down");
+        return { provider: "anthropic", tier: model.conversation?.tier ?? "cheap", route: [] };
+      },
+      specialists: async () => [],
+    });
+    await host("unread-main").configure({ model: { conversation: { tier: "medium" } } }, owner);
+    expect(await host("unread-sub").bindCreator("unread-main")).toEqual({ ok: true });
+    await host("unread-sub").configure({ model: { conversation: { tier: "frontier" } } }, owner);
+    const { settings } = await host("unread-sub").turnConfig();
+    expect(settings.model.conversation).toEqual({ tier: "medium" });
+    // Not its own frontier tier, which it doesn't run on.
+    expect(settings.systemPrompt).not.toContain("You run on");
+  });
+
+  it("gives a subagent's calls outside a turn its creator's limits too (#344)", async () => {
+    roster({ "own-maker": { role: "main" } });
+    await host("own-maker").configure(
+      { model: { conversation: { tier: "medium" }, memory: { tier: "cheap" } } },
+      owner,
+    );
+    expect(await host("own-sub").bindCreator("own-maker")).toEqual({ ok: true });
+    await host("own-sub").configure(
+      { model: { conversation: { tier: "frontier" }, memory: { tier: "frontier" } } },
+      owner,
+    );
+    // A checkpoint's summary runs on the memory area: its creator's, not its own frontier.
+    expect(await host("own-sub").ownModel()).toEqual({
+      provider: "anthropic",
+      memory: { tier: "cheap" },
+      conversation: { tier: "medium" },
+    });
+    // Any other agent's are its own settings, unclamped.
+    expect(await host("own-maker").ownModel()).toEqual({
+      conversation: { tier: "medium" },
+      memory: { tier: "cheap" },
+    });
+  });
+
+  it("falls back to the cheapest tier when its creator was never read", async () => {
+    replaceIdentitySourcesForTesting({
+      agent: async (id) =>
+        id === "sub-orphan" ? { name: id, role: "subagent", owner: "sub-silent" } : null,
+      describe: async (model) => {
+        // The creator's trio can't be described: as if llm-gateway didn't answer for it.
+        if (model.conversation?.tier === "frontier") throw new Error("down");
+        return { provider: "anthropic", tier: model.conversation?.tier ?? "cheap", route: [] };
+      },
+      specialists: async () => [],
+    });
+    await host("sub-silent").configure({ model: { conversation: { tier: "frontier" } } }, owner);
+    await host("sub-orphan").configure({ model: { conversation: { tier: "medium" } } }, owner);
+    expect((await host("sub-orphan").turnConfig()).settings.model).toEqual({
+      conversation: { tier: "cheap" },
+    });
+  });
+});
+
+describe("the specialists in an agent's prompt (#287)", () => {
+  afterEach(() => {
+    replaceIdentitySourcesForTesting(undefined);
+  });
+
+  it("lists the specialists it owns with their remits, and keeps the last list when it can't be read", async () => {
+    let specialists: () => Promise<{ id: string; name: string; remit: string }[]> = async () => [
+      { id: "sales", name: "Sales", remit: "Quotes for wholesale clients." },
+      { id: "docs", name: "Docs", remit: "" },
+    ];
+    replaceIdentitySourcesForTesting({
+      agent: async (id) => ({ name: id, role: "main", owner: null }),
+      describe: async () => ({ provider: "anthropic", tier: "cheap", route: [] }),
+      specialists: () => specialists(),
+    });
+    const stub = host("roster-main");
+    const listed = (await stub.turnConfig()).settings.systemPrompt;
+    expect(listed).toContain("# Your specialists");
+    expect(listed).toContain(
+      '- sales ("Sales"): Quotes for wholesale clients.\n- docs ("Docs"): no remit set',
+    );
+    expect(listed).toContain("even when the owner didn't name it");
+
+    specialists = async () => {
+      throw new Error("Durable Object reset because its code was updated");
+    };
+    expect((await stub.turnConfig()).settings.systemPrompt).toBe(listed);
+
+    // An agent that owns none has no such section.
+    specialists = async () => [];
+    expect((await stub.turnConfig()).settings.systemPrompt).not.toContain("# Your specialists");
+  });
+});
+
+describe("a subagent's trio, held to its creator's (#290)", () => {
+  const limits = (fields: object) =>
+    ({ tier: "medium", provider: "anthropic", tools: null, ...fields }) as never;
+
+  it("takes the lower tier, and its creator's for a tier it doesn't rank", () => {
+    expect(clampModel({ conversation: { tier: "frontier" } }, limits({}))).toEqual({
+      provider: "anthropic",
+      conversation: { tier: "medium" },
+    });
+    expect(clampModel({ conversation: { tier: "cheap" } }, limits({}))).toMatchObject({
+      conversation: { tier: "cheap" },
+    });
+    expect(clampModel({ conversation: { tier: "auto" as never } }, limits({}))).toMatchObject({
+      conversation: { tier: "medium" },
+    });
+    expect(clampModel({}, limits({}))).toMatchObject({ conversation: { tier: "medium" } });
+  });
+
+  it("holds its effort to the creator's, none when the creator sets none", () => {
+    const effortOf = (own: object, creator: object) =>
+      clampModel({ conversation: { tier: "cheap", ...own } }, limits(creator)).conversation;
+    expect(effortOf({ effort: "max" }, { effort: "high" })).toEqual({
+      tier: "cheap",
+      effort: "high",
+    });
+    expect(effortOf({ effort: "low" }, { effort: "high" })).toEqual({
+      tier: "cheap",
+      effort: "low",
+    });
+    // Unset counts as the model's default, which may be above the creator's: it takes the creator's.
+    expect(effortOf({}, { effort: "low" })).toEqual({ tier: "cheap", effort: "low" });
+    expect(effortOf({ effort: "high" }, {})).toEqual({ tier: "cheap" });
   });
 });
