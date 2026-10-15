@@ -86,7 +86,13 @@ import {
 } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
-import { type Handoff, handoffNotice } from "./handoff-notices.ts";
+import {
+  type Announcement,
+  announcementNotice,
+  keyOf,
+  type StoredAnnouncement,
+  stored,
+} from "./announcements.ts";
 import migrations from "./migrations/migrations.js";
 import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
 import { failureNotice, routeNotice } from "./route-notices.ts";
@@ -140,11 +146,18 @@ const WEBCHAT_ID_PREFIX = "webchat:";
 const WEBCHAT_RECEIVED_IDS = 100;
 /** While the owner types in the webchat, buffered messages wait at least this long for the rest. */
 const TYPING_HOLD_MS = 4_000;
-/** The most handoffs a conversation keeps for its next reply's notice (#287); the oldest go first. */
-const MAX_UNSAID_HANDOFFS = 20;
+/** The most announcements a conversation keeps for its next reply's notice; the oldest go first. */
+const MAX_UNSAID_ANNOUNCEMENTS = 20;
+/** Where a conversation keeps its unsaid handoffs, in #287's shape, so a rollback still reads them. */
+const HANDOFFS = "handoffs";
+/** Where it keeps the subagents created or deleted (#342), which a release before it never reads. */
+const SUBAGENT_CHANGES = "subagentChanges";
 
-/** Kelpie's last handoff notice (#287): its outbox row, and the tasks it named. */
-interface HandoffNotice {
+/**
+ * Kelpie's last notice of them (#287): its outbox row, and the keys of what it named (`keyOf`); a
+ * handoff's is its task id, as before #342.
+ */
+interface AnnouncementNotice {
   turnId: number;
   seq: number;
   taskIds: string[];
@@ -1185,7 +1198,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           .where(and(eq(schema.outbox.turnId, turnId), eq(schema.outbox.status, "sending")))
           .run();
         await this.#deliver(turnId, controller.signal);
-        this.#settleHandoffNotice();
+        this.#settleAnnouncements();
       } else if (turn.attempts < 2) {
         await this.#call(turnId, controller);
       } else {
@@ -1398,14 +1411,15 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       this.#ports.now(),
       locale,
     );
-    // Then who has the work its tools handed off, with any an earlier turn left unsaid (#287).
-    this.#settleHandoffNotice();
-    const handoffs = this.#get<Handoff[]>("handoffs", []);
-    const handedOff = handoffNotice(handoffs, locale);
-    const handoffSeq = bubbles.length + (routes.text === null ? 0 : 1);
+    // Then what its tools did, as subagents made and work handed off, with what an earlier turn
+    // left unsaid (#287, #342).
+    this.#settleAnnouncements();
+    const announcements = this.#announcements();
+    const announced = announcementNotice(announcements, locale);
+    const announcedSeq = bubbles.length + (routes.text === null ? 0 : 1);
     const notices = [
       ...(routes.text === null ? [] : [{ text: routes.text }]),
-      ...(handedOff === null ? [] : [{ text: handedOff }]),
+      ...(announced === null ? [] : [{ text: announced }]),
       ...confirmations.map(({ id, code, summary }) => ({
         text: confirmationNotice(summary, code, button, locale),
         confirmationId: id,
@@ -1432,11 +1446,11 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           .run();
       });
       // Noted with the rows: whichever path sends the notice, what it named is cleared once sent.
-      if (handedOff !== null) {
-        const said: HandoffNotice = {
+      if (announced !== null) {
+        const said: AnnouncementNotice = {
           turnId,
-          seq: handoffSeq,
-          taskIds: handoffs.map(({ taskId }) => taskId),
+          seq: announcedSeq,
+          taskIds: announcements.map(keyOf),
         };
         tx.insert(schema.state)
           .values({ key: "handoffNotice", value: said })
@@ -1451,17 +1465,42 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (routes.text !== null && this.#bubbleSent(turnId, bubbles.length)) {
       this.#set("routeNotices", routes.announced);
     }
-    this.#settleHandoffNotice();
+    this.#settleAnnouncements();
+  }
+
+  /** What the turn's tools had Kelpie announce that no notice said yet (#287, #342). */
+  #announcements(): Announcement[] {
+    return [
+      ...stored(this.#get<StoredAnnouncement[]>(HANDOFFS, [])),
+      ...this.#get<Announcement[]>(SUBAGENT_CHANGES, []),
+    ];
+  }
+
+  /** Keeps these unsaid, the newest MAX_UNSAID_ANNOUNCEMENTS of them, each kind in its own key. */
+  #keepAnnouncements(all: readonly Announcement[]): void {
+    const kept = all.slice(-MAX_UNSAID_ANNOUNCEMENTS);
+    this.#set(
+      HANDOFFS,
+      kept.flatMap((one) =>
+        one.kind === "handoff"
+          ? [{ taskId: one.taskId, agentId: one.agentId, name: one.name }]
+          : [],
+      ),
+    );
+    this.#set(
+      SUBAGENT_CHANGES,
+      kept.filter((one) => one.kind !== "handoff"),
+    );
   }
 
   /**
-   * Clears the handoffs Kelpie's last notice named once it went out (#287), whichever path sent it:
-   * the reply, its resume after an eviction, or a delivery that failed on a later bubble. Only
-   * those it named: a late call may have added one since. A notice that never went out leaves them
-   * for the next reply.
+   * Clears what Kelpie's last notice named once it went out (#287), whichever path sent it: the
+   * reply, its resume after an eviction, or a delivery that failed on a later bubble. Only what it
+   * named: a late call may have added more since. A notice that never went out leaves it all for
+   * the next reply.
    */
-  #settleHandoffNotice(): void {
-    const notice = this.#get<HandoffNotice | null>("handoffNotice", null);
+  #settleAnnouncements(): void {
+    const notice = this.#get<AnnouncementNotice | null>("handoffNotice", null);
     if (notice === null) return;
     const status = this.#db
       .select({ status: schema.outbox.status })
@@ -1471,25 +1510,25 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (status === "pending" || status === "sending") return;
     if (status === "sent") {
       const said = new Set(notice.taskIds);
-      this.#set(
-        "handoffs",
-        this.#get<Handoff[]>("handoffs", []).filter(({ taskId }) => !said.has(taskId)),
-      );
+      this.#keepAnnouncements(this.#announcements().filter((one) => !said.has(keyOf(one))));
     }
     this.#set("handoffNotice", null);
   }
 
   /**
-   * Keeps a handoff for Kelpie's notice after the next reply this conversation sends (#287). It
-   * outlives the turn that made it, since the task does: a turn stopped before its reply leaves it
-   * for the next one.
+   * Keeps what a tool did for Kelpie's notice after the next reply this conversation sends (#287,
+   * #342). It outlives the turn that made it, since the task or the subagent does: a turn stopped
+   * before its reply leaves it for the next one.
    */
-  #handOff(handoff: Handoff): void {
-    const kept = this.#get<Handoff[]>("handoffs", []).filter(
-      ({ taskId }) => taskId !== handoff.taskId,
-    );
-    const { taskId, agentId, name } = handoff;
-    this.#set("handoffs", [...kept, { taskId, agentId, name }].slice(-MAX_UNSAID_HANDOFFS));
+  #announce(announcement: Announcement): void {
+    const key = keyOf(announcement);
+    const kept = this.#announcements().filter((one) => keyOf(one) !== key);
+    const { kind, agentId, name } = announcement;
+    const one: Announcement =
+      kind === "handoff"
+        ? { kind, taskId: announcement.taskId, agentId, name }
+        : { kind, agentId, name };
+    this.#keepAnnouncements([...kept, one]);
   }
 
   #bubbleSent(turnId: number, seq: number): boolean {
@@ -1678,7 +1717,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
                 ? false
                 : this.#confirm(turn.id, actor.userId, request),
             sendLink: (link) => this.#sendLink(turn.id, link),
-            handOff: (handoff) => this.#handOff(handoff),
+            announce: (announcement) => this.#announce(announcement),
             memoryAgentId: this.#memoryAgentId(),
           };
           const task = this.#taskHandle();

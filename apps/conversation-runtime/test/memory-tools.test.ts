@@ -67,7 +67,7 @@ const context = (turn = `turn-${turns++}`): ToolContext => ({
   signal: new AbortController().signal,
   confirm: async () => false,
   sendLink: () => {},
-  handOff: () => {},
+  announce: () => {},
   locale: "en",
 });
 

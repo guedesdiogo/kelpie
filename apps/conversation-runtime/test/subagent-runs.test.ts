@@ -166,13 +166,18 @@ describe("a temporary subagent (#290)", () => {
     });
     await main.flush();
     await until(async () => {
-      expect(world.sent.at(-1)).toBe("I made a scout.");
+      expect(world.sent.at(-1)).toMatch(/^Kelpie created the subagent "Scout" \(kelpie-sub-/);
     });
     const scout = (await registry().list()).find(
       (entry) => entry.owner === "kelpie" && entry.role === "subagent" && entry.name === "Scout",
     );
     if (!scout) throw new Error("no subagent");
     expect(scout).toMatchObject({ chat: false });
+    // Kelpie, not the model, tells the owner it exists (#342).
+    expect(world.sent.slice(-2)).toEqual([
+      "I made a scout.",
+      `Kelpie created the subagent "Scout" (${scout.id}).`,
+    ]);
 
     // The main agent hands it a task; the subagent searches its creator's memory and ends it.
     scripts.push(
@@ -202,6 +207,8 @@ describe("a temporary subagent (#290)", () => {
     await until(async () => {
       expect(world.sent.at(-1)).toBe("The scout found TAP 123, aisle seat.");
     });
+    // The handoff was Kelpie's to announce too (#287).
+    expect(world.sent).toContain(`Kelpie handed a task to "Scout" (${scout.id}).`);
 
     // The subagent's turns had only a subagent's tools, and read as its creator.
     const theirs = world.requests
@@ -241,7 +248,10 @@ describe("a temporary subagent (#290)", () => {
     });
     await main.flush();
     await until(async () => {
-      expect(world.sent.at(-1)).toBe("Deleted the scout.");
+      expect(world.sent.slice(-2)).toEqual([
+        "Deleted the scout.",
+        `Kelpie deleted the subagent "Scout" (${scout.id}).`,
+      ]);
     });
     expect(await registry().get(scout.id)).toBeNull();
     // Its AgentHost is erased: its soul and pinned creator are gone.

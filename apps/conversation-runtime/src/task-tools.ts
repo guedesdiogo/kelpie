@@ -261,7 +261,7 @@ export function taskTools(ports: TaskToolPorts): ToolProvider {
       created.set(turnKey, count + 1);
       if (created.size > 50) created.delete(created.keys().next().value ?? "");
       // Kelpie, not the model, tells the owner who has it (ADR-0036 §4).
-      context.handOff({ taskId: made.value.id, agentId, name: assignee.name });
+      context.announce({ kind: "handoff", taskId: made.value.id, agentId, name: assignee.name });
       return {
         output: `Created the task ${made.value.id} for the agent ${agentId}. Kelpie tells the owner it has it, and tells you when it ends or asks something.`,
       };

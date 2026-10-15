@@ -232,6 +232,8 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
       // Half made, it goes, so nothing runs without its limits.
       const undo = async (why: string) => {
         const removed = await ports.remove(context.actor, id).catch(() => null);
+        // Still listed, it exists: the owner hears of it from Kelpie as of any other (#342).
+        if (!removed?.ok) context.announce({ kind: "created", agentId: id, name: name.trim() });
         return failed(
           removed?.ok
             ? why
@@ -244,6 +246,8 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
       } catch {
         return await undo("Kelpie couldn't set it up: try again.");
       }
+      // Kelpie, not the model, tells the owner it exists (ADR-0036 §6, #342).
+      context.announce({ kind: "created", agentId: id, name: name.trim() });
       return {
         output: `Created the subagent ${id}, named ${JSON.stringify(name.trim())}. Hand it work with create_task and agentId ${id}; Kelpie tells you when each task ends or asks something. Delete it with delete_subagent once its demand ends.`,
       };
@@ -267,6 +271,7 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
       if (!mine) return failed(`You have no subagent ${String(id)}.`);
       const result = await ports.remove(context.actor, mine.id);
       if (result.ok) {
+        context.announce({ kind: "deleted", agentId: mine.id, name: mine.name });
         return {
           output: `Deleted the subagent ${mine.id}. What it reported reached you already; a task it hadn't finished went with it.`,
         };

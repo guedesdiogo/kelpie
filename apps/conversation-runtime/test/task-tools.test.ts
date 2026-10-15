@@ -70,8 +70,8 @@ function contextOf(agentId: string, task?: TaskRunHandle): ToolContext {
     signal: new AbortController().signal,
     confirm: async () => false,
     sendLink: () => undefined,
-    handOff: ({ agentId: to, name, taskId }) => {
-      handedOff.push(`${to} ${name} ${taskId}`);
+    announce: (one) => {
+      if (one.kind === "handoff") handedOff.push(`${one.agentId} ${one.name} ${one.taskId}`);
     },
     ...(task ? { task } : {}),
   };

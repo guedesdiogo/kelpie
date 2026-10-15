@@ -1,4 +1,4 @@
-import { evictDurableObject, runDurableObjectAlarm } from "cloudflare:test";
+import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { REGISTRY_NAME } from "@kelpie/config";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -84,7 +84,10 @@ describe("the mandatory handoff (#287)", () => {
     await main.flush();
 
     await vi.waitFor(() =>
-      expect(world.sent).toEqual(["Sales is on it.", "Kelpie handed a task to Sales (hf-sales)."]),
+      expect(world.sent).toEqual([
+        "Sales is on it.",
+        'Kelpie handed a task to "Sales" (hf-sales).',
+      ]),
     );
     const system = world.requests[0]?.system ?? "";
     expect(system).toContain("# Your specialists");
@@ -109,7 +112,7 @@ describe("the mandatory handoff (#287)", () => {
     await vi.waitFor(() =>
       expect(world.sent).toEqual([
         "A Sales já está cuidando disso.",
-        "O Kelpie passou uma tarefa para Sales (hf-sales).",
+        'O Kelpie passou uma tarefa para "Sales" (hf-sales).',
       ]),
     );
   });
@@ -125,12 +128,16 @@ describe("the mandatory handoff (#287)", () => {
     await main.ingest(message("handoff-refused", "m2", "Anything?"));
     await main.flush();
     await vi.waitFor(() =>
-      expect(world.sent).toEqual(["Here.", "Kelpie handed a task to Sales (hf-sales)."]),
+      expect(world.sent).toEqual(["Here.", 'Kelpie handed a task to "Sales" (hf-sales).']),
     );
     await main.ingest(message("handoff-refused", "m3", "And now?"));
     await main.flush();
     await vi.waitFor(() =>
-      expect(world.sent).toEqual(["Here.", "Kelpie handed a task to Sales (hf-sales).", "Again."]),
+      expect(world.sent).toEqual([
+        "Here.",
+        'Kelpie handed a task to "Sales" (hf-sales).',
+        "Again.",
+      ]),
     );
   });
   it("follows a route's notice when the turn fell back, and isn't said again", async () => {
@@ -151,7 +158,7 @@ describe("the mandatory handoff (#287)", () => {
       expect(world.sent).toEqual([
         "Sales is on it.",
         ROUTE_NOTE,
-        "Kelpie handed a task to Sales (hf-sales).",
+        'Kelpie handed a task to "Sales" (hf-sales).',
       ]),
     );
     await main.ingest(message("handoff-route", "m2", "Thanks."));
@@ -184,7 +191,10 @@ describe("the mandatory handoff (#287)", () => {
     await main.ingest(message("handoff-failed-send", "m2", "Thanks."));
     await main.flush();
     await vi.waitFor(() =>
-      expect(world.sent.slice(-2)).toEqual(["Next.", "Kelpie handed a task to Sales (hf-sales)."]),
+      expect(world.sent.slice(-2)).toEqual([
+        "Next.",
+        'Kelpie handed a task to "Sales" (hf-sales).',
+      ]),
     );
   });
 
@@ -200,7 +210,10 @@ describe("the mandatory handoff (#287)", () => {
     await evictDurableObject(main);
     expect(await runDurableObjectAlarm(main)).toBe(true);
     await vi.waitFor(() =>
-      expect(world.sent).toEqual(["Sales is on it.", "Kelpie handed a task to Sales (hf-sales)."]),
+      expect(world.sent).toEqual([
+        "Sales is on it.",
+        'Kelpie handed a task to "Sales" (hf-sales).',
+      ]),
     );
     await vi.waitFor(async () =>
       expect(await main.turns()).toMatchObject([{ status: "delivered" }]),
@@ -211,8 +224,105 @@ describe("the mandatory handoff (#287)", () => {
     await vi.waitFor(() =>
       expect(world.sent).toEqual([
         "Sales is on it.",
-        "Kelpie handed a task to Sales (hf-sales).",
+        'Kelpie handed a task to "Sales" (hf-sales).',
         "Next.",
+      ]),
+    );
+  });
+  it("announces a handoff kept by the release before #342, which had no kind", async () => {
+    const world = use(fakeWorld([reply("Hello."), reply("Hi.")]));
+    const main = agent("kelpie:telegram:handoff-legacy");
+    await main.ingest(message("handoff-legacy", "m1", "Hello?"));
+    await main.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Hello."]));
+    // Two handoffs as #287 kept them, and its marker for a notice that named the first and went
+    // out, left unsettled when the deploy came.
+    const [first] = await main.turns();
+    await runInDurableObject(main, (_instance, state) => {
+      const put = (key: string, value: unknown) =>
+        state.storage.sql.exec(
+          "INSERT INTO state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+          key,
+          JSON.stringify(value),
+        );
+      put("handoffs", [
+        { taskId: "legacy-1", agentId: "hf-sales", name: "Sales" },
+        { taskId: "legacy-2", agentId: "hf-sales", name: "Sales" },
+      ]);
+      put("handoffNotice", { turnId: first?.id, seq: 0, taskIds: ["legacy-1"] });
+    });
+    await main.ingest(message("handoff-legacy", "m2", "Anything?"));
+    await main.flush();
+    await vi.waitFor(() =>
+      expect(world.sent).toEqual(["Hello.", "Hi.", 'Kelpie handed a task to "Sales" (hf-sales).']),
+    );
+  });
+  it("keeps a handoff in #287's shape and a subagent's changes apart, and says them all next", async () => {
+    const world = use(
+      fakeWorld([
+        toolCalls(
+          { name: "churn" },
+          {
+            name: "create_task",
+            input: { agentId: "hf-sales", title: "Kept", body: "Padaria Silva." },
+          },
+        ),
+        refuse(),
+        reply("Done."),
+      ]),
+    );
+    // A tool that makes a subagent and drops it in the same turn.
+    world.tools = [
+      ...world.tools,
+      {
+        async tools() {
+          return [
+            {
+              spec: { name: "churn", description: "x", inputSchema: { type: "object" as const } },
+              label: "Churning",
+              async run(_input, context) {
+                context.announce({ kind: "created", agentId: "kelpie-sub-abc123", name: "Scout" });
+                context.announce({ kind: "deleted", agentId: "kelpie-sub-abc123", name: "Scout" });
+                return { output: "ok" };
+              },
+            },
+          ];
+        },
+      },
+    ];
+    const main = agent("kelpie:telegram:handoff-kinds");
+    await main.ingest(message("handoff-kinds", "m1", "Make one, hand off, drop it."));
+    await main.flush();
+    await vi.waitFor(async () => expect(await main.turns()).toMatchObject([{ status: "refused" }]));
+    // A release before #342 reads its handoffs, and never the subagents' changes.
+    const kept = await runInDurableObject(main, (_instance, state) =>
+      Object.fromEntries(
+        state.storage.sql
+          .exec<{ key: string; value: string }>(
+            "SELECT key, value FROM state WHERE key IN ('handoffs', 'subagentChanges')",
+          )
+          .toArray()
+          .map(({ key, value }) => [key, JSON.parse(value)]),
+      ),
+    );
+    expect(kept.handoffs).toEqual([
+      { taskId: expect.any(String), agentId: "hf-sales", name: "Sales" },
+    ]);
+    expect(kept.subagentChanges).toEqual([
+      { kind: "created", agentId: "kelpie-sub-abc123", name: "Scout" },
+      { kind: "deleted", agentId: "kelpie-sub-abc123", name: "Scout" },
+    ]);
+
+    await main.ingest(message("handoff-kinds", "m2", "Well?"));
+    await main.flush();
+    await vi.waitFor(() =>
+      expect(world.sent).toEqual([
+        "Done.",
+        [
+          'Kelpie created the subagent "Scout" (kelpie-sub-abc123).',
+          'Kelpie handed a task to "Sales" (hf-sales).',
+          'Kelpie deleted the subagent "Scout" (kelpie-sub-abc123).',
+        ].join("\n"),
       ]),
     );
   });
