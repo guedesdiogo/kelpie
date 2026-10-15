@@ -271,7 +271,9 @@ function productionPorts(env: Env): ConversationPorts {
       // The task tools (#335): a run ends its task, and an agent hands work to those it owns.
       taskTools({
         owned: async (id) =>
-          (await registry.list()).filter((agent) => agent.owner === id).map((agent) => agent.id),
+          (await registry.list())
+            .filter((agent) => agent.owner === id)
+            .map((agent) => ({ id: agent.id, name: agent.name })),
         create: (assignee, task, creator) =>
           env.AGENT_HOST.getByName(assignee).createTaskFor(task, creator),
         // Only an agent the Registry lists: a model-named id makes no object.

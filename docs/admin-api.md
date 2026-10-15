@@ -156,6 +156,9 @@ Each agent has a task board in its `AgentHost` (ADR-0011, #54). The `AgentHost` 
   - **What reaches it mid-run:** a comment joins its next round. The owner's stop ends its turn at once, and the task is cancelled.
   - **What it can't do:** confirm anything. Admin's and Master's own tools aren't in it.
 - **Between agents.** An agent hands work to an agent it owns with `create_task`, which records both agents and the person it acts for.
+  - **The mandatory handoff** (ADR-0036 §4, #287). An agent's prompt lists the specialists it owns, by id and name, with each one's remit, or "no remit set". A demand within a remit goes to that specialist as a task, even when the owner didn't name it. A specialist with no remit takes work only when the owner names it.
+  - **Kelpie announces it.** After the reply, Kelpie names the agent that has the work, by name and id, in the conversation's language: "Kelpie handed a task to Sales (sales)." The text is Kelpie's own, so the model can't change or omit it. A turn that sends no reply, because it was refused or cut short, leaves the notice for the next reply in that conversation.
+  - **An agent it doesn't own** is refused, and the refusal lists the ones it does own. No task goes to another agent in its place.
   - **Who hears the news:** the agent that created the task; for a task a person created, the assignee's owner, or the assignee itself. Kelpie tells it, in the owner's latest conversation with it, when the task is done, cancelled by its agent, waiting for an answer, or failed twice. A `dependency` wait reaches no one.
   - **How it answers:** with `comment_task`. A comment on a waiting task, by a person or an agent, puts it back in To do.
 

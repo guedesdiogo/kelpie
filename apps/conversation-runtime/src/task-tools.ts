@@ -14,8 +14,8 @@ import type { Tool, ToolContext, ToolOutcome, ToolProvider } from "./tools.ts";
 
 /** What the task tools reach: the Registry's owners, and other agents' boards. */
 export interface TaskToolPorts {
-  /** The agents `agentId` owns (ADR-0036 §1). */
-  owned(agentId: string): Promise<string[]>;
+  /** The agents `agentId` owns (ADR-0036 §1), by id and Registry name. */
+  owned(agentId: string): Promise<{ id: string; name: string }[]>;
   create(
     assignee: string,
     task: NewTask,
@@ -234,8 +234,13 @@ export function taskTools(ports: TaskToolPorts): ToolProvider {
       if (count >= MAX_CREATES_PER_TURN) {
         return failed(`One turn hands off at most ${MAX_CREATES_PER_TURN} tasks.`);
       }
-      if (!(await ports.owned(context.agentId)).includes(agentId)) {
-        return failed(`You don't own an agent ${agentId}: hand tasks only to agents you own.`);
+      const owned = await ports.owned(context.agentId);
+      const assignee = owned.find((one) => one.id === agentId);
+      // Never another agent in its place: the model learns which ones it may name (#287).
+      if (!assignee) {
+        return failed(
+          `You don't own an agent ${agentId}. Hand tasks only to the agents you own: ${owned.map((one) => one.id).join(", ")}.`,
+        );
       }
       const task = { title: title.trim(), body, status: "todo" as const, scheduledStartAt: null };
       if (task.title === "" || task.title.length > MAX_TASK_TITLE) {
@@ -255,8 +260,10 @@ export function taskTools(ports: TaskToolPorts): ToolProvider {
       // Kept for the last few turns only.
       created.set(turnKey, count + 1);
       if (created.size > 50) created.delete(created.keys().next().value ?? "");
+      // Kelpie, not the model, tells the owner who has it (ADR-0036 §4).
+      context.handOff({ taskId: made.value.id, agentId, name: assignee.name });
       return {
-        output: `Created the task ${made.value.id} for the agent ${agentId}. Kelpie tells you when it ends or asks something.`,
+        output: `Created the task ${made.value.id} for the agent ${agentId}. Kelpie tells the owner it has it, and tells you when it ends or asks something.`,
       };
     },
   };

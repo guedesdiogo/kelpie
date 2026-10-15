@@ -7,6 +7,7 @@
     "typecheck": "bun run types > /dev/null && tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "eval:handoff": "sh -c 'ANTHROPIC_API_KEY=\"${ANTHROPIC_API_KEY:-$(node eval/model-key.mjs ANTHROPIC_API_KEY)}\" OPENAI_API_KEY=\"${OPENAI_API_KEY:-$(node eval/model-key.mjs OPENAI_API_KEY)}\" EVAL_MODELS=1 exec vitest run --config vitest.eval.config.ts'",
     "db:generate": "drizzle-kit generate && drizzle-kit generate --config drizzle.agent-host.config.ts && drizzle-kit generate --config drizzle.registry.config.ts && bunx biome check --write src/migrations src/agent-host/migrations src/registry/migrations"
   },
   "dependencies": {

@@ -11,7 +11,14 @@ import type { TaskRunHandle, Tool, ToolContext } from "../src/tools.ts";
 
 const TASK = "0f8b7c1e-6a2d-4c3b-9e5f-1a2b3c4d5e6f";
 
-function world(owned: Record<string, string[]> = { kelpie: ["helper"] }) {
+function world(
+  owned: Record<string, { id: string; name: string }[]> = {
+    kelpie: [
+      { id: "helper", name: "Helper" },
+      { id: "sales", name: "Sales" },
+    ],
+  },
+) {
   const calls: string[] = [];
   const view = (fields: Partial<TaskView>): TaskView => ({
     id: TASK,
@@ -48,6 +55,9 @@ function world(owned: Record<string, string[]> = { kelpie: ["helper"] }) {
   return { provider: taskTools(ports), calls };
 }
 
+/** The handoffs the tools had Kelpie announce, as `agentId name taskId`. */
+const handedOff: string[] = [];
+
 function contextOf(agentId: string, task?: TaskRunHandle): ToolContext {
   return {
     locale: "en",
@@ -60,6 +70,9 @@ function contextOf(agentId: string, task?: TaskRunHandle): ToolContext {
     signal: new AbortController().signal,
     confirm: async () => false,
     sendLink: () => undefined,
+    handOff: ({ agentId: to, name, taskId }) => {
+      handedOff.push(`${to} ${name} ${taskId}`);
+    },
     ...(task ? { task } : {}),
   };
 }
@@ -159,19 +172,28 @@ describe("the task tools (#335)", () => {
     const tools = await provider.tools("kelpie", { channel: "telegram" });
     const create = byName(tools, "create_task");
     const context = contextOf("kelpie");
+    handedOff.length = 0;
 
     expect(
       await create.run({ agentId: "helper", title: "Book", body: "Lisbon." }, context),
     ).toEqual({
-      output: `Created the task ${TASK} for the agent helper. Kelpie tells you when it ends or asks something.`,
+      output: `Created the task ${TASK} for the agent helper. Kelpie tells the owner it has it, and tells you when it ends or asks something.`,
     });
+    // Kelpie, not the model, announces who has it (ADR-0036 §4, #287).
+    expect(handedOff).toEqual([`helper Helper ${TASK}`]);
+    // An agent it doesn't own is refused with the ones it does, never handed to another.
     expect(
       await create.run({ agentId: "stranger", title: "Book", body: "x" }, context),
-    ).toMatchObject({ isError: true, output: expect.stringContaining("You don't own") });
+    ).toMatchObject({
+      isError: true,
+      output:
+        "You don't own an agent stranger. Hand tasks only to the agents you own: helper, sales.",
+    });
     expect(
       await create.run({ agentId: "helper", title: "a".repeat(201), body: "x" }, context),
     ).toMatchObject({ isError: true });
     expect(calls).toEqual(["create helper Book by kelpie for u-owner"]);
+    expect(handedOff).toHaveLength(1);
   });
 
   it("answer on another agent's task by its ids, which resumes it", async () => {
