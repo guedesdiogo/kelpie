@@ -196,6 +196,7 @@ Changing a spring means simulating it again the same way, and updating its row, 
 7. **Streaming is calm.** Only new words appear, with opacity alone, in `--dur-word`. Nothing animates layout per token, and the word wrappers are removed when the stream ends. Phases have their real names, the elapsed time appears after 3 s, and progress is never faked.
 8. **Motion announces a change; a state stays still.**
    - A loop stops within 5 s. From then on, a state shows through color, shape and text.
+   - The one exception is the mascot's life in place, in every state, under its own guards (ADR-0045 §6).
    - An elapsed time shows that an agent is still working. It updates once a second, or once a minute under the less-motion switch: that is the control WCAG 2.2.2 asks of information that updates by itself.
    - A spinner appears only after 150 to 300 ms of waiting and stays at least 300 ms.
 9. **Leaving is faster than arriving.** Entries use springs; exits use `--dur-exit` or `--dur-exit-moment` with `--ease-exit`.
@@ -351,7 +352,7 @@ Moment grammar: the roster is where Kelpie spends its novelty.
 |---|---|---|
 | Working | `--accent` ring, elapsed time `m:ss` | The ring turns three times, 1.4 s each, then stops |
 | Waiting for the owner | `--warm` ring, "waiting for you", time since | A halo pulses three times, 1.6 s each, then stops |
-| Idle | Avatar at 45% opacity, grayscale | None |
+| Idle | Avatar at 45% opacity, grayscale; a mascot keeps its color and dozes after 45 s (ADR-0045) | None for the avatar; a mascot breathes and draws idle gestures (ADR-0045 §6) |
 | Error | `--danger` ring, what failed | One shake, 380 ms |
 | No response | Dashed `--muted` ring, "no response for 1 min" | None |
 
@@ -366,7 +367,7 @@ Moment grammar: the roster is where Kelpie spends its novelty.
 - **Finished work leaves; failures stay.** A subagent or task that succeeded leaves a list at once. One that failed stays 30 s with its `--danger` ring, and can be dismissed.
 - **An agent is compared with itself.** Its numbers sit against its own last 30 days, never in a ranking of agents.
 - **The roster never reorders** when a state changes: a list that jumps under the pointer costs a misclick.
-- **How the agent itself looks** (avatar or mascot) is still open (ADR-0043 §6).
+- **How the agent itself looks:** a plush mascot the owner customizes (ADR-0045). Its section lands with its code; until then, agents keep the avatar.
 - **Reduced motion:** rings and halos are still; color, shape and the status text carry the state. The elapsed time shows minutes only ("2 min") and updates once a minute. The strip and an opening row appear with a fade, and counts change with a fade.
 
 ### 5.10 Following the chat
