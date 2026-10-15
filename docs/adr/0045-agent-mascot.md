@@ -151,7 +151,7 @@
 - **§5.9 dims an idle avatar** to 45% opacity, in grayscale. An idle mascot keeps its color, breathes and dozes after 45 s.
 - **The roster's glyphs and labels stay** as §5.9 and ADR-0044 set them. In high contrast and forced colors, the glyphs and labels carry the state, not the mascot's colors.
 - **The mascot replaces the avatar's rings and halo.** The state shows in the figure: its pose, the bubble of §10 and, at 36 px, a badge. §5.9's pop on a change and shake on an error apply to the mascot.
-- **The 36 px mascot shows a small glossy badge:**
+- **The 36 px mascot shows a small glossy badge,** with a ring in `--surface` so it stands out on any body color:
   - `--warm` for waiting;
   - `--danger` for error;
   - `--accent`, with the tool's icon, for working.
@@ -170,9 +170,11 @@
   - bubbles to think.
 - **The activity is always true,** since progress is never faked (rule 7).
   - It follows the tool the agent is calling. ADR-0025's loop runs one at a time.
-  - Between tools, while the model thinks or writes, the mascot alternates between thinking (bubbles) and writing (paper and pencil) every 5 to 8 s.
+  - Between tools, it shows what the model is doing: thinking (bubbles), or writing its reply, which is the Typing state (§6).
+  - While a tool runs, Working and the tool's object take precedence over Typing.
+  - Reading or writing the vault shows the paper and pencil. Any tool without its own object shows thinking, and so does the badge's icon.
   - It never shows a tool that isn't in use.
-- **In other states, the mittens gesture** as §6's table lists. A click or tap on an idle mascot makes it clap.
+- **In other states, the mittens gesture** as §6's table lists. A click or tap on an idle mascot in the header or the profile makes it clap. In the roster, pressing the row opens it, as §5.9 says.
 - **In the poses for listening, typing, working, approved, error and dozing, the hands stay under reduced motion,** so the pose still reads.
 - **Waiting and error show a glossy 3D speech bubble beside the head:**
   - amber with `?` for waiting;
