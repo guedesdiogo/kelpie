@@ -286,8 +286,10 @@ export function memoryTools(store: MemoryStore): ToolProvider {
     }
   }
   return {
-    async tools() {
-      return [search, read, write];
+    // A task's run reads memory, but doesn't write it (#335): another agent's words may steer it,
+    // and the agent that hears its result writes what's worth keeping.
+    async tools(_agentId, place) {
+      return place?.channel === "task" ? [search, read] : [search, read, write];
     },
   };
 }

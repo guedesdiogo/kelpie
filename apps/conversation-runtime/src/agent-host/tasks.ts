@@ -1,5 +1,6 @@
 import type {
   Actor,
+  CommentSource,
   NewTask,
   RunOutcome,
   TaskAuthor,
@@ -28,12 +29,35 @@ export const STOP_GRACE_MS = 2 * 60_000;
 export const MAX_FAILURES = 2;
 /** Tasks not yet Done or Cancelled an agent holds; a full board refuses new ones. */
 export const MAX_OPEN_TASKS = 500;
+/** Of those, the most other agents may have open on it (#335): the rest of the board is the owner's. */
+export const MAX_OPEN_AGENT_TASKS = 20;
+/** The most times a task goes to Waiting: one more ends it in Cancelled, so no loop runs on. */
+export const MAX_WAITS = 5;
 export const MAX_COMMENTS = 500;
 /** The most a list returns, most recently changed first. */
 export const LIST_LIMIT = 200;
 
 /** Where a step comes from: a person, the agent's run, or Kelpie itself, as when a lease ran out. */
 type Step = { actor: TaskAuthor | null; via: string };
+
+/**
+ * Who writes a task or a comment (#335): a person on the board, or an agent in a chat or a task.
+ * `actingUserId` is the person the work is for (ADR-0015).
+ */
+export interface TaskWriter {
+  author: TaskAuthor;
+  via: string;
+  actingUserId: string;
+  source: CommentSource;
+}
+
+/** The owner, writing on the board through the admin API. */
+export const personWriter = (actor: Actor): TaskWriter => ({
+  author: { kind: "user", id: actor.userId },
+  via: actor.via,
+  actingUserId: actor.userId,
+  source: "board",
+});
 
 const OPEN: TaskStatus[] = ["backlog", "todo", "in_progress", "waiting"];
 const notFound = { ok: false, reason: "unknown_task" } as const;
@@ -49,14 +73,22 @@ export class TaskBoard {
     this.#agent = { actor: { kind: "agent", id: agentId }, via: `agent:${agentId}` };
   }
 
-  create(input: NewTask, actor: Actor, id: string, now: number): TaskResult<TaskView> {
+  create(input: NewTask, writer: TaskWriter, id: string, now: number): TaskResult<TaskView> {
     const open = this.#db
       .select({ n: count() })
       .from(schema.tasks)
       .where(inArray(schema.tasks.status, OPEN))
       .get();
     if ((open?.n ?? 0) >= MAX_OPEN_TASKS) return notAllowed;
-    const step = person(actor);
+    if (writer.author.kind === "agent") {
+      const byAgents = this.#db
+        .select({ n: count() })
+        .from(schema.tasks)
+        .where(and(inArray(schema.tasks.status, OPEN), eq(schema.tasks.creatorKind, "agent")))
+        .get();
+      if ((byAgents?.n ?? 0) >= MAX_OPEN_AGENT_TASKS) return notAllowed;
+    }
+    const step = stepOf(writer);
     this.#db.transaction((tx) => {
       tx.insert(schema.tasks)
         .values({
@@ -64,9 +96,9 @@ export class TaskBoard {
           ...input,
           createdAt: now,
           updatedAt: now,
-          creatorKind: "user",
-          creatorId: actor.userId,
-          actingUserId: actor.userId,
+          creatorKind: writer.author.kind,
+          creatorId: writer.author.id,
+          actingUserId: writer.actingUserId,
         })
         .run();
       tx.insert(schema.taskEvents)
@@ -102,29 +134,50 @@ export class TaskBoard {
     return this.#view(id);
   }
 
-  comment(id: string, text: string, actor: Actor, now: number): TaskResult<TaskView> {
-    if (!this.#row(id)) return notFound;
+  /**
+   * Adds a comment, at any status. A comment on a task in Waiting is the answer it waited for
+   * (#335): the task goes back to To do, its failures forgotten.
+   */
+  comment(id: string, text: string, writer: TaskWriter, now: number): TaskResult<TaskView> {
+    const task = this.#row(id);
+    if (!task) return notFound;
     const comments = this.#db
       .select({ n: count() })
       .from(schema.taskComments)
       .where(eq(schema.taskComments.taskId, id))
       .get();
     if ((comments?.n ?? 0) >= MAX_COMMENTS) return notAllowed;
+    const step = stepOf(writer);
+    // Its answer comes from someone else: the agent's own comment never resumes its task.
+    const own = writer.author.kind === "agent" && this.#agent.actor?.id === writer.author.id;
+    const resumes = task.status === "waiting" && !own;
     this.#db.transaction((tx) => {
       tx.insert(schema.taskComments)
         .values({
           taskId: id,
           at: now,
-          authorKind: "user",
-          authorId: actor.userId,
-          source: "board",
+          authorKind: writer.author.kind,
+          authorId: writer.author.id,
+          source: writer.source,
           text,
         })
         .run();
-      tx.update(schema.tasks).set({ updatedAt: now }).where(eq(schema.tasks.id, id)).run();
-      tx.insert(schema.taskEvents)
-        .values(event(id, now, person(actor), "commented", null, null))
+      tx.update(schema.tasks)
+        .set(
+          resumes
+            ? { status: "todo", waitingReason: null, failures: 0, updatedAt: now }
+            : { updatedAt: now },
+        )
+        .where(eq(schema.tasks.id, id))
         .run();
+      tx.insert(schema.taskEvents)
+        .values(event(id, now, step, "commented", null, null))
+        .run();
+      if (resumes) {
+        tx.insert(schema.taskEvents)
+          .values(event(id, now, step, "resumed", "waiting", "todo"))
+          .run();
+      }
     });
     return this.#view(id);
   }
@@ -330,7 +383,7 @@ export class TaskBoard {
    * Ends every run whose lease ran out (ADR-0011): each counts as a failed attempt, unless the
    * owner asked it to stop, which ends it in Cancelled. Every wake runs it, not only a lookup.
    */
-  sweep(now: number): number {
+  sweep(now: number): string[] {
     const expired = this.#db
       .select()
       .from(schema.tasks)
@@ -353,7 +406,35 @@ export class TaskBoard {
         "lease_expired",
       );
     }
-    return expired.length;
+    return expired.map((task) => task.id);
+  }
+
+  /**
+   * Ends a stopped task's run in Cancelled at once (#335), once its conversation stopped the turn.
+   */
+  endStopped(id: string, now: number): void {
+    const task = this.#row(id);
+    if (task?.status !== "in_progress" || task.stopRequestedAt === null) return;
+    const run = this.#db
+      .select({ id: schema.taskRuns.id })
+      .from(schema.taskRuns)
+      .where(and(eq(schema.taskRuns.taskId, id), isNull(schema.taskRuns.endedAt)))
+      .orderBy(desc(schema.taskRuns.id))
+      .get();
+    this.#end(
+      task,
+      run?.id ?? null,
+      "cancelled",
+      { status: "cancelled" },
+      now,
+      this.#kelpie,
+      "stopped",
+    );
+  }
+
+  /** The person a task acts for (ADR-0015): its run's turns act as them. */
+  actingUserOf(id: string): string | null {
+    return this.#row(id)?.actingUserId ?? null;
   }
 
   /**
@@ -395,6 +476,8 @@ export class TaskBoard {
       changes.result = outcome.status === "cancelled" ? (outcome.result ?? null) : null;
     } else if (outcome.status === "done") {
       changes = { ...changes, status: "done", result: outcome.result };
+    } else if (outcome.status === "waiting" && task.waits >= MAX_WAITS) {
+      changes = { ...changes, status: "cancelled", result: "It waited too many times." };
     } else if (outcome.status === "waiting") {
       changes = { status: "waiting", waitingReason: outcome.reason, waits: task.waits + 1 };
     } else if (outcome.status === "cancelled") {
@@ -467,10 +550,8 @@ export class TaskBoard {
   }
 }
 
-const person = (actor: Actor): Step => ({
-  actor: { kind: "user", id: actor.userId },
-  via: actor.via,
-});
+const person = (actor: Actor): Step => stepOf(personWriter(actor));
+const stepOf = (writer: TaskWriter): Step => ({ actor: writer.author, via: writer.via });
 
 function event(
   taskId: string,

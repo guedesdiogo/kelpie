@@ -1,5 +1,8 @@
-/** The channels Kelpie supports, in the order they arrive (ADR-0003). */
-export type ChannelId = "webchat" | "telegram" | "whatsapp" | "slack" | "discord";
+/**
+ * The channels Kelpie supports, in the order they arrive (ADR-0003), and `task`: a task's own
+ * conversation (#335), which reaches no person and sends nothing anywhere.
+ */
+export type ChannelId = "webchat" | "telegram" | "whatsapp" | "slack" | "discord" | "task";
 
 export type MessagePart =
   | { type: "text"; text: string }

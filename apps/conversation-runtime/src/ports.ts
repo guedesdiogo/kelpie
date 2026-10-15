@@ -33,6 +33,7 @@ import {
 import { mainAgentTools } from "./main-agent.ts";
 import { memoryTools } from "./memory-tools.ts";
 import { setupTools } from "./setup-agent.ts";
+import { taskTools } from "./task-tools.ts";
 import type { ToolProvider } from "./tools.ts";
 
 /** One model call: its events, the router's fallbacks among them, and a way to stop it. */
@@ -240,6 +241,18 @@ function productionPorts(env: Env): ConversationPorts {
       setupTools(commands, { adminOrigin: env.ADMIN_ORIGIN }),
       // The main agent's (#289): other agents' model trios, behind the owner's confirmation.
       mainAgentTools(commands, async (id) => (await registry.get(id))?.role ?? null),
+      // The task tools (#335): a run ends its task, and an agent hands work to those it owns.
+      taskTools({
+        owned: async (id) =>
+          (await registry.list()).filter((agent) => agent.owner === id).map((agent) => agent.id),
+        create: (assignee, task, creator) =>
+          env.AGENT_HOST.getByName(assignee).createTaskFor(task, creator),
+        // Only an agent the Registry lists: a model-named id makes no object.
+        comment: async (assignee, taskId, text, by) =>
+          (await registry.get(assignee))
+            ? env.AGENT_HOST.getByName(assignee).commentTaskAs(taskId, text, by, "chat")
+            : { ok: false, reason: "unknown_task" },
+      }),
     ],
     awaitSetup: (agentId, conversation, step, until) =>
       withTimeout(agentHost(agentId).awaitSetup(conversation, step, until), AWAIT_SETUP_TIMEOUT_MS),
