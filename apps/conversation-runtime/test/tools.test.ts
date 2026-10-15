@@ -17,6 +17,7 @@ import {
 import {
   type FakeWorld,
   fakeWorld,
+  hang,
   noRoute,
   OVER_BUDGET,
   reply,
@@ -260,6 +261,9 @@ describe("a turn's tools", () => {
           source: expect.stringMatching(/^telegram:chat-1, \d{4}-\d{2}-\d{2}$/),
           confirm: expect.any(Function),
           sendLink: expect.any(Function),
+          announce: expect.any(Function),
+          // Its own memory: only a subagent reads its creator's (#290).
+          memoryAgentId: "assistant",
           locale: "en",
         },
       },
@@ -711,5 +715,26 @@ describe("a turn's steps", () => {
     await vi.waitFor(() => expect(world.sent).toEqual(["Done."]));
     expect(world.steps).toEqual([]);
     expect(world.typingKept).toBe(1);
+  });
+});
+
+describe("a turn stored before #290 (#344)", () => {
+  it("resumes with its tools: its settings name no allowlist", async () => {
+    const world = use(fakeWorld([hang(), reply("Again.")]));
+    provide(world, { lookup: answer });
+    const stub = agent("tools-old-turn");
+    await stub.ingest(message("m1", "anyone?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.requests).toHaveLength(1));
+    // A turn row as a build before #290 wrote it: its settings have no `tools`.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec("UPDATE turns SET settings = json_remove(settings, '$.tools')");
+    });
+
+    await evictDurableObject(stub);
+    await runDurableObjectAlarm(stub);
+
+    await vi.waitFor(() => expect(world.sent).toEqual(["Again."]));
+    expect(world.requests.at(-1)?.tools?.map((spec) => spec.name)).toEqual(["lookup"]);
   });
 });

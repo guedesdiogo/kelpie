@@ -163,6 +163,7 @@ A user who never asks sees one line: the LLM Kelpie uses.
   - besides the owner, an agent with `spawn` creates and deletes agents: its own subagents.
 - **[ADR-0016](0016-vault-second-brain.md):** subagents have no `agents/<id>/` folder in the vault.
 - **[ADR-0017](0017-history-compaction.md):** the checkpoint's summaries run on the agent's memory trio, `cheap` by default, instead of always on the cheap tier.
+- **This ADR's §1** ([#343](https://github.com/guedesdiogo/kelpie/issues/343)): on 2026-10-15 the owner named the main agent's role **Master**: «Vamos chamar apenas de "Master"». Kelpie's texts call it Master in English, Brazilian Portuguese and Spanish. `main` stays its value in the Registry, and the code keeps its names.
 
 ## Consequences
 

@@ -49,6 +49,7 @@ import {
   type FallbackEvent,
   LlmError,
   type LlmEvent,
+  type ModelSettings,
   type ToolCallPart,
   type ToolResult,
   type Usage,
@@ -85,11 +86,19 @@ import {
 } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
+import {
+  type Announcement,
+  announcementNotice,
+  keyOf,
+  type StoredAnnouncement,
+  stored,
+} from "./announcements.ts";
 import migrations from "./migrations/migrations.js";
 import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
 import { failureNotice, routeNotice } from "./route-notices.ts";
 import * as schema from "./schema.ts";
 import { bareHttpsOrigin, setupNote } from "./setup-agent.ts";
+import { SUBAGENT_TOOLS } from "./subagent-limits.ts";
 import {
   CONFIRMATION_MS,
   type ConfirmationRequest,
@@ -137,6 +146,22 @@ const WEBCHAT_ID_PREFIX = "webchat:";
 const WEBCHAT_RECEIVED_IDS = 100;
 /** While the owner types in the webchat, buffered messages wait at least this long for the rest. */
 const TYPING_HOLD_MS = 4_000;
+/** The most announcements a conversation keeps for its next reply's notice; the oldest go first. */
+const MAX_UNSAID_ANNOUNCEMENTS = 20;
+/** Where a conversation keeps its unsaid handoffs, in #287's shape, so a rollback still reads them. */
+const HANDOFFS = "handoffs";
+/** Where it keeps the subagents created or deleted (#342), which a release before it never reads. */
+const SUBAGENT_CHANGES = "subagentChanges";
+
+/**
+ * Kelpie's last notice of them (#287): its outbox row, and the keys of what it named (`keyOf`); a
+ * handoff's is its task id, as before #342.
+ */
+interface AnnouncementNotice {
+  turnId: number;
+  seq: number;
+  taskIds: string[];
+}
 /** What the owner is told on a channel when they pause a conversation (issue #134, #187). */
 export const PAUSED_TEXT: Localized = {
   en: "Paused. I'll answer after your next message.",
@@ -786,6 +811,42 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     return this.env.AGENT_HOST.getByName(this.#agentId());
   }
 
+  /**
+   * Whose memory the agent reads (#290): a subagent reads only its creator's, read-only (ADR-0036
+   * §5); any other agent, its own.
+   */
+  #memoryAgentId(): string {
+    const roster = this.#get<AgentConfig["agent"] | null>("roster", null);
+    return roster?.role === "subagent" && roster.owner ? roster.owner : this.#agentId();
+  }
+
+  /**
+   * The tools a turn may use (#290): a subagent never gets those that create agents or tasks,
+   * write memory, or configure Kelpie, whatever it was granted; and an agent whose settings name
+   * its tools gets only those.
+   */
+  #allowed(tools: Map<string, Tool>, settings: AgentSettings): Map<string, Tool> {
+    const roster = this.#get<AgentConfig["agent"] | null>("roster", null);
+    const subagent = roster?.role === "subagent";
+    // A turn stored before #290 has no allowlist in its settings: it has none (#344).
+    const named = settings.tools == null ? null : new Set(settings.tools);
+    // A subagent's tools also stay within its creator's allowlist (ADR-0036 §5).
+    const creators =
+      subagent && roster?.creatorTools !== undefined && roster.creatorTools !== null
+        ? new Set(roster.creatorTools)
+        : null;
+    for (const name of [...tools.keys()]) {
+      if (
+        (subagent && !SUBAGENT_TOOLS.has(name)) ||
+        (named !== null && !named.has(name)) ||
+        (creators !== null && !creators.has(name))
+      ) {
+        tools.delete(name);
+      }
+    }
+    return tools;
+  }
+
   /** The latest person in this conversation's history, whom a note of Kelpie's is written as. */
   #lastUserId(): string | null {
     return (
@@ -898,6 +959,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (this.#pendingInbound().length === 0) return;
     await this.#cancelFlushSchedule();
     this.#set("resumedAt", null);
+    // What this turn's limits read (#290): a subagent's tools and memory follow its creator's.
+    this.#set("roster", config.agent ?? null);
     const pending = this.#pendingInbound();
     const access = leastAccess([...pending, ...this.#unansweredAccess()]);
     const now = this.#ports.now();
@@ -1007,8 +1070,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     let summary = "";
     let usage: Usage[] = [];
     try {
-      // The memory area: the agent's own settings for it, `cheap` unless they set its tier (#286).
-      const { model } = (await this.#config()).settings;
+      // The memory area: the agent's own settings for it, `cheap` unless they set its tier (#286),
+      // and a subagent's held to its creator's, as on its turns (#344).
+      const model = await this.#ownModel();
       const call = await this.#ports.generate(
         { area: "memory", agent: model },
         {
@@ -1134,6 +1198,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           .where(and(eq(schema.outbox.turnId, turnId), eq(schema.outbox.status, "sending")))
           .run();
         await this.#deliver(turnId, controller.signal);
+        this.#settleAnnouncements();
       } else if (turn.attempts < 2) {
         await this.#call(turnId, controller);
       } else {
@@ -1346,8 +1411,15 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       this.#ports.now(),
       locale,
     );
+    // Then what its tools did, as subagents made and work handed off, with what an earlier turn
+    // left unsaid (#287, #342).
+    this.#settleAnnouncements();
+    const announcements = this.#announcements();
+    const announced = announcementNotice(announcements, locale);
+    const announcedSeq = bubbles.length + (routes.text === null ? 0 : 1);
     const notices = [
       ...(routes.text === null ? [] : [{ text: routes.text }]),
+      ...(announced === null ? [] : [{ text: announced }]),
       ...confirmations.map(({ id, code, summary }) => ({
         text: confirmationNotice(summary, code, button, locale),
         confirmationId: id,
@@ -1373,6 +1445,18 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           })
           .run();
       });
+      // Noted with the rows: whichever path sends the notice, what it named is cleared once sent.
+      if (announced !== null) {
+        const said: AnnouncementNotice = {
+          turnId,
+          seq: announcedSeq,
+          taskIds: announcements.map(keyOf),
+        };
+        tx.insert(schema.state)
+          .values({ key: "handoffNotice", value: said })
+          .onConflictDoUpdate({ target: schema.state.key, set: { value: said } })
+          .run();
+      }
     });
     await this.#awaitSteps(links);
     await this.#deliver(turnId, controller.signal);
@@ -1381,6 +1465,70 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (routes.text !== null && this.#bubbleSent(turnId, bubbles.length)) {
       this.#set("routeNotices", routes.announced);
     }
+    this.#settleAnnouncements();
+  }
+
+  /** What the turn's tools had Kelpie announce that no notice said yet (#287, #342). */
+  #announcements(): Announcement[] {
+    return [
+      ...stored(this.#get<StoredAnnouncement[]>(HANDOFFS, [])),
+      ...this.#get<Announcement[]>(SUBAGENT_CHANGES, []),
+    ];
+  }
+
+  /** Keeps these unsaid, the newest MAX_UNSAID_ANNOUNCEMENTS of them, each kind in its own key. */
+  #keepAnnouncements(all: readonly Announcement[]): void {
+    const kept = all.slice(-MAX_UNSAID_ANNOUNCEMENTS);
+    this.#set(
+      HANDOFFS,
+      kept.flatMap((one) =>
+        one.kind === "handoff"
+          ? [{ taskId: one.taskId, agentId: one.agentId, name: one.name }]
+          : [],
+      ),
+    );
+    this.#set(
+      SUBAGENT_CHANGES,
+      kept.filter((one) => one.kind !== "handoff"),
+    );
+  }
+
+  /**
+   * Clears what Kelpie's last notice named once it went out (#287), whichever path sent it: the
+   * reply, its resume after an eviction, or a delivery that failed on a later bubble. Only what it
+   * named: a late call may have added more since. A notice that never went out leaves it all for
+   * the next reply.
+   */
+  #settleAnnouncements(): void {
+    const notice = this.#get<AnnouncementNotice | null>("handoffNotice", null);
+    if (notice === null) return;
+    const status = this.#db
+      .select({ status: schema.outbox.status })
+      .from(schema.outbox)
+      .where(and(eq(schema.outbox.turnId, notice.turnId), eq(schema.outbox.seq, notice.seq)))
+      .get()?.status;
+    if (status === "pending" || status === "sending") return;
+    if (status === "sent") {
+      const said = new Set(notice.taskIds);
+      this.#keepAnnouncements(this.#announcements().filter((one) => !said.has(keyOf(one))));
+    }
+    this.#set("handoffNotice", null);
+  }
+
+  /**
+   * Keeps what a tool did for Kelpie's notice after the next reply this conversation sends (#287,
+   * #342). It outlives the turn that made it, since the task or the subagent does: a turn stopped
+   * before its reply leaves it for the next one.
+   */
+  #announce(announcement: Announcement): void {
+    const key = keyOf(announcement);
+    const kept = this.#announcements().filter((one) => keyOf(one) !== key);
+    const { kind, agentId, name } = announcement;
+    const one: Announcement =
+      kind === "handoff"
+        ? { kind, taskId: announcement.taskId, agentId, name }
+        : { kind, agentId, name };
+    this.#keepAnnouncements([...kept, one]);
   }
 
   #bubbleSent(turnId: number, seq: number): boolean {
@@ -1431,7 +1579,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     step: (name: TurnStep, label?: string) => void,
   ): Promise<Extract<LlmEvent, { type: "finish" }> | null> {
     const agentId = this.#agentId();
-    const tools = await this.#tools(agentId);
+    const tools = this.#allowed(await this.#tools(agentId), settings);
     if (controller.signal.aborted || !this.#isRunning(turn.id)) return null;
     const specs = [...tools.values()].map((tool) => tool.spec);
     // Earlier replies are replayed with their native output only under the same tools. A turn
@@ -1569,6 +1717,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
                 ? false
                 : this.#confirm(turn.id, actor.userId, request),
             sendLink: (link) => this.#sendLink(turn.id, link),
+            announce: (announcement) => this.#announce(announcement),
+            memoryAgentId: this.#memoryAgentId(),
           };
           const task = this.#taskHandle();
           if (task) context.task = task;
@@ -1882,7 +2032,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     try {
       const question = this.#question();
       if (question === "") return null;
-      const recalled = await this.#ports.recall(this.#agentId(), question, {
+      const recalled = await this.#ports.recall(this.#memoryAgentId(), question, {
         scopes,
         budgetTokens: RECALL_BUDGET_TOKENS,
         qualifier: settings.qualifier,
@@ -1929,7 +2079,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     // Settings stored before the core existed have no such field.
     if (!(settings.memoryCore ?? DEFAULT_SETTINGS.memoryCore)) return "";
     try {
-      const core = await this.#ports.core(this.#agentId(), CORE_BUDGET_TOKENS);
+      const core = await this.#ports.core(this.#memoryAgentId(), CORE_BUDGET_TOKENS);
       if (typeof core.text !== "string" || core.text.length > CORE_MAX_CHARS) {
         throw new TypeError("the core answered past its budget");
       }
@@ -2071,8 +2221,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    *   one bad session can't hold back the ones after it. Its messages stay in the history.
    */
   async closeSession(): Promise<void> {
-    // A task's conversation isn't captured: the task holds its record (#335).
+    // A task's conversation isn't captured: the task holds its record (#335); nor is any of a
+    // subagent's (ADR-0036 §5).
     if (this.#get<Destination | null>("destination", null)?.channel === "task") return;
+    if (this.#get<AgentConfig["agent"] | null>("roster", null)?.role === "subagent") return;
     if (this.#closingSession) return;
     if (this.#turnRunning() || this.#pendingInbound().length > 0) {
       await this.#scheduleSessionClose(SESSION_RETRY_MS);
@@ -2706,6 +2858,13 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const agentId = this.#get<string | null>("agentId", null);
     if (!agentId) throw new Error("The conversation has no agent yet");
     return this.env.AGENT_HOST.getByName(agentId).config();
+  }
+
+  /** The agent's own model settings, held to its creator's for a subagent (#344). */
+  async #ownModel(): Promise<ModelSettings> {
+    const agentId = this.#get<string | null>("agentId", null);
+    if (!agentId) throw new Error("The conversation has no agent yet");
+    return this.env.AGENT_HOST.getByName(agentId).ownModel();
   }
 
   /** What a new turn runs with: the settings, and the system prompt from the agent's vault. */

@@ -4,6 +4,7 @@ import type {
   AgentConfig,
   AgentHostContract,
   AgentSettings,
+  AgentSkill,
   ConfigureResult,
   EraseResult,
   NewTask,
@@ -37,7 +38,14 @@ import {
   SETUP_AGENT_ID,
 } from "@kelpie/config";
 import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
-import type { ModelDescription, ModelSettings } from "@kelpie/llm/models";
+import type {
+  AreaChoice,
+  Effort,
+  ModelDescription,
+  ModelSettings,
+  ProviderId,
+} from "@kelpie/llm/models";
+import type { ModelTier } from "@kelpie/llm/router";
 import { Agent } from "agents";
 import { and, desc, eq, isNotNull, lte, notLike } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
@@ -111,9 +119,18 @@ const COMPILE_TIMEOUT_MS = 3_000;
  * its conversation's trio as llm-gateway resolves it (#286).
  */
 export interface IdentitySources {
-  /** The agent's name and role, or null while the Registry doesn't list it. */
-  agent(id: string): Promise<{ name: string; role: AgentRole } | null>;
+  /** The agent's name, role and owner, or null while the Registry doesn't list it. */
+  agent(id: string): Promise<{ name: string; role: AgentRole; owner?: string | null } | null>;
   describe(agent: ModelSettings): Promise<ModelDescription>;
+  /** The specialists the agent owns, with their remits (ADR-0036 §4, #287). */
+  specialists(id: string): Promise<Specialist[]>;
+}
+
+/** One of the specialists an agent owns, as its prompt lists it (#287); an empty remit is none. */
+export interface Specialist {
+  id: string;
+  name: string;
+  remit: string;
 }
 
 let identitySourcesForTesting: IdentitySources | undefined;
@@ -184,6 +201,19 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       settings: { ...this.#defaults(), ...this.#stored() },
       promptVersion: this.#get("promptVersion", 0),
     };
+  }
+
+  /**
+   * The model settings the agent's calls resolve from (#344): its stored ones, a tier set before
+   * #286 included, so an area it leaves unset follows the instance's default rather than `cheap`.
+   * A subagent's are held to its creator's, as each of its turns' are. Only a pinned creator
+   * counts here, without the Registry's role that a turn also reads: every subagent is pinned
+   * before the Registry lists it.
+   */
+  async ownModel(): Promise<ModelSettings> {
+    const model = agentModel(this.#stored());
+    const creator = this.#get<string | null>("creator", null);
+    return creator === null ? model : clampModel(model, await this.#creatorLimits(creator));
   }
 
   #defaults(): AgentSettings {
@@ -271,13 +301,14 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     const sources = this.#identitySources();
     // The stored settings, read before the await: the trio is described for them.
     const model = agentModel(this.#stored());
-    const [vault, listed, described] = await Promise.all([
+    const [vault, listed, described, specialists] = await Promise.all([
       this.#vaultContext(),
       this.#lookup(
         "identityAgent",
-        async () => (await sources.agent(id)) ?? { name: id, role: null },
+        async () => (await sources.agent(id)) ?? { name: id, role: null, owner: null },
       ),
       this.#lookup("identityModel", () => sources.describe(model)),
+      this.#lookup("identitySpecialists", () => sources.specialists(id)),
     ]);
     // Read after the await: another call or a configure may have run meanwhile, and the compare,
     // the bump and the write below are one synchronous step.
@@ -293,6 +324,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     for (const [stateKey, looked] of [
       ["identityAgent", listed],
       ["identityModel", described],
+      ["identitySpecialists", specialists],
     ] as const) {
       const changed = JSON.stringify(looked.value) !== JSON.stringify(this.#get(stateKey, null));
       if (looked.fresh && changed) rows.push([stateKey, looked.value]);
@@ -311,20 +343,108 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
         }
       });
     }
+    // A subagent's creator is pinned on its own object when it is made (#290): the Registry not
+    // answering never makes it anything else.
+    const pinned = this.#get<string | null>("creator", null);
+    const role = pinned !== null ? "subagent" : (listed.value?.role ?? null);
+    const owner = pinned ?? listed.value?.owner ?? null;
+    const limits = role === "subagent" && owner ? await this.#creatorLimits(owner) : null;
+    // A subagent never runs above its creator (ADR-0036 §5), field by field, at every turn.
+    const effective = limits ? clampModel(model, limits) : model;
+    let runsOn = described.value;
+    if (limits && JSON.stringify(effective) !== JSON.stringify(model)) {
+      // Bounded like the other lookups; unread, the prompt names no model rather than a wrong one.
+      runsOn = (await this.#lookup("identityModelClamped", () => sources.describe(effective)))
+        .value;
+    }
+    const spawn = role === "main" || (role === "specialist" && config.settings.spawn);
     const identity = identitySection({
       id,
       name: listed.value?.name ?? id,
-      role: listed.value?.role ?? null,
-      model: described.value,
+      role,
+      creator: owner,
+      remit: config.settings.remit,
+      model: runsOn,
     });
+    const prompt = [
+      identity,
+      composeSystemPrompt(config.settings.systemPrompt, vault),
+      ...storedSkills(config.settings.skills),
+      ...specialistsSection(specialists.value ?? []),
+      ...(spawn ? [CREATE_SUBAGENT_SKILL] : []),
+    ];
     return {
       settings: {
         ...config.settings,
-        model,
-        systemPrompt: `${identity}\n\n${composeSystemPrompt(config.settings.systemPrompt, vault)}`,
+        model: effective,
+        systemPrompt: prompt.join("\n\n"),
       },
       promptVersion,
+      agent: { role, owner, spawn, creatorTools: limits?.tools ?? null },
     };
+  }
+
+  /**
+   * Pins this agent as `creator`'s subagent (#290), once, as it is made: from then on it is one,
+   * with that creator's limits, whatever the Registry answers. Only a new object is pinned: one
+   * already pinned, configured, or holding a conversation or a task is an agent already, whose id a
+   * new subagent never takes over (#344).
+   */
+  bindCreator(creator: string): { ok: boolean } {
+    if (!isAgentId(creator)) return { ok: false };
+    const has = (
+      table: typeof schema.auditLog | typeof schema.conversations | typeof schema.tasks,
+    ) => this.#db.select().from(table).limit(1).get() !== undefined;
+    const inUse =
+      this.#get<string | null>("creator", null) !== null ||
+      Object.keys(this.#stored()).length > 0 ||
+      has(schema.auditLog) ||
+      has(schema.conversations) ||
+      has(schema.tasks);
+    if (inUse) return { ok: false };
+    this.#db.insert(schema.state).values({ key: "creator", value: creator }).run();
+    return { ok: true };
+  }
+
+  /**
+   * A subagent's creator's limits (#290): its trio as it resolves now, from its own settings rather
+   * than the defaults (#344), and its tool allowlist. The last ones read stand in when the creator
+   * can't be read in time; without any, the cheapest tier and no tools, so a subagent never runs
+   * above it by failing open.
+   */
+  async #creatorLimits(creator: string): Promise<CreatorLimits> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const work = (async (): Promise<CreatorLimits> => {
+        const host = this.env.AGENT_HOST.getByName(creator);
+        const [{ settings }, model] = await Promise.all([host.config(), host.ownModel()]);
+        const described = await this.#identitySources().describe(model);
+        return {
+          tier: described.tier,
+          ...(described.effort === undefined ? {} : { effort: described.effort }),
+          provider: described.provider,
+          ...(model.memory ? { memory: model.memory } : {}),
+          tools: settings.tools,
+        };
+      })();
+      const limits = await Promise.race([
+        work,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("timed out")), IDENTITY_TIMEOUT_MS);
+        }),
+      ]);
+      this.#db
+        .insert(schema.state)
+        .values({ key: "creatorLimits", value: limits })
+        .onConflictDoUpdate({ target: schema.state.key, set: { value: limits } })
+        .run();
+      return limits;
+    } catch (error) {
+      console.warn("AgentHost: a subagent's creator wasn't read", errorName(error));
+      return this.#get<CreatorLimits | null>("creatorLimits", null) ?? CHEAPEST_LIMITS;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   /**
@@ -698,8 +818,10 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     }
   }
 
-  /** The agent the Registry says owns this one, or null. */
+  /** The agent that owns this one: a subagent's pinned creator, else the Registry's owner, or null. */
   async #ownerOf(): Promise<string | null> {
+    const pinned = this.#get<string | null>("creator", null);
+    if (pinned !== null) return pinned;
     return (await this.#registry().get(this.ctx.id.name ?? ""))?.owner ?? null;
   }
 
@@ -741,9 +863,22 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     return {
       agent: async (id) => {
         const entry = await registry.get(id);
-        return entry ? { name: entry.name, role: entry.role } : null;
+        return entry ? { name: entry.name, role: entry.role, owner: entry.owner } : null;
       },
       describe: (agent) => gateway.describe("conversation", agent),
+      // Each remit is its specialist's own setting; one that can't be read keeps the last list.
+      specialists: async (id) => {
+        const owned = (await registry.list()).filter(
+          (entry) => entry.owner === id && entry.role === "specialist",
+        );
+        return Promise.all(
+          owned.map(async ({ id: specialist, name }) => ({
+            id: specialist,
+            name,
+            remit: (await this.env.AGENT_HOST.getByName(specialist).config()).settings.remit,
+          })),
+        );
+      },
     };
   }
 
@@ -941,6 +1076,91 @@ const SETUP_WAIT_GRACE_MS = 5 * 60_000;
 const MAX_CONVERSATION_NAME = 256;
 
 const invalidTask = { ok: false, reason: "invalid_input" } as const;
+
+/** What a subagent's creator holds, as its limits (#290). */
+interface CreatorLimits {
+  tier: string;
+  effort?: Effort;
+  provider: ProviderId | null;
+  memory?: AreaChoice;
+  tools: string[] | null;
+}
+
+/** The limits when nothing of the creator's was ever read: the cheapest tier, no effort, no tools. */
+const CHEAPEST_LIMITS: CreatorLimits = { tier: "cheap", provider: null, tools: [] };
+
+const TIER_RANK: Record<string, number> = { cheap: 0, medium: 1, frontier: 2 };
+const EFFORT_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, xhigh: 3, max: 4 };
+
+/**
+ * A subagent's trio held to its creator's (#290), field by field: its tier at most the creator's,
+ * a tier Kelpie doesn't rank counting as above it; its effort at most the creator's, none when the
+ * creator sets none, and the creator's when it sets none itself; and the creator's route and
+ * memory area.
+ */
+export function clampModel(own: ModelSettings, limits: CreatorLimits): ModelSettings {
+  const ownTier = own.conversation?.tier;
+  const tier =
+    ownTier !== undefined &&
+    ownTier in TIER_RANK &&
+    limits.tier in TIER_RANK &&
+    (TIER_RANK[ownTier] ?? 0) <= (TIER_RANK[limits.tier] ?? 0)
+      ? ownTier
+      : limits.tier;
+  const ownEffort = own.conversation?.effort;
+  const effort =
+    limits.effort === undefined
+      ? undefined
+      : ownEffort !== undefined &&
+          (EFFORT_RANK[ownEffort] ?? 99) <= (EFFORT_RANK[limits.effort] ?? 0)
+        ? ownEffort
+        : limits.effort;
+  return {
+    ...(limits.provider === null ? {} : { provider: limits.provider }),
+    ...(limits.memory ? { memory: limits.memory } : {}),
+    conversation: { tier: tier as ModelTier, ...(effort === undefined ? {} : { effort }) },
+  };
+}
+
+/** The skills kept with the agent's settings (#290), as its prompt lists them. */
+function storedSkills(skills: AgentSkill[]): string[] {
+  if (skills.length === 0) return [];
+  return [
+    `# Your skills\n\n${skills.map((skill) => `## ${skill.name}\n\n${skill.instructions.trim()}`).join("\n\n")}`,
+  ];
+}
+
+/**
+ * The specialists the agent owns and the mandatory handoff (ADR-0036 §4, #287): a demand within a
+ * specialist's remit becomes its task, even when the owner didn't name it.
+ */
+function specialistsSection(specialists: readonly Specialist[]): string[] {
+  if (specialists.length === 0) return [];
+  const lines = specialists.map(
+    ({ id, name, remit }) => `- ${id} (${JSON.stringify(name)}): ${remit || "no remit set"}`,
+  );
+  return [
+    `# Your specialists
+
+These agents are yours, each with a remit. When a demand falls within a specialist's remit, hand it to that specialist with create_task, even when the owner didn't name it, instead of doing it yourself. It knows nothing of this conversation: put in the task's body every fact and constraint it needs, and the result you want back. Say in your reply that you handed it off; Kelpie also tells the owner who has it. When the task ends or asks something, Kelpie tells you: relay its result, naming the specialist that did the work, or ask the owner its question.
+
+A demand within no remit is yours to do. A specialist with no remit set takes work only when the owner names it. Only the owner's own turns in a direct conversation hand work off.
+
+${lines.join("\n")}`,
+  ];
+}
+
+/**
+ * The built-in `create-subagent` skill (ADR-0036 §5, #290), for every agent with `spawn`: when a
+ * subagent is worth it, how to brief one, and to delete it once the demand ends.
+ */
+export const CREATE_SUBAGENT_SKILL = `# Skill: create-subagent
+
+You can create temporary subagents with create_subagent, and hand them work with create_task.
+- Worth it: a demand that would crowd this conversation, or work that can run while you go on. Not for anything that needs the owner: a subagent can't talk to them, can't confirm, and can't write memory.
+- Brief it completely. It knows nothing of this conversation: give it a soul and skills for the work, and put in the task every fact, constraint and the result you want back.
+- Its result is its own report, not a verified fact. Check what matters before you rely on it, and write to memory yourself what is worth keeping.
+- You have at most three live at once. Delete each one with delete_subagent once its demand ends: it lives until you do.`;
 
 const isUserId = (value: unknown): value is string =>
   typeof value === "string" && value !== "" && value.length <= 128;

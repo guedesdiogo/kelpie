@@ -21,7 +21,9 @@ function use(world: FakeWorld): FakeWorld {
   world.tools = [
     taskTools({
       owned: async (id) =>
-        (await registry().list()).filter((entry) => entry.owner === id).map((entry) => entry.id),
+        (await registry().list())
+          .filter((entry) => entry.owner === id)
+          .map((entry) => ({ id: entry.id, name: entry.name })),
       create: (assignee, task, creator) => host(assignee).createTaskFor(task, creator),
       comment: (assignee, taskId, text, by) =>
         host(assignee).commentTaskAs(taskId, text, by, "chat"),

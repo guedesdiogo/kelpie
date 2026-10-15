@@ -5,7 +5,7 @@ import { type Actor, type AgentSettings, DEFAULT_SETTINGS, SETUP_AGENT_ID } from
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
-import { type SetupCommands, setupTools } from "../src/setup-agent.ts";
+import { SETUP_PROMPT, type SetupCommands, setupTools } from "../src/setup-agent.ts";
 import {
   type ConfirmationRequest,
   canonicalJson,
@@ -180,6 +180,7 @@ function contextOf(confirmed: boolean, actor: Actor = owner, locale: Locale = "e
     sendLink(link) {
       links.push(link);
     },
+    announce() {},
   };
   return { context, asked, links };
 }
@@ -228,6 +229,33 @@ describe("the setup agent's tools", () => {
       for (const label of Object.values(tool.label)) expect(label).toMatch(/^[A-Z][a-z]/);
       expect(tool.spec.inputSchema).toMatchObject({ type: "object", additionalProperties: false });
     }
+  });
+
+  it("calls the role the Registry names `main` Master, in its prompt, tools and texts (#343)", async () => {
+    // list_agents shows the Registry's value, so the prompt ties the two.
+    expect(SETUP_PROMPT).toContain("Master, the role `main` in list_agents,");
+    const { commands, agents } = fakeCommands();
+    agents.set("ana", "Ana");
+    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    for (const text of [
+      SETUP_PROMPT,
+      ...[...tools.values()].flatMap((tool) => [
+        JSON.stringify(tool.spec),
+        ...Object.values(tool.label),
+      ]),
+    ]) {
+      expect(text).not.toMatch(/main agent|agente principal/i);
+    }
+    expect(tools.get("set_main_agent")?.label).toEqual({
+      en: "Choosing Master",
+      "pt-BR": "Escolhendo o Master",
+      es: "Eligiendo el Master",
+    });
+    const { context, asked } = contextOf(false, owner, "es");
+    await run(tools, "set_main_agent", { id: "ana" }, context);
+    expect(asked.map((request) => request.summary)).toEqual([
+      'convertir el agente "Ana" (ana) en el Master, el que conversa contigo.',
+    ]);
   });
 
   it("lists, creates and renames agents directly", async () => {
@@ -312,7 +340,7 @@ describe("the setup agent's tools", () => {
       {
         command: "setMainAgent",
         input: { id: "ana" },
-        summary: 'tornar o agente "Ana" (ana) o agente principal, o que conversa com você.',
+        summary: 'tornar o agente "Ana" (ana) o Master, o que conversa com você.',
       },
       {
         command: "setAgentChat",
@@ -324,7 +352,7 @@ describe("the setup agent's tools", () => {
 
     const confirmed = contextOf(true);
     expect(await run(tools, "set_main_agent", { id: "ana" }, confirmed.context)).toEqual({
-      output: "The agent ana is now the main agent: the one the owner talks to.",
+      output: "The agent ana is now Master: the one the owner talks to.",
     });
     expect(
       await run(tools, "set_agent_chat", { id: "ana", chat: true }, confirmed.context),
@@ -332,7 +360,7 @@ describe("the setup agent's tools", () => {
       output: "The owner can now chat with the agent ana.",
     });
     expect(confirmed.asked.map((request) => request.summary)).toEqual([
-      'make the agent "Ana" (ana) the main agent, the one you talk to.',
+      'make the agent "Ana" (ana) Master, the one you talk to.',
       'let you chat with the agent "Ana" (ana).',
     ]);
     expect(calls).toEqual(['setMainAgent {"id":"ana"}', 'setAgentChat {"id":"ana","chat":true}']);
@@ -430,14 +458,16 @@ describe("the setup agent's tools", () => {
 
     const admin = await run(tools, "set_main_agent", { id: SETUP_AGENT_ID }, context);
     expect(admin).toMatchObject({ isError: true });
-    expect(admin.output).toContain("Admin can't be the main agent");
+    expect(admin.output).toContain("Admin can't be Master");
     for (const id of [SETUP_AGENT_ID, "kelpie"]) {
       const refused = await run(tools, "set_agent_chat", { id, chat: false }, context);
       expect(refused).toMatchObject({ isError: true });
-      expect(refused.output).toContain("Only a specialist's chat can change");
+      expect(refused.output).toContain(
+        "Only a specialist's chat can change: Admin and Master always chat",
+      );
     }
     expect(await run(tools, "set_main_agent", { id: "kelpie" }, context)).toEqual({
-      output: "The agent kelpie is already the main agent; nothing changed.",
+      output: "The agent kelpie is already Master; nothing changed.",
     });
     expect(await run(tools, "set_agent_chat", { id: "ana", chat: false }, context)).toEqual({
       output: "The agent ana's chat is already off; nothing changed.",
@@ -513,7 +543,7 @@ describe("the setup agent's tools", () => {
 
     for (const id of [SETUP_AGENT_ID, "kelpie"]) {
       expect(await run(tools, "delete_agent", { id }, context)).toEqual({
-        output: "Admin and the main agent can't be deleted.",
+        output: "Admin and Master can't be deleted.",
         isError: true,
       });
     }
@@ -557,7 +587,7 @@ describe("the setup agent's tools", () => {
     const { context } = contextOf(true);
 
     const created = await run(tools, "create_agent", { id: "ana", name: "Ana" }, context);
-    expect(created.output).toContain("its chat is off");
+    expect(created.output).toContain("It is a specialist, owned by Master, and its chat is off");
     const connected = await run(tools, "connect_telegram", { agentId: "ana" }, context);
     expect(connected.output).toContain("Its chat is off");
     const paired = await run(tools, "pair_telegram", { agentId: "ana" }, context);
