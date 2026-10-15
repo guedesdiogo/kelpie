@@ -27,11 +27,11 @@ describe("parseSettings", () => {
     expect(parseSettings({ toolLoopMs: 300_000 })).toEqual({ toolLoopMs: 300_000 });
   });
 
-  it("runs three tasks at once by default, and at most ten (#54)", () => {
+  it("runs three tasks at once by default, at most ten, and none at 0 (#54, #335)", () => {
     expect(DEFAULT_SETTINGS.maxConcurrentTasks).toBe(3);
-    expect(parseSettings({ maxConcurrentTasks: 1 })).toEqual({ maxConcurrentTasks: 1 });
+    expect(parseSettings({ maxConcurrentTasks: 0 })).toEqual({ maxConcurrentTasks: 0 });
     expect(parseSettings({ maxConcurrentTasks: 10 })).toEqual({ maxConcurrentTasks: 10 });
-    for (const value of [0, 11, 2.5, "3"]) {
+    for (const value of [-1, 11, 2.5, "3"]) {
       expect(parseSettings({ maxConcurrentTasks: value })).toBeNull();
     }
   });

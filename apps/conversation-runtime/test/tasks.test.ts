@@ -1,7 +1,7 @@
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { TaskView } from "@kelpie/config";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type AgentHost,
   replaceTaskRunnerForTesting,
@@ -88,8 +88,12 @@ const wakes = (stub: ReturnType<typeof host>) =>
       .map((schedule) => ("time" in schedule ? schedule.time * 1_000 : null)),
   );
 
-afterEach(() => {
+// Each test picks its runner; none by default, as before #335 brought the task conversations.
+beforeEach(() => {
   replaceTaskRunnerForTesting(null);
+});
+afterEach(() => {
+  replaceTaskRunnerForTesting(undefined);
 });
 
 describe("the task board's rules for people (ADR-0011)", () => {
@@ -488,5 +492,73 @@ describe("leases, runs and stops (#54)", () => {
     await create(stub, "private", { body: "Personal data." });
     expect(await stub.erase([])).toMatchObject({ ok: true });
     expect(await afterDestroy(() => host("board-erased").listTasks())).toEqual([]);
+  });
+});
+
+describe("tasks other agents write (#335)", () => {
+  const helper = (id: string) => host(id);
+  const by = (agentId: string) => ({ agentId, actingUserId: "u-owner" });
+
+  it("lets an agent's own comment leave its waiting task waiting: the answer comes from others", async () => {
+    fakeRunner();
+    await env.REGISTRY.getByName("registry").add("board-self", "Self", owner);
+    const stub = helper("board-self");
+    const task = await create(stub, "asks", { status: "todo" });
+    await stub.finishTask(task.id, await runOf(stub, task), {
+      status: "waiting",
+      reason: "needs_input",
+    });
+
+    expect(
+      await stub.commentTaskAs(task.id, "I answer myself.", "board-self", "agent"),
+    ).toMatchObject({ value: { status: "waiting" } });
+    // The agent that owns it answers: the task goes back to To do, and runs again.
+    expect(await stub.commentTaskAs(task.id, "May 3rd.", "kelpie", "chat")).toMatchObject({
+      value: { status: "in_progress", attempt: 2 },
+    });
+    const detail = await stub.getTask(task.id);
+    if (!detail.ok) throw new Error("no detail");
+    expect(detail.value.comments.map((comment) => [comment.author.id, comment.source])).toEqual([
+      ["board-self", "agent"],
+      ["kelpie", "chat"],
+    ]);
+  });
+
+  it("keeps most of a board for the owner: other agents open at most 20 tasks on it", async () => {
+    await env.REGISTRY.getByName("registry").add("board-crowded", "Crowded", owner);
+    const stub = helper("board-crowded");
+    const task = { title: "x", body: "", status: "backlog", scheduledStartAt: null } as const;
+    for (let i = 0; i < 20; i++) {
+      expect(await stub.createTaskFor(task, by("kelpie"))).toMatchObject({ ok: true });
+    }
+    expect(await stub.createTaskFor(task, by("kelpie"))).toEqual({
+      ok: false,
+      reason: "not_allowed",
+    });
+    expect(await stub.createTask(task, owner)).toMatchObject({ ok: true });
+  });
+
+  it("cancels a task once it went to Waiting five times, so no loop runs on", async () => {
+    fakeRunner();
+    const stub = helper("board-loop");
+    const task = await create(stub, "loops", { status: "todo" });
+    for (let i = 0; i < 6; i++) {
+      await stub.finishTask(task.id, await runOf(stub, task), {
+        status: "waiting",
+        reason: "needs_input",
+      });
+      await stub.commentTask(task.id, "Try again.", owner);
+    }
+    expect(await stub.getTask(task.id)).toMatchObject({
+      value: { status: "cancelled", result: "It waited too many times." },
+    });
+  });
+
+  it("runs none of an agent's tasks while its limit is 0", async () => {
+    const started = fakeRunner();
+    const stub = helper("board-off");
+    await stub.configure({ maxConcurrentTasks: 0 }, owner);
+    await create(stub, "held", { status: "todo" });
+    expect(started).toEqual([]);
   });
 });

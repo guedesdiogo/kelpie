@@ -145,11 +145,19 @@ Each agent has a task board in its `AgentHost` (ADR-0011, #54). The `AgentHost` 
 - **Pickup.** A task in To do is eligible at once, or at its scheduled start. The `AgentHost` claims eligible tasks in order of their scheduled start, or creation, while fewer than the agent's `maxConcurrentTasks` run. That setting is 3 by default and at most 10; the setup agent asks the owner before changing it, as for any setting. A task in Waiting holds no slot.
 - **Leases.** A claim leases the task for 15 minutes and opens a run, with a random token its reports must carry. The run's heartbeat extends the lease, but never past 2 hours from the run's start.
   - A lease that runs out is swept on the next wake, and the attempt counts as failed.
-  - Two failed attempts in a row put the task in Waiting, with the reason `failed`. For now that shows only on the task; telling its creator comes with #335.
+  - Two failed attempts in a row put the task in Waiting, with the reason `failed`.
   - A run that couldn't start counts as a failed attempt, and is tried again at a wake a minute later. A pass of pickup stops after three such runs.
   - After the owner's stop, the run's lease lasts at most 2 more minutes, whatever its heartbeat: then the task ends in Cancelled, unless the run finished it first.
 - **Done needs a result.** Every change goes into the task's history, with who made it and through what.
-- **Not yet running.** Until #335 brings the task conversation that runs tasks, nothing claims them: a task in To do stays there.
+- **Runs** (#335). Each run is a conversation of its own, named `<agent>:task:<task id>`.
+  - **What it reaches:** no person and no channel. It isn't captured into memory either, because the task is its record.
+  - **What it starts with:** the task and its newest comments. A task or comment another agent wrote comes as data, never as the owner's instructions.
+  - **How it ends the task:** with `complete_task` and the result, `wait_on_task` and a question, or `cancel_task` and a reason. A turn that leaves the task running gets one nudge from Kelpie; a second such turn counts as a failed attempt.
+  - **What reaches it mid-run:** a comment joins its next round. The owner's stop ends its turn at once, and the task is cancelled.
+  - **What it can't do:** confirm anything. Admin's and the main agent's own tools aren't in it.
+- **Between agents.** An agent hands work to an agent it owns with `create_task`, which records both agents and the person it acts for.
+  - **Who hears the news:** the agent that created the task; for a task a person created, the assignee's owner, or the assignee itself. Kelpie tells it, in the owner's latest conversation with it, when the task is done, cancelled by its agent, waiting for an answer, or failed twice. A `dependency` wait reaches no one.
+  - **How it answers:** with `comment_task`. A comment on a waiting task, by a person or an agent, puts it back in To do.
 
 ## Pairing
 

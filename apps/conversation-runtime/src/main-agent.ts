@@ -123,7 +123,9 @@ export function mainAgentTools(
   };
 
   return {
-    async tools(agentId) {
+    // A task's conversation has no owner to confirm anything (#335).
+    async tools(agentId, place) {
+      if (place?.channel === "task") return [];
       return (await roleOf(agentId)) === "main" ? [tool] : [];
     },
   };

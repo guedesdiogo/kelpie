@@ -46,6 +46,11 @@ export const setupWaits = sqliteTable(
  */
 export const conversations = sqliteTable("conversations", {
   name: text("name").primaryKey(),
+  /**
+   * When it last started a turn (#335): the owner's latest conversation with the agent is where
+   * Kelpie tells the agent a task's news. Null for one not seen since that release.
+   */
+  lastTurnAt: integer("last_turn_at"),
 });
 
 /**

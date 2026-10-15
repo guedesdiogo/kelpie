@@ -151,7 +151,7 @@ export interface AgentHostContract {
   createTask(input: NewTask, actor: Actor): Promise<TaskResult<TaskView>>;
   editTask(id: string, changes: TaskEdit, actor: Actor): Promise<TaskResult<TaskView>>;
   moveTask(id: string, status: "backlog" | "todo", actor: Actor): Promise<TaskResult<TaskView>>;
-  commentTask(id: string, text: string, actor: Actor): TaskResult<TaskView>;
+  commentTask(id: string, text: string, actor: Actor): Promise<TaskResult<TaskView>>;
   requestStop(id: string, actor: Actor): Promise<TaskResult<TaskView>>;
   listTasks(status?: TaskStatus): TaskSummary[];
   getTask(id: string): TaskResult<TaskDetail>;
