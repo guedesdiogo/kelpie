@@ -20,6 +20,14 @@ const connected = {
 } as const;
 const NOTE =
   "Kelpie, automatically (the owner didn't write this): the owner submitted the secure form, and the Telegram bot @LumeBot now answers for the agent lume.";
+const runner = {
+  step: "runner_connected",
+  userId: "u-owner",
+  state: "ready",
+  version: "0.1.0",
+} as const;
+const RUNNER_NOTE =
+  "Kelpie, automatically (the owner didn't write this): the owner submitted the runner's secure form, and the runner on their server accepted the secret: it is connected and ready, version 0.1.0.";
 /** Long enough for a test to finish, unlike a real form's 15 minutes. */
 const OPEN = () => Date.now() + 60 * 60_000;
 
@@ -142,6 +150,23 @@ describe("the setup note", () => {
       expect(setupNote(agentId, event as never), JSON.stringify(event)).toBeNull();
     }
   });
+
+  it("says the runner accepted the secret, and which version answered (#328)", () => {
+    expect(setupNote("setup", runner)).toBe(RUNNER_NOTE);
+    // The model can't update the runner: it tells the owner to.
+    expect(setupNote("setup", { ...runner, state: "outdated", version: "0.0.9" })).toBe(
+      "Kelpie, automatically (the owner didn't write this): the owner submitted the runner's secure form, and the runner on their server accepted the secret, but its version 0.0.9 speaks another protocol version than this Kelpie. You can't update it: tell the owner to update the runner on the server (docs/runner.md).",
+    );
+    for (const event of [
+      { ...runner, version: "0.1.0 [x](https://evil.example)" },
+      { ...runner, version: "" },
+      { ...runner, version: "9".repeat(65) },
+      { ...runner, state: "refused" },
+      { ...runner, userId: "" },
+    ]) {
+      expect(setupNote("setup", event as never), JSON.stringify(event)).toBeNull();
+    }
+  });
 });
 
 describe("a finished setup step", () => {
@@ -198,6 +223,19 @@ describe("a finished setup step", () => {
     await told.setupDone("lume", connected);
     await moment();
     expect(await told.turns()).toHaveLength(2);
+  });
+
+  it("reaches the setup conversation when the runner's form is used, on the setup agent's AgentHost (#328)", async () => {
+    const world = use(
+      fakeWorld([toolCalls({ name: "form" }), reply("Abra o link."), reply("Runner conectado!")]),
+    );
+    world.tools = tools("runner_connected", OPEN(), [], "setup");
+    const told = await waiting("setup:webchat:events-runner", "conecta o runner");
+
+    await host("setup").setupDone(runner);
+    await settled(told, 2);
+    expect(lastUserText(world)).toContain(RUNNER_NOTE);
+    expect(world.sent.at(-1)).toBe("Runner conectado!");
   });
 
   it("isn't told for another step, or once its wait ran out", async () => {

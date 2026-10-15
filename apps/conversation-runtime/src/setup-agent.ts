@@ -1,4 +1,4 @@
-import type { Locale, Localized, RunnerState } from "@kelpie/channels";
+import { type Locale, type Localized, RUNNER_VERSION, type RunnerState } from "@kelpie/channels";
 import {
   type AgentEntry,
   type AgentSettings,
@@ -42,7 +42,7 @@ How you work:
 - When the owner finishes on one of those pages, Kelpie tells you in this conversation, in a note that starts "Kelpie, automatically". Don't ask them to tell you when they're done: when the note comes, go on with the next step.
 - Never ask for a secret in the chat, such as a bot token, the runner's secret or an API key. A bot token goes only into the secure form connect_telegram has Kelpie send, and the runner's secret only into connect_runner's. If the owner pastes a secret in the chat anyway, tell them to revoke it and make a new one: for the runner, a new secret in its file on the server (docs/runner.md).
 - To make a Telegram bot, the owner sends /newbot to BotFather on Telegram, which answers with the bot's token. Have them do that first, and only then call connect_telegram: its form works once and only for a few minutes. Tell them to submit the form once and wait for its page; a page that says the link was already used means the bot is connected.
-- The owner's VPS runner is the computer Kelpie's agents use. To connect it, call connect_runner: Kelpie sends a secure form where the owner pastes the runner's secret from their server, never in the chat. Kelpie isn't told when the form is done, so call runner_status once the owner says they submitted it.
+- The owner's VPS runner is the computer Kelpie's agents use. To connect it, call connect_runner: Kelpie sends a secure form where the owner pastes the runner's secret from their server, never in the chat. When the runner accepts it, Kelpie tells you here, so don't ask the owner to say they submitted it. Call runner_status when they ask how the runner is.
 - Some steps are outside what you can do: deploying Kelpie's Workers, their bindings and secrets, Cloudflare Access, and the model keys. For those, point the owner to the setup checklist in docs/admin-api.md.`;
 
 /** The commands the setup agent's tools run; the identity and vault commands stay off them. */
@@ -309,6 +309,17 @@ export function setupNote(agentId: string, event: SetupEvent): string | null {
   const kelpie = "Kelpie, automatically (the owner didn't write this):";
   if (event.step === "telegram_paired") {
     return `${kelpie} the owner's pairing link was used: a Telegram account is now paired, as the owner's, with the bot of the agent ${agentId}.`;
+  }
+  if (event.step === "runner_connected") {
+    if (!RUNNER_VERSION.test(String(event.version))) return null;
+    const accepted = `${kelpie} the owner submitted the runner's secure form, and the runner on their server accepted the secret`;
+    if (event.state === "ready") {
+      return `${accepted}: it is connected and ready, version ${event.version}.`;
+    }
+    if (event.state === "outdated") {
+      return `${accepted}, but its version ${event.version} speaks another protocol version than this Kelpie. You can't update it: tell the owner to update the runner on the server (docs/runner.md).`;
+    }
+    return null;
   }
   if (event.step !== "telegram_connected" || !BOT_USERNAME.test(String(event.bot))) return null;
   return event.webhookRegistered === true
@@ -872,9 +883,19 @@ export function setupTools(
         }
         const href = pageLink(adminOrigin, result.value.path, context.locale);
         const minutes = Math.max(Math.round((result.value.expiresAt - now()) / 60_000), 1);
-        context.sendLink({ href, text: TEXTS[context.locale].runnerForm(href, minutes) });
+        // The runner is the instance's, and only the setup agent connects it: its AgentHost keeps
+        // the wait, and the admin API reports the form to it (#328).
+        context.sendLink({
+          href,
+          text: TEXTS[context.locale].runnerForm(href, minutes),
+          awaits: {
+            agentId: SETUP_AGENT_ID,
+            step: "runner_connected",
+            until: result.value.expiresAt,
+          },
+        });
         return {
-          output: `Kelpie sends the owner the link in a message of its own, right after your reply: don't write a link yourself. The form works once, for the next ${minutes} minutes. The owner pastes the runner's secret there, never in the chat, and the form checks it with the runner before saving it. Kelpie isn't told when they finish: once they say they submitted it, call runner_status.`,
+          output: `${LINK_SENT}\nThe form works once, for the next ${minutes} minutes. The owner pastes the runner's secret there, never in the chat, and the form checks it with the runner before saving it.`,
         };
       },
     },
