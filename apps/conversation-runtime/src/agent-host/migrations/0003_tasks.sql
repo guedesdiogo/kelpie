@@ -25,6 +25,7 @@ CREATE INDEX `task_events_task` ON `task_events` (`task_id`);--> statement-break
 CREATE TABLE `task_runs` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`task_id` text NOT NULL,
+	`token` text NOT NULL,
 	`attempt` integer NOT NULL,
 	`started_at` integer NOT NULL,
 	`ended_at` integer,

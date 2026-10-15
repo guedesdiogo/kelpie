@@ -58,7 +58,8 @@ export function replaceContextStoreForTesting(store: ContextStoreContract | unde
  * `finishTask`; `start` returns once it began. #335 brings the task conversation that runs tasks.
  */
 export interface TaskRunner {
-  start(agentId: string, task: TaskView, run: number): Promise<void>;
+  /** `run` is the run's random token, which its reports must carry. */
+  start(agentId: string, task: TaskView, run: string): Promise<void>;
 }
 
 let taskRunnerForTesting: TaskRunner | null = null;
@@ -71,8 +72,10 @@ export function replaceTaskRunnerForTesting(runner: TaskRunner | null): void {
   taskRunnerForTesting = runner;
 }
 
-/** While a task runs, the board wakes at least this often: ADR-0011's heartbeat backstop. */
-const TASK_BACKSTOP_MS = 15 * 60_000;
+/** A task whose run didn't start is tried again at a wake this much later. */
+const START_RETRY_MS = 60_000;
+/** Runs that fail to start before a pass of pickup stops trying, until the next wake. */
+const MAX_START_FAILURES_PER_PASS = 3;
 
 /** A vault the Context Store can't read in time is replaced by the last one it compiled. */
 const COMPILE_TIMEOUT_MS = 3_000;
@@ -345,18 +348,14 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   async createTask(input: NewTask, actor: Actor): Promise<TaskResult<TaskView>> {
     const now = Date.now();
     const task = parseNewTask(input, now);
-    if (!task || !isActor(actor)) return invalidTask;
-    const created = this.#tasks.create(task, actor, crypto.randomUUID(), now);
-    await this.#tasksChanged();
-    return created;
+    if (!task || !isOwnerActor(actor)) return invalidTask;
+    return this.#afterPickup(this.#tasks.create(task, actor, crypto.randomUUID(), now));
   }
 
   async editTask(id: string, changes: TaskEdit, actor: Actor): Promise<TaskResult<TaskView>> {
     const edit = parseTaskEdit(changes, Date.now());
-    if (!isTaskId(id) || !edit || !isActor(actor)) return invalidTask;
-    const edited = this.#tasks.edit(id, edit, actor, Date.now());
-    await this.#tasksChanged();
-    return edited;
+    if (!isTaskId(id) || !edit || !isOwnerActor(actor)) return invalidTask;
+    return this.#afterPickup(this.#tasks.edit(id, edit, actor, Date.now()));
   }
 
   async moveTask(
@@ -364,25 +363,21 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     status: "backlog" | "todo",
     actor: Actor,
   ): Promise<TaskResult<TaskView>> {
-    if (!isTaskId(id) || (status !== "backlog" && status !== "todo") || !isActor(actor)) {
+    if (!isTaskId(id) || (status !== "backlog" && status !== "todo") || !isOwnerActor(actor)) {
       return invalidTask;
     }
-    const moved = this.#tasks.move(id, status, actor, Date.now());
-    await this.#tasksChanged();
-    return moved;
+    return this.#afterPickup(this.#tasks.move(id, status, actor, Date.now()));
   }
 
   commentTask(id: string, text: string, actor: Actor): TaskResult<TaskView> {
     const comment = parseCommentText(text);
-    if (!isTaskId(id) || comment === null || !isActor(actor)) return invalidTask;
+    if (!isTaskId(id) || comment === null || !isOwnerActor(actor)) return invalidTask;
     return this.#tasks.comment(id, comment, actor, Date.now());
   }
 
   async requestStop(id: string, actor: Actor): Promise<TaskResult<TaskView>> {
-    if (!isTaskId(id) || !isActor(actor)) return invalidTask;
-    const stopped = this.#tasks.requestStop(id, actor, Date.now());
-    await this.#tasksChanged();
-    return stopped;
+    if (!isTaskId(id) || !isOwnerActor(actor)) return invalidTask;
+    return this.#afterPickup(this.#tasks.requestStop(id, actor, Date.now()));
   }
 
   listTasks(status?: TaskStatus): TaskSummary[] {
@@ -393,20 +388,22 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     return isTaskId(id) ? this.#tasks.get(id) : invalidTask;
   }
 
-  /** A run's heartbeat (#335 calls it): extends its lease, and says whether to stop. */
-  heartbeatTask(id: string, run: number) {
-    if (!isTaskId(id) || !Number.isInteger(run))
+  /**
+   * A run's heartbeat (#335 calls it): extends its lease, and says whether to stop. `run` is the
+   * token its claim gave it.
+   */
+  heartbeatTask(id: string, run: string) {
+    if (!isTaskId(id) || !isTaskId(run)) {
       return { ok: false as const, reason: "not_running" as const };
+    }
     return this.#tasks.heartbeat(id, run, Date.now());
   }
 
-  /** A run's end (#335 calls it). Done needs a result. */
-  async finishTask(id: string, run: number, outcome: RunOutcome): Promise<TaskResult<TaskView>> {
+  /** A run's end (#335 calls it), by the token its claim gave it. Done needs a result. */
+  async finishTask(id: string, run: string, outcome: RunOutcome): Promise<TaskResult<TaskView>> {
     const parsed = parseRunOutcome(outcome);
-    if (!isTaskId(id) || !Number.isInteger(run) || !parsed) return invalidTask;
-    const finished = this.#tasks.finish(id, run, parsed, Date.now());
-    await this.#tasksChanged();
-    return finished;
+    if (!isTaskId(id) || !isTaskId(run) || !parsed) return invalidTask;
+    return this.#afterPickup(this.#tasks.finish(id, run, parsed, Date.now()));
   }
 
   /** The board's wake, as the SDK schedules it: sweeps leases, picks up tasks, sets the next one. */
@@ -414,41 +411,55 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     await this.#tasksChanged();
   }
 
+  /** Runs pickup after a change, then answers with the task as it is now: perhaps claimed. */
+  async #afterPickup(result: TaskResult<TaskView>): Promise<TaskResult<TaskView>> {
+    if (!result.ok) return result;
+    await this.#tasksChanged();
+    return this.#tasks.view(result.value.id);
+  }
+
   /**
    * Sweeps the leases that ran out, claims eligible tasks while slots are free, and sets the next
    * wake. Each claim checks the slots again, so concurrent calls never run more than the limit.
-   * Without a runner nothing is claimed, and no model is ever called for an empty board.
+   * A task whose run didn't start waits for the next wake, a minute later, and a pass gives up
+   * after a few such failures. Without a runner nothing is claimed, and no model is ever called
+   * for an empty board. It is best effort: the change that called it is already saved.
    */
   async #tasksChanged(): Promise<void> {
-    const agentId = this.ctx.id.name ?? "";
-    const runner = taskRunnerForTesting;
-    this.#tasks.sweep(Date.now());
-    while (runner) {
-      const claimed = this.#tasks.claimNext(this.config().settings.maxConcurrentTasks, Date.now());
-      if (!claimed) break;
-      try {
-        await runner.start(agentId, claimed.task, claimed.run);
-      } catch (error) {
-        console.error("AgentHost: a task's run didn't start", errorName(error));
-        this.#tasks.finish(
-          claimed.task.id,
-          claimed.run,
-          { status: "failed" },
-          Date.now(),
-          "start_failed",
-        );
+    try {
+      const agentId = this.ctx.id.name ?? "";
+      const runner = taskRunnerForTesting;
+      this.#tasks.sweep(Date.now());
+      const failed = new Set<string>();
+      while (runner && failed.size < MAX_START_FAILURES_PER_PASS) {
+        const max = this.config().settings.maxConcurrentTasks;
+        const claimed = this.#tasks.claimNext(max, Date.now(), failed);
+        if (!claimed) break;
+        try {
+          await runner.start(agentId, claimed.task, claimed.run);
+        } catch (error) {
+          console.error("AgentHost: a task's run didn't start", errorName(error));
+          failed.add(claimed.task.id);
+          this.#tasks.finish(
+            claimed.task.id,
+            claimed.run,
+            { status: "failed" },
+            Date.now(),
+            "start_failed",
+          );
+        }
       }
+      await this.#scheduleTaskWake(runner !== null, failed.size > 0);
+    } catch (error) {
+      console.error("AgentHost: the task board's pickup failed", errorName(error));
     }
-    await this.#scheduleTaskWake(runner !== null);
   }
 
   /** One SDK schedule for the board's next wake, moved when that time changes. */
-  async #scheduleTaskWake(canRun: boolean): Promise<void> {
+  async #scheduleTaskWake(canRun: boolean, retry: boolean): Promise<void> {
     const now = Date.now();
     let due = this.#tasks.nextWake(now, canRun);
-    if (canRun && this.#tasks.list("in_progress").length > 0) {
-      due = Math.min(due ?? Number.POSITIVE_INFINITY, now + TASK_BACKSTOP_MS);
-    }
+    if (retry) due = Math.min(due ?? Number.POSITIVE_INFINITY, now + START_RETRY_MS);
     // The SDK keeps schedule times in whole seconds: the next one, so a wake is never early.
     const next = due === null ? null : Math.ceil(due / 1_000) * 1_000;
     const wake = this.#get<{ id: string; at: number } | null>("taskWake", null);
@@ -675,14 +686,17 @@ const MAX_CONVERSATION_NAME = 256;
 
 const invalidTask = { ok: false, reason: "invalid_input" } as const;
 
-/** An actor as the commands build it: a user id, a role and a channel, never empty. */
-function isActor(actor: unknown): actor is Actor {
+/**
+ * The owner, as the commands build the actor: a user id and a channel, never empty. Only the owner
+ * changes tasks while Kelpie is single-player (ADR-0015).
+ */
+function isOwnerActor(actor: unknown): actor is Actor {
   const { userId, role, via } = (actor ?? {}) as Partial<Actor>;
   return (
     typeof userId === "string" &&
     userId !== "" &&
     userId.length <= 128 &&
-    typeof role === "string" &&
+    role === "owner" &&
     typeof via === "string" &&
     via !== "" &&
     via.length <= 128

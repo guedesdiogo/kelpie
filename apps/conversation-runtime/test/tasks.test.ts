@@ -7,7 +7,7 @@ import {
   replaceTaskRunnerForTesting,
   type TaskRunner,
 } from "../src/agent-host/agent-host.ts";
-import { LEASE_MS, MAX_RUN_MS } from "../src/agent-host/tasks.ts";
+import { LEASE_MS, MAX_RUN_MS, STOP_GRACE_MS } from "../src/agent-host/tasks.ts";
 
 // The task board (ADR-0011, #54): the rules people follow, pickup within the agent's limit, scheduled
 // starts, leases and the run protocol #335's task conversation will use.
@@ -17,7 +17,7 @@ const owner = { userId: "u-owner", role: "owner", via: "admin-api" } as const;
 
 /** A runner that records each start, as #335's task conversation would begin a run. */
 function fakeRunner(fail = false) {
-  const started: { agentId: string; task: string; run: number }[] = [];
+  const started: { agentId: string; task: string; run: string }[] = [];
   const runner: TaskRunner = {
     async start(agentId, task, run) {
       if (fail) throw new Error("no runner today");
@@ -47,19 +47,37 @@ const expireLease = (stub: ReturnType<typeof host>, task: TaskView) =>
     );
   });
 
-/** The run a task holds now, from its detail. */
-async function runOf(stub: ReturnType<typeof host>, task: TaskView): Promise<number> {
+/** The token of the run a task holds now. */
+async function runOf(stub: ReturnType<typeof host>, task: TaskView): Promise<string> {
   return runInDurableObject(stub, (_instance, state) => {
     const [row] = state.storage.sql
-      .exec<{ id: number }>(
-        "SELECT id FROM task_runs WHERE task_id = ? AND ended_at IS NULL ORDER BY id DESC LIMIT 1",
+      .exec<{ token: string }>(
+        "SELECT token FROM task_runs WHERE task_id = ? AND ended_at IS NULL ORDER BY id DESC LIMIT 1",
         task.id,
       )
       .toArray();
     if (!row) throw new Error("no open run");
-    return row.id;
+    return row.token;
   });
 }
+
+/** A token no run holds. */
+const STALE = "00000000-0000-4000-8000-000000000001";
+
+/** Runs a read on an object again once its destroyed instance is gone. */
+async function afterDestroy<T>(read: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await read();
+    } catch (error) {
+      if (attempt >= 20 || !String(error).includes("destroyed")) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+}
+
+const sleepUntil = (at: number) =>
+  new Promise((resolve) => setTimeout(resolve, Math.max(at - Date.now(), 0) + 50));
 
 const wakes = (stub: ReturnType<typeof host>) =>
   runInDurableObject(stub, (instance: AgentHost) =>
@@ -209,6 +227,8 @@ describe("pickup, the limit and scheduled starts (#54)", () => {
     const stub = host("board-waiting");
     await stub.configure({ maxConcurrentTasks: 1 }, owner);
     const asking = await create(stub, "asking", { status: "todo" });
+    // The answer is the task as it is after pickup: already running.
+    expect(asking).toMatchObject({ status: "in_progress", attempt: 1 });
     await create(stub, "next", { status: "todo" });
     expect(started.map((run) => run.task)).toEqual(["asking"]);
 
@@ -243,13 +263,22 @@ describe("leases, runs and stops (#54)", () => {
   it("sweeps a lease that ran out on the next wake; the second failure in a row waits", async () => {
     const started = fakeRunner();
     const stub = host("board-lease");
+    const before = Date.now();
     const task = await create(stub, "flaky", { status: "todo" });
-    // A wake waits for the lease to run out.
+    // A wake waits for the lease to run out, and no longer.
     const [wake] = await wakes(stub);
-    expect(wake).toBeGreaterThanOrEqual(Date.now() + LEASE_MS - 60_000);
+    expect(wake).toBeGreaterThanOrEqual(before + LEASE_MS);
+    expect(wake).toBeLessThanOrEqual(Date.now() + LEASE_MS + 1_000);
 
-    await expireLease(stub, task);
+    // The run goes silent: its lease ends in a moment, and the alarm sweeps it.
+    const soon = Date.now() + 1_200;
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec("UPDATE tasks SET lease_until = ? WHERE id = ?", soon, task.id);
+    });
     await stub.wakeTasks();
+    expect(await wakes(stub)).toEqual([Math.ceil(soon / 1_000) * 1_000]);
+    await sleepUntil(Math.ceil(soon / 1_000) * 1_000);
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
     // The expired attempt goes back to To do and is claimed again at once.
     expect(started.map((run) => run.run)).toHaveLength(2);
     await expireLease(stub, task);
@@ -283,7 +312,10 @@ describe("leases, runs and stops (#54)", () => {
     expect(await stub.requestStop(task.id, owner)).toMatchObject({
       value: { status: "in_progress", stopRequested: true },
     });
-    expect(await stub.heartbeatTask(task.id, run)).toMatchObject({ ok: true, stop: true });
+    // The run has STOP_GRACE_MS left, whatever its heartbeat says.
+    const beat = await stub.heartbeatTask(task.id, run);
+    expect(beat).toMatchObject({ ok: true, stop: true });
+    expect(beat.ok && beat.leaseUntil).toBeLessThanOrEqual(Date.now() + STOP_GRACE_MS);
 
     // The run stops as asked; any end but Done is Cancelled.
     expect(await stub.finishTask(task.id, run, { status: "failed" })).toMatchObject({
@@ -298,8 +330,64 @@ describe("leases, runs and stops (#54)", () => {
       reason: "dependency",
     });
     expect(await stub.requestStop(waiting.id, owner)).toMatchObject({
-      value: { status: "cancelled" },
+      value: { status: "cancelled", waitingReason: null },
     });
+
+    // A run that finishes before it stops keeps its Done.
+    const quick = await create(stub, "quick", { status: "todo" });
+    const quickRun = await runOf(stub, quick);
+    await stub.requestStop(quick.id, owner);
+    expect(
+      await stub.finishTask(quick.id, quickRun, { status: "done", result: "Already sent." }),
+    ).toMatchObject({ value: { status: "done", result: "Already sent." } });
+  });
+
+  it("ends the lease of a run that ignores the stop, within STOP_GRACE_MS", async () => {
+    fakeRunner();
+    const stub = host("board-stop-ignored");
+    const task = await create(stub, "stubborn", { status: "todo" });
+    const run = await runOf(stub, task);
+    await stub.requestStop(task.id, owner);
+    // The owner asked longer ago than the grace: no heartbeat keeps the lease.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE tasks SET stop_requested_at = ?, lease_until = ? WHERE id = ?",
+        Date.now() - STOP_GRACE_MS - 1_000,
+        Date.now() - 1,
+        task.id,
+      );
+    });
+    expect(await stub.heartbeatTask(task.id, run)).toEqual({ ok: false, reason: "not_running" });
+    await stub.wakeTasks();
+    expect(await stub.getTask(task.id)).toMatchObject({ value: { status: "cancelled" } });
+    expect(await stub.finishTask(task.id, run, { status: "done", result: "Late." })).toEqual({
+      ok: false,
+      reason: "not_allowed",
+    });
+  });
+
+  it("refuses people's changes to a task in Waiting, Done or Cancelled, but takes comments", async () => {
+    fakeRunner();
+    const stub = host("board-ended");
+    const ended: TaskView[] = [];
+    for (const [title, outcome] of [
+      ["waits", { status: "waiting", reason: "needs_input" }],
+      ["done", { status: "done", result: "Done." }],
+      ["cancelled", { status: "cancelled" }],
+    ] as const) {
+      const task = await create(stub, title, { status: "todo" });
+      await stub.finishTask(task.id, await runOf(stub, task), outcome);
+      ended.push(task);
+    }
+    const refused = { ok: false, reason: "not_allowed" };
+    for (const task of ended) {
+      expect(await stub.editTask(task.id, { title: "again" }, owner)).toEqual(refused);
+      expect(await stub.moveTask(task.id, "todo", owner)).toEqual(refused);
+      expect(await stub.commentTask(task.id, "Noted.", owner)).toMatchObject({ ok: true });
+    }
+    for (const task of ended.slice(1)) {
+      expect(await stub.requestStop(task.id, owner)).toEqual(refused);
+    }
   });
 
   it("cancels a stopped task whose run went silent, at its lease's end", async () => {
@@ -322,11 +410,15 @@ describe("leases, runs and stops (#54)", () => {
       ok: false,
       reason: "invalid_input",
     });
-    expect(await stub.finishTask(task.id, run + 1, { status: "done", result: "x" })).toEqual({
+    expect(await stub.finishTask(task.id, STALE, { status: "done", result: "x" })).toEqual({
       ok: false,
       reason: "not_allowed",
     });
-    expect(await stub.heartbeatTask(task.id, run + 1)).toEqual({
+    expect(await stub.heartbeatTask(task.id, STALE)).toEqual({
+      ok: false,
+      reason: "not_running",
+    });
+    expect(await stub.heartbeatTask(task.id, 7 as never)).toEqual({
       ok: false,
       reason: "not_running",
     });
@@ -335,16 +427,17 @@ describe("leases, runs and stops (#54)", () => {
     if (!beat.ok) throw new Error("no lease");
     expect(beat.leaseUntil).toBeGreaterThan(Date.now() + LEASE_MS - 5_000);
     // A lease never outlasts MAX_RUN_MS from the run's start.
-    await runInDurableObject(stub, (_instance, state) => {
-      state.storage.sql.exec(
-        "UPDATE task_runs SET started_at = ? WHERE id = ?",
-        Date.now() - MAX_RUN_MS + 1_000,
-        run,
-      );
-    });
+    const startedAt = (at: number) =>
+      runInDurableObject(stub, (_instance, state) => {
+        state.storage.sql.exec("UPDATE task_runs SET started_at = ? WHERE token = ?", at, run);
+      });
+    await startedAt(Date.now() - MAX_RUN_MS + 1_000);
     const late = await stub.heartbeatTask(task.id, run);
     if (!late.ok) throw new Error("no lease");
     expect(late.leaseUntil).toBeLessThanOrEqual(Date.now() + 1_000);
+    // Past the ceiling, the heartbeat no longer holds the task.
+    await startedAt(Date.now() - MAX_RUN_MS - 1_000);
+    expect(await stub.heartbeatTask(task.id, run)).toEqual({ ok: false, reason: "not_running" });
 
     expect(await stub.finishTask(task.id, run, { status: "done", result: "Sent." })).toMatchObject({
       value: { status: "done", result: "Sent." },
@@ -355,15 +448,45 @@ describe("leases, runs and stops (#54)", () => {
     });
   });
 
-  it("counts a run that couldn't start as a failed attempt", async () => {
+  it("counts a run that couldn't start as a failed attempt, tried again a minute later", async () => {
     fakeRunner(true);
     const stub = host("board-start-fails");
+    const before = Date.now();
     const task = await create(stub, "unlucky", { status: "todo" });
+    expect(task).toMatchObject({ status: "todo", attempt: 1 });
+    // Not again in the same pass: the next wake, a minute on, tries it.
+    const [wake] = await wakes(stub);
+    expect(wake).toBeGreaterThanOrEqual(before + 60_000);
+    expect(wake).toBeLessThanOrEqual(Date.now() + 61_000);
+
+    await stub.wakeTasks();
     const detail = await stub.getTask(task.id);
     if (!detail.ok) throw new Error("no detail");
     // Two failures in a row: the task waits for the owner instead of looping.
     expect(detail.value).toMatchObject({ status: "waiting", waitingReason: "failed", attempt: 2 });
     expect(detail.value.runs.map((run) => run.outcome)).toEqual(["failed", "failed"]);
     expect(detail.value.events.map((event) => event.kind)).toContain("start_failed");
+  });
+
+  it("stops a pass after three runs that couldn't start", async () => {
+    const stub = host("board-start-storm");
+    for (const title of ["a", "b", "c", "d", "e"]) await create(stub, title, { status: "todo" });
+    let attempts = 0;
+    replaceTaskRunnerForTesting({
+      async start() {
+        attempts += 1;
+        throw new Error("down");
+      },
+    });
+    await stub.configure({ maxConcurrentTasks: 10 }, owner);
+    await stub.wakeTasks();
+    expect(attempts).toBe(3);
+  });
+
+  it("goes with its agent: deleting the agent erases its tasks (#303)", async () => {
+    const stub = host("board-erased");
+    await create(stub, "private", { body: "Personal data." });
+    expect(await stub.erase([])).toMatchObject({ ok: true });
+    expect(await afterDestroy(() => host("board-erased").listTasks())).toEqual([]);
   });
 });

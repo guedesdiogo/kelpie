@@ -117,6 +117,8 @@ export const taskRuns = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     taskId: text("task_id").notNull(),
+    /** Random: only the run that got it can report on the task (#54). */
+    token: text("token").notNull(),
     attempt: integer("attempt").notNull(),
     startedAt: integer("started_at").notNull(),
     endedAt: integer("ended_at"),

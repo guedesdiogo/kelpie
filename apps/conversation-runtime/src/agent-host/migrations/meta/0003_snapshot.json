@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "50d271fb-85b5-4935-93e7-20f6bebd413c",
+  "id": "727e6636-4938-4bac-921f-d1875113a046",
   "prevId": "ad3af8af-17af-4a4f-8e62-eeba3b0ed1a5",
   "tables": {
     "audit_log": {
@@ -296,6 +296,13 @@
         },
         "task_id": {
           "name": "task_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "token": {
+          "name": "token",
           "type": "text",
           "primaryKey": false,
           "notNull": true,

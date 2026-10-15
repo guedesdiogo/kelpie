@@ -39,7 +39,7 @@ Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`
 | `/commands/editTask` | `{ "agentId": "sales", "taskId": "…", "title": "…" }`, with any of `title`, `body` and `scheduledStartAt`, `null` clearing the start; only in Backlog or To do |
 | `/commands/moveTask` | `{ "agentId": "sales", "taskId": "…", "status": "todo" }`; between `backlog` and `todo` only |
 | `/commands/commentTask` | `{ "agentId": "sales", "taskId": "…", "text": "…" }`, at any status |
-| `/commands/requestStop` | `{ "agentId": "sales", "taskId": "…" }`; asks the agent to stop a running task, which then ends in Cancelled. A waiting one is cancelled at once |
+| `/commands/requestStop` | `{ "agentId": "sales", "taskId": "…" }`; asks the agent to stop a running task, which ends in Cancelled within 2 minutes unless its run finishes it first. A waiting one is cancelled at once |
 | `/commands/listTasks` | `{ "agentId": "sales" }`, or with `"status": "todo"`; the 200 most recently changed |
 | `/commands/getTask` | `{ "agentId": "sales", "taskId": "…" }`; the task with its comments, history and runs. An unknown task answers `404 unknown_task`, and a change the rules don't allow `409 not_allowed` |
 | `/commands/listIdentities` | none |
@@ -143,10 +143,11 @@ Each agent has a task board in its `AgentHost` (ADR-0011, #54). The `AgentHost` 
 
   From In progress on, only the agent moves a task.
 - **Pickup.** A task in To do is eligible at once, or at its scheduled start. The `AgentHost` claims eligible tasks in order of their scheduled start, or creation, while fewer than the agent's `maxConcurrentTasks` run. That setting is 3 by default and at most 10; the setup agent asks the owner before changing it, as for any setting. A task in Waiting holds no slot.
-- **Leases.** A claim leases the task for 15 minutes and opens a run. The run's heartbeat extends the lease, but never past 2 hours from the run's start.
+- **Leases.** A claim leases the task for 15 minutes and opens a run, with a random token its reports must carry. The run's heartbeat extends the lease, but never past 2 hours from the run's start.
   - A lease that runs out is swept on the next wake, and the attempt counts as failed.
-  - Two failed attempts in a row put the task in Waiting, with the reason `failed`.
-  - A stopped task whose run goes silent ends in Cancelled.
+  - Two failed attempts in a row put the task in Waiting, with the reason `failed`. For now that shows only on the task; telling its creator comes with #335.
+  - A run that couldn't start counts as a failed attempt, and is tried again at a wake a minute later. A pass of pickup stops after three such runs.
+  - After the owner's stop, the run's lease lasts at most 2 more minutes, whatever its heartbeat: then the task ends in Cancelled, unless the run finished it first.
 - **Done needs a result.** Every change goes into the task's history, with who made it and through what.
 - **Not yet running.** Until #335 brings the task conversation that runs tasks, nothing claims them: a task in To do stays there.
 

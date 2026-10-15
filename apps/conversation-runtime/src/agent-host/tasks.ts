@@ -10,7 +10,7 @@ import type {
   TaskSummary,
   TaskView,
 } from "@kelpie/config";
-import { and, asc, count, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, lte, notInArray, or, sql } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import * as schema from "./schema.ts";
 
@@ -22,7 +22,9 @@ import * as schema from "./schema.ts";
 export const LEASE_MS = 15 * 60_000;
 /** The longest a run may hold its task: past it, its lease runs out whatever its heartbeat. */
 export const MAX_RUN_MS = 2 * 60 * 60_000;
-/** Failed runs in a row that put a task in Waiting, and tell its creator. */
+/** After the owner's stop, the run's lease lasts at most this long, whatever its heartbeat. */
+export const STOP_GRACE_MS = 2 * 60_000;
+/** Failed runs in a row that put a task in Waiting. */
 export const MAX_FAILURES = 2;
 /** Tasks not yet Done or Cancelled an agent holds; a full board refuses new ones. */
 export const MAX_OPEN_TASKS = 500;
@@ -129,7 +131,8 @@ export class TaskBoard {
 
   /**
    * The owner asks the agent to stop (ADR-0011). A waiting task has no run, so it ends in
-   * Cancelled at once; a running one ends there when its run does, or when its lease runs out.
+   * Cancelled at once. A running one ends there when its run does, unless the run finishes it
+   * first, and at the latest when its lease runs out, STOP_GRACE_MS after the request.
    */
   requestStop(id: string, actor: Actor, now: number): TaskResult<TaskView> {
     const task = this.#row(id);
@@ -137,15 +140,24 @@ export class TaskBoard {
     if (task.status === "waiting") {
       this.#set(
         id,
-        { status: "cancelled", stopRequestedAt: now },
+        { status: "cancelled", stopRequestedAt: now, waitingReason: null },
         now,
         person(actor),
         "stopped",
         "waiting",
       );
     } else if (task.status === "in_progress") {
+      // The run gets STOP_GRACE_MS to end; then its lease runs out and the sweep cancels it.
       if (task.stopRequestedAt === null) {
-        this.#set(id, { stopRequestedAt: now }, now, person(actor), "stop_requested", null);
+        const leaseUntil = Math.min(task.leaseUntil ?? now, now + STOP_GRACE_MS);
+        this.#set(
+          id,
+          { stopRequestedAt: now, leaseUntil },
+          now,
+          person(actor),
+          "stop_requested",
+          null,
+        );
       }
     } else {
       return notAllowed;
@@ -155,7 +167,16 @@ export class TaskBoard {
 
   list(status?: TaskStatus): TaskSummary[] {
     return this.#db
-      .select()
+      .select({
+        id: schema.tasks.id,
+        title: schema.tasks.title,
+        status: schema.tasks.status,
+        scheduledStartAt: schema.tasks.scheduledStartAt,
+        createdAt: schema.tasks.createdAt,
+        updatedAt: schema.tasks.updatedAt,
+        creatorKind: schema.tasks.creatorKind,
+        creatorId: schema.tasks.creatorId,
+      })
       .from(schema.tasks)
       .where(status ? eq(schema.tasks.status, status) : undefined)
       .orderBy(desc(schema.tasks.updatedAt), desc(schema.tasks.createdAt))
@@ -216,9 +237,14 @@ export class TaskBoard {
 
   /**
    * Claims the next eligible task while fewer than `max` run, in order: the earliest scheduled
-   * start, or creation, first. A task in Waiting holds no slot (#54).
+   * start, or creation, first, leaving out `skip`. A task in Waiting holds no slot (#54). The run's
+   * token is random, so only the run that got it can report on the task.
    */
-  claimNext(max: number, now: number): { task: TaskView; run: number } | null {
+  claimNext(
+    max: number,
+    now: number,
+    skip: ReadonlySet<string> = new Set(),
+  ): { task: TaskView; run: string } | null {
     return this.#db.transaction((tx) => {
       const running = tx
         .select({ n: count() })
@@ -233,6 +259,7 @@ export class TaskBoard {
           and(
             eq(schema.tasks.status, "todo"),
             or(isNull(schema.tasks.scheduledStartAt), lte(schema.tasks.scheduledStartAt, now)),
+            skip.size > 0 ? notInArray(schema.tasks.id, [...skip]) : undefined,
           ),
         )
         .orderBy(
@@ -247,35 +274,37 @@ export class TaskBoard {
         .set({ status: "in_progress", attempt, leaseUntil: now + LEASE_MS, updatedAt: now })
         .where(eq(schema.tasks.id, next.id))
         .run();
-      const run = tx
-        .insert(schema.taskRuns)
-        .values({ taskId: next.id, attempt, startedAt: now })
-        .returning({ id: schema.taskRuns.id })
-        .get();
+      const token = crypto.randomUUID();
+      tx.insert(schema.taskRuns).values({ taskId: next.id, token, attempt, startedAt: now }).run();
       tx.insert(schema.taskEvents)
         .values(event(next.id, now, this.#agent, "claimed", "todo", "in_progress"))
         .run();
       const task = tx.select().from(schema.tasks).where(eq(schema.tasks.id, next.id)).get();
       if (!task) throw new Error("A claimed task disappeared");
-      return { task: viewOf(task), run: run.id };
+      return { task: viewOf(task), run: token };
     });
   }
 
   /**
-   * The run's heartbeat: extends its lease, up to MAX_RUN_MS from its start, and says whether the
-   * owner asked it to stop. Only the task's current run counts.
+   * The run's heartbeat: extends its lease, up to MAX_RUN_MS from its start and STOP_GRACE_MS from
+   * the owner's stop, and says whether to stop. Only the task's current run counts.
    */
   heartbeat(
     id: string,
-    run: number,
+    run: string,
     now: number,
   ): { ok: true; leaseUntil: number; stop: boolean } | { ok: false; reason: "not_running" } {
     const current = this.#currentRun(id, run);
     if (!current) return { ok: false, reason: "not_running" };
-    const leaseUntil = Math.min(now + LEASE_MS, current.run.startedAt + MAX_RUN_MS);
+    const { stopRequestedAt } = current.task;
+    const leaseUntil = Math.min(
+      now + LEASE_MS,
+      current.run.startedAt + MAX_RUN_MS,
+      stopRequestedAt === null ? Number.POSITIVE_INFINITY : stopRequestedAt + STOP_GRACE_MS,
+    );
     if (leaseUntil <= now) return { ok: false, reason: "not_running" };
     this.#db.update(schema.tasks).set({ leaseUntil }).where(eq(schema.tasks.id, id)).run();
-    return { ok: true, leaseUntil, stop: current.task.stopRequestedAt !== null };
+    return { ok: true, leaseUntil, stop: stopRequestedAt !== null };
   }
 
   /**
@@ -285,7 +314,7 @@ export class TaskBoard {
    */
   finish(
     id: string,
-    run: number,
+    run: string,
     outcome: RunOutcome,
     now: number,
     kind = "finished",
@@ -293,7 +322,7 @@ export class TaskBoard {
     const current = this.#currentRun(id, run);
     if (!current) return notAllowed;
     const step = kind === "finished" ? this.#agent : this.#kelpie;
-    this.#end(current.task, run, outcome.status, outcome, now, step, kind);
+    this.#end(current.task, current.run.id, outcome.status, outcome, now, step, kind);
     return this.#view(id);
   }
 
@@ -360,22 +389,20 @@ export class TaskBoard {
     kind: string,
   ): void {
     const failures = outcome.status === "failed" ? task.failures + 1 : 0;
-    let changes: Partial<typeof schema.tasks.$inferInsert>;
+    let changes: Partial<typeof schema.tasks.$inferInsert> = { waitingReason: null };
     if (task.stopRequestedAt !== null && outcome.status !== "done") {
-      changes = {
-        status: "cancelled",
-        result: outcome.status === "cancelled" ? (outcome.result ?? null) : null,
-      };
+      changes.status = "cancelled";
+      changes.result = outcome.status === "cancelled" ? (outcome.result ?? null) : null;
     } else if (outcome.status === "done") {
-      changes = { status: "done", result: outcome.result, waitingReason: null };
+      changes = { ...changes, status: "done", result: outcome.result };
     } else if (outcome.status === "waiting") {
       changes = { status: "waiting", waitingReason: outcome.reason, waits: task.waits + 1 };
     } else if (outcome.status === "cancelled") {
-      changes = { status: "cancelled", result: outcome.result ?? null };
+      changes = { ...changes, status: "cancelled", result: outcome.result ?? null };
     } else if (failures >= MAX_FAILURES) {
       changes = { status: "waiting", waitingReason: "failed", waits: task.waits + 1 };
     } else {
-      changes = { status: "todo" };
+      changes.status = "todo";
     }
     this.#db.transaction((tx) => {
       tx.update(schema.tasks)
@@ -394,7 +421,7 @@ export class TaskBoard {
     });
   }
 
-  #currentRun(id: string, run: number) {
+  #currentRun(id: string, token: string) {
     const task = this.#row(id);
     if (task?.status !== "in_progress") return null;
     const current = this.#db
@@ -403,7 +430,7 @@ export class TaskBoard {
       .where(and(eq(schema.taskRuns.taskId, id), isNull(schema.taskRuns.endedAt)))
       .orderBy(desc(schema.taskRuns.id))
       .get();
-    return current && current.id === run ? { task, run: current } : null;
+    return current && current.token === token ? { task, run: current } : null;
   }
 
   #set(
@@ -427,6 +454,11 @@ export class TaskBoard {
 
   #row(id: string) {
     return this.#db.select().from(schema.tasks).where(eq(schema.tasks.id, id)).get();
+  }
+
+  /** A task as it is now, as the RPC methods answer once pickup ran. */
+  view(id: string): TaskResult<TaskView> {
+    return this.#view(id);
   }
 
   #view(id: string): TaskResult<TaskView> {
@@ -460,7 +492,19 @@ function event(
   };
 }
 
-function summaryOf(row: typeof schema.tasks.$inferSelect): TaskSummary {
+function summaryOf(
+  row: Pick<
+    typeof schema.tasks.$inferSelect,
+    | "id"
+    | "title"
+    | "status"
+    | "scheduledStartAt"
+    | "createdAt"
+    | "updatedAt"
+    | "creatorKind"
+    | "creatorId"
+  >,
+): TaskSummary {
   return {
     id: row.id,
     title: row.title,
