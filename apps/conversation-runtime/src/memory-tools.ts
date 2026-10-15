@@ -140,7 +140,7 @@ export function memoryTools(store: MemoryStore): ToolProvider {
       if (k !== undefined && !isCount(k, 1, MAX_K)) {
         return invalid(`k must be a whole number from 1 to ${MAX_K}.`);
       }
-      const found = await store.search(context.agentId, query, {
+      const found = await store.search(context.memoryAgentId ?? context.agentId, query, {
         scopes: context.scopes,
         ...(k === undefined ? {} : { k: k as number }),
         qualifier: context.qualifier,
@@ -162,7 +162,7 @@ export function memoryTools(store: MemoryStore): ToolProvider {
       if (offset !== undefined && !isCount(offset, 0, Number.MAX_SAFE_INTEGER)) {
         return invalid("offset must be a whole number, 0 or more.");
       }
-      const page = await store.readNote(context.agentId, path, {
+      const page = await store.readNote(context.memoryAgentId ?? context.agentId, path, {
         scopes: context.scopes,
         ...(offset === undefined ? {} : { offset: offset as number }),
       });

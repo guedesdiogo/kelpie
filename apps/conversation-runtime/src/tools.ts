@@ -218,6 +218,8 @@ export interface ToolContext {
   sendLink(link: HostLink): void;
   /** In a task's conversation, its run (#335); elsewhere, none. */
   task?: TaskRunHandle;
+  /** Whose memory the turn reads: a subagent's creator's (#290), else the agent's own. */
+  memoryAgentId?: string;
 }
 
 /**

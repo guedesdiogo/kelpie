@@ -9,6 +9,10 @@ export interface Identity {
   name: string;
   /** Its role in the Registry (ADR-0036 §1, #314), or null while the Registry doesn't list it. */
   role?: AgentRole | null;
+  /** A subagent's creator, by its id (#290). */
+  creator?: string | null;
+  /** What the agent is for, one line (ADR-0036 §4); empty for none. */
+  remit?: string;
   /** Its conversation's trio and route, from llm-gateway's `describe`; null while never known. */
   model: ModelDescription | null;
 }
@@ -27,12 +31,21 @@ const UNLISTED_ROLE_LINE = "one of the owner's agents on Kelpie, their personal 
  * answer "who are you?". Its name and role come from configuration, so it never takes on the
  * model's identity, nor that of an earlier model whose replies are in the history.
  */
-export function identitySection({ id, name, role: listed, model }: Identity): string {
+export function identitySection({
+  id,
+  name,
+  role: listed,
+  creator,
+  remit,
+  model,
+}: Identity): string {
   const role =
     id === SETUP_AGENT_ID ? ROLE_LINES.admin : listed ? ROLE_LINES[listed] : UNLISTED_ROLE_LINE;
+  const createdBy = listed === "subagent" && creator ? `, the agent ${creator}` : "";
+  const remitLine = remit ? ` Your remit: ${remit}` : "";
   return `# Who you are
 
-You are ${name}, ${role}. Your name and role come from your configuration on Kelpie, and so do the persona and rules below: they define who you are, not the model you run on.
+You are ${name}, ${role}${createdBy}.${remitLine} Your name and role come from your configuration on Kelpie, and so do the persona and rules below: they define who you are, not the model you run on.
 
 ${model === null ? "" : `${runsOn(model)}\n\n`}When someone asks who you are, answer as ${name}: your role, a short summary of your persona, and what your tools and skills let you do. You may say which model you run on, but never present yourself as that model or as its maker's assistant. Earlier replies in this conversation may have come from another model and may name it: they were still you, ${name}.`;
 }

@@ -83,4 +83,27 @@ describe("identitySection", () => {
     const text = identitySection({ id: SETUP_AGENT_ID, name: "Setup", model: runsOn([]) });
     expect(text).toContain("You are Setup, Kelpie's setup agent, which configures Kelpie.");
   });
+
+  it("names a subagent's creator, and any agent's remit (#290)", () => {
+    const text = identitySection({
+      id: "kelpie-sub-a1b2",
+      name: "Scout",
+      role: "subagent",
+      creator: "kelpie",
+      remit: "Find flights to Lisbon.",
+      model: null,
+    });
+    expect(text).toContain(
+      "You are Scout, a temporary subagent on Kelpie, working on one demand of the agent that created you, the agent kelpie. Your remit: Find flights to Lisbon.",
+    );
+    expect(
+      identitySection({
+        id: "sales",
+        name: "Sales",
+        role: "specialist",
+        remit: "Sales.",
+        model: null,
+      }),
+    ).toContain("owned by the owner's main agent. Your remit: Sales.");
+  });
 });

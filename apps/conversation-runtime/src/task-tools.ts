@@ -222,7 +222,9 @@ export function taskTools(ports: TaskToolPorts): ToolProvider {
     label: { en: "Handing off a task", "pt-BR": "Passando uma tarefa", es: "Pasando una tarea" },
     async run(input, context) {
       const { agentId, title, body } = fields(input);
-      if (context.actor.role !== "owner") return failed("Only the owner's turns hand off tasks.");
+      if (context.actor.role !== "owner" || context.scopes !== "all") {
+        return failed("Only the owner's own turns, in a direct conversation, hand off tasks.");
+      }
       if (!isAgentId(agentId) || typeof title !== "string" || typeof body !== "string") {
         return failed("Give the agentId, a one-line title and the body.");
       }
