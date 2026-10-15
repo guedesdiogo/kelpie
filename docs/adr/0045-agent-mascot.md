@@ -163,7 +163,7 @@
   - The mittens are a shade lighter than the body, with a soft shadow.
 - **At work, the task's object comes out of the body, and the mittens use it:**
   - a magnifier to search the web;
-  - paper and a pencil to write in the vault;
+  - paper and a pencil to read or write the vault;
   - a laptop for code;
   - a calendar for the agenda;
   - an envelope for email;
@@ -174,7 +174,7 @@
   - While a tool runs, Working and the tool's object take precedence over Typing.
   - Reading or writing the vault shows the paper and pencil. Any tool without its own object shows thinking, and so does the badge's icon.
   - It never shows a tool that isn't in use.
-- **In other states, the mittens gesture** as §6's table lists. A click or tap on an idle mascot in the header or the profile makes it clap. In the roster, pressing the row opens it, as §5.9 says.
+- **In other states, the mittens gesture** as §6's table lists. A click or tap on an idle mascot in the header or the profile makes it clap. In the roster, pressing the row does what the roster defines (`docs/design-system.md` §5.9 and §5.14), never a clap.
 - **In the poses for listening, typing, working, approved, error and dozing, the hands stay under reduced motion,** so the pose still reads.
 - **Waiting and error show a glossy 3D speech bubble beside the head:**
   - amber with `?` for waiting;
