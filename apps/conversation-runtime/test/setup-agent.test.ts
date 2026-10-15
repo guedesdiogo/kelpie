@@ -1,9 +1,17 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { Locale, RunnerState } from "@kelpie/channels";
-import { type Actor, type AgentSettings, DEFAULT_SETTINGS, SETUP_AGENT_ID } from "@kelpie/config";
+import {
+  type Actor,
+  type AgentSettings,
+  DEFAULT_SETTINGS,
+  KELPIE_MASCOT,
+  MASCOT_HEADS,
+  SETUP_AGENT_ID,
+} from "@kelpie/config";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
+import { MASCOT_SCHEMA } from "../src/mascot-schema.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import { SETUP_PROMPT, type SetupCommands, setupTools } from "../src/setup-agent.ts";
 import {
@@ -57,7 +65,14 @@ function fakeCommands() {
       if (name === undefined) return { ok: false, reason: "unknown_agent" };
       return {
         ok: true,
-        value: { id, name, ...roleOf(id), settings: DEFAULT_SETTINGS, promptVersion: 0 },
+        value: {
+          id,
+          name,
+          ...roleOf(id),
+          settings: DEFAULT_SETTINGS,
+          promptVersion: 0,
+          mascot: KELPIE_MASCOT,
+        },
       };
     },
     async createAgent(actor, input) {
@@ -657,6 +672,46 @@ describe("the setup agent's tools", () => {
     const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
     const { context } = contextOf(true);
     expect((await run(tools, "runner_status", {}, context)).output).toContain(words);
+  });
+
+  it("changes an agent's mascot whole, after the owner's confirmation (ADR-0045 §2)", async () => {
+    const { commands, calls } = fakeCommands();
+    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const schema = tools.get("configure_agent")?.spec.inputSchema as unknown as {
+      properties: { settings: { properties: Record<string, unknown> } };
+    };
+    expect(schema.properties.settings.properties.mascot).toBe(MASCOT_SCHEMA);
+    expect(MASCOT_SCHEMA.properties.head.properties.type.enum).toEqual(Object.keys(MASCOT_HEADS));
+    expect(MASCOT_SCHEMA.properties.head.description).toContain("ears: pointed, floppy, round");
+
+    const mascot = {
+      ...KELPIE_MASCOT,
+      color: "pink",
+      accessory: { type: "hat", variation: "top" },
+    };
+    const input = { id: SETUP_AGENT_ID, settings: { mascot } };
+    const waiting = contextOf(false);
+    await run(tools, "configure_agent", input, waiting.context);
+    expect(waiting.asked[0]?.summary).toContain(`mascot to ${JSON.stringify(mascot)}`);
+    expect(calls).toEqual([]);
+
+    const confirmed = contextOf(true);
+    expect((await run(tools, "configure_agent", input, confirmed.context)).isError).toBe(undefined);
+    expect(calls).toEqual([`configureAgent ${JSON.stringify(input)}`]);
+    // A variation that isn't its type's is refused before the owner is asked.
+    const wrong = { ...mascot, head: { type: "ears", variation: "mohawk" } };
+    const refused = contextOf(false);
+    expect(
+      (
+        await run(
+          tools,
+          "configure_agent",
+          { ...input, settings: { mascot: wrong } },
+          refused.context,
+        )
+      ).isError,
+    ).toBe(true);
+    expect(refused.asked).toEqual([]);
   });
 
   it("asks the owner to confirm a settings change, for its parsed input, and runs it only then", async () => {

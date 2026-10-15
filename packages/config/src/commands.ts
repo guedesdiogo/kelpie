@@ -11,6 +11,7 @@ import {
 } from "@kelpie/access";
 import type { ChannelFormsContract, ChannelId, RunnerState } from "@kelpie/channels";
 import { type ModelSettings, type ProviderId, parseModelSettings } from "@kelpie/llm/models";
+import { type Mascot, mascotFor } from "./mascot.ts";
 import {
   type AgentSettings,
   isAgentId,
@@ -60,6 +61,9 @@ export interface AgentEntry extends AgentSummary {
   /** Whether the user can reach it on a channel: always Admin and the main agent, never a subagent. */
   chat: boolean;
 }
+
+/** An agent as `getAgent` shows it: with the mascot it shows (ADR-0045 §2). */
+export type ShownAgent = AgentEntry & AgentConfig & { mascot: Mascot };
 
 export interface AgentConfig {
   settings: AgentSettings;
@@ -451,13 +455,17 @@ export function createConfigCommands(ports: ConfigPorts) {
       return result.ok ? { ok: true, value: { id, name: name.trim() } } : result;
     },
 
-    async getAgent(actor: Actor, input: unknown): Promise<CommandResult<AgentEntry & AgentConfig>> {
+    /** The agent, its settings, and the mascot it shows: its default until the owner picks one. */
+    async getAgent(actor: Actor, input: unknown): Promise<CommandResult<ShownAgent>> {
       if (!isOwner(actor)) return forbidden;
       const { id } = (input ?? {}) as { id?: unknown };
       if (!isAgentId(id)) return invalid;
       const agent = await ports.registry.get(id);
       if (!agent) return { ok: false, reason: "unknown_agent" };
-      return { ok: true, value: { ...agent, ...(await ports.agents.config(id)) } };
+      const config = await ports.agents.config(id);
+      // A Registry or AgentHost from before the field, during a rollout, has none.
+      const mascot = mascotFor(id, agent.role ?? null, config.settings.mascot ?? null);
+      return { ok: true, value: { ...agent, ...config, mascot } };
     },
 
     async configureAgent(actor: Actor, input: unknown): Promise<CommandResult<AgentConfig>> {

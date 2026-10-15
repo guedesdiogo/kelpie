@@ -7,6 +7,7 @@ import {
   type ConfigPorts,
   createConfigCommands,
 } from "../src/commands.ts";
+import { derivedMascot, KELPIE_MASCOT } from "../src/mascot.ts";
 import { type AgentSettings, DEFAULT_SETTINGS, SETUP_AGENT_ID } from "../src/settings.ts";
 import type { TaskView } from "../src/tasks.ts";
 
@@ -275,6 +276,28 @@ describe("configuration commands", () => {
       ok: true,
       value: [{ id: "sales", name: "Vendas", ...SPECIALIST }],
     });
+  });
+
+  it("shows the mascot an agent shows: its default until the owner picks one (ADR-0045 §2)", async () => {
+    const commands = createConfigCommands(fakePorts().ports);
+    await commands.createAgent(owner, { id: "sales", name: "Sales" });
+    expect(await commands.getAgent(owner, { id: "sales" })).toMatchObject({
+      ok: true,
+      value: { settings: { mascot: null }, mascot: derivedMascot("sales") },
+    });
+
+    const picked = { ...KELPIE_MASCOT, color: "pink" };
+    await commands.configureAgent(owner, { id: "sales", settings: { mascot: picked } });
+    expect(await commands.getAgent(owner, { id: "sales" })).toMatchObject({
+      ok: true,
+      value: { settings: { mascot: picked }, mascot: picked },
+    });
+    expect(
+      await commands.configureAgent(owner, {
+        id: "sales",
+        settings: { mascot: { ...picked, shape: "triangle" } },
+      }),
+    ).toEqual({ ok: false, reason: "invalid_input" });
   });
 
   it("lets the owner read and set the instance's model settings (#289)", async () => {

@@ -1,5 +1,5 @@
 import type { Actor, AgentRole } from "@kelpie/config";
-import { DEFAULT_SETTINGS } from "@kelpie/config";
+import { DEFAULT_SETTINGS, KELPIE_MASCOT } from "@kelpie/config";
 import { describe, expect, it } from "vitest";
 import { type MainAgentCommands, mainAgentTools } from "../src/main-agent.ts";
 import type { ConfirmationRequest, Tool, ToolContext } from "../src/tools.ts";
@@ -28,6 +28,7 @@ function fakeCommands() {
           // Ana keeps a memory tier of her own, which a conversation change must leave alone.
           settings: id === "ana" ? { ...DEFAULT_SETTINGS, model: ANA_MODEL } : DEFAULT_SETTINGS,
           promptVersion: 0,
+          mascot: KELPIE_MASCOT,
         },
       };
     },
