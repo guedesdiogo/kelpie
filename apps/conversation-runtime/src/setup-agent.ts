@@ -141,6 +141,12 @@ const SPECS = {
             maxWaitMs: { type: "integer", minimum: 0, maximum: 120_000 },
             qualifier: { type: "string", enum: ["clef", "jev"] },
             toolLoopMs: { type: "integer", minimum: 120_000, maximum: 600_000 },
+            maxConcurrentTasks: {
+              type: "integer",
+              minimum: 1,
+              maximum: 10,
+              description: "How many of its tasks the agent runs at once; more costs more.",
+            },
             model: MODEL_SETTINGS_SCHEMA,
           },
           additionalProperties: false,

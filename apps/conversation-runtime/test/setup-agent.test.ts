@@ -668,6 +668,29 @@ describe("the setup agent's tools", () => {
     ]);
   });
 
+  it("asks the owner before the agent runs more tasks at once, as for any setting (#54)", async () => {
+    const { commands, calls } = fakeCommands();
+    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const schema = tools.get("configure_agent")?.spec.inputSchema as unknown as {
+      properties: { settings: { properties: object } };
+    };
+    expect(schema.properties.settings.properties).toHaveProperty("maxConcurrentTasks", {
+      type: "integer",
+      minimum: 1,
+      maximum: 10,
+      description: "How many of its tasks the agent runs at once; more costs more.",
+    });
+    const input = { id: SETUP_AGENT_ID, settings: { maxConcurrentTasks: 5 } };
+    const waiting = contextOf(false);
+    expect((await run(tools, "configure_agent", input, waiting.context)).output).toContain(
+      "Not done yet",
+    );
+    expect(waiting.asked[0]?.summary).toBe(
+      `change the settings of the agent "Setup" (${SETUP_AGENT_ID}): maxConcurrentTasks to 5.`,
+    );
+    expect(calls).toEqual([]);
+  });
+
   it("refuses settings it can't show the owner whole, before asking", async () => {
     const tools = await toolsOf(setupTools(fakeCommands().commands, { adminOrigin: ADMIN }));
     const { context, asked } = contextOf(true);

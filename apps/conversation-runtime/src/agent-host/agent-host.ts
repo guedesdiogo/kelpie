@@ -6,16 +6,30 @@ import type {
   AgentSettings,
   ConfigureResult,
   EraseResult,
+  NewTask,
   RegistryContract,
+  RunOutcome,
   SetupEvent,
   SetupStep,
+  TaskDetail,
+  TaskEdit,
+  TaskResult,
+  TaskStatus,
+  TaskSummary,
+  TaskView,
 } from "@kelpie/config";
 import {
   type AgentRole,
   agentModel,
   DEFAULT_SETTINGS,
   isAgentId,
+  isTaskId,
+  isTaskStatus,
+  parseCommentText,
+  parseNewTask,
+  parseRunOutcome,
   parseSettings,
+  parseTaskEdit,
   REGISTRY_NAME,
   SETUP_AGENT_ID,
 } from "@kelpie/config";
@@ -30,6 +44,7 @@ import { identitySection } from "./identity.ts";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
 import { composeSystemPrompt, hasVaultContext } from "./system-prompt.ts";
+import { TaskBoard } from "./tasks.ts";
 
 let contextStoreForTesting: ContextStoreContract | undefined;
 
@@ -37,6 +52,30 @@ let contextStoreForTesting: ContextStoreContract | undefined;
 export function replaceContextStoreForTesting(store: ContextStoreContract | undefined): void {
   contextStoreForTesting = store;
 }
+
+/**
+ * Starts a run of a task the agent claimed (#54). The run reports back through `heartbeatTask` and
+ * `finishTask`; `start` returns once it began. #335 brings the task conversation that runs tasks.
+ */
+export interface TaskRunner {
+  /** `run` is the run's random token, which its reports must carry. */
+  start(agentId: string, task: TaskView, run: string): Promise<void>;
+}
+
+let taskRunnerForTesting: TaskRunner | null = null;
+
+/**
+ * Tests run in the Worker's isolate and give the board a runner with this. Production has none
+ * until #335, so pickup claims nothing: no task waits on a run that can't start.
+ */
+export function replaceTaskRunnerForTesting(runner: TaskRunner | null): void {
+  taskRunnerForTesting = runner;
+}
+
+/** A task whose run didn't start is tried again at a wake this much later. */
+const START_RETRY_MS = 60_000;
+/** Runs that fail to start before a pass of pickup stops trying, until the next wake. */
+const MAX_START_FAILURES_PER_PASS = 3;
 
 /** A vault the Context Store can't read in time is replaced by the last one it compiled. */
 const COMPILE_TIMEOUT_MS = 3_000;
@@ -82,10 +121,12 @@ const IDENTITY_TIMEOUT_MS = 1_000;
  */
 export class AgentHost extends Agent<Env> implements AgentHostContract {
   readonly #db: DrizzleSqliteDODatabase<typeof schema>;
+  readonly #tasks: TaskBoard;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.#db = drizzle(ctx.storage, { schema });
+    this.#tasks = new TaskBoard(this.#db, ctx.id.name ?? "");
     // If a migration fails the object resets, and the next request retries it.
     void ctx.blockConcurrencyWhile(async () => {
       try {
@@ -299,6 +340,144 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     return { ok: true, conversations: all.size };
   }
 
+  /**
+   * The task board (ADR-0011, #54). The commands authorize the actor (ADR-0013); these methods
+   * parse their input again, because they are an RPC boundary. Every change that may free a slot
+   * or queue a task picks up eligible ones and sets the next wake.
+   */
+  async createTask(input: NewTask, actor: Actor): Promise<TaskResult<TaskView>> {
+    const now = Date.now();
+    const task = parseNewTask(input, now);
+    if (!task || !isOwnerActor(actor)) return invalidTask;
+    return this.#afterPickup(this.#tasks.create(task, actor, crypto.randomUUID(), now));
+  }
+
+  async editTask(id: string, changes: TaskEdit, actor: Actor): Promise<TaskResult<TaskView>> {
+    const edit = parseTaskEdit(changes, Date.now());
+    if (!isTaskId(id) || !edit || !isOwnerActor(actor)) return invalidTask;
+    return this.#afterPickup(this.#tasks.edit(id, edit, actor, Date.now()));
+  }
+
+  async moveTask(
+    id: string,
+    status: "backlog" | "todo",
+    actor: Actor,
+  ): Promise<TaskResult<TaskView>> {
+    if (!isTaskId(id) || (status !== "backlog" && status !== "todo") || !isOwnerActor(actor)) {
+      return invalidTask;
+    }
+    return this.#afterPickup(this.#tasks.move(id, status, actor, Date.now()));
+  }
+
+  commentTask(id: string, text: string, actor: Actor): TaskResult<TaskView> {
+    const comment = parseCommentText(text);
+    if (!isTaskId(id) || comment === null || !isOwnerActor(actor)) return invalidTask;
+    return this.#tasks.comment(id, comment, actor, Date.now());
+  }
+
+  async requestStop(id: string, actor: Actor): Promise<TaskResult<TaskView>> {
+    if (!isTaskId(id) || !isOwnerActor(actor)) return invalidTask;
+    return this.#afterPickup(this.#tasks.requestStop(id, actor, Date.now()));
+  }
+
+  listTasks(status?: TaskStatus): TaskSummary[] {
+    return this.#tasks.list(isTaskStatus(status) ? status : undefined);
+  }
+
+  getTask(id: string): TaskResult<TaskDetail> {
+    return isTaskId(id) ? this.#tasks.get(id) : invalidTask;
+  }
+
+  /**
+   * A run's heartbeat (#335 calls it): extends its lease, and says whether to stop. `run` is the
+   * token its claim gave it.
+   */
+  heartbeatTask(id: string, run: string) {
+    if (!isTaskId(id) || !isTaskId(run)) {
+      return { ok: false as const, reason: "not_running" as const };
+    }
+    return this.#tasks.heartbeat(id, run, Date.now());
+  }
+
+  /** A run's end (#335 calls it), by the token its claim gave it. Done needs a result. */
+  async finishTask(id: string, run: string, outcome: RunOutcome): Promise<TaskResult<TaskView>> {
+    const parsed = parseRunOutcome(outcome);
+    if (!isTaskId(id) || !isTaskId(run) || !parsed) return invalidTask;
+    return this.#afterPickup(this.#tasks.finish(id, run, parsed, Date.now()));
+  }
+
+  /** The board's wake, as the SDK schedules it: sweeps leases, picks up tasks, sets the next one. */
+  async wakeTasks(): Promise<void> {
+    await this.#tasksChanged();
+  }
+
+  /** Runs pickup after a change, then answers with the task as it is now: perhaps claimed. */
+  async #afterPickup(result: TaskResult<TaskView>): Promise<TaskResult<TaskView>> {
+    if (!result.ok) return result;
+    await this.#tasksChanged();
+    return this.#tasks.view(result.value.id);
+  }
+
+  /**
+   * Sweeps the leases that ran out, claims eligible tasks while slots are free, and sets the next
+   * wake. Each claim checks the slots again, so concurrent calls never run more than the limit.
+   * A task whose run didn't start waits for the next wake, a minute later, and a pass gives up
+   * after a few such failures. Without a runner nothing is claimed, and no model is ever called
+   * for an empty board. It is best effort: the change that called it is already saved.
+   */
+  async #tasksChanged(): Promise<void> {
+    try {
+      const agentId = this.ctx.id.name ?? "";
+      const runner = taskRunnerForTesting;
+      this.#tasks.sweep(Date.now());
+      const failed = new Set<string>();
+      while (runner && failed.size < MAX_START_FAILURES_PER_PASS) {
+        const max = this.config().settings.maxConcurrentTasks;
+        const claimed = this.#tasks.claimNext(max, Date.now(), failed);
+        if (!claimed) break;
+        try {
+          await runner.start(agentId, claimed.task, claimed.run);
+        } catch (error) {
+          console.error("AgentHost: a task's run didn't start", errorName(error));
+          failed.add(claimed.task.id);
+          this.#tasks.finish(
+            claimed.task.id,
+            claimed.run,
+            { status: "failed" },
+            Date.now(),
+            "start_failed",
+          );
+        }
+      }
+      await this.#scheduleTaskWake(runner !== null, failed.size > 0);
+    } catch (error) {
+      console.error("AgentHost: the task board's pickup failed", errorName(error));
+    }
+  }
+
+  /** One SDK schedule for the board's next wake, moved when that time changes. */
+  async #scheduleTaskWake(canRun: boolean, retry: boolean): Promise<void> {
+    const now = Date.now();
+    let due = this.#tasks.nextWake(now, canRun);
+    if (retry) due = Math.min(due ?? Number.POSITIVE_INFINITY, now + START_RETRY_MS);
+    // The SDK keeps schedule times in whole seconds: the next one, so a wake is never early.
+    const next = due === null ? null : Math.ceil(due / 1_000) * 1_000;
+    const wake = this.#get<{ id: string; at: number } | null>("taskWake", null);
+    if (wake && next !== null && wake.at === next && (await this.getScheduleById(wake.id))) return;
+    if (wake) await this.cancelSchedule(wake.id);
+    if (next === null) {
+      this.#db.delete(schema.state).where(eq(schema.state.key, "taskWake")).run();
+      return;
+    }
+    const schedule = await this.schedule(new Date(next), "wakeTasks");
+    const value = { id: schedule.id, at: next };
+    this.#db
+      .insert(schema.state)
+      .values({ key: "taskWake", value })
+      .onConflictDoUpdate({ target: schema.state.key, set: { value } })
+      .run();
+  }
+
   #identitySources(): IdentitySources {
     if (identitySourcesForTesting) return identitySourcesForTesting;
     const registry = this.env.REGISTRY.getByName(
@@ -508,6 +687,25 @@ const MAX_SETUP_WAIT_MS = 24 * 60 * 60_000;
 const SETUP_WAIT_GRACE_MS = 5 * 60_000;
 /** A conversation object's name is an agent id, a channel and a thread id. */
 const MAX_CONVERSATION_NAME = 256;
+
+const invalidTask = { ok: false, reason: "invalid_input" } as const;
+
+/**
+ * The owner, as the commands build the actor: a user id and a channel, never empty. Only the owner
+ * changes tasks while Kelpie is single-player (ADR-0015).
+ */
+function isOwnerActor(actor: unknown): actor is Actor {
+  const { userId, role, via } = (actor ?? {}) as Partial<Actor>;
+  return (
+    typeof userId === "string" &&
+    userId !== "" &&
+    userId.length <= 128 &&
+    role === "owner" &&
+    typeof via === "string" &&
+    via !== "" &&
+    via.length <= 128
+  );
+}
 
 function errorName(error: unknown): string {
   return error instanceof Error ? error.name : "unknown error";

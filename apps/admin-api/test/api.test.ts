@@ -109,6 +109,46 @@ function world({
         return { ok: true, conversations: conversations.length };
       },
     },
+    tasks: {
+      async create(agentId, task) {
+        ran.push(`tasks.create ${agentId} ${task.title} ${task.status}`);
+        return {
+          ok: true,
+          value: {
+            id: "0f8b7c1e-6a2d-4c3b-9e5f-1a2b3c4d5e6f",
+            title: task.title,
+            status: task.status,
+            scheduledStartAt: task.scheduledStartAt,
+            createdAt: NOW_MS,
+            updatedAt: NOW_MS,
+            creator: { kind: "user", id: "u-owner" },
+            body: task.body,
+            waitingReason: null,
+            attempt: 0,
+            stopRequested: false,
+            result: null,
+          },
+        };
+      },
+      async edit() {
+        return { ok: false, reason: "not_allowed" };
+      },
+      async move() {
+        return { ok: false, reason: "not_allowed" };
+      },
+      async comment() {
+        return { ok: false, reason: "unknown_task" };
+      },
+      async requestStop() {
+        return { ok: false, reason: "not_allowed" };
+      },
+      async list() {
+        return [];
+      },
+      async get() {
+        return { ok: false, reason: "unknown_task" };
+      },
+    },
     directory: {
       async issuePairingCode() {
         ran.push("directory.issuePairingCode");
@@ -366,6 +406,38 @@ describe("admin API commands", () => {
     expect(await call(deps, "/commands/deleteAgent", { id: "sales" })).toEqual({
       status: 404,
       body: { ok: false, reason: "unknown_agent" },
+    });
+  });
+
+  it("queues and reads an agent's tasks, and answers 404 for a task it doesn't hold (#54)", async () => {
+    const { deps, ran } = world();
+    await call(deps, "/commands/createAgent", { id: "sales", name: "Sales" });
+    const created = await call(deps, "/commands/createTask", {
+      agentId: "sales",
+      title: "Book the flights",
+      status: "todo",
+    });
+    expect(created).toMatchObject({
+      status: 200,
+      body: { ok: true, value: { title: "Book the flights", status: "todo" } },
+    });
+    expect(ran).toContain("tasks.create sales Book the flights todo");
+    expect(
+      await call(deps, "/commands/getTask", {
+        agentId: "sales",
+        taskId: "0f8b7c1e-6a2d-4c3b-9e5f-1a2b3c4d5e6f",
+      }),
+    ).toEqual({ status: 404, body: { ok: false, reason: "unknown_task" } });
+    expect(
+      await call(deps, "/commands/moveTask", {
+        agentId: "sales",
+        taskId: "0f8b7c1e-6a2d-4c3b-9e5f-1a2b3c4d5e6f",
+        status: "todo",
+      }),
+    ).toEqual({ status: 409, body: { ok: false, reason: "not_allowed" } });
+    expect(await call(deps, "/commands/listTasks", { agentId: "sales" })).toEqual({
+      status: 200,
+      body: { ok: true, value: [] },
     });
   });
 

@@ -8,11 +8,29 @@ import {
   createConfigCommands,
 } from "../src/commands.ts";
 import { type AgentSettings, DEFAULT_SETTINGS, SETUP_AGENT_ID } from "../src/settings.ts";
+import type { TaskView } from "../src/tasks.ts";
 
 const owner: Actor = { userId: "u-owner", role: "owner", via: "admin-api" };
 /** What the fake Registry answers for every agent it holds (ADR-0036 §1). */
 const SPECIALIST = { role: "specialist", owner: null, chat: true } as const;
 const member: Actor = { userId: "u-member", role: "member", via: "admin-api" };
+
+const TASK_ID = "0f8b7c1e-6a2d-4c3b-9e5f-1a2b3c4d5e6f";
+const taskView = (fields: Partial<TaskView>): TaskView => ({
+  id: TASK_ID,
+  title: "Book the flights",
+  status: "backlog",
+  scheduledStartAt: null,
+  createdAt: 1_000,
+  updatedAt: 1_000,
+  creator: { kind: "user", id: "u-owner" },
+  body: "",
+  waitingReason: null,
+  attempt: 0,
+  stopRequested: false,
+  result: null,
+  ...fields,
+});
 
 function fakePorts() {
   const agents = new Map<
@@ -172,6 +190,38 @@ function fakePorts() {
         };
         const reason = failures[agentId];
         return reason ? { ok: false, reason } : { ok: true };
+      },
+    },
+    tasks: {
+      async create(agentId, task, actor) {
+        calls.push(`tasks.create ${agentId} ${JSON.stringify(task)} ${actor.userId}`);
+        return { ok: true, value: taskView({ title: task.title, status: task.status }) };
+      },
+      async edit(agentId, taskId, edit) {
+        calls.push(`tasks.edit ${agentId} ${taskId} ${JSON.stringify(edit)}`);
+        return taskId === TASK_ID
+          ? { ok: true, value: taskView(edit) }
+          : { ok: false, reason: "unknown_task" };
+      },
+      async move(agentId, taskId, status) {
+        calls.push(`tasks.move ${agentId} ${taskId} ${status}`);
+        return { ok: false, reason: "not_allowed" };
+      },
+      async comment(agentId, taskId, text) {
+        calls.push(`tasks.comment ${agentId} ${taskId} ${text}`);
+        return { ok: true, value: taskView({}) };
+      },
+      async requestStop(agentId, taskId) {
+        calls.push(`tasks.requestStop ${agentId} ${taskId}`);
+        return { ok: true, value: taskView({ status: "in_progress", stopRequested: true }) };
+      },
+      async list(agentId, status) {
+        calls.push(`tasks.list ${agentId} ${status ?? "-"}`);
+        return [];
+      },
+      async get(agentId, taskId) {
+        calls.push(`tasks.get ${agentId} ${taskId}`);
+        return { ok: false, reason: "unknown_task" };
       },
     },
     vault: {
@@ -924,5 +974,93 @@ describe("deleteAgent (#303)", () => {
       ok: false,
       reason: "not_allowed",
     });
+  });
+});
+
+describe("task commands (#54)", () => {
+  function withAgent() {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+    return { commands, calls, ready: commands.createAgent(owner, { id: "sales", name: "Sales" }) };
+  }
+  const tasksCalls = (calls: string[]) => calls.filter((call) => call.startsWith("tasks."));
+
+  it("lets the owner create, edit, move, comment, stop, list and read an agent's tasks", async () => {
+    const { commands, calls, ready } = withAgent();
+    await ready;
+    const start = Date.now() + 86_400_000;
+    expect(
+      await commands.createTask(owner, {
+        agentId: "sales",
+        title: "  Book the flights ",
+        status: "todo",
+        scheduledStartAt: start,
+      }),
+    ).toMatchObject({ ok: true, value: { title: "Book the flights", status: "todo" } });
+    expect(
+      await commands.editTask(owner, { agentId: "sales", taskId: TASK_ID, title: "Book" }),
+    ).toMatchObject({ ok: true, value: { title: "Book" } });
+    expect(
+      await commands.moveTask(owner, { agentId: "sales", taskId: TASK_ID, status: "todo" }),
+    ).toEqual({ ok: false, reason: "not_allowed" });
+    expect(
+      await commands.commentTask(owner, { agentId: "sales", taskId: TASK_ID, text: " Soon. " }),
+    ).toMatchObject({ ok: true });
+    expect(await commands.requestStop(owner, { agentId: "sales", taskId: TASK_ID })).toMatchObject({
+      value: { stopRequested: true },
+    });
+    expect(await commands.listTasks(owner, { agentId: "sales", status: "todo" })).toEqual({
+      ok: true,
+      value: [],
+    });
+    expect(await commands.getTask(owner, { agentId: "sales", taskId: TASK_ID })).toEqual({
+      ok: false,
+      reason: "unknown_task",
+    });
+    expect(tasksCalls(calls)).toEqual([
+      `tasks.create sales {"title":"Book the flights","body":"","status":"todo","scheduledStartAt":${start}} u-owner`,
+      `tasks.edit sales ${TASK_ID} {"title":"Book"}`,
+      `tasks.move sales ${TASK_ID} todo`,
+      `tasks.comment sales ${TASK_ID} Soon.`,
+      `tasks.requestStop sales ${TASK_ID}`,
+      "tasks.list sales todo",
+      `tasks.get sales ${TASK_ID}`,
+    ]);
+  });
+
+  it("refuses everyone but the owner, unknown agents and inputs it can't parse, before any call", async () => {
+    const { commands, calls, ready } = withAgent();
+    await ready;
+    expect(await commands.createTask(member, { agentId: "sales", title: "x" })).toEqual({
+      ok: false,
+      reason: "forbidden",
+    });
+    expect(await commands.listTasks(member, { agentId: "sales" })).toEqual({
+      ok: false,
+      reason: "forbidden",
+    });
+    expect(await commands.createTask(owner, { agentId: "ghost", title: "x" })).toEqual({
+      ok: false,
+      reason: "unknown_agent",
+    });
+    const invalid = { ok: false, reason: "invalid_input" };
+    for (const [command, input] of [
+      ["createTask", { agentId: "sales" }],
+      ["createTask", { agentId: "sales", title: "x", status: "done" }],
+      ["createTask", { title: "x" }],
+      ["editTask", { agentId: "sales", taskId: TASK_ID }],
+      ["editTask", { agentId: "sales", taskId: "nope", title: "x" }],
+      ["editTask", { agentId: "sales", taskId: TASK_ID, status: "todo" }],
+      ["moveTask", { agentId: "sales", taskId: TASK_ID, status: "in_progress" }],
+      ["commentTask", { agentId: "sales", taskId: TASK_ID, text: "  " }],
+      ["requestStop", { agentId: "sales" }],
+      ["listTasks", { agentId: "sales", status: "later" }],
+      ["getTask", { agentId: "sales", taskId: 7 }],
+    ] as const) {
+      expect(await commands[command](owner, input), `${command} ${JSON.stringify(input)}`).toEqual(
+        invalid,
+      );
+    }
+    expect(tasksCalls(calls)).toEqual([]);
   });
 });

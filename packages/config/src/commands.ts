@@ -18,6 +18,20 @@ import {
   parseSettings,
   SETUP_AGENT_ID,
 } from "./settings.ts";
+import {
+  isTaskId,
+  isTaskStatus,
+  type NewTask,
+  parseCommentText,
+  parseNewTask,
+  parseTaskEdit,
+  type TaskDetail,
+  type TaskEdit,
+  type TaskResult,
+  type TaskStatus,
+  type TaskSummary,
+  type TaskView,
+} from "./tasks.ts";
 
 /**
  * Who asked for a change, and through what: "admin-api", or "agent:<id>" for an agent's tool.
@@ -133,6 +147,14 @@ export interface AgentHostContract {
    * which must all be its own, then itself. Safe to repeat.
    */
   erase(conversations: string[]): Promise<EraseResult>;
+  /** The agent's task board (ADR-0011, #54), as people change it. */
+  createTask(input: NewTask, actor: Actor): Promise<TaskResult<TaskView>>;
+  editTask(id: string, changes: TaskEdit, actor: Actor): Promise<TaskResult<TaskView>>;
+  moveTask(id: string, status: "backlog" | "todo", actor: Actor): Promise<TaskResult<TaskView>>;
+  commentTask(id: string, text: string, actor: Actor): TaskResult<TaskView>;
+  requestStop(id: string, actor: Actor): Promise<TaskResult<TaskView>>;
+  listTasks(status?: TaskStatus): TaskSummary[];
+  getTask(id: string): TaskResult<TaskDetail>;
   /** Answers once the object's migrations ran; the deploy's probe calls it (#234). */
   ping(): { ok: true };
 }
@@ -247,6 +269,31 @@ export interface ConfigPorts {
     listIdentities(): Promise<(ChannelIdentity & { status: IdentityStatus })[]>;
     setTimeZone(userId: string, timeZone: string): Promise<TimeZoneResult>;
   };
+  /** Each agent's task board, in its `AgentHost` (ADR-0011, #54). */
+  tasks: {
+    create(agentId: string, task: NewTask, actor: Actor): Promise<TaskResult<TaskView>>;
+    edit(
+      agentId: string,
+      taskId: string,
+      edit: TaskEdit,
+      actor: Actor,
+    ): Promise<TaskResult<TaskView>>;
+    move(
+      agentId: string,
+      taskId: string,
+      status: "backlog" | "todo",
+      actor: Actor,
+    ): Promise<TaskResult<TaskView>>;
+    comment(
+      agentId: string,
+      taskId: string,
+      text: string,
+      actor: Actor,
+    ): Promise<TaskResult<TaskView>>;
+    requestStop(agentId: string, taskId: string, actor: Actor): Promise<TaskResult<TaskView>>;
+    list(agentId: string, status?: TaskStatus): Promise<TaskSummary[]>;
+    get(agentId: string, taskId: string): Promise<TaskResult<TaskDetail>>;
+  };
   /** The secure forms that take a channel's or the runner's secrets, in channel-egress (ADR-0013). */
   channels: Pick<
     ChannelFormsContract,
@@ -283,6 +330,7 @@ export type CommandResult<T> =
         | "channel_refused"
         | "not_allowed"
         | "no_key"
+        | "unknown_task"
         | Extract<IdentityResult, { ok: false }>["reason"];
     };
 
@@ -311,6 +359,26 @@ export function createConfigCommands(ports: ConfigPorts) {
     return named.every((provider) => provider === undefined || providers.includes(provider));
   };
   const unavailable = { ok: false, reason: "unavailable" } as const;
+  /**
+   * A task command's agent and, when `withTask`, its task: the owner's, an agent the Registry
+   * lists, and a task id of the form the board gives. The other fields are the command's own.
+   */
+  async function taskTarget(
+    actor: Actor,
+    input: unknown,
+    withTask: boolean,
+  ): Promise<
+    | { ok: true; agentId: string; taskId: string; rest: Record<string, unknown> }
+    | { ok: false; reason: "forbidden" | "invalid_input" | "unknown_agent" }
+  > {
+    if (!isOwner(actor)) return forbidden;
+    if (typeof input !== "object" || input === null || Array.isArray(input)) return invalid;
+    const { agentId, taskId, ...rest } = input as Record<string, unknown>;
+    if (!isAgentId(agentId)) return invalid;
+    if (withTask ? !isTaskId(taskId) : taskId !== undefined) return invalid;
+    if (!(await ports.registry.get(agentId))) return { ok: false, reason: "unknown_agent" };
+    return { ok: true, agentId, taskId: withTask ? (taskId as string) : "", rest };
+  }
   /**
    * The owner's threads with any agent, as `<channel>:<thread>` (#303): the webchat's is their user
    * id, and a channel's their account's, since only direct chats are admitted. They name the
@@ -474,6 +542,74 @@ export function createConfigCommands(ports: ConfigPorts) {
         deleted.push(live.id);
       }
       return { ok: true, value: { deleted, webhooksLeft, everyThread } };
+    },
+
+    /**
+     * Queues work for an agent (ADR-0011, #54): in Backlog by default, or in To do, where its
+     * `AgentHost` picks it up, at its scheduled start if it has one.
+     */
+    async createTask(actor: Actor, input: unknown): Promise<CommandResult<TaskView>> {
+      const target = await taskTarget(actor, input, false);
+      if (!target.ok) return target;
+      const task = parseNewTask(target.rest, Date.now());
+      if (!task) return invalid;
+      return ports.tasks.create(target.agentId, task, actor);
+    },
+
+    /** Edits a task's title, body or scheduled start while it is in Backlog or To do. */
+    async editTask(actor: Actor, input: unknown): Promise<CommandResult<TaskView>> {
+      const target = await taskTarget(actor, input, true);
+      if (!target.ok) return target;
+      const edit = parseTaskEdit(target.rest, Date.now());
+      if (!edit) return invalid;
+      return ports.tasks.edit(target.agentId, target.taskId, edit, actor);
+    },
+
+    /** Moves a task between Backlog and To do; from In progress on, only the agent moves it. */
+    async moveTask(actor: Actor, input: unknown): Promise<CommandResult<TaskView>> {
+      const target = await taskTarget(actor, input, true);
+      if (!target.ok) return target;
+      const { status, ...rest } = target.rest;
+      if ((status !== "backlog" && status !== "todo") || Object.keys(rest).length > 0) {
+        return invalid;
+      }
+      return ports.tasks.move(target.agentId, target.taskId, status, actor);
+    },
+
+    async commentTask(actor: Actor, input: unknown): Promise<CommandResult<TaskView>> {
+      const target = await taskTarget(actor, input, true);
+      if (!target.ok) return target;
+      const { text, ...rest } = target.rest;
+      const comment = parseCommentText(text);
+      if (comment === null || Object.keys(rest).length > 0) return invalid;
+      return ports.tasks.comment(target.agentId, target.taskId, comment, actor);
+    },
+
+    /** Asks the agent to stop a running task, which then ends in Cancelled; a waiting one at once. */
+    async requestStop(actor: Actor, input: unknown): Promise<CommandResult<TaskView>> {
+      const target = await taskTarget(actor, input, true);
+      if (!target.ok) return target;
+      if (Object.keys(target.rest).length > 0) return invalid;
+      return ports.tasks.requestStop(target.agentId, target.taskId, actor);
+    },
+
+    /** An agent's tasks, most recently changed first, or those in one status. */
+    async listTasks(actor: Actor, input: unknown): Promise<CommandResult<TaskSummary[]>> {
+      const target = await taskTarget(actor, input, false);
+      if (!target.ok) return target;
+      const { status, ...rest } = target.rest;
+      if ((status !== undefined && !isTaskStatus(status)) || Object.keys(rest).length > 0) {
+        return invalid;
+      }
+      return { ok: true, value: await ports.tasks.list(target.agentId, status) };
+    },
+
+    /** A task with its comments, its history and its runs. */
+    async getTask(actor: Actor, input: unknown): Promise<CommandResult<TaskDetail>> {
+      const target = await taskTarget(actor, input, true);
+      if (!target.ok) return target;
+      if (Object.keys(target.rest).length > 0) return invalid;
+      return ports.tasks.get(target.agentId, target.taskId);
     },
 
     async listIdentities(actor: Actor): Promise<CommandResult<ShownIdentity[]>> {
