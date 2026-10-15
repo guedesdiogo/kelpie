@@ -779,6 +779,18 @@ describe("AgentHost and subagents (#290)", () => {
     await host("sub-in-use").configure({ remit: "Quotes." }, owner);
     expect(await host("sub-in-use").bindCreator("kelpie")).toEqual({ ok: false });
     expect((await host("sub-in-use").config()).settings.remit).toBe("Quotes.");
+    // Nor one configured back to its defaults, one with a task, or one with a conversation.
+    await host("sub-reset").configure({ remit: "Quotes." }, owner);
+    await host("sub-reset").configure({ remit: "" }, owner);
+    expect(await host("sub-reset").bindCreator("kelpie")).toEqual({ ok: false });
+    const task = await host("sub-tasked").createTask(
+      { title: "Later", body: "", status: "backlog", scheduledStartAt: null },
+      owner,
+    );
+    expect(task.ok).toBe(true);
+    expect(await host("sub-tasked").bindCreator("kelpie")).toEqual({ ok: false });
+    await host("sub-talked").turnConfig("sub-talked:telegram:1");
+    expect(await host("sub-talked").bindCreator("kelpie")).toEqual({ ok: false });
     expect((await host("sub-pinned").turnConfig()).agent).toMatchObject({
       role: "subagent",
       owner: "kelpie",
