@@ -1,4 +1,4 @@
-import type { ChannelFormsContract, Locale } from "@kelpie/channels";
+import type { ChannelFormsContract, Locale, RunnerAnswered } from "@kelpie/channels";
 import { PAGES } from "./texts.ts";
 
 // The one-time secure forms (ADR-0013) where the owner pastes a secret: a Telegram bot token, or
@@ -44,6 +44,9 @@ function formGone(form: Gone, locale: Locale): Response {
 
 /** What a stored token tells the conversation that sent the form (#206): which bot, and its webhook. */
 export type Connected = (agentId: string, bot: string, webhookRegistered: boolean) => Promise<void>;
+
+/** What a stored runner secret tells the conversation that sent the form (#328): how it answered. */
+export type RunnerConnected = (runner: RunnerAnswered) => Promise<void>;
 
 /** A setup step's report the form's answer doesn't wait on for longer than this (#206). */
 const REPORT_TIMEOUT_MS = 2_000;
@@ -98,13 +101,15 @@ export async function submitForm(
 
 /**
  * Submits the runner's secret (#294). `channel-egress` checks it with the runner's `/health` before
- * storing it; a runner that can't answer leaves the form open for another try.
+ * storing it; a runner that can't answer leaves the form open for another try. Once it is stored,
+ * `connected` reports it, as `submitForm` does a bot's token (#328).
  */
 export async function submitRunnerForm(
   token: string,
   secret: string,
   forms: FormDeps,
   locale: Locale,
+  connected?: RunnerConnected,
 ): Promise<Response> {
   const texts = PAGES[locale].runner;
   const again = async (status: number, message: string) => {
@@ -116,6 +121,7 @@ export async function submitRunnerForm(
   if (secret.trim() === "") return again(400, texts.empty);
   const result = await forms.redeemRunnerForm(token, secret);
   if (result.ok) {
+    if (connected) await bounded(() => connected(result.runner), REPORT_TIMEOUT_MS);
     const version = `<code>${escapeHtml(result.runner.version)}</code>`;
     const body = result.runner.state === "ready" ? texts.done(version) : texts.outdated(version);
     return page(200, texts.connected, `<p>${body}</p>`, locale);

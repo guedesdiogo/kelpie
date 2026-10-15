@@ -4,6 +4,9 @@
 /** The protocol's version. It changes when a request or an answer changes shape. */
 export const RUNNER_PROTOCOL = 1;
 
+/** A version as the runner reports it, such as `0.1.0`; anything else isn't the runner's answer. */
+export const RUNNER_VERSION = /^[0-9A-Za-z.+-]{1,64}$/;
+
 /**
  * The runner as `channel-egress` sees it, never with its secret:
  * - `not_configured`: `channel-egress` was deployed without the runner's VPC Service;

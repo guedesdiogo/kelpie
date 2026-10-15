@@ -1010,7 +1010,11 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
 }
 
 /** Every setup step: a new one doesn't compile until it is here. */
-const SETUP_STEPS: Record<SetupStep, true> = { telegram_connected: true, telegram_paired: true };
+const SETUP_STEPS: Record<SetupStep, true> = {
+  telegram_connected: true,
+  telegram_paired: true,
+  runner_connected: true,
+};
 const isSetupStep = (step: unknown): step is SetupStep =>
   typeof step === "string" && Object.hasOwn(SETUP_STEPS, step);
 /** The longest a link lasts: a day for the pairing page, whose Telegram code starts later. */
