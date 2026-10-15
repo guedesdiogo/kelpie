@@ -13,11 +13,13 @@ function world({
   described = { provider: "anthropic", tier: "medium", effort: "high", route: [] },
   live = [] as AgentEntry[],
   failConfigure = false,
+  creatorTools = null as string[] | null,
 }: {
   spawn?: boolean;
   described?: ModelDescription;
   live?: AgentEntry[];
   failConfigure?: boolean;
+  creatorTools?: string[] | null;
 } = {}) {
   const calls: string[] = [];
   const configured: Partial<AgentSettings>[] = [];
@@ -25,13 +27,19 @@ function world({
     async canSpawn() {
       return spawn;
     },
-    async ceiling() {
-      return { model: { memory: { tier: "cheap" } }, described };
+    async creator() {
+      return { model: { memory: { tier: "cheap" } }, described, tools: creatorTools };
+    },
+    async bindCreator(id, creator) {
+      calls.push(`bind ${id.startsWith(`${creator}-sub-`) ? "sub" : id} to ${creator}`);
+      return { ok: true };
     },
     async add(id, name, creator) {
       calls.push(`add ${name} by ${creator}`);
       if (live.length >= 3) return { ok: false, reason: "not_allowed" };
-      return id.startsWith(`${creator}-sub-`) ? { ok: true } : { ok: false, reason: "invalid_input" };
+      return id.startsWith(`${creator}-sub-`)
+        ? { ok: true }
+        : { ok: false, reason: "invalid_input" };
     },
     async configure(_id, settings) {
       configured.push(settings);
@@ -88,7 +96,7 @@ describe("the subagent tools (#290)", () => {
       context(),
     );
     expect(created.output).toMatch(/^Created the subagent kelpie-sub-[0-9a-f]{6}, named "Scout"\./);
-    expect(calls).toEqual(["add Scout by kelpie"]);
+    expect(calls).toEqual(["add Scout by kelpie", "bind sub to kelpie"]);
     expect(configured).toEqual([
       {
         systemPrompt: "You find flights.",
@@ -98,7 +106,7 @@ describe("the subagent tools (#290)", () => {
         model: {
           provider: "anthropic",
           memory: { tier: "cheap" },
-          conversation: { tier: "cheap", effort: "high" },
+          conversation: { tier: "cheap", effort: "low" },
         },
         maxConcurrentTasks: 1,
       },
@@ -111,8 +119,8 @@ describe("the subagent tools (#290)", () => {
     for (const [input, says] of [
       [{ ...brief, tier: "frontier" }, "Its tier can't be above yours, medium."],
       [{ ...brief, effort: "max" }, "Its effort can't be above yours, high."],
-      [{ ...brief, tools: ["memory_write"] }, "A subagent's tools are only these"],
-      [{ ...brief, tools: ["create_task"] }, "A subagent's tools are only these"],
+      [{ ...brief, tools: ["memory_write"] }, "A subagent's tools can only be these"],
+      [{ ...brief, tools: ["create_task"] }, "A subagent's tools can only be these"],
       [{ ...brief, name: "" }, "Give it a name"],
       [{ ...brief, remit: "Two\nlines" }, "That subagent isn't valid"],
     ] as const) {
@@ -169,11 +177,58 @@ describe("the subagent tools (#290)", () => {
     const { provider, calls } = world({ live });
     const remove = await tool(provider, "delete_subagent");
     expect(await remove.run({ id: "kelpie-sub-aaaaaa" }, context())).toEqual({
-      output: "Deleted the subagent kelpie-sub-aaaaaa. Its results stay on your tasks.",
+      output:
+        "Deleted the subagent kelpie-sub-aaaaaa. What it reported reached you already; a task it hadn't finished went with it.",
     });
     for (const id of ["sales", "someone-else", 7]) {
       expect(await remove.run({ id }, context()), String(id)).toMatchObject({ isError: true });
     }
     expect(calls).toEqual(["remove kelpie-sub-aaaaaa"]);
+  });
+
+  it("default a subagent to the cheapest tier and a low effort, and cap its brief", async () => {
+    const { provider, configured } = world();
+    const create = await tool(provider, "create_subagent");
+    await create.run({ ...brief, skills: null, tier: null, effort: null, tools: null }, context());
+    expect(configured[0]?.model).toEqual({
+      provider: "anthropic",
+      memory: { tier: "cheap" },
+      conversation: { tier: "cheap", effort: "low" },
+    });
+    expect(
+      await create.run(
+        {
+          ...brief,
+          soul: "a".repeat(20_000),
+          skills: [{ name: "x", instructions: "b".repeat(4_000) }],
+        },
+        context(),
+      ),
+    ).toMatchObject({ isError: true, output: expect.stringContaining("at most 24000 characters") });
+  });
+
+  it("keep a subagent's tools within its creator's allowlist", async () => {
+    const { provider, configured } = world({ creatorTools: ["create_subagent", "complete_task"] });
+    const create = await tool(provider, "create_subagent");
+    expect(await create.run({ ...brief, tools: ["memory_search"] }, context())).toMatchObject({
+      isError: true,
+      output: expect.stringContaining("can only be these: complete_task"),
+    });
+    await create.run(brief, context());
+    expect(configured.at(-1)?.tools).toEqual(["complete_task"]);
+  });
+
+  it("are refused to a turn that doesn't read all the owner's memory", async () => {
+    const { provider, calls } = world();
+    const narrow = context({ scopes: ["conversation/telegram-group"] });
+    expect(await (await tool(provider, "create_subagent")).run(brief, narrow)).toMatchObject({
+      isError: true,
+      output: expect.stringContaining("direct conversation"),
+    });
+    const member = context({ actor: { userId: "u-x", role: "member", via: "x" } });
+    expect(
+      await (await tool(provider, "delete_subagent")).run({ id: "kelpie-sub-aaaaaa" }, member),
+    ).toMatchObject({ isError: true });
+    expect(calls).toEqual([]);
   });
 });

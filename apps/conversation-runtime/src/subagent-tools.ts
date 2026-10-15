@@ -21,8 +21,14 @@ import type { Tool, ToolContext, ToolOutcome, ToolProvider } from "./tools.ts";
 export interface SubagentPorts {
   /** Whether the agent creates subagents: the main agent by its role, others by `spawn`. */
   canSpawn(agentId: string): Promise<boolean>;
-  /** The creator's own trio, as it resolves now: a subagent's ceiling. */
-  ceiling(agentId: string): Promise<{ model: ModelSettings; described: ModelDescription }>;
+  /** The creator's own trio, as it resolves now, and its tool allowlist: a subagent's ceiling. */
+  creator(agentId: string): Promise<{
+    model: ModelSettings;
+    described: ModelDescription;
+    tools: string[] | null;
+  }>;
+  /** Pins the new subagent's creator on its own object, so it stays a subagent whatever happens. */
+  bindCreator(id: string, creator: string): Promise<{ ok: boolean }>;
   add(
     id: string,
     name: string,
@@ -90,6 +96,8 @@ const SPECS = {
 } as const satisfies Record<string, Tool["spec"]>;
 
 const failed = (output: string): ToolOutcome => ({ output, isError: true });
+/** The longest a subagent's soul and skills are together: they go with every model call it makes. */
+const MAX_BRIEF_CHARS = 24_000;
 const fields = (input: unknown): Record<string, unknown> =>
   typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {};
 
@@ -108,36 +116,39 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
       es: "Creando un subagente",
     },
     async run(input, context) {
-      if (context.actor.role !== "owner") return failed("Only the owner's turns create subagents.");
+      // Only a turn that reads all of the owner's memory makes one: a subagent reads all of its
+      // creator's (ADR-0036 §5), never more than the turn that made it.
+      if (context.actor.role !== "owner" || context.scopes !== "all") {
+        return failed("Only the owner's own turns, in a direct conversation, create subagents.");
+      }
       if (!(await ports.canSpawn(context.agentId))) {
         return failed(
           "You can't create subagents: only Admin can let you, at the owner's request.",
         );
       }
-      const {
-        name,
-        soul,
-        remit,
-        skills = [],
-        tier,
-        effort,
-        tools = [...SUBAGENT_TOOLS],
-      } = fields(input);
+      const given = fields(input);
+      const optional = (key: string) => (given[key] === null ? undefined : given[key]);
+      const { name, soul, remit } = given;
+      const skills = optional("skills") ?? [];
+      const tier = optional("tier");
+      const effort = optional("effort");
       if (!isAgentName(name)) return failed("Give it a name: one line of up to 80 characters.");
-      if (!Array.isArray(tools) || tools.some((tool) => !SUBAGENT_TOOLS.has(String(tool)))) {
-        return failed(
-          `A subagent's tools are only these: ${[...SUBAGENT_TOOLS].join(", ")}. It can't have the others.`,
-        );
+      const { model, described, tools: creatorTools } = await ports.creator(context.agentId);
+      // Its tools are a subagent's, within what its creator may use.
+      const allowed = [...SUBAGENT_TOOLS].filter(
+        (tool) => creatorTools === null || creatorTools.includes(tool),
+      );
+      const tools = optional("tools") ?? allowed;
+      if (!Array.isArray(tools) || tools.some((tool) => !allowed.includes(String(tool)))) {
+        return failed(`A subagent's tools can only be these: ${allowed.join(", ") || "none"}.`);
       }
       if (tier !== undefined && !TIERS.includes(tier as never)) return failed("Unknown tier.");
       if (effort !== undefined && !EFFORTS.includes(effort as never))
         return failed("Unknown effort.");
-      const { model, described } = await ports.ceiling(context.agentId);
-      if (
-        tier !== undefined &&
-        TIERS.indexOf(tier as never) > TIERS.indexOf(described.tier as never)
-      ) {
-        return failed(`Its tier can't be above yours, ${described.tier}.`);
+      // A tier Kelpie doesn't rank leaves only the cheapest.
+      const ceiling = Math.max(TIERS.indexOf(described.tier as never), 0);
+      if (tier !== undefined && TIERS.indexOf(tier as never) > ceiling) {
+        return failed(`Its tier can't be above yours, ${TIERS[ceiling]}.`);
       }
       if (
         effort !== undefined &&
@@ -150,22 +161,31 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
             : `Its effort can't be above yours, ${described.effort}.`,
         );
       }
+      const brief =
+        String(soul ?? "").length +
+        (Array.isArray(skills)
+          ? skills.reduce((sum, skill) => sum + JSON.stringify(skill ?? "").length, 0)
+          : 0);
+      if (brief > MAX_BRIEF_CHARS) {
+        return failed(`Its soul and skills together hold at most ${MAX_BRIEF_CHARS} characters.`);
+      }
       const settings = parseSettings({
         systemPrompt: soul,
         remit,
         skills: skills as AgentSkill[],
         tools: tools as string[],
-        // It runs on its creator's route, at most its creator's tier and effort.
+        // It runs on its creator's route, at the cheapest tier unless it asks for more, within the
+        // creator's: costs are the creator's (ADR-0036 §5).
         model: {
           ...(described.provider === null ? {} : { provider: described.provider }),
           ...(model.memory ? { memory: model.memory } : {}),
           conversation: {
-            tier: (tier ?? described.tier) as never,
-            ...(effort === undefined
-              ? described.effort === undefined
+            tier: (tier ?? "cheap") as never,
+            ...(effort !== undefined
+              ? { effort: effort as never }
+              : described.effort === undefined
                 ? {}
-                : { effort: described.effort }
-              : { effort: effort as never }),
+                : { effort: "low" as never }),
           },
         },
         maxConcurrentTasks: 1,
@@ -175,20 +195,38 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
           "That subagent isn't valid: a soul of up to 20,000 characters, a remit of one line, and at most 10 skills.",
         );
       }
+      const live = (await ports.owned(context.agentId)).filter((one) => one.role === "subagent");
+      if (live.length >= 3) {
+        return failed(
+          "You already have three live subagents: delete one with delete_subagent first.",
+        );
+      }
       const id = subagentId(context.agentId);
       const added = await ports.add(id, name.trim(), context.agentId, context.actor);
       if (!added.ok) {
         return failed(
           added.reason === "not_allowed"
-            ? "You already have three live subagents: delete one with delete_subagent first."
+            ? "Kelpie didn't create it: you made the most subagents a day allows, or have three live."
             : "Kelpie couldn't create it: try again.",
         );
       }
-      const configured = await ports.configure(id, settings, context.actor);
-      if (!configured.ok) {
-        // Half made: it goes, so nothing runs without its limits.
-        await ports.remove(context.actor, id);
-        return failed("Kelpie couldn't set it up: try again.");
+      // Half made, it goes, so nothing runs without its limits.
+      const undo = async (why: string) => {
+        const removed = await ports.remove(context.actor, id).catch(() => null);
+        return failed(
+          removed?.ok
+            ? why
+            : `${why} Kelpie couldn't remove the half-made subagent ${id}: call delete_subagent with it.`,
+        );
+      };
+      try {
+        if (!(await ports.bindCreator(id, context.agentId)).ok) {
+          return await undo("Kelpie couldn't set it up: try again.");
+        }
+        const configured = await ports.configure(id, settings, context.actor);
+        if (!configured.ok) return await undo("Kelpie couldn't set it up: try again.");
+      } catch {
+        return await undo("Kelpie couldn't set it up: try again.");
       }
       return {
         output: `Created the subagent ${id}, named ${JSON.stringify(name.trim())}. Hand it work with create_task and agentId ${id}; Kelpie tells you when each task ends or asks something. Delete it with delete_subagent once its demand ends.`,
@@ -203,15 +241,24 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
       es: "Eliminando un subagente",
     },
     async run(input, context) {
+      if (context.actor.role !== "owner")
+        return failed("Only the owner's own turns delete subagents.");
       const { id } = fields(input);
       const mine = (await ports.owned(context.agentId)).find(
         (agent) => agent.id === id && agent.role === "subagent",
       );
       if (!mine) return failed(`You have no subagent ${String(id)}.`);
       const result = await ports.remove(context.actor, mine.id);
-      return result.ok
-        ? { output: `Deleted the subagent ${mine.id}. Its results stay on your tasks.` }
-        : failed("The deletion didn't finish: call delete_subagent again.");
+      if (result.ok) {
+        return {
+          output: `Deleted the subagent ${mine.id}. What it reported reached you already; a task it hadn't finished went with it.`,
+        };
+      }
+      return failed(
+        result.reason === "forbidden"
+          ? "Only the owner's own turns delete subagents."
+          : "The deletion didn't finish: call delete_subagent again.",
+      );
     },
   };
   return {

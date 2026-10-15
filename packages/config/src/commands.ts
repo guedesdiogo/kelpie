@@ -69,7 +69,13 @@ export interface AgentConfig {
    * The agent as a turn's limits read it (#290), when `turnConfig` built this: its role, its
    * owner, and whether it creates subagents.
    */
-  agent?: { role: AgentRole | null; owner: string | null; spawn: boolean };
+  agent?: {
+    role: AgentRole | null;
+    owner: string | null;
+    spawn: boolean;
+    /** A subagent's creator's tool allowlist, which its own tools stay within; null for none. */
+    creatorTools?: string[] | null;
+  };
 }
 
 /**

@@ -279,15 +279,16 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
 - **The main agent's own tool:** `set_agent_model` changes another agent's model settings, when the owner asks or agrees with its suggestion, behind the same confirmation (#289). No agent changes its own model, except Admin, through `configure_agent`.
 - **The check is at `admit`:** a chat its role doesn't allow answers `no_grant`, so a specialist whose chat is off doesn't answer its bot or the webchat.
 
-**Subagents** (ADR-0036 §5, #290). An agent with `spawn` creates temporary subagents for a demand, with `create_subagent`, and hands them work with `create_task`. The main agent has `spawn` by its role. Any other agent has it only when Admin's `configure_agent` turns it on, which takes the owner's confirmation. A subagent never has it.
+**Subagents** (ADR-0036 §5, #290). An agent with `spawn` creates temporary subagents for a demand, with `create_subagent`, and hands them work with `create_task`. The main agent has `spawn` by its role. A specialist has it only when Admin's `configure_agent` turns it on, which takes the owner's confirmation. Admin and subagents never have it. Only the owner's own turns in a direct conversation create a subagent or hand off a task.
 - **What a creator gives one:** a name, a soul, a one-line remit and up to 10 skills, kept on its own `AgentHost`, not in the vault. Kelpie picks its id, from the creator's.
-- **What it can never exceed:** its creator's tier and effort, on the creator's route, checked when it is created and at every turn.
+- **What it can never exceed:** its creator's tier and effort, field by field, on the creator's route. That is checked when it is created and at every turn, with the last limits read when the creator doesn't answer, and the cheapest tier when nothing was ever read. It starts at the cheapest tier unless its creator asks for more.
 - **What it holds:**
-  - a subagent's tools only: `memory_search`, `memory_read` and its task tools;
+  - a subagent's tools only, `memory_search`, `memory_read` and its task tools, and only those of them its creator may use;
   - read-only memory, on its creator's scopes;
   - no channel, and no capture.
-- **How many:** three live per creator at most; a fourth is refused.
-- **How it ends:** it lives until its creator deletes it with `delete_subagent`, or the owner through Admin. Deleting its creator deletes it too, and its results stay on the creator's tasks.
+- **How many:** three live per creator at most, and ten made a day; past either, a new one is refused. Its soul and skills together hold at most 24,000 characters.
+- **What pins it:** its own `AgentHost` records its creator, so it stays a subagent whatever the Registry answers.
+- **How it ends:** it lives until its creator deletes it with `delete_subagent`, or the owner through Admin, and deleting its creator deletes it too. What it already reported reached its creator as Kelpie's news; a task it hadn't finished goes with it.
 - **The skill:** every agent with `spawn` gets the built-in `create-subagent` skill in its prompt. It covers when a subagent is worth it, how to brief one, and to delete it when the demand ends.
 
 `configure_agent` also takes `spawn`, a one-line `remit`, and `tools`, the tools an agent may use by name, or `null` for all it is given. Each change waits for the owner's confirmation.

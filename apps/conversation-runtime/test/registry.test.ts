@@ -333,4 +333,19 @@ describe("Registry subagents (#290)", () => {
       reason: "invalid_input",
     });
   });
+
+  it("lets a creator make at most ten in a day, however many it deleted", async () => {
+    const stub = registry("subagents-churn");
+    const agentActor = { userId: "u-owner", role: "owner", via: "agent:kelpie" } as const;
+    for (let i = 0; i < 10; i++) {
+      expect(await stub.addSubagent(`kelpie-sub-c${i}`, "Helper", "kelpie", agentActor)).toEqual({
+        ok: true,
+      });
+      await stub.remove(`kelpie-sub-c${i}`, agentActor);
+    }
+    expect(await stub.addSubagent("kelpie-sub-c10", "Helper", "kelpie", agentActor)).toEqual({
+      ok: false,
+      reason: "not_allowed",
+    });
+  });
 });

@@ -248,18 +248,20 @@ function productionPorts(env: Env): ConversationPorts {
       subagentTools({
         canSpawn: async (id) => {
           const entry = await registry.get(id);
-          if (!entry || entry.role === "subagent") return false;
-          return entry.role === "main" || (await agentHost(id).config()).settings.spawn;
+          if (entry?.role === "main") return true;
+          return entry?.role === "specialist" && (await agentHost(id).config()).settings.spawn;
         },
-        ceiling: async (id) => {
-          const model = agentModel((await agentHost(id).config()).settings);
+        creator: async (id) => {
+          const { settings } = await agentHost(id).config();
+          const model = agentModel(settings);
           const described = await (
             env.LLM_GATEWAY as unknown as {
               describe(area: "conversation", agent: ModelSettings): Promise<ModelDescription>;
             }
           ).describe("conversation", model);
-          return { model, described };
+          return { model, described, tools: settings.tools };
         },
+        bindCreator: (id, creator) => env.AGENT_HOST.getByName(id).bindCreator(creator),
         add: (id, name, creator, actor) => registry.addSubagent(id, name, creator, actor),
         configure: (id, settings, actor) => agentHost(id).configure(settings, actor),
         owned: async (creator) =>

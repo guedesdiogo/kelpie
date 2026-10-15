@@ -233,6 +233,17 @@ describe("what a task's run is given (#335)", () => {
         isError: true,
       },
     );
+    // A turn that reads only part of the owner's memory, as in a group, hands off nothing.
+    const narrow = {
+      ...contextOf("kelpie"),
+      scopes: ["conversation/telegram-group"],
+    } as ToolContext;
+    expect(await create.run({ agentId: "helper", title: "Book", body: "x" }, narrow)).toMatchObject(
+      {
+        isError: true,
+        output: expect.stringContaining("direct conversation"),
+      },
+    );
     const owner = contextOf("kelpie");
     for (let i = 0; i < 3; i++) {
       expect(

@@ -5,6 +5,7 @@ import type { CompiledContext, ContextStoreContract } from "@kelpie/context-stor
 import { afterEach, describe, expect, it } from "vitest";
 import {
   CREATE_SUBAGENT_SKILL,
+  clampModel,
   replaceContextStoreForTesting,
   replaceIdentitySourcesForTesting,
 } from "../src/agent-host/agent-host.ts";
@@ -478,7 +479,7 @@ describe("AgentHost with a vault", () => {
       },
       promptVersion: 0,
       // What a turn's limits read (#290): an agent the Registry doesn't list has no role.
-      agent: { role: null, owner: null, spawn: false },
+      agent: { role: null, owner: null, spawn: false, creatorTools: null },
     });
   });
 
@@ -711,7 +712,7 @@ describe("AgentHost and subagents (#290)", () => {
     };
     expect(await taught("sub-main")).toEqual({
       prompt: true,
-      agent: { role: "main", owner: null, spawn: true },
+      agent: { role: "main", owner: null, spawn: true, creatorTools: null },
     });
     expect(await taught("sub-specialist")).toMatchObject({
       prompt: false,
@@ -720,7 +721,7 @@ describe("AgentHost and subagents (#290)", () => {
     expect(await taught("sub-spawner")).toMatchObject({ prompt: true, agent: { spawn: true } });
     expect(await taught("sub-child")).toEqual({
       prompt: false,
-      agent: { role: "subagent", owner: "sub-main", spawn: false },
+      agent: { role: "subagent", owner: "sub-main", spawn: false, creatorTools: null },
     });
   });
 
@@ -750,13 +751,81 @@ describe("AgentHost and subagents (#290)", () => {
     await host("sub-maker").configure({ model: { conversation: { tier: "medium" } } }, owner);
     await host("sub-climber").configure({ model: { conversation: { tier: "frontier" } } }, owner);
     const climbed = await host("sub-climber").turnConfig();
-    expect(climbed.settings.model).toEqual({ conversation: { tier: "medium" } });
+    // Held to its creator's tier, on its creator's route.
+    expect(climbed.settings.model).toEqual({
+      provider: "anthropic",
+      conversation: { tier: "medium" },
+    });
     expect(climbed.settings.systemPrompt).toContain("You run on Kelpie's medium tier");
 
     // Within its creator's, it keeps its own.
     await host("sub-climber").configure({ model: { conversation: { tier: "cheap" } } }, owner);
     expect((await host("sub-climber").turnConfig()).settings.model).toEqual({
+      provider: "anthropic",
       conversation: { tier: "cheap" },
     });
+  });
+
+  it("stays a subagent once its creator is pinned, whatever the Registry answers", async () => {
+    roster({});
+    expect(await host("sub-pinned").bindCreator("kelpie")).toEqual({ ok: true });
+    expect(await host("sub-pinned").bindCreator("someone-else")).toEqual({ ok: false });
+    expect((await host("sub-pinned").turnConfig()).agent).toMatchObject({
+      role: "subagent",
+      owner: "kelpie",
+      spawn: false,
+    });
+  });
+
+  it("falls back to the cheapest tier when its creator was never read", async () => {
+    replaceIdentitySourcesForTesting({
+      agent: async (id) =>
+        id === "sub-orphan" ? { name: id, role: "subagent", owner: "sub-silent" } : null,
+      describe: async (model) => {
+        // The creator's trio can't be described: as if llm-gateway didn't answer for it.
+        if (model.conversation?.tier === "frontier") throw new Error("down");
+        return { provider: "anthropic", tier: model.conversation?.tier ?? "cheap", route: [] };
+      },
+    });
+    await host("sub-silent").configure({ model: { conversation: { tier: "frontier" } } }, owner);
+    await host("sub-orphan").configure({ model: { conversation: { tier: "medium" } } }, owner);
+    expect((await host("sub-orphan").turnConfig()).settings.model).toEqual({
+      conversation: { tier: "cheap" },
+    });
+  });
+});
+
+describe("a subagent's trio, held to its creator's (#290)", () => {
+  const limits = (fields: object) =>
+    ({ tier: "medium", provider: "anthropic", tools: null, ...fields }) as never;
+
+  it("takes the lower tier, and its creator's for a tier it doesn't rank", () => {
+    expect(clampModel({ conversation: { tier: "frontier" } }, limits({}))).toEqual({
+      provider: "anthropic",
+      conversation: { tier: "medium" },
+    });
+    expect(clampModel({ conversation: { tier: "cheap" } }, limits({}))).toMatchObject({
+      conversation: { tier: "cheap" },
+    });
+    expect(clampModel({ conversation: { tier: "auto" as never } }, limits({}))).toMatchObject({
+      conversation: { tier: "medium" },
+    });
+    expect(clampModel({}, limits({}))).toMatchObject({ conversation: { tier: "medium" } });
+  });
+
+  it("holds its effort to the creator's, none when the creator sets none", () => {
+    const effortOf = (own: object, creator: object) =>
+      clampModel({ conversation: { tier: "cheap", ...own } }, limits(creator)).conversation;
+    expect(effortOf({ effort: "max" }, { effort: "high" })).toEqual({
+      tier: "cheap",
+      effort: "high",
+    });
+    expect(effortOf({ effort: "low" }, { effort: "high" })).toEqual({
+      tier: "cheap",
+      effort: "low",
+    });
+    // Unset counts as the model's default, which may be above the creator's: it takes the creator's.
+    expect(effortOf({}, { effort: "low" })).toEqual({ tier: "cheap", effort: "low" });
+    expect(effortOf({ effort: "high" }, {})).toEqual({ tier: "cheap" });
   });
 });

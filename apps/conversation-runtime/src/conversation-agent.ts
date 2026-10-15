@@ -805,8 +805,17 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const roster = this.#get<AgentConfig["agent"] | null>("roster", null);
     const subagent = roster?.role === "subagent";
     const named = settings.tools === null ? null : new Set(settings.tools);
+    // A subagent's tools also stay within its creator's allowlist (ADR-0036 §5).
+    const creators =
+      subagent && roster?.creatorTools !== undefined && roster.creatorTools !== null
+        ? new Set(roster.creatorTools)
+        : null;
     for (const name of [...tools.keys()]) {
-      if ((subagent && !SUBAGENT_TOOLS.has(name)) || (named !== null && !named.has(name))) {
+      if (
+        (subagent && !SUBAGENT_TOOLS.has(name)) ||
+        (named !== null && !named.has(name)) ||
+        (creators !== null && !creators.has(name))
+      ) {
         tools.delete(name);
       }
     }
@@ -2101,8 +2110,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    *   one bad session can't hold back the ones after it. Its messages stay in the history.
    */
   async closeSession(): Promise<void> {
-    // A task's conversation isn't captured: the task holds its record (#335).
+    // A task's conversation isn't captured: the task holds its record (#335); nor is any of a
+    // subagent's (ADR-0036 §5).
     if (this.#get<Destination | null>("destination", null)?.channel === "task") return;
+    if (this.#get<AgentConfig["agent"] | null>("roster", null)?.role === "subagent") return;
     if (this.#closingSession) return;
     if (this.#turnRunning() || this.#pendingInbound().length > 0) {
       await this.#scheduleSessionClose(SESSION_RETRY_MS);
