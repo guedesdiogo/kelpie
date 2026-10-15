@@ -8,6 +8,11 @@ Everything in this repository is written in English: code, comments, commit mess
 
 - **Pluggable connectors.** Every external service (Postgres provider, Jev access path, model provider, channel, tool source) sits behind an interface and a config value. Ship one adapter first; adding another must be one new adapter plus configuration, with the provider's specific strengths still usable. Don't build extra adapters until they are asked for.
 - **Extra cost is opt-in.** A feature that generates cost beyond the Workers Paid plan ships turned off. It turns on only at the user's explicit request and with their approval. For example, no agent can code by default, not even on the Cloudflare Sandbox (owner, 2026-10-12). A feature that bills only once a free tier runs out, such as R2's 10 GB or Browser Run's 10 hours a month, stays on, guarded by the cost alert at 90% of the tier (#269).
+- **The interface follows the design system.** New and redesigned pages, components and animations take their values from `docs/design-system.md` (ADR-0043).
+- **What the design system doesn't define starts from award-winning work.**
+  - This covers a new component, screen, state or interaction. Before designing it, research how award-winning UX and UI work solves it; the awards and the steps are in `docs/design-system.md` §8.
+  - Look at how they move in interactions and how usable they are. Never settle for a library's default look.
+  - Post the findings on the issue as adopt, adapt or avoid, with links. Add the result to the design system in the same pull request (owner, 2026-10-15).
 - Decisions recorded in `docs/adr/` are binding; changing one takes a new ADR.
 
 ## Reference projects
