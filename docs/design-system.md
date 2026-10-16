@@ -130,7 +130,7 @@ Motion depends on how often an interaction happens, not on which screen it is in
 | Grammar | Applies to | Character |
 |---|---|---|
 | **Frequent** | Messages, streaming, tool rows, the task board, lists, menus, the palette, navigation | Fast, no visible overshoot, small distances, tight stagger |
-| **Moment** | Confirming an action, turning on something that costs, delegating to subagents, saving to memory, agent presence changes | Springs that pass their target a little, larger distances, and a signature: the pups of a subagent, the ring of a confirmation, the arc into the vault, a mascot's announcement |
+| **Moment** | Confirming an action, turning on something that costs, delegating to subagents, saving to memory, agent presence changes | Springs that pass their target a little, larger distances, and a signature: a parent's pups, the ring of a confirmation, the arc into the vault, a mascot's announcement |
 
 **The mascot's life in place** (breathing, blinking, its repertoire) is not UI motion in either grammar. It uses the frequent springs, runs under its own guards, and is the one exception to rule 8 (5.19, ADR-0045 §6).
 
@@ -152,7 +152,7 @@ The other columns come from simulating each spring with semi-implicit Euler, in 
 | `--spring-slow` | 300 / 0.9 | 31.2 | 197 ms | 394 ms | 0.1% | Large surfaces, drawers, a mascot dozing off |
 | `--spring-moment-fast` | 800 / 0.6 | 33.9 | 83 ms | 393 ms | 9.2% | A released hold, small moment feedback |
 | `--spring-moment` | 380 / 0.8 | 31.2 | 153 ms | 457 ms | 1.4% | Moment layout: a button that grows, a card that collapses, a mascot's pose |
-| `--spring-moment-slow` | 200 / 0.8 | 22.6 | 211 ms | 611 ms | 1.4% | Large moment travel; no pattern uses it since ADR-0051 took the subagents' links away |
+| `--spring-moment-slow` | 200 / 0.8 | 22.6 | 211 ms | 611 ms | 1.4% | Large moment travel; no pattern uses it since ADR-0051 |
 | `--spring-pop` | 800 / 0.55 | 31.1 | 79 ms | 471 ms | 12.3% | Confirmations: a check, a vault that receives, a mascot that changes state, and its bubble |
 
 The first six are Material 3's standard and expressive spatial springs. `--spring-pop` is Kelpie's own, a little bouncier than Material 3's expressive fast spring.
@@ -338,17 +338,18 @@ Frequent. Each fire of a routine creates a task ([ADR-0039](adr/0039-routines-as
 
 ### 5.6 Subagents
 
-Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0036-agent-roles-models-and-subagents.md)). They leave as pups and come back one by one ([ADR-0051](adr/0051-subagent-pups-return-one-by-one.md)).
+Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0036-agent-roles-models-and-subagents.md)). They work as pups of their parent's mascot, which leave it and come back one by one ([ADR-0051](adr/0051-subagent-pups-return-one-by-one.md)).
 
-- **Each subagent is a pup** of the parent's mascot (ADR-0045 §7): the same shape and head, a lighter color, dot eyes, no accessory, and 40% of the size. All of them show, since a creator has at most three live subagents (ADR-0036).
-- **Pups stand beside the parent,** on its ground, with no link between them.
-- **Leaving.** Each pup comes out of the parent's middle at a scale of 0.3 and goes to its place with `--spring-moment`, 110 ms apart. As each one leaves, the parent pulses (`scale` 0.9 to 1, `--spring-pop`), and the pup takes Working with its task's object (5.19).
-- **Each one comes back when its own task ends,** in the order they finish:
-  - it smiles and hops, as a reply that lands (5.19);
-  - it travels back into the parent's middle, shrinking to 0.3 and fading, in 200 ms with `--ease-exit`, faster than it left (rule 9);
-  - the parent swallows it (`scale` 1.12 to 1, `--spring-pop`).
-- **A status line counts them back,** "1 of 3 back", then "All three are back with the result", in a polite live region.
-- **When the last one is back,** the parent returns to Idle and greets the result with Idle's hop and smile.
+- **Each subagent at work is a pup** of the parent's mascot (ADR-0045 §7): the same shape and head, a lighter color, dot eyes, no accessory, and 40% of the size.
+- **A pup follows its subagent's tasks.** It leaves when its subagent starts a task and comes back when that task ends. A subagent with no task shows no pup. At most three pups show, since a creator has at most three live subagents (ADR-0036).
+- **Where pups play.** Beside the parent, on its ground, with no link between them, wherever the parent's mascot shows at 120 px or more. Each pup follows 5.19's row for its rendered size. Smaller views draw no pups: the parent's own state, Working while its pups are out, says it is delegating.
+- **Leaving.** Each pup comes out of the parent's middle at a scale of 0.3 and goes to its place with `--spring-moment`, `--stagger-moment` apart. As each one leaves, the parent pulses (`scale` 0.9 to 1, `--spring-pop`), and the pup takes Working with its task's object (5.19).
+- **Coming back, in the order the tasks end:**
+  - a task that succeeded: the pup smiles and hops, as a reply that lands (5.19), then 520 ms later it travels back into the parent's middle, shrinking to 0.3 and fading, in `--dur-exit-moment` with `--ease-exit` (rule 9), and the parent swallows it (`scale` 1.12 to 1, `--spring-pop`);
+  - a task that failed: the pup takes Error and stays 30 s, as 5.9's failures do, then goes back the same way with no smile;
+  - a task that waits for an answer: the pup takes Waiting until the answer comes, and the strip of 5.9 counts it.
+- **A status line counts them back** in a polite live region: "1 of 3 back", "All 3 are back", and "1 failed" when one did. These are fixed texts ([ADR-0027](adr/0027-fixed-texts-in-three-languages.md)).
+- **The parent's state** comes from 5.9 and 5.19 as for any agent: Working while its pups are out. The hop and smile greet the reply that relays the result (5.1).
 - **Reduced motion:** pups fade in and out at their places in `--dur-fade`, and the mascots are Still (5.19).
 
 ### 5.7 Saved to memory
@@ -572,6 +573,7 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 | Task card (5.5) | 20 px | the shape, the color and the eyes only: no head, accessory, mittens or badge; still, since the card already says the state. The engine draws a badge at every size up to 40 px today, so the board needs that changed |
 | Conversation header | 48 px | its home. Everything happens inside its box; the box is kept before the figure arrives, so nothing in the layout moves |
 | Empty conversation, profile, the expired-login dialog (5.12) | 160 px | gestures a little more often |
+| Pups (5.6) | 40% of the parent | drawn only where the parent shows at 120 px or more; each follows the row above for its rendered size |
 | Telegram bot photo | 800 px square, cropped round by Telegram | a still, and a loop Telegram plays (below) |
 
 **Reduced motion and the pause.**
@@ -706,7 +708,7 @@ Frequent, and still: the logo never moves ([ADR-0049](adr/0049-logo-main-mascot-
 - **View Transitions** fit navigation between views. They never wrap a list that streams.
 - **The Motion library** fits only where the owner drags something with velocity, such as reordering the board. It is loaded with the page that needs it.
 - **An entrance plays once.** It is keyed to the element, so a streaming update never replays it. It never leaves content at opacity 0 if the animation doesn't run, which happens when a background tab pauses timelines. A list animates entries only up to 60 rows; past that, rows appear at once.
-- **Heavy effects stay off the DOM's per-frame path.** An effect heavier than a transform belongs in a shader scoped to its element, or nowhere. Full-screen WebGL stays out of the product.
+- **Heavy effects stay off the DOM's per-frame path.** No pattern uses an SVG filter now; a filter, a blur or anything heavier belongs in a shader scoped to its element, or nowhere. Full-screen WebGL stays out of the product.
 - **The mascot engine is the one continuous loop.** A new surface that shows an agent reuses it (5.19): one shared timer, observers that stop figures out of view, and the plush painted once per size. Nothing draws an agent another way.
 - **The stack is still open.** These choices guide whatever UI stack Kelpie picks; the [viability study](viability-study.md) lists it among its open questions.
 
