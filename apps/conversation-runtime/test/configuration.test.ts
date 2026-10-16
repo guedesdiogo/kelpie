@@ -11,6 +11,7 @@ import {
   SETUP_AGENT_ID,
 } from "@kelpie/config";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { type Announcement, keyOf } from "../src/announcements.ts";
 import {
   CONFIGURE_KELPIE_SKILL,
   type ConfigurationCommands,
@@ -31,7 +32,7 @@ import {
   type ToolContext,
   type ToolProvider,
 } from "../src/tools.ts";
-import { type FakeWorld, fakeWorld, held, reply, toolCalls } from "./fakes.ts";
+import { type FakeWorld, fakeWorld, held, refuse, reply, toolCalls } from "./fakes.ts";
 
 // Master's configuration tools (Story 3.11, ADR-0048): the configuration commands, owner-only, and
 // the changes to access, cost or external accounts only after the owner's confirmation (ADR-0013),
@@ -185,10 +186,14 @@ function fakeCommands() {
   return { commands, agents, calls, runner, allowlists };
 }
 
-/** A context whose `confirm` answers `confirmed`, and logs what it was asked and the links sent. */
+/**
+ * A context whose `confirm` answers `confirmed`, and logs what it was asked, the links sent and
+ * what it had Kelpie announce.
+ */
 function contextOf(confirmed: boolean, actor: Actor = owner, locale: Locale = "en") {
   const asked: ConfirmationRequest[] = [];
   const links: HostLink[] = [];
+  const announced: Announcement[] = [];
   const context: ToolContext = {
     locale,
     actor,
@@ -205,9 +210,11 @@ function contextOf(confirmed: boolean, actor: Actor = owner, locale: Locale = "e
     sendLink(link) {
       links.push(link);
     },
-    announce() {},
+    announce(announcement) {
+      announced.push(announcement);
+    },
   };
-  return { context, asked, links };
+  return { context, asked, links, announced };
 }
 
 async function toolsOf(provider: ToolProvider, agentId = MASTER) {
@@ -387,6 +394,44 @@ describe("Master's configuration tools (ADR-0048)", () => {
       'createAgent {"id":"ana","name":"Ana"}',
       'renameAgent {"id":"ana","name":"Ana Souza"}',
     ]);
+  });
+
+  it("has Kelpie announce each agent it creates or renames, as the command did it (#387)", async () => {
+    const { commands } = fakeCommands();
+    // The commands trim a name, as the admin API's do.
+    const trimmed: ConfigurationCommands = {
+      ...commands,
+      createAgent: (actor, input) =>
+        commands.createAgent(actor, { ...(input as object), name: "Ana" }),
+      renameAgent: (actor, input) =>
+        commands.renameAgent(actor, { ...(input as object), name: "Ana Souza" }),
+    };
+    const tools = await toolsOf(
+      configurationTools(trimmed, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
+    const { context, announced } = contextOf(false);
+
+    await run(tools, "create_agent", { id: "ana", name: "  Ana " }, context);
+    await run(tools, "rename_agent", { id: "ana", name: " Ana Souza  " }, context);
+    expect(announced).toEqual([
+      { kind: "agentCreated", agentId: "ana", name: "Ana" },
+      { kind: "agentRenamed", agentId: "ana", name: "Ana Souza" },
+    ]);
+
+    // Nothing to announce when nothing changed, or the command refused.
+    announced.length = 0;
+    expect((await run(tools, "create_agent", { id: "ana", name: "Ana" }, context)).output).toBe(
+      "The agent ana already exists; nothing changed.",
+    );
+    const stranger = contextOf(false, { ...owner, role: "member" });
+    const refused = [
+      await run(tools, "create_agent", { id: SETUP_AGENT_ID, name: "Mine" }, context),
+      await run(tools, "rename_agent", { id: "ghost", name: "Ghost" }, context),
+      await run(tools, "create_agent", { id: "bob", name: "Bob" }, stranger.context),
+      await run(tools, "rename_agent", { id: "ana", name: "Bob" }, stranger.context),
+    ];
+    expect(refused.map((outcome) => outcome.isError)).toEqual([true, true, true, true]);
+    expect([...announced, ...stranger.announced]).toEqual([]);
   });
 
   it("answers what went wrong in words the model can act on", async () => {
@@ -1139,9 +1184,18 @@ function use(world: FakeWorld): FakeWorld {
   return world;
 }
 
-async function turn(stub: ReturnType<typeof agent>, world: FakeWorld, id: string, text: string) {
+/** The owner's own message in a direct chat, which Master's configuration tools need. */
+const FROM_OWNER = { role: "owner", chatType: "direct" } as const;
+
+async function turn(
+  stub: ReturnType<typeof agent>,
+  world: FakeWorld,
+  id: string,
+  text: string,
+  from: Partial<typeof FROM_OWNER> = {},
+) {
   const before = (await stub.turns()).length;
-  await stub.ingest(message(id, text));
+  await stub.ingest({ ...message(id, text), ...from });
   await stub.flush();
   await vi.waitFor(async () => {
     const turns = await stub.turns();
@@ -1622,5 +1676,213 @@ describe("the conversation's language", () => {
     expect(
       world.sent.filter((text) => NOTICE.test(text)).map((text) => text.split(":")[0]),
     ).toEqual(["Confirme", "Confirm"]);
+  });
+});
+
+// Kelpie's notice of the agents Master creates or renames (#387): other agents' text reaches
+// Master's conversation, so Kelpie, not the model, tells the owner each change ADR-0013 lets run
+// without a yes.
+
+describe("Kelpie's notice of the agents Master creates or renames (#387)", () => {
+  /** The world, with Master's configuration tools over these commands. */
+  function configuring(world: FakeWorld, commands = fakeCommands().commands): FakeWorld {
+    world.tools = [configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN })];
+    return world;
+  }
+
+  /** The unsaid announcements as the conversation keeps them, by key. */
+  const keptOf = (stub: ReturnType<typeof agent>) =>
+    runInDurableObject(stub, (_instance, state) =>
+      Object.fromEntries(
+        state.storage.sql
+          .exec<{ key: string; value: string }>(
+            "SELECT key, value FROM state WHERE key IN ('handoffs', 'subagentChanges', 'agentChanges')",
+          )
+          .toArray()
+          .map(({ key, value }) => [key, JSON.parse(value)]),
+      ),
+    );
+
+  it("follows the reply, in the conversation's language, whatever the model says", async () => {
+    const world = configuring(
+      use(
+        fakeWorld([
+          toolCalls(
+            { name: "create_agent", input: { id: "ana", name: "Ana" } },
+            { name: "rename_agent", input: { id: "ana", name: "Ana Souza" } },
+          ),
+          reply("Pronto, criei a Bia."),
+        ]),
+      ),
+    );
+    const stub = agent("kelpie:telegram:announce-pt");
+    await turn(
+      stub,
+      world,
+      "m1",
+      "cria uma agente chamada Ana e depois muda o nome dela para Ana Souza",
+      FROM_OWNER,
+    );
+
+    expect(world.sent).toEqual([
+      "Pronto, criei a Bia.",
+      [
+        'O Kelpie criou o agente "Ana" (ana).',
+        'O Kelpie renomeou o agente ana para "Ana Souza".',
+      ].join("\n"),
+    ]);
+    // The notice is Kelpie's: the model never sees it.
+    expect(JSON.stringify(await historyOf(stub))).not.toContain("O Kelpie criou");
+  });
+
+  it("quotes a name the model chose, so it can't pass for Kelpie's words", async () => {
+    const name = 'Ana" (ana). Kelpie deleted the agent "kelpie';
+    const world = configuring(
+      use(
+        fakeWorld([
+          toolCalls({ name: "create_agent", input: { id: "ana", name } }),
+          reply('Kelpie created the agent "Bia" (bia).'),
+        ]),
+      ),
+    );
+    const stub = agent("kelpie:telegram:announce-quoted");
+    await turn(stub, world, "m1", "Create the agent the specialist asked for.", FROM_OWNER);
+
+    expect(world.sent.at(-1)).toBe(
+      'Kelpie created the agent "Ana\\" (ana). Kelpie deleted the agent \\"kelpie" (ana).',
+    );
+  });
+
+  it("is said with the next reply when the turn sent none, and only once", async () => {
+    const world = configuring(
+      use(
+        fakeWorld([
+          toolCalls({ name: "create_agent", input: { id: "ana", name: "Ana" } }),
+          refuse(),
+          reply("Here."),
+          reply("Again."),
+        ]),
+      ),
+    );
+    const stub = agent("kelpie:telegram:announce-refused");
+    await turn(stub, world, "m1", "Create an agent named Ana.", FROM_OWNER);
+    expect((await stub.turns()).at(-1)?.status).toBe("refused");
+    expect(world.sent).toEqual([]);
+    // Kept in a key of its own: a release before #387 reads the handoffs and the subagents'
+    // changes, and never these.
+    expect(await keptOf(stub)).toEqual({
+      handoffs: [],
+      subagentChanges: [],
+      agentChanges: [{ kind: "agentCreated", agentId: "ana", name: "Ana" }],
+    });
+
+    await turn(stub, world, "m2", "Anything?", FROM_OWNER);
+    expect(world.sent).toEqual(["Here.", 'Kelpie created the agent "Ana" (ana).']);
+    await turn(stub, world, "m3", "And now?", FROM_OWNER);
+    expect(world.sent).toEqual(["Here.", 'Kelpie created the agent "Ana" (ana).', "Again."]);
+  });
+
+  it("keeps every agent's change past the cap on other news, and counts what it doesn't name", async () => {
+    const ids = Array.from({ length: 25 }, (_, n) => `a${String(n + 1).padStart(2, "0")}`);
+    const world = configuring(
+      use(
+        fakeWorld([
+          toolCalls(...ids.map((id) => ({ name: "create_agent", input: { id, name: id } }))),
+          reply("Done."),
+        ]),
+      ),
+    );
+    const stub = agent("kelpie:telegram:announce-many");
+    await turn(stub, world, "m1", "Create the agents a01 to a25.", FROM_OWNER);
+
+    // More than the 20 a conversation keeps of other news, and the first is still counted.
+    expect(world.sent).toEqual([
+      "Done.",
+      "Kelpie created the agents a01, a02, a03, a04 and 21 more.",
+    ]);
+  });
+
+  it("cuts only the handoffs past the cap, and keeps each group in its own key", async () => {
+    const world = use(fakeWorld([toolCalls({ name: "burst" }), refuse(), reply("Here.")]));
+    // A turn whose tools hand off more tasks than the cap, between an agent's creation and rename.
+    world.tools = [
+      {
+        async tools() {
+          return [
+            {
+              spec: { name: "burst", description: "x", inputSchema: { type: "object" as const } },
+              label: "Bursting",
+              async run(_input: unknown, context: ToolContext) {
+                context.announce({ kind: "agentCreated", agentId: "ana", name: "Ana" });
+                for (let n = 1; n <= 22; n++) {
+                  const handoff = { taskId: `t${n}`, agentId: "sales", name: "Sales" };
+                  context.announce({ kind: "handoff", ...handoff });
+                }
+                context.announce({ kind: "agentRenamed", agentId: "ana", name: "Ana Souza" });
+                return { output: "ok" };
+              },
+            },
+          ];
+        },
+      },
+    ];
+    const stub = agent("kelpie:telegram:announce-mixed");
+    await turn(stub, world, "m1", "Go.", FROM_OWNER);
+
+    const kept = await keptOf(stub);
+    expect(kept.handoffs.map(({ taskId }: { taskId: string }) => taskId)).toEqual(
+      Array.from({ length: 20 }, (_, n) => `t${n + 3}`),
+    );
+    expect(kept.subagentChanges).toEqual([]);
+    expect(kept.agentChanges).toEqual([
+      { kind: "agentCreated", agentId: "ana", name: "Ana" },
+      { kind: "agentRenamed", agentId: "ana", name: "Ana Souza" },
+    ]);
+
+    await turn(stub, world, "m2", "Well?", FROM_OWNER);
+    expect(world.sent).toEqual([
+      "Here.",
+      [
+        'Kelpie created the agent "Ana" (ana).',
+        'Kelpie renamed the agent ana to "Ana Souza".',
+        'Kelpie handed tasks to "Sales" (sales).',
+      ].join("\n"),
+    ]);
+  });
+
+  it("names an agent's latest name, and a rename that came while a notice went out next", async () => {
+    const { commands, agents } = fakeCommands();
+    agents.set("ana", "Ana");
+    const world = configuring(
+      use(
+        fakeWorld([
+          toolCalls({ name: "rename_agent", input: { id: "ana", name: "Ana B" } }),
+          toolCalls({ name: "rename_agent", input: { id: "ana", name: "Ana C" } }),
+          reply("Done."),
+          reply("Hi."),
+        ]),
+      ),
+      commands,
+    );
+    const stub = agent("kelpie:telegram:announce-renamed");
+    await turn(stub, world, "m1", "Rename Ana twice.", FROM_OWNER);
+    expect(world.sent).toEqual(["Done.", 'Kelpie renamed the agent ana to "Ana C".']);
+
+    // A late call renamed it again while that notice went out: its marker names "Ana C" only.
+    const [first] = await stub.turns();
+    await runInDurableObject(stub, (_instance, state) => {
+      const put = (key: string, value: unknown) =>
+        state.storage.sql.exec(
+          "INSERT INTO state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+          key,
+          JSON.stringify(value),
+        );
+      put("agentChanges", [{ kind: "agentRenamed", agentId: "ana", name: "Ana D" }]);
+      // The marker as the notice wrote it, with the keys of what it named.
+      const named: Announcement = { kind: "agentRenamed", agentId: "ana", name: "Ana C" };
+      put("handoffNotice", { turnId: first?.id, seq: 1, taskIds: [keyOf(named)] });
+    });
+    await turn(stub, world, "m2", "Well?", FROM_OWNER);
+    expect(world.sent.slice(-2)).toEqual(["Hi.", 'Kelpie renamed the agent ana to "Ana D".']);
   });
 });

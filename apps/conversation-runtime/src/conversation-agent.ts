@@ -92,6 +92,7 @@ import {
   type Announcement,
   announcementNotice,
   keyOf,
+  replaces,
   type StoredAnnouncement,
   stored,
 } from "./announcements.ts";
@@ -150,12 +151,17 @@ const WEBCHAT_ID_PREFIX = "webchat:";
 const WEBCHAT_RECEIVED_IDS = 100;
 /** While the owner types in the webchat, buffered messages wait at least this long for the rest. */
 const TYPING_HOLD_MS = 4_000;
-/** The most announcements a conversation keeps for its next reply's notice; the oldest go first. */
+/**
+ * The most handoffs and subagents' changes a conversation keeps for its next reply's notice; past
+ * it, the handoffs go first. The agents Master created or renamed all stay (#387).
+ */
 const MAX_UNSAID_ANNOUNCEMENTS = 20;
 /** Where a conversation keeps its unsaid handoffs, in #287's shape, so a rollback still reads them. */
 const HANDOFFS = "handoffs";
 /** Where it keeps the subagents created or deleted (#342), which a release before it never reads. */
 const SUBAGENT_CHANGES = "subagentChanges";
+/** Where it keeps the agents Master created or renamed (#387), apart for the same reason. */
+const AGENT_CHANGES = "agentChanges";
 
 /**
  * Kelpie's last notice of them (#287): its outbox row, and the keys of what it named (`keyOf`); a
@@ -1447,8 +1453,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       this.#ports.now(),
       locale,
     );
-    // Then what its tools did, as subagents made and work handed off, with what an earlier turn
-    // left unsaid (#287, #342).
+    // Then what its tools did, as agents and subagents made and work handed off, with what an
+    // earlier turn left unsaid (#287, #342, #387).
     this.#settleAnnouncements();
     const announcements = this.#announcements();
     const announced = announcementNotice(announcements, locale);
@@ -1504,17 +1510,28 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     this.#settleAnnouncements();
   }
 
-  /** What the turn's tools had Kelpie announce that no notice said yet (#287, #342). */
+  /** What the turn's tools had Kelpie announce that no notice said yet (#287, #342, #387). */
   #announcements(): Announcement[] {
     return [
       ...stored(this.#get<StoredAnnouncement[]>(HANDOFFS, [])),
       ...this.#get<Announcement[]>(SUBAGENT_CHANGES, []),
+      ...this.#get<Announcement[]>(AGENT_CHANGES, []),
     ];
   }
 
-  /** Keeps these unsaid, the newest MAX_UNSAID_ANNOUNCEMENTS of them, each kind in its own key. */
+  /**
+   * Keeps these unsaid, each group in its own key. Of the handoffs and subagents' changes, only the
+   * last MAX_UNSAID_ANNOUNCEMENTS. An agent's creation and its latest name always stay, at most two
+   * per agent, so no burst of changes pushes one out unsaid, and the notice counts what it doesn't
+   * name (#387).
+   */
   #keepAnnouncements(all: readonly Announcement[]): void {
-    const kept = all.slice(-MAX_UNSAID_ANNOUNCEMENTS);
+    const ofAgents = (one: Announcement) =>
+      one.kind === "agentCreated" || one.kind === "agentRenamed";
+    const kept = [
+      ...all.filter((one) => !ofAgents(one)).slice(-MAX_UNSAID_ANNOUNCEMENTS),
+      ...all.filter(ofAgents),
+    ];
     this.#set(
       HANDOFFS,
       kept.flatMap((one) =>
@@ -1525,8 +1542,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     );
     this.#set(
       SUBAGENT_CHANGES,
-      kept.filter((one) => one.kind !== "handoff"),
+      kept.filter((one) => one.kind === "created" || one.kind === "deleted"),
     );
+    this.#set(AGENT_CHANGES, kept.filter(ofAgents));
   }
 
   /**
@@ -1553,12 +1571,11 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
 
   /**
    * Keeps what a tool did for Kelpie's notice after the next reply this conversation sends (#287,
-   * #342). It outlives the turn that made it, since the task or the subagent does: a turn stopped
-   * before its reply leaves it for the next one.
+   * #342, #387). It outlives the turn that made it, since the task or the agent does: a turn
+   * stopped before its reply leaves it for the next one.
    */
   #announce(announcement: Announcement): void {
-    const key = keyOf(announcement);
-    const kept = this.#announcements().filter((one) => keyOf(one) !== key);
+    const kept = this.#announcements().filter((one) => !replaces(announcement, one));
     const { kind, agentId, name } = announcement;
     const one: Announcement =
       kind === "handoff"

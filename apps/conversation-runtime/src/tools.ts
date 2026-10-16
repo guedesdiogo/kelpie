@@ -219,9 +219,10 @@ export interface ToolContext {
   sendLink(link: HostLink): void;
   /**
    * Has Kelpie announce, after a reply, what the turn's tools did (ADR-0036 §4 and §6), in its own
-   * fixed words: a task handed to another agent (#287), a subagent created or deleted (#342). What
-   * it announces stands whatever becomes of the turn, so a call the turn gave up on still announces
-   * it, and a turn that sends no reply leaves it for the next one.
+   * fixed words: a task handed to another agent (#287), a subagent created or deleted (#342), an
+   * agent Master created or renamed (#387). What it announces stands whatever becomes of the turn,
+   * so a call the turn gave up on still announces it, and a turn that sends no reply leaves it for
+   * the next one.
    */
   announce(announcement: Announcement): void;
   /** In a task's conversation, its run (#335); elsewhere, none. */
