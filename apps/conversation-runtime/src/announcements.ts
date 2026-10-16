@@ -164,7 +164,7 @@ const MAX_SHOWN_NAME = 80;
 function quoted(name: string): string {
   let shown = "";
   for (const character of name) {
-    const written = visible(character.replace(/[\\"]/, "\\$&"));
+    const written = visible(character.replaceAll(/[\\"]/g, "\\$&"));
     if (shown.length + written.length > MAX_SHOWN_NAME) return `"${shown}…"`;
     shown += written;
   }
