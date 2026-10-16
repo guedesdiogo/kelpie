@@ -1,5 +1,6 @@
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import type { BotPhotoRequest } from "@kelpie/channels";
 import {
   DEFAULT_SETTINGS,
   derivedMascot,
@@ -9,10 +10,11 @@ import {
   SETUP_AGENT_ID,
 } from "@kelpie/config";
 import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CREATE_SUBAGENT_SKILL,
   clampModel,
+  replaceChannelEgressForTesting,
   replaceContextStoreForTesting,
   replaceIdentitySourcesForTesting,
 } from "../src/agent-host/agent-host.ts";
@@ -985,10 +987,17 @@ describe("a subagent's trio, held to its creator's (#290)", () => {
 describe("The bot's photo (ADR-0046)", () => {
   const picked: Mascot = { ...KELPIE_MASCOT, color: "lagoon" };
 
+  /** Waits for the photo the object asks for when it starts (#388), which the test egress takes. */
+  const started = (stub: ReturnType<typeof host>) =>
+    vi.waitFor(async () => expect(await stateOf(stub, "botPhoto")).toBeDefined(), {
+      timeout: 5_000,
+    });
+
   /** The agent's AgentHost, with a channel-egress that records what it is asked for. */
   async function photoHost(id: string, answer: object = { ok: true }) {
     const asked: [string, unknown][] = [];
     const stub = host(id);
+    await started(stub);
     await runInDurableObject(stub, (instance) => {
       const configurable = instance as unknown as { env: Env };
       configurable.env = {
@@ -1054,5 +1063,117 @@ describe("The bot's photo (ADR-0046)", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  describe("when the object starts (#388)", () => {
+    /** Kelpie as it was before ADR-0049. */
+    const OLD_KELPIE: Mascot = {
+      ...KELPIE_MASCOT,
+      eyes: "shine",
+      head: { type: "ears", variation: "pointed" },
+      accessory: { type: "belt", variation: "collar" },
+    };
+    const asked: [string, unknown][] = [];
+    let answer: BotPhotoRequest = { ok: true };
+
+    beforeEach(() => {
+      replaceChannelEgressForTesting({
+        updateBotPhoto: async (agentId, mascot) => {
+          asked.push([agentId, mascot]);
+          return answer;
+        },
+      });
+    });
+
+    afterEach(() => {
+      replaceChannelEgressForTesting(undefined);
+      asked.length = 0;
+      answer = { ok: true };
+    });
+
+    /** One more answer from the Registry: a start's lookup that came before it has been answered. */
+    const registryRoundTrip = () => env.REGISTRY.getByName(REGISTRY_NAME).get("kelpie");
+
+    /**
+     * Leaves the agent's object with `rows` in its state, as an earlier deploy would have, and
+     * evicts it, so its next call starts it again. What its first start asked for isn't counted.
+     */
+    async function stopped(id: string, rows: Record<string, unknown> = {}) {
+      const stub = host(id);
+      await started(stub);
+      await seedState(stub, rows);
+      await evictDurableObject(stub);
+      asked.length = 0;
+      return stub;
+    }
+
+    it("asks for the main agent's new default when its bot was last asked for the old one", async () => {
+      const kelpie = await stopped("kelpie", { botPhoto: OLD_KELPIE });
+      // As the deploy's probe wakes it, before anyone writes to it.
+      await kelpie.ping();
+      await vi.waitFor(() => expect(asked).toEqual([["kelpie", KELPIE_MASCOT]]));
+      await vi.waitFor(async () =>
+        expect(await stateOf(kelpie, "botPhoto")).toEqual(KELPIE_MASCOT),
+      );
+    });
+
+    it("asks nothing when it last asked for the mascot it shows, or the owner picked one", async () => {
+      const same = await stopped("photo-start-same");
+      const own = await stopped("photo-start-picked", {
+        settings: { mascot: picked },
+        botPhoto: OLD_KELPIE,
+      });
+      const control = await stopped("photo-start-control", { botPhoto: OLD_KELPIE });
+      await same.ping();
+      await own.ping();
+      // Started last, so the others would have asked before it.
+      await control.ping();
+      await vi.waitFor(() => expect(asked).toHaveLength(1));
+      await registryRoundTrip();
+      expect(asked).toEqual([["photo-start-control", derivedMascot("photo-start-control")]]);
+    });
+
+    it("asks again at the next start after a failure, and remembers an agent without a bot", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const stub = await stopped("photo-start-retry", { botPhoto: OLD_KELPIE });
+        const mascot = derivedMascot("photo-start-retry");
+        answer = { ok: false, reason: "store_unavailable" };
+        await stub.ping();
+        await vi.waitFor(() =>
+          expect(warn).toHaveBeenCalledWith(
+            "AgentHost: the bot's photo wasn't asked for",
+            "store_unavailable",
+          ),
+        );
+        expect(await stateOf(stub, "botPhoto")).toEqual(OLD_KELPIE);
+
+        answer = { ok: false, reason: "not_connected" };
+        await evictDurableObject(stub);
+        await stub.ping();
+        await vi.waitFor(async () => expect(await stateOf(stub, "botPhoto")).toEqual(mascot));
+        expect(asked).toEqual([
+          ["photo-start-retry", mascot],
+          ["photo-start-retry", mascot],
+        ]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("keeps a mascot the owner picks while its default is looked up", async () => {
+      const racing = await stopped("photo-start-race", { botPhoto: OLD_KELPIE });
+      const control = await stopped("photo-start-race-control", { botPhoto: OLD_KELPIE });
+      // The pick starts the object, whose start looks its default up in the Registry meanwhile.
+      await racing.configure({ mascot: picked }, owner);
+      await control.ping();
+      await vi.waitFor(() => expect(asked).toHaveLength(2));
+      await registryRoundTrip();
+      expect(asked).toEqual([
+        ["photo-start-race", picked],
+        ["photo-start-race-control", derivedMascot("photo-start-race-control")],
+      ]);
+      await vi.waitFor(async () => expect(await stateOf(racing, "botPhoto")).toEqual(picked));
+    });
   });
 });

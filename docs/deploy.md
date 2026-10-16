@@ -97,7 +97,7 @@ After the gates pass on `main`, the `Deploy` job runs `tools/release`. It:
    - The probes repeat every minute.
    - The GraphQL Analytics API counts the new versions' exceptions, exceeded limits and internal errors, Durable Objects included.
 
-The run's summary has the table of versions, the probes and the barriers. The probes change nothing: the webhooks name no agent, so no conversation or notice runs, and the deep probe only wakes objects. Its answer has no ids and no data.
+The run's summary has the table of versions, the probes and the barriers. The probes change nothing: the webhooks name no agent, so no conversation or notice runs, and the deep probe only wakes objects. An `AgentHost` that wakes does its own start work: its migrations, and a request for its bot's photo when the agent's default mascot changed (ADR-0054). The probe's answer has no ids and no data.
 
 ### Automatic rollback
 
