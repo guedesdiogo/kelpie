@@ -10,6 +10,7 @@ import {
 } from "@kelpie/config";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { replaceTaskRunnerForTesting } from "../src/agent-host/agent-host.ts";
+import { configurationTools, MASTER_TOOLS } from "../src/configuration.ts";
 import { memoryTools } from "../src/memory-tools.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import { SUBAGENT_TOOLS } from "../src/subagent-limits.ts";
@@ -301,5 +302,56 @@ describe("a temporary subagent (#290)", () => {
     expect(await offered(child, "allow-maker-sub-aaaaaa")).toEqual(
       new Set(["complete_task", "memory_search"]),
     );
+  });
+
+  it("never narrows Master's orchestration tools: its allowlist narrows only the others (#391)", async () => {
+    const owner = { userId: "u-owner", role: "owner", via: "admin-api" } as const;
+    const world = use(fakeWorld([reply("One."), reply("Two."), reply("Three.")]));
+    world.tools.push(
+      configurationTools({} as never, {
+        roleOf: async (id) => (await registry().get(id))?.role ?? null,
+        adminOrigin: "https://admin.example",
+      }),
+    );
+    /** The tools a direct turn of the agent is offered, in a thread of its own. */
+    const offered = async (agentId: string, thread: string) => {
+      const before = world.requests.length;
+      const chat = agent(`${agentId}:telegram:${thread}`);
+      await chat.ingest({
+        agentId,
+        providerMessageId: `${thread}:m1`,
+        userId: "u-owner",
+        role: "owner",
+        chatType: "direct",
+        text: "What can you do?",
+        destination: { channel: "telegram", threadId: thread },
+        sentAt: Date.now(),
+        timeZone: null,
+      });
+      await chat.flush();
+      await until(async () => {
+        expect(world.requests.length).toBeGreaterThan(before);
+        expect((await chat.turns()).every((turn) => turn.status !== "running")).toBe(true);
+      });
+      return new Set(world.requests[before]?.tools?.map((spec) => spec.name) ?? []);
+    };
+
+    const all = await offered("kelpie", "allow-master-all");
+    // An allowlist stored on Master, as one from before #386 might be, narrows only the others.
+    await host("kelpie").configure({ tools: ["memory_search"] }, owner);
+    const narrowed = await offered("kelpie", "allow-master-narrow");
+    await host("kelpie").configure({ tools: null }, owner);
+    expect(narrowed).toEqual(
+      new Set([...all].filter((name) => name === "memory_search" || MASTER_TOOLS.has(name))),
+    );
+    for (const name of ["configure_agent", "set_main_agent", "create_subagent", "create_task"]) {
+      expect(narrowed).toContain(name);
+    }
+    expect(narrowed).not.toContain("memory_read");
+
+    // A specialist's allowlist still narrows everything it is given.
+    await registry().add("allow-spec", "Spec", owner);
+    await host("allow-spec").configure({ tools: ["memory_search"] }, owner);
+    expect(await offered("allow-spec", "allow-spec-chat")).toEqual(new Set(["memory_search"]));
   });
 });

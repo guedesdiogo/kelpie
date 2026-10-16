@@ -95,7 +95,7 @@ import {
   type StoredAnnouncement,
   stored,
 } from "./announcements.ts";
-import { bareHttpsOrigin, setupNote } from "./configuration.ts";
+import { bareHttpsOrigin, heldTools, setupNote } from "./configuration.ts";
 import migrations from "./migrations/migrations.js";
 import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
 import { failureNotice, routeNotice } from "./route-notices.ts";
@@ -856,13 +856,15 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   /**
    * The tools a turn may use (#290): a subagent never gets those that create agents or tasks,
    * write memory, or configure Kelpie, whatever it was granted; and an agent whose settings name
-   * its tools gets only those.
+   * its tools gets only those, except that Master always keeps the ones it orchestrates Kelpie
+   * with (ADR-0049, #391).
    */
   #allowed(tools: Map<string, Tool>, settings: AgentSettings): Map<string, Tool> {
     const roster = this.#get<AgentConfig["agent"] | null>("roster", null);
     const subagent = roster?.role === "subagent";
     // A turn stored before #290 has no allowlist in its settings: it has none (#344).
-    const named = settings.tools == null ? null : new Set(settings.tools);
+    const held = heldTools(roster?.role ?? null, settings.tools ?? null);
+    const named = held === null ? null : new Set(held);
     // A subagent's tools also stay within its creator's allowlist (ADR-0036 §5).
     const creators =
       subagent && roster?.creatorTools !== undefined && roster.creatorTools !== null

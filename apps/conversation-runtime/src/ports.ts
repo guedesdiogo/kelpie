@@ -31,7 +31,7 @@ import {
   type RouterEvent,
 } from "@kelpie/llm";
 import type { ModelDescription, ModelSettings } from "@kelpie/llm/models";
-import { configurationTools } from "./configuration.ts";
+import { configurationTools, heldTools } from "./configuration.ts";
 import { memoryTools } from "./memory-tools.ts";
 import { subagentTools } from "./subagent-tools.ts";
 import { taskTools } from "./task-tools.ts";
@@ -260,17 +260,19 @@ function productionPorts(env: Env): ConversationPorts {
           return entry?.role === "specialist" && (await agentHost(id).config()).settings.spawn;
         },
         creator: async (id) => {
-          // Its own model, not the defaults: an unset tier follows the instance's (#344).
-          const [{ settings }, model] = await Promise.all([
+          // Its own model, not the defaults: an unset tier follows the instance's (#344). Master
+          // holds its orchestration tools whatever its list (ADR-0049, #391).
+          const [{ settings }, model, entry] = await Promise.all([
             agentHost(id).config(),
             agentHost(id).ownModel(),
+            registry.get(id),
           ]);
           const described = await (
             env.LLM_GATEWAY as unknown as {
               describe(area: "conversation", agent: ModelSettings): Promise<ModelDescription>;
             }
           ).describe("conversation", model);
-          return { model, described, tools: settings.tools };
+          return { model, described, tools: heldTools(entry?.role ?? null, settings.tools) };
         },
         bindCreator: (id, creator) => env.AGENT_HOST.getByName(id).bindCreator(creator),
         discard: (id) => agentHost(id).erase([]),
