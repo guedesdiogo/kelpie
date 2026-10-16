@@ -23,7 +23,7 @@ export interface WebchatDeps {
   agentExists(agentId: string): Promise<boolean>;
   /** The registry's agents, in its order, for the page's switcher (#140). */
   listAgents(): Promise<Pick<AgentEntry, "id" | "name" | "role" | "chat">[]>;
-  /** Each agent's mascot, through conversation-runtime's read-only AgentLooks (ADR-0050 §7). */
+  /** Each agent's mascot, through conversation-runtime's read-only AgentLooks (ADR-0052 §7). */
   mascots(agentIds: string[]): Promise<Record<string, unknown>>;
   /** The static page, from Workers assets. */
   page(request: Request): Promise<Response>;
@@ -79,7 +79,7 @@ export async function handleWebchat(request: Request, deps: WebchatDeps): Promis
   if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
     return new Response(null, { status: 426 });
   }
-  // The sidebar's presence view (ADR-0050 §1), or the conversation's own socket; nothing else.
+  // The sidebar's presence view (ADR-0052 §1), or the conversation's own socket; nothing else.
   const view = url.searchParams.get("view");
   if (view !== null && view !== "presence") return new Response(null, { status: 400 });
   const agentId = url.searchParams.get("agent");
@@ -125,7 +125,7 @@ async function agentList(sub: string, deps: WebchatDeps): Promise<Response> {
   );
   const listed = chatting.filter((_, index) => admitted[index]);
   if (listed.length === 0) return new Response(null, { status: 403 });
-  // Each row draws its agent's mascot before its socket opens (ADR-0050 §7). Without them, the list
+  // Each row draws its agent's mascot before its socket opens (ADR-0052 §7). Without them, the list
   // still answers; a value that isn't a mascot never reaches the page.
   const looks = await deps.mascots(listed.map(({ id }) => id)).catch(() => ({}));
   const agents = listed.map(({ id, name, role }) => {

@@ -132,7 +132,7 @@ describe("the webchat's agent list", () => {
     expect(fakes.page).not.toHaveBeenCalled();
   });
 
-  it("names each admitted agent's mascot, as AgentLooks reads it, and only a valid one (ADR-0050 §7)", async () => {
+  it("names each admitted agent's mascot, as AgentLooks reads it, and only a valid one (ADR-0052 §7)", async () => {
     const fakes = deps({
       mascots: vi.fn(async () => ({
         assistant: KELPIE_MASCOT,
@@ -257,7 +257,7 @@ describe("the webchat's socket", () => {
     );
   });
 
-  it("opens the sidebar's presence view, admitted the same way, and refuses a view it doesn't know (ADR-0050 §1)", async () => {
+  it("opens the sidebar's presence view, admitted the same way, and refuses a view it doesn't know (ADR-0052 §1)", async () => {
     const fakes = deps();
     await handleWebchat(socketRequest("/webchat/ws?agent=assistant&view=presence"), fakes);
     expect(fakes.admit).toHaveBeenCalledOnce();

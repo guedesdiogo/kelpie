@@ -147,7 +147,7 @@ import {
 type Received = Omit<InboundMessage, "role" | "chatType"> & { role?: unknown; chatType?: unknown };
 
 /** The most history rows a webchat socket is shown when it opens. */
-/** The most presence sockets one conversation keeps, and the open confirmations one lists (ADR-0050). */
+/** The most presence sockets one conversation keeps, and the open confirmations one lists (ADR-0052). */
 const PRESENCE_AT_MOST = 8;
 const REQUESTS_AT_MOST = 10;
 const WEBCHAT_REPLAY_ROWS = 50;
@@ -365,7 +365,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   readonly #inFlight = new Map<number, TurnInFlight>();
   /** Serializes flush planning, so concurrent messages can't arm two schedules. */
   #planning: Promise<void> = Promise.resolve();
-  /** The running turn's latest step, for a presence socket that opens later (ADR-0050 §2). */
+  /** The running turn's latest step, for a presence socket that opens later (ADR-0052 §2). */
   #step: Omit<RunningTurn, "agoMs"> | null = null;
   /** The open confirmations each user was last told, so a change alone sends them again. */
   readonly #toldRequests = new Map<string, string>();
@@ -419,7 +419,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       return;
     }
     connection.setState({ ...admission, openedAt: Date.now() });
-    // The sidebar's view gets what the conversation knows now, and none of its content (ADR-0050).
+    // The sidebar's view gets what the conversation knows now, and none of its content (ADR-0052).
     if (admission.view === "presence") {
       send(connection, this.#presenceNow(admission.userId));
       this.#capPresence();
@@ -431,7 +431,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       received: this.#receivedWebchatIds(),
       paused: this.#get("paused", false),
     });
-    // A confirmation still open after its turn settled isn't in the history (ADR-0050 §4).
+    // A confirmation still open after its turn settled isn't in the history (ADR-0052 §4).
     const open = this.#openRequests(admission.userId);
     if (open.requests.length > 0) {
       send(connection, { type: "requests", ...open });
@@ -467,14 +467,14 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const admission = connection.state as SocketAdmission | null;
     if (!admission) return;
     const frame = parseClientFrame(message);
-    // A presence socket takes only a card's actions, checked before any other frame (ADR-0050 §3).
+    // A presence socket takes only a card's actions, checked before any other frame (ADR-0052 §3).
     if (admission.view === "presence" && frame?.type !== "confirm" && frame?.type !== "pause") {
       connection.close(1008, "presence view");
       return;
     }
     if (!frame) return;
     // A pause or a press names its agent: a confirmation's id is its own conversation's counter.
-    // A presence socket must name it; on the conversation's own, a page from before ADR-0050
+    // A presence socket must name it; on the conversation's own, a page from before ADR-0052
     // names none, and then the id is read against this conversation alone.
     if (frame.type === "confirm" || frame.type === "pause") {
       const named = frame.agent ?? (admission.view === "presence" ? null : admission.agentId);
@@ -555,7 +555,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .from(schema.confirmations)
       .where(eq(schema.confirmations.id, id))
       .get();
-    // Only a confirmation whose notice the owner was shown (ADR-0050 §3).
+    // Only a confirmation whose notice the owner was shown (ADR-0052 §3).
     const shown = this.#db
       .select({ id: schema.outbox.id })
       .from(schema.outbox)
@@ -1010,7 +1010,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   }
 
   /**
-   * Every frame to the webchat's sockets goes through here (ADR-0050 §2): a socket gets only what
+   * Every frame to the webchat's sockets goes through here (ADR-0052 §2): a socket gets only what
    * its view allows, and one with no admission gets nothing. `to` picks the conversation's own
    * sockets, the presence ones, or both; a function makes each socket's frame from its admission,
    * or null to send it nothing.
@@ -1034,7 +1034,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     }
   }
 
-  /** A presence socket's first frame (ADR-0050 §2): what the conversation knows now. */
+  /** A presence socket's first frame (ADR-0052 §2): what the conversation knows now. */
   #presenceNow(userId: string): ServerFrame {
     const now = this.#ports.now();
     const running = this.#db
@@ -1074,7 +1074,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     }
   }
 
-  /** A step of the running turn, to presence sockets whatever the agent's settings (ADR-0050 §2). */
+  /** A step of the running turn, to presence sockets whatever the agent's settings (ADR-0052 §2). */
   #showStep(status: TurnStep, label?: string, activity?: ToolActivity): void {
     const shown = {
       ...(label === undefined ? {} : { label }),
@@ -1085,7 +1085,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   }
 
   /**
-   * `userId`'s open confirmations (ADR-0050 §2): not used, not expired, and their notice sent,
+   * `userId`'s open confirmations (ADR-0052 §2): not used, not expired, and their notice sent,
    * newest first, at most 10.
    */
   #openRequests(userId: string): OpenRequests {
@@ -1128,7 +1128,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     return requests.map((request) => `${request.id}:${now + request.expiresInMs}`).join(",");
   }
 
-  /** Tells every socket its user's open confirmations once they changed (ADR-0050 §2, §4). */
+  /** Tells every socket its user's open confirmations once they changed (ADR-0052 §2, §4). */
   #tellRequests(): void {
     const lists = new Map<string, OpenRequests>();
     const listOf = (userId: string) => {
@@ -1529,7 +1529,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     // channel can show them (#141), "typing" elsewhere. Delivery shows "typing" before each bubble.
     const showsSteps = settings.conversational && capabilities.status;
     const step = (name: TurnStep, label?: string, activity?: ToolActivity) => {
-      // Presence sockets follow every step, whether or not the channel shows them (ADR-0050 §2).
+      // Presence sockets follow every step, whether or not the channel shows them (ADR-0052 §2).
       this.#showStep(name, label, activity);
       if (showsSteps) {
         // A courtesy, like "typing": a failure doesn't stop the turn.
@@ -2120,7 +2120,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           .set({ usedAt: now })
           .where(eq(schema.confirmations.id, pending.id))
           .run();
-        // Used, it leaves the open list (ADR-0050 §2).
+        // Used, it leaves the open list (ADR-0052 §2).
         this.#tellRequests();
         return true;
       }
@@ -2839,7 +2839,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       }
     }
     // A presence socket hears every end, a delivered one included, since it gets no bubble
-    // (ADR-0050 §2); a notice mid-send just counted as sent.
+    // (ADR-0052 §2); a notice mid-send just counted as sent.
     this.#showStep("idle");
     if (status === "failed") this.#toSockets({ type: "failed" }, "presence");
     this.#tellRequests();
@@ -3133,7 +3133,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .where(eq(schema.outbox.id, id))
       .returning({ confirmationId: schema.outbox.confirmationId })
       .get();
-    // A confirmation's notice sent: the open list changed (ADR-0050 §2).
+    // A confirmation's notice sent: the open list changed (ADR-0052 §2).
     if (status === "sent" && row?.confirmationId != null) this.#tellRequests();
   }
 

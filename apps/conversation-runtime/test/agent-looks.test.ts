@@ -2,7 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { derivedMascot, KELPIE_MASCOT, type Mascot, REGISTRY_NAME } from "@kelpie/config";
 import { describe, expect, it } from "vitest";
 
-// What ingress reads for the webchat's list of agents (ADR-0050 §7): each agent's mascot, through
+// What ingress reads for the webchat's list of agents (ADR-0052 §7): each agent's mascot, through
 // an entrypoint that reads and does nothing else, so ingress never binds an AgentHost.
 
 const owner = { userId: "u-owner", role: "owner", via: "admin-api" } as const;

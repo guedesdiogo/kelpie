@@ -13,8 +13,8 @@ import { chatTypeOf, roleOf } from "./turn-access.ts";
 /**
  * What the browser sends: a message with an id of its own choosing, whether it is typing, a pause
  * that holds every answer until the next message, or a press of a notice's Confirm button, by the
- * confirmation's id (#186). A pause and a press name their agent (ADR-0050 §3): a confirmation's
- * id is its own conversation's counter. A page from before ADR-0050 names none.
+ * confirmation's id (#186). A pause and a press name their agent (ADR-0052 §3): a confirmation's
+ * id is its own conversation's counter. A page from before ADR-0052 names none.
  */
 export type ClientFrame =
   | { type: "message"; id: string; text: string }
@@ -22,7 +22,7 @@ export type ClientFrame =
   | { type: "pause"; agent?: string }
   | { type: "confirm"; id: number; agent?: string };
 
-/** An open confirmation as the webchat lists it (ADR-0050 §2): its summary, in full, and its times. */
+/** An open confirmation as the webchat lists it (ADR-0052 §2): its summary, in full, and its times. */
 export interface OpenRequest {
   id: number;
   summary: string;
@@ -98,9 +98,9 @@ export type ServerFrame =
   | { type: "rejected"; id: string; reason: string }
   /** What a press of a Confirm button did: refused for a confirmation not open, or not theirs. */
   | { type: "confirmation"; id: number; status: "accepted" | "refused" }
-  /** The open confirmations (ADR-0050 §4), to both views, when they change. */
+  /** The open confirmations (ADR-0052 §4), to both views, when they change. */
   | ({ type: "requests" } & OpenRequests)
-  /** A presence socket's first frame (ADR-0050 §2): what the conversation knows now. */
+  /** A presence socket's first frame (ADR-0052 §2): what the conversation knows now. */
   | ({
       type: "presence";
       turn: RunningTurn | null;
@@ -111,7 +111,7 @@ export type ServerFrame =
   /** A turn settled `failed`, to presence sockets. */
   | { type: "failed" };
 
-/** What a presence socket may get (ADR-0050 §2); every other frame stays off it. */
+/** What a presence socket may get (ADR-0052 §2); every other frame stays off it. */
 export const PRESENCE_FRAMES: ReadonlySet<ServerFrame["type"]> = new Set([
   "presence",
   "status",
@@ -137,7 +137,7 @@ export function parseAdmission(value: string | null): SocketAdmission | null {
   if (!value) return null;
   try {
     const parsed = JSON.parse(value) as Partial<WebchatAdmission> | null;
-    // A view this conversation doesn't know isn't admitted (ADR-0050 §1).
+    // A view this conversation doesn't know isn't admitted (ADR-0052 §1).
     const view = parsed?.view ?? null;
     if (view !== null && view !== "presence") return null;
     if (
@@ -180,7 +180,7 @@ export function parseClientFrame(message: unknown): ClientFrame | null {
   if (frame?.type === "typing" && typeof frame.active === "boolean") {
     return { type: "typing", active: frame.active };
   }
-  // The agent a pause or a press names (ADR-0050 §3), when the page names one.
+  // The agent a pause or a press names (ADR-0052 §3), when the page names one.
   const agent = typeof frame?.agent === "string" ? { agent: frame.agent } : {};
   if (frame?.type === "pause") return { type: "pause", ...agent };
   if (frame?.type === "confirm" && Number.isSafeInteger(frame.id) && (frame.id as number) > 0) {

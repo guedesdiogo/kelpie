@@ -87,7 +87,7 @@ export interface WebchatAdmission {
   /** The browser's language, as the page names it (#187); an older ingress or page sends none. */
   language?: string | null;
   /**
-   * The sidebar's presence view (ADR-0050): the socket gets only the conversation's presence, and
+   * The sidebar's presence view (ADR-0052): the socket gets only the conversation's presence, and
    * may send only a card's actions. Without it, the socket is the conversation's own.
    */
   view?: "presence";

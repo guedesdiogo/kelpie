@@ -9,11 +9,11 @@ import {
   type RegistryContract,
 } from "@kelpie/config";
 
-/** The most agents one call asks about; the webchat follows at most 16 (ADR-0050 §1). */
+/** The most agents one call asks about; the webchat follows at most 16 (ADR-0052 §1). */
 const AT_MOST = 32;
 
 /**
- * What ingress binds to draw the webchat's list of agents (ADR-0050 §7): each listed agent's
+ * What ingress binds to draw the webchat's list of agents (ADR-0052 §7): each listed agent's
  * mascot, as the conversation's `agent` frame computes it, and nothing more. Binding the AgentHost
  * itself would also let the internet-facing Worker configure any agent.
  */

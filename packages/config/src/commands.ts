@@ -188,7 +188,7 @@ export interface SetupEventsContract {
 
 /**
  * conversation-runtime's `AgentLooks` entrypoint: ingress reads each listed agent's mascot for the
- * webchat's list (ADR-0050 §7), and nothing else.
+ * webchat's list (ADR-0052 §7), and nothing else.
  */
 export interface AgentLooksContract {
   mascots(agentIds: string[]): Promise<Record<string, Mascot>>;

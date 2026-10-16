@@ -69,7 +69,7 @@ function webchatDeps(env: Env): WebchatDeps {
       (
         env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<Pick<RegistryContract, "list">>
       ).list(),
-    // conversation-runtime's AgentLooks reads each agent's mascot, and nothing else (ADR-0050 §7).
+    // conversation-runtime's AgentLooks reads each agent's mascot, and nothing else (ADR-0052 §7).
     mascots: (agentIds) => (env.AGENT_LOOKS as unknown as AgentLooksContract).mascots(agentIds),
     page: (request) => env.ASSETS.fetch(request),
     connect: (name, admission) => connectWebchat(env, name, admission),

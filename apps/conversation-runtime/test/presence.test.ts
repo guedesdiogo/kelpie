@@ -8,7 +8,7 @@ import * as schema from "../src/schema.ts";
 import type { ToolContext } from "../src/tools.ts";
 import { type FakeWorld, fakeWorld, noRoute, refuse, reply, toolCalls } from "./fakes.ts";
 
-// The webchat's sidebar follows each agent through a socket in a presence view (ADR-0050): it gets
+// The webchat's sidebar follows each agent through a socket in a presence view (ADR-0052): it gets
 // the conversation's presence and never its content, and it may send only a card's actions, each
 // naming its agent.
 
@@ -47,7 +47,7 @@ async function open(name: string, admission: unknown = owner) {
 
 const ofType = (frames: Frame[], type: string) => frames.filter((frame) => frame.type === type);
 const types = (frames: Frame[]) => frames.map((frame) => frame.type);
-/** What a presence socket may ever get (ADR-0050 §2). */
+/** What a presence socket may ever get (ADR-0052 §2). */
 const PRESENCE_FRAMES = [
   "presence",
   "status",
@@ -103,7 +103,7 @@ async function turn(name: string, chat: Awaited<ReturnType<typeof open>>, text =
   );
 }
 
-describe("the presence view (ADR-0050)", () => {
+describe("the presence view (ADR-0052)", () => {
   it("opens with the conversation's presence, and nothing of its content", async () => {
     use(fakeWorld([]));
     const row = await open("assistant:webchat:p-open", presence);
@@ -299,7 +299,7 @@ describe("the presence view (ADR-0050)", () => {
   });
 });
 
-describe("the conversation's own socket (ADR-0050 §3)", () => {
+describe("the conversation's own socket (ADR-0052 §3)", () => {
   it("refuses a press naming another agent, and still takes one naming none", async () => {
     use(fakeWorld([]));
     const chat = await open("assistant:webchat:own-agent");

@@ -76,7 +76,7 @@ export class Registry extends DurableObject {
 export class SetupEvents extends WorkerEntrypoint {
   setupDone() {}
 }
-// Each agent's mascot for the webchat's list (ADR-0050 §7): none in the routing tests.
+// Each agent's mascot for the webchat's list (ADR-0052 §7): none in the routing tests.
 export class AgentLooks extends WorkerEntrypoint {
   mascots() {
     return {};
