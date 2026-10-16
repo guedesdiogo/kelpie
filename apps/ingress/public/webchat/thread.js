@@ -40,6 +40,10 @@ const defaultTimers = {
 
 /** How long a confirmation's success shows before the card folds into its receipt (5.3). */
 export const RING_MS = 650;
+/** How long the card's hold must last to pause the conversation (ADR-0044 §2, the lab's hold). */
+export const HOLD_MS = 1_200;
+/** At most this many of the latest messages slide up when one arrives below them (5.1). */
+const FLIP_AT_MOST = 12;
 /** At most this many steps of a row enter staggered; a stagger stops at 300 ms (§4.3). */
 const STAGGER_MS = 30;
 const STAGGER_UNTIL_MS = 300;
@@ -53,6 +57,8 @@ export class Thread {
   #agentName;
   #less;
   #onConfirm;
+  #onPause;
+  #cardMascot;
   #onAnnounce;
   #onChange;
   #days = new Map();
@@ -69,7 +75,8 @@ export class Thread {
    * @param {HTMLElement} root
    * @param {{
    *   texts: object, locale: string, agentName: () => string, less: () => boolean,
-   *   onConfirm: (id: number) => boolean, onAnnounce: (text: string) => void,
+   *   onConfirm: (id: number) => boolean, onPause?: () => boolean,
+   *   cardMascot?: (host: HTMLElement) => void, onAnnounce: (text: string) => void,
    *   onChange: (change: { kind: string, element: Element }) => void,
    *   now?: () => number, timers?: typeof defaultTimers,
    * }} options
@@ -81,6 +88,8 @@ export class Thread {
     this.#agentName = options.agentName;
     this.#less = options.less;
     this.#onConfirm = options.onConfirm;
+    this.#onPause = options.onPause ?? (() => false);
+    this.#cardMascot = options.cardMascot ?? (() => {});
     this.#onAnnounce = options.onAnnounce;
     this.#onChange = options.onChange;
     this.#now = options.now ?? Date.now;
@@ -121,14 +130,17 @@ export class Thread {
   owner({ id, text, queued = false }) {
     // A new message interrupts the turn in flight (ADR-0024); its reply won't come.
     this.stop("idle");
-    const bubble = this.#ownerBubble(id, text, this.#now(), { queued });
+    let bubble;
+    this.#flip(() => {
+      bubble = this.#ownerBubble(id, text, this.#now(), { queued });
+      enter(bubble.parentElement, { origin: "100% 100%" });
+      this.#onChange({ kind: "owner", element: bubble });
+    });
     const entry = this.#owner.get(id);
     entry.slowTimer = this.#timers.set(() => {
       entry.slow = true;
       this.#mark(entry);
     }, SENDING_AFTER_MS);
-    enter(bubble.parentElement, { origin: "100% 100%" });
-    this.#onChange({ kind: "owner", element: bubble });
     return bubble;
   }
 
@@ -224,9 +236,12 @@ export class Thread {
     activity.phase = null;
     if (!activity.row) {
       activity.row = toolRow();
-      activity.bubble.parentElement.before(activity.row.element);
-      activity.row.label.append(rollText(label));
-      enter(activity.row.element, { spring: SPRINGS.fast });
+      this.#flip(() => {
+        activity.bubble.parentElement.before(activity.row.element);
+        activity.row.label.append(rollText(label));
+        enter(activity.row.element, { spring: SPRINGS.fast });
+        this.#onChange({ kind: "tool", element: activity.row.element });
+      });
     } else {
       roll(activity.row.label, label);
       activity.row.element.dataset.state = "running";
@@ -256,20 +271,22 @@ export class Thread {
       bubble.removeAttribute("aria-hidden");
       bubble.replaceChildren();
       this.#join(bubble, at);
-    } else {
-      bubble = this.#bubble("assistant", at);
     }
-    this.#reply(bubble, frame, at);
+    const kind = Number.isSafeInteger(frame.confirmation) ? "approval" : "reply";
     if (before) {
+      this.#reply(bubble, frame, at);
       resize(bubble, before);
       const content = bubble.querySelector(":scope > .text");
       if (content) fadeIn(content, REPLY_TEXT_DELAY);
-    } else {
-      enter(bubble.parentElement, { origin: "0% 100%" });
+      this.#onChange({ kind, element: bubble });
+      return bubble;
     }
-    this.#onChange({
-      kind: Number.isSafeInteger(frame.confirmation) ? "approval" : "reply",
-      element: bubble,
+    // A new bubble: the ones above slide up as it arrives below them (5.1).
+    this.#flip(() => {
+      bubble = this.#bubble("assistant", at);
+      this.#reply(bubble, frame, at);
+      enter(bubble.parentElement, { origin: "0% 100%" });
+      this.#onChange({ kind, element: bubble });
     });
     return bubble;
   }
@@ -306,13 +323,16 @@ export class Thread {
     const phase = document.createElement("span");
     phase.className = "phase";
     bubble.append(dots, phase);
-    place(this.#groupFor("assistant", this.#now()), messageOf("assistant", bubble));
     this.#activity = { bubble, phaseElement: phase, phase: null, steps: [], row: null };
     this.#activity.started = this.#now();
     this.#activity.ticker = this.#timers.every(() => this.#tick(), this.#less() ? 60_000 : 1_000);
-    enter(bubble.parentElement, { origin: "0% 100%" });
-    this.#onChange({ kind: "typing", element: bubble });
-    return this.#activity;
+    const activity = this.#activity;
+    this.#flip(() => {
+      place(this.#groupFor("assistant", this.#now()), messageOf("assistant", bubble));
+      enter(bubble.parentElement, { origin: "0% 100%" });
+      this.#onChange({ kind: "typing", element: bubble });
+    });
+    return activity;
   }
 
   /** The elapsed times: from 3 s, once a second, or once a minute under less motion (rule 8). */
@@ -372,6 +392,24 @@ export class Thread {
     row.head.addEventListener("click", () => openRow(row));
   }
 
+  /**
+   * Adds something below the latest messages, and they slide up from where they were (FLIP,
+   * `--spring-base`, 5.1). `add` also tells the page, so the scroll that follows is measured too.
+   */
+  #flip(add) {
+    const olds = this.#less()
+      ? []
+      : [...this.#root.querySelectorAll(".message, .tool-row")].slice(-FLIP_AT_MOST);
+    const first = olds.map((element) => element.getBoundingClientRect().top);
+    add();
+    olds.forEach((element, index) => {
+      if (!element.isConnected) return;
+      const shift = first[index] - element.getBoundingClientRect().top;
+      if (Math.abs(shift) < 0.5) return;
+      play(element, [{ transform: `translateY(${shift}px)` }, { transform: "none" }], SPRINGS.base);
+    });
+  }
+
   // ── Days, groups and bubbles ─────────────────────────────────────────────────────────────────
 
   #clear() {
@@ -412,8 +450,6 @@ export class Thread {
 
   #seen(sender, at, group) {
     this.#last = { sender, at, group };
-    const time = group.querySelector(":scope > .group-time");
-    time?.replaceChildren(timeOf(at, this.#locale));
   }
 
   /**
@@ -441,11 +477,8 @@ export class Thread {
       sender === "user" ? this.#texts.you : this.#agentName(),
       heading.dataset.time,
     );
-    const time = document.createElement("p");
-    time.className = "group-time";
-    time.setAttribute("aria-hidden", "true");
-    time.append(timeOf(at, this.#locale));
-    group.append(heading, time);
+    // No time under the group: each bubble's shows on hover or a tap (decision 1, #378).
+    group.append(heading);
     day.append(group);
     // The typing bubble's group counts as the latest, so the next message from the owner opens
     // its own group after it.
@@ -498,6 +531,23 @@ export class Thread {
 
   #card(bubble, id, at) {
     bubble.classList.add("card");
+    // Who asks and until when, above the notice (the lab's "Aprovar uma ação", decision 13).
+    const head = document.createElement("div");
+    head.className = "card-head";
+    const mascot = document.createElement("span");
+    mascot.className = "card-mascot";
+    mascot.setAttribute("aria-hidden", "true");
+    const who = document.createElement("p");
+    who.className = "card-who";
+    who.textContent = this.#texts.cardAsks(this.#agentName());
+    const until = document.createElement("p");
+    until.className = "card-until";
+    until.textContent = this.#texts.cardUntil(clock(at + CONFIRMATION_MS, this.#locale));
+    const heading = document.createElement("div");
+    heading.append(who, until);
+    head.append(mascot, heading);
+    bubble.prepend(head);
+    this.#cardMascot(mascot);
     const actions = document.createElement("div");
     actions.className = "card-actions";
     const confirm = document.createElement("button");
@@ -511,8 +561,19 @@ export class Thread {
     status.className = "confirm-icon";
     confirm.append(status, label);
     actions.append(confirm);
-    bubble.append(actions);
-    const card = { id, bubble, actions, confirm, label, status, open: true, viaKeyboard: false };
+    const hold = this.#hold();
+    bubble.append(actions, hold.button);
+    const card = {
+      id,
+      bubble,
+      actions,
+      confirm,
+      label,
+      status,
+      hold,
+      open: true,
+      viaKeyboard: false,
+    };
     if (!this.#cards.has(id)) this.#cards.set(id, []);
     this.#cards.get(id).push(card);
     // A key held down since before the card appeared doesn't count: only one pressed on it.
@@ -537,6 +598,72 @@ export class Thread {
     card.expiry = this.#timers.set(() => {
       if (card.open && !card.pressed) this.#fold(card, "neutral", this.#texts.expired);
     }, left);
+  }
+
+  /**
+   * The card's hold, under its actions: held for 1.2 s, it pauses the conversation, as the
+   * composer's Pause does (ADR-0044 §2). Holding, not clicking, keeps it from being a slip beside
+   * Confirm. Its fill is progress, so it moves under reduced motion too (rule 10).
+   */
+  #hold() {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "hold";
+    const fill = document.createElement("span");
+    fill.className = "hold-fill";
+    fill.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.className = "label";
+    label.append(rollText(this.#texts.holdToPause));
+    button.append(fill, label);
+    const state = { button, timer: null, fill: null, done: false };
+    const start = () => {
+      if (state.done || state.timer !== null) return;
+      roll(label, this.#texts.holding);
+      state.fill?.cancel();
+      state.fill = play(fill, [{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }], {
+        duration: HOLD_MS,
+        easing: "linear",
+        fill: "forwards",
+      });
+      state.timer = this.#timers.set(() => {
+        state.timer = null;
+        if (!this.#onPause()) {
+          end();
+          return;
+        }
+        state.done = true;
+        button.disabled = true;
+        roll(label, this.#texts.pausedStatus);
+      }, HOLD_MS);
+    };
+    const end = () => {
+      if (state.done) return;
+      this.#timers.clear(state.timer);
+      state.timer = null;
+      state.fill?.cancel();
+      state.fill = null;
+      roll(label, this.#texts.holdToPause);
+    };
+    button.addEventListener("pointerdown", (event) => {
+      if (event.button > 0) return;
+      event.preventDefault();
+      start();
+    });
+    for (const type of ["pointerup", "pointerleave", "pointercancel"]) {
+      button.addEventListener(type, end);
+    }
+    button.addEventListener("keydown", (event) => {
+      if ((event.key === " " || event.key === "Enter") && !event.repeat) {
+        event.preventDefault();
+        start();
+      }
+    });
+    button.addEventListener("keyup", (event) => {
+      if (event.key === " " || event.key === "Enter") end();
+    });
+    button.addEventListener("contextmenu", (event) => event.preventDefault());
+    return state;
   }
 
   /** The press: the button grows to the card's width and says what it does (5.3). */
@@ -593,33 +720,59 @@ export class Thread {
     this.#timers.set(() => this.#fold(card, "check", receipt), quiet ? DUR.fade : RING_MS);
   }
 
-  /** The card folds into its receipt: who decided what and when (5.3). */
+  /**
+   * The card folds into its receipt, who decided what and when (5.3): its content leaves first
+   * (exit), then its height goes to the receipt's with `--spring-moment`.
+   */
   #fold(card, glyph, text, { announce = true, instant = false } = {}) {
     card.open = false;
+    this.#timers.clear(card.hold?.timer);
     const { bubble } = card;
-    const before = bubble.getBoundingClientRect();
     bubble.dataset.state = glyph === "check" ? "confirmed" : "closed";
-    const receipt = document.createElement("p");
-    receipt.className = "receipt";
-    receipt.append(icon(glyph), text);
-    card.actions.replaceWith(receipt);
-    bubble.querySelector(":scope > .text")?.remove();
-    bubble.classList.add("receipt-only");
-    if (!instant) {
-      resize(bubble, before, SPRINGS.moment);
-      if (reduced()) fadeIn(receipt);
-      else
-        play(
-          receipt,
-          [
-            { opacity: 0, transform: "translateY(4px)" },
-            { opacity: 1, transform: "none" },
-          ],
-          { duration: SPRINGS.moment.duration, easing: SPRINGS.moment.easing },
-        );
+    const content = [...bubble.children].filter((child) => !child.matches("time.at"));
+    const swap = () => {
+      if (!bubble.isConnected && !instant) return;
+      const before = bubble.getBoundingClientRect();
+      const receipt = document.createElement("p");
+      receipt.className = "receipt";
+      receipt.append(icon(glyph), text);
+      for (const child of content) child.remove();
+      bubble.append(receipt);
+      bubble.classList.add("receipt-only");
+      if (!instant) {
+        resize(bubble, before, SPRINGS.moment);
+        if (reduced()) fadeIn(receipt);
+        else
+          play(
+            receipt,
+            [
+              { opacity: 0, transform: "translateY(4px)" },
+              { opacity: 1, transform: "none" },
+            ],
+            { duration: SPRINGS.moment.duration, easing: SPRINGS.moment.easing, delay: 60 },
+          );
+      }
+      if (announce) this.#onAnnounce(text);
+      this.#onChange({ kind: "receipt", element: bubble, text });
+    };
+    if (instant || card.viaKeyboard || reduced()) {
+      swap();
+      return;
     }
-    if (announce) this.#onAnnounce(text);
-    this.#onChange({ kind: "receipt", element: bubble, text });
+    const leaving = content
+      .map((child) =>
+        play(child, [{ opacity: 1 }, { opacity: 0 }], {
+          duration: DUR.exitMoment,
+          easing: EASE.exit,
+          fill: "forwards",
+        }),
+      )
+      .filter(Boolean);
+    if (leaving.length === 0) {
+      swap();
+      return;
+    }
+    Promise.all(leaving.map((animation) => animation.finished)).then(swap, swap);
   }
 }
 
@@ -632,9 +785,8 @@ function messageOf(sender, bubble) {
   return message;
 }
 
-/** Messages go before the group's time, which closes it. */
 function place(group, element) {
-  group.insertBefore(element, group.querySelector(":scope > .group-time"));
+  group.append(element);
 }
 
 function textOf(text) {
@@ -644,7 +796,7 @@ function textOf(text) {
   return content;
 }
 
-/** A bubble's exact time, shown on hover or a tap; or a group's time. */
+/** A bubble's exact time, shown on hover or a tap. */
 function timeOf(at, locale, className) {
   const time = document.createElement("time");
   // The group's heading says the time to screen readers; these are for the eye.

@@ -95,10 +95,14 @@ describe("the conversation", () => {
       deadline: { remainingMs: 10_000, spanMs: 10_000, holding: false },
     });
     expect($("wait").hidden).toBe(false);
+    expect($("wait-label").textContent).toBe("Waiting for you to finish");
     expect(marks()).toEqual(["Held"]);
 
     socket.receive({ type: "wait", deadline: null });
-    expect($("wait").hidden).toBe(true);
+    // The demo's track says the agent writes until its reply comes (decision 10, #378).
+    expect($("wait").hidden).toBe(false);
+    expect($("wait").dataset.state).toBe("writing");
+    expect($("wait-label").textContent).toBe("Assistant is writing");
     // "Held" fades out as the turn starts reading.
     vi.advanceTimersByTime(200);
     await vi.waitFor(() => expect(marks()).toEqual([""]));
@@ -111,10 +115,28 @@ describe("the conversation", () => {
     expect(document.querySelector(".tool-row")).not.toBeNull();
 
     socket.receive({ type: "bubble", text: "Sim, está marcado." });
+    expect($("wait").hidden).toBe(true);
     expect(document.querySelector(".bubble.typing")).toBeNull();
     expect(typing.textContent).toContain("Sim, está marcado.");
     expect($("announcer").textContent).toBe("Assistant: Sim, está marcado.");
     expect($("status").textContent).toBe("");
+  });
+
+  it("has one row: the text, then Pause and Send as round icon buttons that say their name", async () => {
+    await opened();
+    const row = $("text").parentElement;
+    expect([...row.querySelectorAll("textarea, button")].map((element) => element.id)).toEqual([
+      "text",
+      "pause",
+      "send",
+    ]);
+    expect($("pause").getAttribute("aria-label")).toBe("Pause");
+    expect($("pause").getAttribute("aria-pressed")).toBe("false");
+    expect($("send").getAttribute("aria-label")).toBe("Send");
+    expect($("send").querySelector("svg")).not.toBeNull();
+    expect($("send").querySelector(".tip").textContent).toBe("Send");
+    // No keyboard hint on screen, and no `title` anywhere (#378).
+    expect(document.querySelector("[title]")).toBeNull();
   });
 
   it("keeps Enter for an input method and Shift+Enter, and sends nothing empty", async () => {
@@ -174,6 +196,7 @@ describe("the conversation", () => {
     expect($("paused-line").textContent).toBe("Paused. Assistant answers after your next message.");
     expect($("status").textContent).toBe("Paused");
     expect($("pause").disabled).toBe(true);
+    expect($("pause").getAttribute("aria-pressed")).toBe("true");
     expect($("wait").hidden).toBe(true);
     // A pause doesn't bring the typing bubble.
     expect(document.querySelector(".bubble.typing")).toBeNull();

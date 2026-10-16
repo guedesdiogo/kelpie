@@ -11,6 +11,7 @@ let root;
 let changes;
 let announced;
 let confirms;
+let pauses;
 let thread;
 
 function make({ allow = true } = {}) {
@@ -19,6 +20,7 @@ function make({ allow = true } = {}) {
   changes = [];
   announced = [];
   confirms = [];
+  pauses = 0;
   thread = new Thread(root, {
     texts: T,
     locale: "en",
@@ -28,9 +30,20 @@ function make({ allow = true } = {}) {
       confirms.push(id);
       return allow;
     },
+    onPause: () => {
+      pauses += 1;
+      return allow;
+    },
     onAnnounce: (text) => announced.push(text),
     onChange: (change) => changes.push(change),
   });
+}
+
+/** The receipt shows once the card's content has left (5.3). */
+async function receiptOf(card) {
+  vi.advanceTimersByTime(200);
+  await vi.waitFor(() => expect(card.querySelector(".receipt")).not.toBeNull());
+  return card.querySelector(".receipt");
 }
 
 const bubbles = () => [...root.querySelectorAll(".bubble")];
@@ -76,9 +89,9 @@ describe("the replayed history", () => {
     expect(groups.map((group) => group.querySelectorAll(".message").length)).toEqual([2, 1, 1]);
     expect(groups[0].querySelector("h3").textContent).toBe("You, 2:12 PM");
     expect(groups[1].querySelector("h3").textContent).toBe("Agenda, 2:14 PM");
-    // The group's time is its latest message's, after its bubbles.
-    expect(groups[0].lastElementChild.className).toBe("group-time");
-    expect(groups[0].lastElementChild.textContent).toBe("2:13 PM");
+    // A group has no time under it: each bubble's shows on hover or a tap (decision 1, #378).
+    expect(root.querySelector(".group-time")).toBeNull();
+    expect(bubbles()[1].querySelector("time.at").textContent).toBe("2:12 PM");
     expect(announced).toEqual([]);
     expect(changes).toEqual([]);
     expect(thread.isEmpty).toBe(false);
@@ -102,6 +115,26 @@ describe("the replayed history", () => {
     expect(bubbles().map((bubble) => bubble.querySelector(".text").textContent)).toEqual(["dois"]);
     thread.replay([]);
     expect(thread.isEmpty).toBe(true);
+  });
+});
+
+describe("a new message below (5.1)", () => {
+  it("slides the bubbles above up from where they were, with --spring-base", () => {
+    thread.replay([{ role: "assistant", text: "Oi.", at: NOW - 60_000 }]);
+    const old = root.querySelector(".message");
+    const animate = vi.fn(() => ({ finished: Promise.resolve(), cancel() {} }));
+    old.animate = animate;
+    // Before the new bubble arrives, the old one sits 40 px lower than after.
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(() => {
+      const top = root.querySelectorAll(".message").length > 1 ? 60 : 100;
+      return { top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: top };
+    });
+    thread.owner({ id: "m1", text: "nova" });
+    expect(animate).toHaveBeenCalledWith(
+      [{ transform: "translateY(40px)" }, { transform: "none" }],
+      expect.objectContaining({ easing: expect.stringContaining("linear(") }),
+    );
+    vi.restoreAllMocks();
   });
 });
 
@@ -257,6 +290,14 @@ describe("a turn's activity (5.1, 5.2)", () => {
 describe("the confirmation card (5.3)", () => {
   const notice = { text: "Kelpie wants to change the tier.", confirmation: 7 };
 
+  it("says who asks and until when, above the notice and its actions", () => {
+    const card = thread.reply(notice);
+    expect(card.querySelector(".card-who").textContent).toBe("Agenda asks you to confirm");
+    expect(card.querySelector(".card-until").textContent).toBe("Valid until 2:42 PM");
+    expect(card.querySelector(".text").textContent).toBe("Kelpie wants to change the tier.");
+    expect(card.querySelector(".card-actions button.confirm")).not.toBeNull();
+  });
+
   it("confirms on a press, then folds into a receipt that says who decided when", async () => {
     const card = thread.reply(notice);
     expect(changes.at(-1).kind).toBe("approval");
@@ -282,26 +323,26 @@ describe("the confirmation card (5.3)", () => {
     expect(card.querySelector(".confirm-icon svg.icon-check")).not.toBeNull();
     expect(thread.openCards).toEqual([]);
     vi.advanceTimersByTime(RING_MS);
-    expect(card.querySelector(".receipt").textContent).toBe("You confirmed at 2:32 PM");
+    // Its content leaves first, then the card folds to the receipt's height (5.3).
+    expect((await receiptOf(card)).textContent).toBe("You confirmed at 2:32 PM");
     expect(card.querySelector(".card-actions")).toBeNull();
+    expect(card.querySelector(".card-who")).toBeNull();
     expect(announced).toEqual(["You confirmed at 2:32 PM"]);
     expect(changes.at(-1)).toMatchObject({ kind: "receipt" });
   });
 
-  it("folds into a neutral receipt when the press is refused", () => {
+  it("folds into a neutral receipt when the press is refused", async () => {
     const card = thread.reply(notice);
     card.querySelector("button.confirm").click();
     thread.confirmation(7, "refused");
-    expect(card.querySelector(".receipt").textContent).toBe("No longer valid. Ask again.");
+    expect((await receiptOf(card)).textContent).toBe("No longer valid. Ask again.");
     expect(card.querySelector(".receipt svg.icon-neutral")).not.toBeNull();
   });
 
-  it("expires after its 10 minutes, or at once when it arrives already expired", () => {
+  it("expires after its 10 minutes, or at once when it arrives already expired", async () => {
     const card = thread.reply(notice);
     vi.advanceTimersByTime(CONFIRMATION_MS);
-    expect(card.querySelector(".receipt").textContent).toBe(
-      "Expired. Ask again if you still want it.",
-    );
+    expect((await receiptOf(card)).textContent).toBe("Expired. Ask again if you still want it.");
 
     make();
     thread.replay([
@@ -335,27 +376,48 @@ describe("the confirmation card (5.3)", () => {
     expect(thread.openCards).toHaveLength(1);
   });
 
-  it("answers every notice of the same confirmation", () => {
+  it("answers every notice of the same confirmation", async () => {
     const first = thread.reply(notice);
     const second = thread.reply(notice);
     thread.confirmation(7, "accepted");
     vi.advanceTimersByTime(RING_MS);
-    expect(first.querySelector(".receipt")).not.toBeNull();
-    expect(second.querySelector(".receipt")).not.toBeNull();
+    await receiptOf(first);
+    await receiptOf(second);
     // A late answer for a card already folded changes nothing.
     thread.confirmation(7, "refused");
     expect(first.querySelector(".receipt").textContent).toBe("You confirmed at 2:32 PM");
   });
 
-  it("leaves room in its action row for Deny and the hold (#361)", () => {
+  it("leaves room in its action row for Deny (#361)", () => {
     const card = thread.reply(notice);
     const actions = card.querySelector(".card-actions");
     const deny = document.createElement("button");
     deny.textContent = "Deny this call";
-    actions.append(deny);
+    actions.prepend(deny);
     expect([...actions.children].map((button) => button.textContent)).toEqual([
-      "Confirm",
       "Deny this call",
+      "Confirm",
     ]);
+  });
+
+  it("pauses the conversation from the hold under its actions, only once held long enough (ADR-0044 §2)", () => {
+    const card = thread.reply(notice);
+    const hold = card.querySelector("button.hold");
+    expect(hold.textContent).toBe("Hold to pause this conversation");
+    hold.dispatchEvent(new PointerEvent("pointerdown", { button: 0 }));
+    vi.advanceTimersByTime(600);
+    hold.dispatchEvent(new PointerEvent("pointerup"));
+    vi.advanceTimersByTime(2_000);
+    // Let go too soon: nothing.
+    expect(pauses).toBe(0);
+    hold.dispatchEvent(new PointerEvent("pointerdown", { button: 0 }));
+    vi.advanceTimersByTime(1_200);
+    expect(pauses).toBe(1);
+    // From the keyboard, a held Space does the same.
+    make();
+    const again = thread.reply(notice).querySelector("button.hold");
+    again.dispatchEvent(new KeyboardEvent("keydown", { key: " " }));
+    vi.advanceTimersByTime(1_200);
+    expect(pauses).toBe(1);
   });
 });

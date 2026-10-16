@@ -93,16 +93,21 @@
         <div id="thread" role="log" aria-live="off" aria-label="Conversation" aria-busy="true"></div>
         <button id="pill" type="button" class="pill" hidden></button>
       </main>
-      <div id="wait" class="wait" aria-hidden="true" hidden><span class="wait-fill"></span></div>
+      <div id="wait" class="wait" aria-hidden="true" hidden>
+        <span class="track"><span class="wait-fill"></span></span>
+        <span id="wait-label"></span>
+      </div>
       <form id="composer" autocomplete="off">
         <div class="composer-notes">
           <p id="restored" role="status" hidden></p>
           <p id="paused-line" hidden></p>
         </div>
-        <label for="text" class="visually-hidden">Message</label>
-        <textarea id="text" rows="1" maxlength="16000" enterkeyhint="send"></textarea>
-        <button type="submit" id="send" class="send">Send</button>
-        <button type="button" id="pause" class="pause" title="Hold the answer until your next message">Pause</button>
+        <div class="field">
+          <label for="text" class="visually-hidden">Message</label>
+          <textarea id="text" rows="1" maxlength="16000" enterkeyhint="send"></textarea>
+          <button type="button" id="pause" class="pause" aria-label="Pause" aria-pressed="false" data-tip></button>
+          <button type="submit" id="send" class="send" aria-label="Send" data-tip></button>
+        </div>
       </form>
     </div>
     <footer><span id="version"></span></footer>

@@ -5,6 +5,7 @@
 // confirmation's notice, which the runtime marks with its id (#186). The header shows the agent's
 // mascot, whose state follows the conversation's (ADR-0045).
 
+import { icon } from "./icons.js";
 import { Mascot, ownerTyping, setMotion } from "./mascot.js";
 import { isDrawable } from "./mascot-art.js";
 import { effectiveMotion, MOTIONS, presenceKeeper } from "./mascot-states.js";
@@ -29,6 +30,7 @@ import { enter, fadeIn, hideAfterExit, play, reduced, SPRINGS, scrollToEnd } fro
 import { popover, segmented } from "./popover.js";
 import { localeOf, TEXTS } from "./texts.js";
 import { Thread } from "./thread.js";
+import { tips } from "./tips.js";
 import { Toasts } from "./toasts.js";
 
 const LOCALE = localeOf(navigator.language);
@@ -47,6 +49,7 @@ const banner = $("banner");
 const bannerText = $("banner-text");
 const waitBar = $("wait");
 const waitFill = waitBar.querySelector(".wait-fill");
+const waitLabel = $("wait-label");
 const pill = $("pill");
 const announcer = $("announcer");
 const mascotHost = $("mascot");
@@ -87,6 +90,13 @@ const thread = new Thread(threadElement, {
     send({ type: "confirm", id });
     return true;
   },
+  // The card's hold pauses the conversation, as Pause does (ADR-0044 §2).
+  onPause: () => askPause(),
+  // The card shows who asks: the agent's mascot, still, in Waiting (decision 13, #378).
+  cardMascot: (host) => {
+    if (mascotConfig)
+      new Mascot(host, { mascot: mascotConfig, px: 40, mode: "still", state: "waiting" });
+  },
   onAnnounce: (text) => announce(text),
   onChange: (change) => followChange(change),
 });
@@ -124,6 +134,7 @@ function receive(frame) {
       break;
     case "bubble":
       clearTimeout(typingTimer);
+      endWriting();
       thread.reply(frame);
       present(frame);
       if (presence.current.state === "idle") mascot?.arrive();
@@ -191,6 +202,7 @@ function step(name, label) {
 
 function stopped(reason) {
   clearTimeout(typingTimer);
+  endWriting();
   thread.stop(reason);
   setStatus(paused ? T.pausedStatus : "");
 }
@@ -202,6 +214,7 @@ function setStatus(text) {
 
 function setPaused(value) {
   paused = value;
+  pause.setAttribute("aria-pressed", String(value));
   const line = $("paused-line");
   line.hidden = !value;
   line.textContent = value ? T.paused(agentName()) : "";
@@ -254,15 +267,29 @@ let typingIdleTimer = null;
 
 const ownerTypes = () => Date.now() - lastInputAt < TYPING_IDLE_MS;
 
-/** A new deadline, or the end of the wait, which brings the typing bubble unless `quiet`. */
+/** While the agent writes after the wait, the track says so, until its reply or a stop (5.1). */
+let writing = false;
+
+/**
+ * A new deadline, or the end of the wait, which brings the typing bubble unless `quiet`. The
+ * demo's track says "Waiting for you to finish", then "<agent> is writing" (decision 10, #378).
+ */
 function setWait(deadline, { quiet = false } = {}) {
   const now = Date.now();
   const from = wait ? shownFill(now) : 0;
   const had = wait !== null;
   wait = waitOf(deadline, now);
   thread.setWaiting(wait !== null);
+  if (wait) writing = false;
+  else if (had && !quiet) writing = true;
   drawWait(from);
   if (had && wait === null && !quiet) thread.working(null);
+}
+
+function endWriting() {
+  if (!writing) return;
+  writing = false;
+  drawWait(0);
 }
 
 function shownFill(now) {
@@ -276,11 +303,19 @@ function drawWait(from) {
   const now = Date.now();
   const motion = wait && barMotion(wait, now, from, { typing: ownerTypes() });
   if (!motion) {
-    waitBar.hidden = true;
     waitFill.style.transform = "scaleX(0)";
+    waitBar.hidden = !writing;
+    if (writing) {
+      waitBar.dataset.state = "writing";
+      waitLabel.textContent = T.writing(agentName());
+    } else {
+      delete waitBar.dataset.state;
+    }
     return;
   }
   waitBar.hidden = false;
+  waitBar.dataset.state = "waiting";
+  waitLabel.textContent = T.waitingYou;
   waitFill.style.transform = motion.keyframes.at(-1).transform;
   waitAnimation = play(waitFill, motion.keyframes, {
     duration: motion.duration,
@@ -315,12 +350,12 @@ function followChange(change) {
   showEmpty();
   if (change.kind === "owner") {
     // Sending a message always returns to the end.
-    toEnd({ flip: true });
+    toEnd();
     return;
   }
   if (change.kind === "receipt") return;
   if (following && !selecting) {
-    toEnd({ flip: true });
+    toEnd();
     return;
   }
   // An approval never forces a scroll; it counts in the pill.
@@ -329,21 +364,10 @@ function followChange(change) {
   updatePill();
 }
 
-/** To the end: at once, or with the bubbles above sliding up after the new one (FLIP). */
-function toEnd({ flip = false, animate = false } = {}) {
-  const distance = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
-  if (animate) {
-    scrollToEnd(scroller);
-  } else {
-    scroller.scrollTop = scroller.scrollHeight;
-    if (flip && distance > 0 && distance < scroller.clientHeight && !reduced()) {
-      play(
-        threadElement,
-        [{ transform: `translateY(${distance}px)` }, { transform: "none" }],
-        SPRINGS.base,
-      );
-    }
-  }
+/** To the end: at once, or with a spring. The thread slides the bubbles above up itself (5.1). */
+function toEnd({ animate = false } = {}) {
+  if (animate) scrollToEnd(scroller);
+  else scroller.scrollTop = scroller.scrollHeight;
   following = true;
   unseen = 0;
   approvalBelow = false;
@@ -558,19 +582,18 @@ function renderOffline() {
   // A first socket still connecting has no next try to count down to.
   const now = Date.now();
   const text = offlineText(T, { nextTryAt, now, less: reduced() || nextTryAt <= now });
+  const words = document.createElement("span");
   const digits = text.match(/\d+/);
-  if (!digits) {
-    bannerText.textContent = text;
-    return;
+  if (digits) {
+    const number = document.createElement("span");
+    number.className = "digits";
+    number.textContent = digits[0];
+    words.append(text.slice(0, digits.index), number, text.slice(digits.index + digits[0].length));
+  } else {
+    words.textContent = text;
   }
-  const number = document.createElement("span");
-  number.className = "digits";
-  number.textContent = digits[0];
-  bannerText.replaceChildren(
-    text.slice(0, digits.index),
-    number,
-    text.slice(digits.index + digits[0].length),
-  );
+  // The demo's no-Wi-Fi icon before the words (decision 14).
+  bannerText.replaceChildren(icon("wifiOff"), words);
 }
 
 /** Back: the banner turns --ok for 2.6 s, saying how many waiting messages went out. */
@@ -582,7 +605,7 @@ function back(resent) {
   if (!wasOffline || banner.hidden) return;
   if (status.textContent === T.offlineStatus) setStatus(paused ? T.pausedStatus : "");
   banner.dataset.state = "back";
-  bannerText.textContent = T.back(resent);
+  bannerText.replaceChildren(icon("check"), T.back(resent));
   backTimer = setTimeout(() => {
     banner.hidden = true;
     delete banner.dataset.state;
@@ -807,13 +830,17 @@ input.addEventListener("input", () => {
   }
 });
 
-pause.addEventListener("click", () => {
+/** Pauses the conversation, or says why it can't while offline (5.13). */
+function askPause() {
   if (!isOpen()) {
     toasts.show({ text: T.pauseOffline, error: true });
-    return;
+    return false;
   }
   send({ type: "pause" });
-});
+  return true;
+}
+
+pause.addEventListener("click", askPause);
 
 /** A printable key anywhere focuses the composer, except in a field, a dialog or on a button. */
 document.addEventListener("keydown", (event) => {
@@ -987,9 +1014,12 @@ function translatePage() {
   document.querySelector(".skip").textContent = T.skip;
   threadElement.setAttribute("aria-label", T.conversation);
   document.querySelector('label[for="text"]').textContent = T.message;
-  sendButton.textContent = T.send;
-  pause.textContent = T.pause;
-  pause.title = T.pauseTitle;
+  // Round icon buttons that say their name in a tooltip, with no keyboard hint (decision 4).
+  sendButton.setAttribute("aria-label", T.send);
+  sendButton.replaceChildren(icon("up"));
+  pause.setAttribute("aria-label", T.pause);
+  pause.replaceChildren(icon("pause"));
+  tips(form);
   $("retry").textContent = T.tryNow;
   $("display-button").textContent = T.display;
   $("display").setAttribute("aria-label", T.display);

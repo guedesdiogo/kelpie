@@ -320,14 +320,24 @@ footer {
 
 /* ── The connection banner (5.12) ──────────────────────────────────────────────────────────── */
 
+/* The review's "Caiu a conexão": a pill at the top of the conversation, with the no-Wi-Fi icon. */
 .banner {
+  position: absolute;
+  inset-block-start: var(--space-3);
+  inset-inline-start: 50%;
+  translate: -50% 0;
+  z-index: 5;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-4);
-  background: var(--sunken);
-  font-size: var(--text-ui);
+  inline-size: max-content;
+  max-inline-size: calc(100% - 2 * var(--space-4));
+  padding: 7px var(--space-2) 7px var(--space-3);
+  border-radius: var(--r-chip);
+  background: var(--fg);
+  color: var(--bg);
+  box-shadow: var(--shadow-pop);
+  font-size: var(--text-sm);
   transition:
     background-color var(--dur-fade) var(--ease-fade),
     color var(--dur-fade) var(--ease-fade);
@@ -336,11 +346,24 @@ footer {
   display: none;
 }
 #banner-text {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
 .banner .digits {
   font-family: var(--font-mono);
+}
+.banner #retry {
+  min-block-size: 0;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--r-chip);
+  background: color-mix(in srgb, var(--bg) 18%, transparent);
+  color: inherit;
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 .banner[data-state="back"] {
   background: var(--ok);
@@ -356,13 +379,18 @@ main {
   position: relative;
   flex: 1;
   min-block-size: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 0 var(--space-4) var(--space-4);
 }
+/* Anchored to the bottom, as the demo's thread is: a new message pushes the ones above up. */
 #thread {
+  flex: 1 0 auto;
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   gap: var(--space-3);
 }
 #thread[aria-busy="true"] {
@@ -385,18 +413,17 @@ main {
   font-weight: 400;
   pointer-events: none;
 }
+/* In sentence case, as the webchat has no uppercase labels (decision 2, #378). */
 .day-label time {
   display: inline-block;
-  padding: 2px var(--space-2);
+  padding: 2px 10px;
   border: 1px solid var(--line);
   border-radius: var(--r-chip);
   background: var(--surface);
   color: var(--muted);
-  font-family: var(--font-mono);
   font-size: var(--text-xs);
+  font-weight: 500;
   line-height: var(--leading-xs);
-  letter-spacing: var(--tracking-eyebrow);
-  text-transform: uppercase;
   transition: opacity var(--dur-fade) var(--ease-fade);
 }
 .day-label[data-stuck] time {
@@ -411,19 +438,6 @@ main {
 }
 .group[data-sender="user"] {
   align-items: flex-end;
-}
-.group-time {
-  margin: 0;
-  padding-inline: var(--space-1);
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  line-height: var(--leading-xs);
-  font-variant-numeric: tabular-nums;
-}
-/* A group with no message yet (the typing bubble, a tool row) shows no time. */
-.group:not(:has(.bubble:not(.typing))) > .group-time {
-  display: none;
 }
 /* Settled groups skip their layout until they scroll into view (Hermes); the newest never. */
 .day:not(:last-child) > .group {
@@ -455,22 +469,10 @@ main {
   background: var(--sunken);
   color: var(--fg);
 }
+/* A queued message waits in --sunken, its text in --muted, with "Na fila" (decision 14). */
 .message[data-queued] .bubble {
   background: var(--sunken);
-  color: var(--fg);
-}
-/* Inside a group, a corner that touches a neighbor shrinks (Telegram), and no bubble has a tail. */
-.message[data-sender="user"] + .message[data-sender="user"] .bubble {
-  border-start-end-radius: var(--r-sm);
-}
-.message[data-sender="user"]:has(+ .message[data-sender="user"]) .bubble {
-  border-end-end-radius: var(--r-sm);
-}
-.message[data-sender="assistant"] + .message[data-sender="assistant"] .bubble {
-  border-start-start-radius: var(--r-sm);
-}
-.message[data-sender="assistant"]:has(+ .message[data-sender="assistant"]) .bubble {
-  border-end-start-radius: var(--r-sm);
+  color: var(--muted);
 }
 .bubble > .text {
   white-space: pre-wrap;
@@ -783,23 +785,83 @@ main {
 
 /* ── The confirmation card (5.3), with room for Deny and the hold (#361) ───────────────────── */
 
+/* The lab's compact card: who asks, the notice, the actions on the right, the hold under them. */
 .bubble.card {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  padding: var(--space-3);
+  inline-size: min(100%, 370px);
+  padding: var(--space-4);
   border: 1px solid var(--line);
   border-radius: var(--r-card);
-  background: var(--surface);
+  background: var(--bg);
   box-shadow: var(--shadow);
 }
 .message[data-sender="assistant"] .bubble.card {
-  background: var(--surface);
+  background: var(--bg);
+}
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.card-mascot {
+  inline-size: 40px;
+  block-size: 40px;
+  flex: none;
+  line-height: 0;
+}
+.card-mascot:empty {
+  display: none;
+}
+.card-who,
+.card-until {
+  margin: 0;
+}
+.card-until {
+  color: var(--muted);
+  font-size: var(--text-xs);
 }
 .card-actions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--space-2);
+}
+.hold {
+  position: relative;
+  align-self: flex-end;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--muted);
+  border-radius: var(--r-btn);
+  background: var(--sunken);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.hold:disabled {
+  cursor: default;
+}
+.hold-fill {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+.hold .label {
+  position: relative;
+  display: inline-grid;
+}
+.hold .label > .roll {
+  grid-area: 1 / 1;
 }
 .confirm {
   position: relative;
@@ -958,11 +1020,26 @@ main {
 
 /* ── The wait's bar and the composer (5.1, 5.15, §5.20) ────────────────────────────────────── */
 
-/* A 3px bar under the thread drains toward the real deadline; it is progress, so it moves under
- * reduced motion too. */
+/* The demo's 64 px track over the composer drains toward the real deadline, then the line says
+ * the agent writes (decision 10). The track is progress, so it moves under reduced motion too. */
 .wait {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  block-size: 18px;
+  padding-inline: var(--space-4);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+}
+.wait .track {
+  inline-size: 64px;
   block-size: 3px;
   flex: none;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--line);
 }
 .wait-fill {
   display: block;
@@ -972,23 +1049,19 @@ main {
   transform-origin: left center;
 }
 .wait[hidden] {
-  display: block;
+  display: flex;
   visibility: hidden;
 }
 
 #composer {
   display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: end;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom));
-  border-block-start: 1px solid var(--line);
+  padding: var(--space-2) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
 }
 #composer[hidden] {
   display: none;
 }
 .composer-notes {
-  grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
@@ -1004,49 +1077,73 @@ main {
 .composer-notes p[hidden] {
   display: none;
 }
-#text {
-  display: block;
-  inline-size: 100%;
+/* The demo's composer: one row, the text, then Pause and Send as round icon buttons (decision 4). */
+.field {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
   min-block-size: 40px;
+  padding: 6px 6px 6px var(--space-3);
+  border: 1px solid var(--muted);
+  border-radius: 16px;
+  background: var(--bg);
+  transition:
+    border-color var(--dur-fade) var(--ease-fade),
+    box-shadow var(--dur-fade) var(--ease-fade);
+}
+.field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-halo);
+}
+#text {
+  flex: 1;
+  min-inline-size: 0;
+  align-self: center;
+  min-block-size: 26px;
   max-block-size: 160px;
   field-sizing: content;
   resize: none;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--muted);
-  border-radius: var(--r-btn);
-  background: var(--surface);
+  margin: 0;
+  padding: 2px 0;
+  border: 0;
+  background: none;
   font-size: var(--text-base);
   line-height: var(--leading-ui);
   unicode-bidi: plaintext;
 }
 #text:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 0;
+  outline: none;
+  box-shadow: none;
+}
+.send,
+.pause {
+  position: relative;
+  display: grid;
+  place-items: center;
+  inline-size: 26px;
+  block-size: 26px;
+  flex: none;
+  padding: 0;
+  border-radius: 50%;
+  cursor: pointer;
 }
 .send {
-  min-block-size: 40px;
-  padding: 0 var(--space-4);
   border: 0;
-  border-radius: var(--r-btn);
   background: var(--accent);
   color: var(--on-accent);
-  font-size: var(--text-ui);
-  font-weight: 500;
-  cursor: pointer;
   transition: transform var(--dur-press) var(--ease-standard);
 }
 .send:active {
   transform: scale(var(--scale-press));
 }
 .pause {
-  min-block-size: 40px;
-  padding: 0 var(--space-3);
   border: 1px solid var(--muted);
-  border-radius: var(--r-btn);
   background: none;
   color: var(--fg);
-  font-size: var(--text-sm);
-  cursor: pointer;
+}
+.pause[aria-pressed="true"] {
+  background: var(--sunken);
+  color: var(--muted);
 }
 .pause:disabled,
 .send:disabled {
@@ -1055,6 +1152,31 @@ main {
 }
 .send:disabled {
   background: var(--sunken);
+}
+
+/* Tooltips: the button's name, for the eye (tips.js). */
+[data-tip] {
+  position: relative;
+}
+.tip {
+  position: absolute;
+  inset-block-end: calc(100% + 6px);
+  inset-inline-start: 50%;
+  translate: -50% 0;
+  z-index: 9;
+  padding: 4px var(--space-2);
+  border-radius: 6px;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: var(--leading-xs);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+}
+.tip[data-shown] {
+  opacity: 1;
 }
 
 /* ── Toasts (5.13) and the sign-in dialog (5.12) ───────────────────────────────────────────── */
@@ -1160,7 +1282,11 @@ dialog h2 {
     font-size: var(--text-input-phone);
   }
   .send,
-  .pause,
+  .pause {
+    inline-size: 44px;
+    block-size: 44px;
+  }
+  .hold,
   .icon-button,
   .confirm,
   .copy,
