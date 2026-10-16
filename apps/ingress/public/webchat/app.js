@@ -22,6 +22,7 @@ import {
   QUIET_AFTER_MS,
   retryDelay,
   TYPING_IDLE_MS,
+  tabOf,
   waitOf,
 } from "./model.js";
 import { enter, fadeIn, hideAfterExit, play, reduced, SPRINGS, scrollToEnd } from "./motion.js";
@@ -51,6 +52,7 @@ const announcer = $("announcer");
 const mascotHost = $("mascot");
 const motionAsk = $("motion-ask");
 const login = $("login");
+const favicon = $("favicon");
 
 let agent = new URLSearchParams(location.search).get("agent") ?? "";
 /** The agents the owner can talk to, from /webchat/agents. */
@@ -687,7 +689,7 @@ function showAgents() {
   const name = $("agent-name");
   name.textContent = agentName();
   thread.renamed();
-  document.title = agentName() === "Kelpie" ? "Kelpie" : `${agentName()} · Kelpie`;
+  showTab();
   const switcher = $("switcher");
   const several = agents.length > 1;
   switcher.setAttribute("aria-disabled", String(!several));
@@ -727,6 +729,23 @@ function chevron() {
 }
 
 popover($("switcher"), $("agents"), { arrows: true });
+
+/**
+ * How many agents wait for the owner (5.9). The page hears only the open one, which waits while its
+ * mascot does; once the sidebar hears every agent (#378), its strip's count goes here.
+ */
+let waiting = 0;
+
+/**
+ * The tab's title starts with the count, and the favicon gets its --warm dot. Each is written only
+ * when it changes: Firefox marks a pinned tab whose title changed. Safari keeps the first favicon
+ * (WebKit bug 266426), so the title carries the count there.
+ */
+function showTab() {
+  const { title, icon } = tabOf(agentName(), waiting);
+  if (document.title !== title) document.title = title;
+  if (favicon.getAttribute("href") !== icon) favicon.setAttribute("href", icon);
+}
 
 // ── The composer ───────────────────────────────────────────────────────────────────────────────
 
@@ -825,9 +844,11 @@ if (viewport) {
 const MOTION_KEY = "kelpie.mascotMotion";
 let mascot = null;
 let mascotConfig = null;
-const presence = presenceKeeper((shown) =>
-  mascot?.setState(shown.state, { activity: shown.activity }),
-);
+const presence = presenceKeeper((shown) => {
+  mascot?.setState(shown.state, { activity: shown.activity });
+  waiting = shown.state === "waiting" ? 1 : 0;
+  showTab();
+});
 const present = (event) => presence.event(event);
 
 /** The agent's mascot, from the conversation; one the page can't draw is ignored. */

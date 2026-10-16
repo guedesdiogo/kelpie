@@ -14,6 +14,9 @@ const KELP = "#0A7469";
 const ON_KELP = "#F0FAF8";
 const KELP_DARK = "#3BC3AE";
 const ON_KELP_DARK = "#03201B";
+/** --warm, light and dark: the dot that says an agent waits for the owner (§5.9). */
+const WARM = "#915708";
+const WARM_DARK = "#EEAE4A";
 
 const n = (value) => String(Math.round(value * 1000) / 1000);
 
@@ -149,6 +152,18 @@ function favicon(size, dark = true) {
 }
 
 /**
+ * The 32 px favicon while an agent waits for the owner (§5.9): the same tile, with a --warm dot
+ * in the bottom-right corner, where the 36 px badge sits, so both ears stay clear. --warm on
+ * --accent measures about 1:1, so a 2 px --on-accent ring sets the dot apart (5.53 and 8.80).
+ */
+function faviconWaiting() {
+  const style = `<style>.t{fill:${KELP}}.g{fill:${ON_KELP}}.w{fill:${WARM}}@media (prefers-color-scheme:dark){.t{fill:${KELP_DARK}}.g{fill:${ON_KELP_DARK}}.w{fill:${WARM_DARK}}}</style>`;
+  const tile = `<rect class="t" width="32" height="32" rx="${n(32 * 0.22)}"/><path class="g" d="${SMALL[32]}"/>`;
+  const dot = `<circle class="g" cx="25" cy="25" r="7"/><circle class="w" cx="25" cy="25" r="5"/>`;
+  return svg("0 0 32 32", `${style}${tile}${dot}`);
+}
+
+/**
  * A home-screen icon on a 100 box: the mark `fill` of the box tall, centred on a kelp tile.
  * `square` is for iOS, which masks it; `rounded` for the manifest's `any`; `maskable` keeps the
  * figure inside the 40% circle Android may crop to.
@@ -241,6 +256,7 @@ const files = {
   [`${BRAND}/app-icon-rounded.svg`]: appIcon("rounded", 0.62),
   [`${BRAND}/app-icon-maskable.svg`]: appIcon("square", 0.5),
   [`${WEBCHAT}/icon.svg`]: favicon(32),
+  [`${WEBCHAT}/icon-waiting.svg`]: faviconWaiting(),
 };
 for (const [path, text] of Object.entries(files)) writeFileSync(path, text);
 
