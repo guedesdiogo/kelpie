@@ -420,11 +420,12 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       const work = (async (): Promise<CreatorLimits> => {
         const host = this.env.AGENT_HOST.getByName(creator);
         const sources = this.#identitySources();
-        // A Master creator holds its orchestration tools whatever its list (ADR-0050, #391).
+        // A Master creator holds its orchestration tools whatever its list (ADR-0050, #391). A role
+        // that can't be read counts as none: its own list, never wider.
         const [{ settings }, model, listed] = await Promise.all([
           host.config(),
           host.ownModel(),
-          sources.agent(creator),
+          sources.agent(creator).catch(() => null),
         ]);
         const described = await sources.describe(model);
         return {

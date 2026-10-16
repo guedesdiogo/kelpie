@@ -807,6 +807,23 @@ describe("AgentHost and subagents (#290)", () => {
     ]);
   });
 
+  it("keeps a subagent's creator limits when only the creator's role can't be read (#391)", async () => {
+    replaceIdentitySourcesForTesting({
+      agent: async (id) => {
+        if (id === "role-down-main") throw new Error("Durable Object reset");
+        return { name: id, role: "subagent", owner: "role-down-main" };
+      },
+      describe: async () => ({ provider: "anthropic", tier: "medium", route: [] }),
+      specialists: async () => [],
+    });
+    await host("role-down-main").configure({ tools: ["memory_search", "complete_task"] }, owner);
+    // Its own list, read without the role: never the cheapest limits' empty one, and never wider.
+    expect((await host("role-down-child").turnConfig()).agent?.creatorTools).toEqual([
+      "memory_search",
+      "complete_task",
+    ]);
+  });
+
   it("holds a subagent to the tier its creator runs on, the instance's when it sets none (#344)", async () => {
     // The instance's conversation tier is frontier: an agent that sets none runs on it.
     replaceIdentitySourcesForTesting({

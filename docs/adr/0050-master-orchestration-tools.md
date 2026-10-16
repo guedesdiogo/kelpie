@@ -40,12 +40,23 @@ The reference check is on #391. Hermes Agent's [`bundle_non_core_tools`](https:/
 ### Amendments
 
 - **[ADR-0048](0048-master-configures-kelpie.md) §2:** Kelpie keeps an agent that configures it in chat because Master always holds its orchestration tools, not because the two tools refuse a list.
+- **[ADR-0036](0036-agent-roles-models-and-subagents.md) §3:** the owner sets Master's other tools through `tools`, and not its orchestration tools.
 - **[ADR-0036](0036-agent-roles-models-and-subagents.md) §5:** a subagent's tools are a subset of what its creator holds, a Master creator's orchestration tools included.
 
 ## Consequences
 
 - **The admin API is no longer needed to recover a narrowed Master's configuration tools,** as it was for a list stored before ADR-0048.
 - **The owner can't narrow Master out of orchestration** through `tools`. They narrow only Master's other tools.
+  - `get_agent` and the confirmation of a change to Master's `tools` say so, so the stored list isn't mistaken for all Master holds.
+  - Some of these tools run without the owner's confirmation, as ADR-0013 allows for smaller changes: `create_subagent`, `delete_subagent`, `create_task`, `create_agent`, `rename_agent`, and the link tools.
+  - What still bounds them:
+    - three live subagents per creator, and ten a day;
+    - three handoffs per turn;
+    - an assignee's `maxConcurrentTasks`, which `0` stops;
+    - a subagent's own tools, which are memory reads and its task tools.
+  - Making another agent Master moves the same tools with the role.
+- **No new cost:** Master already held these tools by default (`tools: null`). This only stops a list from removing them, so the rule that extra cost is opt-in isn't touched.
+- **A role read late is the one gap:** a turn that read a last-seen `main` role, while the Registry was slow, filters its tools as Master's for that turn. The providers still check the role, spawn and ownership afresh when they list and run their tools.
 - **Tests cover:**
   - a direct turn of a Master whose list names only `memory_search` is offered every orchestration tool, and only `memory_search` of the others;
   - a specialist with the same list gets only `memory_search`;

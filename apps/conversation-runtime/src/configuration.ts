@@ -157,7 +157,8 @@ const SPECS = {
             tools: {
               type: ["array", "null"],
               items: { type: "string" },
-              description: "The tools it may use, by name; null for all it is given.",
+              description:
+                "The tools it may use, by name; null for all it is given. Master keeps its configuration, subagent and task tools whatever the list.",
             },
             maxConcurrentTasks: {
               type: "integer",
@@ -399,6 +400,8 @@ const TEXTS: Localized<{
   settingTo: string;
   settingFrom: string;
   changeSettings: (agent: string, id: string, changes: string) => string;
+  /** After a change to Master's tools: the list never removes its orchestration tools (#391). */
+  masterKeeps: string;
   mainAgent: (agent: string, id: string) => string;
   models: (before: string, after: string) => string;
   chat: (agent: string, id: string, on: boolean) => string;
@@ -413,6 +416,7 @@ const TEXTS: Localized<{
     settingFrom: "from",
     changeSettings: (agent, id, changes) =>
       `change the settings of the agent ${agent} (${id}): ${changes}.`,
+    masterKeeps: "Master keeps its configuration, subagent and task tools whatever the list.",
     mainAgent: (agent, id) =>
       `make the agent ${agent} (${id}) Master, the one you talk to, which also configures Kelpie.`,
     models: (before, after) =>
@@ -437,6 +441,8 @@ const TEXTS: Localized<{
     settingFrom: "de",
     changeSettings: (agent, id, changes) =>
       `alterar as configurações do agente ${agent} (${id}): ${changes}.`,
+    masterKeeps:
+      "O Master mantém as tools de configuração, de subagentes e de tarefas, qualquer que seja a lista.",
     mainAgent: (agent, id) =>
       `tornar o agente ${agent} (${id}) o Master, o que conversa com você e configura o Kelpie.`,
     models: (before, after) =>
@@ -461,6 +467,8 @@ const TEXTS: Localized<{
     settingFrom: "de",
     changeSettings: (agent, id, changes) =>
       `cambiar la configuración del agente ${agent} (${id}): ${changes}.`,
+    masterKeeps:
+      "El Master conserva las tools de configuración, de subagentes y de tareas, sea cual sea la lista.",
     mainAgent: (agent, id) =>
       `convertir el agente ${agent} (${id}) en el Master, el que conversa contigo y configura Kelpie.`,
     models: (before, after) =>
@@ -621,7 +629,15 @@ export function configurationTools(
           return failed("That isn't an agent id: lowercase letters, digits and hyphens.");
         const result = await commands.getAgent(context.actor, { id });
         if (!result.ok) return refusal(result, id);
-        return { output: JSON.stringify(result.value, null, 2) };
+        const shown = JSON.stringify(result.value, null, 2);
+        const { role, settings } = result.value;
+        // Its stored list isn't all it holds (ADR-0050).
+        return {
+          output:
+            role === "main" && settings.tools !== null
+              ? `${shown}\nAs Master, it also always holds its orchestration tools, whatever this list says: ${[...MASTER_TOOLS].join(", ")}.`
+              : shown,
+        };
       },
     },
     {
@@ -679,11 +695,17 @@ export function configurationTools(
         const agent = await agentOf(context, id);
         if (!("id" in agent)) return agent;
         const change = { id: agent.id, settings: parsed };
-        const summary = TEXTS[context.locale].changeSettings(
+        const texts = TEXTS[context.locale];
+        const changed = texts.changeSettings(
           JSON.stringify(agent.name),
           agent.id,
           describe(parsed, context.locale, agent.settings.model ?? {}),
         );
+        // A list never holds Master back from orchestrating (ADR-0050): the owner sees that too.
+        const summary =
+          agent.role === "main" && parsed.tools !== undefined
+            ? `${changed} ${texts.masterKeeps}`
+            : changed;
         // The owner confirms what they see, and one bubble shows the whole change, or nothing.
         if (visible(summary).length > MAX_SUMMARY_CHARS) {
           return failed(

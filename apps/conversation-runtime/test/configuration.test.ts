@@ -307,6 +307,26 @@ describe("Master's configuration tools (ADR-0048)", () => {
     }
     // Every configuration tool is one of Master's orchestration tools.
     for (const name of tools.keys()) expect(MASTER_TOOLS.has(name), name).toBe(true);
+    // The owner and the model are told the list doesn't hold them back.
+    const shown = contextOf(false, owner, "pt-BR");
+    await run(
+      tools,
+      "configure_agent",
+      { id: MASTER, settings: { tools: ["memory_search"] } },
+      shown.context,
+    );
+    expect(shown.asked[0]?.summary).toContain(
+      "O Master mantém as tools de configuração, de subagentes e de tarefas, qualquer que seja a lista.",
+    );
+    const forAna = contextOf(false);
+    await run(tools, "configure_agent", { id: "ana", settings: { tools: [] } }, forAna.context);
+    expect(forAna.asked[0]?.summary).not.toContain("Master keeps");
+    allowlists.set(MASTER, ["memory_search"]);
+    expect(
+      (await run(tools, "get_agent", { id: MASTER }, contextOf(false).context)).output,
+    ).toContain(
+      "As Master, it also always holds its orchestration tools, whatever this list says:",
+    );
     // What an agent holds: Master's list gains them; anyone else's, or no list, stays as it is.
     expect(new Set(heldTools("main", ["memory_search"]))).toEqual(
       new Set([...MASTER_TOOLS, "memory_search"]),

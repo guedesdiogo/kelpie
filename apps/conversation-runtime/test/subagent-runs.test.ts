@@ -10,7 +10,7 @@ import {
 } from "@kelpie/config";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { replaceTaskRunnerForTesting } from "../src/agent-host/agent-host.ts";
-import { configurationTools, MASTER_TOOLS } from "../src/configuration.ts";
+import { configurationTools, heldTools, MASTER_TOOLS } from "../src/configuration.ts";
 import { memoryTools } from "../src/memory-tools.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import { SUBAGENT_TOOLS } from "../src/subagent-limits.ts";
@@ -51,7 +51,8 @@ function use(world: FakeWorld): FakeWorld {
         return {
           model: agentModel(settings),
           described: { provider: "anthropic", tier: "medium", route: [] },
-          tools: settings.tools,
+          // As production reads it (ports.ts): what the creator holds, by its role (#391).
+          tools: heldTools((await registry().get(id))?.role ?? null, settings.tools),
         };
       },
       add: (id, name, creator, actor) => registry().addSubagent(id, name, creator, actor),
@@ -313,6 +314,17 @@ describe("a temporary subagent (#290)", () => {
         adminOrigin: "https://admin.example",
       }),
     );
+    // Master hands tasks only to agents it owns: this specialist is its own.
+    await registry().add("allow-spec", "Spec", owner);
+    // Every orchestration tool is one a provider offers Master, in a chat or a task's run.
+    const provided = new Set<string>();
+    for (const provider of world.tools) {
+      for (const channel of ["telegram", "task"] as const) {
+        for (const tool of await provider.tools("kelpie", { channel }))
+          provided.add(tool.spec.name);
+      }
+    }
+    for (const name of MASTER_TOOLS) expect(provided, name).toContain(name);
     /** The tools a direct turn of the agent is offered, in a thread of its own. */
     const offered = async (agentId: string, thread: string) => {
       const before = world.requests.length;
@@ -350,8 +362,45 @@ describe("a temporary subagent (#290)", () => {
     expect(narrowed).not.toContain("memory_read");
 
     // A specialist's allowlist still narrows everything it is given.
-    await registry().add("allow-spec", "Spec", owner);
     await host("allow-spec").configure({ tools: ["memory_search"] }, owner);
     expect(await offered("allow-spec", "allow-spec-chat")).toEqual(new Set(["memory_search"]));
+  });
+
+  it("lets a narrowed Master create a subagent that can finish its task (#391)", async () => {
+    const owner = { userId: "u-owner", role: "owner", via: "admin-api" } as const;
+    const world = use(
+      fakeWorld([
+        toolCalls({
+          name: "create_subagent",
+          input: { name: "Narrow", soul: "You check one thing.", remit: "One check." },
+        }),
+        reply("Made it."),
+      ]),
+    );
+    await host("kelpie").configure({ tools: ["memory_search"] }, owner);
+    const chat = agent("kelpie:telegram:allow-narrow-spawn");
+    await chat.ingest({
+      agentId: "kelpie",
+      providerMessageId: "narrow:m1",
+      userId: "u-owner",
+      role: "owner",
+      chatType: "direct",
+      text: "Make a helper.",
+      destination: { channel: "telegram", threadId: "allow-narrow-spawn" },
+      sentAt: Date.now(),
+      timeZone: null,
+    });
+    await chat.flush();
+    await until(async () => {
+      expect(world.sent.at(-1)).toMatch(/^Kelpie created the subagent "Narrow" \(kelpie-sub-/);
+    });
+    const made = (await registry().list()).find((entry) => entry.name === "Narrow");
+    if (!made) throw new Error("no subagent");
+    // It holds a subagent's task tools, within what its narrowed creator holds.
+    expect((await host(made.id).turnConfig()).agent?.creatorTools).toEqual(
+      expect.arrayContaining(["memory_search", "complete_task"]),
+    );
+    await host("kelpie").configure({ tools: null }, owner);
+    expect(await commands().deleteAgent(owner, { id: made.id })).toMatchObject({ ok: true });
   });
 });
