@@ -45,10 +45,10 @@ The owner works in the conversation, where no pup showed, and asked for them at 
   - The row is as tall as the box, and pups stand on its bottom edge, the parent's ground.
   - The row starts `--space-1` from the box, and pups stand `--space-1` apart. The name keeps `--space-3` after the row.
 - **What a pup shows.** It is 20 px, with the shape, the head, the lighter color and dot eyes.
-  - The head stays, though a task card drops it. It is what makes a pup its parent's (ADR-0045 §7), and it read at 20 px on the design system's card. If the engine's head doesn't read at that size, it is dropped as on a task card.
+  - The head stays, though a task card drops it. It is what makes a pup its parent's (ADR-0045 §7). If the engine's head doesn't read at 20 px, it is dropped as on a task card.
   - It has no mouth, brows, mittens or task's object.
   - It breathes and blinks, and plays its announcements, such as the hop of a task that succeeded. It has no gestures and doesn't doze.
-- **A failed pup** shows §5.9's triangle glyph above its head, 10 px in `--danger`, as a small Error bubble.
+- **A failed pup** shows §5.9's triangle glyph above its head, bare, 10 px in `--danger`.
   - It sits on the header's background, inside the row's height and the pup's width, so it covers neither the pup nor its neighbor.
   - On the background `--danger` passes 3:1 (WCAG 1.4.11) in every theme; on the mascots' bodies it wouldn't.
   - The glyph is drawn in SVG, so it shows in forced colors and higher contrast.
@@ -106,15 +106,14 @@ They follow §5.6 on both surfaces:
 
 ### The profile's count
 
-The profile's line, "1 of 3 back", now counts in its total every pup out since no pup was out, so a pup that leaves after others came back raises it.
+The profile's line, "1 of 3 back", counts subagents, not departures. Its total is the subagents that went out since none was out, at most three (ADR-0036), and a subagent that leaves again counts as out until it is back.
 
 ### Unchanged
 
 From ADR-0051:
 - a pup follows its subagent's tasks;
 - at most three show;
-- the parent's state comes from §5.9 and §5.19;
-- the profile's own count line.
+- the parent's state comes from §5.9 and §5.19.
 
 From ADR-0045 §7: the look of a pup.
 
@@ -127,7 +126,7 @@ From ADR-0045 §7: the look of a pup.
   - §9: the sources read on #403;
   - the introduction, which lists the ADRs.
 - **#378 lays out the webchat's header** (§5.21). The pups' row and the count sit inside its `.agent`, and their rules stay in §5.6.
-- **The engine draws a round badge at every size up to 40 px.** Header pups need it off, with the triangle glyph beside them instead.
+- **The engine draws a round badge at every size up to 40 px.** Header pups need it off, with the triangle glyph above them instead.
 - **Reduced motion:**
   - pups fade in and out at their places in `--dur-fade`;
   - the pups after a returning one, and the name, take their new places at once;

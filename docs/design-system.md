@@ -352,7 +352,7 @@ Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0
   - The row starts `--space-1` from the box, and pups stand `--space-1` apart. The name keeps `--space-3` after the row.
   - A header pup is 20 px: 40% of 48 px is 19.2 px. It has the shape, the head, the lighter color and dot eyes. A task card at 20 px drops the head (5.19), but a pup keeps it: the head makes it its parent's. If the engine's head doesn't read at 20 px, it is dropped as on a task card.
   - It has no mouth, brows, mittens or task's object. It breathes, blinks and plays its announcements, such as a success's hop, with no gestures and no dozing.
-  - A failed pup shows 5.9's triangle glyph above its head, 10 px in `--danger`, as a small Error bubble. It sits on the header's background, inside the row's height and the pup's width, where `--danger` passes 3:1 in every theme; on the bodies it wouldn't. It is drawn in SVG and hidden from screen readers. The engine's round badge isn't drawn on header pups.
+  - A failed pup shows 5.9's triangle glyph above its head, bare, 10 px in `--danger`. It sits on the header's background, inside the row's height and the pup's width, where `--danger` passes 3:1 in every theme; on the bodies it wouldn't. It is drawn in SVG and hidden from screen readers. The engine's round badge isn't drawn on header pups.
   - A working or waiting pup carries no mark. A waiting pup looks at the parent.
   - Header pups aren't interactive: at 20 px they are below the 24 px target size (WCAG 2.5.8).
   - For screen readers, the row is a list named for the parent's subagents, such as "Research's subagents". Each pup is an item named by its task and state, such as "read the reviews, failed". The figures are hidden.
@@ -372,7 +372,7 @@ Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0
   - **A task cancelled,** by the owner's stop or by its agent, or lost with its subagent, goes back with no smile or hop and doesn't count as failed. An ending the page can't tell is never shown as a success. The pause doesn't cancel tasks (5.3).
   - **A task that waits for an answer.** The subagent's question goes to its creator, not to the owner (ADR-0036). The pup stays out with no amber, looking at the parent, and the strip of 5.9 doesn't count it. On the profile it holds its task's object at rest. If the creator then asks the owner, the parent's state follows 5.9 and 5.19, for example Waiting while a confirmation is open (5.3).
 - **On the profile, a status line counts them back** in a polite live region:
-  - "1 of 3 back", where 3 counts every pup out since no pup was out;
+  - "1 of 3 back", which counts subagents, not departures: 3 is the subagents that went out since none was out, at most three, and one that leaves again counts as out until it is back;
   - "All 3 are back", or "It's back" for a single pup;
   - "1 failed" when one did;
   - "1 waiting on <creator's name>", such as "1 waiting on Kelpie", while one waits on its creator.
