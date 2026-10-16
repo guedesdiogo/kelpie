@@ -52,6 +52,9 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0046](0046-telegram-bot-photo.md) | Each agent's Telegram bot shows the agent's mascot as its profile photo | [#368](https://github.com/guedesdiogo/kelpie/issues/368) |
 | [0047](0047-mascot-offline.md) | When the page loses its connection, every mascot shows Offline | [#380](https://github.com/guedesdiogo/kelpie/issues/380) |
 | [0048](0048-master-configures-kelpie.md) | Master configures Kelpie, and the setup agent goes | [#382](https://github.com/guedesdiogo/kelpie/issues/382) |
+| [0049](0049-logo-main-mascot-silhouette.md) | Kelpie's logo is the main mascot's silhouette, and the main mascot gets round ears and big eyes | [#385](https://github.com/guedesdiogo/kelpie/issues/385) |
+| [0050](0050-master-orchestration-tools.md) | Master always holds the tools it orchestrates Kelpie with | [#391](https://github.com/guedesdiogo/kelpie/issues/391) |
+| [0051](0051-subagent-pups-return-one-by-one.md) | Subagents leave and come back as pups beside their parent, one by one, with no link | [#399](https://github.com/guedesdiogo/kelpie/issues/399) |
 
 ## Format
 

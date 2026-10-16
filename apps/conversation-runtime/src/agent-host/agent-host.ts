@@ -52,7 +52,7 @@ import { Agent } from "agents";
 import { and, desc, eq, isNotNull, lte, notLike } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
-import { CONFIGURE_KELPIE_SKILL } from "../configuration.ts";
+import { CONFIGURE_KELPIE_SKILL, heldTools } from "../configuration.ts";
 import { identitySection } from "./identity.ts";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
@@ -419,14 +419,21 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     try {
       const work = (async (): Promise<CreatorLimits> => {
         const host = this.env.AGENT_HOST.getByName(creator);
-        const [{ settings }, model] = await Promise.all([host.config(), host.ownModel()]);
-        const described = await this.#identitySources().describe(model);
+        const sources = this.#identitySources();
+        // A Master creator holds its orchestration tools whatever its list (ADR-0050, #391). A role
+        // that can't be read counts as none: its own list, never wider.
+        const [{ settings }, model, listed] = await Promise.all([
+          host.config(),
+          host.ownModel(),
+          sources.agent(creator).catch(() => null),
+        ]);
+        const described = await sources.describe(model);
         return {
           tier: described.tier,
           ...(described.effort === undefined ? {} : { effort: described.effort }),
           provider: described.provider,
           ...(model.memory ? { memory: model.memory } : {}),
-          tools: settings.tools,
+          tools: heldTools(listed?.role ?? null, settings.tools),
         };
       })();
       const limits = await Promise.race([

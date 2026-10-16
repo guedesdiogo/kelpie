@@ -789,6 +789,41 @@ describe("AgentHost and subagents (#290)", () => {
     });
   });
 
+  it("lets a narrowed Master's subagent keep the task tools Master always holds (#391)", async () => {
+    roster({
+      "held-main": { role: "main" },
+      "held-child": { role: "subagent", owner: "held-main" },
+      "held-spec": { role: "specialist" },
+      "held-spec-child": { role: "subagent", owner: "held-spec" },
+    });
+    await host("held-main").configure({ tools: ["memory_search"] }, owner);
+    expect((await host("held-child").turnConfig()).agent?.creatorTools).toEqual(
+      expect.arrayContaining(["memory_search", "complete_task", "wait_on_task", "comment_task"]),
+    );
+    // A specialist's list stays its own.
+    await host("held-spec").configure({ tools: ["memory_search"], spawn: true }, owner);
+    expect((await host("held-spec-child").turnConfig()).agent?.creatorTools).toEqual([
+      "memory_search",
+    ]);
+  });
+
+  it("keeps a subagent's creator limits when only the creator's role can't be read (#391)", async () => {
+    replaceIdentitySourcesForTesting({
+      agent: async (id) => {
+        if (id === "role-down-main") throw new Error("Durable Object reset");
+        return { name: id, role: "subagent", owner: "role-down-main" };
+      },
+      describe: async () => ({ provider: "anthropic", tier: "medium", route: [] }),
+      specialists: async () => [],
+    });
+    await host("role-down-main").configure({ tools: ["memory_search", "complete_task"] }, owner);
+    // Its own list, read without the role: never the cheapest limits' empty one, and never wider.
+    expect((await host("role-down-child").turnConfig()).agent?.creatorTools).toEqual([
+      "memory_search",
+      "complete_task",
+    ]);
+  });
+
   it("holds a subagent to the tier its creator runs on, the instance's when it sets none (#344)", async () => {
     // The instance's conversation tier is frontier: an agent that sets none runs on it.
     replaceIdentitySourcesForTesting({

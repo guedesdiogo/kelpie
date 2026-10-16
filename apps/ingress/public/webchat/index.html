@@ -9,6 +9,12 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="" />
     <title>Kelpie</title>
+    <!-- The logo's icons (ADR-0049). Access guards the webchat, so the manifest asks with the
+         login's cookie; a browser fetches it without one otherwise. -->
+    <link rel="icon" href="/webchat/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/webchat/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/webchat/apple-touch-icon.png" />
+    <link rel="manifest" href="/webchat/manifest.webmanifest" crossorigin="use-credentials" />
     <link
       rel="preload"
       href="/webchat/fonts/geist-latin-wght-5.3.0.woff2"

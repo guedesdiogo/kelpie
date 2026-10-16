@@ -1,6 +1,6 @@
 # Design system
 
-Kelpie's interface follows one visual identity and one motion system, decided in [ADR-0043](adr/0043-design-system.md) and extended by its first review in [ADR-0044](adr/0044-design-system-review.md), by the agent mascot in [ADR-0045](adr/0045-agent-mascot.md) and by its Telegram photo in [ADR-0046](adr/0046-telegram-bot-photo.md). This document holds the values. A page, component or animation takes its colors, type, spacing, radii and motion from the tokens below. A literal number is allowed only where a pattern in section 5 sets it.
+Kelpie's interface follows one visual identity and one motion system, decided in [ADR-0043](adr/0043-design-system.md) and extended by its first review in [ADR-0044](adr/0044-design-system-review.md), by the agent mascot in [ADR-0045](adr/0045-agent-mascot.md), by its Telegram photo in [ADR-0046](adr/0046-telegram-bot-photo.md), by the logo in [ADR-0049](adr/0049-logo-main-mascot-silhouette.md) and by the subagents' pups in [ADR-0051](adr/0051-subagent-pups-return-one-by-one.md). This document holds the values. A page, component or animation takes its colors, type, spacing, radii and motion from the tokens below. A literal number is allowed only where a pattern in section 5 sets it.
 
 The direction is called **Mistura** ("mix"): the identity of the water spirit (kelp colors, shapes that change) with the discipline of the herding dog (Pastoreio, "herding": fast, grouped, no bounce). What the owner does a hundred times a day moves quickly and plainly. The moments that matter (approving, spending, delegating, remembering) get the expressive motion. Each agent is one of those changing shapes: a plush drop of water that stays alive in its place (5.19).
 
@@ -130,7 +130,7 @@ Motion depends on how often an interaction happens, not on which screen it is in
 | Grammar | Applies to | Character |
 |---|---|---|
 | **Frequent** | Messages, streaming, tool rows, the task board, lists, menus, the palette, navigation | Fast, no visible overshoot, small distances, tight stagger |
-| **Moment** | Confirming an action, turning on something that costs, delegating to subagents, saving to memory, agent presence changes | Springs that pass their target a little, larger distances, and a signature: the drop of a subagent, the ring of a confirmation, the arc into the vault, a mascot's announcement |
+| **Moment** | Confirming an action, turning on something that costs, delegating to subagents, saving to memory, agent presence changes | Springs that pass their target a little, larger distances, and a signature: a parent's pups, the ring of a confirmation, the arc into the vault, a mascot's announcement |
 
 **The mascot's life in place** (breathing, blinking, its repertoire) is not UI motion in either grammar. It uses the frequent springs, runs under its own guards, and is the one exception to rule 8 (5.19, ADR-0045 §6).
 
@@ -152,7 +152,7 @@ The other columns come from simulating each spring with semi-implicit Euler, in 
 | `--spring-slow` | 300 / 0.9 | 31.2 | 197 ms | 394 ms | 0.1% | Large surfaces, drawers, a mascot dozing off |
 | `--spring-moment-fast` | 800 / 0.6 | 33.9 | 83 ms | 393 ms | 9.2% | A released hold, small moment feedback |
 | `--spring-moment` | 380 / 0.8 | 31.2 | 153 ms | 457 ms | 1.4% | Moment layout: a button that grows, a card that collapses, a mascot's pose |
-| `--spring-moment-slow` | 200 / 0.8 | 22.6 | 211 ms | 611 ms | 1.4% | Travel: subagents leaving their parent, links drawing |
+| `--spring-moment-slow` | 200 / 0.8 | 22.6 | 211 ms | 611 ms | 1.4% | Large moment travel; no pattern uses it since ADR-0051 |
 | `--spring-pop` | 800 / 0.55 | 31.1 | 79 ms | 471 ms | 12.3% | Confirmations: a check, a vault that receives, a mascot that changes state, and its bubble |
 
 The first six are Material 3's standard and expressive spatial springs. `--spring-pop` is Kelpie's own, a little bouncier than Material 3's expressive fast spring.
@@ -338,14 +338,26 @@ Frequent. Each fire of a routine creates a task ([ADR-0039](adr/0039-routines-as
 
 ### 5.6 Subagents
 
-Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0036-agent-roles-models-and-subagents.md)).
+Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0036-agent-roles-models-and-subagents.md)). They work as pups of their parent's mascot, which leave it and come back one by one ([ADR-0051](adr/0051-subagent-pups-return-one-by-one.md)).
 
-- **The parent's mascot pulses** (`scale` 0.9 to 1, `--spring-pop`).
-- **Each subagent is a pup** of the parent's mascot (ADR-0045 §7): the same shape and head, a lighter color, dot eyes, no accessory, and 40% of the size. All of them show, since a creator has at most three live subagents (ADR-0036).
-- **A pup leaves the parent's body as a drop**, under an SVG "goo" filter on one layer (Gaussian blur 7, alpha matrix 20 / −9). It travels to its place with `--spring-moment-slow`, `--stagger-moment` apart.
-- **A link draws** from the parent (stroke offset, `--spring-moment-slow`, 60 ms later), and the label enters 8px from the left, 140 ms later.
-- **When it is done**, it travels back faster than it left (rule 9) and fades into the parent. The link retracts, and the parent swallows it (`scale` 1.12 to 1, `--spring-pop`, at 55% of the return).
-- **Reduced motion:** pups and links fade in and out at their places, without the goo.
+- **Each subagent at work is a pup** of the parent's mascot (ADR-0045 §7): the same shape and head, a lighter color, dot eyes, no accessory, and 40% of the size.
+- **A pup follows its subagent's tasks.** It leaves when its subagent starts a task and comes back when that task ends. A subagent with no task shows no pup. At most three pups show, since a creator has at most three live subagents (ADR-0036).
+- **Where pups play.**
+  - Pups play beside the parent, on its ground, with no link between them, on the agent's profile, where its mascot shows at 160 px (5.19). The empty conversation and the Telegram photo draw none.
+  - Their three slots beside the parent are kept, so nothing in the layout moves when a pup arrives.
+  - At 40% of the profile's 160 px, a pup is 64 px and keeps the full face of 5.19's 48 px row.
+  - The conversation's header and the roster draw no pups.
+  - No pups show while the page is Offline (ADR-0047). Pups out when it goes Offline fade out in `--dur-fade`; when it is back, the pups of tasks still running reappear at their places, without leaving again.
+- **The parent's state** comes from 5.9 and 5.19 as for any agent. Delegating is not a state of its own.
+- **Leaving.** Each pup comes out of the parent's middle at a scale of 0.3 and goes to its place with `--spring-moment`, `--stagger-moment` apart. As each one leaves, the parent pulses (`scale` 0.9 to 1, `--spring-pop`), and the pup takes Working with its task's object (5.19).
+- **Coming back, in the order the tasks end:**
+  - **A task that succeeded.** The pup smiles and hops, as a reply that lands (5.19). 520 ms later it travels back into the parent's middle, shrinking to 0.3 and fading, in `--dur-exit-moment` with `--ease-exit` (rule 9). The parent swallows it (`scale` 1.12 to 1, `--spring-pop`).
+  - **A task that failed.** The pup takes Error and stays 30 s, as 5.9's failures do, then goes back the same way with no smile. Dismissing it sends it back at once. If the creator sends the task back to To do, its pup leaves again when it runs.
+  - **A task cancelled,** by the owner's stop or by its agent, or lost with its subagent, goes back with no smile and doesn't count as failed. The pause doesn't cancel tasks (5.3).
+  - **A task that waits for an answer.** The subagent's question goes to its creator, not to the owner (ADR-0036). The pup stays out with its task's object at rest, looking at the parent, with no amber, and the strip of 5.9 doesn't count it. If the creator then asks the owner, the parent's state follows 5.9 and 5.19, for example Waiting while a confirmation is open (5.3).
+- **A status line counts them back** in a polite live region: "1 of 3 back", "All 3 are back", "It's back" for a single pup, "1 failed" when one did, and "1 waiting on <creator's name>", such as "1 waiting on Kelpie", while one waits on its creator. These are fixed texts ([ADR-0027](adr/0027-fixed-texts-in-three-languages.md)).
+- **The parent's mascot** greets the reply that relays the result, as 5.1 says.
+- **Reduced motion:** pups fade in and out at their places in `--dur-fade`, and the mascots are Still (5.19).
 
 ### 5.7 Saved to memory
 
@@ -519,7 +531,7 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 | Head | `none`; `ears`: `pointed`, `floppy`, `round`; `horns`: `two`, `one`, `antennae`; `hair`: `strands`, `curl`, `mohawk`; `leaves`: `one`, `two`, `kelp` |
 | Accessory | `none`; `glasses`: `round`, `dark`; `bow`: `tie`, `head`; `hat`: `beret`, `top`, `beanie`; `belt`: `belt`, `collar` |
 
-- **The main agent starts as Kelpie:** `mark`, `kelp`, `shine`, pointed ears and a collar. Every other agent starts with a mascot derived from its id, until the owner picks one. A new option goes at the end of its axis; derived mascots draw from the options above, frozen, so a new one never changes them.
+- **The main agent starts as Kelpie:** `mark`, `kelp`, `big` eyes, round ears and no accessory ([ADR-0049](adr/0049-logo-main-mascot-silhouette.md)). Its silhouette is the logo (5.23). Every other agent starts with a mascot derived from its id, until the owner picks one. A new option goes at the end of its axis; derived mascots draw from the options above, frozen, so a new one never changes them.
 - **A hat hides what sits in the middle of the head:** one horn, antennae, hair and leaves. Ears and two horns stay.
 - **Body colors are tokens with one value in both themes,** since they color the figure, not the page. None is amber, which means the owner needs to act.
 
@@ -568,6 +580,7 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 | Task card (5.5) | 20 px | the shape, the color and the eyes only: no head, accessory, mittens or badge; still, since the card already says the state. The engine draws a badge at every size up to 40 px today, so the board needs that changed |
 | Conversation header | 48 px | its home. Everything happens inside its box; the box is kept before the figure arrives, so nothing in the layout moves |
 | Empty conversation, profile, the expired-login dialog (5.12) | 160 px | gestures a little more often |
+| Pups (5.6) | 40% of the parent, 64 px on the profile | only on the agent's profile, in slots kept beside the parent; the full face of the 48 px row; none while the page is Offline |
 | Telegram bot photo | 800 px square, cropped round by Telegram | a still, and a loop Telegram plays (below) |
 
 **Reduced motion and the pause.**
@@ -662,13 +675,47 @@ Frequent. One step away, in the header, for a page with no settings of its own.
 - **The system's reduced motion can't be turned off** here; the switch only adds to it.
 - **Reduced motion:** the menu fades.
 
+### 5.23 The logo
+
+Frequent, and still: the logo never moves ([ADR-0049](adr/0049-logo-main-mascot-silhouette.md)). Kelpie's logo is the main agent's mascot as a flat silhouette, and it names the product.
+
+- **The files.** `scripts/brand-icons.mjs` draws them all:
+  - in `docs/brand/`, the mark (`kelpie-mark.svg`), its lockups for light and dark, the 16 px favicon master (`favicon-16.svg`) and the sources of the home-screen icons (`app-icon.svg`, `app-icon-rounded.svg` and `app-icon-maskable.svg`);
+  - the webchat's icons, listed under the favicon below.
+- **The mark** is the main mascot's `mark` shape with its round ears, in one color: no face, fur, accessory or shadow.
+  - It comes from the engine's 120 grid: the shape at 24..96 × 36..108 with corners 36, 36, 36 and 11.5, and the ears, circles of 10.5 at (38, 42) and (82, 42).
+  - If the main mascot's default changes, the mark changes with it, through a new ADR.
+- **The lockup** sets the mark beside "Kelpie" in Bricolage Grotesque 680, tracking −0.03em, with the font's kerning:
+  - the mark is 1.3 cap heights tall, centered on the cap band;
+  - its right edge sits half a cap from the K's stem;
+  - the webchat's sidebar will set the word at 17 px, once #378 brings the sidebar;
+  - nothing else comes within half a cap of the lockup, or a quarter of the mark's height of the mark alone.
+- **Color.** The mark and the word are `--accent`:
+  - on `--bg`, `--surface` and `--sunken` they measure 4.80, 5.38 and 4.38 in light, and 8.51, 7.78 and 8.23 in dark;
+  - a logo is exempt from WCAG 1.4.11, but the logo that links home still keeps 3:1, which every pair passes;
+  - on anything else (a photo, another color), the mark goes in `--on-accent` on an `--accent` tile;
+  - it is never `--warm`.
+- **Small sizes have their own drawings.** At 32 px and below, the favicon's masters draw the mark with its body on whole pixels and the ears a little larger, so they survive.
+- **The favicon is an opaque tile:** `--accent`, radius 22% of its side, with the mark in `--on-accent` (5.31:1 in light, 7.83:1 in dark).
+  - Safari ignores the dark block inside an SVG favicon, so the light tile is the one every browser can show.
+  - Chrome and Firefox take the dark tile on a dark system.
+  - The webchat serves:
+    - `icon.svg`, the 32 px master;
+    - `favicon.ico`, with a 16 px layer from `docs/brand/favicon-16.svg` and a 32 px one from the 32 px master;
+    - `apple-touch-icon.png`, 180 px and square, since iOS masks it, with the mark 62% of the tile tall;
+    - `icon-192.png` and `icon-512.png` on a rounded tile;
+    - `icon-maskable-512.png`, with the mark inside the 40% circle Android may crop to.
+  - It asks for its manifest with the Access login's cookie, and the manifest opens the webchat as a browser tab.
+- **It never stands in for an agent.** Every agent, the main one included, shows its own mascot (5.19). The logo carries no state, badge or glyph. The amber dot of 5.9 belongs to the tab's favicon, not to the logo.
+- **Reduced motion:** nothing changes; it doesn't move.
+
 ## 6. Implementation notes
 
 - **CSS first.** Tokens are custom properties. Springs are the `linear()` values above, supported in every current browser. Enter and exit use transitions with `@starting-style`. Choreographed sequences use the Web Animations API, which takes the same easings.
 - **View Transitions** fit navigation between views. They never wrap a list that streams.
 - **The Motion library** fits only where the owner drags something with velocity, such as reordering the board. It is loaded with the page that needs it.
 - **An entrance plays once.** It is keyed to the element, so a streaming update never replays it. It never leaves content at opacity 0 if the animation doesn't run, which happens when a background tab pauses timelines. A list animates entries only up to 60 rows; past that, rows appear at once.
-- **Heavy effects stay off the DOM's per-frame path.** The goo is one SVG filter on one layer, during a moment. Anything heavier belongs in a shader scoped to its element, or nowhere. Full-screen WebGL stays out of the product.
+- **Heavy effects stay off the DOM's per-frame path.** No pattern uses an SVG filter now; a filter, a blur or anything heavier belongs in a shader scoped to its element, or nowhere. Full-screen WebGL stays out of the product.
 - **The mascot engine is the one continuous loop.** A new surface that shows an agent reuses it (5.19): one shared timer, observers that stop figures out of view, and the plush painted once per size. Nothing draws an agent another way.
 - **The stack is still open.** These choices guide whatever UI stack Kelpie picks; the [viability study](viability-study.md) lists it among its open questions.
 
@@ -687,6 +734,7 @@ A pull request that changes the interface answers yes to each line:
 - [ ] `--warm` appears only where the owner must act, and a toast only where 5.13 allows one.
 - [ ] Copy follows the voice in section 2.
 - [ ] Every place that shows an agent shows its mascot at a size from 5.19, never a photo, an initial or a generic icon.
+- [ ] The logo appears only as the brand, drawn by `scripts/brand-icons.mjs` and sized as 5.23 says, and never in place of an agent's mascot.
 - [ ] A mascot's pose, badge, glyph and label agree, and they show the agent's real state.
 - [ ] A new mascot surface moves only as its size allows in 5.19, and the pause and reduced motion stop it.
 
@@ -752,6 +800,13 @@ The rules above cite these. The first set was read on 2026-10-15; a source added
   - Telegram's [profile videos](https://core.telegram.org/api/files) and [sticker rules](https://core.telegram.org/stickers);
   - Apple's [app icons](https://developer.apple.com/design/human-interface-guidelines/app-icons) and Android's [adaptive icons](https://developer.android.com/develop/ui/views/launch/icon_design_adaptive), on content in a round crop;
   - [Discord's reduced motion](https://support.discord.com/hc/en-us/articles/360040613412), which stills avatars outside the profile.
+- The logo ([ADR-0049](adr/0049-logo-main-mascot-silhouette.md)), read on 2026-10-16; the findings and the reference-project check are on #385:
+  - a mark that reduces the mascot, never replaced by it: [GitHub's logo](https://brand.github.com/foundations/logo) and [Mailchimp's brand assets](https://mailchimp.com/about/brand-assets/), with a reverse drawn for dark backgrounds;
+  - small sizes: [Dropbox's logo](https://brand.dropbox.com/logo), a separate glyph at 32 px and below; [Discord's 2021 refresh](https://discord.com/blog/happy-blurpthday-to-discord-a-place-for-everything-you-can-imagine), blunt shapes for small surfaces; [Primer's icons](https://primer.style/foundations/icons), whole pixels and 1 px gaps;
+  - [Copilot's Mico](https://thenextweb.com/news/microsoft-copilot-mico-retired-features-killed-app-merge), a mascot retired while the logo stayed;
+  - favicons: [Safari 26's release notes](https://developer.apple.com/documentation/safari-release-notes/safari-26-release-notes), [WebKit bug 309949](https://bugs.webkit.org/show_bug.cgi?id=309949) and [Evil Martians' "How to Favicon in 2026"](https://evilmartians.com/chronicles/how-to-favicon-in-2021-six-files-that-fit-most-needs);
+  - home-screen icons: [Apple's app icons](https://developer.apple.com/design/human-interface-guidelines/app-icons) and [web.dev on maskable icons](https://web.dev/articles/maskable-icon);
+  - [invokta's favicon](https://github.com/vinilana/invokta/blob/f1e2f04f98c967ab4bb73bd02c3fa581f04ce0e5/apps/docs/public/favicon.svg#L1-L10), drawn apart from its mark, and [Hermes Agent's icon script](https://github.com/NousResearch/hermes-agent/blob/b65e078cdc77ebe83979a2d5355179535f340e89/scripts/generate_icons.py#L1-L90), every size from one master.
 - Accessibility:
   - [WCAG 2.2.2 Pause, Stop, Hide](https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html);
   - [WCAG 2.3.3 Animation from Interactions](https://www.w3.org/WAI/WCAG22/Understanding/animation-from-interactions.html);

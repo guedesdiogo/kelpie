@@ -281,7 +281,7 @@ The owner configures Kelpie by talking to Master, the agent they talk to (Story 
   - One created now doesn't chat until `setAgentChat` turns its chat on.
   - Agents that existed before roles keep their chat.
 - **Models:** Master changes any agent's model settings with `configure_agent`, its own included, behind the owner's confirmation (#289, ADR-0048). No other agent changes its own model, and this API's `configureAgent` can always raise Master's tier again.
-- **Master keeps its tools:** `configure_agent` refuses a tools list for Master that leaves out a configuration tool, and `set_main_agent` refuses an agent whose tools list leaves them out. This API can still change either.
+- **Master always holds its orchestration tools** (ADR-0050, #391): the configuration tools, `create_subagent` and `delete_subagent`, and the task board's tools. Its `tools` setting narrows only its other tools, and its subagents may take the task tools whatever its list.
 - **The check is at `admit`:** a chat its role doesn't allow answers `no_grant`, so a specialist whose chat is off doesn't answer its bot or the webchat.
 
 **Subagents** (ADR-0036 §5, #290). An agent with `spawn` creates temporary subagents for a demand, with `create_subagent`, and hands them work with `create_task`. Master has `spawn` by its role. A specialist has it only when Master's `configure_agent` turns it on, which takes the owner's confirmation. Subagents never have it. Only the owner's own turns in a direct conversation create a subagent or hand off a task.
@@ -297,7 +297,7 @@ The owner configures Kelpie by talking to Master, the agent they talk to (Story 
 - **Kelpie announces them** (ADR-0036 §6, #342). After the reply, Kelpie names each subagent its creator creates or deletes with its tools, by name and id, in the conversation's language: `Kelpie created the subagent "Scout" (kelpie-sub-a1b2c3).` The name is quoted, since its creator chose it, and only the id is Kelpie's. Like the handoff notice, the text is Kelpie's own, so the model can't change or omit it, a turn that sends no reply leaves it for the next one, and past four subagents it counts the rest. A subagent deleted through `delete_agent`, or with its creator, is reported by that deletion's own confirmation and result.
 - **The skill:** every agent with `spawn` gets the built-in `create-subagent` skill in its prompt. It covers when a subagent is worth it, how to brief one, and to delete it when the demand ends.
 
-`configure_agent` also takes `spawn`, a one-line `remit`, and `tools`, the tools an agent may use by name, or `null` for all it is given. Each change waits for the owner's confirmation.
+`configure_agent` also takes `spawn`, a one-line `remit`, and `tools`, the tools an agent may use by name, or `null` for all it is given; Master keeps its orchestration tools whatever the list. Each change waits for the owner's confirmation.
 
 **Deleting an agent** (ADR-0036 §1, #303). `deleteAgent`, or Master's `delete_agent` after the owner's confirmation, deletes an agent and every subagent it owns. The agent's chat goes off first, so no channel reaches it. Then the subagents go, deepest first, and the agent last. For each agent, in order:
 1. Its role is read again: an agent that became Master meanwhile stops the deletion.
