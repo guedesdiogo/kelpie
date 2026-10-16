@@ -7,7 +7,7 @@
 - Amended by: [ADR-0040](0040-continue-at-the-tool-bound.md), a separate Continue button, under the same rules, continues a turn past its tool bound
 - Amended by: [ADR-0044](0044-design-system-review.md), a Deny button, under the same rules, closes a confirmation at once, and the agent goes on without that change
 - Amended by: [ADR-0052](0052-webchat-presence-sockets.md), a press names its agent and may come from a sidebar row's presence socket, and an open confirmation's card comes back after its turn settled
-- Amended by: [ADR-0055](0055-composer-files-dictation-and-model.md), a pick on the webchat's model chip, and a tap on Kelpie's model picker on Telegram, are the owner's yes to an agent's `conversation`-area trio, and the picker's inline buttons carry its id
+- Amended by: [ADR-0055](0055-composer-files-dictation-and-model.md), a pick on the webchat's model chip, and a tap on Kelpie's model picker on Telegram, are the owner's yes to one field of an agent's `conversation`-area trio, and the picker's inline buttons carry its random id; every confirmation keeps the typed code
 
 ## Context
 

@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-14
 - Issue: [#307](https://github.com/guedesdiogo/kelpie/issues/307)
+- Amended by: [ADR-0055](0055-composer-files-dictation-and-model.md), a continuation also keeps the earlier turn's one-reply `max` (§4)
 - Decided by the owner on 2026-10-13, answering research note 10's Q2: «Q2: sim»
 
 ## Context
