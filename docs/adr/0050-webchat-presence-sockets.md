@@ -77,7 +77,7 @@ So a roster that guesses lags and misses requests. Linear's agent sessions make 
   - not used;
   - not expired;
   - asked by this socket's user;
-  - its notice sent, which is an outbox row for it marked sent. A confirmation from a turn the owner interrupted never shows.
+  - its notice sent, which is an outbox row for it marked sent. A confirmation whose notice an interruption cut off never shows.
 
   Each one carries its id, the summary its tool wrote, in full, how long ago a turn last asked for it, and how long until it expires, both in ms.
 
@@ -113,7 +113,7 @@ So a roster that guesses lags and misses requests. Linear's agent sessions make 
 
 - After `history`, it gets the same `requests` frame, and again whenever the list changes.
 - So a reconnect returns the mascot to Waiting while a confirmation is open (5.12), and the strip and the tab's title count it.
-- **The page draws the card again.** A confirmation open after its turn settled shows its card at the end of the thread, with its time. The page draws a card for an open confirmation that has none in the thread yet, from the history or from a live bubble. That means a turn that settled before this socket opened, since the history replays only a running turn's notices. So each confirmation has one card. This amends ADR-0026's line that a notice doesn't come back once its turn has settled.
+- **The page draws the card again.** A confirmation open after its turn settled shows its card at the end of the thread, with its time. A notice's own bubble always draws its card, as today, and a notice shown again draws another. `requests` draws a card only for an open confirmation with none in the thread, from the history or from a live bubble. That means a turn that settled before this socket opened, since the history replays only a running turn's notices. So `requests` never doubles a card. This amends ADR-0026's line that a notice doesn't come back once its turn has settled.
 
 ### 5. How the page keeps the rows honest
 
@@ -176,9 +176,9 @@ This stays within the Workers Paid plan, so it ships on with no switch.
     - a frame naming another agent is refused, and a press of one conversation's id over another's socket confirms nothing in either;
     - on the conversation's own socket, a frame naming no agent still counts;
     - anything else closes the socket, and the SDK's frames stay inert on it;
-    - a press counts only under ADR-0026's rules, and a press of an interrupted turn's confirmation is refused;
+    - a press counts only under ADR-0026's rules, and a press of a confirmation whose notice an interruption cut off is refused;
   - **open confirmations:**
-    - "open" means a notice sent: an interrupted turn's confirmation never shows, and another user's never does;
+    - "open" means a notice sent: a confirmation whose notice an interruption cut off never shows, and another user's never does;
     - the presence view gets the open list in `presence` on connect and `requests` after; the conversation's own socket gets `requests` after `history` and on each change;
     - a notice's bubble followed by `requests` gives one card per confirmation;
   - **the page:**
