@@ -3,10 +3,10 @@
 // shows and records the loop Telegram plays. The webchat never loads it.
 //
 // The engine moves the mascot with timers, the Web Animations API and a few CSS transitions, in
-// real time. Here a virtual clock moves them frame by frame instead, and each frame is the SVG as it stands then, drawn to a
-// canvas: every frame is exact, however long one takes to draw. The frames then play in real time
-// into a MediaRecorder, the only H.264 encoder Browser Run's page has: it isn't a secure context,
-// so WebCodecs is missing.
+// real time. Here a virtual clock moves them frame by frame instead, and each frame is the SVG as
+// it stands then, drawn to a canvas: every frame is exact, however long one takes to draw. The
+// frames then play in real time into a MediaRecorder, the only H.264 encoder Browser Run's page
+// has: it isn't a secure context, so WebCodecs is missing.
 
 /** The photo's side: Telegram recommends 800 px for a profile video. */
 export const PHOTO_PX = 800;
