@@ -125,9 +125,16 @@ describe("The photo's clock", () => {
     // A gesture at 100 ms changes a style, and the hand fades in over 150 ms.
     const fade = new HeldAnimation(150);
     win.setTimeout(() => running.push(fade), 100);
+    // The clock's own animations, and the ones that don't run, aren't taken again.
+    const own = (win.Element.prototype.animate as (endTime: number) => HeldAnimation)(1_000);
+    const paused = new HeldAnimation(500);
+    paused.pause();
+    running.push(own, paused);
     await clock.advance(200);
     expect(fade.playState).toBe("paused");
     expect(fade.currentTime).toBe(100);
+    expect(own.currentTime).toBe(200);
+    expect(paused.currentTime).toBe(0);
     await clock.advance(300);
     expect(fade.playState).toBe("finished");
   });

@@ -31,7 +31,7 @@ A photo can't be reused, so each one goes up as a new file. Telegram recommends 
 
 - **When:** the agent's `AgentHost` asks channel-egress for the photo when its bot connects and when its mascot changes, including back to the default.
 - **Who sends it:** a `BotPhoto` Durable Object per agent keeps the newest mascot asked for. Its alarm waits 5 s, so a mascot changed several times in a row is drawn once, then draws and sends it.
-- **Its cost has a ceiling:** one agent's photo is drawn 5 minutes apart at least, and the newest mascot waits its turn. Each mascot gets 5 tries at most.
+- **Its cost has a ceiling:** a new mascot is drawn 5 minutes after the last drawing began at the soonest, and the newest one waits its turn. Photos drawn are kept until they are sent, so a failed send isn't drawn again. Each mascot gets 5 tries at most; after the fifth, the bot keeps its photo until the next mascot or bot.
 - **What it skips:** a mascot already on that bot isn't drawn again. An agent without a bot gets nothing.
 - **What it replaces:** it replaces a photo set in BotFather, because the owner asked for the photo to follow the mascot by itself.
 
