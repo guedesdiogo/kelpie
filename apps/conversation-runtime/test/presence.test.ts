@@ -1,0 +1,311 @@
+import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import { WEBCHAT_ADMISSION_HEADER } from "@kelpie/conversation/contract";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ConversationAgent } from "../src/conversation-agent.ts";
+import { replacePortsForTesting } from "../src/ports.ts";
+import * as schema from "../src/schema.ts";
+import type { ToolContext } from "../src/tools.ts";
+import { type FakeWorld, fakeWorld, noRoute, refuse, reply, toolCalls } from "./fakes.ts";
+
+// The webchat's sidebar follows each agent through a socket in a presence view (ADR-0050): it gets
+// the conversation's presence and never its content, and it may send only a card's actions, each
+// naming its agent.
+
+const owner = {
+  agentId: "assistant",
+  userId: "u-owner",
+  role: "owner",
+  chatType: "direct",
+  timeZone: null,
+};
+const presence = { ...owner, view: "presence" };
+const agent = (name: string) => env.CONVERSATION_AGENT.getByName(name);
+
+type Frame = { type: string } & Record<string, unknown>;
+
+async function open(name: string, admission: unknown = owner) {
+  const headers: Record<string, string> = { Upgrade: "websocket" };
+  headers[WEBCHAT_ADMISSION_HEADER] = JSON.stringify(admission);
+  const response = await agent(name).fetch("https://conversation/webchat", { headers });
+  const socket = response.webSocket;
+  if (!socket) throw new Error(`no socket: ${response.status}`);
+  const frames: Frame[] = [];
+  let closedWith: number | null = null;
+  socket.addEventListener("message", (event) => frames.push(JSON.parse(String(event.data))));
+  socket.addEventListener("close", (event) => {
+    closedWith = event.code;
+  });
+  socket.accept();
+  return {
+    frames,
+    closedWith: () => closedWith,
+    send: (frame: unknown) =>
+      socket.send(typeof frame === "string" ? frame : JSON.stringify(frame)),
+  };
+}
+
+const ofType = (frames: Frame[], type: string) => frames.filter((frame) => frame.type === type);
+const types = (frames: Frame[]) => frames.map((frame) => frame.type);
+/** What a presence socket may ever get (ADR-0050 §2). */
+const PRESENCE_FRAMES = [
+  "presence",
+  "status",
+  "failed",
+  "paused",
+  "resumed",
+  "requests",
+  "confirmation",
+];
+
+function use(world: FakeWorld): FakeWorld {
+  replacePortsForTesting(world.ports);
+  return world;
+}
+
+afterEach(() => {
+  replacePortsForTesting(undefined);
+});
+
+/** A provider with one tool, `change`, gated on the owner's confirmation. */
+function changing(world: FakeWorld): unknown[] {
+  const ran: unknown[] = [];
+  world.tools = [
+    {
+      async tools() {
+        return [
+          {
+            spec: { name: "change", description: "Changes.", inputSchema: { type: "object" } },
+            label: "Changing",
+            async run(input: unknown, context: ToolContext) {
+              const summary = `change the tier to ${JSON.stringify(input)}.`;
+              if (!(await context.confirm({ command: "change", input, summary }))) {
+                return { output: "Not done yet." };
+              }
+              ran.push(input);
+              return { output: "Done." };
+            },
+          },
+        ];
+      },
+    },
+  ];
+  return ran;
+}
+
+/** The owner writes on the conversation's own socket, and the turn runs to its end. */
+async function turn(name: string, chat: Awaited<ReturnType<typeof open>>, text = "oi") {
+  chat.send({ type: "message", id: `m${Math.random().toString(36).slice(2, 8)}`, text });
+  await vi.waitFor(() => expect(ofType(chat.frames, "accepted").length).toBeGreaterThan(0));
+  await agent(name).flush();
+  await vi.waitFor(async () =>
+    expect((await agent(name).turns()).at(-1)?.status).not.toBe("running"),
+  );
+}
+
+describe("the presence view (ADR-0050)", () => {
+  it("opens with the conversation's presence, and nothing of its content", async () => {
+    use(fakeWorld([]));
+    const row = await open("assistant:webchat:p-open", presence);
+    await vi.waitFor(() => expect(row.frames).toHaveLength(1));
+    expect(row.frames[0]).toEqual({
+      type: "presence",
+      turn: null,
+      failed: false,
+      paused: false,
+      requests: [],
+      more: 0,
+    });
+    // No history, no wait, no mascot.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(types(row.frames)).toEqual(["presence"]);
+  });
+
+  it("closes a socket whose admission names a view it doesn't know", async () => {
+    use(fakeWorld([]));
+    const row = await open("assistant:webchat:p-view", { ...owner, view: "all" });
+    await vi.waitFor(() => expect(row.closedWith()).toBe(1008));
+  });
+
+  it("follows each step and gets idle after a delivered turn, never a bubble", async () => {
+    use(fakeWorld([toolCalls({ name: "missing" }), reply("Oi.")]));
+    const name = "assistant:webchat:p-steps";
+    const chat = await open(name);
+    const row = await open(name, presence);
+    await turn(name, chat);
+    await vi.waitFor(() =>
+      expect(ofType(row.frames, "status").at(-1)).toMatchObject({ status: "idle" }),
+    );
+    expect(types(row.frames).every((type) => PRESENCE_FRAMES.includes(type))).toBe(true);
+    expect(ofType(row.frames, "status").map((frame) => frame.status)).toContain("thinking");
+    // The conversation's own socket still ends the step on the reply's bubble.
+    expect(ofType(chat.frames, "bubble").map((frame) => frame.text)).toContain("Oi.");
+  });
+
+  it("gets idle after a refused turn, which leaves no step behind", async () => {
+    use(fakeWorld([refuse()]));
+    const name = "assistant:webchat:p-refused";
+    const chat = await open(name);
+    const row = await open(name, presence);
+    await turn(name, chat);
+    await vi.waitFor(() =>
+      expect(ofType(row.frames, "status").at(-1)).toMatchObject({ status: "idle" }),
+    );
+    const late = await open(name, presence);
+    await vi.waitFor(() => expect(late.frames).toHaveLength(1));
+    expect(late.frames[0]).toMatchObject({ type: "presence", turn: null });
+  });
+
+  it("gets failed when a turn fails, and a new presence socket learns it", async () => {
+    use(fakeWorld([noRoute("unavailable")]));
+    const name = "assistant:webchat:p-failed";
+    const chat = await open(name);
+    const row = await open(name, presence);
+    await turn(name, chat);
+    await vi.waitFor(() => expect(ofType(row.frames, "failed")).toHaveLength(1));
+    const late = await open(name, presence);
+    await vi.waitFor(() => expect(late.frames).toHaveLength(1));
+    expect(late.frames[0]).toMatchObject({ type: "presence", failed: true });
+  });
+
+  it("lists the open confirmations once their notice is sent, on both views, and drops a used one", async () => {
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "change", input: { to: "frontier" } }),
+        reply("Confirme, por favor."),
+        toolCalls({ name: "change", input: { to: "frontier" } }),
+        reply("Feito."),
+      ]),
+    );
+    const ran = changing(world);
+    const name = "assistant:webchat:p-requests";
+    const chat = await open(name);
+    const row = await open(name, presence);
+    await turn(name, chat, "mude o tier");
+    const id = Number(ofType(chat.frames, "bubble")[1]?.confirmation);
+    const listed = [{ id, summary: 'change the tier to {"to":"frontier"}.' }];
+    await vi.waitFor(() =>
+      expect(ofType(row.frames, "requests").at(-1)?.requests).toMatchObject(listed),
+    );
+    expect(ofType(chat.frames, "requests").at(-1)?.requests).toMatchObject(listed);
+    const [shown] = ofType(row.frames, "requests").at(-1)?.requests as {
+      askedAgoMs: number;
+      expiresInMs: number;
+    }[];
+    expect(shown?.askedAgoMs).toBeGreaterThanOrEqual(0);
+    expect(shown?.expiresInMs).toBeGreaterThan(9 * 60_000);
+    // A socket that opens later learns it in its snapshot, and the conversation's own after history.
+    const late = await open(name, presence);
+    await vi.waitFor(() => expect(late.frames).toHaveLength(1));
+    expect(late.frames[0]?.requests).toMatchObject(listed);
+    const reloaded = await open(name);
+    await vi.waitFor(() => expect(ofType(reloaded.frames, "requests")).toHaveLength(1));
+    expect(types(reloaded.frames).indexOf("requests")).toBeGreaterThan(
+      types(reloaded.frames).indexOf("history"),
+    );
+
+    // The row's card confirms over the presence socket, naming its agent.
+    row.send({ type: "confirm", id, agent: "assistant" });
+    await vi.waitFor(() =>
+      expect(ofType(row.frames, "confirmation")).toEqual([
+        { type: "confirmation", id, status: "accepted" },
+      ]),
+    );
+    await agent(name).flush();
+    await vi.waitFor(() => expect(ran).toEqual([{ to: "frontier" }]));
+    // Used, it leaves both lists.
+    await vi.waitFor(() => expect(ofType(row.frames, "requests").at(-1)?.requests).toEqual([]));
+    await vi.waitFor(() => expect(ofType(chat.frames, "requests").at(-1)?.requests).toEqual([]));
+  });
+
+  it("takes only a card's actions, each naming its agent, and closes on anything else", async () => {
+    use(fakeWorld([]));
+    const name = "assistant:webchat:p-actions";
+    // A confirm with no agent, or another's, is refused, and the socket stays open.
+    const row = await open(name, presence);
+    row.send({ type: "confirm", id: 1 });
+    row.send({ type: "confirm", id: 1, agent: "agenda" });
+    await vi.waitFor(() => expect(ofType(row.frames, "confirmation")).toHaveLength(2));
+    expect(ofType(row.frames, "confirmation").map((frame) => frame.status)).toEqual([
+      "refused",
+      "refused",
+    ]);
+    // A pause naming another agent is ignored; one naming this one pauses the conversation.
+    row.send({ type: "pause", agent: "agenda" });
+    row.send({ type: "pause", agent: "assistant" });
+    await vi.waitFor(() => expect(ofType(row.frames, "paused")).toHaveLength(1));
+    expect(row.closedWith()).toBeNull();
+    // A message, typing or a frame it can't read closes it.
+    for (const frame of [
+      { type: "message", id: "m1", text: "oi" },
+      { type: "typing", active: true },
+      "not json",
+    ]) {
+      const other = await open(name, presence);
+      other.send(frame);
+      await vi.waitFor(() => expect(other.closedWith()).toBe(1008));
+    }
+  });
+
+  it("keeps the SDK's own frames inert on a presence socket", async () => {
+    use(fakeWorld([]));
+    const name = "assistant:webchat:p-sdk";
+    const row = await open(name, presence);
+    row.send({ type: "cf_agent_state", state: { forged: true } });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const state = await runInDurableObject(
+      agent(name),
+      (instance: ConversationAgent) => instance.state,
+    );
+    expect(state).toBeUndefined();
+  });
+
+  it("refuses a press for a confirmation whose notice was never sent", async () => {
+    use(fakeWorld([]));
+    const name = "assistant:webchat:p-unsent";
+    const row = await open(name, presence);
+    await vi.waitFor(() => expect(row.frames).toHaveLength(1));
+    const id = await runInDurableObject(agent(name), (_instance, state) => {
+      const now = Date.now();
+      const rows = state.storage.sql
+        .exec(
+          `INSERT INTO confirmations (code, user_id, command, input, summary, after_history_id, turn_id, created_at, expires_at)
+           VALUES ('ABC123', 'u-owner', 'change', '{}', 'x', 0, 1, ?, ?) RETURNING id`,
+          now,
+          now + 600_000,
+        )
+        .toArray();
+      return Number(rows[0]?.id);
+    });
+    row.send({ type: "confirm", id, agent: "assistant" });
+    await vi.waitFor(() =>
+      expect(ofType(row.frames, "confirmation")).toEqual([
+        { type: "confirmation", id, status: "refused" },
+      ]),
+    );
+    void schema;
+  });
+
+  it("keeps at most 8 presence sockets, closing the oldest with 1013", async () => {
+    use(fakeWorld([]));
+    const name = "assistant:webchat:p-cap";
+    const rows: Awaited<ReturnType<typeof open>>[] = [];
+    for (let index = 0; index < 9; index += 1) {
+      rows.push(await open(name, presence));
+      await vi.waitFor(() => expect(rows.at(-1)?.frames).toHaveLength(1));
+    }
+    await vi.waitFor(() => expect(rows[0]?.closedWith()).toBe(1013));
+    expect(rows.slice(1).map((row) => row.closedWith())).toEqual(Array(8).fill(null));
+  });
+});
+
+describe("the conversation's own socket (ADR-0050 §3)", () => {
+  it("refuses a press naming another agent, and still takes one naming none", async () => {
+    use(fakeWorld([]));
+    const chat = await open("assistant:webchat:own-agent");
+    chat.send({ type: "confirm", id: 1, agent: "agenda" });
+    chat.send({ type: "confirm", id: 1 });
+    await vi.waitFor(() => expect(ofType(chat.frames, "confirmation")).toHaveLength(2));
+    expect(chat.closedWith()).toBeNull();
+  });
+});

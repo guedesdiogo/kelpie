@@ -13,13 +13,37 @@ import { chatTypeOf, roleOf } from "./turn-access.ts";
 /**
  * What the browser sends: a message with an id of its own choosing, whether it is typing, a pause
  * that holds every answer until the next message, or a press of a notice's Confirm button, by the
- * confirmation's id (#186).
+ * confirmation's id (#186). A pause and a press name their agent (ADR-0050 §3): a confirmation's
+ * id is its own conversation's counter. A page from before ADR-0050 names none.
  */
 export type ClientFrame =
   | { type: "message"; id: string; text: string }
   | { type: "typing"; active: boolean }
-  | { type: "pause" }
-  | { type: "confirm"; id: number };
+  | { type: "pause"; agent?: string }
+  | { type: "confirm"; id: number; agent?: string };
+
+/** An open confirmation as the webchat lists it (ADR-0050 §2): its summary, in full, and its times. */
+export interface OpenRequest {
+  id: number;
+  summary: string;
+  /** How long ago a turn last asked for it, and how long until it expires, in ms. */
+  askedAgoMs: number;
+  expiresInMs: number;
+}
+
+/** The open confirmations, newest first, at most 10, and how many more there are. */
+export interface OpenRequests {
+  requests: OpenRequest[];
+  more: number;
+}
+
+/** The turn a presence socket sees running: how long ago it began, and its latest step. */
+export interface RunningTurn {
+  agoMs: number;
+  step: TurnStep | null;
+  label?: string;
+  activity?: ToolActivity;
+}
 
 /** One line of the conversation as the page shows it. */
 export interface ShownMessage {
@@ -73,7 +97,30 @@ export type ServerFrame =
   | { type: "accepted"; id: string }
   | { type: "rejected"; id: string; reason: string }
   /** What a press of a Confirm button did: refused for a confirmation not open, or not theirs. */
-  | { type: "confirmation"; id: number; status: "accepted" | "refused" };
+  | { type: "confirmation"; id: number; status: "accepted" | "refused" }
+  /** The open confirmations (ADR-0050 §4), to both views, when they change. */
+  | ({ type: "requests" } & OpenRequests)
+  /** A presence socket's first frame (ADR-0050 §2): what the conversation knows now. */
+  | ({
+      type: "presence";
+      turn: RunningTurn | null;
+      /** Whether the latest turn settled `failed`, for 5.9's Error. */
+      failed: boolean;
+      paused: boolean;
+    } & OpenRequests)
+  /** A turn settled `failed`, to presence sockets. */
+  | { type: "failed" };
+
+/** What a presence socket may get (ADR-0050 §2); every other frame stays off it. */
+export const PRESENCE_FRAMES: ReadonlySet<ServerFrame["type"]> = new Set([
+  "presence",
+  "status",
+  "failed",
+  "paused",
+  "resumed",
+  "requests",
+  "confirmation",
+]);
 
 /**
  * Who ingress admitted for a socket. The role and chat type are null when it named none, as before
@@ -82,12 +129,17 @@ export type ServerFrame =
 export type SocketAdmission = Omit<WebchatAdmission, "role" | "chatType"> & {
   role: Role | null;
   chatType: ChatType | null;
+  /** When the socket opened, so the presence cap closes the oldest after hibernation too. */
+  openedAt?: number;
 };
 
 export function parseAdmission(value: string | null): SocketAdmission | null {
   if (!value) return null;
   try {
     const parsed = JSON.parse(value) as Partial<WebchatAdmission> | null;
+    // A view this conversation doesn't know isn't admitted (ADR-0050 §1).
+    const view = parsed?.view ?? null;
+    if (view !== null && view !== "presence") return null;
     if (
       typeof parsed?.agentId === "string" &&
       typeof parsed.userId === "string" &&
@@ -101,6 +153,7 @@ export function parseAdmission(value: string | null): SocketAdmission | null {
         timeZone: parsed.timeZone,
         // The browser's language (#187); an older ingress names none.
         language: typeof parsed.language === "string" ? parsed.language : null,
+        ...(view === "presence" ? { view } : {}),
       };
     }
   } catch {
@@ -127,9 +180,11 @@ export function parseClientFrame(message: unknown): ClientFrame | null {
   if (frame?.type === "typing" && typeof frame.active === "boolean") {
     return { type: "typing", active: frame.active };
   }
-  if (frame?.type === "pause") return { type: "pause" };
+  // The agent a pause or a press names (ADR-0050 §3), when the page names one.
+  const agent = typeof frame?.agent === "string" ? { agent: frame.agent } : {};
+  if (frame?.type === "pause") return { type: "pause", ...agent };
   if (frame?.type === "confirm" && Number.isSafeInteger(frame.id) && (frame.id as number) > 0) {
-    return { type: "confirm", id: frame.id as number };
+    return { type: "confirm", id: frame.id as number, ...agent };
   }
   return null;
 }
@@ -150,18 +205,8 @@ export function shownText(message: ChatMessage): string {
  * asking the agent again shows it again.
  */
 export function webchatEgress(
-  sockets: () => Iterable<{ send(data: string): void }>,
+  broadcast: (frame: ServerFrame) => void,
 ): Pick<ConversationPorts, "send" | "typing" | "keepTyping" | "status"> {
-  const broadcast = (frame: ServerFrame) => {
-    const data = JSON.stringify(frame);
-    for (const socket of sockets()) {
-      try {
-        socket.send(data);
-      } catch {
-        // A socket closing mid-send misses this frame; the next one it opens replays history.
-      }
-    }
-  };
   return {
     async send(_agentId, _destination, text, options) {
       broadcast({
