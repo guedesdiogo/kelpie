@@ -1,0 +1,19 @@
+{
+  "name": "Kelpie",
+  "short_name": "Kelpie",
+  "start_url": "/webchat/",
+  "scope": "/webchat/",
+  "display": "browser",
+  "background_color": "#E7EEEC",
+  "theme_color": "#E7EEEC",
+  "icons": [
+    { "src": "/webchat/icon-192.png", "type": "image/png", "sizes": "192x192" },
+    { "src": "/webchat/icon-512.png", "type": "image/png", "sizes": "512x512" },
+    {
+      "src": "/webchat/icon-maskable-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ]
+}

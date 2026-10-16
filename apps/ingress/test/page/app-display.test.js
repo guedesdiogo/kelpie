@@ -55,16 +55,17 @@ describe("the Display menu (§5.22)", () => {
   });
 });
 
-describe("the mascot in the header (ADR-0045)", () => {
-  const KELPIE = {
-    shape: "mark",
-    color: "kelp",
-    eyes: "shine",
-    cheeks: false,
-    head: { type: "ears", variation: "pointed" },
-    accessory: { type: "belt", variation: "collar" },
-  };
+/** The main agent's default mascot (ADR-0049), as the socket names it. */
+const KELPIE = {
+  shape: "mark",
+  color: "kelp",
+  eyes: "big",
+  cheeks: false,
+  head: { type: "ears", variation: "round" },
+  accessory: { type: "none" },
+};
 
+describe("the mascot in the header (ADR-0045)", () => {
   it("asks how it moves before it first moves, and keeps the answer in the Display menu", async () => {
     const { socket } = await loadPage();
     socket.open();
@@ -126,14 +127,7 @@ describe("leftovers", () => {
     await settle();
     socket.receive({
       type: "agent",
-      mascot: {
-        shape: "mark",
-        color: "kelp",
-        eyes: "shine",
-        cheeks: false,
-        head: { type: "ears", variation: "pointed" },
-        accessory: { type: "belt", variation: "collar" },
-      },
+      mascot: KELPIE,
     });
     await settle();
     const host = $("empty-mascot");

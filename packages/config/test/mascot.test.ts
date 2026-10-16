@@ -82,15 +82,16 @@ describe("the mascot setting", () => {
 });
 
 describe("mascotFor", () => {
-  it("starts the main agent as Kelpie", () => {
+  it("starts the main agent as Kelpie, with round ears and big eyes (ADR-0049)", () => {
     expect(KELPIE_MASCOT).toEqual({
       shape: "mark",
       color: "kelp",
-      eyes: "shine",
+      eyes: "big",
       cheeks: false,
-      head: { type: "ears", variation: "pointed" },
-      accessory: { type: "belt", variation: "collar" },
+      head: { type: "ears", variation: "round" },
+      accessory: { type: "none" },
     });
+    expect(parseMascot(KELPIE_MASCOT)).toEqual(KELPIE_MASCOT);
     expect(mascotFor("kelpie", "main", null)).toEqual(KELPIE_MASCOT);
     expect(mascotFor("assistant", "main", null)).toEqual(KELPIE_MASCOT);
   });
