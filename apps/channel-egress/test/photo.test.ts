@@ -95,6 +95,7 @@ const stored = (agentId: string) =>
   runInDurableObject(photoOf(agentId), async (_instance, state) => ({
     wanted: await state.storage.get<{ mascot: Mascot }>("wanted"),
     alarm: await state.storage.getAlarm(),
+    drawn: await state.storage.get("drawn"),
   }));
 
 afterEach(() => {
@@ -335,11 +336,13 @@ describe("A bot's photo", () => {
     await exports.ChannelEgress.updateBotPhoto("photo-k", OTHER);
     await expect(drawNow("photo-k", stand)).rejects.toThrow();
     expect((await stored("photo-k")).wanted?.mascot).toEqual(OTHER);
+    expect((await stored("photo-k")).drawn).toBeDefined();
     status = 200;
     await drawNow("photo-k", stand);
     expect(stand.asked).toHaveLength(2);
     expect(uploads.at(-1)?.photo?.type).toBe("animated");
-    expect((await stored("photo-k")).wanted).toBeUndefined();
+    // Sent, so nothing is kept.
+    expect(await stored("photo-k")).toMatchObject({ wanted: undefined, drawn: undefined });
   });
 
   it("gives up at once when Telegram refuses the bot for good", async () => {
