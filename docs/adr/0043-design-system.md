@@ -7,6 +7,7 @@
 - Amends: [ADR-0024](0024-fixed-wait-end-of-turn.md), the wait before a reply shows where the interface knows its deadline (§5)
 - Amended by: [ADR-0044](0044-design-system-review.md), the first review adds patterns and a fifth presence state, "no response"
 - Amended by: [ADR-0045](0045-agent-mascot.md), each agent is a plush mascot (§6), with an exception to rule 8 for its life in place
+- Amended by: [ADR-0047](0047-mascot-offline.md), a sixth presence state, Offline, shown while the page has lost its connection
 
 ## Context
 

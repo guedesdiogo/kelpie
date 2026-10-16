@@ -3,16 +3,21 @@
 - Status: Accepted
 - Date: 2026-10-16
 - Issue: [#380](https://github.com/guedesdiogo/kelpie/issues/380)
-- The owner asked on 2026-10-16, relayed by the webchat session: «uma animação do mascote para quando esta "sem conexão", que mostrou acontecer quando esta deslogado, mas tbm quando estiver sem sinal de internet/conexão podemos usar tbm». Then, on the lab page: «Aprovo o estado sem conexão como está no laboratório: a ficha, o balão cinza, o glifo, o diálogo com o mascote grande e o pulinho na volta. Mesmo glifo para login expirado, e sem 'última atualização' no rótulo.»
+- The owner asked on 2026-10-16, relayed by the webchat session: «uma animação do mascote para quando esta "sem conexão", que mostrou acontecer quando esta deslogado, mas tbm quando estiver sem sinal de internet/conexão podemos usar tbm». Then, having seen the lab page: «Aprovo o estado sem conexão como está no laboratório: a ficha, o balão cinza, o glifo, o diálogo com o mascote grande e o pulinho na volta. Mesmo glifo para login expirado, e sem 'última atualização' no rótulo.»
 - Amends:
-  - [ADR-0045](0045-agent-mascot.md) §4, so the expired-login dialog shows the mascot at 160 px, and §6, with a new state;
+  - [ADR-0045](0045-agent-mascot.md):
+    - §4, so the expired-login dialog shows the mascot at 160 px;
+    - §6, with a new state;
+    - §9, with a `--muted` badge at 36 px;
+    - §10, with a grey bubble beside the amber and the red ones, and the plug kept under reduced motion;
+  - [ADR-0043](0043-design-system.md)'s presence states (`docs/design-system.md` §5.9), which gain a sixth, Offline: a state of the page, shown wherever presence shows;
   - `docs/design-system.md` §5.12, as #377 set it, so the mascot no longer returns to Idle when the connection is lost.
 
 ## Context
 
 **#377 set §5.12: with the connection lost, "the mascot returns to Idle at once".** The page hears nothing more of the turn, so it can't vouch for work it no longer sees (rule 7). Idle says something too, though: that the agent is free, which the page can't see either.
 
-**The webchat's mockup already says what happened.** On its «Sem conexão» and «Login expirado» screens, the header and every agent in the side list read "sem conexão".
+**The webchat's mockup already says what happened.** On the «Sem conexão» and «Login expirado» screens of [#378](https://github.com/guedesdiogo/kelpie/issues/378)'s mockup, the header and every agent in the side list read "sem conexão".
 
 **The research on #380:**
 - No award-winning product documents an offline character.
@@ -28,14 +33,14 @@
 ### 1. A state of its own: Offline
 
 - **When:** the page lost its connection. That is when §5.12's banner enters, 2 s after the loss, or when the expired-login dialog opens.
-  - Every mascot on the page shows it at once, since the page sees none of the agents.
+  - Every mascot on the page that shows a state shows it at once, since the page sees none of the agents. The switcher and the task card show no state, so they don't change.
   - It says what the page knows, that the connection is gone, and nothing about a turn (rule 7).
 - **Pose:**
   - it holds the plug that came out, by its loose cord, in a mitten, with its eyes open on it and its brows up;
   - beside it, a solid grey bubble (`--muted`) shows a struck-through plug.
   - It is neither amber, which is Waiting, nor red, which is Error, so it doesn't read as the agent asking or failing. The solid outline and the glyph keep it apart from No response's dashed `…` bubble.
 - **Announcement:** the plug comes out of the body, drops a little and swings to rest, and the bubble pops.
-- **Repertoire in Alive, the calmest of all:** it blinks, glances, looks at the plug, tries the plug in the air, shakes it, looks around, sighs and yawns.
+- **Repertoire in Alive, calmer than Idle's:** it blinks, glances, looks at the plug, tries the plug in the air, shakes it, looks around, sighs and yawns.
   - Gestures come 4 to 8 s apart, and it never hops.
   - Nothing in it pleads or trembles, which would blame the agent for the network.
 - **At 36 px:** a `--muted` badge with a `--surface` ring. §5.9's glyph, a struck-through circle, and the label "no connection" carry the state. The label shows no time.
@@ -43,21 +48,26 @@
 
 ### 2. One state for both causes
 
-No internet, no server and an expired login show the same state and glyph. The banner or the dialog says which it is.
+No internet, no server and an expired login show the same state and glyph. The banner says the connection is lost, and the dialog says the login expired: the page can't tell a missing network from a missing server.
 
 ### 3. The expired-login dialog shows the mascot at 160 px
 
-Holding its plug, above the dialog's text. Behind the dialog, every mascot shows Offline too.
+The conversation's agent's mascot, holding its plug, above the dialog's text. Behind the dialog, every mascot shows Offline too.
 
 ### 4. Back
 
-When the connection comes back:
-- the plug clicks home and the mascot gives a small hop, under 1 s;
-- then it shows the state the history brings (§5.12), such as Waiting while a confirmation is still open.
+When the connection comes back, the mascot plays a return announcement, then shows the state the history brings (§5.12), such as Waiting while a confirmation is still open.
+- **The announcement:** the plug clicks home, with a small hop and a blink, under 1 s.
+- **Where it plays:** in Alive and in States only, at every size, the roster's included, like any announcement.
+- **In Still:** the new pose comes with the crossfade.
 
 ## Consequences
 
-- **`docs/design-system.md` changes in the same pull request:** §5.12, §5.19 (its row, the dialog's size and the bubble), §5.9 (its row) and §9.
+- **`docs/design-system.md` changes in the same pull request:**
+  - §5.12;
+  - §5.19: its row, the return, the bubble, the roster's badge, the dialog's size and Still;
+  - §5.9: its row;
+  - §9.
 - **The webchat implements it in #378.** The engine gains:
   - the plug, as an object in the mittens;
   - the grey bubble and its glyph;
