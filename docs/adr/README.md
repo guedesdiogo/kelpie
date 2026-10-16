@@ -49,6 +49,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0043](0043-design-system.md) | Kelpie's interface follows one design system: the Mistura identity, with motion chosen by how often an interaction happens | [#356](https://github.com/guedesdiogo/kelpie/issues/356) |
 | [0044](0044-design-system-review.md) | The owner can deny one action without stopping its agent, and the design system adds the patterns of its first review | [#358](https://github.com/guedesdiogo/kelpie/issues/358) |
 | [0045](0045-agent-mascot.md) | Each agent is a customizable plush mascot that stays alive in place | [#364](https://github.com/guedesdiogo/kelpie/issues/364) |
+| [0046](0046-telegram-bot-photo.md) | Each agent's Telegram bot shows the agent's mascot as its profile photo | [#368](https://github.com/guedesdiogo/kelpie/issues/368) |
 
 ## Format
 

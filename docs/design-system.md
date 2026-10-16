@@ -543,6 +543,7 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 | Roster | 36 px | no mouth or brows, eyes 15% larger, no mittens; a glossy badge with a `--surface` ring takes the bubble's place: `--warm` for waiting, `--danger` for error, `--accent` with the tool's icon for working. One gesture at a time across the list, every 7 to 16 s, never a hop |
 | Conversation header | 48 px | its home. Everything happens inside its box; the box is kept before the figure arrives, so nothing in the layout moves |
 | Empty conversation, profile | 160 px | gestures a little more often |
+| Telegram bot photo | 800 px square, cropped round by Telegram | a still, and a loop Telegram plays (below) |
 
 **Reduced motion and the pause.**
 - **The pause** (WCAG 2.2.2) is a setting with three values: Alive, States only, Still. Before a mascot first moves, the webchat asks for it under the header, and the mascot stays still until the owner answers. The Display menu (5.22) keeps it, in the browser. The first run's comfort step and settings (5.17) will hold it too.
@@ -553,6 +554,12 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 - **Reading comes first.** While the owner types, the conversation's mascot only breathes and blinks.
 - **Nothing moves off screen or in a hidden tab,** the activity's loop included. One shared timer, every 400 ms, schedules every mascot, and an `IntersectionObserver` stops those out of view.
 - **The mascot makes no sound.**
+
+**In Telegram** ([ADR-0046](adr/0046-telegram-bot-photo.md)). The agent's bot shows the mascot as its profile photo. Browser Run draws it with the webchat's own engine when the bot connects and when the mascot changes; a mascot already on that bot isn't drawn again.
+- **The square** is 800 px on a flat, opaque `--bg` (light). The figure is centered by what it shows, from its ears or hat to its shadow, so nothing that matters falls in the corners Telegram crops.
+- **The still** is the rest pose. It is the JPG, and the loop's first frame.
+- **The loop** lasts one idle breath, 3.6 s at 30 fps, so it joins up: a blink at 0.7 s, a wave at 1.3 s, a blink at 3.0 s.
+- **Telegram decides when the loop plays,** so the pause and reduced motion don't reach it. It is made safe on its own: one pass under 5 s, no flash, no zoom and no scaling of the whole figure.
 
 ### 5.20 The conversation
 
@@ -708,6 +715,10 @@ The rules above cite these. The first set was read on 2026-10-15; a source added
   - [OpenAI's dots documentation](https://learn.chatgpt.com/docs/dots);
   - the Apple Design Awards [2024](https://www.apple.com/newsroom/2024/06/apple-announces-winners-of-the-2024-apple-design-awards/) and [2026](https://www.apple.com/newsroom/2026/06/apple-reveals-winners-of-the-2026-apple-design-awards/);
   - [Hermes Agent's StatusPulse](https://github.com/NousResearch/hermes-agent/blob/b51e8b850494e0a95a4b410c3d9b9a26df9ae261/apps/desktop/src/components/ui/status-pulse.tsx#L1-L130).
+- The bot's photo ([ADR-0046](adr/0046-telegram-bot-photo.md)), read on 2026-10-16; the findings are on #368:
+  - Telegram's [profile videos](https://core.telegram.org/api/files) and [sticker rules](https://core.telegram.org/stickers);
+  - Apple's [app icons](https://developer.apple.com/design/human-interface-guidelines/app-icons) and Android's [adaptive icons](https://developer.android.com/develop/ui/views/launch/icon_design_adaptive), on content in a round crop;
+  - [Discord's reduced motion](https://support.discord.com/hc/en-us/articles/360040613412), which stills avatars outside the profile.
 - Accessibility:
   - [WCAG 2.2.2 Pause, Stop, Hide](https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html);
   - [WCAG 2.3.3 Animation from Interactions](https://www.w3.org/WAI/WCAG22/Understanding/animation-from-interactions.html);
