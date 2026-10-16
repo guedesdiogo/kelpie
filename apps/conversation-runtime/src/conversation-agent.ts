@@ -151,7 +151,10 @@ const WEBCHAT_ID_PREFIX = "webchat:";
 const WEBCHAT_RECEIVED_IDS = 100;
 /** While the owner types in the webchat, buffered messages wait at least this long for the rest. */
 const TYPING_HOLD_MS = 4_000;
-/** The most announcements a conversation keeps for its next reply's notice; the oldest go first. */
+/**
+ * The most handoffs and subagents' changes a conversation keeps for its next reply's notice; past
+ * it, the handoffs go first. The agents Master created or renamed all stay (#387).
+ */
 const MAX_UNSAID_ANNOUNCEMENTS = 20;
 /** Where a conversation keeps its unsaid handoffs, in #287's shape, so a rollback still reads them. */
 const HANDOFFS = "handoffs";
@@ -1514,9 +1517,19 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     ];
   }
 
-  /** Keeps these unsaid, the newest MAX_UNSAID_ANNOUNCEMENTS of them, each kind in its own key. */
+  /**
+   * Keeps these unsaid, each group in its own key. Of the handoffs and subagents' changes, only the
+   * last MAX_UNSAID_ANNOUNCEMENTS. An agent's creation and its latest name always stay, at most two
+   * per agent, so no burst of changes pushes one out unsaid, and the notice counts what it doesn't
+   * name (#387).
+   */
   #keepAnnouncements(all: readonly Announcement[]): void {
-    const kept = all.slice(-MAX_UNSAID_ANNOUNCEMENTS);
+    const ofAgents = (one: Announcement) =>
+      one.kind === "agentCreated" || one.kind === "agentRenamed";
+    const kept = [
+      ...all.filter((one) => !ofAgents(one)).slice(-MAX_UNSAID_ANNOUNCEMENTS),
+      ...all.filter(ofAgents),
+    ];
     this.#set(
       HANDOFFS,
       kept.flatMap((one) =>
@@ -1529,10 +1542,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       SUBAGENT_CHANGES,
       kept.filter((one) => one.kind === "created" || one.kind === "deleted"),
     );
-    this.#set(
-      AGENT_CHANGES,
-      kept.filter((one) => one.kind === "agentCreated" || one.kind === "agentRenamed"),
-    );
+    this.#set(AGENT_CHANGES, kept.filter(ofAgents));
   }
 
   /**

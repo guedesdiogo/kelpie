@@ -1787,6 +1787,26 @@ describe("Kelpie's notice of the agents Master creates or renames (#387)", () =>
     expect(world.sent).toEqual(["Here.", 'Kelpie created the agent "Ana" (ana).', "Again."]);
   });
 
+  it("keeps every agent's change past the cap on other news, and counts what it doesn't name", async () => {
+    const ids = Array.from({ length: 25 }, (_, n) => `a${String(n + 1).padStart(2, "0")}`);
+    const world = configuring(
+      use(
+        fakeWorld([
+          toolCalls(...ids.map((id) => ({ name: "create_agent", input: { id, name: id } }))),
+          reply("Done."),
+        ]),
+      ),
+    );
+    const stub = agent("kelpie:telegram:announce-many");
+    await turn(stub, world, "m1", "Create the agents a01 to a25.", FROM_OWNER);
+
+    // More than the 20 a conversation keeps of other news, and the first is still counted.
+    expect(world.sent).toEqual([
+      "Done.",
+      "Kelpie created the agents a01, a02, a03, a04 and 21 more.",
+    ]);
+  });
+
   it("names an agent's latest name, and a rename that came while a notice went out next", async () => {
     const { commands, agents } = fakeCommands();
     agents.set("ana", "Ana");

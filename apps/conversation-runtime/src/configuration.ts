@@ -647,7 +647,7 @@ export function configurationTools(
         const { id, name } = fields(input);
         const result = await commands.renameAgent(context.actor, { id, name });
         if (!result.ok) return refusal(result, typeof id === "string" ? id : undefined);
-        // As for a new agent (#387): later confirmations quote this name beside the id.
+        // As for a new agent (#387), and later confirmations quote this name beside the id.
         context.announce({
           kind: "agentRenamed",
           agentId: result.value.id,

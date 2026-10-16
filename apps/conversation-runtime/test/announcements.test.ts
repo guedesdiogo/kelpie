@@ -6,6 +6,7 @@ import {
   replaces,
   stored,
 } from "../src/announcements.ts";
+import { MAX_SUMMARY_CHARS } from "../src/tools.ts";
 
 // Kelpie's notices of what a turn's tools did (ADR-0036 §4 and §6): a handoff names who has the
 // work (#287), and a subagent created or deleted is named too (#342), as is an agent Master
@@ -137,6 +138,58 @@ describe("announcementNotice", () => {
     expect(announcementNotice([{ ...sales, name: "Scout\\" }], "en")).toBe(
       'Kelpie handed a task to "Scout\\\\" (sales).',
     );
+  });
+
+  it("names four agents a line and counts the rest, in the conversation's language (#387)", () => {
+    const made = ["a1", "a2", "a3", "a4", "a5", "a6"].map(
+      (id): Announcement => ({ kind: "agentCreated", agentId: id, name: id.toUpperCase() }),
+    );
+    expect(announcementNotice(made, "en")).toBe(
+      'Kelpie created the agents "A1" (a1), "A2" (a2), "A3" (a3), "A4" (a4) and 2 more.',
+    );
+    expect(announcementNotice(made.slice(0, 5), "pt-BR")).toBe(
+      'O Kelpie criou os agentes "A1" (a1), "A2" (a2), "A3" (a3), "A4" (a4) e mais 1.',
+    );
+    expect(announcementNotice(made, "es")).toBe(
+      'Kelpie creó los agentes "A1" (a1), "A2" (a2), "A3" (a3), "A4" (a4) y 2 más.',
+    );
+  });
+
+  it("shows a name whole up to 80 characters written out, and cuts the rest (#387)", () => {
+    const whole = "N".repeat(80);
+    expect(announcementNotice([{ ...sales, name: whole }], "en")).toBe(
+      `Kelpie handed a task to "${whole}" (sales).`,
+    );
+    // Each quote takes two characters once escaped, so 40 fill the 80.
+    expect(announcementNotice([{ ...sales, name: '"'.repeat(41) }], "en")).toBe(
+      `Kelpie handed a task to "${'\\"'.repeat(40)}…" (sales).`,
+    );
+    // A hidden character takes seven written out, and none is cut in half.
+    expect(announcementNotice([{ ...sales, name: "͏".repeat(12) }], "en")).toBe(
+      `Kelpie handed a task to "${"\\u{34F}".repeat(11)}…" (sales).`,
+    );
+  });
+
+  it("fits one Telegram message whatever the agents' names and number (#387)", () => {
+    // The longest ids, and names that grow the most once written out.
+    const id = (n: number) => `a${String(n).padStart(39, "0")}`;
+    const names = ["͏".repeat(80), '"'.repeat(80), "\\".repeat(80)];
+    const all = Array.from({ length: 30 }, (_, n): Announcement[] => {
+      const agentId = id(n);
+      const name = names[n % names.length] ?? "";
+      return [
+        { kind: "agentCreated", agentId, name },
+        { kind: "created", agentId, name },
+        { kind: "agentRenamed", agentId, name },
+        { kind: "handoff", taskId: `t${n}`, agentId, name },
+        { kind: "deleted", agentId, name },
+      ];
+    }).flat();
+    for (const locale of ["en", "pt-BR", "es"] as const) {
+      const notice = announcementNotice(all, locale) ?? "";
+      expect(notice.split("\n"), locale).toHaveLength(5);
+      expect(notice.length, locale).toBeLessThanOrEqual(MAX_SUMMARY_CHARS);
+    }
   });
 
   it("is null without an announcement", () => {

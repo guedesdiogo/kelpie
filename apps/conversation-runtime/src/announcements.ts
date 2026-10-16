@@ -66,6 +66,8 @@ const TEXTS: Localized<{
   handoff: Line;
   deleted: Line;
   and: string;
+  /** The agents a line counts past the ones it names. */
+  more: (count: number) => string;
 }> = {
   en: {
     agentCreated: {
@@ -90,6 +92,7 @@ const TEXTS: Localized<{
       several: (to) => `Kelpie deleted the subagents ${to}.`,
     },
     and: "and",
+    more: (count) => `${count} more`,
   },
   "pt-BR": {
     agentCreated: {
@@ -114,6 +117,7 @@ const TEXTS: Localized<{
       several: (to) => `O Kelpie excluiu os subagentes ${to}.`,
     },
     and: "e",
+    more: (count) => `mais ${count}`,
   },
   es: {
     agentCreated: {
@@ -138,6 +142,7 @@ const TEXTS: Localized<{
       several: (to) => `Kelpie eliminó los subagentes ${to}.`,
     },
     and: "y",
+    more: (count) => `${count} más`,
   },
 };
 
@@ -145,8 +150,30 @@ const TEXTS: Localized<{
 const ORDER = ["agentCreated", "created", "agentRenamed", "handoff", "deleted"] as const;
 
 /**
- * The notice for these announcements, a line for each kind, naming each agent once; null without
- * one.
+ * The most agents a line names, and the most of a name it shows once written out: past them it
+ * counts the agents and cuts the name, so a notice fits one Telegram message (#387).
+ */
+const MAX_NAMED = 4;
+const MAX_SHOWN_NAME = 80;
+
+/**
+ * A name in quotes: a subagent's, or one Master's tools set, is the model's choice, and only the id
+ * is Kelpie's. Each backslash and quote is escaped, so it can't close them, and `visible` writes out
+ * what wouldn't show. A name past MAX_SHOWN_NAME ends in "…", never in half an escape.
+ */
+function quoted(name: string): string {
+  let shown = "";
+  for (const character of name) {
+    const written = visible(character.replace(/[\\"]/, "\\$&"));
+    if (shown.length + written.length > MAX_SHOWN_NAME) return `"${shown}…"`;
+    shown += written;
+  }
+  return `"${shown}"`;
+}
+
+/**
+ * The notice for these announcements, a line for each kind, naming each agent once, the first
+ * MAX_NAMED of them by name; null without one.
  */
 export function announcementNotice(
   announcements: readonly Announcement[],
@@ -158,22 +185,22 @@ export function announcementNotice(
     if (these.length === 0) return [];
     const agents = new Map<string, string>();
     for (const { agentId, name } of these) {
-      // The name in quotes: a subagent's, or one Master's tools set, is the model's choice, and
-      // only the id is Kelpie's. Its backslashes and quotes are escaped first, so it can't close
-      // them; `visible` adds its own.
       if (!agents.has(agentId)) {
-        const quoted = `"${visible(name.replaceAll("\\", "\\\\").replaceAll('"', '\\"'))}"`;
         agents.set(
           agentId,
           kind === "agentRenamed"
-            ? texts.renamedTo(agentId, quoted)
+            ? texts.renamedTo(agentId, quoted(name))
             : name === agentId
               ? agentId
-              : `${quoted} (${agentId})`,
+              : `${quoted(name)} (${agentId})`,
         );
       }
     }
-    const named = [...agents.values()];
+    const all = [...agents.values()];
+    const named =
+      all.length > MAX_NAMED
+        ? [...all.slice(0, MAX_NAMED), texts.more(all.length - MAX_NAMED)]
+        : all;
     const last = named.pop() ?? "";
     const to = named.length === 0 ? last : `${named.join(", ")} ${texts.and} ${last}`;
     return [these.length === 1 ? texts[kind].one(to) : texts[kind].several(to)];
