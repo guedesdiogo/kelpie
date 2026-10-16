@@ -123,7 +123,7 @@ An instance with no agent in the role `main` has no agent with the configuration
 - **Text from other agents now reaches a turn that holds configuration tools.**
   - A specialist's task news reaches the owner's conversation with Master as Kelpie's note. The setup agent never got task news.
   - So that text can steer a change that ADR-0013 lets run without a yes, such as `create_agent` or `rename_agent`. A rename also changes the name a later confirmation quotes, beside the id.
-  - A follow-up has Kelpie announce those changes, as it does a subagent's creation.
+  - [#387](https://github.com/guedesdiogo/kelpie/issues/387) has Kelpie announce those changes, as it does a subagent's creation.
 
 ## Alternatives considered
 
