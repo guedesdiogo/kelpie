@@ -45,10 +45,12 @@ The owner works in the conversation, where no pup showed, and asked for them at 
   - The row is as tall as the box, and pups stand on its bottom edge, the parent's ground.
   - The row starts `--space-1` from the box, and pups stand `--space-1` apart. The name keeps `--space-3` after the row.
 - **What a pup shows.** It is 20 px, with the shape, the head, the lighter color and dot eyes.
-  - The head stays, though a task card drops it. It is what makes a pup its parent's (ADR-0045 §7), and it still reads at 20 px.
+  - The head stays, though a task card drops it. It is what makes a pup its parent's (ADR-0045 §7), and it read at 20 px on the design system's card. If the engine's head doesn't read at that size, it is dropped as on a task card.
   - It has no mouth, brows, mittens or task's object.
-  - It breathes and blinks, and nothing else: no gestures, no dozing.
-- **A failed pup** shows §5.9's triangle glyph at its lower right, 10 px in `--danger`.
+  - It breathes and blinks, and plays its announcements, such as the hop of a task that succeeded. It has no gestures and doesn't doze.
+- **A failed pup** shows §5.9's triangle glyph above its head, 10 px in `--danger`, as a small Error bubble.
+  - It sits on the header's background, inside the row's height and the pup's width, so it covers neither the pup nor its neighbor.
+  - On the background `--danger` passes 3:1 (WCAG 1.4.11) in every theme; on the mascots' bodies it wouldn't.
   - The glyph is drawn in SVG, so it shows in forced colors and higher contrast.
   - It is hidden from screen readers, which read the pup's name.
   - The engine's round badge, which carries no glyph, isn't drawn on header pups.
@@ -73,18 +75,18 @@ The owner works in the conversation, where no pup showed, and asked for them at 
 - The row keeps the width of the most pups out since it last emptied.
 - When the last pup is back, the row empties 1 s later. A subagent that starts its next task at once doesn't move the name.
 - So the name moves when the row grows and when it empties, not on each return.
-- On a 320 px screen the name keeps about 110 px and ends in an ellipsis.
+- The name ends in an ellipsis when it doesn't fit. On a 320 px screen with three pups out, beside today's Display button, which has a label, it keeps about 70 px.
 
 ### The header's count
 
-- The count is its own polite live region, on the status line's row, after a middle dot.
+- The count is its own polite live region, on the status line's row. A middle dot separates it from the phase only when both show.
 - It isn't the status line, so a change of phase doesn't repeat it, and the status line still names only the turn's phase (§5.20).
 - It changes only when a pup leaves, fails, waits or comes back.
 - **Its parts, joined by middle dots,** come in this order:
   1. "1 failed", while a failed pup is out;
   2. "1 waiting on <creator's name>", such as "1 waiting on Kelpie";
   3. "2 subagents at work", or "1 subagent at work", counting the pups out that work.
-- With no pup out, the count is empty.
+- When the last pup is back, the count reads "All subagents are back" for 5 s, so screen readers hear the end, then empties.
 - **On a narrow header,** such as a phone's:
   - the phase ends in an ellipsis first;
   - then the count hides its parts whole, from the last, so a failure stays in sight;
@@ -102,13 +104,17 @@ They follow §5.6 on both surfaces:
 - **a task that waits on its creator:** the pup stays out with no amber;
 - **a task the creator sends back to To do:** its pup leaves again when the task runs.
 
+### The profile's count
+
+The profile's line, "1 of 3 back", now counts in its total every pup out since no pup was out, so a pup that leaves after others came back raises it.
+
 ### Unchanged
 
 From ADR-0051:
 - a pup follows its subagent's tasks;
 - at most three show;
 - the parent's state comes from §5.9 and §5.19;
-- the profile's own count line: "1 of 3 back", where 3 counts the pups out since the row last emptied.
+- the profile's own count line.
 
 From ADR-0045 §7: the look of a pup.
 
@@ -117,6 +123,8 @@ From ADR-0045 §7: the look of a pup.
 - **`docs/design-system.md` changes in the same pull request:**
   - §5.6, rewritten;
   - §5.19's sizes table: the header's row and the pups' row;
+  - §5.21: one bullet that points to the pups' row;
+  - §9: the sources read on #403;
   - the introduction, which lists the ADRs.
 - **#378 lays out the webchat's header** (§5.21). The pups' row and the count sit inside its `.agent`, and their rules stay in §5.6.
 - **The engine draws a round badge at every size up to 40 px.** Header pups need it off, with the triangle glyph beside them instead.

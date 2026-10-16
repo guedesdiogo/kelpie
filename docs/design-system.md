@@ -350,9 +350,9 @@ Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0
 - **The header's row.**
   - Pups stand in a row between the mascot's box and the agent's name (5.21). The row is as tall as the box, and pups stand on its bottom edge, the parent's ground.
   - The row starts `--space-1` from the box, and pups stand `--space-1` apart. The name keeps `--space-3` after the row.
-  - A header pup is 20 px: 40% of 48 px is 19.2 px. It has the shape, the head, the lighter color and dot eyes. A task card at 20 px drops the head (5.19), but a pup keeps it: the head makes it its parent's, and it still reads at that size.
-  - It has no mouth, brows, mittens or task's object. It breathes and blinks, and nothing else: no gestures, no dozing.
-  - A failed pup shows 5.9's triangle glyph at its lower right, 10 px in `--danger`, drawn in SVG and hidden from screen readers. The engine's round badge isn't drawn on header pups.
+  - A header pup is 20 px: 40% of 48 px is 19.2 px. It has the shape, the head, the lighter color and dot eyes. A task card at 20 px drops the head (5.19), but a pup keeps it: the head makes it its parent's. If the engine's head doesn't read at 20 px, it is dropped as on a task card.
+  - It has no mouth, brows, mittens or task's object. It breathes, blinks and plays its announcements, such as a success's hop, with no gestures and no dozing.
+  - A failed pup shows 5.9's triangle glyph above its head, 10 px in `--danger`, as a small Error bubble. It sits on the header's background, inside the row's height and the pup's width, where `--danger` passes 3:1 in every theme; on the bodies it wouldn't. It is drawn in SVG and hidden from screen readers. The engine's round badge isn't drawn on header pups.
   - A working or waiting pup carries no mark. A waiting pup looks at the parent.
   - Header pups aren't interactive: at 20 px they are below the 24 px target size (WCAG 2.5.8).
   - For screen readers, the row is a list named for the parent's subagents, such as "Research's subagents". Each pup is an item named by its task and state, such as "read the reviews, failed". The figures are hidden.
@@ -363,7 +363,7 @@ Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0
 - **The header's name moves as little as it can.**
   - When the row needs more room, the name and the status line slide to their new place with `--spring-moment`, as a `transform` from where they were. They never stretch.
   - The row keeps the width of the most pups out since it last emptied. When the last pup is back, the row empties 1 s later, so a subagent that starts its next task at once doesn't move the name.
-  - On a 320 px screen the name keeps about 110 px and ends in an ellipsis.
+  - The name ends in an ellipsis when it doesn't fit. On a 320 px screen with three pups out, beside today's Display button, which has a label, it keeps about 70 px.
 - **The parent's state** comes from 5.9 and 5.19 as for any agent. Delegating is not a state of its own.
 - **Leaving.** Each pup comes out of the parent's middle at a scale of 0.3 and goes to its place with `--spring-moment`, `--stagger-moment` apart. As each one leaves, the parent pulses (`scale` 0.9 to 1, `--spring-pop`). On the profile the pup takes Working with its task's object (5.19).
 - **Coming back, in the order the tasks end:**
@@ -372,14 +372,14 @@ Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0
   - **A task cancelled,** by the owner's stop or by its agent, or lost with its subagent, goes back with no smile or hop and doesn't count as failed. An ending the page can't tell is never shown as a success. The pause doesn't cancel tasks (5.3).
   - **A task that waits for an answer.** The subagent's question goes to its creator, not to the owner (ADR-0036). The pup stays out with no amber, looking at the parent, and the strip of 5.9 doesn't count it. On the profile it holds its task's object at rest. If the creator then asks the owner, the parent's state follows 5.9 and 5.19, for example Waiting while a confirmation is open (5.3).
 - **On the profile, a status line counts them back** in a polite live region:
-  - "1 of 3 back", where 3 counts the pups out since the row last emptied;
+  - "1 of 3 back", where 3 counts every pup out since no pup was out;
   - "All 3 are back", or "It's back" for a single pup;
   - "1 failed" when one did;
   - "1 waiting on <creator's name>", such as "1 waiting on Kelpie", while one waits on its creator.
-- **In the conversation, the header's count** is its own polite live region, on the status line's row, after a middle dot.
+- **In the conversation, the header's count** is its own polite live region, on the status line's row. A middle dot separates it from the phase only when both show.
   - It isn't 5.20's status line, which still names only the turn's phase, so a change of phase doesn't repeat it. The count changes only when a pup leaves, fails, waits or comes back.
   - Its parts, joined by middle dots, come in this order: "1 failed", while a failed pup is out; "1 waiting on <creator's name>"; "2 subagents at work", or "1 subagent at work", counting the pups out that work.
-  - With no pup out, it is empty.
+  - When the last pup is back, it reads "All subagents are back" for 5 s, so screen readers hear the end, then empties.
   - On a narrow header, the phase ends in an ellipsis first. Then the count hides its parts whole, from the last, so a failure stays in sight. Screen readers still read the whole count.
   - Offline empties it with the pups. While paused it stays, since the pause cancels no task.
 - **These texts are fixed** ([ADR-0027](adr/0027-fixed-texts-in-three-languages.md)).
@@ -611,7 +611,7 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 | Task card (5.5) | 20 px | the shape, the color and the eyes only: no head, accessory, mittens or badge; still, since the card already says the state. The engine draws a badge at every size up to 40 px today, so the board needs that changed |
 | Conversation header | 48 px | its home. Everything happens inside its box; the box is kept before the figure arrives, so nothing moves when it does. Its pups stand in a row after the box, and the name slides to make room (5.6, ADR-0053) |
 | Empty conversation, profile, the expired-login dialog (5.12) | 160 px | gestures a little more often |
-| Pups (5.6) | 40% of the parent: 20 px in the conversation's header, 64 px on the profile | in the header, the shape, the head, the lighter color and dot eyes, breathing and blinking only, with 5.9's triangle beside a failed one and no badge; on the profile, the full face of the 48 px row; left-aligned beside the parent, closing up as they come back; none while the page is Offline |
+| Pups (5.6) | 40% of the parent: 20 px in the conversation's header, 64 px on the profile | in the header, the shape, the head, the lighter color and dot eyes, breathing, blinking and announcing only, with 5.9's triangle above a failed one and no badge; on the profile, the full face of the 48 px row; left-aligned beside the parent, closing up as they come back; none while the page is Offline |
 | Telegram bot photo | 800 px square, cropped round by Telegram | a still, and a loop Telegram plays (below) |
 
 **Reduced motion and the pause.**
@@ -683,6 +683,7 @@ Frequent. The webchat's thread and composer (#140); the research is on #140.
 Frequent.
 
 - **The header** holds the 48px mascot (5.19), the agent's name in Bricolage Grotesque at `--text-h3`, and the status line.
+- **While the agent's subagents work,** their pups stand in a row between the mascot and the name, and their count follows the status line on its row (5.6, [ADR-0053](adr/0053-pups-in-the-conversation-header.md)).
 - **The switcher.** With more than one agent, the name is a button that opens the list. From a click it grows from the name as 5.8 does; from the keyboard it appears at once.
   - Each agent is a link to its conversation (`?agent=<id>`), with its still 36 px mascot in the Idle pose (5.19), its name, and its id in Geist Mono. Back and new tabs work.
   - The current one is marked with `aria-current`.
@@ -850,6 +851,11 @@ The rules above cite these. The first set was read on 2026-10-15; a source added
   - [Chromium's link element](https://github.com/chromium/chromium/blob/1ac7132d0190493dbeb52e8625ad8d3cfb25adca/third_party/blink/renderer/core/html/html_link_element.cc#L143-L151), which ignores setting the same `href` again;
   - [WebKit bug 266426](https://bugs.webkit.org/show_bug.cgi?id=266426), still open: Safari keeps the first favicon;
   - [Hermes Agent's session dot](https://github.com/NousResearch/hermes-agent/blob/848fc0ad8be766b9dc10fe42bd80b5fc2d45d95c/apps/desktop/src/app/chat/session-status-dot.tsx#L23-L37), one amber state for what needs the user, which never moves.
+- The pups in the conversation's header ([ADR-0053](adr/0053-pups-in-the-conversation-header.md)), read on 2026-10-16; the findings and the reference-project check are on #403:
+  - [Hermes Agent's subagent glyphs](https://github.com/NousResearch/hermes-agent/blob/848fc0ad8be766b9dc10fe42bd80b5fc2d45d95c/ui-tui/src/lib/subagentGlyph.ts#L16-L34), a shape for each status and never a success for an unknown ending;
+  - figures kept apart while there is room: [Primer's avatar stack](https://primer.style/product/components/avatar-stack/) and [Fluent 2's avatar group](https://fluent2.microsoft.design/components/web/react/core/avatargroup/usage), which also asks for text beside a small badge;
+  - closing a gap with transforms: [Motion's `popLayout`](https://motion.dev/docs/react-animate-presence) and [FLIP](https://aerotwist.com/blog/flip-your-animations/);
+  - [WCAG 4.1.3 Status Messages](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html), for the polite count.
 - Accessibility:
   - [WCAG 2.2.2 Pause, Stop, Hide](https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html);
   - [WCAG 2.3.3 Animation from Interactions](https://www.w3.org/WAI/WCAG22/Understanding/animation-from-interactions.html);
