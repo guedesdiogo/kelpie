@@ -1,6 +1,6 @@
 # Design system
 
-Kelpie's interface follows one visual identity and one motion system, decided in [ADR-0043](adr/0043-design-system.md) and extended by its first review in [ADR-0044](adr/0044-design-system-review.md), by the agent mascot in [ADR-0045](adr/0045-agent-mascot.md) and by its Telegram photo in [ADR-0046](adr/0046-telegram-bot-photo.md). This document holds the values. A page, component or animation takes its colors, type, spacing, radii and motion from the tokens below. A literal number is allowed only where a pattern in section 5 sets it.
+Kelpie's interface follows one visual identity and one motion system, decided in [ADR-0043](adr/0043-design-system.md) and extended by its first review in [ADR-0044](adr/0044-design-system-review.md), by the agent mascot in [ADR-0045](adr/0045-agent-mascot.md), by its Telegram photo in [ADR-0046](adr/0046-telegram-bot-photo.md) and by the logo in [ADR-0049](adr/0049-logo-main-mascot-silhouette.md). This document holds the values. A page, component or animation takes its colors, type, spacing, radii and motion from the tokens below. A literal number is allowed only where a pattern in section 5 sets it.
 
 The direction is called **Mistura** ("mix"): the identity of the water spirit (kelp colors, shapes that change) with the discipline of the herding dog (Pastoreio, "herding": fast, grouped, no bounce). What the owner does a hundred times a day moves quickly and plainly. The moments that matter (approving, spending, delegating, remembering) get the expressive motion. Each agent is one of those changing shapes: a plush drop of water that stays alive in its place (5.19).
 
@@ -519,7 +519,7 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 | Head | `none`; `ears`: `pointed`, `floppy`, `round`; `horns`: `two`, `one`, `antennae`; `hair`: `strands`, `curl`, `mohawk`; `leaves`: `one`, `two`, `kelp` |
 | Accessory | `none`; `glasses`: `round`, `dark`; `bow`: `tie`, `head`; `hat`: `beret`, `top`, `beanie`; `belt`: `belt`, `collar` |
 
-- **The main agent starts as Kelpie:** `mark`, `kelp`, `shine`, pointed ears and a collar. Every other agent starts with a mascot derived from its id, until the owner picks one. A new option goes at the end of its axis; derived mascots draw from the options above, frozen, so a new one never changes them.
+- **The main agent starts as Kelpie:** `mark`, `kelp`, `big` eyes, round ears and no accessory ([ADR-0049](adr/0049-logo-main-mascot-silhouette.md)). Its silhouette is the logo (5.23). Every other agent starts with a mascot derived from its id, until the owner picks one. A new option goes at the end of its axis; derived mascots draw from the options above, frozen, so a new one never changes them.
 - **A hat hides what sits in the middle of the head:** one horn, antennae, hair and leaves. Ears and two horns stay.
 - **Body colors are tokens with one value in both themes,** since they color the figure, not the page. None is amber, which means the owner needs to act.
 
@@ -662,6 +662,37 @@ Frequent. One step away, in the header, for a page with no settings of its own.
 - **The system's reduced motion can't be turned off** here; the switch only adds to it.
 - **Reduced motion:** the menu fades.
 
+### 5.23 The logo
+
+Frequent, and still: the logo never moves ([ADR-0049](adr/0049-logo-main-mascot-silhouette.md)). Kelpie's logo is the main agent's mascot as a flat silhouette, and it names the product. `scripts/brand-icons.mjs` draws every file: the mark and its lockups in `docs/brand/`, and the webchat's icons.
+
+- **The mark** is the main mascot's `mark` shape with its round ears, in one color: no face, fur, accessory or shadow.
+  - It comes from the engine's 120 grid: the shape at 24..96 × 36..108 with corners 36, 36, 36 and 11.5, and the ears, circles of 10.5 at (38, 42) and (82, 42).
+  - If the main mascot's default changes, the mark changes with it, through a new ADR.
+- **The lockup** sets the mark beside "Kelpie" in Bricolage Grotesque 680, tracking −0.03em, with the font's kerning:
+  - the mark is 1.3 cap heights tall, centered on the cap band;
+  - its right edge sits half a cap from the K's stem;
+  - the webchat's sidebar sets the word at 17 px;
+  - nothing else comes within half a cap of the lockup, or a quarter of the mark's height of the mark alone.
+- **Color.** The mark and the word are `--accent`:
+  - on `--bg`, `--surface` and `--sunken` they measure 4.80, 5.38 and 4.38 in light, and 8.51, 7.78 and 8.23 in dark;
+  - a logo is exempt from WCAG 1.4.11, but the logo that links home still keeps 3:1, which every pair passes;
+  - on anything else (a photo, another color), the mark goes in `--on-accent` on an `--accent` tile;
+  - it is never `--warm`.
+- **Small sizes have their own drawings.** At 32 px and below, the favicon's masters draw the mark on whole pixels, with the ears a little larger so they survive.
+- **The favicon is an opaque tile:** `--accent`, radius 22% of its side, with the mark in `--on-accent` (5.31:1 in light, 7.83:1 in dark).
+  - Safari ignores the dark block inside an SVG favicon, so the light tile is the one every browser can show.
+  - Chrome and Firefox take the dark tile on a dark system.
+  - The webchat serves:
+    - `icon.svg`, the 32 px master;
+    - `favicon.ico`, with 16 and 32 px layers;
+    - `apple-touch-icon.png`, 180 px and square, since iOS masks it, with the mark 62% of the tile tall;
+    - `icon-192.png` and `icon-512.png` on a rounded tile;
+    - `icon-maskable-512.png`, with the mark inside the 40% circle Android may crop to.
+  - It asks for its manifest with the Access login's cookie, and the manifest opens the webchat as a browser tab.
+- **It never stands in for an agent.** Every agent, the main one included, shows its own mascot (5.19). The logo carries no state, badge or glyph. The amber dot of 5.9 belongs to the tab's favicon, not to the logo.
+- **Reduced motion:** nothing changes; it doesn't move.
+
 ## 6. Implementation notes
 
 - **CSS first.** Tokens are custom properties. Springs are the `linear()` values above, supported in every current browser. Enter and exit use transitions with `@starting-style`. Choreographed sequences use the Web Animations API, which takes the same easings.
@@ -687,6 +718,7 @@ A pull request that changes the interface answers yes to each line:
 - [ ] `--warm` appears only where the owner must act, and a toast only where 5.13 allows one.
 - [ ] Copy follows the voice in section 2.
 - [ ] Every place that shows an agent shows its mascot at a size from 5.19, never a photo, an initial or a generic icon.
+- [ ] The logo appears only as the brand, drawn by `scripts/brand-icons.mjs` and sized as 5.23 says, and never in place of an agent's mascot.
 - [ ] A mascot's pose, badge, glyph and label agree, and they show the agent's real state.
 - [ ] A new mascot surface moves only as its size allows in 5.19, and the pause and reduced motion stop it.
 
@@ -752,6 +784,13 @@ The rules above cite these. The first set was read on 2026-10-15; a source added
   - Telegram's [profile videos](https://core.telegram.org/api/files) and [sticker rules](https://core.telegram.org/stickers);
   - Apple's [app icons](https://developer.apple.com/design/human-interface-guidelines/app-icons) and Android's [adaptive icons](https://developer.android.com/develop/ui/views/launch/icon_design_adaptive), on content in a round crop;
   - [Discord's reduced motion](https://support.discord.com/hc/en-us/articles/360040613412), which stills avatars outside the profile.
+- The logo ([ADR-0049](adr/0049-logo-main-mascot-silhouette.md)), read on 2026-10-16; the findings and the reference-project check are on #385:
+  - a mark that reduces the mascot, never replaced by it: [GitHub's logo](https://brand.github.com/foundations/logo) and [Mailchimp's brand assets](https://mailchimp.com/about/brand-assets/), with a reverse drawn for dark backgrounds;
+  - small sizes: [Dropbox's logo](https://brand.dropbox.com/logo), a separate glyph at 32 px and below; [Discord's 2021 refresh](https://discord.com/blog/happy-blurpthday-to-discord-a-place-for-everything-you-can-imagine), blunt shapes for small surfaces; [Primer's icons](https://primer.style/foundations/icons), whole pixels and 1 px gaps;
+  - [Copilot's Mico](https://thenextweb.com/news/microsoft-copilot-mico-retired-features-killed-app-merge), a mascot retired while the logo stayed;
+  - favicons: [Safari 26's release notes](https://developer.apple.com/documentation/safari-release-notes/safari-26-release-notes), [WebKit bug 309949](https://bugs.webkit.org/show_bug.cgi?id=309949) and [Evil Martians' "How to Favicon in 2026"](https://evilmartians.com/chronicles/how-to-favicon-in-2021-six-files-that-fit-most-needs);
+  - home-screen icons: [Apple's app icons](https://developer.apple.com/design/human-interface-guidelines/app-icons) and [web.dev on maskable icons](https://web.dev/articles/maskable-icon);
+  - [invokta's favicon](https://github.com/vinilana/invokta/blob/f1e2f04f98c967ab4bb73bd02c3fa581f04ce0e5/apps/docs/public/favicon.svg#L1-L10), drawn apart from its mark, and [Hermes Agent's icon script](https://github.com/NousResearch/hermes-agent/blob/b65e078cdc77ebe83979a2d5355179535f340e89/scripts/generate_icons.py#L1-L90), every size from one master.
 - Accessibility:
   - [WCAG 2.2.2 Pause, Stop, Hide](https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html);
   - [WCAG 2.3.3 Animation from Interactions](https://www.w3.org/WAI/WCAG22/Understanding/animation-from-interactions.html);

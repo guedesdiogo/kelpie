@@ -5,7 +5,7 @@
 //   node scripts/brand-icons.mjs
 //
 // It finds Chrome on the PATH (google-chrome, chromium) or in $CHROME. The design system's logo
-// section (docs/design-system.md §1.1) holds the rules these files follow.
+// section (docs/design-system.md §5.23) holds the rules these files follow.
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
