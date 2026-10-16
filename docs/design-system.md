@@ -94,6 +94,8 @@ Only the weights listed are used, with `font-synthesis-weight: none`.
 
 Digits that change or line up (timers, counts, prices, times) use `font-variant-numeric: tabular-nums`. Running text stays near 65 characters per line.
 
+**The webchat has no uppercase labels** (owner, 2026-10-16, #378). Its day labels, menus, cards and the sidebar write in sentence case, and Geist Mono is only for times, counts, paths and code. The eyebrow above stays for the documentation pages.
+
 ### Voice
 
 Kelpie writes the way a capable colleague talks.
@@ -242,7 +244,7 @@ Frequent. Kelpie waits `quietMs` after the owner's latest message before answeri
 
 - **The owner's message.** It enters from below the composer (`--rise`, `--scale-in`, `--spring-base`, origin at the bottom right), and the bubbles above slide up with it (FLIP, `--spring-base`).
 - **Held messages.** While the buffer holds them, each of the owner's messages carries a small clock in `--muted` under it, "held". The bubble itself doesn't change, so its text keeps its contrast. The mark fades out (`--dur-fade`) when the turn starts reading them.
-- **The wait.** A 3px bar under the thread shows it, wherever the interface knows the buffer's deadline. ADR-0043 amends ADR-0024 for this; before, nothing showed during the wait.
+- **The wait.** A 64px track, 3px tall, over the composer shows it, wherever the interface knows the buffer's deadline, beside "Waiting for you to finish" in `--muted`. Once the wait ends, the line reads "Kelpie is writing" until the reply or a stop (decision 10, #378). ADR-0043 amends ADR-0024 for this; before, nothing showed during the wait.
   - The webchat learns the deadline from one socket message, `wait`, added with its redesign (#140). It says how long is left and how long the wait is, in ms, so the browser's clock doesn't matter, and whether the owner's typing holds it.
   - The conversation sends it after planning a flush, when the typing hold moves it, and to a socket that opens during it. It sends `deadline: null` when the turn starts reading, or a pause cancels the wait.
   - The bar follows the buffer's real deadline: `quietMs` after the latest message, capped by `maxWaitMs` from the first.
@@ -265,8 +267,9 @@ Frequent.
 - **The row.** It appears when a call starts, with the call's real name. A call that changes something carries a "changes" tag beside its name; a call that only reads carries none.
 - **The mascot follows the same call.** While a row runs, the header's mascot holds that tool's object when it has one, and thinks otherwise (5.19). Between calls, it thinks or types the reply.
 - **Each new action** replaces the label above it: the old label leaves upward (exit, 75% of its height), and the new one rises with `--spring-fast`.
-- **The spinner** follows rule 8, and turns for at most 5 s. After that, a still ring and the elapsed time (shown from 3 s) say the call is running.
-- **Done**, the row becomes a one-line summary ("3 steps · 2.6 s") with a check. A click opens it: height with `--spring-base`, rows entering with `--stagger`.
+- **The spinner** follows rule 8, and turns for at most 5 s. After that, a still ring and the elapsed time say the call is running.
+- **The time sits on the right,** from 3 s, in Geist Mono with tabular figures, counting whole seconds and then `m:ss` (decision 11, #378).
+- **Done**, the label says what was done, with a check (decision 11). Until the runtime names what a call did, the webchat writes a one-line summary instead ("3 steps · 2.6 s"). A click opens the row: height with `--spring-base`, rows entering with `--stagger`.
 - **Typed results.** A result with a known type (an event, a file, a table, a link) shows as a card of that type, not as running text. The card enters with `--rise` and `--spring-base`, or with a fade under reduced motion.
 - **Streamed text** follows rule 7.
 - **Reduced motion:**
@@ -284,6 +287,9 @@ Moment. The owner's press is the yes ([ADR-0026](adr/0026-confirmation-by-owner-
   - **Confirm**, the primary button;
   - **Deny this call**, beside it. It closes the confirmation, and the agent goes on without that change;
   - **Hold to pause this conversation**, a smaller control under them. It uses the hold of 5.4 and runs the existing pause (#134): the next answer waits for the owner's next message, and background tasks keep running.
+- **The card is compact** (decision 13, #378): who asks, with the agent's still 40px mascot in Waiting and until when it holds; then the text; then the actions on the right, and the hold under them.
+- **A sidebar row draws the same card** under itself for its agent's request (5.9, [ADR-0052](adr/0052-webchat-presence-sockets.md)). Its press and its hold go over that row's socket, never over the open conversation's.
+- **A press in the card's first 400 ms is ignored,** after it draws or draws again: it may have appeared under the pointer (ADR-0052 §5). An open card's content never changes in place.
 - **What the card shows is bounded** (ADR-0044 §1). The agent is named by its id. The evidence comes from the tool call's typed fields, appears as quoted data marked as written by the agent, and never carries a link or a control.
 - **The agent's mascot answers with the card** (5.19):
   - while the card is open, it takes Waiting: its eyes on the owner, brows up, the amber bubble; among its gestures, it points at the card;
@@ -427,14 +433,20 @@ Moment grammar. Every place that shows an agent shows its mascot (5.19), at the 
 - **On a change,** the mascot plays its new state's announcement (5.19), and the status line rolls.
 - **A roster stays calm.** At 36 px its repertoire plays one gesture at a time across the whole list, every 7 to 16 s, and never a hop; a state's announcement still plays. Pressing a row does what the roster defines, never a clap.
 - **What waits for the owner is counted, not moved.**
-  - A strip above the roster counts the agents waiting, in `--warm`. Its count rolls. It enters with `--rise`, and leaves when nothing waits. Its slot above the roster is reserved, so the rows never move when it appears.
+  - A strip above the roster counts the agents waiting, with a bell in `--warm` on a 14% `--warm` tint: "1 agent waiting for you". Its count, in Geist Mono, rolls. It enters with `--rise` and `--spring-fast`, and leaves when nothing waits. Its slot above the roster is reserved, so the rows never move when it appears.
   - The browser tab's title starts with the count, "(2) Kelpie", and the favicon gets a `--warm` dot (5.23).
     - The agent's name stays after the count, "(1) Assistant · Kelpie". The title and the favicon change only when the count does.
-    - An answer, an expiry or the end of the wait clears the count; looking at the tab doesn't.
+    - The count is the strip's: a confirmation answered or expired leaves it, and neither writing nor looking at the tab does.
     - Safari keeps the favicon the page loaded with ([WebKit bug 266426](https://bugs.webkit.org/show_bug.cgi?id=266426)), so the title carries the count there.
-    - The webchat hears only the open conversation until its sidebar hears every agent (#378). Until then it counts that agent while its mascot waits.
   - A free tier past 90% joins the count (5.16).
-- **A row opens in place.** Pressing a waiting agent's row grows its request under the row (height, `--spring-moment`), with the card of 5.3. From the keyboard it appears at once.
+- **A row** (decision 15, #378): the agent's 36px mascot with only 5.19's badge, and no ring around it; its name; a line with the glyph, then "state · what it does"; and the time on the right in Geist Mono with tabular figures, `m:ss` while it works and "3 min ago" while it waits. The open conversation's row stands on `--surface`.
+- **Each row follows its own agent** ([ADR-0052](adr/0052-webchat-presence-sockets.md)).
+  - The open conversation's row reads that conversation's own socket. Every other row, up to 16 in the Registry's order, reads a presence socket of its own. Past 16, a row shows its mascot and name with no state, and the list says once that it follows the first 16.
+  - A row shows no state until its first frame arrives; it is never Idle by default.
+  - A row whose socket has been closed 2 s shows Offline, alone.
+  - A request expires on the page's clock too, so a row stops waiting when its last request does.
+- **A row opens in place.** The row opens its agent's conversation. A waiting row's state, "waiting for you", is a disclosure (`aria-expanded`): pressing it grows the request under the row (height, `--spring-moment`), with the card of 5.3. From the keyboard it appears at once. For the conversation that is open, the disclosure moves focus to its card in the thread instead. Once the card folds, its receipt shows 1.6 s and the request closes.
+- **The keyboard.** The list is one tab stop, with roving focus and `aria-current` on the open agent. ↑, ↓, Home and End move, with no animation, and Enter opens a row. → opens a waiting row's request, and ← or Escape closes it.
 - **Finished work leaves; failures stay.** A subagent or task that succeeded leaves a list at once. One that failed stays 30 s with its triangle glyph and what failed, and can be dismissed.
 - **An agent is compared with itself.** Its numbers sit against its own last 30 days, never in a ranking of agents.
 - **The roster never reorders** when a state changes: a list that jumps under the pointer costs a misclick.
@@ -470,10 +482,10 @@ Frequent.
 Frequent.
 
 - **The first 2 s show no banner.**
-- **The banner.** Then a banner enters at the top (from 8px above, `--spring-base`): what happened, when the next try is ("No connection. Trying again in 8 s", digits in Geist Mono), and "Try now".
-- **Queued messages.** What the owner sends meanwhile shows in `--sunken` with a clock and "queued". It goes out in order when the connection is back.
+- **The banner.** Then a banner enters at the top (from 8px above, `--spring-base`): the no-Wi-Fi icon, what happened, when the next try is ("No connection. Trying again in 8 s", digits in Geist Mono), and "Try now" (decision 14, #378).
+- **Queued messages.** What the owner sends meanwhile shows in `--sunken` with its text in `--muted`, a clock and "queued" (decision 14). It goes out in order when the connection is back.
 - **Every mascot that shows a state shows Offline (5.19) when the banner enters.** It says what the page knows, that the connection is gone, and nothing about the turn it no longer sees (rule 7). Every agent in the roster reads "no connection" with the same glyph (ADR-0047).
-- **Back,** the banner turns `--ok`, "Back. 1 message sent.", for 2.6 s, then leaves, and every Offline mascot's plug clicks home (5.19). A new connection starts from the history, and a mascot takes Waiting again if a confirmation in it is still open. Alerts stay quiet for the first 4 s after reconnecting, so a backlog doesn't arrive as a burst.
+- **Back,** the banner turns `--ok`, "Back. 1 message sent.", for 2.6 s, then leaves, and every Offline mascot's plug clicks home (5.19). A new connection starts from the history, and a mascot takes Waiting again if a confirmation is still open. A confirmation still open after its turn settled isn't in the history: the conversation lists it, and its card draws again at the thread's end with the time it was asked ([ADR-0052](adr/0052-webchat-presence-sockets.md) §4). A sidebar row whose own socket came through reads its state again, and the others try at once. Alerts stay quiet for the first 4 s after reconnecting, so a backlog doesn't arrive as a burst.
 - **An expired login** opens a centered dialog, and keeps the draft. The dialog shows the conversation's mascot at 160 px in Offline, holding its plug, and behind it every mascot that shows a state is Offline too.
   - The page tells it from a lost connection by asking ingress with `X-Requested-With`, which Access answers with 401 once the session expired.
   - Under Access, signing in is a full page of its own, so the dialog says what happened and holds one button, "Sign in again". The page keeps the draft and the messages not yet accepted in the tab's storage, signs in again through a reload, and restores them with "Restored your unsent message".
@@ -636,17 +648,17 @@ Frequent. The webchat's thread and composer (#140); the research is on #140.
 
 - **Groups.** Consecutive messages from one sender, within 10 minutes and on the same day, form a group (Telegram).
   - Messages in a group sit `--space-1` apart, and groups `--space-3`.
-  - Corners are `--r-bubble`, and `--r-sm` on a side that touches a neighbor in its group. There are no tails.
+  - Corners are one radius, `--r-bubble`, in a group too (decision 3, #378). There are no tails.
   - A hidden heading opens each group for screen readers: "You, 14:32", "Agenda, 14:33".
 - **Bubbles.**
   - The owner's are `--accent` with `--on-accent`, on the right; the agent's are `--sunken`, on the left. A reply needs its bubble: 5.1's typing bubble becomes it.
-  - A bubble is at most 29rem wide, in a column of about 48rem. Text runs with `unicode-bidi: plaintext`, and long words and links break anywhere.
+  - A bubble is at most 29rem wide, and the conversation runs edge to edge, beside the sidebar on a wide screen (decision 9). Text runs with `unicode-bidi: plaintext`, and long words and links break anywhere.
+  - Bubbles have no border in the dark theme (decision 17), and no avatar sits beside a reply: the mascot lives in the header (decision 18).
 - **Times.**
-  - A group shows its latest time once, under it, in Geist Mono `--muted` with tabular figures.
-  - A bubble's own time shows beside it on hover or a tap, without moving the layout. There is no sideways drag, which would fight scrolling on a phone.
+  - A bubble's own time shows beside it on hover or a tap, in Geist Mono `--muted` with tabular figures, without moving the layout (decision 1, #378). There is no sideways drag, which would fight scrolling on a phone.
   - Times follow the browser's time zone.
 - **Days.**
-  - Each day opens with a label: "Today", "Yesterday", a weekday within the week, then the date, with the year only for another year.
+  - Each day opens with a label in sentence case: "Today", "Yesterday", a weekday within the week, then the date, with the year only for another year (decision 2).
   - It is an `h2` holding a `<time datetime>`, in a `--surface` pill.
   - It sticks to the top while scrolling, and a stuck label fades out (`--dur-fade`) 1 s after scrolling stops.
 - **Under the owner's messages,** one quiet mark, strongest first. Marks only move forward: a replayed history never steps one back.
@@ -666,6 +678,8 @@ Frequent. The webchat's thread and composer (#140); the research is on #140.
   - A ↗ follows, with a hidden "(opens in a new tab)" for screen readers.
   - There is no confirmation dialog per link and no fetched page title.
 - **The composer.**
+  - One row, as the demo's: the text, then Pause and Send as round icon buttons that say their name in a tooltip (decision 4, #378).
+  - No keyboard hint shows on the screen. Screen readers keep it: the field is described by what Enter does, which a touch keyboard changes.
   - It grows with its text up to 160px, about six lines, through `field-sizing: content`, at once (rule 1).
   - Enter sends and Shift+Enter breaks the line. Nothing is sent while an input method composes (`isComposing` or keyCode 229). On a touch keyboard, Enter breaks the line and the button sends.
   - A printable key pressed anywhere focuses it, except in a field, a dialog or on a button, and "Skip to message" opens the tab order.
@@ -682,30 +696,33 @@ Frequent. The webchat's thread and composer (#140); the research is on #140.
 
 Frequent.
 
-- **The header** holds the 48px mascot (5.19), the agent's name in Bricolage Grotesque at `--text-h3`, and the status line.
+- **The header** holds the 48px mascot (5.19), the agent's name in Bricolage Grotesque at `--text-h3`, and the status line. Below the sidebar's width, the owner's avatar sits at its end (5.24).
 - **While the agent's subagents work,** their pups stand in a row between the mascot and the name, and their count follows the status line on its row (5.6, [ADR-0053](adr/0053-pups-in-the-conversation-header.md)).
-- **The switcher.** With more than one agent, the name is a button that opens the list. From a click it grows from the name as 5.8 does; from the keyboard it appears at once.
+- **On a wide screen the sidebar's roster is the switcher** (5.24), and the name is only a heading.
+- **The switcher.** Below the sidebar's width, with more than one agent, the name is a button that opens the list. From a click it grows from the name as 5.8 does; from the keyboard it appears at once. On a phone the list is a sheet (5.15) that stops at 40% and 90%.
   - Each agent is a link to its conversation (`?agent=<id>`), with its still 36 px mascot in the Idle pose (5.19), its name, and its id in Geist Mono. Back and new tabs work.
   - The current one is marked with `aria-current`.
   - Arrows, Home and End move through the list, and Escape closes it.
 - **The order** is the registry's and never changes with activity (5.9).
 - **Without `?agent=`,** the webchat opens the main agent, and so does an id the list doesn't name.
-- **The list comes from ingress.** It names only the agents that chat, each one only if the Directory admits this login to it, as it admits the agent's socket.
+- **The list comes from ingress.** It names only the agents that chat, each one only if the Directory admits this login to it, as it admits the agent's socket. It carries each agent's mascot, so the list and the sidebar draw them before any socket opens ([ADR-0052](adr/0052-webchat-presence-sockets.md) §7).
 - **Reduced motion:** the list fades.
 
 ### 5.22 The Display menu
 
-Frequent. One step away, in the header, for a page with no settings of its own.
+Frequent. One step away, from the owner's account: the sidebar's foot (5.24), or the header's avatar below the sidebar's width (decision 8, #378).
 
-- **Three rows of choices,** each a radiogroup with its boundary in `--muted`, and the chosen one filled with `--accent`:
-  - Theme: System, Light, Dark;
-  - Motion: System, Less, the switch of rule 10;
-  - Contrast: System, More, the higher-contrast set of §1.
-- **The mascot's setting** joins them once the owner has answered its question (5.19). Under reduced motion it can't move, and says why.
+- **It grows from the account** as 5.8 does, from 0.97 and 6px, with `--spring-fast`: upward from the sidebar's foot, down from the header's avatar. From the keyboard it appears at once, with focus on the chosen theme, and Escape returns focus to the button that opened it.
+- **It starts with the owner:** the name and the email from the Access login. The page shows them and never stores them.
+- **The theme,** as icons: System, Light and Dark, each with its name for screen readers and in a tooltip.
+  - The lab's segmented control: a `--sunken` track with its boundary in `--muted`, and a `--surface` chip under the chosen one. The chip slides with `--spring-fast` for the pointer and jumps for the arrows.
+  - The theme applies at once, the page crossfades in `--dur-fade`, and the chosen icon turns into place with `--spring-base`: the screen settles, the sun turns a quarter, the moon tilts.
+- **Less motion and More contrast,** as switches: the switch of rule 10, and the higher-contrast set of §1. The system's reduced motion can't be turned off here; the switch only adds to it.
+- **The mascot's setting** joins them once the owner has answered its question (5.19). Each choice draws the mascot's own outline: mid-hop for Alive, with 5.19's badge for States only, standing on a line for Still. Under reduced motion it can't move, and says why.
+- **The version** closes the menu, in Geist Mono `--muted` (decision 5). A press copies it, and "Copied" shows in its place for 1.5 s.
 - **They are stored in this browser** until the comfort step of 5.17 exists.
 - **They apply before the first paint.** A small script in the page's head sets them on `<html>`, so the page never flashes the wrong theme. The phone's browser bar takes the page's background.
-- **The system's reduced motion can't be turned off** here; the switch only adds to it.
-- **Reduced motion:** the menu fades.
+- **Reduced motion:** the menu and the chip fade.
 
 ### 5.23 The logo
 
@@ -720,7 +737,7 @@ Frequent, and still: the logo never moves ([ADR-0049](adr/0049-logo-main-mascot-
 - **The lockup** sets the mark beside "Kelpie" in Bricolage Grotesque 680, tracking −0.03em, with the font's kerning:
   - the mark is 1.3 cap heights tall, centered on the cap band;
   - its right edge sits half a cap from the K's stem;
-  - the webchat's sidebar will set the word at 17 px, once #378 brings the sidebar;
+  - the webchat's sidebar sets the word at 17 px (5.24);
   - nothing else comes within half a cap of the lockup, or a quarter of the mark's height of the mark alone.
 - **Color.** The mark and the word are `--accent`:
   - on `--bg`, `--surface` and `--sunken` they measure 4.80, 5.38 and 4.38 in light, and 8.51, 7.78 and 8.23 in dark;
@@ -745,6 +762,21 @@ Frequent, and still: the logo never moves ([ADR-0049](adr/0049-logo-main-mascot-
   - a static file, so the page's CSP admits it without `data:` images. It has no ICO twin: the browsers that change a favicon at runtime read the SVG.
 - **It never stands in for an agent.** Every agent, the main one included, shows its own mascot (5.19). The logo carries no state, badge or glyph. The amber dot of 5.9 belongs to the tab's favicon, not to the logo.
 - **Reduced motion:** nothing changes; it doesn't move.
+
+### 5.24 The sidebar
+
+Frequent. On a screen 56rem wide or more, the agents sit in a sidebar beside the conversation, which takes the rest of the width (the owner, #378).
+
+- **296px on `--bg`,** with a `--line` border toward the conversation. From the top:
+  - the lockup (5.23), linking home;
+  - the strip's reserved slot (5.9);
+  - the roster (5.9), whose rows never reorder;
+  - the owner's account, at the foot.
+- **The account** (the owner, 2026-10-16): a 24px avatar, the name, truncated when long, and a chevron. A press opens the Display menu (5.22).
+  - The avatar shows the initials on `--accent` with `--on-accent`: the first and last words of the name, or of the email's name without one. A photo the login carries waits for a content policy that allows its host.
+  - Without a login to read, the button reads "Display".
+- **Below 56rem** the sidebar gives way: the header's name switches agents (5.21) and the header's avatar opens the menu. What waits for the owner still counts in the tab's title and on the favicon.
+- **Reduced motion:** the strip and an opening request fade, and the rows' times count in minutes.
 
 ## 6. Implementation notes
 
@@ -856,6 +888,13 @@ The rules above cite these. The first set was read on 2026-10-15; a source added
   - figures kept apart while there is room: [Primer's avatar stack](https://primer.style/product/components/avatar-stack/) and [Fluent 2's avatar group](https://fluent2.microsoft.design/components/web/react/core/avatargroup/usage), which also asks for text beside a small badge;
   - closing a gap with transforms: [Motion's `popLayout`](https://motion.dev/docs/react-animate-presence) and [FLIP](https://aerotwist.com/blog/flip-your-animations/);
   - [WCAG 4.1.3 Status Messages](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html), for the polite count.
+- The sidebar ([ADR-0052](adr/0052-webchat-presence-sockets.md), 5.9 and 5.24), read on 2026-10-16; the findings are on #378:
+  - [Slack's notifications](https://slack.com/help/articles/360025446073), where only a mention gets a counted badge;
+  - [Things 3](https://culturedcode.com/things/support/articles/2785159/) (Apple Design Award 2017), whose sidebar counts and never reorders;
+  - [iOS 14's Messages](https://www.apple.com/newsroom/2020/06/apple-reimagines-the-iphone-experience-with-ios-14/), typing shown without moving the pinned contact;
+  - [Linear's Inbox](https://linear.app/docs/inbox), its keys on the selected row, and [Linear's agent sessions](https://linear.app/developers/agent-interaction), where the server sets `awaitingInput`;
+  - [Cursor's agents window](https://forum.cursor.com/t/agents-approval-window/170388) and [GitHub's agent sessions](https://github.blog/changelog/2026-03-26-agent-activity-in-github-issues-and-projects/);
+  - [Hermes Agent's roster](https://github.com/NousResearch/hermes-agent/tree/848fc0ad8be766b9dc10fe42bd80b5fc2d45d95c/apps/desktop/src/plugins/hermes-bots): its still status mark and one place that settles states, adopted, and its polling and reordering, avoided.
 - Accessibility:
   - [WCAG 2.2.2 Pause, Stop, Hide](https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html);
   - [WCAG 2.3.3 Animation from Interactions](https://www.w3.org/WAI/WCAG22/Understanding/animation-from-interactions.html);
