@@ -40,7 +40,7 @@
   - beside it, a solid grey bubble (`--muted`) shows a struck-through plug.
   - It is neither amber, which is Waiting, nor red, which is Error, so it doesn't read as the agent asking or failing. The solid outline and the glyph keep it apart from No response's dashed `…` bubble.
 - **Announcement:** the plug comes out of the body, drops a little and swings to rest, and the bubble pops.
-- **Repertoire in Alive, calmer than Idle's:** it blinks, glances, looks at the plug, tries the plug in the air, shakes it, looks around, sighs and yawns.
+- **Repertoire in Alive, a calm one:** it blinks, glances, looks at the plug, tries the plug in the air, shakes it, looks around, sighs and yawns.
   - Gestures come 4 to 8 s apart, and it never hops.
   - Nothing in it pleads or trembles, which would blame the agent for the network.
 - **At 36 px:** a `--muted` badge with a `--surface` ring. §5.9's glyph, a struck-through circle, and the label "no connection" carry the state. The label shows no time.
@@ -52,7 +52,7 @@ No internet, no server and an expired login show the same state and glyph. The b
 
 ### 3. The expired-login dialog shows the mascot at 160 px
 
-The conversation's agent's mascot, holding its plug, above the dialog's text. Behind the dialog, every mascot shows Offline too.
+The conversation's agent's mascot, holding its plug, above the dialog's text. Behind the dialog, every mascot that shows a state shows Offline too.
 
 ### 4. Back
 
@@ -84,7 +84,7 @@ When the connection comes back, the mascot plays a return announcement, then sho
 - **Idle, as #377 had it.** It reads as free, a state the page can't see.
 - **Dozing.** Closed eyes read as asleep.
 - **Greying the agent's last face,** as Hermes does. It keeps a mood the page can't see.
-- **Stopping after a few gestures,** as Chrome's dinosaur does after 3 blinks. ADR-0045 §6 keeps every mascot alive; this repertoire is the calmest instead.
+- **Stopping after a few gestures,** as Chrome's dinosaur does after 3 blinks. ADR-0045 §6 keeps every mascot alive; this repertoire is a calm one instead.
 - **A key glyph for an expired login.** The owner chose one glyph for both.
 - **"Last updated 2 min ago" in the label.** The owner declined it.
 
