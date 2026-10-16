@@ -1,4 +1,4 @@
-# ADR-0049: Master always holds the tools it orchestrates Kelpie with
+# ADR-0050: Master always holds the tools it orchestrates Kelpie with
 
 - Status: Accepted
 - Date: 2026-10-16

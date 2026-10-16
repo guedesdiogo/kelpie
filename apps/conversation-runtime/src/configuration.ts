@@ -289,7 +289,7 @@ const NO_RUNNER = failed(
 );
 
 /**
- * The tools Master orchestrates Kelpie with (ADR-0049, #391): configuration, its subagents and the
+ * The tools Master orchestrates Kelpie with (ADR-0050, #391): configuration, its subagents and the
  * task board. Its `tools` setting never removes them; it narrows only its other tools.
  */
 export const MASTER_TOOLS: ReadonlySet<string> = new Set([

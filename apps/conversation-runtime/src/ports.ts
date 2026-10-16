@@ -261,7 +261,7 @@ function productionPorts(env: Env): ConversationPorts {
         },
         creator: async (id) => {
           // Its own model, not the defaults: an unset tier follows the instance's (#344). Master
-          // holds its orchestration tools whatever its list (ADR-0049, #391).
+          // holds its orchestration tools whatever its list (ADR-0050, #391).
           const [{ settings }, model, entry] = await Promise.all([
             agentHost(id).config(),
             agentHost(id).ownModel(),

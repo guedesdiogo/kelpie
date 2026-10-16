@@ -857,7 +857,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    * The tools a turn may use (#290): a subagent never gets those that create agents or tasks,
    * write memory, or configure Kelpie, whatever it was granted; and an agent whose settings name
    * its tools gets only those, except that Master always keeps the ones it orchestrates Kelpie
-   * with (ADR-0049, #391).
+   * with (ADR-0050, #391).
    */
   #allowed(tools: Map<string, Tool>, settings: AgentSettings): Map<string, Tool> {
     const roster = this.#get<AgentConfig["agent"] | null>("roster", null);

@@ -1,4 +1,9 @@
-# Kelpie
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/kelpie-lockup-dark.svg">
+    <img alt="Kelpie" src="docs/brand/kelpie-lockup-light.svg" height="56">
+  </picture>
+</h1>
 
 [![CI](https://github.com/guedesdiogo/kelpie/actions/workflows/ci.yml/badge.svg)](https://github.com/guedesdiogo/kelpie/actions/workflows/ci.yml)
 

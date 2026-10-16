@@ -281,7 +281,7 @@ The owner configures Kelpie by talking to Master, the agent they talk to (Story 
   - One created now doesn't chat until `setAgentChat` turns its chat on.
   - Agents that existed before roles keep their chat.
 - **Models:** Master changes any agent's model settings with `configure_agent`, its own included, behind the owner's confirmation (#289, ADR-0048). No other agent changes its own model, and this API's `configureAgent` can always raise Master's tier again.
-- **Master always holds its orchestration tools** (ADR-0049, #391): the configuration tools, `create_subagent` and `delete_subagent`, and the task board's tools. Its `tools` setting narrows only its other tools, and its subagents may take the task tools whatever its list.
+- **Master always holds its orchestration tools** (ADR-0050, #391): the configuration tools, `create_subagent` and `delete_subagent`, and the task board's tools. Its `tools` setting narrows only its other tools, and its subagents may take the task tools whatever its list.
 - **The check is at `admit`:** a chat its role doesn't allow answers `no_grant`, so a specialist whose chat is off doesn't answer its bot or the webchat.
 
 **Subagents** (ADR-0036 §5, #290). An agent with `spawn` creates temporary subagents for a demand, with `create_subagent`, and hands them work with `create_task`. Master has `spawn` by its role. A specialist has it only when Master's `configure_agent` turns it on, which takes the owner's confirmation. Subagents never have it. Only the owner's own turns in a direct conversation create a subagent or hand off a task.

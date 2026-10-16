@@ -83,14 +83,14 @@ export interface Mascot {
   accessory: Part<typeof MASCOT_ACCESSORIES>;
 }
 
-/** The main agent's mascot until the owner picks another. */
+/** The main agent's mascot until the owner picks another; the logo is its silhouette (ADR-0049). */
 export const KELPIE_MASCOT: Mascot = {
   shape: "mark",
   color: "kelp",
-  eyes: "shine",
+  eyes: "big",
   cheeks: false,
-  head: { type: "ears", variation: "pointed" },
-  accessory: { type: "belt", variation: "collar" },
+  head: { type: "ears", variation: "round" },
+  accessory: { type: "none" },
 };
 
 const oneOf = <T extends string>(options: readonly T[], value: unknown): value is T =>

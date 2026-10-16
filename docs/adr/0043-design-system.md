@@ -8,6 +8,7 @@
 - Amended by: [ADR-0044](0044-design-system-review.md), the first review adds patterns and a fifth presence state, "no response"
 - Amended by: [ADR-0045](0045-agent-mascot.md), each agent is a plush mascot (§6), with an exception to rule 8 for its life in place
 - Amended by: [ADR-0047](0047-mascot-offline.md), a sixth presence state, Offline, shown while the page has lost its connection
+- Amended by: [ADR-0049](0049-logo-main-mascot-silhouette.md), the identity gains a logo: the main mascot's silhouette (§2)
 
 ## Context
 
