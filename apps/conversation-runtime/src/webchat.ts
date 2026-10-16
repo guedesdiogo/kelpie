@@ -1,8 +1,10 @@
 import type { Role } from "@kelpie/access";
 import { type Block, formatReply } from "@kelpie/channels";
+import type { Mascot } from "@kelpie/config";
 import type { ChatType, WebchatAdmission } from "@kelpie/conversation/contract";
 import type { ChatMessage } from "@kelpie/llm";
 import type { ConversationPorts, TurnStep } from "./ports.ts";
+import type { ToolActivity } from "./tools.ts";
 import { chatTypeOf, roleOf } from "./turn-access.ts";
 
 // The webchat's socket protocol (issue #40). The socket lives on the conversation's object;
@@ -37,14 +39,20 @@ export type ServerFrame =
    * shows and resends only the ones it doesn't list.
    */
   | { type: "history"; messages: ShownMessage[]; received: string[]; paused: boolean }
+  /** The agent's mascot (ADR-0045), after the history. */
+  | { type: "agent"; mascot: Mascot }
   /**
    * A reply's bubble comes formatted (#188). Kelpie's own notices come as written, a link notice
-   * formatted with its one link, and a confirmation's with the id its button sends (#186).
+   * formatted with its one link, and a confirmation's with the id its button sends (#186). The
+   * notice of a turn no route answered is marked `failed`, for the mascot's error.
    */
-  | { type: "bubble"; text: string; blocks?: Block[]; confirmation?: number }
+  | { type: "bubble"; text: string; blocks?: Block[]; confirmation?: number; failed?: true }
   | { type: "typing"; active: boolean }
-  /** What the turn is doing (#141); `idle` once it stopped without a reply. */
-  | { type: "status"; status: TurnStep; label?: string }
+  /**
+   * What the turn is doing (#141); `idle` once it stopped without a reply. A tool's step names its
+   * activity, for the mascot's object (ADR-0045 §10); a tool without one has none.
+   */
+  | { type: "status"; status: TurnStep; label?: string; activity?: ToolActivity }
   | { type: "paused" }
   | { type: "resumed" }
   | { type: "accepted"; id: string }
@@ -148,6 +156,7 @@ export function webchatEgress(
           ? {}
           : { blocks: formatReply(text, new Set(options.links)) }),
         ...(options.confirmation === undefined ? {} : { confirmation: options.confirmation }),
+        ...(options.failure ? { failed: true } : {}),
       });
       return { ok: true, providerMessageId: `webchat:${crypto.randomUUID()}` };
     },
@@ -158,12 +167,13 @@ export function webchatEgress(
     async keepTyping() {
       broadcast({ type: "typing", active: true });
     },
-    async status(_agentId, _destination, step, label) {
-      broadcast(
-        label === undefined
-          ? { type: "status", status: step }
-          : { type: "status", status: step, label },
-      );
+    async status(_agentId, _destination, step, label, activity) {
+      broadcast({
+        type: "status",
+        status: step,
+        ...(label === undefined ? {} : { label }),
+        ...(activity === undefined ? {} : { activity }),
+      });
     },
   };
 }

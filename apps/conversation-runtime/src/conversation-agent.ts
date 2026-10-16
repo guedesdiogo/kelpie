@@ -21,6 +21,7 @@ import {
   DEFAULT_SETTINGS,
   isAgentId,
   isTaskId,
+  mascotFor,
   REGISTRY_NAME,
   type RegistryContract,
   type SetupEvent,
@@ -118,6 +119,7 @@ import {
   TOOL_STOPPED_RESULT,
   TOOL_TIMED_OUT_RESULT,
   type Tool,
+  type ToolActivity,
   type ToolContext,
   visible,
 } from "./tools.ts";
@@ -405,6 +407,28 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       received: this.#receivedWebchatIds(),
       paused: this.#get("paused", false),
     });
+    void this.#showAgent(connection, admission.agentId);
+  }
+
+  /**
+   * Sends the socket the agent's mascot (ADR-0045): the owner's pick, or its default by its role
+   * in the Registry. Without it, the page shows no mascot, so a failure only costs the figure.
+   */
+  async #showAgent(connection: Connection, agentId: string): Promise<void> {
+    const registry = this.env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<
+      Pick<RegistryContract, "get">
+    >;
+    try {
+      const [{ settings }, entry] = await Promise.all([
+        this.env.AGENT_HOST.getByName(agentId).config(),
+        registry.get(agentId),
+      ]);
+      // A Registry or AgentHost from before the field, during a rollout, has none.
+      const mascot = mascotFor(agentId, entry?.role ?? null, settings.mascot ?? null);
+      send(connection, { type: "agent", mascot });
+    } catch (error) {
+      console.warn("ConversationAgent: the agent's mascot wasn't sent", errorName(error));
+    }
   }
 
   override async onMessage(connection: Connection, message: WSMessage): Promise<void> {
@@ -1262,7 +1286,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         this.#agentId(),
         this.#destination(),
         { id: row.id, text },
-        { silent: false },
+        { silent: false, failure: true },
         flight.controller.signal,
       );
       if (sent && this.#isRunning(turnId)) this.#setBubble(row.id, "sent");
@@ -1294,10 +1318,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     // Once the wait is over, the turn shows it is working until the reply is in: its steps where the
     // channel can show them (#141), "typing" elsewhere. Delivery shows "typing" before each bubble.
     const showsSteps = settings.conversational && capabilities.status;
-    const step = (name: TurnStep, label?: string) => {
+    const step = (name: TurnStep, label?: string, activity?: ToolActivity) => {
       if (showsSteps) {
         // A courtesy, like "typing": a failure doesn't stop the turn.
-        this.#channel.status(agentId, destination, name, label).catch(() => undefined);
+        this.#channel.status(agentId, destination, name, label, activity).catch(() => undefined);
       }
     };
     const answered = new AbortController();
@@ -1576,7 +1600,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     controller: AbortController,
     settings: AgentSettings,
     memory: string | null,
-    step: (name: TurnStep, label?: string) => void,
+    step: (name: TurnStep, label?: string, activity?: ToolActivity) => void,
   ): Promise<Extract<LlmEvent, { type: "finish" }> | null> {
     const agentId = this.#agentId();
     const tools = this.#allowed(await this.#tools(agentId), settings);
@@ -1723,8 +1747,12 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           const task = this.#taskHandle();
           if (task) context.task = task;
         }
-        const label = tools.get(toolCall.name)?.label;
-        step("tool", label === undefined ? undefined : labelIn(label, context.locale));
+        const tool = tools.get(toolCall.name);
+        step(
+          "tool",
+          tool === undefined ? undefined : labelIn(tool.label, context.locale),
+          tool?.activity,
+        );
         progress.running = toolCall.id;
         const result = await this.#runWithin(tools, toolCall, context, remaining);
         progress.running = undefined;

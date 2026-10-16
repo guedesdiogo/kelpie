@@ -5,13 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Kelpie</title>
     <link rel="stylesheet" href="/webchat/style.css" />
+    <link rel="stylesheet" href="/webchat/mascot.css" />
     <script type="module" src="/webchat/app.js"></script>
   </head>
   <body>
     <header>
-      <h1>Kelpie</h1>
+      <div class="agent">
+        <span id="mascot" class="mascot-host" aria-hidden="true"></span>
+        <h1>Kelpie</h1>
+      </div>
       <p id="status" role="status">Connecting…</p>
     </header>
+    <section id="motion-ask" aria-labelledby="motion-ask-text" hidden>
+      <p id="motion-ask-text">Mascots can move in place: they blink, breathe and hop. How should they move?</p>
+      <div class="choices">
+        <button type="button" data-motion="alive">Alive</button>
+        <button type="button" data-motion="states">States only</button>
+        <button type="button" data-motion="still">Still</button>
+      </div>
+    </section>
     <main>
       <ol id="messages" aria-live="polite" aria-label="Conversation"></ol>
       <p id="typing" hidden>Typing…</p>
@@ -22,6 +34,16 @@
       <button type="submit">Send</button>
       <button type="button" id="pause" title="Hold the answer until your next message">Pause</button>
     </form>
-    <footer id="version"></footer>
+    <footer>
+      <label id="motion-label" hidden>
+        <span>Mascot</span>
+        <select id="motion">
+          <option value="alive">Alive</option>
+          <option value="states">States only</option>
+          <option value="still">Still</option>
+        </select>
+      </label>
+      <span id="version"></span>
+    </footer>
   </body>
 </html>

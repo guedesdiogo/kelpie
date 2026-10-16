@@ -95,11 +95,15 @@ export default { fetch: () => new Response(null, { status: 404 }) };`,
     // CI's `test:coverage` fails under 80% on any of these, in every workspace (ADR-0030).
     coverage: {
       provider: "istanbul",
-      include: ["src/**/*.ts"],
+      // The webchat's mascot engine has its data and pure logic in these two; mascot.js needs a
+      // browser, so it is checked in one.
+      include: ["src/**/*.ts", "public/webchat/mascot-states.js", "public/webchat/mascot-art.js"],
       exclude: ["src/**/*.d.ts"],
       reporter: ["text-summary", "json-summary"],
       thresholds: { statements: 80, branches: 80, functions: 80, lines: 80 },
     },
+    // The mascot's test reads its stylesheet's tokens as text; Vitest empties CSS otherwise.
+    css: { include: [/mascot\.css/] },
     testTimeout: 20_000,
     hookTimeout: 30_000,
   },

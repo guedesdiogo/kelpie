@@ -1,12 +1,20 @@
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { REGISTRY_NAME } from "@kelpie/config";
+import { derivedMascot, KELPIE_MASCOT, type Mascot, REGISTRY_NAME } from "@kelpie/config";
 import { WEBCHAT_ADMISSION_HEADER } from "@kelpie/conversation/contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import type { ToolContext } from "../src/tools.ts";
-import { type FakeWorld, fakeWorld, refuse, reply, sayThenCall, toolCalls } from "./fakes.ts";
+import {
+  type FakeWorld,
+  fakeWorld,
+  noRoute,
+  refuse,
+  reply,
+  sayThenCall,
+  toolCalls,
+} from "./fakes.ts";
 
 // The webchat's socket lives on the conversation's object (issue #40). Ingress admits the owner
 // and passes the admission in a header the browser can't set; these tests open sockets the way
@@ -134,7 +142,28 @@ describe("webchat sockets", () => {
       }),
     );
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(chat.frames.map((frame) => frame.type)).toEqual(["history"]);
+    expect(chat.frames.map((frame) => frame.type)).toEqual(["history", "agent"]);
+  });
+
+  it("shows the agent's mascot after the history: its default until the owner picks one (ADR-0045)", async () => {
+    use(fakeWorld([]));
+    const first = await open("assistant:webchat:mascot");
+    await vi.waitFor(() =>
+      expect(ofType(first.frames, "agent")).toEqual([
+        { type: "agent", mascot: derivedMascot("assistant") },
+      ]),
+    );
+
+    const mascot: Mascot = { ...KELPIE_MASCOT, shape: "star", head: { type: "none" } };
+    const owned = { userId: "u-owner", role: "owner", via: "test" } as const;
+    expect(await env.AGENT_HOST.getByName("assistant").configure({ mascot }, owned)).toMatchObject({
+      ok: true,
+    });
+    const next = await open("assistant:webchat:mascot");
+    await vi.waitFor(() =>
+      expect(ofType(next.frames, "agent")).toEqual([{ type: "agent", mascot }]),
+    );
+    await env.AGENT_HOST.getByName("assistant").configure({ mascot: null }, owned);
   });
 
   it("keeps a socket whose admission has no role, and gives its turns only their own scope (#131)", async () => {
@@ -376,7 +405,8 @@ describe("webchat sockets", () => {
     use(fakeWorld([]));
     const name = "assistant:webchat:evicted";
     const chat = await open(name);
-    await vi.waitFor(() => expect(chat.frames).toHaveLength(1));
+    // The history, then the agent's mascot.
+    await vi.waitFor(() => expect(chat.frames).toHaveLength(2));
     await evictDurableObject(agent(name));
 
     chat.send({ type: "message", id: "c1", text: "ainda aqui?" });
@@ -430,7 +460,8 @@ describe("webchat sockets", () => {
     use(fakeWorld([]));
     const name = "assistant:webchat:sdk-frames";
     const chat = await open(name);
-    await vi.waitFor(() => expect(chat.frames).toHaveLength(1));
+    // The history, then the agent's mascot.
+    await vi.waitFor(() => expect(chat.frames).toHaveLength(2));
     // The socket is read-only, and the object marks none of its methods callable over it.
     chat.send({ type: "cf_agent_state", state: { forged: true } });
     chat.send({
@@ -452,7 +483,7 @@ describe("webchat sockets", () => {
       ],
     });
 
-    await vi.waitFor(() => expect(chat.frames).toHaveLength(3));
+    await vi.waitFor(() => expect(chat.frames).toHaveLength(4));
     expect(ofType(chat.frames, "cf_agent_state_error")).toHaveLength(1);
     expect(ofType(chat.frames, "rpc")).toMatchObject([{ id: "r1", success: false }]);
     const state = await runInDurableObject(
@@ -469,7 +500,8 @@ describe("the owner's typing in the webchat", () => {
     use(fakeWorld([]));
     const name = "assistant:webchat:typing-idle";
     const chat = await open(name);
-    await vi.waitFor(() => expect(chat.frames).toHaveLength(1));
+    // The history, then the agent's mascot.
+    await vi.waitFor(() => expect(chat.frames).toHaveLength(2));
     chat.send({ type: "typing", active: true });
 
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -545,6 +577,7 @@ describe("a turn's steps in the webchat", () => {
             {
               spec: { name: "lookup", description: "Looks up.", inputSchema: { type: "object" } },
               label: "Looking it up",
+              activity: "search",
               run: async () => ({ output: "ok" }),
             },
           ];
@@ -563,7 +596,8 @@ describe("a turn's steps in the webchat", () => {
     expect(ofType(chat.frames, "status")).toEqual([
       { type: "status", status: "memory" },
       { type: "status", status: "thinking" },
-      { type: "status", status: "tool", label: "Looking it up" },
+      // The tool's activity, for the mascot's object (ADR-0045 §10).
+      { type: "status", status: "tool", label: "Looking it up", activity: "search" },
       { type: "status", status: "thinking" },
     ]);
     const types = chat.frames.map((frame) => frame.type);
@@ -833,6 +867,21 @@ describe("a turn's steps in the webchat", () => {
     const later = await open(name);
     await vi.waitFor(() => expect(later.frames[0]).toMatchObject({ type: "history" }));
     expect(JSON.stringify(later.frames[0])).not.toContain("to_k-1_x");
+  });
+
+  it("marks the notice of a turn no route answered, for the mascot's error (ADR-0045 §6)", async () => {
+    use(fakeWorld([noRoute("out_of_credits", [], { provider: "anthropic", model: "claude-x" })]));
+    const name = "assistant:webchat:no-route";
+    const chat = await open(name);
+    chat.send({ type: "message", id: "c1", text: "oi?" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
+    await agent(name).flush();
+    await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(1));
+    expect(ofType(chat.frames, "bubble")[0]).toMatchObject({ failed: true });
+    // The turn settles after its notice, and only clears the step: the page keeps the error.
+    await vi.waitFor(() => expect(chat.frames.at(-1)).toEqual({ type: "status", status: "idle" }));
+    const types = chat.frames.map((frame) => frame.type);
+    expect(types.lastIndexOf("bubble")).toBeLessThan(types.lastIndexOf("status"));
   });
 
   it("clears the step when the turn stops without a reply", async () => {

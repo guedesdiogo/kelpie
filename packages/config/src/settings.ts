@@ -2,6 +2,7 @@
 import { type ModelSettings, parseModelSettings } from "@kelpie/llm/models";
 import { MODEL_TIERS, type ModelTier } from "@kelpie/llm/router";
 import { QUALIFIER_BACKENDS, type QualifierBackend } from "@kelpie/qualifier";
+import { type Mascot, parseMascot } from "./mascot.ts";
 
 /** Kelpie runs one `Registry`, which lists the agents. */
 export const REGISTRY_NAME = "registry";
@@ -65,6 +66,11 @@ export interface AgentSettings {
   skills: AgentSkill[];
   /** The tools the agent may use, by name; null for every tool it is given (ADR-0036 §3). */
   tools: string[] | null;
+  /**
+   * The mascot the owner picked for the agent (ADR-0045 §2); null until they pick one, and the
+   * agent shows its default (`mascotFor`).
+   */
+  mascot: Mascot | null;
 }
 
 /** A skill kept with the agent's settings: its name, and what it tells the agent to do. */
@@ -89,6 +95,7 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   remit: "",
   skills: [],
   tools: null,
+  mascot: null,
 };
 
 /** The most skills one agent keeps, and the longest one. */
@@ -204,6 +211,13 @@ export function parseSettings(input: unknown): Partial<AgentSettings> | null {
         }
         parsed.tools = [...new Set(value)];
         break;
+      case "mascot": {
+        // null goes back to the agent's default.
+        const mascot = value === null ? null : parseMascot(value);
+        if (value !== null && !mascot) return null;
+        parsed.mascot = mascot;
+        break;
+      }
       case "maxConcurrentTasks":
         // 0 runs none of the agent's tasks: they wait in To do (#335).
         if (!isInteger(value, 0, 10)) return null;

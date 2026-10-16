@@ -13,6 +13,7 @@ import {
 import { type ModelSettings, parseModelSettings } from "@kelpie/llm/models";
 // The router module only: the package root also loads the provider SDKs.
 import { MODEL_TIERS } from "@kelpie/llm/router";
+import { MASCOT_SCHEMA } from "./mascot-schema.ts";
 import { MODEL_SETTINGS_SCHEMA } from "./model-schema.ts";
 import {
   MAX_SUMMARY_CHARS,
@@ -35,7 +36,7 @@ export const SETUP_PROMPT = `You are Kelpie's setup agent. You help the owner co
 How you work:
 - Make every change with your tools, and never say you made one your tools didn't confirm.
 - Kelpie's agents have roles. Master, the role \`main\` in list_agents, is the agent the owner talks to: a new instance starts with one, Kelpie, and set_main_agent makes another agent Master. If list_agents shows no agent with the role \`main\`, ask the owner which agent should be Master. Every other agent is a specialist, and the owner can chat with a specialist only once its chat is on (set_agent_chat).
-- For a first setup, go in this order: see which agents exist (list_agents); connect Master's Telegram bot (connect_telegram); then pair the owner's Telegram account with it (pair_telegram). Create another agent, with a short id of lowercase letters, digits and hyphens, and a name (create_agent), only when the owner asks for one; to talk to it, its chat must be on. Changing an agent's model or prompt (configure_agent) is optional.
+- For a first setup, go in this order: see which agents exist (list_agents); connect Master's Telegram bot (connect_telegram); then pair the owner's Telegram account with it (pair_telegram). Create another agent, with a short id of lowercase letters, digits and hyphens, and a name (create_agent), only when the owner asks for one; to talk to it, its chat must be on. Changing an agent's model, prompt or mascot (configure_agent) is optional.
 - Delete an agent (delete_agent) only when the owner asks for it: its subagents go with it, and nothing it held can be recovered. Admin and Master can't be deleted.
 - Changing an agent's settings, which agent is Master or an agent's chat, or deleting an agent, needs the owner's confirmation. Kelpie itself shows them what will change, with a Confirm button in the webchat or a code to reply with: don't ask them to confirm in other words, and never make up a code. Once they confirm, call the same tool again with the same input.
 - Kelpie itself sends the owner the links of connect_telegram and pair_telegram, in a message of its own after your reply. Never write those links yourself, and never make one up: just tell the owner to open the link Kelpie sent. What the owner does on that page is their yes.
@@ -77,7 +78,8 @@ const SPECS = {
   },
   get_agent: {
     name: "get_agent",
-    description: "Show an agent's name and settings: its model tier, prompt and timings.",
+    description:
+      "Show an agent's name and settings: its model tier, prompt and timings, and the mascot it shows.",
     inputSchema: {
       type: "object",
       properties: { id: AGENT_ID },
@@ -160,6 +162,7 @@ const SPECS = {
                 "How many of its tasks the agent runs at once; 0 runs none, and more costs more.",
             },
             model: MODEL_SETTINGS_SCHEMA,
+            mascot: MASCOT_SCHEMA,
           },
           additionalProperties: false,
         },

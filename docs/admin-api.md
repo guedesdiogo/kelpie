@@ -98,6 +98,8 @@ Identity values in answers are masked.
 
 **Tools.** A turn may run the agent's tools for up to 5 rounds, within `toolLoopMs`: 120 s by default, the floor, up to 600 000 (ADR-0025). Past either bound, one last model call answers with what it has. In the webchat, the turn shows its step once the wait is over: reading memory, thinking, or the tool it runs. Telegram shows "typing".
 
+**The mascot** (ADR-0045, [design-system.md](design-system.md#519-the-agents-mascot)). `mascot` sets how the agent looks: `shape`, `color`, `eyes`, `cheeks`, and `head` and `accessory` as a type with its variation, such as `{ "type": "ears", "variation": "pointed" }`. It is set whole, every axis included, and `null` goes back to the default: Kelpie for the main agent, and one derived from its id for any other. `getAgent` shows the one the agent shows now as `mascot`. In the webchat, the header shows it, and its state follows the conversation's.
+
 **The memory core.** `memoryCore: true` carries the agent's always-loaded core into every turn, and it is off by default (#112, [memory-format.md](memory-format.md#retrieval)).
 - **What it holds:** the notes the owner pinned, the owner's profile and the agent's self-model, within 1,000 tokens.
 - **When it loads:** once per conversation, and again at each checkpoint.

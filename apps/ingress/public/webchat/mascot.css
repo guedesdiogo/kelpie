@@ -1,0 +1,509 @@
+/*
+ * The agent's mascot (ADR-0045). The body colors are tokens with one value in both themes: they
+ * color the figure, not the page. The other tokens are the design system's (docs/design-system.md
+ * §1), for the bubbles, the badge and the ground shadow.
+ */
+:root {
+  --mascot-kelp: #2e9e8e;
+  --mascot-lagoon: #2fb3c6;
+  --mascot-tide: #4f8fd6;
+  --mascot-sky: #7ebde9;
+  --mascot-indigo: #777ce2;
+  --mascot-anemone: #b07ccf;
+  --mascot-pink: #e58bb0;
+  --mascot-fawn: #b8916e;
+  --mascot-cocoa: #a47458;
+  --mascot-moss: #8aaa45;
+  --mascot-lime: #b3cc3e;
+  --mascot-slate: #7f95a5;
+  --mascot-ink: #0c2523;
+  --mascot-eye-white: #ffffff;
+  --mascot-shadow: rgb(0 0 0 / 0.16);
+  --surface: #f7faf9;
+  --muted: #4c6663;
+  --accent: #0a7469;
+  --on-accent: #f0faf8;
+  --warm: #915708;
+  --ok: #1b7c45;
+  --danger: #ba3a27;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --mascot-shadow: rgb(0 0 0 / 0.5);
+    --surface: #0f1f1e;
+    --muted: #88a39e;
+    --accent: #3bc3ae;
+    --on-accent: #03201b;
+    --warm: #eeae4a;
+    --ok: #55c585;
+    --danger: #f07461;
+  }
+}
+
+.mascot-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+.mascot {
+  display: block;
+  overflow: visible;
+}
+.mascot .g {
+  transform-box: view-box;
+  transform-origin: 60px 108px;
+}
+.mascot
+  :is(
+    .m-eyeW,
+    .m-eyeP,
+    .m-blink,
+    .m-brow,
+    .bub,
+    .star-a,
+    .zz,
+    .bd-dot,
+    .bd-ring,
+    .m-shadow,
+    .mo-o-w
+  ) {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.mascot .m-ear {
+  transform-box: fill-box;
+  transform-origin: 50% 88%;
+}
+.mascot :is(.m-leaf, .m-ant) {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+.mascot .m-flop {
+  transform-origin: 75% 8%;
+}
+
+/* Eyes, mouth and lines */
+.mascot .ink {
+  fill: var(--mascot-ink);
+}
+.mascot .wht {
+  fill: var(--mascot-eye-white);
+}
+.mascot .stk {
+  fill: none;
+  stroke: var(--mascot-ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.mascot .eink {
+  fill: url(#kg-bead);
+}
+.mascot .scl {
+  fill: url(#kg-sclera);
+}
+.mascot .eao {
+  fill: url(#kg-ao);
+}
+.mascot .esh {
+  fill: url(#kg-esh);
+}
+.mascot .espec {
+  fill: url(#kg-spec);
+}
+.mascot .btn-r {
+  fill: none;
+  stroke: color-mix(in oklab, var(--body) 64%, white);
+  stroke-width: 0.9;
+  opacity: 0.6;
+}
+.mascot .btn-h {
+  fill: color-mix(in oklab, var(--body) 64%, white);
+}
+.mascot .chk {
+  fill: url(#kg-blush);
+}
+
+/* Hard parts: crisp vectors with volume, gloss and a soft shadow on the fur */
+.mascot .csh {
+  fill: url(#kg-shadow);
+}
+.mascot .gloss {
+  fill: url(#kg-gloss);
+}
+.mascot .satin {
+  fill: url(#kg-satin);
+}
+.mascot .knot {
+  fill: #b8456f;
+}
+.mascot .strap {
+  fill: url(#kg-strap);
+}
+.mascot .strap-hl {
+  fill: none;
+  stroke: #ffffff;
+  stroke-opacity: 0.22;
+  stroke-width: 0.8;
+}
+.mascot .stitch {
+  fill: none;
+  stroke: #ffffff;
+  stroke-opacity: 0.32;
+  stroke-width: 0.7;
+  stroke-dasharray: 1.6 1.4;
+}
+.mascot .ring {
+  fill: none;
+  stroke: #8e9c99;
+  stroke-width: 1.6;
+}
+.mascot .tagc {
+  fill: url(#kg-metal);
+  stroke: #5e6d6a;
+  stroke-width: 0.8;
+}
+.mascot .buckle {
+  fill: none;
+  stroke: url(#kg-metal);
+  stroke-width: 2;
+}
+.mascot .hl {
+  fill: none;
+  stroke: #ffffff;
+  stroke-opacity: 0.55;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+}
+.mascot .hl.thin {
+  stroke-opacity: 0.3;
+  stroke-width: 0.8;
+}
+.mascot .lens {
+  fill: url(#kg-lens);
+  stroke: url(#kg-frame);
+  stroke-width: 2.4;
+}
+.mascot .lens-d {
+  fill: url(#kg-lensd);
+  stroke: url(#kg-frame);
+  stroke-width: 2.4;
+}
+.mascot .frame {
+  fill: none;
+  stroke: url(#kg-frame);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+.mascot .horn {
+  fill: url(#kg-horn);
+}
+.mascot .hornl {
+  fill: none;
+  stroke: #6e5a36;
+  stroke-opacity: 0.45;
+  stroke-width: 1.1;
+  stroke-linecap: round;
+}
+.mascot .hornhi {
+  fill: none;
+  stroke: #ffffff;
+  stroke-opacity: 0.65;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+}
+.mascot .ant {
+  fill: none;
+  stroke: color-mix(in oklab, var(--body) 66%, var(--mascot-ink));
+  stroke-width: 2.6;
+  stroke-linecap: round;
+}
+.mascot .anthi {
+  fill: none;
+  stroke: #ffffff;
+  stroke-opacity: 0.4;
+  stroke-width: 0.8;
+  stroke-linecap: round;
+}
+.mascot .vein {
+  fill: none;
+  stroke: #000000;
+  stroke-opacity: 0.22;
+  stroke-width: 0.8;
+  stroke-linecap: round;
+}
+.mascot .drop {
+  fill: #a9d8f2;
+  stroke: var(--mascot-ink);
+  stroke-opacity: 0.35;
+  stroke-width: 1;
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.mascot .m-shadow {
+  fill: var(--mascot-shadow);
+}
+
+/* The task's objects, one at a time, as the activity the conversation names */
+.mascot .bd-ico {
+  fill: none;
+  stroke: var(--on-accent);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.mascot :is(.act, .bd-ico, .ico) {
+  display: none;
+}
+.mascot[data-act="search"] .act-search,
+.mascot[data-act="vault"] .act-vault,
+.mascot[data-act="code"] .act-code,
+.mascot[data-act="calendar"] .act-calendar,
+.mascot[data-act="email"] .act-email {
+  display: inline;
+}
+.mascot[data-badge="work"] .bd-ico,
+.mascot[data-act="search"] .ico-search,
+.mascot[data-act="vault"] .ico-vault,
+.mascot[data-act="code"] .ico-code,
+.mascot[data-act="calendar"] .ico-calendar,
+.mascot[data-act="email"] .ico-email,
+.mascot[data-act="think"] .ico-think {
+  display: inline;
+}
+.mascot .bd-ico .dots {
+  stroke-width: 3.4;
+}
+.mascot :is(.m-work, .aw) {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.mascot .p-glass {
+  fill: url(#kg-lens);
+  stroke: url(#kg-frame);
+  stroke-width: 2.2;
+}
+.mascot .p-handle {
+  stroke: var(--mascot-ink);
+  stroke-width: 3.2;
+  stroke-linecap: round;
+}
+.mascot .p-glint {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+.mascot .p-paper {
+  fill: url(#kg-paper);
+  stroke: var(--mascot-ink);
+  stroke-opacity: 0.18;
+  stroke-width: 0.8;
+}
+.mascot :is(.p-line, .p-code, .p-check) {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+.mascot .p-line {
+  stroke: var(--mascot-ink);
+  stroke-opacity: 0.55;
+  stroke-width: 1.4;
+}
+.mascot .p-pencil {
+  fill: url(#kg-pencil);
+}
+.mascot .p-tip {
+  fill: var(--mascot-ink);
+}
+.mascot .p-screen {
+  fill: url(#kg-screen);
+}
+.mascot .p-code {
+  stroke: #7ee0cf;
+  stroke-width: 1.6;
+}
+.mascot .p-base {
+  fill: url(#kg-alu);
+  stroke: var(--mascot-ink);
+  stroke-opacity: 0.25;
+  stroke-width: 0.6;
+}
+.mascot .p-band {
+  fill: var(--mascot-kelp);
+}
+.mascot .p-cell {
+  fill: var(--mascot-ink);
+  opacity: 0.22;
+}
+.mascot .p-check {
+  stroke: #1b7c45;
+  stroke-width: 2.4;
+}
+.mascot .p-flap {
+  fill: none;
+  stroke: var(--mascot-ink);
+  stroke-opacity: 0.5;
+  stroke-width: 1.2;
+}
+
+/* Floating mittens: shown where a pose or gesture puts them */
+.mascot .hand {
+  opacity: 0;
+  transition: opacity 150ms ease;
+  transform-box: view-box;
+  transform-origin: 0 0;
+}
+.mascot .hand[data-on] {
+  opacity: 1;
+}
+.mascot .hg {
+  transform-box: fill-box;
+  transform-origin: 50% 85%;
+}
+
+/* Effects */
+.mascot .bub {
+  fill: color-mix(in oklab, var(--body) 22%, transparent);
+  stroke: var(--body);
+  stroke-width: 2.2;
+}
+.mascot .star {
+  fill: var(--ok);
+}
+.mascot .zz {
+  font-family: system-ui, sans-serif;
+  font-weight: 700;
+  fill: var(--muted);
+}
+
+/* The glossy 3D bubble beside the head, and the badge at roster size */
+.mascot .bd-c {
+  stroke: var(--surface);
+  stroke-width: 4;
+  paint-order: stroke;
+}
+.mascot[data-badge="wait"] .bd-c {
+  fill: url(#kg-wait);
+}
+.mascot[data-badge="error"] .bd-c {
+  fill: url(#kg-err);
+}
+.mascot[data-badge="work"] .bd-c {
+  fill: url(#kg-acc);
+}
+.mascot .bd-hl {
+  fill: #ffffff;
+  opacity: 0.5;
+}
+.mascot[data-badge="silent"] .bd-c {
+  fill: var(--surface);
+  stroke: var(--muted);
+  stroke-width: 1.2;
+  stroke-dasharray: 2.4 1.8;
+}
+.mascot[data-badge="silent"] :is(.bd-hl, .bd-g) {
+  fill: var(--muted);
+}
+.mascot[data-badge="silent"] .bd-hl {
+  opacity: 0;
+}
+.mascot .bub3d {
+  stroke: rgb(0 0 0 / 0.18);
+  stroke-width: 0.6;
+}
+.mascot .bd-bob {
+  transform-box: fill-box;
+  transform-origin: 30% 90%;
+}
+.mascot .speech .bd-dot {
+  transform-origin: 25% 95%;
+}
+.mascot .bd-g {
+  font-family: system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 16px;
+  fill: var(--on-accent);
+}
+.mascot .speech .bd-g {
+  font-size: 14.5px;
+}
+.mascot .bd-ring {
+  fill: none;
+  stroke: var(--warm);
+  stroke-width: 2.5;
+  opacity: 0;
+}
+.mascot[data-badge="error"] .bd-ring {
+  stroke: var(--danger);
+}
+
+/* The bubble's colors come from the theme tokens. */
+.kg-warm-1 {
+  stop-color: color-mix(in oklab, var(--warm) 45%, white);
+}
+.kg-warm-2 {
+  stop-color: var(--warm);
+}
+.kg-warm-3 {
+  stop-color: color-mix(in oklab, var(--warm) 72%, black);
+}
+.kg-danger-1 {
+  stop-color: color-mix(in oklab, var(--danger) 45%, white);
+}
+.kg-danger-2 {
+  stop-color: var(--danger);
+}
+.kg-danger-3 {
+  stop-color: color-mix(in oklab, var(--danger) 72%, black);
+}
+.kg-accent-1 {
+  stop-color: color-mix(in oklab, var(--accent) 45%, white);
+}
+.kg-accent-2 {
+  stop-color: var(--accent);
+}
+.kg-accent-3 {
+  stop-color: color-mix(in oklab, var(--accent) 72%, black);
+}
+
+/* What shows per state: crossfades, never movement */
+.mascot .sw {
+  opacity: 0;
+  transition: opacity var(--sw, 140ms) ease;
+}
+.mascot[data-eyes="open"] .e-open,
+.mascot[data-eyes="happy"] .e-happy,
+.mascot[data-eyes="closed"] .e-closed,
+.mascot[data-mouth="o"] .mo-o,
+.mascot[data-mouth="smile"] .mo-smile,
+.mascot[data-mouth="wave"] .mo-wave,
+.mascot[data-fx="bubbles"] .fx-bub,
+.mascot[data-fx="spark"] .fx-spark,
+.mascot[data-fx="zzz"] .fx-zzz {
+  opacity: 1;
+}
+.mascot :is(.m-brows, .m-bdw) {
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.mascot:not([data-brows="none"]) .m-brows,
+.mascot:not([data-badge="none"]) .m-bdw {
+  opacity: 1;
+}
+
+/* At 36 px: no mouth or brows, eyes 15% larger, and the badge (ADR-0045 §4) */
+.mascot[data-size="s"] :is(.m-mouth, .m-brows, .fx-zzz, .bd-g) {
+  display: none;
+}
+.mascot[data-size="s"] .m-eyeW {
+  transform: scale(1.15);
+}
+.mascot[data-size="s"] .m-bdw {
+  transform: scale(1.3);
+  transform-box: fill-box;
+  transform-origin: center;
+}

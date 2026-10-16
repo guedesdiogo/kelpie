@@ -20,8 +20,21 @@ export {
   type SetupEvent,
   type SetupEventsContract,
   type SetupStep,
+  type ShownAgent,
   type ShownIdentity,
 } from "./commands.ts";
+export {
+  derivedMascot,
+  KELPIE_MASCOT,
+  MASCOT_ACCESSORIES,
+  MASCOT_COLORS,
+  MASCOT_EYES,
+  MASCOT_HEADS,
+  MASCOT_SHAPES,
+  type Mascot,
+  mascotFor,
+  parseMascot,
+} from "./mascot.ts";
 export {
   type AgentSettings,
   type AgentSkill,

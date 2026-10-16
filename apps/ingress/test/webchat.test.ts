@@ -39,6 +39,10 @@ describe("the webchat's page", () => {
     expect(response.headers.get("content-security-policy")).toContain(
       "connect-src 'self' wss://ingress.test",
     );
+    // The mascot's fur is painted in the page and shown as blob: images (ADR-0045 §8); nothing
+    // else loads an image from elsewhere.
+    expect(response.headers.get("content-security-policy")).toContain("img-src 'self' blob:;");
+    expect(response.headers.get("content-security-policy")).not.toContain("data:");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(fakes.page).toHaveBeenCalledOnce();
