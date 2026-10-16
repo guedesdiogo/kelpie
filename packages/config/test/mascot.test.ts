@@ -95,8 +95,8 @@ describe("mascotFor", () => {
     expect(mascotFor("assistant", "main", null)).toEqual(KELPIE_MASCOT);
   });
 
-  it("starts every other agent with a mascot derived from its id, the setup agent included", () => {
-    for (const role of ["admin", "specialist", null] as const) {
+  it("starts every other agent with a mascot derived from its id", () => {
+    for (const role of ["specialist", "subagent", null] as const) {
       expect(mascotFor("setup", role, null)).toEqual(derivedMascot("setup"));
     }
     expect(mascotFor("agenda", "specialist", null)).toEqual(derivedMascot("agenda"));

@@ -1,8 +1,7 @@
-import { type NewTask, type RunOutcome, SETUP_AGENT_ID, type TaskView } from "@kelpie/config";
+import type { NewTask, RunOutcome, TaskView } from "@kelpie/config";
 import { describe, expect, it } from "vitest";
-import { mainAgentTools } from "../src/main-agent.ts";
+import { configurationTools } from "../src/configuration.ts";
 import { memoryTools } from "../src/memory-tools.ts";
-import { setupTools } from "../src/setup-agent.ts";
 import { type TaskToolPorts, taskTools } from "../src/task-tools.ts";
 import type { TaskRunHandle, Tool, ToolContext } from "../src/tools.ts";
 
@@ -226,14 +225,15 @@ describe("what a task's run is given (#335)", () => {
     throw new Error("not called");
   };
 
-  it("leaves Admin's and the main agent's tools out of it, and memory writes", async () => {
-    const setup = setupTools({} as never, { adminOrigin: "https://admin.example" });
-    expect(await setup.tools(SETUP_AGENT_ID, { channel: "task" })).toEqual([]);
-    expect((await setup.tools(SETUP_AGENT_ID, { channel: "webchat" })).length).toBeGreaterThan(0);
-
-    const main = mainAgentTools({} as never, async () => "main");
-    expect(await main.tools("kelpie", { channel: "task" })).toEqual([]);
-    expect(names(await main.tools("kelpie", { channel: "telegram" }))).toEqual(["set_agent_model"]);
+  it("leaves Master's configuration tools out of it, and memory writes", async () => {
+    const configuration = configurationTools({} as never, {
+      roleOf: async () => "main",
+      adminOrigin: "https://admin.example",
+    });
+    expect(await configuration.tools("kelpie", { channel: "task" })).toEqual([]);
+    expect(names(await configuration.tools("kelpie", { channel: "telegram" }))).toContain(
+      "configure_agent",
+    );
 
     const memory = memoryTools({ search: none, readNote: none, writeNote: none });
     expect(names(await memory.tools("helper", { channel: "task" }))).toEqual([

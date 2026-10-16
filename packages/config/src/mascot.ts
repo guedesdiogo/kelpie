@@ -199,7 +199,7 @@ export function derivedMascot(agentId: string): Mascot {
 
 /**
  * The mascot an agent shows: the one the owner picked, or else Kelpie for the main agent and one
- * derived from its id for any other, the setup agent and new agents included.
+ * derived from its id for any other, new agents included.
  */
 export function mascotFor(agentId: string, role: AgentRole | null, picked: Mascot | null): Mascot {
   if (picked) return picked;

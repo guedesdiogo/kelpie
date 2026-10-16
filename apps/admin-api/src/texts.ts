@@ -107,11 +107,11 @@ export const PAGES: Localized<PageTexts> = {
     },
     noBot: {
       title: "No bot yet",
-      body: "Connect the agent's Telegram bot first: ask the setup agent, or run the <code>connectTelegram</code> command.",
+      body: "Connect the agent's Telegram bot first: ask Master, or run the <code>connectTelegram</code> command.",
     },
     noAgent: {
       title: "No such agent",
-      body: "Check the link, or ask the setup agent for a new one.",
+      body: "Check the link, or ask Master for a new one.",
     },
     runner: {
       title: "Connect the runner",
@@ -186,11 +186,11 @@ export const PAGES: Localized<PageTexts> = {
     },
     noBot: {
       title: "Ainda sem bot",
-      body: "Conecte primeiro o bot do Telegram do agente: peça ao agente de configuração, ou rode o comando <code>connectTelegram</code>.",
+      body: "Conecte primeiro o bot do Telegram do agente: peça ao Master, ou rode o comando <code>connectTelegram</code>.",
     },
     noAgent: {
       title: "Esse agente não existe",
-      body: "Confira o link, ou peça um novo ao agente de configuração.",
+      body: "Confira o link, ou peça um novo ao Master.",
     },
     runner: {
       title: "Conectar o runner",
@@ -265,11 +265,11 @@ export const PAGES: Localized<PageTexts> = {
     },
     noBot: {
       title: "Todavía no hay bot",
-      body: "Conecta primero el bot de Telegram del agente: pídeselo al agente de configuración, o ejecuta el comando <code>connectTelegram</code>.",
+      body: "Conecta primero el bot de Telegram del agente: pídeselo al Master, o ejecuta el comando <code>connectTelegram</code>.",
     },
     noAgent: {
       title: "Ese agente no existe",
-      body: "Revisa el enlace, o pide uno nuevo al agente de configuración.",
+      body: "Revisa el enlace, o pide uno nuevo al Master.",
     },
     runner: {
       title: "Conectar el runner",

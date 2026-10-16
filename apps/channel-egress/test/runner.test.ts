@@ -198,7 +198,7 @@ describe("the runner's secure form", () => {
   });
 });
 
-describe("the setup agent's entrypoint", () => {
+describe("the configuration tools' entrypoint", () => {
   it("opens the runner's form, which the admin API then serves, and reads the runner's state", async () => {
     const form = await exports.SetupForms.createRunnerForm();
     if (!form.ok) throw new Error(`form refused: ${form.reason}`);

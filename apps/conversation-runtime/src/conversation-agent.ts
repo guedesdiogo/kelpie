@@ -94,11 +94,11 @@ import {
   type StoredAnnouncement,
   stored,
 } from "./announcements.ts";
+import { bareHttpsOrigin, setupNote } from "./configuration.ts";
 import migrations from "./migrations/migrations.js";
 import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
 import { failureNotice, routeNotice } from "./route-notices.ts";
 import * as schema from "./schema.ts";
-import { bareHttpsOrigin, setupNote } from "./setup-agent.ts";
 import { SUBAGENT_TOOLS } from "./subagent-limits.ts";
 import {
   CONFIRMATION_MS,

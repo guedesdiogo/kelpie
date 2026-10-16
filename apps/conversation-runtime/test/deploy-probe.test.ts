@@ -1,6 +1,6 @@
 import { listDurableObjectIds, runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
-import { REGISTRY_NAME, SETUP_AGENT_ID } from "@kelpie/config";
+import { REGISTRY_NAME } from "@kelpie/config";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import agentHostMigrations from "../src/agent-host/migrations/migrations.js";
 import { AGENT_HOSTS_AT_ONCE, type ProbeTargets, probeRuntime } from "../src/deploy-probe.ts";
@@ -25,7 +25,7 @@ function targets(overrides: Partial<ProbeTargets> = {}) {
   const fake: ProbeTargets = {
     registry: {
       ping: async () => ({ ok: true }),
-      list: async () => [entry("sales", "Sales"), entry(SETUP_AGENT_ID, "Setup")],
+      list: async () => [entry("sales", "Sales"), entry("kelpie", "Kelpie")],
     },
     agentHost: (id) => ({
       ping: async () => {
@@ -51,10 +51,9 @@ describe("DeployProbe", () => {
     });
     const woken = (await listDurableObjectIds(env.AGENT_HOST)).map((id) => id.toString()).sort();
     expect(woken).toEqual(
-      // The main agent a new instance starts with (#288), the setup agent and the one added.
-      ["kelpie", "sales", SETUP_AGENT_ID]
-        .map((name) => env.AGENT_HOST.idFromName(name).toString())
-        .sort(),
+      // The main agent a new instance starts with (#288) and the one added; the retired setup
+      // agent isn't listed (ADR-0047).
+      ["kelpie", "sales"].map((name) => env.AGENT_HOST.idFromName(name).toString()).sort(),
     );
   });
 });
@@ -83,7 +82,7 @@ describe("probeRuntime", () => {
   it("pings each AgentHost the Registry lists", async () => {
     const { fake, pinged } = targets();
     expect(await probeRuntime(fake)).toEqual({ registry: "ok", agentHosts: "ok", gateway: "ok" });
-    expect(pinged.sort()).toEqual(["sales", SETUP_AGENT_ID]);
+    expect(pinged.sort()).toEqual(["kelpie", "sales"]);
   });
 
   it("wakes at most ten AgentHosts at a time", async () => {

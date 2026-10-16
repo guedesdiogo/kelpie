@@ -209,7 +209,9 @@ async function handleForm(request: Request, pathname: string, deps: AdminDeps): 
     // The runner's page names its field `runnerSecret`; channel-egress refuses it on any other form.
     const runnerSecret = fields.get("runnerSecret");
     if (runnerSecret !== null) {
-      // The setup conversation that sent the form learns the runner is connected (#328).
+      // The conversation that sent the form learns the runner is connected (#328). The runner is
+      // the instance's: its waits live on the retired setup agent's AgentHost, by that id
+      // (ADR-0047).
       return await submitRunnerForm(token, runnerSecret, deps.forms, locale, ({ state, version }) =>
         deps.setupDone(SETUP_AGENT_ID, { step: "runner_connected", userId, state, version }),
       );

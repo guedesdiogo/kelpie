@@ -1,6 +1,7 @@
 import { type Locale, type Localized, RUNNER_VERSION, type RunnerState } from "@kelpie/channels";
 import {
   type AgentEntry,
+  type AgentRole,
   type AgentSettings,
   type CommandResult,
   type ConfigCommands,
@@ -24,30 +25,33 @@ import {
   visible,
 } from "./tools.ts";
 
-// The built-in setup agent (Story 3.11, ADR-0013): the owner configures Kelpie by talking to it, in
-// the webchat. Every instance has it (the Registry seeds it), and only it gets these tools: the
-// configuration commands the admin API runs, with the same checks. A change to access, cost or an
-// external account waits for the owner's own yes (ADR-0013, ADR-0026): a confirmation the host
-// gates in code, or the owner's act on an admin API page whose link the host sends itself.
+// Master's configuration tools (Story 3.11, ADR-0013, ADR-0047): the owner configures Kelpie by
+// talking to Master. Only the agent whose Registry role is `main` gets them, and they follow the
+// role when it moves: the configuration commands the admin API runs, with the same checks. A change
+// to access, cost or an external account waits for the owner's own yes (ADR-0013, ADR-0026): a
+// confirmation the host gates in code, or the owner's act on an admin API page whose link the host
+// sends itself.
 
-/** Its persona, until the owner configures another. */
-export const SETUP_PROMPT = `You are Kelpie's setup agent. You help the owner configure Kelpie by talking: creating their agents, connecting each agent's Telegram bot, and pairing the owner's own Telegram account with it. Reply in the language the owner writes in.
+/** How Master configures Kelpie: a built-in skill in its prompt, whatever its persona. */
+export const CONFIGURE_KELPIE_SKILL = `# Skill: configure-kelpie
 
-How you work:
+You also configure Kelpie for the owner, with your configuration tools. They work only in a conversation with the owner, never in a task's run.
+
 - Make every change with your tools, and never say you made one your tools didn't confirm.
-- Kelpie's agents have roles. Master, the role \`main\` in list_agents, is the agent the owner talks to: a new instance starts with one, Kelpie, and set_main_agent makes another agent Master. If list_agents shows no agent with the role \`main\`, ask the owner which agent should be Master. Every other agent is a specialist, and the owner can chat with a specialist only once its chat is on (set_agent_chat).
-- For a first setup, go in this order: see which agents exist (list_agents); connect Master's Telegram bot (connect_telegram); then pair the owner's Telegram account with it (pair_telegram). Create another agent, with a short id of lowercase letters, digits and hyphens, and a name (create_agent), only when the owner asks for one; to talk to it, its chat must be on. Changing an agent's model, prompt or mascot (configure_agent) is optional.
-- Delete an agent (delete_agent) only when the owner asks for it: its subagents go with it, and nothing it held can be recovered. Admin and Master can't be deleted.
-- Changing an agent's settings, which agent is Master or an agent's chat, or deleting an agent, needs the owner's confirmation. Kelpie itself shows them what will change, with a Confirm button in the webchat or a code to reply with: don't ask them to confirm in other words, and never make up a code. Once they confirm, call the same tool again with the same input.
-- Kelpie itself sends the owner the links of connect_telegram and pair_telegram, in a message of its own after your reply. Never write those links yourself, and never make one up: just tell the owner to open the link Kelpie sent. What the owner does on that page is their yes.
+- Kelpie's agents have roles. You are Master, the role \`main\` in list_agents. Master is the agent the owner talks to, and the configuration tools go with the role: set_main_agent makes another agent Master, and it takes them. Every other agent is a specialist, and the owner can chat with a specialist only once its chat is on (set_agent_chat).
+- For a first setup, go in this order: see which agents exist (list_agents); connect your own Telegram bot (connect_telegram); then pair the owner's Telegram account with it (pair_telegram). Create another agent, with a short id of lowercase letters, digits and hyphens, and a name (create_agent), only when the owner asks for one; to talk to it, its chat must be on. Changing an agent's model, prompt or mascot (configure_agent), yours included, is optional.
+- Your own settings change as any agent's do, with the owner's confirmation. Before you narrow your own tools or lower your own tier, tell the owner: a configuration tool you take from yourself comes back only through the admin API.
+- Delete an agent (delete_agent) only when the owner asks for it: its subagents go with it, and nothing it held can be recovered. Master can't be deleted.
+- Changing an agent's settings or the instance's models, which agent is Master or an agent's chat, or deleting an agent, needs the owner's confirmation. Kelpie itself shows them what will change, with a Confirm button in the webchat or a code to reply with: don't ask them to confirm in other words, and never make up a code. Once they confirm, call the same tool again with the same input.
+- Kelpie itself sends the owner the links of connect_telegram, pair_telegram and connect_runner, in a message of its own after your reply. Never write those links yourself, and never make one up: just tell the owner to open the link Kelpie sent. What the owner does on that page is their yes.
 - When the owner finishes on one of those pages, Kelpie tells you in this conversation, in a note that starts "Kelpie, automatically". Don't ask them to tell you when they're done: when the note comes, go on with the next step.
 - Never ask for a secret in the chat, such as a bot token, the runner's secret or an API key. A bot token goes only into the secure form connect_telegram has Kelpie send, and the runner's secret only into connect_runner's. If the owner pastes a secret in the chat anyway, tell them to revoke it and make a new one: for the runner, a new secret in its file on the server (docs/runner.md).
 - To make a Telegram bot, the owner sends /newbot to BotFather on Telegram, which answers with the bot's token. Have them do that first, and only then call connect_telegram: its form works once and only for a few minutes. Tell them to submit the form once and wait for its page; a page that says the link was already used means the bot is connected.
 - The owner's VPS runner is the computer Kelpie's agents use. To connect it, call connect_runner: Kelpie sends a secure form where the owner pastes the runner's secret from their server, never in the chat. When the runner accepts it, Kelpie tells you here, so don't ask the owner to say they submitted it. Call runner_status when they ask how the runner is.
 - Some steps are outside what you can do: deploying Kelpie's Workers, their bindings and secrets, Cloudflare Access, and the model keys. For those, point the owner to the setup checklist in docs/admin-api.md.`;
 
-/** The commands the setup agent's tools run; the identity and vault commands stay off them. */
-export type SetupCommands = Pick<
+/** The commands the configuration tools run; the identity and vault commands stay off them. */
+export type ConfigurationCommands = Pick<
   ConfigCommands,
   | "listAgents"
   | "getAgent"
@@ -161,7 +165,10 @@ const SPECS = {
               description:
                 "How many of its tasks the agent runs at once; 0 runs none, and more costs more.",
             },
-            model: MODEL_SETTINGS_SCHEMA,
+            model: {
+              ...MODEL_SETTINGS_SCHEMA,
+              description: `${MODEL_SETTINGS_SCHEMA.description} It replaces the agent's whole model settings: pass them whole, as get_agent shows them, with the change.`,
+            },
             mascot: MASCOT_SCHEMA,
           },
           additionalProperties: false,
@@ -202,7 +209,7 @@ const SPECS = {
   set_agent_chat: {
     name: "set_agent_chat",
     description:
-      "Turn a specialist's chat on or off: whether the owner can reach it on its channels. Admin and Master always chat. It needs the owner's confirmation, as set_main_agent does.",
+      "Turn a specialist's chat on or off: whether the owner can reach it on its channels. Master always chats. It needs the owner's confirmation, as set_main_agent does.",
     inputSchema: {
       type: "object",
       properties: { id: AGENT_ID, chat: { type: "boolean" } },
@@ -213,7 +220,7 @@ const SPECS = {
   delete_agent: {
     name: "delete_agent",
     description:
-      "Delete an agent, and its subagents with it, for good: their settings, their conversations with all their history, and any Telegram bot connected to them. Admin and Master can't be deleted. Its files in the owner's vault stay. It needs the owner's confirmation, as set_main_agent does.",
+      "Delete an agent, and its subagents with it, for good: their settings, their conversations with all their history, and any Telegram bot connected to them. Master can't be deleted. Its files in the owner's vault stay. It needs the owner's confirmation, as set_main_agent does.",
     inputSchema: {
       type: "object",
       properties: { id: AGENT_ID },
@@ -265,11 +272,14 @@ const NOT_OWNER = failed("Only the owner can change Kelpie's configuration.");
 const NO_KEY = failed(
   "That provider has no key in llm-gateway, so it can't serve: the owner sets one as a deploy secret (docs/secrets.md). get_models lists the providers that have one.",
 );
-const NOT_MAIN = failed("Admin can't be Master, and a subagent can't either.");
+const NOT_MAIN = failed("A subagent can't be Master.");
 const NOT_SPECIALIST = failed(
-  "Only a specialist's chat can change: Admin and Master always chat, and a subagent never does.",
+  "Only a specialist's chat can change: Master always chats, and a subagent never does.",
 );
-const NOT_DELETABLE = failed("Admin and Master can't be deleted.");
+const NOT_DELETABLE = failed("Master can't be deleted.");
+const NOT_MASTER = failed(
+  "This agent isn't Master any more, so it can't configure Kelpie: the owner asks Master.",
+);
 const NOT_CONFIGURED = failed(
   "Kelpie's admin API address isn't set (ADMIN_ORIGIN on conversation-runtime), so I can't give its link. The owner sets it when deploying: see docs/admin-api.md.",
 );
@@ -532,14 +542,19 @@ export function bareHttpsOrigin(value: string): string {
 }
 
 /**
- * The setup agent's tools, over the configuration commands. `adminOrigin` is the admin API's
- * origin (`ADMIN_ORIGIN`), for the links to its secure form and its pairing page; anything but a
- * bare https origin counts as unset, so a mistyped value gives no link. `now` tells how long a
- * form has left: a duration, which the model passes on without turning a time into a zone.
+ * Master's configuration tools, over the configuration commands. `roleOf` reads an agent's role
+ * from the Registry. `adminOrigin` is the admin API's origin (`ADMIN_ORIGIN`), for the links to its
+ * secure form and its pairing page; anything but a bare https origin counts as unset, so a
+ * mistyped value gives no link. `now` tells how long a form has left: a duration, which the model
+ * passes on without turning a time into a zone.
  */
-export function setupTools(
-  commands: SetupCommands,
-  options: { adminOrigin: string; now?: () => number },
+export function configurationTools(
+  commands: ConfigurationCommands,
+  options: {
+    roleOf: (agentId: string) => Promise<AgentRole | null>;
+    adminOrigin: string;
+    now?: () => number;
+  },
 ): ToolProvider {
   const adminOrigin = bareHttpsOrigin(options.adminOrigin);
   const now = options.now ?? (() => Date.now());
@@ -723,7 +738,7 @@ export function setupTools(
         const agent = await agentOf(context, fields(input).id);
         if (!("id" in agent)) return agent;
         // Checked before the owner is asked: a yes that can't change anything isn't asked for.
-        if (agent.role === "admin" || agent.role === "subagent") return NOT_MAIN;
+        if (agent.role === "subagent") return NOT_MAIN;
         if (agent.role === "main") {
           return { output: `The agent ${agent.id} is already Master; nothing changed.` };
         }
@@ -737,8 +752,9 @@ export function setupTools(
         const result = await commands.setMainAgent(context.actor, change);
         if (!result.ok)
           return result.reason === "not_allowed" ? NOT_MAIN : refusal(result, agent.id);
+        // The tools go with the role (ADR-0047): the caller, Master until now, can't call them.
         return {
-          output: `The agent ${agent.id} is now Master: the one the owner talks to.`,
+          output: `The agent ${agent.id} is now Master: the one the owner talks to. Your configuration tools went with the role: from now on, ${agent.id} configures Kelpie.`,
         };
       },
     },
@@ -790,7 +806,7 @@ export function setupTools(
         if (!isOwner(context)) return NOT_OWNER;
         const agent = await agentOf(context, fields(input).id);
         if (!("id" in agent)) return agent;
-        if (agent.role === "admin" || agent.role === "main") return NOT_DELETABLE;
+        if (agent.role === "main") return NOT_DELETABLE;
         // The owner sees every agent that goes, and the input names them, so the yes deletes
         // that set: the command refuses one that changed meanwhile.
         const listed = await commands.listAgents(context.actor);
@@ -895,8 +911,9 @@ export function setupTools(
         }
         const href = pageLink(adminOrigin, result.value.path, context.locale);
         const minutes = Math.max(Math.round((result.value.expiresAt - now()) / 60_000), 1);
-        // The runner is the instance's, and only the setup agent connects it: its AgentHost keeps
-        // the wait, and the admin API reports the form to it (#328).
+        // The runner is the instance's, not one agent's: the retired setup agent's AgentHost keeps
+        // the wait under its fixed id, and the admin API reports the form there (#328, ADR-0047).
+        // The note still reaches this conversation, whichever agent is Master by then.
         context.sendLink({
           href,
           text: TEXTS[context.locale].runnerForm(href, minutes),
@@ -927,10 +944,20 @@ export function setupTools(
     },
   ];
 
+  // Again when one runs: a turn that listed them may outlive the agent's role (ADR-0047).
+  const masters: Tool[] = tools.map((tool) => ({
+    ...tool,
+    async run(input, context) {
+      if ((await options.roleOf(context.agentId)) !== "main") return NOT_MASTER;
+      return tool.run(input, context);
+    },
+  }));
+
   return {
     // A task's conversation has no owner to confirm anything (#335).
     async tools(agentId, place) {
-      return agentId === SETUP_AGENT_ID && place?.channel !== "task" ? tools : [];
+      if (place?.channel === "task") return [];
+      return (await options.roleOf(agentId)) === "main" ? masters : [];
     },
   };
 }

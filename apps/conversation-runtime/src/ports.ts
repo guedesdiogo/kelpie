@@ -31,9 +31,8 @@ import {
   type RouterEvent,
 } from "@kelpie/llm";
 import type { ModelDescription, ModelSettings } from "@kelpie/llm/models";
-import { mainAgentTools } from "./main-agent.ts";
+import { configurationTools } from "./configuration.ts";
 import { memoryTools } from "./memory-tools.ts";
-import { setupTools } from "./setup-agent.ts";
 import { subagentTools } from "./subagent-tools.ts";
 import { taskTools } from "./task-tools.ts";
 import type { ToolActivity, ToolProvider } from "./tools.ts";
@@ -140,7 +139,7 @@ interface LlmGatewayBinding {
   }>;
 }
 
-/** llm-gateway's admin entrypoint: the instance's model settings, for the setup agent (#289). */
+/** llm-gateway's admin entrypoint: the instance's model settings, for Master's tools (#289). */
 interface LlmGatewayAdminBinding {
   providers: ConfigPorts["models"]["providers"];
   instanceModels: ConfigPorts["models"]["view"];
@@ -246,12 +245,13 @@ function productionPorts(env: Env): ConversationPorts {
         writeNote: (agentId, input, options) =>
           withTimeout(contextStore.writeNote(agentId, input, options), REMEMBER_TIMEOUT_MS),
       }),
-      // The setup agent's (#48): the same commands as the admin API, minus the ones that need the
-      // Directory, the vault's admin entrypoint or more of channel-egress than opening a form,
-      // which this Worker doesn't bind.
-      setupTools(commands, { adminOrigin: env.ADMIN_ORIGIN }),
-      // The main agent's (#289): other agents' model trios, behind the owner's confirmation.
-      mainAgentTools(commands, async (id) => (await registry.get(id))?.role ?? null),
+      // Master's configuration tools (#48, ADR-0047): the same commands as the admin API, minus the
+      // ones that need the Directory, the vault's admin entrypoint or more of channel-egress than
+      // opening a form, which this Worker doesn't bind.
+      configurationTools(commands, {
+        roleOf: async (id) => (await registry.get(id))?.role ?? null,
+        adminOrigin: env.ADMIN_ORIGIN,
+      }),
       // Temporary subagents (#290): an agent with spawn creates them, within its own limits.
       subagentTools({
         canSpawn: async (id) => {
@@ -346,9 +346,9 @@ function productionPorts(env: Env): ConversationPorts {
 }
 
 /**
- * What the setup agent's tools never call: the commands that need the Directory, the vault's admin
- * entrypoint, or channel-egress beyond opening a form and reading the runner's state. Binding the
- * Directory here would make ingress and this Worker bind each other.
+ * What Master's configuration tools never call: the commands that need the Directory, the vault's
+ * admin entrypoint, or channel-egress beyond opening a form and reading the runner's state. Binding
+ * the Directory here would make ingress and this Worker bind each other.
  */
 function notBound(): Promise<never> {
   return Promise.reject(new Error("not bound in conversation-runtime"));

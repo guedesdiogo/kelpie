@@ -38,7 +38,6 @@ import {
   parseSettings,
   parseTaskEdit,
   REGISTRY_NAME,
-  SETUP_AGENT_ID,
 } from "@kelpie/config";
 import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
 import type {
@@ -53,7 +52,7 @@ import { Agent } from "agents";
 import { and, desc, eq, isNotNull, lte, notLike } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
-import { SETUP_PROMPT } from "../setup-agent.ts";
+import { CONFIGURE_KELPIE_SKILL } from "../configuration.ts";
 import { identitySection } from "./identity.ts";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
@@ -195,9 +194,9 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   }
 
   /**
-   * The agent's settings, defaults filled in, and its prompt version. The setup agent's default
-   * prompt is its built-in persona. A deploy that edits a built-in prompt doesn't bump the version:
-   * each turn's prompt key catches a change in the text the model gets (#220).
+   * The agent's settings, defaults filled in, and its prompt version. A deploy that edits a
+   * built-in prompt doesn't bump the version: each turn's prompt key catches a change in the text
+   * the model gets (#220).
    */
   config(): AgentConfig {
     return {
@@ -220,9 +219,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   }
 
   #defaults(): AgentSettings {
-    return this.ctx.id.name === SETUP_AGENT_ID
-      ? { ...DEFAULT_SETTINGS, systemPrompt: SETUP_PROMPT }
-      : DEFAULT_SETTINGS;
+    return DEFAULT_SETTINGS;
   }
 
   /** Only the settings a change set: the others follow the defaults. */
@@ -375,6 +372,8 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       ...storedSkills(config.settings.skills),
       ...specialistsSection(specialists.value ?? []),
       ...(spawn ? [CREATE_SUBAGENT_SKILL] : []),
+      // Master configures Kelpie (ADR-0047), whatever persona the owner gave it.
+      ...(role === "main" ? [CONFIGURE_KELPIE_SKILL] : []),
     ];
     return {
       settings: {

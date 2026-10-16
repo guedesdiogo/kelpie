@@ -15,7 +15,7 @@ import {
 } from "@kelpie/llm";
 import { describe, expect, it, vi } from "vitest";
 import { replaceTaskRunnerForTesting } from "../src/agent-host/agent-host.ts";
-import { mainAgentTools } from "../src/main-agent.ts";
+import { configurationTools } from "../src/configuration.ts";
 import { memoryTools } from "../src/memory-tools.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import { subagentTools } from "../src/subagent-tools.ts";
@@ -86,13 +86,10 @@ const TOOLS: ToolProvider[] = [
     readNote: async () => ({ ok: false, reason: "not_found" }),
     writeNote: async () => ({ ok: true, path: "notes/x.md" }),
   } as never),
-  mainAgentTools(
-    {
-      configure: async () => ({ ok: false, reason: "unavailable" }),
-      config: async () => ({ ok: false, reason: "unavailable" }),
-    } as never,
-    async (id) => (await registry().get(id))?.role ?? null,
-  ),
+  configurationTools({} as never, {
+    roleOf: async (id) => (await registry().get(id))?.role ?? null,
+    adminOrigin: "https://admin.example",
+  }),
   subagentTools({
     canSpawn: async (id) => (await registry().get(id))?.role === "main",
     creator: async () => ({

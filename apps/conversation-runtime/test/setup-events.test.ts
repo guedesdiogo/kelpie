@@ -1,8 +1,8 @@
 import { env } from "cloudflare:workers";
 import type { SetupStep } from "@kelpie/config";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { setupNote } from "../src/configuration.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
-import { setupNote } from "../src/setup-agent.ts";
 import type { ToolContext, ToolProvider } from "../src/tools.ts";
 import { type FakeWorld, fakeWorld, held, reply, toolCalls } from "./fakes.ts";
 
@@ -225,7 +225,7 @@ describe("a finished setup step", () => {
     expect(await told.turns()).toHaveLength(2);
   });
 
-  it("reaches the setup conversation when the runner's form is used, on the setup agent's AgentHost (#328)", async () => {
+  it("reaches the conversation that sent the runner's form, through the retired setup agent's AgentHost (#328, ADR-0047)", async () => {
     const world = use(
       fakeWorld([toolCalls({ name: "form" }), reply("Abra o link."), reply("Runner conectado!")]),
     );

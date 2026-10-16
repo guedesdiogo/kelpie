@@ -125,7 +125,7 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
       }
       if (!(await ports.canSpawn(context.agentId))) {
         return failed(
-          "You can't create subagents: only Admin can let you, at the owner's request.",
+          "You can't create subagents: only Master can let you, at the owner's request.",
         );
       }
       const given = fields(input);
@@ -143,7 +143,7 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
       // Without complete_task, a subagent could never finish a task (#344).
       if (!allowed.includes("complete_task")) {
         return failed(
-          "You may not use complete_task, so a subagent of yours could never finish a task: ask the owner to allow it through Admin.",
+          "You may not use complete_task, so a subagent of yours could never finish a task: ask the owner to allow it through Master.",
         );
       }
       const tools = optional("tools") ?? allowed;

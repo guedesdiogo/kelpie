@@ -75,7 +75,7 @@ function world({
       },
       async setChat(id, chat) {
         ran.push(`registry.setChat ${id}`);
-        if (id === "setup") return { ok: false, reason: "not_allowed" };
+        if (id === "kelpie") return { ok: false, reason: "not_allowed" };
         if (chat) chatOff.delete(id);
         else chatOff.add(id);
         return { ok: true };
@@ -381,7 +381,7 @@ describe("admin API commands", () => {
       status: 200,
       body: { ok: true, value: {} },
     });
-    expect(await call(deps, "/commands/setAgentChat", { id: "setup", chat: false })).toEqual({
+    expect(await call(deps, "/commands/setAgentChat", { id: "kelpie", chat: false })).toEqual({
       status: 409,
       body: { ok: false, reason: "not_allowed" },
     });
@@ -1199,7 +1199,7 @@ describe("admin API runner form (#294)", () => {
     expect(await response.text()).toContain("another protocol version");
   });
 
-  it("reports the connected runner to the setup agent's conversations, and answers whatever the report does (#328)", async () => {
+  it("reports the connected runner to the retired setup agent's AgentHost, which keeps the instance's waits, and answers whatever the report does (#328)", async () => {
     const { deps, reported } = world();
     await handle(submit(RUNNER.good), deps);
     expect(reported).toEqual([
