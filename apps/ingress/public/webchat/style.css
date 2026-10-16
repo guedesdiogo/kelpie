@@ -1767,6 +1767,11 @@ dialog h2 {
 :root:not([data-reduced]) .agent-name .label {
   view-transition-name: agent-name;
 }
+/* A theme's change, and the rest of a move between agents, crossfade in --dur-fade. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--dur-fade);
+}
 ::view-transition-group(agent-mascot),
 ::view-transition-group(agent-name) {
   animation-duration: var(--spring-base-dur);

@@ -115,7 +115,8 @@
           </div>
           <div class="field">
             <label for="text" class="visually-hidden">Message</label>
-            <textarea id="text" rows="1" maxlength="16000" enterkeyhint="send"></textarea>
+            <textarea id="text" rows="1" maxlength="16000" enterkeyhint="send" aria-describedby="text-hint"></textarea>
+            <p id="text-hint" class="visually-hidden">Enter sends, and Shift+Enter starts a new line.</p>
             <button type="button" id="pause" class="pause" aria-label="Pause" aria-pressed="false" data-tip></button>
             <button type="submit" id="send" class="send" aria-label="Send" data-tip></button>
           </div>

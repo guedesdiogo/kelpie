@@ -1103,7 +1103,13 @@ function buildDisplay() {
     value: current.theme,
     icons: THEME_ICONS,
     onChange: (theme) => {
-      display?.set({ theme });
+      // The theme applies at once, and the page crossfades into it; from the keyboard, it swaps.
+      const apply = () => display?.set({ theme });
+      if (typeof document.startViewTransition === "function" && !fromKeyboard()) {
+        document.startViewTransition(apply);
+      } else {
+        apply();
+      }
       const chosen = $("theme").querySelector(`[data-value="${theme}"] .icon`);
       if (chosen && !reduced() && !fromKeyboard()) {
         play(chosen, [{ transform: THEME_TURN[theme] }, { transform: "none" }], SPRINGS.base);
@@ -1209,6 +1215,8 @@ function translatePage() {
   document.querySelector(".skip").textContent = T.skip;
   threadElement.setAttribute("aria-label", T.conversation);
   document.querySelector('label[for="text"]').textContent = T.message;
+  // No keyboard hint on the screen, but screen readers keep it (decision 4).
+  $("text-hint").textContent = touchKeyboard.matches ? T.composerHintTouch : T.composerHint;
   // Round icon buttons that say their name in a tooltip, with no keyboard hint (decision 4).
   sendButton.setAttribute("aria-label", T.send);
   sendButton.replaceChildren(icon("up"));

@@ -362,6 +362,13 @@ describe("following the chat (5.10)", () => {
 });
 
 describe("the keyboard", () => {
+  it("tells screen readers what Enter does, with no hint on the screen (decision 4)", async () => {
+    await opened();
+    const hint = $($("text").getAttribute("aria-describedby"));
+    expect(hint.classList.contains("visually-hidden")).toBe(true);
+    expect(hint.textContent).toBe("Enter sends, and Shift+Enter starts a new line.");
+  });
+
   it("sends a printable key to the composer, but not from a button or a field", async () => {
     await opened();
     const key = (target, init) =>
