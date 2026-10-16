@@ -5,6 +5,7 @@ import {
   rowAfter,
   rowAt,
   rowLine,
+  rowMascot,
   UNKNOWN,
 } from "../../public/webchat/presence.js";
 import { TEXTS } from "../../public/webchat/texts.js";
@@ -186,6 +187,40 @@ describe("a row's state", () => {
   });
 });
 
+describe("a row's mascot", () => {
+  const at = (frames) => frames.reduce((row, frame) => rowAfter(row, frame, NOW), UNKNOWN);
+
+  it("holds the tool's object while a tool runs, and thinks otherwise", () => {
+    const row = at([
+      presence(),
+      { type: "status", status: "tool", label: "Searching", activity: "search" },
+    ]);
+    expect(rowMascot(row)).toEqual({ state: "working", activity: "search" });
+    expect(rowMascot(at([presence({ turn: { agoMs: 1, step: "memory" } })]))).toEqual({
+      state: "working",
+      activity: "vault",
+    });
+    expect(rowMascot(at([presence({ turn: { agoMs: 1, step: "thinking" } })]))).toEqual({
+      state: "working",
+      activity: "think",
+    });
+    expect(rowMascot(at([presence(), { type: "status", status: "typing" }]))).toEqual({
+      state: "typing",
+      activity: null,
+    });
+    // A tool with no activity the page knows still works, with none.
+    expect(rowMascot(at([presence(), { type: "status", status: "tool" }])).state).toBe("working");
+  });
+
+  it("waits, fails and goes offline as its row does, and stands idle otherwise", () => {
+    expect(rowMascot(at([presence({ requests: [asked()] })])).state).toBe("waiting");
+    expect(rowMascot(at([presence(), { type: "failed" }])).state).toBe("error");
+    expect(rowMascot(at([presence(), { type: "offline" }])).state).toBe("offline");
+    expect(rowMascot(at([presence({ paused: true })])).state).toBe("idle");
+    expect(rowMascot(UNKNOWN).state).toBe("idle");
+  });
+});
+
 describe("a row's presence socket", () => {
   let hidden;
 
@@ -309,6 +344,14 @@ describe("a row's presence socket", () => {
     second.presenceLink.retry();
     vi.advanceTimersByTime(300);
     expect(FakeSocket.all).toHaveLength(2);
+  });
+
+  it("keeps a socket that is open when the page asks for a retry", () => {
+    const { presenceLink, socket } = link();
+    socket.open();
+    presenceLink.retry();
+    vi.advanceTimersByTime(60_000);
+    expect(FakeSocket.all).toHaveLength(1);
   });
 
   it("waits for a reconnect after the conversation's cap closed it", () => {

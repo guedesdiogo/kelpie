@@ -2,6 +2,7 @@
 // it takes only the frames that view allows, starts unknown rather than idle, and shows Offline once
 // its socket has been closed 2 s, because the row can't vouch for its agent's state any more.
 
+import { activityOf } from "./mascot-states.js";
 import { retryDelay } from "./model.js";
 
 /** What a presence socket may bring (ADR-0052 §2). Every other frame is dropped. */
@@ -27,10 +28,11 @@ export const UNKNOWN = Object.freeze({
   state: "unknown",
   known: false,
   offline: false,
-  /** When the running turn began, its latest step and that step's label. */
+  /** When the running turn began, its latest step, that step's label and its tool's activity. */
   since: null,
   step: null,
   label: null,
+  activity: null,
   failed: false,
   paused: false,
   /** The open confirmations, newest first, with when they were asked and when they expire. */
@@ -83,6 +85,7 @@ export function rowAfter(row, frame, now) {
         since: frame.turn ? now - frame.turn.agoMs : null,
         step: frame.turn?.step ?? null,
         label: frame.turn?.label ?? null,
+        activity: frame.turn?.activity ?? null,
         failed: frame.failed,
         paused: frame.paused,
         ...openOf(frame, now),
@@ -91,17 +94,18 @@ export function rowAfter(row, frame, now) {
     case "status":
       next =
         frame.status === "idle"
-          ? { ...row, since: null, step: null, label: null }
+          ? { ...row, since: null, step: null, label: null, activity: null }
           : {
               ...row,
               since: row.since ?? now,
               step: frame.status,
               label: frame.label ?? null,
+              activity: frame.activity ?? null,
               failed: false,
             };
       break;
     case "failed":
-      next = { ...row, since: null, step: null, label: null, failed: true };
+      next = { ...row, since: null, step: null, label: null, activity: null, failed: true };
       break;
     case "paused":
       next = { ...row, paused: true };
@@ -162,6 +166,26 @@ export function rowLine(row, texts, now, { less = false } = {}) {
       return line("idle", texts.rowIdle, texts.rowNoTask);
     default:
       return line(null, "");
+  }
+}
+
+/**
+ * The row's mascot at 36 px (5.9): its state, and while a tool runs, the tool's activity, as the
+ * header's mascot reads the same steps (`presenceAfter`). A row with no state yet, or paused,
+ * stands in Idle, which draws no badge.
+ */
+export function rowMascot(row) {
+  switch (row.state) {
+    case "working":
+      if (row.step === "typing") return { state: "typing", activity: null };
+      if (row.step === "tool") return { state: "working", activity: activityOf(row.activity) };
+      return { state: "working", activity: row.step === "memory" ? "vault" : "think" };
+    case "waiting":
+    case "error":
+    case "offline":
+      return { state: row.state, activity: null };
+    default:
+      return { state: "idle", activity: null };
   }
 }
 
@@ -252,9 +276,9 @@ export class PresenceLink {
     });
   }
 
-  /** Opens again after the backoff; each try in a row waits longer. */
+  /** Opens again after the backoff, unless a socket is open; each try in a row waits longer. */
   retry() {
-    if (this.#closed) return;
+    if (this.#closed || this.#socket) return;
     const delay = retryDelay(this.#attempt, this.#random);
     this.#attempt += 1;
     clearTimeout(this.#retryTimer);
