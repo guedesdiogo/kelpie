@@ -73,21 +73,6 @@ export function resolveModel(input: {
   return { provider, tier, ...(effort ? { effort } : {}) };
 }
 
-/**
- * `current` with only what `change` names changed, area by area (#289): a tier asked for one area
- * leaves the other area and the effort as they were. An area left empty is dropped.
- */
-export function mergeModelSettings(current: ModelSettings, change: ModelSettings): ModelSettings {
-  const merged: ModelSettings = {};
-  const provider = change.provider ?? current.provider;
-  if (provider) merged.provider = provider;
-  for (const area of MODEL_AREAS) {
-    const choice = { ...current[area], ...change[area] };
-    if (Object.keys(choice).length > 0) merged[area] = choice;
-  }
-  return merged;
-}
-
 /** Accepts only known keys with known values; anything else invalidates the whole value. */
 export function parseModelSettings(value: unknown): ModelSettings | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;

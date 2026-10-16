@@ -81,7 +81,6 @@ function fakePorts() {
       },
       async setChat(id, chat) {
         calls.push(`setChat ${id} ${chat}`);
-        if (id === SETUP_AGENT_ID) return { ok: false, reason: "not_allowed" };
         return agents.has(id) ? { ok: true } : { ok: false, reason: "unknown_agent" };
       },
       async remove(id) {
@@ -374,9 +373,10 @@ describe("configuration commands", () => {
       ok: false,
       reason: "unknown_agent",
     });
+    // The retired setup agent (ADR-0048) is no agent the Registry knows.
     expect(await commands.setAgentChat(owner, { id: SETUP_AGENT_ID, chat: false })).toEqual({
       ok: false,
-      reason: "not_allowed",
+      reason: "unknown_agent",
     });
     for (const input of [{ id: "Sales" }, { id: "sales", chat: "no" }, null]) {
       expect(await commands.setAgentChat(owner, input)).toEqual({
@@ -405,7 +405,7 @@ describe("configuration commands", () => {
     });
   });
 
-  it("keeps the setup agent's id to itself", async () => {
+  it("never gives an agent the retired setup agent's id (ADR-0048)", async () => {
     const { ports, calls } = fakePorts();
     const commands = createConfigCommands(ports);
 
@@ -814,7 +814,6 @@ describe("configuration commands", () => {
 describe("deleteAgent (#303)", () => {
   /** ADR-0036 §1's roster: a specialist with a subagent, which has one of its own. */
   const ROSTER: AgentEntry[] = [
-    { id: SETUP_AGENT_ID, name: "Setup", role: "admin", owner: null, chat: true },
     { id: "kelpie", name: "Kelpie", role: "main", owner: null, chat: true },
     { id: "sales", name: "Sales", role: "specialist", owner: "kelpie", chat: true },
     { id: "scout", name: "Scout", role: "subagent", owner: "sales", chat: false },
@@ -868,7 +867,7 @@ describe("deleteAgent (#303)", () => {
       `erase sales ${named("sales")}`,
       "remove sales",
     ]);
-    expect([...roster.keys()]).toEqual([SETUP_AGENT_ID, "kelpie", "quiet"]);
+    expect([...roster.keys()]).toEqual(["kelpie", "quiet"]);
   });
 
   it("deletes a specialist with nothing below it, whose chat is already off", async () => {
@@ -881,18 +880,19 @@ describe("deleteAgent (#303)", () => {
     ]);
   });
 
-  it("never deletes Admin or the main agent, and refuses what it can't check", async () => {
+  it("never deletes Master, and refuses what it can't check", async () => {
     const { commands, calls } = withRoster();
-    for (const id of [SETUP_AGENT_ID, "kelpie"]) {
+    expect(await commands.deleteAgent(owner, { id: "kelpie" })).toEqual({
+      ok: false,
+      reason: "not_allowed",
+    });
+    // The retired setup agent (ADR-0048) is no agent the Registry knows.
+    for (const id of ["ghost", SETUP_AGENT_ID]) {
       expect(await commands.deleteAgent(owner, { id })).toEqual({
         ok: false,
-        reason: "not_allowed",
+        reason: "unknown_agent",
       });
     }
-    expect(await commands.deleteAgent(owner, { id: "ghost" })).toEqual({
-      ok: false,
-      reason: "unknown_agent",
-    });
     for (const input of [
       { id: "Not An Agent" },
       {},
@@ -926,7 +926,7 @@ describe("deleteAgent (#303)", () => {
     ).toEqual(done(["runner", "scout", "sales"]));
   });
 
-  it("stops before an agent that became Admin's or the main one's meanwhile", async () => {
+  it("stops before an agent that became Master meanwhile", async () => {
     const { commands, ports, calls } = withRoster();
     const get = ports.registry.get;
     ports.registry.get = async (id) => {

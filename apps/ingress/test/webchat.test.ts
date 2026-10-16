@@ -8,9 +8,9 @@ import { connectWebchat, handleWebchat, type WebchatDeps } from "../src/webchat.
 const ORIGIN = "https://ingress.test";
 const owner: Admission = { admitted: true, userId: "u-owner", role: "owner", timeZone: null };
 
-/** The registry as its `list()` answers, in its order: Admin, the main agent, two that don't chat. */
+/** The registry as its `list()` answers, in its order: a specialist, the main agent, and more. */
 const REGISTRY: AgentEntry[] = [
-  { id: "kelpie-setup", name: "Setup", role: "admin", owner: null, chat: true },
+  { id: "atlas", name: "Atlas", role: "specialist", owner: "assistant", chat: true },
   { id: "assistant", name: "Assistant", role: "main", owner: null, chat: true },
   { id: "agenda", name: "Agenda", role: "specialist", owner: "assistant", chat: true },
   { id: "quiet", name: "Quiet", role: "specialist", owner: "assistant", chat: false },
@@ -113,14 +113,14 @@ describe("the webchat's agent list", () => {
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(await response.json()).toEqual({
       agents: [
-        { id: "kelpie-setup", name: "Setup", main: false },
+        { id: "atlas", name: "Atlas", main: false },
         { id: "assistant", name: "Assistant", main: true },
         { id: "agenda", name: "Agenda", main: false },
       ],
     });
     // Each agent is admitted as its socket would be; the ones that don't chat aren't asked about.
     expect(vi.mocked(fakes.admit).mock.calls.map(([, agentId]) => agentId)).toEqual([
-      "kelpie-setup",
+      "atlas",
       "assistant",
       "agenda",
     ]);
@@ -150,7 +150,7 @@ describe("the webchat's agent list", () => {
     const { agents } = (await (await handleWebchat(listRequest(), fakes)).json()) as {
       agents: { id: string }[];
     };
-    expect(agents.map((agent) => agent.id)).toEqual(["kelpie-setup", "assistant"]);
+    expect(agents.map((agent) => agent.id)).toEqual(["atlas", "assistant"]);
   });
 
   it("names no agent to an Access login the Directory admits to none", async () => {

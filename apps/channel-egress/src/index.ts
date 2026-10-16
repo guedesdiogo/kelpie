@@ -21,7 +21,7 @@ import {
   type WebhookRegistration,
 } from "@kelpie/channels";
 import { TELEGRAM_SECRET_HEADER, TelegramAdapter } from "@kelpie/channels/telegram";
-import { isAgentId, type Mascot, parseMascot, SETUP_AGENT_ID } from "@kelpie/config";
+import { isAgentId, type Mascot, parseMascot } from "@kelpie/config";
 import { drawPhotos, type Photos } from "./photo/draw.ts";
 import {
   checkRunner,
@@ -104,10 +104,10 @@ async function describeRunnerOf(env: Env) {
 }
 
 /**
- * What the setup agent's Worker binds (Story 3.11): it opens a form, whose link the owner then
- * opens on the admin API, and reads the runner's state, which holds no secret. It also disconnects
- * a deleted agent's bot (#303), which reads nothing back. Binding `ChannelForms` there would also
- * let a model-driven Worker describe, redeem and register.
+ * What the configuration tools' Worker binds (Story 3.11): it opens a form, whose link the owner
+ * then opens on the admin API, and reads the runner's state, which holds no secret. It also
+ * disconnects a deleted agent's bot (#303), which reads nothing back. Binding `ChannelForms` there
+ * would also let a model-driven Worker describe, redeem and register.
  */
 export class SetupForms extends WorkerEntrypoint<Env> implements SetupFormsContract {
   async createTelegramForm(agentId: string) {
@@ -613,13 +613,10 @@ async function sendPhoto(bot: TelegramAdapter, photos: Photos): Promise<void> {
  * Removes a deleted agent's bot (#303): its webhook first, while the token is there to do it, then
  * the secret and forms. A webhook Telegram refuses to remove for good, as with a revoked token,
  * doesn't keep the secret: without it ingress refuses every update for the agent. A failure for
- * now keeps it, so the deletion's next run removes the webhook. Admin can't be deleted, so its bot
- * is never disconnected.
+ * now keeps it, so the deletion's next run removes the webhook.
  */
 async function disconnectTelegramOf(env: Env, agentId: string): Promise<TelegramDisconnection> {
-  if (!isAgentId(agentId) || agentId === SETUP_AGENT_ID) {
-    return { ok: false, reason: "invalid_input" };
-  }
+  if (!isAgentId(agentId)) return { ok: false, reason: "invalid_input" };
   const found = await telegramSecret(env, agentId);
   if (!found.ok && found.reason === "store_unavailable") return unavailable;
   let webhook: "removed" | "refused" | "none" = "none";

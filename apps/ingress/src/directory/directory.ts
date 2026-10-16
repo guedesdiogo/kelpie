@@ -17,7 +17,7 @@ import {
   type TimeZoneResult,
 } from "@kelpie/access";
 import { type ChannelId, MAX_LANGUAGE_TAG_CHARS } from "@kelpie/channels";
-import { REGISTRY_NAME, type RegistryContract } from "@kelpie/config";
+import { REGISTRY_NAME, type RegistryContract, SETUP_AGENT_ID } from "@kelpie/config";
 import { and, count, eq, gt, isNull, lt, or } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
@@ -428,9 +428,9 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
 
   /**
    * Decides whether a sender may reach an agent. The owner reaches every agent whose chat is on:
-   * Admin, the main agent and the specialists the owner opened (ADR-0036 §1, #288). The admin API's
-   * `*` names no agent. Other roles don't exist until multi-user lands; then they'll need a grant
-   * for `agentId` (ADR-0015).
+   * Master and the specialists the owner opened (ADR-0036 §1, #288), never the retired setup agent
+   * (ADR-0048). The admin API's `*` names no agent. Other roles don't exist until multi-user lands;
+   * then they'll need a grant for `agentId` (ADR-0015).
    */
   async admit(identity: ChannelIdentity, agentId: string, language?: string): Promise<Admission> {
     const user = this.#db
@@ -451,7 +451,9 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
       )
       .get();
     if (!user) return { admitted: false, reason: "unknown_identity" };
-    if (user.role !== "owner") return { admitted: false, reason: "no_grant" };
+    if (user.role !== "owner" || agentId === SETUP_AGENT_ID) {
+      return { admitted: false, reason: "no_grant" };
+    }
     if (agentId !== "*") {
       const registry = this.env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<
         Pick<RegistryContract, "get">

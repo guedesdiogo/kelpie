@@ -10,9 +10,10 @@ import {
   SETUP_AGENT_ID,
   type SetAgentResult,
 } from "@kelpie/config";
-import { and, asc, count, eq, gt, ne } from "drizzle-orm";
+import { and, asc, count, eq, gt, like, ne } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
+import { subagentPrefix } from "../subagent-limits.ts";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
 
@@ -45,9 +46,14 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     });
   }
 
-  /** Adds an agent. Adding one that exists changes nothing, so a retried create is safe. */
+  /**
+   * Adds an agent. Adding one that exists changes nothing, so a retried create is safe. The retired
+   * setup agent's id stays its own (ADR-0048).
+   */
   add(id: string, name: string, actor: Actor): AddAgentResult {
-    if (!isAgentId(id) || !isAgentName(name)) return { ok: false, reason: "invalid_input" };
+    if (!isAgentId(id) || id === SETUP_AGENT_ID || !isAgentName(name)) {
+      return { ok: false, reason: "invalid_input" };
+    }
     if (this.get(id)) return { ok: true, created: false };
     const now = Date.now();
     // A specialist the main agent owns, which doesn't chat until the user turns it on (ADR-0036).
@@ -80,7 +86,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     }
     const owner = this.get(creator);
     if (!owner) return { ok: false, reason: "unknown_agent" };
-    if (owner.role === "subagent" || this.get(id)) return { ok: false, reason: "not_allowed" };
+    if (owner.role === "subagent" || this.#row(id)) return { ok: false, reason: "not_allowed" };
     const live = this.#db
       .select({ n: count() })
       .from(schema.agents)
@@ -89,6 +95,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     if ((live?.n ?? 0) >= MAX_LIVE_SUBAGENTS) return { ok: false, reason: "not_allowed" };
     const now = Date.now();
     // Three live, but no churn: deleting one to make another counts against a day's creations.
+    // Only its subagents count: Master also creates agents through its tools (ADR-0048).
     const made = this.#db
       .select({ n: count() })
       .from(schema.auditLog)
@@ -96,6 +103,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
         and(
           eq(schema.auditLog.action, "agent.created"),
           eq(schema.auditLog.via, `agent:${creator}`),
+          like(schema.auditLog.agentId, `${subagentPrefix(creator)}%`),
           gt(schema.auditLog.at, now - DAY_MS),
         ),
       )
@@ -148,22 +156,27 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     return { ok: true };
   }
 
+  /** The agent, never the retired setup agent (ADR-0048): nothing reaches it any more. */
   get(id: string): AgentEntry | null {
-    const row = this.#db.select().from(schema.agents).where(eq(schema.agents.id, id)).get();
+    if (id === SETUP_AGENT_ID) return null;
+    const row = this.#row(id);
     return row ? entryOf(row) : null;
+  }
+
+  /** Any row, the retired setup agent's included. */
+  #row(id: string): typeof schema.agents.$inferSelect | undefined {
+    return this.#db.select().from(schema.agents).where(eq(schema.agents.id, id)).get();
   }
 
   /**
    * Makes the agent the main agent (ADR-0036 §1). The previous one becomes a specialist that keeps
-   * chatting, and every specialist is owned by the new one. Admin and subagents can't be it.
+   * chatting, and every specialist is owned by the new one. A subagent can't be it.
    */
   setMain(id: string, actor: Actor): SetAgentResult {
     if (!isAgentId(id)) return { ok: false, reason: "invalid_input" };
     const agent = this.get(id);
     if (!agent) return { ok: false, reason: "unknown_agent" };
-    if (agent.role === "admin" || agent.role === "subagent") {
-      return { ok: false, reason: "not_allowed" };
-    }
+    if (agent.role === "subagent") return { ok: false, reason: "not_allowed" };
     if (agent.role === "main") return { ok: true };
     const now = Date.now();
     this.#db.transaction((tx) => {
@@ -173,7 +186,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
         .run();
       tx.update(schema.agents)
         .set({ ownerId: id, updatedAt: now })
-        // Admin's row is stored as a specialist; its role is the setup agent's, by its id.
+        // The retired setup agent's row is stored as a specialist: a rollback finds it as it was.
         .where(
           and(
             eq(schema.agents.role, "specialist"),
@@ -199,7 +212,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     return { ok: true };
   }
 
-  /** Turns a specialist's chat on or off. Admin and the main agent always chat; subagents never do. */
+  /** Turns a specialist's chat on or off. The main agent always chats; subagents never do. */
   setChat(id: string, chat: boolean, actor: Actor): SetAgentResult {
     if (!isAgentId(id) || typeof chat !== "boolean") return { ok: false, reason: "invalid_input" };
     const agent = this.get(id);
@@ -224,8 +237,8 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
 
   /**
    * Removes a deleted agent's row and audits it (#303): `deleteAgent` calls it once the agent's
-   * storage is gone. Admin, the main agent and an agent that still owns another, such as its
-   * subagents, aren't removed (ADR-0036 §1).
+   * storage is gone. The main agent and an agent that still owns another, such as its subagents,
+   * aren't removed (ADR-0036 §1).
    */
   remove(id: string, actor: Actor): SetAgentResult {
     if (!isAgentId(id)) return { ok: false, reason: "invalid_input" };
@@ -236,9 +249,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
       .from(schema.agents)
       .where(eq(schema.agents.ownerId, id))
       .get();
-    if (agent.role === "admin" || agent.role === "main" || owns) {
-      return { ok: false, reason: "not_allowed" };
-    }
+    if (agent.role === "main" || owns) return { ok: false, reason: "not_allowed" };
     const now = Date.now();
     this.#db.transaction((tx) => {
       tx.delete(schema.agents).where(eq(schema.agents.id, id)).run();
@@ -273,19 +284,23 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     return { ok: true };
   }
 
+  /** The agents, by id, without the retired setup agent (ADR-0048). */
   list(): AgentEntry[] {
-    return this.#db.select().from(schema.agents).orderBy(asc(schema.agents.id)).all().map(entryOf);
+    return this.#db
+      .select()
+      .from(schema.agents)
+      .where(ne(schema.agents.id, SETUP_AGENT_ID))
+      .orderBy(asc(schema.agents.id))
+      .all()
+      .map(entryOf);
   }
 }
 
 /**
- * An agent as callers see it. Admin is the setup agent, by its id, whatever its row holds, and the
- * roles' rules hold whatever the row says: Admin and the main agent chat, a subagent never does.
+ * An agent as callers see it. The roles' rules hold whatever the row says: the main agent chats,
+ * a subagent never does.
  */
 function entryOf(row: typeof schema.agents.$inferSelect): AgentEntry {
-  if (row.id === SETUP_AGENT_ID) {
-    return { id: row.id, name: row.name, role: "admin", owner: null, chat: true };
-  }
   const chat = row.role === "main" || (row.role === "specialist" && row.chat);
   return { id: row.id, name: row.name, role: row.role, owner: row.ownerId, chat };
 }

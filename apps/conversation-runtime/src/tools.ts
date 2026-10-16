@@ -6,7 +6,7 @@ import type { ToolCallPart, ToolResult, ToolSpec } from "@kelpie/llm";
 import type { Announcement } from "./announcements.ts";
 
 // The tool layer (ADR-0014, issue #141): providers offer an agent tools, and the conversation's
-// turn runs the calls its model asks for. The setup agent's configuration commands (#48) and the
+// turn runs the calls its model asks for. Master's configuration commands (#48, ADR-0048) and the
 // memory tools (#126) arrive as providers.
 
 /** The most rounds of tool calls a turn runs (ADR-0025); calls past them get TOOL_BOUND_RESULT. */

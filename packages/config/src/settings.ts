@@ -8,8 +8,9 @@ import { type Mascot, parseMascot } from "./mascot.ts";
 export const REGISTRY_NAME = "registry";
 
 /**
- * The built-in setup agent (Story 3.11): every instance has it, and only it gets the configuration
- * tools. No other agent may take its id.
+ * The retired setup agent's id (ADR-0048): Master took over its tools. Its Registry row stays for a
+ * rollback, never listed, and no agent may take its id. Its AgentHost keeps the runner's form's
+ * waits, which belong to the instance rather than to one agent.
  */
 export const SETUP_AGENT_ID = "setup";
 
@@ -49,12 +50,12 @@ export interface AgentSettings {
   memoryCore: boolean;
   /**
    * How many of its tasks the agent runs at once (ADR-0011, #54); 0 runs none. Raising it raises
-   * cost, so the setup agent asks for the owner's confirmation, as for any setting.
+   * cost, so Master asks for the owner's confirmation, as for any setting.
    */
   maxConcurrentTasks: number;
   /**
    * Whether the agent creates and deletes temporary subagents (ADR-0036 §5, #290). The main agent
-   * has it by its role; any other agent only when Admin turns it on. A subagent never has it.
+   * has it by its role; any other agent only when Master turns it on. A subagent never has it.
    */
   spawn: boolean;
   /** The agent's remit, one line: what it is for, as its identity tells it (ADR-0036 §4). */

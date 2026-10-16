@@ -1,4 +1,4 @@
-import { type AgentRole, SETUP_AGENT_ID } from "@kelpie/config";
+import type { AgentRole } from "@kelpie/config";
 // The models module only: the package root also loads the provider SDKs.
 import type { ModelDescription } from "@kelpie/llm/models";
 
@@ -17,11 +17,10 @@ export interface Identity {
   model: ModelDescription | null;
 }
 
-/** What each role says about the agent. Admin stays the setup agent until #274 renames it. */
+/** What each role says about the agent. */
 const ROLE_LINES: Record<AgentRole, string> = {
-  admin: "Kelpie's setup agent, which configures Kelpie",
-  // The role `main` is called Master (#343).
-  main: "Master on Kelpie, the agent the owner talks to",
+  // The role `main` is called Master (#343), and it configures Kelpie (ADR-0048).
+  main: "Master on Kelpie, the agent the owner talks to, which also configures Kelpie",
   specialist: "a specialist agent on Kelpie, owned by Master, the agent the owner talks to",
   subagent: "a temporary subagent on Kelpie, working on one demand of the agent that created you",
 };
@@ -32,16 +31,8 @@ const UNLISTED_ROLE_LINE = "one of the owner's agents on Kelpie, their personal 
  * answer "who are you?". Its name and role come from configuration, so it never takes on the
  * model's identity, nor that of an earlier model whose replies are in the history.
  */
-export function identitySection({
-  id,
-  name,
-  role: listed,
-  creator,
-  remit,
-  model,
-}: Identity): string {
-  const role =
-    id === SETUP_AGENT_ID ? ROLE_LINES.admin : listed ? ROLE_LINES[listed] : UNLISTED_ROLE_LINE;
+export function identitySection({ name, role: listed, creator, remit, model }: Identity): string {
+  const role = listed ? ROLE_LINES[listed] : UNLISTED_ROLE_LINE;
   const createdBy = listed === "subagent" && creator ? `, the agent ${creator}` : "";
   const remitLine = remit ? ` Your remit: ${remit}` : "";
   return `# Who you are

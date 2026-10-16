@@ -125,7 +125,7 @@ export interface ChannelFormsContract {
   registerTelegramWebhook(agentId: string): Promise<WebhookRegistration>;
   /**
    * For a deleted agent (#303): removes its bot's webhook at Telegram, then its secret and forms.
-   * Safe to repeat; an agent without a bot answers `none`. Admin's id is `invalid_input`.
+   * Safe to repeat; an agent without a bot answers `none`.
    */
   disconnectTelegram(agentId: string): Promise<TelegramDisconnection>;
   /** The agent's bot, for its `t.me` link. Never its token. */
@@ -167,9 +167,9 @@ export interface ChannelFormsContract {
 }
 
 /**
- * What the setup agent's Worker calls (Story 3.11): it opens a form, and reads the runner's state,
- * which holds no secret. It disconnects a deleted agent's bot (#303), which reads nothing back.
- * Describing, redeeming and registering stay with the admin API.
+ * What the configuration tools' Worker calls (Story 3.11): it opens a form, and reads the runner's
+ * state, which holds no secret. It disconnects a deleted agent's bot (#303), which reads nothing
+ * back. Describing, redeeming and registering stay with the admin API.
  */
 export type SetupFormsContract = Pick<
   ChannelFormsContract,

@@ -1,4 +1,3 @@
-import { SETUP_AGENT_ID } from "@kelpie/config";
 import type { ModelDescription } from "@kelpie/llm";
 import type { RouteModel } from "@kelpie/llm/router";
 import { describe, expect, it } from "vitest";
@@ -61,26 +60,22 @@ describe("identitySection", () => {
   });
 
   it("states the role the Registry gives it (#314)", () => {
-    const line = (role: "admin" | "main" | "specialist" | "subagent") =>
+    const line = (role: "main" | "specialist" | "subagent") =>
       identitySection({ id: "bia", name: "Bia", role, model: runsOn([haiku]) });
     // The role the Registry calls `main` is Master in every text (#343).
-    expect(line("main")).toContain("You are Bia, Master on Kelpie, the agent the owner talks to.");
+    expect(line("main")).toContain(
+      "You are Bia, Master on Kelpie, the agent the owner talks to, which also configures Kelpie.",
+    );
     expect(line("specialist")).toContain(
       "You are Bia, a specialist agent on Kelpie, owned by Master, the agent the owner talks to.",
     );
     expect(line("subagent")).toContain(
       "You are Bia, a temporary subagent on Kelpie, working on one demand of the agent that created you.",
     );
-    expect(line("admin")).toContain("You are Bia, Kelpie's setup agent, which configures Kelpie.");
     // An agent the Registry doesn't list keeps the plain line.
     expect(identitySection({ id: "bia", name: "Bia", role: null, model: null })).toContain(
       "You are Bia, one of the owner's agents on Kelpie",
     );
-  });
-
-  it("gives the setup agent its own role", () => {
-    const text = identitySection({ id: SETUP_AGENT_ID, name: "Setup", model: runsOn([]) });
-    expect(text).toContain("You are Setup, Kelpie's setup agent, which configures Kelpie.");
   });
 
   it("names a subagent's creator, and any agent's remit (#290)", () => {

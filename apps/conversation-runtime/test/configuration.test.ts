@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import type { Locale, RunnerState } from "@kelpie/channels";
 import {
   type Actor,
+  type AgentRole,
   type AgentSettings,
   DEFAULT_SETTINGS,
   KELPIE_MASCOT,
@@ -10,10 +11,14 @@ import {
   SETUP_AGENT_ID,
 } from "@kelpie/config";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  CONFIGURE_KELPIE_SKILL,
+  type ConfigurationCommands,
+  configurationTools,
+} from "../src/configuration.ts";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
 import { MASCOT_SCHEMA } from "../src/mascot-schema.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
-import { SETUP_PROMPT, type SetupCommands, setupTools } from "../src/setup-agent.ts";
 import {
   type ConfirmationRequest,
   canonicalJson,
@@ -26,26 +31,31 @@ import {
 } from "../src/tools.ts";
 import { type FakeWorld, fakeWorld, held, reply, toolCalls } from "./fakes.ts";
 
-// The setup agent's tools (Story 3.11): the configuration commands, owner-only, and the changes to
-// access, cost or external accounts only after the owner's confirmation (ADR-0013), which the host
-// gates in code.
+// Master's configuration tools (Story 3.11, ADR-0048): the configuration commands, owner-only, and
+// the changes to access, cost or external accounts only after the owner's confirmation (ADR-0013),
+// which the host gates in code.
 
 const ADMIN = "https://admin.example.com";
-const owner: Actor = { userId: "u-owner", role: "owner", via: `agent:${SETUP_AGENT_ID}` };
+/** Master, the agent whose tools these are (ADR-0048). */
+const MASTER = "kelpie";
+const owner: Actor = { userId: "u-owner", role: "owner", via: `agent:${MASTER}` };
 
-/** The Registry's answer for an agent's role (ADR-0036 §1): Admin for setup, else a specialist. */
+/** The Registry's answer for an agent's role (ADR-0036 §1): Master for kelpie, else specialist. */
 const roleOf = (id: string) =>
-  id === SETUP_AGENT_ID
-    ? ({ role: "admin", owner: null, chat: true } as const)
-    : id === "kelpie"
-      ? ({ role: "main", owner: null, chat: true } as const)
-      : id === "scout"
-        ? ({ role: "subagent", owner: "ana", chat: false } as const)
-        : ({ role: "specialist", owner: "kelpie", chat: false } as const);
+  id === MASTER
+    ? ({ role: "main", owner: null, chat: true } as const)
+    : id === "scout"
+      ? ({ role: "subagent", owner: "ana", chat: false } as const)
+      : ({ role: "specialist", owner: MASTER, chat: false } as const);
+/** The role the tools read, as the Registry gives it; null for an agent it doesn't list. */
+const roleIn = async (id: string): Promise<AgentRole | null> =>
+  id === "ghost" ? null : roleOf(id).role;
 
 /** Commands over an in-memory registry; every call is logged. */
 function fakeCommands() {
-  const agents = new Map<string, string>([[SETUP_AGENT_ID, "Setup"]]);
+  const agents = new Map<string, string>([[MASTER, "Kelpie"]]);
+  /** The agents whose settings name their tools; the others have all they are given. */
+  const allowlists = new Map<string, string[]>();
   const calls: string[] = [];
   /** The VPS runner as channel-egress would see it (#294); a test changes it. */
   const runner: { configured: boolean; state: RunnerState } = {
@@ -53,7 +63,7 @@ function fakeCommands() {
     state: { state: "ready", version: "0.1.0", protocol: 1 },
   };
   const forbidden = { ok: false, reason: "forbidden" } as const;
-  const commands: SetupCommands = {
+  const commands: ConfigurationCommands = {
     async listAgents(actor) {
       if (actor.role !== "owner") return forbidden;
       return { ok: true, value: [...agents].map(([id, name]) => ({ id, name, ...roleOf(id) })) };
@@ -69,7 +79,7 @@ function fakeCommands() {
           id,
           name,
           ...roleOf(id),
-          settings: DEFAULT_SETTINGS,
+          settings: { ...DEFAULT_SETTINGS, tools: allowlists.get(id) ?? null },
           promptVersion: 0,
           mascot: KELPIE_MASCOT,
         },
@@ -125,14 +135,14 @@ function fakeCommands() {
       calls.push(`setMainAgent ${JSON.stringify(input)}`);
       if (actor.role !== "owner") return forbidden;
       const { id } = input as { id: string };
-      if (id === SETUP_AGENT_ID) return { ok: false, reason: "not_allowed" };
+      if (roleOf(id).role === "subagent") return { ok: false, reason: "not_allowed" };
       return agents.has(id) ? { ok: true, value: {} } : { ok: false, reason: "unknown_agent" };
     },
     async setAgentChat(actor, input) {
       calls.push(`setAgentChat ${JSON.stringify(input)}`);
       if (actor.role !== "owner") return forbidden;
       const { id } = input as { id: string };
-      if (id === SETUP_AGENT_ID) return { ok: false, reason: "not_allowed" };
+      if (roleOf(id).role !== "specialist") return { ok: false, reason: "not_allowed" };
       return agents.has(id) ? { ok: true, value: {} } : { ok: false, reason: "unknown_agent" };
     },
     async deleteAgent(actor, input) {
@@ -141,16 +151,14 @@ function fakeCommands() {
       const { id, ids } = input as { id: string; ids?: string[] };
       if (id === "stuck") return { ok: false, reason: "unavailable" };
       if (!agents.has(id)) return { ok: false, reason: "unknown_agent" };
-      if (roleOf(id).role === "admin" || roleOf(id).role === "main") {
-        return { ok: false, reason: "not_allowed" };
-      }
+      if (roleOf(id).role === "main") return { ok: false, reason: "not_allowed" };
       const below = [...agents.keys()].filter((other) => roleOf(other).owner === id);
       const deleted = [...below, id];
       if (ids && [...ids].sort().join() !== [...deleted].sort().join()) {
         return { ok: false, reason: "not_allowed" };
       }
       for (const gone of deleted) agents.delete(gone);
-      // The setup agent's Worker binds no Directory, so only the webchat's thread is named.
+      // The tools' Worker binds no Directory, so only the webchat's thread is named.
       const webhooksLeft = id === "revoked" ? [id] : [];
       return { ok: true, value: { deleted, webhooksLeft, everyThread: false } };
     },
@@ -172,7 +180,7 @@ function fakeCommands() {
       return { ok: true, value: runner.state };
     },
   };
-  return { commands, agents, calls, runner };
+  return { commands, agents, calls, runner, allowlists };
 }
 
 /** A context whose `confirm` answers `confirmed`, and logs what it was asked and the links sent. */
@@ -182,7 +190,7 @@ function contextOf(confirmed: boolean, actor: Actor = owner, locale: Locale = "e
   const context: ToolContext = {
     locale,
     actor,
-    agentId: SETUP_AGENT_ID,
+    agentId: MASTER,
     scopes: "all",
     qualifier: "clef",
     turn: "1",
@@ -200,7 +208,7 @@ function contextOf(confirmed: boolean, actor: Actor = owner, locale: Locale = "e
   return { context, asked, links };
 }
 
-async function toolsOf(provider: ToolProvider, agentId = SETUP_AGENT_ID) {
+async function toolsOf(provider: ToolProvider, agentId = MASTER) {
   const tools = await provider.tools(agentId);
   return new Map(tools.map((tool) => [tool.spec.name, tool]));
 }
@@ -216,10 +224,19 @@ const run = async (
   return tool.run(input, context);
 };
 
-describe("the setup agent's tools", () => {
-  it("are the setup agent's only, with plain labels and no identity or vault commands", async () => {
-    const provider = setupTools(fakeCommands().commands, { adminOrigin: ADMIN });
-    expect(await provider.tools("assistant")).toEqual([]);
+describe("Master's configuration tools (ADR-0048)", () => {
+  it("are Master's only, with plain labels and no identity or vault commands", async () => {
+    const provider = configurationTools(fakeCommands().commands, {
+      roleOf: roleIn,
+      adminOrigin: ADMIN,
+    });
+    // Neither a specialist, a subagent nor an agent the Registry doesn't list gets them.
+    for (const id of ["assistant", "scout", "ghost", SETUP_AGENT_ID]) {
+      expect(await provider.tools(id), id).toEqual([]);
+    }
+    // A task's run has no owner to confirm anything (#335).
+    expect(await provider.tools(MASTER, { channel: "task" })).toEqual([]);
+    expect(await provider.tools(MASTER, { channel: "telegram" })).toHaveLength(14);
 
     const tools = await toolsOf(provider);
     expect([...tools.keys()]).toEqual([
@@ -246,14 +263,97 @@ describe("the setup agent's tools", () => {
     }
   });
 
-  it("calls the role the Registry names `main` Master, in its prompt, tools and texts (#343)", async () => {
-    // list_agents shows the Registry's value, so the prompt ties the two.
-    expect(SETUP_PROMPT).toContain("Master, the role `main` in list_agents,");
+  it("follow the role: the agent that stops being Master can't run them any more", async () => {
+    const { commands, calls } = fakeCommands();
+    let role: AgentRole = "main";
+    const provider = configurationTools(commands, { roleOf: async () => role, adminOrigin: ADMIN });
+    const tools = await toolsOf(provider);
+    role = "specialist";
+    const { context, asked } = contextOf(true);
+    for (const [name, input] of [
+      ["list_agents", {}],
+      ["create_agent", { id: "ana", name: "Ana" }],
+      ["configure_agent", { id: "ana", settings: { tier: "frontier" } }],
+      ["connect_runner", {}],
+    ] as const) {
+      expect(await run(tools, name, input, context), name).toEqual({
+        output:
+          "This agent isn't Master any more, so it can't configure Kelpie: the owner asks Master.",
+        isError: true,
+      });
+    }
+    expect(asked).toEqual([]);
+    expect(calls).toEqual([]);
+    expect(await provider.tools(MASTER)).toEqual([]);
+  });
+
+  it("never leaves Kelpie without a Master that holds them, before asking anything", async () => {
+    const { commands, agents, calls, allowlists } = fakeCommands();
+    agents.set("ana", "Ana");
+    allowlists.set("ana", ["memory_search", "memory_read"]);
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
+    const { context, asked } = contextOf(true);
+
+    const narrow = await run(tools, "set_main_agent", { id: "ana" }, context);
+    expect(narrow).toEqual({
+      output:
+        "The agent ana's tools leave out configuration tools, so as Master it couldn't configure Kelpie. Change its tools first with configure_agent: null for all it is given, or a list that names every configuration tool.",
+      isError: true,
+    });
+    const own = await run(
+      tools,
+      "configure_agent",
+      { id: MASTER, settings: { tools: ["memory_search", "configure_agent"] } },
+      context,
+    );
+    expect(own).toEqual({
+      output:
+        "Master keeps every configuration tool: a tools list for it must name them all, or be null for all it is given.",
+      isError: true,
+    });
+    expect(asked).toEqual([]);
+    expect(calls).toEqual([]);
+
+    // A list that names them all, or none for a specialist, goes on to the owner's confirmation.
+    const every = [...tools.keys(), "memory_search"];
+    expect(
+      (
+        await run(
+          tools,
+          "configure_agent",
+          { id: MASTER, settings: { tools: every } },
+          contextOf(false).context,
+        )
+      ).output,
+    ).toContain("Not done yet");
+    expect(
+      (
+        await run(
+          tools,
+          "configure_agent",
+          { id: "ana", settings: { tools: ["memory_search"] } },
+          contextOf(false).context,
+        )
+      ).output,
+    ).toContain("Not done yet");
+    allowlists.set("ana", every);
+    expect(
+      (await run(tools, "set_main_agent", { id: "ana" }, contextOf(false).context)).output,
+    ).toContain("Not done yet");
+  });
+
+  it("calls the role the Registry names `main` Master, in its skill, tools and texts (#343)", async () => {
+    // list_agents shows the Registry's value, so the skill ties the two.
+    expect(CONFIGURE_KELPIE_SKILL).toContain("You are Master, the role `main` in list_agents.");
     const { commands, agents } = fakeCommands();
     agents.set("ana", "Ana");
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
     for (const text of [
-      SETUP_PROMPT,
+      CONFIGURE_KELPIE_SKILL,
       ...[...tools.values()].flatMap((tool) => [
         JSON.stringify(tool.spec),
         ...Object.values(tool.label),
@@ -269,13 +369,15 @@ describe("the setup agent's tools", () => {
     const { context, asked } = contextOf(false, owner, "es");
     await run(tools, "set_main_agent", { id: "ana" }, context);
     expect(asked.map((request) => request.summary)).toEqual([
-      'convertir el agente "Ana" (ana) en el Master, el que conversa contigo.',
+      'convertir el agente "Ana" (ana) en el Master, el que conversa contigo y configura Kelpie.',
     ]);
   });
 
   it("lists, creates and renames agents directly", async () => {
     const { commands, calls } = fakeCommands();
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
     const { context, asked } = contextOf(false);
 
     expect(
@@ -287,7 +389,7 @@ describe("the setup agent's tools", () => {
     const listed = await run(tools, "list_agents", {}, context);
     // With each agent's role, and whether the owner can chat with it (#288).
     expect(listed.output).toContain("ana: Ana Souza (specialist, chat off)");
-    expect(listed.output).toContain(`${SETUP_AGENT_ID}: Setup (admin)`);
+    expect(listed.output).toContain(`${MASTER}: Kelpie (main)`);
     expect(asked).toEqual([]);
     expect(calls).toEqual([
       'createAgent {"id":"ana","name":"Ana"}',
@@ -296,7 +398,9 @@ describe("the setup agent's tools", () => {
   });
 
   it("answers what went wrong in words the model can act on", async () => {
-    const tools = await toolsOf(setupTools(fakeCommands().commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      configurationTools(fakeCommands().commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
     const { context } = contextOf(true);
 
     const reserved = await run(
@@ -316,18 +420,20 @@ describe("the setup agent's tools", () => {
 
   it("refuses everyone but the owner, before asking for any confirmation", async () => {
     const { commands, calls } = fakeCommands();
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
     const { context, asked } = contextOf(true, { ...owner, role: "member" });
 
     for (const [name, input] of [
-      ["configure_agent", { id: SETUP_AGENT_ID, settings: { tier: "frontier" } }],
-      ["connect_telegram", { agentId: SETUP_AGENT_ID }],
-      ["pair_telegram", { agentId: SETUP_AGENT_ID }],
+      ["configure_agent", { id: MASTER, settings: { tier: "frontier" } }],
+      ["connect_telegram", { agentId: MASTER }],
+      ["pair_telegram", { agentId: MASTER }],
       ["connect_runner", {}],
       ["runner_status", {}],
       ["create_agent", { id: "ana", name: "Ana" }],
-      ["set_main_agent", { id: SETUP_AGENT_ID }],
-      ["set_agent_chat", { id: SETUP_AGENT_ID, chat: true }],
+      ["set_main_agent", { id: MASTER }],
+      ["set_agent_chat", { id: MASTER, chat: true }],
       ["delete_agent", { id: "ana" }],
     ] as const) {
       expect(await run(tools, name, input, context), name).toEqual({
@@ -342,7 +448,9 @@ describe("the setup agent's tools", () => {
   it("asks the owner to confirm a new main agent or a chat change, and runs it only then (#288)", async () => {
     const { commands, agents, calls } = fakeCommands();
     agents.set("ana", "Ana");
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
 
     const waiting = contextOf(false, owner, "pt-BR");
     expect((await run(tools, "set_main_agent", { id: "ana" }, waiting.context)).output).toContain(
@@ -355,7 +463,8 @@ describe("the setup agent's tools", () => {
       {
         command: "setMainAgent",
         input: { id: "ana" },
-        summary: 'tornar o agente "Ana" (ana) o Master, o que conversa com você.',
+        summary:
+          'tornar o agente "Ana" (ana) o Master, o que conversa com você e configura o Kelpie.',
       },
       {
         command: "setAgentChat",
@@ -367,7 +476,8 @@ describe("the setup agent's tools", () => {
 
     const confirmed = contextOf(true);
     expect(await run(tools, "set_main_agent", { id: "ana" }, confirmed.context)).toEqual({
-      output: "The agent ana is now Master: the one the owner talks to.",
+      output:
+        "The agent ana is now Master: the one the owner talks to. Your configuration tools went with the role: from now on, ana configures Kelpie.",
     });
     expect(
       await run(tools, "set_agent_chat", { id: "ana", chat: true }, confirmed.context),
@@ -375,7 +485,7 @@ describe("the setup agent's tools", () => {
       output: "The owner can now chat with the agent ana.",
     });
     expect(confirmed.asked.map((request) => request.summary)).toEqual([
-      'make the agent "Ana" (ana) Master, the one you talk to.',
+      'make the agent "Ana" (ana) Master, the one you talk to, which also configures Kelpie.',
       'let you chat with the agent "Ana" (ana).',
     ]);
     expect(calls).toEqual(['setMainAgent {"id":"ana"}', 'setAgentChat {"id":"ana","chat":true}']);
@@ -383,7 +493,9 @@ describe("the setup agent's tools", () => {
 
   it("shows and sets the instance's models, behind the owner's confirmation (#289)", async () => {
     const { commands, calls } = fakeCommands();
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
 
     const shown = await run(tools, "get_models", {}, contextOf(false).context);
     expect(JSON.parse(String(shown.output))).toEqual({
@@ -425,38 +537,39 @@ describe("the setup agent's tools", () => {
     });
   });
 
-  it("changes an agent's model, its own included, showing the owner what it had (#289)", async () => {
+  it("says configure_agent's model replaces the agent's whole model settings (ADR-0048)", async () => {
+    const tools = await toolsOf(
+      configurationTools(fakeCommands().commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
+    expect(JSON.stringify(tools.get("configure_agent")?.spec)).toContain(
+      "It replaces the agent's whole model settings: pass them whole, as get_agent shows them",
+    );
+  });
+
+  it("changes an agent's model, Master's own included, showing the owner what it had (#289)", async () => {
     const { commands, calls } = fakeCommands();
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
     const model = { conversation: { tier: "frontier" } };
 
     const waiting = contextOf(false);
-    await run(
-      tools,
-      "configure_agent",
-      { id: SETUP_AGENT_ID, settings: { model } },
-      waiting.context,
-    );
+    await run(tools, "configure_agent", { id: MASTER, settings: { model } }, waiting.context);
     expect(waiting.asked).toEqual([
       {
         command: "configureAgent",
-        input: { id: SETUP_AGENT_ID, settings: { model } },
-        summary: `change the settings of the agent "Setup" (${SETUP_AGENT_ID}): model from {} to ${JSON.stringify(model)}.`,
+        input: { id: MASTER, settings: { model } },
+        summary: `change the settings of the agent "Kelpie" (${MASTER}): model from {} to ${JSON.stringify(model)}.`,
       },
     ]);
     const confirmed = contextOf(true);
     expect(
-      await run(
-        tools,
-        "configure_agent",
-        { id: SETUP_AGENT_ID, settings: { model } },
-        confirmed.context,
-      ),
-    ).toEqual({ output: `Changed the settings of the agent ${SETUP_AGENT_ID}.` });
+      await run(tools, "configure_agent", { id: MASTER, settings: { model } }, confirmed.context),
+    ).toEqual({ output: `Changed the settings of the agent ${MASTER}.` });
     const noKey = await run(
       tools,
       "configure_agent",
-      { id: SETUP_AGENT_ID, settings: { model: { provider: "openai" } } },
+      { id: MASTER, settings: { model: { provider: "openai" } } },
       confirmed.context,
     );
     expect(noKey).toMatchObject({ isError: true });
@@ -468,18 +581,21 @@ describe("the setup agent's tools", () => {
     const { commands, agents, calls } = fakeCommands();
     agents.set("ana", "Ana");
     agents.set("kelpie", "Kelpie");
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
     const { context, asked } = contextOf(true);
 
-    const admin = await run(tools, "set_main_agent", { id: SETUP_AGENT_ID }, context);
-    expect(admin).toMatchObject({ isError: true });
-    expect(admin.output).toContain("Admin can't be Master");
-    for (const id of [SETUP_AGENT_ID, "kelpie"]) {
+    agents.set("scout", "Scout");
+    const subagent = await run(tools, "set_main_agent", { id: "scout" }, context);
+    expect(subagent).toEqual({ output: "A subagent can't be Master.", isError: true });
+    for (const id of [MASTER, "scout"]) {
       const refused = await run(tools, "set_agent_chat", { id, chat: false }, context);
-      expect(refused).toMatchObject({ isError: true });
-      expect(refused.output).toContain(
-        "Only a specialist's chat can change: Admin and Master always chat",
-      );
+      expect(refused).toEqual({
+        output:
+          "Only a specialist's chat can change: Master always chats, and a subagent never does.",
+        isError: true,
+      });
     }
     expect(await run(tools, "set_main_agent", { id: "kelpie" }, context)).toEqual({
       output: "The agent kelpie is already Master; nothing changed.",
@@ -499,7 +615,9 @@ describe("the setup agent's tools", () => {
     agents.set("ana", "Ana");
     agents.set("scout", "Scout");
     agents.set("bia", "Bia");
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
 
     const waiting = contextOf(false);
     expect((await run(tools, "delete_agent", { id: "ana" }, waiting.context)).output).toContain(
@@ -545,23 +663,23 @@ describe("the setup agent's tools", () => {
     expect(done.output).toContain("an agent created again with the id ana would get it back");
     expect(done.output).toContain("Its files in the vault, under agents/ana/, stay");
     expect(calls).toEqual(['deleteAgent {"id":"ana","ids":["ana","scout"]}']);
-    expect([...agents.keys()]).toEqual([SETUP_AGENT_ID, "bia"]);
+    expect([...agents.keys()]).toEqual([MASTER, "bia"]);
   });
 
-  it("never deletes Admin or the main agent, and says what to do when a deletion stops", async () => {
+  it("never deletes Master, and says what to do when a deletion stops", async () => {
     const { commands, agents, calls } = fakeCommands();
     agents.set("kelpie", "Kelpie");
     agents.set("stuck", "Stuck");
     agents.set("revoked", "Revoked");
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
     const { context, asked } = contextOf(true);
 
-    for (const id of [SETUP_AGENT_ID, "kelpie"]) {
-      expect(await run(tools, "delete_agent", { id }, context)).toEqual({
-        output: "Admin and Master can't be deleted.",
-        isError: true,
-      });
-    }
+    expect(await run(tools, "delete_agent", { id: MASTER }, context)).toEqual({
+      output: "Master can't be deleted.",
+      isError: true,
+    });
     expect(await run(tools, "delete_agent", { id: "ghost" }, context)).toEqual({
       output: "There is no agent with the id ghost.",
       isError: true,
@@ -581,7 +699,9 @@ describe("the setup agent's tools", () => {
   it("asks again when what a deletion would delete changed since the owner was shown it", async () => {
     const { commands, agents } = fakeCommands();
     agents.set("ana", "Ana");
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
     const shown = contextOf(false);
     await run(tools, "delete_agent", { id: "ana" }, shown.context);
     expect(shown.asked[0]?.input).toEqual({ id: "ana", ids: ["ana"] });
@@ -598,7 +718,9 @@ describe("the setup agent's tools", () => {
 
   it("tells the model a new agent's chat is off, and when a bot is connected to it (#288)", async () => {
     const { commands } = fakeCommands();
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
     const { context } = contextOf(true);
 
     const created = await run(tools, "create_agent", { id: "ana", name: "Ana" }, context);
@@ -608,14 +730,16 @@ describe("the setup agent's tools", () => {
     const paired = await run(tools, "pair_telegram", { agentId: "ana" }, context);
     expect(paired.output).toContain("Its chat is off");
     expect(
-      (await run(tools, "connect_telegram", { agentId: SETUP_AGENT_ID }, context)).output,
+      (await run(tools, "connect_telegram", { agentId: MASTER }, context)).output,
     ).not.toContain("chat is off");
   });
 
   it("sends the runner's secure form as a link of Kelpie's own, in the owner's language (#294)", async () => {
     const { commands } = fakeCommands();
     const now = () => Date.UTC(2026, 9, 6, 19, 45);
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN, now }));
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN, now }),
+    );
     const { context, links } = contextOf(true, owner, "pt-BR");
 
     const sent = await run(tools, "connect_runner", {}, context);
@@ -630,7 +754,8 @@ describe("the setup agent's tools", () => {
       {
         href: `${ADMIN}/forms/run456?lang=pt-BR`,
         text: `O formulário seguro para conectar o runner: ${ADMIN}/forms/run456?lang=pt-BR\nFunciona uma vez, nos próximos 15 minutos. Cole lá o segredo de ~/.config/kelpie-runner/secret do seu servidor, uma linha só, nunca no chat.`,
-        // The setup agent's AgentHost keeps the wait, until the form expires (#328).
+        // The runner is the instance's: the retired setup agent's AgentHost keeps the wait, until
+        // the form expires (#328, ADR-0048).
         awaits: {
           agentId: SETUP_AGENT_ID,
           step: "runner_connected",
@@ -643,7 +768,9 @@ describe("the setup agent's tools", () => {
   it("says a Kelpie service didn't answer when the runner's state can't be read", async () => {
     const { commands } = fakeCommands();
     commands.describeRunner = async () => ({ ok: false, reason: "unavailable" });
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
     const { context } = contextOf(true);
     expect(await run(tools, "runner_status", {}, context)).toMatchObject({ isError: true });
   });
@@ -651,7 +778,9 @@ describe("the setup agent's tools", () => {
   it("says what to set up when Kelpie was deployed without the runner's VPC Service", async () => {
     const { commands, runner } = fakeCommands();
     runner.configured = false;
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
     const { context, links } = contextOf(true);
     const refused = await run(tools, "connect_runner", {}, context);
     expect(refused).toMatchObject({ isError: true });
@@ -669,14 +798,18 @@ describe("the setup agent's tools", () => {
   ] as const)("tells the model the runner's state: %o", async (state, words) => {
     const { commands, runner } = fakeCommands();
     runner.state = state;
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
     const { context } = contextOf(true);
     expect((await run(tools, "runner_status", {}, context)).output).toContain(words);
   });
 
   it("changes an agent's mascot whole, after the owner's confirmation (ADR-0045 §2)", async () => {
     const { commands, calls } = fakeCommands();
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
     const schema = tools.get("configure_agent")?.spec.inputSchema as unknown as {
       properties: { settings: { properties: Record<string, unknown> } };
     };
@@ -689,7 +822,7 @@ describe("the setup agent's tools", () => {
       color: "pink",
       accessory: { type: "hat", variation: "top" },
     };
-    const input = { id: SETUP_AGENT_ID, settings: { mascot } };
+    const input = { id: MASTER, settings: { mascot } };
     const waiting = contextOf(false);
     await run(tools, "configure_agent", input, waiting.context);
     expect(waiting.asked[0]?.summary).toContain(`mascot to ${JSON.stringify(mascot)}`);
@@ -716,8 +849,10 @@ describe("the setup agent's tools", () => {
 
   it("asks the owner to confirm a settings change, for its parsed input, and runs it only then", async () => {
     const { commands, calls } = fakeCommands();
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
-    const input = { id: SETUP_AGENT_ID, settings: { tier: "frontier", quietMs: 2_000 } };
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
+    const input = { id: MASTER, settings: { tier: "frontier", quietMs: 2_000 } };
 
     const waiting = contextOf(false);
     const asked = await run(tools, "configure_agent", input, waiting.context);
@@ -725,8 +860,8 @@ describe("the setup agent's tools", () => {
     expect(waiting.asked).toEqual([
       {
         command: "configureAgent",
-        input: { id: SETUP_AGENT_ID, settings: { tier: "frontier", quietMs: 2_000 } },
-        summary: `change the settings of the agent "Setup" (${SETUP_AGENT_ID}): tier to "frontier", quietMs to 2000.`,
+        input: { id: MASTER, settings: { tier: "frontier", quietMs: 2_000 } },
+        summary: `change the settings of the agent "Kelpie" (${MASTER}): tier to "frontier", quietMs to 2000.`,
       },
     ]);
     expect(calls).toEqual([]);
@@ -734,11 +869,11 @@ describe("the setup agent's tools", () => {
     for (const [locale, summary] of [
       [
         "pt-BR",
-        `alterar as configurações do agente "Setup" (${SETUP_AGENT_ID}): tier para "frontier", quietMs para 2000.`,
+        `alterar as configurações do agente "Kelpie" (${MASTER}): tier para "frontier", quietMs para 2000.`,
       ],
       [
         "es",
-        `cambiar la configuración del agente "Setup" (${SETUP_AGENT_ID}): tier a "frontier", quietMs a 2000.`,
+        `cambiar la configuración del agente "Kelpie" (${MASTER}): tier a "frontier", quietMs a 2000.`,
       ],
     ] as const) {
       const spoken = contextOf(false, owner, locale);
@@ -749,13 +884,15 @@ describe("the setup agent's tools", () => {
     const confirmed = contextOf(true);
     expect((await run(tools, "configure_agent", input, confirmed.context)).isError).toBe(undefined);
     expect(calls).toEqual([
-      `configureAgent {"id":"${SETUP_AGENT_ID}","settings":{"tier":"frontier","quietMs":2000}}`,
+      `configureAgent {"id":"${MASTER}","settings":{"tier":"frontier","quietMs":2000}}`,
     ]);
   });
 
   it("asks the owner before the agent runs more tasks at once, as for any setting (#54)", async () => {
     const { commands, calls } = fakeCommands();
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
     const schema = tools.get("configure_agent")?.spec.inputSchema as unknown as {
       properties: { settings: { properties: object } };
     };
@@ -766,19 +903,21 @@ describe("the setup agent's tools", () => {
       description:
         "How many of its tasks the agent runs at once; 0 runs none, and more costs more.",
     });
-    const input = { id: SETUP_AGENT_ID, settings: { maxConcurrentTasks: 5 } };
+    const input = { id: MASTER, settings: { maxConcurrentTasks: 5 } };
     const waiting = contextOf(false);
     expect((await run(tools, "configure_agent", input, waiting.context)).output).toContain(
       "Not done yet",
     );
     expect(waiting.asked[0]?.summary).toBe(
-      `change the settings of the agent "Setup" (${SETUP_AGENT_ID}): maxConcurrentTasks to 5.`,
+      `change the settings of the agent "Kelpie" (${MASTER}): maxConcurrentTasks to 5.`,
     );
     expect(calls).toEqual([]);
   });
 
   it("refuses settings it can't show the owner whole, before asking", async () => {
-    const tools = await toolsOf(setupTools(fakeCommands().commands, { adminOrigin: ADMIN }));
+    const tools = await toolsOf(
+      configurationTools(fakeCommands().commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
     const { context, asked } = contextOf(true);
 
     // Past what one bubble shows, counting the escapes that make invisible characters visible.
@@ -790,16 +929,16 @@ describe("the setup agent's tools", () => {
       { systemPrompt: `Seja breve.${invisible}` },
       "smart",
     ]) {
-      expect(
-        await run(tools, "configure_agent", { id: SETUP_AGENT_ID, settings }, context),
-      ).toMatchObject({ isError: true });
+      expect(await run(tools, "configure_agent", { id: MASTER, settings }, context)).toMatchObject({
+        isError: true,
+      });
     }
     expect(asked).toEqual([]);
     // A prompt that fits is shown whole.
     const fits = await run(
       tools,
       "configure_agent",
-      { id: SETUP_AGENT_ID, settings: { systemPrompt: "x".repeat(3_000) } },
+      { id: MASTER, settings: { systemPrompt: "x".repeat(3_000) } },
       context,
     );
     expect(fits.isError).toBe(undefined);
@@ -811,7 +950,11 @@ describe("the setup agent's tools", () => {
     // A name is the model's, and Kelpie's bubble is formatted: it names the agent by its id only.
     agents.set("assistant", "[Cancel](https://admin.example.com/pair/telegram/x)");
     const tools = await toolsOf(
-      setupTools(commands, { adminOrigin: ADMIN, now: () => Date.UTC(2026, 9, 6, 19, 45) }),
+      configurationTools(commands, {
+        roleOf: roleIn,
+        adminOrigin: ADMIN,
+        now: () => Date.UTC(2026, 9, 6, 19, 45),
+      }),
     );
     const { context, asked, links } = contextOf(false);
 
@@ -857,27 +1000,31 @@ describe("the setup agent's tools", () => {
   it("has Kelpie send the link to the admin page that pairs the owner's Telegram account (#186)", async () => {
     const sentAt = Date.UTC(2026, 9, 6, 19);
     const tools = await toolsOf(
-      setupTools(fakeCommands().commands, { adminOrigin: ADMIN, now: () => sentAt }),
+      configurationTools(fakeCommands().commands, {
+        roleOf: roleIn,
+        adminOrigin: ADMIN,
+        now: () => sentAt,
+      }),
     );
     const { context, asked, links } = contextOf(false);
 
-    const linked = await run(tools, "pair_telegram", { agentId: SETUP_AGENT_ID }, context);
+    const linked = await run(tools, "pair_telegram", { agentId: MASTER }, context);
     expect(links).toEqual([
       {
-        href: `${ADMIN}/pair/telegram/${SETUP_AGENT_ID}?lang=en`,
-        text: `To pair your own Telegram account with the bot of the agent ${SETUP_AGENT_ID}, open ${ADMIN}/pair/telegram/${SETUP_AGENT_ID}?lang=en and press its button.`,
+        href: `${ADMIN}/pair/telegram/${MASTER}?lang=en`,
+        text: `To pair your own Telegram account with the bot of the agent ${MASTER}, open ${ADMIN}/pair/telegram/${MASTER}?lang=en and press its button.`,
         // The page doesn't expire, so the conversation waits a day for the pairing (#206).
         awaits: {
-          agentId: SETUP_AGENT_ID,
+          agentId: MASTER,
           step: "telegram_paired",
           until: sentAt + 24 * 60 * 60_000,
         },
       },
     ]);
     const spoken = contextOf(false, owner, "pt-BR");
-    await run(tools, "pair_telegram", { agentId: SETUP_AGENT_ID }, spoken.context);
+    await run(tools, "pair_telegram", { agentId: MASTER }, spoken.context);
     expect(spoken.links.map((link) => link.text)).toEqual([
-      `Para parear sua própria conta do Telegram com o bot do agente ${SETUP_AGENT_ID}, abra ${ADMIN}/pair/telegram/${SETUP_AGENT_ID}?lang=pt-BR e toque no botão da página.`,
+      `Para parear sua própria conta do Telegram com o bot do agente ${MASTER}, abra ${ADMIN}/pair/telegram/${MASTER}?lang=pt-BR e toque no botão da página.`,
     ]);
     expect(linked.output).not.toContain("/pair/");
     expect(asked).toEqual([]);
@@ -890,11 +1037,11 @@ describe("the setup agent's tools", () => {
   it("says so, before asking anything, when the admin API's address isn't a bare https origin", async () => {
     for (const adminOrigin of ["", "http://admin.example.com", `${ADMIN}/x`, "admin.example.com"]) {
       const { commands, calls } = fakeCommands();
-      const tools = await toolsOf(setupTools(commands, { adminOrigin }));
+      const tools = await toolsOf(configurationTools(commands, { roleOf: roleIn, adminOrigin }));
       const { context, asked, links } = contextOf(true);
 
       for (const name of ["connect_telegram", "pair_telegram", "connect_runner"]) {
-        const answer = await run(tools, name, { agentId: SETUP_AGENT_ID }, context);
+        const answer = await run(tools, name, { agentId: MASTER }, context);
         expect(answer.isError, `${name} ${adminOrigin}`).toBe(true);
         expect(answer.output, name).toContain("ADMIN_ORIGIN");
       }
@@ -906,10 +1053,12 @@ describe("the setup agent's tools", () => {
 
   it("never passes on or repeats a token the model sends", async () => {
     const { commands, calls } = fakeCommands();
-    const tools = await toolsOf(setupTools(commands, { adminOrigin: `${ADMIN}/` }));
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: `${ADMIN}/` }),
+    );
     const token = "123456789:AAH-secret-token";
     const { context, asked, links } = contextOf(false);
-    const input = { agentId: SETUP_AGENT_ID, botToken: token };
+    const input = { agentId: MASTER, botToken: token };
 
     const done = await run(tools, "connect_telegram", input, context);
     expect(JSON.stringify([done, asked, links, calls])).not.toContain("secret");
@@ -926,7 +1075,7 @@ const destination = { channel: "telegram", threadId: "chat-1" } as const;
 
 function message(id: string, text: string, userId = "u-owner") {
   return {
-    agentId: SETUP_AGENT_ID,
+    agentId: MASTER,
     providerMessageId: id,
     userId,
     text,

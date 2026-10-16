@@ -1,6 +1,6 @@
 # Admin API
 
-The owner's JSON API for the configuration commands (ADR-0013, Story 3.10). It runs as the `kelpie-admin-api` Worker, behind a Cloudflare Access application, and the setup agent's tools (Story 3.11) call the same commands.
+The owner's JSON API for the configuration commands (ADR-0013, Story 3.10). It runs as the `kelpie-admin-api` Worker, behind a Cloudflare Access application, and Master's configuration tools (Story 3.11, ADR-0048) call the same commands.
 
 ## How a request is trusted
 
@@ -33,8 +33,8 @@ Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`
 | `/commands/getModels` | none; the instance's model settings, the provider pinned as the default, and the providers with a key (#289) |
 | `/commands/configureModels` | `{ "settings": { "conversation": { "tier": "medium" }, "memory": { "tier": "cheap" } } }`; replaces the instance's model settings, which every agent follows unless it has its own. A provider without a key answers `409 no_key` |
 | `/commands/setMainAgent` | `{ "id": "sales" }`; makes the agent Master, the one the owner talks to (ADR-0036 §1). The previous one becomes a specialist that keeps its chat |
-| `/commands/setAgentChat` | `{ "id": "sales", "chat": true }`; lets the owner reach a specialist on its channels, or stops it. Admin and Master always chat |
-| `/commands/deleteAgent` | `{ "id": "sales" }`, or with `"ids": ["sales", …]`, the agents you expect it to delete; deletes the agent and its subagents for good ("Deleting an agent"). It answers `{ "deleted", "webhooksLeft", "everyThread" }`. Admin, Master and an `ids` that no longer matches answer `409 not_allowed`; a deletion cut short answers `503 unavailable`, and running it again finishes it |
+| `/commands/setAgentChat` | `{ "id": "sales", "chat": true }`; lets the owner reach a specialist on its channels, or stops it. Master always chats |
+| `/commands/deleteAgent` | `{ "id": "sales" }`, or with `"ids": ["sales", …]`, the agents you expect it to delete; deletes the agent and its subagents for good ("Deleting an agent"). It answers `{ "deleted", "webhooksLeft", "everyThread" }`. Master and an `ids` that no longer matches answer `409 not_allowed`; a deletion cut short answers `503 unavailable`, and running it again finishes it |
 | `/commands/createTask` | `{ "agentId": "sales", "title": "Book the flights", "body": "…", "status": "todo", "scheduledStartAt": 1793000000000 }`; queues work on the agent's task board ("Tasks"). `status` is `backlog`, the default, or `todo`, and `body` and `scheduledStartAt`, in milliseconds since the epoch, are optional |
 | `/commands/editTask` | `{ "agentId": "sales", "taskId": "…", "title": "…" }`, with any of `title`, `body` and `scheduledStartAt`, `null` clearing the start; only in Backlog or To do |
 | `/commands/moveTask` | `{ "agentId": "sales", "taskId": "…", "status": "todo" }`; between `backlog` and `todo` only |
@@ -67,7 +67,7 @@ Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`
 | 401 | `unauthenticated` |
 | 403 | `forbidden`, `no_owner`, `invalid_bootstrap_token`, `invalid_recovery_token`, `cross_origin` (sent from another origin's page) |
 | 404 | `unknown_agent`, `unknown_identity`, `unknown_user`, `not_found` |
-| 409 | `not_paired` (a pending identity; pair it instead), `not_connected` (the agent has no bot), `identity_taken` (a recovery to a login another user holds), `not_allowed` (the agent's role doesn't take the change, such as Admin as Master), `no_key` (a model setting names a provider llm-gateway has no key for) |
+| 409 | `not_paired` (a pending identity; pair it instead), `not_connected` (the agent has no bot), `identity_taken` (a recovery to a login another user holds), `not_allowed` (the agent's role doesn't take the change, such as a subagent as Master), `no_key` (a model setting names a provider llm-gateway has no key for) |
 | 410 | `bootstrap_disabled`, `recovery_token_spent` |
 | 413 | `too_large` |
 | 415 | `not_json` (a `Content-Type` other than `application/json`) |
@@ -114,7 +114,7 @@ A web address (http or https) shows as a link only when it is in the turn's inpu
 - the inputs are the owner's messages and their own notes in the memory block, the same that may be previewed (#130);
 - any other address, whether the model wrote it or a tool or a note it read gave it, shows as code, with its label, so the owner sees where it points;
 - Telegram links addresses in plain text by itself, with or without a scheme (`example.com/login`, `www.example.com`), so on Telegram any text it could read as an address goes in code too. Emails, `@mentions`, hashtags and phone numbers still show as Telegram finds them;
-- Kelpie's fixed notices, such as a confirmation's, are never formatted. On Telegram the addresses they quote go in code all the same. The exception is a link Kelpie sends itself, such as a secure form's ("Setup agent"): its own link shows as a link, and any other address in it shows as text;
+- Kelpie's fixed notices, such as a confirmation's, are never formatted. On Telegram the addresses they quote go in code all the same. The exception is a link Kelpie sends itself, such as a secure form's ("Configuring Kelpie through Master"): its own link shows as a link, and any other address in it shows as text;
 - a reply replayed in the webchat links what the owner had sent before it among the replayed messages, and their notes its turn recalled;
 - a URL hidden behind text in a Telegram message the owner sent (a `text_link`) doesn't count yet (#190).
 
@@ -144,7 +144,7 @@ Each agent has a task board in its `AgentHost` (ADR-0011, #54). The `AgentHost` 
   - ask the agent to stop a running task.
 
   From In progress on, only the agent moves a task.
-- **Pickup.** A task in To do is eligible at once, or at its scheduled start. The `AgentHost` claims eligible tasks in order of their scheduled start, or creation, while fewer than the agent's `maxConcurrentTasks` run. That setting is 3 by default and at most 10; the setup agent asks the owner before changing it, as for any setting. A task in Waiting holds no slot.
+- **Pickup.** A task in To do is eligible at once, or at its scheduled start. The `AgentHost` claims eligible tasks in order of their scheduled start, or creation, while fewer than the agent's `maxConcurrentTasks` run. That setting is 3 by default and at most 10; Master asks the owner before changing it, as for any setting. A task in Waiting holds no slot.
 - **Leases.** A claim leases the task for 15 minutes and opens a run, with a random token its reports must carry. The run's heartbeat extends the lease, but never past 2 hours from the run's start.
   - A lease that runs out is swept on the next wake, and the attempt counts as failed.
   - Two failed attempts in a row put the task in Waiting, with the reason `failed`.
@@ -156,7 +156,7 @@ Each agent has a task board in its `AgentHost` (ADR-0011, #54). The `AgentHost` 
   - **What it starts with:** the task and its newest comments. A task or comment another agent wrote comes as data, never as the owner's instructions.
   - **How it ends the task:** with `complete_task` and the result, `wait_on_task` and a question, or `cancel_task` and a reason. A turn that leaves the task running gets one nudge from Kelpie; a second such turn counts as a failed attempt.
   - **What reaches it mid-run:** a comment joins its next round. The owner's stop ends its turn at once, and the task is cancelled.
-  - **What it can't do:** confirm anything. Admin's and Master's own tools aren't in it.
+  - **What it can't do:** confirm anything. Master's configuration tools aren't in it.
 - **Between agents.** An agent hands work to an agent it owns with `create_task`, which records both agents and the person it acts for.
   - **The mandatory handoff** (ADR-0036 §4, #287). An agent's prompt lists the specialists it owns, by id and name, with each one's remit, or "no remit set". A demand within a remit goes to that specialist as a task, even when the owner didn't name it. A specialist with no remit takes work only when the owner names it.
   - **Kelpie announces it.** After the reply, Kelpie names the agent that has the work, by name and id, in the conversation's language: `Kelpie handed a task to "Sales" (sales).` The text is Kelpie's own, so the model can't change or omit it. A turn that sends no reply, because it was refused or cut short, leaves the notice for the next reply in that conversation.
@@ -174,7 +174,7 @@ No command takes an identity value to admit someone: the owner proves an account
 2. The owner opens the link in Telegram, which sends the bot `/start <code>`.
 3. A match makes that Telegram account the owner's, enabled, and the bot answers with a fixed "paired" notice. The `/start` never reaches the model.
 
-**From the setup agent.** Its `pair_telegram` tool links to `https://<admin hostname>/pair/telegram/<agent id>`, a page behind the same Access login and owner check as the secure forms:
+**From Master.** Its `pair_telegram` tool links to `https://<admin hostname>/pair/telegram/<agent id>`, a page behind the same Access login and owner check as the secure forms:
 - a `GET` shows a button, and pressing it is the owner's own yes;
 - the page's own `POST` (`Sec-Fetch-Site: same-origin` or, without it, a matching `Origin`, form-encoded) runs `pairTelegram` and shows the `t.me` link. A `POST` with neither header is refused: current browsers send at least one;
 - without a connected bot, the page says to connect it first.
@@ -238,7 +238,7 @@ Form pages are HTML:
       Each text is cut to its first 6,000 characters. Vectors are kept per model, so changing the var means every note is embedded again.
    2. `channel-egress`, with its `SECRETS_KEY` and `--var INGRESS_ORIGIN:https://<ingress hostname>` (`docs/secrets.md`);
    3. `context-store`, with the vault's GitHub App values and secrets (`docs/context-store.md`). Without them it runs with the vault off. It calls `llm-gateway` for memory's embeddings and rerank;
-   4. `conversation-runtime`, with `--var ADMIN_ORIGIN:https://<admin hostname>`, so the setup agent can link to the secure form and the pairing page ("Setup agent"). The deploy workflow carries it to later deploys (`docs/deploy.md`). Without it, the setup agent says it can't give those links;
+   4. `conversation-runtime`, with `--var ADMIN_ORIGIN:https://<admin hostname>`, so Master can link to the secure form and the pairing page ("Configuring Kelpie through Master"). The deploy workflow carries it to later deploys (`docs/deploy.md`). Without it, Master says it can't give those links;
    5. `ingress`, with `--domain <ingress hostname>`. Telegram's and GitHub's webhooks reach it there; like the admin API, it has no `workers.dev` URL. Later deploys keep the domain without the flag, and the deploy workflow carries the webchat's Access values once they are set ("Webchat").
 2. **Create a self-hosted Access application** for the admin API's hostname, with a policy that allows only the owner. Do this before step 4: whoever passes Access and holds the token becomes the owner. Note the team domain (`https://<team>.cloudflareaccess.com`) and the application's AUD tag.
 3. **Keep the instance's values out of the repository.** The hostname and the Access values belong to one deployment, so they go in as flags when deploying (step 5), and `wrangler.jsonc` stays the same for every instance:
@@ -268,23 +268,23 @@ Form pages are HTML:
    - The Worker's `BOOTSTRAP_TOKEN` stays. `wrangler.jsonc` lists it in `secrets.required`, so `wrangler deploy` refuses to deploy without it, and deleting it would make every later deploy fail.
    - It is harmless where it is: `/bootstrap` answers `410` once an owner exists, and the token stops being accepted at the expiry it carries.
 
-## Setup agent
+## Configuring Kelpie through Master
 
-Every instance has a built-in agent, `setup`, to configure Kelpie by talking to it: open `https://<ingress hostname>/webchat/?agent=setup` once the webchat is set up ("Webchat"). It guides a first setup: it connects Master's Telegram bot, and pairs the owner's Telegram account (Story 3.11, ADR-0013).
+The owner configures Kelpie by talking to Master, the agent they talk to (Story 3.11, ADR-0013, ADR-0048): open `https://<ingress hostname>/webchat/` once the webchat is set up ("Webchat"), and the page opens Master. It guides a first setup: it connects its own Telegram bot, and pairs the owner's Telegram account. The configuration tools are Master's because of its role, and they go with the role when `setMainAgent` moves it.
 
 **Roles** (ADR-0036 §1, #288). Each agent has a role, which `listAgents` shows:
-- **`admin`:** the setup agent, by its id.
-- **`main`:** Master, the agent the owner talks to. The owner named the role Master (#343); `main` stays its value.
+- **`main`:** Master, the agent the owner talks to, which also configures Kelpie. The owner named the role Master (#343); `main` stays its value.
   - A new instance starts with one, `kelpie`, named Kelpie.
-  - An instance that already had agents has none until the owner picks one with `setMainAgent`.
+  - An instance that already had agents has none until the owner picks one with `setMainAgent`. Until then, no agent has the configuration tools.
   - The previous Master becomes a specialist that keeps its chat.
 - **`specialist`:** every other agent, owned by Master.
   - One created now doesn't chat until `setAgentChat` turns its chat on.
   - Agents that existed before roles keep their chat.
-- **Master's own tool:** `set_agent_model` changes another agent's model settings, when the owner asks or agrees with its suggestion, behind the same confirmation (#289). No agent changes its own model, except Admin, through `configure_agent`.
+- **Models:** Master changes any agent's model settings with `configure_agent`, its own included, behind the owner's confirmation (#289, ADR-0048). No other agent changes its own model, and this API's `configureAgent` can always raise Master's tier again.
+- **Master keeps its tools:** `configure_agent` refuses a tools list for Master that leaves out a configuration tool, and `set_main_agent` refuses an agent whose tools list leaves them out. This API can still change either.
 - **The check is at `admit`:** a chat its role doesn't allow answers `no_grant`, so a specialist whose chat is off doesn't answer its bot or the webchat.
 
-**Subagents** (ADR-0036 §5, #290). An agent with `spawn` creates temporary subagents for a demand, with `create_subagent`, and hands them work with `create_task`. Master has `spawn` by its role. A specialist has it only when Admin's `configure_agent` turns it on, which takes the owner's confirmation. Admin and subagents never have it. Only the owner's own turns in a direct conversation create a subagent or hand off a task.
+**Subagents** (ADR-0036 §5, #290). An agent with `spawn` creates temporary subagents for a demand, with `create_subagent`, and hands them work with `create_task`. Master has `spawn` by its role. A specialist has it only when Master's `configure_agent` turns it on, which takes the owner's confirmation. Subagents never have it. Only the owner's own turns in a direct conversation create a subagent or hand off a task.
 - **What a creator gives one:** a name, a soul, a one-line remit and up to 10 skills, kept on its own `AgentHost`, not in the vault. Kelpie picks its id, from the creator's.
 - **What it can never exceed:** its creator's tier and effort, field by field, on the creator's route. That is checked when it is created and at every turn, with the last limits read when the creator doesn't answer, and the cheapest tier when nothing was ever read. It starts at the cheapest tier unless its creator asks for more.
 - **What it holds:**
@@ -293,30 +293,31 @@ Every instance has a built-in agent, `setup`, to configure Kelpie by talking to 
   - no channel, and no capture.
 - **How many:** three live per creator at most, and ten made a day; past either, a new one is refused. Its soul and skills together hold at most 24,000 characters.
 - **What pins it:** its own `AgentHost` records its creator, so it stays a subagent whatever the Registry answers.
-- **How it ends:** it lives until its creator deletes it with `delete_subagent`, or the owner through Admin, and deleting its creator deletes it too. What it already reported reached its creator as Kelpie's news; a task it hadn't finished goes with it.
-- **Kelpie announces them** (ADR-0036 §6, #342). After the reply, Kelpie names each subagent its creator creates or deletes with its tools, by name and id, in the conversation's language: `Kelpie created the subagent "Scout" (kelpie-sub-a1b2c3).` The name is quoted, since its creator chose it, and only the id is Kelpie's. Like the handoff notice, the text is Kelpie's own, so the model can't change or omit it, and a turn that sends no reply leaves it for the next one. A subagent deleted through Admin, or with its creator, is reported by that deletion's own confirmation and result.
+- **How it ends:** it lives until its creator deletes it with `delete_subagent`, or the owner through Master's `delete_agent`, and deleting its creator deletes it too. What it already reported reached its creator as Kelpie's news; a task it hadn't finished goes with it.
+- **Kelpie announces them** (ADR-0036 §6, #342). After the reply, Kelpie names each subagent its creator creates or deletes with its tools, by name and id, in the conversation's language: `Kelpie created the subagent "Scout" (kelpie-sub-a1b2c3).` The name is quoted, since its creator chose it, and only the id is Kelpie's. Like the handoff notice, the text is Kelpie's own, so the model can't change or omit it, and a turn that sends no reply leaves it for the next one. A subagent deleted through `delete_agent`, or with its creator, is reported by that deletion's own confirmation and result.
 - **The skill:** every agent with `spawn` gets the built-in `create-subagent` skill in its prompt. It covers when a subagent is worth it, how to brief one, and to delete it when the demand ends.
 
 `configure_agent` also takes `spawn`, a one-line `remit`, and `tools`, the tools an agent may use by name, or `null` for all it is given. Each change waits for the owner's confirmation.
 
-**Deleting an agent** (ADR-0036 §1, #303). `deleteAgent`, or the setup agent's `delete_agent` after the owner's confirmation, deletes an agent and every subagent it owns. The agent's chat goes off first, so no channel reaches it. Then the subagents go, deepest first, and the agent last. For each agent, in order:
-1. Its role is read again: an agent that became Admin or Master meanwhile stops the deletion.
+**Deleting an agent** (ADR-0036 §1, #303). `deleteAgent`, or Master's `delete_agent` after the owner's confirmation, deletes an agent and every subagent it owns. The agent's chat goes off first, so no channel reaches it. Then the subagents go, deepest first, and the agent last. For each agent, in order:
+1. Its role is read again: an agent that became Master meanwhile stops the deletion.
 2. channel-egress removes its Telegram bot's webhook and deletes Kelpie's copy of the bot's token and its open forms. The bot itself stays the owner's, who can revoke its token with BotFather.
    - A webhook Telegram refuses to remove for good, as with a revoked token, doesn't stop the rest. Without the token, ingress refuses the bot's updates, and the result lists the agent under `webhooksLeft`.
    - A failure for now, such as a 429 or a 5xx, keeps the token and stops the deletion, so running it again removes the webhook.
 3. Its `AgentHost` erases its conversations and then itself.
    - The conversations it erases are the ones it recorded at their first turn since #303, plus the owner's threads with it: the webchat's, and each channel identity the `Directory` lists.
-   - The setup agent's Worker binds no `Directory`, so `delete_agent` names only the owner's webchat thread, and the result's `everyThread` is false. A Telegram conversation with no turn since #303 then stays where nothing reaches it, and an agent created again with the same id would get it back. To cover it, delete the agent through this API instead.
+   - Master's tools run in `conversation-runtime`, which binds no `Directory`, so `delete_agent` names only the owner's webchat thread, and the result's `everyThread` is false. A Telegram conversation with no turn since #303 then stays where nothing reaches it, and an agent created again with the same id would get it back. To cover it, delete the agent through this API instead.
 4. Its `Registry` row goes, and the `Registry`'s audit records `agent.deleted`.
 
-Admin and Master can't be deleted, and the `Registry` refuses to remove an agent that still owns another. The setup agent's confirmation names every agent that goes, and its input carries their ids, so a subagent created before the owner's yes stops the deletion until they confirm again. A deletion cut short leaves the agent listed with its chat off, and running it again finishes it. The vault's `agents/<id>/` folder stays: it is the owner's repository, which Kelpie never deletes from. `forgetVaultPaths` drops Kelpie's copy, and the owner deletes the files in the repository.
+Master can't be deleted, and the `Registry` refuses to remove an agent that still owns another. Master's confirmation names every agent that goes, and its input carries their ids, so a subagent created before the owner's yes stops the deletion until they confirm again. A deletion cut short leaves the agent listed with its chat off, and running it again finishes it. The vault's `agents/<id>/` folder stays: it is the owner's repository, which Kelpie never deletes from. `forgetVaultPaths` drops Kelpie's copy, and the owner deletes the files in the repository.
 
-- **Where it comes from.**
-  - A migration of the `Registry` adds it, on new instances and on ones bootstrapped before it.
+- **The retired setup agent** (ADR-0048). Instances once had a separate setup agent, `setup`, with these tools.
+  - The `Registry` keeps its row for a rollback, but never lists it nor answers for it. The `Directory` refuses it, and a webchat socket still open to it closes at its next message, so nothing reaches it.
+  - A Telegram bot once connected to it keeps its token and webhook, and nothing reaches the agent through it. Revoke the token with BotFather.
   - `createAgent` refuses its id.
-  - Its default prompt is a built-in persona. `configureAgent` can replace it, and the vault's persona does, as for any agent.
-  - **Before deploying it to an existing instance,** check with `listAgents` that no agent already uses the id `setup`. Such an agent would keep its name and gain the setup tools.
-- **Its tools** run the commands above, as the owner, through the agent (`via: agent:setup`), and only the setup agent has them:
+  - Its `AgentHost` still keeps the runner form's waits, which are the instance's ("Steps the owner finishes"), and the deploy's probe still wakes it.
+- **Master's guidance:** its prompt carries the built-in `configure-kelpie` skill, whatever persona the owner or the vault gives it.
+- **Its tools** run the commands above, as the owner, through Master (`via: agent:<Master's id>`), and only the agent with the role `main` has them, on every channel it answers: in the webchat, and on Telegram with the typed code. They are checked again when one runs, and a task's run has none:
   - `list_agents`, `get_agent`, `create_agent` and `rename_agent` run directly;
   - `get_models` reads the instance's model settings, and `configure_models` replaces them;
   - `configure_agent` (its `model` included), `configure_models`, `set_main_agent`, `set_agent_chat` and `delete_agent` wait for the owner's confirmation (below);
@@ -349,7 +350,7 @@ Admin and Master can't be deleted, and the `Registry` refuses to remove an agent
   - The model learns only that the link was sent. History, later requests and the outbox's inspection never hold the link.
   - As with a confirmation, the bubble doesn't come back once its turn has settled and the webchat reloads. If the owner says they didn't get it, the agent calls the tool again for a new link.
 - **Steps the owner finishes.** When the owner submits a secure form, the bot's or the runner's, or pairs by pressing Start in the bot, the conversation that sent the link learns it without being told (#206, #328, ADR-0028):
-  - **The wait:** the conversation waits for the step while its link lasts, the form's 15 minutes or a day for pairing, with a few minutes' grace. Both the conversation and the agent's `AgentHost` keep the wait. The runner is the instance's, and only the setup agent connects it, so the setup agent's `AgentHost` keeps its wait.
+  - **The wait:** the conversation waits for the step while its link lasts, the form's 15 minutes or a day for pairing, with a few minutes' grace. Both the conversation and the agent's `AgentHost` keep the wait. The runner is the instance's, so its wait stays on the retired setup agent's `AgentHost`, by that id, whichever agent is Master (ADR-0048).
   - **The report:** the admin API reports a stored token or runner secret to the `AgentHost` it already binds, and `ingress` a redeemed pairing code through conversation-runtime's `SetupEvents` entrypoint, which does nothing else. Each report is bounded and best effort, so the page or the webhook answers whatever happens to it.
   - **The note:** each waiting conversation gets a note Kelpie writes in fixed words, "Kelpie, automatically (the owner didn't write this): …", naming the bot, the pairing, or the runner's version. A conversation takes a report only for a step it waits for, and only once. The agent answers the note.
   - **When the turn starts:**
@@ -365,7 +366,7 @@ Admin and Master can't be deleted, and the `Registry` refuses to remove an agent
 - **Secrets.** The bot's token goes into the secure form ("Secure forms"), never into the chat. If the owner pastes one in the chat anyway, it stays in the conversation: revoke it in BotFather and make a new one. The runner's secret goes into its own form the same way. One pasted in the chat is revoked by writing a new secret to its file on the server ([runner.md](runner.md), "Rotating the secret").
 - **Its context** is any agent's: the vault's persona and rules, recall, and the memory tools. A note in the vault could steer it toward a change that runs directly, such as creating or renaming an agent. The confirmed changes still need the owner's yes: the code or the button, or their own submission on the form or the pairing page.
 
-What the setup agent can't do, because it holds no Cloudflare token (ADR-0013):
+What Master can't do, because it holds no Cloudflare token (ADR-0013):
 - deploy the Workers, in order, with their flags ("Setting it up");
 - set their secrets: the model keys, `SECRETS_KEY` and the bootstrap token (`docs/secrets.md`);
 - create the Access applications and the custom domains;

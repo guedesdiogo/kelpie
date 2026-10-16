@@ -187,7 +187,7 @@ export function generateWith(
 
 const AUDIT_FIELD_CHARS = 128;
 
-/** The instance's model settings as Admin's tools show them. */
+/** The instance's model settings as Master's configuration tools show them. */
 export interface InstanceModels {
   settings: ModelSettings;
   pinned: ProviderId | null;

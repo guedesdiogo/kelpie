@@ -2,6 +2,7 @@ import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { ACCESS_SOURCE, ADMIN_AGENT_ID, type ChannelIdentity } from "@kelpie/access";
 import type { ChannelId } from "@kelpie/channels";
+import { SETUP_AGENT_ID } from "@kelpie/config";
 import { describe, expect, it } from "vitest";
 import type { Directory } from "../src/directory/directory.ts";
 
@@ -59,6 +60,16 @@ describe("Directory", () => {
     // A Registry from before #288, as a partial rollback leaves it, answers no chat at all: the
     // agent is reached as before, not refused.
     expect(await stub.admit(telegram, "legacy")).toMatchObject({ admitted: true });
+  });
+
+  it("refuses the owner the retired setup agent, whatever the Registry says (ADR-0048)", async () => {
+    const stub = await withEnabledOwner("retired-setup");
+
+    expect(await stub.admit(telegram, SETUP_AGENT_ID)).toEqual({
+      admitted: false,
+      reason: "no_grant",
+    });
+    expect(await stub.admit(telegram, "assistant")).toMatchObject({ admitted: true });
   });
 
   it("drops a sender it doesn't know", async () => {

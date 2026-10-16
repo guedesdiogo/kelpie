@@ -10,7 +10,7 @@ import {
   type SetAgentResult,
 } from "@kelpie/config";
 import type { ModelDescription, ModelSettings } from "@kelpie/llm/models";
-import { SUBAGENT_TOOLS } from "./subagent-limits.ts";
+import { SUBAGENT_TOOLS, subagentPrefix } from "./subagent-limits.ts";
 import type { Tool, ToolContext, ToolOutcome, ToolProvider } from "./tools.ts";
 
 // Temporary subagents (ADR-0036 §5, #290): an agent with `spawn` creates them for a demand, and
@@ -106,7 +106,7 @@ const fields = (input: unknown): Record<string, unknown> =>
 /** A subagent's id, from its creator's: never one the model picks. */
 function subagentId(creator: string): string {
   const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 6);
-  return `${creator.slice(0, 29).replace(/-+$/, "")}-sub-${suffix}`;
+  return `${subagentPrefix(creator)}${suffix}`;
 }
 
 export function subagentTools(ports: SubagentPorts): ToolProvider {
@@ -125,7 +125,7 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
       }
       if (!(await ports.canSpawn(context.agentId))) {
         return failed(
-          "You can't create subagents: only Admin can let you, at the owner's request.",
+          "You can't create subagents: only Master can let you, at the owner's request.",
         );
       }
       const given = fields(input);
@@ -143,7 +143,7 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
       // Without complete_task, a subagent could never finish a task (#344).
       if (!allowed.includes("complete_task")) {
         return failed(
-          "You may not use complete_task, so a subagent of yours could never finish a task: ask the owner to allow it through Admin.",
+          "You may not use complete_task, so a subagent of yours could never finish a task: ask the owner to allow it through Master.",
         );
       }
       const tools = optional("tools") ?? allowed;

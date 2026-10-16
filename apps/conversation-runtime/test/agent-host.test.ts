@@ -16,7 +16,7 @@ import {
   replaceContextStoreForTesting,
   replaceIdentitySourcesForTesting,
 } from "../src/agent-host/agent-host.ts";
-import { SETUP_PROMPT } from "../src/setup-agent.ts";
+import { CONFIGURE_KELPIE_SKILL } from "../src/configuration.ts";
 import { withIdentity } from "./prompts.ts";
 
 const host = (id: string) => env.AGENT_HOST.getByName(id);
@@ -105,41 +105,16 @@ describe("AgentHost", () => {
     expect(await host("fresh").config()).toEqual({ settings: DEFAULT_SETTINGS, promptVersion: 0 });
   });
 
-  it("gives the setup agent its built-in persona, which a change can still replace", async () => {
-    const stub = host(SETUP_AGENT_ID);
-    expect(await stub.config()).toEqual({
-      settings: { ...DEFAULT_SETTINGS, systemPrompt: SETUP_PROMPT },
+  it("gives the retired setup agent's id no persona of its own (ADR-0048)", async () => {
+    expect(await host(SETUP_AGENT_ID).config()).toEqual({
+      settings: DEFAULT_SETTINGS,
       promptVersion: 0,
     });
-
-    await stub.configure({ systemPrompt: "Fale como um pirata." }, owner);
-    expect((await stub.config()).settings.systemPrompt).toBe("Fale como um pirata.");
-
-    // Its default is its persona: the other agents' default is a prompt of its own, kept.
-    await stub.configure({ systemPrompt: DEFAULT_SETTINGS.systemPrompt }, owner);
-    expect(await storedOf(stub)).toEqual({ systemPrompt: DEFAULT_SETTINGS.systemPrompt });
-    await stub.configure({ systemPrompt: SETUP_PROMPT }, owner);
-    expect(await storedOf(stub)).toEqual({});
   });
 
   it("keeps the prompt version when a deploy edits a built-in prompt: the prompt key marks it (#220)", async () => {
-    // The last deploy ran an older persona at version 4, and kept it as #210 did.
-    const setup = host(SETUP_AGENT_ID);
-    await setup.config();
-    await seedState(setup, {
-      settings: null,
-      promptVersion: 4,
-      defaultPrompt: "An older persona.",
-    });
-    expect(await setup.config()).toEqual({
-      settings: { ...DEFAULT_SETTINGS, systemPrompt: SETUP_PROMPT },
-      promptVersion: 4,
-    });
-    expect((await setup.turnConfig()).promptVersion).toBe(4);
-    // Only this id gets the persona: leave it as a new agent for the other test that uses it.
-    await seedState(setup, { promptVersion: null, defaultPrompt: null, defaultMemoryCore: null });
-
-    // Any agent's built-in prompt, and one from before #210, which kept none, alike.
+    // Any agent's built-in prompt, and one from before #210, which kept none, alike: the last
+    // deploy ran an older one and kept it.
     for (const [id, defaultPrompt] of [
       ["default-changed", "You are an older assistant."],
       ["untracked", null],
@@ -475,12 +450,6 @@ describe("AgentHost with a vault", () => {
     expect(never).not.toContain("You run on");
   });
 
-  it("tells the setup agent its own role, under its seeded name", async () => {
-    expect((await host(SETUP_AGENT_ID).turnConfig()).settings.systemPrompt).toBe(
-      withIdentity(SETUP_AGENT_ID, SETUP_PROMPT, { name: "Setup" }),
-    );
-  });
-
   it("runs on the configured prompt while the vault has nothing for the agent", async () => {
     expect(await host("empty-vault").turnConfig()).toEqual({
       settings: {
@@ -703,6 +672,21 @@ describe("AgentHost and subagents (#290)", () => {
   }
   afterEach(() => {
     replaceIdentitySourcesForTesting(undefined);
+  });
+
+  it("teaches configure-kelpie to Master alone, over any persona (ADR-0048)", async () => {
+    roster({
+      "cfg-main": { role: "main" },
+      "cfg-specialist": { role: "specialist" },
+      "cfg-child": { role: "subagent", owner: "cfg-main" },
+    });
+    await host("cfg-main").configure({ systemPrompt: "Fale como um pirata." }, owner);
+    const prompt = async (id: string) => (await host(id).turnConfig()).settings.systemPrompt;
+    const master = await prompt("cfg-main");
+    expect(master).toContain("Fale como um pirata.");
+    expect(master.endsWith(`\n\n${CONFIGURE_KELPIE_SKILL}`)).toBe(true);
+    expect(await prompt("cfg-specialist")).not.toContain("configure-kelpie");
+    expect(await prompt("cfg-child")).not.toContain("configure-kelpie");
   });
 
   it("teaches create-subagent to the main agent and to an agent with spawn, never a subagent", async () => {

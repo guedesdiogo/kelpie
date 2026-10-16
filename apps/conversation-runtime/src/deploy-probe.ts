@@ -7,6 +7,7 @@ import {
   REGISTRY_NAME,
   type RegistryContract,
   type RuntimeProbeReport,
+  SETUP_AGENT_ID,
 } from "@kelpie/config";
 
 /** How many AgentHosts the probe wakes at once, so a probe stays a small load however many agents. */
@@ -40,13 +41,13 @@ export async function probeRuntime(targets: ProbeTargets): Promise<RuntimeProbeR
     status("registry", () => targets.registry.ping()),
     // Listing goes through the Registry too, so a broken Registry fails this part as well.
     status("agentHosts", async () => {
-      const agents = await targets.registry.list();
+      // The retired setup agent's too: the Registry doesn't list it, but its AgentHost keeps the
+      // runner form's waits (ADR-0048).
+      const ids = [...(await targets.registry.list()).map((agent) => agent.id), SETUP_AGENT_ID];
       // A few at a time: each wakes an object, which may run its migrations now.
-      for (let start = 0; start < agents.length; start += AGENT_HOSTS_AT_ONCE) {
+      for (let start = 0; start < ids.length; start += AGENT_HOSTS_AT_ONCE) {
         await Promise.all(
-          agents
-            .slice(start, start + AGENT_HOSTS_AT_ONCE)
-            .map((agent) => targets.agentHost(agent.id).ping()),
+          ids.slice(start, start + AGENT_HOSTS_AT_ONCE).map((id) => targets.agentHost(id).ping()),
         );
       }
     }),

@@ -1,6 +1,5 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
-import { SETUP_AGENT_ID } from "@kelpie/config";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SecretStore, SetupForms } from "../src/index.ts";
 import { telegramWebhookUrl } from "../src/telegram-secret.ts";
@@ -66,8 +65,8 @@ describe("SetupForms", () => {
       ok: false,
       reason: "invalid_input",
     });
-    // The setup agent's Worker binds it: it can't describe, redeem or register anything. It opens the
-    // runner's form too, and reads the runner's state, which holds no secret (#294).
+    // The configuration tools' Worker binds it: it can't describe, redeem or register anything. It
+    // opens the runner's form too, and reads the runner's state, which holds no secret (#294).
     expect(
       Object.getOwnPropertyNames(SetupForms.prototype).filter((name) => name !== "constructor"),
     ).toEqual(["createTelegramForm", "createRunnerForm", "describeRunner", "disconnectTelegram"]);
@@ -388,20 +387,6 @@ describe("Disconnecting a deleted agent's bot (#303)", () => {
     expect(await exports.ChannelForms.disconnectTelegram("blip")).toEqual({
       ok: true,
       webhook: "removed",
-    });
-  });
-
-  it("never disconnects Admin's bot: Admin can't be deleted", async () => {
-    const calls = botApi();
-    await connect(SETUP_AGENT_ID);
-    calls.length = 0;
-    expect(await exports.SetupForms.disconnectTelegram(SETUP_AGENT_ID)).toEqual({
-      ok: false,
-      reason: "invalid_input",
-    });
-    expect(calls).toEqual([]);
-    expect(await exports.ChannelForms.describeTelegramBot(SETUP_AGENT_ID)).toMatchObject({
-      ok: true,
     });
   });
 

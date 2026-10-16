@@ -25,7 +25,6 @@ export {
   type ModelDescription,
   type ModelSelection,
   type ModelSettings,
-  mergeModelSettings,
   parseModelSettings,
   type ResolvedModel,
   resolveModel,

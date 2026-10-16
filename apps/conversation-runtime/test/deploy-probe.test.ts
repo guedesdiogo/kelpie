@@ -25,7 +25,7 @@ function targets(overrides: Partial<ProbeTargets> = {}) {
   const fake: ProbeTargets = {
     registry: {
       ping: async () => ({ ok: true }),
-      list: async () => [entry("sales", "Sales"), entry(SETUP_AGENT_ID, "Setup")],
+      list: async () => [entry("sales", "Sales"), entry("kelpie", "Kelpie")],
     },
     agentHost: (id) => ({
       ping: async () => {
@@ -51,7 +51,8 @@ describe("DeployProbe", () => {
     });
     const woken = (await listDurableObjectIds(env.AGENT_HOST)).map((id) => id.toString()).sort();
     expect(woken).toEqual(
-      // The main agent a new instance starts with (#288), the setup agent and the one added.
+      // The main agent a new instance starts with (#288), the one added, and the retired setup
+      // agent's, which keeps the runner form's waits though the Registry doesn't list it (ADR-0048).
       ["kelpie", "sales", SETUP_AGENT_ID]
         .map((name) => env.AGENT_HOST.idFromName(name).toString())
         .sort(),
@@ -80,10 +81,10 @@ describe("ping", () => {
 });
 
 describe("probeRuntime", () => {
-  it("pings each AgentHost the Registry lists", async () => {
+  it("pings each AgentHost the Registry lists, and the retired setup agent's (ADR-0048)", async () => {
     const { fake, pinged } = targets();
     expect(await probeRuntime(fake)).toEqual({ registry: "ok", agentHosts: "ok", gateway: "ok" });
-    expect(pinged.sort()).toEqual(["sales", SETUP_AGENT_ID]);
+    expect(pinged.sort()).toEqual(["kelpie", "sales", SETUP_AGENT_ID]);
   });
 
   it("wakes at most ten AgentHosts at a time", async () => {
@@ -106,7 +107,7 @@ describe("probeRuntime", () => {
     });
     expect((await probeRuntime(fake)).agentHosts).toBe("ok");
     expect(most).toBe(AGENT_HOSTS_AT_ONCE);
-    expect(pinged).toHaveLength(25);
+    expect(pinged).toHaveLength(26);
   });
 
   it("fails agentHosts when any one of them fails, and logs the part without the message", async () => {
