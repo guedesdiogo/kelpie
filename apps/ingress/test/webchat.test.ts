@@ -3,7 +3,12 @@ import type { Admission, Verification } from "@kelpie/access";
 import { type AgentEntry, KELPIE_MASCOT } from "@kelpie/config";
 import { WEBCHAT_ADMISSION_HEADER } from "@kelpie/conversation/contract";
 import { describe, expect, it, vi } from "vitest";
-import { connectWebchat, handleWebchat, type WebchatDeps } from "../src/webchat.ts";
+import {
+  connectWebchat,
+  handleWebchat,
+  MASCOTS_WITHIN_MS,
+  type WebchatDeps,
+} from "../src/webchat.ts";
 
 const ORIGIN = "https://ingress.test";
 const owner: Admission = { admitted: true, userId: "u-owner", role: "owner", timeZone: null };
@@ -159,6 +164,15 @@ describe("the webchat's agent list", () => {
     const response = await handleWebchat(listRequest(), fakes);
     expect(response.status).toBe(200);
     expect(((await response.json()) as { agents: unknown[] }).agents).toHaveLength(3);
+  });
+
+  it("lists the agents without their mascots when AgentLooks is slow", async () => {
+    const fakes = deps({ mascots: vi.fn(() => new Promise<Record<string, unknown>>(() => {})) });
+    const started = Date.now();
+    const response = await handleWebchat(listRequest(), fakes);
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as { agents: { mascot?: unknown }[] }).agents).toHaveLength(3);
+    expect(Date.now() - started).toBeLessThan(MASCOTS_WITHIN_MS + 1_000);
   });
 
   it("lists an agent from a registry before #288 that names no chat, as the Directory admits it", async () => {

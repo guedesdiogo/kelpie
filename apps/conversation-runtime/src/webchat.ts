@@ -111,16 +111,31 @@ export type ServerFrame =
   /** A turn settled `failed`, to presence sockets. */
   | { type: "failed" };
 
+/**
+ * Which of the webchat's sockets get each frame (ADR-0052 §2): the conversation's own, a sidebar
+ * row's presence view, or both. A new frame type doesn't typecheck until it is classified here.
+ */
+export const FRAME_VIEWS: Readonly<Record<ServerFrame["type"], "own" | "presence" | "both">> = {
+  history: "own",
+  agent: "own",
+  bubble: "own",
+  typing: "own",
+  status: "both",
+  wait: "own",
+  paused: "both",
+  resumed: "both",
+  accepted: "own",
+  rejected: "own",
+  confirmation: "both",
+  requests: "both",
+  presence: "presence",
+  failed: "presence",
+};
+
 /** What a presence socket may get (ADR-0052 §2); every other frame stays off it. */
-export const PRESENCE_FRAMES: ReadonlySet<ServerFrame["type"]> = new Set([
-  "presence",
-  "status",
-  "failed",
-  "paused",
-  "resumed",
-  "requests",
-  "confirmation",
-]);
+export const PRESENCE_FRAMES: ReadonlySet<ServerFrame["type"]> = new Set(
+  (Object.keys(FRAME_VIEWS) as ServerFrame["type"][]).filter((type) => FRAME_VIEWS[type] !== "own"),
+);
 
 /**
  * Who ingress admitted for a socket. The role and chat type are null when it named none, as before

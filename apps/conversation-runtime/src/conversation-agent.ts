@@ -127,6 +127,7 @@ import {
 } from "./tools.ts";
 import { chatTypeOf, leastAccess, roleOf, type TurnAccess, turnScopes } from "./turn-access.ts";
 import {
+  FRAME_VIEWS,
   type OpenRequests,
   PRESENCE_FRAMES,
   parseAdmission,
@@ -367,8 +368,6 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   #planning: Promise<void> = Promise.resolve();
   /** The running turn's latest step, for a presence socket that opens later (ADR-0052 §2). */
   #step: Omit<RunningTurn, "agoMs"> | null = null;
-  /** The open confirmations each user was last told, so a change alone sends them again. */
-  readonly #toldRequests = new Map<string, string>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -435,7 +434,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const open = this.#openRequests(admission.userId);
     if (open.requests.length > 0) {
       send(connection, { type: "requests", ...open });
-      this.#toldRequests.set(admission.userId, this.#requestsKey(open));
+      this.#told(admission.userId, this.#requestsKey(open));
     }
     const wait = this.#waitLeft();
     if (wait) send(connection, { type: "wait", deadline: wait });
@@ -1025,7 +1024,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       const presence = admission.view === "presence";
       if ((to === "own" && presence) || (to === "presence" && !presence)) continue;
       const shown = typeof frame === "function" ? frame(admission) : frame;
-      if (!shown || (presence && !PRESENCE_FRAMES.has(shown.type))) continue;
+      if (!shown) continue;
+      if (presence ? !PRESENCE_FRAMES.has(shown.type) : FRAME_VIEWS[shown.type] === "presence") {
+        continue;
+      }
       try {
         send(connection, shown);
       } catch {
@@ -1128,6 +1130,18 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     return requests.map((request) => `${request.id}:${now + request.expiresInMs}`).join(",");
   }
 
+  /**
+   * The open confirmations `userId` was last told, as a key, or records a new one. It is kept in
+   * storage, so a change after the conversation hibernated is still told; a user never told has an
+   * empty list, as a socket opens with none.
+   */
+  #told(userId: string, key?: string): string {
+    const told = this.#get<Record<string, string>>("toldRequests", {});
+    if (key === undefined) return told[userId] ?? "";
+    this.#set("toldRequests", { ...told, [userId]: key });
+    return key;
+  }
+
   /** Tells every socket its user's open confirmations once they changed (ADR-0052 §2, §4). */
   #tellRequests(): void {
     const lists = new Map<string, OpenRequests>();
@@ -1144,9 +1158,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       const userId = (connection.state as SocketAdmission | null)?.userId;
       if (userId === undefined || lists.has(userId)) continue;
       const key = this.#requestsKey(listOf(userId));
-      // A user never told has an empty list, as a socket opens with none.
-      if ((this.#toldRequests.get(userId) ?? "") !== key) changed.add(userId);
-      this.#toldRequests.set(userId, key);
+      if (this.#told(userId) !== key) {
+        changed.add(userId);
+        this.#told(userId, key);
+      }
     }
     if (changed.size === 0) return;
     this.#toSockets((admission) =>

@@ -1,11 +1,11 @@
-import { runInDurableObject } from "cloudflare:test";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { WEBCHAT_ADMISSION_HEADER } from "@kelpie/conversation/contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
-import * as schema from "../src/schema.ts";
 import type { ToolContext } from "../src/tools.ts";
+import { PRESENCE_FRAMES as CLASSIFIED, FRAME_VIEWS } from "../src/webchat.ts";
 import { type FakeWorld, fakeWorld, noRoute, refuse, reply, toolCalls } from "./fakes.ts";
 
 // The webchat's sidebar follows each agent through a socket in a presence view (ADR-0052): it gets
@@ -218,6 +218,38 @@ describe("the presence view (ADR-0052)", () => {
     await vi.waitFor(() => expect(ofType(chat.frames, "requests").at(-1)?.requests).toEqual([]));
   });
 
+  it("still tells a used confirmation's removal after the conversation hibernates", async () => {
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "change", input: { to: "frontier" } }),
+        reply("Confirme, por favor."),
+        toolCalls({ name: "change", input: { to: "frontier" } }),
+        reply("Feito."),
+      ]),
+    );
+    changing(world);
+    const name = "assistant:webchat:p-hibernate";
+    const chat = await open(name);
+    const row = await open(name, presence);
+    await turn(name, chat, "mude o tier");
+    const id = Number(ofType(chat.frames, "bubble")[1]?.confirmation);
+    await vi.waitFor(() => expect(ofType(row.frames, "requests").at(-1)?.requests).toHaveLength(1));
+    // Asleep, the conversation keeps its sockets but loses what it held in memory.
+    await evictDurableObject(agent(name));
+    row.send({ type: "confirm", id, agent: "assistant" });
+    await vi.waitFor(() =>
+      expect(ofType(row.frames, "confirmation")).toEqual([
+        { type: "confirmation", id, status: "accepted" },
+      ]),
+    );
+    await agent(name).flush();
+    await vi.waitFor(() => expect(ofType(row.frames, "requests").at(-1)?.requests).toEqual([]));
+    await vi.waitFor(() => expect(ofType(chat.frames, "requests").at(-1)?.requests).toEqual([]));
+    // Before and after the wake, the row got only its view's frames.
+    expect(types(row.frames).every((type) => PRESENCE_FRAMES.includes(type))).toBe(true);
+    expect(types(chat.frames)).toContain("bubble");
+  });
+
   it("takes only a card's actions, each naming its agent, and closes on anything else", async () => {
     use(fakeWorld([]));
     const name = "assistant:webchat:p-actions";
@@ -283,7 +315,13 @@ describe("the presence view (ADR-0052)", () => {
         { type: "confirmation", id, status: "refused" },
       ]),
     );
-    void schema;
+  });
+
+  it("classifies every frame by view, as the ADR lists the presence view's", () => {
+    expect([...CLASSIFIED].sort()).toEqual([...PRESENCE_FRAMES].sort());
+    // The snapshot and a failed turn are the sidebar's alone; the conversation's own socket shows them otherwise.
+    expect(FRAME_VIEWS.presence).toBe("presence");
+    expect(FRAME_VIEWS.failed).toBe("presence");
   });
 
   it("keeps at most 8 presence sockets, closing the oldest with 1013", async () => {
@@ -301,11 +339,64 @@ describe("the presence view (ADR-0052)", () => {
 
 describe("the conversation's own socket (ADR-0052 §3)", () => {
   it("refuses a press naming another agent, and still takes one naming none", async () => {
-    use(fakeWorld([]));
-    const chat = await open("assistant:webchat:own-agent");
-    chat.send({ type: "confirm", id: 1, agent: "agenda" });
-    chat.send({ type: "confirm", id: 1 });
-    await vi.waitFor(() => expect(ofType(chat.frames, "confirmation")).toHaveLength(2));
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "change", input: { to: "frontier" } }),
+        reply("Confirme, por favor."),
+        toolCalls({ name: "change", input: { to: "frontier" } }),
+        reply("Feito."),
+      ]),
+    );
+    const ran = changing(world);
+    const name = "assistant:webchat:own-agent";
+    const chat = await open(name);
+    await turn(name, chat, "mude o tier");
+    const id = Number(ofType(chat.frames, "bubble")[1]?.confirmation);
+    // Naming another agent, the press is refused, and the confirmation stays open.
+    chat.send({ type: "confirm", id, agent: "agenda" });
+    await vi.waitFor(() =>
+      expect(ofType(chat.frames, "confirmation")).toEqual([
+        { type: "confirmation", id, status: "refused" },
+      ]),
+    );
+    // A page from before ADR-0052 names none: on the conversation's own socket it still counts.
+    chat.send({ type: "confirm", id });
+    await vi.waitFor(() =>
+      expect(ofType(chat.frames, "confirmation").at(-1)).toEqual({
+        type: "confirmation",
+        id,
+        status: "accepted",
+      }),
+    );
+    await agent(name).flush();
+    await vi.waitFor(() => expect(ran).toEqual([{ to: "frontier" }]));
     expect(chat.closedWith()).toBeNull();
+  });
+
+  it("confirms nothing in either conversation for one's id pressed over another's socket", async () => {
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "change", input: { to: "frontier" } }),
+        reply("Confirme, por favor."),
+      ]),
+    );
+    const ran = changing(world);
+    const asking = "assistant:webchat:cross-a";
+    const chat = await open(asking);
+    await turn(asking, chat, "mude o tier");
+    const id = Number(ofType(chat.frames, "bubble")[1]?.confirmation);
+    const other = await open("agenda:webchat:cross-b", { ...presence, agentId: "agenda" });
+    await vi.waitFor(() => expect(other.frames).toHaveLength(1));
+    other.send({ type: "confirm", id, agent: "agenda" });
+    await vi.waitFor(() =>
+      expect(ofType(other.frames, "confirmation")).toEqual([
+        { type: "confirmation", id, status: "refused" },
+      ]),
+    );
+    // The asking conversation still lists it, and ran nothing.
+    const late = await open(asking, presence);
+    await vi.waitFor(() => expect(late.frames).toHaveLength(1));
+    expect(late.frames[0]?.requests).toMatchObject([{ id }]);
+    expect(ran).toEqual([]);
   });
 });

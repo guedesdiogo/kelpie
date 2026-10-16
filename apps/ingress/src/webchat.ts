@@ -111,6 +111,22 @@ export async function handleWebchat(request: Request, deps: WebchatDeps): Promis
   });
 }
 
+/** The mascots are only how the rows look: the list waits this long for them, then answers without. */
+export const MASCOTS_WITHIN_MS = 1_500;
+
+/** `promise`'s value, or `fallback` once `ms` have passed. */
+async function within<T>(ms: number, promise: Promise<T>, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  try {
+    return await Promise.race([promise, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * The agents the page's switcher lists (#140): those that chat, in the registry's order, each one
  * only if the Directory admits this login to it as it would admit its socket. A login it admits to
@@ -127,7 +143,11 @@ async function agentList(sub: string, deps: WebchatDeps): Promise<Response> {
   if (listed.length === 0) return new Response(null, { status: 403 });
   // Each row draws its agent's mascot before its socket opens (ADR-0052 §7). Without them, the list
   // still answers; a value that isn't a mascot never reaches the page.
-  const looks = await deps.mascots(listed.map(({ id }) => id)).catch(() => ({}));
+  const looks = await within(
+    MASCOTS_WITHIN_MS,
+    deps.mascots(listed.map(({ id }) => id)).catch(() => ({})),
+    {},
+  );
   const agents = listed.map(({ id, name, role }) => {
     const mascot: Mascot | null = parseMascot((looks as Record<string, unknown>)[id] ?? null);
     return { id, name, main: role === "main", ...(mascot ? { mascot } : {}) };
