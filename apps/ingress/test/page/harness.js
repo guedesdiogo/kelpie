@@ -55,9 +55,9 @@ export class FakeSocket {
     this.#emit("message", { data: typeof frame === "string" ? frame : JSON.stringify(frame) });
   }
 
-  close() {
+  close(code = 1006) {
     this.readyState = 3;
-    this.#emit("close");
+    this.#emit("close", { code });
   }
 }
 
