@@ -5,6 +5,7 @@
 // own socket; every other row, up to 16, follows a presence socket of its own.
 
 import { Card, defaultTimers } from "./card.js";
+import { icon } from "./icons.js";
 import { Mascot } from "./mascot.js";
 import { isDrawable } from "./mascot-art.js";
 import { APPROVED_MS } from "./mascot-states.js";
@@ -196,6 +197,7 @@ export class Roster {
   #row(agent) {
     const id = `row-${++this.#ids}`;
     const li = element("li", "roster-row");
+    li.dataset.agent = agent.id;
     li.dataset.state = "unknown";
     const box = element("div", "arow");
     const avatar = element("span", "avw");
@@ -377,7 +379,9 @@ export class Roster {
     if (!number) {
       number = element("span", "count");
       words = element("span", "words");
-      this.#strip.append(number, words);
+      const line = element("span", "strip-text");
+      line.append(number, words);
+      this.#strip.append(icon("bell"), line);
     }
     // The count rolls (5.9), unless the strip is just appearing.
     if (appearing || reduced()) number.replaceChildren();

@@ -539,6 +539,21 @@ export class Thread {
     this.#cards.get(id).push(card);
   }
 
+  /**
+   * The open confirmations the conversation lists (ADR-0052 §4). One with no card in the thread,
+   * from a turn that settled before this socket opened, gets its card at the thread's end, with the
+   * time it was asked; one with a card already gets no other.
+   */
+  requests(list) {
+    for (const request of list) {
+      if (this.#cards.has(request.id)) continue;
+      const at = this.#now() - request.askedAgoMs;
+      const bubble = this.#bubble("assistant", at);
+      this.#reply(bubble, { text: request.summary, confirmation: request.id }, at);
+      this.#onChange({ kind: "approval", element: bubble });
+    }
+  }
+
   /** What a press did, on every notice of that confirmation. */
   confirmation(id, status) {
     for (const card of this.#cards.get(id) ?? []) card.confirmation(status);

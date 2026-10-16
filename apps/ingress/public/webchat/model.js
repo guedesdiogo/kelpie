@@ -202,3 +202,15 @@ export function elapsedText(ms, texts, { less }) {
 export function summaryText(steps, ms, texts) {
   return texts.summary(steps, Math.round(ms / 100) / 10);
 }
+
+// ── The account (the owner, 2026-10-16) ───────────────────────────────────────────────────────
+
+/** Up to two initials: the first and last words of the name, or of the email's name before the @. */
+export function initialsOf(name, email, locale) {
+  const words = (name || email.split("@")[0]).split(/[\s._-]+/).filter(Boolean);
+  const chosen = words.length > 1 ? [words[0], words.at(-1)] : words.slice(0, 1);
+  return chosen
+    .map((word) => [...word][0] ?? "")
+    .join("")
+    .toLocaleUpperCase(locale);
+}

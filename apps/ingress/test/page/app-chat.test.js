@@ -287,7 +287,8 @@ describe("the conversation", () => {
     socket.receive("not json");
     socket.receive({ nope: true });
     socket.receive({ type: "something-new" });
-    expect(FakeSocket.all).toHaveLength(1);
+    // Nothing closed the conversation's socket, so it opened no other.
+    expect(FakeSocket.all.filter((each) => !each.url.includes("view=presence"))).toHaveLength(1);
   });
 });
 

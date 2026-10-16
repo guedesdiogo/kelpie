@@ -73,7 +73,14 @@ function keeperWith() {
     },
   };
   const shown: { state: string }[] = [];
-  const keeper = presenceKeeper((presence: { state: string }) => shown.push(presence), timers);
+  const hows: { instant?: boolean; quiet?: boolean }[] = [];
+  const keeper = presenceKeeper(
+    (presence: { state: string }, how: { instant?: boolean; quiet?: boolean }) => {
+      shown.push(presence);
+      hows.push(how);
+    },
+    timers,
+  );
   const clock = {
     advance(ms: number) {
       now += ms;
@@ -84,7 +91,7 @@ function keeperWith() {
       }
     },
   };
-  return { shown, keeper, clock };
+  return { shown, hows, keeper, clock };
 }
 
 /** A fixed sequence of random numbers, repeating. */
@@ -466,6 +473,39 @@ describe("the pause's announcements", () => {
   });
 });
 
+describe("how a change shows (§4.1, 5.3)", () => {
+  it("passes a keyboard's change on to show at once", () => {
+    const { hows, keeper } = keeperWith();
+    keeper.event({ type: "bubble", text: "No model answered.", failed: true });
+    // The owner's message, sent with Enter, ends the error.
+    keeper.event({ type: "sent" }, { instant: true });
+    expect(hows).toEqual([
+      { instant: false, quiet: false },
+      { instant: true, quiet: false },
+    ]);
+  });
+
+  it("brings no announcement for an expiry or a refused press", () => {
+    const { shown, hows, keeper, clock } = keeperWith();
+    keeper.event({ type: "bubble", text: "Confirm?", confirmation: 1 });
+    clock.advance(CONFIRMATION_MS);
+    expect(shown.at(-1)?.state).toBe("idle");
+    expect(hows.at(-1)).toEqual({ quiet: true });
+    keeper.event({ type: "bubble", text: "Confirm?", confirmation: 2 });
+    keeper.event({ type: "confirmation", id: 2, status: "refused" });
+    expect(hows.at(-1)).toEqual({ instant: false, quiet: true });
+    // A confirm still announces its Approved.
+    keeper.event({ type: "bubble", text: "Confirm?", confirmation: 3 });
+    keeper.event({ type: "confirmation", id: 3, status: "accepted" });
+    expect(shown.at(-1)?.state).toBe("approved");
+    expect(hows.at(-1)).toEqual({ instant: false, quiet: false });
+  });
+
+  it("moves a quiet mascot to its pose without the announcement", () => {
+    expect(engine).toContain("if (!quiet) this.announce(next);");
+  });
+});
+
 describe("Offline, when the page loses its connection (ADR-0047)", () => {
   const working = presenceAfter(IDLE, { type: "status", status: "thinking" });
   const offline = presenceAfter(working, { type: "offline" });
@@ -509,6 +549,21 @@ describe("Offline, when the page loses its connection (ADR-0047)", () => {
   it("leaves with the history, whatever it held", () => {
     expect(presenceAfter(offline, { type: "history" })).toEqual(IDLE);
     expect(presenceAfter(offline, { type: "status", status: "thinking" })).toEqual(working);
+  });
+
+  it("returns to Waiting after a reconnect while a confirmation is still open (5.12)", () => {
+    const back = presenceAfter(offline, { type: "history" });
+    const open = { id: 7, summary: "Create the event.", askedAgoMs: 1, expiresInMs: 600_000 };
+    expect(presenceAfter(back, { type: "requests", requests: [open], more: 0 })).toEqual({
+      state: "waiting",
+      activity: null,
+      tool: false,
+    });
+    // A turn at work keeps showing its work; an answered request ends the wait.
+    expect(presenceAfter(working, { type: "requests", requests: [open], more: 0 })).toBe(working);
+    const waiting = presenceAfter(back, { type: "requests", requests: [open], more: 0 });
+    expect(presenceAfter(waiting, { type: "requests", requests: [], more: 0 })).toEqual(IDLE);
+    expect(presenceAfter(working, { type: "requests", requests: [], more: 0 })).toBe(working);
   });
 
   it("drops the plug and swings it on arrival, and clicks it home with a small hop", () => {

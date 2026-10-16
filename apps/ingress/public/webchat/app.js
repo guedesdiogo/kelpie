@@ -5,7 +5,7 @@
 // confirmation's notice, which the runtime marks with its id (#186). The header shows the agent's
 // mascot, whose state follows the conversation's (ADR-0045).
 
-import { icon } from "./icons.js";
+import { icon, outline } from "./icons.js";
 import { Mascot, ownerTyping, setMotion } from "./mascot.js";
 import { isDrawable } from "./mascot-art.js";
 import { effectiveMotion, MOTIONS, presenceKeeper } from "./mascot-states.js";
@@ -15,6 +15,7 @@ import {
   barMotion,
   clock,
   fillAt,
+  initialsOf,
   LOADING_GIVE_UP_MS,
   loginState,
   nearEnd,
@@ -26,8 +27,20 @@ import {
   tabOf,
   waitOf,
 } from "./model.js";
-import { enter, fadeIn, hideAfterExit, play, reduced, SPRINGS, scrollToEnd } from "./motion.js";
+import {
+  enter,
+  fadeIn,
+  fromKeyboard,
+  hideAfterExit,
+  play,
+  reduced,
+  SPRINGS,
+  scrollToEnd,
+} from "./motion.js";
 import { popover, segmented } from "./popover.js";
+import { roll } from "./roll.js";
+import { Roster } from "./roster.js";
+import { sheet } from "./sheet.js";
 import { localeOf, TEXTS } from "./texts.js";
 import { Thread } from "./thread.js";
 import { tips } from "./tips.js";
@@ -103,11 +116,64 @@ const thread = new Thread(threadElement, {
 
 const toasts = new Toasts($("toasts"), { texts: T });
 
+// ── The sidebar's agents (5.9, ADR-0052) ───────────────────────────────────────────────────────
+
+const roster = new Roster($("roster"), {
+  texts: T,
+  locale: LOCALE,
+  strip: $("strip"),
+  note: $("roster-note"),
+  socket: {
+    host: location.host,
+    lang: navigator.language || "",
+    secure: location.protocol === "https:",
+    isHidden: () => document.hidden,
+  },
+  less: () => reduced(),
+  onWaiting: (count) => showWaiting(count),
+  onRefused: () => reloadAgents(),
+  onAnnounce: (text) => announce(text),
+  openOwnCard: () => {
+    const card = thread.openCards.at(-1);
+    if (!card) return false;
+    card.bubble.scrollIntoView({ block: "center" });
+    card.confirm.focus();
+    return true;
+  },
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) roster.wake();
+});
+
+/**
+ * 5.14: opening an agent, its mascot in its box and its name travel to the header with a View
+ * Transition, and the rest crossfades. The header gives its names to the row being opened. From
+ * the keyboard the view changes at once; under reduced motion, only the crossfade plays.
+ */
+addEventListener("pageswap", (event) => {
+  const transition = event.viewTransition;
+  if (!transition) return;
+  if (fromKeyboard()) {
+    transition.skipTransition();
+    return;
+  }
+  const url = event.activation?.entry?.url;
+  const next = url ? new URL(url).searchParams.get("agent") : null;
+  const row = next ? $("roster").querySelector(`[data-agent="${CSS.escape(next)}"]`) : null;
+  if (!row || reduced()) return;
+  mascotHost.style.viewTransitionName = "none";
+  $("agent-name").style.viewTransitionName = "none";
+  row.querySelector(".mascot-host").style.viewTransitionName = "agent-mascot";
+  row.querySelector(".row-link").style.viewTransitionName = "agent-name";
+});
+
 function send(frame) {
   if (isOpen()) socket.send(JSON.stringify(frame));
 }
 
 function receive(frame) {
+  roster.own(frame);
   switch (frame.type) {
     case "history":
       present(frame);
@@ -142,11 +208,13 @@ function receive(frame) {
       setStatus("");
       showEmpty();
       break;
-    case "confirmation":
+    case "confirmation": {
       if (!Number.isSafeInteger(frame.id)) break;
+      const pressed = thread.openCards.find((card) => card.id === frame.id);
       confirmed(frame.id, frame.status);
-      present(frame);
+      present(frame, { instant: Boolean(pressed?.viaKeyboard) });
       break;
+    }
     case "typing":
       if (frame.active) {
         thread.working("typing");
@@ -164,10 +232,16 @@ function receive(frame) {
       setWait(null, { quiet: true });
       stopped("paused");
       setPaused(true);
-      present(frame);
+      present(frame, { instant: pausedByKeyboard });
+      pausedByKeyboard = false;
       break;
     case "resumed":
       setPaused(false);
+      break;
+    // The open confirmations: a card the thread doesn't show yet draws again (ADR-0052 §4).
+    case "requests":
+      thread.requests(Array.isArray(frame.requests) ? frame.requests : []);
+      present(frame);
       break;
     case "accepted":
       unconfirmed.delete(frame.id);
@@ -575,6 +649,7 @@ function showBanner() {
     enter(banner, { rise: -8, scale: 1 });
     // The page sees none of the agents now: every mascot that shows a state says so (ADR-0047).
     present({ type: "offline" });
+    roster.offline(true);
   }
 }
 
@@ -602,6 +677,11 @@ function back(resent) {
   offlineSince = null;
   clearTimeout(bannerTimer);
   clearInterval(bannerTicker);
+  // The rows say what they know again, and each lost one tries again at once (ADR-0052 §5).
+  if (wasOffline) {
+    roster.offline(false);
+    roster.reconnect();
+  }
   if (!wasOffline || banner.hidden) return;
   if (status.textContent === T.offlineStatus) setStatus(paused ? T.pausedStatus : "");
   banner.dataset.state = "back";
@@ -614,6 +694,7 @@ function back(resent) {
 
 $("retry").addEventListener("click", () => {
   if (!isOpen()) connect();
+  roster.reconnect();
 });
 
 // ── The agents and an expired login ────────────────────────────────────────────────────────────
@@ -646,6 +727,7 @@ function showLogin() {
   // The dialog shows the conversation's mascot at 160 px, holding its plug, and behind it every
   // mascot is Offline too (ADR-0047 §3).
   present({ type: "offline" });
+  roster.offline(true);
   if (mascotConfig && !$("login-mascot").mascot) {
     new Mascot($("login-mascot"), {
       mascot: mascotConfig,
@@ -723,18 +805,35 @@ function restoreSession() {
 
 addEventListener("pagehide", saveSession);
 
+/** The list again, once for every row a presence socket refused (ADR-0052 §5). */
+async function reloadAgents() {
+  const { state, agents: found } = await fetchAgents();
+  if (state === "expired") {
+    showLogin();
+    return;
+  }
+  if (state !== "ok") return;
+  agents = found;
+  showAgents();
+}
+
+/** The sidebar shows the agents on a wide screen; below it, the header's name switches. */
+const wide = matchMedia("(min-width: 56rem)");
+const phone = matchMedia("(max-width: 600px)");
+
 function showAgents() {
   const name = $("agent-name");
   name.textContent = agentName();
   thread.renamed();
   showTab();
+  roster.setAgents(agents, agent);
   const switcher = $("switcher");
-  const several = agents.length > 1;
+  const several = agents.length > 1 && !wide.matches;
   switcher.setAttribute("aria-disabled", String(!several));
   switcher.setAttribute("aria-label", several ? `${agentName()}, ${T.switchAgent}` : agentName());
-  if (several && !switcher.querySelector(".icon")) {
-    switcher.append(chevron());
-  }
+  switcher.querySelector(".icon")?.remove();
+  if (several) switcher.append(icon("chevron"));
+  // 5.21's list: each agent's still 36 px mascot in the Idle pose, its name and its id.
   const list = $("agents").querySelector("ul");
   list.replaceChildren(
     ...agents.map((entry) => {
@@ -742,36 +841,53 @@ function showAgents() {
       const link = document.createElement("a");
       link.href = `?agent=${encodeURIComponent(entry.id)}`;
       if (entry.id === agent) link.setAttribute("aria-current", "page");
+      const figure = document.createElement("span");
+      figure.className = "mascot-host";
+      figure.setAttribute("aria-hidden", "true");
       const label = document.createElement("span");
+      label.className = "agent-label";
       label.textContent = entry.name;
       const id = document.createElement("span");
       id.className = "agent-id";
       id.textContent = entry.id;
-      link.append(label, id);
+      link.append(figure, label, id);
       item.append(link);
       return item;
     }),
   );
+  agents.forEach((entry, index) => {
+    if (isDrawable(entry.mascot)) {
+      const host = list.children[index].querySelector(".mascot-host");
+      new Mascot(host, { mascot: entry.mascot, px: 36, mode: "still", state: "idle" });
+    }
+  });
   if (paused) $("paused-line").textContent = T.paused(agentName());
 }
 
-function chevron() {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 16 16");
-  svg.setAttribute("class", "icon");
-  svg.setAttribute("aria-hidden", "true");
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", "M4.5 6.5l3.5 3.5l3.5-3.5");
-  svg.append(path);
-  return svg;
+wide.addEventListener?.("change", () => {
+  if (agents.length > 0) showAgents();
+});
+
+/** The sidebar's roster counts every agent waiting for the owner; the tab says so (5.9). */
+function showWaiting(count) {
+  waiting = count;
+  showTab();
 }
 
-popover($("switcher"), $("agents"), { arrows: true });
+const switcherSheet = sheet($("agents"), { onClose: () => agentsMenu.hide({ restore: false }) });
+const agentsMenu = popover($("switcher"), $("agents"), {
+  arrows: true,
+  onOpen: () => {
+    if (phone.matches) switcherSheet.reset();
+  },
+  // On a phone the list is a sheet that rises from below (5.15); otherwise it grows from the name.
+  motion: () =>
+    phone.matches
+      ? { rise: innerHeight * 0.4, scale: 1, spring: SPRINGS.slow }
+      : { rise: -6, scale: 0.97, spring: SPRINGS.fast },
+});
 
-/**
- * How many agents wait for the owner (5.9). The page hears only the open one, which waits while its
- * mascot does; once the sidebar hears every agent (#378), its strip's count goes here.
- */
+/** How many agents wait for the owner (5.9), as the sidebar's roster counts them, the open one too. */
 let waiting = 0;
 
 /**
@@ -798,7 +914,7 @@ form.addEventListener("submit", (event) => {
   unconfirmed.set(id, text);
   thread.owner({ id, text, queued: !isOpen() });
   send({ type: "message", id, text });
-  present({ type: "sent" });
+  present({ type: "sent" }, { instant: fromKeyboard() });
   mascot?.touch();
   // The next message ends a pause.
   if (paused) setPaused(false);
@@ -831,11 +947,15 @@ input.addEventListener("input", () => {
 });
 
 /** Pauses the conversation, or says why it can't while offline (5.13). */
+/** Whether the latest pause came from a key, so the mascot shows it at once (§4.1). */
+let pausedByKeyboard = false;
+
 function askPause() {
   if (!isOpen()) {
     toasts.show({ text: T.pauseOffline, error: true });
     return false;
   }
+  pausedByKeyboard = fromKeyboard();
   send({ type: "pause" });
   return true;
 }
@@ -886,12 +1006,11 @@ if (viewport) {
 const MOTION_KEY = "kelpie.mascotMotion";
 let mascot = null;
 let mascotConfig = null;
-const presence = presenceKeeper((shown) => {
-  mascot?.setState(shown.state, { activity: shown.activity });
-  waiting = shown.state === "waiting" ? 1 : 0;
-  showTab();
-});
-const present = (event) => presence.event(event);
+const presence = presenceKeeper((shown, how) =>
+  mascot?.setState(shown.state, { activity: shown.activity, ...how }),
+);
+/** `instant` when the keyboard caused it: the new pose shows without its announcement (§4.1). */
+const present = (event, how) => presence.event(event, how);
 
 /** The agent's mascot, from the conversation; one the page can't draw is ignored. */
 function showMascot(config) {
@@ -955,56 +1074,132 @@ for (const button of motionAsk.querySelectorAll("button")) {
 }
 mascotHost.addEventListener("click", () => mascot?.pet());
 
+const THEME_ICONS = {
+  system: () => icon("monitor"),
+  light: () => icon("sun"),
+  dark: () => icon("moon"),
+};
+/** The chosen theme's icon turns into place: the screen settles, the sun a quarter turn, the moon tilts. */
+const THEME_TURN = {
+  system: "scale(.7)",
+  light: "rotate(-90deg) scale(.7)",
+  dark: "rotate(35deg) scale(.7)",
+};
+const MASCOT_ICONS = {
+  alive: () => outline("alive"),
+  states: () => outline("states"),
+  still: () => outline("still"),
+};
+
+/**
+ * The Display menu (5.22, decision 8): the owner's name and email, the theme as icons, less motion
+ * and more contrast as switches, the mascot's motion as its own outline, and the version.
+ */
 function buildDisplay() {
   const current = display?.current ?? { theme: "system", motion: "system", contrast: "system" };
-  const choose = (name) => (value) => display?.set({ [name]: value });
   segmented($("theme"), {
     label: T.theme,
     choices: T.themes,
     value: current.theme,
-    onChange: choose("theme"),
+    icons: THEME_ICONS,
+    onChange: (theme) => {
+      display?.set({ theme });
+      const chosen = $("theme").querySelector(`[data-value="${theme}"] .icon`);
+      if (chosen && !reduced() && !fromKeyboard()) {
+        play(chosen, [{ transform: THEME_TURN[theme] }, { transform: "none" }], SPRINGS.base);
+      }
+    },
   });
-  const motion = segmented($("motion-setting"), {
-    label: T.motionSetting,
-    choices: T.motionChoices,
-    value: current.motion,
-    onChange: choose("motion"),
-  });
+  const less = $("less-motion");
   // The system's reduced motion can't be turned off here; the switch only adds to it.
-  if (display?.systemReduced) {
-    motion.check("less");
-    for (const button of $("motion-setting").querySelectorAll("button")) button.disabled = true;
-  }
-  segmented($("contrast"), {
-    label: T.contrast,
-    choices: T.contrasts,
-    value: current.contrast,
-    onChange: choose("contrast"),
-  });
+  less.checked = Boolean(display?.systemReduced) || current.motion === "less";
+  less.disabled = Boolean(display?.systemReduced);
+  less.onchange = () => display?.set({ motion: less.checked ? "less" : "system" });
+  const contrast = $("more-contrast");
+  contrast.checked = current.contrast === "more";
+  contrast.onchange = () => display?.set({ contrast: contrast.checked ? "more" : "system" });
   mascotChoice = segmented($("motion"), {
     label: T.motion,
     choices: T.motions,
     value: effectiveMotion(readMotion(), reduced()),
+    icons: MASCOT_ICONS,
     onChange: chooseMotion,
   });
+  applyMotion();
 }
 
-popover($("display-button"), $("display"), { onOpen: buildDisplay });
+popover([$("account"), $("account-top")], $("display"), {
+  onOpen: buildDisplay,
+  // From the sidebar's foot it grows upward; from the header's avatar, downward (5.8).
+  motion: (trigger) => ({
+    rise: trigger.id === "account" ? 6 : -6,
+    scale: 0.97,
+    spring: SPRINGS.fast,
+  }),
+});
 display?.onChange(() => applyMotion());
+
+// ── The account (the owner, 2026-10-16) ──────────────────────────────────────────────────────
+
+/**
+ * The owner's name and email, from the Access login (`get-identity`, served by Access on this
+ * origin). They are shown, never stored. Without a name, the email's initials; without a login, the
+ * sidebar's foot reads Display.
+ */
+async function showAccount() {
+  let identity = null;
+  try {
+    const response = await fetch("/cdn-cgi/access/get-identity", {
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+      redirect: "manual",
+      cache: "no-store",
+    });
+    if (response.ok) identity = await response.json();
+  } catch {
+    identity = null;
+  }
+  const email = typeof identity?.email === "string" ? identity.email : "";
+  if (!email) return;
+  const name =
+    typeof identity.name === "string" && identity.name.trim() ? identity.name.trim() : "";
+  const initials = initialsOf(name, email, LOCALE);
+  for (const avatar of document.querySelectorAll(".avatar")) avatar.textContent = initials;
+  document.querySelector(".account-name").textContent = name || email;
+  $("me-name").textContent = name || email;
+  $("me-email").textContent = name ? email : "";
+  const label = T.accountOf(name || email);
+  $("account").setAttribute("aria-label", label);
+  $("account-top").setAttribute("aria-label", label);
+  tips($("account-top").parentElement);
+}
 
 // ── Start ───────────────────────────────────────────────────────────────────────────────────────
 
-/** Kelpie's version and the deploy's commit, in the footer (#148); nothing when it can't be read. */
+/** Kelpie's version and the deploy's commit, in the Display menu (#148, decision 5); a press copies it. */
 async function showVersion() {
   try {
     const response = await fetch("/version", { cache: "no-store" });
     if (!response.ok) return;
     const { version, commit } = await response.json();
     if (typeof version !== "string") return;
-    $("version").textContent =
-      typeof commit === "string" ? `Kelpie ${version} · ${commit}` : `Kelpie ${version}`;
+    const text = typeof commit === "string" ? `Kelpie ${version} · ${commit}` : `Kelpie ${version}`;
+    const button = $("version");
+    button.replaceChildren();
+    roll(button, text);
+    button.hidden = false;
+    button.onclick = async () => {
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch {
+        copied = false;
+      }
+      roll(button, copied ? T.copied : T.copyFailed);
+      setTimeout(() => roll(button, text), 1_500);
+    };
   } catch {
-    // The footer stays empty.
+    // The menu shows no version.
   }
 }
 
@@ -1021,12 +1216,20 @@ function translatePage() {
   pause.replaceChildren(icon("pause"));
   tips(form);
   $("retry").textContent = T.tryNow;
-  $("display-button").textContent = T.display;
-  $("display").setAttribute("aria-label", T.display);
+  // Until the login names the owner, the account is the Display menu's own button.
+  document.querySelector(".account-name").textContent = T.display;
+  for (const avatar of document.querySelectorAll(".avatar"))
+    avatar.replaceChildren(icon("display"));
+  $("account").setAttribute("aria-label", T.display);
+  $("account").append(icon("chevronUp"));
+  $("account-top").setAttribute("aria-label", T.display);
+  tips($("account-top").parentElement);
+  $("display").setAttribute("aria-label", T.accountMenu);
   $("agents").setAttribute("aria-label", T.agents);
+  $("roster").setAttribute("aria-label", T.agents);
   $("theme-label").textContent = T.theme;
-  $("motion-setting-label").textContent = T.motionSetting;
-  $("contrast-label").textContent = T.contrast;
+  $("motion-setting-label").textContent = T.lessMotion;
+  $("contrast-label").textContent = T.moreContrast;
   $("motion-label").textContent = T.motion;
   $("login-title").textContent = T.loginTitle;
   $("login-body").textContent = T.loginBody;
@@ -1040,6 +1243,7 @@ function translatePage() {
 async function start() {
   translatePage();
   showVersion();
+  showAccount();
   applyMotion();
   setStatus(T.connecting);
   // Without `?agent=`, the page opens the main agent (#140).

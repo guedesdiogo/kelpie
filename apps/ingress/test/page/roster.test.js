@@ -8,7 +8,15 @@ import { FakeSocket } from "./harness.js";
 // The sidebar's roster (5.9, ADR-0052): a row per agent in the Registry's order, each following
 // its agent, the open one through the conversation's own socket.
 
-const NOW = new Date(2026, 9, 16, 14, 32).getTime();
+const NOW = vi.hoisted(() => {
+  const now = new Date(2026, 9, 16, 14, 32).getTime();
+  // Before mascot.js loads, so the one timer it starts for every mascot is a fake one too.
+  vi.useFakeTimers({
+    now,
+    toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"],
+  });
+  return now;
+});
 
 const KELPIE = {
   shape: "mark",

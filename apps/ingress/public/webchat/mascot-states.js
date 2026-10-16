@@ -352,6 +352,14 @@ export function presenceAfter(presence, event) {
           : { state: "listening", activity: null, tool: false };
       }
       return presence.state === "listening" ? idle() : presence;
+    // The open confirmations (ADR-0052 §4): after a reconnect, one still open is still waited on.
+    case "requests":
+      if (Array.isArray(event.requests) && event.requests.length > 0) {
+        return presence.state === "working" || presence.state === "typing"
+          ? presence
+          : { state: "waiting", activity: null, tool: false };
+      }
+      return presence.state === "waiting" ? idle() : presence;
     case "confirmation":
       return event.status === "accepted"
         ? { state: "approved", activity: null, tool: false }
@@ -381,8 +389,10 @@ const same = (a, b) => a.state === b.state && a.activity === b.activity && a.too
 /**
  * Keeps the conversation's presence over time and calls `show` on each change: the approval's
  * pose for 1.1 s, then what arrived meanwhile; a wait that ends when the confirmation expires.
+ * `show` also learns how: `instant` for a change the keyboard caused (§4.1), `quiet` for an expiry
+ * or a refused press, which bring no announcement (5.3).
  *
- * @param {(presence: { state: string, activity: string | null, tool: boolean }) => void} show
+ * @param {(presence: { state: string, activity: string | null, tool: boolean }, how: { instant?: boolean, quiet?: boolean }) => void} show
  * @param {{ set: (run: () => void, ms: number) => unknown, clear: (timer: unknown) => void }} [timers]
  */
 export function presenceKeeper(
@@ -392,23 +402,23 @@ export function presenceKeeper(
   let presence = IDLE;
   let afterApproval = IDLE;
   let timer = null;
-  const apply = (next) => {
+  const apply = (next, how = {}) => {
     timers.clear(timer);
     timer = null;
     presence = next;
-    show(presence);
+    show(presence, how);
     if (presence.state === "approved") {
       afterApproval = IDLE;
       timer = timers.set(() => apply(afterApproval), APPROVED_MS);
     } else if (presence.state === "waiting") {
-      timer = timers.set(() => apply(IDLE), CONFIRMATION_MS);
+      timer = timers.set(() => apply(IDLE, { quiet: true }), CONFIRMATION_MS);
     }
   };
   return {
     get current() {
       return presence;
     },
-    event(event) {
+    event(event, { instant = false } = {}) {
       if (presence.state === "approved") {
         afterApproval = presenceAfter(afterApproval, event);
         return;
@@ -416,7 +426,8 @@ export function presenceKeeper(
       const next = presenceAfter(presence, event);
       // A new notice while one waits starts its own 10 minutes.
       const renewed = next.state === "waiting" && event.type === "bubble";
-      if (renewed || !same(next, presence)) apply(next);
+      const refused = event.type === "confirmation" && event.status !== "accepted";
+      if (renewed || !same(next, presence)) apply(next, { instant, quiet: refused });
     },
   };
 }

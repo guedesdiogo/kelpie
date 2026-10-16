@@ -56,9 +56,9 @@ describe("a lost connection (5.12)", () => {
     // The socket and two retries fail; the waits grow, from 300 ms to 600 ms to 1.2 s.
     socket.close();
     vi.advanceTimersByTime(300);
-    FakeSocket.last.close();
+    FakeSocket.own.close();
     vi.advanceTimersByTime(600);
-    FakeSocket.last.close();
+    FakeSocket.own.close();
     vi.advanceTimersByTime(1_099);
     expect($("banner").hidden).toBe(true);
     vi.advanceTimersByTime(1);
@@ -80,7 +80,7 @@ describe("a lost connection (5.12)", () => {
     expect(document.querySelector(".mark").textContent).toBe("Queued");
 
     $("retry").click();
-    const next = FakeSocket.last;
+    const next = FakeSocket.own;
     expect(next).not.toBe(socket);
     next.open();
     next.receive(historyFrame());
@@ -102,9 +102,9 @@ describe("a lost connection (5.12)", () => {
     const { socket } = await connected();
     socket.close();
     vi.advanceTimersByTime(2_000);
-    const connecting = FakeSocket.last;
+    const connecting = FakeSocket.own;
     $("retry").click();
-    const fresh = FakeSocket.last;
+    const fresh = FakeSocket.own;
     expect(fresh).not.toBe(connecting);
     expect(connecting.readyState).toBe(3);
     connecting.open();
@@ -125,8 +125,8 @@ describe("a lost connection (5.12)", () => {
     scroller.dispatchEvent(new Event("scroll"));
     socket.close();
     vi.advanceTimersByTime(300);
-    FakeSocket.last.open();
-    FakeSocket.last.receive(historyFrame([{ role: "assistant", text: "Antiga.", at: NOW }]));
+    FakeSocket.own.open();
+    FakeSocket.own.receive(historyFrame([{ role: "assistant", text: "Antiga.", at: NOW }]));
     expect(scroller.scrollTop).toBe(0);
   });
 
@@ -134,7 +134,7 @@ describe("a lost connection (5.12)", () => {
     const { socket } = await connected();
     socket.close();
     vi.advanceTimersByTime(300);
-    const next = FakeSocket.last;
+    const next = FakeSocket.own;
     expect(next).not.toBe(socket);
     next.open();
     next.receive(historyFrame());
@@ -188,8 +188,8 @@ describe("Offline, when the page loses its connection (ADR-0047)", () => {
     expect($("banner").hidden).toBe(false);
     expect(headerState()).toBe("offline");
     $("retry").click();
-    FakeSocket.last.open();
-    FakeSocket.last.receive(historyFrame());
+    FakeSocket.own.open();
+    FakeSocket.own.receive(historyFrame());
     expect(headerState()).toBe("idle");
   });
 
@@ -204,10 +204,10 @@ describe("Offline, when the page loses its connection (ADR-0047)", () => {
         ? { type: "opaqueredirect", status: 0, ok: false }
         : Response.json({ version: "1.2.3" }),
     );
-    FakeSocket.last.close();
+    FakeSocket.own.close();
     vi.advanceTimersByTime(300);
     // A socket that never opened asks whether the login expired.
-    FakeSocket.last.close();
+    FakeSocket.own.close();
     await settle();
     expect($("login").open).toBe(true);
     const shown = $("login-mascot").mascot;
@@ -329,8 +329,15 @@ describe("the agents (#140)", () => {
     expect(location.search).toBe("?agent=assistant");
   });
 
-  it("lists the agents to switch to, marking the current one", async () => {
+  it("lists the agents to switch to below the sidebar's width, marking the current one", async () => {
+    // Below 56rem the sidebar gives way to the header's switcher.
+    const narrow = vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+      matches: false,
+      media: query,
+      addEventListener() {},
+    }));
     await loadPage();
+    narrow.mockRestore();
     const switcher = $("switcher");
     expect(switcher.getAttribute("aria-disabled")).toBe("false");
     expect(switcher.getAttribute("aria-label")).toBe("Assistant, Switch agent");
@@ -342,6 +349,46 @@ describe("the agents (#140)", () => {
     );
     expect(links[1].getAttribute("aria-current")).toBe("page");
     expect(links[2].textContent).toBe("Agendaagenda");
+  });
+
+  it("leaves the switching to the sidebar on a wide screen", async () => {
+    await loadPage();
+    expect($("switcher").getAttribute("aria-disabled")).toBe("true");
+    const rows = [...$("roster").querySelectorAll(".row-link")];
+    expect(rows.map((row) => row.getAttribute("href"))).toEqual(
+      AGENTS.map((agent) => `?agent=${agent.id}`),
+    );
+    expect(rows[1].getAttribute("aria-current")).toBe("page");
+    // A presence socket for each agent but the open one (ADR-0052 §1).
+    expect(
+      FakeSocket.all.filter((each) => each.url.includes("view=presence")).map((each) => each.url),
+    ).toEqual([
+      "ws://localhost:3000/webchat/ws?agent=kelpie-setup&view=presence&lang=en-US",
+      "ws://localhost:3000/webchat/ws?agent=agenda&view=presence&lang=en-US",
+    ]);
+  });
+
+  it("hands the header's names to the row being opened, for 5.14's transition", async () => {
+    await loadPage();
+    const swap = (url, transition) => {
+      const event = new Event("pageswap");
+      event.viewTransition = transition;
+      event.activation = { entry: { url } };
+      window.dispatchEvent(event);
+    };
+    const transition = { skipTransition: vi.fn() };
+    window.dispatchEvent(new PointerEvent("pointerdown"));
+    swap("http://localhost:3000/webchat/?agent=agenda", transition);
+    const row = $("roster").querySelector('[data-agent="agenda"]');
+    expect(row.querySelector(".mascot-host").style.viewTransitionName).toBe("agent-mascot");
+    expect(row.querySelector(".row-link").style.viewTransitionName).toBe("agent-name");
+    expect($("mascot").style.viewTransitionName).toBe("none");
+    expect(transition.skipTransition).not.toHaveBeenCalled();
+    // From the keyboard, the view changes at once.
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    swap("http://localhost:3000/webchat/?agent=agenda", transition);
+    // Each page this file loaded listens on the same window, so it may be skipped more than once.
+    expect(transition.skipTransition).toHaveBeenCalled();
   });
 
   it("opens the main agent instead of one the list doesn't name", async () => {

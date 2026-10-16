@@ -403,6 +403,23 @@ describe("the confirmation card (5.3)", () => {
     expect(first.querySelector(".receipt").textContent).toBe("You confirmed at 2:32 PM");
   });
 
+  it("draws the card again for a confirmation still open after its turn settled", () => {
+    thread.replay([{ role: "assistant", text: "Earlier.", at: NOW - 120_000 }]);
+    const open = { id: 9, summary: "Send the invite.", askedAgoMs: 60_000, expiresInMs: 540_000 };
+    thread.requests([open]);
+    const cards = [...root.querySelectorAll(".bubble.card")];
+    expect(cards).toHaveLength(1);
+    expect(cards[0].querySelector(".text").textContent).toBe("Send the invite.");
+    expect(cards[0].querySelector(".card-until").textContent).toBe("Valid until 2:41 PM");
+    expect(changes.at(-1).kind).toBe("approval");
+    expect(thread.openCards.map((card) => card.id)).toEqual([9]);
+    // Listed again, or listed after its notice drew its card, it draws no other.
+    thread.requests([open]);
+    thread.reply(notice);
+    thread.requests([{ ...open, id: 7 }]);
+    expect(root.querySelectorAll(".bubble.card")).toHaveLength(2);
+  });
+
   it("leaves room in its action row for Deny (#361)", () => {
     const card = thread.reply(notice);
     const actions = card.querySelector(".card-actions");

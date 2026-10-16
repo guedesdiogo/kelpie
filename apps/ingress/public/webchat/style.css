@@ -74,31 +74,25 @@ a {
   transform: none;
 }
 
-/* ── The window ────────────────────────────────────────────────────────────────────────────── */
+/* ── The window: the agents' sidebar and the conversation, edge to edge (decision 9) ──────── */
 
+:root {
+  /* The conversation's side margin: the phone's 16 px, and 32 px beside the sidebar. */
+  --gutter: var(--space-4);
+}
+.app {
+  display: flex;
+  /* iOS doesn't shrink the viewport for its keyboard; the page measures it (5.15). */
+  block-size: calc(100dvh - var(--keyboard, 0px));
+}
 .chat {
   position: relative;
+  flex: 1;
+  min-inline-size: 0;
   display: flex;
   flex-direction: column;
-  inline-size: min(100% - 2 * var(--space-4), 48rem);
-  block-size: calc(100dvh - 2 * var(--space-4) - var(--space-6));
-  margin: var(--space-4) auto 0;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--r-panel);
   background: var(--surface);
-  box-shadow: var(--shadow);
-}
-
-footer {
-  display: flex;
-  justify-content: center;
-  min-block-size: var(--space-6);
-  padding-block: var(--space-1);
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  line-height: var(--leading-xs);
 }
 
 /* ── The header: the mascot, the agent's name and what it does ─────────────────────────────── */
@@ -108,8 +102,21 @@ footer {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-3) var(--gutter);
   border-block-end: 1px solid var(--line);
+}
+/* The account, below the sidebar's width: the owner's avatar at the header's end. */
+.account-top {
+  display: grid;
+  place-items: center;
+  inline-size: 44px;
+  block-size: 44px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-btn);
+  background: transparent;
+  cursor: pointer;
 }
 
 /* The mascot's 48 px box is kept from the start, so nothing moves when it arrives (ADR-0045). */
@@ -196,11 +203,12 @@ footer {
   background: var(--sunken);
 }
 
-/* ── Popovers: the agent switcher and the Display menu (5.8's growth, §5.21, §5.22) ────────── */
+/* ── The switcher (5.21): a popover from the name, a sheet on a phone (5.15) ───────────────── */
 
-.popover {
+.switcher {
   position: absolute;
   inset-block-start: calc(100% - var(--space-2));
+  inset-inline-start: calc(var(--space-4) + 48px + var(--space-3));
   z-index: 5;
   min-inline-size: 17rem;
   max-inline-size: calc(100% - 2 * var(--space-4));
@@ -210,87 +218,243 @@ footer {
   background: var(--surface);
   box-shadow: var(--shadow-pop);
 }
-.popover[hidden] {
+.switcher[hidden] {
   display: none;
 }
-#agents {
-  inset-inline-start: calc(var(--space-4) + 48px + var(--space-3));
+.switcher .handle {
+  display: none;
 }
-#display {
-  inset-inline-end: var(--space-4);
-}
-.popover ul {
+.switcher ul {
   margin: 0;
-  padding: 0;
+  /* Room for a focused row's ring, which the list's scroll would clip. */
+  padding: var(--space-1);
   list-style: none;
 }
-.popover a {
+.switcher a {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-4);
-  min-block-size: 36px;
-  padding: var(--space-2) var(--space-3);
+  align-items: center;
+  gap: var(--space-3);
+  min-block-size: 44px;
+  padding: var(--space-1) var(--space-3) var(--space-1) var(--space-1);
   border-radius: calc(var(--r-card) - var(--space-2));
   font-size: var(--text-ui);
   text-decoration: none;
   transition: background-color var(--dur-fade) var(--ease-fade);
 }
-.popover a:hover {
+.switcher a:hover {
   background: var(--sunken);
 }
-.popover a[aria-current="page"] {
+.switcher a[aria-current="page"] {
   font-weight: 600;
 }
-.popover .agent-id {
+.switcher .mascot-host {
+  inline-size: 36px;
+  block-size: 36px;
+}
+.switcher .agent-label {
+  flex: 1;
+  min-inline-size: 0;
+}
+.switcher .agent-id {
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
-.setting + .setting {
-  margin-block-start: var(--space-3);
+
+/* ── The Display menu (5.22, decision 8): the lab's controls, from the account ─────────────── */
+
+.menu {
+  position: fixed;
+  z-index: 6;
+  display: grid;
+  gap: 14px;
+  inline-size: 300px;
+  max-inline-size: calc(100vw - 2 * var(--space-4));
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
 }
-.setting > span {
-  display: block;
-  margin-block-end: var(--space-1);
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  letter-spacing: var(--tracking-eyebrow);
-  text-transform: uppercase;
+.menu[hidden] {
+  display: none;
 }
-.segmented {
+/* It grows upward from the sidebar's foot, or down from the header's avatar. */
+.menu[data-from="account"] {
+  inset-inline-start: var(--space-3);
+  inset-block-end: 64px;
+  transform-origin: 20% 100%;
+}
+.menu[data-from="account-top"] {
+  inset-inline-end: var(--space-4);
+  inset-block-start: 64px;
+  transform-origin: 90% 0;
+}
+.who-me {
   display: flex;
-  padding: 2px;
+  align-items: center;
+  gap: 10px;
+  padding-block-end: var(--space-3);
+  border-block-end: 1px solid var(--line);
+}
+.who-me div {
+  min-inline-size: 0;
+}
+.who-me b {
+  display: block;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.who-me .email {
+  display: block;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.who-me .email:empty {
+  display: none;
+}
+.menu-row {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.menu-row[hidden] {
+  display: none;
+}
+.menu .note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.menu .note[hidden] {
+  display: none;
+}
+
+/* The lab's segmented control: a --sunken track bounded in --muted, a chip under the chosen one. */
+.segmented {
+  position: relative;
+  display: flex;
+  padding: 3px;
   border: 1px solid var(--muted);
+  border-radius: 13px;
+  background: var(--sunken);
+}
+.segmented .chip {
+  position: absolute;
+  inset-block: 3px;
+  inset-inline-start: 0;
   border-radius: var(--r-btn);
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.14);
 }
 .segmented button {
+  position: relative;
+  z-index: 1;
   flex: 1;
-  white-space: nowrap;
+  display: grid;
+  place-items: center;
   min-block-size: 32px;
-  padding: 0 var(--space-2);
+  padding: 5px var(--space-2);
   border: 0;
-  border-radius: calc(var(--r-btn) - 2px);
+  border-radius: var(--r-btn);
   background: none;
-  font-size: var(--text-sm);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
   cursor: pointer;
-  transition:
-    background-color var(--dur-fade) var(--ease-fade),
-    color var(--dur-fade) var(--ease-fade);
+  transition: color var(--dur-fade) var(--ease-fade);
 }
 .segmented button[aria-checked="true"] {
-  background: var(--accent);
-  color: var(--on-accent);
+  color: var(--fg);
+}
+.segmented:not(.icons) button[aria-checked="true"] {
+  background: var(--surface);
 }
 .segmented button:disabled {
-  color: var(--muted);
   cursor: not-allowed;
+  opacity: 0.55;
 }
-.setting .note {
-  margin: var(--space-1) 0 0;
+.segmented .icon-m20 {
+  inline-size: 20px;
+  block-size: 20px;
+  stroke-width: 1.5;
+}
+.icon .solid {
+  fill: currentColor;
+  stroke: none;
+}
+
+/* A switch: its label on the left, the lab's track and knob on the right. */
+.toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.toggle input {
+  appearance: none;
+  position: relative;
+  flex: none;
+  inline-size: 30px;
+  block-size: 18px;
+  margin: 0;
+  border: 1px solid var(--muted);
+  border-radius: var(--r-chip);
+  background: var(--line);
+  cursor: pointer;
+  transition: background-color var(--dur-fade) var(--ease-fade);
+}
+.toggle input::after {
+  content: "";
+  position: absolute;
+  inset-block-start: 1px;
+  inset-inline-start: 1px;
+  inline-size: 14px;
+  block-size: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  transition: translate var(--spring-fast-dur) var(--spring-fast);
+}
+.toggle input:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.toggle input:checked::after {
+  translate: 12px 0;
+}
+.toggle input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* The version, in Mono; a press copies it (5.20). */
+.version {
+  justify-self: stretch;
+  padding: 10px 0 0;
+  border: 0;
+  border-block-start: 1px solid var(--line);
+  background: none;
   color: var(--muted);
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
+  text-align: start;
+  cursor: copy;
+}
+.version[hidden] {
+  display: none;
 }
 
 /* ── The mascot's question, asked before it first moves (ADR-0045 §6) ──────────────────────── */
@@ -383,7 +547,7 @@ main {
   flex-direction: column;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 0 var(--space-4) var(--space-4);
+  padding: 0 var(--gutter) var(--space-4);
 }
 /* Anchored to the bottom, as the demo's thread is: a new message pushes the ones above up. */
 #thread {
@@ -1028,7 +1192,7 @@ main {
   gap: 10px;
   flex: none;
   block-size: 18px;
-  padding-inline: var(--space-4);
+  padding-inline: var(--gutter);
   color: var(--muted);
   font-size: var(--text-xs);
   line-height: var(--leading-xs);
@@ -1056,7 +1220,7 @@ main {
 #composer {
   display: grid;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
+  padding: var(--space-2) var(--gutter) calc(var(--space-4) + env(safe-area-inset-bottom));
 }
 #composer[hidden] {
   display: none;
@@ -1266,17 +1430,390 @@ dialog h2 {
   font-size: var(--text-ui);
 }
 
+/* ── The sidebar (5.9, ADR-0052): the agents beside the conversation, on a wide screen ──────── */
+
+.side {
+  display: none;
+}
+@media (min-width: 56rem) {
+  :root {
+    --gutter: var(--space-8);
+  }
+  .side {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    inline-size: 296px;
+    flex: none;
+    padding: var(--space-4) var(--space-3) 14px;
+    overflow-y: auto;
+    border-inline-end: 1px solid var(--line);
+    background: var(--bg);
+  }
+  /* The sidebar is the switcher; the header's name and avatar give way to it. */
+  .account-top,
+  .agent-name .icon {
+    display: none;
+  }
+}
+/* The lockup (5.23): the mark 1.3 cap heights tall, half a cap from the K, both in --accent. */
+.brand {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(0.5cap - 2px);
+  padding: 2px var(--space-2);
+  border-radius: var(--r-sm);
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 680;
+  line-height: 1.05;
+  letter-spacing: var(--tracking-display);
+  text-decoration: none;
+}
+.brand-mark {
+  block-size: calc(1.3cap * 64 / 53.13);
+  inline-size: auto;
+  aspect-ratio: 1;
+  fill: currentColor;
+}
+/* The strip's slot is kept, so the rows never move when it comes (5.9). */
+.slot {
+  min-block-size: 34px;
+}
+.strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 7px var(--space-3);
+  border-radius: var(--r-btn);
+  background: color-mix(in srgb, var(--warm) 14%, transparent);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.strip[hidden] {
+  display: none;
+}
+.strip .icon {
+  color: var(--warm);
+}
+.strip-text {
+  min-inline-size: 0;
+}
+.strip .count {
+  display: inline-grid;
+  vertical-align: top;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.strip .count > .roll {
+  grid-area: 1 / 1;
+}
+.roster ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.arow {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 5px var(--space-2);
+  border-radius: var(--r-btn);
+  transition: background-color var(--dur-fade) var(--ease-fade);
+}
+.arow:hover {
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+}
+.arow:has(.row-link[aria-current]) {
+  background: var(--surface);
+}
+.avw {
+  display: grid;
+  place-items: center;
+  inline-size: 40px;
+  block-size: 40px;
+  flex: none;
+}
+.avw .mascot-host {
+  inline-size: 36px;
+  block-size: 36px;
+}
+.an {
+  display: grid;
+  min-inline-size: 0;
+}
+/* The row's link covers the whole row; its state's disclosure sits above it. */
+.row-link {
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--r-btn);
+}
+.row-link:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.row-link:focus-visible::after {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  box-shadow: 0 0 0 4px var(--focus-halo);
+}
+.ast {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-inline-size: 0;
+  min-block-size: calc(var(--text-sm) * 1.4);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.ast .t {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The state rolls in place; what it does follows it on the same line. */
+.ast .lbl {
+  display: inline-grid;
+  vertical-align: top;
+}
+.ast .lbl > .roll {
+  grid-area: 1 / 1;
+}
+.roster-row[data-state="waiting"] .lbl {
+  color: var(--warm);
+  font-weight: 600;
+}
+.row-open {
+  position: absolute;
+  inset: -2px -4px;
+  z-index: 1;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  cursor: pointer;
+}
+.row-open[hidden] {
+  display: none;
+}
+.row-open:hover {
+  background: color-mix(in srgb, var(--warm) 10%, transparent);
+}
+.atime {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.row-request {
+  overflow: hidden;
+  padding: var(--space-1) 0 var(--space-2) var(--space-2);
+}
+.row-request[hidden] {
+  display: none;
+}
+.row-request > .bubble.row-card {
+  max-inline-size: none;
+  background: var(--surface);
+}
+.roster-note {
+  margin: 0;
+  padding: 0 var(--space-2);
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.roster-note[hidden] {
+  display: none;
+}
+/* 5.9's glyphs: their shapes carry the state, their colors only add to it. */
+.glyph {
+  inline-size: 10px;
+  block-size: 10px;
+  flex: none;
+}
+.glyph .ring {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+.glyph .fill {
+  fill: currentColor;
+}
+.glyph .line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.glyph[data-glyph="working"] {
+  color: var(--accent);
+}
+.glyph[data-glyph="waiting"] {
+  color: var(--warm);
+}
+.glyph[data-glyph="error"] {
+  color: var(--danger);
+}
+.glyph-slot {
+  display: inline-flex;
+  flex: none;
+}
+.glyph-slot:empty {
+  display: none;
+}
+
+/* The sidebar's foot is the owner's account: it opens the Display menu (the owner, 2026-10-16). */
+.side-foot {
+  display: flex;
+  margin-block-start: auto;
+  padding: 0 var(--space-1);
+}
+.account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  inline-size: 100%;
+  padding: 6px var(--space-2);
+  border: 0;
+  border-radius: var(--r-btn);
+  background: transparent;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--dur-fade) var(--ease-fade);
+}
+.account:hover,
+.account[aria-expanded="true"] {
+  background: var(--sunken);
+}
+.account-name {
+  flex: 1;
+  min-inline-size: 0;
+  overflow: hidden;
+  font-size: var(--text-ui);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account .icon-chevronUp {
+  color: var(--muted);
+}
+/* The initials on --accent, without a photo. */
+.avatar {
+  display: grid;
+  place-items: center;
+  inline-size: 24px;
+  block-size: 24px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.avatar .icon {
+  inline-size: 14px;
+  block-size: 14px;
+}
+/* The header's avatar, below the sidebar's width, and the menu's. */
+.account-top .avatar {
+  inline-size: 32px;
+  block-size: 32px;
+}
+/* Near the top edge, its tip opens below, from its end. */
+.account-top .tip {
+  inset-block: calc(100% + 6px) auto;
+  inset-inline: auto 0;
+  translate: none;
+}
+.who-me .avatar {
+  inline-size: 36px;
+  block-size: 36px;
+  font-size: 13px;
+}
+
+/* ── Moving between agents (5.14): the mascot and the name travel, the rest crossfades ───────── */
+
+@view-transition {
+  navigation: auto;
+}
+:root:not([data-reduced]) .top .mascot-host {
+  view-transition-name: agent-mascot;
+}
+:root:not([data-reduced]) .agent-name .label {
+  view-transition-name: agent-name;
+}
+::view-transition-group(agent-mascot),
+::view-transition-group(agent-name) {
+  animation-duration: var(--spring-base-dur);
+  animation-timing-function: var(--spring-base);
+}
+
 /* ── The phone (5.15) ──────────────────────────────────────────────────────────────────────── */
 
 @media (max-width: 600px) {
-  .chat {
-    inline-size: 100%;
-    /* iOS doesn't shrink the viewport for its keyboard; the page measures it (5.15). */
-    block-size: calc(100dvh - var(--keyboard, 0px) - var(--space-6));
-    margin: 0;
+  /* The switcher is a sheet: 90% tall, standing at its 40% stop until it is dragged up. */
+  .switcher {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 8;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    block-size: 90dvh;
+    min-inline-size: 0;
+    max-inline-size: none;
+    padding: var(--space-2) var(--space-3) env(safe-area-inset-bottom);
     border: 0;
-    border-radius: 0;
-    box-shadow: none;
+    border-radius: var(--r-panel) var(--r-panel) 0 0;
+    background: var(--bg);
+    box-shadow: 0 -18px 40px -16px rgb(0 0 0 / 0.5);
+    touch-action: none;
+  }
+  .switcher[hidden] {
+    display: none;
+  }
+  .switcher .handle {
+    display: block;
+    align-self: center;
+    inline-size: 36px;
+    block-size: 4px;
+    flex: none;
+    border-radius: var(--r-chip);
+    background: var(--muted);
+    opacity: 0.5;
+  }
+  .switcher ul {
+    overflow-y: auto;
+    touch-action: pan-y;
+  }
+  .switcher a {
+    min-block-size: 56px;
+    font-size: 15px;
   }
   #text {
     font-size: var(--text-input-phone);
@@ -1291,7 +1828,7 @@ dialog h2 {
   .confirm,
   .copy,
   .segmented button,
-  .popover a,
+  .switcher a,
   .toast button,
   .tool-head {
     min-block-size: 44px;

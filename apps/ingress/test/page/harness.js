@@ -127,7 +127,7 @@ export async function loadPage({
   await import("../../public/webchat/boot.js");
   await import("../../public/webchat/app.js");
   await settle();
-  return { socket: FakeSocket.last, fetch };
+  return { socket: FakeSocket.own, fetch };
 }
 
 export const $ = (id) => document.getElementById(id);

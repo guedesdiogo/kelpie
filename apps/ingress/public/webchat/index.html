@@ -31,86 +31,113 @@
   </head>
   <body>
     <a class="skip" href="#text">Skip to message</a>
-    <div class="chat">
-      <div id="banner" class="banner" role="status" hidden>
-        <p id="banner-text"></p>
-        <button id="retry" type="button" class="icon-button">Try now</button>
-      </div>
-      <header class="top">
-        <div class="agent">
-          <span id="mascot" class="mascot-host" aria-hidden="true"></span>
-          <div class="who">
-            <h1>
-              <button
-                id="switcher"
-                type="button"
-                class="agent-name"
-                aria-expanded="false"
-                aria-controls="agents"
-                aria-disabled="true"
-              >
-                <span class="label" id="agent-name">Kelpie</span>
-              </button>
-            </h1>
-            <p id="status" role="status"></p>
-          </div>
+    <div class="app">
+      <!-- The agents, beside the conversation on a wide screen (5.9, ADR-0052). -->
+      <div id="side" class="side">
+        <a class="brand" href="/webchat/">
+          <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><path d="M32,8.563H32A25,25 0 0 1 57,33.563V33.563A25,25 0 0 1 32,58.563H14.986A7.986,7.986 0 0 1 7,50.576V33.563A25,25 0 0 1 32,8.563ZM9.431,12.729a7.292,7.292 0 1 1 14.583,0a7.292,7.292 0 1 1 -14.583,0ZM39.986,12.729a7.292,7.292 0 1 1 14.583,0a7.292,7.292 0 1 1 -14.583,0Z"/></svg>
+          <span>Kelpie</span>
+        </a>
+        <div class="slot"><p id="strip" class="strip" role="status" hidden></p></div>
+        <nav id="roster" class="roster" aria-label="Agents"><ul></ul></nav>
+        <p id="roster-note" class="roster-note" hidden></p>
+        <div class="side-foot">
+          <button id="account" type="button" class="account" aria-expanded="false" aria-controls="display">
+            <span class="avatar" aria-hidden="true"></span><span class="account-name">Display</span>
+          </button>
         </div>
-        <button
-          id="display-button"
-          type="button"
-          class="icon-button"
-          aria-expanded="false"
-          aria-controls="display"
-        >
-          Display
-        </button>
-        <nav id="agents" class="popover" aria-label="Agents" hidden><ul></ul></nav>
-        <section id="display" class="popover" aria-label="Display" hidden>
-          <div class="setting"><span id="theme-label">Theme</span><div id="theme"></div></div>
-          <div class="setting"><span id="motion-setting-label">Motion</span><div id="motion-setting"></div></div>
-          <div class="setting"><span id="contrast-label">Contrast</span><div id="contrast"></div></div>
-          <div class="setting" id="mascot-setting" hidden>
-            <span id="motion-label">Mascot</span>
-            <div id="motion"></div>
-            <p class="note" id="motion-note" hidden></p>
+      </div>
+      <div class="chat">
+        <div id="banner" class="banner" role="status" hidden>
+          <p id="banner-text"></p>
+          <button id="retry" type="button" class="icon-button">Try now</button>
+        </div>
+        <header class="top">
+          <div class="agent">
+            <span id="mascot" class="mascot-host" aria-hidden="true"></span>
+            <div class="who">
+              <h1>
+                <button
+                  id="switcher"
+                  type="button"
+                  class="agent-name"
+                  aria-expanded="false"
+                  aria-controls="agents"
+                  aria-disabled="true"
+                >
+                  <span class="label" id="agent-name">Kelpie</span>
+                </button>
+              </h1>
+              <p id="status" role="status"></p>
+            </div>
+          </div>
+          <!-- Below the sidebar's width, the account is the header's avatar. -->
+          <button
+            id="account-top"
+            type="button"
+            class="account-top"
+            aria-expanded="false"
+            aria-controls="display"
+            data-tip
+          >
+            <span class="avatar" aria-hidden="true"></span>
+          </button>
+          <nav id="agents" class="switcher" aria-label="Agents" hidden>
+            <span class="handle" aria-hidden="true"></span>
+            <ul></ul>
+          </nav>
+        </header>
+        <section id="motion-ask" aria-labelledby="motion-ask-text" hidden>
+          <p id="motion-ask-text">Mascots can move in place: they blink, breathe and hop. How should they move?</p>
+          <div class="choices">
+            <button type="button" class="icon-button" data-motion="alive">Alive</button>
+            <button type="button" class="icon-button" data-motion="states">States only</button>
+            <button type="button" class="icon-button" data-motion="still">Still</button>
           </div>
         </section>
-      </header>
-      <section id="motion-ask" aria-labelledby="motion-ask-text" hidden>
-        <p id="motion-ask-text">Mascots can move in place: they blink, breathe and hop. How should they move?</p>
-        <div class="choices">
-          <button type="button" class="icon-button" data-motion="alive">Alive</button>
-          <button type="button" class="icon-button" data-motion="states">States only</button>
-          <button type="button" class="icon-button" data-motion="still">Still</button>
+        <main id="scroller">
+          <div id="skeleton" class="skeleton" aria-hidden="true" hidden><span></span><span></span><span></span></div>
+          <div id="empty" class="empty" hidden>
+            <span id="empty-mascot" class="mascot-host" aria-hidden="true"></span>
+            <p id="empty-text"></p>
+          </div>
+          <div id="thread" role="log" aria-live="off" aria-label="Conversation" aria-busy="true"></div>
+          <button id="pill" type="button" class="pill" hidden></button>
+        </main>
+        <div id="wait" class="wait" aria-hidden="true" hidden>
+          <span class="track"><span class="wait-fill"></span></span>
+          <span id="wait-label"></span>
         </div>
-      </section>
-      <main id="scroller">
-        <div id="skeleton" class="skeleton" aria-hidden="true" hidden><span></span><span></span><span></span></div>
-        <div id="empty" class="empty" hidden>
-          <span id="empty-mascot" class="mascot-host" aria-hidden="true"></span>
-          <p id="empty-text"></p>
-        </div>
-        <div id="thread" role="log" aria-live="off" aria-label="Conversation" aria-busy="true"></div>
-        <button id="pill" type="button" class="pill" hidden></button>
-      </main>
-      <div id="wait" class="wait" aria-hidden="true" hidden>
-        <span class="track"><span class="wait-fill"></span></span>
-        <span id="wait-label"></span>
+        <form id="composer" autocomplete="off">
+          <div class="composer-notes">
+            <p id="restored" role="status" hidden></p>
+            <p id="paused-line" hidden></p>
+          </div>
+          <div class="field">
+            <label for="text" class="visually-hidden">Message</label>
+            <textarea id="text" rows="1" maxlength="16000" enterkeyhint="send"></textarea>
+            <button type="button" id="pause" class="pause" aria-label="Pause" aria-pressed="false" data-tip></button>
+            <button type="submit" id="send" class="send" aria-label="Send" data-tip></button>
+          </div>
+        </form>
       </div>
-      <form id="composer" autocomplete="off">
-        <div class="composer-notes">
-          <p id="restored" role="status" hidden></p>
-          <p id="paused-line" hidden></p>
-        </div>
-        <div class="field">
-          <label for="text" class="visually-hidden">Message</label>
-          <textarea id="text" rows="1" maxlength="16000" enterkeyhint="send"></textarea>
-          <button type="button" id="pause" class="pause" aria-label="Pause" aria-pressed="false" data-tip></button>
-          <button type="submit" id="send" class="send" aria-label="Send" data-tip></button>
-        </div>
-      </form>
     </div>
-    <footer><span id="version"></span></footer>
+    <!-- The account and the Display menu (5.22), from the sidebar's foot or the header's avatar. -->
+    <section id="display" class="menu" aria-label="Account and display" hidden>
+      <div class="who-me">
+        <span class="avatar" aria-hidden="true"></span>
+        <div><b id="me-name"></b><span id="me-email" class="email"></span></div>
+      </div>
+      <div class="menu-row"><span id="theme-label">Theme</span><div id="theme"></div></div>
+      <label class="toggle"><span id="motion-setting-label">Less motion</span><input id="less-motion" type="checkbox" /></label>
+      <label class="toggle"><span id="contrast-label">More contrast</span><input id="more-contrast" type="checkbox" /></label>
+      <div class="menu-row" id="mascot-setting" hidden>
+        <span id="motion-label">Mascot</span>
+        <div id="motion"></div>
+      </div>
+      <p class="note" id="motion-note" hidden></p>
+      <button id="version" type="button" class="version" hidden></button>
+    </section>
     <div id="toasts" class="toasts" aria-live="polite"></div>
     <p id="announcer" class="visually-hidden" aria-live="polite"></p>
     <dialog id="login" aria-labelledby="login-title">

@@ -653,7 +653,12 @@ export class Mascot {
    * Shows a state: its pose, then its announcement. `activity` is the task's object at work;
    * `auto` marks a change the mascot made itself, such as dozing off, which is no event.
    */
-  setState(next, { activity = null, auto = false, instant = false } = {}) {
+  /**
+   * Takes a new state: its pose with the moment springs, then its announcement. `instant` shows the
+   * pose at once, as a keyboard action does (§4.1); `quiet` moves to it without the announcement,
+   * as an expiry or a refusal does (5.3).
+   */
+  setState(next, { activity = null, auto = false, instant = false, quiet = false } = {}) {
     const previous = this.state;
     if (next === previous && activity === this.activity) return;
     if (HOLDING_STATES.has(previous)) this.stopWork();
@@ -691,7 +696,7 @@ export class Mascot {
       this.hop(8);
       this.blink();
     }
-    this.announce(next);
+    if (!quiet) this.announce(next);
   }
 
   announce(state) {
