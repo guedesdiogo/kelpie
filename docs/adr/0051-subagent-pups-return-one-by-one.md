@@ -26,19 +26,24 @@ The owner prefers it.
 
 **Pups stand beside the parent with no link and no goo, and each one comes back when its own task ends.** `docs/design-system.md` §5.6 holds the numbers.
 - **A pup follows its subagent's tasks.** It leaves when its subagent starts a task and comes back when that task ends. A subagent with no task shows no pup.
-- **Where they play.** Pups are drawn only where the parent's mascot shows at 120 px or more. Each one follows the mascot's row for its rendered size.
-  - Smaller views draw no pups.
-  - There, the parent's own state says it is delegating.
+- **Where they play.** Pups are drawn only where the parent's mascot shows at 120 px or more, so a pup keeps the full face of the 48 px row.
+  - Today that is the agent's profile.
+  - Their slots beside the parent are kept.
+  - The conversation's header and the roster draw no pups.
+  - No pups show while the page is Offline.
+- **The parent's state** comes from §5.9 and §5.19 as for any agent. Delegating is not a state of its own.
 - **Leaving.**
   - Each pup comes out of the parent's middle at a scale of 0.3, with `--spring-moment`, `--stagger-moment` apart.
   - The parent pulses as each one leaves.
 - **Coming back** depends on how the task ended:
   - **success:** the pup smiles and hops, then goes back into the parent in `--dur-exit-moment` with `--ease-exit` (rule 9), and the parent swallows it;
-  - **failure:** it takes Error and stays 30 s, as §5.9's failures do, then goes back with no smile;
-  - **waiting for an answer:** it takes Waiting until the answer comes.
+  - **failure:** it takes Error and stays 30 s, as §5.9's failures do, then goes back with no smile, or at once when dismissed;
+  - **cancelled or lost:** it goes back with no smile and isn't counted as failed;
+  - **waiting for an answer:** the question goes to the creator, not the owner (ADR-0036), so the pup waits in a calm pose with no amber and isn't counted in §5.9's strip. If the creator then asks the owner, the parent takes Waiting.
 - **Counting.** A polite status line counts them back and names a failure.
-- **The parent's state** comes from §5.9 and §5.19 as for any agent. The hop and smile greet the reply that relays the result (§5.1).
-- **Unchanged from ADR-0045 §7:** what a pup looks like (the same shape and head, a lighter color, dot eyes, no accessory, 40% of the size), and at most three, since ADR-0036 caps a creator at three live subagents.
+- **Unchanged from ADR-0045 §7:**
+  - what a pup looks like: the same shape and head, a lighter color, dot eyes, no accessory, 40% of the size;
+  - at most three, since ADR-0036 caps a creator at three live subagents.
 
 ## Consequences
 
@@ -48,8 +53,10 @@ The owner prefers it.
   - §4.1, where the moment's signature names a parent's pups;
   - §4.2, where `--spring-moment-slow` is now used by no pattern;
   - §6, where no pattern uses an SVG filter any more.
+- **ADR-0045 §7 changes beyond the goo and the link:** pups show only while a task runs, and only where the parent shows at 120 px or more.
+- **Pups show in few places.** Where the owner usually is, in the conversation and the roster, no pup shows. A later design can add a cue there, such as "2 subagents at work" in a row's label, with the owner's approval.
 - **Reduced motion:** pups fade in and out in `--dur-fade` (rule 10), at their places as ADR-0045 §6 says, and the mascots are Still.
-- **No code changes:** nothing draws subagents yet. The design system's published reference already plays this version.
+- **No code changes:** nothing draws subagents yet.
 
 ## Alternatives considered
 
