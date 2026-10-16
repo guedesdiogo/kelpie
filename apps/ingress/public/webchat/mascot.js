@@ -14,6 +14,7 @@ import {
   due,
   gapAfter,
   HAND_POSES,
+  HOLDING_STATES,
   LIST_LOCK_MS,
   POSES,
   QUIET_BLINK_MS,
@@ -36,6 +37,13 @@ function cancel(element) {
   for (const animation of element.getAnimations()) animation.cancel();
 }
 
+/** Starts an animation. A change of state cancels it, and its `finished` then rejects unread. */
+function animate(element, keyframes, options) {
+  const animation = element.animate(keyframes, options);
+  animation.finished?.catch(() => {});
+  return animation;
+}
+
 /** Moves to a pose from wherever the element is now, so a change can interrupt another. */
 function poseTo(element, transform, spring) {
   if (!spring || world.motion === "still") {
@@ -46,7 +54,7 @@ function poseTo(element, transform, spring) {
   const from = getComputedStyle(element).transform;
   cancel(element);
   element.style.transform = transform;
-  element.animate([{ transform: from }, { transform }], {
+  animate(element, [{ transform: from }, { transform }], {
     duration: spring.duration,
     easing: spring.easing,
   });
@@ -368,7 +376,7 @@ export class Mascot {
       uid: this.uid,
       px: this.px,
       hex: hex.trim(),
-      work: this.mode !== "still" || WORKING_STATES.has(this.state),
+      work: this.mode !== "still" || HOLDING_STATES.has(this.state),
       hands: this.mode !== "still" || Boolean(HAND_POSES[this.state]),
     });
     this.host.innerHTML = built.html;
@@ -417,7 +425,7 @@ export class Mascot {
         () => {},
       );
     }
-    if (WORKING_STATES.has(this.state)) this.showActivity(false);
+    if (HOLDING_STATES.has(this.state)) this.showActivity(false);
     this.breathe();
   }
 
@@ -441,7 +449,7 @@ export class Mascot {
     this.clearTimers();
     this.override = null;
     this.applyPose(this.pose(), null);
-    if (WORKING_STATES.has(this.state)) this.showActivity(false);
+    if (HOLDING_STATES.has(this.state)) this.showActivity(false);
     this.lastEvent = now();
     this.nextGesture = now() + 800 + Math.random() * 1700;
     this.breathe();
@@ -476,7 +484,7 @@ export class Mascot {
       from && current !== "none"
         ? [{ ...frames[0], transform: current }, ...frames.slice(1)]
         : frames;
-    return element.animate(keyframes, { ...fits, delay });
+    return animate(element, keyframes, { ...fits, delay });
   }
 
   pose() {
@@ -609,7 +617,8 @@ export class Mascot {
     if (!alive) return;
     const [period, depth0] = BREATH[this.state] ?? BREATH.idle;
     const depth = this.mode === "list" ? depth0 * 0.6 : depth0;
-    this.breath = this.breathG.animate(
+    this.breath = animate(
+      this.breathG,
       [{ transform: "none" }, { transform: `scale(${1 - depth * 0.45}, ${1 + depth})` }],
       {
         duration: period / 2,
@@ -622,7 +631,8 @@ export class Mascot {
       this.badgeBob &&
       (POSES[this.state].badge === "wait" || POSES[this.state].badge === "error")
     ) {
-      this.bob = this.badgeBob.animate(
+      this.bob = animate(
+        this.badgeBob,
         [{ transform: "none" }, { transform: "translate(0px, -1.8px) rotate(-3deg)" }],
         {
           duration: 1150,
@@ -636,7 +646,7 @@ export class Mascot {
 
   /** Reduced motion's change: a 150 ms crossfade. */
   fade() {
-    this.svg.animate([{ opacity: 0.35 }, { opacity: 1 }], { duration: 150, easing: "ease-out" });
+    animate(this.svg, [{ opacity: 0.35 }, { opacity: 1 }], { duration: 150, easing: "ease-out" });
   }
 
   /**
@@ -646,7 +656,7 @@ export class Mascot {
   setState(next, { activity = null, auto = false, instant = false } = {}) {
     const previous = this.state;
     if (next === previous && activity === this.activity) return;
-    if (WORKING_STATES.has(previous)) this.stopWork();
+    if (HOLDING_STATES.has(previous)) this.stopWork();
     this.state = next;
     this.activity = activity;
     this.recent = [];
@@ -660,7 +670,7 @@ export class Mascot {
       for (const animation of this.svg.getAnimations({ subtree: true })) animation.cancel();
       this.breath = null;
       this.applyPose(pose, null);
-      if (WORKING_STATES.has(next)) this.showActivity(false);
+      if (HOLDING_STATES.has(next)) this.showActivity(false);
       this.breathe();
       if (!instant) this.fade();
       return;
@@ -676,10 +686,32 @@ export class Mascot {
         from: false,
       });
     }
+    // Back online (#380): a small hop as the plug clicks home, then the state itself.
+    if (previous === "offline") {
+      this.hop(8);
+      this.blink();
+    }
     this.announce(next);
   }
 
   announce(state) {
+    if (state === "offline") {
+      this.showActivity(true);
+      this.badgeIn(0);
+      // The plug drops a little and swings to rest once it has popped out.
+      this.later(520, () =>
+        this.play(
+          this.workG,
+          [
+            { transform: "none" },
+            { transform: "translate(0px, 3px) rotate(9deg)", offset: 0.3 },
+            { transform: "translate(0px, 1px) rotate(-5deg)", offset: 0.62 },
+            { transform: "none" },
+          ],
+          { duration: 1000, easing: "ease-out", from: false },
+        ),
+      );
+    }
     if (state === "waiting") {
       this.hop(11, true);
       this.badgeIn(3);
@@ -765,10 +797,11 @@ export class Mascot {
   // shows only the activity the conversation names, never one that isn't happening.
 
   showActivity(pop) {
-    if (!WORKING_STATES.has(this.state)) return;
-    const next = this.activity ?? "think";
+    if (!HOLDING_STATES.has(this.state)) return;
+    // Offline always holds its plug; work holds the task's object.
+    const next = this.state === "offline" ? "plug" : (this.activity ?? "think");
     const swap = () => {
-      if (!WORKING_STATES.has(this.state)) return;
+      if (!HOLDING_STATES.has(this.state)) return;
       this.setActivity(next, pop && world.motion !== "still");
       if (this.state === "working" && breathes(this, world)) this.runActivity(next);
     };
@@ -1448,6 +1481,44 @@ export class Mascot {
         easing: "cubic-bezier(.2,0,0,1)",
         from: false,
       },
+    );
+  }
+
+  /** Offline: looks down at the plug it holds, then back. */
+  lookAtPlug() {
+    this.gaze([4, 5], SPRINGS.base);
+    this.blink();
+    this.later(1300, () => this.restore(SPRINGS.base));
+  }
+
+  /** Offline: reaches the plug out, as into a socket, and draws it back. */
+  tryPlug() {
+    this.play(
+      this.workG,
+      [
+        { transform: "none" },
+        { transform: "translate(5px, -3px) rotate(-12deg)", offset: 0.4 },
+        { transform: "translate(6px, -3px) rotate(-12deg)", offset: 0.58 },
+        { transform: "none" },
+      ],
+      { duration: 1300, easing: "ease-in-out", from: false },
+    );
+    this.gaze([5, 2], SPRINGS.base);
+    this.later(1400, () => this.restore(SPRINGS.base));
+  }
+
+  /** Offline: gives the plug a little shake. */
+  shakePlug() {
+    this.play(
+      this.workG,
+      [
+        { transform: "none" },
+        { transform: "rotate(-9deg)", offset: 0.2 },
+        { transform: "rotate(8deg)", offset: 0.45 },
+        { transform: "rotate(-5deg)", offset: 0.7 },
+        { transform: "none" },
+      ],
+      { duration: 720, easing: "ease-in-out", from: false },
     );
   }
 

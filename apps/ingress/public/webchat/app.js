@@ -547,7 +547,11 @@ function showBanner() {
   renderOffline();
   clearInterval(bannerTicker);
   if (!reduced()) bannerTicker = setInterval(renderOffline, 1_000);
-  if (appearing) enter(banner, { rise: -8, scale: 1 });
+  if (appearing) {
+    enter(banner, { rise: -8, scale: 1 });
+    // The page sees none of the agents now: every mascot that shows a state says so (ADR-0047).
+    present({ type: "offline" });
+  }
 }
 
 function renderOffline() {
@@ -616,6 +620,17 @@ async function checkLogin() {
 function showLogin() {
   if (login.open) return;
   saveSession();
+  // The dialog shows the conversation's mascot at 160 px, holding its plug, and behind it every
+  // mascot is Offline too (ADR-0047 §3).
+  present({ type: "offline" });
+  if (mascotConfig && !$("login-mascot").mascot) {
+    new Mascot($("login-mascot"), {
+      mascot: mascotConfig,
+      px: 160,
+      mode: "large",
+      state: "offline",
+    });
+  }
   if (typeof login.showModal === "function") login.showModal();
   else login.setAttribute("open", "");
 }

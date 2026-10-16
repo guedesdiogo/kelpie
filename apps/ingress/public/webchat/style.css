@@ -1118,6 +1118,15 @@ dialog {
   color: var(--fg);
   box-shadow: var(--shadow-pop);
 }
+#login-mascot {
+  display: block;
+  inline-size: 160px;
+  block-size: 160px;
+  margin: 0 auto var(--space-4);
+}
+#login-mascot:empty {
+  display: none;
+}
 dialog::backdrop {
   background: var(--scrim);
 }

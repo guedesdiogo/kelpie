@@ -162,6 +162,62 @@ describe("a lost connection (5.12)", () => {
   });
 });
 
+/** The main agent's default mascot (ADR-0049), as the socket names it. */
+const KELPIE = {
+  shape: "mark",
+  color: "kelp",
+  eyes: "big",
+  cheeks: false,
+  head: { type: "ears", variation: "round" },
+  accessory: { type: "none" },
+};
+
+const headerState = () => $("mascot").mascot?.state;
+
+describe("Offline, when the page loses its connection (ADR-0047)", () => {
+  it("shows when the banner enters, not before, and the new socket's history ends it", async () => {
+    const { socket } = await connected();
+    socket.receive({ type: "agent", mascot: KELPIE });
+    socket.receive({ type: "status", status: "thinking" });
+    expect(headerState()).toBe("working");
+    socket.close();
+    vi.advanceTimersByTime(1_999);
+    // The page can't vouch for the turn, but Offline waits for the banner (5.12).
+    expect(headerState()).toBe("working");
+    vi.advanceTimersByTime(1);
+    expect($("banner").hidden).toBe(false);
+    expect(headerState()).toBe("offline");
+    $("retry").click();
+    FakeSocket.last.open();
+    FakeSocket.last.receive(historyFrame());
+    expect(headerState()).toBe("idle");
+  });
+
+  it("shows on the expired-login dialog, at 160 px, holding its plug", async () => {
+    const fetch = fakeFetch();
+    const page = await loadPage({ fetch });
+    page.socket.open();
+    page.socket.receive(historyFrame());
+    page.socket.receive({ type: "agent", mascot: KELPIE });
+    fetch.mockImplementation(async (url) =>
+      url === "/webchat/agents"
+        ? { type: "opaqueredirect", status: 0, ok: false }
+        : Response.json({ version: "1.2.3" }),
+    );
+    FakeSocket.last.close();
+    vi.advanceTimersByTime(300);
+    // A socket that never opened asks whether the login expired.
+    FakeSocket.last.close();
+    await settle();
+    expect($("login").open).toBe(true);
+    const shown = $("login-mascot").mascot;
+    expect(shown.px).toBe(160);
+    expect(shown.state).toBe("offline");
+    // Behind the dialog, the header's mascot is Offline too.
+    expect(headerState()).toBe("offline");
+  });
+});
+
 describe("an expired login (5.12)", () => {
   it("opens the sign-in dialog when Access says the login expired, keeping the draft", async () => {
     const fetch = fakeFetch();

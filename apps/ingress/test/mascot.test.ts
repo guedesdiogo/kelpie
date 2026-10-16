@@ -40,6 +40,7 @@ import {
   effectiveMotion,
   gapAfter,
   HAND_POSES,
+  HOLDING_STATES,
   IDLE,
   POSES,
   presenceAfter,
@@ -232,6 +233,7 @@ describe("poses per state (ADR-0045 §6)", () => {
       "approved",
       "error",
       "noResponse",
+      "offline",
     ]);
     for (const state of STATES) expect(BREATH, state).toHaveProperty(state);
   });
@@ -258,8 +260,9 @@ describe("poses per state (ADR-0045 §6)", () => {
       error: { l: "cheekL", r: "cheekR" },
       dozing: { r: "pillowR" },
     });
-    // At work, the mittens come with the task's object.
+    // At work, the mittens come with the task's object; offline, with its plug (ADR-0047).
     expect([...WORKING_STATES]).toEqual(["working", "noResponse"]);
+    expect([...HOLDING_STATES]).toEqual(["working", "noResponse", "offline"]);
   });
 
   it("shows only a real activity: a tool without its own object shows thinking", () => {
@@ -270,8 +273,11 @@ describe("poses per state (ADR-0045 §6)", () => {
       "calendar",
       "email",
       "think",
+      "plug",
     ]);
     expect(activityOf("vault")).toBe("vault");
+    // The plug is Offline's, never a tool's.
+    expect(activityOf("plug")).toBe("think");
     expect(activityOf(undefined)).toBe("think");
     expect(activityOf("teleport")).toBe("think");
     expect(activityOf("toString")).toBe("think");
@@ -460,6 +466,58 @@ describe("the pause's announcements", () => {
   });
 });
 
+describe("Offline, when the page loses its connection (ADR-0047)", () => {
+  const working = presenceAfter(IDLE, { type: "status", status: "thinking" });
+  const offline = presenceAfter(working, { type: "offline" });
+
+  it("holds the plug that came out, looking at it, beside a grey bubble", () => {
+    expect(POSES.offline).toMatchObject({ brows: "up", badge: "offline" });
+    expect(POSES.offline.gaze).toEqual(ACTIVITIES.plug.gaze);
+    expect(styles).toContain('.mascot[data-act="plug"] .act-plug');
+    expect(styles).toContain('.mascot[data-badge="offline"] .bd-c');
+    expect(SHARED_DEFS).toContain('id="kg-off"');
+    expect(buildMascot(KELPIE_MASCOT, { uid: 1, px: 160, hex: "#2e9e8e" }).html).toContain(
+      "act-plug",
+    );
+  });
+
+  it("is calm: it never hops, and rests 4 to 8 s between gestures", () => {
+    const names = REPERTOIRES.offline.map((gesture: { name: string }) => gesture.name);
+    expect(names).toEqual([
+      "blink",
+      "glance",
+      "lookAtPlug",
+      "tryPlug",
+      "shakePlug",
+      "lookAround",
+      "sigh",
+      "yawn",
+    ]);
+    for (const at of [0, 0.5, 0.999]) {
+      const gap = gapAfter("offline", "header", () => at);
+      expect(gap).toBeGreaterThanOrEqual(4_000);
+      expect(gap).toBeLessThanOrEqual(8_000);
+    }
+  });
+
+  it("comes only when the banner enters, not when the socket closes", () => {
+    // The page can't vouch for the turn, but Offline waits for the banner's 2 s (5.12).
+    expect(presenceAfter(working, { type: "closed" })).toBe(working);
+    expect(offline).toEqual({ state: "offline", activity: null, tool: false });
+  });
+
+  it("leaves with the history, whatever it held", () => {
+    expect(presenceAfter(offline, { type: "history" })).toEqual(IDLE);
+    expect(presenceAfter(offline, { type: "status", status: "thinking" })).toEqual(working);
+  });
+
+  it("drops the plug and swings it on arrival, and clicks it home with a small hop", () => {
+    expect(engine).toContain('if (state === "offline") {');
+    expect(engine).toContain('if (previous === "offline") {');
+    expect(engine).toContain("this.hop(8);");
+  });
+});
+
 describe("the mascot's state from the conversation", () => {
   const working = presenceAfter(IDLE, { type: "status", status: "thinking" });
 
@@ -517,10 +575,9 @@ describe("the mascot's state from the conversation", () => {
     expect(presenceAfter(waiting, { type: "status", status: "idle" })).toBe(waiting);
   });
 
-  it("is idle after a reply, a pause, a lost socket or a new one, and never listens without the bar", () => {
+  it("is idle after a reply, a pause or a new socket, and never listens without the bar", () => {
     expect(presenceAfter(working, { type: "bubble" })).toEqual(IDLE);
     expect(presenceAfter(working, { type: "paused" })).toEqual(IDLE);
-    expect(presenceAfter(working, { type: "closed" })).toEqual(IDLE);
     expect(presenceAfter(working, { type: "history" })).toEqual(IDLE);
     expect(presenceAfter(working, { type: "sent" })).toBe(working);
     expect(presenceAfter(IDLE, { type: "sent" }).state).not.toBe("listening");
