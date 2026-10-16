@@ -116,3 +116,43 @@ describe("the mascot in the header (ADR-0045)", () => {
     expect($("empty-mascot").childElementCount).toBeGreaterThan(0);
   });
 });
+
+describe("leftovers", () => {
+  it("lets go of the empty conversation's mascot once a message arrives", async () => {
+    const { socket } = await loadPage();
+    socket.open();
+    socket.receive(historyFrame());
+    vi.advanceTimersByTime(500);
+    await settle();
+    socket.receive({
+      type: "agent",
+      mascot: {
+        shape: "mark",
+        color: "kelp",
+        eyes: "shine",
+        cheeks: false,
+        head: { type: "ears", variation: "pointed" },
+        accessory: { type: "belt", variation: "collar" },
+      },
+    });
+    await settle();
+    const host = $("empty-mascot");
+    expect(host.childElementCount).toBeGreaterThan(0);
+    socket.receive({ type: "bubble", text: "Olá." });
+    // The host leaves the page, so the mascots' shared timer stops ticking for it.
+    expect(host.isConnected).toBe(false);
+    expect($("empty-mascot").childElementCount).toBe(0);
+  });
+
+  it("leaves End to the menus that handle it", async () => {
+    await loadPage();
+    const scroller = $("scroller");
+    Object.defineProperty(scroller, "scrollHeight", { value: 3_000, configurable: true });
+    scroller.scrollTop = 0;
+    $("switcher").click();
+    $("agents")
+      .querySelector("a")
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true, cancelable: true }));
+    expect(scroller.scrollTop).toBe(0);
+  });
+});

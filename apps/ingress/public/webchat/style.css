@@ -412,10 +412,6 @@ main {
 .group[data-sender="user"] {
   align-items: flex-end;
 }
-/* A group with no message yet (the typing bubble, a tool row) shows no time. */
-.group:not(:has(.bubble:not(.typing))) > .group-time {
-  display: none;
-}
 .group-time {
   margin: 0;
   padding-inline: var(--space-1);
@@ -424,6 +420,10 @@ main {
   font-size: var(--text-xs);
   line-height: var(--leading-xs);
   font-variant-numeric: tabular-nums;
+}
+/* A group with no message yet (the typing bubble, a tool row) shows no time. */
+.group:not(:has(.bubble:not(.typing))) > .group-time {
+  display: none;
 }
 /* Settled groups skip their layout until they scroll into view (Hermes); the newest never. */
 .day:not(:last-child) > .group {

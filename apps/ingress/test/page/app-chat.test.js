@@ -185,6 +185,38 @@ describe("the conversation", () => {
     expect($("pause").disabled).toBe(false);
   });
 
+  it("shows no typing bubble when a pause ends the wait, in the order the runtime sends", async () => {
+    const { socket } = await opened();
+    socket.receive({
+      type: "wait",
+      deadline: { remainingMs: 9_000, spanMs: 10_000, holding: false },
+    });
+    socket.receive({ type: "paused" });
+    socket.receive({ type: "wait", deadline: null });
+    expect(document.querySelector(".bubble.typing, .bubble.stopped")).toBeNull();
+  });
+
+  it("keeps the held bar full for as long as the owner keeps typing", async () => {
+    const { socket } = await opened();
+    const animate = vi.spyOn(Element.prototype, "animate");
+    const fill = document.querySelector(".wait-fill");
+    const last = () =>
+      animate.mock.calls.filter((_call, index) => animate.mock.contexts[index] === fill).at(-1)[0];
+    type("e");
+    socket.receive({
+      type: "wait",
+      deadline: { remainingMs: 4_000, spanMs: 4_000, holding: true },
+    });
+    for (let keystroke = 0; keystroke < 3; keystroke += 1) {
+      vi.advanceTimersByTime(600);
+      type("e mais");
+      expect(last().at(-1)).toEqual({ transform: "scaleX(1)" });
+    }
+    vi.advanceTimersByTime(1_000);
+    expect(last().at(-1)).toEqual({ transform: "scaleX(0)", offset: 1 });
+    animate.mockRestore();
+  });
+
   it("stops the turn in place when a pause comes in the middle of it", async () => {
     const { socket } = await opened();
     socket.receive({ type: "typing", active: true });

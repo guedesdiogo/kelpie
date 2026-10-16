@@ -136,7 +136,7 @@ describe("the owner's messages", () => {
     thread.owner({ id: "m1", text: "offline", queued: true });
     expect(markOf("m1").textContent).toBe("Queued");
     expect(markOf("m1").parentElement.hasAttribute("data-queued")).toBe(true);
-    thread.queue("m1", false);
+    thread.accept("m1");
     expect(markOf("m1").parentElement.hasAttribute("data-queued")).toBe(false);
 
     thread.owner({ id: "m2", text: "x".repeat(10) });
@@ -191,9 +191,10 @@ describe("a turn's activity (5.1, 5.2)", () => {
     vi.advanceTimersByTime(1_000);
 
     const reply = thread.reply({ text: "Pronto." });
-    // The same element carries the states (rule 6).
+    // The same element carries the states (rule 6), and screen readers reach it once a reply.
     expect(reply).toBe(typing);
     expect(reply.classList.contains("typing")).toBe(false);
+    expect(reply.hasAttribute("aria-hidden")).toBe(false);
     expect(reply.querySelector(".text").textContent).toBe("Pronto.");
     expect(reply.querySelector("time.at")).not.toBeNull();
     expect(row.dataset.state).toBe("done");
@@ -231,6 +232,7 @@ describe("a turn's activity (5.1, 5.2)", () => {
     thread.stop("paused");
     const stopped = root.querySelector(".bubble.stopped");
     expect(stopped.textContent).toContain("Stopped by your pause");
+    expect(stopped.hasAttribute("aria-hidden")).toBe(false);
     const row = root.querySelector(".tool-row");
     expect(row.querySelector(".tool-label .roll:last-child").textContent).toBe(
       "Stopped by your pause",

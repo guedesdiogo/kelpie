@@ -85,6 +85,12 @@ describe("the webchat's fonts", () => {
       fakes,
     );
     expect(font.headers.get("cache-control")).toBe("private, max-age=31536000, immutable");
+    // A font that isn't there isn't remembered as missing.
+    const missing = await handleWebchat(
+      new Request(`${ORIGIN}/webchat/fonts/gone-1.0.0.woff2`),
+      deps({ page: vi.fn(async () => new Response("not found", { status: 404 })) }),
+    );
+    expect(missing.headers.get("cache-control")).toBe("no-store");
     // Everything else changes with a deploy under the same name.
     for (const path of ["/webchat/", "/webchat/app.js", "/webchat/fonts.css"]) {
       const response = await handleWebchat(new Request(`${ORIGIN}${path}`), fakes);
@@ -123,6 +129,15 @@ describe("the webchat's agent list", () => {
       "assistant",
     );
     expect(fakes.page).not.toHaveBeenCalled();
+  });
+
+  it("lists an agent from a registry before #288 that names no chat, as the Directory admits it", async () => {
+    const fakes = deps({
+      listAgents: vi.fn(async () => [{ id: "legacy", name: "Legacy" } as AgentEntry]),
+    });
+    expect(await (await handleWebchat(listRequest(), fakes)).json()).toEqual({
+      agents: [{ id: "legacy", name: "Legacy", main: false }],
+    });
   });
 
   it("leaves out an agent the Directory doesn't admit this identity to", async () => {

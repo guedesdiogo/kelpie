@@ -44,14 +44,22 @@ describe("loading (5.11)", () => {
     await loadPage();
     vi.advanceTimersByTime(10_000);
     expect($("skeleton").hidden).toBe(true);
+    expect($("banner").hidden).toBe(false);
+    // Nothing is scheduled while the first socket still connects: no counting number.
+    expect($("banner-text").textContent).toBe("No connection. Trying again shortly");
   });
 });
 
 describe("a lost connection (5.12)", () => {
   it("changes nothing for 2 s, then a banner counts down to the next try", async () => {
     const { socket } = await connected();
+    // The socket and two retries fail; the waits grow, from 300 ms to 600 ms to 1.2 s.
     socket.close();
-    vi.advanceTimersByTime(1_999);
+    vi.advanceTimersByTime(300);
+    FakeSocket.last.close();
+    vi.advanceTimersByTime(600);
+    FakeSocket.last.close();
+    vi.advanceTimersByTime(1_099);
     expect($("banner").hidden).toBe(true);
     vi.advanceTimersByTime(1);
     expect($("banner").hidden).toBe(false);
@@ -88,6 +96,38 @@ describe("a lost connection (5.12)", () => {
     vi.advanceTimersByTime(1_400);
     next.receive({ type: "bubble", text: "Agora sim." });
     expect($("announcer").textContent).toBe("Assistant: Agora sim.");
+  });
+
+  it("closes a socket still connecting when Try now opens another, and hears only the new one", async () => {
+    const { socket } = await connected();
+    socket.close();
+    vi.advanceTimersByTime(2_000);
+    const connecting = FakeSocket.last;
+    $("retry").click();
+    const fresh = FakeSocket.last;
+    expect(fresh).not.toBe(connecting);
+    expect(connecting.readyState).toBe(3);
+    connecting.open();
+    fresh.open();
+    fresh.receive(historyFrame());
+    connecting.receive({ type: "bubble", text: "Do socket velho." });
+    fresh.receive({ type: "bubble", text: "Do novo." });
+    expect($("thread").textContent).not.toContain("Do socket velho.");
+    expect($("thread").textContent).toContain("Do novo.");
+  });
+
+  it("keeps the reader's place when a reconnect replays the history", async () => {
+    const { socket } = await connected();
+    const scroller = $("scroller");
+    Object.defineProperty(scroller, "scrollHeight", { value: 3_000, configurable: true });
+    Object.defineProperty(scroller, "clientHeight", { value: 500, configurable: true });
+    scroller.scrollTop = 0;
+    scroller.dispatchEvent(new Event("scroll"));
+    socket.close();
+    vi.advanceTimersByTime(300);
+    FakeSocket.last.open();
+    FakeSocket.last.receive(historyFrame([{ role: "assistant", text: "Antiga.", at: NOW }]));
+    expect(scroller.scrollTop).toBe(0);
   });
 
   it("reconnects on its own after the retry's wait, with no banner when it is quick", async () => {
@@ -137,6 +177,7 @@ describe("an expired login (5.12)", () => {
     await settle();
     expect($("login").open).toBe(true);
     expect(JSON.parse(sessionStorage.getItem("kelpie.webchat.assistant"))).toEqual({
+      savedAt: NOW,
       draft: "não perca isto",
       unconfirmed: [],
     });
@@ -155,6 +196,7 @@ describe("an expired login (5.12)", () => {
     const page = await loadPage({
       session: {
         "kelpie.webchat.assistant": JSON.stringify({
+          savedAt: NOW - 60_000,
           draft: "rascunho",
           unconfirmed: [["m-1", "enviada antes"], ["bad"]],
         }),
@@ -181,9 +223,45 @@ describe("an expired login (5.12)", () => {
     expect(sessionStorage.getItem("kelpie.webchat.assistant")).toBeNull();
   });
 
-  it("survives a session store that holds garbage", async () => {
+  it("survives a session store that holds garbage, and drops it", async () => {
     await loadPage({ session: { "kelpie.webchat.assistant": "{garbage" } });
     expect($("text").value).toBe("");
+    expect(sessionStorage.getItem("kelpie.webchat.assistant")).toBeNull();
+  });
+
+  it("never sends an old message by itself: past 10 minutes it comes back as a draft", async () => {
+    const page = await loadPage({
+      session: {
+        "kelpie.webchat.assistant": JSON.stringify({
+          savedAt: NOW - 11 * 60_000,
+          draft: "rascunho",
+          unconfirmed: [["m-1", "apague X"]],
+        }),
+      },
+    });
+    expect($("text").value).toBe("rascunho\napague X");
+    page.socket.open();
+    page.socket.receive(historyFrame());
+    expect(page.socket.sentOf("message")).toEqual([]);
+  });
+
+  it("restores only messages whose ids the conversation takes", async () => {
+    const page = await loadPage({
+      session: {
+        "kelpie.webchat.assistant": JSON.stringify({
+          savedAt: NOW,
+          draft: "",
+          unconfirmed: [
+            ["bad:id", "dois pontos"],
+            ["ok-1", "x".repeat(16_001)],
+            ["ok-2", "certa"],
+          ],
+        }),
+      },
+    });
+    page.socket.open();
+    page.socket.receive(historyFrame());
+    expect(page.socket.sentOf("message")).toEqual([{ type: "message", id: "ok-2", text: "certa" }]);
   });
 });
 
@@ -207,6 +285,12 @@ describe("the agents (#140)", () => {
     );
     expect(links[1].getAttribute("aria-current")).toBe("page");
     expect(links[2].textContent).toBe("Agendaagenda");
+  });
+
+  it("opens the main agent instead of one the list doesn't name", async () => {
+    const replace = vi.spyOn(location, "replace").mockImplementation(() => {});
+    await loadPage({ search: "?agent=ghost" });
+    expect(replace).toHaveBeenCalledWith("?agent=assistant");
   });
 
   it("offers no switcher with one agent", async () => {

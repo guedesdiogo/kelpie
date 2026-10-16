@@ -72,6 +72,7 @@ Four pairs miss AA in light, so text never uses them: `--accent`, `--ok` and `--
 Only the weights listed are used, with `font-synthesis-weight: none`.
 - **The files are variable fonts,** each smaller than the static weights it replaces. Geist's latin file is 29.4 KB, and each of its static weights 33 to 35 KB. Every `@font-face` is held to the weights listed: `400 600`, `400 500` and `680`.
 - **They are self-hosted.** All three are under the SIL Open Font License, with their license beside them. The webchat's content policy is `default-src 'self'` (#140), and no page loads fonts from another origin.
+- **They come from Fontsource 5.3.0,** byte for byte: `@fontsource-variable/geist`, `@fontsource-variable/geist-mono` and `@fontsource-variable/bricolage-grotesque`, the `latin` and `latin-ext` `wght` files. A new version is fetched the same way, under a new name.
 - **Each family ships latin and latin-ext,** chosen by `unicode-range`, so a page that writes no extended letters never loads them.
 - **Names carry the version** (`geist-latin-wght-5.3.0.woff2`), so a browser keeps them a year. `font-display: swap`, and only Geist 400 is preloaded.
 - **Each `font-family` keeps a system fallback stack.**
@@ -413,6 +414,7 @@ Frequent.
 - **An expired login** opens a centered dialog, and keeps the draft.
   - The page tells it from a lost connection by asking ingress with `X-Requested-With`, which Access answers with 401 once the session expired.
   - Under Access, signing in is a full page of its own, so the dialog says what happened and holds one button, "Sign in again". The page keeps the draft and the messages not yet accepted in the tab's storage, signs in again through a reload, and restores them with "Restored your unsent message".
+  - A message not yet accepted goes out again by itself only within 10 minutes. An older one, from a tab reopened later, comes back into the composer as a draft, so nothing old is sent without the owner.
 - **Reduced motion:** the banner fades. Under the less-motion switch it says "Trying again shortly" without a counting number.
 
 ### 5.13 Toasts and undo
@@ -610,7 +612,7 @@ Frequent.
   - The current one is marked with `aria-current`.
   - Arrows, Home and End move through the list, and Escape closes it.
 - **The order** is the registry's and never changes with activity (5.9).
-- **Without `?agent=`,** the webchat opens the main agent.
+- **Without `?agent=`,** the webchat opens the main agent, and so does an id the list doesn't name.
 - **The list comes from ingress.** It names only the agents that chat, each one only if the Directory admits this login to it, as it admits the agent's socket.
 - **Reduced motion:** the list fades.
 

@@ -600,9 +600,13 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     this.#set("epoch", this.#epoch() + 1);
     this.#set("paused", true);
     await this.#serialized(() => this.#cancelFlushSchedule());
-    this.#endWait();
-    // A message may have resumed the conversation meanwhile; then there is nothing to confirm.
-    if (this.#get("paused", false)) await this.#confirmPause(target);
+    // A message may have resumed the conversation meanwhile; then there is nothing to confirm,
+    // and the wait it planned stands.
+    if (this.#get("paused", false)) {
+      await this.#confirmPause(target);
+      // After the pause, so the page doesn't take the wait's end for a turn starting.
+      this.#endWait();
+    }
     return { status: "paused" };
   }
 

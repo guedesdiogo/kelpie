@@ -163,14 +163,6 @@ export class Thread {
     this.#mark(entry);
   }
 
-  /** Whether a message waits for the connection (5.12). */
-  queue(id, queued) {
-    const entry = this.#owner.get(id);
-    if (!entry || entry.accepted) return;
-    entry.queued = queued;
-    this.#mark(entry);
-  }
-
   /** The wait before the reply holds the owner's latest messages (5.1). */
   setWaiting(waiting) {
     if (waiting === this.#waiting) return;
@@ -260,6 +252,8 @@ export class Thread {
       before = bubble.getBoundingClientRect();
       this.#finishActivity(null);
       bubble.classList.remove("typing");
+      // The typing bubble was decoration; the reply is content screen readers reach.
+      bubble.removeAttribute("aria-hidden");
       bubble.replaceChildren();
       this.#join(bubble, at);
     } else {
@@ -290,6 +284,7 @@ export class Thread {
     this.#finishActivity(reason === "paused" ? this.#texts.stoppedByPause : null);
     if (reason === "paused") {
       activity.bubble.classList.remove("typing");
+      activity.bubble.removeAttribute("aria-hidden");
       activity.bubble.classList.add("stopped");
       activity.bubble.replaceChildren(textOf(this.#texts.stoppedByPause));
       this.#join(activity.bubble, this.#now());

@@ -287,15 +287,18 @@ function drawWait(from) {
   });
   // Held while the owner types; once they stop, it drains toward the held deadline.
   if (wait.holding && ownerTypes()) {
-    typingIdleTimer = setTimeout(
-      () => {
-        if (!wait?.holding) return;
-        const at = Date.now();
-        wait = waitOf({ remainingMs: wait.until - at, spanMs: wait.until - at }, at);
-        drawWait(1);
-      },
-      lastInputAt + TYPING_IDLE_MS - now,
-    );
+    const drainOnceIdle = () => {
+      if (!wait?.holding) return;
+      // Still typing: the bar stays full a while longer.
+      if (ownerTypes()) {
+        typingIdleTimer = setTimeout(drainOnceIdle, lastInputAt + TYPING_IDLE_MS - Date.now());
+        return;
+      }
+      const at = Date.now();
+      wait = waitOf({ remainingMs: wait.until - at, spanMs: wait.until - at }, at);
+      drawWait(1);
+    };
+    typingIdleTimer = setTimeout(drainOnceIdle, lastInputAt + TYPING_IDLE_MS - now);
   }
 }
 
@@ -420,7 +423,9 @@ const skeletonTimer = setTimeout(() => {
 const giveUpTimer = setTimeout(() => {
   if (loaded) return;
   skeleton.hidden = true;
-  if (!isOpen()) showBanner();
+  if (isOpen()) return;
+  offlineSince ??= Date.now() - LOADING_GIVE_UP_MS;
+  showBanner();
 }, LOADING_GIVE_UP_MS);
 
 /** The history arrived: the first one replaces the skeleton, a later one ends an outage. */
@@ -438,7 +443,7 @@ function loadedHistory(resent) {
       showEmpty();
       toEnd();
     }, left);
-  } else {
+  } else if (following) {
     toEnd();
   }
   back(resent);
@@ -452,8 +457,10 @@ function showEmpty() {
   if (empty.hidden === !isEmpty) return;
   empty.hidden = !isEmpty;
   if (!isEmpty) {
+    // A new host, so the old one leaves the page and the mascots' timer lets its mascot go.
     emptyMascot = null;
-    $("empty-mascot").replaceChildren();
+    const host = $("empty-mascot");
+    host.replaceWith(host.cloneNode(false));
     return;
   }
   $("empty-text").textContent = T.empty(agentName());
@@ -473,6 +480,10 @@ let backTimer = null;
 
 function connect() {
   clearTimeout(retryTimer);
+  // A socket still connecting is dropped: only the newest one speaks for the conversation.
+  const previous = socket;
+  socket = null;
+  previous?.close();
   const opened = Date.now();
   const lang = encodeURIComponent(navigator.language || "");
   // The browser's language goes along, for Kelpie's own messages when the owner's words don't say
@@ -488,6 +499,7 @@ function connect() {
     updateControls();
   });
   current.addEventListener("message", (event) => {
+    if (socket !== current) return;
     let frame;
     try {
       frame = JSON.parse(event.data);
@@ -537,7 +549,9 @@ function showBanner() {
 }
 
 function renderOffline() {
-  const text = offlineText(T, { nextTryAt, now: Date.now(), less: reduced() });
+  // A first socket still connecting has no next try to count down to.
+  const now = Date.now();
+  const text = offlineText(T, { nextTryAt, now, less: reduced() || nextTryAt <= now });
   const digits = text.match(/\d+/);
   if (!digits) {
     bannerText.textContent = text;
@@ -614,7 +628,7 @@ const sessionKey = () => `kelpie.webchat.${agent}`;
 /** The draft and the messages not yet accepted outlive a reload in this tab (WCAG 2.2.5). */
 function saveSession() {
   try {
-    const kept = { draft: input.value, unconfirmed: [...unconfirmed] };
+    const kept = { savedAt: Date.now(), draft: input.value, unconfirmed: [...unconfirmed] };
     if (kept.draft || kept.unconfirmed.length > 0) {
       sessionStorage.setItem(sessionKey(), JSON.stringify(kept));
     } else {
@@ -625,22 +639,40 @@ function saveSession() {
   }
 }
 
+/** Unsent messages go out again by themselves only this soon after leaving, as a sign-in takes. */
+const RESEND_WITHIN_MS = 10 * 60_000;
+/** The ids and texts the conversation takes (`parseClientFrame`, `LIMITS.maxTextLength`). */
+const MESSAGE_ID = /^[A-Za-z0-9-]{1,64}$/;
+const MAX_TEXT = 16_000;
+
 function restoreSession() {
   let kept = null;
   try {
-    kept = JSON.parse(sessionStorage.getItem(sessionKey()) ?? "null");
+    const stored = sessionStorage.getItem(sessionKey());
     sessionStorage.removeItem(sessionKey());
+    kept = JSON.parse(stored ?? "null");
   } catch {
     return;
   }
-  if (!kept) return;
-  for (const entry of Array.isArray(kept.unconfirmed) ? kept.unconfirmed : []) {
-    if (Array.isArray(entry) && typeof entry[0] === "string" && typeof entry[1] === "string") {
-      unconfirmed.set(entry[0], entry[1]);
-    }
+  if (typeof kept !== "object" || kept === null) return;
+  const messages = (Array.isArray(kept.unconfirmed) ? kept.unconfirmed : []).filter(
+    (entry) =>
+      Array.isArray(entry) &&
+      typeof entry[0] === "string" &&
+      MESSAGE_ID.test(entry[0]) &&
+      typeof entry[1] === "string" &&
+      entry[1].length <= MAX_TEXT,
+  );
+  const fresh = Number.isFinite(kept.savedAt) && Date.now() - kept.savedAt <= RESEND_WITHIN_MS;
+  const draft = [typeof kept.draft === "string" ? kept.draft : ""];
+  for (const [id, text] of messages) {
+    // An old message is never sent by itself: it waits in the box for the owner to send again.
+    if (fresh) unconfirmed.set(id, text);
+    else draft.push(text);
   }
-  if (typeof kept.draft === "string" && kept.draft) {
-    input.value = kept.draft;
+  const text = draft.filter(Boolean).join("\n");
+  if (text) {
+    input.value = text;
     const notice = $("restored");
     notice.textContent = T.restored;
     notice.hidden = false;
@@ -749,6 +781,7 @@ pause.addEventListener("click", () => {
 
 /** A printable key anywhere focuses the composer, except in a field, a dialog or on a button. */
 document.addEventListener("keydown", (event) => {
+  if (event.defaultPrevented) return;
   if (event.key === "End" && !isField(event.target)) {
     event.preventDefault();
     toEnd();
@@ -952,6 +985,14 @@ async function start() {
   if (state === "expired") {
     showLogin();
     return;
+  }
+  // An id the list doesn't name would never connect: the main agent opens instead.
+  if (agent && state === "ok" && !found.some((entry) => entry.id === agent)) {
+    const main = found.find((entry) => entry.main) ?? found[0];
+    if (main) {
+      location.replace(`?agent=${encodeURIComponent(main.id)}`);
+      return;
+    }
   }
   if (!agent) {
     const main = found.find((entry) => entry.main) ?? found[0];

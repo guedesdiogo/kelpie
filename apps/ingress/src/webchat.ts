@@ -65,7 +65,7 @@ export async function handleWebchat(request: Request, deps: WebchatDeps): Promis
       response.headers.set(name, value);
     }
     // Everything else keeps its name across deploys; a font's name changes with its version.
-    if (url.pathname.startsWith(FONTS_PATH)) {
+    if (url.pathname.startsWith(FONTS_PATH) && page.ok) {
       response.headers.set("cache-control", "private, max-age=31536000, immutable");
     }
     return response;
@@ -112,7 +112,8 @@ export async function handleWebchat(request: Request, deps: WebchatDeps): Promis
  */
 async function agentList(sub: string, deps: WebchatDeps): Promise<Response> {
   const identity: ChannelIdentity = { channel: ACCESS_SOURCE, channelUserId: sub };
-  const chatting = (await deps.listAgents()).filter((agent) => agent.chat);
+  // Only an explicit `false`, as the Directory reads it: a registry from before #288 names none.
+  const chatting = (await deps.listAgents()).filter((agent) => agent.chat !== false);
   const admitted = await Promise.all(
     chatting.map(async (agent) => (await deps.admit(identity, agent.id)).admitted),
   );

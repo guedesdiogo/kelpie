@@ -618,11 +618,15 @@ describe("the wait before a reply (ADR-0043 §5)", () => {
     await vi.waitFor(() => expect(ofType(chat.frames, "wait")).toHaveLength(1));
 
     chat.send({ type: "pause" });
-    await vi.waitFor(() => expect(ofType(chat.frames, "paused")).toHaveLength(1));
+    await vi.waitFor(() => expect(ofType(chat.frames, "wait")).toHaveLength(2));
     expect(ofType(chat.frames, "wait")).toEqual([
       expect.objectContaining({ deadline: expect.any(Object) }),
       { type: "wait", deadline: null },
     ]);
+    // The pause comes first, so the page doesn't take the wait's end for a turn starting.
+    const types = chat.frames.map((frame) => frame.type);
+    expect(types.indexOf("paused")).toBeGreaterThan(-1);
+    expect(types.indexOf("paused")).toBeLessThan(types.lastIndexOf("wait"));
   });
 
   it("shows no wait when the agent answers at once", async () => {
