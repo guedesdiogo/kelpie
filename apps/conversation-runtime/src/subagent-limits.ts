@@ -13,3 +13,8 @@ export const SUBAGENT_TOOLS: ReadonlySet<string> = new Set([
   "cancel_task",
   "comment_task",
 ]);
+
+/** How each of a creator's subagent ids starts: Kelpie picks the rest, never the model. */
+export function subagentPrefix(creator: string): string {
+  return `${creator.slice(0, 29).replace(/-+$/, "")}-sub-`;
+}

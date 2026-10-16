@@ -1,6 +1,12 @@
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { derivedMascot, KELPIE_MASCOT, type Mascot, REGISTRY_NAME } from "@kelpie/config";
+import {
+  derivedMascot,
+  KELPIE_MASCOT,
+  type Mascot,
+  REGISTRY_NAME,
+  SETUP_AGENT_ID,
+} from "@kelpie/config";
 import { WEBCHAT_ADMISSION_HEADER } from "@kelpie/conversation/contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
@@ -209,6 +215,19 @@ describe("webchat sockets", () => {
 
     await registry.setChat("quiet", false, owned);
     chat.send({ type: "message", id: "q1", text: "still there?" });
+    await vi.waitFor(() => expect(chat.closedWith()).toBe(1008));
+    expect(ofType(chat.frames, "accepted")).toEqual([]);
+    expect(await agent(name).turns()).toEqual([]);
+  });
+
+  it("closes an open socket to the retired setup agent, before taking the message (ADR-0047)", async () => {
+    use(fakeWorld([reply("Never.")]));
+    // A socket admitted before the deploy that retired it.
+    const name = `${SETUP_AGENT_ID}:webchat:u-owner`;
+    const chat = await open(name, { ...owner, agentId: SETUP_AGENT_ID });
+    await vi.waitFor(() => expect(ofType(chat.frames, "history")).toHaveLength(1));
+
+    chat.send({ type: "message", id: "s1", text: "still there?" });
     await vi.waitFor(() => expect(chat.closedWith()).toBe(1008));
     expect(ofType(chat.frames, "accepted")).toEqual([]);
     expect(await agent(name).turns()).toEqual([]);
@@ -873,8 +892,8 @@ describe("a turn's steps in the webchat", () => {
         },
       },
     ];
-    const name = "setup:webchat:u-owner-note";
-    const chat = await open(name, { ...owner, agentId: "setup" });
+    const name = "kelpie:webchat:u-owner-note";
+    const chat = await open(name, { ...owner, agentId: "kelpie" });
     chat.send({ type: "message", id: "c1", text: "vamos conectar o bot" });
     await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
     await agent(name).flush();
@@ -893,7 +912,7 @@ describe("a turn's steps in the webchat", () => {
     expect(world.sent).toEqual([]);
     expect(JSON.stringify(world.requests.at(-1)?.messages)).toContain("Kelpie, automatically");
 
-    const later = await open(name, { ...owner, agentId: "setup" });
+    const later = await open(name, { ...owner, agentId: "kelpie" });
     await vi.waitFor(() => expect(later.frames[0]).toMatchObject({ type: "history" }));
     const replay = JSON.stringify(later.frames[0]);
     expect(replay).toContain("vamos conectar o bot");

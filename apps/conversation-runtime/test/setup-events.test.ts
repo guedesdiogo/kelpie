@@ -33,7 +33,7 @@ const OPEN = () => Date.now() + 60 * 60_000;
 
 function message(id: string, text: string) {
   return {
-    agentId: "setup",
+    agentId: "kelpie",
     providerMessageId: id,
     userId: "u-owner",
     role: "owner",
@@ -46,7 +46,7 @@ function message(id: string, text: string) {
 }
 
 /**
- * Tools for the setup conversation: `form` has Kelpie send a link waiting for `step` of `agentId`
+ * Tools for Master's conversation: `form` has Kelpie send a link waiting for `step` of `agentId`
  * until `until`, and `whoami` logs who a turn acts for. The agents' AgentHosts outlive a test, so a
  * test that only waits names an agent of its own.
  */
@@ -180,11 +180,11 @@ describe("a finished setup step", () => {
       seen.push(world.awaits.length);
       return send(...args);
     };
-    await waiting("setup:telegram:events-awaits");
+    await waiting("kelpie:telegram:events-awaits");
     expect(world.awaits).toEqual([
       {
         agentId: "lume-awaited",
-        conversation: "setup:telegram:events-awaits",
+        conversation: "kelpie:telegram:events-awaits",
         step: "telegram_connected",
         until,
       },
@@ -203,13 +203,13 @@ describe("a finished setup step", () => {
       ]),
     );
     world.tools = tools("telegram_connected", OPEN());
-    const told = await waiting("setup:telegram:events-told");
+    const told = await waiting("kelpie:telegram:events-told");
     // A conversation the AgentHost lists, but that sent no link itself, takes no report.
-    const stranger = agent("setup:telegram:events-stranger");
+    const stranger = agent("kelpie:telegram:events-stranger");
     await stranger.ingest(message("m1", "oi"));
     await stranger.flush();
     await settled(stranger, 1);
-    await host("lume").awaitSetup("setup:telegram:events-stranger", "telegram_connected", OPEN());
+    await host("lume").awaitSetup("kelpie:telegram:events-stranger", "telegram_connected", OPEN());
 
     await host("lume").setupDone(connected);
     await settled(told, 2);
@@ -230,7 +230,7 @@ describe("a finished setup step", () => {
       fakeWorld([toolCalls({ name: "form" }), reply("Abra o link."), reply("Runner conectado!")]),
     );
     world.tools = tools("runner_connected", OPEN(), [], "setup");
-    const told = await waiting("setup:webchat:events-runner", "conecta o runner");
+    const told = await waiting("kelpie:webchat:events-runner", "conecta o runner");
 
     await host("setup").setupDone(runner);
     await settled(told, 2);
@@ -248,10 +248,10 @@ describe("a finished setup step", () => {
       ]),
     );
     world.tools = tools("telegram_paired", OPEN());
-    const pairing = await waiting("setup:telegram:events-pairing");
+    const pairing = await waiting("kelpie:telegram:events-pairing");
     // Ended past the grace a late report still gets.
     world.tools = tools("telegram_connected", Date.now() - 10 * 60_000);
-    const late = await waiting("setup:telegram:events-late");
+    const late = await waiting("kelpie:telegram:events-late");
 
     await host("lume").setupDone(connected);
     await late.setupDone("lume", connected);
@@ -271,7 +271,7 @@ describe("a finished setup step", () => {
       ]),
     );
     world.tools = tools("telegram_connected", OPEN(), actors);
-    const stub = await waiting("setup:telegram:events-owner");
+    const stub = await waiting("kelpie:telegram:events-owner");
     await stub.setupDone("lume", connected);
     await settled(stub, 2);
     // Nothing of the owner's was pending: the note's own row made the turn the owner's.
@@ -289,7 +289,7 @@ describe("a finished setup step", () => {
       ]),
     );
     world.tools = tools("telegram_connected", OPEN());
-    const stub = await waiting("setup:telegram:events-running");
+    const stub = await waiting("kelpie:telegram:events-running");
     world.modelHeld = true;
     await stub.ingest(message("m2", "e o nome do bot?"));
     await stub.flush();
@@ -313,7 +313,7 @@ describe("a finished setup step", () => {
       fakeWorld([toolCalls({ name: "form" }), reply("Abra o link."), reply("Ok.")]),
     );
     world.tools = tools("telegram_connected", OPEN());
-    const stub = await waiting("setup:telegram:events-joined");
+    const stub = await waiting("kelpie:telegram:events-joined");
 
     await stub.ingest(message("m2", "e agora?"));
     await stub.setupDone("lume", connected);
@@ -333,8 +333,8 @@ describe("a finished setup step", () => {
       fakeWorld([toolCalls({ name: "form" }), reply("Abra o link."), reply("Ok.")]),
     );
     world.tools = tools("telegram_connected", OPEN());
-    const stub = await waiting("setup:telegram:events-paused");
-    await stub.pause({ agentId: "setup", destination });
+    const stub = await waiting("kelpie:telegram:events-paused");
+    await stub.pause({ agentId: "kelpie", destination });
     await stub.setupDone("lume", connected);
     await moment();
     expect(await stub.turns()).toHaveLength(1);
@@ -351,14 +351,14 @@ describe("a finished setup step", () => {
     );
     world.tools = tools("telegram_connected", OPEN());
     const stub = await waiting(
-      "setup:telegram:events-words",
+      "kelpie:telegram:events-words",
       "vamos conectar o bot agora, por favor",
     );
     await stub.setupDone("lume", connected);
     await settled(stub, 2);
 
     // Kelpie's note is in English; the conversation stays Portuguese.
-    await stub.pause({ agentId: "setup", destination });
+    await stub.pause({ agentId: "kelpie", destination });
     expect(world.sent.at(-1)).toBe("Pausado. Respondo depois da sua próxima mensagem.");
 
     await stub.closeSession();

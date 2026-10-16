@@ -38,6 +38,10 @@ The reference check is on #382. It read the source of Hermes Agent, Hermes-Bot-M
   - a secret never passes through the chat (ADR-0013).
 
   The confirmations are code, not a setting, so Master can't turn them off.
+- **The tools reach Telegram too,** since Master answers there.
+  - The setup agent was reached in the webchat, behind Cloudflare Access. On Telegram, the owner's paired account confirms with the typed code, as ADR-0026 already allows.
+  - So a deletion or a model change asked on Telegram rests on that account's security.
+  - The secure forms and the pairing page stay behind Access.
 - **The tools follow the role.** The agent the Registry calls `main` has them, checked when a turn lists them and again when one runs. When `set_main_agent` makes another agent Master, the previous Master's next call is refused.
 - **Not in a task's run:** a task's conversation has no owner to confirm anything (#335).
 - **Master's prompt carries the setup agent's guidance** as a built-in `configure-kelpie` skill, whatever persona the owner gives Master, as the `create-subagent` skill does for `spawn`.
@@ -62,12 +66,18 @@ The other rows of ADR-0036 §3 stand. That includes a subagent's trio at its cre
 - **No agent but Master changes its own trio,** and only with the owner's confirmation. ADR-0036 gave the owner's reason: an agent that lowered its own cost couldn't raise it back. That still holds:
   - Master keeps `configure_agent` at any tier;
   - the admin API's `configureAgent` can always raise it.
-- **The same holds for Master's own tools.** The `configure-kelpie` skill tells Master to warn the owner first, since a configuration tool it takes from itself comes back only through the admin API.
+- **Kelpie always keeps an agent that configures it in chat.**
+  - `configure_agent` refuses a tools list for Master that leaves out a configuration tool.
+  - `set_main_agent` refuses an agent whose tools list leaves them out.
+  - The admin API can still change either.
 
 ### 3. The setup agent retires without a destructive migration
 
 - **The Registry stops listing the `setup` row and answering for it.** `get` and `list` skip it, so `setMainAgent`, `setAgentChat` and `deleteAgent` don't know it, and the webchat doesn't list it.
-- **The Directory refuses it at `admit`** with `no_grant`, whatever the Registry says, so a Telegram bot connected to it reaches nothing.
+- **Nothing reaches it:**
+  - the Directory refuses it at `admit` with `no_grant`, whatever the Registry says, so a Telegram bot connected to it reaches nothing;
+  - a webchat socket opened to it before the deploy closes at its next message.
+- **A bot already connected to it keeps its token and webhook,** since no command deletes the retired agent. Its owner revokes the token with BotFather.
 - **Its row and its `AgentHost`'s storage stay,** so a rollback finds them as they were (ADR-0029). Its id stays reserved: `createAgent` and the Registry refuse it.
 - **Its old conversations with the owner stay** where nothing reaches them. Erasing them waits until no rollback can reach a build from before this ADR.
 
@@ -75,6 +85,7 @@ The other rows of ADR-0036 §3 stand. That includes a subagent's trio at its cre
 
 The runner is the instance's, not one agent's.
 - `connect_runner` keeps the form's wait on the `AgentHost` under the retired id, and the admin API keeps reporting the form there (#328).
+- The deploy's probe still wakes that `AgentHost` (ADR-0033), though the Registry doesn't list it.
 - The note reaches the conversation that sent the form, as ADR-0028 says, whichever agent is Master by then.
 
 ### 5. An instance with no Master
@@ -100,13 +111,19 @@ An instance with no agent in the role `main` has no agent with the configuration
 - **[Story 5.28 (#383)](https://github.com/guedesdiogo/kelpie/issues/383) implements it.** Its tests cover:
   - that the configuration tools reach only Master, follow the role when it moves, and stay off a task's run;
   - that the Registry hides the retired row and keeps it;
-  - that the Directory refuses the retired id;
+  - that the Directory refuses the retired id, and an open socket to it closes;
+  - that Master can't lose the configuration tools through a tools list or `set_main_agent`;
+  - that the deploy's probe still wakes the retired id's `AgentHost`;
   - that only Master's prompt carries the `configure-kelpie` skill;
   - that Master changes its own model only after the owner's confirmation.
 - **Two issues change:**
   - #274 is superseded;
   - the cost reports of #269 go to the owner's conversation with Master.
 - **The handoff eval (#287) runs with Master's prompt,** which now carries the `configure-kelpie` skill, so its rate should be measured again.
+- **Text from other agents now reaches a turn that holds configuration tools.**
+  - A specialist's task news reaches the owner's conversation with Master as Kelpie's note. The setup agent never got task news.
+  - So that text can steer a change that ADR-0013 lets run without a yes, such as `create_agent` or `rename_agent`. A rename also changes the name a later confirmation quotes, beside the id.
+  - A follow-up has Kelpie announce those changes, as it does a subagent's creation.
 
 ## Alternatives considered
 

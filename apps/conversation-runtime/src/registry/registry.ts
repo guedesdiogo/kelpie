@@ -10,9 +10,10 @@ import {
   SETUP_AGENT_ID,
   type SetAgentResult,
 } from "@kelpie/config";
-import { and, asc, count, eq, gt, ne } from "drizzle-orm";
+import { and, asc, count, eq, gt, like, ne } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
+import { subagentPrefix } from "../subagent-limits.ts";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
 
@@ -94,6 +95,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     if ((live?.n ?? 0) >= MAX_LIVE_SUBAGENTS) return { ok: false, reason: "not_allowed" };
     const now = Date.now();
     // Three live, but no churn: deleting one to make another counts against a day's creations.
+    // Only its subagents count: Master also creates agents through its tools (ADR-0047).
     const made = this.#db
       .select({ n: count() })
       .from(schema.auditLog)
@@ -101,6 +103,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
         and(
           eq(schema.auditLog.action, "agent.created"),
           eq(schema.auditLog.via, `agent:${creator}`),
+          like(schema.auditLog.agentId, `${subagentPrefix(creator)}%`),
           gt(schema.auditLog.at, now - DAY_MS),
         ),
       )

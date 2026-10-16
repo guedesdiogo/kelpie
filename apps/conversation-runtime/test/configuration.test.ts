@@ -54,6 +54,8 @@ const roleIn = async (id: string): Promise<AgentRole | null> =>
 /** Commands over an in-memory registry; every call is logged. */
 function fakeCommands() {
   const agents = new Map<string, string>([[MASTER, "Kelpie"]]);
+  /** The agents whose settings name their tools; the others have all they are given. */
+  const allowlists = new Map<string, string[]>();
   const calls: string[] = [];
   /** The VPS runner as channel-egress would see it (#294); a test changes it. */
   const runner: { configured: boolean; state: RunnerState } = {
@@ -77,7 +79,7 @@ function fakeCommands() {
           id,
           name,
           ...roleOf(id),
-          settings: DEFAULT_SETTINGS,
+          settings: { ...DEFAULT_SETTINGS, tools: allowlists.get(id) ?? null },
           promptVersion: 0,
           mascot: KELPIE_MASCOT,
         },
@@ -178,7 +180,7 @@ function fakeCommands() {
       return { ok: true, value: runner.state };
     },
   };
-  return { commands, agents, calls, runner };
+  return { commands, agents, calls, runner, allowlists };
 }
 
 /** A context whose `confirm` answers `confirmed`, and logs what it was asked and the links sent. */
@@ -285,6 +287,63 @@ describe("Master's configuration tools (ADR-0047)", () => {
     expect(await provider.tools(MASTER)).toEqual([]);
   });
 
+  it("never leaves Kelpie without a Master that holds them, before asking anything", async () => {
+    const { commands, agents, calls, allowlists } = fakeCommands();
+    agents.set("ana", "Ana");
+    allowlists.set("ana", ["memory_search", "memory_read"]);
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
+    const { context, asked } = contextOf(true);
+
+    const narrow = await run(tools, "set_main_agent", { id: "ana" }, context);
+    expect(narrow).toEqual({
+      output:
+        "The agent ana's tools leave out configuration tools, so as Master it couldn't configure Kelpie. Change its tools first with configure_agent: null for all it is given, or a list that names every configuration tool.",
+      isError: true,
+    });
+    const own = await run(
+      tools,
+      "configure_agent",
+      { id: MASTER, settings: { tools: ["memory_search", "configure_agent"] } },
+      context,
+    );
+    expect(own).toEqual({
+      output:
+        "Master keeps every configuration tool: a tools list for it must name them all, or be null for all it is given.",
+      isError: true,
+    });
+    expect(asked).toEqual([]);
+    expect(calls).toEqual([]);
+
+    // A list that names them all, or none for a specialist, goes on to the owner's confirmation.
+    const every = [...tools.keys(), "memory_search"];
+    expect(
+      (
+        await run(
+          tools,
+          "configure_agent",
+          { id: MASTER, settings: { tools: every } },
+          contextOf(false).context,
+        )
+      ).output,
+    ).toContain("Not done yet");
+    expect(
+      (
+        await run(
+          tools,
+          "configure_agent",
+          { id: "ana", settings: { tools: ["memory_search"] } },
+          contextOf(false).context,
+        )
+      ).output,
+    ).toContain("Not done yet");
+    allowlists.set("ana", every);
+    expect(
+      (await run(tools, "set_main_agent", { id: "ana" }, contextOf(false).context)).output,
+    ).toContain("Not done yet");
+  });
+
   it("calls the role the Registry names `main` Master, in its skill, tools and texts (#343)", async () => {
     // list_agents shows the Registry's value, so the skill ties the two.
     expect(CONFIGURE_KELPIE_SKILL).toContain("You are Master, the role `main` in list_agents.");
@@ -310,7 +369,7 @@ describe("Master's configuration tools (ADR-0047)", () => {
     const { context, asked } = contextOf(false, owner, "es");
     await run(tools, "set_main_agent", { id: "ana" }, context);
     expect(asked.map((request) => request.summary)).toEqual([
-      'convertir el agente "Ana" (ana) en el Master, el que conversa contigo.',
+      'convertir el agente "Ana" (ana) en el Master, el que conversa contigo y configura Kelpie.',
     ]);
   });
 
@@ -404,7 +463,8 @@ describe("Master's configuration tools (ADR-0047)", () => {
       {
         command: "setMainAgent",
         input: { id: "ana" },
-        summary: 'tornar o agente "Ana" (ana) o Master, o que conversa com você.',
+        summary:
+          'tornar o agente "Ana" (ana) o Master, o que conversa com você e configura o Kelpie.',
       },
       {
         command: "setAgentChat",
@@ -425,7 +485,7 @@ describe("Master's configuration tools (ADR-0047)", () => {
       output: "The owner can now chat with the agent ana.",
     });
     expect(confirmed.asked.map((request) => request.summary)).toEqual([
-      'make the agent "Ana" (ana) Master, the one you talk to.',
+      'make the agent "Ana" (ana) Master, the one you talk to, which also configures Kelpie.',
       'let you chat with the agent "Ana" (ana).',
     ]);
     expect(calls).toEqual(['setMainAgent {"id":"ana"}', 'setAgentChat {"id":"ana","chat":true}']);

@@ -2,9 +2,9 @@ import type { Locale } from "@kelpie/channels";
 import { escapeHtml, page } from "./forms.ts";
 import { PAGES } from "./texts.ts";
 
-// The page that pairs the owner's Telegram account with an agent's bot (Story 3.11). The setup
-// agent links to it, because pairing needs the Directory, which only the admin API and ingress
-// bind. Pressing its button, behind Access and the owner check, is the owner's own yes.
+// The page that pairs the owner's Telegram account with an agent's bot (Story 3.11). Master links
+// to it, because pairing needs the Directory, which only the admin API and ingress bind. Pressing
+// its button, behind Access and the owner check, is the owner's own yes.
 
 /** The agent id in a `/pair/telegram/<agent id>` path, or null when the path isn't one. */
 export function pairingAgentOf(pathname: string): string | null {

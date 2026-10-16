@@ -10,6 +10,7 @@ import {
   parseSettings,
   SETUP_AGENT_ID,
   type SetupEvent,
+  type ShownAgent,
 } from "@kelpie/config";
 import { type ModelSettings, parseModelSettings } from "@kelpie/llm/models";
 // The router module only: the package root also loads the provider SDKs.
@@ -40,7 +41,7 @@ You also configure Kelpie for the owner, with your configuration tools. They wor
 - Make every change with your tools, and never say you made one your tools didn't confirm.
 - Kelpie's agents have roles. You are Master, the role \`main\` in list_agents. Master is the agent the owner talks to, and the configuration tools go with the role: set_main_agent makes another agent Master, and it takes them. Every other agent is a specialist, and the owner can chat with a specialist only once its chat is on (set_agent_chat).
 - For a first setup, go in this order: see which agents exist (list_agents); connect your own Telegram bot (connect_telegram); then pair the owner's Telegram account with it (pair_telegram). Create another agent, with a short id of lowercase letters, digits and hyphens, and a name (create_agent), only when the owner asks for one; to talk to it, its chat must be on. Changing an agent's model, prompt or mascot (configure_agent), yours included, is optional.
-- Your own settings change as any agent's do, with the owner's confirmation. Before you narrow your own tools or lower your own tier, tell the owner: a configuration tool you take from yourself comes back only through the admin API.
+- Your own settings change as any agent's do, with the owner's confirmation. Kelpie refuses a tools list that would take a configuration tool from you, and refuses to make Master an agent whose tools leave them out. Before you lower your own tier, tell the owner.
 - Delete an agent (delete_agent) only when the owner asks for it: its subagents go with it, and nothing it held can be recovered. Master can't be deleted.
 - Changing an agent's settings or the instance's models, which agent is Master or an agent's chat, or deleting an agent, needs the owner's confirmation. Kelpie itself shows them what will change, with a Confirm button in the webchat or a code to reply with: don't ask them to confirm in other words, and never make up a code. Once they confirm, call the same tool again with the same input.
 - Kelpie itself sends the owner the links of connect_telegram, pair_telegram and connect_runner, in a message of its own after your reply. Never write those links yourself, and never make one up: just tell the owner to open the link Kelpie sent. What the owner does on that page is their yes.
@@ -277,6 +278,9 @@ const NOT_SPECIALIST = failed(
   "Only a specialist's chat can change: Master always chats, and a subagent never does.",
 );
 const NOT_DELETABLE = failed("Master can't be deleted.");
+const MASTER_KEEPS = failed(
+  "Master keeps every configuration tool: a tools list for it must name them all, or be null for all it is given.",
+);
 const NOT_MASTER = failed(
   "This agent isn't Master any more, so it can't configure Kelpie: the owner asks Master.",
 );
@@ -286,6 +290,13 @@ const NOT_CONFIGURED = failed(
 const NO_RUNNER = failed(
   "Kelpie was deployed without the runner's VPC Service, so there's no runner to connect yet. The owner sets up the server and the tunnel first: see docs/runner.md.",
 );
+
+/** The configuration tools, by name: the ones Master's own tools list must keep (ADR-0047). */
+const CONFIGURATION_TOOLS = Object.keys(SPECS);
+
+/** Whether an agent with this tools list, as Master, holds every configuration tool. */
+const keepsConfiguration = (tools: readonly string[] | null | undefined) =>
+  tools == null || CONFIGURATION_TOOLS.every((name) => tools.includes(name));
 
 /** What the model is told of the runner's state (#294): never its secret, which Kelpie keeps. */
 function runnerStatus(runner: RunnerState): string {
@@ -389,7 +400,8 @@ const TEXTS: Localized<{
     settingFrom: "from",
     changeSettings: (agent, id, changes) =>
       `change the settings of the agent ${agent} (${id}): ${changes}.`,
-    mainAgent: (agent, id) => `make the agent ${agent} (${id}) Master, the one you talk to.`,
+    mainAgent: (agent, id) =>
+      `make the agent ${agent} (${id}) Master, the one you talk to, which also configures Kelpie.`,
     models: (before, after) =>
       `set the models every agent uses unless it has its own, from ${before} to ${after}.`,
     chat: (agent, id, on) =>
@@ -412,7 +424,8 @@ const TEXTS: Localized<{
     settingFrom: "de",
     changeSettings: (agent, id, changes) =>
       `alterar as configurações do agente ${agent} (${id}): ${changes}.`,
-    mainAgent: (agent, id) => `tornar o agente ${agent} (${id}) o Master, o que conversa com você.`,
+    mainAgent: (agent, id) =>
+      `tornar o agente ${agent} (${id}) o Master, o que conversa com você e configura o Kelpie.`,
     models: (before, after) =>
       `definir os modelos que todo agente usa quando não tem os seus, de ${before} para ${after}.`,
     chat: (agent, id, on) =>
@@ -436,7 +449,7 @@ const TEXTS: Localized<{
     changeSettings: (agent, id, changes) =>
       `cambiar la configuración del agente ${agent} (${id}): ${changes}.`,
     mainAgent: (agent, id) =>
-      `convertir el agente ${agent} (${id}) en el Master, el que conversa contigo.`,
+      `convertir el agente ${agent} (${id}) en el Master, el que conversa contigo y configura Kelpie.`,
     models: (before, after) =>
       `definir los modelos que usa todo agente que no tenga los suyos, de ${before} a ${after}.`,
     chat: (agent, id, on) =>
@@ -561,13 +574,11 @@ export function configurationTools(
   const isOwner = (context: ToolContext) => context.actor.role === "owner";
 
   /** The agent, or the tool's refusal: checked before anything is shown to the owner. */
-  async function agentOf(context: ToolContext, id: unknown): Promise<AgentEntry | ToolOutcome> {
+  async function agentOf(context: ToolContext, id: unknown): Promise<ShownAgent | ToolOutcome> {
     if (!isAgentId(id))
       return failed("That isn't an agent id: lowercase letters, digits and hyphens.");
     const agent = await commands.getAgent(context.actor, { id });
-    if (!agent.ok) return refusal(agent, id);
-    const { name, role, owner, chat } = agent.value;
-    return { id, name, role, owner, chat };
+    return agent.ok ? agent.value : refusal(agent, id);
   }
 
   /** What the model is told when the owner can't reach the agent yet (#288). */
@@ -654,18 +665,19 @@ export function configurationTools(
         }
         const agent = await agentOf(context, id);
         if (!("id" in agent)) return agent;
+        // Kelpie is never left without an agent that configures it in chat (ADR-0047).
+        if (
+          parsed.tools !== undefined &&
+          agent.role === "main" &&
+          !keepsConfiguration(parsed.tools)
+        ) {
+          return MASTER_KEEPS;
+        }
         const change = { id: agent.id, settings: parsed };
-        const current = parsed.model
-          ? await commands.getAgent(context.actor, { id: agent.id })
-          : null;
         const summary = TEXTS[context.locale].changeSettings(
           JSON.stringify(agent.name),
           agent.id,
-          describe(
-            parsed,
-            context.locale,
-            current?.ok ? (current.value.settings.model ?? {}) : undefined,
-          ),
+          describe(parsed, context.locale, agent.settings.model ?? {}),
         );
         // The owner confirms what they see, and one bubble shows the whole change, or nothing.
         if (visible(summary).length > MAX_SUMMARY_CHARS) {
@@ -741,6 +753,11 @@ export function configurationTools(
         if (agent.role === "subagent") return NOT_MAIN;
         if (agent.role === "main") {
           return { output: `The agent ${agent.id} is already Master; nothing changed.` };
+        }
+        if (!keepsConfiguration(agent.settings.tools)) {
+          return failed(
+            `The agent ${agent.id}'s tools leave out configuration tools, so as Master it couldn't configure Kelpie. Change its tools first with configure_agent: null for all it is given, or a list that names every configuration tool.`,
+          );
         }
         const change = { id: agent.id };
         const confirmed = await context.confirm({

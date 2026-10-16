@@ -289,7 +289,7 @@ describe("a temporary subagent (#290)", () => {
     );
     expect(await offered(plain, "allow-plain")).toEqual(new Set(["complete_task", "comment_task"]));
 
-    // A subagent whose allowlist Admin cleared still gets only a subagent's tools, and only those
+    // A subagent whose allowlist Master cleared still gets only a subagent's tools, and only those
     // its creator may use.
     await host("allow-maker").configure({ tools: ["complete_task", "memory_search"] }, owner);
     await registry().addSubagent("allow-maker-sub-aaaaaa", "Sub", "kelpie", owner);

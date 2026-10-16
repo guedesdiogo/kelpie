@@ -353,6 +353,17 @@ describe("Registry subagents (#290)", () => {
     });
   });
 
+  it("counts only a creator's subagents against its day, not the agents Master creates (ADR-0047)", async () => {
+    const stub = registry("subagents-master");
+    const master = { userId: "u-owner", role: "owner", via: "agent:kelpie" } as const;
+    for (let i = 0; i < 10; i++) {
+      expect(await stub.add(`agent-${i}`, "Agent", master)).toEqual({ ok: true, created: true });
+    }
+    expect(await stub.addSubagent("kelpie-sub-m1", "Helper", "kelpie", master)).toEqual({
+      ok: true,
+    });
+  });
+
   it("lets a creator make at most ten in a day, however many it deleted", async () => {
     const stub = registry("subagents-churn");
     const agentActor = { userId: "u-owner", role: "owner", via: "agent:kelpie" } as const;

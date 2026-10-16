@@ -10,7 +10,7 @@ import {
   type SetAgentResult,
 } from "@kelpie/config";
 import type { ModelDescription, ModelSettings } from "@kelpie/llm/models";
-import { SUBAGENT_TOOLS } from "./subagent-limits.ts";
+import { SUBAGENT_TOOLS, subagentPrefix } from "./subagent-limits.ts";
 import type { Tool, ToolContext, ToolOutcome, ToolProvider } from "./tools.ts";
 
 // Temporary subagents (ADR-0036 §5, #290): an agent with `spawn` creates them for a demand, and
@@ -106,7 +106,7 @@ const fields = (input: unknown): Record<string, unknown> =>
 /** A subagent's id, from its creator's: never one the model picks. */
 function subagentId(creator: string): string {
   const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 6);
-  return `${creator.slice(0, 29).replace(/-+$/, "")}-sub-${suffix}`;
+  return `${subagentPrefix(creator)}${suffix}`;
 }
 
 export function subagentTools(ports: SubagentPorts): ToolProvider {

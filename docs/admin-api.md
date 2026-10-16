@@ -67,7 +67,7 @@ Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`
 | 401 | `unauthenticated` |
 | 403 | `forbidden`, `no_owner`, `invalid_bootstrap_token`, `invalid_recovery_token`, `cross_origin` (sent from another origin's page) |
 | 404 | `unknown_agent`, `unknown_identity`, `unknown_user`, `not_found` |
-| 409 | `not_paired` (a pending identity; pair it instead), `not_connected` (the agent has no bot), `identity_taken` (a recovery to a login another user holds), `not_allowed` (the agent's role doesn't take the change, such as Admin as Master), `no_key` (a model setting names a provider llm-gateway has no key for) |
+| 409 | `not_paired` (a pending identity; pair it instead), `not_connected` (the agent has no bot), `identity_taken` (a recovery to a login another user holds), `not_allowed` (the agent's role doesn't take the change, such as a subagent as Master), `no_key` (a model setting names a provider llm-gateway has no key for) |
 | 410 | `bootstrap_disabled`, `recovery_token_spent` |
 | 413 | `too_large` |
 | 415 | `not_json` (a `Content-Type` other than `application/json`) |
@@ -280,7 +280,8 @@ The owner configures Kelpie by talking to Master, the agent they talk to (Story 
 - **`specialist`:** every other agent, owned by Master.
   - One created now doesn't chat until `setAgentChat` turns its chat on.
   - Agents that existed before roles keep their chat.
-- **Models:** Master changes any agent's model settings with `configure_agent`, its own included, behind the owner's confirmation (#289, ADR-0047). No other agent changes its own model. If Master lowers its own tier or takes a tool from itself, this API's `configureAgent` puts it back.
+- **Models:** Master changes any agent's model settings with `configure_agent`, its own included, behind the owner's confirmation (#289, ADR-0047). No other agent changes its own model, and this API's `configureAgent` can always raise Master's tier again.
+- **Master keeps its tools:** `configure_agent` refuses a tools list for Master that leaves out a configuration tool, and `set_main_agent` refuses an agent whose tools list leaves them out. This API can still change either.
 - **The check is at `admit`:** a chat its role doesn't allow answers `no_grant`, so a specialist whose chat is off doesn't answer its bot or the webchat.
 
 **Subagents** (ADR-0036 §5, #290). An agent with `spawn` creates temporary subagents for a demand, with `create_subagent`, and hands them work with `create_task`. Master has `spawn` by its role. A specialist has it only when Master's `configure_agent` turns it on, which takes the owner's confirmation. Subagents never have it. Only the owner's own turns in a direct conversation create a subagent or hand off a task.
@@ -311,11 +312,12 @@ The owner configures Kelpie by talking to Master, the agent they talk to (Story 
 Master can't be deleted, and the `Registry` refuses to remove an agent that still owns another. Master's confirmation names every agent that goes, and its input carries their ids, so a subagent created before the owner's yes stops the deletion until they confirm again. A deletion cut short leaves the agent listed with its chat off, and running it again finishes it. The vault's `agents/<id>/` folder stays: it is the owner's repository, which Kelpie never deletes from. `forgetVaultPaths` drops Kelpie's copy, and the owner deletes the files in the repository.
 
 - **The retired setup agent** (ADR-0047). Instances once had a separate setup agent, `setup`, with these tools.
-  - The `Registry` keeps its row for a rollback, but never lists it nor answers for it, and the `Directory` refuses it, so nothing reaches it.
+  - The `Registry` keeps its row for a rollback, but never lists it nor answers for it. The `Directory` refuses it, and a webchat socket still open to it closes at its next message, so nothing reaches it.
+  - A Telegram bot once connected to it keeps its token and webhook, and nothing reaches the agent through it. Revoke the token with BotFather.
   - `createAgent` refuses its id.
-  - Its `AgentHost` still keeps the runner form's waits, which are the instance's ("Steps the owner finishes").
+  - Its `AgentHost` still keeps the runner form's waits, which are the instance's ("Steps the owner finishes"), and the deploy's probe still wakes it.
 - **Master's guidance:** its prompt carries the built-in `configure-kelpie` skill, whatever persona the owner or the vault gives it.
-- **Its tools** run the commands above, as the owner, through Master (`via: agent:<Master's id>`), and only the agent with the role `main` has them. They are checked again when one runs, and a task's run has none:
+- **Its tools** run the commands above, as the owner, through Master (`via: agent:<Master's id>`), and only the agent with the role `main` has them, on every channel it answers: in the webchat, and on Telegram with the typed code. They are checked again when one runs, and a task's run has none:
   - `list_agents`, `get_agent`, `create_agent` and `rename_agent` run directly;
   - `get_models` reads the instance's model settings, and `configure_models` replaces them;
   - `configure_agent` (its `model` included), `configure_models`, `set_main_agent`, `set_agent_chat` and `delete_agent` wait for the owner's confirmation (below);

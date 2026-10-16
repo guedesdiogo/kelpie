@@ -386,12 +386,12 @@ describe("tasks between agents (#335)", () => {
     expect(
       await host("runs-owned").createTaskFor(
         { title: "Research", body: "", status: "backlog", scheduledStartAt: null },
-        { agentId: "setup", actingUserId: "u-owner" },
+        { agentId: "stranger", actingUserId: "u-owner" },
       ),
     ).toEqual({ ok: false, reason: "not_allowed" });
     if (!made.ok) throw new Error("not made");
     expect(
-      await host("runs-owned").commentTaskAs(made.value.id, "From a stranger.", "setup", "chat"),
+      await host("runs-owned").commentTaskAs(made.value.id, "From a stranger.", "stranger", "chat"),
     ).toEqual({ ok: false, reason: "not_allowed" });
     expect(
       await host("runs-owned").commentTaskAs(made.value.id, "Look at May.", "kelpie", "chat"),
