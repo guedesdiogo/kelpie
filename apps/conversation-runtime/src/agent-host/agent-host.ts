@@ -66,6 +66,18 @@ export function replaceContextStoreForTesting(store: ContextStoreContract | unde
   contextStoreForTesting = store;
 }
 
+type BotPhotos = Pick<ChannelEgressContract, "updateBotPhoto">;
+
+let botPhotosForTesting: BotPhotos | undefined;
+
+/**
+ * Tests run in the Worker's isolate and swap channel-egress's bot photos with this, which an object
+ * asks for as it starts (#388). Production never calls it.
+ */
+export function replaceChannelEgressForTesting(egress: BotPhotos | undefined): void {
+  botPhotosForTesting = egress;
+}
+
 /**
  * Starts a run of a task the agent claimed (#54). The run reports back through `heartbeatTask` and
  * `finishTask`; `start` returns once it began. In production it is the task's own conversation
@@ -177,6 +189,8 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       try {
         await migrate(this.#db, migrations);
         this.#dropUnnamedSettings();
+        // A bot that shows the agent's default follows a new one (#388). No call waits for it.
+        if (!this.config().settings.mascot) void this.#updateBotPhoto(null, true);
       } catch (error) {
         console.error("AgentHost migration failed", error instanceof Error ? error.name : error);
         throw error;
@@ -989,20 +1003,33 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   }
 
   /**
-   * Has the agent's Telegram bot show its mascot as its photo (ADR-0046): when the bot connects, and
-   * when the mascot changes. channel-egress draws it later, and an agent without a bot gets none, so
-   * a failure here only costs the photo.
+   * Has the agent's Telegram bot show its mascot as its photo (ADR-0046): when the bot connects,
+   * when the mascot changes, and, `unlessAsked`, when the object starts (#388). A start asks only
+   * when the mascot the agent shows isn't the one last asked for, as after a release that changes
+   * its default. channel-egress draws it later, and an agent without a bot gets none, so a failure
+   * here only costs the photo. What channel-egress took, or answered there's no bot for, is kept; a
+   * failure keeps nothing, so the next start asks again.
    */
-  async #updateBotPhoto(picked: Mascot | null): Promise<void> {
+  async #updateBotPhoto(picked: Mascot | null, unlessAsked = false): Promise<void> {
     const agentId = this.ctx.id.name;
     if (!agentId) return;
     try {
       // The role picks the default mascot, so only the default needs the Registry.
       const role = picked ? null : ((await this.#registry().get(agentId))?.role ?? null);
+      // A pick made meanwhile asked for its own photo, which the default mustn't replace.
+      if (!picked && this.config().settings.mascot) return;
       const mascot = mascotFor(agentId, role, picked);
-      const egress = this.env.CHANNEL_EGRESS as unknown as ChannelEgressContract;
+      const last = this.#get<Mascot | null>("botPhoto", null);
+      if (unlessAsked && JSON.stringify(mascot) === JSON.stringify(last)) return;
+      const egress = botPhotosForTesting ?? (this.env.CHANNEL_EGRESS as unknown as BotPhotos);
       const asked = await egress.updateBotPhoto(agentId, mascot);
-      if (!asked.ok && asked.reason !== "not_connected") {
+      if (asked.ok || asked.reason === "not_connected") {
+        this.#db
+          .insert(schema.state)
+          .values({ key: "botPhoto", value: mascot })
+          .onConflictDoUpdate({ target: schema.state.key, set: { value: mascot } })
+          .run();
+      } else {
         console.warn("AgentHost: the bot's photo wasn't asked for", asked.reason);
       }
     } catch (error) {

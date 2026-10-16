@@ -4,14 +4,13 @@ import { INJECTED_FAILURE } from "./test/injected-failure.ts";
 
 /**
  * The test Worker's services. Tests replace the model and channel ports with fakes, so
- * channel-egress and llm-gateway's model calls are never made; the bindings only have to exist for
- * the runtime to start. The handoff evaluation (#287) runs on them too.
+ * channel-egress's messages and llm-gateway's model calls are never made; the bindings only have to
+ * exist for the runtime to start. The handoff evaluation (#287) runs on them too.
  */
 export const RUNTIME_MINIFLARE = {
   // The admin API's origin, as a deploy sets it: links to it are Kelpie's own (#188).
   bindings: { ADMIN_ORIGIN: "https://admin.example" },
   serviceBindings: {
-    CHANNEL_EGRESS: () => new Response("channel-egress is not available in tests", { status: 503 }),
     SETUP_FORMS: () => new Response("channel-egress is not available in tests", { status: 503 }),
   },
   // An empty vault: agents run on their settings unless a test swaps in a Context Store.
@@ -24,6 +23,20 @@ export const RUNTIME_MINIFLARE = {
 export class ContextStore extends WorkerEntrypoint {
   compile() {
     return { persona: null, rules: [], skills: [] };
+  }
+}
+export default { fetch: () => new Response(null, { status: 404 }) };`,
+    },
+    // channel-egress answers that no agent has a bot, for the photo every AgentHost asks for when it
+    // starts (#388). It has no other method: tests replace the channel ports.
+    {
+      name: "kelpie-channel-egress",
+      modules: true,
+      compatibilityDate: "2026-10-01",
+      script: `import { WorkerEntrypoint } from "cloudflare:workers";
+export class ChannelEgress extends WorkerEntrypoint {
+  updateBotPhoto() {
+    return { ok: false, reason: "not_connected" };
   }
 }
 export default { fetch: () => new Response(null, { status: 404 }) };`,
