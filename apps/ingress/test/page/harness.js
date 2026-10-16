@@ -97,9 +97,10 @@ export async function loadPage({
   localStorage.clear();
   for (const [key, value] of Object.entries(session)) sessionStorage.setItem(key, value);
   for (const [key, value] of Object.entries(local)) localStorage.setItem(key, value);
-  // The stylesheets and scripts aren't loaded here: the test imports the modules itself.
-  const markup = PAGE.replace(/<link\b[^>]*>/g, "").replace(/<script\b[^>]*><\/script>/g, "");
-  const parsed = new DOMParser().parseFromString(markup, "text/html");
+  // The page's own stylesheets and scripts stay out: the project's DOM loads no file, and the
+  // test imports the modules itself.
+  const parsed = new DOMParser().parseFromString(PAGE, "text/html");
+  for (const node of parsed.querySelectorAll("link, script")) node.remove();
   document.head.replaceChildren(
     ...[...parsed.head.childNodes].map((node) => document.importNode(node, true)),
   );
