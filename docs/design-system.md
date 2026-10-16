@@ -377,12 +377,12 @@ Moment grammar. Every place that shows an agent shows its mascot (5.19), at the 
 | State | The mascot at 48 px and up (5.19) | At 36 px | Glyph and label | Motion |
 |---|---|---|---|---|
 | Working | the task's object in its mittens, or thinking bubbles | an `--accent` badge with the tool's icon | a half-filled circle, "working", the elapsed time `m:ss` | the object pops out, or at 36 px the badge pops; in Alive, the activity's loop |
-| Waiting for the owner | its eyes on the owner, brows up, the amber bubble `?` | a `--warm` badge with `?` | a diamond, "waiting for you", the time since | a hop, and the bubble or badge pulses three times |
+| Waiting for the owner | its eyes on the owner, brows up, the amber bubble `?` | a `--warm` badge | a diamond, "waiting for you", the time since | a hop, and the bubble or badge pulses three times |
 | Idle | eyes open, in its own color; dozing after 45 s | no badge | a hollow circle, "idle" | in Alive, it breathes and draws idle gestures |
-| Error | worried brows, the red bubble `!` | a `--danger` badge with `!` | a triangle, what failed | one shake, and the bubble or badge pops |
+| Error | worried brows, the red bubble `!` | a `--danger` badge | a triangle, what failed | one shake, and the bubble or badge pops |
 | No response | the working pose without its activity, beside a still, dashed `--muted` bubble `…` | the working badge; the glyph and the label carry the state | a dashed circle, "no response for 1 min" | the bubble pops, then nothing |
 
-- **The glyph and the label carry the state on their own.** The glyphs are drawn as SVG, since Geist has no such characters, and are hidden from screen readers, which read the label. In higher contrast, in forced colors, and wherever a figure can't be drawn, they are what shows the state.
+- **The glyph and the label carry the state on their own.** At 36 px the badge has no glyph of its own, so the glyph and the label beside the figure are what names the state. The 5.9 glyphs are drawn as SVG, since Geist has no such characters, and are hidden from screen readers, which read the label. In higher contrast, in forced colors, and wherever a figure can't be drawn, they are what shows the state.
 - **No response** is a working agent from which nothing has arrived for 60 s: no streamed token, and no tool call starting or ending. A tool call still within its time bound counts as activity. The webchat can't tell it apart, and doesn't show it (5.19).
 - **On a change,** the mascot plays its new state's announcement (5.19), and the status line rolls.
 - **A roster stays calm.** At 36 px its repertoire plays one gesture at a time across the whole list, every 7 to 16 s, and never a hop; a state's announcement still plays. Pressing a row does what the roster defines, never a clap.
@@ -428,7 +428,7 @@ Frequent.
 - **The first 2 s show no banner.**
 - **The banner.** Then a banner enters at the top (from 8px above, `--spring-base`): what happened, when the next try is ("No connection. Trying again in 8 s", digits in Geist Mono), and "Try now".
 - **Queued messages.** What the owner sends meanwhile shows in `--sunken` with a clock and "queued". It goes out in order when the connection is back.
-- **The mascot returns to Idle at once.** It hears nothing more of the turn, so it can't vouch for work it no longer sees (rule 7). A new connection starts from the history.
+- **The mascot returns to Idle at once.** It hears nothing more of the turn, so it can't vouch for work it no longer sees (rule 7). A new connection starts from the history, and the mascot takes Waiting again if a confirmation in it is still open.
 - **Back,** the banner turns `--ok`, "Back. 1 message sent.", for 2.6 s, then leaves. Alerts stay quiet for the first 4 s after reconnecting, so a backlog doesn't arrive as a burst.
 - **An expired login** opens a centered dialog, and keeps the draft.
   - The page tells it from a lost connection by asking ingress with `X-Requested-With`, which Access answers with 401 once the session expired.
