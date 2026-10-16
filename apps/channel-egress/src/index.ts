@@ -499,9 +499,9 @@ export class ChannelEgress extends WorkerEntrypoint<Env> implements ChannelEgres
 
 /** How long a bot's photo waits, so a mascot changed several times in a row is drawn once. */
 const PHOTO_DELAY_MS = 5_000;
-/** The least time between two drawings of one agent's photo: each costs Browser Run time. */
+/** A new mascot is drawn this long after the last drawing began, at the soonest. */
 const PHOTO_SPACING_MS = 5 * 60_000;
-/** Tries for one mascot, each drawn again, before it is given up. */
+/** Tries for one mascot before it is given up. A try after a failed send reuses what was drawn. */
 const PHOTO_TRIES = 5;
 /** The least a 429 waits: one without `retry_after` reads as 1 s. */
 const MIN_RATE_LIMIT_MS = 30_000;
@@ -556,7 +556,10 @@ export class BotPhoto extends DurableObject<Env> {
           if (drawn?.shown !== shown) {
             await this.ctx.storage.put("drawnAt", Date.now());
             drawn = { shown, ...(await drawPhotos(this.env.BROWSER, wanted.mascot)) };
-            await this.ctx.storage.put("drawn", drawn);
+            // Kept for a retry only: a photo storage can't hold is still sent now.
+            await this.ctx.storage.put("drawn", drawn).catch((error) => {
+              console.warn("channel-egress: a bot's photo wasn't kept", errorName(error));
+            });
           }
           await sendPhoto(new TelegramAdapter(found.secret), drawn);
           await this.ctx.storage.put("shown", shown);
