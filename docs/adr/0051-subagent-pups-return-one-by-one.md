@@ -5,6 +5,7 @@
 - Issue: [#399](https://github.com/guedesdiogo/kelpie/issues/399)
 - The owner asked on 2026-10-16, reviewing the design system: «Subagents: na sessão de definição do mascote tem uma animação que gostei mais, onde não tem as linhas e no exemplo mostram 3 subagents e depois pega cada um de volta quando cada um termina sua tarefa.»
 - Amends: [ADR-0045](0045-agent-mascot.md) §7, which applied the goo drop and the link of `docs/design-system.md` §5.6
+- Amended by: [ADR-0053](0053-pups-in-the-conversation-header.md), pups show in the conversation's header too, and close up toward the parent as they come back instead of keeping their slots
 
 ## Context
 

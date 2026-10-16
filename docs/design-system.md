@@ -338,26 +338,30 @@ Frequent. Each fire of a routine creates a task ([ADR-0039](adr/0039-routines-as
 
 ### 5.6 Subagents
 
-Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0036-agent-roles-models-and-subagents.md)). They work as pups of their parent's mascot, which leave it and come back one by one ([ADR-0051](adr/0051-subagent-pups-return-one-by-one.md)).
+Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0036-agent-roles-models-and-subagents.md)). They work as pups of their parent's mascot, which leave it and come back one by one ([ADR-0051](adr/0051-subagent-pups-return-one-by-one.md)), in the conversation's header and on the agent's profile ([ADR-0053](adr/0053-pups-in-the-conversation-header.md)).
 
 - **Each subagent at work is a pup** of the parent's mascot (ADR-0045 §7): the same shape and head, a lighter color, dot eyes, no accessory, and 40% of the size.
 - **A pup follows its subagent's tasks.** It leaves when its subagent starts a task and comes back when that task ends. A subagent with no task shows no pup. At most three pups show, since a creator has at most three live subagents (ADR-0036).
-- **Where pups play.**
-  - Pups play beside the parent, on its ground, with no link between them, on the agent's profile, where its mascot shows at 160 px (5.19). The empty conversation and the Telegram photo draw none.
-  - Their three slots beside the parent are kept, so nothing in the layout moves when a pup arrives.
-  - At 40% of the profile's 160 px, a pup is 64 px and keeps the full face of 5.19's 48 px row.
-  - The conversation's header and the roster draw no pups.
+- **Where pups play.** Beside the parent, on its ground, with no link between them, in two places:
+  - **The conversation's header.** Pups stand in a row between the 48 px mascot's box and the agent's name (5.21). The row starts `--space-1` from the box, pups stand `--space-1` apart, and the name keeps `--space-3` after the row. At 40% of 48 px a pup is 20 px, with the roster's detail (5.19): the shape, the head, the lighter color and dot eyes, with no mouth, brows, mittens or task's object, and the roster's life in place. Only Error shows a badge, the roster's `--danger` one; a working pup carries none, since being out already says it works.
+  - **The agent's profile,** where its mascot shows at 160 px (5.19). At 40% a pup is 64 px and keeps the full face of 5.19's 48 px row.
+  - The roster, the switcher's list, task cards, the empty conversation's 160 px figure and the Telegram photo draw none. The empty conversation's header still draws them.
   - No pups show while the page is Offline (ADR-0047). Pups out when it goes Offline fade out in `--dur-fade`; when it is back, the pups of tasks still running reappear at their places, without leaving again.
+- **Pups close up toward the parent.** They stand left-aligned next to it, in the order they left. When one goes back, the pups after it slide toward the parent with `--spring-moment`, and a pup that leaves later takes the first free place after the others.
+- **The header's name doesn't jump.** When the row needs more room, the name and the status line slide to their new place with `--spring-moment`, animated as a `transform` from where they were. While any pup is out, the row keeps its width, so the name moves only when the row grows and when the last pup is back.
 - **The parent's state** comes from 5.9 and 5.19 as for any agent. Delegating is not a state of its own.
-- **Leaving.** Each pup comes out of the parent's middle at a scale of 0.3 and goes to its place with `--spring-moment`, `--stagger-moment` apart. As each one leaves, the parent pulses (`scale` 0.9 to 1, `--spring-pop`), and the pup takes Working with its task's object (5.19).
+- **Leaving.** Each pup comes out of the parent's middle at a scale of 0.3 and goes to its place with `--spring-moment`, `--stagger-moment` apart. As each one leaves, the parent pulses (`scale` 0.9 to 1, `--spring-pop`). On the profile the pup takes Working with its task's object (5.19).
 - **Coming back, in the order the tasks end:**
-  - **A task that succeeded.** The pup smiles and hops, as a reply that lands (5.19). 520 ms later it travels back into the parent's middle, shrinking to 0.3 and fading, in `--dur-exit-moment` with `--ease-exit` (rule 9). The parent swallows it (`scale` 1.12 to 1, `--spring-pop`).
-  - **A task that failed.** The pup takes Error and stays 30 s, as 5.9's failures do, then goes back the same way with no smile. Dismissing it sends it back at once. If the creator sends the task back to To do, its pup leaves again when it runs.
-  - **A task cancelled,** by the owner's stop or by its agent, or lost with its subagent, goes back with no smile and doesn't count as failed. The pause doesn't cancel tasks (5.3).
-  - **A task that waits for an answer.** The subagent's question goes to its creator, not to the owner (ADR-0036). The pup stays out with its task's object at rest, looking at the parent, with no amber, and the strip of 5.9 doesn't count it. If the creator then asks the owner, the parent's state follows 5.9 and 5.19, for example Waiting while a confirmation is open (5.3).
-- **A status line counts them back** in a polite live region: "1 of 3 back", "All 3 are back", "It's back" for a single pup, "1 failed" when one did, and "1 waiting on <creator's name>", such as "1 waiting on Kelpie", while one waits on its creator. These are fixed texts ([ADR-0027](adr/0027-fixed-texts-in-three-languages.md)).
+  - **A task that succeeded.** The pup hops, and on the profile smiles too, as a reply that lands (5.19). 520 ms later it travels back into the parent's middle, shrinking to 0.3 and fading, in `--dur-exit-moment` with `--ease-exit` (rule 9). The parent swallows it (`scale` 1.12 to 1, `--spring-pop`).
+  - **A task that failed.** The pup takes Error and stays 30 s, as 5.9's failures do, then goes back the same way with no smile or hop. Dismissing it sends it back at once. If the creator sends the task back to To do, its pup leaves again when it runs.
+  - **A task cancelled,** by the owner's stop or by its agent, or lost with its subagent, goes back with no smile or hop and doesn't count as failed. The pause doesn't cancel tasks (5.3).
+  - **A task that waits for an answer.** The subagent's question goes to its creator, not to the owner (ADR-0036). The pup stays out with no badge and no amber, and the strip of 5.9 doesn't count it. On the profile it holds its task's object at rest, looking at the parent. If the creator then asks the owner, the parent's state follows 5.9 and 5.19, for example Waiting while a confirmation is open (5.3).
+- **A status line counts them back** in a polite live region: "1 of 3 back", "All 3 are back", "It's back" for a single pup, "1 failed" when one did, and "1 waiting on <creator's name>", such as "1 waiting on Kelpie", while one waits on its creator.
+  - On the profile it is its own line under the stage.
+  - In the conversation it is the header's status line, which adds the count after a middle dot: "3 subagents at work", or "1 subagent at work", while they are out, then the count back, such as "Available · 2 of 3 back · 1 failed". "All 3 are back" stays until the status line next changes. On a phone the line ends in an ellipsis, so the count is cut first.
+  - These are fixed texts ([ADR-0027](adr/0027-fixed-texts-in-three-languages.md)).
 - **The parent's mascot** greets the reply that relays the result, as 5.1 says.
-- **Reduced motion:** pups fade in and out at their places in `--dur-fade`, and the mascots are Still (5.19).
+- **Reduced motion:** pups fade in and out at their places in `--dur-fade`; the pups after a returning one, and the header's name, take their new places at once; the mascots are Still (5.19).
 
 ### 5.7 Saved to memory
 
@@ -582,9 +586,9 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 | Roster | 36 px | no mouth or brows, eyes 15% larger, no mittens; a glossy badge with a `--surface` ring takes the bubble's place: `--warm` for waiting, `--danger` for error, `--accent` with the tool's icon for working, `--muted` for offline. One gesture at a time across the list, every 7 to 16 s, never a hop |
 | Switcher list (5.21) | 36 px | the Idle pose, still, with no badge: the list is open for a moment and carries no state |
 | Task card (5.5) | 20 px | the shape, the color and the eyes only: no head, accessory, mittens or badge; still, since the card already says the state. The engine draws a badge at every size up to 40 px today, so the board needs that changed |
-| Conversation header | 48 px | its home. Everything happens inside its box; the box is kept before the figure arrives, so nothing in the layout moves |
+| Conversation header | 48 px | its home. Everything happens inside its box; the box is kept before the figure arrives, so nothing in the layout moves. Its pups stand in a row after the box (5.6) |
 | Empty conversation, profile, the expired-login dialog (5.12) | 160 px | gestures a little more often |
-| Pups (5.6) | 40% of the parent, 64 px on the profile | only on the agent's profile, in slots kept beside the parent; the full face of the 48 px row; none while the page is Offline |
+| Pups (5.6) | 40% of the parent: 20 px in the conversation's header, 64 px on the profile | in the header, the roster's detail with only Error's badge; on the profile, the full face of the 48 px row; left-aligned beside the parent, closing up as they come back; none while the page is Offline |
 | Telegram bot photo | 800 px square, cropped round by Telegram | a still, and a loop Telegram plays (below) |
 
 **Reduced motion and the pause.**
