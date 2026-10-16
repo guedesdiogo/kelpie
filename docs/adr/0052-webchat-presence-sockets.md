@@ -1,4 +1,4 @@
-# ADR-0050: The webchat's sidebar follows each agent through a socket that carries only its presence
+# ADR-0052: The webchat's sidebar follows each agent through a socket that carries only its presence
 
 - Status: Proposed
 - Date: 2026-10-16
