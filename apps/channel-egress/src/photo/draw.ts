@@ -1,9 +1,10 @@
 import type { Mascot } from "@kelpie/config";
-import css from "./webchat/mascot.css.txt";
+import mascotCss from "./webchat/mascot.css.txt";
 import engine from "./webchat/mascot.js.txt";
 import art from "./webchat/mascot-art.js.txt";
 import photo from "./webchat/mascot-photo.js.txt";
 import states from "./webchat/mascot-states.js.txt";
+import tokens from "./webchat/tokens.css.txt";
 
 // The bot's photo, drawn by Browser Run (ADR-0046): one page runs the webchat's own mascot engine
 // and mascot-photo.js, and answers with a still JPG and a looping MP4. The files are links to the
@@ -16,6 +17,8 @@ export const MODULES: [name: string, text: string][] = [
   ["mascot.js", engine],
   ["mascot-photo.js", photo],
 ];
+/** The webchat's tokens, which the mascot's stylesheet uses too, then that stylesheet. */
+const CSS = `${tokens}\n${mascotCss}`;
 /** The square around the figure: the design system's page background (`--bg`, light). */
 const BACKGROUND = "#e7eeec";
 /** The page has this long to answer; the loop takes 10 to 16 s (#368). */
@@ -51,7 +54,7 @@ const scriptJson = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u0
  */
 export function photoPage(mascot: Mascot): string {
   return `<!doctype html><html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="${PAGE_POLICY}"><style>${css}</style>
+<meta http-equiv="Content-Security-Policy" content="${PAGE_POLICY}"><style>${CSS}</style>
 <style>html, body { margin: 0; overflow: hidden; } #mascot { position: absolute; }</style></head>
 <body><span id="mascot"></span><pre id="photo"></pre>
 <script type="application/json" id="modules">${scriptJson(Object.fromEntries(MODULES))}</script>
@@ -68,7 +71,7 @@ try {
   const host = document.getElementById("mascot");
   const at = (photo.PHOTO_PX - photo.FIGURE_PX) / 2 + "px";
   Object.assign(host.style, { left: at, top: at, width: photo.FIGURE_PX + "px", height: photo.FIGURE_PX + "px" });
-  const drawn = await photo.drawPhoto({ engine, host, mascot: ${scriptJson(mascot)}, css: ${scriptJson(css)}, background: ${scriptJson(BACKGROUND)} });
+  const drawn = await photo.drawPhoto({ engine, host, mascot: ${scriptJson(mascot)}, css: ${scriptJson(CSS)}, background: ${scriptJson(BACKGROUND)} });
   out.textContent = JSON.stringify({ still: await photo.toBase64(drawn.still), loop: drawn.loop && (await photo.toBase64(drawn.loop)) });
 } catch (error) {
   out.textContent = JSON.stringify({ error: String(error?.message ?? error).slice(0, 200) });

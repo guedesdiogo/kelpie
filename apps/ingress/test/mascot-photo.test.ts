@@ -43,13 +43,16 @@ function fakeWindow() {
     now: () => 1_000,
     animate: (endTime: number) => new HeldAnimation(endTime),
   };
+  /** What the document runs on its own, as a CSS transition does when a style changes. */
+  const running: HeldAnimation[] = [];
   const win = {
     setTimeout: own.setTimeout,
     clearTimeout: own.clearTimeout,
     performance: { now: own.now },
     Element: { prototype: { animate: own.animate } },
+    document: { getAnimations: () => running },
   };
-  return { win, real, own };
+  return { win, real, own, running };
 }
 
 describe("The photo's clock", () => {
@@ -113,6 +116,20 @@ describe("The photo's clock", () => {
     blink.currentTime = 7;
     await clock.advance(300);
     expect(blink.currentTime).toBe(7);
+  });
+
+  it("holds a CSS transition from when it starts, as it holds an animation", async () => {
+    const { win, running } = fakeWindow();
+    const clock = virtualClock(win);
+    clock.start();
+    // A gesture at 100 ms changes a style, and the hand fades in over 150 ms.
+    const fade = new HeldAnimation(150);
+    win.setTimeout(() => running.push(fade), 100);
+    await clock.advance(200);
+    expect(fade.playState).toBe("paused");
+    expect(fade.currentTime).toBe(100);
+    await clock.advance(300);
+    expect(fade.playState).toBe("finished");
   });
 
   it("gives the window back its own when it stops", () => {

@@ -93,10 +93,11 @@ export default defineConfig({
     // CI's `test:coverage` fails under 80% on any of these, in every workspace (ADR-0030).
     coverage: {
       provider: "istanbul",
-      // The webchat's page (#140) and the mascot's data and pure logic. mascot.js paints on a
-      // canvas, which the page's DOM doesn't have, so it is checked in a browser.
+      // The webchat's page (#140) and the mascot's data and pure logic. mascot.js and the bot's
+      // photo (mascot-photo.js, ADR-0046) paint on a canvas, which the page's DOM doesn't have, so
+      // they are checked in a browser.
       include: ["src/**/*.ts", "public/webchat/*.js"],
-      exclude: ["src/**/*.d.ts", "public/webchat/mascot.js"],
+      exclude: ["src/**/*.d.ts", "public/webchat/mascot.js", "public/webchat/mascot-photo.js"],
       reporter: ["text-summary", "json-summary"],
       thresholds: { statements: 80, branches: 80, functions: 80, lines: 80 },
     },

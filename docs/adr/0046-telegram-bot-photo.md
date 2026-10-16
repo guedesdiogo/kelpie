@@ -70,7 +70,7 @@ This isn't ambient motion in Kelpie's interface, which the design system rejects
 
 - **The bot shows the mascot** wherever Telegram shows its photo, and follows the owner's changes.
 - **channel-egress gains** a `browser` binding, a `BotPhoto` class (migration `v2`, add-only) and the webchat's mascot files in its bundle, about 120 KB.
-- **The webchat and the photo share one engine.** A change to the engine shows in a bot's photo the next time its mascot changes or its bot connects.
+- **The webchat and the photo share one engine.** A change to the engine shows in a bot's photo the next time its mascot changes or a new bot connects: the same mascot on the same bot isn't drawn again.
 - **Browser Run is used for each connection or mascot change:** about 15 s each, about 2,000 changes a month within the included hours. Until #269's alert ships, its use shows only in Cloudflare's dashboard.
 - **Not yet verified:**
   - whether Telegram takes the fragmented MP4 that `MediaRecorder` writes, which the fallback to the still covers;

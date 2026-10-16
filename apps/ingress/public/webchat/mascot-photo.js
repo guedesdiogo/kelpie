@@ -2,8 +2,8 @@
 // open a blank page with the webchat's own engine and this module, which draws the still the bot
 // shows and records the loop Telegram plays. The webchat never loads it.
 //
-// The engine moves the mascot with timers and the Web Animations API, in real time. Here a virtual
-// clock moves them frame by frame instead, and each frame is the SVG as it stands then, drawn to a
+// The engine moves the mascot with timers, the Web Animations API and a few CSS transitions, in
+// real time. Here a virtual clock moves them frame by frame instead, and each frame is the SVG as it stands then, drawn to a
 // canvas: every frame is exact, however long one takes to draw. The frames then play in real time
 // into a MediaRecorder, the only H.264 encoder Browser Run's page has: it isn't a secure context,
 // so WebCodecs is missing.
@@ -51,8 +51,16 @@ export function virtualClock(win) {
   let now = 0;
   let ids = 0;
 
-  /** Sets each animation to the clock, and finishes the ones past their end, as time would. */
+  /**
+   * Sets each animation to the clock, and finishes the ones past their end, as time would. A CSS
+   * transition starts on its own when a style changes: the clock holds it from then on.
+   */
   function seek() {
+    for (const animation of win.document.getAnimations()) {
+      if (animations.has(animation) || animation.playState !== "running") continue;
+      animation.pause();
+      animations.set(animation, now);
+    }
     for (const [animation, start] of animations) {
       if (animation.playState === "idle") {
         animations.delete(animation);
@@ -141,21 +149,26 @@ export async function drawPhoto({ engine, host, mascot, css, background }) {
 
   const frame = await framer(host, css, background);
   const clock = virtualClock(window);
+  const count = Math.round((LOOP.ms / 1000) * LOOP.fps);
   const frames = [];
   clock.start();
   try {
     figure.lastEvent = performance.now();
     figure.breathe();
     for (const [at, gesture, ...args] of LOOP.steps) setTimeout(() => figure[gesture](...args), at);
-    const count = Math.round((LOOP.ms / 1000) * LOOP.fps);
     for (let i = 0; i < count; i++) {
       await clock.advance((i * 1000) / LOOP.fps);
       frames.push(await frame());
     }
+  } catch (error) {
+    // Without its first frame there is no photo; without a later one, the still goes alone.
+    if (frames.length === 0) throw error;
   } finally {
     clock.stop();
   }
-  return { still: frames[0], loop: await record(frames) };
+  let loop = null;
+  if (frames.length === count) loop = await record(frames).catch(() => null);
+  return { still: frames[0], loop };
 }
 
 /** Waits for every piece's fur, or `FUR_WAIT_MS`: a piece that isn't there keeps its flat body. */
@@ -271,7 +284,8 @@ export function centered({ data, width, height }) {
 
 /**
  * Plays the frames in real time into a MediaRecorder, as an H.264 MP4. Null when this browser
- * can't record that. A few frames are decoded ahead, so none is late.
+ * can't record that. A few frames are decoded ahead, so none is late, and each is let go once
+ * drawn or skipped.
  */
 async function record(frames) {
   if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported(VIDEO_TYPE)) {
@@ -281,8 +295,24 @@ async function record(frames) {
   canvas.width = PHOTO_PX;
   canvas.height = PHOTO_PX;
   const g = canvas.getContext("2d");
-  const decoded = frames.map((frame, i) => (i < 6 ? createImageBitmap(frame) : null));
-  g.drawImage(await decoded[0], 0, 0);
+  const decoded = frames.map(() => null);
+  const bitmap = (i) => {
+    decoded[i] ??= createImageBitmap(frames[i]);
+    return decoded[i];
+  };
+  const release = (i) => {
+    decoded[i]?.then(
+      (image) => image.close(),
+      () => {},
+    );
+    decoded[i] = null;
+  };
+  const show = async (i) => {
+    for (let ahead = i + 1; ahead < Math.min(frames.length, i + 6); ahead++) bitmap(ahead);
+    g.drawImage(await bitmap(i), 0, 0);
+    release(i);
+  };
+  await show(0);
   const recorder = new MediaRecorder(canvas.captureStream(LOOP.fps), {
     mimeType: VIDEO_TYPE,
     videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
@@ -295,20 +325,18 @@ async function record(frames) {
   recorder.start();
   const started = performance.now();
   let shown = 0;
-  while (shown < frames.length) {
-    const due = Math.floor(((performance.now() - started) / 1000) * LOOP.fps);
-    if (due > shown) {
-      shown = Math.min(due, frames.length - 1);
-      g.drawImage(await decoded[shown], 0, 0);
-      for (let i = shown + 1; i < Math.min(frames.length, shown + 6); i++) {
-        decoded[i] ??= createImageBitmap(frames[i]);
-      }
-      if (due >= frames.length) break;
-    }
+  for (;;) {
     await new Promise((resolve) => requestAnimationFrame(resolve));
+    const due = Math.floor(((performance.now() - started) / 1000) * LOOP.fps);
+    if (due >= frames.length) break;
+    if (due <= shown) continue;
+    for (let skipped = shown + 1; skipped < due; skipped++) release(skipped);
+    shown = due;
+    await show(shown);
   }
   recorder.stop();
   await stopped;
+  for (let i = shown + 1; i < frames.length; i++) release(i);
   return new Blob(parts, { type: "video/mp4" });
 }
 

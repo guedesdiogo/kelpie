@@ -991,8 +991,9 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     const agentId = this.ctx.id.name;
     if (!agentId) return;
     try {
-      const entry = await this.#registry().get(agentId);
-      const mascot = mascotFor(agentId, entry?.role ?? null, picked);
+      // The role picks the default mascot, so only the default needs the Registry.
+      const role = picked ? null : ((await this.#registry().get(agentId))?.role ?? null);
+      const mascot = mascotFor(agentId, role, picked);
       const egress = this.env.CHANNEL_EGRESS as unknown as ChannelEgressContract;
       const asked = await egress.updateBotPhoto(agentId, mascot);
       if (!asked.ok && asked.reason !== "not_connected") {
