@@ -285,9 +285,10 @@ export class Roster {
         if (!request.contains(event.relatedTarget)) row.focusInside = false;
         return;
       }
-      // Focus left for the page itself: a press on blank space, unless its button was removed.
+      // Focus left for the page itself: a press on blank space. A browser also drops focus from a
+      // button the card disables or removes (Confirm, as it presses or folds): that stays inside.
       queueMicrotask(() => {
-        if (event.target.isConnected) row.focusInside = false;
+        if (event.target.isConnected && !event.target.disabled) row.focusInside = false;
       });
     });
     return row;

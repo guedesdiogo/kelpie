@@ -371,6 +371,10 @@ describe("the keyboard", () => {
     vi.advanceTimersByTime(PRESS_GUARD_MS);
     confirm.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     confirm.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 }));
+    // Chrome drops focus from the button the press disables, with no target to go to.
+    expect(confirm.disabled).toBe(true);
+    confirm.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: null }));
+    await Promise.resolve();
     agenda.receive({ type: "confirmation", id: 7, status: "accepted" });
     vi.advanceTimersByTime(1_000);
     await vi.waitFor(() => expect(request.querySelector(".receipt")).not.toBeNull());

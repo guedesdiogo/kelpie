@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { derivedMascot, KELPIE_MASCOT, type Mascot, REGISTRY_NAME } from "@kelpie/config";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 // What ingress reads for the webchat's list of agents (ADR-0052 §7): each agent's mascot, through
 // an entrypoint that reads and does nothing else, so ingress never binds an AgentHost.
@@ -9,6 +9,11 @@ const owner = { userId: "u-owner", role: "owner", via: "admin-api" } as const;
 const owned = { userId: "u-owner", role: "owner", via: "test" } as const;
 
 describe("AgentLooks", () => {
+  // The first call starts the Worker; it does so here, in a hook with room for a cold start.
+  beforeAll(async () => {
+    await exports.AgentLooks.mascots([]);
+  }, 30_000);
+
   it("names each listed agent's mascot: the owner's pick, or its default by its role", async () => {
     await env.REGISTRY.getByName(REGISTRY_NAME).add("sales", "Sales", owner);
     const picked: Mascot = { ...KELPIE_MASCOT, shape: "star", head: { type: "none" } };
