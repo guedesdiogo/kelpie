@@ -1,6 +1,6 @@
 # Design system
 
-Kelpie's interface follows one visual identity and one motion system, decided in [ADR-0043](adr/0043-design-system.md) and extended by its first review in [ADR-0044](adr/0044-design-system-review.md), by the agent mascot in [ADR-0045](adr/0045-agent-mascot.md), by its Telegram photo in [ADR-0046](adr/0046-telegram-bot-photo.md) and by the logo in [ADR-0049](adr/0049-logo-main-mascot-silhouette.md). This document holds the values. A page, component or animation takes its colors, type, spacing, radii and motion from the tokens below. A literal number is allowed only where a pattern in section 5 sets it.
+Kelpie's interface follows one visual identity and one motion system, decided in [ADR-0043](adr/0043-design-system.md) and extended by its first review in [ADR-0044](adr/0044-design-system-review.md), by the agent mascot in [ADR-0045](adr/0045-agent-mascot.md), by its Telegram photo in [ADR-0046](adr/0046-telegram-bot-photo.md), by the logo in [ADR-0049](adr/0049-logo-main-mascot-silhouette.md) and by the subagents' pups in [ADR-0051](adr/0051-subagent-pups-return-one-by-one.md). This document holds the values. A page, component or animation takes its colors, type, spacing, radii and motion from the tokens below. A literal number is allowed only where a pattern in section 5 sets it.
 
 The direction is called **Mistura** ("mix"): the identity of the water spirit (kelp colors, shapes that change) with the discipline of the herding dog (Pastoreio, "herding": fast, grouped, no bounce). What the owner does a hundred times a day moves quickly and plainly. The moments that matter (approving, spending, delegating, remembering) get the expressive motion. Each agent is one of those changing shapes: a plush drop of water that stays alive in its place (5.19).
 
@@ -130,7 +130,7 @@ Motion depends on how often an interaction happens, not on which screen it is in
 | Grammar | Applies to | Character |
 |---|---|---|
 | **Frequent** | Messages, streaming, tool rows, the task board, lists, menus, the palette, navigation | Fast, no visible overshoot, small distances, tight stagger |
-| **Moment** | Confirming an action, turning on something that costs, delegating to subagents, saving to memory, agent presence changes | Springs that pass their target a little, larger distances, and a signature: the drop of a subagent, the ring of a confirmation, the arc into the vault, a mascot's announcement |
+| **Moment** | Confirming an action, turning on something that costs, delegating to subagents, saving to memory, agent presence changes | Springs that pass their target a little, larger distances, and a signature: the pups of a subagent, the ring of a confirmation, the arc into the vault, a mascot's announcement |
 
 **The mascot's life in place** (breathing, blinking, its repertoire) is not UI motion in either grammar. It uses the frequent springs, runs under its own guards, and is the one exception to rule 8 (5.19, ADR-0045 §6).
 
@@ -152,7 +152,7 @@ The other columns come from simulating each spring with semi-implicit Euler, in 
 | `--spring-slow` | 300 / 0.9 | 31.2 | 197 ms | 394 ms | 0.1% | Large surfaces, drawers, a mascot dozing off |
 | `--spring-moment-fast` | 800 / 0.6 | 33.9 | 83 ms | 393 ms | 9.2% | A released hold, small moment feedback |
 | `--spring-moment` | 380 / 0.8 | 31.2 | 153 ms | 457 ms | 1.4% | Moment layout: a button that grows, a card that collapses, a mascot's pose |
-| `--spring-moment-slow` | 200 / 0.8 | 22.6 | 211 ms | 611 ms | 1.4% | Travel: subagents leaving their parent, links drawing |
+| `--spring-moment-slow` | 200 / 0.8 | 22.6 | 211 ms | 611 ms | 1.4% | Large moment travel; no pattern uses it since ADR-0051 took the subagents' links away |
 | `--spring-pop` | 800 / 0.55 | 31.1 | 79 ms | 471 ms | 12.3% | Confirmations: a check, a vault that receives, a mascot that changes state, and its bubble |
 
 The first six are Material 3's standard and expressive spatial springs. `--spring-pop` is Kelpie's own, a little bouncier than Material 3's expressive fast spring.
@@ -338,14 +338,18 @@ Frequent. Each fire of a routine creates a task ([ADR-0039](adr/0039-routines-as
 
 ### 5.6 Subagents
 
-Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0036-agent-roles-models-and-subagents.md)).
+Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0036-agent-roles-models-and-subagents.md)). They leave as pups and come back one by one ([ADR-0051](adr/0051-subagent-pups-return-one-by-one.md)).
 
-- **The parent's mascot pulses** (`scale` 0.9 to 1, `--spring-pop`).
 - **Each subagent is a pup** of the parent's mascot (ADR-0045 §7): the same shape and head, a lighter color, dot eyes, no accessory, and 40% of the size. All of them show, since a creator has at most three live subagents (ADR-0036).
-- **A pup leaves the parent's body as a drop**, under an SVG "goo" filter on one layer (Gaussian blur 7, alpha matrix 20 / −9). It travels to its place with `--spring-moment-slow`, `--stagger-moment` apart.
-- **A link draws** from the parent (stroke offset, `--spring-moment-slow`, 60 ms later), and the label enters 8px from the left, 140 ms later.
-- **When it is done**, it travels back faster than it left (rule 9) and fades into the parent. The link retracts, and the parent swallows it (`scale` 1.12 to 1, `--spring-pop`, at 55% of the return).
-- **Reduced motion:** pups and links fade in and out at their places, without the goo.
+- **Pups stand beside the parent,** on its ground, with no link between them.
+- **Leaving.** Each pup comes out of the parent's middle at a scale of 0.3 and goes to its place with `--spring-moment`, 110 ms apart. As each one leaves, the parent pulses (`scale` 0.9 to 1, `--spring-pop`), and the pup takes Working with its task's object (5.19).
+- **Each one comes back when its own task ends,** in the order they finish:
+  - it smiles and hops, as a reply that lands (5.19);
+  - it travels back into the parent's middle, shrinking to 0.3 and fading, in 200 ms with `--ease-exit`, faster than it left (rule 9);
+  - the parent swallows it (`scale` 1.12 to 1, `--spring-pop`).
+- **A status line counts them back,** "1 of 3 back", then "All three are back with the result", in a polite live region.
+- **When the last one is back,** the parent returns to Idle and greets the result with Idle's hop and smile.
+- **Reduced motion:** pups fade in and out at their places in `--dur-fade`, and the mascots are Still (5.19).
 
 ### 5.7 Saved to memory
 
@@ -702,7 +706,7 @@ Frequent, and still: the logo never moves ([ADR-0049](adr/0049-logo-main-mascot-
 - **View Transitions** fit navigation between views. They never wrap a list that streams.
 - **The Motion library** fits only where the owner drags something with velocity, such as reordering the board. It is loaded with the page that needs it.
 - **An entrance plays once.** It is keyed to the element, so a streaming update never replays it. It never leaves content at opacity 0 if the animation doesn't run, which happens when a background tab pauses timelines. A list animates entries only up to 60 rows; past that, rows appear at once.
-- **Heavy effects stay off the DOM's per-frame path.** The goo is one SVG filter on one layer, during a moment. Anything heavier belongs in a shader scoped to its element, or nowhere. Full-screen WebGL stays out of the product.
+- **Heavy effects stay off the DOM's per-frame path.** An effect heavier than a transform belongs in a shader scoped to its element, or nowhere. Full-screen WebGL stays out of the product.
 - **The mascot engine is the one continuous loop.** A new surface that shows an agent reuses it (5.19): one shared timer, observers that stop figures out of view, and the plush painted once per size. Nothing draws an agent another way.
 - **The stack is still open.** These choices guide whatever UI stack Kelpie picks; the [viability study](viability-study.md) lists it among its open questions.
 
