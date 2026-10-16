@@ -401,7 +401,11 @@ Moment grammar. Every place that shows an agent shows its mascot (5.19), at the 
 - **A roster stays calm.** At 36 px its repertoire plays one gesture at a time across the whole list, every 7 to 16 s, and never a hop; a state's announcement still plays. Pressing a row does what the roster defines, never a clap.
 - **What waits for the owner is counted, not moved.**
   - A strip above the roster counts the agents waiting, in `--warm`. Its count rolls. It enters with `--rise`, and leaves when nothing waits. Its slot above the roster is reserved, so the rows never move when it appears.
-  - The browser tab's title starts with the count, "(2) Kelpie", and the favicon gets a `--warm` dot.
+  - The browser tab's title starts with the count, "(2) Kelpie", and the favicon gets a `--warm` dot (5.23).
+    - The agent's name stays after the count, "(1) Assistant · Kelpie". The title and the favicon change only when the count does.
+    - An answer, an expiry or the end of the wait clears the count; looking at the tab doesn't.
+    - Safari keeps the favicon the page loaded with ([WebKit bug 266426](https://bugs.webkit.org/show_bug.cgi?id=266426)), so the title carries the count there.
+    - The webchat hears only the open conversation until its sidebar hears every agent (#378). Until then it counts that agent while its mascot waits.
   - A free tier past 90% joins the count (5.16).
 - **A row opens in place.** Pressing a waiting agent's row grows its request under the row (height, `--spring-moment`), with the card of 5.3. From the keyboard it appears at once.
 - **Finished work leaves; failures stay.** A subagent or task that succeeded leaves a list at once. One that failed stays 30 s with its triangle glyph and what failed, and can be dismissed.
@@ -704,8 +708,13 @@ Frequent, and still: the logo never moves ([ADR-0049](adr/0049-logo-main-mascot-
     - `favicon.ico`, with a 16 px layer from `docs/brand/favicon-16.svg` and a 32 px one from the 32 px master;
     - `apple-touch-icon.png`, 180 px and square, since iOS masks it, with the mark 62% of the tile tall;
     - `icon-192.png` and `icon-512.png` on a rounded tile;
-    - `icon-maskable-512.png`, with the mark inside the 40% circle Android may crop to.
+    - `icon-maskable-512.png`, with the mark inside the 40% circle Android may crop to;
+    - `icon-waiting.svg`, the 32 px master with 5.9's dot, which the page swaps in while an agent waits.
   - It asks for its manifest with the Access login's cookie, and the manifest opens the webchat as a browser tab.
+- **The waiting dot** of 5.9 sits on the favicon, never on the logo:
+  - a `--warm` circle of r 5 at (25, 25) on the 32 px tile. It takes the bottom-right corner, where the 36 px badge sits (5.19), so both ears stay clear;
+  - a 2 px `--on-accent` ring around it, since `--warm` on `--accent` measures 1.04 in light and 1.12 in dark. On `--on-accent` it measures 5.53 and 8.80;
+  - a static file, so the page's CSP admits it without `data:` images. It has no ICO twin: the browsers that change a favicon at runtime read the SVG.
 - **It never stands in for an agent.** Every agent, the main one included, shows its own mascot (5.19). The logo carries no state, badge or glyph. The amber dot of 5.9 belongs to the tab's favicon, not to the logo.
 - **Reduced motion:** nothing changes; it doesn't move.
 
@@ -807,6 +816,13 @@ The rules above cite these. The first set was read on 2026-10-15; a source added
   - favicons: [Safari 26's release notes](https://developer.apple.com/documentation/safari-release-notes/safari-26-release-notes), [WebKit bug 309949](https://bugs.webkit.org/show_bug.cgi?id=309949) and [Evil Martians' "How to Favicon in 2026"](https://evilmartians.com/chronicles/how-to-favicon-in-2021-six-files-that-fit-most-needs);
   - home-screen icons: [Apple's app icons](https://developer.apple.com/design/human-interface-guidelines/app-icons) and [web.dev on maskable icons](https://web.dev/articles/maskable-icon);
   - [invokta's favicon](https://github.com/vinilana/invokta/blob/f1e2f04f98c967ab4bb73bd02c3fa581f04ce0e5/apps/docs/public/favicon.svg#L1-L10), drawn apart from its mark, and [Hermes Agent's icon script](https://github.com/NousResearch/hermes-agent/blob/b65e078cdc77ebe83979a2d5355179535f340e89/scripts/generate_icons.py#L1-L90), every size from one master.
+- The tab's count and the favicon's dot (5.9, 5.23), read on 2026-10-16; the findings and the reference-project check are on #389:
+  - [Claude Code's agent view](https://code.claude.com/docs/en/agent-view), which counts the sessions awaiting input in the tab until each is answered;
+  - [GitHub's pending favicon](https://github.githubassets.com/favicons/favicon-pending.svg), a static file with an amber dot in the bottom-right corner;
+  - [Mattermost's title and favicons](https://github.com/mattermost/mattermost/blob/f5485a5c6e3c65542e35077cc6777ad197617709/webapp/channels/src/components/unreads_status_handler/unreads_status_handler.tsx#L102-L175), `(N) ` before the title and pre-made favicons swapped by `href`;
+  - [Chromium's link element](https://github.com/chromium/chromium/blob/1ac7132d0190493dbeb52e8625ad8d3cfb25adca/third_party/blink/renderer/core/html/html_link_element.cc#L143-L151), which ignores setting the same `href` again;
+  - [WebKit bug 266426](https://bugs.webkit.org/show_bug.cgi?id=266426), still open: Safari keeps the first favicon;
+  - [Hermes Agent's session dot](https://github.com/NousResearch/hermes-agent/blob/848fc0ad8be766b9dc10fe42bd80b5fc2d45d95c/apps/desktop/src/app/chat/session-status-dot.tsx#L23-L37), one amber state for what needs the user, which never moves.
 - Accessibility:
   - [WCAG 2.2.2 Pause, Stop, Hide](https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html);
   - [WCAG 2.3.3 Animation from Interactions](https://www.w3.org/WAI/WCAG22/Understanding/animation-from-interactions.html);
