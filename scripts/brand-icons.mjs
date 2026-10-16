@@ -34,13 +34,19 @@ const circle = (cx, cy, r) =>
 /**
  * The mark on a 64 box, from the mascot engine's 120 grid (apps/ingress/public/webchat/mascot-art.js):
  * the `mark` shape is 24..96 × 36..108 with corners 36, 36, 36 and 11.5, and the round ears are
- * circles of 10.5 at (38, 42) and (82, 42). The figure is 50 wide and centred on the box.
+ * circles of 10.5 at (38, 42) and (82, 42), so the figure runs from 31.5 to 108. It is drawn 50
+ * wide and centred on the box: MARK says where, for every file that places it.
  */
-function mark() {
+const MARK = (() => {
   const k = 50 / 72;
-  const top = (64 - (108 - 31.5) * k) / 2;
-  const x = (v) => 7 + (v - 24) * k;
-  const y = (v) => top + (v - 31.5) * k;
+  const height = (108 - 31.5) * k;
+  return { k, left: 7, top: (64 - height) / 2, width: 50, height };
+})();
+
+function mark() {
+  const { k } = MARK;
+  const x = (v) => MARK.left + (v - 24) * k;
+  const y = (v) => MARK.top + (v - 31.5) * k;
   return [
     rounded(x(24), y(36), 72 * k, 72 * k, [36 * k, 36 * k, 36 * k, 11.5 * k]),
     circle(x(38), y(42), 10.5 * k),
@@ -49,8 +55,8 @@ function mark() {
 }
 
 /**
- * The favicon's own drawings, one per size, on whole pixels: the ears grow a little, or they
- * vanish at 16 px (Dropbox and GitHub keep separate small masters the same way).
+ * The favicon's own drawings, one per size: the body on whole pixels, and the ears a little
+ * larger, or they vanish at 16 px (Dropbox and GitHub keep separate small masters the same way).
  */
 const SMALL = {
   32: [
@@ -109,8 +115,8 @@ function wordmark() {
 function lockup(color) {
   const cap = 660;
   const figure = 1.3 * cap;
-  const scale = figure / (64 - 2 * ((64 - (108 - 31.5) * (50 / 72)) / 2));
-  const markWidth = 50 * scale;
+  const scale = figure / MARK.height;
+  const markWidth = MARK.width * scale;
   const top = -cap / 2 - figure / 2;
   const word = wordmark();
   const wordX = markWidth + 0.5 * cap - 74;
@@ -119,10 +125,10 @@ function lockup(color) {
   const bottom = Math.max(top + figure, 166.8);
   const pad = 20;
   const box = [-pad, Math.floor(top - pad), width + 2 * pad, Math.ceil(bottom - top + 2 * pad)];
-  const markY = top - ((64 - (108 - 31.5) * (50 / 72)) / 2) * scale;
+  const markY = top - MARK.top * scale;
   return svg(
     box.join(" "),
-    `<g fill="${color}"><path transform="translate(${n(-7 * scale)} ${n(markY)}) scale(${n(scale)})" d="${mark()}"/><g transform="translate(${n(wordX)} 0)">${word.paths}</g></g>`,
+    `<g fill="${color}"><path transform="translate(${n(-MARK.left * scale)} ${n(markY)}) scale(${n(scale)})" d="${mark()}"/><g transform="translate(${n(wordX)} 0)">${word.paths}</g></g>`,
   );
 }
 
@@ -148,8 +154,8 @@ function favicon(size, dark = true) {
  * figure inside the 40% circle Android may crop to.
  */
 function appIcon(shape, fill) {
-  const figure = (108 - 31.5) * (50 / 72);
-  const scale = (fill * 100) / figure;
+  const scale = (fill * 100) / MARK.height;
+  // The figure is centred on the 64 box, so its middle is (32, 32).
   const offset = 50 - 32 * scale;
   const tile =
     shape === "rounded"

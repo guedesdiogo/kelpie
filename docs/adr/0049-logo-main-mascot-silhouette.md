@@ -56,12 +56,12 @@ The owner chose Orelhas, and changed the main mascot itself with it.
 ### 3. Small sizes have their own drawings
 
 - **The favicon** is an opaque `--accent` tile with the mark in `--on-accent`. Safari ignores the dark block inside an SVG favicon, so the light tile is the one every browser can show. Chrome and Firefox take the dark tile on a dark system.
-- **The 16 and 32 px masters** sit on whole pixels, with the ears a little larger so they survive.
+- **The 16 and 32 px masters** keep the body on whole pixels and draw the ears a little larger, so they survive.
 
 ### 4. One script draws every file
 
 - **`scripts/brand-icons.mjs`** writes the brand's SVG files and renders the PNG and ICO files from them with headless Chrome. Its outputs are committed:
-  - the mark and its lockups in `docs/brand/`;
+  - in `docs/brand/`: the mark, its lockups for light and dark, the 16 px favicon master and the sources of the home-screen icons;
   - the webchat's `icon.svg`, `favicon.ico` (16 and 32 px), `apple-touch-icon.png` (180 px), `icon-192.png`, `icon-512.png` and `icon-maskable-512.png`.
 - **The webchat links them,** and serves a manifest. Access guards `/webchat/`, so the page asks for the manifest with the login's cookie (`crossorigin="use-credentials"`).
 - **The manifest's `display` is `browser`.** A home-screen icon opens the webchat as a tab, so signing in through Access works as it does today.

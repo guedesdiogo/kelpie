@@ -664,28 +664,31 @@ Frequent. One step away, in the header, for a page with no settings of its own.
 
 ### 5.23 The logo
 
-Frequent, and still: the logo never moves ([ADR-0049](adr/0049-logo-main-mascot-silhouette.md)). Kelpie's logo is the main agent's mascot as a flat silhouette, and it names the product. `scripts/brand-icons.mjs` draws every file: the mark and its lockups in `docs/brand/`, and the webchat's icons.
+Frequent, and still: the logo never moves ([ADR-0049](adr/0049-logo-main-mascot-silhouette.md)). Kelpie's logo is the main agent's mascot as a flat silhouette, and it names the product.
 
+- **The files.** `scripts/brand-icons.mjs` draws them all:
+  - in `docs/brand/`, the mark (`kelpie-mark.svg`), its lockups for light and dark, the 16 px favicon master (`favicon-16.svg`) and the sources of the home-screen icons (`app-icon.svg`, `app-icon-rounded.svg` and `app-icon-maskable.svg`);
+  - the webchat's icons, listed under the favicon below.
 - **The mark** is the main mascot's `mark` shape with its round ears, in one color: no face, fur, accessory or shadow.
   - It comes from the engine's 120 grid: the shape at 24..96 × 36..108 with corners 36, 36, 36 and 11.5, and the ears, circles of 10.5 at (38, 42) and (82, 42).
   - If the main mascot's default changes, the mark changes with it, through a new ADR.
 - **The lockup** sets the mark beside "Kelpie" in Bricolage Grotesque 680, tracking −0.03em, with the font's kerning:
   - the mark is 1.3 cap heights tall, centered on the cap band;
   - its right edge sits half a cap from the K's stem;
-  - the webchat's sidebar sets the word at 17 px;
+  - the webchat's sidebar will set the word at 17 px, once #378 brings the sidebar;
   - nothing else comes within half a cap of the lockup, or a quarter of the mark's height of the mark alone.
 - **Color.** The mark and the word are `--accent`:
   - on `--bg`, `--surface` and `--sunken` they measure 4.80, 5.38 and 4.38 in light, and 8.51, 7.78 and 8.23 in dark;
   - a logo is exempt from WCAG 1.4.11, but the logo that links home still keeps 3:1, which every pair passes;
   - on anything else (a photo, another color), the mark goes in `--on-accent` on an `--accent` tile;
   - it is never `--warm`.
-- **Small sizes have their own drawings.** At 32 px and below, the favicon's masters draw the mark on whole pixels, with the ears a little larger so they survive.
+- **Small sizes have their own drawings.** At 32 px and below, the favicon's masters draw the mark with its body on whole pixels and the ears a little larger, so they survive.
 - **The favicon is an opaque tile:** `--accent`, radius 22% of its side, with the mark in `--on-accent` (5.31:1 in light, 7.83:1 in dark).
   - Safari ignores the dark block inside an SVG favicon, so the light tile is the one every browser can show.
   - Chrome and Firefox take the dark tile on a dark system.
   - The webchat serves:
     - `icon.svg`, the 32 px master;
-    - `favicon.ico`, with 16 and 32 px layers;
+    - `favicon.ico`, with a 16 px layer from `docs/brand/favicon-16.svg` and a 32 px one from the 32 px master;
     - `apple-touch-icon.png`, 180 px and square, since iOS masks it, with the mark 62% of the tile tall;
     - `icon-192.png` and `icon-512.png` on a rounded tile;
     - `icon-maskable-512.png`, with the mark inside the 40% circle Android may crop to.

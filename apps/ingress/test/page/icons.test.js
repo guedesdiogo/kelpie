@@ -31,8 +31,14 @@ function token(name) {
   // Read from disk: this project's Vitest empties CSS imports, `?raw` included.
   const tokens = served("/webchat/tokens.css").toString("utf8");
   const values = [...tokens.matchAll(new RegExp(`${name}: (#[0-9a-f]{6});`, "g"))];
-  return { light: values[0]?.[1], dark: values[1]?.[1] };
+  // The light block comes first, then the dark one.
+  expect(values.length, name).toBeGreaterThanOrEqual(2);
+  return { light: values[0][1], dark: values[1][1] };
 }
+
+/** The fill a CSS rule for `selector` sets in `css`, lowercased. */
+const fill = (css, selector) =>
+  css.match(new RegExp(`\\${selector}\\s*\\{[^}]*fill:\\s*(#[0-9a-fA-F]{6})`))?.[1].toLowerCase();
 
 describe("the webchat's icons (ADR-0049)", () => {
   it("links an SVG favicon, an ICO for the rest, the home-screen icon and the manifest", () => {
@@ -75,15 +81,15 @@ describe("the webchat's icons (ADR-0049)", () => {
   });
 
   it("draws the favicon on --accent with --on-accent, in light and in dark", () => {
-    const svg = served("/webchat/icon.svg").toString("utf8").toLowerCase();
+    const svg = served("/webchat/icon.svg").toString("utf8");
+    const style = svg.match(/<style>([\s\S]*)<\/style>/)?.[1] ?? "";
+    const [light, dark = ""] = style.split(/@media\s*\(prefers-color-scheme:\s*dark\)/);
     const accent = token("--accent");
     const onAccent = token("--on-accent");
     // Safari ignores the dark block inside an SVG favicon, so the light tile comes first and
-    // must read on any tab: it is opaque.
-    expect(svg).toContain(`.t{fill:${accent.light}}.g{fill:${onAccent.light}}`);
-    expect(svg).toContain(
-      `@media (prefers-color-scheme:dark){.t{fill:${accent.dark}}.g{fill:${onAccent.dark}}}`,
-    );
+    // must read on any tab: it is opaque, and covers the whole box.
+    expect([fill(light, ".t"), fill(light, ".g")]).toEqual([accent.light, onAccent.light]);
+    expect([fill(dark, ".t"), fill(dark, ".g")]).toEqual([accent.dark, onAccent.dark]);
     expect(svg).toMatch(/<rect class="t" width="32" height="32"/);
   });
 
@@ -94,6 +100,12 @@ describe("the webchat's icons (ADR-0049)", () => {
   it("names icons in the manifest that exist at their sizes, any and maskable apart", () => {
     const manifest = JSON.parse(served("/webchat/manifest.webmanifest").toString("utf8"));
     expect(manifest).toMatchObject({ name: "Kelpie", start_url: "/webchat/", scope: "/webchat/" });
+    // The page's light background, as the phone's bar takes it before the page paints (5.22).
+    const background = token("--bg").light;
+    expect([manifest.background_color, manifest.theme_color].map((c) => c.toLowerCase())).toEqual([
+      background,
+      background,
+    ]);
     // Chrome needs a 192 and a 512 px icon; a maskable one stays a separate entry.
     expect(manifest.icons.map((icon) => [icon.sizes, icon.purpose ?? "any"])).toEqual([
       ["192x192", "any"],
