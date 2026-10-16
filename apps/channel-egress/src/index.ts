@@ -512,12 +512,18 @@ interface WantedPhoto {
   mascot: Mascot;
 }
 
+/** Photos drawn and not sent yet, for the bot and mascot `shown` names: about 0.6 MB. */
+interface DrawnPhotos extends Photos {
+  shown: string;
+}
+
 /**
  * Puts the agent's mascot on its Telegram bot, as its profile photo (ADR-0046): one per agent. It
  * keeps the newest mascot asked for, and its alarm draws and sends it, since drawing takes longer
  * than a request may wait. A mascot already on that bot isn't sent again. Browser Run's cost has a
- * ceiling: drawings of one agent are 5 min apart at least, and a mascot is tried 5 times at most.
- * A failure is thrown, so the runtime runs the alarm again, a little later each time.
+ * ceiling: a new mascot is drawn 5 min after the last drawing began at the soonest, photos drawn
+ * are kept until sent so a failed send isn't drawn again, and a mascot gets 5 tries at most. A
+ * failure is thrown, so the runtime runs the alarm again, a little later each time.
  */
 export class BotPhoto extends DurableObject<Env> {
   /** Keeps `mascot` as the one to show. A mascot changed again within a few seconds is drawn once. */
@@ -546,9 +552,13 @@ export class BotPhoto extends DurableObject<Env> {
       if (found.ok) {
         const shown = `${found.secret.botId}:${JSON.stringify(wanted.mascot)}`;
         if (shown !== (await this.ctx.storage.get<string>("shown"))) {
-          await this.ctx.storage.put("drawnAt", Date.now());
-          const photos = await drawPhotos(this.env.BROWSER, wanted.mascot);
-          await sendPhoto(new TelegramAdapter(found.secret), photos);
+          let drawn = await this.ctx.storage.get<DrawnPhotos>("drawn");
+          if (drawn?.shown !== shown) {
+            await this.ctx.storage.put("drawnAt", Date.now());
+            drawn = { shown, ...(await drawPhotos(this.env.BROWSER, wanted.mascot)) };
+            await this.ctx.storage.put("drawn", drawn);
+          }
+          await sendPhoto(new TelegramAdapter(found.secret), drawn);
           await this.ctx.storage.put("shown", shown);
         }
       }
@@ -566,6 +576,7 @@ export class BotPhoto extends DurableObject<Env> {
       }
       console.warn("channel-egress: a bot's photo was given up", errorName(error));
     }
+    await this.ctx.storage.delete("drawn");
     // A newer mascot asked for while this one was drawn keeps its turn: `request` set the alarm.
     const latest = await this.ctx.storage.get<WantedPhoto>("wanted");
     if (JSON.stringify(latest) === JSON.stringify(wanted)) {
