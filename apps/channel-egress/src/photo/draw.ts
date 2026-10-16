@@ -22,6 +22,14 @@ const BACKGROUND = "#e7eeec";
 const WAIT_MS = 50_000;
 /** Larger than any photo the page draws, which is about 0.5 MB. */
 const MAX_BYTES = 10 * 1024 * 1024;
+/** The page's HTML, with both photos in base64 and the modules it ran: about 1 MB. */
+const MAX_ANSWER_CHARS = 4 * MAX_BYTES;
+/**
+ * The page reaches nothing outside itself: its modules and fur are blob and data URLs. It holds no
+ * secret either, so this only keeps a future bug in the engine from sending anything out.
+ */
+const PAGE_POLICY =
+  "default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; img-src blob: data:; connect-src blob: data:";
 
 /** What draws the page: Browser Run's binding, or a stand-in. */
 export interface PhotoBrowser {
@@ -42,7 +50,8 @@ const scriptJson = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u0
  * the others', then writes its answer in `#photo` and marks the body done.
  */
 export function photoPage(mascot: Mascot): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><style>${css}</style>
+  return `<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="${PAGE_POLICY}"><style>${css}</style>
 <style>html, body { margin: 0; overflow: hidden; } #mascot { position: absolute; }</style></head>
 <body><span id="mascot"></span><pre id="photo"></pre>
 <script type="application/json" id="modules">${scriptJson(Object.fromEntries(MODULES))}</script>
@@ -85,6 +94,7 @@ export async function drawPhotos(browser: PhotoBrowser, mascot: Mascot): Promise
   if (!response.ok || body?.success !== true || typeof body.result !== "string") {
     throw new Error(`Browser Run answered ${response.status}`);
   }
+  if (body.result.length > MAX_ANSWER_CHARS) throw new Error("The photo page answered too much");
   const answer = answerOf(body.result);
   if ("error" in answer) throw new Error(`The photo page failed: ${answer.error}`);
   return answer;
@@ -106,8 +116,8 @@ function answerOf(html: string): Photos | { error: string } {
   return { still, loop: bytesOf(parsed.loop, MP4) };
 }
 
-/** A JPG starts with its SOI marker; an MP4 with a box, then `ftyp`. */
-const JPEG = (bytes: Uint8Array) => bytes[0] === 0xff && bytes[1] === 0xd8;
+/** A JPG starts with its SOI marker and a segment; an MP4 with a box, then `ftyp`. */
+const JPEG = (bytes: Uint8Array) => bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
 const MP4 = (bytes: Uint8Array) => String.fromCharCode(...bytes.subarray(4, 8)) === "ftyp";
 
 function bytesOf(
@@ -115,12 +125,15 @@ function bytesOf(
   looksRight: (bytes: Uint8Array) => boolean,
 ): Uint8Array<ArrayBuffer> | null {
   if (typeof value !== "string" || value === "" || value.length > (MAX_BYTES * 4) / 3) return null;
+  let binary: string;
   try {
-    const bytes = Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
-    return looksRight(bytes) ? bytes : null;
+    binary = atob(value);
   } catch {
     return null;
   }
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return looksRight(bytes) ? bytes : null;
 }
 
 /** Text as the HTML Browser Run returns it, with `&`, `<` and `>` escaped. */

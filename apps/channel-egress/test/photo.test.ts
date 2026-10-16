@@ -106,6 +106,8 @@ describe("The photo page", () => {
   it("runs the webchat's own modules on the mascot, and no text closes its scripts", () => {
     const page = photoPage(KELPIE_MASCOT);
     expect(page.match(/<\/script>/g)).toHaveLength(2);
+    // It reaches nothing outside itself.
+    expect(page).toContain(`http-equiv="Content-Security-Policy" content="default-src 'none';`);
     expect(page).toContain(JSON.stringify(KELPIE_MASCOT));
     const modules = JSON.parse(
       /<script type="application\/json" id="modules">([^<]*)<\/script>/.exec(page)?.[1] ?? "{}",
@@ -144,7 +146,7 @@ describe("Drawing a photo", () => {
   });
 
   it("goes without the loop when the page has none, or it isn't an MP4", async () => {
-    for (const loop of [null, base64(STILL), "not base64!"]) {
+    for (const loop of [null, base64(STILL), "not base64!", base64(new Uint8Array([0, 0, 0]))]) {
       const photos = await drawPhotos(browser({ still: base64(STILL), loop }), KELPIE_MASCOT);
       expect(photos).toEqual({ still: STILL, loop: null });
     }
@@ -170,6 +172,9 @@ describe("Drawing a photo", () => {
     ).rejects.toThrow(/isn't JSON/);
     const broken: PhotoBrowser = { quickAction: async () => new Response("oops") };
     await expect(drawPhotos(broken, KELPIE_MASCOT)).rejects.toThrow(/answered 200/);
+    await expect(drawPhotos(page("x".repeat(41 * 1024 * 1024)), KELPIE_MASCOT)).rejects.toThrow(
+      /too much/,
+    );
   });
 });
 
@@ -264,27 +269,75 @@ describe("A bot's photo", () => {
     await exports.ChannelEgress.updateBotPhoto("photo-e", OTHER);
     await drawNow("photo-e", browser({ still: base64(STILL), loop: null }));
     expect(refused.map(({ photo }) => photo?.type)).toEqual(["animated", "static", "static"]);
+
+    // A loop too large for Telegram (413) leaves the still too.
+    const large = botApi((type) =>
+      type === "animated"
+        ? Response.json({ ok: false, error_code: 413 }, { status: 413 })
+        : Response.json({ ok: true, result: true }),
+    );
+    await exports.ChannelEgress.updateBotPhoto("photo-e", KELPIE_MASCOT);
+    await drawNow("photo-e", browser());
+    expect(large.map(({ photo }) => photo?.type)).toEqual(["animated", "static"]);
   });
 
-  it("waits as long as Telegram asks, and tries again after a failure", async () => {
-    let status = 429;
+  it("waits as long as Telegram asks, 30 s at least, and gives up after 5 tries", async () => {
+    let answer: { status: number; retry_after?: number } = { status: 429, retry_after: 60 };
     botApi(() =>
-      Response.json({ ok: false, error_code: status, parameters: { retry_after: 30 } }, { status }),
+      Response.json(
+        { ok: false, error_code: answer.status, parameters: { retry_after: answer.retry_after } },
+        { status: answer.status },
+      ),
     );
     await connect("photo-f");
     await exports.ChannelEgress.updateBotPhoto("photo-f", KELPIE_MASCOT);
-    const before = Date.now();
+    let before = Date.now();
     await drawNow("photo-f", browser());
     let now = await stored("photo-f");
     expect(now.wanted?.mascot).toEqual(KELPIE_MASCOT);
-    expect(now.alarm).toBeGreaterThanOrEqual(before + 30_000);
+    expect(now.alarm).toBeGreaterThanOrEqual(before + 60_000);
+    // A 429 without `retry_after` reads as 1 s, and waits 30 s.
+    answer = { status: 429 };
+    before = Date.now();
+    await drawNow("photo-f", browser());
+    expect((await stored("photo-f")).alarm).toBeGreaterThanOrEqual(before + 30_000);
 
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    status = 500;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    answer = { status: 500 };
     await expect(drawNow("photo-f", browser())).rejects.toThrow();
     await expect(drawNow("photo-f", browser({}, 422))).rejects.toThrow(/422/);
+    expect((await stored("photo-f")).wanted?.mascot).toEqual(KELPIE_MASCOT);
+    // The fifth try is the last: the mascot is given up, without throwing.
+    await drawNow("photo-f", browser());
     now = await stored("photo-f");
-    expect(now.wanted?.mascot).toEqual(KELPIE_MASCOT);
+    expect(now.wanted).toBeUndefined();
+    expect(warn).toHaveBeenLastCalledWith(
+      "channel-egress: a bot's photo was given up",
+      "ChannelRequestError",
+    );
+  });
+
+  it("gives up at once when Telegram refuses the bot for good", async () => {
+    const uploads = botApi(() =>
+      Response.json({ ok: false, error_code: 401, description: "nope" }, { status: 401 }),
+    );
+    await connect("photo-i");
+    await exports.ChannelEgress.updateBotPhoto("photo-i", KELPIE_MASCOT);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await drawNow("photo-i", browser());
+    expect(uploads).toHaveLength(1);
+    expect((await stored("photo-i")).wanted).toBeUndefined();
+  });
+
+  it("draws one agent's photo 5 minutes apart at least", async () => {
+    botApi();
+    await connect("photo-j");
+    await exports.ChannelEgress.updateBotPhoto("photo-j", KELPIE_MASCOT);
+    const drawnAt = Date.now();
+    await drawNow("photo-j", browser());
+    await exports.ChannelEgress.updateBotPhoto("photo-j", OTHER);
+    const { alarm } = await stored("photo-j");
+    expect(alarm).toBeGreaterThanOrEqual(drawnAt + 5 * 60_000);
   });
 
   it("tries again when the secret store fails, and drops a bot disconnected meanwhile", async () => {
