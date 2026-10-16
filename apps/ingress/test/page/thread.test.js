@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PRESS_GUARD_MS, RING_MS } from "../../public/webchat/card.js";
 import { CONFIRMATION_MS } from "../../public/webchat/mascot-states.js";
 import { TEXTS } from "../../public/webchat/texts.js";
-import { RING_MS, Thread } from "../../public/webchat/thread.js";
+import { Thread } from "../../public/webchat/thread.js";
 
 const T = TEXTS.en;
 /** Thursday 15 October 2026, 14:32 in the browser's zone. */
@@ -305,6 +306,7 @@ describe("the confirmation card (5.3)", () => {
     const confirm = card.querySelector("button.confirm");
     expect(confirm.textContent).toBe("Confirm");
 
+    vi.advanceTimersByTime(PRESS_GUARD_MS);
     confirm.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
     expect(confirms).toEqual([7]);
     expect(card.dataset.state).toBe("working");
@@ -357,6 +359,7 @@ describe("the confirmation card (5.3)", () => {
   it("acts from the keyboard only on a key pressed on its button, never one held down before", () => {
     const card = thread.reply(notice);
     const confirm = card.querySelector("button.confirm");
+    vi.advanceTimersByTime(PRESS_GUARD_MS);
     confirm.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", repeat: true }));
     confirm.dispatchEvent(new MouseEvent("click", { detail: 0 }));
     expect(confirms).toEqual([]);
@@ -366,6 +369,18 @@ describe("the confirmation card (5.3)", () => {
     // A keyboard confirm skips the grow, the pop and the ring.
     thread.confirmation(7, "accepted");
     expect(card.querySelector(".ring")).toBeNull();
+  });
+
+  it("ignores a press in its first 400 ms, since it may have appeared under the pointer", () => {
+    const card = thread.reply(notice);
+    const confirm = card.querySelector("button.confirm");
+    vi.advanceTimersByTime(PRESS_GUARD_MS - 1);
+    confirm.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+    expect(confirms).toEqual([]);
+    expect(card.dataset.state).toBeUndefined();
+    vi.advanceTimersByTime(1);
+    confirm.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+    expect(confirms).toEqual([7]);
   });
 
   it("does nothing while the socket can't take the press", () => {

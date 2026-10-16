@@ -4,6 +4,7 @@
 // reaches the page as text nodes and the blocks of blocks.js.
 
 import { renderBlocks } from "./blocks.js";
+import { Card, defaultTimers } from "./card.js";
 import { icon } from "./icons.js";
 import { CONFIRMATION_MS } from "./mascot-states.js";
 import {
@@ -30,18 +31,8 @@ import {
   resize,
   SPRINGS,
 } from "./motion.js";
+import { roll, rollText } from "./roll.js";
 
-const defaultTimers = {
-  set: (run, ms) => setTimeout(run, ms),
-  clear: (timer) => clearTimeout(timer),
-  every: (run, ms) => setInterval(run, ms),
-  stop: (timer) => clearInterval(timer),
-};
-
-/** How long a confirmation's success shows before the card folds into its receipt (5.3). */
-export const RING_MS = 650;
-/** How long the card's hold must last to pause the conversation (ADR-0044 §2, the lab's hold). */
-export const HOLD_MS = 1_200;
 /** At most this many of the latest messages slide up when one arrives below them (5.1). */
 const FLIP_AT_MOST = 12;
 /** At most this many steps of a row enter staggered; a stagger stops at 300 ms (§4.3). */
@@ -530,249 +521,27 @@ export class Thread {
   // ── The confirmation card (5.3) ──────────────────────────────────────────────────────────────
 
   #card(bubble, id, at) {
-    bubble.classList.add("card");
-    // Who asks and until when, above the notice (the lab's "Aprovar uma ação", decision 13).
-    const head = document.createElement("div");
-    head.className = "card-head";
-    const mascot = document.createElement("span");
-    mascot.className = "card-mascot";
-    mascot.setAttribute("aria-hidden", "true");
-    const who = document.createElement("p");
-    who.className = "card-who";
-    who.textContent = this.#texts.cardAsks(this.#agentName());
-    const until = document.createElement("p");
-    until.className = "card-until";
-    until.textContent = this.#texts.cardUntil(clock(at + CONFIRMATION_MS, this.#locale));
-    const heading = document.createElement("div");
-    heading.append(who, until);
-    head.append(mascot, heading);
-    bubble.prepend(head);
-    this.#cardMascot(mascot);
-    const actions = document.createElement("div");
-    actions.className = "card-actions";
-    const confirm = document.createElement("button");
-    confirm.type = "button";
-    confirm.className = "confirm";
-    confirm.dataset.confirmation = String(id);
-    const label = document.createElement("span");
-    label.className = "label";
-    label.append(rollText(this.#texts.confirm));
-    const status = document.createElement("span");
-    status.className = "confirm-icon";
-    confirm.append(status, label);
-    actions.append(confirm);
-    const hold = this.#hold();
-    bubble.append(actions, hold.button);
-    const card = {
+    const card = new Card(bubble, {
       id,
-      bubble,
-      actions,
-      confirm,
-      label,
-      status,
-      hold,
-      open: true,
-      viaKeyboard: false,
-    };
+      until: at + CONFIRMATION_MS,
+      who: this.#agentName(),
+      texts: this.#texts,
+      locale: this.#locale,
+      onConfirm: this.#onConfirm,
+      onPause: this.#onPause,
+      mascot: this.#cardMascot,
+      onAnnounce: this.#onAnnounce,
+      onChange: this.#onChange,
+      now: this.#now,
+      timers: this.#timers,
+    });
     if (!this.#cards.has(id)) this.#cards.set(id, []);
     this.#cards.get(id).push(card);
-    // A key held down since before the card appeared doesn't count: only one pressed on it.
-    let pressedHere = false;
-    confirm.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") pressedHere = !event.repeat;
-    });
-    confirm.addEventListener("click", (event) => {
-      const viaKey = event.detail === 0;
-      if (viaKey && !pressedHere) return;
-      pressedHere = false;
-      if (!card.open || card.pressed) return;
-      if (!this.#onConfirm(id)) return;
-      this.#press(card, viaKey || fromKeyboard());
-    });
-    // A confirmation nobody answers expires after its 10 minutes (ADR-0026 §3).
-    const left = at + CONFIRMATION_MS - this.#now();
-    if (left <= 0) {
-      this.#fold(card, "neutral", this.#texts.expired, { announce: false, instant: true });
-      return;
-    }
-    card.expiry = this.#timers.set(() => {
-      if (card.open && !card.pressed) this.#fold(card, "neutral", this.#texts.expired);
-    }, left);
-  }
-
-  /**
-   * The card's hold, under its actions: held for 1.2 s, it pauses the conversation, as the
-   * composer's Pause does (ADR-0044 §2). Holding, not clicking, keeps it from being a slip beside
-   * Confirm. Its fill is progress, so it moves under reduced motion too (rule 10).
-   */
-  #hold() {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "hold";
-    const fill = document.createElement("span");
-    fill.className = "hold-fill";
-    fill.setAttribute("aria-hidden", "true");
-    const label = document.createElement("span");
-    label.className = "label";
-    label.append(rollText(this.#texts.holdToPause));
-    button.append(fill, label);
-    const state = { button, timer: null, fill: null, done: false };
-    const start = () => {
-      if (state.done || state.timer !== null) return;
-      roll(label, this.#texts.holding);
-      state.fill?.cancel();
-      state.fill = play(fill, [{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }], {
-        duration: HOLD_MS,
-        easing: "linear",
-        fill: "forwards",
-      });
-      state.timer = this.#timers.set(() => {
-        state.timer = null;
-        if (!this.#onPause()) {
-          end();
-          return;
-        }
-        state.done = true;
-        button.disabled = true;
-        roll(label, this.#texts.pausedStatus);
-      }, HOLD_MS);
-    };
-    const end = () => {
-      if (state.done) return;
-      this.#timers.clear(state.timer);
-      state.timer = null;
-      state.fill?.cancel();
-      state.fill = null;
-      roll(label, this.#texts.holdToPause);
-    };
-    button.addEventListener("pointerdown", (event) => {
-      if (event.button > 0) return;
-      event.preventDefault();
-      start();
-    });
-    for (const type of ["pointerup", "pointerleave", "pointercancel"]) {
-      button.addEventListener(type, end);
-    }
-    button.addEventListener("keydown", (event) => {
-      if ((event.key === " " || event.key === "Enter") && !event.repeat) {
-        event.preventDefault();
-        start();
-      }
-    });
-    button.addEventListener("keyup", (event) => {
-      if (event.key === " " || event.key === "Enter") end();
-    });
-    button.addEventListener("contextmenu", (event) => event.preventDefault());
-    return state;
-  }
-
-  /** The press: the button grows to the card's width and says what it does (5.3). */
-  #press(card, viaKeyboard) {
-    card.pressed = true;
-    card.viaKeyboard = viaKeyboard;
-    const before = card.confirm.getBoundingClientRect();
-    card.confirm.disabled = true;
-    card.bubble.dataset.state = "working";
-    if (!viaKeyboard) resize(card.confirm, before, SPRINGS.moment);
-    roll(card.label, this.#texts.confirming);
-    card.status.dataset.state = "waiting";
-    card.spin = this.#timers.set(() => {
-      card.status.dataset.state = "spinning";
-    }, SPINNER_AFTER_MS);
   }
 
   /** What a press did, on every notice of that confirmation. */
   confirmation(id, status) {
-    for (const card of this.#cards.get(id) ?? []) {
-      if (!card.open) continue;
-      this.#timers.clear(card.spin);
-      this.#timers.clear(card.expiry);
-      if (status !== "accepted") {
-        this.#fold(card, "neutral", this.#texts.stale);
-        continue;
-      }
-      this.#succeed(card);
-    }
-  }
-
-  #succeed(card) {
-    card.open = false;
-    card.bubble.dataset.state = "done";
-    card.status.dataset.state = "done";
-    card.status.replaceChildren(icon("check", "icon draw"));
-    const quiet = card.viaKeyboard || reduced();
-    if (!quiet) {
-      play(card.confirm, [{ transform: "scale(1.03)" }, { transform: "scale(1)" }], SPRINGS.pop);
-      const ring = document.createElement("span");
-      ring.className = "ring";
-      ring.setAttribute("aria-hidden", "true");
-      card.confirm.append(ring);
-      play(
-        ring,
-        [
-          { opacity: 0.7, transform: "scale(1)" },
-          { opacity: 0, transform: "scale(1.5)" },
-        ],
-        { duration: RING_MS, easing: EASE.fade, fill: "forwards" },
-      );
-    }
-    const receipt = this.#texts.confirmedAt(clock(this.#now(), this.#locale));
-    this.#timers.set(() => this.#fold(card, "check", receipt), quiet ? DUR.fade : RING_MS);
-  }
-
-  /**
-   * The card folds into its receipt, who decided what and when (5.3): its content leaves first
-   * (exit), then its height goes to the receipt's with `--spring-moment`.
-   */
-  #fold(card, glyph, text, { announce = true, instant = false } = {}) {
-    card.open = false;
-    this.#timers.clear(card.hold?.timer);
-    const { bubble } = card;
-    bubble.dataset.state = glyph === "check" ? "confirmed" : "closed";
-    const content = [...bubble.children].filter((child) => !child.matches("time.at"));
-    const swap = () => {
-      if (!bubble.isConnected && !instant) return;
-      const before = bubble.getBoundingClientRect();
-      const receipt = document.createElement("p");
-      receipt.className = "receipt";
-      receipt.append(icon(glyph), text);
-      for (const child of content) child.remove();
-      bubble.append(receipt);
-      bubble.classList.add("receipt-only");
-      if (!instant) {
-        resize(bubble, before, SPRINGS.moment);
-        if (reduced()) fadeIn(receipt);
-        else
-          play(
-            receipt,
-            [
-              { opacity: 0, transform: "translateY(4px)" },
-              { opacity: 1, transform: "none" },
-            ],
-            { duration: SPRINGS.moment.duration, easing: SPRINGS.moment.easing, delay: 60 },
-          );
-      }
-      if (announce) this.#onAnnounce(text);
-      this.#onChange({ kind: "receipt", element: bubble, text });
-    };
-    if (instant || card.viaKeyboard || reduced()) {
-      swap();
-      return;
-    }
-    const leaving = content
-      .map((child) =>
-        play(child, [{ opacity: 1 }, { opacity: 0 }], {
-          duration: DUR.exitMoment,
-          easing: EASE.exit,
-          fill: "forwards",
-        }),
-      )
-      .filter(Boolean);
-    if (leaving.length === 0) {
-      swap();
-      return;
-    }
-    Promise.all(leaving.map((animation) => animation.finished)).then(swap, swap);
+    for (const card of this.#cards.get(id) ?? []) card.confirmation(status);
   }
 }
 
@@ -851,48 +620,4 @@ function openRow(row) {
       { duration: SPRINGS.base.duration, easing: SPRINGS.base.easing, delay, fill: "backwards" },
     );
   });
-}
-
-function rollText(text) {
-  const span = document.createElement("span");
-  span.className = "roll";
-  span.textContent = text;
-  return span;
-}
-
-/** A label that changes rolls: the old one leaves upward, the new one rises (5.2). */
-export function roll(container, text) {
-  const old = container.querySelector(":scope > .roll:last-child");
-  if (old?.textContent === text) return;
-  const next = rollText(text);
-  container.append(next);
-  if (!old) return;
-  if (reduced()) {
-    old.remove();
-    fadeIn(next);
-    return;
-  }
-  old.classList.add("leaving");
-  const leaving = play(
-    old,
-    [
-      { opacity: 1, transform: "translateY(0)" },
-      { opacity: 0, transform: "translateY(-75%)" },
-    ],
-    { duration: DUR.exit, easing: EASE.exit, fill: "forwards" },
-  );
-  if (leaving)
-    leaving.finished.then(
-      () => old.remove(),
-      () => old.remove(),
-    );
-  else old.remove();
-  play(
-    next,
-    [
-      { opacity: 0, transform: "translateY(75%)" },
-      { opacity: 1, transform: "none" },
-    ],
-    SPRINGS.fast,
-  );
 }

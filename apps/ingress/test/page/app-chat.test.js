@@ -267,6 +267,8 @@ describe("the conversation", () => {
     const { socket } = await opened();
     socket.receive({ type: "bubble", text: "Change the tier?", confirmation: 4 });
     const confirm = document.querySelector("button.confirm");
+    // A press in the card's first 400 ms doesn't count (ADR-0052 §5).
+    vi.advanceTimersByTime(400);
     confirm.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
     expect(socket.sentOf("confirm")).toEqual([{ type: "confirm", id: 4 }]);
     socket.receive({ type: "confirmation", id: 4, status: "accepted" });
