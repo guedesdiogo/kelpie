@@ -84,6 +84,18 @@ describe("the replayed history", () => {
     expect(thread.isEmpty).toBe(false);
   });
 
+  it("holds the owner's latest messages from the history while a wait is on", () => {
+    thread.replay([
+      { role: "user", text: "antes", at: NOW - 3 * 60_000 },
+      { role: "assistant", text: "Resposta.", at: NOW - 2 * 60_000 },
+      { role: "user", text: "depois", at: NOW - 60_000 },
+    ]);
+    const marks = () => [...root.querySelectorAll(".mark")].map((mark) => mark.textContent);
+    expect(marks()).toEqual(["", ""]);
+    thread.setWaiting(true);
+    expect(marks()).toEqual(["", "Held"]);
+  });
+
   it("starts over on every replay", () => {
     thread.replay([{ role: "user", text: "um", at: NOW }]);
     thread.replay([{ role: "assistant", text: "dois", at: NOW }]);
@@ -243,7 +255,7 @@ describe("a turn's activity (5.1, 5.2)", () => {
 describe("the confirmation card (5.3)", () => {
   const notice = { text: "Kelpie wants to change the tier.", confirmation: 7 };
 
-  it("confirms on a press, then folds into a receipt that says who decided when", () => {
+  it("confirms on a press, then folds into a receipt that says who decided when", async () => {
     const card = thread.reply(notice);
     expect(changes.at(-1).kind).toBe("approval");
     expect(thread.openCards.map((open) => open.id)).toEqual([7]);
@@ -257,6 +269,8 @@ describe("the confirmation card (5.3)", () => {
     expect(confirm.querySelector(".label .roll:last-child").textContent).toBe("Confirming");
     vi.advanceTimersByTime(200);
     expect(confirm.querySelector(".confirm-icon").dataset.state).toBe("spinning");
+    // The old label rolls away: only the new one stays.
+    await vi.waitFor(() => expect(confirm.querySelector(".label").textContent).toBe("Confirming"));
     // A second press while it works does nothing.
     confirm.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
     expect(confirms).toEqual([7]);

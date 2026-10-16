@@ -68,7 +68,7 @@ describe("a reply's blocks (#188)", () => {
     expect(link.title).toBe("https://www.example.com/a?b=c");
     expect(link.target).toBe("_blank");
     expect(link.rel).toBe("noopener noreferrer");
-    expect(link.querySelector(".link-host").textContent).toBe(" example.com");
+    expect(link.querySelector(".link-host").textContent).toBe("example.com");
     expect(link.querySelector(".link-arrow").getAttribute("aria-hidden")).toBe("true");
     expect(link.querySelector(".visually-hidden").textContent).toBe(" (opens in a new tab)");
   });

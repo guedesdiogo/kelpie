@@ -96,14 +96,21 @@ export class Thread {
     return [...this.#cards.values()].flat().filter((card) => card.open);
   }
 
+  /** The agent's name changed, or arrived after the history: its groups' headings follow. */
+  renamed() {
+    for (const heading of this.#root.querySelectorAll('.group[data-sender="assistant"] > h3')) {
+      heading.textContent = this.#texts.groupHeading(this.#agentName(), heading.dataset.time);
+    }
+  }
+
   /** The conversation so far, as `history` replays it: drawn at once, announced by no one. */
   replay(messages) {
     this.#clear();
     for (const message of messages) {
       const at = Number.isFinite(message.at) ? message.at : this.#now();
       if (message.role === "user") {
-        const bubble = this.#bubble("user", at);
-        bubble.append(textOf(message.text));
+        // Received already; held if a wait is on and no reply came after it (5.1).
+        this.#ownerBubble(`history:${this.#owner.size}`, message.text, at, { accepted: true });
       } else {
         this.#reply(this.#bubble("assistant", at), message, at);
       }
@@ -114,26 +121,28 @@ export class Thread {
   owner({ id, text, queued = false }) {
     // A new message interrupts the turn in flight (ADR-0024); its reply won't come.
     this.stop("idle");
-    const at = this.#now();
-    const bubble = this.#bubble("user", at);
-    bubble.dataset.id = id;
-    const body = document.createElement("div");
-    body.className = "text";
-    body.textContent = text;
-    const mark = document.createElement("p");
-    mark.className = "mark";
-    bubble.append(body);
-    // The mark sits under the bubble, outside its fill, so its --muted text keeps its contrast.
-    bubble.after(mark);
-    const entry = { bubble, mark, accepted: false, refused: null, queued, slow: false, held: true };
-    this.#owner.set(id, entry);
+    const bubble = this.#ownerBubble(id, text, this.#now(), { queued });
+    const entry = this.#owner.get(id);
     entry.slowTimer = this.#timers.set(() => {
       entry.slow = true;
       this.#mark(entry);
     }, SENDING_AFTER_MS);
-    this.#mark(entry);
     enter(bubble.parentElement, { origin: "100% 100%" });
     this.#onChange({ kind: "owner", element: bubble });
+    return bubble;
+  }
+
+  #ownerBubble(id, text, at, { accepted = false, queued = false }) {
+    const bubble = this.#bubble("user", at);
+    bubble.dataset.id = id;
+    bubble.append(textOf(text));
+    const mark = document.createElement("p");
+    mark.className = "mark";
+    // The mark sits under the bubble, outside its fill, so its --muted text keeps its contrast.
+    bubble.after(mark);
+    const entry = { bubble, mark, accepted, refused: null, queued, slow: false, held: true };
+    this.#owner.set(id, entry);
+    this.#mark(entry);
     return bubble;
   }
 
@@ -432,9 +441,10 @@ export class Thread {
     group.dataset.sender = sender;
     const heading = document.createElement("h3");
     heading.className = "visually-hidden";
+    heading.dataset.time = clock(at, this.#locale);
     heading.textContent = this.#texts.groupHeading(
       sender === "user" ? this.#texts.you : this.#agentName(),
-      clock(at, this.#locale),
+      heading.dataset.time,
     );
     const time = document.createElement("p");
     time.className = "group-time";
@@ -501,7 +511,7 @@ export class Thread {
     confirm.dataset.confirmation = String(id);
     const label = document.createElement("span");
     label.className = "label";
-    label.textContent = this.#texts.confirm;
+    label.append(rollText(this.#texts.confirm));
     const status = document.createElement("span");
     status.className = "confirm-icon";
     confirm.append(status, label);
@@ -642,6 +652,8 @@ function textOf(text) {
 /** A bubble's exact time, shown on hover or a tap; or a group's time. */
 function timeOf(at, locale, className) {
   const time = document.createElement("time");
+  // The group's heading says the time to screen readers; these are for the eye.
+  time.setAttribute("aria-hidden", "true");
   if (className) time.className = className;
   time.dateTime = new Date(at).toISOString();
   time.textContent = clock(at, locale);

@@ -73,11 +73,13 @@ describe("the mascot in the header (ADR-0045)", () => {
     await settle();
     expect($("mascot").childElementCount).toBeGreaterThan(0);
     expect($("motion-ask").hidden).toBe(false);
-    expect($("mascot-setting").hidden).toBe(false);
+    // Until the owner answers, the menu has nothing to keep.
+    expect($("mascot-setting").hidden).toBe(true);
 
     $("motion-ask").querySelector('[data-motion="states"]').click();
     expect(localStorage.getItem("kelpie.mascotMotion")).toBe("states");
     expect($("motion-ask").hidden).toBe(true);
+    expect($("mascot-setting").hidden).toBe(false);
     $("display-button").click();
     expect(checked("motion")).toBe("states");
     radios("motion")

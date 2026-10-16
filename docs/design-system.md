@@ -69,7 +69,12 @@ Four pairs miss AA in light, so text never uses them: `--accent`, `--ok` and `--
 | Body | Geist | 400, 500, 600 | All running text and UI. |
 | Mono | Geist Mono | 400, 500 | Code, file paths, keys, times, counts and eyebrows. |
 
-Only the weights listed are loaded, with `font-synthesis-weight: none`. All three are under the SIL Open Font License, and they are self-hosted: the webchat's content policy is `default-src 'self'` (#140), and no page loads fonts from another origin. Each `font-family` keeps a system fallback stack.
+Only the weights listed are used, with `font-synthesis-weight: none`.
+- **The files are variable fonts,** each smaller than the static weights it replaces. Geist's latin file is 29.4 KB, and each of its static weights 33 to 35 KB. Every `@font-face` is held to the weights listed: `400 600`, `400 500` and `680`.
+- **They are self-hosted.** All three are under the SIL Open Font License, with their license beside them. The webchat's content policy is `default-src 'self'` (#140), and no page loads fonts from another origin.
+- **Each family ships latin and latin-ext,** chosen by `unicode-range`, so a page that writes no extended letters never loads them.
+- **Names carry the version** (`geist-latin-wght-5.3.0.woff2`), so a browser keeps them a year. `font-display: swap`, and only Geist 400 is preloaded.
+- **Each `font-family` keeps a system fallback stack.**
 
 | Token | Size | Line height | Use |
 |---|---|---|---|
@@ -228,7 +233,9 @@ Frequent. Kelpie waits `quietMs` after the owner's latest message before answeri
 
 - **The owner's message.** It enters from below the composer (`--rise`, `--scale-in`, `--spring-base`, origin at the bottom right), and the bubbles above slide up with it (FLIP, `--spring-base`).
 - **Held messages.** While the buffer holds them, each of the owner's messages carries a small clock in `--muted` under it, "held". The bubble itself doesn't change, so its text keeps its contrast. The mark fades out (`--dur-fade`) when the turn starts reading them.
-- **The wait.** A 3px bar under the thread shows it, wherever the interface knows the buffer's deadline. The webchat learns it from one new socket message, added with its redesign (#140). ADR-0043 amends ADR-0024 for this; before, nothing showed during the wait.
+- **The wait.** A 3px bar under the thread shows it, wherever the interface knows the buffer's deadline. ADR-0043 amends ADR-0024 for this; before, nothing showed during the wait.
+  - The webchat learns the deadline from one socket message, `wait`, added with its redesign (#140). It says how long is left and how long the wait is, in ms, so the browser's clock doesn't matter, and whether the owner's typing holds it.
+  - The conversation sends it after planning a flush, when the typing hold moves it, and to a socket that opens during it. It sends `deadline: null` when the turn starts reading, or a pause cancels the wait.
   - The bar follows the buffer's real deadline: `quietMs` after the latest message, capped by `maxWaitMs` from the first.
   - A new message refills it in the first 7% of the time, then it drains linearly.
   - While the webchat holds the answer because the owner is still typing, the bar stays full. It drains toward the `maxWaitMs` deadline once that comes first.
@@ -403,7 +410,9 @@ Frequent.
 - **The banner.** Then a banner enters at the top (from 8px above, `--spring-base`): what happened, when the next try is ("No connection. Trying again in 8 s", digits in Geist Mono), and "Try now".
 - **Queued messages.** What the owner sends meanwhile shows in `--sunken` with a clock and "queued". It goes out in order when the connection is back.
 - **Back,** the banner turns `--ok`, "Back. 1 message sent.", for 2.6 s, then leaves. Alerts stay quiet for the first 4 s after reconnecting, so a backlog doesn't arrive as a burst.
-- **An expired login** opens a centered dialog to sign in again, and keeps the draft.
+- **An expired login** opens a centered dialog, and keeps the draft.
+  - The page tells it from a lost connection by asking ingress with `X-Requested-With`, which Access answers with 401 once the session expired.
+  - Under Access, signing in is a full page of its own, so the dialog says what happened and holds one button, "Sign in again". The page keeps the draft and the messages not yet accepted in the tab's storage, signs in again through a reload, and restores them with "Restored your unsent message".
 - **Reduced motion:** the banner fades. Under the less-motion switch it says "Trying again shortly" without a counting number.
 
 ### 5.13 Toasts and undo
@@ -459,7 +468,7 @@ Frequent; crossing a limit is a moment.
 
 Moment.
 
-- **Comfort comes first.** Before anything else, one step sets motion (full or less), text size and contrast. That is where the less-motion switch of rule 10 lives. The step can be reopened in settings.
+- **Comfort comes first.** Before anything else, one step sets motion (full or less), text size and contrast. That is where the less-motion switch of rule 10 lives. The step can be reopened in settings. Until the management UI has them, the webchat's Display menu (5.22) holds the switch, the theme and the contrast.
 - **The first agent.**
   - Until it exists, the empty state says in one sentence why the roster is empty, and offers one button.
   - When it is created, its avatar enters its slot with `--spring-pop`, and the empty block collapses with `--spring-moment`.
@@ -517,7 +526,7 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 | No response | 5.9 No response. The webchat gets no streamed tokens, so it can't tell a slow model from none, and doesn't show it | approved by the owner on #366: the task's object rests, and it looks up at the owner beside a still, dashed `--muted` bubble with `…` | the bubble pops | none |
 
 - **The activity is always true.** It follows the tool the conversation names: a magnifier to search, paper and a pencil for the vault, a laptop for code, a calendar for the agenda, an envelope for email. A tool without its own object, and the model between tools, show thinking: bubbles over the head. Reading memory before a turn is the vault. While a tool runs, Working takes precedence over Typing.
-- **Listening needs the bar.** The webchat doesn't show the wait's bar yet (#140), so its mascot doesn't listen there.
+- **Listening needs the bar.** The webchat's mascot listens while its bar shows (#140). The end of the wait brings it back to idle, unless typing or work has taken over.
 - **Springs.** A state change moves the pose with `--spring-moment`, and the bubble pops with `--spring-pop`. Gestures use `--spring-fast`, `--spring-base` and `--spring-slow`.
 
 **Hands and bubbles.**
@@ -534,7 +543,7 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 | Empty conversation, profile | 160 px | gestures a little more often |
 
 **Reduced motion and the pause.**
-- **The pause** (WCAG 2.2.2) is a setting with three values: Alive, States only, Still. Before a mascot first moves, the webchat asks for it under the header, and the mascot stays still until the owner answers. The footer keeps it, in the browser. The first run's comfort step and settings (5.17) will hold it too.
+- **The pause** (WCAG 2.2.2) is a setting with three values: Alive, States only, Still. Before a mascot first moves, the webchat asks for it under the header, and the mascot stays still until the owner answers. The Display menu (5.22) keeps it, in the browser. The first run's comfort step and settings (5.17) will hold it too.
 - **States only** plays the announcements and nothing else, and cuts each to end within 5 s of the state's start. The mascot doesn't breathe.
 - **A change of setting** stops what the old one played, and keeps the pose. The activity's loop starts again only in Alive.
 - **Still** shows the state's pose: no breathing, no announcement, no repertoire. A change is a 150 ms crossfade. The poses of listening, typing, working, approved, error and dozing keep their hands, and the task's object stays in front of the mascot.
@@ -542,6 +551,82 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 - **Reading comes first.** While the owner types, the conversation's mascot only breathes and blinks.
 - **Nothing moves off screen or in a hidden tab,** the activity's loop included. One shared timer, every 400 ms, schedules every mascot, and an `IntersectionObserver` stops those out of view.
 - **The mascot makes no sound.**
+
+### 5.20 The conversation
+
+Frequent. The webchat's thread and composer (#140); the research is on #140.
+
+- **Groups.** Consecutive messages from one sender, within 10 minutes and on the same day, form a group (Telegram).
+  - Messages in a group sit `--space-1` apart, and groups `--space-3`.
+  - Corners are `--r-bubble`, and `--r-sm` on a side that touches a neighbor in its group. There are no tails.
+  - A hidden heading opens each group for screen readers: "You, 14:32", "Agenda, 14:33".
+- **Bubbles.**
+  - The owner's are `--accent` with `--on-accent`, on the right; the agent's are `--sunken`, on the left. A reply needs its bubble: 5.1's typing bubble becomes it.
+  - A bubble is at most 29rem wide, in a column of about 48rem. Text runs with `unicode-bidi: plaintext`, and long words and links break anywhere.
+- **Times.**
+  - A group shows its latest time once, under it, in Geist Mono `--muted` with tabular figures.
+  - A bubble's own time shows beside it on hover or a tap, without moving the layout. There is no sideways drag, which would fight scrolling on a phone.
+  - Times follow the browser's time zone.
+- **Days.**
+  - Each day opens with a label: "Today", "Yesterday", a weekday within the week, then the date, with the year only for another year.
+  - It is an `h2` holding a `<time datetime>`, in a `--surface` pill.
+  - It sticks to the top while scrolling, and a stuck label fades out (`--dur-fade`) 1 s after scrolling stops.
+- **Under the owner's messages,** one quiet mark, strongest first. Marks only move forward: a replayed history never steps one back.
+  - "Not sent" with the reason, beside a `--danger` icon in `--fg` text. The text goes back to the composer.
+  - "Queued" with a clock, in a `--sunken` bubble (5.12).
+  - "Sending", only after 300 ms. There is no clock, because the clock means held and queued.
+  - "Held" with a clock, during the wait (5.1). It fades out when the turn starts reading.
+- **Kelpie's notices** keep the agent's side. The notice of a turn no route answered carries a `--danger` icon, and a confirmation's is the card of 5.3.
+- **A turn's steps.** 5.2's row sits above the typing bubble, in the agent's column, as a `--surface` pill with a `--line` border.
+  - A pause in the middle of a turn ends the typing bubble in place with "Stopped by your pause", and the row with the same words and a neutral icon.
+- **Code blocks.**
+  - Lines wrap, and a block taller than 400px scrolls.
+  - A real Copy button shows on hover and focus, and always on a touch screen. Its label says "Copied", or "Couldn't copy", in place for 1.5 s, with no toast.
+  - There is no language label or line number.
+- **Links** in a reply keep their text in `--fg` with a `--accent` underline, since §1's accent text misses AA on `--sunken`.
+  - The host follows the text in Geist Mono `--muted`, so a label the model wrote can't hide where it goes.
+  - A ↗ follows, with a hidden "(opens in a new tab)" for screen readers.
+  - There is no confirmation dialog per link and no fetched page title.
+- **The composer.**
+  - It grows with its text up to 160px, about six lines, through `field-sizing: content`, at once (rule 1).
+  - Enter sends and Shift+Enter breaks the line. Nothing is sent while an input method composes (`isComposing` or keyCode 229). On a touch keyboard, Enter breaks the line and the button sends.
+  - A printable key pressed anywhere focuses it, except in a field, a dialog or on a button, and "Skip to message" opens the tab order.
+  - Pause stays a separate, smaller control. A single button that turned Send into Pause would pause on a second tap right after sending. Offline, Pause stays pressable and its toast says why it can't pause.
+- **Paused.** A line on the composer's top edge, in `--muted`, says what resumes it: "Paused. Agenda answers after your next message." Nothing waits on the owner, so it isn't `--warm`, and writing is how they resume (#134).
+- **The empty conversation** shows only once the history arrives with nothing in it: the 160px mascot, one sentence, "No messages with Agenda yet. Write below to start.", and the composer focused.
+- **Announcements.**
+  - The thread is a `role="log"` with `aria-live="off"`.
+  - A separate polite region announces each new reply once, with its sender, and never the replayed history.
+  - The header's status line names the turn's phase, never a ticking count.
+- **Reduced motion:** messages fade in where they land, marks and labels fade, and the dots rest. The bar still drains.
+
+### 5.21 Picking the agent
+
+Frequent.
+
+- **The header** holds the 48px mascot (5.19), the agent's name in Bricolage Grotesque at `--text-h3`, and the status line.
+- **The switcher.** With more than one agent, the name is a button that opens the list. From a click it grows from the name as 5.8 does; from the keyboard it appears at once.
+  - Each agent is a link to its conversation (`?agent=<id>`), with its name and its id in Geist Mono. Back and new tabs work.
+  - The current one is marked with `aria-current`.
+  - Arrows, Home and End move through the list, and Escape closes it.
+- **The order** is the registry's and never changes with activity (5.9).
+- **Without `?agent=`,** the webchat opens the main agent.
+- **The list comes from ingress.** It names only the agents that chat, each one only if the Directory admits this login to it, as it admits the agent's socket.
+- **Reduced motion:** the list fades.
+
+### 5.22 The Display menu
+
+Frequent. One step away, in the header, for a page with no settings of its own.
+
+- **Three rows of choices,** each a radiogroup with its boundary in `--muted`, and the chosen one filled with `--accent`:
+  - Theme: System, Light, Dark;
+  - Motion: System, Less, the switch of rule 10;
+  - Contrast: System, More, the higher-contrast set of §1.
+- **The mascot's setting** joins them once the owner has answered its question (5.19). Under reduced motion it can't move, and says why.
+- **They are stored in this browser** until the comfort step of 5.17 exists.
+- **They apply before the first paint.** A small script in the page's head sets them on `<html>`, so the page never flashes the wrong theme. The phone's browser bar takes the page's background.
+- **The system's reduced motion can't be turned off** here; the switch only adds to it.
+- **Reduced motion:** the menu fades.
 
 ## 6. Implementation notes
 
@@ -630,3 +715,9 @@ The rules above cite these. The first set was read on 2026-10-15; a source added
   - Apple Design Award winners: [Crouton](https://developer.apple.com/news/?id=9x75y43e), [Pine Hearts](https://developer.apple.com/news/?id=p9gxlwd0), [Guitar Wiz](https://developer.apple.com/news/?id=5zi5a25j), [grug](https://developer.apple.com/news/?id=ux44ymcr), [Tide Guide](https://developer.apple.com/news/?id=4r9b23wx);
   - [iA Writer's Authorship](https://ia.net/writer/support/editor/authorship), [Moonlock at Red Dot 2026](https://macpaw.com/news/moonlock-wins-red-dot-award-2026), [Google at Fast Company 2026](https://fastcompanybrasil.com/design/google-adidas-e-nordeste-vencem-premio-de-design-da-fast-company/);
   - craft: [Primer on loading](https://primer.style/product/ui-patterns/loading) and [degraded experiences](https://primer.style/product/ui-patterns/degraded-experiences), [Sonner](https://emilkowal.ski/ui/building-a-toast-component), [Vaul](https://emilkowal.ski/ui/building-a-drawer-component), [Atlassian on drag and drop](https://atlassian.design/components/pragmatic-drag-and-drop/design-guidelines), [MUI X Chat on scrolling](https://mui.com/x/react-chat/behavior/scrolling), [NumberFlow](https://number-flow.barvian.me), [Chrome on View Transitions](https://developer.chrome.com/docs/web-platform/view-transitions/same-document).
+- The webchat's redesign (#140), read on 2026-10-15; the findings are on #140:
+  - [Telegram Web A](https://github.com/Ajaxy/telegram-tt/tree/090e38f1dffec3e0a9aefbec8159a9931fbeec8f), the source of groups, day labels, the composer's limits and links that show where they go;
+  - [Claude Code's accessibility](https://code.claude.com/docs/en/accessibility) and [interactive mode](https://code.claude.com/docs/en/interactive-mode), for the spoken labels and the queued messages;
+  - [Apple Messages' delivery states](https://support.apple.com/guide/messages/ichtee6857f6/mac), [Streamdown's code blocks](https://streamdown.ai/docs/code-blocks), [Chromium's URL display guidelines](https://chromium.googlesource.com/chromium/src/+/main/docs/security/url_display_guidelines/url_display_guidelines.md) and [Geist's theme switcher](https://vercel.com/geist/theme-switcher);
+  - [Cloudflare Access's session management](https://developers.cloudflare.com/cloudflare-one/identity/users/session-management/) and [WCAG 2.2.5 Re-authenticating](https://www.w3.org/WAI/WCAG22/Understanding/re-authenticating), for the expired login;
+  - [Hermes Agent](https://github.com/NousResearch/hermes-agent/tree/acc3cada0da86c81efc8aa6c5a291989549ca900), for the input-method guard, the phone's keyboard and the restored draft.

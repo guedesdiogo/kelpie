@@ -202,7 +202,7 @@ footer {
   position: absolute;
   inset-block-start: calc(100% - var(--space-2));
   z-index: 5;
-  min-inline-size: 15rem;
+  min-inline-size: 17rem;
   max-inline-size: calc(100% - 2 * var(--space-4));
   padding: var(--space-2);
   border: 1px solid var(--line);
@@ -267,6 +267,7 @@ footer {
 }
 .segmented button {
   flex: 1;
+  white-space: nowrap;
   min-block-size: 32px;
   padding: 0 var(--space-2);
   border: 0;
@@ -410,6 +411,10 @@ main {
 }
 .group[data-sender="user"] {
   align-items: flex-end;
+}
+/* A group with no message yet (the typing bubble, a tool row) shows no time. */
+.group:not(:has(.bubble:not(.typing))) > .group-time {
+  display: none;
 }
 .group-time {
   margin: 0;
@@ -574,7 +579,10 @@ main {
   text-decoration-thickness: 1.5px;
   text-underline-offset: 2px;
 }
+/* An inline block, so the link's underline doesn't run under the host. */
 .link-host {
+  display: inline-block;
+  margin-inline-start: 0.3em;
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: var(--text-xs);

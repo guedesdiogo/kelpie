@@ -93,7 +93,7 @@ function link(url, label, texts) {
   anchor.append(label);
   const host = document.createElement("span");
   host.className = "link-host";
-  host.textContent = ` ${shownHost(url)}`;
+  host.textContent = shownHost(url);
   const arrow = document.createElement("span");
   arrow.className = "link-arrow";
   arrow.setAttribute("aria-hidden", "true");

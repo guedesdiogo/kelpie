@@ -100,6 +100,8 @@ function receive(frame) {
     case "history":
       present(frame);
       setPaused(frame.paused);
+      // Connected: the header's line goes back to saying what the agent does.
+      if (!paused) setStatus("");
       setWait(null, { quiet: true });
       thread.replay(Array.isArray(frame.messages) ? frame.messages : []);
       for (const id of Array.isArray(frame.received) ? frame.received : []) unconfirmed.delete(id);
@@ -388,6 +390,14 @@ function markStuckDays() {
   }
 }
 
+// The banner, a note over the composer or the phone's keyboard shrink the thread: while it
+// follows, its end stays in sight.
+if (typeof ResizeObserver === "function") {
+  new ResizeObserver(() => {
+    if (following && !selecting) scroller.scrollTop = scroller.scrollHeight;
+  }).observe(scroller);
+}
+
 document.addEventListener("selectionchange", () => {
   const selection = document.getSelection();
   selecting =
@@ -642,7 +652,8 @@ addEventListener("pagehide", saveSession);
 function showAgents() {
   const name = $("agent-name");
   name.textContent = agentName();
-  document.title = `${agentName()} · Kelpie`;
+  thread.renamed();
+  document.title = agentName() === "Kelpie" ? "Kelpie" : `${agentName()} · Kelpie`;
   const switcher = $("switcher");
   const several = agents.length > 1;
   switcher.setAttribute("aria-disabled", String(!several));
@@ -822,7 +833,8 @@ function applyMotion() {
   const chosen = readMotion();
   const less = reduced();
   motionAsk.hidden = chosen !== null || less || !mascot;
-  $("mascot-setting").hidden = !mascot;
+  // Until the owner answers, the mascot stays still and the question asks; the menu keeps the answer.
+  $("mascot-setting").hidden = !mascot || (chosen === null && !less);
   mascotChoice?.check(effectiveMotion(chosen, less));
   for (const button of $("motion").querySelectorAll("button")) button.disabled = less;
   const note = $("motion-note");

@@ -56,6 +56,12 @@ describe("the conversation", () => {
     expect($("thread").textContent).toContain("Olá.");
     expect($("announcer").textContent).toBe("Conversation loaded");
     expect($("agent-name").textContent).toBe("Assistant");
+    // The groups' headings name the agent once the list arrives, whatever came first.
+    expect(document.querySelector('.group[data-sender="assistant"] > h3').textContent).toMatch(
+      /^Assistant, /,
+    );
+    // Connected, the header's line no longer says "Connecting".
+    expect($("status").textContent).toBe("");
     expect(document.title).toBe("Assistant · Kelpie");
     expect($("version").textContent).toBe("Kelpie 1.2.3 · abc1234");
     expect($("skeleton").hidden).toBe(true);
