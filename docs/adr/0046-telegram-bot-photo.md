@@ -31,6 +31,7 @@ A photo can't be reused, so each one goes up as a new file. Telegram recommends 
 
 - **When:** the agent's `AgentHost` asks channel-egress for the photo when its bot connects and when its mascot changes, including back to the default.
 - **Who sends it:** a `BotPhoto` Durable Object per agent keeps the newest mascot asked for. Its alarm waits 5 s, so a mascot changed several times in a row is drawn once, then draws and sends it.
+- **Its cost has a ceiling:** one agent's photo is drawn 5 minutes apart at least, and the newest mascot waits its turn. Each mascot gets 5 tries at most.
 - **What it skips:** a mascot already on that bot isn't drawn again. An agent without a bot gets nothing.
 - **What it replaces:** it replaces a photo set in BotFather, because the owner asked for the photo to follow the mascot by itself.
 
@@ -54,7 +55,7 @@ The photo is always the mascot the webchat shows.
 
 - **Recording:** a virtual clock moves the engine's timers and Web Animations frame by frame. Each frame is the SVG with its animated transforms written in, drawn to a canvas. The frames then play in real time into `MediaRecorder`.
 - **Sending:** channel-egress sends the loop. When Telegram refuses it (400), or the page couldn't record one, it sends the still.
-- **Failures:** a draw or send that fails is tried again by the alarm, later each time. A 429 waits as long as Telegram asks.
+- **Failures:** a draw or send that fails is tried again by the alarm, later each time, up to the fifth try. A 429 waits as long as Telegram asks, 30 s at least. A refusal that asking again won't change, such as a revoked token, gives up at once. A loop Telegram finds too large (413) is replaced by the still, as for a 400.
 
 ### 5. Motion outside Kelpie's interface
 
