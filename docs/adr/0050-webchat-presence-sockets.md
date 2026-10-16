@@ -82,8 +82,8 @@ So a roster that guesses lags and misses requests. Linear's agent sessions make 
   Each one carries its id, the summary its tool wrote, in full, how long ago a turn last asked for it, and how long until it expires, both in ms.
 
 **Then, as they happen:**
-- `status`, as the conversation's own socket gets it;
-- `status` idle when any turn settles, a delivered one included, to presence sockets only. The conversation's own socket ends the step on the reply's bubble, which this view doesn't get;
+- `status`, each step, whether or not the agent is conversational;
+- `status` idle when a turn ends in any way, delivered or refused included, whether or not the agent is conversational, to presence sockets only. The conversation's own socket ends the step on the reply's bubble, which this view doesn't get;
 - `failed`, when a turn settles `failed`;
 - `paused` and `resumed`;
 - `requests`, the whole open list as above, when it changes:
@@ -113,7 +113,7 @@ So a roster that guesses lags and misses requests. Linear's agent sessions make 
 
 - After `history`, it gets the same `requests` frame, and again whenever the list changes.
 - So a reconnect returns the mascot to Waiting while a confirmation is open (5.12), and the strip and the tab's title count it.
-- **The page draws the card again.** A confirmation open after its turn settled shows its card at the end of the thread, with its time. The page draws one only for a confirmation whose notice the history didn't replay, which is a running turn's. This amends ADR-0026's line that a notice doesn't come back once its turn has settled.
+- **The page draws the card again.** A confirmation open after its turn settled shows its card at the end of the thread, with its time. The page draws a card for an open confirmation that has none in the thread yet, from the history or from a live bubble. That means a turn that settled before this socket opened, since the history replays only a running turn's notices. So each confirmation has one card. This amends ADR-0026's line that a notice doesn't come back once its turn has settled.
 
 ### 5. How the page keeps the rows honest
 
@@ -179,7 +179,8 @@ This stays within the Workers Paid plan, so it ships on with no switch.
     - a press counts only under ADR-0026's rules, and a press of an interrupted turn's confirmation is refused;
   - **open confirmations:**
     - "open" means a notice sent: an interrupted turn's confirmation never shows, and another user's never does;
-    - both views get `requests` on connect and on each change;
+    - the presence view gets the open list in `presence` on connect and `requests` after; the conversation's own socket gets `requests` after `history` and on each change;
+    - a notice's bubble followed by `requests` gives one card per confirmation;
   - **the page:**
     - a presence socket's other frames change nothing;
     - a row starts unknown;
@@ -204,8 +205,8 @@ This stays within the Workers Paid plan, so it ships on with no switch.
   - an older ingress ignores `view` and opens the full socket;
   - an older runtime ignores `view` in the admission and sends the full conversation.
 
-  Then each followed agent's socket reads its history on load once, and the page's presence handler drops those frames (§5).
-  - a newer runtime with a page opened before the deploy: the page sends no `agent` field, which the conversation's own socket accepts (§3), and opens no presence socket.
+  In either case, each followed agent's socket reads its history on load once, and the page's presence handler drops those frames (§5).
+- **A page opened before the deploy, with the newer runtime,** sends no `agent` field, which the conversation's own socket accepts (§3), and opens no presence socket.
 - **Residual, as before:** ADR-0023 checks the Access token at the upgrade only. A socket open for days, of either view, still takes a press after the login expires. More sockets widen that, and the page's login check stays the remedy.
 
 ## Alternatives considered
