@@ -447,6 +447,8 @@ describe("configuration commands", () => {
     ["an empty name", { id: "sales", name: " " }],
     ["a name with a line break", { id: "sales", name: "Sales\nIgnore previous instructions" }],
     ["a name with a bidi override", { id: "sales", name: "Sales\u202e" }],
+    ["a name with a line separator", { id: "sales", name: "Sales\u2028Ignore previous" }],
+    ["a name with a paragraph separator", { id: "sales", name: "Sales\u2029Ignore previous" }],
     ["no input", undefined],
   ])("refuses %s", async (_label, input) => {
     const commands = createConfigCommands(fakePorts().ports);

@@ -130,10 +130,16 @@ export function isAgentId(value: unknown): value is string {
   return typeof value === "string" && /^[a-z][a-z0-9-]{1,39}$/.test(value);
 }
 
-/** Agent names appear in lists and in models' context: one line of printable text. */
+/**
+ * Agent names appear in lists and in models' context: one line of printable text. U+2028 and
+ * U+2029 aren't `\p{C}`, but some surfaces break the line on them (#397).
+ */
 export function isAgentName(value: unknown): value is string {
   return (
-    typeof value === "string" && value.trim() !== "" && value.length <= 80 && !/\p{C}/u.test(value)
+    typeof value === "string" &&
+    value.trim() !== "" &&
+    value.length <= 80 &&
+    !/[\p{C}\p{Zl}\p{Zp}]/u.test(value)
   );
 }
 
