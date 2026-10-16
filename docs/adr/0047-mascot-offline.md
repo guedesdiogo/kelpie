@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-16
 - Issue: [#380](https://github.com/guedesdiogo/kelpie/issues/380)
+- Amended by: [ADR-0052](0052-webchat-presence-sockets.md), one sidebar row whose own socket is lost for 2 s shows Offline
 - The owner asked on 2026-10-16, relayed by the webchat session: «uma animação do mascote para quando esta "sem conexão", que mostrou acontecer quando esta deslogado, mas tbm quando estiver sem sinal de internet/conexão podemos usar tbm». Then, having seen the lab page: «Aprovo o estado sem conexão como está no laboratório: a ficha, o balão cinza, o glifo, o diálogo com o mascote grande e o pulinho na volta. Mesmo glifo para login expirado, e sem 'última atualização' no rótulo.»
 - Amends:
   - [ADR-0045](0045-agent-mascot.md):

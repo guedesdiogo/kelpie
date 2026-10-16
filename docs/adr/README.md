@@ -55,6 +55,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0049](0049-logo-main-mascot-silhouette.md) | Kelpie's logo is the main mascot's silhouette, and the main mascot gets round ears and big eyes | [#385](https://github.com/guedesdiogo/kelpie/issues/385) |
 | [0050](0050-master-orchestration-tools.md) | Master always holds the tools it orchestrates Kelpie with | [#391](https://github.com/guedesdiogo/kelpie/issues/391) |
 | [0051](0051-subagent-pups-return-one-by-one.md) | Subagents leave and come back as pups beside their parent, one by one, with no link | [#399](https://github.com/guedesdiogo/kelpie/issues/399) |
+| [0052](0052-webchat-presence-sockets.md) | The webchat's sidebar follows each agent through a socket that carries only its presence | [#393](https://github.com/guedesdiogo/kelpie/issues/393) |
 | [0053](0053-pups-in-the-conversation-header.md) | Pups show in the conversation's header too, and close up as they come back | [#403](https://github.com/guedesdiogo/kelpie/issues/403) |
 | [0054](0054-bot-photo-follows-default-mascot.md) | A bot's photo follows the agent's default mascot when that default changes | [#388](https://github.com/guedesdiogo/kelpie/issues/388) |
 
