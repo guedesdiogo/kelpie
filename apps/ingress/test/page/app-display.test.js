@@ -32,6 +32,11 @@ describe("the Display menu (§5.22)", () => {
     expect(radios("theme")[2].querySelector(".tip").textContent).toBe("Dark");
     expect($("less-motion").checked).toBe(false);
     expect($("more-contrast").checked).toBe(false);
+    // Each switch has its icon before its words.
+    expect($("less-motion").closest("label").querySelector("svg.icon-lessMotion")).not.toBeNull();
+    expect(
+      $("more-contrast").closest("label").querySelector("svg.icon-contrast .solid"),
+    ).not.toBeNull();
 
     radios("theme")
       .find((radio) => radio.dataset.value === "dark")

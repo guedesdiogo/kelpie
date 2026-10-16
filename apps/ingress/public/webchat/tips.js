@@ -56,7 +56,8 @@ export function tips(root) {
       tip.setAttribute("aria-hidden", "true");
       button.append(tip);
     }
-    tip.textContent = button.getAttribute("aria-label") ?? "";
+    // A tip may say more than the name: an empty Send says why it waits.
+    tip.textContent = button.dataset.tip || (button.getAttribute("aria-label") ?? "");
     if (timers.has(button)) continue;
     timers.set(button, null);
     button.addEventListener("pointerenter", () => {

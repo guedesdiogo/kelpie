@@ -39,18 +39,28 @@ const PATHS = {
     "M8 1.8v1.4M8 12.8v1.4M1.8 8h1.4M12.8 8h1.4M3.6 3.6l1 1M11.4 11.4l1 1M3.6 12.4l1-1M11.4 4.6l1-1",
   ],
   moon: ["M13 9.6A5.2 5.2 0 0 1 6.4 3a5.2 5.2 0 1 0 6.6 6.6Z"],
+  // The comfort switches (the design system's §8 research): less motion, a circle with one trail;
+  // more contrast, a rounded square split on its diagonal, never the half-filled circle of working.
+  lessMotion: ["M11 5.25a2.75 2.75 0 1 0 0 5.5a2.75 2.75 0 1 0 0-5.5Z", "M2.75 8h4"],
+  contrast: [
+    "M5.25 2.75h5.5a2.5 2.5 0 0 1 2.5 2.5v5.5a2.5 2.5 0 0 1-2.5 2.5h-5.5a2.5 2.5 0 0 1-2.5-2.5v-5.5a2.5 2.5 0 0 1 2.5-2.5Z",
+    { d: "M13.25 2.75V10.75A2.5 2.5 0 0 1 10.75 13.25H2.75Z", solid: true },
+  ],
 };
 
-/** The mascot's outline on a 20 px grid, its eyes filled: the shapes of its motion setting. */
+/**
+ * The mascot's outline on a 20 px grid, as the main mascot now looks: round ears (ADR-0049), its
+ * ears and eyes filled. The shapes of its motion setting, as the design system draws them.
+ */
 const BODY = [
   [
     "path",
-    {
-      d: "M4.6 9L5 4.6l2.9 2.4c1.4-.3 2.8-.3 4.2 0L15 4.6l.4 4.4c.9 1.1 1.2 2.2 1.2 3.3 0 2.9-2.7 4.3-6.6 4.3s-6.6-1.4-6.6-4.3c0-1.1.3-2.2 1.2-3.3z",
-    },
+    { d: "M9 6.5h2a6 6 0 0 1 6 6v0a5.5 5.5 0 0 1-5.5 5.5H5a2 2 0 0 1-2-2v-3.5a6 6 0 0 1 6-6Z" },
   ],
-  ["circle", { cx: 7.8, cy: 11.8, r: 1, class: "solid" }],
-  ["circle", { cx: 12.2, cy: 11.8, r: 1, class: "solid" }],
+  ["circle", { cx: 5.9, cy: 5.1, r: 2, class: "solid" }],
+  ["circle", { cx: 14.1, cy: 5.1, r: 2, class: "solid" }],
+  ["circle", { cx: 8.2, cy: 12.4, r: 1, class: "solid" }],
+  ["circle", { cx: 12, cy: 12.4, r: 1, class: "solid" }],
 ];
 
 /**
@@ -59,17 +69,17 @@ const BODY = [
  */
 const OUTLINES = {
   alive: [
-    ["g", { transform: "translate(-.8 -1.6) rotate(-9 10 12)" }, BODY],
-    ["path", { d: "M6.5 18.6h6" }],
-    ["path", { d: "M16.6 2.6l.8 1.6M18.6 5.4l-1.6.6" }],
+    ["g", { transform: "translate(-.6 -1.8) rotate(-9 10 12)" }, BODY],
+    ["path", { d: "M6.5 19.2h6" }],
+    ["path", { d: "M17.2 2.4l.8 1.6M19 5.4l-1.6.6" }],
   ],
   states: [
-    ["g", { transform: "translate(-1.2 .6) scale(.9)" }, BODY],
-    ["circle", { cx: 15.8, cy: 4.6, r: 2.6, class: "solid" }],
+    ["g", { transform: "translate(-1.2 .9) scale(.9)" }, BODY],
+    ["circle", { cx: 16.4, cy: 4, r: 2.6, class: "solid" }],
   ],
   still: [
-    ["g", { transform: "translate(0 -.6)" }, BODY],
-    ["path", { d: "M3 18.4h14" }],
+    ["g", { transform: "translate(0 -.4)" }, BODY],
+    ["path", { d: "M3 19.2h14" }],
   ],
 };
 
@@ -98,9 +108,10 @@ export function icon(name, className = "icon") {
   svg.setAttribute("class", `${className} icon-${name}`);
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("focusable", "false");
-  for (const d of PATHS[name] ?? []) {
+  for (const part of PATHS[name] ?? []) {
     const path = document.createElementNS(SVG, "path");
-    path.setAttribute("d", d);
+    path.setAttribute("d", typeof part === "string" ? part : part.d);
+    if (part.solid) path.setAttribute("class", "solid");
     svg.append(path);
   }
   return svg;

@@ -800,6 +800,7 @@ function restoreSession() {
   const text = draft.filter(Boolean).join("\n");
   if (text) {
     input.value = text;
+    updateSend();
     const notice = $("restored");
     notice.textContent = T.restored;
     notice.hidden = false;
@@ -935,6 +936,7 @@ form.addEventListener("submit", (event) => {
   send({ type: "typing", active: false });
   lastTypingSentAt = 0;
   input.value = "";
+  updateSend();
   $("restored").hidden = true;
   setStatus("");
 });
@@ -948,7 +950,20 @@ input.addEventListener("keydown", (event) => {
   form.requestSubmit();
 });
 
+/**
+ * Empty, Send waits in --sunken, `aria-disabled` but focusable, and its tip says why; the first
+ * character turns it ready (the design system's Composer, Geist's rule on disabled buttons).
+ */
+function updateSend() {
+  const empty = !input.value.trim();
+  if (sendButton.getAttribute("aria-disabled") === String(empty)) return;
+  sendButton.setAttribute("aria-disabled", String(empty));
+  sendButton.dataset.tip = empty ? T.sendEmpty : "";
+  tips(form);
+}
+
 input.addEventListener("input", () => {
+  updateSend();
   // Reading comes first: while the owner types, the mascot only breathes and blinks.
   ownerTyping();
   mascot?.watch();
@@ -1236,7 +1251,11 @@ function translatePage() {
   sendButton.replaceChildren(icon("up"));
   pause.setAttribute("aria-label", T.pause);
   pause.replaceChildren(icon("pause"));
+  updateSend();
   tips(form);
+  for (const slot of document.querySelectorAll(".toggle-icon")) {
+    slot.replaceChildren(icon(slot.dataset.icon));
+  }
   $("retry").textContent = T.tryNow;
   // Until the login names the owner, the account is the Display menu's own button.
   document.querySelector(".account-name").textContent = T.display;

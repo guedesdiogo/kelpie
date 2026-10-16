@@ -134,6 +134,13 @@ describe("the conversation", () => {
     expect($("pause").getAttribute("aria-pressed")).toBe("false");
     expect($("send").getAttribute("aria-label")).toBe("Send");
     expect($("send").querySelector("svg")).not.toBeNull();
+    // Empty, Send waits: focusable, `aria-disabled`, and its tip says why (Geist's rule).
+    expect($("send").disabled).toBe(false);
+    expect($("send").getAttribute("aria-disabled")).toBe("true");
+    expect($("send").querySelector(".tip").textContent).toBe("Write a message to send");
+    $("text").value = "O";
+    $("text").dispatchEvent(new Event("input", { bubbles: true }));
+    expect($("send").getAttribute("aria-disabled")).toBe("false");
     expect($("send").querySelector(".tip").textContent).toBe("Send");
     // No keyboard hint on screen, and no `title` anywhere (#378).
     expect(document.querySelector("[title]")).toBeNull();

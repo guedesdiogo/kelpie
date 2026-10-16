@@ -678,7 +678,8 @@ Frequent. The webchat's thread and composer (#140); the research is on #140.
   - A ↗ follows, with a hidden "(opens in a new tab)" for screen readers.
   - There is no confirmation dialog per link and no fetched page title.
 - **The composer.**
-  - One row, as the demo's: the text, then Pause and Send as round icon buttons that say their name in a tooltip (decision 4, #378).
+  - One row, as the demo's: the text, then Pause and Send as round icon buttons that say their name in a tooltip (decision 4, #378). Pause keeps 12px from Send, so a tap meant for one never lands on the other.
+  - Empty, Send waits in `--sunken` with a `--muted` arrow, `aria-disabled` but focusable, and its tooltip says why: "Write a message to send". The first character turns it ready, a color change in `--dur-fade` with no scale. It never becomes Stop and never shows a spinner: while an agent works, a message queues.
   - No keyboard hint shows on the screen. Screen readers keep it: the field is described by what Enter does, which a touch keyboard changes.
   - It grows with its text up to 160px, about six lines, through `field-sizing: content`, at once (rule 1).
   - Enter sends and Shift+Enter breaks the line. Nothing is sent while an input method composes (`isComposing` or keyCode 229). On a touch keyboard, Enter breaks the line and the button sends.
@@ -717,8 +718,8 @@ Frequent. One step away, from the owner's account: the sidebar's foot (5.24), or
 - **The theme,** as icons: System, Light and Dark, each with its name for screen readers and in a tooltip.
   - The lab's segmented control: a `--sunken` track with its boundary in `--muted`, and a `--surface` chip under the chosen one. The chip slides with `--spring-fast` for the pointer and jumps for the arrows.
   - The theme applies at once, the page crossfades in `--dur-fade`, and the chosen icon turns into place with `--spring-base`: the screen settles, the sun turns a quarter, the moon tilts.
-- **Less motion and More contrast,** as switches: the switch of rule 10, and the higher-contrast set of §1. The system's reduced motion can't be turned off here; the switch only adds to it.
-- **The mascot's setting** joins them once the owner has answered its question (5.19). Each choice draws the mascot's own outline: mid-hop for Alive, with 5.19's badge for States only, standing on a line for Still. Under reduced motion it can't move, and says why.
+- **Less motion and More contrast,** as switches, each with its icon before its words: a circle with one trail, and a rounded square split on its diagonal, never the half-filled circle of working. They are the switch of rule 10 and the higher-contrast set of §1. The system's reduced motion can't be turned off here; the switch only adds to it.
+- **The mascot's setting** joins them once the owner has answered its question (5.19). Each choice draws the mascot's own outline, with the main mascot's round ears (ADR-0049): mid-hop for Alive, with 5.19's badge for States only, standing on a line for Still. Under reduced motion it can't move, and says why.
 - **The version** closes the menu, in Geist Mono `--muted` (decision 5). A press copies it, and "Copied" shows in its place for 1.5 s.
 - **They are stored in this browser** until the comfort step of 5.17 exists.
 - **They apply before the first paint.** A small script in the page's head sets them on `<html>`, so the page never flashes the wrong theme. The phone's browser bar takes the page's background.

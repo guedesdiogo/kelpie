@@ -403,6 +403,15 @@ a {
   font-weight: 500;
   cursor: pointer;
 }
+.toggle-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.toggle-icon {
+  display: inline-flex;
+  color: var(--muted);
+}
 .toggle input {
   appearance: none;
   position: relative;
@@ -1295,12 +1304,26 @@ main {
   border: 0;
   background: var(--accent);
   color: var(--on-accent);
-  transition: transform var(--dur-press) var(--ease-standard);
+  transition:
+    transform var(--dur-press) var(--ease-standard),
+    background-color var(--dur-fade) var(--ease-fade),
+    color var(--dur-fade) var(--ease-fade);
 }
 .send:active {
   transform: scale(var(--scale-press));
 }
+/* Empty, it waits in --sunken with a --muted arrow; the first character turns it ready, no scale. */
+.send[aria-disabled="true"] {
+  background: var(--sunken);
+  color: var(--muted);
+  cursor: default;
+}
+.send[aria-disabled="true"]:active {
+  transform: none;
+}
+/* 12 px from Send, so a tap meant for one never lands on the other (Telegram Web A). */
 .pause {
+  margin-inline-end: 6px;
   border: 1px solid var(--muted);
   background: none;
   color: var(--fg);
