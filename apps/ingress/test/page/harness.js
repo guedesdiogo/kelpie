@@ -28,6 +28,18 @@ export class FakeSocket {
     return FakeSocket.all.at(-1);
   }
 
+  /** The newest socket a sidebar row opened for `agent` (ADR-0052). */
+  static presence(agent) {
+    return FakeSocket.all.findLast(
+      (socket) => socket.url.includes("view=presence") && socket.url.includes(`agent=${agent}&`),
+    );
+  }
+
+  /** The newest of the open conversation's own sockets. */
+  static get own() {
+    return FakeSocket.all.findLast((socket) => !socket.url.includes("view=presence"));
+  }
+
   addEventListener(type, listener) {
     if (!this.listeners.has(type)) this.listeners.set(type, []);
     this.listeners.get(type).push(listener);

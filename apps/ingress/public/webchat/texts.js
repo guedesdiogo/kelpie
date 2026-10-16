@@ -62,6 +62,7 @@ export const TEXTS = {
     rowNoTask: "no task",
     ago: (minutes) => (minutes < 1 ? "now" : `${minutes} min ago`),
     strip: (count) => `${count} ${count === 1 ? "agent" : "agents"} waiting for you`,
+    rosterPast: (count) => `The sidebar follows the first ${count} agents only.`,
     tryNow: "Try now",
     back: (sent) =>
       sent === 0 ? "Back." : `Back. ${sent} ${sent === 1 ? "message" : "messages"} sent.`,
@@ -151,6 +152,7 @@ export const TEXTS = {
     rowNoTask: "sem tarefa",
     ago: (minutes) => (minutes < 1 ? "agora" : `há ${minutes} min`),
     strip: (count) => `${count} ${count === 1 ? "agente" : "agentes"} esperando você`,
+    rosterPast: (count) => `A lateral acompanha só os ${count} primeiros agentes.`,
     tryNow: "Tentar agora",
     back: (sent) =>
       sent === 0
@@ -243,6 +245,7 @@ export const TEXTS = {
     rowNoTask: "sin tarea",
     ago: (minutes) => (minutes < 1 ? "ahora" : `hace ${minutes} min`),
     strip: (count) => `${count} ${count === 1 ? "agente" : "agentes"} esperándote`,
+    rosterPast: (count) => `La barra lateral solo sigue a los primeros ${count} agentes.`,
     tryNow: "Reintentar ahora",
     back: (sent) =>
       sent === 0
