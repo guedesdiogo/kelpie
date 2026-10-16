@@ -318,7 +318,7 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
   - Its `AgentHost` still keeps the runner form's waits, which are the instance's ("Steps the owner finishes"), and the deploy's probe still wakes it.
 - **Master's guidance:** its prompt carries the built-in `configure-kelpie` skill, whatever persona the owner or the vault gives it.
 - **Its tools** run the commands above, as the owner, through Master (`via: agent:<Master's id>`), and only the agent with the role `main` has them, on every channel it answers: in the webchat, and on Telegram with the typed code. They are checked again when one runs, and a task's run has none:
-  - `list_agents`, `get_agent`, `create_agent` and `rename_agent` run directly;
+  - `list_agents`, `get_agent`, `create_agent` and `rename_agent` run directly. Other agents' task news reaches Master's conversation, so Kelpie itself announces each agent those tools create or rename (#387). After the reply, it names the agent by its id and its name, in the conversation's language: `Kelpie created the agent "Sales" (sales).` or `Kelpie renamed the agent sales to "Sales team".` As with a subagent, the name is quoted, the model can't change or omit the text, and a turn that sends no reply leaves it for the next one;
   - `get_models` reads the instance's model settings, and `configure_models` replaces them;
   - `configure_agent` (its `model` included), `configure_models`, `set_main_agent`, `set_agent_chat` and `delete_agent` wait for the owner's confirmation (below);
   - `connect_telegram` opens a secure form ("Secure forms"), and `pair_telegram` leads to the pairing page ("Pairing"). Kelpie sends each link itself (below), and the owner's submitting that page is their yes (ADR-0026).

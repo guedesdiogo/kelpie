@@ -92,6 +92,7 @@ import {
   type Announcement,
   announcementNotice,
   keyOf,
+  replaces,
   type StoredAnnouncement,
   stored,
 } from "./announcements.ts";
@@ -156,6 +157,8 @@ const MAX_UNSAID_ANNOUNCEMENTS = 20;
 const HANDOFFS = "handoffs";
 /** Where it keeps the subagents created or deleted (#342), which a release before it never reads. */
 const SUBAGENT_CHANGES = "subagentChanges";
+/** Where it keeps the agents Master created or renamed (#387), apart for the same reason. */
+const AGENT_CHANGES = "agentChanges";
 
 /**
  * Kelpie's last notice of them (#287): its outbox row, and the keys of what it named (`keyOf`); a
@@ -1445,8 +1448,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       this.#ports.now(),
       locale,
     );
-    // Then what its tools did, as subagents made and work handed off, with what an earlier turn
-    // left unsaid (#287, #342).
+    // Then what its tools did, as agents and subagents made and work handed off, with what an
+    // earlier turn left unsaid (#287, #342, #387).
     this.#settleAnnouncements();
     const announcements = this.#announcements();
     const announced = announcementNotice(announcements, locale);
@@ -1502,11 +1505,12 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     this.#settleAnnouncements();
   }
 
-  /** What the turn's tools had Kelpie announce that no notice said yet (#287, #342). */
+  /** What the turn's tools had Kelpie announce that no notice said yet (#287, #342, #387). */
   #announcements(): Announcement[] {
     return [
       ...stored(this.#get<StoredAnnouncement[]>(HANDOFFS, [])),
       ...this.#get<Announcement[]>(SUBAGENT_CHANGES, []),
+      ...this.#get<Announcement[]>(AGENT_CHANGES, []),
     ];
   }
 
@@ -1523,7 +1527,11 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     );
     this.#set(
       SUBAGENT_CHANGES,
-      kept.filter((one) => one.kind !== "handoff"),
+      kept.filter((one) => one.kind === "created" || one.kind === "deleted"),
+    );
+    this.#set(
+      AGENT_CHANGES,
+      kept.filter((one) => one.kind === "agentCreated" || one.kind === "agentRenamed"),
     );
   }
 
@@ -1551,12 +1559,11 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
 
   /**
    * Keeps what a tool did for Kelpie's notice after the next reply this conversation sends (#287,
-   * #342). It outlives the turn that made it, since the task or the subagent does: a turn stopped
-   * before its reply leaves it for the next one.
+   * #342, #387). It outlives the turn that made it, since the task or the agent does: a turn
+   * stopped before its reply leaves it for the next one.
    */
   #announce(announcement: Announcement): void {
-    const key = keyOf(announcement);
-    const kept = this.#announcements().filter((one) => keyOf(one) !== key);
+    const kept = this.#announcements().filter((one) => !replaces(announcement, one));
     const { kind, agentId, name } = announcement;
     const one: Announcement =
       kind === "handoff"
