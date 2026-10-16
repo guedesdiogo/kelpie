@@ -16,8 +16,8 @@ export const SLEEP_MS = 45_000;
 export const ANNOUNCEMENT_MS = 5_000;
 /** The approval's pose lasts this long, then the mascot goes back to work (ADR-0045 §6). */
 export const APPROVED_MS = 1_100;
-/** A working agent from which nothing has arrived this long shows no response (ADR-0044). */
-export const NO_RESPONSE_MS = 60_000;
+/** A confirmation's notice waits for the owner's press until it expires (ADR-0026 §3). */
+export const CONFIRMATION_MS = 10 * 60_000;
 
 /**
  * The design system's springs (`docs/design-system.md` §4.2), as WAAPI takes them. A state change
@@ -77,7 +77,8 @@ export const POSES = {
     badge: "error",
   }),
   // The proposal on #366, for the owner to approve: the task's object rests, and the mascot looks
-  // up at the owner beside a still, dashed bubble, as the label's dashed circle (ADR-0044).
+  // up at the owner beside a still, dashed bubble, as the label's dashed circle (ADR-0044). The
+  // webchat doesn't show it: it gets no streamed tokens, so it can't tell a slow model from none.
   noResponse: pose({ gaze: [0, -1.5], tilt: 2, eye: 0.92, brows: "up", badge: "silent" }),
 };
 
@@ -295,13 +296,16 @@ export function allowed(timing, motion) {
  * - A turn's steps are working, with the tool's activity, or thinking between tools.
  * - Typing is the reply being written; a running tool takes precedence over it.
  * - A confirmation's notice waits for the owner; their yes is approved, then work goes on.
- * - The notice of a turn no route answered is an error, until the next message or turn.
+ * - The notice of a turn no route answered is an error, until the next message or turn. The
+ *   turn settles right after it, and that clears only the step.
  * - Listening needs the wait's bar, which the webchat doesn't show yet (#140).
  */
 export function presenceAfter(presence, event) {
   switch (event.type) {
     case "status":
-      if (event.status === "idle") return idle();
+      if (event.status === "idle") {
+        return presence.state === "error" || presence.state === "waiting" ? presence : idle();
+      }
       if (event.status === "tool") {
         return { state: "working", activity: activityOf(event.activity), tool: true };
       }
@@ -325,8 +329,10 @@ export function presenceAfter(presence, event) {
     // The owner's message ends a wait or an error; a turn already running goes on showing.
     case "sent":
       return presence.state === "working" || presence.state === "typing" ? presence : idle();
-    // A pause holds every answer, and a new socket starts from the history.
+    // A pause holds every answer; a lost socket hears nothing more of the turn, and a new one
+    // starts from the history.
     case "paused":
+    case "closed":
     case "history":
       return idle();
     default:
@@ -339,3 +345,46 @@ function idle() {
 }
 
 export const IDLE = idle();
+
+const same = (a, b) => a.state === b.state && a.activity === b.activity && a.tool === b.tool;
+
+/**
+ * Keeps the conversation's presence over time and calls `show` on each change: the approval's
+ * pose for 1.1 s, then what arrived meanwhile; a wait that ends when the confirmation expires.
+ *
+ * @param {(presence: { state: string, activity: string | null, tool: boolean }) => void} show
+ * @param {{ set: (run: () => void, ms: number) => unknown, clear: (timer: unknown) => void }} [timers]
+ */
+export function presenceKeeper(
+  show,
+  timers = { set: (run, ms) => setTimeout(run, ms), clear: (timer) => clearTimeout(timer) },
+) {
+  let presence = IDLE;
+  let afterApproval = IDLE;
+  let timer = null;
+  const apply = (next) => {
+    timers.clear(timer);
+    timer = null;
+    presence = next;
+    show(presence);
+    if (presence.state === "approved") {
+      afterApproval = IDLE;
+      timer = timers.set(() => apply(afterApproval), APPROVED_MS);
+    } else if (presence.state === "waiting") {
+      timer = timers.set(() => apply(IDLE), CONFIRMATION_MS);
+    }
+  };
+  return {
+    get current() {
+      return presence;
+    },
+    event(event) {
+      if (presence.state === "approved") {
+        afterApproval = presenceAfter(afterApproval, event);
+        return;
+      }
+      const next = presenceAfter(presence, event);
+      if (!same(next, presence)) apply(next);
+    },
+  };
+}

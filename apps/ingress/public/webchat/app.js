@@ -6,14 +6,8 @@
 // header shows the agent's mascot, whose state follows the conversation's (ADR-0045).
 
 import { Mascot, ownerTyping, setMotion } from "./mascot.js";
-import {
-  APPROVED_MS,
-  effectiveMotion,
-  IDLE,
-  MOTIONS,
-  NO_RESPONSE_MS,
-  presenceAfter,
-} from "./mascot-states.js";
+import { isDrawable } from "./mascot-art.js";
+import { effectiveMotion, MOTIONS, presenceKeeper } from "./mascot-states.js";
 
 const agent = new URLSearchParams(location.search).get("agent") ?? "";
 
@@ -284,49 +278,26 @@ function setActivity(text, shownMs = TYPING_SHOWN_MS) {
 // The mascot (ADR-0045): it shows once the conversation names it, and its state follows what the
 // page shows. The motion setting is this browser's; until the owner picks one, it stays still.
 
-/** A notice waits for the owner's press until it expires (ADR-0026 §3). */
-const CONFIRMATION_MS = 10 * 60_000;
 const MOTION_KEY = "kelpie.mascotMotion";
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 let mascot = null;
-let presence = IDLE;
-/** What arrived during the approval's pose, shown when it ends. */
-let afterApproval = null;
-let presenceTimer = null;
+const presence = presenceKeeper((shown) =>
+  mascot?.setState(shown.state, { activity: shown.activity }),
+);
+const present = (event) => presence.event(event);
 
-function present(event) {
-  if (presence.state === "approved") {
-    afterApproval = presenceAfter(afterApproval, event);
-    return;
-  }
-  showPresence(presenceAfter(presence, event));
-}
-
-function showPresence(next) {
-  clearTimeout(presenceTimer);
-  presence = next;
-  mascot?.setState(presence.state, { activity: presence.activity });
-  if (presence.state === "approved") {
-    afterApproval = IDLE;
-    presenceTimer = setTimeout(() => showPresence(afterApproval), APPROVED_MS);
-  } else if (presence.state === "working" && !presence.tool) {
-    // Nothing from the model for a minute, outside a tool call: no response (ADR-0044).
-    presenceTimer = setTimeout(
-      () => showPresence({ ...presence, state: "noResponse" }),
-      NO_RESPONSE_MS,
-    );
-  } else if (presence.state === "waiting") {
-    presenceTimer = setTimeout(() => showPresence(IDLE), CONFIRMATION_MS);
-  }
-}
-
+/** The agent's mascot, from the conversation; one the page can't draw is ignored. */
 function showMascot(config) {
+  if (!isDrawable(config)) return;
   if (mascot) {
     mascot.change(config);
     return;
   }
   mascot = new Mascot(mascotHost, { mascot: config, px: 48, mode: "header", quietable: true });
-  mascot.setState(presence.state, { activity: presence.activity, instant: true });
+  const { state, activity } = presence.current;
+  mascot.setState(state, { activity, instant: true });
+  // The first time a mascot shows, the page asks how it should move.
+  applyMotion();
 }
 
 function readMotion() {
@@ -345,8 +316,8 @@ function readMotion() {
 function applyMotion() {
   const chosen = readMotion();
   const reduced = reducedMotion.matches;
-  motionAsk.hidden = chosen !== null || reduced;
-  motionLabel.hidden = chosen === null && !reduced;
+  motionAsk.hidden = chosen !== null || reduced || !mascot;
+  motionLabel.hidden = !mascot || (chosen === null && !reduced);
   motionSelect.disabled = reduced;
   motionSelect.value = effectiveMotion(chosen, reduced);
   motionLabel.title = reduced ? T.reducedMotion : "";
@@ -396,13 +367,13 @@ function receive(frame) {
       }
       break;
     case "agent":
-      if (frame.mascot) showMascot(frame.mascot);
+      showMascot(frame.mascot);
       break;
     case "bubble":
       setTyping(false);
       show("assistant", frame.text, undefined, frame.blocks, frame.confirmation);
       present(frame);
-      if (presence.state === "idle") mascot?.arrive();
+      if (presence.current.state === "idle") mascot?.arrive();
       break;
     case "confirmation":
       if (Number.isSafeInteger(frame.id)) pressed(frame.id, frame.status);
@@ -465,6 +436,8 @@ function connect() {
     refused = wasOpen ? 0 : refused + 1;
     status.textContent = refused >= 3 ? T.cantConnect : T.reconnecting;
     setTyping(false);
+    // Nothing more of the turn reaches this page, so the mascot shows none of it.
+    present({ type: "closed" });
     // A socket that dies quickly counts as a failed attempt; full jitter, from 300 ms to 15 s.
     attempt = Date.now() - opened < 5_000 ? attempt + 1 : 0;
     const ceiling = Math.min(15_000, 300 * 2 ** attempt);

@@ -1,10 +1,10 @@
 import type { AgentRole } from "./commands.ts";
 
 // Each agent is a plush mascot the owner customizes on five axes (ADR-0045 §2). The webchat's
-// engine (apps/ingress/public/webchat/mascot.js) draws each option by these ids.
+// engine (apps/ingress/public/webchat/mascot-art.js) draws each option by these ids.
 //
-// The order of each list is part of every derived mascot: a new option goes at the end, and an
-// option is never reordered or removed, or agents that never picked one change their look.
+// A new option goes at the end of its list. Derived mascots draw from the options as they were
+// first listed (`DERIVED`), so a new one never changes an agent that never picked one.
 
 export const MASCOT_SHAPES = [
   "mark",
@@ -127,15 +127,6 @@ export function parseMascot(value: unknown): Mascot | null {
   return { shape, color, eyes, cheeks, head: parsedHead, accessory: parsedAccessory };
 }
 
-/** Every option of a part's axis, its types without variations counted once. */
-function partOptions<Types extends Record<string, readonly string[]>>(types: Types): Part<Types>[] {
-  return Object.entries(types).flatMap(([type, variations]) =>
-    variations.length === 0
-      ? [{ type } as Part<Types>]
-      : variations.map((variation) => ({ type, variation }) as Part<Types>),
-  );
-}
-
 /** FNV-1a, then mulberry32: the same numbers in every runtime, for the same id. */
 function randomFrom(id: string): () => number {
   let seed = 2_166_136_261;
@@ -149,17 +140,60 @@ function randomFrom(id: string): () => number {
   };
 }
 
+/**
+ * What a derived mascot draws from: ADR-0045's options, frozen. The heads and accessories are
+ * listed whole, since a new variation inside a type would shift a flattened list.
+ */
+const DERIVED: {
+  shapes: readonly Mascot["shape"][];
+  colors: readonly Mascot["color"][];
+  eyes: readonly Mascot["eyes"][];
+  heads: readonly Mascot["head"][];
+  accessories: readonly Mascot["accessory"][];
+} = {
+  shapes: MASCOT_SHAPES.slice(0, 12),
+  colors: MASCOT_COLORS.slice(0, 12),
+  eyes: MASCOT_EYES.slice(0, 10),
+  heads: [
+    { type: "none" },
+    { type: "ears", variation: "pointed" },
+    { type: "ears", variation: "floppy" },
+    { type: "ears", variation: "round" },
+    { type: "horns", variation: "two" },
+    { type: "horns", variation: "one" },
+    { type: "horns", variation: "antennae" },
+    { type: "hair", variation: "strands" },
+    { type: "hair", variation: "curl" },
+    { type: "hair", variation: "mohawk" },
+    { type: "leaves", variation: "one" },
+    { type: "leaves", variation: "two" },
+    { type: "leaves", variation: "kelp" },
+  ],
+  accessories: [
+    { type: "none" },
+    { type: "glasses", variation: "round" },
+    { type: "glasses", variation: "dark" },
+    { type: "bow", variation: "tie" },
+    { type: "bow", variation: "head" },
+    { type: "hat", variation: "beret" },
+    { type: "hat", variation: "top" },
+    { type: "hat", variation: "beanie" },
+    { type: "belt", variation: "belt" },
+    { type: "belt", variation: "collar" },
+  ],
+};
+
 /** An agent's mascot until the owner picks one, so two agents rarely look alike. */
 export function derivedMascot(agentId: string): Mascot {
   const random = randomFrom(agentId);
   const pick = <T>(options: readonly T[]): T => options[Math.floor(random() * options.length)] as T;
   return {
-    shape: pick(MASCOT_SHAPES),
-    color: pick(MASCOT_COLORS),
-    eyes: pick(MASCOT_EYES),
+    shape: pick(DERIVED.shapes),
+    color: pick(DERIVED.colors),
+    eyes: pick(DERIVED.eyes),
     cheeks: random() < 0.5,
-    head: pick(partOptions(MASCOT_HEADS)),
-    accessory: pick(partOptions(MASCOT_ACCESSORIES)),
+    head: pick(DERIVED.heads),
+    accessory: pick(DERIVED.accessories),
   };
 }
 

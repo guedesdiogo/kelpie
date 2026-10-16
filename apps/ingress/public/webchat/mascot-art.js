@@ -326,6 +326,31 @@ const ICONS = {
   think: '<path class="dots" d="M-4,0 h.01 M0,0 h.01 M4,0 h.01"/>',
 };
 
+/**
+ * Whether the page can draw this mascot: every axis one of its own options. The runtime validated
+ * it already; a frame that isn't one is ignored, so nothing unknown reaches the markup.
+ */
+export function isDrawable(mascot) {
+  if (typeof mascot !== "object" || mascot === null) return false;
+  const part = (types, value) => {
+    if (typeof value !== "object" || value === null || !Object.hasOwn(types, value.type)) {
+      return false;
+    }
+    const variations = types[value.type];
+    return variations.length === 0
+      ? value.variation === undefined
+      : variations.includes(value.variation);
+  };
+  return (
+    Object.hasOwn(SHAPES, mascot.shape) &&
+    COLORS.includes(mascot.color) &&
+    Object.hasOwn(EYES, mascot.eyes) &&
+    typeof mascot.cheeks === "boolean" &&
+    part(HEADS, mascot.head) &&
+    part(ACCESSORIES, mascot.accessory)
+  );
+}
+
 /** The mascot's size class: the roster's 36 px, the header's 48 px, or the 160 px of a profile. */
 export function sizeOf(px) {
   if (px <= 40) return "s";

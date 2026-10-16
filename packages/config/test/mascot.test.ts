@@ -142,5 +142,11 @@ describe("derivedMascot", () => {
     // Every shape and color turns up across them.
     expect(new Set(ids.map((id) => derivedMascot(id).shape)).size).toBe(MASCOT_SHAPES.length);
     expect(new Set(ids.map((id) => derivedMascot(id).color)).size).toBe(MASCOT_COLORS.length);
+    // ...and every eye, head and accessory, each a valid option.
+    expect(new Set(ids.map((id) => derivedMascot(id).eyes)).size).toBe(MASCOT_EYES.length);
+    const heads = new Set(ids.map((id) => JSON.stringify(derivedMascot(id).head)));
+    expect(heads.size).toBe(13);
+    const accessories = new Set(ids.map((id) => JSON.stringify(derivedMascot(id).accessory)));
+    expect(accessories.size).toBe(10);
   });
 });

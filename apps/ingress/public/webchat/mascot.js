@@ -432,16 +432,16 @@ export class Mascot {
 
   /** The setting changed: stop what it no longer allows, keep the pose. */
   settle() {
-    if (world.motion === "still") {
-      for (const animation of this.svg.getAnimations({ subtree: true })) animation.cancel();
-      this.clearTimers();
-      this.override = null;
-      this.applyPose(this.pose(), null);
-      if (WORKING_STATES.has(this.state)) this.showActivity(false);
-    }
     if (world.motion !== "alive" && this.state === "dozing") {
       this.setState("idle", { instant: true });
     }
+    // What plays now belongs to the old setting: the pose stays, and the activity's loop starts
+    // again only in Alive.
+    for (const animation of this.svg.getAnimations({ subtree: true })) animation.cancel();
+    this.clearTimers();
+    this.override = null;
+    this.applyPose(this.pose(), null);
+    if (WORKING_STATES.has(this.state)) this.showActivity(false);
     this.lastEvent = now();
     this.nextGesture = now() + 800 + Math.random() * 1700;
     this.breathe();
@@ -450,7 +450,6 @@ export class Mascot {
   clearTimers() {
     for (const timer of this.timers) clearTimeout(timer);
     this.timers.clear();
-    this.watching = false;
   }
 
   later(ms, run) {
@@ -601,7 +600,13 @@ export class Mascot {
     this.bob?.cancel();
     this.breath = null;
     this.bob = null;
-    if (!breathes(this, world)) return;
+    const alive = breathes(this, world);
+    // The activity's loop stops off screen and in a hidden tab, and comes back with the mascot.
+    if (this.state === "working" && this.shownActivity) {
+      if (!alive && this.looping) this.stopActivity();
+      if (alive && !this.looping) this.runActivity(this.shownActivity);
+    }
+    if (!alive) return;
     const [period, depth0] = BREATH[this.state] ?? BREATH.idle;
     const depth = this.mode === "list" ? depth0 * 0.6 : depth0;
     this.breath = this.breathG.animate(
@@ -683,7 +688,10 @@ export class Mascot {
       this.shake();
       this.badgeIn(0);
     }
-    if (state === "noResponse") this.badgeIn(0);
+    if (state === "noResponse") {
+      this.showActivity(false);
+      this.badgeIn(0);
+    }
     if (state === "approved") {
       this.hop(15, true);
       this.sparkle();
@@ -762,7 +770,7 @@ export class Mascot {
     const swap = () => {
       if (!WORKING_STATES.has(this.state)) return;
       this.setActivity(next, pop && world.motion !== "still");
-      if (world.motion === "alive" && this.state === "working") this.runActivity(next);
+      if (this.state === "working" && breathes(this, world)) this.runActivity(next);
     };
     const leaving =
       this.shownActivity && this.shownActivity !== next && this.workG && pop
@@ -814,6 +822,9 @@ export class Mascot {
   stopActivity() {
     if (this.workG) for (const part of this.workG.querySelectorAll("*")) cancel(part);
     for (const bubble of this.bubbles) cancel(bubble);
+    // Ends the eyes' following too.
+    this.session += 1;
+    this.looping = false;
   }
 
   stopWork() {
@@ -838,6 +849,7 @@ export class Mascot {
 
   /** The activity's loop, in "Alive" only. */
   runActivity(activity) {
+    this.looping = true;
     const one = (selector) => this.svg.querySelector(selector);
     const all = (selector) => [...this.svg.querySelectorAll(selector)];
     const loop = { iterations: Number.POSITIVE_INFINITY, from: false };
@@ -1655,7 +1667,7 @@ export class Mascot {
       return;
     }
     this.touch();
-    if (this.state !== "idle" || world.motion === "still") return;
+    if (this.state !== "idle" || world.motion !== "alive") return;
     this.expression("happy", "smile", 650);
     this.hop(10, true);
     this.svg.dataset.fx = "spark";
@@ -1681,19 +1693,12 @@ export class Mascot {
     this.wave("r", 2);
   }
 
-  /** The owner types: an idle mascot looks at the composer once, not on every key. */
+  /**
+   * The owner types: an event for the agent, which wakes a dozing mascot. Reading comes first, so
+   * it only breathes and blinks meanwhile (`ownerTyping`).
+   */
   watch() {
     this.touch();
-    if (this.state !== "idle" || world.motion !== "alive") return;
-    if (!this.watching) {
-      this.watching = true;
-      this.gaze([-1, 3.5], SPRINGS.fast);
-    }
-    clearTimeout(this.watchTimer);
-    this.watchTimer = setTimeout(() => {
-      this.watching = false;
-      if (this.state === "idle") this.gaze(this.pose().gaze, SPRINGS.base);
-    }, 2200);
   }
 }
 

@@ -19,6 +19,7 @@ import {
   EYES,
   HEADS,
   handSpot,
+  isDrawable,
   mix,
   palette,
   SHAPES,
@@ -27,11 +28,13 @@ import {
 } from "../public/webchat/mascot-art.js";
 import {
   ACTIVITIES,
+  APPROVED_MS,
   activityOf,
   allowed,
   available,
   BREATH,
   breathes,
+  CONFIRMATION_MS,
   draw,
   due,
   effectiveMotion,
@@ -40,6 +43,7 @@ import {
   IDLE,
   POSES,
   presenceAfter,
+  presenceKeeper,
   REPERTOIRES,
   remember,
   SLEEP_MS,
@@ -51,6 +55,36 @@ import {
 // a browser, is checked by its source.
 
 const STATES = Object.keys(POSES);
+
+/** A presence keeper on a clock the test moves. */
+function keeperWith() {
+  let now = 0;
+  const due: { at: number; run: () => void }[] = [];
+  const timers = {
+    set(run: () => void, ms: number) {
+      const timer = { at: now + ms, run };
+      due.push(timer);
+      return timer;
+    },
+    clear(timer: unknown) {
+      const i = due.indexOf(timer as (typeof due)[number]);
+      if (i >= 0) due.splice(i, 1);
+    },
+  };
+  const shown: { state: string }[] = [];
+  const keeper = presenceKeeper((presence: { state: string }) => shown.push(presence), timers);
+  const clock = {
+    advance(ms: number) {
+      now += ms;
+      for (const timer of [...due].sort((a, b) => a.at - b.at)) {
+        if (timer.at > now || !due.includes(timer)) continue;
+        due.splice(due.indexOf(timer), 1);
+        timer.run();
+      }
+    },
+  };
+  return { shown, keeper, clock };
+}
 
 /** A fixed sequence of random numbers, repeating. */
 function sequence(...values: number[]) {
@@ -145,6 +179,27 @@ describe("the engine's figure", () => {
         { uid: 5, px: 48, hex: "#2e9e8e" },
       );
       expect(built.html).toMatch(/class="(m-ear|horn)"/);
+    }
+  });
+
+  it("draws only a mascot it knows, so a bad frame never reaches the markup", () => {
+    expect(isDrawable(KELPIE_MASCOT)).toBe(true);
+    expect(isDrawable({ ...KELPIE_MASCOT, head: { type: "none" } })).toBe(true);
+    for (const bad of [
+      null,
+      "mark",
+      { ...KELPIE_MASCOT, shape: "__proto__" },
+      { ...KELPIE_MASCOT, shape: "toString" },
+      { ...KELPIE_MASCOT, color: "ink" },
+      { ...KELPIE_MASCOT, eyes: "constructor" },
+      { ...KELPIE_MASCOT, cheeks: "yes" },
+      { ...KELPIE_MASCOT, head: { type: "__proto__" } },
+      { ...KELPIE_MASCOT, head: { type: "ears", variation: "mohawk" } },
+      { ...KELPIE_MASCOT, head: { type: "none", variation: "pointed" } },
+      { ...KELPIE_MASCOT, accessory: { type: "hat" } },
+      { ...KELPIE_MASCOT, accessory: null },
+    ]) {
+      expect(isDrawable(bad), JSON.stringify(bad)).toBe(false);
     }
   });
 
@@ -449,19 +504,61 @@ describe("the mascot's state from the conversation", () => {
   it("shows an error for the notice of a turn no route answered, until the next message", () => {
     const error = presenceAfter(working, { type: "bubble", failed: true });
     expect(error).toMatchObject({ state: "error" });
+    // The failed turn settles right after its notice, and that clears only the step.
+    expect(presenceAfter(error, { type: "status", status: "idle" })).toBe(error);
     expect(presenceAfter(error, { type: "sent" })).toEqual(IDLE);
     expect(presenceAfter(error, { type: "status", status: "thinking" })).toMatchObject({
       state: "working",
     });
   });
 
-  it("is idle after a reply, a pause or a new socket, and never listens without the wait's bar", () => {
+  it("keeps waiting when the turn that asked settles", () => {
+    const waiting = presenceAfter(working, { type: "bubble", confirmation: 7 });
+    expect(presenceAfter(waiting, { type: "status", status: "idle" })).toBe(waiting);
+  });
+
+  it("is idle after a reply, a pause, a lost socket or a new one, and never listens without the bar", () => {
     expect(presenceAfter(working, { type: "bubble" })).toEqual(IDLE);
     expect(presenceAfter(working, { type: "paused" })).toEqual(IDLE);
+    expect(presenceAfter(working, { type: "closed" })).toEqual(IDLE);
     expect(presenceAfter(working, { type: "history" })).toEqual(IDLE);
     expect(presenceAfter(working, { type: "sent" })).toBe(working);
     expect(presenceAfter(IDLE, { type: "sent" }).state).not.toBe("listening");
     expect(presenceAfter(IDLE, { type: "unknown" })).toBe(IDLE);
+  });
+
+  it("shows the approval for 1.1 s, then what arrived meanwhile", () => {
+    const { shown, keeper, clock } = keeperWith();
+    keeper.event({ type: "bubble", confirmation: 3 });
+    keeper.event({ type: "confirmation", status: "accepted" });
+    keeper.event({ type: "status", status: "thinking" });
+    expect(shown.at(-1)).toMatchObject({ state: "approved" });
+    clock.advance(APPROVED_MS);
+    expect(shown.map((presence) => presence.state)).toEqual(["waiting", "approved", "working"]);
+    // Nothing waiting: back to idle.
+    keeper.event({ type: "bubble", confirmation: 4 });
+    keeper.event({ type: "confirmation", status: "accepted" });
+    clock.advance(APPROVED_MS);
+    expect(shown.at(-1)).toEqual(IDLE);
+  });
+
+  it("stops waiting when the confirmation expires, after 10 minutes", () => {
+    const { shown, keeper, clock } = keeperWith();
+    keeper.event({ type: "bubble", confirmation: 3 });
+    clock.advance(CONFIRMATION_MS - 1);
+    expect(keeper.current.state).toBe("waiting");
+    clock.advance(1);
+    expect(shown.at(-1)).toEqual(IDLE);
+  });
+
+  it("shows a change only, so a reconnect doesn't wake a dozing mascot", () => {
+    const { shown, keeper } = keeperWith();
+    keeper.event({ type: "history" });
+    keeper.event({ type: "status", status: "idle" });
+    expect(shown).toEqual([]);
+    keeper.event({ type: "status", status: "thinking" });
+    keeper.event({ type: "status", status: "thinking" });
+    expect(shown).toHaveLength(1);
   });
 
   it("names the agents' defaults by the same ids", () => {

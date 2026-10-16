@@ -488,7 +488,7 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 | Head | `none`; `ears`: `pointed`, `floppy`, `round`; `horns`: `two`, `one`, `antennae`; `hair`: `strands`, `curl`, `mohawk`; `leaves`: `one`, `two`, `kelp` |
 | Accessory | `none`; `glasses`: `round`, `dark`; `bow`: `tie`, `head`; `hat`: `beret`, `top`, `beanie`; `belt`: `belt`, `collar` |
 
-- **The main agent starts as Kelpie:** `mark`, `kelp`, `shine`, pointed ears and a collar. Every other agent starts with a mascot derived from its id, until the owner picks one. Each list only grows at its end: reordering it would change every derived mascot.
+- **The main agent starts as Kelpie:** `mark`, `kelp`, `shine`, pointed ears and a collar. Every other agent starts with a mascot derived from its id, until the owner picks one. A new option goes at the end of its axis; derived mascots draw from the options above, frozen, so a new one never changes them.
 - **A hat hides what sits in the middle of the head:** one horn, antennae, hair and leaves. Ears and two horns stay.
 - **Body colors are tokens with one value in both themes,** since they color the figure, not the page. None is amber, which means the owner needs to act.
 
@@ -506,7 +506,7 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 
 | State | Shown when | Pose | Announcement | Repertoire |
 |---|---|---|---|---|
-| Idle | 5.9 Idle | eyes open | a hop and a smile when a reply lands | blinks, glances, looks around and at the owner, wiggles, twitches an ear, hops (12 s apart), stretches, scratches its head, yawns; waves when the pointer arrives; claps when tapped |
+| Idle | 5.9 Idle | eyes open | a hop and a smile when a reply lands | blinks, glances, looks around and at the owner, wiggles, twitches an ear, hops (12 s apart), stretches, scratches its head, yawns; in Alive, waves when the pointer arrives and claps when tapped |
 | Dozing | Idle, after 45 s without an event | eyes closed, a hand as a pillow, "z" | drifts off with `--spring-slow` | snores, stirs; every 20 s at most, wakes bored, rubs its eyes, yawns, rests its chin and dozes again |
 | Listening | the wait of 5.1, where its bar shows | head tilted, hand cupped at the ear | its ears twitch | twitches an ear, tilts the other way, blinks, nods |
 | Typing | 5.1's typing bubble | mouth open, hands on the keys | talks for about 4 s | talks, blinks |
@@ -514,7 +514,7 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 | Waiting for the owner | 5.9 Waiting; in the webchat, a confirmation's notice (5.3), until it is answered or expires | big eyes, brows up, the amber bubble with `?` | a hop, and the bubble pops and pulses three times | waves, sways, drums on its chin, points at the card, pulses the bubble |
 | Approved | the owner's yes, for 1.1 s, then what comes next | arched eyes, a smile, thumbs up | a happy jump with sparks | none |
 | Error | 5.9 Error; in the webchat, the notice of a turn no route answered, until the next message or turn | worried brows, hands on its cheeks, the red bubble with `!` | one shake, and the bubble pops | wipes its brow, trembles, pleads, sighs, waves for help, looks down |
-| No response | Working, with nothing from the model for 60 s outside a tool call | proposed on #366, for the owner's approval: the task's object rests, and it looks up at the owner beside a still, dashed `--muted` bubble with `…` | the bubble pops | none |
+| No response | 5.9 No response. The webchat gets no streamed tokens, so it can't tell a slow model from none, and doesn't show it | proposed on #366, for the owner's approval: the task's object rests, and it looks up at the owner beside a still, dashed `--muted` bubble with `…` | the bubble pops | none |
 
 - **The activity is always true.** It follows the tool the conversation names: a magnifier to search, paper and a pencil for the vault, a laptop for code, a calendar for the agenda, an envelope for email. A tool without its own object, and the model between tools, show thinking: bubbles over the head. Reading memory before a turn is the vault. While a tool runs, Working takes precedence over Typing.
 - **Listening needs the bar.** The webchat doesn't show the wait's bar yet (#140), so its mascot doesn't listen there.
@@ -536,10 +536,11 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 **Reduced motion and the pause.**
 - **The pause** (WCAG 2.2.2) is a setting with three values: Alive, States only, Still. Before a mascot first moves, the webchat asks for it under the header, and the mascot stays still until the owner answers. The footer keeps it, in the browser. The first run's comfort step and settings (5.17) will hold it too.
 - **States only** plays the announcements and nothing else, and cuts each to end within 5 s of the state's start. The mascot doesn't breathe.
+- **A change of setting** stops what the old one played, and keeps the pose. The activity's loop starts again only in Alive.
 - **Still** shows the state's pose: no breathing, no announcement, no repertoire. A change is a 150 ms crossfade. The poses of listening, typing, working, approved, error and dozing keep their hands, and the task's object stays in front of the mascot.
 - **Reduced motion means Still.** Under `prefers-reduced-motion` or the less-motion switch, the setting can't pick Alive or States only, and the webchat doesn't ask.
 - **Reading comes first.** While the owner types, the conversation's mascot only breathes and blinks.
-- **Nothing moves off screen or in a hidden tab.** One shared timer, every 400 ms, schedules every mascot, and an `IntersectionObserver` stops those out of view.
+- **Nothing moves off screen or in a hidden tab,** the activity's loop included. One shared timer, every 400 ms, schedules every mascot, and an `IntersectionObserver` stops those out of view.
 - **The mascot makes no sound.**
 
 ## 6. Implementation notes

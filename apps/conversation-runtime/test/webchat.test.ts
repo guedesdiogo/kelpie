@@ -878,6 +878,10 @@ describe("a turn's steps in the webchat", () => {
     await agent(name).flush();
     await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(1));
     expect(ofType(chat.frames, "bubble")[0]).toMatchObject({ failed: true });
+    // The turn settles after its notice, and only clears the step: the page keeps the error.
+    await vi.waitFor(() => expect(chat.frames.at(-1)).toEqual({ type: "status", status: "idle" }));
+    const types = chat.frames.map((frame) => frame.type);
+    expect(types.lastIndexOf("bubble")).toBeLessThan(types.lastIndexOf("status"));
   });
 
   it("clears the step when the turn stops without a reply", async () => {
