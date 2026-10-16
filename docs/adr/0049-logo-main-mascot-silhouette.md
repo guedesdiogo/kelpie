@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-16
 - Issue: [#385](https://github.com/guedesdiogo/kelpie/issues/385)
+- Amended by: [ADR-0054](0054-bot-photo-follows-default-mascot.md), the main agent's bot follows the new default without a setting change
 - The owner asked on 2026-10-16: «Precisamos definir um logo melhor para kelpie, abra uma sessão para tratarmos o logo a parte». After comparing four directions on a lab page: «Vamos seguir o Orelhas, mas quero alterar o padrão das orelhas para a configuração "redonda", os olhos para "grandes" e remover a coleira». On approving the plan he first asked for the eyes on the logo too, then: «corrigindo, vamos sem os olhos».
 - Amends:
   - [ADR-0045](0045-agent-mascot.md) §2: the main agent starts as Kelpie with big eyes, round ears and no accessory, in place of shine eyes, pointed ears and a collar;
@@ -73,7 +74,7 @@ The values are in `docs/design-system.md` §5.23.
 - **The webchat has a favicon and a home-screen icon.**
   - The sidebar's lockup lands with #378, in whichever of the two pull requests merges second.
   - The favicon's amber dot from §5.9 is still to be built.
-- **The main agent's Telegram photo keeps the old Kelpie** until its mascot setting changes or its bot connects again. ADR-0046 §1 redraws a photo only then.
+- **The main agent's Telegram photo follows the new Kelpie** when the deploy wakes the agent ([ADR-0054](0054-bot-photo-follows-default-mascot.md)). Until ADR-0054, ADR-0046 §1 redrew a photo only when the mascot setting changed or the bot connected.
 - **Older home-screen shortcuts keep their old icon** until they are added again.
 - **Changing the logo means changing the script and running it.** A test checks the files' sizes, the ICO's two layers and the tile's colours against `tokens.css`.
 - **The logo follows the main mascot's default.** If that default changes again, a new ADR redraws the logo with it.

@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-15
 - Issue: [#368](https://github.com/guedesdiogo/kelpie/issues/368)
+- Amended by: [ADR-0054](0054-bot-photo-follows-default-mascot.md), §1: an agent also asks for its bot's photo when its object starts, if the mascot it shows isn't the one it last asked for
 - The owner asked on 2026-10-15: «Nós conseguimos colocar de forma automática a imagem do mascote ou melhor ainda um gif como na imagem do bot no telegram?» They chose the plan: «Abre a story com o plano: primeiro o JPG estático, depois o MP4 animado, gerados pelo Browser Run.» Then they approved it: «Aprovado o plano da #368. Pode começar.»
 - Amends: [ADR-0045](0045-agent-mascot.md). Its consequences said channels without a figure, such as Telegram, are unaffected; Telegram now shows the mascot as the bot's photo.
 
