@@ -381,6 +381,7 @@ Moment grammar. Every place that shows an agent shows its mascot (5.19), at the 
 | Idle | eyes open, in its own color; dozing after 45 s | no badge | a hollow circle, "idle" | in Alive, it breathes and draws idle gestures |
 | Error | worried brows, the red bubble `!` | a `--danger` badge | a triangle, what failed | one shake, and the bubble or badge pops |
 | No response | the working pose without its activity, beside a still, dashed `--muted` bubble `…` | the working badge; the glyph and the label carry the state | a dashed circle, "no response for 1 min" | the bubble pops, then nothing |
+| Offline | the plug that came out, held by its cord, beside a solid `--muted` bubble with a struck-through plug | a `--muted` badge | a struck-through circle, "no connection", no time | the plug drops and swings, and the bubble pops; in Alive, the calmest repertoire (5.19) |
 
 - **The glyph and the label carry the state on their own.** At 36 px the badge has no glyph of its own, so the glyph and the label beside the figure are what name the state. The 5.9 glyphs are drawn as SVG, since Geist has no such characters, and are hidden from screen readers, which read the label. In higher contrast, in forced colors, and wherever a figure can't be drawn, they are what shows the state.
 - **No response** is a working agent from which nothing has arrived for 60 s: no streamed token, and no tool call starting or ending. A tool call still within its time bound counts as activity. The webchat can't tell it apart, and doesn't show it (5.19).
@@ -428,9 +429,10 @@ Frequent.
 - **The first 2 s show no banner.**
 - **The banner.** Then a banner enters at the top (from 8px above, `--spring-base`): what happened, when the next try is ("No connection. Trying again in 8 s", digits in Geist Mono), and "Try now".
 - **Queued messages.** What the owner sends meanwhile shows in `--sunken` with a clock and "queued". It goes out in order when the connection is back.
-- **The mascot returns to Idle at once.** It hears nothing more of the turn, so it can't vouch for work it no longer sees (rule 7). A new connection starts from the history, and the mascot takes Waiting again if a confirmation in it is still open.
+- **Every mascot shows Offline (5.19) when the banner enters.** It says what the page knows, that the connection is gone, and nothing about the turn it no longer sees (rule 7). Every agent in the roster reads "no connection" with the same glyph (ADR-0047).
+- **Back,** the plug clicks home and the mascot gives a small hop, under 1 s. A new connection starts from the history, and the mascot takes Waiting again if a confirmation in it is still open.
 - **Back,** the banner turns `--ok`, "Back. 1 message sent.", for 2.6 s, then leaves. Alerts stay quiet for the first 4 s after reconnecting, so a backlog doesn't arrive as a burst.
-- **An expired login** opens a centered dialog, and keeps the draft.
+- **An expired login** opens a centered dialog, and keeps the draft. The dialog shows the mascot at 160 px in Offline, holding its plug, and behind it every mascot is Offline too.
   - The page tells it from a lost connection by asking ingress with `X-Requested-With`, which Access answers with 401 once the session expired.
   - Under Access, signing in is a full page of its own, so the dialog says what happened and holds one button, "Sign in again". The page keeps the draft and the messages not yet accepted in the tab's storage, signs in again through a reload, and restores them with "Restored your unsent message".
   - A message not yet accepted goes out again by itself only within 10 minutes. An older one, from a tab reopened later, comes back into the composer as a draft, so nothing old is sent without the owner.
@@ -545,6 +547,7 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 | Approved | the owner's yes, for 1.1 s, then what comes next | arched eyes, a smile, thumbs up | a happy jump with sparks | none |
 | Error | 5.9 Error; in the webchat, the notice of a turn no route answered, until the next message or turn | worried brows, hands on its cheeks, the red bubble with `!` | one shake, and the bubble pops | wipes its brow, trembles, pleads, sighs, waves for help, looks down |
 | No response | 5.9 No response. The webchat gets no streamed tokens, so it can't tell a slow model from none, and doesn't show it | approved by the owner on #366: the task's object rests, and it looks up at the owner beside a still, dashed `--muted` bubble with `…` | the bubble pops | none |
+| Offline | 5.12: the banner of a lost connection, or the expired-login dialog. Every mascot at once, since the page sees none of the agents (ADR-0047) | holds the plug that came out by its loose cord, eyes open on it, brows up, beside a solid `--muted` bubble with a struck-through plug | the plug comes out, drops a little and swings to rest, and the bubble pops | blinks, glances, looks at the plug, tries it in the air, shakes it, looks around, sighs, yawns; 4 to 8 s apart, never a hop. Back, the plug clicks home with a small hop, under 1 s |
 
 - **The activity is always true.** It follows the tool the conversation names: a magnifier to search, paper and a pencil for the vault, a laptop for code, a calendar for the agenda, an envelope for email. A tool without its own object, and the model between tools, show thinking: bubbles over the head. Reading memory before a turn is the vault. While a tool runs, Working takes precedence over Typing.
 - **Listening needs the bar.** The webchat's mascot listens while its bar shows (#140). The end of the wait brings it back to idle, unless typing or work has taken over.
@@ -554,6 +557,7 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 - Floating plush mittens, a shade lighter than the body, with a soft shadow; no arms. They rest docked below the face, small, and appear where a pose or gesture puts them.
 - At work, the task's object comes out of the body and the mittens use it.
 - Waiting and error show a glossy 3D speech bubble beside the head, in `--warm` and `--danger` from the theme, with a glyph, so the state never rides on color alone. It pops out, floats, and pulses when the mascot calls the owner.
+- Offline's bubble is the same, solid, in `--muted`, with a struck-through plug. It pops out and floats, and never pulses: nothing waits for the owner there.
 
 **Sizes.**
 
@@ -563,14 +567,14 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 | Switcher list (5.21) | 36 px | the Idle pose, still, with no badge: the list is open for a moment and carries no state |
 | Task card (5.5) | 20 px | the shape, the color and the eyes only: no head, accessory, mittens or badge; still, since the card already says the state. The engine draws a badge at every size up to 40 px today, so the board needs that changed |
 | Conversation header | 48 px | its home. Everything happens inside its box; the box is kept before the figure arrives, so nothing in the layout moves |
-| Empty conversation, profile | 160 px | gestures a little more often |
+| Empty conversation, profile, the expired-login dialog (5.12) | 160 px | gestures a little more often |
 | Telegram bot photo | 800 px square, cropped round by Telegram | a still, and a loop Telegram plays (below) |
 
 **Reduced motion and the pause.**
 - **The pause** (WCAG 2.2.2) is a setting with three values: Alive, States only, Still. Before a mascot first moves, the webchat asks for it under the header, and the mascot stays still until the owner answers. The Display menu (5.22) keeps it, in the browser. The first run's comfort step and settings (5.17) will hold it too.
 - **States only** plays the announcements and nothing else, and cuts each to end within 5 s of the state's start. The mascot doesn't breathe.
 - **A change of setting** stops what the old one played, and keeps the pose. The activity's loop starts again only in Alive.
-- **Still** shows the state's pose: no breathing, no announcement, no repertoire. A change is a 150 ms crossfade. The poses of listening, typing, working, approved, error and dozing keep their hands, and the task's object stays in front of the mascot.
+- **Still** shows the state's pose: no breathing, no announcement, no repertoire. A change is a 150 ms crossfade. The poses of listening, typing, working, approved, error and dozing keep their hands, the task's object stays in front of the mascot, and Offline keeps its plug.
 - **Reduced motion means Still.** Under `prefers-reduced-motion` or the less-motion switch, the setting can't pick Alive or States only, and the webchat doesn't ask.
 - **Reading comes first.** While the owner types, the conversation's mascot only breathes and blinks.
 - **Nothing moves off screen or in a hidden tab,** the activity's loop included. One shared timer, every 400 ms, schedules every mascot, and an `IntersectionObserver` stops those out of view.
@@ -740,6 +744,11 @@ The rules above cite these. The first set was read on 2026-10-15; a source added
   - [OpenAI's dots documentation](https://learn.chatgpt.com/docs/dots);
   - the Apple Design Awards [2024](https://www.apple.com/newsroom/2024/06/apple-announces-winners-of-the-2024-apple-design-awards/) and [2026](https://www.apple.com/newsroom/2026/06/apple-reveals-winners-of-the-2026-apple-design-awards/);
   - [Hermes Agent's StatusPulse](https://github.com/NousResearch/hermes-agent/blob/b51e8b850494e0a95a4b410c3d9b9a26df9ae261/apps/desktop/src/components/ui/status-pulse.tsx#L1-L130).
+- The offline state ([ADR-0047](adr/0047-mascot-offline.md)), read on 2026-10-16; the findings are on #380:
+  - [Chrome's offline dinosaur](https://blog.google/products/chrome/chrome-dino/), kept for offline only;
+  - [Telegram's presence line](https://github.com/DrKLO/Telegram/blob/f32ffeec763f0bdbf4bec25b52d654f77bff733d/TMessagesProj/src/main/java/org/telegram/ui/Components/ChatAvatarContainer.java#L1582-L1620), replaced while it waits for the network;
+  - [Slack's connection troubleshooting](https://slack.com/help/articles/205138367-Troubleshoot-connection-issues) and [Apple Watch's status icons](https://support.apple.com/en-us/108038);
+  - [WCAG 4.1.3 Status Messages](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html).
 - The bot's photo ([ADR-0046](adr/0046-telegram-bot-photo.md)), read on 2026-10-16; the findings are on #368:
   - Telegram's [profile videos](https://core.telegram.org/api/files) and [sticker rules](https://core.telegram.org/stickers);
   - Apple's [app icons](https://developer.apple.com/design/human-interface-guidelines/app-icons) and Android's [adaptive icons](https://developer.android.com/develop/ui/views/launch/icon_design_adaptive), on content in a round crop;
