@@ -355,7 +355,7 @@ Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0
   - **A task that failed.** The pup takes Error and stays 30 s, as 5.9's failures do, then goes back the same way with no smile. Dismissing it sends it back at once. If the creator sends the task back to To do, its pup leaves again when it runs.
   - **A task cancelled,** by the owner's stop or by its agent, or lost with its subagent, goes back with no smile and doesn't count as failed. The pause doesn't cancel tasks (5.3).
   - **A task that waits for an answer.** The subagent's question goes to its creator, not to the owner (ADR-0036). The pup stays out with its task's object at rest, looking at the parent, with no amber, and the strip of 5.9 doesn't count it. If the creator then asks the owner, the parent's state follows 5.9 and 5.19, for example Waiting while a confirmation is open (5.3).
-- **A status line counts them back** in a polite live region: "1 of 3 back", "All 3 are back", "It's back" for a single pup, "1 failed" when one did, and "1 waiting on Kelpie" while one waits on its creator. These are fixed texts ([ADR-0027](adr/0027-fixed-texts-in-three-languages.md)).
+- **A status line counts them back** in a polite live region: "1 of 3 back", "All 3 are back", "It's back" for a single pup, "1 failed" when one did, and "1 waiting on <creator's name>", such as "1 waiting on Kelpie", while one waits on its creator. These are fixed texts ([ADR-0027](adr/0027-fixed-texts-in-three-languages.md)).
 - **The parent's mascot** greets the reply that relays the result, as 5.1 says.
 - **Reduced motion:** pups fade in and out at their places in `--dur-fade`, and the mascots are Still (5.19).
 
