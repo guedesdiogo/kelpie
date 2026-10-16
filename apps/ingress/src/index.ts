@@ -2,6 +2,7 @@ import { DIRECTORY_NAME, type Remote, remoteKeySet, verifyAccessJwt } from "@kel
 import type { ChannelWebhooksContract } from "@kelpie/channels";
 import { TELEGRAM_WEBHOOK_PATH } from "@kelpie/channels/telegram";
 import {
+  type AgentLooksContract,
   type DeployProbeContract,
   REGISTRY_NAME,
   type RegistryContract,
@@ -68,6 +69,8 @@ function webchatDeps(env: Env): WebchatDeps {
       (
         env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<Pick<RegistryContract, "list">>
       ).list(),
+    // conversation-runtime's AgentLooks reads each agent's mascot, and nothing else (ADR-0050 §7).
+    mascots: (agentIds) => (env.AGENT_LOOKS as unknown as AgentLooksContract).mascots(agentIds),
     page: (request) => env.ASSETS.fetch(request),
     connect: (name, admission) => connectWebchat(env, name, admission),
   };
