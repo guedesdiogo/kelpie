@@ -225,7 +225,7 @@ describe("a finished setup step", () => {
     expect(await told.turns()).toHaveLength(2);
   });
 
-  it("reaches the conversation that sent the runner's form, through the retired setup agent's AgentHost (#328, ADR-0047)", async () => {
+  it("reaches the conversation that sent the runner's form, through the retired setup agent's AgentHost (#328, ADR-0048)", async () => {
     const world = use(
       fakeWorld([toolCalls({ name: "form" }), reply("Abra o link."), reply("Runner conectado!")]),
     );

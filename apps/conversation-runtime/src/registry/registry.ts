@@ -48,7 +48,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
 
   /**
    * Adds an agent. Adding one that exists changes nothing, so a retried create is safe. The retired
-   * setup agent's id stays its own (ADR-0047).
+   * setup agent's id stays its own (ADR-0048).
    */
   add(id: string, name: string, actor: Actor): AddAgentResult {
     if (!isAgentId(id) || id === SETUP_AGENT_ID || !isAgentName(name)) {
@@ -95,7 +95,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     if ((live?.n ?? 0) >= MAX_LIVE_SUBAGENTS) return { ok: false, reason: "not_allowed" };
     const now = Date.now();
     // Three live, but no churn: deleting one to make another counts against a day's creations.
-    // Only its subagents count: Master also creates agents through its tools (ADR-0047).
+    // Only its subagents count: Master also creates agents through its tools (ADR-0048).
     const made = this.#db
       .select({ n: count() })
       .from(schema.auditLog)
@@ -156,7 +156,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     return { ok: true };
   }
 
-  /** The agent, never the retired setup agent (ADR-0047): nothing reaches it any more. */
+  /** The agent, never the retired setup agent (ADR-0048): nothing reaches it any more. */
   get(id: string): AgentEntry | null {
     if (id === SETUP_AGENT_ID) return null;
     const row = this.#row(id);
@@ -284,7 +284,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     return { ok: true };
   }
 
-  /** The agents, by id, without the retired setup agent (ADR-0047). */
+  /** The agents, by id, without the retired setup agent (ADR-0048). */
   list(): AgentEntry[] {
     return this.#db
       .select()

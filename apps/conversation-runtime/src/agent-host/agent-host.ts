@@ -372,7 +372,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       ...storedSkills(config.settings.skills),
       ...specialistsSection(specialists.value ?? []),
       ...(spawn ? [CREATE_SUBAGENT_SKILL] : []),
-      // Master configures Kelpie (ADR-0047), whatever persona the owner gave it.
+      // Master configures Kelpie (ADR-0048), whatever persona the owner gave it.
       ...(role === "main" ? [CONFIGURE_KELPIE_SKILL] : []),
     ];
     return {

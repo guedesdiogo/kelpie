@@ -1,6 +1,6 @@
 # Admin API
 
-The owner's JSON API for the configuration commands (ADR-0013, Story 3.10). It runs as the `kelpie-admin-api` Worker, behind a Cloudflare Access application, and Master's configuration tools (Story 3.11, ADR-0047) call the same commands.
+The owner's JSON API for the configuration commands (ADR-0013, Story 3.10). It runs as the `kelpie-admin-api` Worker, behind a Cloudflare Access application, and Master's configuration tools (Story 3.11, ADR-0048) call the same commands.
 
 ## How a request is trusted
 
@@ -270,7 +270,7 @@ Form pages are HTML:
 
 ## Configuring Kelpie through Master
 
-The owner configures Kelpie by talking to Master, the agent they talk to (Story 3.11, ADR-0013, ADR-0047): open `https://<ingress hostname>/webchat/` once the webchat is set up ("Webchat"), and the page opens Master. It guides a first setup: it connects its own Telegram bot, and pairs the owner's Telegram account. The configuration tools are Master's because of its role, and they go with the role when `setMainAgent` moves it.
+The owner configures Kelpie by talking to Master, the agent they talk to (Story 3.11, ADR-0013, ADR-0048): open `https://<ingress hostname>/webchat/` once the webchat is set up ("Webchat"), and the page opens Master. It guides a first setup: it connects its own Telegram bot, and pairs the owner's Telegram account. The configuration tools are Master's because of its role, and they go with the role when `setMainAgent` moves it.
 
 **Roles** (ADR-0036 §1, #288). Each agent has a role, which `listAgents` shows:
 - **`main`:** Master, the agent the owner talks to, which also configures Kelpie. The owner named the role Master (#343); `main` stays its value.
@@ -280,7 +280,7 @@ The owner configures Kelpie by talking to Master, the agent they talk to (Story 
 - **`specialist`:** every other agent, owned by Master.
   - One created now doesn't chat until `setAgentChat` turns its chat on.
   - Agents that existed before roles keep their chat.
-- **Models:** Master changes any agent's model settings with `configure_agent`, its own included, behind the owner's confirmation (#289, ADR-0047). No other agent changes its own model, and this API's `configureAgent` can always raise Master's tier again.
+- **Models:** Master changes any agent's model settings with `configure_agent`, its own included, behind the owner's confirmation (#289, ADR-0048). No other agent changes its own model, and this API's `configureAgent` can always raise Master's tier again.
 - **Master keeps its tools:** `configure_agent` refuses a tools list for Master that leaves out a configuration tool, and `set_main_agent` refuses an agent whose tools list leaves them out. This API can still change either.
 - **The check is at `admit`:** a chat its role doesn't allow answers `no_grant`, so a specialist whose chat is off doesn't answer its bot or the webchat.
 
@@ -311,7 +311,7 @@ The owner configures Kelpie by talking to Master, the agent they talk to (Story 
 
 Master can't be deleted, and the `Registry` refuses to remove an agent that still owns another. Master's confirmation names every agent that goes, and its input carries their ids, so a subagent created before the owner's yes stops the deletion until they confirm again. A deletion cut short leaves the agent listed with its chat off, and running it again finishes it. The vault's `agents/<id>/` folder stays: it is the owner's repository, which Kelpie never deletes from. `forgetVaultPaths` drops Kelpie's copy, and the owner deletes the files in the repository.
 
-- **The retired setup agent** (ADR-0047). Instances once had a separate setup agent, `setup`, with these tools.
+- **The retired setup agent** (ADR-0048). Instances once had a separate setup agent, `setup`, with these tools.
   - The `Registry` keeps its row for a rollback, but never lists it nor answers for it. The `Directory` refuses it, and a webchat socket still open to it closes at its next message, so nothing reaches it.
   - A Telegram bot once connected to it keeps its token and webhook, and nothing reaches the agent through it. Revoke the token with BotFather.
   - `createAgent` refuses its id.
@@ -350,7 +350,7 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
   - The model learns only that the link was sent. History, later requests and the outbox's inspection never hold the link.
   - As with a confirmation, the bubble doesn't come back once its turn has settled and the webchat reloads. If the owner says they didn't get it, the agent calls the tool again for a new link.
 - **Steps the owner finishes.** When the owner submits a secure form, the bot's or the runner's, or pairs by pressing Start in the bot, the conversation that sent the link learns it without being told (#206, #328, ADR-0028):
-  - **The wait:** the conversation waits for the step while its link lasts, the form's 15 minutes or a day for pairing, with a few minutes' grace. Both the conversation and the agent's `AgentHost` keep the wait. The runner is the instance's, so its wait stays on the retired setup agent's `AgentHost`, by that id, whichever agent is Master (ADR-0047).
+  - **The wait:** the conversation waits for the step while its link lasts, the form's 15 minutes or a day for pairing, with a few minutes' grace. Both the conversation and the agent's `AgentHost` keep the wait. The runner is the instance's, so its wait stays on the retired setup agent's `AgentHost`, by that id, whichever agent is Master (ADR-0048).
   - **The report:** the admin API reports a stored token or runner secret to the `AgentHost` it already binds, and `ingress` a redeemed pairing code through conversation-runtime's `SetupEvents` entrypoint, which does nothing else. Each report is bounded and best effort, so the page or the webhook answers whatever happens to it.
   - **The note:** each waiting conversation gets a note Kelpie writes in fixed words, "Kelpie, automatically (the owner didn't write this): …", naming the bot, the pairing, or the runner's version. A conversation takes a report only for a step it waits for, and only once. The agent answers the note.
   - **When the turn starts:**

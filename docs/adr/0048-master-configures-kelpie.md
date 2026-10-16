@@ -1,4 +1,4 @@
-# ADR-0047: Master configures Kelpie, and the setup agent goes
+# ADR-0048: Master configures Kelpie, and the setup agent goes
 
 - Status: Accepted
 - Date: 2026-10-16

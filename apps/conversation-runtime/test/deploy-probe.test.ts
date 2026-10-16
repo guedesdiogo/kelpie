@@ -52,7 +52,7 @@ describe("DeployProbe", () => {
     const woken = (await listDurableObjectIds(env.AGENT_HOST)).map((id) => id.toString()).sort();
     expect(woken).toEqual(
       // The main agent a new instance starts with (#288), the one added, and the retired setup
-      // agent's, which keeps the runner form's waits though the Registry doesn't list it (ADR-0047).
+      // agent's, which keeps the runner form's waits though the Registry doesn't list it (ADR-0048).
       ["kelpie", "sales", SETUP_AGENT_ID]
         .map((name) => env.AGENT_HOST.idFromName(name).toString())
         .sort(),
@@ -81,7 +81,7 @@ describe("ping", () => {
 });
 
 describe("probeRuntime", () => {
-  it("pings each AgentHost the Registry lists, and the retired setup agent's (ADR-0047)", async () => {
+  it("pings each AgentHost the Registry lists, and the retired setup agent's (ADR-0048)", async () => {
     const { fake, pinged } = targets();
     expect(await probeRuntime(fake)).toEqual({ registry: "ok", agentHosts: "ok", gateway: "ok" });
     expect(pinged.sort()).toEqual(["kelpie", "sales", SETUP_AGENT_ID]);

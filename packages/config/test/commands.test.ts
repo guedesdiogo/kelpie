@@ -373,7 +373,7 @@ describe("configuration commands", () => {
       ok: false,
       reason: "unknown_agent",
     });
-    // The retired setup agent (ADR-0047) is no agent the Registry knows.
+    // The retired setup agent (ADR-0048) is no agent the Registry knows.
     expect(await commands.setAgentChat(owner, { id: SETUP_AGENT_ID, chat: false })).toEqual({
       ok: false,
       reason: "unknown_agent",
@@ -405,7 +405,7 @@ describe("configuration commands", () => {
     });
   });
 
-  it("never gives an agent the retired setup agent's id (ADR-0047)", async () => {
+  it("never gives an agent the retired setup agent's id (ADR-0048)", async () => {
     const { ports, calls } = fakePorts();
     const commands = createConfigCommands(ports);
 
@@ -886,7 +886,7 @@ describe("deleteAgent (#303)", () => {
       ok: false,
       reason: "not_allowed",
     });
-    // The retired setup agent (ADR-0047) is no agent the Registry knows.
+    // The retired setup agent (ADR-0048) is no agent the Registry knows.
     for (const id of ["ghost", SETUP_AGENT_ID]) {
       expect(await commands.deleteAgent(owner, { id })).toEqual({
         ok: false,

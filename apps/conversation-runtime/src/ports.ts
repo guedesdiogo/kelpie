@@ -245,7 +245,7 @@ function productionPorts(env: Env): ConversationPorts {
         writeNote: (agentId, input, options) =>
           withTimeout(contextStore.writeNote(agentId, input, options), REMEMBER_TIMEOUT_MS),
       }),
-      // Master's configuration tools (#48, ADR-0047): the same commands as the admin API, minus the
+      // Master's configuration tools (#48, ADR-0048): the same commands as the admin API, minus the
       // ones that need the Directory, the vault's admin entrypoint or more of channel-egress than
       // opening a form, which this Worker doesn't bind.
       configurationTools(commands, {

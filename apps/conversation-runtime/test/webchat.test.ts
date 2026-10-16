@@ -220,7 +220,7 @@ describe("webchat sockets", () => {
     expect(await agent(name).turns()).toEqual([]);
   });
 
-  it("closes an open socket to the retired setup agent, before taking the message (ADR-0047)", async () => {
+  it("closes an open socket to the retired setup agent, before taking the message (ADR-0048)", async () => {
     use(fakeWorld([reply("Never.")]));
     // A socket admitted before the deploy that retired it.
     const name = `${SETUP_AGENT_ID}:webchat:u-owner`;

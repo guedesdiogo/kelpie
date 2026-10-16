@@ -8,7 +8,7 @@ export const agents = sqliteTable("agents", {
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
   // ADR-0036 §1 (#288). The retired setup agent's row says `specialist`, and is never read
-  // (ADR-0047).
+  // (ADR-0048).
   role: text("role", { enum: ["main", "specialist", "subagent"] })
     .notNull()
     .default("specialist"),

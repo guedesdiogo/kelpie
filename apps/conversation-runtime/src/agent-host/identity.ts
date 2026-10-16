@@ -19,7 +19,7 @@ export interface Identity {
 
 /** What each role says about the agent. */
 const ROLE_LINES: Record<AgentRole, string> = {
-  // The role `main` is called Master (#343), and it configures Kelpie (ADR-0047).
+  // The role `main` is called Master (#343), and it configures Kelpie (ADR-0048).
   main: "Master on Kelpie, the agent the owner talks to, which also configures Kelpie",
   specialist: "a specialist agent on Kelpie, owned by Master, the agent the owner talks to",
   subagent: "a temporary subagent on Kelpie, working on one demand of the agent that created you",

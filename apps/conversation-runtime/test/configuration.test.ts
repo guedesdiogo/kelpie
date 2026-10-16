@@ -31,12 +31,12 @@ import {
 } from "../src/tools.ts";
 import { type FakeWorld, fakeWorld, held, reply, toolCalls } from "./fakes.ts";
 
-// Master's configuration tools (Story 3.11, ADR-0047): the configuration commands, owner-only, and
+// Master's configuration tools (Story 3.11, ADR-0048): the configuration commands, owner-only, and
 // the changes to access, cost or external accounts only after the owner's confirmation (ADR-0013),
 // which the host gates in code.
 
 const ADMIN = "https://admin.example.com";
-/** Master, the agent whose tools these are (ADR-0047). */
+/** Master, the agent whose tools these are (ADR-0048). */
 const MASTER = "kelpie";
 const owner: Actor = { userId: "u-owner", role: "owner", via: `agent:${MASTER}` };
 
@@ -224,7 +224,7 @@ const run = async (
   return tool.run(input, context);
 };
 
-describe("Master's configuration tools (ADR-0047)", () => {
+describe("Master's configuration tools (ADR-0048)", () => {
   it("are Master's only, with plain labels and no identity or vault commands", async () => {
     const provider = configurationTools(fakeCommands().commands, {
       roleOf: roleIn,
@@ -537,7 +537,7 @@ describe("Master's configuration tools (ADR-0047)", () => {
     });
   });
 
-  it("says configure_agent's model replaces the agent's whole model settings (ADR-0047)", async () => {
+  it("says configure_agent's model replaces the agent's whole model settings (ADR-0048)", async () => {
     const tools = await toolsOf(
       configurationTools(fakeCommands().commands, { roleOf: roleIn, adminOrigin: ADMIN }),
     );
@@ -755,7 +755,7 @@ describe("Master's configuration tools (ADR-0047)", () => {
         href: `${ADMIN}/forms/run456?lang=pt-BR`,
         text: `O formulário seguro para conectar o runner: ${ADMIN}/forms/run456?lang=pt-BR\nFunciona uma vez, nos próximos 15 minutos. Cole lá o segredo de ~/.config/kelpie-runner/secret do seu servidor, uma linha só, nunca no chat.`,
         // The runner is the instance's: the retired setup agent's AgentHost keeps the wait, until
-        // the form expires (#328, ADR-0047).
+        // the form expires (#328, ADR-0048).
         awaits: {
           agentId: SETUP_AGENT_ID,
           step: "runner_connected",

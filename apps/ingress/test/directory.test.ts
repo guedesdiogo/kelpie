@@ -62,7 +62,7 @@ describe("Directory", () => {
     expect(await stub.admit(telegram, "legacy")).toMatchObject({ admitted: true });
   });
 
-  it("refuses the owner the retired setup agent, whatever the Registry says (ADR-0047)", async () => {
+  it("refuses the owner the retired setup agent, whatever the Registry says (ADR-0048)", async () => {
     const stub = await withEnabledOwner("retired-setup");
 
     expect(await stub.admit(telegram, SETUP_AGENT_ID)).toEqual({

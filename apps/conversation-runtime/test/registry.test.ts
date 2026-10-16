@@ -35,7 +35,7 @@ describe("Registry", () => {
     expect(await stub.get("kelpie")).toEqual(KELPIE);
   });
 
-  it("never lists nor answers for the retired setup agent, and keeps its row (ADR-0047)", async () => {
+  it("never lists nor answers for the retired setup agent, and keeps its row (ADR-0048)", async () => {
     const stub = registry("retired-setup");
     const unknown = { ok: false, reason: "unknown_agent" };
 
@@ -200,7 +200,7 @@ describe("Registry roles (#288)", () => {
       { ...specialist("ops", "Ops"), owner: "assistant" },
       { ...specialist("sales", "Sales", true), owner: "assistant" },
     ]);
-    // The retired setup agent's row is left as it was (ADR-0047).
+    // The retired setup agent's row is left as it was (ADR-0048).
     const setupRow = await runInDurableObject(stub, (_instance, state) =>
       state.storage.sql.exec("SELECT owner_id FROM agents WHERE id = 'setup'").one(),
     );
@@ -353,7 +353,7 @@ describe("Registry subagents (#290)", () => {
     });
   });
 
-  it("counts only a creator's subagents against its day, not the agents Master creates (ADR-0047)", async () => {
+  it("counts only a creator's subagents against its day, not the agents Master creates (ADR-0048)", async () => {
     const stub = registry("subagents-master");
     const master = { userId: "u-owner", role: "owner", via: "agent:kelpie" } as const;
     for (let i = 0; i < 10; i++) {

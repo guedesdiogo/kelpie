@@ -4,7 +4,7 @@
 - Date: 2026-10-13
 - Issue: [#282](https://github.com/guedesdiogo/kelpie/issues/282)
 - Decided by the owner in the conversation of 2026-10-13; his answers are quoted on #282
-- Amended by: [ADR-0041](0041-auto-tier-by-qualifier.md), `tier` may be `auto` in `conversation`-area entries, the identity section then states `auto`, a creator on `auto` caps its subagent at the tier it ran on when it created it, and the tier picked for each turn is not a trio change; [ADR-0047](0047-master-configures-kelpie.md), the Admin role goes, and Master holds its tools and its place in §3, §5 and §6, its own trio included
+- Amended by: [ADR-0041](0041-auto-tier-by-qualifier.md), `tier` may be `auto` in `conversation`-area entries, the identity section then states `auto`, a creator on `auto` caps its subagent at the tier it ran on when it created it, and the tier picked for each turn is not a trio change; [ADR-0048](0048-master-configures-kelpie.md), the Admin role goes, and Master holds its tools and its place in §3, §5 and §6, its own trio included
 
 ## Context
 

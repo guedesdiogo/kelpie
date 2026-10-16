@@ -42,7 +42,7 @@ export async function probeRuntime(targets: ProbeTargets): Promise<RuntimeProbeR
     // Listing goes through the Registry too, so a broken Registry fails this part as well.
     status("agentHosts", async () => {
       // The retired setup agent's too: the Registry doesn't list it, but its AgentHost keeps the
-      // runner form's waits (ADR-0047).
+      // runner form's waits (ADR-0048).
       const ids = [...(await targets.registry.list()).map((agent) => agent.id), SETUP_AGENT_ID];
       // A few at a time: each wakes an object, which may run its migrations now.
       for (let start = 0; start < ids.length; start += AGENT_HOSTS_AT_ONCE) {

@@ -105,7 +105,7 @@ describe("AgentHost", () => {
     expect(await host("fresh").config()).toEqual({ settings: DEFAULT_SETTINGS, promptVersion: 0 });
   });
 
-  it("gives the retired setup agent's id no persona of its own (ADR-0047)", async () => {
+  it("gives the retired setup agent's id no persona of its own (ADR-0048)", async () => {
     expect(await host(SETUP_AGENT_ID).config()).toEqual({
       settings: DEFAULT_SETTINGS,
       promptVersion: 0,
@@ -674,7 +674,7 @@ describe("AgentHost and subagents (#290)", () => {
     replaceIdentitySourcesForTesting(undefined);
   });
 
-  it("teaches configure-kelpie to Master alone, over any persona (ADR-0047)", async () => {
+  it("teaches configure-kelpie to Master alone, over any persona (ADR-0048)", async () => {
     roster({
       "cfg-main": { role: "main" },
       "cfg-specialist": { role: "specialist" },

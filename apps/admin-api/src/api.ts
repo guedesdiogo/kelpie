@@ -211,7 +211,7 @@ async function handleForm(request: Request, pathname: string, deps: AdminDeps): 
     if (runnerSecret !== null) {
       // The conversation that sent the form learns the runner is connected (#328). The runner is
       // the instance's: its waits live on the retired setup agent's AgentHost, by that id
-      // (ADR-0047).
+      // (ADR-0048).
       return await submitRunnerForm(token, runnerSecret, deps.forms, locale, ({ state, version }) =>
         deps.setupDone(SETUP_AGENT_ID, { step: "runner_connected", userId, state, version }),
       );

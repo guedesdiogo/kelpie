@@ -8,7 +8,7 @@ import { type Mascot, parseMascot } from "./mascot.ts";
 export const REGISTRY_NAME = "registry";
 
 /**
- * The retired setup agent's id (ADR-0047): Master took over its tools. Its Registry row stays for a
+ * The retired setup agent's id (ADR-0048): Master took over its tools. Its Registry row stays for a
  * rollback, never listed, and no agent may take its id. Its AgentHost keeps the runner's form's
  * waits, which belong to the instance rather than to one agent.
  */

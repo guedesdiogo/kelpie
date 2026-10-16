@@ -26,7 +26,7 @@ import {
   visible,
 } from "./tools.ts";
 
-// Master's configuration tools (Story 3.11, ADR-0013, ADR-0047): the owner configures Kelpie by
+// Master's configuration tools (Story 3.11, ADR-0013, ADR-0048): the owner configures Kelpie by
 // talking to Master. Only the agent whose Registry role is `main` gets them, and they follow the
 // role when it moves: the configuration commands the admin API runs, with the same checks. A change
 // to access, cost or an external account waits for the owner's own yes (ADR-0013, ADR-0026): a
@@ -291,7 +291,7 @@ const NO_RUNNER = failed(
   "Kelpie was deployed without the runner's VPC Service, so there's no runner to connect yet. The owner sets up the server and the tunnel first: see docs/runner.md.",
 );
 
-/** The configuration tools, by name: the ones Master's own tools list must keep (ADR-0047). */
+/** The configuration tools, by name: the ones Master's own tools list must keep (ADR-0048). */
 const CONFIGURATION_TOOLS = Object.keys(SPECS);
 
 /** Whether an agent with this tools list, as Master, holds every configuration tool. */
@@ -665,7 +665,7 @@ export function configurationTools(
         }
         const agent = await agentOf(context, id);
         if (!("id" in agent)) return agent;
-        // Kelpie is never left without an agent that configures it in chat (ADR-0047).
+        // Kelpie is never left without an agent that configures it in chat (ADR-0048).
         if (
           parsed.tools !== undefined &&
           agent.role === "main" &&
@@ -769,7 +769,7 @@ export function configurationTools(
         const result = await commands.setMainAgent(context.actor, change);
         if (!result.ok)
           return result.reason === "not_allowed" ? NOT_MAIN : refusal(result, agent.id);
-        // The tools go with the role (ADR-0047): the caller, Master until now, can't call them.
+        // The tools go with the role (ADR-0048): the caller, Master until now, can't call them.
         return {
           output: `The agent ${agent.id} is now Master: the one the owner talks to. Your configuration tools went with the role: from now on, ${agent.id} configures Kelpie.`,
         };
@@ -929,7 +929,7 @@ export function configurationTools(
         const href = pageLink(adminOrigin, result.value.path, context.locale);
         const minutes = Math.max(Math.round((result.value.expiresAt - now()) / 60_000), 1);
         // The runner is the instance's, not one agent's: the retired setup agent's AgentHost keeps
-        // the wait under its fixed id, and the admin API reports the form there (#328, ADR-0047).
+        // the wait under its fixed id, and the admin API reports the form there (#328, ADR-0048).
         // The note still reaches this conversation, whichever agent is Master by then.
         context.sendLink({
           href,
@@ -961,7 +961,7 @@ export function configurationTools(
     },
   ];
 
-  // Again when one runs: a turn that listed them may outlive the agent's role (ADR-0047).
+  // Again when one runs: a turn that listed them may outlive the agent's role (ADR-0048).
   const masters: Tool[] = tools.map((tool) => ({
     ...tool,
     async run(input, context) {

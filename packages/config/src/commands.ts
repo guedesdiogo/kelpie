@@ -50,7 +50,7 @@ export interface AgentSummary {
   name: string;
 }
 
-/** An agent's role (ADR-0036 §1, ADR-0047): `main` is Master. */
+/** An agent's role (ADR-0036 §1, ADR-0048): `main` is Master. */
 export type AgentRole = "main" | "specialist" | "subagent";
 
 /** An agent as the Registry holds it (ADR-0036 §1, #288). */
@@ -135,7 +135,7 @@ export interface RegistryContract {
  * A setup step the owner finishes on an admin page or in Telegram, behind a link Kelpie sent
  * (#206): connecting the agent's Telegram bot through the secure form, or pairing their own
  * Telegram account with it; or connecting the instance's runner through its own form (#328), which
- * the retired setup agent's AgentHost reports, since the runner is the instance's (ADR-0047).
+ * the retired setup agent's AgentHost reports, since the runner is the instance's (ADR-0048).
  */
 export type SetupStep = "telegram_connected" | "telegram_paired" | "runner_connected";
 
@@ -365,7 +365,7 @@ export interface ShownIdentity {
 
 /**
  * The configuration commands (ADR-0013). The admin API and Master's configuration tools (Story
- * 3.11, ADR-0047) call these same functions. Every command is owner-only until multi-user lands
+ * 3.11, ADR-0048) call these same functions. Every command is owner-only until multi-user lands
  * (ADR-0015); the check uses the actor's role, never a comparison of ids.
  */
 export function createConfigCommands(ports: ConfigPorts) {
@@ -440,7 +440,7 @@ export function createConfigCommands(ports: ConfigPorts) {
     ): Promise<CommandResult<AgentSummary & { created: boolean }>> {
       if (!isOwner(actor)) return forbidden;
       const { id, name } = (input ?? {}) as { id?: unknown; name?: unknown };
-      // The retired setup agent's row stays (ADR-0047), so its id is never another agent's.
+      // The retired setup agent's row stays (ADR-0048), so its id is never another agent's.
       if (!isAgentId(id) || id === SETUP_AGENT_ID || !isAgentName(name)) return invalid;
       const result = await ports.registry.add(id, name.trim(), actor);
       if (!result.ok) return result;

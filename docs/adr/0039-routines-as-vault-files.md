@@ -4,7 +4,7 @@
 - Date: 2026-10-14
 - Issue: [#306](https://github.com/guedesdiogo/kelpie/issues/306)
 - Decided by the owner on 2026-10-13, answering research note 10's Q1: «Q1: sim»
-- Amended by: [ADR-0047](0047-master-configures-kelpie.md), Master, not Admin, may call the routine commands for another agent
+- Amended by: [ADR-0048](0048-master-configures-kelpie.md), Master, not Admin, may call the routine commands for another agent
 
 ## Context
 

@@ -429,7 +429,7 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
   /**
    * Decides whether a sender may reach an agent. The owner reaches every agent whose chat is on:
    * Master and the specialists the owner opened (ADR-0036 §1, #288), never the retired setup agent
-   * (ADR-0047). The admin API's `*` names no agent. Other roles don't exist until multi-user lands;
+   * (ADR-0048). The admin API's `*` names no agent. Other roles don't exist until multi-user lands;
    * then they'll need a grant for `agentId` (ADR-0015).
    */
   async admit(identity: ChannelIdentity, agentId: string, language?: string): Promise<Admission> {
