@@ -56,6 +56,8 @@ The issue put ten questions to the owner. Five of his answers change a decision.
 ### 2. Dictation keeps only the text
 
 - **The microphone dictates into the field,** and never sends by itself.
+  - It stops after 15 s of silence or 2 min in total, and transcribes what it has.
+  - These limits also bound a clip's size, since Whisper on Workers AI publishes no byte limit.
 - **Only Cloudflare hears the voice.**
   - The page records a clip, and llm-gateway transcribes it with Workers AI's `whisper-large-v3-turbo`, one clip at a time. The text lands when the owner stops, not while he speaks.
   - Transcription sits behind an interface and a config value in llm-gateway, with Whisper turbo as its first adapter (CLAUDE.md's pluggable connectors).
@@ -73,7 +75,7 @@ The issue put ten questions to the owner. Five of his answers change a decision.
   - Each records what it uses: minutes transcribed and bytes stored.
   - #269 counts them when it lands.
 - **The model chip and Telegram's picker take no hold and no confirmation,** even to raise the tier to `frontier` or the effort to `max`. The pick is the owner's explicit request for that spend.
-- **A pick applies to every turn of the agent:** its conversations, tasks and routines. The notice of §5 says so.
+- **A pick applies to every turn of the agent:** its conversations, tasks and routines. The notice of §5 says so. A one-reply `max` is the exception (§4).
 
 ### 4. The model chip sets the agent's trio
 
@@ -150,15 +152,18 @@ The issue put ten questions to the owner. Five of his answers change a decision.
   - the owner as the actor;
   - the channel and the agent;
   - the trio before and after;
+  - for a one-reply `max`, the conversation and the effort it replaces;
   - on Telegram, the picker's id.
-- **Kelpie posts a notice in the conversation,** in the conversation's language (ADR-0027). It names the new trio, its provider included, and says that it applies from the next reply to every turn of the agent.
+- **Kelpie posts a notice in the conversation,** in the conversation's language (ADR-0027).
+  - It names the new trio, its provider included.
+  - It says that the trio applies from the next reply to every turn of the agent. For a one-reply `max`, it says that only the owner's next turn there takes it.
 - **The agent's identity section** states the new trio from its next turn.
 
 **What doesn't change:**
 - Master's `configure_agent` keeps its confirmation, and so does keeping `max` on an agent.
 - Telegram's other confirmations keep the typed code.
 - On Telegram, Continue (ADR-0040) and Deny (ADR-0044) stay replies in words. The picker is the only Kelpie notice with buttons.
-- The chip and the picker change nothing but the `conversation`-area trio.
+- The chip and the picker change nothing but the `conversation`-area trio and the one-reply `max`.
 
 ### 6. The composer and the design system
 
@@ -183,7 +188,7 @@ Each of these needs the owner's approval and a decision of its own:
 ### 8. Amendments
 
 - **[ADR-0026](0026-confirmation-by-owner-act.md):**
-  - §1: a pick on the webchat's model chip, and a tap on Kelpie's model picker on Telegram, are the owner's yes to one field of an agent's `conversation`-area trio;
+  - §1: a pick on the webchat's model chip, and a tap on Kelpie's model picker on Telegram, are the owner's yes to one field of an agent's `conversation`-area trio, and to a one-reply `max`;
   - §4: inline buttons reach Telegram for the model picker only. Their callback data carries the picker's random id, and every confirmation keeps the typed code.
 - **[ADR-0036](0036-agent-roles-models-and-subagents.md),** as ADR-0048 §2 left it:
   - §2: the chip shows, read-only, the model each tier runs on, and a one-reply `max` sets the effort for one turn only;
@@ -205,7 +210,7 @@ Each of these needs the owner's approval and a decision of its own:
   - `pick_model` refused outside a turn the owner's message started;
   - `max` taken only by the owner's next turn, and returning after it;
   - that dictated audio is stored nowhere, AI Gateway's logs included.
-- **The owner accepted #157's privacy risk for webchat files** (answer 4).
+- **The owner chose ADR-0032 as it stands for webchat files** (answer 4), with #157's privacy risk stated in the question. Handling it stays #157's.
   - The derived text of a photo of an ID lands in the vault's git history.
   - Removing it takes a history rewrite (`docs/context-store.md`).
 - **Spend can rise with one tap.** The owner chose no hold. The notice in the conversation and #269's report keep it visible.
@@ -234,7 +239,7 @@ Each of these needs the owner's approval and a decision of its own:
 ## References
 
 - [Decision 5.30 (#406)](https://github.com/guedesdiogo/kelpie/issues/406), with the research and the owner's answers
-- [ADR-0026](0026-confirmation-by-owner-act.md), [ADR-0027](0027-fixed-texts-in-three-languages.md), [ADR-0032](0032-file-bytes-in-r2.md), [ADR-0036](0036-agent-roles-models-and-subagents.md), [ADR-0040](0040-continue-at-the-tool-bound.md), [ADR-0041](0041-auto-tier-by-qualifier.md), [ADR-0043](0043-design-system.md), [ADR-0048](0048-master-configures-kelpie.md)
+- [ADR-0026](0026-confirmation-by-owner-act.md), [ADR-0027](0027-fixed-texts-in-three-languages.md), [ADR-0032](0032-file-bytes-in-r2.md), [ADR-0036](0036-agent-roles-models-and-subagents.md), [ADR-0040](0040-continue-at-the-tool-bound.md), [ADR-0041](0041-auto-tier-by-qualifier.md), [ADR-0043](0043-design-system.md), [ADR-0044](0044-design-system-review.md), [ADR-0048](0048-master-configures-kelpie.md)
 - [#157](https://github.com/guedesdiogo/kelpie/issues/157) (files become memory), [#269](https://github.com/guedesdiogo/kelpie/issues/269) (cost reports), [#320](https://github.com/guedesdiogo/kelpie/issues/320) (the auto tier), [#378](https://github.com/guedesdiogo/kelpie/issues/378) (the webchat's redesign), [#379](https://github.com/guedesdiogo/kelpie/issues/379) (the agent's editor)
 - [Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/), read on 2026-10-16
 - [Claude Code's model configuration](https://code.claude.com/docs/en/model-config); [Claude.ai's model and effort settings](https://support.claude.com/en/articles/8664678-change-the-model-effort-and-extended-thinking-settings)
