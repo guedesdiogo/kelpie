@@ -10,7 +10,7 @@ import {
 import { TEXTS } from "../../public/webchat/texts.js";
 import { FakeSocket } from "./harness.js";
 
-// A sidebar row follows its agent through a presence socket (ADR-0050): its state comes only from
+// A sidebar row follows its agent through a presence socket (ADR-0052): its state comes only from
 // the frames that view allows, it starts unknown, and it shows Offline 2 s after its socket closes.
 
 const T = TEXTS.en;
@@ -60,6 +60,12 @@ describe("a row's state", () => {
     expect(next).toMatchObject({ state: "working", label: null, since: NOW - 75_000 });
     expect(rowLine(next, T, NOW + 1_000).detail).toBe("Thinking");
     expect(rowAfter(next, { type: "status", status: "idle" }, NOW + 2_000).state).toBe("idle");
+  });
+
+  it("counts in minutes only under less motion", () => {
+    const row = rowAfter(UNKNOWN, presence({ turn: { agoMs: 134_000, step: "thinking" } }), NOW);
+    expect(rowLine(row, T, NOW, { less: true }).time).toBe("2 min");
+    expect(rowLine(row, T, NOW - 120_000, { less: true }).time).toBe("1 min");
   });
 
   it("starts the clock at the first step of a turn it saw begin", () => {

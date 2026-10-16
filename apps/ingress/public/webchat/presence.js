@@ -1,10 +1,10 @@
-// The sidebar's rows follow their agents (ADR-0050). Each row has a presence socket of its own:
+// The sidebar's rows follow their agents (ADR-0052). Each row has a presence socket of its own:
 // it takes only the frames that view allows, starts unknown rather than idle, and shows Offline once
 // its socket has been closed 2 s, because the row can't vouch for its agent's state any more.
 
 import { retryDelay } from "./model.js";
 
-/** What a presence socket may bring (ADR-0050 §2). Every other frame is dropped. */
+/** What a presence socket may bring (ADR-0052 §2). Every other frame is dropped. */
 const PRESENCE_FRAMES = new Set([
   "presence",
   "status",
@@ -122,8 +122,9 @@ export function rowAfter(row, frame, now) {
   return rowAt(next, now);
 }
 
-/** A running turn's time, as m:ss. */
-function elapsed(ms) {
+/** A running turn's time, as m:ss; under less motion, minutes only, which the page updates once a minute. */
+function elapsed(ms, texts, less) {
+  if (less) return texts.minutes(Math.max(1, Math.round(ms / 60_000)));
   const seconds = Math.max(0, Math.floor(ms / 1_000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
@@ -132,7 +133,7 @@ function elapsed(ms) {
  * What the row's line says: its state's glyph and words, what it is about, and a time. The page
  * sets each as text, since a request's summary is the tool's own words.
  */
-export function rowLine(row, texts, now) {
+export function rowLine(row, texts, now, { less = false } = {}) {
   const line = (glyph, label, detail = "", time = "") => ({ glyph, label, detail, time });
   switch (row.state) {
     case "working":
@@ -140,7 +141,7 @@ export function rowLine(row, texts, now) {
         "working",
         texts.rowWorking,
         row.label ?? (row.step ? (texts.steps[row.step] ?? "") : ""),
-        elapsed(now - row.since),
+        elapsed(now - row.since, texts, less),
       );
     case "waiting": {
       const newest = row.requests[0];
@@ -164,7 +165,7 @@ export function rowLine(row, texts, now) {
   }
 }
 
-// ── A row's socket (ADR-0050 §5) ───────────────────────────────────────────────────────────────
+// ── A row's socket (ADR-0052 §5) ───────────────────────────────────────────────────────────────
 
 /**
  * One agent's presence socket. A closed socket retries with the page's backoff; a refusal, or a
