@@ -501,6 +501,18 @@ describe("how a change shows (§4.1, 5.3)", () => {
     expect(hows.at(-1)).toEqual({ instant: false, quiet: false });
   });
 
+  it("waits only as long as an open confirmation has left, after a reconnect", () => {
+    const { shown, keeper, clock } = keeperWith();
+    keeper.event({ type: "history" });
+    const open = { id: 7, summary: "Create the event.", askedAgoMs: 570_000, expiresInMs: 30_000 };
+    keeper.event({ type: "requests", requests: [open], more: 0 });
+    expect(shown.at(-1)?.state).toBe("waiting");
+    clock.advance(29_999);
+    expect(shown.at(-1)?.state).toBe("waiting");
+    clock.advance(1);
+    expect(shown.at(-1)?.state).toBe("idle");
+  });
+
   it("moves a quiet mascot to its pose without the announcement", () => {
     expect(engine).toContain("if (!quiet) this.announce(next);");
   });

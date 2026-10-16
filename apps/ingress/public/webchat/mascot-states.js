@@ -402,7 +402,7 @@ export function presenceKeeper(
   let presence = IDLE;
   let afterApproval = IDLE;
   let timer = null;
-  const apply = (next, how = {}) => {
+  const apply = (next, how = {}, waitMs = CONFIRMATION_MS) => {
     timers.clear(timer);
     timer = null;
     presence = next;
@@ -411,9 +411,14 @@ export function presenceKeeper(
       afterApproval = IDLE;
       timer = timers.set(() => apply(afterApproval), APPROVED_MS);
     } else if (presence.state === "waiting") {
-      timer = timers.set(() => apply(IDLE, { quiet: true }), CONFIRMATION_MS);
+      timer = timers.set(() => apply(IDLE, { quiet: true }), waitMs);
     }
   };
+  // A notice waits its 10 minutes; the open list says how long each confirmation has left.
+  const waitOf = (event) =>
+    event.type === "requests" && event.requests.length > 0
+      ? Math.max(...event.requests.map((request) => request.expiresInMs))
+      : CONFIRMATION_MS;
   return {
     get current() {
       return presence;
@@ -427,7 +432,7 @@ export function presenceKeeper(
       // A new notice while one waits starts its own 10 minutes.
       const renewed = next.state === "waiting" && event.type === "bubble";
       const refused = event.type === "confirmation" && event.status !== "accepted";
-      if (renewed || !same(next, presence)) apply(next, { instant, quiet: refused });
+      if (renewed || !same(next, presence)) apply(next, { instant, quiet: refused }, waitOf(event));
     },
   };
 }

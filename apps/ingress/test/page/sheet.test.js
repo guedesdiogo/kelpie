@@ -71,6 +71,34 @@ describe("a phone's sheet", () => {
     expect(click.defaultPrevented).toBe(true);
   });
 
+  it("takes the pointer only once it drags, so a press still reaches its row", () => {
+    panel.setPointerCapture = vi.fn();
+    pointer("pointerdown", 600);
+    pointer("pointermove", 603);
+    expect(panel.setPointerCapture).not.toHaveBeenCalled();
+    pointer("pointerup", 603);
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+    panel.querySelector("a").dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(false);
+    pointer("pointerdown", 600);
+    pointer("pointermove", 640);
+    expect(panel.setPointerCapture).toHaveBeenCalledOnce();
+  });
+
+  it("does nothing while the panel isn't a sheet", () => {
+    let phone = false;
+    document.body.innerHTML =
+      '<nav class="switcher"><ul><li><a href="?agent=a">A</a></li></ul></nav>';
+    panel = document.querySelector("nav");
+    sheet(panel, { onClose: closed, active: () => phone, height: () => HEIGHT, now: () => clock });
+    drag(600, 900, 100);
+    expect(closed).not.toHaveBeenCalled();
+    expect(panel.style.transform).toBe("");
+    phone = true;
+    drag(600, 900, 100);
+    expect(closed).toHaveBeenCalledOnce();
+  });
+
   it("lets a scrolled list scroll, unless the drag starts on the handle", () => {
     list.scrollTop = 40;
     Object.defineProperty(list, "scrollTop", { value: 40, configurable: true });

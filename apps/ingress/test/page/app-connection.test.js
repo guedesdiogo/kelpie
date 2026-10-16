@@ -368,6 +368,63 @@ describe("the agents (#140)", () => {
     ]);
   });
 
+  it("reloads the list once when rows are refused, and retries the rows it still names", async () => {
+    const { fetch } = await loadPage();
+    const listCalls = () => fetch.mock.calls.filter(([url]) => url === "/webchat/agents").length;
+    expect(listCalls()).toBe(1);
+    // Neither row's socket opened: a refusal and a dropped network look the same (ADR-0052 §5).
+    FakeSocket.presence("kelpie-setup").close(1006);
+    FakeSocket.presence("agenda").close(1006);
+    vi.advanceTimersByTime(0);
+    await settle();
+    expect(listCalls()).toBe(2);
+    const before = FakeSocket.all.length;
+    vi.advanceTimersByTime(300);
+    expect(FakeSocket.all.length).toBe(before + 2);
+  });
+
+  it("retries the rows with their backoff when the list can't be read again", async () => {
+    let failing = false;
+    const base = fakeFetch();
+    const fetch = vi.fn(async (url, init) =>
+      failing && url === "/webchat/agents" ? new Response(null, { status: 503 }) : base(url, init),
+    );
+    await loadPage({ fetch });
+    failing = true;
+    FakeSocket.presence("agenda").close(1006);
+    vi.advanceTimersByTime(0);
+    await settle();
+    const before = FakeSocket.all.length;
+    vi.advanceTimersByTime(300);
+    expect(FakeSocket.all.length).toBe(before + 1);
+    expect(FakeSocket.all.at(-1).url).toContain("agent=agenda&view=presence");
+  });
+
+  it("keeps what the conversation said before the list arrived, for its row and the tab", async () => {
+    let answer;
+    const base = fakeFetch();
+    const listed = new Promise((resolve) => {
+      answer = resolve;
+    });
+    const fetch = vi.fn(async (url, init) => {
+      if (url === "/webchat/agents") await listed;
+      return base(url, init);
+    });
+    const { socket } = await loadPage({ fetch });
+    socket.open();
+    socket.receive(historyFrame());
+    socket.receive({
+      type: "requests",
+      requests: [{ id: 4, summary: "Change the tier?", askedAgoMs: 0, expiresInMs: 600_000 }],
+      more: 0,
+    });
+    answer();
+    await settle();
+    const row = $("roster").querySelector('[data-agent="assistant"]');
+    expect(row.dataset.state).toBe("waiting");
+    expect(document.title).toBe("(1) Assistant · Kelpie");
+  });
+
   it("hands the header's names to the row being opened, for 5.14's transition", async () => {
     await loadPage();
     const swap = (url, transition) => {

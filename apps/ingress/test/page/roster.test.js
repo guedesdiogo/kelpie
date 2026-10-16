@@ -198,18 +198,50 @@ describe("the roster's rows", () => {
     expect(lineOf("Kelpie").state).toBe("waiting");
   });
 
-  it("follows at most 16 agents, and says so once", () => {
+  it("keeps what the open conversation's socket said before the list named its row", () => {
+    document.body.innerHTML =
+      '<p class="strip" hidden></p><nav aria-label="Agents"><ul></ul></nav><p class="note" hidden></p>';
+    nav = document.querySelector("nav");
+    strip = document.querySelector(".strip");
+    waiting = [];
+    roster = new Roster(nav, {
+      texts: TEXTS.en,
+      locale: "en",
+      strip,
+      note: document.querySelector(".note"),
+      socket: {
+        host: "kelpie.test",
+        lang: "en",
+        secure: true,
+        isHidden: () => false,
+        random: () => 1,
+      },
+      less: () => false,
+      onWaiting: (count) => waiting.push(count),
+      onRefused: () => {},
+      onAnnounce: () => {},
+      openOwnCard: () => true,
+    });
+    roster.own({ type: "history", messages: [], received: [], paused: false });
+    roster.own({ type: "requests", requests: [asked()], more: 0 });
+    roster.setAgents(AGENTS, "assistant");
+    expect(lineOf("Kelpie").state).toBe("waiting");
+    expect(waiting.at(-1)).toBe(1);
+  });
+
+  it("follows at most 16 agents, the open one among them, and says so once", () => {
     const many = Array.from({ length: FOLLOWED_AT_MOST + 2 }, (_, index) => ({
       id: `agent-${index}`,
       name: `Agent ${index}`,
       main: index === 0,
     }));
     make(many, "agent-0");
-    expect(FakeSocket.all).toHaveLength(FOLLOWED_AT_MOST);
-    expect(FakeSocket.all.at(-1).url).toContain(`agent=agent-${FOLLOWED_AT_MOST}&`);
+    // The open one follows its own socket; 15 others follow one each.
+    expect(FakeSocket.all).toHaveLength(FOLLOWED_AT_MOST - 1);
+    expect(FakeSocket.all.at(-1).url).toContain(`agent=agent-${FOLLOWED_AT_MOST - 1}&`);
     expect(note.hidden).toBe(false);
-    expect(note.textContent).toBe("The sidebar follows the first 16 agents only.");
-    expect(lineOf(`Agent ${FOLLOWED_AT_MOST + 1}`).state).toBe("unknown");
+    expect(note.textContent).toBe("The sidebar follows 16 agents at a time.");
+    expect(lineOf(`Agent ${FOLLOWED_AT_MOST}`).state).toBe("unknown");
   });
 });
 
@@ -322,6 +354,31 @@ describe("the keyboard", () => {
     expect(document.activeElement).toBe(link);
   });
 
+  it("closes a request with Escape on its row, and keeps focus when one closes by itself", async () => {
+    make();
+    const agenda = opened("agenda");
+    agenda.receive(presence({ requests: [asked()] }));
+    const link = rowOf("Agenda").querySelector(".row-link");
+    link.focus();
+    link.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    const request = rowOf("Agenda").querySelector(".row-request");
+    link.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(request.hidden).toBe(true);
+    // Confirmed from the keyboard, the card folds and its request closes; focus goes back to the row.
+    link.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    const confirm = request.querySelector("button.confirm");
+    confirm.focus();
+    vi.advanceTimersByTime(PRESS_GUARD_MS);
+    confirm.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    confirm.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 }));
+    agenda.receive({ type: "confirmation", id: 7, status: "accepted" });
+    vi.advanceTimersByTime(1_000);
+    await vi.waitFor(() => expect(request.querySelector(".receipt")).not.toBeNull());
+    vi.advanceTimersByTime(RECEIPT_SHOWN_MS);
+    expect(request.hidden).toBe(true);
+    expect(document.activeElement).toBe(link);
+  });
+
   it("does nothing on → for a row that doesn't wait", () => {
     make();
     opened("agenda").receive(presence());
@@ -374,6 +431,32 @@ describe("a lost connection", () => {
     // The row still listed retries with the backoff.
     vi.advanceTimersByTime(300);
     expect(FakeSocket.all.filter((socket) => socket.url.includes("agent=agenda&"))).toHaveLength(2);
+  });
+
+  it("waits longer before each reload when the rows keep refusing, and retries them on request", () => {
+    make();
+    FakeSocket.presence("agenda").close(1006);
+    vi.advanceTimersByTime(0);
+    expect(refused).toHaveBeenCalledTimes(1);
+    roster.retry();
+    // With `random` at 1 the second wave asks after 600 ms, the next after 1.2 s.
+    vi.advanceTimersByTime(300);
+    FakeSocket.presence("agenda").close(1006);
+    vi.advanceTimersByTime(599);
+    expect(refused).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
+    expect(refused).toHaveBeenCalledTimes(2);
+    // A row that reads its state again ends the run.
+    const before = FakeSocket.presence("agenda");
+    roster.retry();
+    vi.advanceTimersByTime(1_000);
+    const agenda = FakeSocket.presence("agenda");
+    expect(agenda).not.toBe(before);
+    agenda.open();
+    agenda.receive(presence());
+    agenda.close(1008);
+    vi.advanceTimersByTime(0);
+    expect(refused).toHaveBeenCalledTimes(3);
   });
 
   it("restarts every row's backoff when the page's own socket is back", () => {

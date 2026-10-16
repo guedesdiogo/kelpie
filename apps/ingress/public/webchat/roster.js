@@ -9,6 +9,7 @@ import { icon } from "./icons.js";
 import { Mascot } from "./mascot.js";
 import { isDrawable } from "./mascot-art.js";
 import { APPROVED_MS } from "./mascot-states.js";
+import { retryDelay } from "./model.js";
 import { enter, hideAfterExit, play, reduced, SPRINGS } from "./motion.js";
 import { PresenceLink, rowAfter, rowAt, rowLine, rowMascot, UNKNOWN } from "./presence.js";
 import { roll } from "./roll.js";
@@ -78,6 +79,10 @@ export class Roster {
   #waiting = 0;
   #ticker = null;
   #refusing = false;
+  /** Reloads of the list in a row with no row coming back between them, for their backoff. */
+  #reloads = 0;
+  /** The open conversation's row, which its socket may bring before the list names it. */
+  #ownState = UNKNOWN;
   #ids = 0;
 
   /**
@@ -123,7 +128,8 @@ export class Roster {
       this.#drop(row);
       this.#rows.delete(id);
     }
-    let followed = 0;
+    // The open conversation counts among the 16, though its own socket follows it.
+    let followed = agents.some((agent) => agent.id === current) ? 1 : 0;
     let past = false;
     let previous = null;
     const rows = new Map();
@@ -146,6 +152,7 @@ export class Roster {
         row.followed = true;
         row.follow?.close();
         row.follow = null;
+        row.state = this.#ownState;
       } else if (followed < FOLLOWED_AT_MOST) {
         followed += 1;
         row.followed = true;
@@ -167,12 +174,20 @@ export class Roster {
     this.#refresh({ instant: true });
   }
 
-  /** A frame of the open conversation's own socket, which its row follows. */
+  /**
+   * A frame of the open conversation's own socket, which its row follows. The socket may open
+   * before the list names the row, so the row's state is kept until it does.
+   */
   own(frame) {
-    const row = this.#rows.get(this.#current);
-    if (!row) return;
     const mapped = ownFrame(frame);
-    if (mapped) this.#apply(row, mapped);
+    if (!mapped) return;
+    const row = this.#rows.get(this.#current);
+    if (row) {
+      this.#apply(row, mapped);
+      this.#ownState = row.state;
+    } else if (mapped.type !== "confirmation") {
+      this.#ownState = rowAfter(this.#ownState, mapped, this.#now());
+    }
   }
 
   /** The page lost its own socket, or has it back: every row says no connection meanwhile. */
@@ -185,6 +200,11 @@ export class Roster {
   /** The page's own socket came back, or the owner chose "Try now": each row's backoff restarts. */
   reconnect() {
     for (const row of this.#rows.values()) row.follow?.reconnect();
+  }
+
+  /** The list couldn't be read again: each row that lost its socket retries with its backoff. */
+  retry() {
+    for (const row of this.#rows.values()) row.follow?.retry();
   }
 
   /** The page shows again: retries held while it was hidden run. */
@@ -251,17 +271,29 @@ export class Roster {
       followed: false,
       current: false,
       card: null,
+      focusInside: false,
       approvedUntil: 0,
       glyph: null,
     };
     open.addEventListener("click", (event) => this.#toggle(row, { keyboard: event.detail === 0 }));
+    // Whether the owner is in the request, which a fold or a close takes from under them.
+    request.addEventListener("focusin", () => {
+      row.focusInside = true;
+    });
+    request.addEventListener("focusout", (event) => {
+      if (event.relatedTarget && !request.contains(event.relatedTarget)) row.focusInside = false;
+    });
     return row;
   }
 
   #follow(row) {
     row.follow = new PresenceLink(row.agent.id, {
       ...this.#socket,
-      onFrame: (frame) => this.#apply(row, frame),
+      onFrame: (frame) => {
+        // A row that reads its state again ends a run of refusals.
+        if (frame.type === "presence") this.#reloads = 0;
+        this.#apply(row, frame);
+      },
       onRefused: () => this.#refused(),
     });
     row.follow.open();
@@ -273,14 +305,19 @@ export class Roster {
     row.li.remove();
   }
 
-  /** Every row that refused in this turn of the page asks for one reload of the list. */
+  /**
+   * Every row that refused at once asks for one reload of the list. Reloads in a row with no row
+   * coming back wait the page's backoff, so a conversation that keeps refusing can't keep asking.
+   */
   #refused() {
     if (this.#refusing) return;
     this.#refusing = true;
+    const delay = this.#reloads === 0 ? 0 : retryDelay(this.#reloads, this.#socket.random);
+    this.#reloads += 1;
     this.#timers.set(() => {
       this.#refusing = false;
       this.#onRefused();
-    }, 0);
+    }, delay);
   }
 
   #apply(row, frame) {
@@ -428,9 +465,10 @@ export class Roster {
       },
       onAnnounce: this.#onAnnounce,
       onChange: (change) => {
-        if (change.kind === "receipt") {
-          this.#timers.set(() => this.#closeRequest(row), RECEIPT_SHOWN_MS);
-        }
+        if (change.kind !== "receipt") return;
+        // The fold took the focused button: focus goes back to the row, and stays on the list.
+        this.#keepFocus(row);
+        this.#timers.set(() => this.#closeRequest(row), RECEIPT_SHOWN_MS);
       },
       now: this.#now,
       timers: this.#timers,
@@ -463,6 +501,15 @@ export class Roster {
     row.request.hidden = true;
     row.request.replaceChildren();
     row.open.setAttribute("aria-expanded", "false");
+    this.#keepFocus(row);
+    row.focusInside = false;
+  }
+
+  /** Focus in the request, or lost from it to the page, returns to its row's link. */
+  #keepFocus(row) {
+    const active = document.activeElement;
+    const lost = !active || active === document.body || !active.isConnected;
+    if (row.request.contains(active) || (row.focusInside && lost)) row.link.focus();
   }
 
   /** An open request stays while its card is open, or folding; one answered elsewhere closes. */
@@ -493,7 +540,6 @@ export class Roster {
       if (event.key === "Escape" && !row.request.hidden) {
         event.preventDefault();
         this.#closeRequest(row);
-        row.link.focus();
       }
       return;
     }
@@ -512,7 +558,7 @@ export class Roster {
     if (event.key === "ArrowRight" && !row.open.hidden) {
       event.preventDefault();
       this.#openRequest(row, { keyboard: true });
-    } else if (event.key === "ArrowLeft" && !row.request.hidden) {
+    } else if ((event.key === "ArrowLeft" || event.key === "Escape") && !row.request.hidden) {
       event.preventDefault();
       this.#closeRequest(row);
     }

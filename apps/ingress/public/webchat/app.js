@@ -100,7 +100,8 @@ const thread = new Thread(threadElement, {
   less: () => reduced(),
   onConfirm: (id) => {
     if (!isOpen()) return false;
-    send({ type: "confirm", id });
+    // It names its agent, as a row's press does (ADR-0052 §3).
+    send({ type: "confirm", id, agent });
     return true;
   },
   // The card's hold pauses the conversation, as Pause does (ADR-0044 §2).
@@ -176,6 +177,8 @@ function receive(frame) {
   roster.own(frame);
   switch (frame.type) {
     case "history":
+      // A list that couldn't be read at first is read again once the conversation answers.
+      if (listFailed) reloadAgents();
       present(frame);
       setPaused(frame.paused);
       // Connected: the header's line goes back to saying what the agent does.
@@ -613,8 +616,8 @@ function connect() {
     if (socket !== current) return;
     socket = null;
     updateControls();
-    // Nothing more of the turn reaches this page, so the mascot and the thread show none of it.
-    present({ type: "closed" });
+    // Nothing more of the turn reaches this page, so the thread shows none of it. The mascot keeps
+    // its state until the banner says Offline, 2 s on (5.12).
     thread.stop("closed");
     setWait(null, { quiet: true });
     offlineSince ??= Date.now();
@@ -805,6 +808,9 @@ function restoreSession() {
 
 addEventListener("pagehide", saveSession);
 
+/** Whether the list couldn't be read when the page started: no answer, rather than a refusal. */
+let listFailed = false;
+
 /** The list again, once for every row a presence socket refused (ADR-0052 §5). */
 async function reloadAgents() {
   const { state, agents: found } = await fetchAgents();
@@ -812,7 +818,12 @@ async function reloadAgents() {
     showLogin();
     return;
   }
-  if (state !== "ok") return;
+  if (state !== "ok") {
+    // Unread, the list keeps its rows, and each that lost its socket retries with its backoff.
+    roster.retry();
+    return;
+  }
+  listFailed = false;
   agents = found;
   showAgents();
 }
@@ -874,7 +885,10 @@ function showWaiting(count) {
   showTab();
 }
 
-const switcherSheet = sheet($("agents"), { onClose: () => agentsMenu.hide({ restore: false }) });
+const switcherSheet = sheet($("agents"), {
+  onClose: () => agentsMenu.hide({ restore: false }),
+  active: () => phone.matches,
+});
 const agentsMenu = popover($("switcher"), $("agents"), {
   arrows: true,
   onOpen: () => {
@@ -956,7 +970,7 @@ function askPause() {
     return false;
   }
   pausedByKeyboard = fromKeyboard();
-  send({ type: "pause" });
+  send({ type: "pause", agent });
   return true;
 }
 
@@ -1261,6 +1275,7 @@ async function start() {
     connect();
   }
   const { state, agents: found } = await (listed ?? fetchAgents());
+  listFailed = state === "unknown";
   agents = found;
   if (state === "expired") {
     showLogin();

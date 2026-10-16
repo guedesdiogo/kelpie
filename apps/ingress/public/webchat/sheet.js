@@ -9,9 +9,13 @@ export const STOPS = [0.4, 0.9];
 /** A release faster than this, in px per ms, is a flick. */
 export const FLICK = 0.5;
 
+/**
+ * `active` says whether the panel is a sheet now: on a phone; elsewhere the same panel is a popover
+ * and a press on it is only a press.
+ */
 export function sheet(
   panel,
-  { onClose, height = () => innerHeight, now = () => performance.now() },
+  { onClose, active = () => true, height = () => innerHeight, now = () => performance.now() },
 ) {
   let stop = STOPS[0];
   let drag = null;
@@ -33,23 +37,25 @@ export function sheet(
   }
 
   panel.addEventListener("pointerdown", (event) => {
-    if (event.pointerType === "mouse" && event.button > 0) return;
+    if (!active() || (event.pointerType === "mouse" && event.button > 0)) return;
     const list = panel.querySelector("ul");
     // The list scrolls first: the sheet moves only once it is at its top.
     if (list && list.scrollTop > 0 && !event.target.closest(".handle")) return;
     drag = {
+      pointer: event.pointerId,
       y: event.clientY,
       at: now(),
       from: offsetAt(stop),
       offset: offsetAt(stop),
       moved: false,
     };
-    panel.setPointerCapture?.(event.pointerId);
   });
   panel.addEventListener("pointermove", (event) => {
     if (!drag) return;
     const dy = event.clientY - drag.y;
     if (!drag.moved && Math.abs(dy) < 6) return;
+    // Only a drag takes the pointer: a press keeps its click on the row under it.
+    if (!drag.moved) panel.setPointerCapture?.(drag.pointer);
     drag.moved = true;
     drag.offset = Math.max(0, drag.from + dy);
     setOffset(drag.offset);

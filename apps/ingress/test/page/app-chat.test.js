@@ -190,7 +190,7 @@ describe("the conversation", () => {
       deadline: { remainingMs: 9_000, spanMs: 10_000, holding: false },
     });
     $("pause").click();
-    expect(socket.sentOf("pause")).toEqual([{ type: "pause" }]);
+    expect(socket.sentOf("pause")).toEqual([{ type: "pause", agent: "assistant" }]);
     socket.receive({ type: "paused" });
     expect($("paused-line").hidden).toBe(false);
     expect($("paused-line").textContent).toBe("Paused. Assistant answers after your next message.");
@@ -270,7 +270,7 @@ describe("the conversation", () => {
     // A press in the card's first 400 ms doesn't count (ADR-0052 §5).
     vi.advanceTimersByTime(400);
     confirm.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
-    expect(socket.sentOf("confirm")).toEqual([{ type: "confirm", id: 4 }]);
+    expect(socket.sentOf("confirm")).toEqual([{ type: "confirm", id: 4, agent: "assistant" }]);
     socket.receive({ type: "confirmation", id: 4, status: "accepted" });
     const toast = document.querySelector(".toast");
     expect(toast.textContent).toContain("You confirmed at 2:32 PM");
