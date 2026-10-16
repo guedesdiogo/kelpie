@@ -5,6 +5,7 @@
 - Issue: [#364](https://github.com/guedesdiogo/kelpie/issues/364)
 - Decided by the owner on 2026-10-15, after seven rounds on a live concept page: «Ficou bom. Aprovo as dez decisões do conceito de mascote.»
 - On the review of this ADR, the owner chose that the working activity shows only what is true: «Só o que é verdade»
+- Amended by: [ADR-0046](0046-telegram-bot-photo.md), the agent's Telegram bot shows its mascot as its profile photo
 - Amends: [ADR-0043](0043-design-system.md), how an agent looks (§6) and an exception to motion rule 8 for the mascot; [ADR-0024](0024-fixed-wait-end-of-turn.md), the mascot also listens during the wait where its bar shows (§5); and `docs/design-system.md` §4.4 rule 8 and §5.9, an idle agent in the roster
 
 ## Context

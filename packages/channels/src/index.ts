@@ -16,6 +16,7 @@ export {
   typingRenewIntervalMs,
 } from "./capabilities.ts";
 export type {
+  BotPhotoRequest,
   ChannelEgressContract,
   ChannelFormsContract,
   ChannelWebhooksContract,

@@ -1,5 +1,5 @@
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
-import { defineConfig } from "vitest/config";
+import { defineConfig, type Plugin } from "vitest/config";
 
 const RUNNER_SECRETS: Record<string, { version: string; protocol: number }> = {
   ["r".repeat(64)]: { version: "0.1.0", protocol: 1 },
@@ -21,8 +21,23 @@ function fakeRunner(request: Request): Response {
     : Response.json({ ok: false }, { status: 401 });
 }
 
+/**
+ * The webchat's mascot files, linked into src/photo/webchat as `.txt` (ADR-0046), stay at the path
+ * of their link, so the `Text` rule below loads them as text. Vite would follow the links to the
+ * `.js` files and run them.
+ */
+const textLinks: Plugin = {
+  name: "kelpie-text-links",
+  enforce: "pre",
+  resolveId: (source, importer) =>
+    source.endsWith(".txt") && importer
+      ? decodeURIComponent(new URL(source, `file://${importer}`).pathname)
+      : null,
+};
+
 export default defineConfig({
   plugins: [
+    textLinks,
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
       // A key for tests only: 32 bytes of 0x2a, base64.

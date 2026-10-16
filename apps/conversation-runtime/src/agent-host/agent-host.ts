@@ -1,4 +1,5 @@
 import type { Remote } from "@kelpie/access";
+import type { ChannelEgressContract } from "@kelpie/channels";
 import type {
   Actor,
   AgentConfig,
@@ -29,6 +30,8 @@ import {
   isTaskId,
   isTaskStatus,
   MAX_TASK_TITLE,
+  type Mascot,
+  mascotFor,
   parseCommentText,
   parseNewTask,
   parseRunOutcome,
@@ -975,7 +978,30 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
         })
         .run();
     });
+    if (fields.includes("mascot")) void this.#updateBotPhoto(settings.mascot ?? null);
     return { ok: true, value: { settings, promptVersion } };
+  }
+
+  /**
+   * Has the agent's Telegram bot show its mascot as its photo (ADR-0046): when the bot connects, and
+   * when the mascot changes. channel-egress draws it later, and an agent without a bot gets none, so
+   * a failure here only costs the photo.
+   */
+  async #updateBotPhoto(picked: Mascot | null): Promise<void> {
+    const agentId = this.ctx.id.name;
+    if (!agentId) return;
+    try {
+      // The role picks the default mascot, so only the default needs the Registry.
+      const role = picked ? null : ((await this.#registry().get(agentId))?.role ?? null);
+      const mascot = mascotFor(agentId, role, picked);
+      const egress = this.env.CHANNEL_EGRESS as unknown as ChannelEgressContract;
+      const asked = await egress.updateBotPhoto(agentId, mascot);
+      if (!asked.ok && asked.reason !== "not_connected") {
+        console.warn("AgentHost: the bot's photo wasn't asked for", asked.reason);
+      }
+    } catch (error) {
+      console.warn("AgentHost: the bot's photo wasn't asked for", errorName(error));
+    }
   }
 
   /**
@@ -1009,11 +1035,14 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   /**
    * Tells each conversation still waiting for the event's step that the owner finished it. A wait
    * ends once its conversation took the event; one it couldn't reach stays, for the next report.
-   * Expired waits go first.
+   * Expired waits go first. A bot just connected also gets the agent's mascot as its photo.
    */
   async setupDone(event: SetupEvent): Promise<void> {
     const agentId = this.ctx.id.name;
     if (!agentId || !isSetupStep(event?.step)) return;
+    if (event.step === "telegram_connected") {
+      void this.#updateBotPhoto(this.config().settings.mascot ?? null);
+    }
     this.#pruneWaits(Date.now());
     const waiting = this.#db
       .select({ conversation: schema.setupWaits.conversation })

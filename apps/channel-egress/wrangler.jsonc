@@ -7,8 +7,9 @@
   // Reached only through service bindings from Kelpie's other Workers.
   "workers_dev": false,
   "preview_urls": false,
-  // Drizzle's Durable Object migrations import .sql files as text.
-  "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
+  // Drizzle's Durable Object migrations import .sql files as text, and the bot's photo imports the
+  // webchat's mascot files, linked in src/photo/webchat as .txt (ADR-0046).
+  "rules": [{ "type": "Text", "globs": ["**/*.sql", "**/*.txt"], "fallthrough": true }],
   // The key that encrypts the secret store (ADR-0013): 32 random bytes, base64. `docs/secrets.md`
   // says how to make it.
   "secrets": { "required": ["SECRETS_KEY"] },
@@ -17,7 +18,16 @@
   // empty, no webhook is registered.
   "vars": { "INGRESS_ORIGIN": "" },
   "durable_objects": {
-    "bindings": [{ "name": "SECRET_STORE", "class_name": "SecretStore" }]
+    "bindings": [
+      { "name": "SECRET_STORE", "class_name": "SecretStore" },
+      { "name": "BOT_PHOTO", "class_name": "BotPhoto" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SecretStore"] }]
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["SecretStore"] },
+    { "tag": "v2", "new_sqlite_classes": ["BotPhoto"] }
+  ],
+  // Browser Run draws each bot's photo (ADR-0046). Workers Paid includes 10 browser hours a month,
+  // and a photo takes about 15 s.
+  "browser": { "binding": "BROWSER" }
 }

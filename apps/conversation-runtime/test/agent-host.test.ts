@@ -1,8 +1,15 @@
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { DEFAULT_SETTINGS, REGISTRY_NAME, SETUP_AGENT_ID } from "@kelpie/config";
+import {
+  DEFAULT_SETTINGS,
+  derivedMascot,
+  KELPIE_MASCOT,
+  type Mascot,
+  REGISTRY_NAME,
+  SETUP_AGENT_ID,
+} from "@kelpie/config";
 import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CREATE_SUBAGENT_SKILL,
   clampModel,
@@ -953,5 +960,80 @@ describe("a subagent's trio, held to its creator's (#290)", () => {
     // Unset counts as the model's default, which may be above the creator's: it takes the creator's.
     expect(effortOf({}, { effort: "low" })).toEqual({ tier: "cheap", effort: "low" });
     expect(effortOf({ effort: "high" }, {})).toEqual({ tier: "cheap" });
+  });
+});
+
+describe("The bot's photo (ADR-0046)", () => {
+  const picked: Mascot = { ...KELPIE_MASCOT, color: "lagoon" };
+
+  /** The agent's AgentHost, with a channel-egress that records what it is asked for. */
+  async function photoHost(id: string, answer: object = { ok: true }) {
+    const asked: [string, unknown][] = [];
+    const stub = host(id);
+    await runInDurableObject(stub, (instance) => {
+      const configurable = instance as unknown as { env: Env };
+      configurable.env = {
+        ...configurable.env,
+        CHANNEL_EGRESS: {
+          updateBotPhoto: async (agentId: string, mascot: unknown) => {
+            asked.push([agentId, mascot]);
+            if ("throws" in answer) throw new Error("egress is down");
+            return answer;
+          },
+        } as unknown as Env["CHANNEL_EGRESS"],
+      };
+    });
+    return { stub, asked };
+  }
+
+  it("is asked for when the mascot changes, and when the bot connects", async () => {
+    const { stub, asked } = await photoHost("photo-agent");
+    await stub.configure({ mascot: picked }, owner);
+    // The same mascot again, or another setting, asks nothing.
+    await stub.configure({ mascot: picked }, owner);
+    await stub.configure({ systemPrompt: "Fale como um pirata." }, owner);
+    await stub.setupDone({ step: "telegram_paired", userId: "u-owner" });
+    await vi.waitFor(() => expect(asked).toHaveLength(1));
+    await stub.setupDone({
+      step: "telegram_connected",
+      userId: "u-owner",
+      bot: "PhotoBot",
+      webhookRegistered: true,
+    });
+    await vi.waitFor(() => expect(asked).toHaveLength(2));
+    // Back to its default: an agent the Registry doesn't list draws one from its id.
+    await stub.configure({ mascot: null }, owner);
+    await vi.waitFor(() => expect(asked).toHaveLength(3));
+    expect(asked).toEqual([
+      ["photo-agent", picked],
+      ["photo-agent", picked],
+      ["photo-agent", derivedMascot("photo-agent")],
+    ]);
+  });
+
+  it("costs only the photo when channel-egress fails or refuses", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const refused = await photoHost("photo-refused", { ok: false, reason: "store_unavailable" });
+      expect(await refused.stub.configure({ mascot: picked }, owner)).toMatchObject({ ok: true });
+      await vi.waitFor(() => expect(warn).toHaveBeenCalledTimes(1));
+      expect(warn).toHaveBeenLastCalledWith(
+        "AgentHost: the bot's photo wasn't asked for",
+        "store_unavailable",
+      );
+
+      const down = await photoHost("photo-down", { throws: true });
+      expect(await down.stub.configure({ mascot: picked }, owner)).toMatchObject({ ok: true });
+      await vi.waitFor(() => expect(warn).toHaveBeenCalledTimes(2));
+      expect(warn).toHaveBeenLastCalledWith("AgentHost: the bot's photo wasn't asked for", "Error");
+
+      // An agent without a bot isn't a failure.
+      const none = await photoHost("photo-none", { ok: false, reason: "not_connected" });
+      await none.stub.configure({ mascot: picked }, owner);
+      await vi.waitFor(() => expect(none.asked).toHaveLength(1));
+      expect(warn).toHaveBeenCalledTimes(2);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
