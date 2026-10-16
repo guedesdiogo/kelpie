@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-06
 - Issue: [#40](https://github.com/guedesdiogo/kelpie/issues/40)
+- Amended by: [ADR-0050](0050-webchat-presence-sockets.md), the socket has a presence view for the sidebar, admitted the same way, that gets only the conversation's presence
 - Accepted by the owner on 2026-10-06: «Sim»
 
 ## Context
