@@ -1698,6 +1698,19 @@ describe("Kelpie's notice of the agents Master creates or renames (#387)", () =>
     return world;
   }
 
+  /** The unsaid announcements as the conversation keeps them, by key. */
+  const keptOf = (stub: ReturnType<typeof agent>) =>
+    runInDurableObject(stub, (_instance, state) =>
+      Object.fromEntries(
+        state.storage.sql
+          .exec<{ key: string; value: string }>(
+            "SELECT key, value FROM state WHERE key IN ('handoffs', 'subagentChanges', 'agentChanges')",
+          )
+          .toArray()
+          .map(({ key, value }) => [key, JSON.parse(value)]),
+      ),
+    );
+
   it("follows the reply, in the conversation's language, whatever the model says", async () => {
     const world = configuring(
       use(
@@ -1765,17 +1778,7 @@ describe("Kelpie's notice of the agents Master creates or renames (#387)", () =>
     expect(world.sent).toEqual([]);
     // Kept in a key of its own: a release before #387 reads the handoffs and the subagents'
     // changes, and never these.
-    const kept = await runInDurableObject(stub, (_instance, state) =>
-      Object.fromEntries(
-        state.storage.sql
-          .exec<{ key: string; value: string }>(
-            "SELECT key, value FROM state WHERE key IN ('handoffs', 'subagentChanges', 'agentChanges')",
-          )
-          .toArray()
-          .map(({ key, value }) => [key, JSON.parse(value)]),
-      ),
-    );
-    expect(kept).toEqual({
+    expect(await keptOf(stub)).toEqual({
       handoffs: [],
       subagentChanges: [],
       agentChanges: [{ kind: "agentCreated", agentId: "ana", name: "Ana" }],
@@ -1804,6 +1807,54 @@ describe("Kelpie's notice of the agents Master creates or renames (#387)", () =>
     expect(world.sent).toEqual([
       "Done.",
       "Kelpie created the agents a01, a02, a03, a04 and 21 more.",
+    ]);
+  });
+
+  it("cuts only the handoffs past the cap, and keeps each group in its own key", async () => {
+    const world = use(fakeWorld([toolCalls({ name: "burst" }), refuse(), reply("Here.")]));
+    // A turn whose tools hand off more tasks than the cap, between an agent's creation and rename.
+    world.tools = [
+      {
+        async tools() {
+          return [
+            {
+              spec: { name: "burst", description: "x", inputSchema: { type: "object" as const } },
+              label: "Bursting",
+              async run(_input: unknown, context: ToolContext) {
+                context.announce({ kind: "agentCreated", agentId: "ana", name: "Ana" });
+                for (let n = 1; n <= 22; n++) {
+                  const handoff = { taskId: `t${n}`, agentId: "sales", name: "Sales" };
+                  context.announce({ kind: "handoff", ...handoff });
+                }
+                context.announce({ kind: "agentRenamed", agentId: "ana", name: "Ana Souza" });
+                return { output: "ok" };
+              },
+            },
+          ];
+        },
+      },
+    ];
+    const stub = agent("kelpie:telegram:announce-mixed");
+    await turn(stub, world, "m1", "Go.", FROM_OWNER);
+
+    const kept = await keptOf(stub);
+    expect(kept.handoffs.map(({ taskId }: { taskId: string }) => taskId)).toEqual(
+      Array.from({ length: 20 }, (_, n) => `t${n + 3}`),
+    );
+    expect(kept.subagentChanges).toEqual([]);
+    expect(kept.agentChanges).toEqual([
+      { kind: "agentCreated", agentId: "ana", name: "Ana" },
+      { kind: "agentRenamed", agentId: "ana", name: "Ana Souza" },
+    ]);
+
+    await turn(stub, world, "m2", "Well?", FROM_OWNER);
+    expect(world.sent).toEqual([
+      "Here.",
+      [
+        'Kelpie created the agent "Ana" (ana).',
+        'Kelpie renamed the agent ana to "Ana Souza".',
+        'Kelpie handed tasks to "Sales" (sales).',
+      ].join("\n"),
     ]);
   });
 

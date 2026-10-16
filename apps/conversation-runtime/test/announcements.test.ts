@@ -165,18 +165,19 @@ describe("announcementNotice", () => {
       `Kelpie handed a task to "${'\\"'.repeat(40)}…" (sales).`,
     );
     // A hidden character takes seven written out, and none is cut in half.
-    expect(announcementNotice([{ ...sales, name: "͏".repeat(12) }], "en")).toBe(
+    expect(announcementNotice([{ ...sales, name: "\u034F".repeat(12) }], "en")).toBe(
       `Kelpie handed a task to "${"\\u{34F}".repeat(11)}…" (sales).`,
     );
   });
 
   it("fits one Telegram message whatever the agents' names and number (#387)", () => {
-    // The longest ids, and names that grow the most once written out.
+    // The longest ids, and names that grow the most once written out: quotes and backslashes
+    // for the four a line names, hidden characters after them.
     const id = (n: number) => `a${String(n).padStart(39, "0")}`;
-    const names = ["͏".repeat(80), '"'.repeat(80), "\\".repeat(80)];
+    const names = ['"'.repeat(80), "\\".repeat(80)];
     const all = Array.from({ length: 30 }, (_, n): Announcement[] => {
       const agentId = id(n);
-      const name = names[n % names.length] ?? "";
+      const name = n < 4 ? (names[n % 2] ?? "") : "\u034F".repeat(80);
       return [
         { kind: "agentCreated", agentId, name },
         { kind: "created", agentId, name },
