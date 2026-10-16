@@ -76,8 +76,8 @@ export const POSES = {
     mouth: "wave",
     badge: "error",
   }),
-  // The proposal on #366, for the owner to approve: the task's object rests, and the mascot looks
-  // up at the owner beside a still, dashed bubble, as the label's dashed circle (ADR-0044). The
+  // The owner approved it on #366: the task's object rests, and the mascot looks up at the owner
+  // beside a still, dashed bubble, as the label's dashed circle (ADR-0044). The
   // webchat doesn't show it: it gets no streamed tokens, so it can't tell a slow model from none.
   noResponse: pose({ gaze: [0, -1.5], tilt: 2, eye: 0.92, brows: "up", badge: "silent" }),
 };
