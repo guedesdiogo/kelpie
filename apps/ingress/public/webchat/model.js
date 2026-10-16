@@ -134,6 +134,18 @@ export function pillText(texts, { count, approval }) {
   return count > 0 ? texts.pillNew(count) : null;
 }
 
+// ── The tab (5.9) ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The tab's title and favicon while `waiting` agents wait for the owner: the title starts with
+ * their count, and the favicon gets the --warm dot. An agent named Kelpie isn't named twice.
+ */
+export function tabOf(name, waiting) {
+  const title = name === "Kelpie" ? "Kelpie" : `${name} · Kelpie`;
+  if (waiting === 0) return { title, icon: "/webchat/icon.svg" };
+  return { title: `(${waiting}) ${title}`, icon: "/webchat/icon-waiting.svg" };
+}
+
 // ── A lost connection (5.12) ───────────────────────────────────────────────────────────────────
 
 /** The first 2 s offline change nothing. */

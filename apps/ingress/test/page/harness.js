@@ -98,9 +98,9 @@ export async function loadPage({
   for (const [key, value] of Object.entries(session)) sessionStorage.setItem(key, value);
   for (const [key, value] of Object.entries(local)) localStorage.setItem(key, value);
   // The page's own stylesheets and scripts stay out: the project's DOM loads no file, and the
-  // test imports the modules itself.
+  // test imports the modules itself. The favicon's links stay, since the page swaps one (5.9).
   const parsed = new DOMParser().parseFromString(PAGE, "text/html");
-  for (const node of parsed.querySelectorAll("link, script")) node.remove();
+  for (const node of parsed.querySelectorAll("link:not([rel='icon']), script")) node.remove();
   document.head.replaceChildren(
     ...[...parsed.head.childNodes].map((node) => document.importNode(node, true)),
   );
