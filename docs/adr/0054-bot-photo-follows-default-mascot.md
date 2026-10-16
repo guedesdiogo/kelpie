@@ -1,4 +1,4 @@
-# ADR-0053: A bot's photo follows the agent's default mascot when that default changes
+# ADR-0054: A bot's photo follows the agent's default mascot when that default changes
 
 - Status: Accepted
 - Date: 2026-10-16
