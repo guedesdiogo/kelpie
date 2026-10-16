@@ -664,12 +664,14 @@ function restoreSession() {
       entry[1].length <= MAX_TEXT,
   );
   const fresh = Number.isFinite(kept.savedAt) && Date.now() - kept.savedAt <= RESEND_WITHIN_MS;
-  const draft = [typeof kept.draft === "string" ? kept.draft : ""];
+  const draft = [];
   for (const [id, text] of messages) {
     // An old message is never sent by itself: it waits in the box for the owner to send again.
     if (fresh) unconfirmed.set(id, text);
     else draft.push(text);
   }
+  // The draft was written after the messages it follows.
+  if (typeof kept.draft === "string") draft.push(kept.draft);
   const text = draft.filter(Boolean).join("\n");
   if (text) {
     input.value = text;

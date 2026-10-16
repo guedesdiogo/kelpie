@@ -239,7 +239,8 @@ describe("an expired login (5.12)", () => {
         }),
       },
     });
-    expect($("text").value).toBe("rascunho\napague X");
+    // In the order they were written: the unsent message came before the draft.
+    expect($("text").value).toBe("apague X\nrascunho");
     page.socket.open();
     page.socket.receive(historyFrame());
     expect(page.socket.sentOf("message")).toEqual([]);

@@ -125,7 +125,12 @@ export default defineConfig({
           // The page's tests import its modules themselves; nothing is fetched from a server.
           environmentOptions: {
             happyDOM: {
-              settings: { disableCSSFileLoading: true, disableJavaScriptFileLoading: true },
+              settings: {
+                disableCSSFileLoading: true,
+                disableJavaScriptFileLoading: true,
+                // A file it doesn't load isn't an error to log.
+                handleDisabledFileLoadingAsSuccess: true,
+              },
             },
           },
         },
