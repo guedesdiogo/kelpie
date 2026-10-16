@@ -93,6 +93,35 @@ describe("the webchat's icons (ADR-0049)", () => {
     expect(svg).toMatch(/<rect class="t" width="32" height="32"/);
   });
 
+  it("draws the waiting favicon: the same tile, and a --warm dot in an --on-accent ring (5.9)", () => {
+    const plain = served("/webchat/icon.svg").toString("utf8");
+    const svg = served("/webchat/icon-waiting.svg").toString("utf8");
+    const style = svg.match(/<style>([\s\S]*)<\/style>/)?.[1] ?? "";
+    const [light, dark = ""] = style.split(/@media\s*\(prefers-color-scheme:\s*dark\)/);
+    const accent = token("--accent");
+    const onAccent = token("--on-accent");
+    const warm = token("--warm");
+    expect([fill(light, ".t"), fill(light, ".g"), fill(light, ".w")]).toEqual([
+      accent.light,
+      onAccent.light,
+      warm.light,
+    ]);
+    expect([fill(dark, ".t"), fill(dark, ".g"), fill(dark, ".w")]).toEqual([
+      accent.dark,
+      onAccent.dark,
+      warm.dark,
+    ]);
+    // The tile and the mark are icon.svg's, unchanged.
+    const tile = plain.match(/<rect class="t"[^>]*\/><path class="g"[^>]*\/>/)?.[0];
+    expect(tile).toBeDefined();
+    expect(svg).toContain(tile);
+    // --warm on --accent measures about 1:1, so a ring in --on-accent sets the dot apart. Both sit
+    // in the bottom-right corner, where the 36 px badge sits (5.19), and leave the ears clear.
+    expect(svg).toMatch(
+      /<circle class="g" cx="25" cy="25" r="7"\/><circle class="w" cx="25" cy="25" r="5"\/>/,
+    );
+  });
+
   it("serves the home-screen icon at 180 px", () => {
     expect(pngSize(served(links("apple-touch-icon")[0].getAttribute("href")))).toBe("180x180");
   });
