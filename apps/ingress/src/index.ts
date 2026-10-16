@@ -64,6 +64,10 @@ function webchatDeps(env: Env): WebchatDeps {
       (await (
         env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<Pick<RegistryContract, "get">>
       ).get(agentId)) !== null,
+    listAgents: async () =>
+      (
+        env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<Pick<RegistryContract, "list">>
+      ).list(),
     page: (request) => env.ASSETS.fetch(request),
     connect: (name, admission) => connectWebchat(env, name, admission),
   };
