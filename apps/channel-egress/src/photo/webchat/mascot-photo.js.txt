@@ -1,0 +1,1 @@
+../../../../ingress/public/webchat/mascot-photo.js

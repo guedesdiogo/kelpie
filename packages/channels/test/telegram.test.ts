@@ -21,15 +21,22 @@ const webhook = (body: unknown, secret: string | null = SECRET) => ({
 function botApi(answer: (method: string) => Response = () => okResult({ message_id: 77 })) {
   const calls: { url: string; method: string; body: Record<string, unknown> }[] = [];
   const redirects: (RequestRedirect | undefined)[] = [];
+  const headers: (HeadersInit | undefined)[] = [];
   const fetch = (async (input: string, init?: RequestInit) => {
     const method = input.split("/").at(-1) ?? "";
-    calls.push({ url: input, method, body: JSON.parse(String(init?.body)) });
+    const body =
+      init?.body instanceof FormData
+        ? Object.fromEntries(init.body)
+        : JSON.parse(String(init?.body));
+    calls.push({ url: input, method, body });
     redirects.push(init?.redirect);
+    headers.push(init?.headers);
     return answer(method);
   }) as typeof globalThis.fetch;
   return {
     calls,
     redirects,
+    headers,
     adapter: new TelegramAdapter({ botToken: TOKEN, webhookSecret: SECRET, fetch }),
   };
 }
@@ -351,6 +358,42 @@ describe("Telegram sending", () => {
 
     const revoked = botApi(() => failure(401));
     await expect(revoked.adapter.deleteWebhook()).rejects.toBeInstanceOf(ChannelRequestError);
+  });
+
+  it("uploads the bot's photo, a still JPG or a looping MP4 (ADR-0046)", async () => {
+    const { adapter, calls, headers, redirects } = botApi(() => okResult(true));
+    const jpg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
+    const mp4 = new Uint8Array([0, 0, 0, 0x24, 0x66, 0x74, 0x79, 0x70]);
+    await adapter.setProfilePhoto({ type: "static", jpg });
+    await adapter.setProfilePhoto({ type: "animated", mp4 });
+
+    expect(calls.map(({ url }) => url)).toEqual([
+      `https://api.telegram.org/bot${TOKEN}/setMyProfilePhoto`,
+      `https://api.telegram.org/bot${TOKEN}/setMyProfilePhoto`,
+    ]);
+    const [still, loop] = calls.map(({ body }) => body);
+    expect(JSON.parse(String(still?.photo))).toEqual({ type: "static", photo: "attach://file" });
+    expect(JSON.parse(String(loop?.photo))).toEqual({
+      type: "animated",
+      animation: "attach://file",
+      main_frame_timestamp: 0,
+    });
+    const files = [still?.file, loop?.file] as File[];
+    expect(files.map((file) => [file.name, file.type])).toEqual([
+      ["mascot.jpg", "image/jpeg"],
+      ["mascot.mp4", "video/mp4"],
+    ]);
+    const bytes = async (file?: File) => new Uint8Array(await (file ?? new Blob()).arrayBuffer());
+    expect(await bytes(files[0])).toEqual(jpg);
+    expect(await bytes(files[1])).toEqual(mp4);
+    // The form sets its own multipart type, and the token in the path never follows a redirect.
+    expect(headers).toEqual([undefined, undefined]);
+    expect(redirects).toEqual(["manual", "manual"]);
+
+    const refused = botApi(() => failure(400));
+    await expect(refused.adapter.setProfilePhoto({ type: "animated", mp4 })).rejects.toMatchObject({
+      status: 400,
+    });
   });
 
   it("turns a 429 into a wait, in milliseconds", async () => {

@@ -30,7 +30,17 @@ export interface ChannelEgressContract {
     options?: SendOptions,
   ): Promise<SendOutcome>;
   typing(agentId: string, destination: EgressDestination): Promise<TypingOutcome>;
+  /**
+   * Shows the agent's mascot as its Telegram bot's photo (ADR-0046). channel-egress draws and sends
+   * it soon after, the newest mascot first. It checks `mascot` again, since it is an RPC boundary.
+   */
+  updateBotPhoto(agentId: string, mascot: unknown): Promise<BotPhotoRequest>;
 }
+
+/** Whether a bot's photo was asked for. An agent without a bot gets none. */
+export type BotPhotoRequest =
+  | { ok: true }
+  | { ok: false; reason: "invalid_input" | "not_connected" | "store_unavailable" };
 
 /**
  * Why a bot's webhook couldn't be registered: no bot is stored for the agent, ingress's public

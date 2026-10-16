@@ -60,6 +60,11 @@ interface TelegramMessage {
   is_automatic_forward?: boolean;
 }
 
+/** A bot's profile photo: a still JPG, or a looping MPEG4. */
+export type ProfilePhoto =
+  | { type: "static"; jpg: Uint8Array<ArrayBuffer> }
+  | { type: "animated"; mp4: Uint8Array<ArrayBuffer> };
+
 interface TelegramResponse<T> {
   ok: boolean;
   result?: T;
@@ -158,13 +163,34 @@ export class TelegramAdapter implements ChannelAdapter {
     await this.#call("deleteWebhook", { drop_pending_updates: true });
   }
 
-  async #call<T>(method: string, body: Record<string, unknown>): Promise<T> {
+  /**
+   * Sets the bot's own profile photo (`setMyProfilePhoto`), the agent's mascot (ADR-0046). Telegram
+   * reuses no photo, so each one goes up as a new file. A loop's still is its first frame.
+   */
+  async setProfilePhoto(photo: ProfilePhoto): Promise<void> {
+    const form = new FormData();
+    if (photo.type === "static") {
+      form.set("photo", JSON.stringify({ type: "static", photo: "attach://file" }));
+      form.set("file", new Blob([photo.jpg], { type: "image/jpeg" }), "mascot.jpg");
+    } else {
+      form.set(
+        "photo",
+        JSON.stringify({ type: "animated", animation: "attach://file", main_frame_timestamp: 0 }),
+      );
+      form.set("file", new Blob([photo.mp4], { type: "video/mp4" }), "mascot.mp4");
+    }
+    await this.#call("setMyProfilePhoto", form);
+  }
+
+  async #call<T>(method: string, body: Record<string, unknown> | FormData): Promise<T> {
     let response: Response;
     try {
       response = await this.#fetch(`${API}/bot${this.#config.botToken}/${method}`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
+        // A form sets its own multipart type, with the boundary.
+        ...(body instanceof FormData
+          ? { body }
+          : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
         // The token is in the path; a redirect would carry it elsewhere. Workers' fetch only takes
         // "follow" or "manual", so a redirect comes back as an answer and fails below.
         redirect: "manual",

@@ -1,6 +1,7 @@
-import { WorkerEntrypoint } from "cloudflare:workers";
+import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { maskIdentityValue } from "@kelpie/access";
 import {
+  type BotPhotoRequest,
   type ChannelEgressContract,
   type ChannelFormsContract,
   ChannelRateLimitedError,
@@ -20,7 +21,8 @@ import {
   type WebhookRegistration,
 } from "@kelpie/channels";
 import { TELEGRAM_SECRET_HEADER, TelegramAdapter } from "@kelpie/channels/telegram";
-import { isAgentId, SETUP_AGENT_ID } from "@kelpie/config";
+import { isAgentId, type Mascot, parseMascot, SETUP_AGENT_ID } from "@kelpie/config";
+import { drawPhotos, type Photos } from "./photo/draw.ts";
 import {
   checkRunner,
   parseRunnerSecret,
@@ -467,6 +469,24 @@ export class ChannelEgress extends WorkerEntrypoint<Env> implements ChannelEgres
     }
   }
 
+  /**
+   * Has the agent's bot show `mascot` as its photo (ADR-0046). Its `BotPhoto` draws and sends it
+   * soon after; an agent without a bot gets nothing.
+   */
+  async updateBotPhoto(agentId: string, mascot: unknown): Promise<BotPhotoRequest> {
+    const parsed = parseMascot(mascot);
+    if (!isAgentId(agentId) || !parsed) return { ok: false, reason: "invalid_input" };
+    const found = await telegramSecret(this.env, agentId);
+    if (!found.ok) return { ok: false, reason: found.reason };
+    try {
+      await this.env.BOT_PHOTO.getByName(agentId).request(agentId, parsed);
+      return { ok: true };
+    } catch (error) {
+      console.error("channel-egress: a bot's photo wasn't asked for", errorName(error));
+      return unavailable;
+    }
+  }
+
   async #telegram(
     agentId: string,
     destination: EgressDestination,
@@ -475,6 +495,78 @@ export class ChannelEgress extends WorkerEntrypoint<Env> implements ChannelEgres
     const found = await telegramSecret(this.env, agentId);
     return found.ok ? new TelegramAdapter(found.secret) : null;
   }
+}
+
+/** How long a bot's photo waits, so a mascot changed several times in a row is drawn once. */
+const PHOTO_DELAY_MS = 5_000;
+
+/** The mascot a `BotPhoto` is to show next. */
+interface WantedPhoto {
+  agentId: string;
+  mascot: Mascot;
+}
+
+/**
+ * Puts the agent's mascot on its Telegram bot, as its profile photo (ADR-0046): one per agent. It
+ * keeps the newest mascot asked for, and its alarm draws and sends it, since drawing takes longer
+ * than a request may wait. A mascot already on that bot isn't sent again. A failure is thrown, so
+ * the runtime runs the alarm again, a little later each time.
+ */
+export class BotPhoto extends DurableObject<Env> {
+  /** Keeps `mascot` as the one to show. A mascot changed again within a few seconds is drawn once. */
+  async request(agentId: string, mascot: Mascot): Promise<void> {
+    await this.ctx.storage.put<WantedPhoto>("wanted", { agentId, mascot });
+    if ((await this.ctx.storage.getAlarm()) === null) {
+      await this.ctx.storage.setAlarm(Date.now() + PHOTO_DELAY_MS);
+    }
+  }
+
+  override async alarm(): Promise<void> {
+    const wanted = await this.ctx.storage.get<WantedPhoto>("wanted");
+    if (!wanted) return;
+    try {
+      const found = await telegramSecret(this.env, wanted.agentId);
+      if (!found.ok && found.reason === "store_unavailable") {
+        throw new Error("The secret store is unavailable");
+      }
+      // A bot disconnected meanwhile needs no photo.
+      if (found.ok) {
+        const shown = `${found.secret.botId}:${JSON.stringify(wanted.mascot)}`;
+        if (shown !== (await this.ctx.storage.get<string>("shown"))) {
+          const photos = await drawPhotos(this.env.BROWSER, wanted.mascot);
+          await sendPhoto(new TelegramAdapter(found.secret), photos);
+          await this.ctx.storage.put("shown", shown);
+        }
+      }
+    } catch (error) {
+      if (error instanceof ChannelRateLimitedError) {
+        await this.ctx.storage.setAlarm(Date.now() + error.retryAfterMs);
+        return;
+      }
+      console.warn("channel-egress: a bot's photo failed, for now", errorName(error));
+      throw error;
+    }
+    // A newer mascot asked for while this one was drawn keeps its turn: `request` set the alarm.
+    const latest = await this.ctx.storage.get<WantedPhoto>("wanted");
+    if (JSON.stringify(latest) === JSON.stringify(wanted)) await this.ctx.storage.delete("wanted");
+  }
+}
+
+/**
+ * Sends the loop, or the still when there is no loop or Telegram refuses it: the Bot API doesn't
+ * say which MP4s it takes, and MediaRecorder writes a fragmented one (#368).
+ */
+async function sendPhoto(bot: TelegramAdapter, photos: Photos): Promise<void> {
+  if (photos.loop) {
+    try {
+      await bot.setProfilePhoto({ type: "animated", mp4: photos.loop });
+      return;
+    } catch (error) {
+      if (!(error instanceof ChannelRequestError && error.status === 400)) throw error;
+      console.warn("channel-egress: Telegram refused the bot's loop; sending its still");
+    }
+  }
+  await bot.setProfilePhoto({ type: "static", jpg: photos.still });
 }
 
 /** The agent's stored bot. A secret that doesn't decrypt or parse counts as no bot. */
