@@ -2,48 +2,111 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="" />
     <title>Kelpie</title>
+    <link
+      rel="preload"
+      href="/webchat/fonts/geist-latin-wght-5.3.0.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link rel="stylesheet" href="/webchat/tokens.css" />
     <link rel="stylesheet" href="/webchat/style.css" />
     <link rel="stylesheet" href="/webchat/mascot.css" />
+    <script src="/webchat/boot.js"></script>
     <script type="module" src="/webchat/app.js"></script>
   </head>
   <body>
-    <header>
-      <div class="agent">
-        <span id="mascot" class="mascot-host" aria-hidden="true"></span>
-        <h1>Kelpie</h1>
+    <a class="skip" href="#text">Skip to message</a>
+    <div class="chat">
+      <div id="banner" class="banner" role="status" hidden>
+        <p id="banner-text"></p>
+        <button id="retry" type="button" class="icon-button">Try now</button>
       </div>
-      <p id="status" role="status">Connecting…</p>
-    </header>
-    <section id="motion-ask" aria-labelledby="motion-ask-text" hidden>
-      <p id="motion-ask-text">Mascots can move in place: they blink, breathe and hop. How should they move?</p>
-      <div class="choices">
-        <button type="button" data-motion="alive">Alive</button>
-        <button type="button" data-motion="states">States only</button>
-        <button type="button" data-motion="still">Still</button>
-      </div>
-    </section>
-    <main>
-      <ol id="messages" aria-live="polite" aria-label="Conversation"></ol>
-      <p id="typing" hidden>Typing…</p>
-    </main>
-    <form id="composer" autocomplete="off">
-      <label for="text" class="visually-hidden">Message</label>
-      <textarea id="text" rows="2" maxlength="16000" required></textarea>
-      <button type="submit">Send</button>
-      <button type="button" id="pause" title="Hold the answer until your next message">Pause</button>
-    </form>
-    <footer>
-      <label id="motion-label" hidden>
-        <span>Mascot</span>
-        <select id="motion">
-          <option value="alive">Alive</option>
-          <option value="states">States only</option>
-          <option value="still">Still</option>
-        </select>
-      </label>
-      <span id="version"></span>
-    </footer>
+      <header class="top">
+        <div class="agent">
+          <span id="mascot" class="mascot-host" aria-hidden="true"></span>
+          <div class="who">
+            <h1>
+              <button
+                id="switcher"
+                type="button"
+                class="agent-name"
+                aria-haspopup="true"
+                aria-expanded="false"
+                aria-controls="agents"
+                aria-disabled="true"
+              >
+                <span class="label" id="agent-name">Kelpie</span>
+              </button>
+            </h1>
+            <p id="status" role="status"></p>
+          </div>
+        </div>
+        <button
+          id="display-button"
+          type="button"
+          class="icon-button"
+          aria-haspopup="true"
+          aria-expanded="false"
+          aria-controls="display"
+        >
+          Display
+        </button>
+        <nav id="agents" class="popover" aria-label="Agents" hidden><ul></ul></nav>
+        <section id="display" class="popover" aria-label="Display" hidden>
+          <div class="setting"><span id="theme-label">Theme</span><div id="theme"></div></div>
+          <div class="setting"><span id="motion-setting-label">Motion</span><div id="motion-setting"></div></div>
+          <div class="setting"><span id="contrast-label">Contrast</span><div id="contrast"></div></div>
+          <div class="setting" id="mascot-setting" hidden>
+            <span id="motion-label">Mascot</span>
+            <div id="motion"></div>
+            <p class="note" id="motion-note" hidden></p>
+          </div>
+        </section>
+      </header>
+      <section id="motion-ask" aria-labelledby="motion-ask-text" hidden>
+        <p id="motion-ask-text">Mascots can move in place: they blink, breathe and hop. How should they move?</p>
+        <div class="choices">
+          <button type="button" class="icon-button" data-motion="alive">Alive</button>
+          <button type="button" class="icon-button" data-motion="states">States only</button>
+          <button type="button" class="icon-button" data-motion="still">Still</button>
+        </div>
+      </section>
+      <main id="scroller">
+        <div id="skeleton" class="skeleton" aria-hidden="true" hidden><span></span><span></span><span></span></div>
+        <div id="empty" class="empty" hidden>
+          <span id="empty-mascot" class="mascot-host" aria-hidden="true"></span>
+          <p id="empty-text"></p>
+        </div>
+        <div id="thread" role="log" aria-live="off" aria-label="Conversation" aria-busy="true"></div>
+        <button id="pill" type="button" class="pill" hidden></button>
+      </main>
+      <div id="wait" class="wait" aria-hidden="true" hidden><span class="wait-fill"></span></div>
+      <form id="composer" autocomplete="off">
+        <div class="composer-notes">
+          <p id="restored" role="status" hidden></p>
+          <p id="paused-line" hidden></p>
+        </div>
+        <label for="text" class="visually-hidden">Message</label>
+        <textarea id="text" rows="1" maxlength="16000" enterkeyhint="send"></textarea>
+        <button type="submit" id="send" class="send">Send</button>
+        <button type="button" id="pause" class="pause" title="Hold the answer until your next message">Pause</button>
+      </form>
+    </div>
+    <footer><span id="version"></span></footer>
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+    <p id="announcer" class="visually-hidden" aria-live="polite"></p>
+    <dialog id="login" aria-labelledby="login-title">
+      <h2 id="login-title">Your login expired</h2>
+      <p id="login-body">Sign in again to keep talking. What you wrote stays here.</p>
+      <button type="button" id="sign-in" class="send">Sign in again</button>
+    </dialog>
   </body>
 </html>

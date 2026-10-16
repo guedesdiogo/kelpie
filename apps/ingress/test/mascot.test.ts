@@ -527,6 +527,19 @@ describe("the mascot's state from the conversation", () => {
     expect(presenceAfter(IDLE, { type: "unknown" })).toBe(IDLE);
   });
 
+  it("listens during the wait its bar shows (ADR-0045 §5), unless work has taken over", () => {
+    const wait = { type: "wait", deadline: { remainingMs: 8_000, spanMs: 10_000, holding: false } };
+    const listening = presenceAfter(IDLE, wait);
+    expect(listening).toEqual({ state: "listening", activity: null, tool: false });
+    expect(presenceAfter(listening, { type: "wait", deadline: null })).toEqual(IDLE);
+    expect(presenceAfter(working, wait)).toBe(working);
+    const typing = presenceAfter(working, { type: "typing", active: true });
+    expect(presenceAfter(typing, wait)).toBe(typing);
+    // The end of a wait it never listened to changes nothing.
+    expect(presenceAfter(working, { type: "wait", deadline: null })).toBe(working);
+    expect(presenceAfter(IDLE, { type: "wait", deadline: { remainingMs: 0 } })).toBe(IDLE);
+  });
+
   it("shows the approval for 1.1 s, then what arrived meanwhile", () => {
     const { shown, keeper, clock } = keeperWith();
     keeper.event({ type: "bubble", confirmation: 3 });
