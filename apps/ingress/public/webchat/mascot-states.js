@@ -384,7 +384,9 @@ export function presenceKeeper(
         return;
       }
       const next = presenceAfter(presence, event);
-      if (!same(next, presence)) apply(next);
+      // A new notice while one waits starts its own 10 minutes.
+      const renewed = next.state === "waiting" && event.type === "bubble";
+      if (renewed || !same(next, presence)) apply(next);
     },
   };
 }

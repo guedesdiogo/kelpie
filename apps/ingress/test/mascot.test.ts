@@ -551,6 +551,17 @@ describe("the mascot's state from the conversation", () => {
     expect(shown.at(-1)).toEqual(IDLE);
   });
 
+  it("waits for the latest notice: each confirmation has its own 10 minutes", () => {
+    const { keeper, clock } = keeperWith();
+    keeper.event({ type: "bubble", confirmation: 3 });
+    clock.advance(8 * 60_000);
+    keeper.event({ type: "bubble", confirmation: 4 });
+    clock.advance(2 * 60_000);
+    expect(keeper.current.state).toBe("waiting");
+    clock.advance(8 * 60_000);
+    expect(keeper.current.state).toBe("idle");
+  });
+
   it("shows a change only, so a reconnect doesn't wake a dozing mascot", () => {
     const { shown, keeper } = keeperWith();
     keeper.event({ type: "history" });
