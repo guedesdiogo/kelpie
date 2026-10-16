@@ -1,10 +1,10 @@
 # Design system
 
-Kelpie's interface follows one visual identity and one motion system, decided in [ADR-0043](adr/0043-design-system.md) and extended by its first review in [ADR-0044](adr/0044-design-system-review.md). This document holds the values. A page, component or animation takes its colors, type, spacing, radii and motion from the tokens below. A literal number is allowed only where a pattern in section 5 sets it.
+Kelpie's interface follows one visual identity and one motion system, decided in [ADR-0043](adr/0043-design-system.md) and extended by its first review in [ADR-0044](adr/0044-design-system-review.md), by the agent mascot in [ADR-0045](adr/0045-agent-mascot.md) and by its Telegram photo in [ADR-0046](adr/0046-telegram-bot-photo.md). This document holds the values. A page, component or animation takes its colors, type, spacing, radii and motion from the tokens below. A literal number is allowed only where a pattern in section 5 sets it.
 
-The direction is called **Mistura** ("mix"): the identity of the water spirit (kelp colors, shapes that change) with the discipline of the herding dog (Pastoreio, "herding": fast, grouped, no bounce). What the owner does a hundred times a day moves quickly and plainly. The moments that matter (approving, spending, delegating, remembering) get the expressive motion.
+The direction is called **Mistura** ("mix"): the identity of the water spirit (kelp colors, shapes that change) with the discipline of the herding dog (Pastoreio, "herding": fast, grouped, no bounce). What the owner does a hundred times a day moves quickly and plainly. The moments that matter (approving, spending, delegating, remembering) get the expressive motion. Each agent is one of those changing shapes: a plush drop of water that stays alive in its place (5.19).
 
-A live reference with every interaction below runs in the owner's motion lab (a private page). This document is the source of truth when the two differ.
+Live references run in the owner's motion lab and in the mascot's concept page (private pages). This document is the source of truth when the two differ.
 
 ## 1. Color
 
@@ -25,7 +25,8 @@ Every color is a token with a light and a dark value. The theme follows the oper
 | `--danger` | `#BA3A27` | `#F07461` | Errors, refusals that need action |
 
 - **Text on `--ok`** uses `--surface`, so it inverts with the theme.
-- **Text on a tint** (a highlight, a hold fill) is `--fg`. Text on a solid fill uses that fill's own text color: `--on-accent` on `--accent`, `--surface` on `--ok`.
+- **The mascot's body colors** are the one exception to light and dark pairs. They color the figure, not the page, so each has one value in both themes, and none is amber (5.19).
+- **Text on a tint** (a highlight, a hold fill) is `--fg`. Text on a solid fill uses that fill's own text color: `--on-accent` on `--accent`, `--warm` and `--danger`, and `--surface` on `--ok`.
 - **Tints** come from `color-mix()` with a token, never from a new literal: a focus halo is `--accent` at 18%, a hold-to-confirm fill `--accent` at 28%, a card that just landed `--accent` at 22%, a text highlight `--accent` at 24%, a receipt icon well `--ok` at 16%, a scrim `--fg` at 16%.
 - **Shadows** are black at low alpha in both themes: `--shadow` is `0 1px 2px rgb(0 0 0 / .06), 0 14px 30px -18px rgb(0 0 0 / .38)`, and `--shadow-pop` (palettes, menus) is `0 18px 40px -16px rgb(0 0 0 / .5)`.
 
@@ -40,7 +41,7 @@ With `prefers-contrast: more`, or Kelpie's own contrast setting (5.17), two toke
 
 Every boundary then reaches 3:1, and secondary text 7:1. `--accent`, `--warm`, `--ok` and `--danger` keep their AA values (section 1's table), so text in those colors stays at 4.5:1, not 7:1.
 
-With `prefers-reduced-transparency: reduce`, scrims and tints become solid fills. In `forced-colors` mode the system's colors replace the tokens, and the state glyphs of 5.9 carry the meaning that color would.
+With `prefers-reduced-transparency: reduce`, scrims and tints become solid fills. In `forced-colors` mode the system's colors replace the tokens, and the state glyphs of 5.9 carry the meaning that color would. A mascot's state is read there from the glyph and the label beside it (ADR-0045 §9).
 
 ### Measured contrast
 
@@ -56,6 +57,9 @@ WCAG 2 contrast ratios, measured on 2026-10-15 from the hex values above. AA ask
 | `--ok` on `--bg` / `--surface` / `--sunken` | 4.44 / 4.98 / 4.06 | 8.60 / 7.86 / 8.33 |
 | `--surface` on `--ok` | 4.98 | 7.86 |
 | `--danger` on `--bg` / `--surface` / `--sunken` | 4.79 / 5.37 / 4.38 | 6.53 / 5.97 / 6.32 |
+| `--on-accent` on `--warm` / `--danger` (the mascot's `?` and `!`, at the bubble's middle stop) | 5.53 / 5.30 | 8.80 / 6.01 |
+
+The mascot's bubble is a gradient around its token, lighter at the top left, so its glyph measures lower there. The glyph never carries the state alone: the label, the glyph of 5.9 and the pose do too.
 
 Four pairs miss AA in light, so text never uses them: `--accent`, `--ok` and `--danger` on `--sunken`, and `--ok` on `--bg`. There, the text is `--fg`, and the color moves to an underline or an icon (icons need 3:1, which all four pass).
 
@@ -98,6 +102,7 @@ Kelpie writes the way a capable colleague talks.
 - **No apologies, no exclamation marks, no whimsical verbs.** A phase says what is being done: "Reading people/ana-souza.md".
 - **Empty states explain in one sentence why they are empty**, and offer the one action that fills them.
 - **Receipts say who did what and when,** in the owner's time zone.
+- **The mascot carries no words.** Its bubbles hold a glyph (`?`, `!`, `…`); what the agent says goes in the conversation.
 
 The fixed texts follow [ADR-0027](adr/0027-fixed-texts-in-three-languages.md): English, Brazilian Portuguese and Spanish.
 
@@ -125,9 +130,11 @@ Motion depends on how often an interaction happens, not on which screen it is in
 | Grammar | Applies to | Character |
 |---|---|---|
 | **Frequent** | Messages, streaming, tool rows, the task board, lists, menus, the palette, navigation | Fast, no visible overshoot, small distances, tight stagger |
-| **Moment** | Confirming an action, turning on something that costs, delegating to subagents, saving to memory, agent presence changes | Springs that pass their target a little, larger distances, and a signature: the drop of a subagent, the ring of a confirmation, the arc into the vault |
+| **Moment** | Confirming an action, turning on something that costs, delegating to subagents, saving to memory, agent presence changes | Springs that pass their target a little, larger distances, and a signature: the drop of a subagent, the ring of a confirmation, the arc into the vault, a mascot's announcement |
 
-**From the keyboard**, anything opened, moved or navigated appears at once. What shows progress or a result still shows: a hold fill grows while the key is held, and a confirmation still turns `--ok` and shows its check, without the grow, the pop or the ring.
+**The mascot's life in place** (breathing, blinking, its repertoire) is not UI motion in either grammar. It uses the frequent springs, runs under its own guards, and is the one exception to rule 8 (5.19, ADR-0045 §6).
+
+**From the keyboard**, anything opened, moved or navigated appears at once. What shows progress or a result still shows: a hold fill grows while the key is held, and a confirmation still turns `--ok` and shows its check, without the grow, the pop or the ring. A mascot whose state a keyboard action changes takes the new pose without its announcement.
 
 ### 4.2 Springs
 
@@ -142,11 +149,11 @@ The other columns come from simulating each spring with semi-implicit Euler, in 
 |---|---|---|---|---|---|---|
 | `--spring-fast` | 1400 / 0.9 | 67.3 | 91 ms | 194 ms | 0.1% | Chips, labels that roll, the palette, highlights |
 | `--spring-base` | 700 / 0.9 | 47.6 | 129 ms | 266 ms | 0.1% | Bubbles, cards, lists, panels |
-| `--spring-slow` | 300 / 0.9 | 31.2 | 197 ms | 394 ms | 0.1% | Large surfaces, drawers |
+| `--spring-slow` | 300 / 0.9 | 31.2 | 197 ms | 394 ms | 0.1% | Large surfaces, drawers, a mascot dozing off |
 | `--spring-moment-fast` | 800 / 0.6 | 33.9 | 83 ms | 393 ms | 9.2% | A released hold, small moment feedback |
-| `--spring-moment` | 380 / 0.8 | 31.2 | 153 ms | 457 ms | 1.4% | Moment layout: a button that grows, a card that collapses |
+| `--spring-moment` | 380 / 0.8 | 31.2 | 153 ms | 457 ms | 1.4% | Moment layout: a button that grows, a card that collapses, a mascot's pose |
 | `--spring-moment-slow` | 200 / 0.8 | 22.6 | 211 ms | 611 ms | 1.4% | Travel: subagents leaving their parent, links drawing |
-| `--spring-pop` | 800 / 0.55 | 31.1 | 79 ms | 471 ms | 12.3% | Confirmations: a check, a vault that receives, an avatar that changes state |
+| `--spring-pop` | 800 / 0.55 | 31.1 | 79 ms | 471 ms | 12.3% | Confirmations: a check, a vault that receives, a mascot that changes state, and its bubble |
 
 The first six are Material 3's standard and expressive spatial springs. `--spring-pop` is Kelpie's own, a little bouncier than Material 3's expressive fast spring.
 
@@ -197,8 +204,8 @@ Changing a spring means simulating it again the same way, and updating its row, 
 2. **Respond before animating.** Feedback within 100 ms. A control highlights when pressed and commits when released.
 3. **Springs move things; curves change color.** Position and size use springs. Color and opacity never overshoot.
 4. **Everything can be interrupted.** A released hold goes back from where it is, at the speed it had. Nothing blocks input while it animates.
-5. **Things come from where they start.** A popover grows from its trigger, a task comes out of its routine, a note leaves the sentence and enters the vault. A dialog stays centered.
-6. **One element carries the states.** The same button goes from "Confirm" to "Creating" to a receipt; the same bubble goes from typing to the reply. Nothing is swapped for a different element in another place.
+5. **Things come from where they start.** A popover grows from its trigger, a task comes out of its routine, a note leaves the sentence and enters the vault, the task's object comes out of the mascot's body. A dialog stays centered.
+6. **One element carries the states.** The same button goes from "Confirm" to "Creating" to a receipt; the same bubble goes from typing to the reply; the same mascot changes pose from state to state. Nothing is swapped for a different element in another place.
 7. **Streaming is calm.** Only new words appear, with opacity alone, in `--dur-word`. Nothing animates layout per token, and the word wrappers are removed when the stream ends. Phases have their real names, the elapsed time appears after 3 s, and progress is never faked.
 8. **Motion announces a change; a state stays still.**
    - A loop stops within 5 s. From then on, a state shows through color, shape and text.
@@ -208,7 +215,7 @@ Changing a spring means simulating it again the same way, and updating its row, 
 9. **Leaving is faster than arriving.** Entries use springs; exits use `--dur-exit` or `--dur-exit-moment` with `--ease-exit`.
 10. **Reduced motion replaces, it doesn't erase.**
     - The trigger is `prefers-reduced-motion: reduce`, or Kelpie's own switch for less motion, for people who don't want to change their system.
-    - Movement and scale become opacity, in at most `--dur-fade`. Colors, focus, confirmations and progress stay. Loops are still.
+    - Movement and scale become opacity, in at most `--dur-fade`. Colors, focus, confirmations and progress stay. Loops are still. A mascot goes Still: the state's pose, with a 150 ms crossfade on a change (5.19).
     - This also meets WCAG 2.3.3 (level AAA): motion from interactions can be turned off.
 
 Two engineering rules come with them:
@@ -222,6 +229,7 @@ Sound is opt-in and off by default ([ADR-0044](adr/0044-design-system-review.md)
 - **They have a setting of their own,** separate from the less-motion switch.
 - **A frequent action never makes a sound.**
 - **Browser notifications** are opt-in the same way. Only "an agent needs you" raises one, and only while Kelpie's tab is hidden.
+- **The mascot makes no sound.** Its snores and sighs are drawn (ADR-0045 §6).
 - **No vibration.**
 
 ## 5. Patterns
@@ -243,16 +251,19 @@ Frequent. Kelpie waits `quietMs` after the owner's latest message before answeri
   - With `quietMs: 0` there is no wait and no bar.
 - **Typing.** When the wait ends, a typing bubble appears. Its dots blink in steps, 0.8 s per cycle, for five cycles. Then they rest at 60% opacity until the reply comes.
 - **The reply.** It takes the typing bubble's place in the same element: its width and height go to the reply's size (`--spring-base`), and the text fades in after 70 ms.
+- **The header's mascot follows the turn** (5.19). It listens while the bar shows, takes Typing with the typing bubble, and greets a reply with Idle's hop and smile.
 - **Reduced motion:**
   - bubbles fade in where they land;
   - the bar still drains, since it is progress;
-  - the dots rest at 60% from the start.
+  - the dots rest at 60% from the start;
+  - the mascot is Still (5.19).
 
 ### 5.2 Tool calls and streaming
 
 Frequent.
 
 - **The row.** It appears when a call starts, with the call's real name. A call that changes something carries a "changes" tag beside its name; a call that only reads carries none.
+- **The mascot follows the same call.** While a row runs, the header's mascot holds that tool's object when it has one, and thinks otherwise (5.19). Between calls, it thinks or types the reply.
 - **Each new action** replaces the label above it: the old label leaves upward (exit, 75% of its height), and the new one rises with `--spring-fast`.
 - **The spinner** follows rule 8, and turns for at most 5 s. After that, a still ring and the elapsed time (shown from 3 s) say the call is running.
 - **Done**, the row becomes a one-line summary ("3 steps · 2.6 s") with a check. A click opens it: height with `--spring-base`, rows entering with `--stagger`.
@@ -261,7 +272,8 @@ Frequent.
 - **Reduced motion:**
   - labels swap with a fade;
   - the spinner is a still ring;
-  - the summary opens at once.
+  - the summary opens at once;
+  - the mascot is Still (5.19).
 
 ### 5.3 Confirm an action
 
@@ -273,6 +285,11 @@ Moment. The owner's press is the yes ([ADR-0026](adr/0026-confirmation-by-owner-
   - **Deny this call**, beside it. It closes the confirmation, and the agent goes on without that change;
   - **Hold to pause this conversation**, a smaller control under them. It uses the hold of 5.4 and runs the existing pause (#134): the next answer waits for the owner's next message, and background tasks keep running.
 - **What the card shows is bounded** (ADR-0044 §1). The agent is named by its id. The evidence comes from the tool call's typed fields, appears as quoted data marked as written by the agent, and never carries a link or a control.
+- **The agent's mascot answers with the card** (5.19):
+  - while the card is open, it takes Waiting: its eyes on the owner, brows up, the amber bubble; among its gestures, it points at the card;
+  - Confirm brings Approved for 1.1 s, a happy jump, then what comes next;
+  - Deny (#361) and an expiry bring no announcement: the pose changes as for any state change, as quiet as the neutral receipt;
+  - from the keyboard, each change shows the new pose without its announcement.
 - **The press.** The button scales to `--scale-press` and grows to the card's full width (width and position, `--spring-moment`). The other button leaves as it grows (exit, `--scale-in-moment`).
 - **Working.** Its label rolls to a spinner and what is happening ("Creating the event"). The spinner follows rule 8: after 5 s, a still ring and the elapsed time take its place.
 - **Success:**
@@ -289,7 +306,7 @@ Moment. The owner's press is the yes ([ADR-0026](adr/0026-confirmation-by-owner-
   - Enter or Space acts only with focus on a button. Enter in the composer sends a message; it never confirms or denies.
   - A key already held down when the card appeared doesn't count.
   - A keyboard confirm or deny skips the grow, the pop and the ring. A confirm goes from the label to the spinner, to the check, to the receipt; a deny, which runs nothing, goes straight to the receipt.
-- **Reduced motion:** the grow, the pop and the ring go. The color change, the check and the receipt stay, each with a fade.
+- **Reduced motion:** the grow, the pop and the ring go. The color change, the check and the receipt stay, each with a fade. The mascot is Still (5.19).
 
 ### 5.4 Turn on something that costs
 
@@ -307,7 +324,7 @@ Frequent. Each fire of a routine creates a task ([ADR-0039](adr/0039-routines-as
 
 - **The routine fires.** Its chip pulses once (`scale` 1.05 to 1, `--spring-fast`), and the new card leaves it: from the chip's position at scale 0.7 to its slot at the top of its column (FLIP, `--spring-base`). The cards below move down with it.
 - **Column counts** roll like labels (5.2).
-- **An agent takes the task.** Its avatar enters on the card (`--scale-in`, `--spring-fast`), and the card travels to the next column (FLIP, `--spring-base`). A progress bar fills only from real progress.
+- **An agent takes the task.** Its mascot enters on the card at 20 px (`--scale-in`, `--spring-fast`), and the card travels to the next column (FLIP, `--spring-base`). A progress bar fills only from real progress.
 - **Done**, the check draws and the title turns `--muted`. The card carries the evidence of the work (a link, a file, a screenshot) and its duration in the past tense: "Ran 4 min 12 s".
 - **Delegation shows.** A task the owner gave an agent carries "Delegated by you": the owner stays accountable, the agent does the work.
 - **Dragging a card.** People move a task only between Backlog and To do; from In progress on, the agent owns its status ([ADR-0011](adr/0011-agent-task-board.md)). So only cards in those two columns lift, and only those columns accept a drop. Other cards and columns show a no-drop cursor and don't lift.
@@ -323,11 +340,12 @@ Frequent. Each fire of a routine creates a task ([ADR-0039](adr/0039-routines-as
 
 Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0036-agent-roles-models-and-subagents.md)).
 
-- **The parent pulses** (`scale` 0.9 to 1, `--spring-pop`).
-- **Each subagent leaves the parent as a drop**, under an SVG "goo" filter on one layer (Gaussian blur 7, alpha matrix 20 / −9). It travels to its place with `--spring-moment-slow`, `--stagger-moment` apart.
+- **The parent's mascot pulses** (`scale` 0.9 to 1, `--spring-pop`).
+- **Each subagent is a pup** of the parent's mascot (ADR-0045 §7): the same shape and head, a lighter color, dot eyes, no accessory, and 40% of the size. All of them show, since a creator has at most three live subagents (ADR-0036).
+- **A pup leaves the parent's body as a drop**, under an SVG "goo" filter on one layer (Gaussian blur 7, alpha matrix 20 / −9). It travels to its place with `--spring-moment-slow`, `--stagger-moment` apart.
 - **A link draws** from the parent (stroke offset, `--spring-moment-slow`, 60 ms later), and the label enters 8px from the left, 140 ms later.
-- **When it is done**, it travels back and fades into the parent. The link retracts, and the parent swallows it (`scale` 1.12 to 1, `--spring-pop`, at 55% of the return).
-- **Reduced motion:** subagents and links fade in and out at their places, without the goo.
+- **When it is done**, it travels back faster than it left (rule 9) and fades into the parent. The link retracts, and the parent swallows it (`scale` 1.12 to 1, `--spring-pop`, at 55% of the return).
+- **Reduced motion:** pups and links fade in and out at their places, without the goo.
 
 ### 5.7 Saved to memory
 
@@ -335,12 +353,12 @@ Moment.
 
 - **The highlight.** The learned phrase gets a highlight that grows from its start (`--accent` at 24%, `--spring-moment`). It is not `--warm`: remembering asks nothing of the owner.
 - **The chip.** A chip with the real file path, such as `people/ana-souza.md`, lifts from the phrase (`--rise-moment`, `--scale-in-moment`). It travels in `--dur-travel` (`--ease-travel`) along an arc 60px above the straight line to the vault, shrinking to 0.35 and fading over the last 18%.
-- **The vault** pops (`scale` 1.14 to 1, `--spring-pop`), and its count rolls.
+- **The vault** pops (`scale` 1.14 to 1, `--spring-pop`), and its count rolls. While the agent writes to the vault, its mascot holds the paper and pencil (5.19).
 - **The toast** (5.13) says where the note went, from which conversation, when and by which agent: "Saved to `people/ana-souza.md` · From this conversation, today at 14:32 · by Kelpie". It offers Open and Undo for 10 s. Undo sends the chip back along the same arc and takes the highlight away. In the vault, Undo writes a new version that removes the note; history keeps both.
 - **Each note keeps its origin.** The vault shows who wrote each passage, from a write log rather than markers in the file: the owner, an agent or an import.
 - **Off the record.** A conversation can be marked so nothing from it enters the vault.
 - **A new note appears as ink.** Its text reveals left to right under a mask, over `--dur-travel`. Only a new note does this; chat keeps rule 7.
-- **Reduced motion:** the highlight fades in, the chip fades out where it is, the count changes with a fade, and a new note appears whole.
+- **Reduced motion:** the highlight fades in, the chip fades out where it is, the count changes with a fade, a new note appears whole, and the mascot is Still (5.19).
 
 ### 5.8 Command palette
 
@@ -354,29 +372,29 @@ Frequent, and the clearest case of rule 1.
 
 ### 5.9 Agent presence
 
-Moment grammar: the roster is where Kelpie spends its novelty.
+Moment grammar. Every place that shows an agent shows its mascot (5.19), at the size that place allows. The mascot is where Kelpie spends its novelty; the rest of a roster stays quiet.
 
-| State | Shows | Motion |
-|---|---|---|
-| Working | `--accent` ring, elapsed time `m:ss` | The ring turns three times, 1.4 s each, then stops |
-| Waiting for the owner | `--warm` ring, "waiting for you", time since | A halo pulses three times, 1.6 s each, then stops |
-| Idle | Avatar at 45% opacity, grayscale; a mascot keeps its color and dozes after 45 s (ADR-0045) | None for the avatar; a mascot breathes and draws idle gestures (ADR-0045 §6) |
-| Error | `--danger` ring, what failed | One shake, 380 ms |
-| No response | Dashed `--muted` ring, "no response for 1 min" | None |
+| State | The mascot at 48 px and up (5.19) | At 36 px | Glyph and label | Motion |
+|---|---|---|---|---|
+| Working | the task's object in its mittens, or thinking bubbles | an `--accent` badge with the tool's icon | a half-filled circle, "working", the elapsed time `m:ss` | the object pops out, or at 36 px the badge pops; in Alive, the activity's loop |
+| Waiting for the owner | its eyes on the owner, brows up, the amber bubble `?` | a `--warm` badge | a diamond, "waiting for you", the time since | a hop, and the bubble or badge pulses three times |
+| Idle | eyes open, in its own color; dozing after 45 s | no badge | a hollow circle, "idle" | in Alive, it breathes and draws idle gestures |
+| Error | worried brows, the red bubble `!` | a `--danger` badge | a triangle, what failed | one shake, and the bubble or badge pops |
+| No response | the working pose without its activity, beside a still, dashed `--muted` bubble `…` | the working badge; the glyph and the label carry the state | a dashed circle, "no response for 1 min" | the bubble pops, then nothing |
 
-- **Each state has a glyph** beside its label, so it reads without color or motion: a half-filled circle for working, a diamond for waiting, a hollow circle for idle, a dashed circle for no response, a triangle for error. The glyphs are drawn as SVG, since Geist has no such characters, and are hidden from screen readers, which read the label.
-- **No response** is a working agent from which nothing has arrived for 60 s: no streamed token, and no tool call starting or ending. A tool call still within its time bound counts as activity.
-- **On a change**, the avatar pops (`scale` 0.86 to 1, `--spring-pop`), and the status line rolls.
+- **The glyph and the label carry the state on their own.** At 36 px the badge has no glyph of its own, so the glyph and the label beside the figure are what name the state. The 5.9 glyphs are drawn as SVG, since Geist has no such characters, and are hidden from screen readers, which read the label. In higher contrast, in forced colors, and wherever a figure can't be drawn, they are what shows the state.
+- **No response** is a working agent from which nothing has arrived for 60 s: no streamed token, and no tool call starting or ending. A tool call still within its time bound counts as activity. The webchat can't tell it apart, and doesn't show it (5.19).
+- **On a change,** the mascot plays its new state's announcement (5.19), and the status line rolls.
+- **A roster stays calm.** At 36 px its repertoire plays one gesture at a time across the whole list, every 7 to 16 s, and never a hop; a state's announcement still plays. Pressing a row does what the roster defines, never a clap.
 - **What waits for the owner is counted, not moved.**
   - A strip above the roster counts the agents waiting, in `--warm`. Its count rolls. It enters with `--rise`, and leaves when nothing waits. Its slot above the roster is reserved, so the rows never move when it appears.
   - The browser tab's title starts with the count, "(2) Kelpie", and the favicon gets a `--warm` dot.
   - A free tier past 90% joins the count (5.16).
 - **A row opens in place.** Pressing a waiting agent's row grows its request under the row (height, `--spring-moment`), with the card of 5.3. From the keyboard it appears at once.
-- **Finished work leaves; failures stay.** A subagent or task that succeeded leaves a list at once. One that failed stays 30 s with its `--danger` ring, and can be dismissed.
+- **Finished work leaves; failures stay.** A subagent or task that succeeded leaves a list at once. One that failed stays 30 s with its triangle glyph and what failed, and can be dismissed.
 - **An agent is compared with itself.** Its numbers sit against its own last 30 days, never in a ranking of agents.
 - **The roster never reorders** when a state changes: a list that jumps under the pointer costs a misclick.
-- **How the agent itself looks:** a plush mascot the owner customizes (5.19, ADR-0045). It replaces the avatar where it ships: so far the webchat's header.
-- **Reduced motion:** rings and halos are still; color, shape and the status text carry the state. The elapsed time shows minutes only ("2 min") and updates once a minute. The strip and an opening row appear with a fade, and counts change with a fade.
+- **Reduced motion:** mascots are Still (5.19): the state's pose, its badge and its bubble, with a 150 ms crossfade on a change. The elapsed time shows minutes only ("2 min") and updates once a minute. The strip and an opening row appear with a fade, and counts change with a fade.
 
 ### 5.10 Following the chat
 
@@ -407,9 +425,10 @@ Frequent.
 
 Frequent.
 
-- **The first 2 s change nothing.**
+- **The first 2 s show no banner.**
 - **The banner.** Then a banner enters at the top (from 8px above, `--spring-base`): what happened, when the next try is ("No connection. Trying again in 8 s", digits in Geist Mono), and "Try now".
 - **Queued messages.** What the owner sends meanwhile shows in `--sunken` with a clock and "queued". It goes out in order when the connection is back.
+- **The mascot returns to Idle at once.** It hears nothing more of the turn, so it can't vouch for work it no longer sees (rule 7). A new connection starts from the history, and the mascot takes Waiting again if a confirmation in it is still open.
 - **Back,** the banner turns `--ok`, "Back. 1 message sent.", for 2.6 s, then leaves. Alerts stay quiet for the first 4 s after reconnecting, so a backlog doesn't arrive as a burst.
 - **An expired login** opens a centered dialog, and keeps the draft.
   - The page tells it from a lost connection by asking ingress with `X-Requested-With`, which Access answers with 401 once the session expired.
@@ -434,7 +453,7 @@ Frequent.
 
 Frequent.
 
-- **From a list to a detail,** the agent's avatar and name travel to their new place with a View Transition (`--spring-base`), and the rest crossfades.
+- **From a list to a detail,** the agent's mascot, in its box, and its name travel to their new place with a View Transition (`--spring-base`), and the rest crossfades.
 - **Back** reverses the direction.
 - **From the keyboard,** and in a browser without View Transitions, the view changes at once.
 - **A streaming chat** is never part of the transition.
@@ -470,10 +489,10 @@ Frequent; crossing a limit is a moment.
 
 Moment.
 
-- **Comfort comes first.** Before anything else, one step sets motion (full or less), text size and contrast. That is where the less-motion switch of rule 10 lives. The step can be reopened in settings. Until the management UI has them, the webchat's Display menu (5.22) holds the switch, the theme and the contrast.
+- **Comfort comes first.** Before anything else, one step sets motion (full or less), text size, contrast and the mascot's pause (Alive, States only or Still, 5.19). That is where the less-motion switch of rule 10 lives. The step can be reopened in settings. Until the management UI has them, the webchat's Display menu (5.22) holds the switch, the theme, the contrast and the mascot's pause.
 - **The first agent.**
   - Until it exists, the empty state says in one sentence why the roster is empty, and offers one button.
-  - When it is created, its avatar enters its slot with `--spring-pop`, and the empty block collapses with `--spring-moment`.
+  - When it is created, its mascot enters its slot with `--spring-pop` and plays Idle's hop and smile, and the empty block collapses with `--spring-moment`.
 - **Channels and secrets** are asked at the step that needs them, not up front.
 - **Reduced motion:** fades.
 
@@ -541,6 +560,8 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 | Where | Size | What changes |
 |---|---|---|
 | Roster | 36 px | no mouth or brows, eyes 15% larger, no mittens; a glossy badge with a `--surface` ring takes the bubble's place: `--warm` for waiting, `--danger` for error, `--accent` with the tool's icon for working. One gesture at a time across the list, every 7 to 16 s, never a hop |
+| Switcher list (5.21) | 36 px | the Idle pose, still, with no badge: the list is open for a moment and carries no state |
+| Task card (5.5) | 20 px | the shape, the color and the eyes only: no head, accessory, mittens or badge; still, since the card already says the state. The engine draws a badge at every size up to 40 px today, so the board needs that changed |
 | Conversation header | 48 px | its home. Everything happens inside its box; the box is kept before the figure arrives, so nothing in the layout moves |
 | Empty conversation, profile | 160 px | gestures a little more often |
 | Telegram bot photo | 800 px square, cropped round by Telegram | a still, and a loop Telegram plays (below) |
@@ -615,7 +636,7 @@ Frequent.
 
 - **The header** holds the 48px mascot (5.19), the agent's name in Bricolage Grotesque at `--text-h3`, and the status line.
 - **The switcher.** With more than one agent, the name is a button that opens the list. From a click it grows from the name as 5.8 does; from the keyboard it appears at once.
-  - Each agent is a link to its conversation (`?agent=<id>`), with its name and its id in Geist Mono. Back and new tabs work.
+  - Each agent is a link to its conversation (`?agent=<id>`), with its still 36 px mascot in the Idle pose (5.19), its name, and its id in Geist Mono. Back and new tabs work.
   - The current one is marked with `aria-current`.
   - Arrows, Home and End move through the list, and Escape closes it.
 - **The order** is the registry's and never changes with activity (5.9).
@@ -644,6 +665,7 @@ Frequent. One step away, in the header, for a page with no settings of its own.
 - **The Motion library** fits only where the owner drags something with velocity, such as reordering the board. It is loaded with the page that needs it.
 - **An entrance plays once.** It is keyed to the element, so a streaming update never replays it. It never leaves content at opacity 0 if the animation doesn't run, which happens when a background tab pauses timelines. A list animates entries only up to 60 rows; past that, rows appear at once.
 - **Heavy effects stay off the DOM's per-frame path.** The goo is one SVG filter on one layer, during a moment. Anything heavier belongs in a shader scoped to its element, or nowhere. Full-screen WebGL stays out of the product.
+- **The mascot engine is the one continuous loop.** A new surface that shows an agent reuses it (5.19): one shared timer, observers that stop figures out of view, and the plush painted once per size. Nothing draws an agent another way.
 - **The stack is still open.** These choices guide whatever UI stack Kelpie picks; the [viability study](viability-study.md) lists it among its open questions.
 
 ## 7. Review checklist
@@ -653,13 +675,16 @@ A pull request that changes the interface answers yes to each line:
 - [ ] Every color, size, radius, duration and easing comes from a token, unless a pattern in section 5 sets the number.
 - [ ] Only `transform`, `opacity` and color animate, apart from the contained sizes in 5.1, 5.2, 5.3, 5.9, 5.17 and 5.18 and the mask reveal in 5.7; no `transition: all`.
 - [ ] Keyboard-triggered actions don't animate their way in or out; progress and results still show.
-- [ ] Loops stop within 5 s, and the steady state reads without motion.
+- [ ] Loops stop within 5 s, apart from the mascot's life in place (5.19), and the steady state reads without motion.
 - [ ] Exits are faster than entries, and staggers stop at 300 ms.
 - [ ] Interrupting an animation leaves no element stuck halfway.
 - [ ] Under reduced motion, every movement becomes a short fade, and no feedback disappears.
 - [ ] New text meets the contrast in section 1, in both themes and in higher contrast, and controls draw their boundary in `--muted`.
 - [ ] `--warm` appears only where the owner must act, and a toast only where 5.13 allows one.
 - [ ] Copy follows the voice in section 2.
+- [ ] Every place that shows an agent shows its mascot at a size from 5.19, never a photo, an initial or a generic icon.
+- [ ] A mascot's pose, badge, glyph and label agree, and they show the agent's real state.
+- [ ] A new mascot surface moves only as its size allows in 5.19, and the pause and reduced motion stop it.
 
 ## 8. Designing what isn't here yet
 
@@ -686,8 +711,8 @@ A component, screen, state or interaction this document doesn't define is design
 
 **Already rejected.** Research turned these down; a new design doesn't bring them back without a new decision:
 - glass or blur over content;
-- glows or ambient motion that loop;
-- a character that wanders the screen;
+- glows or ambient motion that loop, apart from the mascot's life in place under its guards (5.19);
+- a character that wanders the screen: the mascot lives in its box, and the box moves only with its view (5.14);
 - playful verbs in place of real phase names;
 - a roster that regroups itself by state.
 
