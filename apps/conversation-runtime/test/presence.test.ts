@@ -188,7 +188,7 @@ describe("the presence view (ADR-0052)", () => {
       expect(ofType(row.frames, "requests").at(-1)?.requests).toMatchObject(listed),
     );
     expect(ofType(chat.frames, "requests").at(-1)?.requests).toMatchObject(listed);
-    const [shown] = ofType(row.frames, "requests").at(-1)?.requests as {
+    const [shown] = (ofType(row.frames, "requests").at(-1)?.requests ?? []) as {
       askedAgoMs: number;
       expiresInMs: number;
     }[];

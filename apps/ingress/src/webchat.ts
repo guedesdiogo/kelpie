@@ -116,14 +116,14 @@ export const MASCOTS_WITHIN_MS = 1_500;
 
 /** `promise`'s value, or `fallback` once `ms` have passed. */
 async function within<T>(ms: number, promise: Promise<T>, fallback: T): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timer: ReturnType<typeof setTimeout> | null = null;
   const late = new Promise<T>((resolve) => {
     timer = setTimeout(() => resolve(fallback), ms);
   });
   try {
     return await Promise.race([promise, late]);
   } finally {
-    clearTimeout(timer);
+    if (timer !== null) clearTimeout(timer);
   }
 }
 
