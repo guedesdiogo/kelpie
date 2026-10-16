@@ -1,6 +1,6 @@
 # Design system
 
-Kelpie's interface follows one visual identity and one motion system, decided in [ADR-0043](adr/0043-design-system.md) and extended by its first review in [ADR-0044](adr/0044-design-system-review.md), by the agent mascot in [ADR-0045](adr/0045-agent-mascot.md), by its Telegram photo in [ADR-0046](adr/0046-telegram-bot-photo.md) and by the logo in [ADR-0049](adr/0049-logo-main-mascot-silhouette.md). This document holds the values. A page, component or animation takes its colors, type, spacing, radii and motion from the tokens below. A literal number is allowed only where a pattern in section 5 sets it.
+Kelpie's interface follows one visual identity and one motion system, decided in [ADR-0043](adr/0043-design-system.md) and extended by its first review in [ADR-0044](adr/0044-design-system-review.md), by the agent mascot in [ADR-0045](adr/0045-agent-mascot.md), by its Telegram photo in [ADR-0046](adr/0046-telegram-bot-photo.md), by the logo in [ADR-0049](adr/0049-logo-main-mascot-silhouette.md) and by the subagents' pups in [ADR-0051](adr/0051-subagent-pups-return-one-by-one.md) and [ADR-0053](adr/0053-pups-in-the-conversation-header.md). This document holds the values. A page, component or animation takes its colors, type, spacing, radii and motion from the tokens below. A literal number is allowed only where a pattern in section 5 sets it.
 
 The direction is called **Mistura** ("mix"): the identity of the water spirit (kelp colors, shapes that change) with the discipline of the herding dog (Pastoreio, "herding": fast, grouped, no bounce). What the owner does a hundred times a day moves quickly and plainly. The moments that matter (approving, spending, delegating, remembering) get the expressive motion. Each agent is one of those changing shapes: a plush drop of water that stays alive in its place (5.19).
 
@@ -130,7 +130,7 @@ Motion depends on how often an interaction happens, not on which screen it is in
 | Grammar | Applies to | Character |
 |---|---|---|
 | **Frequent** | Messages, streaming, tool rows, the task board, lists, menus, the palette, navigation | Fast, no visible overshoot, small distances, tight stagger |
-| **Moment** | Confirming an action, turning on something that costs, delegating to subagents, saving to memory, agent presence changes | Springs that pass their target a little, larger distances, and a signature: the drop of a subagent, the ring of a confirmation, the arc into the vault, a mascot's announcement |
+| **Moment** | Confirming an action, turning on something that costs, delegating to subagents, saving to memory, agent presence changes | Springs that pass their target a little, larger distances, and a signature: a parent's pups, the ring of a confirmation, the arc into the vault, a mascot's announcement |
 
 **The mascot's life in place** (breathing, blinking, its repertoire) is not UI motion in either grammar. It uses the frequent springs, runs under its own guards, and is the one exception to rule 8 (5.19, ADR-0045 §6).
 
@@ -152,7 +152,7 @@ The other columns come from simulating each spring with semi-implicit Euler, in 
 | `--spring-slow` | 300 / 0.9 | 31.2 | 197 ms | 394 ms | 0.1% | Large surfaces, drawers, a mascot dozing off |
 | `--spring-moment-fast` | 800 / 0.6 | 33.9 | 83 ms | 393 ms | 9.2% | A released hold, small moment feedback |
 | `--spring-moment` | 380 / 0.8 | 31.2 | 153 ms | 457 ms | 1.4% | Moment layout: a button that grows, a card that collapses, a mascot's pose |
-| `--spring-moment-slow` | 200 / 0.8 | 22.6 | 211 ms | 611 ms | 1.4% | Travel: subagents leaving their parent, links drawing |
+| `--spring-moment-slow` | 200 / 0.8 | 22.6 | 211 ms | 611 ms | 1.4% | Large moment travel; no pattern uses it since ADR-0051 |
 | `--spring-pop` | 800 / 0.55 | 31.1 | 79 ms | 471 ms | 12.3% | Confirmations: a check, a vault that receives, a mascot that changes state, and its bubble |
 
 The first six are Material 3's standard and expressive spatial springs. `--spring-pop` is Kelpie's own, a little bouncier than Material 3's expressive fast spring.
@@ -338,14 +338,53 @@ Frequent. Each fire of a routine creates a task ([ADR-0039](adr/0039-routines-as
 
 ### 5.6 Subagents
 
-Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0036-agent-roles-models-and-subagents.md)).
+Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0036-agent-roles-models-and-subagents.md)). They work as pups of their parent's mascot, which leave it and come back one by one ([ADR-0051](adr/0051-subagent-pups-return-one-by-one.md)), in the conversation's header and on the agent's profile ([ADR-0053](adr/0053-pups-in-the-conversation-header.md)).
 
-- **The parent's mascot pulses** (`scale` 0.9 to 1, `--spring-pop`).
-- **Each subagent is a pup** of the parent's mascot (ADR-0045 §7): the same shape and head, a lighter color, dot eyes, no accessory, and 40% of the size. All of them show, since a creator has at most three live subagents (ADR-0036).
-- **A pup leaves the parent's body as a drop**, under an SVG "goo" filter on one layer (Gaussian blur 7, alpha matrix 20 / −9). It travels to its place with `--spring-moment-slow`, `--stagger-moment` apart.
-- **A link draws** from the parent (stroke offset, `--spring-moment-slow`, 60 ms later), and the label enters 8px from the left, 140 ms later.
-- **When it is done**, it travels back faster than it left (rule 9) and fades into the parent. The link retracts, and the parent swallows it (`scale` 1.12 to 1, `--spring-pop`, at 55% of the return).
-- **Reduced motion:** pups and links fade in and out at their places, without the goo.
+- **Each subagent at work is a pup** of the parent's mascot (ADR-0045 §7): the same shape and head, a lighter color, dot eyes, no accessory, and 40% of the size.
+- **A pup follows its subagent's tasks.** It leaves when its subagent starts a task and comes back when that task ends. A subagent with no task shows no pup. At most three pups show, since a creator has at most three live subagents (ADR-0036).
+- **Where pups play:** beside the parent, on its ground, with no link between them.
+  - **In the conversation's header,** at 20 px, beside the 48 px mascot (below).
+  - **On the agent's profile,** where its mascot shows at 160 px (5.19). At 40%, a pup is 64 px and keeps the full face of 5.19's 48 px row.
+- **Where pups don't play:** the roster, the switcher's list, task cards, the empty conversation's 160 px figure and the Telegram photo. The empty conversation's header still draws them.
+- **Offline.** No pups show while the page is Offline (ADR-0047). Pups out when it goes Offline fade out in `--dur-fade`. When it is back, the pups of tasks still running reappear at their places, without leaving again.
+- **The header's row.**
+  - Pups stand in a row between the mascot's box and the agent's name (5.21). The row is as tall as the box, and pups stand on its bottom edge, the parent's ground.
+  - The row starts `--space-1` from the box, and pups stand `--space-1` apart. The name keeps `--space-3` after the row.
+  - A header pup is 20 px: 40% of 48 px is 19.2 px. It has the shape, the head, the lighter color and dot eyes. A task card at 20 px drops the head (5.19), but a pup keeps it: the head makes it its parent's. If the engine's head doesn't read at 20 px, it is dropped as on a task card.
+  - It has no mouth, brows, mittens or task's object. It breathes, blinks and plays its announcements, such as a success's hop, with no gestures and no dozing.
+  - A failed pup shows 5.9's triangle glyph above its head, bare, 10 px in `--danger`. It sits on the header's background, inside the row's height and the pup's width, where `--danger` passes 3:1 in every theme; on the bodies it wouldn't. It is drawn in SVG and hidden from screen readers. The engine's round badge isn't drawn on header pups.
+  - A working or waiting pup carries no mark. A waiting pup looks at the parent.
+  - Header pups aren't interactive: at 20 px they are below the 24 px target size (WCAG 2.5.8).
+  - For screen readers, the row is a list named for the parent's subagents, such as "Research's subagents". Each pup is an item named by its task and state, such as "read the reviews, failed". The figures are hidden.
+- **Pups close up toward the parent.**
+  - They stand left-aligned next to it, in the order they left.
+  - When one goes back, the pups after it slide toward the parent with `--spring-moment`, as a `transform` from where they were.
+  - A pup that leaves later takes the first free place after the others.
+- **The header's name moves as little as it can.**
+  - When the row needs more room, the name and the status line slide to their new place with `--spring-moment`, as a `transform` from where they were. They never stretch.
+  - The row keeps the width of the most pups out since it last emptied. When the last pup is back, the row empties 1 s later, so a subagent that starts its next task at once doesn't move the name.
+  - The name ends in an ellipsis when it doesn't fit. On a 320 px screen with three pups out, beside today's Display button, which has a label, it keeps about 70 px.
+- **The parent's state** comes from 5.9 and 5.19 as for any agent. Delegating is not a state of its own.
+- **Leaving.** Each pup comes out of the parent's middle at a scale of 0.3 and goes to its place with `--spring-moment`, `--stagger-moment` apart. As each one leaves, the parent pulses (`scale` 0.9 to 1, `--spring-pop`). On the profile the pup takes Working with its task's object (5.19).
+- **Coming back, in the order the tasks end:**
+  - **A task that succeeded.** The pup hops, and on the profile smiles too, as a reply that lands (5.19). 520 ms later it travels back into the parent's middle, shrinking to 0.3 and fading, in `--dur-exit-moment` with `--ease-exit` (rule 9). The parent swallows it (`scale` 1.12 to 1, `--spring-pop`).
+  - **A task that failed.** On the profile the pup takes Error; in the header it shows its triangle. It stays 30 s, as 5.9's failures do, then goes back the same way with no smile or hop. Dismissing the failure where 5.9 lists it sends the pup back at once. If the creator sends the task back to To do, its pup leaves again when it runs.
+  - **A task cancelled,** by the owner's stop or by its agent, or lost with its subagent, goes back with no smile or hop and doesn't count as failed. An ending the page can't tell is never shown as a success. The pause doesn't cancel tasks (5.3).
+  - **A task that waits for an answer.** The subagent's question goes to its creator, not to the owner (ADR-0036). The pup stays out with no amber, looking at the parent, and the strip of 5.9 doesn't count it. On the profile it holds its task's object at rest. If the creator then asks the owner, the parent's state follows 5.9 and 5.19, for example Waiting while a confirmation is open (5.3).
+- **On the profile, a status line counts them back** in a polite live region:
+  - "1 of 3 back", which counts subagents, not departures: 3 is the subagents that went out since none was out, at most three, and one that leaves again counts as out until it is back;
+  - "All 3 are back", or "It's back" for a single pup;
+  - "1 failed" when one did;
+  - "1 waiting on <creator's name>", such as "1 waiting on Kelpie", while one waits on its creator.
+- **In the conversation, the header's count** is its own polite live region, on the status line's row. A middle dot separates it from the phase only when both show.
+  - It isn't 5.20's status line, which still names only the turn's phase, so a change of phase doesn't repeat it. The count changes only when a pup leaves, fails, waits or comes back.
+  - Its parts, joined by middle dots, come in this order: "1 failed", while a failed pup is out; "1 waiting on <creator's name>"; "2 subagents at work", or "1 subagent at work", counting the pups out that work.
+  - When the last pup is back, it reads "All subagents are back" for 5 s, so screen readers hear the end, then empties.
+  - On a narrow header, the phase ends in an ellipsis first. Then the count hides its parts whole, from the last, so a failure stays in sight. Screen readers still read the whole count.
+  - Offline empties it with the pups. While paused it stays, since the pause cancels no task.
+- **These texts are fixed** ([ADR-0027](adr/0027-fixed-texts-in-three-languages.md)).
+- **The parent's mascot** greets the reply that relays the result, as 5.1 says.
+- **Reduced motion:** pups fade in and out at their places in `--dur-fade`; the pups after a returning one, and the header's name, take their new places at once; the mascots are Still (5.19).
 
 ### 5.7 Saved to memory
 
@@ -389,7 +428,11 @@ Moment grammar. Every place that shows an agent shows its mascot (5.19), at the 
 - **A roster stays calm.** At 36 px its repertoire plays one gesture at a time across the whole list, every 7 to 16 s, and never a hop; a state's announcement still plays. Pressing a row does what the roster defines, never a clap.
 - **What waits for the owner is counted, not moved.**
   - A strip above the roster counts the agents waiting, in `--warm`. Its count rolls. It enters with `--rise`, and leaves when nothing waits. Its slot above the roster is reserved, so the rows never move when it appears.
-  - The browser tab's title starts with the count, "(2) Kelpie", and the favicon gets a `--warm` dot.
+  - The browser tab's title starts with the count, "(2) Kelpie", and the favicon gets a `--warm` dot (5.23).
+    - The agent's name stays after the count, "(1) Assistant · Kelpie". The title and the favicon change only when the count does.
+    - An answer, an expiry or the end of the wait clears the count; looking at the tab doesn't.
+    - Safari keeps the favicon the page loaded with ([WebKit bug 266426](https://bugs.webkit.org/show_bug.cgi?id=266426)), so the title carries the count there.
+    - The webchat hears only the open conversation until its sidebar hears every agent (#378). Until then it counts that agent while its mascot waits.
   - A free tier past 90% joins the count (5.16).
 - **A row opens in place.** Pressing a waiting agent's row grows its request under the row (height, `--spring-moment`), with the card of 5.3. From the keyboard it appears at once.
 - **Finished work leaves; failures stay.** A subagent or task that succeeded leaves a list at once. One that failed stays 30 s with its triangle glyph and what failed, and can be dismissed.
@@ -566,8 +609,9 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 | Roster | 36 px | no mouth or brows, eyes 15% larger, no mittens; a glossy badge with a `--surface` ring takes the bubble's place: `--warm` for waiting, `--danger` for error, `--accent` with the tool's icon for working, `--muted` for offline. One gesture at a time across the list, every 7 to 16 s, never a hop |
 | Switcher list (5.21) | 36 px | the Idle pose, still, with no badge: the list is open for a moment and carries no state |
 | Task card (5.5) | 20 px | the shape, the color and the eyes only: no head, accessory, mittens or badge; still, since the card already says the state. The engine draws a badge at every size up to 40 px today, so the board needs that changed |
-| Conversation header | 48 px | its home. Everything happens inside its box; the box is kept before the figure arrives, so nothing in the layout moves |
+| Conversation header | 48 px | its home. Everything happens inside its box; the box is kept before the figure arrives, so nothing moves when it does. Its pups stand in a row after the box, and the name slides to make room (5.6, ADR-0053) |
 | Empty conversation, profile, the expired-login dialog (5.12) | 160 px | gestures a little more often |
+| Pups (5.6) | 40% of the parent: 20 px in the conversation's header, 64 px on the profile | in the header, the shape, the head, the lighter color and dot eyes, breathing, blinking and announcing only, with 5.9's triangle above a failed one and no badge; on the profile, the full face of the 48 px row; left-aligned beside the parent, closing up as they come back; none while the page is Offline |
 | Telegram bot photo | 800 px square, cropped round by Telegram | a still, and a loop Telegram plays (below) |
 
 **Reduced motion and the pause.**
@@ -639,6 +683,7 @@ Frequent. The webchat's thread and composer (#140); the research is on #140.
 Frequent.
 
 - **The header** holds the 48px mascot (5.19), the agent's name in Bricolage Grotesque at `--text-h3`, and the status line.
+- **While the agent's subagents work,** their pups stand in a row between the mascot and the name, and their count follows the status line on its row (5.6, [ADR-0053](adr/0053-pups-in-the-conversation-header.md)).
 - **The switcher.** With more than one agent, the name is a button that opens the list. From a click it grows from the name as 5.8 does; from the keyboard it appears at once.
   - Each agent is a link to its conversation (`?agent=<id>`), with its still 36 px mascot in the Idle pose (5.19), its name, and its id in Geist Mono. Back and new tabs work.
   - The current one is marked with `aria-current`.
@@ -691,8 +736,13 @@ Frequent, and still: the logo never moves ([ADR-0049](adr/0049-logo-main-mascot-
     - `favicon.ico`, with a 16 px layer from `docs/brand/favicon-16.svg` and a 32 px one from the 32 px master;
     - `apple-touch-icon.png`, 180 px and square, since iOS masks it, with the mark 62% of the tile tall;
     - `icon-192.png` and `icon-512.png` on a rounded tile;
-    - `icon-maskable-512.png`, with the mark inside the 40% circle Android may crop to.
+    - `icon-maskable-512.png`, with the mark inside the 40% circle Android may crop to;
+    - `icon-waiting.svg`, the 32 px master with 5.9's dot, which the page swaps in while an agent waits.
   - It asks for its manifest with the Access login's cookie, and the manifest opens the webchat as a browser tab.
+- **The waiting dot** of 5.9 sits on the favicon, never on the logo:
+  - a `--warm` circle of r 5 at (25, 25) on the 32 px tile. It takes the bottom-right corner, where the 36 px badge sits (5.19), so both ears stay clear;
+  - a 2 px `--on-accent` ring around it, since `--warm` on `--accent` measures 1.04 in light and 1.12 in dark. On `--on-accent` it measures 5.53 and 8.80;
+  - a static file, so the page's CSP admits it without `data:` images. It has no ICO twin: the browsers that change a favicon at runtime read the SVG.
 - **It never stands in for an agent.** Every agent, the main one included, shows its own mascot (5.19). The logo carries no state, badge or glyph. The amber dot of 5.9 belongs to the tab's favicon, not to the logo.
 - **Reduced motion:** nothing changes; it doesn't move.
 
@@ -702,7 +752,7 @@ Frequent, and still: the logo never moves ([ADR-0049](adr/0049-logo-main-mascot-
 - **View Transitions** fit navigation between views. They never wrap a list that streams.
 - **The Motion library** fits only where the owner drags something with velocity, such as reordering the board. It is loaded with the page that needs it.
 - **An entrance plays once.** It is keyed to the element, so a streaming update never replays it. It never leaves content at opacity 0 if the animation doesn't run, which happens when a background tab pauses timelines. A list animates entries only up to 60 rows; past that, rows appear at once.
-- **Heavy effects stay off the DOM's per-frame path.** The goo is one SVG filter on one layer, during a moment. Anything heavier belongs in a shader scoped to its element, or nowhere. Full-screen WebGL stays out of the product.
+- **Heavy effects stay off the DOM's per-frame path.** No pattern uses an SVG filter now; a filter, a blur or anything heavier belongs in a shader scoped to its element, or nowhere. Full-screen WebGL stays out of the product.
 - **The mascot engine is the one continuous loop.** A new surface that shows an agent reuses it (5.19): one shared timer, observers that stop figures out of view, and the plush painted once per size. Nothing draws an agent another way.
 - **The stack is still open.** These choices guide whatever UI stack Kelpie picks; the [viability study](viability-study.md) lists it among its open questions.
 
@@ -794,6 +844,18 @@ The rules above cite these. The first set was read on 2026-10-15; a source added
   - favicons: [Safari 26's release notes](https://developer.apple.com/documentation/safari-release-notes/safari-26-release-notes), [WebKit bug 309949](https://bugs.webkit.org/show_bug.cgi?id=309949) and [Evil Martians' "How to Favicon in 2026"](https://evilmartians.com/chronicles/how-to-favicon-in-2021-six-files-that-fit-most-needs);
   - home-screen icons: [Apple's app icons](https://developer.apple.com/design/human-interface-guidelines/app-icons) and [web.dev on maskable icons](https://web.dev/articles/maskable-icon);
   - [invokta's favicon](https://github.com/vinilana/invokta/blob/f1e2f04f98c967ab4bb73bd02c3fa581f04ce0e5/apps/docs/public/favicon.svg#L1-L10), drawn apart from its mark, and [Hermes Agent's icon script](https://github.com/NousResearch/hermes-agent/blob/b65e078cdc77ebe83979a2d5355179535f340e89/scripts/generate_icons.py#L1-L90), every size from one master.
+- The tab's count and the favicon's dot (5.9, 5.23), read on 2026-10-16; the findings and the reference-project check are on #389:
+  - [Claude Code's agent view](https://code.claude.com/docs/en/agent-view), which counts the sessions awaiting input in the tab until each is answered;
+  - [GitHub's pending favicon](https://github.githubassets.com/favicons/favicon-pending.svg), a static file with an amber dot in the bottom-right corner;
+  - [Mattermost's title and favicons](https://github.com/mattermost/mattermost/blob/f5485a5c6e3c65542e35077cc6777ad197617709/webapp/channels/src/components/unreads_status_handler/unreads_status_handler.tsx#L102-L175), `(N) ` before the title and pre-made favicons swapped by `href`;
+  - [Chromium's link element](https://github.com/chromium/chromium/blob/1ac7132d0190493dbeb52e8625ad8d3cfb25adca/third_party/blink/renderer/core/html/html_link_element.cc#L143-L151), which ignores setting the same `href` again;
+  - [WebKit bug 266426](https://bugs.webkit.org/show_bug.cgi?id=266426), still open: Safari keeps the first favicon;
+  - [Hermes Agent's session dot](https://github.com/NousResearch/hermes-agent/blob/848fc0ad8be766b9dc10fe42bd80b5fc2d45d95c/apps/desktop/src/app/chat/session-status-dot.tsx#L23-L37), one amber state for what needs the user, which never moves.
+- The pups in the conversation's header ([ADR-0053](adr/0053-pups-in-the-conversation-header.md)), read on 2026-10-16; the findings and the reference-project check are on #403:
+  - [Hermes Agent's subagent glyphs](https://github.com/NousResearch/hermes-agent/blob/848fc0ad8be766b9dc10fe42bd80b5fc2d45d95c/ui-tui/src/lib/subagentGlyph.ts#L16-L34), a shape for each status and never a success for an unknown ending;
+  - figures kept apart while there is room: [Primer's avatar stack](https://primer.style/product/components/avatar-stack/) and [Fluent 2's avatar group](https://fluent2.microsoft.design/components/web/react/core/avatargroup/usage), which also asks for text beside a small badge;
+  - closing a gap with transforms: [Motion's `popLayout`](https://motion.dev/docs/react-animate-presence) and [FLIP](https://aerotwist.com/blog/flip-your-animations/);
+  - [WCAG 4.1.3 Status Messages](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html), for the polite count.
 - Accessibility:
   - [WCAG 2.2.2 Pause, Stop, Hide](https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html);
   - [WCAG 2.3.3 Animation from Interactions](https://www.w3.org/WAI/WCAG22/Understanding/animation-from-interactions.html);

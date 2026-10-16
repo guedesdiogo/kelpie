@@ -16,6 +16,7 @@ import {
   retryDelay,
   sameGroup,
   summaryText,
+  tabOf,
   waitOf,
 } from "../../public/webchat/model.js";
 import { localeOf, TEXTS } from "../../public/webchat/texts.js";
@@ -131,6 +132,22 @@ describe("following the chat (5.10)", () => {
     expect(pillText(T, { count: 3, approval: false })).toBe("↓ 3 new");
     expect(pillText(T, { count: 3, approval: true })).toBe("↓ Approval waiting");
     expect(pillText(TEXTS["pt-BR"], { count: 1, approval: false })).toBe("↓ 1 nova");
+  });
+});
+
+describe("the tab (5.9)", () => {
+  it("starts the title with the count of agents waiting, and gives the favicon its dot", () => {
+    expect(tabOf("Assistant", 0)).toEqual({
+      title: "Assistant · Kelpie",
+      icon: "/webchat/icon.svg",
+    });
+    expect(tabOf("Assistant", 1)).toEqual({
+      title: "(1) Assistant · Kelpie",
+      icon: "/webchat/icon-waiting.svg",
+    });
+    // An agent named Kelpie isn't named twice.
+    expect(tabOf("Kelpie", 0).title).toBe("Kelpie");
+    expect(tabOf("Kelpie", 2).title).toBe("(2) Kelpie");
   });
 });
 
