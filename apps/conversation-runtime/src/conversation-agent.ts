@@ -418,6 +418,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       return;
     }
     connection.setState({ ...admission, openedAt: Date.now() });
+    // Either view learns the open confirmations now, so the next change is told against them.
+    const open = this.#openRequests(admission.userId);
+    this.#told(admission.userId, this.#requestsKey(open));
     // The sidebar's view gets what the conversation knows now, and none of its content (ADR-0052).
     if (admission.view === "presence") {
       send(connection, this.#presenceNow(admission.userId));
@@ -431,11 +434,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       paused: this.#get("paused", false),
     });
     // A confirmation still open after its turn settled isn't in the history (ADR-0052 §4).
-    const open = this.#openRequests(admission.userId);
-    if (open.requests.length > 0) {
-      send(connection, { type: "requests", ...open });
-      this.#told(admission.userId, this.#requestsKey(open));
-    }
+    if (open.requests.length > 0) send(connection, { type: "requests", ...open });
     const wait = this.#waitLeft();
     if (wait) send(connection, { type: "wait", deadline: wait });
     void this.#showAgent(connection, admission.agentId);

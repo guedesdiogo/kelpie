@@ -379,6 +379,21 @@ describe("the keyboard", () => {
     expect(document.activeElement).toBe(link);
   });
 
+  it("leaves focus where the owner put it when a request closes by itself", async () => {
+    make();
+    const agenda = opened("agenda");
+    agenda.receive(presence({ requests: [asked()] }));
+    rowOf("Agenda").querySelector(".row-open").click();
+    const confirm = rowOf("Agenda").querySelector("button.confirm");
+    confirm.focus();
+    // A press on blank space takes focus to the page.
+    confirm.blur();
+    await Promise.resolve();
+    agenda.receive({ type: "requests", requests: [], more: 0 });
+    expect(rowOf("Agenda").querySelector(".row-request").hidden).toBe(true);
+    expect(document.activeElement).toBe(document.body);
+  });
+
   it("does nothing on → for a row that doesn't wait", () => {
     make();
     opened("agenda").receive(presence());

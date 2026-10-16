@@ -42,6 +42,7 @@ async function open(name: string, admission: unknown = owner) {
     closedWith: () => closedWith,
     send: (frame: unknown) =>
       socket.send(typeof frame === "string" ? frame : JSON.stringify(frame)),
+    close: () => socket.close(1000),
   };
 }
 
@@ -248,6 +249,40 @@ describe("the presence view (ADR-0052)", () => {
     // Before and after the wake, the row got only its view's frames.
     expect(types(row.frames).every((type) => PRESENCE_FRAMES.includes(type))).toBe(true);
     expect(types(chat.frames)).toContain("bubble");
+  });
+
+  it("tells a row that opened after the ask when its confirmation is used", async () => {
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "change", input: { to: "frontier" } }),
+        reply("Confirme, por favor."),
+        toolCalls({ name: "change", input: { to: "frontier" } }),
+        reply("Feito."),
+      ]),
+    );
+    const ran = changing(world);
+    const name = "assistant:webchat:p-away";
+    // The owner writes and leaves: the agent asks while no socket of theirs is open.
+    const chat = await open(name);
+    chat.send({ type: "message", id: "m-away", text: "mude o tier" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "accepted")).toHaveLength(1));
+    chat.close();
+    await agent(name).flush();
+    await vi.waitFor(async () =>
+      expect((await agent(name).turns()).at(-1)?.status).not.toBe("running"),
+    );
+    // Back, the sidebar's row learns the request from its snapshot, and confirms it.
+    const row = await open(name, presence);
+    await vi.waitFor(() => expect(row.frames).toHaveLength(1));
+    const [request] = (row.frames[0]?.requests ?? []) as { id: number }[];
+    expect(request).toBeDefined();
+    row.send({ type: "confirm", id: request?.id, agent: "assistant" });
+    await vi.waitFor(() =>
+      expect(ofType(row.frames, "confirmation").at(-1)?.status).toBe("accepted"),
+    );
+    await agent(name).flush();
+    await vi.waitFor(() => expect(ran).toEqual([{ to: "frontier" }]));
+    await vi.waitFor(() => expect(ofType(row.frames, "requests").at(-1)?.requests).toEqual([]));
   });
 
   it("takes only a card's actions, each naming its agent, and closes on anything else", async () => {

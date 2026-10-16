@@ -400,6 +400,31 @@ describe("the agents (#140)", () => {
     expect(FakeSocket.all.at(-1).url).toContain("agent=agenda&view=presence");
   });
 
+  it("reads the list again when it fails after the conversation answered", async () => {
+    let fail;
+    const base = fakeFetch();
+    let calls = 0;
+    const failing = new Promise((resolve) => {
+      fail = resolve;
+    });
+    const fetch = vi.fn(async (url, init) => {
+      if (url !== "/webchat/agents") return base(url, init);
+      calls += 1;
+      if (calls === 1) {
+        await failing;
+        return new Response(null, { status: 503 });
+      }
+      return base(url, init);
+    });
+    const { socket } = await loadPage({ fetch });
+    socket.open();
+    socket.receive(historyFrame());
+    fail();
+    await settle();
+    expect(calls).toBe(2);
+    expect($("roster").querySelectorAll(".row-link")).toHaveLength(AGENTS.length);
+  });
+
   it("keeps what the conversation said before the list arrived, for its row and the tab", async () => {
     let answer;
     const base = fakeFetch();

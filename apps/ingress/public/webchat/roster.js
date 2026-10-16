@@ -281,7 +281,14 @@ export class Roster {
       row.focusInside = true;
     });
     request.addEventListener("focusout", (event) => {
-      if (event.relatedTarget && !request.contains(event.relatedTarget)) row.focusInside = false;
+      if (event.relatedTarget) {
+        if (!request.contains(event.relatedTarget)) row.focusInside = false;
+        return;
+      }
+      // Focus left for the page itself: a press on blank space, unless its button was removed.
+      queueMicrotask(() => {
+        if (event.target.isConnected) row.focusInside = false;
+      });
     });
     return row;
   }

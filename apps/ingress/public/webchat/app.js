@@ -1295,6 +1295,8 @@ async function start() {
   }
   const { state, agents: found } = await (listed ?? fetchAgents());
   listFailed = state === "unknown";
+  // The conversation may have answered before the list failed: read it again now, then.
+  if (listFailed && isOpen()) reloadAgents();
   agents = found;
   if (state === "expired") {
     showLogin();
