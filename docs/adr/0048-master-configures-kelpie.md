@@ -5,6 +5,7 @@
 - Issue: [#382](https://github.com/guedesdiogo/kelpie/issues/382)
 - Decided by the owner on 2026-10-16: «O agente principal e o agente setup serão um só. Vamos remover o conceito de agente setup e passar as permissões e responsabilidades do agente setup para o agente principal.»
 - Amended by: [ADR-0050](0050-master-orchestration-tools.md), Master always holds its orchestration tools, so §2's guards on a tools list go
+- Amended by: [ADR-0055](0055-composer-files-dictation-and-model.md), Master gains a tool that has Kelpie send the model picker, and on Telegram a model change is the owner's tap, not the typed code
 
 ## Context
 

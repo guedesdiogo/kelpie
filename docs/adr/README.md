@@ -58,6 +58,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0052](0052-webchat-presence-sockets.md) | The webchat's sidebar follows each agent through a socket that carries only its presence | [#393](https://github.com/guedesdiogo/kelpie/issues/393) |
 | [0053](0053-pups-in-the-conversation-header.md) | Pups show in the conversation's header too, and close up as they come back | [#403](https://github.com/guedesdiogo/kelpie/issues/403) |
 | [0054](0054-bot-photo-follows-default-mascot.md) | A bot's photo follows the agent's default mascot when that default changes | [#388](https://github.com/guedesdiogo/kelpie/issues/388) |
+| [0055](0055-composer-files-dictation-and-model.md) | The composer attaches files and dictates text, and the owner's own pick of an agent's model is the yes | [#406](https://github.com/guedesdiogo/kelpie/issues/406) |
 
 ## Format
 
