@@ -15,6 +15,8 @@ import {
   CONFIGURE_KELPIE_SKILL,
   type ConfigurationCommands,
   configurationTools,
+  heldTools,
+  MASTER_TOOLS,
 } from "../src/configuration.ts";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
 import { MASCOT_SCHEMA } from "../src/mascot-schema.ts";
@@ -287,61 +289,51 @@ describe("Master's configuration tools (ADR-0048)", () => {
     expect(await provider.tools(MASTER)).toEqual([]);
   });
 
-  it("never leaves Kelpie without a Master that holds them, before asking anything", async () => {
-    const { commands, agents, calls, allowlists } = fakeCommands();
+  it("take any tools list for Master or a new Master: its orchestration tools are never narrowed (#391)", async () => {
+    const { commands, agents, allowlists } = fakeCommands();
     agents.set("ana", "Ana");
-    allowlists.set("ana", ["memory_search", "memory_read"]);
+    allowlists.set("ana", ["memory_search"]);
     const tools = await toolsOf(
       configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
     );
-    const { context, asked } = contextOf(true);
-
-    const narrow = await run(tools, "set_main_agent", { id: "ana" }, context);
-    expect(narrow).toEqual({
-      output:
-        "The agent ana's tools leave out configuration tools, so as Master it couldn't configure Kelpie. Change its tools first with configure_agent: null for all it is given, or a list that names every configuration tool.",
-      isError: true,
-    });
-    const own = await run(
+    for (const [name, input] of [
+      ["configure_agent", { id: MASTER, settings: { tools: ["memory_search"] } }],
+      ["configure_agent", { id: MASTER, settings: { tools: [] } }],
+      ["set_main_agent", { id: "ana" }],
+    ] as const) {
+      expect((await run(tools, name, input, contextOf(false).context)).output, name).toContain(
+        "Not done yet",
+      );
+    }
+    // Every configuration tool is one of Master's orchestration tools.
+    for (const name of tools.keys()) expect(MASTER_TOOLS.has(name), name).toBe(true);
+    // The owner and the model are told the list doesn't hold them back.
+    const shown = contextOf(false, owner, "pt-BR");
+    await run(
       tools,
       "configure_agent",
-      { id: MASTER, settings: { tools: ["memory_search", "configure_agent"] } },
-      context,
+      { id: MASTER, settings: { tools: ["memory_search"] } },
+      shown.context,
     );
-    expect(own).toEqual({
-      output:
-        "Master keeps every configuration tool: a tools list for it must name them all, or be null for all it is given.",
-      isError: true,
-    });
-    expect(asked).toEqual([]);
-    expect(calls).toEqual([]);
-
-    // A list that names them all, or none for a specialist, goes on to the owner's confirmation.
-    const every = [...tools.keys(), "memory_search"];
+    expect(shown.asked[0]?.summary).toContain(
+      "O Master mantém as tools de configuração, de subagentes e de tarefas, qualquer que seja a lista.",
+    );
+    const forAna = contextOf(false);
+    await run(tools, "configure_agent", { id: "ana", settings: { tools: [] } }, forAna.context);
+    expect(forAna.asked[0]?.summary).not.toContain("Master keeps");
+    allowlists.set(MASTER, ["memory_search"]);
     expect(
-      (
-        await run(
-          tools,
-          "configure_agent",
-          { id: MASTER, settings: { tools: every } },
-          contextOf(false).context,
-        )
-      ).output,
-    ).toContain("Not done yet");
-    expect(
-      (
-        await run(
-          tools,
-          "configure_agent",
-          { id: "ana", settings: { tools: ["memory_search"] } },
-          contextOf(false).context,
-        )
-      ).output,
-    ).toContain("Not done yet");
-    allowlists.set("ana", every);
-    expect(
-      (await run(tools, "set_main_agent", { id: "ana" }, contextOf(false).context)).output,
-    ).toContain("Not done yet");
+      (await run(tools, "get_agent", { id: MASTER }, contextOf(false).context)).output,
+    ).toContain(
+      "As Master, it also always holds its orchestration tools, whatever this list says:",
+    );
+    // What an agent holds: Master's list gains them; anyone else's, or no list, stays as it is.
+    expect(new Set(heldTools("main", ["memory_search"]))).toEqual(
+      new Set([...MASTER_TOOLS, "memory_search"]),
+    );
+    expect(heldTools("main", null)).toBeNull();
+    expect(heldTools("specialist", ["memory_search"])).toEqual(["memory_search"]);
+    expect(heldTools(null, ["memory_search"])).toEqual(["memory_search"]);
   });
 
   it("calls the role the Registry names `main` Master, in its skill, tools and texts (#343)", async () => {
