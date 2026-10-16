@@ -26,7 +26,7 @@ Every color is a token with a light and a dark value. The theme follows the oper
 
 - **Text on `--ok`** uses `--surface`, so it inverts with the theme.
 - **The mascot's body colors** are the one exception to light and dark pairs. They color the figure, not the page, so each has one value in both themes, and none is amber (5.19).
-- **Text on a tint** (a highlight, a hold fill) is `--fg`. Text on a solid fill uses that fill's own text color: `--on-accent` on `--accent`, `--surface` on `--ok`.
+- **Text on a tint** (a highlight, a hold fill) is `--fg`. Text on a solid fill uses that fill's own text color: `--on-accent` on `--accent`, `--warm` and `--danger`, and `--surface` on `--ok`.
 - **Tints** come from `color-mix()` with a token, never from a new literal: a focus halo is `--accent` at 18%, a hold-to-confirm fill `--accent` at 28%, a card that just landed `--accent` at 22%, a text highlight `--accent` at 24%, a receipt icon well `--ok` at 16%, a scrim `--fg` at 16%.
 - **Shadows** are black at low alpha in both themes: `--shadow` is `0 1px 2px rgb(0 0 0 / .06), 0 14px 30px -18px rgb(0 0 0 / .38)`, and `--shadow-pop` (palettes, menus) is `0 18px 40px -16px rgb(0 0 0 / .5)`.
 
@@ -41,7 +41,7 @@ With `prefers-contrast: more`, or Kelpie's own contrast setting (5.17), two toke
 
 Every boundary then reaches 3:1, and secondary text 7:1. `--accent`, `--warm`, `--ok` and `--danger` keep their AA values (section 1's table), so text in those colors stays at 4.5:1, not 7:1.
 
-With `prefers-reduced-transparency: reduce`, scrims and tints become solid fills. In `forced-colors` mode the system's colors replace the tokens, and the state glyphs of 5.9 carry the meaning that color would. A mascot keeps its painting there, and its state is read from the glyph and the label beside it (ADR-0045 §9).
+With `prefers-reduced-transparency: reduce`, scrims and tints become solid fills. In `forced-colors` mode the system's colors replace the tokens, and the state glyphs of 5.9 carry the meaning that color would. A mascot's state is read there from the glyph and the label beside it (ADR-0045 §9).
 
 ### Measured contrast
 
@@ -57,7 +57,9 @@ WCAG 2 contrast ratios, measured on 2026-10-15 from the hex values above. AA ask
 | `--ok` on `--bg` / `--surface` / `--sunken` | 4.44 / 4.98 / 4.06 | 8.60 / 7.86 / 8.33 |
 | `--surface` on `--ok` | 4.98 | 7.86 |
 | `--danger` on `--bg` / `--surface` / `--sunken` | 4.79 / 5.37 / 4.38 | 6.53 / 5.97 / 6.32 |
-| `--surface` on `--warm` / `--danger` (the mascot's `?` and `!`) | 5.60 / 5.37 | 8.74 / 5.97 |
+| `--on-accent` on `--warm` / `--danger` (the mascot's `?` and `!`, at the bubble's middle stop) | 5.53 / 5.30 | 8.80 / 6.01 |
+
+The mascot's bubble is a gradient around its token, lighter at the top left, so its glyph measures lower there. The glyph never carries the state alone: the label, the glyph of 5.9 and the pose do too.
 
 Four pairs miss AA in light, so text never uses them: `--accent`, `--ok` and `--danger` on `--sunken`, and `--ok` on `--bg`. There, the text is `--fg`, and the color moves to an underline or an icon (icons need 3:1, which all four pass).
 
@@ -132,7 +134,7 @@ Motion depends on how often an interaction happens, not on which screen it is in
 
 **The mascot's life in place** (breathing, blinking, its repertoire) is not UI motion in either grammar. It uses the frequent springs, runs under its own guards, and is the one exception to rule 8 (5.19, ADR-0045 §6).
 
-**From the keyboard**, anything opened, moved or navigated appears at once. What shows progress or a result still shows: a hold fill grows while the key is held, and a confirmation still turns `--ok` and shows its check, without the grow, the pop or the ring. A mascot whose state a keyboard action changes takes the new pose without its announcement, in a 150 ms crossfade.
+**From the keyboard**, anything opened, moved or navigated appears at once. What shows progress or a result still shows: a hold fill grows while the key is held, and a confirmation still turns `--ok` and shows its check, without the grow, the pop or the ring. A mascot whose state a keyboard action changes takes the new pose without its announcement.
 
 ### 4.2 Springs
 
@@ -253,14 +255,15 @@ Frequent. Kelpie waits `quietMs` after the owner's latest message before answeri
 - **Reduced motion:**
   - bubbles fade in where they land;
   - the bar still drains, since it is progress;
-  - the dots rest at 60% from the start.
+  - the dots rest at 60% from the start;
+  - the mascot is Still (5.19).
 
 ### 5.2 Tool calls and streaming
 
 Frequent.
 
 - **The row.** It appears when a call starts, with the call's real name. A call that changes something carries a "changes" tag beside its name; a call that only reads carries none.
-- **The mascot holds the same tool.** While a row runs, the header's mascot holds that tool's object (5.19). The row and the object always name the same call; between calls, the mascot thinks.
+- **The mascot follows the same call.** While a row runs, the header's mascot holds that tool's object when it has one, and thinks otherwise (5.19). Between calls, it thinks or types the reply.
 - **Each new action** replaces the label above it: the old label leaves upward (exit, 75% of its height), and the new one rises with `--spring-fast`.
 - **The spinner** follows rule 8, and turns for at most 5 s. After that, a still ring and the elapsed time (shown from 3 s) say the call is running.
 - **Done**, the row becomes a one-line summary ("3 steps · 2.6 s") with a check. A click opens it: height with `--spring-base`, rows entering with `--stagger`.
@@ -269,7 +272,8 @@ Frequent.
 - **Reduced motion:**
   - labels swap with a fade;
   - the spinner is a still ring;
-  - the summary opens at once.
+  - the summary opens at once;
+  - the mascot is Still (5.19).
 
 ### 5.3 Confirm an action
 
@@ -282,10 +286,10 @@ Moment. The owner's press is the yes ([ADR-0026](adr/0026-confirmation-by-owner-
   - **Hold to pause this conversation**, a smaller control under them. It uses the hold of 5.4 and runs the existing pause (#134): the next answer waits for the owner's next message, and background tasks keep running.
 - **What the card shows is bounded** (ADR-0044 §1). The agent is named by its id. The evidence comes from the tool call's typed fields, appears as quoted data marked as written by the agent, and never carries a link or a control.
 - **The agent's mascot answers with the card** (5.19):
-  - while the card is open, it takes Waiting: the amber bubble, its eyes on the owner, pointing at the card;
-  - Confirm brings Approved for 1.1 s, a happy jump, then Working;
-  - Deny (#361) and an expiry bring no celebration: it crossfades to what comes next, as the neutral receipt does;
-  - from the keyboard, each change is a 150 ms crossfade.
+  - while the card is open, it takes Waiting: its eyes on the owner, brows up, the amber bubble; among its gestures, it points at the card;
+  - Confirm brings Approved for 1.1 s, a happy jump, then what comes next;
+  - Deny (#361) and an expiry bring no announcement: the pose changes as for any state change, as quiet as the neutral receipt;
+  - from the keyboard, each change shows the new pose without its announcement.
 - **The press.** The button scales to `--scale-press` and grows to the card's full width (width and position, `--spring-moment`). The other button leaves as it grows (exit, `--scale-in-moment`).
 - **Working.** Its label rolls to a spinner and what is happening ("Creating the event"). The spinner follows rule 8: after 5 s, a still ring and the elapsed time take its place.
 - **Success:**
@@ -302,7 +306,7 @@ Moment. The owner's press is the yes ([ADR-0026](adr/0026-confirmation-by-owner-
   - Enter or Space acts only with focus on a button. Enter in the composer sends a message; it never confirms or denies.
   - A key already held down when the card appeared doesn't count.
   - A keyboard confirm or deny skips the grow, the pop and the ring. A confirm goes from the label to the spinner, to the check, to the receipt; a deny, which runs nothing, goes straight to the receipt.
-- **Reduced motion:** the grow, the pop and the ring go. The color change, the check and the receipt stay, each with a fade.
+- **Reduced motion:** the grow, the pop and the ring go. The color change, the check and the receipt stay, each with a fade. The mascot is Still (5.19).
 
 ### 5.4 Turn on something that costs
 
@@ -340,7 +344,7 @@ Moment. Subagents are temporary and never exceed their creator ([ADR-0036](adr/0
 - **Each subagent is a pup** of the parent's mascot (ADR-0045 §7): the same shape and head, a lighter color, dot eyes, no accessory, and 40% of the size. All of them show, since a creator has at most three live subagents (ADR-0036).
 - **A pup leaves the parent's body as a drop**, under an SVG "goo" filter on one layer (Gaussian blur 7, alpha matrix 20 / −9). It travels to its place with `--spring-moment-slow`, `--stagger-moment` apart.
 - **A link draws** from the parent (stroke offset, `--spring-moment-slow`, 60 ms later), and the label enters 8px from the left, 140 ms later.
-- **When it is done**, it travels back faster than it left (`--spring-moment`, rule 9) and fades into the parent. The link retracts, and the parent swallows it (`scale` 1.12 to 1, `--spring-pop`, at 55% of the return).
+- **When it is done**, it travels back faster than it left (rule 9) and fades into the parent. The link retracts, and the parent swallows it (`scale` 1.12 to 1, `--spring-pop`, at 55% of the return).
 - **Reduced motion:** pups and links fade in and out at their places, without the goo.
 
 ### 5.7 Saved to memory
@@ -354,7 +358,7 @@ Moment.
 - **Each note keeps its origin.** The vault shows who wrote each passage, from a write log rather than markers in the file: the owner, an agent or an import.
 - **Off the record.** A conversation can be marked so nothing from it enters the vault.
 - **A new note appears as ink.** Its text reveals left to right under a mask, over `--dur-travel`. Only a new note does this; chat keeps rule 7.
-- **Reduced motion:** the highlight fades in, the chip fades out where it is, the count changes with a fade, and a new note appears whole.
+- **Reduced motion:** the highlight fades in, the chip fades out where it is, the count changes with a fade, a new note appears whole, and the mascot is Still (5.19).
 
 ### 5.8 Command palette
 
@@ -370,24 +374,24 @@ Frequent, and the clearest case of rule 1.
 
 Moment grammar. Every place that shows an agent shows its mascot (5.19), at the size that place allows. The mascot is where Kelpie spends its novelty; the rest of a roster stays quiet.
 
-| State | The mascot (5.19) | Glyph and label | Motion |
-|---|---|---|---|
-| Working | the task's object in its mittens; at 36 px, an `--accent` badge with the tool's icon | a half-filled circle, "working", the elapsed time `m:ss` | the object pops out; in Alive, the activity's loop |
-| Waiting for the owner | its eyes on the owner, the amber bubble `?`; at 36 px, a `--warm` badge | a diamond, "waiting for you", the time since | a hop, and the bubble pulses three times |
-| Idle | eyes open, in its own color; dozing after 45 s | a hollow circle, "idle" | in Alive, it breathes and draws idle gestures |
-| Error | worried brows, the red bubble `!`; at 36 px, a `--danger` badge | a triangle, what failed | one shake, and the bubble pops |
-| No response | the working pose without its activity, beside a still, dashed `--muted` bubble `…` | a dashed circle, "no response for 1 min" | the bubble pops, then nothing |
+| State | The mascot at 48 px and up (5.19) | At 36 px | Glyph and label | Motion |
+|---|---|---|---|---|
+| Working | the task's object in its mittens, or thinking bubbles | an `--accent` badge with the tool's icon | a half-filled circle, "working", the elapsed time `m:ss` | the object pops out, or at 36 px the badge pops; in Alive, the activity's loop |
+| Waiting for the owner | its eyes on the owner, brows up, the amber bubble `?` | a `--warm` badge with `?` | a diamond, "waiting for you", the time since | a hop, and the bubble or badge pulses three times |
+| Idle | eyes open, in its own color; dozing after 45 s | no badge | a hollow circle, "idle" | in Alive, it breathes and draws idle gestures |
+| Error | worried brows, the red bubble `!` | a `--danger` badge with `!` | a triangle, what failed | one shake, and the bubble or badge pops |
+| No response | the working pose without its activity, beside a still, dashed `--muted` bubble `…` | the working badge; the glyph and the label carry the state | a dashed circle, "no response for 1 min" | the bubble pops, then nothing |
 
 - **The glyph and the label carry the state on their own.** The glyphs are drawn as SVG, since Geist has no such characters, and are hidden from screen readers, which read the label. In higher contrast, in forced colors, and wherever a figure can't be drawn, they are what shows the state.
 - **No response** is a working agent from which nothing has arrived for 60 s: no streamed token, and no tool call starting or ending. A tool call still within its time bound counts as activity. The webchat can't tell it apart, and doesn't show it (5.19).
 - **On a change,** the mascot plays its new state's announcement (5.19), and the status line rolls.
-- **A roster stays calm.** At 36 px there is one gesture at a time across the whole list, every 7 to 16 s, and never a hop. Pressing a row does what the roster defines, never a clap.
+- **A roster stays calm.** At 36 px its repertoire plays one gesture at a time across the whole list, every 7 to 16 s, and never a hop; a state's announcement still plays. Pressing a row does what the roster defines, never a clap.
 - **What waits for the owner is counted, not moved.**
   - A strip above the roster counts the agents waiting, in `--warm`. Its count rolls. It enters with `--rise`, and leaves when nothing waits. Its slot above the roster is reserved, so the rows never move when it appears.
   - The browser tab's title starts with the count, "(2) Kelpie", and the favicon gets a `--warm` dot.
   - A free tier past 90% joins the count (5.16).
 - **A row opens in place.** Pressing a waiting agent's row grows its request under the row (height, `--spring-moment`), with the card of 5.3. From the keyboard it appears at once.
-- **Finished work leaves; failures stay.** A subagent or task that succeeded leaves a list at once. One that failed stays 30 s with its error badge, and can be dismissed.
+- **Finished work leaves; failures stay.** A subagent or task that succeeded leaves a list at once. One that failed stays 30 s with its triangle glyph and what failed, and can be dismissed.
 - **An agent is compared with itself.** Its numbers sit against its own last 30 days, never in a ranking of agents.
 - **The roster never reorders** when a state changes: a list that jumps under the pointer costs a misclick.
 - **Reduced motion:** mascots are Still (5.19): the state's pose, its badge and its bubble, with a 150 ms crossfade on a change. The elapsed time shows minutes only ("2 min") and updates once a minute. The strip and an opening row appear with a fade, and counts change with a fade.
@@ -421,10 +425,10 @@ Frequent.
 
 Frequent.
 
-- **The first 2 s change nothing.**
+- **The first 2 s show no banner.**
 - **The banner.** Then a banner enters at the top (from 8px above, `--spring-base`): what happened, when the next try is ("No connection. Trying again in 8 s", digits in Geist Mono), and "Try now".
 - **Queued messages.** What the owner sends meanwhile shows in `--sunken` with a clock and "queued". It goes out in order when the connection is back.
-- **The mascot returns to Idle.** It hears nothing more of the turn, so it can't vouch for work it no longer sees (rule 7). A new connection starts from the history.
+- **The mascot returns to Idle at once.** It hears nothing more of the turn, so it can't vouch for work it no longer sees (rule 7). A new connection starts from the history.
 - **Back,** the banner turns `--ok`, "Back. 1 message sent.", for 2.6 s, then leaves. Alerts stay quiet for the first 4 s after reconnecting, so a backlog doesn't arrive as a burst.
 - **An expired login** opens a centered dialog, and keeps the draft.
   - The page tells it from a lost connection by asking ingress with `X-Requested-With`, which Access answers with 401 once the session expired.
@@ -449,7 +453,7 @@ Frequent.
 
 Frequent.
 
-- **From a list to a detail,** the agent's mascot and name travel to their new place with a View Transition (`--spring-base`), and the rest crossfades.
+- **From a list to a detail,** the agent's mascot, in its box, and its name travel to their new place with a View Transition (`--spring-base`), and the rest crossfades.
 - **Back** reverses the direction.
 - **From the keyboard,** and in a browser without View Transitions, the view changes at once.
 - **A streaming chat** is never part of the transition.
@@ -485,7 +489,7 @@ Frequent; crossing a limit is a moment.
 
 Moment.
 
-- **Comfort comes first.** Before anything else, one step sets motion (full or less), text size, contrast and the mascot's pause (Alive, States only or Still, 5.19). That is where the less-motion switch of rule 10 lives. The step can be reopened in settings. Until the management UI has them, the webchat's Display menu (5.22) holds the switch, the theme and the contrast.
+- **Comfort comes first.** Before anything else, one step sets motion (full or less), text size, contrast and the mascot's pause (Alive, States only or Still, 5.19). That is where the less-motion switch of rule 10 lives. The step can be reopened in settings. Until the management UI has them, the webchat's Display menu (5.22) holds the switch, the theme, the contrast and the mascot's pause.
 - **The first agent.**
   - Until it exists, the empty state says in one sentence why the roster is empty, and offers one button.
   - When it is created, its mascot enters its slot with `--spring-pop` and plays Idle's hop and smile, and the empty block collapses with `--spring-moment`.
@@ -556,8 +560,8 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 | Where | Size | What changes |
 |---|---|---|
 | Roster | 36 px | no mouth or brows, eyes 15% larger, no mittens; a glossy badge with a `--surface` ring takes the bubble's place: `--warm` for waiting, `--danger` for error, `--accent` with the tool's icon for working. One gesture at a time across the list, every 7 to 16 s, never a hop |
-| Switcher list (5.21) | 36 px | as in the roster, but still: the list is open for a moment, and its badges already show each state |
-| Task card (5.5) | 20 px | the shape, the color and the eyes only: no head, accessory, mittens or badge; still, since the card already says the state |
+| Switcher list (5.21) | 36 px | the Idle pose, still, with no badge: the list is open for a moment and carries no state |
+| Task card (5.5) | 20 px | the shape, the color and the eyes only: no head, accessory, mittens or badge; still, since the card already says the state. The engine draws a badge at every size up to 40 px today, so the board needs that changed |
 | Conversation header | 48 px | its home. Everything happens inside its box; the box is kept before the figure arrives, so nothing in the layout moves |
 | Empty conversation, profile | 160 px | gestures a little more often |
 | Telegram bot photo | 800 px square, cropped round by Telegram | a still, and a loop Telegram plays (below) |
@@ -632,7 +636,7 @@ Frequent.
 
 - **The header** holds the 48px mascot (5.19), the agent's name in Bricolage Grotesque at `--text-h3`, and the status line.
 - **The switcher.** With more than one agent, the name is a button that opens the list. From a click it grows from the name as 5.8 does; from the keyboard it appears at once.
-  - Each agent is a link to its conversation (`?agent=<id>`), with its still 36 px mascot (5.19), its name, and its id in Geist Mono. Back and new tabs work.
+  - Each agent is a link to its conversation (`?agent=<id>`), with its still 36 px mascot in the Idle pose (5.19), its name, and its id in Geist Mono. Back and new tabs work.
   - The current one is marked with `aria-current`.
   - Arrows, Home and End move through the list, and Escape closes it.
 - **The order** is the registry's and never changes with activity (5.9).
@@ -671,7 +675,7 @@ A pull request that changes the interface answers yes to each line:
 - [ ] Every color, size, radius, duration and easing comes from a token, unless a pattern in section 5 sets the number.
 - [ ] Only `transform`, `opacity` and color animate, apart from the contained sizes in 5.1, 5.2, 5.3, 5.9, 5.17 and 5.18 and the mask reveal in 5.7; no `transition: all`.
 - [ ] Keyboard-triggered actions don't animate their way in or out; progress and results still show.
-- [ ] Loops stop within 5 s, and the steady state reads without motion.
+- [ ] Loops stop within 5 s, apart from the mascot's life in place (5.19), and the steady state reads without motion.
 - [ ] Exits are faster than entries, and staggers stop at 300 ms.
 - [ ] Interrupting an animation leaves no element stuck halfway.
 - [ ] Under reduced motion, every movement becomes a short fade, and no feedback disappears.
@@ -707,8 +711,8 @@ A component, screen, state or interaction this document doesn't define is design
 
 **Already rejected.** Research turned these down; a new design doesn't bring them back without a new decision:
 - glass or blur over content;
-- glows or ambient motion that loop;
-- a character that wanders the screen: the mascot lives in its box;
+- glows or ambient motion that loop, apart from the mascot's life in place under its guards (5.19);
+- a character that wanders the screen: the mascot lives in its box, and the box moves only with its view (5.14);
 - playful verbs in place of real phase names;
 - a roster that regroups itself by state.
 
