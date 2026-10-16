@@ -383,6 +383,30 @@ describe("the keyboard", () => {
     expect(document.activeElement).toBe(link);
   });
 
+  it("leaves focus on the page when the owner leaves the row during the receipt", async () => {
+    make();
+    const agenda = opened("agenda");
+    agenda.receive(presence({ requests: [asked()] }));
+    const link = rowOf("Agenda").querySelector(".row-link");
+    link.focus();
+    link.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    const request = rowOf("Agenda").querySelector(".row-request");
+    const confirm = request.querySelector("button.confirm");
+    confirm.focus();
+    vi.advanceTimersByTime(PRESS_GUARD_MS);
+    confirm.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    confirm.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 }));
+    agenda.receive({ type: "confirmation", id: 7, status: "accepted" });
+    vi.advanceTimersByTime(1_000);
+    await vi.waitFor(() => expect(request.querySelector(".receipt")).not.toBeNull());
+    expect(document.activeElement).toBe(link);
+    // A press on blank space while the receipt shows takes focus to the page, and it stays there.
+    link.blur();
+    vi.advanceTimersByTime(RECEIPT_SHOWN_MS);
+    expect(request.hidden).toBe(true);
+    expect(document.activeElement).toBe(document.body);
+  });
+
   it("leaves focus where the owner put it when a request closes by itself", async () => {
     make();
     const agenda = opened("agenda");

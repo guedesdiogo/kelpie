@@ -517,7 +517,11 @@ export class Roster {
   #keepFocus(row) {
     const active = document.activeElement;
     const lost = !active || active === document.body || !active.isConnected;
-    if (row.request.contains(active) || (row.focusInside && lost)) row.link.focus();
+    if (row.request.contains(active) || (row.focusInside && lost)) {
+      row.link.focus();
+      // Focus is on the row now, outside the request: where the owner takes it next is theirs.
+      row.focusInside = false;
+    }
   }
 
   /** An open request stays while its card is open, or folding; one answered elsewhere closes. */
