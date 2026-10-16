@@ -106,9 +106,20 @@ const MAX_SKILL_CHARS = 4_000;
 const MAX_TOOLS = 32;
 const isToolName = (value: unknown): value is string =>
   typeof value === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(value);
-/** One line of printable text, as a remit or a skill's name. */
+/**
+ * One line of printable text, as a remit or a skill's name. U+2028 and U+2029 aren't `\p{C}`, but
+ * some surfaces break the line on them (#397, #401).
+ */
 const isLine = (value: unknown, max: number): value is string =>
-  typeof value === "string" && value.length <= max && !/\p{C}/u.test(value);
+  typeof value === "string" && value.length <= max && !/[\p{C}\p{Zl}\p{Zp}]/u.test(value);
+/**
+ * Whether the text shows a character (#401). Spaces, default-ignorable characters such as the Hangul
+ * fillers and variation selectors, and the Braille blank show nothing on their own, and `trim()`
+ * keeps all but the spaces. Beside a visible character they stay valid, as U+FE0F does after the
+ * heart U+2764.
+ */
+const isVisible = (value: string): boolean =>
+  /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\u2800]/u.test(value);
 
 function parseSkills(value: unknown): AgentSkill[] | null {
   if (!Array.isArray(value) || value.length > MAX_SKILLS) return null;
@@ -117,7 +128,7 @@ function parseSkills(value: unknown): AgentSkill[] | null {
     if (typeof entry !== "object" || entry === null) return null;
     const { name, instructions, ...rest } = entry as Record<string, unknown>;
     if (Object.keys(rest).length > 0) return null;
-    if (!isLine(name, 80) || name.trim() === "") return null;
+    if (!isLine(name, 80) || !isVisible(name)) return null;
     if (typeof instructions !== "string" || instructions.trim() === "") return null;
     if (instructions.length > MAX_SKILL_CHARS) return null;
     skills.push({ name: name.trim(), instructions });
@@ -130,17 +141,9 @@ export function isAgentId(value: unknown): value is string {
   return typeof value === "string" && /^[a-z][a-z0-9-]{1,39}$/.test(value);
 }
 
-/**
- * Agent names appear in lists and in models' context: one line of printable text. U+2028 and
- * U+2029 aren't `\p{C}`, but some surfaces break the line on them (#397).
- */
+/** Agent names appear in lists and in models' context: one line of printable text that shows. */
 export function isAgentName(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.trim() !== "" &&
-    value.length <= 80 &&
-    !/[\p{C}\p{Zl}\p{Zp}]/u.test(value)
-  );
+  return isLine(value, 80) && isVisible(value);
 }
 
 const isInteger = (value: unknown, min: number, max: number): value is number =>
