@@ -26,7 +26,7 @@
 **A confirmation still open after its turn settled reaches no socket.**
 - A confirmation's notice belongs to its turn.
 - The transcript replays only the sent notices of a turn still running (`conversation-agent.ts`, `#transcript`). So a socket opened later never learns that one is open.
-- The `confirmations` table still holds it until a later turn uses it, or until it expires, 10 minutes after it was last shown (ADR-0026 §3).
+- The `confirmations` table still holds it until a later turn uses it, or until it expires, 10 minutes after a turn last asked for it (ADR-0026 §3).
 - This is why the #377 review found that a reconnect leaves the mascot Idle while a confirmation waits.
 
 **Two facts about today's code shape this decision:**
@@ -60,17 +60,18 @@ So a roster that guesses lags and misses requests. Linear's agent sessions make 
   - The runtime closes a socket whose admission names a view it doesn't know, with 1008.
 - **The view is the page's request, not a grant.** Today the owner is the one user and may open either view, so asking for less gains nothing. If the webchat ever admits other users (ADR-0015), the view becomes a grant the Directory gives.
 - **It reaches the same Durable Object,** the owner's webchat conversation with that agent. So a row shows what that conversation is doing.
-- **The runtime keeps at most 8 presence sockets per conversation.** A ninth closes the oldest with 1013, so a leaking tab can't grow them.
+- **The runtime keeps at most 8 presence sockets per conversation.** A ninth closes the oldest with 1013, so a leaking tab can't grow them. Each socket's state carries when it opened, since hibernation loses the order in memory. A page doesn't retry a 1013 until its next list reload or its own socket's reconnect, so tabs can't evict each other in turn.
 
 ### 2. What the presence view receives
 
 **Every frame the conversation sends goes through one function.** It reads the connection's admission and sends only what that connection's view allows. A connection with no admission gets nothing. Nothing else iterates the conversation's sockets.
 
 **On connect, the presence view gets one `presence` frame** with what the conversation knows now:
-- **The turn's current step,** its tool's label and activity, and how long ago the turn began, in ms. The conversation will start keeping the latest step in memory, set with each step and cleared when the turn settles. The ms count means the browser's clock doesn't matter.
-  - An object that woke with no turn running is idle.
-  - One woken by an eviction mid-turn reads the running turn from its table. It says working without a label until the recovered turn's next step.
-- **Whether its latest turn failed,** for 5.9's Error.
+- **Whether a turn is running,** and how long ago it began, in ms, so the browser's clock doesn't matter.
+  - Working means a turn with status `running` in the conversation's table.
+  - The conversation will start keeping its latest step in memory, which adds the step's name, its tool's label and its activity. It sets it with each step, clears it on an `idle` step and when a turn settles, and keeps it whether or not the channel shows steps.
+  - An object woken by an eviction mid-turn has no step in memory. It says working without a label until the recovered turn's next step.
+- **Whether its latest turn settled `failed`,** for 5.9's Error.
 - **Whether it is paused.**
 - **Its open confirmations,** newest first, at most 10, with the count of any others. "Open" means:
   - not used;
@@ -78,20 +79,20 @@ So a roster that guesses lags and misses requests. Linear's agent sessions make 
   - asked by this socket's user;
   - its notice sent, which is an outbox row for it marked sent. A confirmation from a turn the owner interrupted never shows.
 
-  Each one carries its id, the summary its tool wrote, in full, and how long until it expires, in ms.
+  Each one carries its id, the summary its tool wrote, in full, how long ago a turn last asked for it, and how long until it expires, both in ms.
 
 **Then, as they happen:**
 - `status`, as the conversation's own socket gets it;
-- `status` idle when any turn settles, a delivered one included. The conversation's own socket ends the step on the reply's bubble, which this view doesn't get;
-- `failed`, when a turn ends with the failure notice;
+- `status` idle when any turn settles, a delivered one included, to presence sockets only. The conversation's own socket ends the step on the reply's bubble, which this view doesn't get;
+- `failed`, when a turn settles `failed`;
 - `paused` and `resumed`;
-- `confirmations`, the whole open list as above, when it changes:
+- `requests`, the whole open list as above, when it changes:
   - a notice is sent;
   - a later turn uses a confirmation;
   - one is shown again, with a new expiry.
 
   No frame marks an expiry: the page drops a confirmation when its time runs out, and the conversation checks again at the press. So no alarm wakes the conversation for it.
-- `confirmation`, the answer to a press, to the socket that sent it.
+- `confirmation`, the answer to a press, to the socket that sent it. (`requests` is the open list; `confirmation` answers one press.)
 
 **Never anything else.** No `history`, no `bubble`, no `typing`, no `wait`, no `agent`, no reply's text, and no message of the owner's.
 
@@ -101,18 +102,18 @@ So a roster that guesses lags and misses requests. Linear's agent sessions make 
   - `confirm`;
   - `pause`, the card's hold (ADR-0044);
   - `deny`, once #361 builds it.
-- **The rules for each:**
-  - A frame counts only if its agent is the socket's admitted agent. A confirmation's id is its own conversation's counter, so an id alone could confirm another agent's change.
-  - A press counts under ADR-0026 §3: from the socket of the user who asked, for a confirmation of theirs still open. Then the conversation replies with the code for them, and ADR-0013's gate takes it as a typed code, once.
-  - A pause works as it does from the conversation (#134).
-- **The conversation's own socket names its agent on these frames too.** A frame there that names another agent is refused.
-- **Anything else closes the socket with 1008.** The view is checked first, before any other frame is read: `message`, `typing`, binary or malformed frames, and the SDK's own frames.
+- **Each of these frames carries an `agent` field with the agent's id.** A confirmation's id is its own conversation's counter, so an id alone could confirm another agent's change.
+  - **On a presence socket, the field is required.** A `confirm` without it, or naming another agent, is answered `refused`. A `pause` or a `deny` like that is ignored. The socket stays open.
+  - **On the conversation's own socket,** a frame naming another agent gets the same treatment. One naming none counts as naming the socket's agent: pages open before this ADR's deploy send none, and there the id is read against this conversation alone.
+- **A press counts under ADR-0026 §3,** and only for a confirmation that is open as §2 defines it, its notice sent included. `#press` today checks the user, the use and the expiry, and gains the notice check. Then the conversation replies with the code for them, and ADR-0013's gate takes it as a typed code, once.
+- **A pause works as it does from the conversation** (#134).
+- **Anything else closes the socket with 1008,** checked first in `onMessage`: `message`, `typing`, and binary or malformed frames. The Agents SDK answers its own state and RPC frames before `onMessage` runs, so this check never sees them. They stay inert, since the connection is read-only and no method is callable (ADR-0034), and a test pins that on a presence socket.
 
 ### 4. The conversation's own socket learns of open confirmations too
 
-- After `history`, it gets the same `confirmations` frame, and again whenever the list changes.
+- After `history`, it gets the same `requests` frame, and again whenever the list changes.
 - So a reconnect returns the mascot to Waiting while a confirmation is open (5.12), and the strip and the tab's title count it.
-- **The page draws the card again.** A confirmation open after its turn settled shows its card at the end of the thread, with its time. This amends ADR-0026's line that a notice doesn't come back once its turn has settled.
+- **The page draws the card again.** A confirmation open after its turn settled shows its card at the end of the thread, with its time. The page draws one only for a confirmation whose notice the history didn't replay, which is a running turn's. This amends ADR-0026's line that a notice doesn't come back once its turn has settled.
 
 ### 5. How the page keeps the rows honest
 
@@ -125,7 +126,7 @@ So a roster that guesses lags and misses requests. Linear's agent sessions make 
   - it retries with the page's backoff (`retryDelay`);
   - the backoff starts again when the page's own socket reconnects, or on "Try now";
   - after 2 s closed, it shows Offline (ADR-0047), because the row can't vouch for the state any more.
-- **A refusal doesn't retry.** A socket closed with 1008, or refused at the upgrade, isn't retried. The page reloads the agent list once for all rows, and drops the rows no longer listed.
+- **A refusal doesn't retry at once.** A presence socket closed with 1008, or one that never opened, isn't retried at once. The browser doesn't show an upgrade's status: a refusal and a dropped network both close with 1006. So the page reloads the agent list once for all rows, drops the rows no longer listed, and retries the others with the backoff.
 - **Retries pause while the page is hidden.** The login check runs once for the page, not once per row.
 - **When the page loses its own socket,** every row is Offline already (ADR-0047).
 - **The notices' text stays on the page.** It stays out of the tab's title, notifications and the tab's storage. Names and summaries are set as text, never as markup.
@@ -133,7 +134,7 @@ So a roster that guesses lags and misses requests. Linear's agent sessions make 
 ### 6. What it costs
 
 - **A presence socket costs nothing at rest.**
-  - It hibernates like the conversation's own socket (the Agents SDK accepts it with the hibernation API, ADR-0034).
+  - It hibernates like the conversation's own socket: the Agents SDK accepts it with the hibernation API, and the cost rests on hibernation (ADR-0002).
   - An idle conversation stays asleep.
   - It sends only the card's actions, so it wakes nothing on its own.
 - **Opening the page wakes each followed agent's conversation once,** for its `presence` frame. That is one read of its turns and its confirmations, and nothing from its history.
@@ -156,7 +157,7 @@ This stays within the Workers Paid plan, so it ships on with no switch.
 - **The owner's yes.** This text adds to step 3 of #378's plan, which proposed status, wait and open-confirmation frames:
   - the cap of 16;
   - `paused`, `resumed` and `failed` in place of `wait`;
-  - the card's actions on the view;
+  - the card's actions on the view, and the `agent` field on them, which the conversation's own socket takes too;
   - the card drawn again in the thread;
   - Offline for one row;
   - the mascots in the list.
@@ -170,20 +171,21 @@ This stays within the Workers Paid plan, so it ships on with no switch.
   - **the frames:**
     - one function chooses every frame by view, and a new frame type fails a test until someone classifies it;
     - a presence socket gets only §2's frames, before and after a hibernation wake;
-    - a presence socket gets idle after a delivered turn, and `failed` after a failed one;
+    - a presence socket gets idle after a delivered turn, and `failed` after a failed one, and a refused turn leaves no step behind;
   - **what the view may send:**
     - a frame naming another agent is refused, and a press of one conversation's id over another's socket confirms nothing in either;
-    - anything else closes the socket;
-    - a press counts only under ADR-0026's rules;
+    - on the conversation's own socket, a frame naming no agent still counts;
+    - anything else closes the socket, and the SDK's frames stay inert on it;
+    - a press counts only under ADR-0026's rules, and a press of an interrupted turn's confirmation is refused;
   - **open confirmations:**
     - "open" means a notice sent: an interrupted turn's confirmation never shows, and another user's never does;
-    - both views get `confirmations` on connect and on each change;
+    - both views get `requests` on connect and on each change;
   - **the page:**
     - a presence socket's other frames change nothing;
     - a row starts unknown;
     - a card's press goes over its row's socket;
     - Offline shows for a row closed 2 s;
-    - there is no retry after a refusal;
+    - a socket closed with 1008, or one that never opened, reloads the list once instead of retrying at once;
     - one socket per row survives reconnects.
 - **`docs/design-system.md` changes with #378:**
   - 5.3, for the card in a row;
@@ -191,17 +193,19 @@ This stays within the Workers Paid plan, so it ships on with no switch.
     - a waiting row's state opens its request;
     - one row's Offline;
     - the order the rows are followed in;
-  - 5.12, for the card drawn again after a reconnect.
+  - 5.12, for the card drawn again after a reconnect;
+  - 5.21, since the agent list that the switcher reads now carries each agent's mascot.
 - **A row shows the owner's webchat conversation with that agent,** not its work elsewhere.
   - A turn it runs for a task, or in its Telegram chat, doesn't show there. Those conversations send no steps today.
   - [#394](https://github.com/guedesdiogo/kelpie/issues/394) is the follow-up: an agent's presence across all its conversations.
-- **ADR-0040's Continue offer** is a second kind of open notice beside confirmations. When it is built, it joins the `confirmations` frame and the card, under the same rules.
+- **ADR-0040's Continue offer** is a second kind of open notice beside confirmations. When it is built, it joins the `requests` frame and the card, under the same rules.
 - **More sockets per page:** one per followed agent, typically under ten, each idle almost all the time.
 - **A rollback keeps the data where it was, at a one-time cost.** The owner may open either view, so neither direction exposes anything new:
   - an older ingress ignores `view` and opens the full socket;
   - an older runtime ignores `view` in the admission and sends the full conversation.
 
   Then each followed agent's socket reads its history on load once, and the page's presence handler drops those frames (§5).
+  - a newer runtime with a page opened before the deploy: the page sends no `agent` field, which the conversation's own socket accepts (§3), and opens no presence socket.
 - **Residual, as before:** ADR-0023 checks the Access token at the upgrade only. A socket open for days, of either view, still takes a press after the login expires. More sockets widen that, and the page's login check stays the remedy.
 
 ## Alternatives considered
@@ -217,6 +221,7 @@ This stays within the Workers Paid plan, so it ships on with no switch.
 - **Bind `AgentHost` on ingress to read the mascots.** Its `wrangler.jsonc` keeps it out on purpose: that binding would let ingress configure any agent.
 - **Keep Confirm the only action from a row.** The card's hold would then close the socket, and 5.3's card would lose an answer in the one place it opens outside the thread.
 - **An alarm per confirmation, to tell the page when it expires.** It wakes every idle conversation 10 minutes after each request, for what the page can count from `expiresInMs`.
+- **A required `agent` field on the conversation's own socket too.** It is stricter, but Pause and Confirm would stop working in every tab open across the deploy until it reloads.
 
 ## References
 
