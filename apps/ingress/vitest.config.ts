@@ -1,36 +1,35 @@
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
 
-export default defineConfig({
-  plugins: [
-    cloudflareTest({
-      wrangler: { configPath: "./wrangler.jsonc" },
-      // Ingress binds channel-egress's webhook checks, context-store's GitHub webhook, and
-      // conversation-runtime's conversations and deploy probe.
-      // Most tests pass fakes to `handleTelegramWebhook()`. These stubs let the routing tests run
-      // the production wiring: egress accepts one secret, a conversation keeps what it gets and
-      // echoes the headers of a webchat upgrade, and the deploy's probe finds every part ok.
-      miniflare: {
-        // The deploy probe's token, as the deploy workflow uploads it (#234).
-        bindings: { DEPLOY_PROBE_TOKEN: "deploy-probe-token-for-tests-0123456789" },
-        workers: [
-          {
-            name: "kelpie-channel-egress",
-            modules: true,
-            compatibilityDate: "2026-10-01",
-            script: `import { WorkerEntrypoint } from "cloudflare:workers";
+// The Workers' own code runs in workerd; the webchat page's modules run in a browser-like DOM.
+const workers = cloudflareTest({
+  wrangler: { configPath: "./wrangler.jsonc" },
+  // Ingress binds channel-egress's webhook checks, context-store's GitHub webhook, and
+  // conversation-runtime's conversations and deploy probe.
+  // Most tests pass fakes to `handleTelegramWebhook()`. These stubs let the routing tests run
+  // the production wiring: egress accepts one secret, a conversation keeps what it gets and
+  // echoes the headers of a webchat upgrade, and the deploy's probe finds every part ok.
+  miniflare: {
+    // The deploy probe's token, as the deploy workflow uploads it (#234).
+    bindings: { DEPLOY_PROBE_TOKEN: "deploy-probe-token-for-tests-0123456789" },
+    workers: [
+      {
+        name: "kelpie-channel-egress",
+        modules: true,
+        compatibilityDate: "2026-10-01",
+        script: `import { WorkerEntrypoint } from "cloudflare:workers";
 export class ChannelWebhooks extends WorkerEntrypoint {
   verifyTelegram(_agentId, secret) {
     return secret === "routed-secret" ? { ok: true } : { ok: false, reason: "refused" };
   }
 }
 export default { fetch: () => new Response(null, { status: 404 }) };`,
-          },
-          {
-            name: "kelpie-context-store",
-            modules: true,
-            compatibilityDate: "2026-10-01",
-            script: `import { WorkerEntrypoint } from "cloudflare:workers";
+      },
+      {
+        name: "kelpie-context-store",
+        modules: true,
+        compatibilityDate: "2026-10-01",
+        script: `import { WorkerEntrypoint } from "cloudflare:workers";
 export class GitHubWebhooks extends WorkerEntrypoint {
   receive(delivery) {
     if (delivery.signature !== "sha256=${"a".repeat(64)}") return { status: 401 };
@@ -38,12 +37,12 @@ export class GitHubWebhooks extends WorkerEntrypoint {
   }
 }
 export default { fetch: () => new Response(null, { status: 404 }) };`,
-          },
-          {
-            name: "kelpie-conversation-runtime",
-            modules: true,
-            compatibilityDate: "2026-10-01",
-            script: `import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
+      },
+      {
+        name: "kelpie-conversation-runtime",
+        modules: true,
+        compatibilityDate: "2026-10-01",
+        script: `import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 export class ConversationAgent extends DurableObject {
   // The webchat's upgrade: the socket's first frame echoes the headers this object received.
   async fetch(request) {
@@ -83,28 +82,59 @@ export class DeployProbe extends WorkerEntrypoint {
   }
 }
 export default { fetch: () => new Response(null, { status: 404 }) };`,
-            durableObjects: { CONVERSATION_AGENT: "ConversationAgent", REGISTRY: "Registry" },
-          },
-        ],
+        durableObjects: { CONVERSATION_AGENT: "ConversationAgent", REGISTRY: "Registry" },
       },
-    }),
-  ],
-  // The first test of each file waits for the workerd runtime to start, which takes seconds on a
-  // busy machine (#88). These budgets cover that start, not slow tests.
+    ],
+  },
+});
+
+export default defineConfig({
   test: {
     // CI's `test:coverage` fails under 80% on any of these, in every workspace (ADR-0030).
     coverage: {
       provider: "istanbul",
-      // The webchat's mascot engine has its data and pure logic in these two; mascot.js needs a
-      // browser, so it is checked in one.
-      include: ["src/**/*.ts", "public/webchat/mascot-states.js", "public/webchat/mascot-art.js"],
-      exclude: ["src/**/*.d.ts"],
+      // The webchat's page (#140) and the mascot's data and pure logic. mascot.js paints on a
+      // canvas, which the page's DOM doesn't have, so it is checked in a browser.
+      include: ["src/**/*.ts", "public/webchat/*.js"],
+      exclude: ["src/**/*.d.ts", "public/webchat/mascot.js"],
       reporter: ["text-summary", "json-summary"],
       thresholds: { statements: 80, branches: 80, functions: 80, lines: 80 },
     },
-    // The mascot's test reads its stylesheet's tokens as text; Vitest empties CSS otherwise.
-    css: { include: [/mascot\.css/] },
-    testTimeout: 20_000,
-    hookTimeout: 30_000,
+    projects: [
+      {
+        plugins: [workers],
+        test: {
+          name: "workers",
+          include: ["test/**/*.test.ts"],
+          // The mascot's test reads its stylesheet's tokens as text; Vitest empties CSS otherwise.
+          css: { include: [/mascot\.css/, /tokens\.css/] },
+          // The first test of each file waits for the workerd runtime to start, which takes seconds
+          // on a busy machine (#88). These budgets cover that start, not slow tests.
+          testTimeout: 20_000,
+          hookTimeout: 30_000,
+        },
+      },
+      {
+        test: {
+          name: "page",
+          include: ["test/page/**/*.test.js"],
+          environment: "happy-dom",
+          // Each file's first test imports the page; with coverage's instrumentation that takes
+          // seconds on a busy machine.
+          testTimeout: 20_000,
+          // The page's tests import its modules themselves; nothing is fetched from a server.
+          environmentOptions: {
+            happyDOM: {
+              settings: {
+                disableCSSFileLoading: true,
+                disableJavaScriptFileLoading: true,
+                // A file it doesn't load isn't an error to log.
+                handleDisabledFileLoadingAsSuccess: true,
+              },
+            },
+          },
+        },
+      },
+    ],
   },
 });

@@ -32,6 +32,14 @@ export interface ShownMessage {
   confirmation?: number;
 }
 
+/** When the wait before a reply ends, as the page draws its bar. */
+export interface WaitDeadline {
+  remainingMs: number;
+  /** The wait's whole length, so a socket that opens in the middle draws what is left of it. */
+  spanMs: number;
+  holding: boolean;
+}
+
 /** What the page receives. */
 export type ServerFrame =
   /**
@@ -53,6 +61,13 @@ export type ServerFrame =
    * activity, for the mascot's object (ADR-0045 §10); a tool without one has none.
    */
   | { type: "status"; status: TurnStep; label?: string; activity?: ToolActivity }
+  /**
+   * The wait before Kelpie answers (ADR-0043 §5): how long until the turn reads the buffered
+   * messages, and how long the wait is from the latest one, in ms, so the browser's clock doesn't
+   * matter. `holding` while the owner's typing holds it. `null` once it is over: the turn reads the
+   * messages, or a pause cancelled them.
+   */
+  | { type: "wait"; deadline: WaitDeadline | null }
   | { type: "paused" }
   | { type: "resumed" }
   | { type: "accepted"; id: string }

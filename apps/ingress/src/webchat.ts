@@ -5,12 +5,15 @@ import {
   type Verification,
 } from "@kelpie/access";
 import { MAX_LANGUAGE_CHARS } from "@kelpie/channels";
-import { isAgentId } from "@kelpie/config";
+import { type AgentEntry, isAgentId } from "@kelpie/config";
 import { WEBCHAT_ADMISSION_HEADER, type WebchatAdmission } from "@kelpie/conversation/contract";
 import { conversationName } from "./telegram-webhook.ts";
 
 export const WEBCHAT_PATH = "/webchat";
 const SOCKET_PATH = `${WEBCHAT_PATH}/ws`;
+const AGENTS_PATH = `${WEBCHAT_PATH}/agents`;
+/** The self-hosted fonts (ADR-0043 §2), whose file names carry their version. */
+const FONTS_PATH = `${WEBCHAT_PATH}/fonts/`;
 
 export interface WebchatDeps {
   /** Verifies the Cloudflare Access token on the request. */
@@ -18,6 +21,8 @@ export interface WebchatDeps {
   admit(identity: ChannelIdentity, agentId: string): Promise<Admission>;
   /** Whether the agent is in the registry: the Directory admits the owner to any id it doesn't know. */
   agentExists(agentId: string): Promise<boolean>;
+  /** The registry's agents, in its order, for the page's switcher (#140). */
+  listAgents(): Promise<Pick<AgentEntry, "id" | "name" | "role" | "chat">[]>;
   /** The static page, from Workers assets. */
   page(request: Request): Promise<Response>;
   /** Opens the socket on the conversation's object. */
@@ -52,11 +57,16 @@ export async function handleWebchat(request: Request, deps: WebchatDeps): Promis
     return new Response(null, { status: verification.reason === "not_configured" ? 404 : 403 });
   }
   const url = new URL(request.url);
+  if (url.pathname === AGENTS_PATH) return agentList(verification.sub, deps);
   if (url.pathname !== SOCKET_PATH) {
     const page = await deps.page(request);
     const response = new Response(page.body, page);
     for (const [name, value] of Object.entries(pageHeaders(url.host))) {
       response.headers.set(name, value);
+    }
+    // Everything else keeps its name across deploys; a font's name changes with its version.
+    if (url.pathname.startsWith(FONTS_PATH) && page.ok) {
+      response.headers.set("cache-control", "private, max-age=31536000, immutable");
     }
     return response;
   }
@@ -93,6 +103,28 @@ export async function handleWebchat(request: Request, deps: WebchatDeps): Promis
     timeZone,
     ...(language === "" ? {} : { language }),
   });
+}
+
+/**
+ * The agents the page's switcher lists (#140): those that chat, in the registry's order, each one
+ * only if the Directory admits this login to it as it would admit its socket. A login it admits to
+ * none learns no names.
+ */
+async function agentList(sub: string, deps: WebchatDeps): Promise<Response> {
+  const identity: ChannelIdentity = { channel: ACCESS_SOURCE, channelUserId: sub };
+  // Only an explicit `false`, as the Directory reads it: a registry from before #288 names none.
+  const chatting = (await deps.listAgents()).filter((agent) => agent.chat !== false);
+  const admitted = await Promise.all(
+    chatting.map(async (agent) => (await deps.admit(identity, agent.id)).admitted),
+  );
+  const agents = chatting
+    .filter((_, index) => admitted[index])
+    .map(({ id, name, role }) => ({ id, name, main: role === "main" }));
+  if (agents.length === 0) return new Response(null, { status: 403 });
+  return Response.json(
+    { agents },
+    { headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } },
+  );
 }
 
 /**

@@ -1,0 +1,382 @@
+/*
+ * Kelpie's design system (docs/design-system.md, ADR-0043) as custom properties: §1 color, §2
+ * type, §3 space and radius, §4 motion. Pages take their values from here. boot.js sets the
+ * owner's display choices on <html> before the first paint: `data-theme` (light or dark; absent
+ * follows the system), `data-contrast="more"` and `data-reduced` (reduced motion, from the system
+ * or the less-motion switch).
+ */
+
+/* §2: self-hosted, only the weights listed, latin and latin-ext. The files are variable fonts,
+ * smaller than the static weights they replace, held to the listed weights here. */
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/webchat/fonts/geist-latin-wght-5.3.0.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/webchat/fonts/geist-latin-ext-wght-5.3.0.woff2") format("woff2");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("/webchat/fonts/geist-mono-latin-wght-5.3.0.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("/webchat/fonts/geist-mono-latin-ext-wght-5.3.0.woff2") format("woff2");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+@font-face {
+  font-family: "Bricolage Grotesque";
+  font-style: normal;
+  font-weight: 680;
+  font-display: swap;
+  src: url("/webchat/fonts/bricolage-grotesque-latin-wght-5.3.0.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Bricolage Grotesque";
+  font-style: normal;
+  font-weight: 680;
+  font-display: swap;
+  src: url("/webchat/fonts/bricolage-grotesque-latin-ext-wght-5.3.0.woff2") format("woff2");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
+:root {
+  color-scheme: light dark;
+
+  /* §1, light. */
+  --bg: #e7eeec;
+  --surface: #f7faf9;
+  --sunken: #dae5e2;
+  --fg: #0c2523;
+  --muted: #4c6663;
+  --line: #c2d2ce;
+  --accent: #0a7469;
+  --on-accent: #f0faf8;
+  --warm: #915708;
+  --ok: #1b7c45;
+  --danger: #ba3a27;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 14px 30px -18px rgb(0 0 0 / 0.38);
+  --shadow-pop: 0 18px 40px -16px rgb(0 0 0 / 0.5);
+  /* §1's tints, from a token, never a new literal. */
+  --focus-halo: color-mix(in srgb, var(--accent) 18%, transparent);
+  --hold-fill: color-mix(in srgb, var(--accent) 28%, transparent);
+  --landed: color-mix(in srgb, var(--accent) 22%, transparent);
+  --receipt-well: color-mix(in srgb, var(--ok) 16%, transparent);
+  --scrim: color-mix(in srgb, var(--fg) 16%, transparent);
+
+  /* §2. */
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-body:
+    "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --text-xs: 11.5px;
+  --text-sm: 12.5px;
+  --text-ui: 13.5px;
+  --text-base: 15px;
+  --text-lg: 17.5px;
+  --text-h3: 22px;
+  --text-h2: clamp(28px, 3.6vw, 42px);
+  --text-h1: clamp(46px, 7.4vw, 88px);
+  --leading-xs: 1.4;
+  --leading-sm: 1.4;
+  --leading-ui: 1.45;
+  --leading-base: 1.55;
+  --leading-lg: 1.55;
+  --leading-h: 1.05;
+  --leading-h1: 0.94;
+  --tracking-display: -0.03em;
+  --tracking-eyebrow: 0.08em;
+  /* §5.15: a phone's inputs, so the page doesn't zoom on focus. */
+  --text-input-phone: 16px;
+
+  /* §3. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --r-sm: 6px;
+  --r-btn: 10px;
+  --r-bubble: 14px;
+  --r-card: 14px;
+  --r-panel: 16px;
+  --r-chip: 999px;
+
+  /* §4.2. */
+  --spring-fast: linear(
+    0,
+    0.063,
+    0.176,
+    0.323,
+    0.466,
+    0.58,
+    0.687,
+    0.773,
+    0.839,
+    0.884,
+    0.921,
+    0.948,
+    0.965,
+    0.978,
+    0.987,
+    0.993,
+    0.996,
+    0.998,
+    1,
+    1,
+    1
+  );
+  --spring-fast-dur: 194ms;
+  --spring-base: linear(
+    0,
+    0.052,
+    0.174,
+    0.309,
+    0.441,
+    0.561,
+    0.671,
+    0.754,
+    0.82,
+    0.874,
+    0.912,
+    0.939,
+    0.961,
+    0.975,
+    0.984,
+    0.991,
+    0.995,
+    0.998,
+    1,
+    1,
+    1
+  );
+  --spring-base-dur: 266ms;
+  --spring-slow: linear(
+    0,
+    0.052,
+    0.157,
+    0.291,
+    0.426,
+    0.543,
+    0.649,
+    0.737,
+    0.807,
+    0.859,
+    0.901,
+    0.932,
+    0.954,
+    0.97,
+    0.981,
+    0.989,
+    0.994,
+    0.997,
+    0.999,
+    1,
+    1
+  );
+  --spring-slow-dur: 394ms;
+  --spring-moment-fast: linear(
+    0,
+    0.133,
+    0.384,
+    0.656,
+    0.872,
+    1.004,
+    1.074,
+    1.092,
+    1.081,
+    1.057,
+    1.033,
+    1.013,
+    1,
+    0.993,
+    0.992,
+    0.993,
+    0.995,
+    0.997,
+    0.999,
+    1,
+    1
+  );
+  --spring-moment-fast-dur: 393ms;
+  --spring-moment: linear(
+    0,
+    0.083,
+    0.254,
+    0.443,
+    0.606,
+    0.745,
+    0.849,
+    0.92,
+    0.966,
+    0.993,
+    1.007,
+    1.013,
+    1.014,
+    1.012,
+    1.01,
+    1.007,
+    1.005,
+    1.003,
+    1.002,
+    1.001,
+    1
+  );
+  --spring-moment-dur: 457ms;
+  --spring-moment-slow: linear(
+    0,
+    0.079,
+    0.238,
+    0.423,
+    0.588,
+    0.728,
+    0.832,
+    0.907,
+    0.956,
+    0.987,
+    1.004,
+    1.012,
+    1.014,
+    1.013,
+    1.011,
+    1.009,
+    1.006,
+    1.004,
+    1.003,
+    1.001,
+    1
+  );
+  --spring-moment-slow-dur: 611ms;
+  --spring-pop: linear(
+    0,
+    0.184,
+    0.513,
+    0.827,
+    1.023,
+    1.112,
+    1.12,
+    1.086,
+    1.045,
+    1.011,
+    0.992,
+    0.985,
+    0.987,
+    0.991,
+    0.996,
+    1,
+    1.002,
+    1.002,
+    1.001,
+    1.001,
+    1
+  );
+  --spring-pop-dur: 471ms;
+
+  /* §4.3. */
+  --dur-press: 100ms;
+  --dur-fade: 150ms;
+  --dur-word: 110ms;
+  --dur-exit: 120ms;
+  --dur-exit-moment: 170ms;
+  --dur-travel: 720ms;
+  --dur-hold: 1200ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-fade: cubic-bezier(0, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --ease-travel: cubic-bezier(0.55, 0, 0.25, 1);
+  --stagger: 30ms;
+  --stagger-moment: 60ms;
+  --rise: 8px;
+  --rise-moment: 18px;
+  --scale-in: 0.97;
+  --scale-in-moment: 0.92;
+  --scale-press: 0.97;
+}
+
+/* §1, dark: from the system, unless the owner picked light; or picked. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #091514;
+    --surface: #0f1f1e;
+    --sunken: #0b1918;
+    --fg: #dbeae6;
+    --muted: #88a39e;
+    --line: #21403b;
+    --accent: #3bc3ae;
+    --on-accent: #03201b;
+    --warm: #eeae4a;
+    --ok: #55c585;
+    --danger: #f07461;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #091514;
+  --surface: #0f1f1e;
+  --sunken: #0b1918;
+  --fg: #dbeae6;
+  --muted: #88a39e;
+  --line: #21403b;
+  --accent: #3bc3ae;
+  --on-accent: #03201b;
+  --warm: #eeae4a;
+  --ok: #55c585;
+  --danger: #f07461;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+/* §1, higher contrast: two tokens change, and tints become solid (see style.css). */
+:root[data-contrast="more"] {
+  --line: #6b8480;
+  --muted: #344b48;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-contrast="more"]:not([data-theme="light"]) {
+    --line: #557570;
+    --muted: #a5beb9;
+  }
+}
+:root[data-contrast="more"][data-theme="dark"] {
+  --line: #557570;
+  --muted: #a5beb9;
+}

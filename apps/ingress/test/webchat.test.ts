@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import type { Admission, Verification } from "@kelpie/access";
+import type { AgentEntry } from "@kelpie/config";
 import { WEBCHAT_ADMISSION_HEADER } from "@kelpie/conversation/contract";
 import { describe, expect, it, vi } from "vitest";
 import { connectWebchat, handleWebchat, type WebchatDeps } from "../src/webchat.ts";
@@ -7,11 +8,21 @@ import { connectWebchat, handleWebchat, type WebchatDeps } from "../src/webchat.
 const ORIGIN = "https://ingress.test";
 const owner: Admission = { admitted: true, userId: "u-owner", role: "owner", timeZone: null };
 
+/** The registry as its `list()` answers, in its order: Admin, the main agent, two that don't chat. */
+const REGISTRY: AgentEntry[] = [
+  { id: "kelpie-setup", name: "Setup", role: "admin", owner: null, chat: true },
+  { id: "assistant", name: "Assistant", role: "main", owner: null, chat: true },
+  { id: "agenda", name: "Agenda", role: "specialist", owner: "assistant", chat: true },
+  { id: "quiet", name: "Quiet", role: "specialist", owner: "assistant", chat: false },
+  { id: "helper-1", name: "Helper", role: "subagent", owner: "agenda", chat: false },
+];
+
 function deps(overrides: Partial<WebchatDeps> = {}) {
   const fakes = {
     authenticate: vi.fn(async (): Promise<Verification> => ({ ok: true, sub: "access-sub" })),
     admit: vi.fn(async (): Promise<Admission> => owner),
     agentExists: vi.fn(async (agentId: string) => agentId === "assistant"),
+    listAgents: vi.fn(async () => REGISTRY),
     page: vi.fn(async () => new Response("<!doctype html>", { status: 200 })),
     connect: vi.fn(async () => new Response("socket", { status: 200 })),
     ...overrides,
@@ -61,6 +72,105 @@ describe("the webchat's page", () => {
     expect((await handleWebchat(new Request(`${ORIGIN}/webchat/`), fakes)).status).toBe(403);
     expect((await handleWebchat(socketRequest(), fakes)).status).toBe(403);
     expect(fakes.admit).not.toHaveBeenCalled();
+  });
+});
+
+describe("the webchat's fonts", () => {
+  it("are kept by the browser for a year, since their names change with their version", async () => {
+    const fakes = deps({
+      page: vi.fn(async () => new Response("woff2", { status: 200 })),
+    });
+    const font = await handleWebchat(
+      new Request(`${ORIGIN}/webchat/fonts/geist-latin-wght-5.3.0.woff2`),
+      fakes,
+    );
+    expect(font.headers.get("cache-control")).toBe("private, max-age=31536000, immutable");
+    // A font that isn't there isn't remembered as missing.
+    const missing = await handleWebchat(
+      new Request(`${ORIGIN}/webchat/fonts/gone-1.0.0.woff2`),
+      deps({ page: vi.fn(async () => new Response("not found", { status: 404 })) }),
+    );
+    expect(missing.headers.get("cache-control")).toBe("no-store");
+    // Everything else changes with a deploy under the same name.
+    for (const path of ["/webchat/", "/webchat/app.js", "/webchat/fonts.css"]) {
+      const response = await handleWebchat(new Request(`${ORIGIN}${path}`), fakes);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+    }
+  });
+});
+
+describe("the webchat's agent list", () => {
+  const listRequest = (headers: Record<string, string> = {}) =>
+    new Request(`${ORIGIN}/webchat/agents`, { headers });
+
+  it("lists the agents that chat, in the registry's order, to an identity the Directory admits", async () => {
+    const fakes = deps();
+    const response = await handleWebchat(listRequest(), fakes);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(await response.json()).toEqual({
+      agents: [
+        { id: "kelpie-setup", name: "Setup", main: false },
+        { id: "assistant", name: "Assistant", main: true },
+        { id: "agenda", name: "Agenda", main: false },
+      ],
+    });
+    // Each agent is admitted as its socket would be; the ones that don't chat aren't asked about.
+    expect(vi.mocked(fakes.admit).mock.calls.map(([, agentId]) => agentId)).toEqual([
+      "kelpie-setup",
+      "assistant",
+      "agenda",
+    ]);
+    expect(fakes.admit).toHaveBeenCalledWith(
+      { channel: "cloudflare-access", channelUserId: "access-sub" },
+      "assistant",
+    );
+    expect(fakes.page).not.toHaveBeenCalled();
+  });
+
+  it("lists an agent from a registry before #288 that names no chat, as the Directory admits it", async () => {
+    const fakes = deps({
+      listAgents: vi.fn(async () => [{ id: "legacy", name: "Legacy" } as AgentEntry]),
+    });
+    expect(await (await handleWebchat(listRequest(), fakes)).json()).toEqual({
+      agents: [{ id: "legacy", name: "Legacy", main: false }],
+    });
+  });
+
+  it("leaves out an agent the Directory doesn't admit this identity to", async () => {
+    const fakes = deps({
+      admit: vi.fn(
+        async (_identity: unknown, agentId: string): Promise<Admission> =>
+          agentId === "agenda" ? { admitted: false, reason: "no_grant" } : owner,
+      ),
+    });
+    const { agents } = (await (await handleWebchat(listRequest(), fakes)).json()) as {
+      agents: { id: string }[];
+    };
+    expect(agents.map((agent) => agent.id)).toEqual(["kelpie-setup", "assistant"]);
+  });
+
+  it("names no agent to an Access login the Directory admits to none", async () => {
+    const fakes = deps({
+      admit: vi.fn(
+        async (): Promise<Admission> => ({ admitted: false, reason: "unknown_identity" }),
+      ),
+    });
+    const response = await handleWebchat(listRequest(), fakes);
+    expect(response.status).toBe(403);
+    expect(await response.text()).toBe("");
+  });
+
+  it("asks for a valid Access login first, as the page does", async () => {
+    const off = deps({ authenticate: async () => ({ ok: false, reason: "not_configured" }) });
+    expect((await handleWebchat(listRequest(), off)).status).toBe(404);
+    const invalid = deps({ authenticate: async () => ({ ok: false, reason: "expired" }) });
+    expect((await handleWebchat(listRequest(), invalid)).status).toBe(403);
+    expect(invalid.listAgents).not.toHaveBeenCalled();
+    expect(invalid.admit).not.toHaveBeenCalled();
   });
 });
 

@@ -1,7 +1,7 @@
 /*
  * The agent's mascot (ADR-0045). The body colors are tokens with one value in both themes: they
- * color the figure, not the page. The other tokens are the design system's (docs/design-system.md
- * §1), for the bubbles, the badge and the ground shadow.
+ * color the figure, not the page. The design system's tokens it also uses (docs/design-system.md
+ * §1), for the bubbles, the badge and the ground shadow, are the page's, in tokens.css.
  */
 :root {
   --mascot-kelp: #2e9e8e;
@@ -19,25 +19,15 @@
   --mascot-ink: #0c2523;
   --mascot-eye-white: #ffffff;
   --mascot-shadow: rgb(0 0 0 / 0.16);
-  --surface: #f7faf9;
-  --muted: #4c6663;
-  --accent: #0a7469;
-  --on-accent: #f0faf8;
-  --warm: #915708;
-  --ok: #1b7c45;
-  --danger: #ba3a27;
 }
+/* The ground shadow follows the page's theme, which the owner may pick (tokens.css). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --mascot-shadow: rgb(0 0 0 / 0.5);
-    --surface: #0f1f1e;
-    --muted: #88a39e;
-    --accent: #3bc3ae;
-    --on-accent: #03201b;
-    --warm: #eeae4a;
-    --ok: #55c585;
-    --danger: #f07461;
   }
+}
+:root[data-theme="dark"] {
+  --mascot-shadow: rgb(0 0 0 / 0.5);
 }
 
 .mascot-defs {

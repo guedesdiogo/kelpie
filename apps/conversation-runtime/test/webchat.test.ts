@@ -535,6 +535,118 @@ describe("the owner's typing in the webchat", () => {
   });
 });
 
+describe("the wait before a reply (ADR-0043 §5)", () => {
+  it("tells the page how long the wait lasts, and when the turn starts reading", async () => {
+    const world = use(fakeWorld([reply("Sim.")]));
+    const name = "assistant:webchat:wait";
+    const start = world.clock;
+    const chat = await open(name);
+    chat.send({ type: "message", id: "c1", text: "então" });
+    await vi.waitFor(() =>
+      expect(ofType(chat.frames, "wait")).toEqual([
+        { type: "wait", deadline: { remainingMs: 10_000, spanMs: 10_000, holding: false } },
+      ]),
+    );
+
+    // A new message starts the wait again; one read later counts from the latest message.
+    world.clock = start + 3_000;
+    chat.send({ type: "message", id: "c2", text: "e mais" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "wait")).toHaveLength(2));
+    expect(ofType(chat.frames, "wait")[1]).toEqual({
+      type: "wait",
+      deadline: { remainingMs: 10_000, spanMs: 10_000, holding: false },
+    });
+
+    await agent(name).flush();
+    await vi.waitFor(() => expect(ofType(chat.frames, "bubble")).toHaveLength(1));
+    expect(ofType(chat.frames, "wait")[2]).toEqual({ type: "wait", deadline: null });
+    // The end of the wait comes before anything of the turn.
+    const types = chat.frames.map((frame) => frame.type);
+    expect(types.lastIndexOf("wait")).toBeLessThan(types.indexOf("bubble"));
+  });
+
+  it("holds while the owner types, then counts toward the cap", async () => {
+    const world = use(fakeWorld([]));
+    const name = "assistant:webchat:wait-hold";
+    const start = world.clock;
+    const chat = await open(name);
+    chat.send({ type: "message", id: "c1", text: "então" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "wait")).toHaveLength(1));
+
+    world.clock = start + 8_000;
+    chat.send({ type: "typing", active: true });
+    await vi.waitFor(() => expect(ofType(chat.frames, "wait")).toHaveLength(2));
+    expect(ofType(chat.frames, "wait")[1]).toEqual({
+      type: "wait",
+      deadline: { remainingMs: 4_000, spanMs: 4_000, holding: true },
+    });
+
+    // Past the cap, typing no longer holds: the wait ends 60 s after the first message.
+    world.clock = start + 58_000;
+    chat.send({ type: "typing", active: true });
+    await vi.waitFor(() => expect(ofType(chat.frames, "wait")).toHaveLength(3));
+    expect(ofType(chat.frames, "wait")[2]).toEqual({
+      type: "wait",
+      deadline: { remainingMs: 2_000, spanMs: 2_000, holding: false },
+    });
+  });
+
+  it("tells a socket that opens during the wait how much of it is left", async () => {
+    const world = use(fakeWorld([]));
+    const name = "assistant:webchat:wait-late";
+    const start = world.clock;
+    const first = await open(name);
+    first.send({ type: "message", id: "c1", text: "então" });
+    await vi.waitFor(() => expect(ofType(first.frames, "wait")).toHaveLength(1));
+
+    world.clock = start + 4_000;
+    const second = await open(name);
+    await vi.waitFor(() =>
+      expect(ofType(second.frames, "wait")).toEqual([
+        { type: "wait", deadline: { remainingMs: 6_000, spanMs: 10_000, holding: false } },
+      ]),
+    );
+    const types = second.frames.map((frame) => frame.type);
+    expect(types.indexOf("history")).toBeLessThan(types.indexOf("wait"));
+  });
+
+  it("ends the wait when the owner pauses", async () => {
+    use(fakeWorld([]));
+    const name = "assistant:webchat:wait-pause";
+    const chat = await open(name);
+    chat.send({ type: "message", id: "c1", text: "so" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "wait")).toHaveLength(1));
+
+    chat.send({ type: "pause" });
+    await vi.waitFor(() => expect(ofType(chat.frames, "wait")).toHaveLength(2));
+    expect(ofType(chat.frames, "wait")).toEqual([
+      expect.objectContaining({ deadline: expect.any(Object) }),
+      { type: "wait", deadline: null },
+    ]);
+    // The pause comes first, so the page doesn't take the wait's end for a turn starting.
+    const types = chat.frames.map((frame) => frame.type);
+    expect(types.indexOf("paused")).toBeGreaterThan(-1);
+    expect(types.indexOf("paused")).toBeLessThan(types.lastIndexOf("wait"));
+  });
+
+  it("shows no wait when the agent answers at once", async () => {
+    use(fakeWorld([reply("Já.")]));
+    const agentId = "wait-none";
+    expect(
+      await env.AGENT_HOST.getByName(agentId).configure(
+        { quietMs: 0 },
+        { userId: "u-owner", role: "owner", via: "test" },
+      ),
+    ).toMatchObject({ ok: true });
+    const chat = await open(`${agentId}:webchat:none`, { ...owner, agentId });
+    chat.send({ type: "message", id: "c1", text: "agora" });
+    await vi.waitFor(() =>
+      expect(ofType(chat.frames, "bubble")).toEqual([expect.objectContaining({ text: "Já." })]),
+    );
+    expect(ofType(chat.frames, "wait")).toEqual([]);
+  });
+});
+
 describe("pausing from the webchat", () => {
   it("pauses on the Pause frame, tells every socket, and resumes with the next message", async () => {
     use(fakeWorld([]));

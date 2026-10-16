@@ -298,7 +298,8 @@ export function allowed(timing, motion) {
  * - A confirmation's notice waits for the owner; their yes is approved, then work goes on.
  * - The notice of a turn no route answered is an error, until the next message or turn. The
  *   turn settles right after it, and that clears only the step.
- * - Listening needs the wait's bar, which the webchat doesn't show yet (#140).
+ * - The wait before a reply, where its bar shows (ADR-0045 §5), is listening; its end goes back
+ *   to idle, unless typing or work has taken over.
  */
 export function presenceAfter(presence, event) {
   switch (event.type) {
@@ -322,6 +323,13 @@ export function presenceAfter(presence, event) {
         return { state: "waiting", activity: null, tool: false };
       }
       return idle();
+    case "wait":
+      if (event.deadline?.remainingMs > 0) {
+        return presence.state === "working" || presence.state === "typing"
+          ? presence
+          : { state: "listening", activity: null, tool: false };
+      }
+      return presence.state === "listening" ? idle() : presence;
     case "confirmation":
       return event.status === "accepted"
         ? { state: "approved", activity: null, tool: false }

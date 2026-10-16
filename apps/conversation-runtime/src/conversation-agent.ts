@@ -131,6 +131,7 @@ import {
   type ShownMessage,
   type SocketAdmission,
   shownText,
+  type WaitDeadline,
   webchatEgress,
 } from "./webchat.ts";
 
@@ -407,6 +408,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       received: this.#receivedWebchatIds(),
       paused: this.#get("paused", false),
     });
+    const wait = this.#waitLeft();
+    if (wait) send(connection, { type: "wait", deadline: wait });
     void this.#showAgent(connection, admission.agentId);
   }
 
@@ -597,8 +600,13 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     this.#set("epoch", this.#epoch() + 1);
     this.#set("paused", true);
     await this.#serialized(() => this.#cancelFlushSchedule());
-    // A message may have resumed the conversation meanwhile; then there is nothing to confirm.
-    if (this.#get("paused", false)) await this.#confirmPause(target);
+    // A message may have resumed the conversation meanwhile; then there is nothing to confirm,
+    // and the wait it planned stands.
+    if (this.#get("paused", false)) {
+      await this.#confirmPause(target);
+      // After the pause, so the page doesn't take the wait's end for a turn starting.
+      this.#endWait();
+    }
     return { status: "paused" };
   }
 
@@ -1029,6 +1037,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       }
       return id;
     });
+    this.#endWait();
     await this.deleteFibers({ settledBefore: new Date(now - FIBER_RETENTION_MS) });
     await this.startFiber("turn", () => this.#runTurn(turnId), {
       idempotencyKey: `turn:${turnId}`,
@@ -2652,6 +2661,12 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       const schedule = await this.schedule(new Date(flushAt), "flush", { epoch });
       this.#set("flushSchedule", schedule.id);
       this.#set("flushAt", flushAt);
+      const latest = written.at(-1)?.receivedAt ?? now;
+      this.#showWait({
+        remainingMs: flushAt - this.#ports.now(),
+        spanMs: flushAt - latest,
+        holding: false,
+      });
     }
     this.#set("plannedEpoch", epoch);
   }
@@ -2677,10 +2692,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (flushAt === null || !first) return;
     const epoch = this.#epoch();
     const { settings } = await this.#config();
-    const target = Math.min(
-      Math.max(flushAt, this.#ports.now() + TYPING_HOLD_MS),
-      first.receivedAt + settings.maxWaitMs,
-    );
+    const now = this.#ports.now();
+    const cap = first.receivedAt + settings.maxWaitMs;
+    const target = Math.min(Math.max(flushAt, now + TYPING_HOLD_MS), cap);
     // A message or a flush may have changed the plan while the settings were read.
     if (target <= flushAt || epoch !== this.#epoch() || this.#get("flushAt", null) !== flushAt) {
       return;
@@ -2691,6 +2705,32 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const schedule = await this.schedule(new Date(target), "flush", { epoch });
     this.#set("flushSchedule", schedule.id);
     this.#set("flushAt", target);
+    // The page keeps its bar full while the hold lasts; at the cap it drains toward it.
+    this.#showWait({ remainingMs: target - now, spanMs: target - now, holding: target < cap });
+  }
+
+  /** The webchat's sockets learn the wait's deadline, for its bar (ADR-0043 §5). */
+  #showWait(deadline: WaitDeadline): void {
+    this.#set("waitShown", true);
+    this.#broadcast({ type: "wait", deadline });
+  }
+
+  /** The wait the sockets were shown is over: the turn reads the messages, or a pause took them. */
+  #endWait(): void {
+    if (!this.#get("waitShown", false)) return;
+    this.#set("waitShown", false);
+    this.#broadcast({ type: "wait", deadline: null });
+  }
+
+  /** What is left of the wait, for a socket that opens during it. */
+  #waitLeft(): WaitDeadline | null {
+    const flushAt = this.#get<number | null>("flushAt", null);
+    const latest = this.#pendingInbound()
+      .filter((row) => !row.fromKelpie)
+      .at(-1);
+    const now = this.#ports.now();
+    if (flushAt === null || !latest || flushAt <= now) return null;
+    return { remainingMs: flushAt - now, spanMs: flushAt - latest.receivedAt, holding: false };
   }
 
   #serialized(step: () => Promise<void>): Promise<void> {
