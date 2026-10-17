@@ -21,7 +21,7 @@ On 2026-10-17 the owner asked Master in the webchat: «o que esta rolando no run
 - **`claude agents --json`.** The docs call it the supported way to read session state from outside. It adds a `waiting` status.
 - **User-level hooks.**
   - The docs say they apply to remote sessions.
-  - On the VPS, the Claude app's transcripts record the user-level `PreToolUse`, `PostToolUse`, `Stop` and `SessionStart` hooks running, by the research's count of their entries.
+  - On the VPS, the Claude app's transcripts record the user-level `PreToolUse`, `PostToolUse`, `Stop` and `SessionStart` hooks running, by a count of their entries.
   - `Notification` would tell when a session shows a permission prompt (`permission_prompt`), asks a question (`elicitation_dialog`), or sits idle after its reply (`idle_prompt`).
   - `Stop` carries the last reply.
   - Today's user-level hooks are herdr's, `rtk`'s and ai-memory's. None listens to `Notification` or `PermissionRequest`.
@@ -70,7 +70,7 @@ On 2026-10-17 the owner asked Master in the webchat: «o que esta rolando no run
 
     The events past "permission, question and end" are there to close a wait (§4).
   - **The excerpt:** `Stop` also writes the last reply. The hook first redacts the whole reply (§3), then cuts it to 500 characters, dropping a trailing partial word. The owner's second answer had the hooks write only the event, the session and the time; his third answer adds this excerpt.
-- **The PR link:** the owner's third answer includes it. The runner reads only the transcript's `pr-link` entries, and never its messages. It reads at most the transcript's last 1 MB, where a PR link is written, and the address must be a GitHub pull request.
+- **The PR link:** the owner's third answer includes it. The runner reads only the transcript's `pr-link` entries, and never its messages. It reads at most the transcript's last 1 MB, so a link written before that shows as none, and the address must be a GitHub pull request.
 - **Bounds on disk:**
   - The spool and the excerpts live in a directory only the owner's user can open (`0700`), in files only it can read (`0600`).
   - The spool keeps at most 1 MB, and drops the oldest lines past that.
