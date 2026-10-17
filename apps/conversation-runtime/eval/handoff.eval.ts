@@ -234,6 +234,8 @@ describe.skipIf(!enabled)("the mandatory handoff, on the cheap tier (#287)", () 
       return {
         events: noting(router.stream({ tier: "cheap" }, request, { signal: controller.signal })),
         cancel: () => controller.abort(),
+        // Its routes are API routes, which never ask for a tool's result (#295).
+        answer: async () => {},
       };
     };
     replacePortsForTesting(world.ports);

@@ -52,6 +52,7 @@ import {
   LlmError,
   type LlmEvent,
   type ModelSettings,
+  type RouteSession,
   type ToolCallPart,
   type ToolResult,
   type Usage,
@@ -336,11 +337,36 @@ interface TurnInFlight {
   fallbacks?: FallbackEvent[];
   /** The same, for the model call running now: a failed call's notice names only its own. */
   callFallbacks?: FallbackEvent[];
+  /** The route's session, once its clean reply answered the turn: kept if it is delivered (#295). */
+  session?: Omit<StoredSession, "throughHistoryId">;
 }
 
 interface ToolProgress {
   done: ReadonlyMap<string, ToolResult>;
   running?: string | undefined;
+}
+
+/** A round as the turn runs it: its calls' results so far, which the turn adds to. */
+interface RoundProgress extends ToolProgress {
+  done: Map<string, ToolResult>;
+}
+
+/** Where a conversation keeps its session on a route that keeps one (#295). */
+const ROUTE_SESSION = "routeSession";
+
+/**
+ * A conversation's session on a route that keeps the conversation itself, such as `claude-code`
+ * (#295): the history it holds, and what its requests were sent under. The next turn resumes it
+ * only while all of it still matches; history stays the source of truth.
+ */
+interface StoredSession {
+  id: string;
+  /** The reply of the turn that kept it: the last history row the session holds. */
+  throughHistoryId: number;
+  systemVersion: number;
+  checkpointId: number | null;
+  promptKey: string;
+  toolsKey: string | null;
 }
 
 /**
@@ -1493,7 +1519,12 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   async #tellFailure(turnId: number, flight: TurnInFlight, error: LlmError): Promise<void> {
     if (!this.#isRunning(turnId)) return;
     try {
-      const text = failureNotice(flight.callFallbacks ?? [], error, this.#locale());
+      const text = failureNotice(
+        flight.callFallbacks ?? [],
+        error,
+        this.#locale(),
+        this.#get<string | null>("timeZone", null),
+      );
       const last =
         this.#db
           .select({ value: max(schema.outbox.seq) })
@@ -1616,6 +1647,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       }
     }
     if (finish.reason === "refusal") {
+      // A refused reply isn't kept, so a route's session that holds it is out of step (#295).
+      this.#set(ROUTE_SESSION, null);
       // Calls in history keep the block they were sent after. Nothing follows a refused reply, the
       // links its tools had Kelpie send among it (#186).
       this.#db
@@ -1660,6 +1693,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       this.#get<Record<string, number>>("routeNotices", {}),
       this.#ports.now(),
       locale,
+      this.#get<string | null>("timeZone", null),
     );
     // Then what its tools did, as agents and subagents made and work handed off, with what an
     // earlier turn left unsaid (#287, #342, #387).
@@ -1824,8 +1858,11 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    * one at a time, and their results follow it; the next call sends history again, unchanged, with
    * the memory block back after the turn's last user message instead of in `context` (#137). Past
    * MAX_TOOL_ROUNDS rounds or the agent's `toolLoopMs`, calls get an error result and one last call,
-   * with the same tools, answers; if it still asks for tools, TOOL_LIMIT_TEXT does. Returns the
-   * reply, with every round's usage, or null once the turn stopped.
+   * with the same tools, answers; if it still asks for tools, TOOL_LIMIT_TEXT does. A route that runs
+   * its own tool loop (#295) takes the same steps within one call: each `tool_round` is such a reply,
+   * and each `tool_request` runs one of its calls, then answers it through the call. Its bounds are
+   * the same, and a round past them cancels the call. Returns the reply, with every round's usage,
+   * or null once the turn stopped.
    */
   async #loop(
     turn: {
@@ -1870,10 +1907,98 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     let context: ToolContext | undefined;
     let last = false;
     let pendingContext = memory;
+    const flight = this.#inFlight.get(turn.id);
+
+    // The fixed text that answers when even the last call asks for tools.
+    const limitReached = (): Extract<LlmEvent, { type: "finish" }> => ({
+      type: "finish",
+      reason: "stop",
+      message: {
+        role: "assistant",
+        parts: [{ type: "text", text: TOOL_LIMIT_TEXT[this.#locale()] }],
+      },
+      usage,
+    });
+    // A reply that asks for tools goes into history, and its round starts.
+    const record = (message: AssistantMessage): RoundProgress => {
+      const now = this.#ports.now();
+      this.#db.transaction((tx) => {
+        tx.insert(schema.history)
+          .values({
+            turnId: turn.id,
+            role: "assistant",
+            userId: null,
+            systemVersion: turn.systemVersion,
+            checkpointId: turn.checkpointId,
+            message,
+            createdAt: now,
+          })
+          .run();
+        // An eviction mid-loop would lose this round's usage otherwise.
+        tx.update(schema.turns).set({ usage }).where(eq(schema.turns.id, turn.id)).run();
+      });
+      rounds += 1;
+      const progress: RoundProgress = { done: new Map() };
+      if (flight) flight.tools = progress;
+      return progress;
+    };
+    // The round's results follow its reply in history; a call without one gets a stub.
+    const close = (progress: RoundProgress) => {
+      this.#closeOpenCalls(turn.id, progress);
+      if (flight) flight.tools = undefined;
+    };
+    // One call, within the turn's bounds: past them, it gets an error result, and the turn's last
+    // call follows. Null once the turn stopped.
+    const run = async (toolCall: ToolCallPart, progress: RoundProgress) => {
+      const remaining = toolLoopMs - (this.#ports.now() - started);
+      // Once a call timed out, the turn's time is up for the rest too.
+      if (last || rounds > MAX_TOOL_ROUNDS || remaining <= 0) {
+        last = true;
+        return { callId: toolCall.id, output: TOOL_BOUND_RESULT, isError: true };
+      }
+      if (!context) {
+        const actor = this.#actor(turn, agentId);
+        context = {
+          locale: this.#locale(),
+          actor,
+          agentId,
+          scopes: turnScopes(turn, this.#destination()),
+          qualifier: settings.qualifier,
+          turn: String(turn.id),
+          source: this.#source(),
+          signal: controller.signal,
+          // No one answers a confirmation in a task's conversation (#335).
+          confirm: async (request) =>
+            this.#destination().channel === "task"
+              ? false
+              : this.#confirm(turn.id, actor.userId, request),
+          sendLink: (link) => this.#sendLink(turn.id, link),
+          announce: (announcement) => this.#announce(announcement),
+          memoryAgentId: this.#memoryAgentId(),
+        };
+        const task = this.#taskHandle();
+        if (task) context.task = task;
+      }
+      const tool = tools.get(toolCall.name);
+      step(
+        "tool",
+        tool === undefined ? undefined : labelIn(tool.label, context.locale),
+        tool?.activity,
+      );
+      progress.running = toolCall.id;
+      const result = await this.#runWithin(tools, toolCall, context, remaining);
+      progress.running = undefined;
+      // Settling the turn already wrote this round's results.
+      if (!this.#isRunning(turn.id)) return null;
+      if (result === null) last = true;
+      return result ?? { callId: toolCall.id, output: TOOL_TIMED_OUT_RESULT, isError: true };
+    };
+
     for (;;) {
       step("thinking");
       // A turn's settings from before #286 have no `model`, and their tier was the conversation's.
       const agent = settings.model ?? { conversation: { tier: settings.tier } };
+      const session = this.#routeSession(turn, promptKey, toolsKey);
       const call = await this.#ports.generate(
         { area: "conversation", agent },
         {
@@ -1884,9 +2009,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           // History rows never keep it; the turn does, for later requests (#137).
           ...(pendingContext === null ? {} : { context: pendingContext }),
         },
+        session,
       );
       pendingContext = null;
-      const flight = this.#inFlight.get(turn.id);
       if (flight) {
         flight.call = call;
         flight.callFallbacks = [];
@@ -1896,121 +2021,129 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         return null;
       }
       let finish: Extract<LlmEvent, { type: "finish" }> | undefined;
+      // The round of the route's own loop whose calls it asks for now, by id (#295).
+      let open: { calls: Map<string, ToolCallPart>; progress: RoundProgress } | undefined;
       for await (const event of call.events) {
         if (event.type === "finish") finish = event;
         else if (event.type === "fallback" && flight) {
           flight.fallbacks ??= [];
           flight.fallbacks.push(event);
           flight.callFallbacks?.push(event);
-        } else if (event.type === "tool_round" || event.type === "tool_request") {
-          // Leaving the stream cancels the call. Running the route's loop is #295's next step.
-          throw new LlmError(
-            "This route runs its own tool loop, which this runtime doesn't handle yet",
-            "protocol",
-            false,
-          );
+        } else if (event.type === "tool_round") {
+          usage.push(...event.usage);
+          // Calls the route answered without asking, such as one for no tool it has, get stubs.
+          if (open) close(open.progress);
+          open = undefined;
+          const asked = event.message.parts.filter((part) => part.type === "tool_call");
+          if (asked.length === 0) {
+            throw new LlmError("The route sent a tool round without calls", "protocol", false);
+          }
+          // A round past the bound: as on the API route, its calls never reach history, where
+          // they would have no results, and the fixed text answers.
+          if (last) {
+            call.cancel();
+            return limitReached();
+          }
+          open = {
+            calls: new Map(asked.map((part) => [part.id, part])),
+            progress: record(event.message),
+          };
+        } else if (event.type === "tool_request") {
+          // The call as its round asked for it, which is what history holds.
+          const toolCall = open?.calls.get(event.call.id);
+          if (!open || !toolCall || open.progress.done.has(toolCall.id)) {
+            throw new LlmError("The route asked for a call no round holds", "protocol", false);
+          }
+          const result = await run(toolCall, open.progress);
+          if (result === null) return null;
+          open.progress.done.set(toolCall.id, result);
+          await call.answer(result);
+          if (open.progress.done.size === open.calls.size) {
+            close(open.progress);
+            open = undefined;
+            step("thinking");
+          }
         }
       }
       if (!this.#isRunning(turn.id)) return null;
+      if (open) close(open.progress);
       if (!finish) throw new Error("The model stream ended without a reply");
       usage.push(...finish.usage);
       const calls = finish.message.parts.filter((part) => part.type === "tool_call");
       // A reply that asks for tools without naming any is a reply: there is nothing to run.
       if (finish.reason !== "tool_calls" || calls.length === 0) {
+        // The route's session then holds the turn, unless it says otherwise or a bound cut the
+        // turn's tools short (#295). The turn keeps it only once the reply is delivered.
+        if (flight && session && finish.session?.clean && !last) {
+          flight.session = {
+            id: finish.session.id,
+            systemVersion: turn.systemVersion,
+            checkpointId: turn.checkpointId,
+            promptKey,
+            toolsKey,
+          };
+        }
         return {
           ...finish,
           reason: finish.reason === "tool_calls" ? "stop" : finish.reason,
           usage,
         };
       }
-      if (last) {
-        return {
-          ...finish,
-          reason: "stop",
-          message: {
-            role: "assistant",
-            parts: [{ type: "text", text: TOOL_LIMIT_TEXT[this.#locale()] }],
-          },
-          usage,
-        };
-      }
-
-      const now = this.#ports.now();
-      this.#db.transaction((tx) => {
-        tx.insert(schema.history)
-          .values({
-            turnId: turn.id,
-            role: "assistant",
-            userId: null,
-            systemVersion: turn.systemVersion,
-            checkpointId: turn.checkpointId,
-            message: finish.message,
-            createdAt: now,
-          })
-          .run();
-        // An eviction mid-loop would lose this round's usage otherwise.
-        tx.update(schema.turns).set({ usage }).where(eq(schema.turns.id, turn.id)).run();
-      });
-      rounds += 1;
-      const progress: { done: Map<string, ToolResult>; running?: string | undefined } = {
-        done: new Map(),
-      };
-      if (flight) flight.tools = progress;
+      if (last) return limitReached();
+      const progress = record(finish.message);
       for (const toolCall of calls) {
-        const remaining = toolLoopMs - (this.#ports.now() - started);
-        // Once a call timed out, the turn's time is up for the rest too.
-        if (last || rounds > MAX_TOOL_ROUNDS || remaining <= 0) {
-          last = true;
-          progress.done.set(toolCall.id, {
-            callId: toolCall.id,
-            output: TOOL_BOUND_RESULT,
-            isError: true,
-          });
-          continue;
-        }
-        if (!context) {
-          const actor = this.#actor(turn, agentId);
-          context = {
-            locale: this.#locale(),
-            actor,
-            agentId,
-            scopes: turnScopes(turn, this.#destination()),
-            qualifier: settings.qualifier,
-            turn: String(turn.id),
-            source: this.#source(),
-            signal: controller.signal,
-            // No one answers a confirmation in a task's conversation (#335).
-            confirm: async (request) =>
-              this.#destination().channel === "task"
-                ? false
-                : this.#confirm(turn.id, actor.userId, request),
-            sendLink: (link) => this.#sendLink(turn.id, link),
-            announce: (announcement) => this.#announce(announcement),
-            memoryAgentId: this.#memoryAgentId(),
-          };
-          const task = this.#taskHandle();
-          if (task) context.task = task;
-        }
-        const tool = tools.get(toolCall.name);
-        step(
-          "tool",
-          tool === undefined ? undefined : labelIn(tool.label, context.locale),
-          tool?.activity,
-        );
-        progress.running = toolCall.id;
-        const result = await this.#runWithin(tools, toolCall, context, remaining);
-        progress.running = undefined;
-        // Settling the turn already wrote this round's results.
-        if (!this.#isRunning(turn.id)) return null;
-        if (result === null) last = true;
-        progress.done.set(
-          toolCall.id,
-          result ?? { callId: toolCall.id, output: TOOL_TIMED_OUT_RESULT, isError: true },
-        );
+        const result = await run(toolCall, progress);
+        if (result === null) return null;
+        progress.done.set(toolCall.id, result);
       }
-      this.#closeOpenCalls(turn.id, progress);
-      if (flight) flight.tools = undefined;
+      close(progress);
     }
+  }
+
+  /**
+   * The session a turn's model call carries, for a route that keeps one (#295). Only the owner's
+   * direct conversations have one (ADR-0037 §3), never a task's (owner decision 3 on #295): without
+   * it, the router never picks such a route. It resumes the stored session only while that holds
+   * exactly this history, under the same prompt version, checkpoint, prompt and tools, with no reply
+   * or tool result after its last row. Otherwise a new session is seeded.
+   */
+  #routeSession(
+    turn: { systemVersion: number; checkpointId: number | null } & TurnAccess,
+    promptKey: string,
+    toolsKey: string | null,
+  ): RouteSession | undefined {
+    if (turn.role !== "owner" || turn.chatType !== "direct") return undefined;
+    if (this.#destination().channel === "task") return undefined;
+    const conversation = this.name;
+    const stored = this.#get<StoredSession | null>(ROUTE_SESSION, null);
+    if (
+      stored !== null &&
+      stored.systemVersion === turn.systemVersion &&
+      stored.checkpointId === turn.checkpointId &&
+      stored.promptKey === promptKey &&
+      stored.toolsKey === toolsKey &&
+      !this.#answeredAfter(stored.throughHistoryId)
+    ) {
+      return { conversation, id: stored.id, resume: true };
+    }
+    return { conversation, id: crypto.randomUUID(), resume: false };
+  }
+
+  /** Whether a reply or a tool's result follows this history row. */
+  #answeredAfter(historyId: number): boolean {
+    return (
+      this.#db
+        .select({ id: schema.history.id })
+        .from(schema.history)
+        .where(
+          and(
+            gt(schema.history.id, historyId),
+            inArray(schema.history.role, ["assistant", "tool"]),
+          ),
+        )
+        .limit(1)
+        .get() !== undefined
+    );
   }
 
   /**
@@ -2809,9 +2942,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         : rows.length > 0 && rows.every(isSent)
           ? "delivered"
           : "interrupted";
+    const flight = this.#inFlight.get(turnId);
     // Calls still running get their results now: the ones that finished keep theirs (ADR-0025).
     try {
-      this.#closeOpenCalls(turnId, this.#inFlight.get(turnId)?.tools);
+      this.#closeOpenCalls(turnId, flight?.tools);
     } catch (error) {
       // A call left without a result would fail every later request: short stubs instead.
       console.error("ConversationAgent: closing a turn's calls failed", errorName(error));
@@ -2819,6 +2953,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     }
     const ranTools = this.#toolRounds(turnId) > 0;
     const now = this.#ports.now();
+    // The route's session holds this turn only when its clean reply was delivered whole (#295). Any
+    // other turn leaves the session out of step with history, so the next one seeds a new session.
+    const session = status === "delivered" ? flight?.session : undefined;
+    const stored = this.#get<StoredSession | null>(ROUTE_SESSION, null);
     this.#db.transaction((tx) => {
       tx.update(schema.outbox)
         .set({ status: "sent", sentAt: now })
@@ -2833,17 +2971,27 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       if (!kept && !ranTools) {
         tx.update(schema.turns).set({ context: null }).where(eq(schema.turns.id, turnId)).run();
       }
-      if (kept) {
-        tx.insert(schema.history)
-          .values({
-            turnId,
-            role: "assistant",
-            userId: null,
-            systemVersion: turn.systemVersion,
-            checkpointId: turn.checkpointId,
-            message: kept,
-            createdAt: now,
-          })
+      const replyId = kept
+        ? tx
+            .insert(schema.history)
+            .values({
+              turnId,
+              role: "assistant",
+              userId: null,
+              systemVersion: turn.systemVersion,
+              checkpointId: turn.checkpointId,
+              message: kept,
+              createdAt: now,
+            })
+            .returning({ id: schema.history.id })
+            .get().id
+        : null;
+      const value: StoredSession | null =
+        session && replyId !== null ? { ...session, throughHistoryId: replyId } : null;
+      if (value !== null || stored !== null) {
+        tx.insert(schema.state)
+          .values({ key: ROUTE_SESSION, value })
+          .onConflictDoUpdate({ target: schema.state.key, set: { value } })
           .run();
       }
       // History holds what was kept; the full reply and the settings aren't needed any more.

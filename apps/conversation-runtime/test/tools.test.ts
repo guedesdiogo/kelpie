@@ -632,6 +632,7 @@ describe("a turn's tools and interruption", () => {
           };
         })(),
         cancel() {},
+        async answer() {},
       };
     };
     const stub = agent("tools-refused");
