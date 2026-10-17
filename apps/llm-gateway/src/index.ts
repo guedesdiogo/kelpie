@@ -64,8 +64,10 @@ const MAX_QUALIFY_TIMEOUT_MS = 3_000;
 /** One `embed` call takes at most this many texts, and this long. */
 const MAX_EMBED_TEXTS = 256;
 const EMBED_TIMEOUT_MS = 30_000;
-/** The longest conversation name, session id or tool call id a caller may send (#295). */
+/** The longest conversation name or tool call id a caller may send (#295). */
 const MAX_ID_CHARS = 256;
+/** A route session's id: a UUID, as Claude Code's are. The runner puts it in a path (#295). */
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /**
  * The longest tool result an answer may carry. The turn cuts a result at 10,000 characters, plus a
  * note, before it gets here (ADR-0025), so this only stops a caller sending more than any needs.
@@ -113,6 +115,14 @@ export class Generation extends RpcTarget {
 
   cancel(): void {
     this.#controller.abort();
+  }
+
+  /**
+   * A caller that drops its stub without `cancel()`, as an evicted conversation does, still ends
+   * the call: a route waiting for a tool's result would otherwise wait until its own deadline.
+   */
+  [Symbol.dispose](): void {
+    this.cancel();
   }
 
   /** The result of a call a `tool_request` event asked for. It is an RPC boundary, so it is checked. */
@@ -198,11 +208,15 @@ const callEnded = () =>
 const isBoundedText = (value: unknown, max: number): value is string =>
   typeof value === "string" && value !== "" && value.length <= max;
 
+const isConversationCall = (call: ModelSelection): boolean =>
+  typeof call === "object" && call !== null && call.area === "conversation";
+
 /** A session as RPC sent it, rebuilt from the fields Kelpie knows; null when malformed. */
 function parseSession(value: unknown): RouteSession | null {
   if (typeof value !== "object" || value === null) return null;
   const { conversation, id, resume } = value as Partial<Record<keyof RouteSession, unknown>>;
-  if (!isBoundedText(conversation, MAX_ID_CHARS) || !isBoundedText(id, MAX_ID_CHARS)) return null;
+  if (!isBoundedText(conversation, MAX_ID_CHARS)) return null;
+  if (typeof id !== "string" || !SESSION_ID.test(id)) return null;
   return typeof resume === "boolean" ? { conversation, id, resume } : null;
 }
 
@@ -220,7 +234,7 @@ function parseToolResult(value: unknown): ToolResult | null {
 export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
   /**
    * One model call. `session` is the conversation's, for a route that keeps one (#295): only a call
-   * with a session reaches such a route.
+   * with a session reaches such a route, and only a `conversation` call may send one.
    */
   generate(call: ModelSelection, request: RoutedRequest, session?: RouteSession): Generation {
     return generateWith(this.env, call, request, session);
@@ -312,6 +326,10 @@ export function generateWith(
     try {
       const checked = session === undefined ? undefined : parseSession(session);
       if (checked === null) throw new LlmError("Malformed session", "bad_request", false);
+      // Only a conversation keeps a session: checkpoints, Dream and resolve never reach its route.
+      if (checked && !isConversationCall(call)) {
+        throw new LlmError("A session goes only with a conversation's call", "bad_request", false);
+      }
       const choice = await choiceFor(call, () => defaultsOrNone(env, router));
       const options: StreamOptions = {
         signal: controller.signal,

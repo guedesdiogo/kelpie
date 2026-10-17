@@ -839,6 +839,7 @@ describe("a route that runs its own tool loop (#295)", () => {
     id: "6c1f2a9e-3b7d-4e51-9a0c-2f8d7e6b5a41",
     resume: true,
   };
+  const conversation = { area: "conversation" } as const;
   const call = (id: string) => ({
     type: "tool_call" as const,
     id,
@@ -888,7 +889,7 @@ describe("a route that runs its own tool loop (#295)", () => {
 
   it("passes a session to the route over RPC, only with the fields it knows", async () => {
     const seen = routeLoop([]);
-    using generation = await exports.LlmGateway.generate("medium", request, {
+    using generation = await exports.LlmGateway.generate(conversation, request, {
       ...session,
       token: "not a session field",
     } as RouteSession);
@@ -904,12 +905,14 @@ describe("a route that runs its own tool loop (#295)", () => {
       "6c1f2a9e",
       { ...session, id: "" },
       { ...session, id: 42 },
+      { ...session, id: "../6c1f2a9e" },
+      { ...session, id: "6c1f2a9e" },
       { ...session, conversation: "c".repeat(257) },
       { ...session, resume: "yes" },
       { conversation: session.conversation, id: session.id },
     ]) {
       using generation = await exports.LlmGateway.generate(
-        "medium",
+        conversation,
         request,
         malformed as RouteSession,
       );
@@ -920,9 +923,21 @@ describe("a route that runs its own tool loop (#295)", () => {
     expect(AnthropicMessagesProvider.prototype.stream).not.toHaveBeenCalled();
   });
 
+  it("refuses a session on a call that isn't a conversation's, before any route", async () => {
+    routeLoop([]);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const selection of ["medium", { area: "memory" }] as const) {
+      using generation = await exports.LlmGateway.generate(selection, request, session);
+      await expect(read(await generation.events())).rejects.toMatchObject({
+        code: "bad_request",
+      });
+    }
+    expect(AnthropicMessagesProvider.prototype.stream).not.toHaveBeenCalled();
+  });
+
   it("gives the route each result the caller answers over RPC, before or after it waits", async () => {
     const seen = routeLoop(["toolu_01", "toolu_02"]);
-    using generation = await exports.LlmGateway.generate("medium", request, session);
+    using generation = await exports.LlmGateway.generate(conversation, request, session);
     const events = fromNdjsonStream(await generation.events())[Symbol.asyncIterator]();
 
     expect((await events.next()).value).toEqual({ type: "tool_request", call: call("toolu_01") });
@@ -941,7 +956,7 @@ describe("a route that runs its own tool loop (#295)", () => {
 
   it("ignores an answer that is malformed, for a call that doesn't wait, or late, and says why", async () => {
     routeLoop(["toolu_01"]);
-    const generation = generateWith(env as GatewayEnv, "medium", request, session);
+    const generation = generateWith(env as GatewayEnv, conversation, request, session);
     const events = fromNdjsonStream(generation.events())[Symbol.asyncIterator]();
     expect((await events.next()).value).toMatchObject({ type: "tool_request" });
 
@@ -981,7 +996,7 @@ describe("a route that runs its own tool loop (#295)", () => {
 
   it("rejects the route's wait when the call is cancelled", async () => {
     const seen = routeLoop(["toolu_01"]);
-    using generation = await exports.LlmGateway.generate("medium", request, session);
+    using generation = await exports.LlmGateway.generate(conversation, request, session);
     const events = fromNdjsonStream(await generation.events())[Symbol.asyncIterator]();
     await events.next();
     const next = events.next();
@@ -996,10 +1011,22 @@ describe("a route that runs its own tool loop (#295)", () => {
     });
   });
 
+  it("rejects the route's wait when the caller drops its stub without cancelling", async () => {
+    const seen = routeLoop(["toolu_01"]);
+    {
+      using generation = await exports.LlmGateway.generate(conversation, request, session);
+      const events = fromNdjsonStream(await generation.events())[Symbol.asyncIterator]();
+      await events.next();
+      void events.next().catch(() => undefined);
+      await vi.waitFor(() => expect(seen.waiting).toBe("toolu_01"));
+    }
+    await vi.waitFor(() => expect(seen.failure).toMatchObject({ code: "aborted" }));
+  });
+
   it("rejects the route's wait when its own signal aborts", async () => {
     const own = new AbortController();
     const seen = routeLoop(["toolu_01", "toolu_02"], own.signal);
-    const generation = generateWith(env as GatewayEnv, "medium", request, session);
+    const generation = generateWith(env as GatewayEnv, conversation, request, session);
     const events = fromNdjsonStream(generation.events())[Symbol.asyncIterator]();
     await events.next();
     expect(generation.answer({ callId: "toolu_01", output: "Ana" })).toEqual({ ok: true });
@@ -1032,7 +1059,7 @@ describe("a route that runs its own tool loop (#295)", () => {
         };
       },
     );
-    const generation = generateWith(env as GatewayEnv, "medium", request, session);
+    const generation = generateWith(env as GatewayEnv, conversation, request, session);
     const events = fromNdjsonStream(generation.events())[Symbol.asyncIterator]();
     await events.next();
     const next = events.next();
