@@ -23,13 +23,19 @@ The `claude-code` route reaches Claude through the runner ([ADR-0037](adr/0037-c
 
 - **Its id is Kelpie's,** a lowercase UUID. A new session takes it, and a resumed one goes on from it: live, or from its transcript after a restart or an idle close.
 - **A turn's frames** are `text`, `round` (a reply whose tool calls Claude Code runs, with its usage), `tool_call` (a call to run now), `finish` and `error`. Each maps onto one of Kelpie's model events, or onto its error. Their shapes are in `packages/channels/src/runner.ts`.
+  - A reply that didn't stream, as after Claude Code fell back from a failed stream, goes out the same way.
+  - A `ping` frame follows each 20 seconds the stream stays silent, as while Kelpie runs a tool, so the connections on the way stay open. It maps onto no event. Bun's idle timeout is lifted for a turn's stream only.
 - **Kelpie's tools** are an in-process MCP server, `kelpie`. A tool call goes out as a `tool_call` frame, and its result comes back on `/tool-results`. Without a result within the agent's tool bound plus 2 minutes, the turn fails.
 - **Isolation, on every call:** no built-in tool, no settings file or `CLAUDE.md`, no MCP server but Kelpie's, and no claude.ai connector. Kelpie's system prompt replaces Claude Code's, and a message's text goes as written, so `@path` and slash commands do nothing. `canUseTool` lets only Kelpie's own tools run.
+  - **Checked on each turn:** when Claude Code's `init` lists a tool other than Kelpie's, an MCP server other than its own, or a credential other than the login (`apiKeySource` other than `none`), the turn fails, the runner logs why, and the session closes as unfinished.
 - **The environment:** Claude Code's process gets only `HOME`, `PATH`, `LANG` and `TMPDIR` from the runner's, plus Kelpie's client name and the switches that turn off its compaction and its memory. So `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_CUSTOM_HEADERS` never reach it, and it uses the server's own login.
-- **Failures** come from Claude Code's structured signals: a usage limit (with its reset), spent usage, a billing error (unverified), a failed login, or any other error. Each is a retryable `error` frame with a fixed message. What Claude Code writes on stderr goes to the runner's journal only.
-- **Closing:** a session closes after 15 minutes without a turn, when its conversation starts a new one, on `DELETE`, or when a turn fails or its stream is dropped. A session whose turn didn't finish can't be resumed, until the runner restarts.
+- **Failures** come from Claude Code's structured signals: a usage limit (with its reset), spent usage, a billing error (unverified), a failed login or an account that may not use Claude Code, or any other error. Each is a retryable `error` frame with a fixed message. What Claude Code writes on stderr goes to the runner's journal only, on one line and cut at 2,000 characters.
+- **Closing:** a session closes after 15 minutes without a turn, when its conversation starts a new one, on `DELETE`, or when a turn fails or its stream is dropped. A session whose turn didn't finish is never resumed: the runner deletes its transcript, and remembers its id.
+- **Limits:** at most 4 sessions are live, and the runner starts at most 30 turns a minute.
+  - A new session past 4 closes the one idle the longest, which stays resumable. When every live session is running a turn, the new one answers 503 with `reason: "full"`.
+  - A turn past 30 a minute answers 429 with `reason: "rate"`, and `Retry-After` in seconds.
 - **409:** a turn answers 409 with a `reason` when its session is `lost` (neither live nor on disk), `unfinished` (a turn still runs, or the last one failed) or `mismatched` (another conversation, prompt, model, tools or tool bound, or a new session's id already taken). Kelpie then starts a new session.
-- **Transcripts:** Claude Code keeps them under `~/.claude/projects/`, in the folder for the runner's working directory, `~/kelpie`.
+- **Transcripts:** Claude Code keeps them under `~/.claude/projects/`, in the folder for the work folder (`KELPIE_RUNNER_WORK_DIR`).
 
 ## Setting it up
 
@@ -56,6 +62,8 @@ On the VPS, as the user whose claude.ai login Claude Code uses:
 
 3. **Install the service.** It restarts on failure, but not on a setting to fix (exit 78). It sets `NoNewPrivileges`, which every process the runner starts inherits, and `NODE_ENV=production`, so an error never answers with Bun's page of source.
 
+   It also bounds what the runner and its Claude Code sessions may use: 4 sessions of about 285 MB and 20 threads each, one more closing, and the runner. Past `MemoryHigh=1536M` the kernel reclaims memory, at `MemoryMax=2G` it kills a process of the service, and `TasksMax=256` caps their threads.
+
    ```bash
    mkdir -p ~/.config/systemd/user
    cp ~/kelpie/tools/runner/kelpie-runner.service ~/.config/systemd/user/
@@ -80,7 +88,7 @@ The service reads these from its environment, through `Environment=` lines in th
 |---|---|---|
 | `KELPIE_RUNNER_PORT` | `47832` | the loopback port, which the VPC Service points at |
 | `KELPIE_RUNNER_SECRET_FILE` | `~/.config/kelpie-runner/secret` | the secret file |
-| `KELPIE_RUNNER_WORK_DIR` | `~/.local/state/kelpie-runner/claude-code` | the empty folder Claude Code runs in, created `0700`; its sessions' transcripts are kept for this folder, apart from the owner's own sessions |
+| `KELPIE_RUNNER_WORK_DIR` | `~/.local/state/kelpie-runner/claude-code` | the empty folder Claude Code runs in, created `0700`; its sessions' transcripts are kept for this folder, apart from the owner's own sessions. A folder already there must be a directory of the runner's user that no one else may open, or the runner doesn't start (exit 78) |
 
 ## The tunnel and the VPC Service
 
@@ -153,7 +161,7 @@ A rollback to a build deployed before the variable was set leaves `channel-egres
 ## Operating it
 
 - **Logs:** `journalctl --user -u kelpie-runner`. Each request logs its method, path and status, never its headers or body. Claude Code's stderr, and how a session ended, are logged there too.
-- **Updating:** `git -C ~/kelpie pull --ff-only`, then `bun install --production --frozen-lockfile --filter @kelpie/runner` in `~/kelpie`, then `systemctl --user restart kelpie-runner`. A merge into `main` doesn't deploy the runner: it is the owner's server.
+- **Updating:** `git -C ~/kelpie pull --ff-only`, then `bun install --production --frozen-lockfile --filter @kelpie/runner` in `~/kelpie`, then `systemctl --user restart kelpie-runner`. When `tools/runner/kelpie-runner.service` changed, copy it to `~/.config/systemd/user/` again and run `systemctl --user daemon-reload` before the restart. A merge into `main` doesn't deploy the runner: it is the owner's server.
 - **Rotating the secret:**
   1. Add the new secret as a second line of the file, and restart the runner. It now accepts both.
   2. Give Kelpie the new secret, through a new `connectRunner` form.

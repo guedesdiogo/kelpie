@@ -23,6 +23,11 @@ export interface HandlerOptions {
   sessions: Pick<Sessions, "turn" | "answer" | "close">;
 }
 
+/** What the handler uses of Bun's server: a request's own idle timeout, in seconds. */
+export interface ServerTimeouts {
+  timeout(request: Request, seconds: number): void;
+}
+
 /** `/sessions/:id`, `/sessions/:id/turns` or `/sessions/:id/tool-results`. */
 const SESSION_PATH = /^\/sessions\/([^/]+)(\/turns|\/tool-results)?$/;
 
@@ -31,10 +36,10 @@ export function createHandler({
   secrets,
   log,
   sessions,
-}: HandlerOptions): (request: Request) => Promise<Response> {
-  return async (request) => {
+}: HandlerOptions): (request: Request, server: ServerTimeouts) => Promise<Response> {
+  return async (request, server) => {
     const path = pathOf(request.url);
-    const response = await route(request, path, secrets, sessions);
+    const response = await route(request, path, secrets, sessions, server);
     log({ method: request.method, path: path ?? "?", status: response.status });
     return response;
   };
@@ -54,6 +59,7 @@ async function route(
   path: string | null,
   secrets: readonly string[],
   sessions: HandlerOptions["sessions"],
+  server: ServerTimeouts,
 ): Promise<Response> {
   // The secret comes first, so a caller without it learns nothing, not even which paths exist.
   if (!isAuthorized(request.headers.get("authorization"), secrets)) {
@@ -76,7 +82,9 @@ async function route(
   }
   if (request.method !== "POST") return notAllowed("POST");
   if (!SESSION_ID.test(id)) return Response.json({ ok: false }, { status: 400 });
-  return action === "/turns" ? turn(request, id, sessions) : toolResult(request, id, sessions);
+  return action === "/turns"
+    ? turn(request, id, sessions, server)
+    : toolResult(request, id, sessions);
 }
 
 /** `POST /sessions/:id/turns`: the turn's frames, as NDJSON, until it ends. */
@@ -84,15 +92,26 @@ async function turn(
   request: Request,
   id: string,
   sessions: HandlerOptions["sessions"],
+  server: ServerTimeouts,
 ): Promise<Response> {
   const body = await readJson(request, MAX_TURN_BYTES);
   if ("status" in body) return Response.json({ ok: false }, { status: body.status });
   const turnRequest = parseTurnRequest(body.value);
   if (!turnRequest) return Response.json({ ok: false }, { status: 400 });
   const started = await sessions.turn(id, turnRequest);
-  if ("conflict" in started) {
-    return Response.json({ ok: false, reason: started.conflict }, { status: 409 });
+  if (!("stream" in started)) {
+    return Response.json(
+      { ok: false, reason: started.reason },
+      {
+        status: started.status,
+        ...(started.status === 429
+          ? { headers: { "retry-after": String(started.retryAfter) } }
+          : {}),
+      },
+    );
   }
+  // The stream stays silent while Kelpie runs a tool, up to a ping: Bun mustn't close it as idle.
+  server.timeout(request, 0);
   return new Response(started.stream, {
     headers: { "content-type": "application/x-ndjson", "cache-control": "no-store" },
   });

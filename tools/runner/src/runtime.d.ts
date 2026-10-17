@@ -7,8 +7,10 @@ declare const Bun: {
     port: number;
     /** False: an error answers a bare 500, never Bun's page with the source and its path. */
     development: boolean;
-    /** Seconds a connection may stay silent before Bun closes it; 0 never closes it. */
-    idleTimeout: number;
-    fetch: (request: Request) => Response | Promise<Response>;
+    /** The server lets `fetch` set a request's own idle timeout, in seconds; 0 lifts it. */
+    fetch: (
+      request: Request,
+      server: { timeout(request: Request, seconds: number): void },
+    ) => Response | Promise<Response>;
   }): unknown;
 };

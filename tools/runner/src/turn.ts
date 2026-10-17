@@ -1,9 +1,12 @@
 import type {
+  SDKAssistantMessage,
   SDKMessage,
   SDKRateLimitInfo,
   SDKResultMessage,
+  SDKSystemMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { TOOL_PREFIX } from "./claude.ts";
+import { SERVER_NAME, TOOL_PREFIX } from "./claude.ts";
+import { forLog } from "./journal.ts";
 import type {
   RunnerErrorCode,
   RunnerFrame,
@@ -17,6 +20,12 @@ import type { ToolCall, ToolOutcome } from "./tools.ts";
 /** Kelpie's own cut of a tool's output (`TOOL_OUTPUT_MAX_CHARS`), applied again here. */
 export const TOOL_OUTPUT_MAX_CHARS = 10_000;
 const CUT_NOTE = "\n[Cut: the result was longer.]";
+
+/**
+ * How long a turn's stream may stay silent, as while Kelpie runs a tool, before a `ping` frame
+ * keeps the connections on its way open.
+ */
+export const PING_MS = 20_000;
 
 /** What a call gets once its turn ended without its result. */
 export const STOPPED: ToolOutcome = {
@@ -43,7 +52,7 @@ type Block =
   | { type: "tool_use"; id: string; name: string; json: string }
   | { type: "other" };
 
-/** One model reply, as its stream events build it. */
+/** One model reply, as its stream events build it, or as one message when it didn't stream. */
 interface Reply {
   model: string;
   blocks: Block[];
@@ -79,12 +88,17 @@ export class Turn {
   readonly stream: ReadableStream<Uint8Array>;
   readonly #sessionId: string;
   readonly #waitMs: number;
+  readonly #warn: (message: string) => void;
   readonly #onEnd: (finished: boolean) => void;
   readonly #encoder = new TextEncoder();
   #controller!: ReadableStreamDefaultController<Uint8Array>;
   #cancelled = false;
+  #ping: ReturnType<typeof setTimeout> | undefined;
   #streaming: Reply | undefined;
   #latest: Reply | undefined;
+  // Replies seen, streamed or whole, by message id: Claude Code also sends a streamed reply's blocks
+  // as assistant messages.
+  readonly #replies = new Set<string>();
   // Tool uses whose round went out, and calls Claude Code made.
   readonly #rounds = new Set<string>();
   readonly #calls = new Map<string, Pending>();
@@ -94,9 +108,15 @@ export class Turn {
   #refused = false;
   #compacted = false;
 
-  constructor(sessionId: string, waitMs: number, onEnd: (finished: boolean) => void) {
+  constructor(
+    sessionId: string,
+    waitMs: number,
+    warn: (message: string) => void,
+    onEnd: (finished: boolean) => void,
+  ) {
     this.#sessionId = sessionId;
     this.#waitMs = waitMs;
+    this.#warn = warn;
     this.#onEnd = onEnd;
     this.stream = new ReadableStream<Uint8Array>({
       start: (controller) => {
@@ -107,6 +127,7 @@ export class Turn {
         this.#end(false);
       },
     });
+    this.#keepAlive();
   }
 
   handle(message: SDKMessage): void {
@@ -116,9 +137,7 @@ export class Turn {
         if (message.parent_tool_use_id === null) this.#onEvent(message.event);
         return;
       case "assistant":
-        if (message.parent_tool_use_id === null && message.error !== undefined) {
-          this.#apiError = message.error;
-        }
+        if (message.parent_tool_use_id === null) this.#onAssistant(message);
         return;
       case "rate_limit_event":
         // Only a rejection explains a failure; the latest one stands.
@@ -130,6 +149,7 @@ export class Turn {
         }
         return;
       case "system":
+        if (message.subtype === "init") this.#checkIsolation(message);
         if (message.subtype === "compact_boundary") this.#compacted = true;
         if (message.subtype === "model_refusal_no_fallback") this.#refused = true;
         return;
@@ -185,12 +205,66 @@ export class Turn {
     this.#end(false);
   }
 
+  /**
+   * Fails the turn when Claude Code's session isn't the one the runner set up (ADR-0037 §2): a tool
+   * other than Kelpie's, an MCP server other than its own, or a credential other than the login.
+   */
+  #checkIsolation(init: SDKSystemMessage): void {
+    const servers = init.mcp_servers;
+    const tool = init.tools.find((name) => !name.startsWith(TOOL_PREFIX));
+    const breach =
+      tool !== undefined
+        ? `a tool other than Kelpie's, ${tool}`
+        : servers.length !== 1 || servers[0]?.name !== SERVER_NAME || servers[0].source !== "sdk"
+          ? `MCP servers other than Kelpie's: ${JSON.stringify(servers.map(({ name, source }) => ({ name, source })))}`
+          : init.apiKeySource !== "none"
+            ? `a credential other than the server's login: ${init.apiKeySource}`
+            : undefined;
+    if (breach === undefined) return;
+    this.#warn(`Claude Code's session ${this.#sessionId} isn't isolated: ${forLog(breach)}`);
+    this.fail({ code: "server_error" });
+  }
+
+  /**
+   * An assistant message: Claude Code's own error message, or a reply that didn't stream, as after
+   * Claude Code fell back from a failed stream. A streamed reply's blocks come again here: its
+   * events already built it.
+   */
+  #onAssistant({ error, message }: SDKAssistantMessage): void {
+    if (error !== undefined) {
+      this.#apiError = error;
+      return;
+    }
+    if (this.#replies.has(message.id)) return;
+    this.#replies.add(message.id);
+    const reply: Reply = {
+      model: message.model,
+      blocks: [],
+      usage: usageOf(message.usage),
+      stopReason: message.stop_reason,
+    };
+    for (const block of message.content) {
+      if (block.type === "text") {
+        reply.blocks.push({ type: "text", text: block.text });
+        if (block.text !== "") this.#emit({ type: "text", delta: block.text });
+      } else if (block.type === "tool_use") {
+        const json = JSON.stringify(block.input);
+        reply.blocks.push({ type: "tool_use", id: block.id, name: block.name, json });
+      }
+    }
+    this.#settle(reply);
+  }
+
   #onEvent(event: Extract<SDKMessage, { type: "stream_event" }>["event"]): void {
     switch (event.type) {
       case "message_start": {
-        const usage: Reply["usage"] = {};
-        for (const field of USAGE_FIELDS) usage[field] = event.message.usage[field];
-        this.#streaming = { model: event.message.model, blocks: [], usage, stopReason: null };
+        this.#replies.add(event.message.id);
+        this.#streaming = {
+          model: event.message.model,
+          blocks: [],
+          usage: usageOf(event.message.usage),
+          stopReason: null,
+        };
         return;
       }
       case "content_block_start": {
@@ -298,7 +372,11 @@ export class Turn {
         return { code: "rate_limited" };
       case "billing_error":
         return { code: "out_of_credits", unverified: true };
+      // The login failed, or its account or organization may not use Claude Code now.
       case "authentication_failed":
+      case "oauth_org_not_allowed":
+      case "account_on_hold":
+      case "verification_required":
         return { code: "auth" };
       default:
         return { code: "server_error" };
@@ -307,10 +385,18 @@ export class Turn {
 
   #emit(frame: RunnerFrame): void {
     this.#controller.enqueue(this.#encoder.encode(`${JSON.stringify(frame)}\n`));
+    this.#keepAlive();
+  }
+
+  /** Sends a `ping` once the stream has been silent for PING_MS, and again after each. */
+  #keepAlive(): void {
+    clearTimeout(this.#ping);
+    this.#ping = setTimeout(() => this.#emit({ type: "ping" }), PING_MS);
   }
 
   /** Ends the turn, once: its session then hands it no more messages, calls or results. */
   #end(finished: boolean): void {
+    clearTimeout(this.#ping);
     if (!this.#cancelled) this.#controller.close();
     for (const pending of [...this.#calls.values()]) pending.settle(STOPPED);
     this.#onEnd(finished);
@@ -344,6 +430,16 @@ function parseInput(json: string): unknown {
   } catch {
     return json;
   }
+}
+
+/** The token counts a reply's usage gives. */
+function usageOf(usage: Partial<Record<UsageField, number | null>>): Reply["usage"] {
+  const counts: Reply["usage"] = {};
+  for (const field of USAGE_FIELDS) {
+    const count = usage[field];
+    if (count !== undefined) counts[field] = count;
+  }
+  return counts;
 }
 
 /** The reply's token counts, or none when it didn't give them: never zeros in their place. */

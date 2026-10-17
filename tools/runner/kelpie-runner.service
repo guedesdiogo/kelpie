@@ -15,6 +15,12 @@ RestartPreventExitStatus=78
 NoNewPrivileges=true
 # Files the runner writes are its user's alone.
 UMask=0077
+# The runner keeps at most 4 Claude Code sessions live, of about 285 MB and 20 threads each. These
+# bounds leave room for them, one more closing, and the runner: past MemoryHigh the kernel reclaims
+# memory, and at MemoryMax it kills a process of the service rather than starve the server.
+MemoryHigh=1536M
+MemoryMax=2G
+TasksMax=256
 Environment=NODE_ENV=production
 
 [Install]

@@ -51,6 +51,6 @@ export function loadSecrets(path: string, uid = ownUid()): string[] {
 }
 
 /** The runner's user. Node's types make `getuid` optional, as Windows lacks it; the runner is Linux's. */
-function ownUid(): number {
+export function ownUid(): number {
   return (process.getuid as () => number)();
 }

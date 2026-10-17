@@ -47,7 +47,8 @@ export interface RunnerToolSpec {
 
 /**
  * `POST /sessions/:id/turns`: one turn of a conversation's session. A new session (`resume` false)
- * takes the id; a resumed one goes on from it, live or from its transcript after a restart.
+ * takes the id; a resumed one goes on from it, live or from its transcript after a restart. A turn
+ * that can't start answers 409, 429 or 503 with a `reason` (docs/runner.md).
  */
 export interface RunnerTurnRequest {
   /** The conversation the session belongs to. Its new session closes its old one. */
@@ -100,10 +101,13 @@ export type RunnerErrorCode = "rate_limited" | "out_of_credits" | "auth" | "serv
  * - `finish`: the last reply. `clean` is false when the session no longer matches the turn, as
  *   after Claude Code compacted it;
  * - `error`: the turn failed. `resetsAt` is in epoch ms; `unverified` marks a code read from a
- *   signal other failures share.
+ *   signal other failures share;
+ * - `ping`: nothing happened for a while, as while Kelpie runs a tool. It keeps the connections
+ *   between Kelpie and the runner open, and maps onto no event.
  */
 export type RunnerFrame =
   | { type: "text"; delta: string }
+  | { type: "ping" }
   | { type: "round"; message: RunnerReply; usage: RunnerUsage[] }
   | { type: "tool_call"; call: RunnerToolCall }
   | {

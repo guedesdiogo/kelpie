@@ -2,13 +2,22 @@ import type { CanUseTool, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ENV_ALLOWLIST, MAX_TURNS } from "../src/claude.ts";
 import { VERSION } from "../src/protocol.ts";
-import { IDLE_MS, RESULT_GRACE_MS, Sessions } from "../src/sessions.ts";
-import { STOPPED, TOOL_OUTPUT_MAX_CHARS } from "../src/turn.ts";
+import {
+  CALL_TIMEOUT_MARGIN_MS,
+  IDLE_MS,
+  MAX_LIVE,
+  MAX_UNFINISHED,
+  RESULT_GRACE_MS,
+  Sessions,
+  TURNS_PER_MINUTE,
+} from "../src/sessions.ts";
+import { PING_MS, STOPPED, TOOL_OUTPUT_MAX_CHARS } from "../src/turn.ts";
 import {
   apiError,
   type FakeSession,
   fakeClaude,
   frames,
+  init,
   OTHER_SESSION,
   rateLimit,
   reply,
@@ -17,6 +26,7 @@ import {
   system,
   type ToolUse,
   turnRequest,
+  whole,
 } from "./fake-claude.ts";
 
 const FORBIDDEN = [
@@ -45,35 +55,52 @@ const USAGE = [
   { model: "claude-haiku-5-5", inputUncached: 12, cacheRead: 56, cacheWrite: 78, output: 34 },
 ];
 
-function setup({ onDisk = [] as string[] } = {}) {
+function setup({
+  onDisk = [] as string[],
+  deleteFails = false,
+  ...limits
+}: {
+  onDisk?: string[];
+  deleteFails?: boolean;
+  maxLive?: number;
+  turnsPerMinute?: number;
+  maxUnfinished?: number;
+} = {}) {
   const claude = fakeClaude();
   const warnings: string[] = [];
+  const deleted: string[] = [];
   const sessions = new Sessions({
     query: claude.query,
-    // Claude Code keeps a session's transcript from its start.
+    // Claude Code keeps a session's transcript from its start, until it is deleted.
     sessionExists: async (id) =>
-      onDisk.includes(id) ||
-      claude.sessions.some(({ options }) => options.sessionId === id || options.resume === id),
+      !deleted.includes(id) &&
+      (onDisk.includes(id) ||
+        claude.sessions.some(({ options }) => options.sessionId === id || options.resume === id)),
+    deleteSession: async (id) => {
+      if (deleteFails) throw new Error("EACCES:\npermission denied");
+      deleted.push(id);
+    },
     env: RUNNER_ENV,
     cwd: "/home/owner/kelpie",
     warn: (message) => warnings.push(message),
+    ...limits,
   });
   /** Starts a turn that must start, and reads its frames. */
   const start = async (id = SESSION, overrides: Parameters<typeof turnRequest>[0] = {}) => {
     const started = await sessions.turn(id, turnRequest(overrides));
-    if (!("stream" in started)) throw new Error(`409 ${started.conflict}`);
+    if (!("stream" in started)) throw new Error(`${started.status} ${started.reason}`);
     return frames(started.stream);
   };
   const conflict = async (id: string, overrides: Parameters<typeof turnRequest>[0] = {}) => {
     const started = await sessions.turn(id, turnRequest(overrides));
-    return "conflict" in started ? started.conflict : "started";
+    return "stream" in started ? "started" : started.reason;
   };
   const last = (): FakeSession => {
     const session = claude.sessions.at(-1);
     if (!session) throw new Error("No session started");
     return session;
   };
-  return { claude, sessions, warnings, start, conflict, last };
+  return { claude, sessions, warnings, deleted, start, conflict, last };
 }
 
 /** A reply without tools, and the turn's successful result. */
@@ -136,7 +163,7 @@ describe("a session's settings", () => {
     expect(options.mcpServers?.kelpie).toMatchObject({
       type: "sdk",
       name: "kelpie",
-      timeout: 120_000 + RESULT_GRACE_MS,
+      timeout: 120_000 + RESULT_GRACE_MS + CALL_TIMEOUT_MARGIN_MS,
     });
     // Kelpie's tools stay out of allowedTools, so each call reaches canUseTool.
     expect(options.allowedTools).toBeUndefined();
@@ -171,6 +198,7 @@ describe("a session's settings", () => {
     const sessions = new Sessions({
       query: claude.query,
       sessionExists: async () => false,
+      deleteSession: async () => {},
       env: { PATH: "/usr/bin" },
       cwd: "/srv",
       warn: () => {},
@@ -242,7 +270,11 @@ describe("a session's settings", () => {
     const { start, last, warnings } = setup();
     await start();
     last().options.stderr?.("a warning\n");
-    expect(warnings).toEqual([`Claude Code (session ${SESSION}): a warning`]);
+    last().options.stderr?.(`two\nlines\u001b[31m${"x".repeat(3_000)}`);
+    expect(warnings[0]).toBe(`Claude Code (session ${SESSION}): a warning`);
+    expect(warnings[1]).toBe(
+      `Claude Code (session ${SESSION}): two lines [31m${"x".repeat(1_986)}…`,
+    );
   });
 });
 
@@ -279,7 +311,7 @@ describe("a turn's frames", () => {
     const turn = await start();
     const session = last();
     await session.next();
-    session.send(system("init"), ...reply("msg_1", ["Let me look. ", SEARCH]));
+    session.send(init(), ...reply("msg_1", ["Let me look. ", SEARCH]));
     expect(await turn.next()).toEqual({ type: "text", delta: "Let me " });
     expect(await turn.next()).toEqual({ type: "text", delta: "look. " });
     expect(await turn.next()).toEqual({
@@ -382,22 +414,24 @@ describe("a turn's frames", () => {
     expect(sessions.answer(SESSION, answer)).toBe(false);
   });
 
-  it("fails the turn when a call's result doesn't come by its deadline", async () => {
+  it("fails the turn when a call's result doesn't come by its deadline, before Claude Code's", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { start, last, conflict } = setup();
     const turn = await start();
     const session = last();
     await session.next();
     session.send(...reply("msg_1", [SEARCH]));
-    const call = (await session.tools()).callTool(callFor("toolu_1"), undefined, {
-      timeout: 10 * 60 * 60_000,
-    });
+    // Claude Code waits as long as the server's timeout says.
+    const timeout = session.kelpie.timeout as number;
+    expect(timeout).toBe(120_000 + RESULT_GRACE_MS + CALL_TIMEOUT_MARGIN_MS);
+    const call = (await session.tools()).callTool(callFor("toolu_1"), undefined, { timeout });
     await turn.next();
     await turn.next();
     vi.advanceTimersByTime(120_000 + RESULT_GRACE_MS - 1);
     await settle();
     vi.advanceTimersByTime(1);
-    expect(await turn.rest()).toEqual([errorFrame("server_error")]);
+    const all = await turn.rest();
+    expect(all.filter((frame) => frame.type !== "ping")).toEqual([errorFrame("server_error")]);
     expect(await call).toEqual({
       content: [{ type: "text", text: STOPPED.output }],
       isError: true,
@@ -479,6 +513,50 @@ describe("a turn's frames", () => {
     await session.next();
     session.send(...reply("msg_1", ["Hi."], { usage: null }), result(SESSION));
     expect((await turn.rest()).at(-1)).toMatchObject({ type: "finish", usage: [] });
+  });
+
+  it("takes a reply's final counts from its end, over those at its start", async () => {
+    const { start, last } = setup();
+    const turn = await start();
+    const session = last();
+    await session.next();
+    const final = {
+      input_tokens: 100,
+      output_tokens: 7,
+      cache_read_input_tokens: 200,
+      cache_creation_input_tokens: 300,
+    };
+    session.send(...reply("msg_1", ["Hi."], { final }), result(SESSION));
+    expect((await turn.rest()).at(-1)).toMatchObject({
+      type: "finish",
+      usage: [
+        {
+          model: "claude-haiku-5-5",
+          inputUncached: 100,
+          cacheRead: 200,
+          cacheWrite: 300,
+          output: 7,
+        },
+      ],
+    });
+  });
+
+  it("keeps each text block of the last reply", async () => {
+    const { start, last } = setup();
+    const turn = await start();
+    const session = last();
+    await session.next();
+    session.send(...reply("msg_1", ["First.", "Second."]), result(SESSION));
+    expect((await turn.rest()).at(-1)).toMatchObject({
+      type: "finish",
+      message: {
+        role: "assistant",
+        parts: [
+          { type: "text", text: "First." },
+          { type: "text", text: "Second." },
+        ],
+      },
+    });
   });
 
   it("counts a reply that used no cache as no cached tokens", async () => {
@@ -661,6 +739,13 @@ describe("a turn's failures", () => {
       { code: "out_of_credits", unverified: true },
     ],
     ["a failed login", [apiError("authentication_failed")], { code: "auth" }],
+    [
+      "an organization barred from Claude Code",
+      [apiError("oauth_org_not_allowed")],
+      { code: "auth" },
+    ],
+    ["an account on hold", [apiError("account_on_hold")], { code: "auth" }],
+    ["an account to verify", [apiError("verification_required")], { code: "auth" }],
     ["another API error", [apiError("overloaded")], { code: "server_error" }],
     [
       "an allowed limit, which explains nothing",
@@ -786,14 +871,42 @@ describe("sessions", () => {
     expect(claude.sessions).toHaveLength(0);
   });
 
-  it("answers 409 for a session whose last turn failed, though Claude Code keeps it", async () => {
-    const { conflict, start, last } = setup();
+  it("answers 409 for a session whose last turn failed, and deletes its transcript", async () => {
+    const { conflict, start, last, deleted } = setup();
     const turn = await start();
     await last().next();
     last().send(apiError("rate_limit"), result(SESSION, { isError: true }));
     await turn.rest();
     expect(last().closed).toBe(true);
+    expect(deleted).toEqual([SESSION]);
     expect(await conflict(SESSION, { resume: true })).toBe("unfinished");
+  });
+
+  it("remembers the last unfinished sessions; an older one's deleted transcript can't resume", async () => {
+    const { conflict, start, last } = setup({ maxUnfinished: 1 });
+    for (const id of [SESSION, OTHER_SESSION]) {
+      const turn = await start(id, { conversation: id });
+      await last().next();
+      last().send(result(id, { isError: true }));
+      await turn.rest();
+    }
+    expect(await conflict(SESSION, { resume: true, conversation: SESSION })).toBe("lost");
+    expect(await conflict(OTHER_SESSION, { resume: true, conversation: OTHER_SESSION })).toBe(
+      "unfinished",
+    );
+    expect(MAX_UNFINISHED).toBe(1_000);
+  });
+
+  it("logs a transcript it couldn't delete, on one line", async () => {
+    const { start, last, warnings } = setup({ deleteFails: true });
+    const turn = await start();
+    await last().next();
+    last().send(result(SESSION, { isError: true }));
+    await turn.rest();
+    await settle();
+    expect(warnings).toEqual([
+      `Couldn't delete Claude Code's session ${SESSION}: Error: EACCES: permission denied`,
+    ]);
   });
 
   it("refuses the second of two new sessions racing for one id", async () => {
@@ -803,7 +916,7 @@ describe("sessions", () => {
       sessions.turn(SESSION, turnRequest()),
     ]);
     expect(first).toHaveProperty("stream");
-    expect(second).toEqual({ conflict: "mismatched" });
+    expect(second).toEqual({ status: 409, reason: "mismatched" });
     expect(claude.sessions).toHaveLength(1);
   });
 
@@ -850,7 +963,7 @@ describe("sessions", () => {
   });
 
   it("closes a session on DELETE, which a later turn may resume", async () => {
-    const { sessions, start, last, claude } = setup();
+    const { sessions, start, last, claude, deleted } = setup();
     const turn = await start();
     await last().next();
     last().send(...answered("Hi."));
@@ -861,6 +974,7 @@ describe("sessions", () => {
     sessions.close(OTHER_SESSION);
     await start(SESSION, { resume: true });
     expect(claude.sessions).toHaveLength(2);
+    expect(deleted).toEqual([]);
   });
 
   it("fails a running turn on DELETE, and its session can't be resumed", async () => {
@@ -906,5 +1020,212 @@ describe("sessions", () => {
     const next = session.next();
     sessions.close(SESSION);
     expect(await next).toBeUndefined();
+  });
+});
+
+describe("a session's isolation, checked on Claude Code's init", () => {
+  it("lets the turn go on when Claude Code has only Kelpie's tools, its server and the login", async () => {
+    const { start, last, warnings } = setup();
+    const turn = await start();
+    await last().next();
+    last().send(init(), ...answered("Hi."));
+    expect((await turn.rest()).at(-1)).toMatchObject({ type: "finish", reason: "stop" });
+    expect(warnings).toEqual([]);
+  });
+
+  it.each([
+    [
+      "a built-in tool",
+      { tools: ["mcp__kelpie__memory_search", "Bash"] },
+      "a tool other than Kelpie's, Bash",
+    ],
+    [
+      "a claude.ai connector",
+      {
+        mcp_servers: [
+          { name: "kelpie", status: "connected", source: "sdk" },
+          { name: "claude.ai Google Drive", status: "connected", source: "claudeai" },
+        ],
+      },
+      "MCP servers other than Kelpie's",
+    ],
+    [
+      "a configured server named as Kelpie's",
+      { mcp_servers: [{ name: "kelpie", status: "connected", source: "user" }] },
+      "MCP servers other than Kelpie's",
+    ],
+    ["no MCP server", { mcp_servers: [] }, "MCP servers other than Kelpie's: []"],
+    [
+      "an API key",
+      { apiKeySource: "ANTHROPIC_API_KEY" },
+      "a credential other than the server's login: ANTHROPIC_API_KEY",
+    ],
+  ])("fails the turn on %s, and closes the session as unfinished", async (_, fields, logged) => {
+    const { start, last, warnings, deleted, conflict } = setup();
+    const turn = await start();
+    await last().next();
+    last().send(init(fields), ...answered("Hi."));
+    expect(await turn.rest()).toEqual([errorFrame("server_error")]);
+    expect(warnings).toEqual([
+      expect.stringContaining(`Claude Code's session ${SESSION} isn't isolated: ${logged}`),
+    ]);
+    expect(last().closed).toBe(true);
+    expect(deleted).toEqual([SESSION]);
+    expect(await conflict(SESSION, { resume: true })).toBe("unfinished");
+  });
+});
+
+describe("a reply that didn't stream", () => {
+  it("goes out as a round when Claude Code runs its calls", async () => {
+    const { sessions, start, last } = setup();
+    const turn = await start();
+    const session = last();
+    await session.next();
+    session.send(whole("msg_1", ["Looking.", SEARCH]));
+    expect(await turn.next()).toEqual({ type: "text", delta: "Looking." });
+    expect(await turn.next()).toEqual({
+      type: "round",
+      message: {
+        role: "assistant",
+        parts: [
+          { type: "text", text: "Looking." },
+          { type: "tool_call", id: "toolu_1", name: "memory_search", input: { query: "Ana" } },
+        ],
+      },
+      usage: USAGE,
+    });
+    const call = (await session.tools()).callTool(callFor("toolu_1"));
+    expect(await turn.next()).toMatchObject({ type: "tool_call", call: { id: "toolu_1" } });
+    sessions.answer(SESSION, { callId: "toolu_1", output: "Lisbon" });
+    expect(await call).toEqual({ content: [{ type: "text", text: "Lisbon" }] });
+  });
+
+  it("goes out as the finish when it is the last reply", async () => {
+    const { start, last } = setup();
+    const turn = await start();
+    const session = last();
+    await session.next();
+    // A stream that failed partway, then the reply Claude Code asked for again without one.
+    const lisbon = whole("msg_2", ["", "Lisbon."]);
+    // Its thinking isn't Kelpie's to keep.
+    (lisbon as unknown as { message: { content: unknown[] } }).message.content.unshift({
+      type: "thinking",
+      thinking: "The note says Lisbon.",
+    });
+    session.send(...reply("msg_1", ["Lis"]).slice(0, 3), lisbon);
+    // A reply that comes twice counts once.
+    session.send(whole("msg_2", ["Lisbon."]), result(SESSION));
+    expect(await turn.rest()).toEqual([
+      { type: "text", delta: "Li" },
+      { type: "text", delta: "Lisbon." },
+      {
+        type: "finish",
+        reason: "stop",
+        message: { role: "assistant", parts: [{ type: "text", text: "Lisbon." }] },
+        usage: USAGE,
+        session: { id: SESSION, clean: true },
+      },
+    ]);
+  });
+});
+
+describe("a turn's keepalive", () => {
+  it("sends a ping after each 20 s the stream stays silent, until the turn ends", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { start, last } = setup();
+    const turn = await start();
+    const session = last();
+    await session.next();
+    vi.advanceTimersByTime(PING_MS);
+    const events = reply("msg_1", ["Hi."]);
+    session.send(...events.slice(0, 3));
+    await settle();
+    vi.advanceTimersByTime(PING_MS - 1);
+    await settle();
+    vi.advanceTimersByTime(1);
+    session.send(...events.slice(3), result(SESSION));
+    await settle();
+    vi.advanceTimersByTime(10 * PING_MS);
+    expect(await turn.rest()).toEqual([
+      { type: "ping" },
+      { type: "text", delta: "Hi" },
+      { type: "ping" },
+      { type: "text", delta: "." },
+      expect.objectContaining({ type: "finish" }),
+    ]);
+    expect(PING_MS).toBe(20_000);
+  });
+});
+
+describe("the runner's limits", () => {
+  const id = (n: number) => `${String(n).padStart(8, "0")}-2222-4333-8444-555555555555`;
+
+  it("closes the session idle the longest to make room past 4 live sessions", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { claude, start } = setup();
+    const turnOn = async (n: number, resume: boolean) => {
+      vi.setSystemTime(n * 1_000);
+      const turn = await start(id(n % 10), { conversation: `c${n % 10}`, resume });
+      const session = claude.sessions[(n % 10) - 1] as FakeSession;
+      await session.next();
+      session.send(...answered("Hi.", id(n % 10)));
+      await turn.rest();
+    };
+    for (let n = 1; n <= MAX_LIVE; n += 1) await turnOn(n, false);
+    // The first session's later turn leaves the second idle the longest.
+    await turnOn(11, true);
+    vi.setSystemTime(12_000);
+    await start(id(5), { conversation: "c5" });
+    expect(claude.sessions.map((session) => session.closed)).toEqual([
+      false,
+      true,
+      false,
+      false,
+      false,
+    ]);
+    // It stays resumable.
+    await start(id(2), { conversation: "c2", resume: true });
+    expect(claude.sessions).toHaveLength(6);
+    expect(MAX_LIVE).toBe(4);
+  });
+
+  it("answers 503 when every live session runs a turn", async () => {
+    const { claude, start, conflict } = setup({ maxLive: 2 });
+    await start(id(1), { conversation: "c1" });
+    await start(id(2), { conversation: "c2" });
+    expect(await conflict(id(3), { conversation: "c3" })).toBe("full");
+    expect(claude.sessions).toHaveLength(2);
+  });
+
+  it("replaces a conversation's running session even at the cap: its turn fails, unfinished", async () => {
+    const { claude, start, conflict } = setup({ maxLive: 1 });
+    const old = await start(id(1), { conversation: "c1" });
+    await start(id(2), { conversation: "c1" });
+    expect(await old.rest()).toEqual([errorFrame("server_error")]);
+    expect(claude.sessions.map((session) => session.closed)).toEqual([true, false]);
+    expect(await conflict(id(1), { conversation: "c1", resume: true })).toBe("unfinished");
+  });
+
+  it("answers 429 past the turns a minute allows, with the seconds to wait", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(100_000);
+    const { sessions, start, last } = setup({ turnsPerMinute: 2 });
+    const first = await start();
+    await last().next();
+    last().send(...answered("Hi."));
+    await first.rest();
+    vi.setSystemTime(110_000);
+    await start(SESSION, { resume: true });
+    vi.setSystemTime(120_000);
+    expect(await sessions.turn(OTHER_SESSION, turnRequest({ conversation: "c2" }))).toEqual({
+      status: 429,
+      reason: "rate",
+      retryAfter: 40,
+    });
+    vi.setSystemTime(160_001);
+    expect(await sessions.turn(OTHER_SESSION, turnRequest({ conversation: "c2" }))).toHaveProperty(
+      "stream",
+    );
+    expect(TURNS_PER_MINUTE).toBe(30);
   });
 });

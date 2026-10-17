@@ -12,12 +12,14 @@ const RESULTS = `/sessions/${SESSION}/tool-results`;
 function setup(sessions: HandlerOptions["sessions"] = stubSessions()) {
   const logs: LogEntry[] = [];
   const handle = createHandler({ secrets: [SECRET], log: (entry) => logs.push(entry), sessions });
+  // Bun's server, whose idle timeout a turn's stream lifts.
+  const server = { timeout: vi.fn() };
   const call = (path: string, init: RequestInit = {}) =>
-    handle(new Request(`http://runner${path}`, init));
+    handle(new Request(`http://runner${path}`, init), server);
   const auth = { authorization: `Bearer ${SECRET}` };
   const post = (path: string, body: unknown) =>
     call(path, { method: "POST", headers: auth, body: JSON.stringify(body) });
-  return { logs, call, auth, post, sessions };
+  return { logs, call, auth, post, sessions, server };
 }
 
 function stubSessions() {
@@ -79,8 +81,9 @@ describe("the runner's handler", () => {
         method: "GET",
         headers: new Headers({ authorization }),
       }) as unknown as Request;
-    expect((await handle(broken("Bearer guess"))).status).toBe(401);
-    expect((await handle(broken(`Bearer ${SECRET}`))).status).toBe(400);
+    const server = { timeout: vi.fn() };
+    expect((await handle(broken("Bearer guess"), server)).status).toBe(401);
+    expect((await handle(broken(`Bearer ${SECRET}`), server)).status).toBe(400);
     expect(logs).toEqual([
       { method: "GET", path: "?", status: 401 },
       { method: "GET", path: "?", status: 400 },
@@ -188,25 +191,50 @@ describe("the session routes' input checks", () => {
 });
 
 describe("the session routes", () => {
-  it("streams a turn's frames as NDJSON", async () => {
-    const { post, sessions } = setup();
-    const response = await post(TURNS, turnRequest());
+  it("streams a turn's frames as NDJSON, with Bun's idle timeout lifted for it alone", async () => {
+    const { post, call, auth, sessions, server } = setup();
+    await call("/health", { headers: auth });
+    await post(RESULTS, { callId: "toolu_1", output: "x" });
+    expect(server.timeout).not.toHaveBeenCalled();
+    const request = new Request(`http://runner${TURNS}`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify(turnRequest()),
+    });
+    const response = await createHandler({ secrets: [SECRET], log: () => {}, sessions })(
+      request,
+      server,
+    );
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/x-ndjson");
     expect(await response.text()).toBe('{"type":"text","delta":"Hi"}\n');
     expect(sessions.turn).toHaveBeenCalledWith(SESSION, turnRequest());
+    expect(server.timeout).toHaveBeenCalledExactlyOnceWith(request, 0);
   });
 
-  it("answers 409 with the reason a turn can't start", async () => {
-    const sessions = {
-      ...stubSessions(),
-      turn: vi.fn(async () => ({ conflict: "lost" as const })),
-    };
-    const { post } = setup(sessions);
-    const response = await post(TURNS, turnRequest({ resume: true }));
-    expect(response.status).toBe(409);
-    expect(await response.json()).toEqual({ ok: false, reason: "lost" });
-  });
+  it.each([
+    [{ status: 409 as const, reason: "lost" as const }, 409, {}],
+    [{ status: 503 as const, reason: "full" as const }, 503, {}],
+    [
+      { status: 429 as const, reason: "rate" as const, retryAfter: 17 },
+      429,
+      { "retry-after": "17" },
+    ],
+  ])(
+    "answers a turn that can't start with its status and reason: %j",
+    async (refusal, status, headers) => {
+      const sessions = { ...stubSessions(), turn: vi.fn(async () => refusal) };
+      const { post, server } = setup(sessions);
+      const response = await post(TURNS, turnRequest({ resume: true }));
+      expect(response.status).toBe(status);
+      expect(await response.json()).toEqual({ ok: false, reason: refusal.reason });
+      for (const [name, value] of Object.entries(headers)) {
+        expect(response.headers.get(name)).toBe(value);
+      }
+      expect(response.headers.has("retry-after")).toBe(status === 429);
+      expect(server.timeout).not.toHaveBeenCalled();
+    },
+  );
 
   it("gives a call its result, or answers 409 when no call waits for it", async () => {
     const sessions = stubSessions();
@@ -236,6 +264,7 @@ describe("the session routes", () => {
       new Sessions({
         query: claude.query,
         sessionExists: async () => false,
+        deleteSession: async () => {},
         env: {},
         cwd: "/srv",
         warn: () => {},

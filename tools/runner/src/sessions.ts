@@ -1,5 +1,6 @@
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { sessionOptions } from "./claude.ts";
+import { forLog } from "./journal.ts";
 import type { RunnerToolResult, RunnerTurnRequest } from "./protocol.ts";
 import { kelpieServer, type ToolCall, type ToolOutcome } from "./tools.ts";
 import { STOPPED, Turn } from "./turn.ts";
@@ -17,18 +18,37 @@ export interface SessionsOptions {
   query: QueryFn;
   /** Whether Claude Code keeps the session's transcript, which a resume needs. */
   sessionExists: (id: string) => Promise<boolean>;
+  /** Deletes the session's transcript, so that nothing resumes it. */
+  deleteSession: (id: string) => Promise<void>;
   /** The runner's environment, of which Claude Code gets an allowlist. */
   env: Record<string, string | undefined>;
   cwd: string;
   /** The runner's own log, for what Claude Code says on stderr and how a session ended. */
   warn: (message: string) => void;
   idleMs?: number;
+  maxLive?: number;
+  turnsPerMinute?: number;
+  maxUnfinished?: number;
 }
 
 /** A session closes after this long without a turn. A later turn resumes it from its transcript. */
 export const IDLE_MS = 15 * 60_000;
 /** How much longer than the agent's tool bound a call waits for its result. */
 export const RESULT_GRACE_MS = 2 * 60_000;
+/**
+ * How much longer than that Claude Code waits for a call, as the MCP server's timeout: the
+ * runner's own deadline comes first, and fails the turn.
+ */
+export const CALL_TIMEOUT_MARGIN_MS = 10_000;
+/**
+ * Live sessions at most. Each is a Claude Code process of about 285 MB; the systemd unit's
+ * `MemoryMax` leaves room for these and the runner.
+ */
+export const MAX_LIVE = 4;
+/** Turns the runner starts in any minute, at most. */
+export const TURNS_PER_MINUTE = 30;
+/** Unfinished sessions remembered, so that none is resumed. Their transcripts are deleted too. */
+export const MAX_UNFINISHED = 1_000;
 
 /**
  * Why a turn can't start, which `409` carries. The provider then seeds a new session (#295):
@@ -40,13 +60,25 @@ export const RESULT_GRACE_MS = 2 * 60_000;
  */
 export type Conflict = "lost" | "unfinished" | "mismatched";
 
+/**
+ * A turn the runner won't start: 409 for a conflict; 503 when every live session is running a
+ * turn and none can make room; 429 past the turns a minute allows, with the seconds to wait.
+ */
+export type Refusal =
+  | { status: 409; reason: Conflict }
+  | { status: 503; reason: "full" }
+  | { status: 429; reason: "rate"; retryAfter: number };
+
 /** Every conversation's live session on Claude Code: one `query()` on streaming input each. */
 export class Sessions {
   readonly #options: SessionsOptions;
   readonly #live = new Map<string, Session>();
   readonly #conversations = new Map<string, Session>();
-  // Sessions whose last turn didn't finish, until the runner restarts: never resumed.
+  // Sessions whose last turn didn't finish: never resumed. Their transcripts are deleted as well,
+  // for after a restart.
   readonly #unfinished = new Set<string>();
+  // When the last minute's turns started.
+  #started: number[] = [];
 
   constructor(options: SessionsOptions) {
     this.#options = options;
@@ -56,22 +88,40 @@ export class Sessions {
   async turn(
     id: string,
     request: RunnerTurnRequest,
-  ): Promise<{ stream: ReadableStream<Uint8Array> } | { conflict: Conflict }> {
+  ): Promise<{ stream: ReadableStream<Uint8Array> } | Refusal> {
+    const now = Date.now();
+    this.#started = this.#started.filter((at) => at > now - 60_000);
+    const [oldest] = this.#started;
+    if (
+      oldest !== undefined &&
+      this.#started.length >= (this.#options.turnsPerMinute ?? TURNS_PER_MINUTE)
+    ) {
+      return { status: 429, reason: "rate", retryAfter: Math.ceil((oldest + 60_000 - now) / 1000) };
+    }
     const known = this.#known(id, request);
-    if (known) return known;
+    if (known) return this.#counted(known);
     const exists = await this.#options.sessionExists(id);
-    if (exists !== request.resume) return { conflict: request.resume ? "lost" : "mismatched" };
+    if (exists !== request.resume) {
+      return { status: 409, reason: request.resume ? "lost" : "mismatched" };
+    }
     // Another request may have started it meanwhile.
     const raced = this.#known(id, request);
-    if (raced) return raced;
-    // A conversation's new session closes its old one.
-    this.#conversations.get(request.conversation)?.close();
+    if (raced) return this.#counted(raced);
+    // A conversation's new session closes its old one. Past the cap, the session idle the
+    // longest closes too, and it stays resumable.
+    const old = this.#conversations.get(request.conversation);
+    if (this.#live.size - (old ? 1 : 0) >= (this.#options.maxLive ?? MAX_LIVE)) {
+      const idlest = this.#idlest(old);
+      if (!idlest) return { status: 503, reason: "full" };
+      idlest.close();
+    }
+    old?.close();
     const session = new Session(id, request, this.#options, (clean) =>
       this.#closed(session, clean),
     );
     this.#live.set(id, session);
     this.#conversations.set(request.conversation, session);
-    return { stream: session.start(request) };
+    return this.#counted({ stream: session.start(request) });
   }
 
   /** Gives a call its result. False when the session has no call waiting for it. */
@@ -88,20 +138,45 @@ export class Sessions {
   #known(
     id: string,
     request: RunnerTurnRequest,
-  ): { stream: ReadableStream<Uint8Array> } | { conflict: Conflict } | undefined {
-    if (this.#unfinished.has(id)) return { conflict: "unfinished" };
+  ): { stream: ReadableStream<Uint8Array> } | Refusal | undefined {
+    if (this.#unfinished.has(id)) return { status: 409, reason: "unfinished" };
     const live = this.#live.get(id);
     if (!live) return undefined;
-    if (!request.resume || !live.serves(request)) return { conflict: "mismatched" };
-    if (live.busy) return { conflict: "unfinished" };
+    if (!request.resume || !live.serves(request)) return { status: 409, reason: "mismatched" };
+    if (live.busy) return { status: 409, reason: "unfinished" };
     return { stream: live.start(request) };
+  }
+
+  /** Counts a turn that starts toward the minute's. */
+  #counted<T extends object>(started: T): T {
+    if ("stream" in started) this.#started.push(Date.now());
+    return started;
+  }
+
+  /** The live session idle the longest, other than `except`, if any is idle. */
+  #idlest(except: Session | undefined): Session | undefined {
+    let idlest: Session | undefined;
+    for (const session of this.#live.values()) {
+      if (session === except || session.idleSince === undefined) continue;
+      if (!idlest || session.idleSince < (idlest.idleSince as number)) idlest = session;
+    }
+    return idlest;
   }
 
   // A session closes once, before another of its id or its conversation starts.
   #closed(session: Session, clean: boolean): void {
     this.#live.delete(session.id);
     this.#conversations.delete(session.conversation);
-    if (!clean) this.#unfinished.add(session.id);
+    if (clean) return;
+    this.#unfinished.add(session.id);
+    if (this.#unfinished.size > (this.#options.maxUnfinished ?? MAX_UNFINISHED)) {
+      this.#unfinished.delete(this.#unfinished.values().next().value as string);
+    }
+    this.#options.deleteSession(session.id).catch((error: unknown) => {
+      this.#options.warn(
+        `Couldn't delete Claude Code's session ${session.id}: ${forLog(String(error))}`,
+      );
+    });
   }
 }
 
@@ -117,6 +192,8 @@ class Session {
   #turn: Turn | undefined;
   #idle: ReturnType<typeof setTimeout> | undefined;
   #closed = false;
+  /** When its last turn ended; undefined while a turn runs. */
+  idleSince: number | undefined;
 
   constructor(
     id: string,
@@ -132,7 +209,7 @@ class Session {
     const server = kelpieServer(
       request.tools,
       (call, signal) => this.#call(call, signal),
-      request.toolLoopMs + RESULT_GRACE_MS,
+      request.toolLoopMs + RESULT_GRACE_MS + CALL_TIMEOUT_MARGIN_MS,
     );
     this.#query = options.query({
       prompt: this.#inbox,
@@ -144,7 +221,7 @@ class Session {
         server,
         env: options.env,
         cwd: options.cwd,
-        stderr: (data) => options.warn(`Claude Code (session ${id}): ${data.trimEnd()}`),
+        stderr: (data) => options.warn(`Claude Code (session ${id}): ${forLog(data.trimEnd())}`),
       }),
     });
     void this.#read();
@@ -161,8 +238,12 @@ class Session {
 
   start(request: RunnerTurnRequest): ReadableStream<Uint8Array> {
     clearTimeout(this.#idle);
-    const turn = new Turn(this.id, request.toolLoopMs + RESULT_GRACE_MS, (finished) =>
-      this.#ended(turn, finished),
+    this.idleSince = undefined;
+    const turn = new Turn(
+      this.id,
+      request.toolLoopMs + RESULT_GRACE_MS,
+      this.#options.warn,
+      (finished) => this.#ended(turn, finished),
     );
     this.#turn = turn;
     this.#inbox.push({
@@ -195,8 +276,12 @@ class Session {
     if (this.#turn !== turn) return;
     this.#turn = undefined;
     // A turn that didn't finish leaves more in Claude Code's transcript than in Kelpie's history.
-    if (!finished) this.#shutdown(false);
-    else this.#idle = setTimeout(() => this.close(), this.#options.idleMs ?? IDLE_MS);
+    if (!finished) {
+      this.#shutdown(false);
+      return;
+    }
+    this.idleSince = Date.now();
+    this.#idle = setTimeout(() => this.close(), this.#options.idleMs ?? IDLE_MS);
   }
 
   /** Hands Claude Code's messages to the turn. Its process ending ends the session. */
@@ -205,7 +290,7 @@ class Session {
     try {
       for await (const message of this.#query) this.#turn?.handle(message);
     } catch (error) {
-      ending = `failed: ${error instanceof Error ? error.message : String(error)}`;
+      ending = `failed: ${forLog(error instanceof Error ? error.message : String(error))}`;
     }
     if (!this.#closed) this.#options.warn(`Claude Code's session ${this.id} ${ending}`);
     this.#shutdown(true);

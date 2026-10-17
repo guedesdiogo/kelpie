@@ -121,11 +121,16 @@ export class FakeSession {
     return this.#out;
   }
 
+  /** The session's Kelpie server, as the runner configured it. */
+  get kelpie(): McpSdkServerConfigWithInstance {
+    return (this.options.mcpServers as Record<string, McpSdkServerConfigWithInstance>)
+      .kelpie as McpSdkServerConfigWithInstance;
+  }
+
   /** An MCP client on the session's Kelpie server, as Claude Code is. */
   async tools(): Promise<Client> {
-    const server = this.options.mcpServers?.kelpie as McpSdkServerConfigWithInstance;
     const [client, served] = InMemoryTransport.createLinkedPair();
-    await server.instance.connect(served);
+    await this.kelpie.instance.connect(served);
     const mcp = new Client({ name: "fake-claude", version: "0.0.0" });
     await mcp.connect(client);
     return mcp;
@@ -152,30 +157,51 @@ export interface ToolUse {
   input: unknown;
 }
 
-/** A model reply as Claude Code streams it: its events, from `message_start` to `message_stop`. */
+const USAGE = {
+  input_tokens: 12,
+  output_tokens: 34,
+  cache_read_input_tokens: 56,
+  cache_creation_input_tokens: 78,
+};
+
+/** A reply's block as the Messages API has it. */
+const contentOf = (block: string | ToolUse) =>
+  typeof block === "string"
+    ? { type: "text", text: block }
+    : { type: "tool_use", id: block.id, name: block.name, input: block.input };
+
+const assistant = (
+  id: string,
+  content: unknown[],
+  body: { model: string; stop: string | null; usage: unknown; parent: string | null },
+) =>
+  ({
+    type: "assistant",
+    message: { id, model: body.model, content, stop_reason: body.stop, usage: body.usage },
+    parent_tool_use_id: body.parent,
+    session_id: SESSION,
+  }) as unknown as SDKMessage;
+
+/**
+ * A model reply as Claude Code streams it: its events, from `message_start` to `message_stop`, with
+ * each block also as an assistant message of its own, as Claude Code sends it. `final` is what
+ * `message_delta` says of the usage; by default, only the output.
+ */
 export function reply(
   id: string,
   blocks: (string | ToolUse)[],
   {
     stop = blocks.some((block) => typeof block !== "string") ? "tool_use" : "end_turn",
-    usage = {
-      input_tokens: 12,
-      output_tokens: 34,
-      cache_read_input_tokens: 56,
-      cache_creation_input_tokens: 78,
-    } as Record<string, number | null> | null,
+    usage = USAGE as Record<string, number | null> | null,
+    final = undefined as Record<string, number | null> | undefined,
     model = "claude-haiku-5-5",
     parent = null as string | null,
   } = {},
 ): SDKMessage[] {
   const event = (body: Record<string, unknown>) =>
     ({ type: "stream_event", event: body, parent_tool_use_id: parent }) as unknown as SDKMessage;
-  const events = [
-    event({
-      type: "message_start",
-      message: { id, model, usage: usage ? { ...usage, output_tokens: 1 } : {} },
-    }),
-  ];
+  const startUsage = usage ? { ...usage, output_tokens: 1 } : {};
+  const events = [event({ type: "message_start", message: { id, model, usage: startUsage } })];
   blocks.forEach((block, index) => {
     if (typeof block === "string") {
       events.push(
@@ -205,19 +231,49 @@ export function reply(
         }),
       );
     }
-    events.push(event({ type: "content_block_stop", index }));
+    events.push(
+      assistant(id, [contentOf(block)], { model, stop: null, usage: startUsage, parent }),
+      event({ type: "content_block_stop", index }),
+    );
   });
   events.push(
     event({
       type: "message_delta",
       delta: { stop_reason: stop },
-      usage: usage
-        ? { output_tokens: usage.output_tokens, input_tokens: null }
-        : { output_tokens: 5 },
+      usage:
+        final ??
+        (usage ? { output_tokens: usage.output_tokens, input_tokens: null } : { output_tokens: 5 }),
     }),
     event({ type: "message_stop" }),
   );
   return events;
+}
+
+/** A model reply that didn't stream, as after Claude Code fell back from a failed stream. */
+export function whole(
+  id: string,
+  blocks: (string | ToolUse)[],
+  { stop = blocks.some((block) => typeof block !== "string") ? "tool_use" : "end_turn" } = {},
+): SDKMessage {
+  return assistant(id, blocks.map(contentOf), {
+    model: "claude-haiku-5-5",
+    stop,
+    usage: USAGE,
+    parent: null,
+  });
+}
+
+/** Claude Code's `system/init` for a session the runner isolated, with any field replaced. */
+export function init(overrides: Record<string, unknown> = {}): SDKMessage {
+  return {
+    type: "system",
+    subtype: "init",
+    tools: ["mcp__kelpie__memory_search"],
+    mcp_servers: [{ name: "kelpie", status: "connected", source: "sdk" }],
+    apiKeySource: "none",
+    session_id: SESSION,
+    ...overrides,
+  } as unknown as SDKMessage;
 }
 
 export function result(
