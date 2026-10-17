@@ -100,7 +100,8 @@ What belongs to one agent only sits under `agents/<agent-id>/` (ADR-0016): `SOUL
 - **Every file is kept, binary ones too,** as Hermes keeps them, so the folder in the vault is the folder at that commit. A binary file, such as a font, is committed as bytes and labeled in the review; an executable one, such as an `.exe` or a `.so`, is a finding. Kelpie's working copy still holds Markdown only (ADR-0005).
 - **The review shows** the `SKILL.md`, every file, and a static scan with its findings by file and line, adapted from Hermes's `skills_guard`.
   - Scripts are kept and labeled "kept, not runnable in Kelpie", since no agent runs code by default.
-  - The scan advises, with one exception: hidden characters, which can carry instructions the owner can't see, block the install.
+  - The scan advises, with one exception: hidden characters, which can carry instructions the owner can't see, block the install. They are the characters that show nothing: format and default-ignorable characters, and joiners or variation selectors anywhere but after the emoji, the letters or the ideographs they shape.
+  - A binary file no known format explains, by its extension and its first bytes (an image, a font, a PDF, an archive), is scanned as text too.
 - **The owner's Install adds a pending change,** and Save commits it under `agents/<id>/skills/<name>/`.
   - Save refuses it when the skill's folder changed in the vault since the review, or when the folder holds files and no `SKILL.md`, which no review showed.
   - The commit's trailers name its source, its commit and its content's hash: `Kelpie-Skill: <name>`, `Kelpie-Skill-Source`, `Kelpie-Skill-Commit` and `Kelpie-Skill-Hash`.

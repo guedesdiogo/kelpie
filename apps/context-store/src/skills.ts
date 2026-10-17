@@ -137,7 +137,7 @@ export async function skillFromEntries(
   }
   const leftOut: LeftOut[] = [];
   const kept: { entry: ZipEntry; path: string }[] = [];
-  // Two paths a Mac's or Windows' checkout would take as one, by case or by Unicode's form.
+  // Two paths a Mac's or Windows' checkout would take as one, by case or by Unicode's forms.
   const seen = new Set<string>();
   let declared = 0;
   for (const { entry, path: full } of under) {
@@ -147,8 +147,11 @@ export async function skillFromEntries(
       leftOut.push({ path, why: "hidden" });
       continue;
     }
-    if (!isCleanPath(path)) return { ok: false, problem: { reason: "unsafe_path", path } };
-    const key = path.normalize("NFC").toLowerCase();
+    // A name with a character that shows nothing, as a Hangul filler, could pass for another.
+    if (!isCleanPath(path) || /\p{Default_Ignorable_Code_Point}/u.test(path)) {
+      return { ok: false, problem: { reason: "unsafe_path", path } };
+    }
+    const key = path.normalize("NFKC").toLowerCase();
     if (seen.has(key)) return { ok: false, problem: { reason: "path_clash", path } };
     seen.add(key);
     // The vault would read a second one as a skill of its own, which the owner never reviewed.
