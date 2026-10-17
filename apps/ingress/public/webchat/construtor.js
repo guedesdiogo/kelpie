@@ -141,17 +141,6 @@ export class Construtor {
     this.#refresh();
   }
 
-  /** Every step since the editor opened, newest last. */
-  get steps() {
-    return this.#history.length;
-  }
-
-  /** The look as it is now, set from outside: a discard, or the saved one again. */
-  reset(look) {
-    this.#history = [];
-    this.#set(look, null);
-  }
-
   /** Shows an axis's tab: its radiogroups, drawn on this agent's mascot. */
   show(axis, { instant = false } = {}) {
     const changed = axis !== this.#axis;
@@ -202,7 +191,7 @@ export class Construtor {
 
   #set(look, axis) {
     this.look = look;
-    this.preview?.restyle(look, axis ?? "color");
+    this.preview?.restyle(look, axis);
     // A part's new type, from a pick, Undo or a draw, brings its own variations: the groups follow.
     if (Object.hasOwn(PARTS, this.#axis) && look[this.#axis].type !== this.#builtType) {
       const focused = this.#groups.contains(document.activeElement);
