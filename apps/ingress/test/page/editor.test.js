@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Editor } from "../../public/webchat/editor.js";
 import { setMotion } from "../../public/webchat/mascot.js";
@@ -792,5 +795,76 @@ describe("the review's cases (#379, round 1)", () => {
     sent.length = 0;
     await editor.save();
     expect(sent).toEqual([{ agentId: "agenda", section: "profile", body: { name: "Agendas" } }]);
+  });
+});
+
+describe("the review's cases (#379, round 2)", () => {
+  it("hides the section that isn't shown, though the stylesheet lays each one out", () => {
+    // Read from disk: the page's DOM loads no stylesheet, and an author `display` beats `[hidden]`.
+    const css = readFileSync(
+      join(fileURLToPath(import.meta.url), "../../../public/webchat/style.css"),
+      "utf8",
+    );
+    for (const section of [".flds", ".construtor"]) {
+      expect(css, section).toMatch(
+        new RegExp(`\\${section}\\[hidden\\][^{]*\\{\\s*display: none;`),
+      );
+    }
+  });
+
+  it("gives a save 15 s before it counts as failed, so the panel never waits for good", async () => {
+    const fetch = vi.fn(async () => Response.json({ mascot: AGENDA.mascot }));
+    vi.stubGlobal("fetch", fetch);
+    editor = new Editor({ texts: T, toasts: { show: () => {} }, onSaved: () => {} });
+    open();
+    radios("Shape")[0].click();
+    await editor.save();
+    expect(fetch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+    vi.unstubAllGlobals();
+  });
+
+  it("undoes every field a retried profile save set, the first attempt's too", async () => {
+    open();
+    tab("Profile").click();
+    for (const [id, value] of [
+      ["editor-specialty", "Agenda"],
+      ["editor-remit", "Meetings."],
+    ]) {
+      const input = $(`#${id}`);
+      input.value = value;
+      input.dispatchEvent(new Event("input"));
+    }
+    answers.profile = { ok: false, status: 503, value: { specialty: "Agenda" } };
+    await editor.save();
+    delete answers.profile;
+    await editor.save();
+    vi.advanceTimersByTime(APPROVED_MS);
+    sent.length = 0;
+    await shown.at(-1).action.run();
+    expect(sent).toEqual([
+      {
+        agentId: "agenda",
+        section: "profile",
+        body: { remit: AGENDA.remit, specialty: AGENDA.specialty },
+      },
+    ]);
+  });
+
+  it("closes after a save when the phone's Back comes during it", async () => {
+    vi.spyOn(history, "back").mockImplementation(() => {});
+    open(AGENDA, { sheet: true });
+    radios("Shape")[0].click();
+    let release;
+    answers.mascot = new Promise((done) => {
+      release = done;
+    });
+    const saving = editor.save();
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(footer().getAttribute("role")).toBeNull();
+    release({ ok: true, value: { mascot: { ...AGENDA.mascot, shape: "mark" } } });
+    await saving;
+    expect($("#editor")).toBeNull();
+    expect(history.back).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
   });
 });

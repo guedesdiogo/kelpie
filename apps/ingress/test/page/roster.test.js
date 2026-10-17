@@ -156,6 +156,29 @@ describe("the pencil on each mascot (#379)", () => {
     expect(penOf("Kelpie").tabIndex).toBe(-1);
   });
 
+  it("shows while the pointer rests on the mascot, though the row's link takes the hover", () => {
+    make();
+    const box = rowOf("Agenda").querySelector(".arow");
+    const avatar = box.querySelector(".avw");
+    avatar.getBoundingClientRect = () => ({
+      left: 10,
+      top: 10,
+      right: 50,
+      bottom: 50,
+      width: 40,
+      height: 40,
+    });
+    const move = (x, y) =>
+      box.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: x, clientY: y }));
+    move(30, 30);
+    expect(box.hasAttribute("data-mascot-hover")).toBe(true);
+    move(120, 30);
+    expect(box.hasAttribute("data-mascot-hover")).toBe(false);
+    move(30, 30);
+    box.dispatchEvent(new PointerEvent("pointerleave"));
+    expect(box.hasAttribute("data-mascot-hover")).toBe(false);
+  });
+
   it("opens that row's agent's editor, from the row, and says when it is open", () => {
     make();
     // A pointer's click counts its presses; a key's counts none.

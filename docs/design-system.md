@@ -441,7 +441,7 @@ Moment grammar. Every place that shows an agent shows its mascot (5.19), at the 
   - A free tier past 90% joins the count (5.16).
 - **A row** (decision 15, #378): the agent's 36px mascot with only 5.19's badge, and no ring around it; its name; a line with the glyph, then "state · what it does"; and the time on the right in Geist Mono with tabular figures, `m:ss` while it works and "3 min ago" while it waits. The open conversation's row stands on `--surface`.
 - **The pencil** (#379): a 24 px badge on the mascot's top right, in `--surface` with a `--muted` ring, opens the agent's editor (5.25).
-  - It shows while the pointer rests on the mascot, fading in and scaling from 0.9 with `--spring-fast`. Under reduced motion it only fades.
+  - It shows while the pointer rests on the mascot, fading in and scaling from 0.9 with `--spring-fast`. Under reduced motion it only fades. The row's link still takes a press on the mascot.
   - It is a real button, "Edit Agenda", in the tab order right after the row that holds the list's tab stop, and it shows while it has focus.
   - Where nothing hovers, it rests on every mascot.
   - It belongs to the mascot: a row that draws no mascot has none. A press on the mascot itself never opens the editor.
@@ -812,7 +812,7 @@ Moment for its Save and its open; frequent for its sections and choices (#379, [
   - Under the specialty and the description, what each is for, and its count, "15 of 40", in Geist Mono.
   - The main agent's specialty is a read-only field with a lock: "principal", and why.
   - A name that shows nothing can't be saved: the field turns its boundary `--danger`, says "Write a name", and Save waits. A specialty or a description that shows nothing is an empty one.
-  - What a line can't hold leaves as it is pasted: tabs and breaks become spaces, and control, format and invisible characters go, as the agent's settings would refuse them (ADR-0056).
+  - What a line can't hold leaves as it is pasted: tabs and breaks become spaces, and control and format characters go, as do runs of variation selectors, which the agent's settings would refuse (ADR-0056).
   - Inputs use 16 px text on the phone (5.15).
 - **Mascot, the mascot lab's Construtor.**
   - The preview stands on a small stage, 160 px (120 on the phone), and stays pettable. Beside it, the summary line, which is also its text alternative ("Pebble · Fawn · Dots eyes with cheeks · floppy ears · a bow tie"), then Undo and Randomize all as icon buttons (5.26), then one line on what a tap does and when the look counts.

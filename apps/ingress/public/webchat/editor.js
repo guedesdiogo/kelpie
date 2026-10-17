@@ -27,6 +27,8 @@ import { tips } from "./tips.js";
 export const ID_PX = 56;
 /** Siblings leave and enter this far apart (`--stagger`). */
 export const STAGGER_MS = 30;
+/** A save that hasn't answered by then has failed, and can be tried again. */
+export const SAVE_TIMEOUT_MS = 15_000;
 
 const element = (tag, className) => {
   const made = document.createElement(tag);
@@ -45,6 +47,7 @@ async function put(agentId, section, body) {
       body: JSON.stringify(body),
       redirect: "manual",
       cache: "no-store",
+      signal: AbortSignal.timeout(SAVE_TIMEOUT_MS),
     });
     // Access answers an expired login with 401, or a redirect to its sign-in (5.12).
     if (loginState(response) === "expired") return { ok: false, status: 401 };
@@ -94,6 +97,11 @@ export class Editor {
       const open = this.#open;
       if (!open?.sheet || open.closing) return;
       open.pushed = false;
+      // During a save, Back closes the sheet once the save ends.
+      if (open.saving) {
+        open.closeWhenSaved = true;
+        return;
+      }
       if (this.#changed().length > 0) {
         history.pushState({ editor: open.agent.id }, "");
         open.pushed = true;
@@ -147,6 +155,8 @@ export class Editor {
       pushed: false,
       closeTimer: null,
       toast: null,
+      // What each profile field held before a save that set it and then failed, for Undo.
+      undoBase: {},
     };
     this.#open = open;
     this.#build(open);
@@ -876,6 +886,11 @@ export class Editor {
         open.saved.mascot = result.value.mascot;
         changes.mascot = result.value.mascot;
       } else {
+        if (!result.ok) {
+          for (const key of Object.keys(result.value)) {
+            if (!Object.hasOwn(open.undoBase, key)) open.undoBase[key] = before.profile[key];
+          }
+        }
         open.saved.profile = { ...open.saved.profile, ...result.value };
         Object.assign(changes, result.value);
       }
@@ -896,10 +911,12 @@ export class Editor {
     // Undo sends back what was saved before each changed field, and the mascot whole.
     const undo = {
       mascot: before.mascot,
-      profile: Object.fromEntries(
-        Object.keys(bodies.profile).map((key) => [key, before.profile[key]]),
-      ),
+      profile: {
+        ...Object.fromEntries(Object.keys(bodies.profile).map((key) => [key, before.profile[key]])),
+        ...(sections.includes("profile") ? open.undoBase : {}),
+      },
     };
+    if (sections.includes("profile")) open.undoBase = {};
     // What the owner changed while it saved is still to save: the editor stays, and says so.
     if (this.#changed().length > 0) {
       this.#marks({ leaving: true });

@@ -1813,7 +1813,7 @@ dialog h2 {
   inline-size: 12px;
   block-size: 12px;
 }
-.arow:has(.avw:hover) .pen,
+.arow[data-mascot-hover] .pen,
 .pen:hover,
 .pen:focus-visible,
 .pen[aria-expanded="true"] {
@@ -2087,6 +2087,11 @@ dialog h2 {
   overflow-y: auto;
 }
 
+/* The section that isn't shown stays on the page, hidden: its layout would beat `[hidden]`. */
+.flds[hidden],
+.construtor[hidden] {
+  display: none;
+}
 /* Profile: the name, the specialty and the short description. */
 .flds {
   display: grid;

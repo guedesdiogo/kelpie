@@ -315,6 +315,18 @@ export class Roster {
       this.#onEdit(row.agent, { trigger: pen, from: li, keyboard: event.detail === 0 }),
     );
     tips(box);
+    // The row's link covers the row and takes its hover, so the row says when the pointer is on
+    // the mascot; a press there still opens the conversation.
+    box.addEventListener("pointermove", (event) => {
+      const at = avatar.getBoundingClientRect();
+      const on =
+        event.clientX >= at.left &&
+        event.clientX <= at.right &&
+        event.clientY >= at.top &&
+        event.clientY <= at.bottom;
+      box.toggleAttribute("data-mascot-hover", on);
+    });
+    box.addEventListener("pointerleave", () => box.removeAttribute("data-mascot-hover"));
     // Whether the owner is in the request, which a fold or a close takes from under them.
     request.addEventListener("focusin", () => {
       row.focusInside = true;
