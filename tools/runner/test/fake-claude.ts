@@ -91,6 +91,11 @@ export class FakeSession {
   readonly #prompt: AsyncIterator<SDKUserMessage>;
   readonly #out = new Channel<SDKMessage>();
   closed = false;
+  /** Whether the process begins with its `system/init`, as Claude Code's does. */
+  begins = true;
+  /** Whether the process outlives `close()` until `exit()`, as a slow one does. */
+  lingers = false;
+  #begun = false;
 
   constructor(prompt: AsyncIterable<SDKUserMessage>, options: Options) {
     this.options = options;
@@ -104,6 +109,8 @@ export class FakeSession {
   }
 
   send(...messages: SDKMessage[]): void {
+    if (!this.#begun && this.begins) this.#out.push(init());
+    this.#begun = true;
     for (const message of messages) this.#out.push(message);
   }
 
@@ -114,7 +121,7 @@ export class FakeSession {
 
   close(): void {
     this.closed = true;
-    this.#out.end();
+    if (!this.lingers) this.#out.end();
   }
 
   messages(): AsyncIterable<SDKMessage> {

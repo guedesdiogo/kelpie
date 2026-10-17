@@ -15,11 +15,14 @@ RestartPreventExitStatus=78
 NoNewPrivileges=true
 # Files the runner writes are its user's alone.
 UMask=0077
-# The runner keeps at most 4 Claude Code sessions live, of about 285 MB and 20 threads each. These
-# bounds leave room for them, one more closing, and the runner: past MemoryHigh the kernel reclaims
-# memory, and at MemoryMax it kills a process of the service rather than starve the server.
-MemoryHigh=1536M
-MemoryMax=2G
+# The runner keeps at most 4 Claude Code sessions live, of up to about 420 MB and 20 threads each,
+# and one more while a closed one exits: with the runner, about 2.2 GB. Past MemoryHigh the kernel
+# reclaims the service's memory. At MemoryMax its OOM killer kills one process, most likely a
+# session's, and OOMPolicy=continue keeps the unit up: that session's turn fails and it closes.
+# systemd's default, stop, would stop the whole runner.
+MemoryHigh=2560M
+MemoryMax=3G
+OOMPolicy=continue
 TasksMax=256
 Environment=NODE_ENV=production
 

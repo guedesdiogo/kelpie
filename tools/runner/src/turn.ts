@@ -391,7 +391,14 @@ export class Turn {
   /** Sends a `ping` once the stream has been silent for PING_MS, and again after each. */
   #keepAlive(): void {
     clearTimeout(this.#ping);
-    this.#ping = setTimeout(() => this.#emit({ type: "ping" }), PING_MS);
+    this.#ping = setTimeout(() => {
+      // A timer's throw would end the runner: a ping that can't go out is only logged.
+      try {
+        this.#emit({ type: "ping" });
+      } catch (error) {
+        this.#warn(`A ping of session ${this.#sessionId} failed: ${forLog(String(error))}`);
+      }
+    }, PING_MS);
   }
 
   /** Ends the turn, once: its session then hands it no more messages, calls or results. */

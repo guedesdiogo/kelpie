@@ -41,11 +41,12 @@ export const RESULT_GRACE_MS = 2 * 60_000;
  */
 export const CALL_TIMEOUT_MARGIN_MS = 10_000;
 /**
- * Live sessions at most. Each is a Claude Code process of about 285 MB; the systemd unit's
- * `MemoryMax` leaves room for these and the runner.
+ * Claude Code processes at most, live sessions and closing ones together, before a new session
+ * starts: each takes up to about 420 MB. The systemd unit's memory bounds leave room for these, the
+ * new one, and the runner.
  */
 export const MAX_LIVE = 4;
-/** Turns the runner starts in any minute, at most. */
+/** Turns the runner admits in any minute, at most. A turn it then refuses gives its place back. */
 export const TURNS_PER_MINUTE = 30;
 /** Unfinished sessions remembered, so that none is resumed. Their transcripts are deleted too. */
 export const MAX_UNFINISHED = 1_000;
@@ -54,15 +55,16 @@ export const MAX_UNFINISHED = 1_000;
  * Why a turn can't start, which `409` carries. The provider then seeds a new session (#295):
  * - `lost`: no session to resume, live or on disk;
  * - `unfinished`: a turn is still running, or the session's last turn didn't finish, so Claude
- *   Code's transcript holds more than Kelpie's history;
+ *   Code's transcript holds more than Kelpie's history, or its closed process hasn't exited yet;
  * - `mismatched`: the session belongs to another conversation or runs another prompt, model or
  *   tools, or a new session asks for an id already taken.
  */
 export type Conflict = "lost" | "unfinished" | "mismatched";
 
 /**
- * A turn the runner won't start: 409 for a conflict; 503 when every live session is running a
- * turn and none can make room; 429 past the turns a minute allows, with the seconds to wait.
+ * A turn the runner won't start: 409 for a conflict; 503 when no session can make room, as every
+ * live one runs a turn or a closed one's process hasn't exited yet; 429 past the turns a minute
+ * allows, with the seconds to wait.
  */
 export type Refusal =
   | { status: 409; reason: Conflict }
@@ -74,6 +76,8 @@ export class Sessions {
   readonly #options: SessionsOptions;
   readonly #live = new Map<string, Session>();
   readonly #conversations = new Map<string, Session>();
+  // Closed sessions whose process hasn't exited yet: they still take their room.
+  readonly #closing = new Set<Session>();
   // Sessions whose last turn didn't finish: never resumed. Their transcripts are deleted as well,
   // for after a restart.
   readonly #unfinished = new Set<string>();
@@ -89,6 +93,7 @@ export class Sessions {
     id: string,
     request: RunnerTurnRequest,
   ): Promise<{ stream: ReadableStream<Uint8Array> } | Refusal> {
+    // The turn takes its place in the minute's before any wait, so a burst can't overshoot.
     const now = Date.now();
     this.#started = this.#started.filter((at) => at > now - 60_000);
     const [oldest] = this.#started;
@@ -98,30 +103,45 @@ export class Sessions {
     ) {
       return { status: 429, reason: "rate", retryAfter: Math.ceil((oldest + 60_000 - now) / 1000) };
     }
+    this.#started.push(now);
+    const started = await this.#start(id, request);
+    // A turn refused gives its place back: only the turns that start count.
+    if (!("stream" in started)) this.#started.splice(this.#started.indexOf(now), 1);
+    return started;
+  }
+
+  async #start(
+    id: string,
+    request: RunnerTurnRequest,
+  ): Promise<{ stream: ReadableStream<Uint8Array> } | Refusal> {
     const known = this.#known(id, request);
-    if (known) return this.#counted(known);
+    if (known) return known;
     const exists = await this.#options.sessionExists(id);
     if (exists !== request.resume) {
       return { status: 409, reason: request.resume ? "lost" : "mismatched" };
     }
     // Another request may have started it meanwhile.
     const raced = this.#known(id, request);
-    if (raced) return this.#counted(raced);
+    if (raced) return raced;
     // A conversation's new session closes its old one. Past the cap, the session idle the
-    // longest closes too, and it stays resumable.
+    // longest closes too, and it stays resumable. A closed session's process counts until it
+    // exits, so at most one more than the cap runs: the one closing to make room.
+    const max = this.#options.maxLive ?? MAX_LIVE;
+    if (this.#live.size + this.#closing.size > max) return { status: 503, reason: "full" };
     const old = this.#conversations.get(request.conversation);
-    if (this.#live.size - (old ? 1 : 0) >= (this.#options.maxLive ?? MAX_LIVE)) {
+    if (this.#live.size - (old ? 1 : 0) >= max) {
       const idlest = this.#idlest(old);
       if (!idlest) return { status: 503, reason: "full" };
       idlest.close();
     }
     old?.close();
-    const session = new Session(id, request, this.#options, (clean) =>
-      this.#closed(session, clean),
-    );
+    const session = new Session(id, request, this.#options, {
+      closed: (clean) => this.#closed(session, clean),
+      exited: (clean) => void this.#exited(session, clean),
+    });
     this.#live.set(id, session);
     this.#conversations.set(request.conversation, session);
-    return this.#counted({ stream: session.start(request) });
+    return { stream: session.start(request) };
   }
 
   /** Gives a call its result. False when the session has no call waiting for it. */
@@ -140,17 +160,15 @@ export class Sessions {
     request: RunnerTurnRequest,
   ): { stream: ReadableStream<Uint8Array> } | Refusal | undefined {
     if (this.#unfinished.has(id)) return { status: 409, reason: "unfinished" };
+    // Its process may still write the transcript: a new one mustn't take it yet.
+    for (const session of this.#closing) {
+      if (session.id === id) return { status: 409, reason: "unfinished" };
+    }
     const live = this.#live.get(id);
     if (!live) return undefined;
     if (!request.resume || !live.serves(request)) return { status: 409, reason: "mismatched" };
     if (live.busy) return { status: 409, reason: "unfinished" };
     return { stream: live.start(request) };
-  }
-
-  /** Counts a turn that starts toward the minute's. */
-  #counted<T extends object>(started: T): T {
-    if ("stream" in started) this.#started.push(Date.now());
-    return started;
   }
 
   /** The live session idle the longest, other than `except`, if any is idle. */
@@ -167,16 +185,30 @@ export class Sessions {
   #closed(session: Session, clean: boolean): void {
     this.#live.delete(session.id);
     this.#conversations.delete(session.conversation);
+    this.#closing.add(session);
     if (clean) return;
     this.#unfinished.add(session.id);
     if (this.#unfinished.size > (this.#options.maxUnfinished ?? MAX_UNFINISHED)) {
       this.#unfinished.delete(this.#unfinished.values().next().value as string);
     }
-    this.#options.deleteSession(session.id).catch((error: unknown) => {
+  }
+
+  /**
+   * A closed session's process exited. An unfinished session's transcript goes then, when nothing
+   * can write it again. One Claude Code never wrote is fine.
+   */
+  async #exited(session: Session, clean: boolean): Promise<void> {
+    this.#closing.delete(session);
+    if (clean) return;
+    try {
+      if (await this.#options.sessionExists(session.id)) {
+        await this.#options.deleteSession(session.id);
+      }
+    } catch (error) {
       this.#options.warn(
         `Couldn't delete Claude Code's session ${session.id}: ${forLog(String(error))}`,
       );
-    });
+    }
   }
 }
 
@@ -186,12 +218,15 @@ class Session {
   readonly conversation: string;
   readonly #key: string;
   readonly #options: SessionsOptions;
-  readonly #onClose: (clean: boolean) => void;
+  readonly #events: SessionEvents;
   readonly #inbox = new Inbox();
   readonly #query: SessionQuery;
   #turn: Turn | undefined;
   #idle: ReturnType<typeof setTimeout> | undefined;
   #closed = false;
+  #clean = true;
+  // Whether the process began with its `system/init`, which the turn checks the isolation on.
+  #initialized = false;
   /** When its last turn ended; undefined while a turn runs. */
   idleSince: number | undefined;
 
@@ -199,13 +234,13 @@ class Session {
     id: string,
     request: RunnerTurnRequest,
     options: SessionsOptions,
-    onClose: (clean: boolean) => void,
+    events: SessionEvents,
   ) {
     this.id = id;
     this.conversation = request.conversation;
     this.#key = keyOf(request);
     this.#options = options;
-    this.#onClose = onClose;
+    this.#events = events;
     const server = kelpieServer(
       request.tools,
       (call, signal) => this.#call(call, signal),
@@ -284,16 +319,31 @@ class Session {
     this.#idle = setTimeout(() => this.close(), this.#options.idleMs ?? IDLE_MS);
   }
 
-  /** Hands Claude Code's messages to the turn. Its process ending ends the session. */
+  /**
+   * Hands Claude Code's messages to the turn. A process that doesn't begin with its init can't be
+   * checked, so it fails the turn. The process ending ends the session.
+   */
   async #read(): Promise<void> {
     let ending = "ended";
     try {
-      for await (const message of this.#query) this.#turn?.handle(message);
+      for await (const message of this.#query) {
+        if (!this.#initialized && !this.#closed) {
+          this.#initialized = message.type === "system" && message.subtype === "init";
+          if (!this.#initialized) {
+            this.#options.warn(
+              `Claude Code's session ${this.id} didn't begin with its init, but ${forLog(message.type)}`,
+            );
+            this.#shutdown(false);
+          }
+        }
+        this.#turn?.handle(message);
+      }
     } catch (error) {
       ending = `failed: ${forLog(error instanceof Error ? error.message : String(error))}`;
     }
     if (!this.#closed) this.#options.warn(`Claude Code's session ${this.id} ${ending}`);
     this.#shutdown(true);
+    this.#events.exited(this.#clean);
   }
 
   #shutdown(clean: boolean): void {
@@ -305,8 +355,15 @@ class Session {
     turn?.fail({ code: "server_error" });
     this.#inbox.end();
     this.#query.close();
-    this.#onClose(clean && turn === undefined);
+    this.#clean = clean && turn === undefined;
+    this.#events.closed(this.#clean);
   }
+}
+
+/** What a session tells its registry: that it closed, and later that its process exited. */
+interface SessionEvents {
+  closed(clean: boolean): void;
+  exited(clean: boolean): void;
 }
 
 /** What a live session can't change: its prompt, model and tools, and so its tools' timeout. */

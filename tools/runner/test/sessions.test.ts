@@ -57,10 +57,12 @@ const USAGE = [
 
 function setup({
   onDisk = [] as string[],
+  neverWritten = [] as string[],
   deleteFails = false,
   ...limits
 }: {
   onDisk?: string[];
+  neverWritten?: string[];
   deleteFails?: boolean;
   maxLive?: number;
   turnsPerMinute?: number;
@@ -74,6 +76,7 @@ function setup({
     // Claude Code keeps a session's transcript from its start, until it is deleted.
     sessionExists: async (id) =>
       !deleted.includes(id) &&
+      !neverWritten.includes(id) &&
       (onDisk.includes(id) ||
         claude.sessions.some(({ options }) => options.sessionId === id || options.resume === id)),
     deleteSession: async (id) => {
@@ -972,6 +975,7 @@ describe("sessions", () => {
     expect(last().closed).toBe(true);
     // A session that isn't live closes as nothing.
     sessions.close(OTHER_SESSION);
+    await settle();
     await start(SESSION, { resume: true });
     expect(claude.sessions).toHaveLength(2);
     expect(deleted).toEqual([]);
@@ -1066,6 +1070,7 @@ describe("a session's isolation, checked on Claude Code's init", () => {
     await last().next();
     last().send(init(fields), ...answered("Hi."));
     expect(await turn.rest()).toEqual([errorFrame("server_error")]);
+    await settle();
     expect(warnings).toEqual([
       expect.stringContaining(`Claude Code's session ${SESSION} isn't isolated: ${logged}`),
     ]);
@@ -1227,5 +1232,117 @@ describe("the runner's limits", () => {
       "stream",
     );
     expect(TURNS_PER_MINUTE).toBe(30);
+  });
+});
+
+describe("a session's process", () => {
+  it("fails the turn when it doesn't begin with its init, and the session closes unfinished", async () => {
+    const { start, last, warnings, deleted, conflict } = setup();
+    const turn = await start();
+    const session = last();
+    await session.next();
+    session.begins = false;
+    session.send(...answered("Hi."));
+    expect(await turn.rest()).toEqual([errorFrame("server_error")]);
+    await settle();
+    expect(warnings).toEqual([
+      `Claude Code's session ${SESSION} didn't begin with its init, but stream_event`,
+    ]);
+    expect(session.closed).toBe(true);
+    expect(deleted).toEqual([SESSION]);
+    expect(await conflict(SESSION, { resume: true })).toBe("unfinished");
+  });
+
+  it("isn't asked for its init once its session closed", async () => {
+    const { sessions, start, last, warnings } = setup();
+    await start();
+    const session = last();
+    session.begins = false;
+    session.send(...answered("Hi."));
+    sessions.close(SESSION);
+    await settle();
+    expect(warnings).toEqual([]);
+  });
+
+  it("deletes an unfinished session's transcript only once its process exited", async () => {
+    const { sessions, start, last, deleted } = setup();
+    await start();
+    const session = last();
+    session.lingers = true;
+    sessions.close(SESSION);
+    await settle();
+    expect(deleted).toEqual([]);
+    session.exit();
+    await settle();
+    expect(deleted).toEqual([SESSION]);
+  });
+
+  it("leaves alone an unfinished session whose transcript Claude Code never wrote", async () => {
+    const { sessions, start, deleted, warnings } = setup({ neverWritten: [SESSION] });
+    await start();
+    sessions.close(SESSION);
+    await settle();
+    expect(deleted).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("logs a ping that can't go out, and the turn goes on", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { start, last, warnings } = setup();
+    const turn = await start();
+    const session = last();
+    await session.next();
+    const encode = vi.spyOn(TextEncoder.prototype, "encode").mockImplementationOnce(() => {
+      throw new Error("the stream broke");
+    });
+    expect(() => vi.advanceTimersByTime(PING_MS)).not.toThrow();
+    encode.mockRestore();
+    expect(warnings).toEqual([`A ping of session ${SESSION} failed: Error: the stream broke`]);
+    session.send(...answered("Hi."));
+    expect((await turn.rest()).at(-1)).toMatchObject({ type: "finish", reason: "stop" });
+  });
+});
+
+describe("the runner's admission", () => {
+  const id = (n: number) => `${String(n).padStart(8, "0")}-2222-4333-8444-555555555555`;
+
+  it("counts a turn when it is admitted, so a burst can't go past the minute's", async () => {
+    const { sessions, claude } = setup({ turnsPerMinute: 2 });
+    const started = await Promise.all(
+      [1, 2, 3].map((n) => sessions.turn(id(n), turnRequest({ conversation: `c${n}` }))),
+    );
+    expect(started.map((turn) => ("stream" in turn ? "started" : turn.status))).toEqual([
+      "started",
+      "started",
+      429,
+    ]);
+    expect(claude.sessions).toHaveLength(2);
+  });
+
+  it("gives a refused turn's place back", async () => {
+    const { conflict } = setup({ turnsPerMinute: 1 });
+    expect(await conflict(SESSION, { resume: true })).toBe("lost");
+    expect(await conflict(SESSION)).toBe("started");
+  });
+
+  it("counts a closed session until its process exits", async () => {
+    const { claude, start, conflict } = setup({ maxLive: 2 });
+    for (const n of [1, 2]) {
+      const turn = await start(id(n), { conversation: `c${n}` });
+      const session = claude.sessions[n - 1] as FakeSession;
+      await session.next();
+      session.lingers = true;
+      session.send(...answered("Hi.", id(n)));
+      await turn.rest();
+    }
+    // The first session closes to make room, but its process lingers.
+    await start(id(3), { conversation: "c3" });
+    expect(claude.sessions.map((session) => session.closed)).toEqual([true, false, false]);
+    expect(await conflict(id(4), { conversation: "c4" })).toBe("full");
+    // Its transcript can't be taken while it may still write it.
+    expect(await conflict(id(1), { conversation: "c1", resume: true })).toBe("unfinished");
+    claude.sessions[0]?.exit();
+    await settle();
+    expect(await conflict(id(4), { conversation: "c4" })).toBe("started");
   });
 });

@@ -30,10 +30,12 @@ The `claude-code` route reaches Claude through the runner ([ADR-0037](adr/0037-c
   - **Checked on each turn:** when Claude Code's `init` lists a tool other than Kelpie's, an MCP server other than its own, or a credential other than the login (`apiKeySource` other than `none`), the turn fails, the runner logs why, and the session closes as unfinished.
 - **The environment:** Claude Code's process gets only `HOME`, `PATH`, `LANG` and `TMPDIR` from the runner's, plus Kelpie's client name and the switches that turn off its compaction and its memory. So `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_CUSTOM_HEADERS` never reach it, and it uses the server's own login.
 - **Failures** come from Claude Code's structured signals: a usage limit (with its reset), spent usage, a billing error (unverified), a failed login or an account that may not use Claude Code, or any other error. Each is a retryable `error` frame with a fixed message. What Claude Code writes on stderr goes to the runner's journal only, on one line and cut at 2,000 characters.
-- **Closing:** a session closes after 15 minutes without a turn, when its conversation starts a new one, on `DELETE`, or when a turn fails or its stream is dropped. A session whose turn didn't finish is never resumed: the runner deletes its transcript, and remembers its id.
+- **Closing:** a session closes after 15 minutes without a turn, when its conversation starts a new one, on `DELETE`, or when a turn fails or its stream is dropped. A session whose turn didn't finish is never resumed: the runner remembers its id, and deletes its transcript once its process has exited.
+- **A process must begin with its `init`:** one whose first message is anything else fails its turn, and its session closes as unfinished.
 - **Limits:** at most 4 sessions are live, and the runner starts at most 30 turns a minute.
-  - A new session past 4 closes the one idle the longest, which stays resumable. When every live session is running a turn, the new one answers 503 with `reason: "full"`.
-  - A turn past 30 a minute answers 429 with `reason: "rate"`, and `Retry-After` in seconds.
+  - A closed session's process counts until it exits. A new session past 4 closes the one idle the longest, which stays resumable, so at most 5 processes run. When no session can make room, because every live one runs a turn or a closed one hasn't exited yet, the new one answers 503 with `reason: "full"`.
+  - Until a closed session's process has exited, a turn on its id answers 409 `unfinished`: the process may still write the transcript.
+  - A turn counts toward the minute's when it is admitted, so a burst can't go past 30. A turn the runner then refuses gives its place back. Past 30, a turn answers 429 with `reason: "rate"`, and `Retry-After` in seconds.
 - **409:** a turn answers 409 with a `reason` when its session is `lost` (neither live nor on disk), `unfinished` (a turn still runs, or the last one failed) or `mismatched` (another conversation, prompt, model, tools or tool bound, or a new session's id already taken). Kelpie then starts a new session.
 - **Transcripts:** Claude Code keeps them under `~/.claude/projects/`, in the folder for the work folder (`KELPIE_RUNNER_WORK_DIR`).
 
@@ -62,7 +64,10 @@ On the VPS, as the user whose claude.ai login Claude Code uses:
 
 3. **Install the service.** It restarts on failure, but not on a setting to fix (exit 78). It sets `NoNewPrivileges`, which every process the runner starts inherits, and `NODE_ENV=production`, so an error never answers with Bun's page of source.
 
-   It also bounds what the runner and its Claude Code sessions may use: 4 sessions of about 285 MB and 20 threads each, one more closing, and the runner. Past `MemoryHigh=1536M` the kernel reclaims memory, at `MemoryMax=2G` it kills a process of the service, and `TasksMax=256` caps their threads.
+   It also bounds what the runner and its Claude Code sessions may use. A session's process takes up to about 420 MB (53 `claude` processes measured on the VPS: median 259 MB, max 419 MB) and about 20 threads. The bounds cover 4 sessions, one more closing, and the runner, about 2.2 GB:
+   - past `MemoryHigh=2560M` the kernel reclaims the service's memory;
+   - at `MemoryMax=3G` its OOM killer kills one process, most likely a session's. `OOMPolicy=continue` keeps the runner up, and that session's turn fails. systemd's default policy, `stop`, would stop the whole runner;
+   - `TasksMax=256` caps their threads.
 
    ```bash
    mkdir -p ~/.config/systemd/user
