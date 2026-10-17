@@ -46,6 +46,46 @@ const PATHS = {
     "M5.25 2.75h5.5a2.5 2.5 0 0 1 2.5 2.5v5.5a2.5 2.5 0 0 1-2.5 2.5h-5.5a2.5 2.5 0 0 1-2.5-2.5v-5.5a2.5 2.5 0 0 1 2.5-2.5Z",
     { d: "M13.25 2.75V10.75A2.5 2.5 0 0 1 10.75 13.25H2.75Z", solid: true },
   ],
+  // The agent's editor (#379, the lab "O editor do agente em movimento"): the pencil on a mascot,
+  // Undo as a U-turn, never a circle that reads as refresh, and Randomize as a die with three pips.
+  pencil: ["M10.5 2.8l2.4 2.4L6.2 11.9l-3 .8.8-3z", "M9.2 4.1l2.4 2.4"],
+  undo: ["M5.5 4L2.5 7l3 3", "M2.5 7h7a3.5 3.5 0 0 1 0 7H8"],
+  dice: [
+    "M5 2.5h6A2.5 2.5 0 0 1 13.5 5v6a2.5 2.5 0 0 1-2.5 2.5H5A2.5 2.5 0 0 1 2.5 11V5A2.5 2.5 0 0 1 5 2.5Z",
+    { d: "M5.5 4.5a1 1 0 1 0 0 2a1 1 0 1 0 0-2Z", solid: true },
+    { d: "M8 7a1 1 0 1 0 0 2a1 1 0 1 0 0-2Z", solid: true },
+    { d: "M10.5 9.5a1 1 0 1 0 0 2a1 1 0 1 0 0-2Z", solid: true },
+  ],
+  lock: [
+    "M5 7h6a1.5 1.5 0 0 1 1.5 1.5v3.5A1.5 1.5 0 0 1 11 13.5H5A1.5 1.5 0 0 1 3.5 12V8.5A1.5 1.5 0 0 1 5 7Z",
+    "M5.5 7V5a2.5 2.5 0 0 1 5 0v2",
+  ],
+  // The editor's sections: an ID card, a page with a heart, a list, two stacked notes and a puzzle
+  // piece. None is a lone diamond, triangle, or hollow or dashed circle: those are 5.9's glyphs.
+  profile: [
+    "M3.5 3.5h9A1.5 1.5 0 0 1 14 5v6a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11V5a1.5 1.5 0 0 1 1.5-1.5Z",
+    "M5.8 6a1.3 1.3 0 1 0 0 2.6a1.3 1.3 0 1 0 0-2.6Z",
+    "M4 10.4c.5-.9 1.1-1.3 1.8-1.3s1.3.4 1.8 1.3M9.5 7h3M9.5 9.5h3",
+  ],
+  soul: [
+    "M4 2.5h5.5l3 3v8H4z",
+    "M9.5 2.5v3h3",
+    "M8.2 11.6s-2-1.2-2-2.5a1 1 0 0 1 2-.5a1 1 0 0 1 2 .5c0 1.3-2 2.5-2 2.5z",
+  ],
+  rules: [
+    "M6.5 4.5h7M6.5 8h7M6.5 11.5h7",
+    { d: "M3.4 3.6a.9.9 0 1 0 0 1.8a.9.9 0 1 0 0-1.8Z", solid: true },
+    { d: "M3.4 7.1a.9.9 0 1 0 0 1.8a.9.9 0 1 0 0-1.8Z", solid: true },
+    { d: "M3.4 10.6a.9.9 0 1 0 0 1.8a.9.9 0 1 0 0-1.8Z", solid: true },
+  ],
+  memory: [
+    "M5.5 3.5h7v7",
+    "M3.5 5.5h6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-6a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z",
+    "M4.5 8.5h4M4.5 11h3",
+  ],
+  skills: [
+    "M6.5 3.5h1.7a1.3 1.3 0 0 1 2.6 0h1.7v2.2a1.3 1.3 0 0 1 0 2.6V11h-2.3a1.3 1.3 0 0 0-2.6 0H5.4V8.3a1.3 1.3 0 0 1 0-2.6V3.5z",
+  ],
 };
 
 /**
@@ -81,6 +121,8 @@ const OUTLINES = {
     ["g", { transform: "translate(0 -.4)" }, BODY],
     ["path", { d: "M3 19.2h14" }],
   ],
+  // The editor's Mascot section (#379): the mascot's own outline, at rest.
+  body: [["g", { transform: "translate(0 -1.6)" }, BODY]],
 };
 
 function draw(parent, shapes) {

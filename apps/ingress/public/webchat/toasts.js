@@ -6,6 +6,8 @@
 import { enter, leave, play, reduced } from "./motion.js";
 
 export const TOAST_MS = 5_000;
+/** A toast that offers Undo stays twice as long (5.13). */
+export const UNDO_TOAST_MS = 10_000;
 const MOST = 3;
 
 const defaultTimers = {
@@ -30,15 +32,25 @@ export class Toasts {
     });
   }
 
-  /** A toast with `text`; `action` is a `{ label, run }` button; an error stays until dismissed. */
-  show({ text, error = false, action = null }) {
+  /**
+   * A toast with `text`, and `detail` on a second line; `action` is a `{ label, run }` button,
+   * which `undo` keeps for 10 s; an error stays until dismissed.
+   */
+  show({ text, detail = "", error = false, action = null, undo = false }) {
     const element = document.createElement("div");
     element.className = "toast";
     if (error) element.dataset.error = "";
     const words = document.createElement("p");
     words.textContent = text;
+    if (detail) {
+      const more = document.createElement("span");
+      more.className = "detail";
+      more.textContent = detail;
+      words.append(more);
+    }
     element.append(words);
-    const toast = { element, error, left: TOAST_MS, holds: new Set(), timer: null, bar: null };
+    const lasts = undo ? UNDO_TOAST_MS : TOAST_MS;
+    const toast = { element, error, lasts, left: lasts, holds: new Set(), timer: null, bar: null };
     if (action) {
       const button = document.createElement("button");
       button.type = "button";
@@ -99,7 +111,7 @@ export class Toasts {
     toast.timer = this.#timers.set(() => this.dismiss(toast), toast.left);
     toast.animation = play(
       toast.bar,
-      [{ transform: `scaleX(${toast.left / TOAST_MS})` }, { transform: "scaleX(0)" }],
+      [{ transform: `scaleX(${toast.left / toast.lasts})` }, { transform: "scaleX(0)" }],
       { duration: toast.left, easing: "linear", fill: "forwards" },
     );
   }

@@ -724,12 +724,14 @@ export function buildMascot(mascot, { uid, px, hex, work = true, hands = true })
           .map(([name, d]) => `<g class="ico ico-${name}">${d}</g>`)
           .join("")}</g></g></g></g>`
       : `<g transform="translate(${fx + spread + 25} ${ty - 9}) scale(${size === "m" ? 1.6 : 1.4})"><g class="m-bdw speech"><g class="bd-bob"><g class="bd-dot"><path class="bd-c bub3d" d="M0,-11 C7,-11 11,-7 11,-2 C11,3.5 7,7 1,7 L-5,11.5 L-3.6,6.2 C-8.5,5 -11,2 -11,-2 C-11,-7 -7,-11 0,-11 Z"/><ellipse class="bd-hl" cx="-4.6" cy="-6.2" rx="4.4" ry="2.1" transform="rotate(-20 -4.6 -6.2)"/><text class="bd-g" y="3" text-anchor="middle"></text><g class="bd-off"><path d="M-2.2,-6.4 V-3.8 M2.2,-6.4 V-3.8"/><rect x="-4.2" y="-3.8" width="8.4" height="5.6" rx="1.6"/><path d="M0,1.8 V4.4"/><path class="slash" d="M-6.2,4.6 L6.2,-7"/></g></g></g></g></g>`;
+  // The head's and the accessory's parts, each in a group the editor's preview drops in (#379).
+  const part = (name, svg) => (svg ? `<g class="${name}">${svg}</g>` : "");
   const html =
     `<svg class="mascot" viewBox="10 14 100 100" width="${px}" height="${px}" data-size="${size}" data-eyes="open" data-mouth="none" data-brows="none" data-fx="none" data-badge="none" aria-hidden="true" focusable="false">` +
     `<defs><clipPath id="mc${uid}"><path d="${shape.d}"/></clipPath><radialGradient id="mg${uid}" cx=".36" cy=".3" r=".85"><stop offset="0" stop-color="${color.light}"/><stop offset=".55" stop-color="${color.body}"/><stop offset="1" stop-color="${color.edge}"/></radialGradient></defs>` +
     '<ellipse class="m-shadow" cx="60" cy="111" rx="30" ry="3.6"/>' +
-    `<g class="m-hop g"><g class="m-breath g"><g class="m-sq g"><g class="m-pose g">${backHard}${backEars}${body}${frontEars}${lower}` +
-    `<g class="m-face">${cheeks}${eyeSvg}${glasses}<g class="m-brows">${brows}</g>${mouth}</g>${workSvg}${onTop}${handsSvg}${effects}</g></g></g></g>` +
+    `<g class="m-hop g"><g class="m-breath g"><g class="m-sq g"><g class="m-pose g">${part("m-head", backHard + backEars)}${body}${part("m-head", frontEars)}${part("m-acc", lower)}` +
+    `<g class="m-face">${cheeks}${eyeSvg}${part("m-acc", glasses)}<g class="m-brows">${brows}</g>${mouth}</g>${workSvg}${part("m-acc", onTop)}${handsSvg}${effects}</g></g></g></g>` +
     `${badge}</svg>`;
   return {
     html,

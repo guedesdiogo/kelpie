@@ -3,8 +3,10 @@
 // carries the same login. Model output is never parsed as HTML: thread.js and blocks.js build it
 // from text nodes and the blocks the runtime read (#188). A Confirm button shows only on a
 // confirmation's notice, which the runtime marks with its id (#186). The header shows the agent's
-// mascot, whose state follows the conversation's (ADR-0045).
+// mascot, whose state follows the conversation's (ADR-0045). A pencil on an agent's mascot opens
+// its editor (#379), and what it saves reaches the header, the sidebar and the switcher.
 
+import { Editor } from "./editor.js";
 import { icon, outline } from "./icons.js";
 import { Mascot, ownerTyping, setMotion } from "./mascot.js";
 import { isDrawable } from "./mascot-art.js";
@@ -141,7 +143,44 @@ const roster = new Roster($("roster"), {
     card.confirm.focus();
     return true;
   },
+  onEdit: (entry, how) => openEditor(entry, how),
 });
+
+// ── The agent's editor (#379) ──────────────────────────────────────────────────────────────────
+
+const editor = new Editor({
+  texts: T,
+  toasts,
+  onSaved: (agentId, changes) => saved(agentId, changes),
+  onClose: () => roster.editing(null),
+  onExpired: () => showLogin(),
+});
+
+/**
+ * Opens an agent's editor, from the pencil on its mascot: a panel beside the sidebar, or the 90%
+ * sheet on a phone. An agent the list drew no mascot for has no pencil.
+ */
+function openEditor(entry, { trigger, from = null, keyboard = false }) {
+  if (!isDrawable(entry.mascot)) return;
+  const sheet = phone.matches;
+  if (agentsMenu.open) agentsMenu.hide({ restore: false });
+  const opened = editor.open(entry, {
+    trigger,
+    from,
+    keyboard,
+    sheet,
+    returnTo: wide.matches ? trigger : $("switcher"),
+  });
+  if (opened) roster.editing(entry.id);
+}
+
+/** What a save wrote: the agent's entry follows, and so do its header, row and switcher. */
+function saved(agentId, changes) {
+  agents = agents.map((entry) => (entry.id === agentId ? { ...entry, ...changes } : entry));
+  // The header's mascot plays the change's jump (ADR-0045 §2).
+  if (agentId === agent && changes.mascot) showMascot(changes.mascot);
+  showAgents();
+}
 
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) roster.wake();
@@ -845,7 +884,9 @@ function showAgents() {
   switcher.setAttribute("aria-label", several ? `${agentName()}, ${T.switchAgent}` : agentName());
   switcher.querySelector(".icon")?.remove();
   if (several) switcher.append(icon("chevron"));
-  // 5.21's list: each agent's still 36 px mascot in the Idle pose, its name and its id.
+  // 5.21's list: each agent's still 36 px mascot in the Idle pose, its name with its specialty,
+  // and its id. The open agent's mascot carries the editor's pencil at rest (#379): a phone has no
+  // pointer to rest on it.
   const list = $("agents").querySelector("ul");
   list.replaceChildren(
     ...agents.map((entry) => {
@@ -859,14 +900,37 @@ function showAgents() {
       const label = document.createElement("span");
       label.className = "agent-label";
       label.textContent = entry.name;
+      const specialty = entry.main ? T.editor.principal : (entry.specialty ?? "");
+      if (specialty) {
+        const words = document.createElement("span");
+        words.className = "agent-specialty";
+        words.textContent = specialty;
+        label.append(" ", words);
+      }
       const id = document.createElement("span");
       id.className = "agent-id";
       id.textContent = entry.id;
       link.append(figure, label, id);
       item.append(link);
+      if (entry.id === agent && isDrawable(entry.mascot)) {
+        const pen = document.createElement("button");
+        pen.type = "button";
+        pen.className = "pen at-rest";
+        pen.dataset.tip = "";
+        pen.setAttribute("aria-label", T.editor.edit(entry.name));
+        pen.setAttribute("aria-expanded", String(editor.agentId === entry.id));
+        pen.setAttribute("aria-controls", "editor");
+        pen.append(icon("pencil"));
+        pen.addEventListener("click", (event) =>
+          openEditor(entry, { trigger: pen, keyboard: event.detail === 0 }),
+        );
+        item.append(pen);
+        item.classList.add("editable");
+      }
       return item;
     }),
   );
+  tips(list);
   agents.forEach((entry, index) => {
     if (isDrawable(entry.mascot)) {
       const host = list.children[index].querySelector(".mascot-host");
@@ -1047,6 +1111,7 @@ function showMascot(config) {
   mascotConfig = config;
   if (mascot) {
     mascot.change(config);
+    emptyMascot?.change(config);
     return;
   }
   mascot = new Mascot(mascotHost, { mascot: config, px: 48, mode: "header", quietable: true });

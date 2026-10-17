@@ -2,7 +2,9 @@
 // the Registry's order, which no state changes. A row shows its agent's mascot at 36 px, its name,
 // a line with 5.9's glyph, its state and what it does, and a time. A waiting row's state opens its
 // request under the row, with 5.3's card. The open conversation's row follows that conversation's
-// own socket; every other row, up to 16, follows a presence socket of its own.
+// own socket; every other row, up to 16, follows a presence socket of its own. A pencil on each
+// mascot opens the agent's editor (#379): it shows while the pointer rests on the mascot, and is a
+// real button in the row's tab order, shown while it has focus.
 
 import { Card, defaultTimers } from "./card.js";
 import { icon } from "./icons.js";
@@ -13,6 +15,7 @@ import { retryDelay } from "./model.js";
 import { enter, hideAfterExit, play, reduced, SPRINGS } from "./motion.js";
 import { PresenceLink, rowAfter, rowAt, rowLine, rowMascot, UNKNOWN } from "./presence.js";
 import { roll } from "./roll.js";
+import { tips } from "./tips.js";
 
 /** The rows that follow their agent; past them, a row shows its mascot and name only. */
 export const FOLLOWED_AT_MOST = 16;
@@ -72,6 +75,7 @@ export class Roster {
   #onRefused;
   #onAnnounce;
   #openOwnCard;
+  #onEdit;
   /** The rows by agent id, in the list's order. */
   #rows = new Map();
   #current = "";
@@ -92,6 +96,8 @@ export class Roster {
    *   socket: { host: string, lang: string, secure: boolean, isHidden: () => boolean },
    *   less: () => boolean, onWaiting: (count: number) => void, onRefused: () => void,
    *   onAnnounce: (text: string) => void, openOwnCard: () => boolean,
+   *   onEdit?: (agent: object, how: { trigger: HTMLElement, from: HTMLElement,
+   *     keyboard: boolean }) => void,
    *   now?: () => number, timers?: typeof defaultTimers,
    * }} options
    */
@@ -107,6 +113,7 @@ export class Roster {
     this.#onRefused = options.onRefused;
     this.#onAnnounce = options.onAnnounce;
     this.#openOwnCard = options.openOwnCard;
+    this.#onEdit = options.onEdit ?? (() => {});
     this.#now = options.now ?? Date.now;
     this.#timers = options.timers ?? defaultTimers;
     nav.addEventListener("keydown", (event) => this.#key(event));
@@ -140,11 +147,19 @@ export class Roster {
       const before = previous ? previous.li.nextSibling : this.#list.firstChild;
       if (before !== row.li) this.#list.insertBefore(row.li, before);
       previous = row;
-      if (row.agent.name !== agent.name) row.link.textContent = agent.name;
-      row.agent = agent;
-      if (!row.mascot && isDrawable(agent.mascot)) {
-        row.mascot = new Mascot(row.host, { mascot: agent.mascot, px: 36, mode: "list" });
+      if (row.agent.name !== agent.name) {
+        row.link.textContent = agent.name;
+        row.pen.setAttribute("aria-label", this.#texts.editor.edit(agent.name));
+        tips(row.avatar);
       }
+      row.agent = agent;
+      if (isDrawable(agent.mascot)) {
+        // A mascot the owner just saved: the row's takes it, with its jump (ADR-0045 §2).
+        if (row.mascot) row.mascot.change(agent.mascot);
+        else row.mascot = new Mascot(row.host, { mascot: agent.mascot, px: 36, mode: "list" });
+      }
+      // The pencil belongs to the mascot: a row that draws none has nothing to edit from.
+      row.pen.hidden = !row.mascot;
       row.current = agent.id === current;
       if (row.current) row.link.setAttribute("aria-current", "page");
       else row.link.removeAttribute("aria-current");
@@ -190,6 +205,13 @@ export class Roster {
     }
   }
 
+  /** The agent whose editor is open, whose pencil says so; null when none is. */
+  editing(agentId) {
+    for (const row of this.#rows.values()) {
+      row.pen.setAttribute("aria-expanded", String(row.agent.id === agentId));
+    }
+  }
+
   /** The page lost its own socket, or has it back: every row says no connection meanwhile. */
   offline(lost) {
     if (this.#pageOffline === lost) return;
@@ -223,7 +245,17 @@ export class Roster {
     const avatar = element("span", "avw");
     const host = element("span", "mascot-host");
     host.setAttribute("aria-hidden", "true");
-    avatar.append(host);
+    // A 24 px badge on the mascot's top right, the editor's one way in (#379).
+    const pen = element("button", "pen");
+    pen.type = "button";
+    pen.tabIndex = -1;
+    pen.hidden = true;
+    pen.dataset.tip = "";
+    pen.setAttribute("aria-label", this.#texts.editor.edit(agent.name));
+    pen.setAttribute("aria-expanded", "false");
+    pen.setAttribute("aria-controls", "editor");
+    pen.append(icon("pencil"));
+    avatar.append(host, pen);
     const who = element("span", "an");
     const link = element("a", "row-link");
     link.href = `?agent=${encodeURIComponent(agent.id)}`;
@@ -258,6 +290,8 @@ export class Roster {
       agent,
       li,
       link,
+      avatar,
+      pen,
       host,
       mascot: null,
       mark,
@@ -276,6 +310,10 @@ export class Roster {
       glyph: null,
     };
     open.addEventListener("click", (event) => this.#toggle(row, { keyboard: event.detail === 0 }));
+    pen.addEventListener("click", (event) =>
+      this.#onEdit(row.agent, { trigger: pen, from: li, keyboard: event.detail === 0 }),
+    );
+    tips(avatar);
     // Whether the owner is in the request, which a fold or a close takes from under them.
     request.addEventListener("focusin", () => {
       row.focusInside = true;
@@ -534,9 +572,13 @@ export class Roster {
 
   // ── The keyboard: one tab stop, ↑ ↓ Home End to move, → and ← for a request ──────────────────
 
+  /** The list is one tab stop, and the row there brings its pencil into the tab order after it. */
   #rove(row) {
     if (!row) return;
-    for (const other of this.#rows.values()) other.link.tabIndex = other === row ? 0 : -1;
+    for (const other of this.#rows.values()) {
+      other.link.tabIndex = other === row ? 0 : -1;
+      other.pen.tabIndex = other === row ? 0 : -1;
+    }
   }
 
   #rowOf(target) {

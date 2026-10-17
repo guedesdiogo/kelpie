@@ -211,6 +211,8 @@ describe("the page's language", () => {
     for (const locale of ["en", "pt-BR", "es"]) {
       const texts = TEXTS[locale];
       for (const [name, value] of Object.entries(texts)) {
+        // The agent editor's texts nest; editor-model.test.js checks them (#379).
+        if (name === "editor") continue;
         if (typeof value === "function") {
           const written = value(2, 2.5);
           expect(written, `${locale} ${name}`).toMatch(/\S/);
