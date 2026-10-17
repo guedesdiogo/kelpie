@@ -378,17 +378,23 @@ export class RunnerChat extends WorkerEntrypoint<Env> implements RunnerChatContr
   async turn(sessionId: string, request: RunnerTurnRequest): Promise<TurnStart> {
     const release = takeTurnPlace();
     if (!release) return { ok: false, reason: "full" };
-    const body = turnBody(sessionId, request);
-    if (!body) {
+    try {
+      const body = turnBody(sessionId, request);
+      if (!body) {
+        release();
+        return invalidInput;
+      }
+      const found = await this.#runner();
+      if (!found.ok) {
+        release();
+        return found;
+      }
+      return await startTurn(found.runner, found.secret, sessionId, body, release);
+    } catch (error) {
+      // Nothing expected throws here: an unexpected throw mustn't keep the place for good.
       release();
-      return invalidInput;
+      throw error;
     }
-    const found = await this.#runner();
-    if (!found.ok) {
-      release();
-      return found;
-    }
-    return startTurn(found.runner, found.secret, sessionId, body, release);
   }
 
   async answer(sessionId: string, result: RunnerToolResult): Promise<RunnerAnswerOutcome> {

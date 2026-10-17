@@ -4,6 +4,7 @@ import {
   parseRunnerTurnRequest,
   RUNNER_SESSION_ID,
   type RunnerTurnRequest,
+  runnerJsonLength,
 } from "../src/runner.ts";
 
 // The checks the runner makes on what it receives, and channel-egress on what it relays (#420).
@@ -35,6 +36,19 @@ function turnRequest(overrides: Partial<RunnerTurnRequest> = {}): RunnerTurnRequ
 }
 
 const TOOL = turnRequest().tools[0];
+
+/** A schema whose JSON nests `depth` objects and arrays: itself, then lists in lists. */
+function nested(depth: number): Record<string, unknown> {
+  let value: unknown[] = [];
+  for (let level = 2; level < depth; level += 1) value = [value];
+  return { type: "object", default: value };
+}
+
+function cyclic(): Record<string, unknown> {
+  const schema: Record<string, unknown> = { type: "object" };
+  schema.properties = { self: schema };
+  return schema;
+}
 const withTool = (tool: unknown) => ({ ...turnRequest(), tools: [tool] });
 const withMessage = (message: unknown) => ({ ...turnRequest(), messages: [message] });
 const withPart = (part: unknown) => withMessage({ role: "user", parts: [part] });
@@ -95,6 +109,36 @@ describe("parseRunnerTurnRequest", () => {
     ["a description that isn't a string", withTool({ ...TOOL, description: null })],
     ["a schema that isn't an object", withTool({ ...TOOL, inputSchema: [] })],
     ["a schema for an array", withTool({ ...TOOL, inputSchema: { type: "array" } })],
+    [
+      "a schema over 64 KiB as JSON",
+      withTool({ ...TOOL, inputSchema: { type: "object", description: "d".repeat(64 * 1024) } }),
+    ],
+    [
+      "schemas over 1 MiB together, each within 64 KiB",
+      {
+        ...turnRequest(),
+        tools: Array.from({ length: 17 }, (_, i) => ({
+          ...TOOL,
+          name: `t${i}`,
+          inputSchema: { type: "object", description: "d".repeat(64_000) },
+        })),
+      },
+    ],
+    ["a schema nested deeper than 64", withTool({ ...TOOL, inputSchema: nested(65) })],
+    ["a schema with a BigInt", withTool({ ...TOOL, inputSchema: { type: "object", default: 1n } })],
+    ["a schema with a cycle", withTool({ ...TOOL, inputSchema: cyclic() })],
+    [
+      "a schema with a number JSON can't write",
+      withTool({ ...TOOL, inputSchema: { type: "object", maximum: Number.POSITIVE_INFINITY } }),
+    ],
+    [
+      "a schema with an object other than a plain one",
+      withTool({ ...TOOL, inputSchema: { type: "object", default: new Date(0) } }),
+    ],
+    [
+      "a schema with a function",
+      withTool({ ...TOOL, inputSchema: { type: "object", default: () => 1 } }),
+    ],
     ["messages that aren't a list", { ...turnRequest(), messages: "Hi" }],
     ["no message", { ...turnRequest(), messages: [] }],
     [
@@ -148,6 +192,60 @@ describe("parseRunnerToolResult", () => {
     ["an error mark that isn't a boolean", { callId: "toolu_1", output: "x", isError: "yes" }],
   ])("refuses %s", (_, body) => {
     expect(parseRunnerToolResult(body)).toBeNull();
+  });
+});
+
+describe("a tool's schema", () => {
+  it("takes one of 64 KiB as JSON, and 1 MiB for all the tools together", () => {
+    const schema = (length: number) => {
+      const value = { type: "object", description: "" };
+      value.description = "d".repeat(length - JSON.stringify(value).length);
+      return value;
+    };
+    expect(JSON.stringify(schema(64 * 1024))).toHaveLength(64 * 1024);
+    const one = withTool({ ...TOOL, inputSchema: schema(64 * 1024) });
+    expect(parseRunnerTurnRequest(one)).toEqual(one);
+    const all = {
+      ...turnRequest(),
+      tools: Array.from({ length: 16 }, (_, i) => ({
+        ...TOOL,
+        name: `t${i}`,
+        inputSchema: schema(64 * 1024),
+      })),
+    };
+    expect(parseRunnerTurnRequest(all)).toEqual(all);
+    expect(parseRunnerTurnRequest(withTool({ ...TOOL, inputSchema: nested(64) }))).not.toBeNull();
+  });
+});
+
+describe("runnerJsonLength", () => {
+  it("counts a value as JSON.stringify writes it, a property without a value left out", () => {
+    const value = {
+      type: "object",
+      properties: { query: { type: "string", minLength: 1, enum: ["a", "b"] } },
+      required: ["query"],
+      additionalProperties: false,
+      nothing: null,
+      unset: undefined,
+      list: [1.5, -2, true, null, [], {}],
+    };
+    expect(runnerJsonLength(value, 1_000)).toBe(JSON.stringify(value).length);
+  });
+
+  it("stops as soon as the count passes its budget", () => {
+    let read = 0;
+    const wide: Record<string, string> = {};
+    for (let i = 0; i < 1_000; i += 1) {
+      Object.defineProperty(wide, `k${i}`, {
+        enumerable: true,
+        get: () => {
+          read += 1;
+          return "v".repeat(100);
+        },
+      });
+    }
+    expect(runnerJsonLength(wide, 1_000)).toBeNull();
+    expect(read).toBeLessThanOrEqual(10);
   });
 });
 

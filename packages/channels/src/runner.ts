@@ -143,6 +143,11 @@ const MAX_CONVERSATION_CHARS = 256;
 const MAX_SYSTEM_CHARS = 200_000;
 const MAX_TOOLS = 128;
 const MAX_DESCRIPTION_CHARS = 10_000;
+/** A tool's input schema as JSON, and all the tools' schemas together, in UTF-16 code units. */
+const MAX_SCHEMA_CHARS = 64 * 1024;
+const MAX_SCHEMAS_CHARS = 1024 * 1024;
+/** How deep a schema's JSON may nest objects and arrays. */
+const MAX_SCHEMA_DEPTH = 64;
 const MAX_MESSAGES = 1_000;
 const MAX_PARTS = 1_000;
 const MAX_CALL_ID_CHARS = 256;
@@ -210,12 +215,19 @@ function parseTools(value: unknown): RunnerToolSpec[] | null {
   if (!Array.isArray(value) || value.length > MAX_TOOLS) return null;
   const names = new Set<string>();
   const specs: RunnerToolSpec[] = [];
+  let schemas = 0;
   for (const entry of value) {
     if (!hasKeys(entry, ["name", "description", "inputSchema"])) return null;
     const { name, description, inputSchema } = entry;
     if (typeof name !== "string" || !TOOL_NAME.test(name) || names.has(name)) return null;
     if (typeof description !== "string" || description.length > MAX_DESCRIPTION_CHARS) return null;
     if (!isObject(inputSchema) || inputSchema.type !== "object") return null;
+    const length = runnerJsonLength(
+      inputSchema,
+      Math.min(MAX_SCHEMA_CHARS, MAX_SCHEMAS_CHARS - schemas),
+    );
+    if (length === null) return null;
+    schemas += length;
     names.add(name);
     specs.push({ name, description, inputSchema: inputSchema as RunnerToolSpec["inputSchema"] });
   }
@@ -239,6 +251,52 @@ function parseMessages(value: unknown): RunnerTurnRequest["messages"] | null {
     messages.push({ role: "user", parts: texts });
   }
   return messages;
+}
+
+/**
+ * The length of `value` as `JSON.stringify` writes it, in UTF-16 code units, escapes left out; or
+ * null past `budget`, or for what JSON can't carry as written: a BigInt, a function, a number that
+ * isn't finite, an object other than a plain one or an array, or nesting deeper than
+ * MAX_SCHEMA_DEPTH, which a cycle reaches. It stops as soon as the count passes the budget, so a huge
+ * value costs no more than the budget to measure.
+ */
+export function runnerJsonLength(value: unknown, budget: number): number | null {
+  let length = 0;
+  const visit = (node: unknown, depth: number): boolean => {
+    if (node === null) length += 4;
+    else if (typeof node === "boolean") length += node ? 4 : 5;
+    else if (typeof node === "string") length += node.length + 2;
+    else if (typeof node === "number") {
+      if (!Number.isFinite(node)) return false;
+      length += String(node).length;
+    } else if (Array.isArray(node)) {
+      if (depth >= MAX_SCHEMA_DEPTH) return false;
+      length += 2 + Math.max(node.length - 1, 0);
+      for (const item of node) {
+        // As JSON.stringify does, a list writes a missing value as null.
+        if (!visit(item === undefined ? null : item, depth + 1)) return false;
+      }
+    } else if (typeof node === "object" && isPlain(node)) {
+      if (depth >= MAX_SCHEMA_DEPTH) return false;
+      length += 2;
+      let first = true;
+      for (const key of Object.keys(node)) {
+        const item = (node as Record<string, unknown>)[key];
+        // As JSON.stringify does, an object leaves out a property without a value.
+        if (item === undefined) continue;
+        length += key.length + 3 + (first ? 0 : 1);
+        first = false;
+        if (!visit(item, depth + 1)) return false;
+      }
+    } else return false;
+    return length <= budget;
+  };
+  return visit(value, 0) ? length : null;
+}
+
+function isPlain(value: object): boolean {
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

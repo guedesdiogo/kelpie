@@ -14,6 +14,7 @@ import {
   type RunnerTurnRequest,
   type RunnerTurnStart,
   type RunnerTurnStream,
+  runnerJsonLength,
 } from "@kelpie/channels";
 
 /** How long a health check, a tool's result or a close waits for the runner's whole answer. */
@@ -140,12 +141,17 @@ export function turnBody(sessionId: unknown, request: unknown): Uint8Array | nul
 }
 
 /**
- * The request's text, in UTF-16 code units. Its JSON takes at least as many bytes in UTF-8, so a
- * request whose text alone is past the runner's bound is refused before it is encoded.
+ * The request's text and its tools' schemas, in UTF-16 code units. Its JSON takes at least as many
+ * bytes in UTF-8, so a request whose text alone is past the runner's bound is refused before it is
+ * encoded. The schemas were measured and bounded as the request was parsed, to 1 MiB together.
  */
 function textLength(request: RunnerTurnRequest): number {
   let length = request.system.length;
-  for (const tool of request.tools) length += tool.description.length;
+  for (const tool of request.tools) {
+    length +=
+      tool.description.length +
+      (runnerJsonLength(tool.inputSchema, RUNNER_MAX_TURN_BYTES) ?? RUNNER_MAX_TURN_BYTES);
+  }
   for (const message of request.messages) {
     for (const part of message.parts) length += part.text.length;
   }
@@ -207,7 +213,7 @@ export class RunnerTurn extends RpcTarget implements RunnerTurnStream {
  * The runner's response, chunk for chunk, as a byte stream, which RPC carries. An abort cancels
  * the response, so the runner sees its turn's stream dropped, even through a binding that doesn't
  * abort it on its own. So does IDLE_MS without a byte while a read waits: the time a reader spends
- * elsewhere, as running a tool, isn't the runner's silence.
+ * elsewhere, as running a tool, isn't the runner's silence. So does IDLE_MS before the first read.
  *
  * The relay then ends, as it does when the runner's connection drops: it never errors, since an
  * errored stream fails RPC's own pump too. Without a `finish` or `error` frame, a reader takes that
@@ -220,9 +226,15 @@ function relay(
 ): ReadableStream<Uint8Array> {
   const { signal } = controller;
   const reader = body.getReader();
+  // A byte stream pulls only for a read: a turn never read would never time out on its own.
+  const unread = setTimeout(() => {
+    console.warn("channel-egress: a turn's stream wasn't read");
+    controller.abort();
+  }, IDLE_MS);
   signal.addEventListener(
     "abort",
     () => {
+      clearTimeout(unread);
       release();
       void reader.cancel().catch(() => undefined);
     },
@@ -235,6 +247,7 @@ function relay(
   return new ReadableStream({
     type: "bytes",
     async pull(stream) {
+      clearTimeout(unread);
       const idle = setTimeout(() => {
         console.warn("channel-egress: the runner's turn stream went silent");
         controller.abort();
@@ -277,6 +290,22 @@ export async function startTurn(
   sessionId: string,
   body: Uint8Array,
   release: () => void = () => {},
+): Promise<TurnStart> {
+  try {
+    return await sendTurn(runner, secret, sessionId, body, release);
+  } catch (error) {
+    // Nothing expected throws here: an unexpected throw mustn't keep the place for good.
+    release();
+    throw error;
+  }
+}
+
+async function sendTurn(
+  runner: Fetcher,
+  secret: string,
+  sessionId: string,
+  body: Uint8Array,
+  release: () => void,
 ): Promise<TurnStart> {
   const controller = new AbortController();
   // Armed until the stream begins, or until an answer that isn't one has been read. The same
@@ -395,13 +424,15 @@ async function answerOf(response: Response, signal: AbortSignal): Promise<Answer
  * longer, cut short or not JSON. The body is cancelled either way, which frees its connection.
  */
 async function readJson(response: Response, signal: AbortSignal): Promise<unknown> {
-  if (!response.body) return null;
-  const reader = response.body.getReader();
-  const stop = () => void reader.cancel().catch(() => undefined);
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  const stop = () => void reader?.cancel().catch(() => undefined);
   signal.addEventListener("abort", stop, { once: true });
+  // Checked before each chunk is kept, so no more than MAX_ANSWER_BYTES is ever kept.
   const bytes = new Uint8Array(MAX_ANSWER_BYTES);
   let size = 0;
   try {
+    if (!response.body || signal.aborted) return null;
+    reader = response.body.getReader();
     for (;;) {
       const chunk = await reader.read();
       if (signal.aborted) return null;

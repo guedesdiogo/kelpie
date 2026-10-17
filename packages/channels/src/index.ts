@@ -74,6 +74,7 @@ export {
   type RunnerToolSpec,
   type RunnerTurnRequest,
   type RunnerUsage,
+  runnerJsonLength,
 } from "./runner.ts";
 
 // Adapters have their own entry points (`@kelpie/channels/telegram`): they need the runtime's fetch

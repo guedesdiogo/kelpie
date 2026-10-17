@@ -125,6 +125,18 @@ describe("checkRunner", () => {
     expect(cancelled).toBe(true);
   });
 
+  it("is unreachable when its health's body can't be read, without throwing", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const response = Response.json({ ok: true, version: "0.1.0", protocol: RUNNER_PROTOCOL });
+    response.body?.getReader();
+    expect(
+      await checkRunner(
+        fetcher(() => response),
+        READY,
+      ),
+    ).toEqual({ state: "unreachable" });
+  });
+
   it("is unreachable when the call fails", async () => {
     const runner = fetcher(() => {
       throw new Error("connection refused");
