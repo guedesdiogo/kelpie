@@ -24,7 +24,11 @@ const AFTER_URL = ".,:;!?'\"";
  */
 export function lineMark(line) {
   const match =
-    HEADING.exec(line) ?? BULLET.exec(line) ?? NUMBERED.exec(line) ?? QUOTE.exec(line) ?? FENCE.exec(line);
+    HEADING.exec(line) ??
+    BULLET.exec(line) ??
+    NUMBERED.exec(line) ??
+    QUOTE.exec(line) ??
+    FENCE.exec(line);
   return match ? match[0] : "";
 }
 
@@ -39,7 +43,13 @@ export function readMarkdown(text) {
   let list = null;
   let quote = null;
   const flush = (end) => {
-    if (paragraph) blocks.push({ type: "paragraph", children: readInline(paragraph.text.join("\n")), line: paragraph.line, end });
+    if (paragraph)
+      blocks.push({
+        type: "paragraph",
+        children: readInline(paragraph.text.join("\n")),
+        line: paragraph.line,
+        end,
+      });
     if (list) {
       blocks.push({
         type: "list",
@@ -50,7 +60,13 @@ export function readMarkdown(text) {
         end,
       });
     }
-    if (quote) blocks.push({ type: "quote", children: readInline(quote.text.join("\n")), line: quote.line, end });
+    if (quote)
+      blocks.push({
+        type: "quote",
+        children: readInline(quote.text.join("\n")),
+        line: quote.line,
+        end,
+      });
     paragraph = null;
     list = null;
     quote = null;
@@ -59,7 +75,12 @@ export function readMarkdown(text) {
   if (lines[0] === "---") {
     const close = lines.findIndex((line, index) => index > 0 && FRONTMATTER_END.test(line));
     if (close > 0) {
-      blocks.push({ type: "frontmatter", text: lines.slice(1, close).join("\n"), line: 0, end: close });
+      blocks.push({
+        type: "frontmatter",
+        text: lines.slice(1, close).join("\n"),
+        line: 0,
+        end: close,
+      });
       i = close + 1;
     }
   }
@@ -69,10 +90,17 @@ export function readMarkdown(text) {
     if (fence) {
       flush(i - 1);
       const start = i;
-      const closing = new RegExp(`^ {0,3}${fence[0] === "`" ? "`" : "~"}{${fence.length},}[ \\t]*$`);
+      const closing = new RegExp(
+        `^ {0,3}${fence[0] === "`" ? "`" : "~"}{${fence.length},}[ \\t]*$`,
+      );
       const body = [];
       for (i += 1; i < lines.length && !closing.test(lines[i]); i += 1) body.push(lines[i]);
-      blocks.push({ type: "code", text: body.join("\n"), line: start, end: Math.min(i, lines.length - 1) });
+      blocks.push({
+        type: "code",
+        text: body.join("\n"),
+        line: start,
+        end: Math.min(i, lines.length - 1),
+      });
       continue;
     }
     if (line.trim() === "") {
@@ -136,7 +164,10 @@ function openingFence(line) {
 }
 
 function headingText(rest) {
-  return rest.replace(/[ \t]+#+[ \t]*$/, "").replace(/^#+[ \t]*$/, "").trim();
+  return rest
+    .replace(/[ \t]+#+[ \t]*$/, "")
+    .replace(/^#+[ \t]*$/, "")
+    .trim();
 }
 
 /**
@@ -214,7 +245,12 @@ export function readInline(source, depth = 0) {
 const isWordChar = (char) => char !== undefined && /[\p{L}\p{N}]/u.test(char);
 
 function closerPositions(source) {
-  const positions = new Map([["**", []], ["__", []], ["*", []], ["_", []]]);
+  const positions = new Map([
+    ["**", []],
+    ["__", []],
+    ["*", []],
+    ["_", []],
+  ]);
   for (let at = 0; at < source.length; ) {
     const char = source[at];
     if (char !== "*" && char !== "_") {

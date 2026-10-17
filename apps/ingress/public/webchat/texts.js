@@ -119,7 +119,6 @@ export const TEXTS = {
         memory: "Memory",
         skills: "Skills",
       },
-      soon: "Soon",
       changed: "changed",
       notSaved: "not saved",
       close: "Close",
@@ -243,7 +242,8 @@ export const TEXTS = {
           title: "New skill",
         },
         skillProblems: {
-          frontmatter: "Start the file with its frontmatter: a name and a description between --- lines.",
+          frontmatter:
+            "Start the file with its frontmatter: a name and a description between --- lines.",
           name: "The name takes lowercase letters, digits and single hyphens, as in morning-brief.",
           name_mismatch: "A saved skill keeps its name. To rename it, create a new one.",
           description: "Write a description: what it does, and when to use it.",
@@ -267,6 +267,8 @@ export const TEXTS = {
           invalid: "The vault didn't take it as it is.",
           skill_invalid: "The SKILL.md isn't valid: check its name and description.",
           staged_gone: "The reviewed skill expired. Fetch it again.",
+          memory_too_long: "The Memory is over Hermes's 2,200 characters.",
+          memory_format: "The Memory isn't in Hermes's format.",
         },
         installing: {
           sources: "Where to install from",
@@ -280,15 +282,18 @@ export const TEXTS = {
           review: "Review",
           hint: "Paste a GitHub link, or drop a .zip here.",
           fetching: (where) => `Fetching ${where}`,
+          reading: (what) => `Reading ${what}`,
           checked: (count, at) =>
             `${number("en", count)} ${count === 1 ? "file" : "files"} checked${at ? `, at ${at}` : ""}`,
           ready: "Ready for you to review",
           pinned:
             "Installs at this version of the repository. To change versions, use «Look for an update» on the skill.",
-          files: (count, size) => `${number("en", count)} ${count === 1 ? "file" : "files"}, ${size}`,
+          files: (count, size) =>
+            `${number("en", count)} ${count === 1 ? "file" : "files"}, ${size}`,
           script: "script: kept, not runnable in Kelpie",
           binary: "binary: kept as it is",
-          leftOut: (count) => `${number("en", count)} hidden ${count === 1 ? "file" : "files"} left out, such as .DS_Store`,
+          leftOut: (count) =>
+            `${number("en", count)} hidden ${count === 1 ? "file" : "files"} left out, such as .DS_Store`,
           verdict: {
             clean: "Clean: nothing suspicious in the instructions.",
             caution: (count) =>
@@ -341,10 +346,27 @@ export const TEXTS = {
           },
         },
       },
-      failedMany: (ids, names) => `${list("en", ids.map((id) => names[id]))} weren't saved`,
-      stillSavedMany: (ids, names) => `${list("en", ids.map((id) => names[id]))} are saved.`,
+      savedOne: {
+        soul: "soul saved",
+        rules: "rules saved",
+        memory: "memory saved",
+        skills: "skills saved",
+      },
+      failedMany: (ids, names) =>
+        `${list(
+          "en",
+          ids.map((id) => names[id]),
+        )} weren't saved`,
+      stillSavedMany: (ids, names) =>
+        `${list(
+          "en",
+          ids.map((id) => names[id]),
+        )} are saved.`,
       savedMany: (name, ids, names) =>
-        `${name}: ${list("en", ids.map((id) => names[id].toLowerCase()))} saved`,
+        `${name}: ${list(
+          "en",
+          ids.map((id) => names[id].toLowerCase()),
+        )} saved`,
       shapes: {
         mark: "Mark",
         bubble: "Bubble",
@@ -524,7 +546,6 @@ export const TEXTS = {
         memory: "Memória",
         skills: "Skills",
       },
-      soon: "Em breve",
       changed: "alterado",
       notSaved: "não salvo",
       close: "Fechar",
@@ -621,9 +642,11 @@ export const TEXTS = {
         emptyFile: "Ainda não há nada aqui. Passe para Editar para escrever.",
         fileOf: (file, name) => `${file} de ${name}`,
         soulAbout: (name) => `A persona de ${name}: quem é e como trabalha.`,
-        rulesAbout: (name) => `O que vale só para ${name}, por cima das regras compartilhadas do cofre.`,
+        rulesAbout: (name) =>
+          `O que vale só para ${name}, por cima das regras compartilhadas do cofre.`,
         noRules: (name) => `Nenhuma regra só de ${name}`,
-        noRulesWhy: "Segue as regras compartilhadas do cofre. O que valer só para este agente, escreva aqui.",
+        noRulesWhy:
+          "Segue as regras compartilhadas do cofre. O que valer só para este agente, escreva aqui.",
         createRules: "Criar regras próprias",
         rulesStart: (name) => `# Regras de ${name}\n\n`,
         memoryAbout:
@@ -656,7 +679,8 @@ export const TEXTS = {
           title: "Nova skill",
         },
         skillProblems: {
-          frontmatter: "Comece o arquivo pelo frontmatter: um nome e uma descrição entre linhas ---.",
+          frontmatter:
+            "Comece o arquivo pelo frontmatter: um nome e uma descrição entre linhas ---.",
           name: "O nome leva letras minúsculas, dígitos e hífens simples, como resumo-da-manha.",
           name_mismatch: "Uma skill salva mantém o nome. Para trocar, crie uma nova.",
           description: "Escreva uma descrição: o que faz, e quando usar.",
@@ -680,6 +704,8 @@ export const TEXTS = {
           invalid: "O cofre não aceitou como está.",
           skill_invalid: "O SKILL.md não é válido: confira o nome e a descrição.",
           staged_gone: "A skill revisada expirou. Busque de novo.",
+          memory_too_long: "A Memória passou de 2.200 caracteres.",
+          memory_format: "A Memória não está no formato do Hermes.",
         },
         installing: {
           sources: "De onde instalar",
@@ -693,6 +719,7 @@ export const TEXTS = {
           review: "Revisar",
           hint: "Cole um link do GitHub, ou solte um .zip aqui.",
           fetching: (where) => `Buscando ${where}`,
+          reading: (what) => `Lendo ${what}`,
           checked: (count, at) =>
             `${number("pt-BR", count)} ${count === 1 ? "arquivo verificado" : "arquivos verificados"}${at ? `, em ${at}` : ""}`,
           ready: "Pronta para você revisar",
@@ -708,7 +735,8 @@ export const TEXTS = {
             clean: "Limpa: nada suspeito nas instruções.",
             caution: (count) =>
               `${number("pt-BR", count)} ${count === 1 ? "aviso: leia" : "avisos: leia"} antes de instalar.`,
-            blocked: "Bloqueada: caracteres escondidos podem levar instruções que você não lê aqui.",
+            blocked:
+              "Bloqueada: caracteres escondidos podem levar instruções que você não lê aqui.",
           },
           kinds: {
             hidden_characters: "caracteres escondidos",
@@ -756,12 +784,27 @@ export const TEXTS = {
           },
         },
       },
+      savedOne: {
+        soul: "alma salva",
+        rules: "regras salvas",
+        memory: "memória salva",
+        skills: "skills salvas",
+      },
       failedMany: (ids, names) =>
-        `${list("pt-BR", ids.map((id) => names[id]))} não foram ${masculine(ids) ? "salvos" : "salvas"}`,
+        `${list(
+          "pt-BR",
+          ids.map((id) => names[id]),
+        )} não foram ${masculine(ids) ? "salvos" : "salvas"}`,
       stillSavedMany: (ids, names) =>
-        `${list("pt-BR", ids.map((id) => names[id]))} estão ${masculine(ids) ? "salvos" : "salvas"}.`,
+        `${list(
+          "pt-BR",
+          ids.map((id) => names[id]),
+        )} estão ${masculine(ids) ? "salvos" : "salvas"}.`,
       savedMany: (name, ids, names) =>
-        `${name}: ${list("pt-BR", ids.map((id) => names[id].toLowerCase()))} ${masculine(ids) ? "salvos" : "salvas"}`,
+        `${name}: ${list(
+          "pt-BR",
+          ids.map((id) => names[id].toLowerCase()),
+        )} ${masculine(ids) ? "salvos" : "salvas"}`,
       shapes: {
         mark: "Marca",
         bubble: "Bolha",
@@ -941,7 +984,6 @@ export const TEXTS = {
         memory: "Memoria",
         skills: "Skills",
       },
-      soon: "Pronto",
       changed: "cambiado",
       notSaved: "no guardado",
       close: "Cerrar",
@@ -1037,9 +1079,11 @@ export const TEXTS = {
         emptyFile: "Aún no hay nada aquí. Pasa a Editar para escribir.",
         fileOf: (file, name) => `${file} de ${name}`,
         soulAbout: (name) => `La persona de ${name}: quién es y cómo trabaja.`,
-        rulesAbout: (name) => `Lo que vale solo para ${name}, por encima de las reglas compartidas del cofre.`,
+        rulesAbout: (name) =>
+          `Lo que vale solo para ${name}, por encima de las reglas compartidas del cofre.`,
         noRules: (name) => `Ninguna regla solo de ${name}`,
-        noRulesWhy: "Sigue las reglas compartidas del cofre. Lo que valga solo para este agente, escríbelo aquí.",
+        noRulesWhy:
+          "Sigue las reglas compartidas del cofre. Lo que valga solo para este agente, escríbelo aquí.",
         createRules: "Crear reglas propias",
         rulesStart: (name) => `# Reglas de ${name}\n\n`,
         memoryAbout:
@@ -1072,7 +1116,8 @@ export const TEXTS = {
           title: "Nueva skill",
         },
         skillProblems: {
-          frontmatter: "Empieza el archivo por su frontmatter: un nombre y una descripción entre líneas ---.",
+          frontmatter:
+            "Empieza el archivo por su frontmatter: un nombre y una descripción entre líneas ---.",
           name: "El nombre lleva minúsculas, dígitos y guiones simples, como resumen-de-la-manana.",
           name_mismatch: "Una skill guardada conserva su nombre. Para cambiarlo, crea una nueva.",
           description: "Escribe una descripción: qué hace, y cuándo usarla.",
@@ -1096,6 +1141,8 @@ export const TEXTS = {
           invalid: "El cofre no lo aceptó tal como está.",
           skill_invalid: "El SKILL.md no es válido: revisa el nombre y la descripción.",
           staged_gone: "La skill revisada caducó. Búscala de nuevo.",
+          memory_too_long: "La Memoria pasó de 2200 caracteres.",
+          memory_format: "La Memoria no está en el formato de Hermes.",
         },
         installing: {
           sources: "De dónde instalar",
@@ -1109,12 +1156,14 @@ export const TEXTS = {
           review: "Revisar",
           hint: "Pega un enlace de GitHub, o suelta un .zip aquí.",
           fetching: (where) => `Buscando ${where}`,
+          reading: (what) => `Leyendo ${what}`,
           checked: (count, at) =>
             `${number("es", count)} ${count === 1 ? "archivo revisado" : "archivos revisados"}${at ? `, en ${at}` : ""}`,
           ready: "Lista para que la revises",
           pinned:
             "Se instala en esta versión del repositorio. Para cambiar de versión, usa «Buscar actualización» en la skill.",
-          files: (count, size) => `${number("es", count)} ${count === 1 ? "archivo" : "archivos"}, ${size}`,
+          files: (count, size) =>
+            `${number("es", count)} ${count === 1 ? "archivo" : "archivos"}, ${size}`,
           script: "script: se guarda, no se ejecuta en Kelpie",
           binary: "binario: se guarda tal cual",
           leftOut: (count) =>
@@ -1123,7 +1172,8 @@ export const TEXTS = {
             clean: "Limpia: nada sospechoso en las instrucciones.",
             caution: (count) =>
               `${number("es", count)} ${count === 1 ? "aviso: léelo" : "avisos: léelos"} antes de instalar.`,
-            blocked: "Bloqueada: los caracteres ocultos pueden llevar instrucciones que no lees aquí.",
+            blocked:
+              "Bloqueada: los caracteres ocultos pueden llevar instrucciones que no lees aquí.",
           },
           kinds: {
             hidden_characters: "caracteres ocultos",
@@ -1171,12 +1221,27 @@ export const TEXTS = {
           },
         },
       },
+      savedOne: {
+        soul: "alma guardada",
+        rules: "reglas guardadas",
+        memory: "memoria guardada",
+        skills: "skills guardadas",
+      },
       failedMany: (ids, names) =>
-        `${list("es", ids.map((id) => names[id]))} no se ${ids.length === 1 ? "guardó" : "guardaron"}`,
+        `${list(
+          "es",
+          ids.map((id) => names[id]),
+        )} no se ${ids.length === 1 ? "guardó" : "guardaron"}`,
       stillSavedMany: (ids, names) =>
-        `${list("es", ids.map((id) => names[id]))} ${ids.length === 1 ? "está" : "están"} ${ids.includes("profile") ? "guardados" : "guardadas"}.`,
+        `${list(
+          "es",
+          ids.map((id) => names[id]),
+        )} ${ids.length === 1 ? "está" : "están"} ${ids.includes("profile") ? "guardados" : "guardadas"}.`,
       savedMany: (name, ids, names) =>
-        `${name}: ${list("es", ids.map((id) => names[id].toLowerCase()))} ${ids.includes("profile") ? "guardados" : "guardadas"}`,
+        `${name}: ${list(
+          "es",
+          ids.map((id) => names[id].toLowerCase()),
+        )} ${ids.includes("profile") ? "guardados" : "guardadas"}`,
       shapes: {
         mark: "Marca",
         bubble: "Burbuja",

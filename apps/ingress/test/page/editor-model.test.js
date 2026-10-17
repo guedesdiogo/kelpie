@@ -33,14 +33,14 @@ const KELPIE = {
 };
 
 describe("the editor's sections", () => {
-  it("lists Profile and Mascot ready, and the agent's own files for #381", () => {
-    expect(SECTIONS.map((section) => [section.id, section.ready])).toEqual([
-      ["profile", true],
-      ["mascot", true],
-      ["soul", false],
-      ["rules", false],
-      ["memory", false],
-      ["skills", false],
+  it("lists Profile and Mascot, then the agent's own files (#381)", () => {
+    expect(SECTIONS.map((section) => section.id)).toEqual([
+      "profile",
+      "mascot",
+      "soul",
+      "rules",
+      "memory",
+      "skills",
     ]);
   });
 });
@@ -161,16 +161,18 @@ describe("the editor's texts", () => {
           expect(value, `${locale} ${path}`).toMatch(/\S/);
           continue;
         }
-        const written =
-          path === "summary"
-            ? value({ shape: "a", color: "b", eyes: "c", cheeks: true, head: "d", accessory: "e" })
-            : path === "saved"
-              ? value("Agenda", { profile: true, mascot: true })
-              : path === "discardWhat"
-                ? value(["Perfil", "Mascote"])
-                : path === "options"
-                  ? value("shape", 12)
-                  : value(2, 3);
+        const sections = TEXTS[locale].editor.sections;
+        const args = {
+          summary: [{ shape: "a", color: "b", eyes: "c", cheeks: true, head: "d", accessory: "e" }],
+          saved: ["Agenda", { profile: true, mascot: true }],
+          discardWhat: [["Perfil", "Mascote"]],
+          options: ["shape", 12],
+          failedMany: [["soul", "memory"], sections],
+          stillSavedMany: [["profile", "soul"], sections],
+          savedMany: ["Kelpie", ["mascot", "skills"], sections],
+          "files.chars": ["# Kelpie"],
+        }[path] ?? [2, 3];
+        const written = value(...args);
         expect(written, `${locale} ${path}`).toMatch(/\S/);
         expect(written, `${locale} ${path}`).not.toContain("undefined");
       }

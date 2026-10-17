@@ -27,7 +27,16 @@ const FILES = {
   soul: { content: "# Soul", version: V(1) },
   rules: null,
   memory: { content: "one\n§\ntwo", version: V(2) },
-  skills: [{ name: "brief", description: "Briefs.", content: "x", version: V(3), origin: null, edited: false }],
+  skills: [
+    {
+      name: "brief",
+      description: "Briefs.",
+      content: "x",
+      version: V(3),
+      origin: null,
+      edited: false,
+    },
+  ],
 };
 
 describe("Hermes's memory", () => {
@@ -40,7 +49,12 @@ describe("Hermes's memory", () => {
   });
 
   it("counts characters as Python does, and says when it is near or over the limit", () => {
-    expect(memoryBudget(["x".repeat(246)])).toEqual({ used: 246, limit: 2_200, over: 0, level: "ok" });
+    expect(memoryBudget(["x".repeat(246)])).toEqual({
+      used: 246,
+      limit: 2_200,
+      over: 0,
+      level: "ok",
+    });
     expect(memoryBudget(["x".repeat(1_760)]).level).toBe("near");
     expect(memoryBudget(["😀".repeat(2_200)]).level).toBe("near");
     expect(memoryBudget(["x".repeat(1_000), "y".repeat(1_261)])).toEqual({
@@ -73,18 +87,20 @@ describe("a SKILL.md's fields", () => {
 
   it("names a new skill with a name no other skill has", () => {
     expect(freeSkillName("nova-skill", new Set())).toBe("nova-skill");
-    expect(freeSkillName("nova-skill", new Set(["nova-skill", "nova-skill-2"]))).toBe("nova-skill-3");
+    expect(freeSkillName("nova-skill", new Set(["nova-skill", "nova-skill-2"]))).toBe(
+      "nova-skill-3",
+    );
   });
 });
 
 describe("what a Save sends", () => {
   it("shows the drafts over what is saved", () => {
     const drafts = freshDrafts();
-    expect([shownSoul(FILES, drafts), shownRules(FILES, drafts), shownEntries(FILES, drafts)]).toEqual([
-      "# Soul",
-      null,
-      ["one", "two"],
-    ]);
+    expect([
+      shownSoul(FILES, drafts),
+      shownRules(FILES, drafts),
+      shownEntries(FILES, drafts),
+    ]).toEqual(["# Soul", null, ["one", "two"]]);
     drafts.rules = "# Mine";
     drafts.memory = ["one"];
     expect([shownRules(FILES, drafts), shownEntries(FILES, drafts)]).toEqual(["# Mine", ["one"]]);
@@ -116,7 +132,9 @@ describe("what a Save sends", () => {
     drafts.memory = ["a", "b"];
     drafts.skills.set("brief", { content: "y" });
     drafts.skills.set("pdf", { install: { id: "f".repeat(32), hash: "sha256:h" } });
-    expect(fileChanges(FILES, drafts, ["soul", "rules", "memory", "skills"], { soul: V(9) })).toEqual([
+    expect(
+      fileChanges(FILES, drafts, ["soul", "rules", "memory", "skills"], { soul: V(9) }),
+    ).toEqual([
       { file: "soul", content: "# New", version: V(9) },
       { file: "rules", content: "# Rules", version: null },
       { file: "memory", content: "a\n§\nb", version: V(2) },
@@ -125,7 +143,11 @@ describe("what a Save sends", () => {
     ]);
     expect(fileChanges(FILES, drafts, ["memory"])).toHaveLength(1);
     expect(fileChanges(FILES, drafts, ["skills"], { "skill:brief": V(7) })[0].version).toBe(V(7));
-    expect(["soul", "skill", "install"].map((file) => sectionOf({ file }))).toEqual(["soul", "skills", "skills"]);
+    expect(["soul", "skill", "install"].map((file) => sectionOf({ file }))).toEqual([
+      "soul",
+      "skills",
+      "skills",
+    ]);
   });
 });
 
@@ -137,7 +159,10 @@ describe("the review's words", () => {
     const names = TEXTS["pt-BR"].editor.files;
     expect(originLine(null, names)).toBe("");
     expect(
-      originLine({ kind: "github", owner: "exemplo", repo: "skills", commit: "3f2a91c".padEnd(40, "0") }, names),
+      originLine(
+        { kind: "github", owner: "exemplo", repo: "skills", commit: "3f2a91c".padEnd(40, "0") },
+        names,
+      ),
     ).toBe("exemplo/skills · 3f2a91c");
     expect(originLine({ kind: "archive", filename: "a.zip" }, names)).toBe(names.origins.archive);
     expect(originLine({ kind: "unknown" }, names)).toBe("");

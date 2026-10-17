@@ -59,6 +59,12 @@ function make() {
     toasts: { show: (toast) => shown.push(toast) },
     onSaved: (agentId, changes) => saved.push([agentId, changes]),
     onExpired: expired,
+    // The agent's own files have tests of their own (files.test.js): here, a vault that is off.
+    files: {
+      read: async () => ({ ok: false, status: 503, value: { reason: "vault_off" } }),
+      save: async () => ({ ok: false, status: 503, value: { reason: "vault_off" } }),
+      fetchSkill: async () => ({ ok: false, status: 503, value: { reason: "vault_off" } }),
+    },
     send: async (agentId, section, body) => {
       sent.push({ agentId, section, body });
       const answer = answers[section];
@@ -130,7 +136,7 @@ describe("opening the editor", () => {
     expect($(".editor-title").textContent).toBe("Mascot");
   });
 
-  it("lists every section, and keeps the agent's own files disabled until #381", () => {
+  it("lists every section, each one ready", () => {
     open();
     const tabs = $$(".editor-tabs [role='tab']");
     expect(tabs.map((each) => each.querySelector(".nl").textContent)).toEqual([
@@ -141,30 +147,25 @@ describe("opening the editor", () => {
       "Memory",
       "Skills",
     ]);
-    expect(tabs.map((each) => each.getAttribute("aria-disabled"))).toEqual([
-      null,
-      null,
-      "true",
-      "true",
-      "true",
-      "true",
-    ]);
+    expect(tabs.every((each) => !each.hasAttribute("aria-disabled"))).toBe(true);
     tab("Soul").click();
-    expect(tab("Mascot").getAttribute("aria-selected")).toBe("true");
+    expect(tab("Soul").getAttribute("aria-selected")).toBe("true");
   });
 
-  it("moves between its sections as APG tabs, skipping the disabled ones", () => {
+  it("moves between its sections as APG tabs, and wraps", () => {
     open();
     key(tab("Mascot"), "ArrowDown");
+    expect(tab("Soul").getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(tab("Soul"));
+    expect($("#editor-panel").getAttribute("aria-labelledby")).toBe("editor-tab-soul");
+    key(tab("Soul"), "Home");
     expect(tab("Profile").getAttribute("aria-selected")).toBe("true");
-    expect(document.activeElement).toBe(tab("Profile"));
-    expect($("#editor-panel").getAttribute("aria-labelledby")).toBe("editor-tab-profile");
     key(tab("Profile"), "ArrowUp");
-    expect(tab("Mascot").getAttribute("aria-selected")).toBe("true");
-    key(tab("Mascot"), "Home");
+    expect(tab("Skills").getAttribute("aria-selected")).toBe("true");
+    key(tab("Skills"), "End");
+    expect(tab("Skills").getAttribute("aria-selected")).toBe("true");
+    key(tab("Skills"), "ArrowDown");
     expect(tab("Profile").getAttribute("aria-selected")).toBe("true");
-    key(tab("Profile"), "End");
-    expect(tab("Mascot").getAttribute("aria-selected")).toBe("true");
   });
 
   it("closes with Escape, its focus back on the pencil", () => {

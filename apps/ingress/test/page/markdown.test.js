@@ -34,7 +34,12 @@ describe("an agent's Markdown", () => {
     );
     expect(blocks).toEqual([
       { type: "heading", level: 1, children: [text("Kelpie")], line: 0, end: 0 },
-      { type: "paragraph", children: [text("Você é o Kelpie,\no agente principal.")], line: 2, end: 3 },
+      {
+        type: "paragraph",
+        children: [text("Você é o Kelpie,\no agente principal.")],
+        line: 2,
+        end: 3,
+      },
       { type: "heading", level: 2, children: [text("Como trabalha")], line: 5, end: 5 },
       {
         type: "list",
@@ -67,7 +72,12 @@ describe("an agent's Markdown", () => {
 
   it("reads a SKILL.md's frontmatter as a block of its own, and an unclosed one as text", () => {
     const [front, heading] = readMarkdown("---\nname: pdf\ndescription: Fills.\n---\n# PDF");
-    expect(front).toEqual({ type: "frontmatter", text: "name: pdf\ndescription: Fills.", line: 0, end: 3 });
+    expect(front).toEqual({
+      type: "frontmatter",
+      text: "name: pdf\ndescription: Fills.",
+      line: 0,
+      end: 3,
+    });
     expect(heading).toMatchObject({ type: "heading", line: 4 });
     expect(readMarkdown("---\nname: pdf")[0]).toMatchObject({ type: "rule", line: 0 });
   });
@@ -82,7 +92,9 @@ describe("an agent's Markdown", () => {
       ["quote", 3],
       ["list", 4],
     ]);
-    expect(readMarkdown("a\r\nb")).toEqual([{ type: "paragraph", children: [text("a\nb")], line: 0, end: 1 }]);
+    expect(readMarkdown("a\r\nb")).toEqual([
+      { type: "paragraph", children: [text("a\nb")], line: 0, end: 1 },
+    ]);
     expect(readMarkdown("``` `x`\n").map((block) => block.type)).toEqual(["paragraph"]);
   });
 
@@ -102,7 +114,9 @@ describe("an agent's Markdown", () => {
       { type: "link", href: "https://kelpie.dev/x", children: [text("https://kelpie.dev/x")] },
       text("."),
     ]);
-    expect(readInline("snake_case and 2*3 and **open")).toEqual([text("snake_case and 2*3 and **open")]);
+    expect(readInline("snake_case and 2*3 and **open")).toEqual([
+      text("snake_case and 2*3 and **open"),
+    ]);
     expect(readInline("[]() [x](has space) [x](")).toEqual([text("[]() [x](has space) [x](")]);
     expect(readInline("http://")).toEqual([text("http://")]);
   });
@@ -133,7 +147,9 @@ describe("a file's blocks, drawn", () => {
   };
 
   it("never parses the file as HTML, and marks each block with its lines", () => {
-    const host = draw('# <img src=x onerror="alert(1)">\n\n<script>alert(1)</script>\n\n- <b>x</b>');
+    const host = draw(
+      '# <img src=x onerror="alert(1)">\n\n<script>alert(1)</script>\n\n- <b>x</b>',
+    );
     expect(host.querySelector("img, script, b")).toBeNull();
     expect(host.querySelector("h3").className).toBe("md-h1");
     expect(host.querySelector("h3").dataset.line).toBe("0");

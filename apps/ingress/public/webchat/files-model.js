@@ -109,7 +109,8 @@ export function shownEntries(files, drafts) {
 export function changedFileSections(files, drafts) {
   if (!files) return [];
   const changed = [];
-  if (drafts.soul !== undefined && drafts.soul !== (files.soul?.content ?? "")) changed.push("soul");
+  if (drafts.soul !== undefined && drafts.soul !== (files.soul?.content ?? ""))
+    changed.push("soul");
   if (drafts.rules !== undefined && drafts.rules !== (files.rules?.content ?? null)) {
     changed.push("rules");
   }
@@ -144,7 +145,11 @@ export function fileChanges(files, drafts, sections, bases = {}) {
     changes.push({ file: "rules", content: drafts.rules, version: base("rules", files.rules) });
   }
   if (sections.includes("memory")) {
-    changes.push({ file: "memory", content: memoryOf(drafts.memory), version: base("memory", files.memory) });
+    changes.push({
+      file: "memory",
+      content: memoryOf(drafts.memory),
+      version: base("memory", files.memory),
+    });
   }
   if (sections.includes("skills")) {
     const saved = new Map(files.skills.map((skill) => [skill.name, skill]));
@@ -176,12 +181,15 @@ export function sizeLabel(bytes, locale) {
 /** Where a skill came from, in one line: "exemplo/skills · 3f2a91c", or its kind's name. */
 export function originLine(origin, names) {
   if (!origin) return "";
-  if (origin.kind === "github") return `${origin.owner}/${origin.repo} · ${origin.commit.slice(0, 7)}`;
+  if (origin.kind === "github")
+    return `${origin.owner}/${origin.repo} · ${origin.commit.slice(0, 7)}`;
   return names.origins[origin.kind] ?? "";
 }
 
 /** The owner and repository an address names, for the fetch's first phase; null if none. */
 export function repositoryOf(address) {
-  const match = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/\s]+)\/([^/\s#?]+)/i.exec(address.trim());
+  const match = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/\s]+)\/([^/\s#?]+)/i.exec(
+    address.trim(),
+  );
   return match ? `${match[1]}/${match[2].replace(/\.git$/, "")}` : null;
 }

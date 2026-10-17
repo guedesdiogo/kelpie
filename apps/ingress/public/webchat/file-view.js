@@ -53,7 +53,15 @@ export class FileView {
    * @param {{ names: object, label: string, path: string, content: string, about?: string,
    *   mode?: "read" | "edit", onInput?: (text: string) => void }} options
    */
-  constructor({ names, label, path, content, about = "", mode = rememberedView(), onInput = () => {} }) {
+  constructor({
+    names,
+    label,
+    path,
+    content,
+    about = "",
+    mode = rememberedView(),
+    onInput = () => {},
+  }) {
     this.#names = names;
     this.#onInput = onInput;
     this.mode = mode;
@@ -280,7 +288,11 @@ export class FileView {
   #lineAtCaret() {
     const at = this.input.selectionStart ?? 0;
     let line = 0;
-    for (let i = this.input.value.indexOf("\n"); i !== -1 && i < at; i = this.input.value.indexOf("\n", i + 1)) {
+    for (
+      let i = this.input.value.indexOf("\n");
+      i !== -1 && i < at;
+      i = this.input.value.indexOf("\n", i + 1)
+    ) {
       line += 1;
     }
     return line;
@@ -288,7 +300,8 @@ export class FileView {
 
   #offsetOfLine(line) {
     let at = 0;
-    for (let i = 0; i < line && i < this.#lines.length; i += 1) at += (this.#lines[i] ?? "").length + 1;
+    for (let i = 0; i < line && i < this.#lines.length; i += 1)
+      at += (this.#lines[i] ?? "").length + 1;
     return Math.min(at, this.input.value.length);
   }
 
@@ -297,17 +310,20 @@ export class FileView {
   /** The first block, or line, in view, and how far it sits below the scroller's top. */
   #firstInView(scroller) {
     const top = scroller.getBoundingClientRect().top;
-    const nodes = this.mode === "read" ? this.view.querySelectorAll("[data-line]") : this.marks.children;
+    const nodes =
+      this.mode === "read" ? this.view.querySelectorAll("[data-line]") : this.marks.children;
     for (const node of nodes) {
       const rect = node.getBoundingClientRect();
-      if (rect.bottom > top) return { line: Number(node.dataset.line), offset: Math.max(0, rect.top - top) };
+      if (rect.bottom > top)
+        return { line: Number(node.dataset.line), offset: Math.max(0, rect.top - top) };
     }
     return { line: 0, offset: null };
   }
 
   /** What shows the source line `line` in the view now showing. */
   #elementAt(line) {
-    if (this.mode === "edit") return this.marks.children[Math.min(line, this.marks.children.length - 1)] ?? null;
+    if (this.mode === "edit")
+      return this.marks.children[Math.min(line, this.marks.children.length - 1)] ?? null;
     let found = null;
     for (const node of this.view.querySelectorAll("[data-line]")) {
       if (Number(node.dataset.line) > line) break;
@@ -318,7 +334,8 @@ export class FileView {
 
   #rects() {
     const rects = new Map();
-    const nodes = this.mode === "read" ? this.view.querySelectorAll("[data-line]") : this.marks.children;
+    const nodes =
+      this.mode === "read" ? this.view.querySelectorAll("[data-line]") : this.marks.children;
     for (const node of nodes) rects.set(node.dataset.line, node.getBoundingClientRect());
     return rects;
   }
@@ -327,7 +344,8 @@ export class FileView {
   #slide(before) {
     const scroller = this.element.closest(".editor-body") ?? this.element;
     const view = scroller.getBoundingClientRect();
-    const nodes = this.mode === "read" ? this.view.querySelectorAll("[data-line]") : this.marks.children;
+    const nodes =
+      this.mode === "read" ? this.view.querySelectorAll("[data-line]") : this.marks.children;
     let moved = 0;
     for (const node of nodes) {
       if (moved >= MAX_SLIDES) break;
@@ -337,7 +355,11 @@ export class FileView {
       const dx = from.left - to.left;
       const dy = from.top - to.top;
       if (dx === 0 && dy === 0) continue;
-      play(node, [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], SPRINGS.base);
+      play(
+        node,
+        [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }],
+        SPRINGS.base,
+      );
       moved += 1;
     }
   }
