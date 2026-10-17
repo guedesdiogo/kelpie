@@ -98,7 +98,7 @@ Changing a spring means simulating it again the same way, and updating its row, 
     - This also meets WCAG 2.3.3 (level AAA): motion from interactions can be turned off.
 
 Two engineering rules come with them:
-- in anything that runs daily, animate only `transform`, `opacity` and color. The exceptions are the contained size changes in 5.1, 5.2, 5.3, 5.9, 5.17, 5.18 and 5.25 (the editor's panel growing from its row, its content kept at its final size), and the one mask reveal in 5.7;
+- in anything that runs daily, animate only `transform`, `opacity` and color. The exceptions are the contained size changes in 5.1, 5.2, 5.3, 5.9, 5.17, 5.18 and 5.25 (the editor's panel growing from its row, its content kept at its final size; a skill's review card opening from its field; the skills list opening the gap for a new skill), and the one mask reveal in 5.7;
 - never write `transition: all`.
 
 ## 4.5 Sound
