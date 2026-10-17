@@ -26,7 +26,11 @@ import {
   type RoutedRequest,
   type RouteModel,
   type RouterOptions,
+  type RouteSession,
   resolveModel,
+  type StreamOptions,
+  type ToolAnswers,
+  type ToolResult,
   toNdjsonStream,
   WorkersAiEmbedder,
 } from "@kelpie/llm";
@@ -60,24 +64,49 @@ const MAX_QUALIFY_TIMEOUT_MS = 3_000;
 /** One `embed` call takes at most this many texts, and this long. */
 const MAX_EMBED_TEXTS = 256;
 const EMBED_TIMEOUT_MS = 30_000;
+/** The longest conversation name or tool call id a caller may send (#295). */
+const MAX_ID_CHARS = 256;
+/** A route session's id: a UUID, as Claude Code's are. The runner puts it in a path (#295). */
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/**
+ * The longest tool result an answer may carry. The turn cuts a result at 10,000 characters, plus a
+ * note, before it gets here (ADR-0025), so this only stops a caller sending more than any needs.
+ */
+const MAX_ANSWER_CHARS = 20_000;
 
 /** Vars a deploy may set to any string, whatever the generated types say (`docs/admin-api.md`). */
 type GatewayEnv = Omit<Env, "EMBEDDING_PROVIDER" | "OPENAI_BASE_URL" | "MODEL_FALLBACK"> &
   Secrets & { EMBEDDING_PROVIDER: string; OPENAI_BASE_URL: string; MODEL_FALLBACK: string };
 
 /**
+ * What `Generation.answer` did with a result: taken, or ignored because it is malformed
+ * (`invalid_input`), because no call by its id waits for one, never asked for or answered already
+ * (`unknown_call`), or because the call is over (`ended`).
+ */
+export type AnswerOutcome =
+  | { ok: true }
+  | { ok: false; reason: "invalid_input" | "unknown_call" | "ended" };
+
+/**
  * One model call. Read `events()` once, as newline-delimited JSON (decode it with
  * `fromNdjsonStream` from `@kelpie/llm`). Call `cancel()` to abort the provider request: cancelling
- * a stream received over RPC doesn't reach this side while the provider is quiet.
+ * a stream received over RPC doesn't reach this side while the provider is quiet. A route that runs
+ * its own tool loop sends `tool_request` events, and `answer()` gives each call its result (#295).
  */
 export class Generation extends RpcTarget {
   readonly #events: ReadableStream<Uint8Array>;
   readonly #controller: AbortController;
+  readonly #answers: PendingAnswers;
 
-  constructor(events: ReadableStream<Uint8Array>, controller: AbortController) {
+  constructor(
+    events: ReadableStream<Uint8Array>,
+    controller: AbortController,
+    answers: PendingAnswers,
+  ) {
     super();
     this.#events = events;
     this.#controller = controller;
+    this.#answers = answers;
   }
 
   events(): ReadableStream<Uint8Array> {
@@ -87,12 +116,128 @@ export class Generation extends RpcTarget {
   cancel(): void {
     this.#controller.abort();
   }
+
+  /**
+   * A caller that drops its stub without `cancel()`, as an evicted conversation does, still ends
+   * the call: a route waiting for a tool's result would otherwise wait until its own deadline.
+   */
+  [Symbol.dispose](): void {
+    this.cancel();
+  }
+
+  /** The result of a call a `tool_request` event asked for. It is an RPC boundary, so it is checked. */
+  answer(result: ToolResult): AnswerOutcome {
+    const checked = parseToolResult(result);
+    return checked ? this.#answers.answer(checked) : { ok: false, reason: "invalid_input" };
+  }
+}
+
+/**
+ * The results a route that runs its own tool loop waits for (#295). A call id is asked for when its
+ * `tool_request` event goes out, and answered once, before or after the route starts waiting. It
+ * all ends with the call: a wait then rejects, and a later answer is ignored.
+ */
+class PendingAnswers implements ToolAnswers {
+  readonly #asked = new Set<string>();
+  readonly #held = new Map<string, ToolResult>();
+  readonly #waiting = new Map<
+    string,
+    {
+      resolve: (result: ToolResult) => void;
+      reject: (error: LlmError) => void;
+      signal: AbortSignal | undefined;
+      onAbort: () => void;
+    }
+  >();
+  #ended = false;
+
+  /** Notes a call the caller is asked to answer. */
+  ask(callId: string): void {
+    if (!this.#ended) this.#asked.add(callId);
+  }
+
+  answer(result: ToolResult): AnswerOutcome {
+    if (this.#ended) return { ok: false, reason: "ended" };
+    if (!this.#asked.delete(result.callId)) return { ok: false, reason: "unknown_call" };
+    if (this.#waiting.has(result.callId)) this.#settle(result.callId, result);
+    else this.#held.set(result.callId, result);
+    return { ok: true };
+  }
+
+  wait(callId: string, signal?: AbortSignal): Promise<ToolResult> {
+    if (this.#ended || signal?.aborted) return Promise.reject(callEnded());
+    // A second wait would replace the first, which would then never settle.
+    if (this.#waiting.has(callId)) {
+      return Promise.reject(
+        new LlmError("The route already waits for this call's result", "protocol", false),
+      );
+    }
+    const held = this.#held.get(callId);
+    if (held) {
+      this.#held.delete(callId);
+      return Promise.resolve(held);
+    }
+    return new Promise((resolve, reject) => {
+      const onAbort = () => this.#settle(callId, callEnded());
+      this.#waiting.set(callId, { resolve, reject, signal, onAbort });
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
+  /** Ends every wait, and the answers still to come: the call finished, failed or was cancelled. */
+  end(): void {
+    this.#ended = true;
+    this.#asked.clear();
+    this.#held.clear();
+    for (const callId of [...this.#waiting.keys()]) this.#settle(callId, callEnded());
+  }
+
+  #settle(callId: string, outcome: ToolResult | LlmError): void {
+    const waiter = this.#waiting.get(callId);
+    if (!waiter) return;
+    this.#waiting.delete(callId);
+    waiter.signal?.removeEventListener("abort", waiter.onAbort);
+    if (outcome instanceof LlmError) waiter.reject(outcome);
+    else waiter.resolve(outcome);
+  }
+}
+
+const callEnded = () =>
+  new LlmError("The call ended before the tool's result came", "aborted", false);
+
+const isBoundedText = (value: unknown, max: number): value is string =>
+  typeof value === "string" && value !== "" && value.length <= max;
+
+const isConversationCall = (call: ModelSelection): boolean =>
+  typeof call === "object" && call !== null && call.area === "conversation";
+
+/** A session as RPC sent it, rebuilt from the fields Kelpie knows; null when malformed. */
+function parseSession(value: unknown): RouteSession | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { conversation, id, resume } = value as Partial<Record<keyof RouteSession, unknown>>;
+  if (!isBoundedText(conversation, MAX_ID_CHARS)) return null;
+  if (typeof id !== "string" || !SESSION_ID.test(id)) return null;
+  return typeof resume === "boolean" ? { conversation, id, resume } : null;
+}
+
+/** A tool's result as RPC sent it, rebuilt from the fields Kelpie knows; null when malformed. */
+function parseToolResult(value: unknown): ToolResult | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { callId, output, isError } = value as Partial<Record<keyof ToolResult, unknown>>;
+  if (!isBoundedText(callId, MAX_ID_CHARS)) return null;
+  if (typeof output !== "string" || output.length > MAX_ANSWER_CHARS) return null;
+  if (isError !== undefined && typeof isError !== "boolean") return null;
+  return { callId, output, ...(isError === undefined ? {} : { isError }) };
 }
 
 /** Model access for Kelpie's other Workers, through a service binding. */
 export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
-  generate(call: ModelSelection, request: RoutedRequest): Generation {
-    return generateWith(this.env, call, request);
+  /**
+   * One model call. `session` is the conversation's, for a route that keeps one (#295): only a call
+   * with a session reaches such a route, and only a `conversation` call may send one.
+   */
+  generate(call: ModelSelection, request: RoutedRequest, session?: RouteSession): Generation {
+    return generateWith(this.env, call, request, session);
   }
 
   /**
@@ -164,25 +309,48 @@ export class LlmGatewayAdmin extends WorkerEntrypoint<GatewayEnv> {
 
 /**
  * One model call. When ModelDefaults can't answer, the call goes on with no instance settings, in
- * the route table's order, as before #286: a model call never fails for them.
+ * the route table's order, as before #286: a model call never fails for them. A malformed session
+ * is refused as a bad request.
  */
 export function generateWith(
   env: GatewayEnv,
   call: ModelSelection,
   request: RoutedRequest,
+  session?: RouteSession,
 ): Generation {
   const router = modelRouter(env);
   const controller = new AbortController();
+  const answers = new PendingAnswers();
+  controller.signal.addEventListener("abort", () => answers.end(), { once: true });
   async function* routed() {
-    const choice = await choiceFor(call, () => defaultsOrNone(env, router));
-    yield* router.stream(choice, request, { signal: controller.signal });
+    try {
+      const checked = session === undefined ? undefined : parseSession(session);
+      if (checked === null) throw new LlmError("Malformed session", "bad_request", false);
+      // Only a conversation keeps a session: checkpoints, Dream and resolve never reach its route.
+      if (checked && !isConversationCall(call)) {
+        throw new LlmError("A session goes only with a conversation's call", "bad_request", false);
+      }
+      const choice = await choiceFor(call, () => defaultsOrNone(env, router));
+      const options: StreamOptions = {
+        signal: controller.signal,
+        answers,
+        ...(checked ? { session: checked } : {}),
+      };
+      for await (const event of router.stream(choice, request, options)) {
+        // Asked for before the caller sees it, so its answer can't come first.
+        if (event.type === "tool_request") answers.ask(event.call.id);
+        yield event;
+      }
+    } finally {
+      answers.end();
+    }
   }
   const events = toNdjsonStream(
     routed(),
     () => controller.abort(),
     (error) => logFailure("generate", error),
   );
-  return new Generation(events, controller);
+  return new Generation(events, controller, answers);
 }
 
 const AUDIT_FIELD_CHARS = 128;
@@ -301,7 +469,8 @@ async function choiceFor(
 
 /**
  * The instance's settings and pinned provider. With nothing pinned yet, ModelDefaults pins the
- * first provider with a key in the cheap tier's order, and that pin then leads every tier.
+ * first provider with a key in the cheap tier's order, and that pin then leads every tier. A route
+ * that needs a session is never pinned: without one, `route` leaves it out (#295).
  */
 function defaultsOf(env: GatewayEnv, router: ModelRouter): Promise<InstanceDefaults> {
   const withKey = router.route("cheap")[0]?.provider ?? null;

@@ -1902,6 +1902,13 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           flight.fallbacks ??= [];
           flight.fallbacks.push(event);
           flight.callFallbacks?.push(event);
+        } else if (event.type === "tool_round" || event.type === "tool_request") {
+          // Leaving the stream cancels the call. Running the route's loop is #295's next step.
+          throw new LlmError(
+            "This route runs its own tool loop, which this runtime doesn't handle yet",
+            "protocol",
+            false,
+          );
         }
       }
       if (!this.#isRunning(turn.id)) return null;

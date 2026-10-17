@@ -17,6 +17,13 @@ export class LlmError extends Error {
   override readonly name = "LlmError";
   /** The route that failed, set by the router, so a notice can name it (#293). */
   route?: { provider: ProviderId; model: string };
+  /** When a usage limit resets, in epoch ms, if the route said so (#295). */
+  resetsAt?: number;
+  /**
+   * Set when the code is read from a text that other failures share, so it can't be confirmed:
+   * Anthropic's "out of extra usage" also comes with a content-filter rejection (#295).
+   */
+  unverified?: boolean;
 
   constructor(
     message: string,

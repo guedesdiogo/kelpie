@@ -91,6 +91,13 @@ describe("failureNotice", () => {
     );
   });
 
+  it("names Claude Code's route by its product name (#295)", () => {
+    const claudeCode = { provider: "claude-code" as const, model: "claude-sonnet-5-5" };
+    expect(failureNotice([], { code: "server_error", route: claudeCode }, "en")).toBe(
+      "I couldn't answer this message: Claude Code (claude-sonnet-5-5) is unavailable.",
+    );
+  });
+
   it("speaks of the model only when no route is known, as for a tier with none", () => {
     expect(failureNotice([], { code: "unavailable" }, "es")).toBe(
       "No pude responder a este mensaje: el modelo no está disponible.",

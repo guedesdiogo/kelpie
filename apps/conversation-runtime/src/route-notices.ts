@@ -7,7 +7,11 @@ import type { FallbackEvent, LlmErrorCode, ProviderId } from "@kelpie/llm";
 /** A route and reason announced in a conversation aren't announced again for this long. */
 export const ROUTE_NOTICE_REPEAT_MS = 24 * 60 * 60_000;
 
-const PROVIDERS: Record<ProviderId, string> = { anthropic: "Anthropic", openai: "OpenAI" };
+const PROVIDERS: Record<ProviderId, string> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  "claude-code": "Claude Code",
+};
 
 type Reason = "credits" | "rate" | "auth" | "down" | "unreadable" | "refused" | "failed";
 

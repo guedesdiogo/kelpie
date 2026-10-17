@@ -12,6 +12,9 @@ export type WireFrame =
       message: string;
       /** The route that failed, which Kelpie's notice names (#293). */
       route?: { provider: ProviderId; model: string };
+      /** The error's `resetsAt` and `unverified`, when it has them (#295). */
+      resetsAt?: number;
+      unverified?: boolean;
     };
 
 // Provider error messages can quote request details or part of a key, so only these go out.
@@ -67,15 +70,18 @@ export function toNdjsonStream(
 }
 
 function toErrorFrame(error: unknown): WireFrame {
-  const code = error instanceof LlmError ? error.code : "internal";
-  const retryable = error instanceof LlmError && error.retryable;
-  const route = error instanceof LlmError ? error.route : undefined;
+  if (!(error instanceof LlmError)) {
+    return { type: "error", code: "internal", retryable: false, message: WIRE_MESSAGES.internal };
+  }
+  const { code, retryable, route, resetsAt, unverified } = error;
   return {
     type: "error",
     code,
     retryable,
     message: WIRE_MESSAGES[code],
     ...(route ? { route: { provider: route.provider, model: route.model } } : {}),
+    ...(resetsAt === undefined ? {} : { resetsAt }),
+    ...(unverified === undefined ? {} : { unverified }),
   };
 }
 
@@ -104,6 +110,8 @@ export async function* fromNdjsonStream(
         if (frame.type === "error") {
           const error = new LlmError(frame.message, frame.code, frame.retryable);
           if (frame.route) error.route = frame.route;
+          if (frame.resetsAt !== undefined) error.resetsAt = frame.resetsAt;
+          if (frame.unverified !== undefined) error.unverified = frame.unverified;
           throw error;
         }
         if (frame.type === "finish") finished = true;

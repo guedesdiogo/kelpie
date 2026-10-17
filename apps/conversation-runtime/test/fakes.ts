@@ -42,6 +42,8 @@ type ModelScript =
     }
   /** The router fell back from these routes, then `text` answered (#293). */
   | { kind: "fellBack"; fallbacks: FallbackEvent[]; text: string }
+  /** Sends these events as they are. */
+  | { kind: "events"; events: RouterEvent[] }
   /** The router fell back from these routes, then `route` failed with `code` (#293). */
   | {
       kind: "noRoute";
@@ -67,6 +69,7 @@ export const noRoute = (
   fallbacks: FallbackEvent[] = [],
   route?: { provider: "anthropic" | "openai"; model: string },
 ): ModelScript => ({ kind: "noRoute", fallbacks, code, ...(route ? { route } : {}) });
+export const events = (...sent: RouterEvent[]): ModelScript => ({ kind: "events", events: sent });
 export const toolCalls = (...calls: { name: string; input?: unknown }[]): ModelScript => ({
   kind: "tools",
   calls: calls.map(({ name, input }) => ({ name, input: input ?? {} })),
@@ -302,6 +305,9 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
               if (script.route) error.route = script.route;
               throw error;
             }
+            case "events":
+              yield* script.events;
+              return;
             case "fellBack":
               yield* script.fallbacks;
               yield { type: "text", delta: script.text };

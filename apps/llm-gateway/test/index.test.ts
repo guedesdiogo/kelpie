@@ -1,6 +1,12 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
-import { fromNdjsonStream, type RoutedRequest, type RouterEvent } from "@kelpie/llm";
+import {
+  AnthropicMessagesProvider,
+  fromNdjsonStream,
+  type RoutedRequest,
+  type RouterEvent,
+  type RouteSession,
+} from "@kelpie/llm";
 import type { Question } from "@kelpie/qualifier";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -823,5 +829,247 @@ describe("the instance's model settings (#289)", () => {
       { memory: { tier: "medium" } },
     ]);
     expect(audit[1]?.via).toHaveLength(128);
+  });
+});
+
+describe("a route that runs its own tool loop (#295)", () => {
+  type GatewayEnv = Parameters<typeof generateWith>[0];
+  const session: RouteSession = {
+    conversation: "assistant:telegram:chat-1",
+    id: "6c1f2a9e-3b7d-4e51-9a0c-2f8d7e6b5a41",
+    resume: true,
+  };
+  const conversation = { area: "conversation" } as const;
+  const call = (id: string) => ({
+    type: "tool_call" as const,
+    id,
+    name: "search_memory",
+    input: { query: "Ana" },
+  });
+
+  /**
+   * A fake provider, standing in for `claude-code`'s: the Anthropic adapter's stream is replaced,
+   * so the real gateway and router carry its events and answers. It asks for each call in turn and
+   * waits for its result, with `signal` if given, then replies with the outputs.
+   */
+  function routeLoop(ids: string[], signal?: AbortSignal) {
+    const seen: { session?: RouteSession | undefined; waiting?: string; failure?: unknown } = {};
+    vi.spyOn(AnthropicMessagesProvider.prototype, "stream").mockImplementation(
+      async function* (_request, options) {
+        seen.session = options?.session;
+        const answers = options?.answers;
+        if (!answers) throw new Error("the gateway sent no answers");
+        const outputs: string[] = [];
+        for (const id of ids) {
+          yield { type: "tool_request", call: call(id) };
+          seen.waiting = id;
+          try {
+            outputs.push((await answers.wait(id, signal)).output);
+          } catch (error) {
+            seen.failure = error;
+            throw error;
+          }
+        }
+        yield {
+          type: "finish",
+          reason: "stop",
+          message: { role: "assistant", parts: [{ type: "text", text: outputs.join(" ") }] },
+          usage: [],
+        };
+      },
+    );
+    return seen;
+  }
+
+  const read = async (stream: ReadableStream<Uint8Array>) => {
+    const events: RouterEvent[] = [];
+    for await (const event of fromNdjsonStream(stream)) events.push(event);
+    return events;
+  };
+
+  it("passes a session to the route over RPC, only with the fields it knows", async () => {
+    const seen = routeLoop([]);
+    using generation = await exports.LlmGateway.generate(conversation, request, {
+      ...session,
+      token: "not a session field",
+    } as RouteSession);
+    expect(await read(await generation.events())).toMatchObject([{ type: "finish" }]);
+    expect(seen.session).toEqual(session);
+  });
+
+  it("refuses a malformed session as a bad request, before any route", async () => {
+    routeLoop([]);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const malformed of [
+      null,
+      "6c1f2a9e",
+      { ...session, id: "" },
+      { ...session, id: 42 },
+      { ...session, id: "../6c1f2a9e" },
+      { ...session, id: "6c1f2a9e" },
+      { ...session, conversation: "c".repeat(257) },
+      { ...session, resume: "yes" },
+      { conversation: session.conversation, id: session.id },
+    ]) {
+      using generation = await exports.LlmGateway.generate(
+        conversation,
+        request,
+        malformed as RouteSession,
+      );
+      await expect(read(await generation.events())).rejects.toMatchObject({
+        code: "bad_request",
+      });
+    }
+    expect(AnthropicMessagesProvider.prototype.stream).not.toHaveBeenCalled();
+  });
+
+  it("refuses a session on a call that isn't a conversation's, before any route", async () => {
+    routeLoop([]);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const selection of ["medium", { area: "memory" }] as const) {
+      using generation = await exports.LlmGateway.generate(selection, request, session);
+      await expect(read(await generation.events())).rejects.toMatchObject({
+        code: "bad_request",
+      });
+    }
+    expect(AnthropicMessagesProvider.prototype.stream).not.toHaveBeenCalled();
+  });
+
+  it("gives the route each result the caller answers over RPC, before or after it waits", async () => {
+    const seen = routeLoop(["toolu_01", "toolu_02"]);
+    using generation = await exports.LlmGateway.generate(conversation, request, session);
+    const events = fromNdjsonStream(await generation.events())[Symbol.asyncIterator]();
+
+    expect((await events.next()).value).toEqual({ type: "tool_request", call: call("toolu_01") });
+    expect(await generation.answer({ callId: "toolu_01", output: "Ana" })).toEqual({ ok: true });
+    expect((await events.next()).value).toEqual({ type: "tool_request", call: call("toolu_02") });
+    const next = events.next();
+    await vi.waitFor(() => expect(seen.waiting).toBe("toolu_02"));
+    expect(
+      await generation.answer({ callId: "toolu_02", output: "mora no Porto", isError: false }),
+    ).toEqual({ ok: true });
+    expect((await next).value).toMatchObject({
+      type: "finish",
+      message: { parts: [{ type: "text", text: "Ana mora no Porto" }] },
+    });
+  });
+
+  it("ignores an answer that is malformed, for a call that doesn't wait, or late, and says why", async () => {
+    routeLoop(["toolu_01"]);
+    const generation = generateWith(env as GatewayEnv, conversation, request, session);
+    const events = fromNdjsonStream(generation.events())[Symbol.asyncIterator]();
+    expect((await events.next()).value).toMatchObject({ type: "tool_request" });
+
+    for (const malformed of [
+      null,
+      { output: "Ana" },
+      { callId: "", output: "Ana" },
+      { callId: "t".repeat(257), output: "Ana" },
+      { callId: "toolu_01", output: 42 },
+      { callId: "toolu_01", output: "x".repeat(20_001) },
+      { callId: "toolu_01", output: "Ana", isError: "no" },
+    ]) {
+      expect(generation.answer(malformed as never)).toEqual({
+        ok: false,
+        reason: "invalid_input",
+      });
+    }
+    expect(generation.answer({ callId: "toolu_99", output: "Ana" })).toEqual({
+      ok: false,
+      reason: "unknown_call",
+    });
+    expect(generation.answer({ callId: "toolu_01", output: "Ana" })).toEqual({ ok: true });
+    expect(generation.answer({ callId: "toolu_01", output: "again" })).toEqual({
+      ok: false,
+      reason: "unknown_call",
+    });
+    expect((await events.next()).value).toMatchObject({
+      type: "finish",
+      message: { parts: [{ type: "text", text: "Ana" }] },
+    });
+    expect((await events.next()).done).toBe(true);
+    expect(generation.answer({ callId: "toolu_01", output: "late" })).toEqual({
+      ok: false,
+      reason: "ended",
+    });
+  });
+
+  it("rejects the route's wait when the call is cancelled", async () => {
+    const seen = routeLoop(["toolu_01"]);
+    using generation = await exports.LlmGateway.generate(conversation, request, session);
+    const events = fromNdjsonStream(await generation.events())[Symbol.asyncIterator]();
+    await events.next();
+    const next = events.next();
+    await vi.waitFor(() => expect(seen.waiting).toBe("toolu_01"));
+
+    await generation.cancel();
+    await expect(next).rejects.toMatchObject({ code: "aborted" });
+    expect(seen.failure).toMatchObject({ code: "aborted" });
+    expect(await generation.answer({ callId: "toolu_01", output: "Ana" })).toEqual({
+      ok: false,
+      reason: "ended",
+    });
+  });
+
+  it("rejects the route's wait when the caller drops its stub without cancelling", async () => {
+    const seen = routeLoop(["toolu_01"]);
+    {
+      using generation = await exports.LlmGateway.generate(conversation, request, session);
+      const events = fromNdjsonStream(await generation.events())[Symbol.asyncIterator]();
+      await events.next();
+      void events.next().catch(() => undefined);
+      await vi.waitFor(() => expect(seen.waiting).toBe("toolu_01"));
+    }
+    await vi.waitFor(() => expect(seen.failure).toMatchObject({ code: "aborted" }));
+  });
+
+  it("rejects the route's wait when its own signal aborts", async () => {
+    const own = new AbortController();
+    const seen = routeLoop(["toolu_01", "toolu_02"], own.signal);
+    const generation = generateWith(env as GatewayEnv, conversation, request, session);
+    const events = fromNdjsonStream(generation.events())[Symbol.asyncIterator]();
+    await events.next();
+    expect(generation.answer({ callId: "toolu_01", output: "Ana" })).toEqual({ ok: true });
+    await events.next();
+    const next = events.next();
+    await vi.waitFor(() => expect(seen.waiting).toBe("toolu_02"));
+
+    own.abort();
+    await expect(next).rejects.toMatchObject({ code: "aborted" });
+    expect(seen.failure).toMatchObject({ code: "aborted" });
+  });
+
+  it("refuses a second wait for the same call, and still answers the first", async () => {
+    const waits: Promise<unknown>[] = [];
+    vi.spyOn(AnthropicMessagesProvider.prototype, "stream").mockImplementation(
+      async function* (_request, options) {
+        const answers = options?.answers as NonNullable<typeof options>["answers"] & {};
+        yield { type: "tool_request", call: call("toolu_01") };
+        const first = answers.wait("toolu_01");
+        waits.push(
+          first,
+          answers.wait("toolu_01").catch((error: unknown) => error),
+        );
+        const { output } = await first;
+        yield {
+          type: "finish",
+          reason: "stop",
+          message: { role: "assistant", parts: [{ type: "text", text: output }] },
+          usage: [],
+        };
+      },
+    );
+    const generation = generateWith(env as GatewayEnv, conversation, request, session);
+    const events = fromNdjsonStream(generation.events())[Symbol.asyncIterator]();
+    await events.next();
+    const next = events.next();
+    await vi.waitFor(() => expect(waits).toHaveLength(2));
+
+    expect(await waits[1]).toMatchObject({ code: "protocol" });
+    expect(generation.answer({ callId: "toolu_01", output: "Ana" })).toEqual({ ok: true });
+    expect((await next).value).toMatchObject({
+      type: "finish",
+      message: { parts: [{ type: "text", text: "Ana" }] },
+    });
   });
 });
