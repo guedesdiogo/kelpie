@@ -317,8 +317,8 @@
  },
  "lastChange": {
   "by": "Diogo Guedes",
-  "at": "2026-10-17T18:55:18Z",
-  "via": "Claude Code · guedesdiogo/kelpie@59907ec",
-  "note": "The webchat's sidebar (5.24, #412) and the agent's editor with icon buttons and tooltips (5.25 and 5.26, #414): Sidebar and AgentEditor cards, IconButton, AgentHeader, DisplayMenu, Mascot, Presence, ConfirmCard, Thread and other cards brought to main, 11 new icons, the guide regenerated, and the engine rebuilt from main alone, Offline included."
+  "at": "2026-10-17T19:05:26Z",
+  "via": "Claude Code · guedesdiogo/kelpie#426",
+  "note": "The AgentEditor card's toast takes the typed name as text, and bundle.js's header names the commit that last changed the engine (0b1f59e); the sources now live in tools/design-system."
  }
 }

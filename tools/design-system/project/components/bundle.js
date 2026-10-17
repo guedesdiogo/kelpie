@@ -1,5 +1,5 @@
 /* Kelpie: the agent mascot engine (ADR-0045) and the previews' motion helpers, as one classic script.
- * The engine is apps/ingress/public/webchat/mascot*.js at main@59907ec, Offline included, unchanged
+ * The engine is apps/ingress/public/webchat/mascot*.js as of 0b1f59e, unchanged
  * but for its import and export lines.
  * window.Kelpie.mascot is the engine; window.Kelpie.ui the helpers. */
 (function () {

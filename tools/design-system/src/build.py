@@ -1,12 +1,17 @@
 # Builds components/bundle.js and the mascot part of bundle.css from the webchat's own engine
 # (apps/ingress/public/webchat/mascot*.js, mascot.css), so the system runs the shipped code.
-import re, sys, pathlib
+import re, sys, pathlib, subprocess
 import os
 # The engine: main's, which carries Offline (ADR-0047) since #412; ENGINE only for a newer one approved for it.
 DS = pathlib.Path(__file__).resolve().parents[1]
 ROOT = DS.parents[1]
 W = pathlib.Path(os.environ.get('ENGINE', ROOT / 'apps/ingress/public/webchat'))
-ORIGIN = os.environ.get('ENGINE_ORIGIN', 'apps/ingress/public/webchat/mascot*.js at main@59907ec, Offline included, unchanged\n * but for its import and export lines')
+# The bundle's header names the commit that last changed the engine, so it stays true on a rebuild.
+ENGINE_FILES = ['mascot.js', 'mascot-art.js', 'mascot-states.js', 'mascot.css']
+def last_change():
+    out = subprocess.run(['git', '-C', str(ROOT), 'log', '-1', '--format=%h', '--', *('apps/ingress/public/webchat/' + f for f in ENGINE_FILES)], capture_output=True, text=True, check=True)
+    return out.stdout.strip()
+ORIGIN = os.environ.get('ENGINE_ORIGIN') or ('apps/ingress/public/webchat/mascot*.js as of ' + last_change() + ', unchanged\n * but for its import and export lines')
 OUT = DS / 'project/components'
 
 def module(path, deps):
@@ -17,7 +22,7 @@ def module(path, deps):
         spec, mod = m.group(1), m.group(2)
         return 'const {' + spec + '} = ' + deps[mod] + ';'
     src = re.sub(r'^import \{([^}]*)\} from "\./([\w-]+)\.js";', imp, src, flags=re.M | re.S)
-    assert 'import ' not in re.sub(r'//.*', '', src).split('\n')[0]
+    assert not re.search(r'^import ', src, re.M), path
     return src, names
 
 states, sn = module('mascot-states.js', {})

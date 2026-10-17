@@ -262,7 +262,9 @@
   // A Toast says what saved, with Undo for 10 s; Undo sends back what was saved before.
   function toast(what, before) {
     var t = document.createElement("div"); t.className = "k-toast"; t.setAttribute("role", "status");
-    t.innerHTML = '<span class="text-sm"><b>' + saved.profile.name + ": " + what + ' saved</b><span class="detail text-sm">The Telegram bot\'s photo changes in a few minutes.</span></span><button type="button" class="k-btn text-ui">Undo</button>';
+    t.innerHTML = '<span class="text-sm"><b></b><span class="detail text-sm">The Telegram bot\'s photo changes in a few minutes.</span></span><button type="button" class="k-btn text-ui">Undo</button>';
+    // The name is what the owner typed, so it goes in as text.
+    t.querySelector("b").textContent = saved.profile.name + ": " + what + " saved";
     stage.append(t); ui.enter(t, { spring: "base" });
     var gone = setTimeout(leave, 10000);
     function leave() { ui.exit(t).finished.then(function () { t.remove(); }); }

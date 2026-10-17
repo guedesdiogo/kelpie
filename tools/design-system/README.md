@@ -26,10 +26,11 @@ Generated files, never edited by hand:
 
 ## Build
 
-Each script works from any folder.
+Each script works from any folder. Run them in this order, since `build_css.py` reads the `mascot.part.css` that `build.py` writes:
 
 - `python3 -I tools/design-system/src/build.py` builds `bundle.js` from the webchat's own engine, `apps/ingress/public/webchat/mascot*.js`, plus `src/helpers.js`. It also copies the engine's `mascot.css` into `src/mascot.part.css`.
   - The engine's code is unchanged, apart from its import and export lines, so the cards run what ships.
+  - The bundle's header names the commit that last changed the engine, read from git.
   - `ENGINE` points it at another copy of the engine, and `ENGINE_ORIGIN` names that copy in the bundle's header. Use them only for an engine an ADR approved before it ships.
 - `python3 -I tools/design-system/src/build_css.py` joins `src/css/*.css`, `0-base.css` first, and `src/mascot.part.css` into `bundle.css`.
 - `python3 -I tools/design-system/src/guide.py` regenerates `project/guide/*.md` from `docs/design-system.md`.
@@ -43,7 +44,7 @@ Each script works from any folder.
 - each card, framed as the artifact frames it, in `test/c/<Name>/index.html`;
 - `test/index.html`, with every card.
 
-To view it, serve `tools/design-system` on localhost, for example with `python3 -m http.server 8768 --bind 127.0.0.1`. Stop the server and delete `test/` when you're done.
+To view it, serve `tools/design-system` on localhost, for example with `python3 -m http.server 8768 --bind 127.0.0.1` run in that folder, and open http://127.0.0.1:8768/test/index.html. Stop the server and delete `test/` when you're done.
 
 ## Publish
 
