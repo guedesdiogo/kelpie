@@ -346,6 +346,41 @@ describe("the files in the editor", () => {
     expect(shown.at(-1)).toEqual({ text: T.editor.undone("Kelpie") });
   });
 
+  it("keeps what the owner typed while it saved, to save next on the version just written", async () => {
+    await open();
+    tab("Soul").click();
+    $(".editor-head [role='radio'][aria-label='Edit']").click();
+    const input = $(".files-soul .doc-input");
+    type(input, "# One");
+    let answer;
+    io.save.mockImplementationOnce(
+      (_agentId, changes) =>
+        new Promise((resolve) => {
+          sent.push(changes);
+          answer = resolve;
+        }),
+    );
+    const saving = editor.save();
+    type(input, "# One and two");
+    answer({
+      ok: true,
+      status: 200,
+      value: {
+        ok: true,
+        commit: V(7),
+        outcomes: [{ status: "saved", version: V(8) }],
+        undo: [],
+        files: files({ soul: { content: "# One", version: V(8) } }),
+      },
+    });
+    await saving;
+    expect(input.isConnected).toBe(true);
+    expect(input.value).toBe("# One and two");
+    expect($(".dirty").textContent).toBe("1 unsaved change");
+    await editor.save();
+    expect(sent[1]).toEqual([{ file: "soul", content: "# One and two", version: V(8) }]);
+  });
+
   it("creates the agent's own rules from the empty state", async () => {
     await open();
     tab("Rules").click();

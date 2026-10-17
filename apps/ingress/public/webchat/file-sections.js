@@ -11,6 +11,7 @@ import {
   freeSkillName,
   freshDrafts,
   memoryBudget,
+  memoryOf,
   newSkill,
   originLine,
   sectionOf,
@@ -152,28 +153,36 @@ export class FileSections {
       return { saved: [], failed: [...outcome.keys()], undo: [] };
     }
     const { outcomes, files, undo } = result.value;
+    // Only what the answer changes is drawn again: a file the owner is typing in keeps its caret.
+    const redraw = new Set();
     sent.forEach((change, index) => {
       const section = sectionOf(change);
       const answer = outcomes[index];
       const ok = answer?.status === "saved";
       outcome.set(section, (outcome.get(section) ?? true) && ok);
-      const key = change.file === "skill" ? `skill:${change.name}` : change.file;
+      const name =
+        change.file === "skill"
+          ? change.name
+          : change.file === "install"
+            ? this.#installName(change.staged)
+            : null;
+      const key = name !== null ? `skill:${name}` : change.file;
+      if (section === "skills") redraw.add("skills");
       if (ok) {
-        if (change.file === "skill" || change.file === "install") {
-          const name = change.file === "skill" ? change.name : this.#installName(change.staged);
-          if (name) {
-            this.drafts.skills.delete(name);
-            delete this.bases[`skill:${name}`];
-            delete this.conflicts[`skill:${name}`];
-          }
-        } else {
-          this.drafts[change.file] = undefined;
-          delete this.bases[key];
-          delete this.conflicts[key];
-          delete this.refusals[key];
+        if (this.conflicts[key] || this.refusals[key]) redraw.add(section);
+        delete this.conflicts[key];
+        delete this.refusals[key];
+        // A draft the owner changed while it saved stays, to save next, on the version written.
+        if (!this.#sentDraft(change, name)) {
+          this.bases[key] = answer.version;
+          return;
         }
+        delete this.bases[key];
+        if (name !== null) this.drafts.skills.delete(name);
+        else this.drafts[change.file] = undefined;
         return;
       }
+      redraw.add(section);
       if (answer?.status === "conflict") {
         // The draft keeps its own base, so saving again can't overwrite the vault's by accident.
         if (!Object.hasOwn(this.bases, key)) this.bases[key] = change.version;
@@ -183,13 +192,27 @@ export class FileSections {
       }
     });
     this.files = files;
-    this.#drawAll();
+    for (const section of redraw) this.#redraw(section);
     const sections = [...outcome];
     return {
       saved: sections.filter(([, ok]) => ok).map(([section]) => section),
       failed: sections.filter(([, ok]) => !ok).map(([section]) => section),
       undo,
     };
+  }
+
+  /** Whether the draft is still what this change sent. */
+  #sentDraft(change, name) {
+    if (name !== null) {
+      const draft = this.drafts.skills.get(name);
+      return change.file === "install"
+        ? draft?.install?.id === change.staged
+        : draft !== undefined && draft.content === change.content;
+    }
+    if (change.file === "memory") {
+      return this.drafts.memory !== undefined && memoryOf(this.drafts.memory) === change.content;
+    }
+    return this.drafts[change.file] === change.content;
   }
 
   /** Why a section didn't save, in one sentence: a conflict, or what the vault refused. */

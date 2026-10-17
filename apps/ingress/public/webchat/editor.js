@@ -1028,6 +1028,8 @@ export class Editor {
     const files = filesResult
       ? open.files.applySave(sent, filesResult)
       : { saved: [], failed: [], undo: [] };
+    // A section drawn again brings its own path and switch to the header.
+    if (filesResult) this.#head();
     for (const section of files.saved) open.failed.delete(section);
     if (Object.keys(changes).length > 0) this.#onSaved(open.agent.id, changes);
     const failed = [
