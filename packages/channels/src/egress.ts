@@ -204,14 +204,20 @@ export type RunnerRelayFailure = {
 
 /**
  * A turn the runner started: its stream, read once, and a way to stop it. The stub is disposable,
- * and disposing it, as a caller that goes away does, cancels the turn as `cancel()` does.
+ * and disposing it, as a caller that goes away does, cancels the turn as `cancel()` does. A caller
+ * holds the whole result with `using`: workerd doesn't always tell the target that a stub never
+ * called was dropped, and the turn then keeps its place in flight until the caller's request ends.
  */
 export interface RunnerTurnStream {
   /**
-   * The runner's NDJSON frames (`RunnerFrame`), byte for byte, `ping` frames included: they keep
-   * the RPC hop open too while Kelpie runs a tool, and a reader skips them. The stream never errors.
-   * It ends after the runner's `finish` or `error` frame; an end without either is a dropped turn,
-   * as after `cancel()` or when the runner's connection drops.
+   * The runner's NDJSON frames (`RunnerFrame`), byte for byte, `ping` frames included: the runner
+   * opens the stream with one, and sends one after each 20 s of silence, as while Kelpie runs a
+   * tool. They keep the RPC hop open too, and a reader skips them. The stream never errors. It ends
+   * after the runner's `finish` or `error` frame; an end without either is a dropped turn, as after
+   * `cancel()`, when the runner's connection drops, or after 60 s without a byte while it is read.
+   *
+   * The runner has no deadline for a turn while no tool's result is awaited, so the caller sets one
+   * for the whole turn, and calls `cancel()` when it passes.
    */
   events(): ReadableStream<Uint8Array>;
   /**
@@ -226,8 +232,9 @@ export interface RunnerTurnStream {
  * A turn's start (`POST /sessions/:id/turns`):
  * - `lost`, `unfinished` or `mismatched` (409): the session can't take the turn, so the caller
  *   seeds a new one;
- * - `full` (503) and `rate` (429, with the runner's `Retry-After`): the runner's own capacity, which
- *   is never a Claude usage limit.
+ * - `full` (503, or 4 turns already in flight through this `channel-egress` isolate) and `rate`
+ *   (429, with the runner's `Retry-After`, kept between 1 and 300 s): the runner's own capacity,
+ *   which is never a Claude usage limit.
  */
 export type RunnerTurnStart =
   | { ok: true; turn: RunnerTurnStream }
@@ -236,13 +243,13 @@ export type RunnerTurnStart =
   | { ok: false; reason: "rate"; retryAfterMs: number };
 
 /** A tool's result given to the runner, or `unknown_call` (409): no call of the session waits for it. */
-export type RunnerAnswer =
+export type RunnerAnswerOutcome =
   | { ok: true }
   | RunnerRelayFailure
   | { ok: false; reason: "unknown_call" };
 
 /** A session closed, or one the runner didn't have. */
-export type RunnerClose = { ok: true } | RunnerRelayFailure;
+export type RunnerCloseOutcome = { ok: true } | RunnerRelayFailure;
 
 /**
  * What the `claude-code` route calls to reach the runner (#295): llm-gateway binds it. A separate
@@ -252,7 +259,7 @@ export interface RunnerChatContract {
   /** Starts a turn of the session `sessionId`, a lowercase UUID. */
   turn(sessionId: string, request: RunnerTurnRequest): Promise<RunnerTurnStart>;
   /** The result of a call a `tool_call` frame asked for. */
-  answer(sessionId: string, result: RunnerToolResult): Promise<RunnerAnswer>;
+  answer(sessionId: string, result: RunnerToolResult): Promise<RunnerAnswerOutcome>;
   /** Closes the session. A turn it was running fails. */
-  close(sessionId: string): Promise<RunnerClose>;
+  close(sessionId: string): Promise<RunnerCloseOutcome>;
 }

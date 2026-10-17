@@ -12,9 +12,9 @@ import {
   isLocale,
   type Localized,
   RecipientUnavailableError,
-  type RunnerAnswer,
+  type RunnerAnswerOutcome,
   type RunnerChatContract,
-  type RunnerClose,
+  type RunnerCloseOutcome,
   type RunnerToolResult,
   type RunnerTurnRequest,
   type SendOptions,
@@ -41,6 +41,7 @@ import {
   runnerOf,
   startTurn,
   type TurnStart,
+  takeTurnPlace,
   turnBody,
 } from "./runner.ts";
 import { randomToken } from "./secrets/crypto.ts";
@@ -370,21 +371,34 @@ const invalidInput = { ok: false as const, reason: "invalid_input" as const };
  * again, since this is an RPC boundary, and each answer is a value.
  */
 export class RunnerChat extends WorkerEntrypoint<Env> implements RunnerChatContract {
+  /**
+   * A turn takes one of the isolate's places in flight before its request is even read, so a burst
+   * costs neither encoding nor the runner's room. Its place is freed when it ends, whichever way.
+   */
   async turn(sessionId: string, request: RunnerTurnRequest): Promise<TurnStart> {
+    const release = takeTurnPlace();
+    if (!release) return { ok: false, reason: "full" };
     const body = turnBody(sessionId, request);
-    if (!body) return invalidInput;
+    if (!body) {
+      release();
+      return invalidInput;
+    }
     const found = await this.#runner();
-    return found.ok ? startTurn(found.runner, found.secret, sessionId, body) : found;
+    if (!found.ok) {
+      release();
+      return found;
+    }
+    return startTurn(found.runner, found.secret, sessionId, body, release);
   }
 
-  async answer(sessionId: string, result: RunnerToolResult): Promise<RunnerAnswer> {
+  async answer(sessionId: string, result: RunnerToolResult): Promise<RunnerAnswerOutcome> {
     const checked = checkedResult(sessionId, result);
     if (!checked) return invalidInput;
     const found = await this.#runner();
     return found.ok ? giveResult(found.runner, found.secret, sessionId, checked) : found;
   }
 
-  async close(sessionId: string): Promise<RunnerClose> {
+  async close(sessionId: string): Promise<RunnerCloseOutcome> {
     if (!isSessionId(sessionId)) return invalidInput;
     const found = await this.#runner();
     return found.ok ? closeSession(found.runner, found.secret, sessionId) : found;

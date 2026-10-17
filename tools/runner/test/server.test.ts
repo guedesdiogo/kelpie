@@ -284,6 +284,7 @@ describe("the session routes", () => {
       arguments: { query: "Ana" },
       _meta: { "claudecode/toolUseId": "toolu_1" },
     });
+    expect(await turn.next()).toEqual({ type: "ping" });
     expect(await turn.next()).toMatchObject({ type: "round" });
     expect(await turn.next()).toMatchObject({ type: "tool_call", call: { id: "toolu_1" } });
     expect((await post(RESULTS, { callId: "toolu_1", output: "Lisbon" })).status).toBe(200);

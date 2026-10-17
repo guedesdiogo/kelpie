@@ -6,25 +6,40 @@ import {
   RUNNER_PROTOCOL,
   RUNNER_SESSION_ID,
   RUNNER_VERSION,
-  type RunnerAnswer,
   type RunnerAnswered,
-  type RunnerClose,
+  type RunnerAnswerOutcome,
+  type RunnerCloseOutcome,
   type RunnerRelayFailure,
   type RunnerToolResult,
+  type RunnerTurnRequest,
   type RunnerTurnStart,
   type RunnerTurnStream,
 } from "@kelpie/channels";
 
-/** How long a health check, a tool's result or a close waits for the runner's answer. */
+/** How long a health check, a tool's result or a close waits for the runner's whole answer. */
 const REQUEST_TIMEOUT_MS = 5_000;
 /**
- * How long a turn waits for its stream to begin. Its body may carry a seed of up to 8 MiB, which
- * the runner reads before it answers. Once the stream begins, nothing here bounds it: the runner
- * sends a `ping` after each 20 s of silence, and ends the turn at its own deadline.
+ * How long a turn waits for its stream to begin, or for the whole of an answer that isn't one. Its
+ * body may carry a seed of up to 8 MiB, which the runner reads before it answers, and the runner
+ * opens every turn's stream with a `ping` at once, so 15 s is ample. Once the stream begins, only
+ * IDLE_MS bounds it here.
  */
 const TURN_START_TIMEOUT_MS = 15_000;
+/**
+ * How long a turn's stream may send nothing while it is read: three of the runner's 20 s pings.
+ * The runner has no deadline for a turn while no tool's result is awaited, so the provider sets its
+ * own for the whole turn, and calls `cancel()`.
+ */
+const IDLE_MS = 60_000;
+/** The most of an answer read when it isn't a turn's stream: the runner's take a few dozen bytes. */
+const MAX_ANSWER_BYTES = 4_096;
+/** The turns this isolate relays at once: the runner keeps 4 sessions live. */
+const MAX_TURNS_IN_FLIGHT = 4;
 /** The wait after a 429 without a `Retry-After` to read: the runner counts turns by the minute. */
 const DEFAULT_RETRY_AFTER_MS = 60_000;
+/** The bounds of a `Retry-After` taken from the runner, in seconds. */
+const MIN_RETRY_AFTER_S = 1;
+const MAX_RETRY_AFTER_S = 300;
 
 /**
  * The runner's secret: printable, without spaces, between 32 and 256 characters. `openssl rand -hex
@@ -44,6 +59,7 @@ export type RunnerCheck = RunnerAnswered | { state: "refused" | "unreachable" };
 
 /** Calls the runner's `/health` with `secret`, through its VPC Service. Never logs the secret. */
 export async function checkRunner(runner: Fetcher, secret: string): Promise<RunnerCheck> {
+  const timeout = deadline(REQUEST_TIMEOUT_MS);
   let response: Response;
   try {
     // The VPC Service sets the host and the port; only the path matters.
@@ -51,15 +67,17 @@ export async function checkRunner(runner: Fetcher, secret: string): Promise<Runn
       headers: { authorization: `Bearer ${secret}` },
       // The runner never redirects: an answer that does isn't the runner's.
       redirect: "manual",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: timeout.signal,
     });
   } catch (error) {
+    timeout.clear();
     console.warn("channel-egress: the runner couldn't be reached", errorName(error));
     return { state: "unreachable" };
   }
+  const health = await readJson(response, timeout.signal);
+  timeout.clear();
   if (response.status === 401) return { state: "refused" };
-  const health: unknown = response.ok ? await response.json().catch(() => null) : null;
-  if (!isHealth(health)) {
+  if (!response.ok || !isHealth(health)) {
     console.warn("channel-egress: the runner's answer isn't its health", response.status);
     return { state: "unreachable" };
   }
@@ -104,13 +122,34 @@ export function isSessionId(value: unknown): value is string {
 
 /**
  * A turn's body, as the runner reads it; null when the session's id or the request is malformed,
- * or the body is larger than the runner takes. The request is rebuilt from the fields it knows.
+ * when JSON can't carry it, or when the body is larger than the runner takes. The request is
+ * rebuilt from the fields it knows.
  */
 export function turnBody(sessionId: unknown, request: unknown): Uint8Array | null {
   const checked = isSessionId(sessionId) ? parseRunnerTurnRequest(request) : null;
-  if (!checked) return null;
-  const body = new TextEncoder().encode(JSON.stringify(checked));
+  if (!checked || textLength(checked) > RUNNER_MAX_TURN_BYTES) return null;
+  let json: string;
+  try {
+    json = JSON.stringify(checked);
+  } catch {
+    // A tool's schema came over RPC with a BigInt or a cycle in it.
+    return null;
+  }
+  const body = new TextEncoder().encode(json);
   return body.byteLength <= RUNNER_MAX_TURN_BYTES ? body : null;
+}
+
+/**
+ * The request's text, in UTF-16 code units. Its JSON takes at least as many bytes in UTF-8, so a
+ * request whose text alone is past the runner's bound is refused before it is encoded.
+ */
+function textLength(request: RunnerTurnRequest): number {
+  let length = request.system.length;
+  for (const tool of request.tools) length += tool.description.length;
+  for (const message of request.messages) {
+    for (const part of message.parts) length += part.text.length;
+  }
+  return length;
 }
 
 /** A tool's result, rebuilt; null when it or the session's id is malformed. */
@@ -118,20 +157,37 @@ export function checkedResult(sessionId: unknown, result: unknown): RunnerToolRe
   return isSessionId(sessionId) ? parseRunnerToolResult(result) : null;
 }
 
+let turnsInFlight = 0;
+
+/**
+ * Takes one of this isolate's places for a turn in flight, or null when all MAX_TURNS_IN_FLIGHT are
+ * taken. The release frees it once, however often it is called.
+ */
+export function takeTurnPlace(): (() => void) | null {
+  if (turnsInFlight >= MAX_TURNS_IN_FLIGHT) return null;
+  turnsInFlight += 1;
+  let held = true;
+  return () => {
+    if (held) turnsInFlight -= 1;
+    held = false;
+  };
+}
+
 /**
  * A turn the runner started. `events()` relays its NDJSON frames byte for byte, `ping` frames
  * included: they keep the RPC hop open too, while Kelpie runs a tool. Cancelling a stream over RPC
  * doesn't reach this side while the runner is quiet, so `cancel()` aborts the runner's request, and
- * so does disposing the last stub, as when a caller drops it.
+ * so does disposing the last stub, as when a caller drops it. The turn's place in flight is freed
+ * when its relay ends, whichever way.
  */
 export class RunnerTurn extends RpcTarget implements RunnerTurnStream {
   readonly #events: ReadableStream<Uint8Array>;
   readonly #controller: AbortController;
 
-  constructor(body: ReadableStream<Uint8Array>, controller: AbortController) {
+  constructor(body: ReadableStream<Uint8Array>, controller: AbortController, release: () => void) {
     super();
     this.#controller = controller;
-    this.#events = relay(body, controller);
+    this.#events = relay(body, controller, release);
   }
 
   events(): ReadableStream<Uint8Array> {
@@ -150,35 +206,56 @@ export class RunnerTurn extends RpcTarget implements RunnerTurnStream {
 /**
  * The runner's response, chunk for chunk, as a byte stream, which RPC carries. An abort cancels
  * the response, so the runner sees its turn's stream dropped, even through a binding that doesn't
- * abort it on its own. The relay then ends, as it does when the runner's connection drops: it never
- * errors, since an errored stream fails RPC's own pump too. Without a `finish` or `error` frame, a
- * reader takes that end for a dropped turn.
+ * abort it on its own. So does IDLE_MS without a byte while a read waits: the time a reader spends
+ * elsewhere, as running a tool, isn't the runner's silence.
+ *
+ * The relay then ends, as it does when the runner's connection drops: it never errors, since an
+ * errored stream fails RPC's own pump too. Without a `finish` or `error` frame, a reader takes that
+ * end for a dropped turn.
  */
 function relay(
   body: ReadableStream<Uint8Array>,
   controller: AbortController,
+  release: () => void,
 ): ReadableStream<Uint8Array> {
   const { signal } = controller;
   const reader = body.getReader();
-  signal.addEventListener("abort", () => void reader.cancel().catch(() => undefined), {
-    once: true,
-  });
+  signal.addEventListener(
+    "abort",
+    () => {
+      release();
+      void reader.cancel().catch(() => undefined);
+    },
+    { once: true },
+  );
+  const end = (stream: ReadableByteStreamController) => {
+    release();
+    stream.close();
+  };
   return new ReadableStream({
     type: "bytes",
     async pull(stream) {
-      for (;;) {
-        let chunk: ReadableStreamReadResult<Uint8Array>;
-        try {
-          chunk = await reader.read();
-        } catch (error) {
-          if (!signal.aborted) {
-            console.warn("channel-egress: the runner's turn stream failed", errorName(error));
+      const idle = setTimeout(() => {
+        console.warn("channel-egress: the runner's turn stream went silent");
+        controller.abort();
+      }, IDLE_MS);
+      try {
+        for (;;) {
+          let chunk: ReadableStreamReadResult<Uint8Array>;
+          try {
+            chunk = await reader.read();
+          } catch (error) {
+            if (!signal.aborted) {
+              console.warn("channel-egress: the runner's turn stream failed", errorName(error));
+            }
+            return end(stream);
           }
-          return stream.close();
+          if (chunk.done || signal.aborted) return end(stream);
+          // A byte stream refuses an empty chunk.
+          if (chunk.value.byteLength > 0) return stream.enqueue(chunk.value);
         }
-        if (chunk.done || signal.aborted) return stream.close();
-        // A byte stream refuses an empty chunk.
-        if (chunk.value.byteLength > 0) return stream.enqueue(chunk.value);
+      } finally {
+        clearTimeout(idle);
       }
     },
     cancel() {
@@ -190,16 +267,21 @@ function relay(
 /** A turn's start, with the relay's own class, which RPC turns into a disposable stub. */
 export type TurnStart = Exclude<RunnerTurnStart, { ok: true }> | { ok: true; turn: RunnerTurn };
 
-/** `POST /sessions/:id/turns`, with a body `turnBody` made. */
+/**
+ * `POST /sessions/:id/turns`, with a body `turnBody` made. `release` frees the turn's place in
+ * flight: at once when the turn doesn't start, else when its relay ends.
+ */
 export async function startTurn(
   runner: Fetcher,
   secret: string,
   sessionId: string,
   body: Uint8Array,
+  release: () => void = () => {},
 ): Promise<TurnStart> {
   const controller = new AbortController();
-  // Only the stream's start: the same signal then aborts the stream, on `cancel()`.
-  const timer = setTimeout(() => controller.abort(), TURN_START_TIMEOUT_MS);
+  // Armed until the stream begins, or until an answer that isn't one has been read. The same
+  // signal then aborts the stream, on `cancel()`.
+  const start = deadline(TURN_START_TIMEOUT_MS, controller);
   let response: Response;
   try {
     response = await runner.fetch(`http://runner/sessions/${sessionId}/turns`, {
@@ -210,16 +292,19 @@ export async function startTurn(
       signal: controller.signal,
     });
   } catch (error) {
+    start.clear();
+    release();
     console.warn("channel-egress: the runner couldn't be reached for a turn", errorName(error));
     return unreachable;
-  } finally {
-    clearTimeout(timer);
   }
   const type = response.headers.get("content-type") ?? "";
   if (response.status === 200 && response.body && type.startsWith("application/x-ndjson")) {
-    return { ok: true, turn: new RunnerTurn(response.body, controller) };
+    start.clear();
+    return { ok: true, turn: new RunnerTurn(response.body, controller, release) };
   }
-  const answer = await answerOf(response);
+  const answer = await answerOf(response, controller.signal);
+  start.clear();
+  release();
   const known = failureOf(answer);
   if (known) return known;
   const { reason } = answer;
@@ -244,7 +329,7 @@ export async function giveResult(
   secret: string,
   sessionId: string,
   result: RunnerToolResult,
-): Promise<RunnerAnswer> {
+): Promise<RunnerAnswerOutcome> {
   const answer = await call(runner, secret, `/sessions/${sessionId}/tool-results`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -260,7 +345,7 @@ export async function closeSession(
   runner: Fetcher,
   secret: string,
   sessionId: string,
-): Promise<RunnerClose> {
+): Promise<RunnerCloseOutcome> {
   const answer = await call(runner, secret, `/sessions/${sessionId}`, { method: "DELETE" });
   if (answer.status === 200 && answer.ok === true) return { ok: true };
   return failureOf(answer) ?? unexpected(answer, "a close");
@@ -274,33 +359,73 @@ interface Answer {
   reason?: unknown;
 }
 
-/** A short call to the runner, bounded as `/health` is. */
+/** A short call to the runner, its answer read whole within REQUEST_TIMEOUT_MS. */
 async function call(
   runner: Fetcher,
   secret: string,
   path: string,
   init: { method: string; headers?: Record<string, string>; body?: string },
 ): Promise<Answer> {
-  let response: Response;
+  const timeout = deadline(REQUEST_TIMEOUT_MS);
   try {
-    response = await runner.fetch(`http://runner${path}`, {
+    const response = await runner.fetch(`http://runner${path}`, {
       ...init,
       headers: { ...init.headers, authorization: `Bearer ${secret}` },
       redirect: "manual",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: timeout.signal,
     });
+    return await answerOf(response, timeout.signal);
   } catch (error) {
     console.warn("channel-egress: the runner couldn't be reached", errorName(error));
     return { status: 0 };
+  } finally {
+    timeout.clear();
   }
-  return answerOf(response);
 }
 
-async function answerOf(response: Response): Promise<Answer> {
-  const value = (await response.json().catch(() => null)) as Answer | null;
+async function answerOf(response: Response, signal: AbortSignal): Promise<Answer> {
+  const value = (await readJson(response, signal)) as Answer | null;
   return typeof value === "object" && value !== null && typeof value.ok === "boolean"
     ? { status: response.status, ok: value.ok, reason: value.reason }
     : { status: response.status };
+}
+
+/**
+ * An answer's body as JSON, read up to MAX_ANSWER_BYTES while `signal` allows; null when it is
+ * longer, cut short or not JSON. The body is cancelled either way, which frees its connection.
+ */
+async function readJson(response: Response, signal: AbortSignal): Promise<unknown> {
+  if (!response.body) return null;
+  const reader = response.body.getReader();
+  const stop = () => void reader.cancel().catch(() => undefined);
+  signal.addEventListener("abort", stop, { once: true });
+  const bytes = new Uint8Array(MAX_ANSWER_BYTES);
+  let size = 0;
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (signal.aborted) return null;
+      if (chunk.done) break;
+      if (size + chunk.value.byteLength > MAX_ANSWER_BYTES) return null;
+      bytes.set(chunk.value, size);
+      size += chunk.value.byteLength;
+    }
+    return JSON.parse(new TextDecoder().decode(bytes.subarray(0, size)));
+  } catch {
+    return null;
+  } finally {
+    signal.removeEventListener("abort", stop);
+    stop();
+  }
+}
+
+/** A signal that aborts after `ms`, as a timeout, unless cleared first. */
+function deadline(ms: number, controller = new AbortController()) {
+  const timer = setTimeout(
+    () => controller.abort(new DOMException("The runner took too long", "TimeoutError")),
+    ms,
+  );
+  return { signal: controller.signal, clear: () => clearTimeout(timer) };
 }
 
 /**
@@ -320,11 +445,11 @@ function unexpected(answer: Answer, what: string): RunnerRelayFailure {
   return unreachable;
 }
 
-/** The runner's `Retry-After`, in whole seconds, as ms. */
+/** The runner's `Retry-After`, in whole seconds, as ms, kept between 1 and 300 s. */
 function retryAfterMs(header: string | null): number {
-  return header !== null && /^\d{1,4}$/.test(header)
-    ? Number(header) * 1_000
-    : DEFAULT_RETRY_AFTER_MS;
+  if (header === null || !/^\d+$/.test(header)) return DEFAULT_RETRY_AFTER_MS;
+  const seconds = Math.min(Math.max(Number(header), MIN_RETRY_AFTER_S), MAX_RETRY_AFTER_S);
+  return seconds * 1_000;
 }
 
 function errorName(error: unknown): string {

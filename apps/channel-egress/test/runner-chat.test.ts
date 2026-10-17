@@ -106,6 +106,55 @@ function hangingRunner(): { aborted: boolean; cancelled: boolean } {
   return seen;
 }
 
+/** A body that never ends: 1 KiB each pull. It counts its pulls, and says when it is cancelled. */
+function endless() {
+  const state = { pulls: 0, cancelled: false };
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      state.pulls += 1;
+      controller.enqueue(new TextEncoder().encode(" ".repeat(1_024)));
+    },
+    cancel() {
+      state.cancelled = true;
+    },
+  });
+  return { body, state };
+}
+
+/** A body that never sends a byte, and says when it is cancelled. */
+function stalled() {
+  const state = { cancelled: false };
+  const body = new ReadableStream<Uint8Array>({
+    cancel() {
+      state.cancelled = true;
+    },
+  });
+  return { body, state };
+}
+
+/** A stand-in that waits until its request is aborted, as a runner that never answers. */
+const silent = () =>
+  fetcher(
+    (_, signal) =>
+      new Promise((_, reject) => signal?.addEventListener("abort", () => reject(signal.reason))),
+  );
+
+/** Whether `promise` has settled, without waiting for it. */
+async function settled(promise: Promise<unknown>): Promise<boolean> {
+  let done = false;
+  void promise.then(
+    () => {
+      done = true;
+    },
+    () => {
+      done = true;
+    },
+  );
+  await Promise.resolve();
+  await Promise.resolve();
+  return done;
+}
+
 /** A RunnerChat on `runner`, called directly rather than over RPC. */
 const chatOn = (runner: Fetcher | undefined) =>
   new RunnerChat(createExecutionContext(), { ...env, RUNNER: runner } as unknown as Env);
@@ -217,6 +266,72 @@ describe("RunnerChat", () => {
     expect(await exports.RunnerChat.close(id)).toEqual({ ok: false, reason });
   });
 
+  it("takes at most 4 turns in flight, answers full past them before the runner, and frees a place when one ends", async () => {
+    await storeRunnerSecret(READY);
+    hangingRunner();
+    const fetch = vi.mocked((runnerOf(env) as Fetcher).fetch);
+    const start = async () => {
+      const started = await exports.RunnerChat.turn(crypto.randomUUID(), turnRequest());
+      if (!started.ok) throw new Error(`turn refused: ${started.reason}`);
+      return started;
+    };
+    const started = [await start(), await start(), await start(), await start()];
+    const full = { ok: false, reason: "full" };
+    expect(await exports.RunnerChat.turn(crypto.randomUUID(), turnRequest())).toEqual(full);
+    expect(fetch).toHaveBeenCalledTimes(4);
+
+    // A cancel frees a place, and so does a stub dropped without one once its stream was taken.
+    // workerd doesn't always tell a target that a stub never called was dropped.
+    await started[0]?.turn.cancel();
+    started.push(await start());
+    {
+      using dropped = started[1]?.turn;
+      await dropped?.events();
+    }
+    await vi.waitFor(async () => started.push(await start()));
+    expect(await exports.RunnerChat.turn(crypto.randomUUID(), turnRequest())).toEqual(full);
+    for (const turn of started.slice(2)) await turn.turn.cancel();
+  });
+
+  it("frees the place of a turn that finishes, drops, is refused or never starts", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await storeRunnerSecret(READY);
+    for (let i = 0; i < 5; i += 1) {
+      const finished = await exports.RunnerChat.turn(crypto.randomUUID(), turnRequest());
+      if (!finished.ok) throw new Error(`turn refused: ${finished.reason}`);
+      await readAll(await finished.turn.events());
+      const refused = turnRequest({ conversation: "lost" });
+      expect(await exports.RunnerChat.turn(crypto.randomUUID(), refused)).toMatchObject({
+        reason: "lost",
+      });
+      expect(
+        await exports.RunnerChat.turn(crypto.randomUUID(), turnRequest({ messages: [] })),
+      ).toMatchObject({ reason: "invalid_input" });
+    }
+    await storeRunnerValue("not json");
+    for (let i = 0; i < 5; i += 1) {
+      expect(await exports.RunnerChat.turn(crypto.randomUUID(), turnRequest())).toMatchObject({
+        reason: "not_connected",
+      });
+    }
+    await storeRunnerSecret(READY);
+    vi.spyOn(runnerOf(env) as Fetcher, "fetch").mockImplementation(async () =>
+      ndjson(
+        new ReadableStream({
+          pull() {
+            throw new TypeError("Network connection lost.");
+          },
+        }),
+      ),
+    );
+    for (let i = 0; i < 5; i += 1) {
+      const dropped = await exports.RunnerChat.turn(crypto.randomUUID(), turnRequest());
+      if (!dropped.ok) throw new Error(`turn refused: ${dropped.reason}`);
+      expect((await readAll(await dropped.turn.events())).byteLength).toBe(0);
+    }
+  });
+
   it("is not connected without a stored secret, and calls no runner", async () => {
     await storeRunnerValue("not json");
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -288,6 +403,42 @@ describe("RunnerChat's input checks", () => {
     expect(calls).toEqual([]);
   });
 
+  it("refuses a turn whose text alone passes 8 MiB, before encoding it", async () => {
+    await storeRunnerSecret(READY);
+    const stringify = vi.spyOn(JSON, "stringify");
+    const request = turnRequest({
+      messages: Array.from({ length: 1_000 }, () => ({
+        role: "user" as const,
+        parts: [{ type: "text" as const, text: "x".repeat(9_000) }],
+      })),
+    });
+    expect(turnBody(id, request)).toBeNull();
+    expect(stringify).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a BigInt", { type: "object", default: 1n }],
+    [
+      "a cycle",
+      (() => {
+        const schema: Record<string, unknown> = { type: "object" };
+        schema.properties = { self: schema };
+        return schema;
+      })(),
+    ],
+  ])(
+    "refuses a turn whose tool schema holds %s, which JSON can't carry",
+    async (_, inputSchema) => {
+      await storeRunnerSecret(READY);
+      const { runner, seen: calls } = recording(() => new Response(null));
+      const request = turnRequest({
+        tools: [{ name: "t", description: "d", inputSchema: inputSchema as { type: "object" } }],
+      });
+      expect(await chatOn(runner).turn(id, request)).toEqual(invalid);
+      expect(calls).toEqual([]);
+    },
+  );
+
   it("takes a body just under 8 MiB", () => {
     const text = "x".repeat(8_000);
     const request = turnRequest({
@@ -348,8 +499,30 @@ describe("the runner's answers", () => {
     expect(await startTurn(fetcher(answer), READY, id, body())).toEqual(unreachable);
   });
 
+  it("keeps the runner's Retry-After between 1 and 300 seconds", async () => {
+    for (const [retryAfter, ms] of [
+      ["0", 1_000],
+      ["7", 7_000],
+      ["300", 300_000],
+      ["301", 300_000],
+      ["99999999999999999999", 300_000],
+    ] as const) {
+      const runner = fetcher(() =>
+        Response.json(
+          { ok: false, reason: "rate" },
+          { status: 429, headers: { "retry-after": retryAfter } },
+        ),
+      );
+      expect(await startTurn(runner, READY, id, body())).toEqual({
+        ok: false,
+        reason: "rate",
+        retryAfterMs: ms,
+      });
+    }
+  });
+
   it("waits a minute after a 429 whose Retry-After it can't read", async () => {
-    for (const retryAfter of [null, "soon", "-1", "99999"]) {
+    for (const retryAfter of [null, "soon", "-1", "1.5"]) {
       const runner = fetcher(() =>
         Response.json(
           { ok: false, reason: "rate" },
@@ -367,23 +540,14 @@ describe("the runner's answers", () => {
   it("gives up on a turn whose stream doesn't begin within 15 seconds", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const runner = fetcher(
-      (_, signal) =>
-        new Promise((_, reject) => signal?.addEventListener("abort", () => reject(signal.reason))),
-    );
-    const started = startTurn(runner, READY, id, body());
+    const started = startTurn(silent(), READY, id, body());
     await vi.advanceTimersByTimeAsync(14_999);
-    let settled = false;
-    void started.then(() => {
-      settled = true;
-    });
-    await Promise.resolve();
-    expect(settled).toBe(false);
+    expect(await settled(started)).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(await started).toEqual(unreachable);
   });
 
-  it("doesn't bound a stream that began: a quiet turn goes on past the start's 15 seconds", async () => {
+  it("doesn't time a stream no one reads: a turn read late goes on past any bound", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     let push: (text: string) => void = () => {};
     const runner = fetcher(() =>
@@ -402,6 +566,80 @@ describe("the runner's answers", () => {
     if (!started.ok) throw new Error(`turn refused: ${started.reason}`);
     await vi.advanceTimersByTimeAsync(60_000);
     push('{"type":"ping"}\n');
+    expect(new TextDecoder().decode(await readAll(started.turn.events()))).toBe(
+      '{"type":"ping"}\n',
+    );
+  });
+
+  it("ends a turn whose runner sends nothing for 60 s while it is read, and aborts its request", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let signal: AbortSignal | undefined;
+    let push: (text: string) => void = () => {};
+    const quiet = stalled();
+    const runner = fetcher((_, given) => {
+      signal = given;
+      return ndjson(
+        new ReadableStream({
+          start(controller) {
+            push = (text) => controller.enqueue(new TextEncoder().encode(text));
+          },
+          cancel: () => {
+            quiet.state.cancelled = true;
+          },
+        }),
+      );
+    });
+    const started = await startTurn(runner, READY, id, body());
+    if (!started.ok) throw new Error(`turn refused: ${started.reason}`);
+    const reader = started.turn.events().getReader();
+
+    // A byte within 60 s, here a ping at 59 s, keeps the turn going, and starts the count again.
+    let read = reader.read();
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(await settled(read)).toBe(false);
+    push('{"type":"ping"}\n');
+    expect((await read).done).toBe(false);
+    read = reader.read();
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(await settled(read)).toBe(false);
+    expect(signal?.aborted).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await read).done).toBe(true);
+    expect(signal?.aborted).toBe(true);
+    expect(quiet.state.cancelled).toBe(true);
+    expect(warn).toHaveBeenCalledWith("channel-egress: the runner's turn stream went silent");
+  });
+
+  it("stops the runner when the reader cancels the stream itself", async () => {
+    let signal: AbortSignal | undefined;
+    const source = stalled();
+    const runner = fetcher((_, given) => {
+      signal = given;
+      return ndjson(source.body);
+    });
+    const started = await startTurn(runner, READY, id, body());
+    if (!started.ok) throw new Error(`turn refused: ${started.reason}`);
+    await started.turn.events().cancel();
+    expect(signal?.aborted).toBe(true);
+    expect(source.state.cancelled).toBe(true);
+  });
+
+  it("skips an empty chunk, which a byte stream can't carry", async () => {
+    const runner = fetcher(() =>
+      ndjson(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array(0));
+            controller.enqueue(new TextEncoder().encode('{"type":"ping"}\n'));
+            controller.close();
+          },
+        }),
+      ),
+    );
+    const started = await startTurn(runner, READY, id, body());
+    if (!started.ok) throw new Error(`turn refused: ${started.reason}`);
     expect(new TextDecoder().decode(await readAll(started.turn.events()))).toBe(
       '{"type":"ping"}\n',
     );
@@ -477,6 +715,69 @@ describe("the runner's answers", () => {
     }
     expect(await closeSession(fetcher(answer), READY, id)).toEqual(unreachable);
   });
+
+  it("follows no redirect: every call asks the binding for the answer as it is", async () => {
+    const inits: (RequestInit | undefined)[] = [];
+    const runner = {
+      fetch: async (_: RequestInfo, init?: RequestInit) => {
+        inits.push(init);
+        return init?.method === "POST" && inits.length === 1
+          ? ndjson('{"type":"ping"}\n')
+          : Response.json({ ok: true });
+      },
+    } as unknown as Fetcher;
+    expect((await startTurn(runner, READY, id, body())).ok).toBe(true);
+    expect(await giveResult(runner, READY, id, RESULT)).toEqual({ ok: true });
+    expect(await closeSession(runner, READY, id)).toEqual({ ok: true });
+    expect(inits.map((init) => init?.redirect)).toEqual(["manual", "manual", "manual"]);
+  });
+
+  const calls = [
+    ["a turn", 503, (runner: Fetcher) => startTurn(runner, READY, id, body()), 15_000],
+    ["a result", 200, (runner: Fetcher) => giveResult(runner, READY, id, RESULT), 5_000],
+    ["a close", 200, (runner: Fetcher) => closeSession(runner, READY, id), 5_000],
+  ] as const;
+
+  it.each(calls)(
+    "reads at most 4 KiB of the runner's answer to %s, then cancels it",
+    async (_, status, send) => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { body, state } = endless();
+      const runner = fetcher(() => new Response(body, { status }));
+      expect(await send(runner)).toEqual(unreachable);
+      expect(state.cancelled).toBe(true);
+      expect(state.pulls).toBeLessThanOrEqual(6);
+    },
+  );
+
+  it.each(calls)(
+    "gives up on an answer to %s whose body stalls, within its bound",
+    async (_, status, send, bound) => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { body, state } = stalled();
+      const runner = fetcher(() => new Response(body, { status }));
+      const answer = send(runner);
+      await vi.advanceTimersByTimeAsync(bound - 1);
+      expect(await settled(answer)).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await answer).toEqual(unreachable);
+      expect(state.cancelled).toBe(true);
+    },
+  );
+
+  it.each(calls.slice(1))(
+    "gives up on %s the runner doesn't answer within 5 seconds",
+    async (_, _status, send) => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const answer = send(silent());
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(await settled(answer)).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await answer).toEqual(unreachable);
+    },
+  );
 
   it("never puts the secret in a result, an error or a log", async () => {
     const logged: unknown[] = [];

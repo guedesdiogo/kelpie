@@ -102,8 +102,9 @@ export type RunnerErrorCode = "rate_limited" | "out_of_credits" | "auth" | "serv
  *   after Claude Code compacted it;
  * - `error`: the turn failed. `resetsAt` is in epoch ms; `unverified` marks a code read from a
  *   signal other failures share;
- * - `ping`: nothing happened for a while, as while Kelpie runs a tool. It keeps the connections
- *   between Kelpie and the runner open, and maps onto no event.
+ * - `ping`: the stream's first frame, so its headers go out at once, and again after each 20 s of
+ *   silence, as while Kelpie runs a tool. It keeps the connections between Kelpie and the runner
+ *   open, and maps onto no event.
  */
 export type RunnerFrame =
   | { type: "text"; delta: string }

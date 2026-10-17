@@ -1,7 +1,7 @@
 import { createExecutionContext } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { RUNNER_PROTOCOL } from "@kelpie/channels";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChannelForms } from "../src/index.ts";
 import { checkRunner } from "../src/runner.ts";
 
@@ -31,6 +31,11 @@ async function runnerForm() {
   if (!form.ok) throw new Error(`form refused: ${form.reason}`);
   return form.token;
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe("checkRunner", () => {
   it("is ready when the runner answers /health on Kelpie's protocol, given the secret as a bearer token", async () => {
@@ -76,6 +81,48 @@ describe("checkRunner", () => {
     ],
   ])("is unreachable on %s", async (_, answer) => {
     expect(await checkRunner(fetcher(answer), READY)).toEqual({ state: "unreachable" });
+  });
+
+  it("reads at most 4 KiB of the runner's health, then cancels it", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const state = { pulls: 0, cancelled: false };
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        state.pulls += 1;
+        controller.enqueue(new TextEncoder().encode(" ".repeat(1_024)));
+      },
+      cancel() {
+        state.cancelled = true;
+      },
+    });
+    expect(
+      await checkRunner(
+        fetcher(() => new Response(body)),
+        READY,
+      ),
+    ).toEqual({
+      state: "unreachable",
+    });
+    expect(state).toEqual({ pulls: expect.any(Number), cancelled: true });
+    expect(state.pulls).toBeLessThanOrEqual(6);
+  });
+
+  it("is unreachable when its health's body stalls past 5 seconds", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const check = checkRunner(
+      fetcher(() => new Response(body)),
+      READY,
+    );
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await check).toEqual({ state: "unreachable" });
+    expect(cancelled).toBe(true);
   });
 
   it("is unreachable when the call fails", async () => {

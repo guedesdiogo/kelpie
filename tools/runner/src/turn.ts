@@ -23,7 +23,7 @@ const CUT_NOTE = "\n[Cut: the result was longer.]";
 
 /**
  * How long a turn's stream may stay silent, as while Kelpie runs a tool, before a `ping` frame
- * keeps the connections on its way open.
+ * keeps the connections on its way open. Every turn's stream also opens with one.
  */
 export const PING_MS = 20_000;
 
@@ -127,7 +127,9 @@ export class Turn {
         this.#end(false);
       },
     });
-    this.#keepAlive();
+    // Bun sends a streamed response's headers with its first chunk. Without this ping, a turn whose
+    // first reply is slow would send nothing for up to 20 s, past channel-egress's wait for its start.
+    this.#emit({ type: "ping" });
   }
 
   handle(message: SDKMessage): void {
