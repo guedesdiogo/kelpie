@@ -1,0 +1,29 @@
+<!-- @dsCard group="Work" height=300 subtitle="5.18 · moment" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>ReceiptFold</title></head>
+<body>
+<div class="k-stage">
+  <button type="button" class="k-replay text-sm" id="again">Replay</button>
+  <article class="k-card k-fold text-ui" id="card"></article>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui, card = document.getElementById("card");
+  var DETAIL = '<div class="k-fold-in"><b>Weekly summary</b><ol class="k-tool-steps text-sm"><li>' + ui.icon("check") + "Read 14 notes from this week</li><li>" + ui.icon("check") + "Grouped them by project</li><li>" + ui.icon("check") + "Wrote the summary</li><li>" + ui.icon("check") + "Linked the open tasks</li></ol></div>";
+  var SUMMARY = '<div class="k-fold-in"><span class="k-receipt"><span class="k-receipt-ic">' + ui.icon("check") + '</span><span><b>Weekly summary</b> · Kelpie ran it in 4 min 12 s, today at 18:02.</span></span><span class="k-fold-paths k-mono text-sm"><a class="k-link" href="#">notes/2026-w42.md</a> <a class="k-link" href="#">projects/kelpie.md</a> <a class="k-link" href="#">people/ana-souza.md</a></span></div>';
+  var play = ui.runner(async function (run) {
+    card.innerHTML = DETAIL;
+    await run.sleep(1600);
+    var h0 = card.getBoundingClientRect().height;
+    card.innerHTML = SUMMARY;
+    var h1 = card.getBoundingClientRect().height;
+    ui.animate(card, [{ height: h0 + "px", transform: "scaleY(1)" }, { height: h1 + "px", transform: "scaleY(0.98)", offset: 0.5 }, { height: h1 + "px", transform: "none" }], { spring: "moment" });
+    ui.animate(card.firstChild, [{ opacity: 0 }, { opacity: 1 }], { dur: ui.num("dur-fade", 150), ease: ui.ease("fade"), delay: 80 });
+  });
+  document.getElementById("again").addEventListener("click", function () { play(); });
+  play();
+})();
+</script>
+</body>
+</html>

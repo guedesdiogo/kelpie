@@ -1,0 +1,25 @@
+<!-- @dsCard group="Conversation" height=230 subtitle="5.20 · hover, then Copy" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>CodeBlock</title></head>
+<body>
+<div class="k-stage">
+  <div class="k-bubble text-ui" style="max-width:520px">
+    <p style="margin:0 0 8px">Add this to <code class="k-code-inline k-mono">wrangler.toml</code> and deploy again:</p>
+    <div class="k-code"><pre class="k-mono text-sm" id="code">[[r2_buckets]]
+binding = "VAULT"
+bucket_name = "kelpie-vault"</pre><button type="button" class="k-copy k-mono text-xs" id="copy">Copy</button></div>
+  </div>
+</div>
+<script>
+(function () {
+  var b = document.getElementById("copy"), t = null;
+  b.addEventListener("click", function () {
+    function say(text) { b.textContent = text; b.dataset.state = "1"; clearTimeout(t); t = setTimeout(function () { b.textContent = "Copy"; delete b.dataset.state; }, 1500); }
+    try { navigator.clipboard.writeText(document.getElementById("code").textContent).then(function () { say("Copied"); }, function () { say("Couldn't copy"); }); }
+    catch (e) { say("Couldn't copy"); }
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+/* CodeBlock (5.20): the webchat's .code and .copy. */
+.k-code { position: relative; }
+.k-code pre { margin: 0; max-block-size: 400px; overflow: auto; padding: var(--space-2) var(--space-3); padding-inline-end: calc(var(--space-12) + var(--space-6)); border: 1px solid var(--line); border-radius: calc(var(--r-bubble) - var(--space-1)); background: var(--surface); white-space: pre-wrap; overflow-wrap: anywhere; }
+.k-copy { position: absolute; inset-block-start: var(--space-1); inset-inline-end: var(--space-1); min-block-size: 28px; padding: 0 var(--space-2); border: 1px solid var(--muted); border-radius: var(--r-sm); background: var(--surface); color: var(--fg); cursor: pointer; opacity: 0; transition: opacity var(--dur-fade) var(--ease-fade); }
+.k-code:hover .k-copy, .k-code:focus-within .k-copy, .k-copy[data-state] { opacity: 1; }
+@media (hover: none) { .k-copy { opacity: 1; } }
+.k-code-inline { padding: 0.1em 0.35em; border-radius: var(--r-sm); background: var(--surface); font-size: 0.92em; }

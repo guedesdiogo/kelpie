@@ -1,0 +1,10 @@
+/* ConnectionBanner (5.12). */
+.k-chat { position: relative; overflow: hidden; }
+/* The webchat mockup's banner (#378, decision 14): a dark pill at the top, the no-Wi-Fi icon, Try now. */
+.k-banner { position: absolute; top: var(--space-2); left: 50%; translate: -50% 0; z-index: 5; display: flex; align-items: center; gap: var(--space-2); padding: 6px var(--space-2) 6px var(--space-3); border-radius: var(--r-chip); background: var(--fg); color: var(--bg); box-shadow: var(--shadow-pop); white-space: nowrap; }
+.k-banner .k-icon { width: 14px; height: 14px; }
+.k-banner-b { border: 0; border-radius: var(--r-chip); padding: var(--space-1) 10px; background: color-mix(in srgb, var(--bg) 18%, transparent); color: inherit; font-weight: 600; cursor: pointer; }
+.k-banner.back { background: var(--ok); color: var(--surface); padding-inline-end: var(--space-3); }
+.k-net-ctl { justify-content: flex-start; }
+.k-dialog { position: absolute; left: 50%; top: 50%; translate: -50% -50%; z-index: 6; width: min(86%, 320px); display: grid; justify-items: center; gap: var(--space-2); padding: var(--space-4); text-align: center; border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-pop); }
+.k-dialog .k-mh.s160 { margin-bottom: var(--space-3); }

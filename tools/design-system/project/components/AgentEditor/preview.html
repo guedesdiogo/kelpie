@@ -1,0 +1,327 @@
+<!-- @dsCard group="Agents" height=640 subtitle="5.25 · pick parts, Randomize, Undo, then Save; Close asks before it discards" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>AgentEditor</title></head>
+<body>
+<div class="k-stage k-edstage" id="stage">
+  <div class="k-ed-row" id="row"><span class="k-avw"><span class="k-mh s36" id="rowfig"></span></span><span class="text-ui" style="font-weight:600" id="rowname">Agenda</span><button type="button" class="k-pen" id="pen" aria-label="Edit Agenda" data-tip="Edit Agenda">__pencil__</button></div>
+  <section class="k-ed" id="ed" aria-label="Edit Agenda">
+    <div class="k-ed-in" id="edin">
+      <div class="k-ed-id"><span class="k-mh" id="idfig"></span><div class="k-ed-who"><span class="k-ed-name" id="idname">Agenda</span><span class="k-ed-spec text-sm" id="idspec">Calendar</span></div></div>
+      <div class="k-ed-tabs" role="tablist" aria-orientation="vertical" aria-label="What defines Agenda" id="tabs"><span class="k-ed-hl" id="hl" aria-hidden="true"></span></div>
+      <div class="k-ed-head"><h3 class="k-ed-title k-display text-h3" id="title">Mascot</h3><button type="button" class="k-icb close" id="close" aria-label="Close" data-tip="Close">__close__</button></div>
+      <div class="k-ed-body" id="body">
+        <div class="k-flds" id="p-profile" role="tabpanel" aria-labelledby="t-profile" hidden>
+          <div class="k-fld"><label for="f-name">Name</label><div class="k-inrow"><input class="k-inp" id="f-name" maxlength="80" autocomplete="off"></div><p class="k-ferr text-sm" id="name-err" hidden>__alert__Write a name</p></div>
+          <div class="k-fld"><label for="f-spec">Specialty</label><div class="k-inrow"><input class="k-inp" id="f-spec" maxlength="40" autocomplete="off" aria-describedby="h-spec"></div><div class="k-help text-sm" id="h-spec"><span>Shows beside the name, here and in the agent switcher.</span><span class="cnt k-mono text-xs" id="c-spec"></span></div></div>
+          <div class="k-fld"><label for="f-remit">Short description</label><div class="k-inrow"><input class="k-inp" id="f-remit" maxlength="200" autocomplete="off" aria-describedby="h-remit"></div><div class="k-help text-sm" id="h-remit"><span>One line on what it's for. Kelpie uses it to know what to hand this agent.</span><span class="cnt k-mono text-xs" id="c-remit"></span></div></div>
+        </div>
+        <div id="p-mascot" role="tabpanel" aria-labelledby="t-mascot">
+          <div class="k-ed-top">
+            <div class="k-stagebox"><span class="k-mh s160" id="pv" role="img" aria-labelledby="sum"></span></div>
+            <div class="k-pv-side">
+              <p class="k-pv-sum" id="sum" aria-live="polite"></p>
+              <div class="k-pv-act"><button type="button" class="k-icb" id="undo" aria-label="Undo" data-tip="Nothing to undo" aria-disabled="true">__undo__</button><button type="button" class="k-icb" id="dice" aria-label="Randomize all" data-tip="Randomize all">__dice__</button></div>
+              <p class="k-pv-hint text-sm">Tap the mascot to pet it. It changes here while you choose, and counts once you save.</p>
+            </div>
+          </div>
+          <div class="k-axis-tabs" role="tablist" aria-label="Parts of the mascot" id="axes"></div>
+          <div class="k-axis-panel" role="tabpanel" id="axpanel">
+            <div class="k-tabp-h"><span class="cnt k-mono text-xs" id="cnt"></span><button type="button" class="k-icb quiet" id="rax" aria-label="Randomize shape" data-tip="Randomize shape">__dice__</button></div>
+            <div id="groups" style="display:grid;gap:var(--space-3)"></div>
+          </div>
+        </div>
+      </div>
+      <div class="k-ed-foot" id="foot">
+        <p class="dirty text-sm" id="dirty"></p>
+        <p class="meta" id="meta">Applies to Agenda everywhere. The Telegram bot's photo changes in a few minutes.</p>
+        <button type="button" class="k-btn text-ui" id="cancel">Cancel</button>
+        <button type="button" class="k-btn primary text-ui k-save" id="save" aria-disabled="true"><span id="saveic" style="display:inline-flex"></span><span class="k-word">Sav<span class="k-roll" id="suf"><span class="n">e</span></span></span></button>
+      </div>
+      <div class="k-ed-foot ask" id="ask" hidden>__alertw__<p><b id="ask-q"></b><span id="ask-what"></span></p><button type="button" class="k-btn text-ui" id="keep">Keep editing</button><button type="button" class="k-btn danger text-ui" id="discard">Discard</button></div>
+    </div>
+  </section>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui, E = window.Kelpie.mascot, $ = function (id) { return document.getElementById(id); };
+  var stage = $("stage");
+  stage.innerHTML = stage.innerHTML.replace("__pencil__", ui.icon("pencil")).replace("__close__", ui.icon("close")).replace("__alert__", ui.icon("alert")).replace("__undo__", ui.icon("undo")).split("__dice__").join(ui.icon("dice")).replace("__alertw__", ui.icon("alert"));
+  // The webchat's English names (texts.js), and the engine's own axes (mascot-art.js).
+  var N = {
+    axes: { shape: "Shape", color: "Color", eyes: "Eyes", head: "Head", accessory: "Accessory" },
+    plural: { shape: "shapes", color: "colors", eyes: "eyes", head: "options", accessory: "options" },
+    shapes: { mark: "Mark", bubble: "Bubble", drop: "Drop", pebble: "Pebble", buoy: "Buoy", jellyfish: "Jellyfish", cloud: "Cloud", dune: "Dune", star: "Star", heart: "Heart", bean: "Bean", block: "Block" },
+    colors: { kelp: "Kelp", lagoon: "Lagoon", tide: "Tide", sky: "Sky", indigo: "Indigo", anemone: "Anemone", pink: "Pink", fawn: "Fawn", cocoa: "Cocoa", moss: "Moss", lime: "Lime", slate: "Slate" },
+    eyes: { dots: "Dots", pills: "Pills", shine: "Shine", marbles: "Marbles", cyclops: "Cyclops", "half-moon": "Half-moon", frog: "Frog", stars: "Stars", big: "Big", buttons: "Buttons" },
+    types: { none: "Nothing", ears: "Ears", horns: "Horns", hair: "Hair", leaves: "Leaves", glasses: "Glasses", bow: "Bow", hat: "Hat", belt: "Belt" },
+    vars: { pointed: "Pointed", floppy: "Floppy", round: "Round", two: "Two", one: "One", antennae: "Antennae", strands: "Strands", curl: "Curl", mohawk: "Mohawk", kelp: "Kelp", dark: "Dark", tie: "Bow tie", head: "On the head", beret: "Beret", top: "Top hat", beanie: "Beanie", belt: "Belt", collar: "Collar" },
+    phrases: { ears: { pointed: "pointed ears", floppy: "floppy ears", round: "round ears" }, horns: { two: "two horns", one: "one horn", antennae: "antennae" }, hair: { strands: "three strands of hair", curl: "a curl", mohawk: "a mohawk" }, leaves: { one: "one leaf", two: "two leaves", kelp: "a kelp frond" }, glasses: { round: "round glasses", dark: "dark glasses" }, bow: { tie: "a bow tie", head: "a bow on its head" }, hat: { beret: "a beret", top: "a top hat", beanie: "a beanie" }, belt: { belt: "a belt", collar: "a collar" } },
+  };
+  var AXES = ["shape", "color", "eyes", "head", "accessory"], PARTS = { head: E.HEADS, accessory: E.ACCESSORIES };
+  var CHOICES = { shape: Object.keys(E.SHAPES), color: E.COLORS, eyes: Object.keys(E.EYES) };
+  var STEP = { shape: "shape", color: "color", eyes: "eyes", cheeks: "cheeks", head: "head", accessory: "accessory", random: "randomize" };
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+  function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+  function partOptions(types) { var out = []; Object.keys(types).forEach(function (t) { if (!types[t].length) out.push({ type: t }); else types[t].forEach(function (v) { out.push({ type: t, variation: v }); }); }); return out; }
+  function options(axis) { return PARTS[axis] ? partOptions(PARTS[axis]) : CHOICES[axis]; }
+  function pick(list) { return list[Math.floor(Math.random() * list.length)]; }
+  function phrase(p, none) { return p.type === "none" ? none : N.phrases[p.type][p.variation]; }
+  function summary(l) { return N.shapes[l.shape] + " · " + N.colors[l.color] + " · " + N.eyes[l.eyes] + " eyes" + (l.cheeks ? " with cheeks" : "") + " · " + phrase(l.head, "nothing on its head") + " · " + phrase(l.accessory, "no accessory"); }
+  function changedAxis(a, b) { var c = AXES.concat("cheeks").filter(function (x) { return !same(a[x], b[x]); }); return c.length === 1 ? c[0] : "random"; }
+  var saved = { look: clone(ui.LOOKS.agenda), profile: { name: "Agenda", specialty: "Calendar", remit: "Keeps the calendar and books what it holds." } };
+  var draft = { look: clone(saved.look), profile: clone(saved.profile) }, history = [], axis = "shape", section = "mascot", busy = false;
+  var ed = $("ed"), rowfig = ui.mascot($("rowfig"), draft.look, 36, { mode: "still" });
+  var idm = ui.mascot($("idfig"), draft.look, 56), pv = ui.mascot($("pv"), draft.look, 160, { mode: "large" });
+  ui.tooltips(stage);
+  function tipOf(b) { return b.querySelector(".k-tip"); }
+  // The sections, as APG tabs: Profile and Mascot ship; the agent's files wait for #381, dimmed.
+  var SECTIONS = [["profile", "Profile", "profile"], ["mascot", "Mascot", "body"], ["soul", "Soul", "soul"], ["rules", "Rules", "rules"], ["memory", "Memory", "memory"], ["skills", "Skills", "skills"]];
+  var tabs = $("tabs");
+  SECTIONS.forEach(function (s) {
+    var ready = s[0] === "profile" || s[0] === "mascot";
+    tabs.insertAdjacentHTML("beforeend", '<button type="button" class="k-navi text-ui" role="tab" id="t-' + s[0] + '" data-s="' + s[0] + '"' + (ready ? ' aria-controls="p-' + s[0] + '"' : ' aria-disabled="true"') + ">" +
+      (s[2] === "body" ? ui.pauseIcon("body") : ui.icon(s[2])) + '<span class="nl">' + s[1] + "</span>" + (ready ? '<span class="k-dot" hidden></span><span class="k-sr ch"></span>' : '<span class="soon text-xs">Soon</span>') + "</button>");
+  });
+  var navs = Array.prototype.slice.call(tabs.querySelectorAll(".k-navi")), live = navs.filter(function (b) { return !b.hasAttribute("aria-disabled"); }), hlY = null;
+  function showSection(id, keyboard) {
+    section = id;
+    navs.forEach(function (b) { var on = b.dataset.s === id; b.setAttribute("aria-selected", String(on)); b.tabIndex = on ? 0 : -1; });
+    var b = $("t-" + id), hl = $("hl"), y = b.offsetTop;
+    hl.style.width = b.offsetWidth + "px"; hl.style.height = b.offsetHeight + "px"; hl.style.transform = "translate(" + b.offsetLeft + "px, " + y + "px)";
+    if (!keyboard && hlY != null && hlY !== y) ui.animate(hl, [{ transform: "translate(" + b.offsetLeft + "px, " + hlY + "px)" }, { transform: "translate(" + b.offsetLeft + "px, " + y + "px)" }], { spring: "fast" });
+    hlY = y;
+    $("title").textContent = id === "profile" ? "Profile" : "Mascot";
+    $("p-profile").hidden = id !== "profile"; $("p-mascot").hidden = id !== "mascot";
+    $("meta").hidden = id !== "mascot";
+    if (!keyboard) ui.enter($("p-" + id), { spring: "base" });
+    // In Profile the mascot looks at the owner (5.25).
+    idm.setState("idle", { instant: true });
+  }
+  tabs.addEventListener("click", function (e) { var b = e.target.closest(".k-navi"); if (b && !b.hasAttribute("aria-disabled") && b.dataset.s !== section) showSection(b.dataset.s, e.detail === 0); });
+  tabs.addEventListener("keydown", function (e) {
+    var i = live.indexOf(document.activeElement); if (i < 0) return;
+    var to = { ArrowDown: (i + 1) % live.length, ArrowUp: (i - 1 + live.length) % live.length, Home: 0, End: live.length - 1 }[e.key];
+    if (to == null) return; e.preventDefault(); showSection(live[to].dataset.s, true); live[to].focus();
+  });
+  // The axes: APG tabs in a segmented track; each axis is a named radiogroup of tiles drawn on this agent.
+  $("axes").innerHTML = AXES.map(function (a) { return '<button type="button" class="k-axis-tab" role="tab" id="ax-' + a + '" aria-controls="axpanel" data-a="' + a + '">' + N.axes[a] + "</button>"; }).join("");
+  var axTabs = Array.prototype.slice.call($("axes").children);
+  function showAxis(a, keyboard) {
+    axis = a;
+    axTabs.forEach(function (t) { var on = t.dataset.a === a; t.setAttribute("aria-selected", String(on)); t.tabIndex = on ? 0 : -1; });
+    $("axpanel").setAttribute("aria-labelledby", "ax-" + a);
+    var n = (PARTS[a] ? partOptions(PARTS[a]) : CHOICES[a]).length;
+    $("cnt").textContent = n + " " + N.plural[a];
+    $("rax").setAttribute("aria-label", "Randomize " + STEP[a]); tipOf($("rax")).textContent = "Randomize " + STEP[a];
+    tiles();
+    if (!keyboard) ui.enter($("groups"), { spring: "base" });
+  }
+  $("axes").addEventListener("click", function (e) { var t = e.target.closest(".k-axis-tab"); if (t) showAxis(t.dataset.a, e.detail === 0); });
+  $("axes").addEventListener("keydown", function (e) {
+    var i = axTabs.indexOf(document.activeElement); if (i < 0) return;
+    var to = { ArrowRight: (i + 1) % 5, ArrowLeft: (i + 4) % 5, Home: 0, End: 4 }[e.key];
+    if (to == null) return; e.preventDefault(); showAxis(AXES[to], true); axTabs[to].focus();
+  });
+  // Each tile's host is in the page before its mascot draws: the engine reads the body color from CSS.
+  function group(parent, label, opts, current, draw, onPick, swatches) {
+    var g = document.createElement("div");
+    parent.append(g);
+    g.className = "k-tiles" + (swatches ? " sw" : ""); g.setAttribute("role", "radiogroup"); g.setAttribute("aria-label", label);
+    opts.forEach(function (o) {
+      var b = document.createElement("button"), on = same(o, current);
+      b.type = "button"; b.className = "k-opt" + (swatches ? " sw" : ""); b.setAttribute("role", "radio"); b.setAttribute("aria-checked", String(on)); b.tabIndex = on ? 0 : -1;
+      b._v = o; g.append(b); draw(b, o);
+      b.addEventListener("click", function (e) { choose(b, e.detail === 0); });
+    });
+    function choose(b, keyboard) {
+      Array.prototype.forEach.call(g.children, function (x) { x.setAttribute("aria-checked", String(x === b)); x.tabIndex = x === b ? 0 : -1; });
+      onPick(b._v, keyboard);
+    }
+    g.addEventListener("keydown", function (e) {
+      var k = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key]; if (!k) return;
+      e.preventDefault(); var all = Array.prototype.slice.call(g.children), i = all.indexOf(document.activeElement), n = all[(i + k + all.length) % all.length];
+      n.focus(); choose(n, true);
+    });
+    return g;
+  }
+  function tile(b, look, name) {
+    var h = document.createElement("span"); h.className = "k-mh"; b.append(h);
+    b.insertAdjacentHTML("beforeend", "<span>" + name + "</span>");
+    ui.mascot(h, look, 46, { mode: "still" });
+  }
+  function withAxis(v) { var l = clone(draft.look); l[axis] = v; return l; }
+  function tiles() {
+    var box = $("groups"), l = draft.look; box.innerHTML = "";
+    if (axis === "color") {
+      group(box, "Color", CHOICES.color, l.color, function (b, o) { b.innerHTML = '<span class="k-swc" style="background:var(--mascot-' + o + ')"></span><span>' + N.colors[o] + "</span>"; }, function (v) { apply(withAxis(v)); }, true);
+    } else if (PARTS[axis]) {
+      var types = PARTS[axis], part = l[axis];
+      group(box, N.axes[axis], Object.keys(types), part.type, function (b, t) {
+        tile(b, withAxis(t === part.type ? part : types[t].length ? { type: t, variation: types[t][0] } : { type: t }), N.types[t]);
+      }, function (t, keyboard) { var p = draft.look[axis]; apply(withAxis(p.type === t ? p : types[t].length ? { type: t, variation: types[t][0] } : { type: t })); tiles(); if (keyboard) focusChecked(0); });
+      if (types[part.type].length) {
+        var sub = document.createElement("div"); sub.style.display = "grid"; sub.style.gap = "6px";
+        sub.innerHTML = '<span class="text-sm k-muted">Variation</span>';
+        box.append(sub);
+        group(sub, "Variation", types[part.type], part.variation, function (b, v) { tile(b, withAxis({ type: part.type, variation: v }), N.vars[v]); }, function (v) { apply(withAxis({ type: part.type, variation: v })); });
+      }
+    } else {
+      group(box, N.axes[axis], CHOICES[axis], l[axis], function (b, o) { tile(b, withAxis(o), (axis === "shape" ? N.shapes : N.eyes)[o]); }, function (v) { apply(withAxis(v)); });
+      if (axis === "eyes") {
+        box.insertAdjacentHTML("beforeend", '<label class="k-switch text-ui"><span>Rosy cheeks</span><input type="checkbox" role="switch" id="cheeks"' + (l.cheeks ? " checked" : "") + '><span class="k-sw"></span></label>');
+        $("cheeks").addEventListener("change", function (e) { var n = clone(draft.look); n.cheeks = e.target.checked; apply(n); });
+      }
+    }
+  }
+  function focusChecked(i) { var g = $("groups").querySelectorAll("[role=radiogroup]")[i], c = g && g.querySelector('[aria-checked="true"]'); if (c) c.focus({ preventScroll: true }); }
+  // Every change goes through the engine's restyle: a crossfade, and the part that changed moves.
+  function apply(next, o) {
+    o = o || {};
+    if (same(next, draft.look)) return;
+    var ax = o.axis || changedAxis(draft.look, next);
+    if (!o.undo) history.push({ look: draft.look, axis: ax });
+    draft.look = next;
+    pv.restyle(next, ax); idm.restyle(next, ax === "random" ? "color" : ax);
+    $("sum").textContent = summary(next);
+    refresh();
+  }
+  function refresh() {
+    var u = $("undo"), last = history[history.length - 1];
+    u.setAttribute("aria-disabled", String(!last));
+    u.setAttribute("aria-label", last ? "Undo " + STEP[last.axis] : "Undo");
+    tipOf(u).textContent = last ? "Undo " + STEP[last.axis] : "Nothing to undo";
+    var changed = [];
+    if (!same(draft.profile, saved.profile)) changed.push("profile");
+    if (!same(draft.look, saved.look)) changed.push("mascot");
+    ["profile", "mascot"].forEach(function (s) {
+      var t = $("t-" + s), dot = t.querySelector(".k-dot"), on = changed.indexOf(s) >= 0;
+      t.querySelector(".ch").textContent = on ? ", changed" : "";
+      if (on && dot.hidden) { dot.hidden = false; ui.animate(dot, [{ transform: "scale(0.6)", opacity: 0 }, { transform: "none", opacity: 1 }], { spring: "fast" }); }
+      if (!on) dot.hidden = true;
+    });
+    var valid = /\S/.test(draft.profile.name);
+    $("name-err").hidden = valid; $("f-name").setAttribute("aria-invalid", String(!valid));
+    $("dirty").innerHTML = changed.length ? "<i></i><span><span class=\"k-mono\">" + changed.length + "</span> unsaved " + (changed.length === 1 ? "change" : "changes") + "</span>" : "All saved";
+    if (!busy) $("save").setAttribute("aria-disabled", String(!changed.length || !valid));
+    $("idname").textContent = draft.profile.name || "Agenda"; $("idspec").textContent = draft.profile.specialty;
+    $("c-spec").textContent = draft.profile.specialty.length + " of 40"; $("c-remit").textContent = draft.profile.remit.length + " of 200";
+    return changed;
+  }
+  // Randomize: the die turns 90° with spring-moment-fast, and the mascot swaps its look and jumps.
+  var turned = 0;
+  function randomize(btn, keyboard, ax) {
+    var next;
+    if (ax) { var others = options(ax).filter(function (o) { return !same(o, draft.look[ax]); }); next = withAxis(pick(others)); }
+    else { next = { shape: pick(CHOICES.shape), color: pick(CHOICES.color), eyes: pick(CHOICES.eyes), cheeks: Math.random() < 0.5, head: pick(partOptions(E.HEADS)), accessory: pick(partOptions(E.ACCESSORIES)) }; }
+    if (!keyboard) { var svg = btn.querySelector("svg"), from = turned; turned += 90; svg.style.transform = "rotate(" + turned + "deg)"; ui.animate(svg, [{ transform: "rotate(" + from + "deg)" }, { transform: "rotate(" + turned + "deg)" }], { spring: "moment-fast" }); }
+    apply(next, { axis: ax || "random" }); tiles();
+  }
+  $("dice").addEventListener("click", function (e) { randomize($("dice"), e.detail === 0); });
+  $("rax").addEventListener("click", function (e) { randomize($("rax"), e.detail === 0, axis); });
+  // Undo: every step since the panel opened; the option that came back takes the landing tint.
+  function undo() {
+    var last = history.pop(); if (!last) return;
+    apply(last.look, { undo: true, axis: last.axis }); tiles();
+    var ax = last.axis === "cheeks" ? "eyes" : last.axis;
+    if (ax !== "random" && ax !== axis) showAxis(ax, true);
+    var back = $("groups").querySelector('[aria-checked="true"]');
+    if (!back) return;
+    if (ax === "color") ui.animate(back.querySelector(".k-swc"), [{ transform: "scale(1.25)" }, { transform: "none" }], { spring: "pop" });
+    else ui.animate(back, [{ backgroundColor: ui.token("landed") || "transparent" }, { backgroundColor: ui.token("surface") }], { dur: 400, ease: ui.ease("fade") });
+  }
+  $("undo").addEventListener("click", undo);
+  // Profile: one line each, as the agent's settings take them; a name that shows nothing can't be saved.
+  [["f-name", "name"], ["f-spec", "specialty"], ["f-remit", "remit"]].forEach(function (f) {
+    var el = $(f[0]); el.value = draft.profile[f[1]];
+    el.addEventListener("input", function () { el.value = el.value.replace(/[\t\r\n]/g, " "); draft.profile[f[1]] = el.value; refresh(); });
+  });
+  // Save, once: Sav-e, Sav-ing, Sav-ed; a spinner after 200 ms; success without the ring.
+  function save(keyboard) {
+    var b = $("save"); if (busy || b.getAttribute("aria-disabled") === "true") return;
+    busy = true; b.dataset.state = "busy"; ui.roll($("suf"), "ing");
+    var sp = setTimeout(function () { $("saveic").innerHTML = '<span class="k-spinner"></span>'; }, 200);
+    setTimeout(function () {
+      clearTimeout(sp); b.dataset.state = "done"; ui.roll($("suf"), "ed");
+      $("saveic").innerHTML = ui.icon("check", keyboard ? "" : "draw");
+      if (!keyboard) ui.animate(b, [{ transform: "scale(1.03)" }, { transform: "none" }], { spring: "pop" });
+      var what = refresh(), before = clone(saved);
+      Array.prototype.forEach.call(tabs.querySelectorAll(".k-dot:not([hidden])"), function (d, i) { ui.exit(d, { delay: i * ui.num("stagger", 30) }).finished.then(function () { d.hidden = true; d.getAnimations().forEach(function (x) { x.cancel(); }); }); });
+      [pv, idm].forEach(function (m) { m.setState("approved", { instant: keyboard }); });
+      saved = { look: clone(draft.look), profile: clone(draft.profile) }; history = [];
+      rowfig.restyle(saved.look, "color"); $("rowname").textContent = saved.profile.name;
+      setTimeout(function () {
+        [pv, idm].forEach(function (m) { m.setState("idle", { instant: true }); });
+        close(false);
+        toast(what.length === 2 ? "profile and mascot" : what[0], before);
+      }, 1100);
+    }, 900);
+  }
+  $("save").addEventListener("click", function (e) { save(e.detail === 0); });
+  function resetSave() { var b = $("save"); busy = false; delete b.dataset.state; $("saveic").innerHTML = ""; $("suf").innerHTML = '<span class="n">e</span>'; refresh(); }
+  // A Toast says what saved, with Undo for 10 s; Undo sends back what was saved before.
+  function toast(what, before) {
+    var t = document.createElement("div"); t.className = "k-toast"; t.setAttribute("role", "status");
+    t.innerHTML = '<span class="text-sm"><b></b><span class="detail text-sm">The Telegram bot\'s photo changes in a few minutes.</span></span><button type="button" class="k-btn text-ui">Undo</button>';
+    // The name is what the owner typed, so it goes in as text.
+    t.querySelector("b").textContent = saved.profile.name + ": " + what + " saved";
+    stage.append(t); ui.enter(t, { spring: "base" });
+    var gone = setTimeout(leave, 10000);
+    function leave() { ui.exit(t).finished.then(function () { t.remove(); }); }
+    t.querySelector("button").addEventListener("click", function () {
+      clearTimeout(gone); saved = before; draft = { look: clone(before.look), profile: clone(before.profile) };
+      [pv, idm, rowfig].forEach(function (m) { m.restyle(draft.look, "color"); });
+      ["f-name", "f-spec", "f-remit"].forEach(function (id, i) { $(id).value = draft.profile[["name", "specialty", "remit"][i]]; });
+      $("sum").textContent = summary(draft.look); t.querySelector("b").textContent = before.profile.name + ": change undone"; $("rowname").textContent = before.profile.name; t.querySelector(".detail").remove(); t.querySelector("button").remove();
+      tiles(); refresh(); gone = setTimeout(leave, 2600);
+    });
+  }
+  // Opening: the panel grows from its row with spring-slow, its content kept at its final size.
+  function open(keyboard) {
+    if (!ed.hidden) return;
+    Array.prototype.forEach.call(stage.querySelectorAll(".k-toast"), function (t) { t.remove(); });
+    resetSave(); ed.hidden = false; showSection("mascot", true); showAxis(axis, true);
+    if (keyboard) { $("t-mascot").focus(); return; }
+    if (ui.reduced()) { ui.animate(ed, [{ opacity: 0 }, { opacity: 1 }], {}); return; }
+    var r = $("row"), W = ed.offsetWidth, H = ed.offsetHeight, inner = $("edin");
+    inner.style.width = W + "px"; inner.style.height = H + "px";
+    ui.animate(ed, [{ width: r.offsetWidth + "px", height: r.offsetHeight + "px" }, { width: W + "px", height: H + "px" }], { spring: "slow" }).finished.then(function () { inner.style.width = ""; inner.style.height = ""; });
+    Array.prototype.forEach.call(inner.children, function (c, i) { if (!c.hidden) ui.enter(c, { y: 6, scale: 1, delay: 90 + i * ui.num("stagger", 30) }); });
+  }
+  function close(keyboard) {
+    $("ask").hidden = true; $("foot").hidden = false;
+    var end = function () { ed.hidden = true; ed.getAnimations().forEach(function (x) { x.cancel(); }); $("pen").focus({ preventScroll: true }); };
+    if (keyboard) end(); else ui.exit(ed).finished.then(end);
+  }
+  // Closing or Cancel with changes asks inside the footer, on a 10% warm tint; Keep editing takes focus.
+  function tryClose(keyboard) {
+    if (busy) return;
+    var changed = refresh(), n = changed.length;
+    if (!n) { close(keyboard); return; }
+    $("ask-q").textContent = "Discard " + n + " " + (n === 1 ? "change" : "changes") + "?";
+    var names = changed.map(function (c) { return c === "profile" ? "Profile" : "Mascot"; });
+    $("ask-what").textContent = names.join(" and ") + (n === 1 ? " goes" : " go") + " back to what was saved.";
+    $("foot").hidden = true; $("ask").hidden = false; $("keep").focus({ preventScroll: true });
+  }
+  $("close").addEventListener("click", function (e) { tryClose(e.detail === 0); });
+  $("cancel").addEventListener("click", function (e) { tryClose(e.detail === 0); });
+  $("keep").addEventListener("click", function () { $("ask").hidden = true; $("foot").hidden = false; $("save").focus({ preventScroll: true }); });
+  $("discard").addEventListener("click", function (e) {
+    draft = { look: clone(saved.look), profile: clone(saved.profile) }; history = [];
+    [pv, idm, rowfig].forEach(function (m) { m.restyle(draft.look, "color"); });
+    ["f-name", "f-spec", "f-remit"].forEach(function (id, i) { $(id).value = draft.profile[["name", "specialty", "remit"][i]]; });
+    $("sum").textContent = summary(draft.look); tiles(); refresh(); close(e.detail === 0);
+  });
+  $("pen").addEventListener("click", function (e) { open(e.detail === 0); });
+  ed.addEventListener("keydown", function (e) {
+    var inField = /INPUT|TEXTAREA/.test(e.target.tagName);
+    if (e.key === "Escape") { e.preventDefault(); if (!$("ask").hidden) $("keep").click(); else tryClose(true); }
+    else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !inField) { e.preventDefault(); undo(); }
+    else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") { e.preventDefault(); save(true); }
+  });
+  $("sum").textContent = summary(draft.look);
+  showSection("mascot", true); showAxis("shape", true); refresh();
+})();
+</script>
+</body>
+</html>

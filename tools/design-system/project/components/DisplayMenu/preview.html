@@ -1,0 +1,91 @@
+<!-- @dsCard group="Navigation" height=520 subtitle="5.22 · press the account; the choices apply to the panel" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>DisplayMenu</title></head>
+<body>
+<div class="k-stage k-dm">
+  <div class="k-dm-side">
+    <section class="k-dmenu text-sm" id="menu" aria-label="Account and display" hidden>
+      <div class="k-dm-who"><span class="k-ava" aria-hidden="true">AS</span><div class="k-col" style="gap:0"><b class="text-ui">Ana Souza</b><span class="k-muted text-sm">ana@example.com</span></div></div>
+      <div class="k-dm-row"><span id="l-theme">Theme</span>
+        <div class="k-seg" aria-labelledby="l-theme" id="theme">
+          <button type="button" data-v="system" aria-checked="true" aria-label="System" data-tip="System">__monitor__</button>
+          <button type="button" data-v="light" aria-checked="false" aria-label="Light" data-tip="Light">__sun__</button>
+          <button type="button" data-v="dark" aria-checked="false" aria-label="Dark" data-tip="Dark">__moon__</button>
+        </div>
+      </div>
+      <label class="k-switch"><span class="k-sw-l">__less__Less motion</span><input type="checkbox" id="less"><span class="k-sw"></span></label>
+      <label class="k-switch"><span class="k-sw-l">__contrast__More contrast</span><input type="checkbox" id="more"><span class="k-sw"></span></label>
+      <div class="k-dm-row"><span id="l-mascot">Mascot</span>
+        <div class="k-seg" aria-labelledby="l-mascot" id="mascot">
+          <button type="button" data-v="alive" aria-checked="true" aria-label="Alive" data-tip="Alive">__alive__</button>
+          <button type="button" data-v="states" aria-checked="false" aria-label="States only" data-tip="States only">__states__</button>
+          <button type="button" data-v="still" aria-checked="false" aria-label="Still" data-tip="Still">__still__</button>
+        </div>
+      </div>
+      <p class="k-muted" id="why" hidden style="margin:0">Less motion is on, so mascots are still.</p>
+      <button type="button" class="k-dm-ver k-mono text-xs" id="ver">Kelpie 0.30.0 · 624788e</button>
+    </section>
+    <button type="button" class="k-acct" id="acct" aria-haspopup="true" aria-expanded="false" aria-controls="menu"><span class="k-ava sm" aria-hidden="true">AS</span><span class="text-ui k-acct-n">Ana Souza</span><svg class="k-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 9.5l3.5-3.5l3.5 3.5"/></svg></button>
+  </div>
+  <div class="k-dm-panel" id="panel">
+    <div class="k-ahead"><span class="k-mh s48" id="fig"></span><div class="k-col" style="gap:0"><span class="k-display text-h3">Kelpie</span><span class="text-sm k-muted">Reading the vault</span></div></div>
+    <p class="k-bubble text-ui">Your week has 3 meetings and one free afternoon.</p>
+    <p class="k-bubble me text-ui" style="justify-self:end">Block the afternoon for writing</p>
+  </div>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui, E = window.Kelpie.mascot, menu = document.getElementById("menu"), acct = document.getElementById("acct"), panel = document.getElementById("panel");
+  menu.innerHTML = menu.innerHTML.replace("__monitor__", ui.icon("monitor")).replace("__sun__", ui.icon("sun")).replace("__moon__", ui.icon("moon"))
+    .replace("__less__", ui.icon("lessMotion")).replace("__contrast__", ui.icon("contrast")).replace("__alive__", ui.pauseIcon("alive")).replace("__states__", ui.pauseIcon("states")).replace("__still__", ui.pauseIcon("still"));
+  var m = ui.mascot(document.getElementById("fig"), ui.LOOKS.kelpie, 48, { state: "working", activity: "vault" });
+  var pick = { theme: "system", mascot: "alive" }, page = document.documentElement.getAttribute("data-theme") || "light";
+  function apply() {
+    var dark = pick.theme === "dark" || (pick.theme === "system" && /dark/.test(page));
+    var more = document.getElementById("more").checked || /more/.test(page);
+    var before = panel.getAttribute("data-theme");
+    panel.setAttribute("data-theme", (dark ? "dark" : "light") + (more ? "-more" : ""));
+    // The theme applies at once, and the page crossfades in dur-fade.
+    if (before && before !== panel.getAttribute("data-theme")) ui.animate(panel, [{ opacity: 0.6 }, { opacity: 1 }], {});
+    var less = document.getElementById("less").checked || ui.reduced();
+    mascotSeg.set(less ? "still" : pick.mascot);
+    Array.prototype.forEach.call(document.querySelectorAll("#mascot > button"), function (b) { b.disabled = less && b.dataset.v !== "still"; });
+    document.getElementById("why").hidden = !less;
+    E.setMotion(less ? "still" : pick.mascot);
+  }
+  ui.segment(document.getElementById("theme"), function (v, keyboard, b) {
+    pick.theme = v; apply();
+    // The chosen icon turns into place: the sun a quarter turn, the moon a tilt.
+    var turn = { light: "rotate(-90deg)", dark: "rotate(-25deg)" }[v];
+    if (turn && !keyboard) ui.animate(b.querySelector("svg"), [{ transform: turn }, { transform: "none" }], { spring: "base" });
+  });
+  var mascotSeg = ui.segment(document.getElementById("mascot"), function (v) { pick.mascot = v; apply(); });
+  document.getElementById("less").addEventListener("change", apply);
+  document.getElementById("more").addEventListener("change", apply);
+  ui.tooltips(menu);
+  function open(keyboard) {
+    menu.hidden = false; acct.setAttribute("aria-expanded", "true");
+    mascotSeg.refresh();
+    if (!keyboard) ui.animate(menu, [{ opacity: 0, transform: "translateY(6px) scale(" + ui.num("scale-in", 0.97) + ")" }, { opacity: 1, transform: "none" }], { spring: "fast" });
+    document.querySelector('#theme [aria-checked="true"]').focus({ preventScroll: true });
+  }
+  function close(keyboard) {
+    acct.setAttribute("aria-expanded", "false");
+    if (keyboard) { menu.hidden = true; acct.focus(); return; }
+    ui.exit(menu, { y: 4 }).finished.then(function () { menu.hidden = true; });
+  }
+  acct.addEventListener("click", function (e) { menu.hidden ? open(e.detail === 0) : close(e.detail === 0); });
+  menu.addEventListener("keydown", function (e) { if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); close(true); } });
+  document.getElementById("ver").addEventListener("click", function () {
+    var v = this, text = v.textContent, t;
+    function say(s) { v.textContent = s; setTimeout(function () { v.textContent = text; }, 1500); }
+    try { navigator.clipboard.writeText(text).then(function () { say("Copied"); }, function () { say("Couldn't copy"); }); } catch (e) { say("Couldn't copy"); }
+  });
+  apply();
+  // The card opens with the menu shown, without moving focus into it.
+  menu.hidden = false; acct.setAttribute("aria-expanded", "true");
+})();
+</script>
+</body>
+</html>

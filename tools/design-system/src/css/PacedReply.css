@@ -1,0 +1,24 @@
+/* PacedReply (5.1). */
+.k-chat { max-width: 520px; padding: var(--space-3) var(--space-4) var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); height: 400px; }
+.k-chat-thread { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; gap: var(--space-1); }
+.k-chat-thread > * { flex: none; }
+.k-chat-thread > .k-bubble:not(.me) { align-self: flex-start; transform-origin: bottom left; }
+.k-msg.me { display: grid; justify-items: end; gap: 2px; }
+.k-msg.me .k-bubble { transform-origin: bottom right; }
+.k-bubble.typing { display: flex; gap: 4px; align-items: center; padding: var(--space-3); overflow: hidden; }
+.k-bubble.typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: k-dot 0.8s steps(1, end) 5 forwards; }
+.k-bubble.typing i:nth-child(2) { animation-delay: 0.16s; }
+.k-bubble.typing i:nth-child(3) { animation-delay: 0.32s; }
+@keyframes k-dot { 0%, 100% { opacity: 0.6; } 33% { opacity: 1; } 66% { opacity: 0.3; } }
+/* The wait (#378, decision 10): the demo's 64 px track and its words, then who is writing. */
+.k-buffer { display: flex; align-items: center; gap: 10px; height: 18px; flex: none; color: var(--muted); opacity: 0; transition: opacity var(--dur-fade) var(--ease-fade); }
+.k-buffer.on { opacity: 1; }
+.k-wait { width: 64px; height: 3px; flex: none; background: var(--line); border-radius: 3px; overflow: hidden; }
+.k-wait i { display: block; height: 100%; background: var(--accent); transform: scaleX(0); transform-origin: left center; }
+.k-chat .k-compose { align-items: center; }
+.k-composer-text { white-space: nowrap; overflow: hidden; font-size: 15px; }
+.k-phase { margin-left: 4px; color: var(--muted); font-size: 12.5px; }
+.k-caret { width: 1.5px; height: 16px; background: var(--accent); margin-right: auto; animation: k-caret 1s steps(1) 5; }
+.k-chat .k-round { cursor: default; }
+@keyframes k-caret { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .k-bubble.typing i { animation: none; opacity: 0.6; } .k-caret { animation: none; } }

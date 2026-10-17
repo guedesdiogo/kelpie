@@ -1,0 +1,61 @@
+<!-- @dsCard group="Work" height=250 subtitle="5.16 · the R2 card crosses 90%" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Metric</title></head>
+<body>
+<div class="k-stage">
+  <button type="button" class="k-replay text-sm" id="again">Replay</button>
+  <div class="k-metrics">
+    <div class="k-metric k-card">
+      <span class="text-sm k-muted">Tasks this week</span>
+      <span class="k-roll k-mono k-metric-v" id="tasks"><span class="n">41</span></span>
+      <svg class="k-spark" viewBox="0 0 160 24" preserveAspectRatio="none" aria-hidden="true"><path id="line" d=""/><circle id="dot" r="2.5"/></svg>
+      <span class="text-sm k-muted">Against its own last 30 days</span>
+    </div>
+    <div class="k-metric k-card" id="tier">
+      <span class="text-sm k-muted k-tier-h"><svg class="k-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11Z"/><path d="M8 5v3.5"/><path d="M8 10.6v.4"/></svg>R2 storage, free tier</span>
+      <span class="k-metric-v k-mono"><span class="k-roll" id="gb"><span class="n">8.6</span></span> <span class="text-sm k-muted">of 10 GB</span></span>
+      <span class="k-meter"><i id="meter"></i></span>
+      <span class="text-sm" id="tier-t">Within the free tier.</span>
+      <button type="button" class="k-btn text-sm" id="used" hidden>Show what used it</button>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui;
+  var series = [5, 7, 6, 9, 8, 11, 10, 12, 9, 13, 12, 14];
+  function path(v) { var max = 16; return v.map(function (y, i) { return (i ? "L" : "M") + (i * 160 / (v.length - 1)).toFixed(1) + " " + (22 - y / max * 20).toFixed(1); }).join(" "); }
+  var play = ui.runner(async function (run) {
+    var data = series.slice(0, 9), line = document.getElementById("line"), dot = document.getElementById("dot"), tier = document.getElementById("tier");
+    tier.classList.remove("over"); document.getElementById("used").hidden = true; document.getElementById("tier-t").textContent = "Within the free tier.";
+    document.getElementById("gb").innerHTML = '<span class="n">8.6</span>'; document.getElementById("meter").style.transform = "scaleX(0.86)";
+    document.getElementById("tasks").innerHTML = '<span class="n">41</span>';
+    function draw(first) {
+      line.setAttribute("d", path(data));
+      var last = data.length - 1; dot.setAttribute("cx", (last * 160 / (data.length - 1)).toFixed(1)); dot.setAttribute("cy", (22 - data[last] / 16 * 20).toFixed(1));
+      if (first) { var L = line.getTotalLength(); line.style.strokeDasharray = L; ui.animate(line, [{ strokeDashoffset: L }, { strokeDashoffset: 0 }], { spring: "slow" }); }
+    }
+    draw(true);
+    for (var i = 0; i < 3; i++) {
+      await run.sleep(1200);
+      data.push(series[9 + i]);
+      line.style.strokeDasharray = "none";
+      draw(false);
+      ui.roll(document.getElementById("tasks"), String(42 + i));
+    }
+    await run.sleep(600);
+    ui.roll(document.getElementById("gb"), "9.1");
+    document.getElementById("meter").style.transform = "scaleX(0.91)";
+    // Crossing 90%: warm border and icon, text in fg says so, one pop, and what used it.
+    tier.classList.add("over");
+    document.getElementById("tier-t").textContent = "Past 90% of the free tier. Past 10 GB, R2 bills by use.";
+    document.getElementById("used").hidden = false;
+    ui.animate(tier, [{ transform: "scale(1.03)" }, { transform: "none" }], { spring: "pop" });
+  });
+  document.getElementById("again").addEventListener("click", function () { play(); });
+  play();
+})();
+</script>
+</body>
+</html>

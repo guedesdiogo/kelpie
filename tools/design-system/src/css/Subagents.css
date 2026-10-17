@@ -1,0 +1,22 @@
+/* Subagents (5.6): the pups demo of the mascot's concept page, with no links, in the header and on the profile. */
+.k-pups { display: grid; gap: var(--space-2); max-width: 520px; }
+.k-pups-l { margin: var(--space-1) 0 0; }
+.k-pups-head { padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); }
+/* The header's row stands on the parent's ground, a space-1 from its box. */
+.k-hpups { display: flex; align-items: flex-end; gap: var(--space-1); align-self: stretch; margin-inline-start: calc(var(--space-1) - var(--space-3)); padding-bottom: 2px; }
+.k-hpups:empty { display: none; }
+.k-hpup { position: relative; display: inline-flex; }
+/* A failed header pup shows 5.9's triangle above its head, on the header's background, where --danger
+   passes 3:1; the figure has no badge. */
+.k-hpup-x { position: absolute; left: 50%; bottom: calc(100% + 2px); margin-left: -5px; display: inline-flex; color: var(--danger); }
+.k-hpup-x .k-glyph { width: 10px; height: 10px; }
+/* The status line's row: the phase ends in an ellipsis first; the count is its own live region. */
+.k-hline { display: flex; min-width: 0; margin: 0; white-space: nowrap; }
+.k-hphase { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.k-hcount { flex: none; }
+.k-hphase:not(:empty) + .k-hcount:not(:empty)::before { content: "\00a0·\00a0"; }
+.k-pups-stage { position: relative; display: flex; align-items: flex-end; gap: var(--space-2); height: 250px; padding: 0 var(--space-5) var(--space-6); border-radius: var(--r-panel); background: var(--surface); border: 1px solid var(--line); overflow: hidden; }
+.k-pups-stage::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 40px; background: var(--sunken); }
+.k-pups-stage > .k-mh, .k-pups-row { position: relative; }
+.k-pups-row { display: flex; align-items: flex-end; gap: var(--space-2); }
+.k-pups-cap { margin: 0; min-block-size: 1.5em; }

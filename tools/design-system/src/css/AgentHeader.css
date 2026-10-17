@@ -1,0 +1,18 @@
+/* AgentHeader (5.21). */
+.k-ahead { display: flex; align-items: center; gap: var(--space-3); padding-bottom: var(--space-3); border-bottom: 1px solid var(--line); }
+.k-ahead-name { display: inline-flex; align-items: center; gap: var(--space-1); padding: 0; border: 0; background: none; color: var(--fg); cursor: pointer; justify-self: start; }
+.k-switcher { position: absolute; left: var(--space-4); top: 76px; z-index: 10; min-width: 240px; padding: var(--space-1); border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-pop); transform-origin: top left; }
+.k-switcher ul { list-style: none; margin: 0; padding: 0; display: grid; }
+.k-switcher a { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding: var(--space-2); border-radius: calc(var(--r-card) - var(--space-1)); color: var(--fg); text-decoration: none; }
+.k-switcher a:hover { background: var(--sunken); }
+.k-switcher a[aria-current] { background: var(--sunken); font-weight: 600; }
+.k-switcher li { position: relative; }
+.k-spec { color: var(--muted); font-weight: 400; }
+/* The open agent's pencil rests on its mascot, with a 44 px target (5.21). */
+.k-pen.at-rest { top: 0; left: 0; width: 44px; height: 44px; border: 0; background: none; opacity: 1; scale: 1; }
+.k-pen.at-rest::before { content: ""; position: absolute; top: 2px; right: 2px; width: 22px; height: 22px; border: 1px solid var(--muted); border-radius: 50%; background: var(--surface); }
+.k-pen.at-rest > .k-icon { position: absolute; top: 7px; right: 7px; }
+/* Below the sidebar's width, the owner's avatar at the header's end opens the Display menu. */
+.k-ahead-acct { position: relative; display: grid; place-items: center; width: 44px; height: 44px; flex: none; margin-left: auto; padding: 0; border: 0; border-radius: var(--r-btn); background: none; cursor: pointer; }
+.k-ahead-acct .k-ava { width: 32px; height: 32px; }
+.k-ahead-acct .k-tip { bottom: auto; top: calc(100% + 6px); left: auto; right: 0; translate: none; }

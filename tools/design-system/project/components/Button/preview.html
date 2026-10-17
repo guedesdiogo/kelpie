@@ -1,0 +1,21 @@
+<!-- @dsCard group="Decisions" height=150 subtitle="Primary, secondary, done and disabled" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Button</title></head>
+<body>
+<div class="k-stage">
+  <div class="k-row">
+    <button type="button" class="k-btn primary text-ui">Confirm</button>
+    <button type="button" class="k-btn text-ui">Deny this call</button>
+    <button type="button" class="k-btn ok text-ui"><svg class="k-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3l6-6.5"/></svg>Event created</button>
+    <button type="button" class="k-btn primary text-ui" disabled>Confirm</button>
+  </div>
+  <p class="k-caption text-sm">Press and hold one: it scales to 0.97 within 100 ms and commits when you let go.</p>
+</div>
+<script>
+(function () {
+  // Nothing to run: the press is CSS (scale-press over dur-press).
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,93 @@
+<!-- @dsCard group="Decisions" height=540 subtitle="5.3 · moment; the header's mascot answers the card" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>ConfirmCard</title></head>
+<body>
+<div class="k-stage">
+  <button type="button" class="k-replay text-sm" id="again">Replay</button>
+  <header class="k-ahead"><span class="k-mh s48" id="head"></span><span class="k-display text-h3">Agenda</span></header>
+  <div class="k-card k-confirm" id="card"></div>
+  <p class="k-sr" aria-live="polite" id="live"></p>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui, card = document.getElementById("card"), live = document.getElementById("live");
+  // The card's figure is still, in Waiting (decision 13); the header's mascot answers the card (5.19).
+  var hm = ui.mascot(document.getElementById("head"), ui.LOOKS.agenda, 48), drawnAt = 0;
+  var BODY =
+    '<div class="k-confirm-in">' +
+    '<div class="k-confirm-h"><span class="k-mh s40" id="fig"></span><div class="k-col" style="gap:0"><span class="text-ui"><code class="k-id k-mono">agenda</code> asks for your confirmation</span><span class="text-sm k-muted">on task <span class="k-mono">#123</span> · open until 14:43</span></div></div>' +
+    '<p class="text-ui" style="margin:0">Create an event on your calendar.</p>' +
+    '<div class="k-evidence"><span class="text-sm k-muted">Written by the agent</span><ul class="text-sm"><li>“Coffee with Ana”</li><li>Tomorrow · <span class="k-mono">10:00–10:30</span></li><li>Google Meet · invite: ana@example.com</li></ul></div>' +
+    '<div class="k-actions"><button type="button" class="k-btn text-ui no">Deny this call</button><button type="button" class="k-btn primary text-ui yes"><span class="k-roll lbl"><span class="n">Confirm</span></span></button></div>' +
+    '<button type="button" class="k-hold-s text-sm">' + ui.icon("pause") + 'Hold to pause this conversation</button>' +
+    "</div>";
+  var decided = false;
+  function hhmm() { return "14:32"; }
+  async function decide(run, yes, keyboard) {
+    if (decided) return;
+    decided = true;
+    var acts = card.querySelector(".k-actions"), btn = card.querySelector(yes ? ".yes" : ".no"), other = card.querySelector(yes ? ".no" : ".yes");
+    acts.style.pointerEvents = "none";
+    // The mascot: Approved for 1.1 s, then the work it frees; a deny only changes the pose.
+    if (yes) { hm.setState("approved", { instant: keyboard }); run.later(1100, function () { hm.setState("working", { activity: "calendar", instant: keyboard }); }); }
+    else hm.setState("idle", { instant: keyboard, quiet: true });
+    if (!keyboard) {
+      var ra = acts.getBoundingClientRect(), ro = other.getBoundingClientRect(), r0 = btn.getBoundingClientRect();
+      Object.assign(other.style, { position: "absolute", left: (ro.left - ra.left) + "px", top: (ro.top - ra.top) + "px", width: ro.width + "px" });
+      btn.classList.add("wide");
+      var r1 = btn.getBoundingClientRect();
+      ui.animate(other, [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(" + ui.num("scale-in-moment", 0.92) + ")" }], { dur: ui.num("dur-exit-moment", 170), ease: ui.ease("exit"), fill: "forwards" });
+      ui.animate(btn, [{ width: r0.width + "px", transform: "translateX(" + (r0.left - r1.left) + "px)" }, { width: r1.width + "px", transform: "none" }], { spring: "moment" });
+    } else { other.style.visibility = "hidden"; btn.classList.add("wide"); }
+    if (yes) {
+      ui.roll(btn.querySelector(".lbl"), '<span class="k-spinner"></span><span>Creating the event</span>');
+      await run.sleep(1900);
+      btn.classList.add("ok");
+      hm.setState("idle", { instant: keyboard });
+      ui.roll(btn.querySelector(".lbl"), ui.icon("check", "draw") + "<span>Event created</span>", { spring: "pop" });
+      if (!keyboard && !ui.reduced()) {
+        ui.animate(btn, [{ transform: "scale(1.03)" }, { transform: "none" }], { spring: "pop" });
+        var ring = document.createElement("span");
+        ring.className = "k-ring";
+        acts.append(ring);
+        Object.assign(ring.style, { left: btn.offsetLeft + "px", top: btn.offsetTop + "px", width: btn.offsetWidth + "px", height: btn.offsetHeight + "px", inset: "auto" });
+        ring.animate([{ transform: "scale(1)", opacity: 0.7 }, { transform: "scale(1.5)", opacity: 0 }], { duration: 650, easing: ui.ease("standard"), fill: "forwards" }).finished.then(function () { ring.remove(); });
+      }
+      await run.sleep(1100);
+    } else if (!keyboard) await run.sleep(450);
+    // The receipt: content fades, the height collapses, the receipt rises 4px.
+    var inner = card.firstElementChild, h0 = card.getBoundingClientRect().height;
+    await ui.exit(inner, { y: 0, scale: 1, moment: true }).finished;
+    if (!run.alive) return;
+    var text = yes ? "You confirmed at " + hhmm() + ". <b>Coffee with Ana</b> was created." : "You denied at " + hhmm() + ". <code class=\"k-id k-mono\">agenda</code> goes on without it.";
+    card.innerHTML = '<div class="k-receipt text-ui"><span class="k-receipt-ic' + (yes ? "" : " neutral") + '">' + ui.icon(yes ? "check" : "neutral") + "</span><span>" + text + "</span></div>";
+    card.classList.add("done");
+    var h1 = card.getBoundingClientRect().height;
+    ui.animate(card, [{ height: h0 + "px" }, { height: h1 + "px" }], { spring: "moment" });
+    ui.enter(card.firstElementChild, { y: 4, scale: 1, delay: 60 });
+    live.textContent = card.textContent;
+  }
+  var play = ui.runner(async function (run) {
+    decided = false;
+    card.classList.remove("done");
+    card.innerHTML = BODY;
+    ui.mascot(document.getElementById("fig"), ui.LOOKS.agenda, 40, { mode: "still", state: "waiting" });
+    hm.setState("idle", { instant: true });
+    // A press in the card's first 400 ms is ignored: it may have appeared under the pointer (ADR-0052 §5).
+    drawnAt = performance.now();
+    function press(yes) { return function (e) { if (performance.now() - drawnAt < 400) return; ui.guard(decide(play.takeover(), yes, e.detail === 0)); }; }
+    // detail 0 is a click from the keyboard: no grow, no pop, no ring, no announcement.
+    card.querySelector(".yes").addEventListener("click", press(true));
+    card.querySelector(".no").addEventListener("click", press(false));
+    await run.sleep(400);
+    hm.setState("waiting");
+    await run.sleep(2600);
+    await decide(run, true, false);
+  });
+  document.getElementById("again").addEventListener("click", function () { play(); });
+  play();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,85 @@
+<!-- @dsCard group="Conversation" height=440 subtitle="5.2 · press the summary to open it" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>ToolRow</title></head>
+<body>
+<div class="k-stage">
+  <button type="button" class="k-replay text-sm" id="again">Replay</button>
+  <div class="k-ahead"><span class="k-mh s48" id="fig"></span><span class="k-display text-h3">Agenda</span></div>
+  <div class="k-turn text-ui" id="turn"></div>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui, turn = document.getElementById("turn");
+  var m = ui.mascot(document.getElementById("fig"), ui.LOOKS.agenda, 48);
+  async function stream(el, text, run) {
+    var words = text.split(" ");
+    for (var i = 0; i < words.length; i++) {
+      var w = document.createElement("span");
+      w.textContent = (i ? " " : "") + words[i];
+      el.append(w);
+      ui.animate(w, [{ opacity: 0 }, { opacity: 1 }], { dur: ui.num("dur-word", 110), ease: ui.ease("fade") });
+      await run.sleep(42);
+    }
+    await run.sleep(ui.num("dur-word", 110));
+    el.textContent = el.textContent; // the word wrappers go when the stream ends
+  }
+  var play = ui.runner(async function (run) {
+    turn.innerHTML = "";
+    m.setState("idle", { instant: true });
+    await run.sleep(400);
+    var p1 = document.createElement("p"); p1.className = "k-stream"; turn.append(p1);
+    m.setState("typing");
+    await stream(p1, "I will look at your calendar and at what I know about Ana.", run);
+    var row = document.createElement("div");
+    row.className = "k-tool";
+    row.innerHTML = '<button type="button" class="k-tool-head text-sm" aria-expanded="false" disabled><span class="k-roll k-tool-ic"><span class="n"><span class="k-spinner"></span></span></span><span class="k-roll k-tool-lbl"><span class="n">Starting</span></span><span class="k-tool-tag text-xs k-mono" hidden>changes</span><span class="k-tool-time k-mono text-xs"></span></button><ol class="k-tool-steps text-sm" hidden></ol>';
+    turn.append(row);
+    ui.enter(row, {});
+    var lbl = row.querySelector(".k-tool-lbl"), time = row.querySelector(".k-tool-time"), steps = row.querySelector("ol"), tag = row.querySelector(".k-tool-tag");
+    var t0 = performance.now();
+    var tick = setInterval(function () { var s = Math.floor((performance.now() - t0) / 1000); time.textContent = s >= 3 ? s + " s" : ""; }, 250);
+    run.timers.push(tick);
+    var STEPS = [["Reading tomorrow's calendar", "3 events tomorrow", "calendar", false], ["Reading people/ana-souza.md", "Ana prefers mornings", "vault", false], ["Looking for a free hour", "Free from 10:00 to 11:30", "think", false], ["Holding 10:00 on the calendar", "10:00 held", "calendar", true]];
+    for (var i = 0; i < STEPS.length; i++) {
+      ui.roll(lbl, STEPS[i][0]);
+      tag.hidden = !STEPS[i][3];
+      m.setState("working", { activity: STEPS[i][2] });
+      await run.sleep(1100);
+      steps.insertAdjacentHTML("beforeend", "<li>" + ui.icon("check") + "<span>" + STEPS[i][1] + "</span></li>");
+    }
+    clearInterval(tick);
+    var total = Math.round((performance.now() - t0) / 1000);
+    row.classList.add("done");
+    tag.hidden = true;
+    ui.roll(row.querySelector(".k-tool-ic"), ui.icon("check", "draw"), { spring: "pop" });
+    ui.roll(lbl, "Checked the calendar and the vault");
+    time.textContent = STEPS.length + " steps · " + total + " s";
+    var head = row.querySelector(".k-tool-head");
+    head.disabled = false;
+    head.onclick = function (e) {
+      var open = head.getAttribute("aria-expanded") === "true", h0 = row.getBoundingClientRect().height;
+      steps.hidden = open; head.setAttribute("aria-expanded", String(!open));
+      if (e.detail === 0) return; // from the keyboard: at once
+      var h1 = row.getBoundingClientRect().height;
+      ui.animate(row, [{ height: h0 + "px" }, { height: h1 + "px" }], { spring: "base" });
+      if (!open) Array.prototype.forEach.call(steps.children, function (li, k) { ui.enter(li, { y: 4, delay: Math.min(k * ui.num("stagger", 30), 300) }); });
+    };
+    // A typed result shows as its card.
+    var card = document.createElement("div");
+    card.className = "k-result";
+    card.innerHTML = ui.icon("clock") + '<div class="k-col" style="gap:0"><b>Coffee with Ana</b><span class="k-mono text-sm k-muted">Tomorrow · 10:00–10:30</span></div>';
+    turn.append(card);
+    ui.enter(card, {});
+    await run.sleep(300);
+    var p2 = document.createElement("p"); p2.className = "k-stream"; turn.append(p2);
+    m.setState("typing");
+    await stream(p2, "You are free from 10:00 to 11:30. I held 10:00 for coffee with Ana.", run);
+    m.setState("idle"); m.arrive();
+  });
+  document.getElementById("again").addEventListener("click", function () { play(); });
+  play();
+})();
+</script>
+</body>
+</html>
