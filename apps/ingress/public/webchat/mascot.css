@@ -550,3 +550,13 @@
   transform-box: fill-box;
   transform-origin: center;
 }
+
+/* The editor's preview crossfades from the look it had (#379): the old figure fades out on top. */
+.mascot-host:has(> .m-leaving) {
+  position: relative;
+}
+.mascot.m-leaving {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}

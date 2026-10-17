@@ -4,6 +4,7 @@
 - Date: 2026-10-16
 - Issue: [#393](https://github.com/guedesdiogo/kelpie/issues/393)
 - Proposed in step 3 of [#378](https://github.com/guedesdiogo/kelpie/issues/378)'s plan, which the owner approved on 2026-10-16. This text goes further than step 3, and he approved it on 2026-10-16: «Aprovo o texto da ADR-0052.»
+- Amended by: [ADR-0056](0056-agent-editor-and-random-mascot.md), `AgentLooks` also names each agent's specialty and remit, and ingress binds `AgentEditor`, its one write path into agents (§7)
 - Amends:
   - [ADR-0023](0023-webchat-access-login.md) §2 to §4: the webchat's socket has a second view, admitted the same way;
   - [ADR-0026](0026-confirmation-by-owner-act.md) §3, so a press names its agent and may come from that view, and the line in its Consequences that a notice doesn't come back once its turn has settled;

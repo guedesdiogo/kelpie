@@ -61,6 +61,12 @@ export interface AgentSettings {
   /** The agent's remit, one line: what it is for, as its identity tells it (ADR-0036 §4). */
   remit: string;
   /**
+   * What the agent specializes in, one line for the owner's eyes, such as "Agenda e e-mail" (#379).
+   * It never reaches the prompt. The main agent's is always "principal", whatever this holds, and
+   * the configuration commands refuse to change it.
+   */
+  specialty: string;
+  /**
    * Skills kept on the agent's AgentHost, not in the vault: a subagent's, which last only as long
    * as it does (ADR-0036 §5).
    */
@@ -94,11 +100,15 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   maxConcurrentTasks: 3,
   spawn: false,
   remit: "",
+  specialty: "",
   skills: [],
   tools: null,
   mascot: null,
 };
 
+/** The longest remit and specialty (#379): one line each. */
+export const MAX_REMIT_CHARS = 200;
+export const MAX_SPECIALTY_CHARS = 40;
 /** The most skills one agent keeps, and the longest one. */
 const MAX_SKILLS = 10;
 const MAX_SKILL_CHARS = 4_000;
@@ -108,10 +118,15 @@ const isToolName = (value: unknown): value is string =>
   typeof value === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(value);
 /**
  * One line of printable text, as a remit or a skill's name. U+2028 and U+2029 aren't `\p{C}`, but
- * some surfaces break the line on them (#397, #401).
+ * some surfaces break the line on them (#397, #401). A variation sequence takes one selector after
+ * its character, as an emoji or an ideograph does (#401); a run of them shows nothing and can carry
+ * hidden text into a prompt (#379).
  */
 const isLine = (value: unknown, max: number): value is string =>
-  typeof value === "string" && value.length <= max && !/[\p{C}\p{Zl}\p{Zp}]/u.test(value);
+  typeof value === "string" &&
+  value.length <= max &&
+  !/[\p{C}\p{Zl}\p{Zp}]/u.test(value) &&
+  !/\p{Variation_Selector}\p{Variation_Selector}/u.test(value);
 /**
  * Whether the text shows a character (#401). Spaces, default-ignorable characters such as the Hangul
  * fillers and variation selectors, and the Braille blank show nothing on their own, and `trim()`
@@ -201,9 +216,18 @@ export function parseSettings(input: unknown): Partial<AgentSettings> | null {
         if (typeof value !== "boolean") return null;
         parsed.spawn = value;
         break;
+      // Empty clears them; otherwise each must show something (#379).
       case "remit":
-        if (!isLine(value, 200)) return null;
+        if (!isLine(value, MAX_REMIT_CHARS) || !(value.trim() === "" || isVisible(value))) {
+          return null;
+        }
         parsed.remit = value.trim();
+        break;
+      case "specialty":
+        if (!isLine(value, MAX_SPECIALTY_CHARS) || !(value.trim() === "" || isVisible(value))) {
+          return null;
+        }
+        parsed.specialty = value.trim();
         break;
       case "skills": {
         const skills = parseSkills(value);

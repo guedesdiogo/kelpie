@@ -2,6 +2,7 @@ import { DIRECTORY_NAME, type Remote, remoteKeySet, verifyAccessJwt } from "@kel
 import type { ChannelWebhooksContract } from "@kelpie/channels";
 import { TELEGRAM_WEBHOOK_PATH } from "@kelpie/channels/telegram";
 import {
+  type AgentEditorContract,
   type AgentLooksContract,
   type DeployProbeContract,
   REGISTRY_NAME,
@@ -18,7 +19,14 @@ import {
   handleGitHubWebhook,
 } from "./github-webhook.ts";
 import { handleTelegramWebhook, type TelegramWebhookDeps } from "./telegram-webhook.ts";
-import { connectWebchat, handleWebchat, WEBCHAT_PATH, type WebchatDeps } from "./webchat.ts";
+import {
+  connectWebchat,
+  handleAgentEdit,
+  handleWebchat,
+  isAgentEditPath,
+  WEBCHAT_PATH,
+  type WebchatDeps,
+} from "./webchat.ts";
 
 export { Directory } from "./directory/directory.ts";
 
@@ -69,8 +77,10 @@ function webchatDeps(env: Env): WebchatDeps {
       (
         env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<Pick<RegistryContract, "list">>
       ).list(),
-    // conversation-runtime's AgentLooks reads each agent's mascot, and nothing else (ADR-0052 §7).
-    mascots: (agentIds) => (env.AGENT_LOOKS as unknown as AgentLooksContract).mascots(agentIds),
+    // conversation-runtime's AgentLooks reads how each agent shows, and nothing else (ADR-0052 §7).
+    looks: (agentIds) => (env.AGENT_LOOKS as unknown as AgentLooksContract).looks(agentIds),
+    // conversation-runtime's AgentEditor: an agent's mascot, name, remit and specialty (#379).
+    editor: env.AGENT_EDITOR as unknown as AgentEditorContract,
     page: (request) => env.ASSETS.fetch(request),
     connect: (name, admission) => connectWebchat(env, name, admission),
   };
@@ -118,6 +128,11 @@ export default {
       (pathname === WEBCHAT_PATH || pathname.startsWith(`${WEBCHAT_PATH}/`))
     ) {
       return handleWebchat(request, webchatDeps(env));
+    }
+
+    // The agent editor's saves (#379); any other method there is an unknown path.
+    if (request.method === "PUT" && isAgentEditPath(pathname)) {
+      return handleAgentEdit(request, webchatDeps(env));
     }
 
     const prefix = `${TELEGRAM_WEBHOOK_PATH}/`;

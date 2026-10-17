@@ -2,8 +2,10 @@ export {
   type Actor,
   type AddAgentResult,
   type AgentConfig,
+  type AgentEditorContract,
   type AgentEntry,
   type AgentHostContract,
+  type AgentLook,
   type AgentLooksContract,
   type AgentRole,
   type AgentSummary,
@@ -35,6 +37,7 @@ export {
   type Mascot,
   mascotFor,
   parseMascot,
+  randomMascot,
 } from "./mascot.ts";
 export {
   type AgentSettings,
@@ -43,6 +46,8 @@ export {
   DEFAULT_SETTINGS,
   isAgentId,
   isAgentName,
+  MAX_REMIT_CHARS,
+  MAX_SPECIALTY_CHARS,
   parseSettings,
   REGISTRY_NAME,
   SETUP_AGENT_ID,

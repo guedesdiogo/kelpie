@@ -157,13 +157,13 @@ export function portsFor(env: Env): ConversationPorts {
   return portsForTesting ?? productionPorts(env);
 }
 
-function productionPorts(env: Env): ConversationPorts {
-  const gateway = env.LLM_GATEWAY as unknown as LlmGatewayBinding;
+/**
+ * The configuration commands this Worker runs (ADR-0013): Master's tools and the webchat's agent
+ * editor (#379), minus the ones that need the Directory, the vault's admin entrypoint or more of
+ * channel-egress than opening a form, which this Worker doesn't bind.
+ */
+export function configCommands(env: Env) {
   const gatewayAdmin = env.LLM_GATEWAY_ADMIN as unknown as LlmGatewayAdminBinding;
-  // A service binding to channel-egress's ChannelEgress entrypoint, which answers with values.
-  const egress = env.CHANNEL_EGRESS as unknown as ChannelEgressContract;
-  // A service binding to context-store's ContextStore entrypoint.
-  const contextStore = env.CONTEXT_STORE as unknown as ContextStoreContract;
   // A service binding to channel-egress's SetupForms entrypoint, which only opens a form, reads the
   // runner's state, which holds no secret, and disconnects a deleted agent's bot (#303).
   const forms = env.SETUP_FORMS as unknown as SetupFormsContract;
@@ -171,7 +171,7 @@ function productionPorts(env: Env): ConversationPorts {
   const registry = env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<RegistryContract>;
   const agentHost = (id: string) =>
     env.AGENT_HOST.getByName(id) as unknown as Remote<AgentHostContract>;
-  const commands = createConfigCommands({
+  return createConfigCommands({
     registry,
     agents: {
       configure: (id, changes, actor) => agentHost(id).configure(changes, actor),
@@ -210,6 +210,18 @@ function productionPorts(env: Env): ConversationPorts {
     },
     vault: { held: notBound, forget: notBound, setDream: notBound },
   });
+}
+
+function productionPorts(env: Env): ConversationPorts {
+  const gateway = env.LLM_GATEWAY as unknown as LlmGatewayBinding;
+  // A service binding to channel-egress's ChannelEgress entrypoint, which answers with values.
+  const egress = env.CHANNEL_EGRESS as unknown as ChannelEgressContract;
+  // A service binding to context-store's ContextStore entrypoint.
+  const contextStore = env.CONTEXT_STORE as unknown as ContextStoreContract;
+  const registry = env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<RegistryContract>;
+  const agentHost = (id: string) =>
+    env.AGENT_HOST.getByName(id) as unknown as Remote<AgentHostContract>;
+  const commands = configCommands(env);
   return {
     async generate(selection, request) {
       const generation = await gateway.generate(selection, request);
@@ -245,9 +257,7 @@ function productionPorts(env: Env): ConversationPorts {
         writeNote: (agentId, input, options) =>
           withTimeout(contextStore.writeNote(agentId, input, options), REMEMBER_TIMEOUT_MS),
       }),
-      // Master's configuration tools (#48, ADR-0048): the same commands as the admin API, minus the
-      // ones that need the Directory, the vault's admin entrypoint or more of channel-egress than
-      // opening a form, which this Worker doesn't bind.
+      // Master's configuration tools (#48, ADR-0048): the same commands as the admin API.
       configurationTools(commands, {
         roleOf: async (id) => (await registry.get(id))?.role ?? null,
         adminOrigin: env.ADMIN_ORIGIN,

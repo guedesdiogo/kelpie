@@ -7,7 +7,7 @@ import {
   type ConfigPorts,
   createConfigCommands,
 } from "../src/commands.ts";
-import { derivedMascot, KELPIE_MASCOT } from "../src/mascot.ts";
+import { derivedMascot, KELPIE_MASCOT, parseMascot } from "../src/mascot.ts";
 import { type AgentSettings, DEFAULT_SETTINGS, SETUP_AGENT_ID } from "../src/settings.ts";
 import type { TaskView } from "../src/tasks.ts";
 
@@ -45,6 +45,10 @@ function fakePorts() {
   ];
   const identities = new Map(seeded.map((entry) => [key(entry.identity), entry]));
   const calls: string[] = [];
+  /** The agent `setMain` made the main agent; the others are specialists. */
+  let main: string | null = null;
+  const roleOf = (id: string) =>
+    id === main ? { ...SPECIALIST, role: "main" as const } : SPECIALIST;
   const models: { settings: object } = { settings: {} };
   /** What channel-egress answers about the runner; a test changes it to another case. */
   const runner: {
@@ -70,14 +74,16 @@ function fakePorts() {
       },
       async get(id) {
         const agent = agents.get(id);
-        return agent ? { id, name: agent.name, ...SPECIALIST } : null;
+        return agent ? { id, name: agent.name, ...roleOf(id) } : null;
       },
       async list() {
-        return [...agents].map(([id, { name }]) => ({ id, name, ...SPECIALIST }));
+        return [...agents].map(([id, { name }]) => ({ id, name, ...roleOf(id) }));
       },
       async setMain(id) {
         calls.push(`setMain ${id}`);
-        return agents.has(id) ? { ok: true } : { ok: false, reason: "unknown_agent" };
+        if (!agents.has(id)) return { ok: false, reason: "unknown_agent" };
+        main = id;
+        return { ok: true };
       },
       async setChat(id, chat) {
         calls.push(`setChat ${id} ${chat}`);
@@ -103,7 +109,8 @@ function fakePorts() {
       },
     },
     agents: {
-      async configure(id, changes) {
+      async configure(id, changes, actor) {
+        calls.push(`configure ${id} ${Object.keys(changes).join(",")} ${actor.via}`);
         const agent = agents.get(id);
         if (!agent) throw new Error("unknown agent");
         if (changes.systemPrompt && changes.systemPrompt !== agent.settings.systemPrompt) {
@@ -278,8 +285,10 @@ describe("configuration commands", () => {
   });
 
   it("shows the mascot an agent shows: its default until the owner picks one (ADR-0045 §2)", async () => {
-    const commands = createConfigCommands(fakePorts().ports);
-    await commands.createAgent(owner, { id: "sales", name: "Sales" });
+    const { ports } = fakePorts();
+    const commands = createConfigCommands(ports);
+    // An agent created before #379 has no mascot of its own.
+    await ports.registry.add("sales", "Sales", owner);
     expect(await commands.getAgent(owner, { id: "sales" })).toMatchObject({
       ok: true,
       value: { settings: { mascot: null }, mascot: derivedMascot("sales") },
@@ -297,6 +306,69 @@ describe("configuration commands", () => {
         settings: { mascot: { ...picked, shape: "triangle" } },
       }),
     ).toEqual({ ok: false, reason: "invalid_input" });
+  });
+
+  it("gives a new agent a random mascot, saved as its setting, and never draws again (#379)", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+    await commands.createAgent(owner, { id: "sales", name: "Sales" });
+    const shown = await commands.getAgent(owner, { id: "sales" });
+    if (!shown.ok) throw new Error("no agent");
+    expect(shown.value.settings.mascot).not.toBeNull();
+    expect(parseMascot(shown.value.settings.mascot)).toEqual(shown.value.settings.mascot);
+    expect(shown.value.mascot).toEqual(shown.value.settings.mascot);
+    expect(calls).toContain("configure sales mascot admin-api");
+
+    // Creating it again changes nothing: its look stays the one it got.
+    await commands.createAgent(owner, { id: "sales", name: "Sales" });
+    expect(calls.filter((call) => call.startsWith("configure "))).toHaveLength(1);
+    expect(await commands.getAgent(owner, { id: "sales" })).toMatchObject({
+      value: { mascot: shown.value.mascot },
+    });
+  });
+
+  it("still creates the agent when its mascot can't be saved: it shows its default (#379)", async () => {
+    const { ports } = fakePorts();
+    ports.agents.configure = async () => {
+      throw new Error("AgentHost unavailable");
+    };
+    const commands = createConfigCommands(ports);
+    expect(await commands.createAgent(owner, { id: "sales", name: "Sales" })).toEqual({
+      ok: true,
+      value: { id: "sales", name: "Sales", created: true },
+    });
+    expect(await commands.getAgent(owner, { id: "sales" })).toMatchObject({
+      value: { mascot: derivedMascot("sales") },
+    });
+  });
+
+  it("keeps the main agent's specialty, and takes any other agent's (#379)", async () => {
+    const commands = createConfigCommands(fakePorts().ports);
+    await commands.createAgent(owner, { id: "kelpie", name: "Kelpie" });
+    await commands.createAgent(owner, { id: "agenda", name: "Agenda" });
+    await commands.setMainAgent(owner, { id: "kelpie" });
+
+    expect(
+      await commands.configureAgent(owner, { id: "kelpie", settings: { specialty: "Agenda" } }),
+    ).toEqual({ ok: false, reason: "not_allowed" });
+    expect(
+      await commands.configureAgent(owner, { id: "kelpie", settings: { remit: "Your day." } }),
+    ).toMatchObject({ ok: true, value: { settings: { remit: "Your day." } } });
+    expect(
+      await commands.configureAgent(owner, {
+        id: "agenda",
+        settings: { specialty: "Agenda e e-mail" },
+      }),
+    ).toMatchObject({ ok: true, value: { settings: { specialty: "Agenda e e-mail" } } });
+
+    // The rule follows the role: once Agenda is the main agent, its specialty is fixed too.
+    await commands.setMainAgent(owner, { id: "agenda" });
+    expect(
+      await commands.configureAgent(owner, { id: "agenda", settings: { specialty: "" } }),
+    ).toEqual({ ok: false, reason: "not_allowed" });
+    expect(
+      await commands.configureAgent(owner, { id: "kelpie", settings: { specialty: "Rotina" } }),
+    ).toMatchObject({ ok: true });
   });
 
   it("lets the owner read and set the instance's model settings (#289)", async () => {

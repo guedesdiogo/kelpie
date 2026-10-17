@@ -94,6 +94,38 @@ describe("parseSettings", () => {
     expect(parseSettings(input)).toBeNull();
   });
 
+  it("takes a specialty, one line of up to 40 characters, none by default (#379)", () => {
+    expect(DEFAULT_SETTINGS.specialty).toBe("");
+    expect(parseSettings({ specialty: " Agenda e e-mail " })).toEqual({
+      specialty: "Agenda e e-mail",
+    });
+    expect(parseSettings({ specialty: "" })).toEqual({ specialty: "" });
+    expect(parseSettings({ specialty: "a".repeat(40) })).toEqual({ specialty: "a".repeat(40) });
+    const separator = String.fromCharCode(0x2028);
+    for (const specialty of ["a".repeat(41), "Two\nlines", `Two${separator}lines`, 4, null]) {
+      expect(parseSettings({ specialty }), JSON.stringify(specialty)).toBeNull();
+    }
+  });
+
+  it("refuses a remit or a specialty that shows nothing, or a run of variation selectors (#379)", () => {
+    const hidden = String.fromCodePoint(0xfe01, 0xe0100, 0xe0101);
+    for (const input of [
+      { remit: String.fromCodePoint(0x3164, 0x2800) },
+      { specialty: String.fromCodePoint(0x3164) },
+      { remit: `Agenda${hidden}` },
+      { specialty: `Agenda${hidden}` },
+    ]) {
+      expect(parseSettings(input), JSON.stringify(input)).toBeNull();
+    }
+    // Empty still clears them, and a variation sequence keeps its one selector.
+    expect(parseSettings({ remit: "", specialty: "" })).toEqual({ remit: "", specialty: "" });
+    const heart = `Agenda ${String.fromCodePoint(0x2764, 0xfe0f)}`;
+    expect(parseSettings({ specialty: heart })).toEqual({ specialty: heart });
+    const ideograph = String.fromCodePoint(0x845b, 0xe0100);
+    expect(parseSettings({ remit: ideograph })).toEqual({ remit: ideograph });
+    expect(isAgentName(`Agenda${hidden}`)).toBe(false);
+  });
+
   it("keeps a skill's name with an emoji's presentation selector (#401)", () => {
     const skills = [{ name: "Fact check \u2764\uFE0F", instructions: "x" }];
     expect(parseSettings({ skills })).toEqual({ skills });

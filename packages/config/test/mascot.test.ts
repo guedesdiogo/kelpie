@@ -10,6 +10,7 @@ import {
   type Mascot,
   mascotFor,
   parseMascot,
+  randomMascot,
 } from "../src/mascot.ts";
 import { DEFAULT_SETTINGS, parseSettings } from "../src/settings.ts";
 
@@ -149,5 +150,37 @@ describe("derivedMascot", () => {
     expect(heads.size).toBe(13);
     const accessories = new Set(ids.map((id) => JSON.stringify(derivedMascot(id).accessory)));
     expect(accessories.size).toBe(10);
+  });
+});
+
+describe("randomMascot (#379)", () => {
+  it("draws a valid mascot from every option there is now", () => {
+    const looks = Array.from({ length: 400 }, () => randomMascot());
+    for (const look of looks) expect(parseMascot(look)).toEqual(look);
+    expect(new Set(looks.map((look) => look.shape)).size).toBe(MASCOT_SHAPES.length);
+    expect(new Set(looks.map((look) => look.color)).size).toBe(MASCOT_COLORS.length);
+    expect(new Set(looks.map((look) => look.eyes)).size).toBe(MASCOT_EYES.length);
+    expect(new Set(looks.map((look) => JSON.stringify(look.head))).size).toBe(13);
+    expect(new Set(looks.map((look) => JSON.stringify(look.accessory))).size).toBe(10);
+    expect(new Set(looks.map((look) => look.cheeks))).toEqual(new Set([true, false]));
+  });
+
+  it("takes each option from the draw it is given", () => {
+    expect(randomMascot(() => 0)).toEqual({
+      shape: "mark",
+      color: "kelp",
+      eyes: "dots",
+      cheeks: true,
+      head: { type: "none" },
+      accessory: { type: "none" },
+    });
+    expect(randomMascot(() => 0.999)).toEqual({
+      shape: "block",
+      color: "slate",
+      eyes: "buttons",
+      cheeks: false,
+      head: { type: "leaves", variation: "kelp" },
+      accessory: { type: "belt", variation: "collar" },
+    });
   });
 });

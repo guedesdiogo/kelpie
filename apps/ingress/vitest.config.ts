@@ -76,12 +76,14 @@ export class Registry extends DurableObject {
 export class SetupEvents extends WorkerEntrypoint {
   setupDone() {}
 }
-// Each agent's mascot for the webchat's list (ADR-0052 §7): none in the routing tests.
+// How each agent shows in the webchat's list (ADR-0052 §7): nothing in the routing tests.
 export class AgentLooks extends WorkerEntrypoint {
-  mascots() {
+  looks() {
     return {};
   }
 }
+// The agent editor (#379): the routing tests never reach it, since Access isn't configured there.
+export class AgentEditor extends WorkerEntrypoint {}
 export class DeployProbe extends WorkerEntrypoint {
   probe() {
     return { registry: "ok", agentHosts: "ok", gateway: "ok" };

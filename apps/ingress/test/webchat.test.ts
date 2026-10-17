@@ -1,10 +1,11 @@
 import { env, exports } from "cloudflare:workers";
 import type { Admission, Verification } from "@kelpie/access";
-import { type AgentEntry, KELPIE_MASCOT } from "@kelpie/config";
+import { type Actor, type AgentEntry, KELPIE_MASCOT, type Mascot } from "@kelpie/config";
 import { WEBCHAT_ADMISSION_HEADER } from "@kelpie/conversation/contract";
 import { describe, expect, it, vi } from "vitest";
 import {
   connectWebchat,
+  handleAgentEdit,
   handleWebchat,
   MASCOTS_WITHIN_MS,
   type WebchatDeps,
@@ -22,13 +23,27 @@ const REGISTRY: AgentEntry[] = [
   { id: "helper-1", name: "Helper", role: "subagent", owner: "agenda", chat: false },
 ];
 
+/** The AgentEditor as conversation-runtime answers, keeping what it was asked to set. */
+function editorFake() {
+  const done = <T>(value: T) => ({ ok: true as const, value });
+  return {
+    setMascot: vi.fn(async (_actor: Actor, _id: string, mascot: unknown) => done(mascot as Mascot)),
+    rename: vi.fn(async (_actor: Actor, _id: string, name: unknown) => done(String(name).trim())),
+    setRemit: vi.fn(async (_actor: Actor, _id: string, remit: unknown) => done(String(remit))),
+    setSpecialty: vi.fn(async (_actor: Actor, _id: string, specialty: unknown) =>
+      done(String(specialty)),
+    ),
+  } satisfies WebchatDeps["editor"];
+}
+
 function deps(overrides: Partial<WebchatDeps> = {}) {
   const fakes = {
     authenticate: vi.fn(async (): Promise<Verification> => ({ ok: true, sub: "access-sub" })),
     admit: vi.fn(async (): Promise<Admission> => owner),
     agentExists: vi.fn(async (agentId: string) => agentId === "assistant"),
     listAgents: vi.fn(async () => REGISTRY),
-    mascots: vi.fn(async (): Promise<Record<string, unknown>> => ({})),
+    looks: vi.fn(async (): Promise<Record<string, unknown>> => ({})),
+    editor: editorFake(),
     page: vi.fn(async () => new Response("<!doctype html>", { status: 200 })),
     connect: vi.fn(async () => new Response("socket", { status: 200 })),
     ...overrides,
@@ -139,15 +154,15 @@ describe("the webchat's agent list", () => {
 
   it("names each admitted agent's mascot, as AgentLooks reads it, and only a valid one (ADR-0052 §7)", async () => {
     const fakes = deps({
-      mascots: vi.fn(async () => ({
-        assistant: KELPIE_MASCOT,
-        agenda: { ...KELPIE_MASCOT, shape: "<img src=x onerror=alert(1)>" },
+      looks: vi.fn(async () => ({
+        assistant: { mascot: KELPIE_MASCOT },
+        agenda: { mascot: { ...KELPIE_MASCOT, shape: "<img src=x onerror=alert(1)>" } },
       })),
     });
     const { agents } = (await (await handleWebchat(listRequest(), fakes)).json()) as {
       agents: unknown[];
     };
-    expect(fakes.mascots).toHaveBeenCalledWith(["atlas", "assistant", "agenda"]);
+    expect(fakes.looks).toHaveBeenCalledWith(["atlas", "assistant", "agenda"]);
     expect(agents).toEqual([
       { id: "atlas", name: "Atlas", main: false },
       { id: "assistant", name: "Assistant", main: true, mascot: KELPIE_MASCOT },
@@ -155,9 +170,41 @@ describe("the webchat's agent list", () => {
     ]);
   });
 
+  it("names each agent's specialty and remit for its editor, as one line each (#379)", async () => {
+    const fakes = deps({
+      looks: vi.fn(async () => ({
+        assistant: { mascot: KELPIE_MASCOT, specialty: "", remit: "Your day." },
+        agenda: { mascot: KELPIE_MASCOT, specialty: "Agenda e e-mail", remit: "Meetings." },
+        atlas: { mascot: KELPIE_MASCOT, specialty: 7, remit: "a".repeat(300) },
+      })),
+    });
+    const { agents } = (await (await handleWebchat(listRequest(), fakes)).json()) as {
+      agents: unknown[];
+    };
+    expect(agents).toEqual([
+      { id: "atlas", name: "Atlas", main: false, mascot: KELPIE_MASCOT },
+      {
+        id: "assistant",
+        name: "Assistant",
+        main: true,
+        mascot: KELPIE_MASCOT,
+        specialty: "",
+        remit: "Your day.",
+      },
+      {
+        id: "agenda",
+        name: "Agenda",
+        main: false,
+        mascot: KELPIE_MASCOT,
+        specialty: "Agenda e e-mail",
+        remit: "Meetings.",
+      },
+    ]);
+  });
+
   it("lists the agents without their mascots when AgentLooks fails", async () => {
     const fakes = deps({
-      mascots: vi.fn(async () => {
+      looks: vi.fn(async () => {
         throw new Error("down");
       }),
     });
@@ -167,7 +214,7 @@ describe("the webchat's agent list", () => {
   });
 
   it("lists the agents without their mascots when AgentLooks is slow", async () => {
-    const fakes = deps({ mascots: vi.fn(() => new Promise<Record<string, unknown>>(() => {})) });
+    const fakes = deps({ looks: vi.fn(() => new Promise<Record<string, unknown>>(() => {})) });
     const started = Date.now();
     const response = await handleWebchat(listRequest(), fakes);
     expect(response.status).toBe(200);
@@ -379,5 +426,280 @@ describe("the webchat's route", () => {
       });
       expect(response.status).toBe(404);
     }
+  });
+});
+
+describe("the webchat's agent editor (#379)", () => {
+  const PICKED: Mascot = { ...KELPIE_MASCOT, shape: "star", color: "pink" };
+  const edit = (
+    path: string,
+    body: unknown,
+    { headers = {}, method = "PUT" }: { headers?: Record<string, string>; method?: string } = {},
+  ) =>
+    new Request(`${ORIGIN}${path}`, {
+      method,
+      headers: {
+        Origin: ORIGIN,
+        "Sec-Fetch-Site": "same-origin",
+        "Content-Type": "application/json",
+        ...headers,
+      },
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    });
+  const mascotOf = (agent = "assistant", body: unknown = PICKED, options = {}) =>
+    edit(`/webchat/agents/${agent}/mascot`, body, options);
+  const profileOf = (body: unknown, agent = "assistant") =>
+    edit(`/webchat/agents/${agent}/profile`, body);
+  const owned = { userId: "u-owner", role: "owner", via: "webchat" };
+
+  it("saves the owner's mascot, whole, as the actor the Directory resolved", async () => {
+    const fakes = deps();
+    const response = await handleAgentEdit(mascotOf(), fakes);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ mascot: PICKED });
+    expect(fakes.admit).toHaveBeenCalledWith(
+      { channel: "cloudflare-access", channelUserId: "access-sub" },
+      "assistant",
+    );
+    expect(fakes.editor.setMascot).toHaveBeenCalledWith(owned, "assistant", PICKED);
+  });
+
+  it("saves the profile's fields the page sends, the specialty first, and answers what they now are", async () => {
+    const fakes = deps();
+    const response = await handleAgentEdit(
+      profileOf({ name: " Agenda ", remit: "Meetings.", specialty: "Agenda e e-mail" }),
+      fakes,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      name: "Agenda",
+      remit: "Meetings.",
+      specialty: "Agenda e e-mail",
+    });
+    const order = [
+      vi.mocked(fakes.editor.setSpecialty).mock.invocationCallOrder[0],
+      vi.mocked(fakes.editor.setRemit).mock.invocationCallOrder[0],
+      vi.mocked(fakes.editor.rename).mock.invocationCallOrder[0],
+    ];
+    expect(order).toEqual([...order].sort((a, b) => (a ?? 0) - (b ?? 0)));
+
+    const one = deps();
+    expect(await (await handleAgentEdit(profileOf({ remit: "" }), one)).json()).toEqual({
+      remit: "",
+    });
+    expect(one.editor.rename).not.toHaveBeenCalled();
+    expect(one.editor.setSpecialty).not.toHaveBeenCalled();
+  });
+
+  it("refuses a request without a valid Access login, as the page does", async () => {
+    const off = deps({ authenticate: async () => ({ ok: false, reason: "not_configured" }) });
+    expect((await handleAgentEdit(mascotOf(), off)).status).toBe(404);
+    const expired = deps({ authenticate: async () => ({ ok: false, reason: "expired" }) });
+    expect((await handleAgentEdit(mascotOf(), expired)).status).toBe(403);
+    expect(expired.admit).not.toHaveBeenCalled();
+    expect(expired.editor.setMascot).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["another origin", { Origin: "https://evil.test" }],
+    ["no origin", { Origin: "" }],
+    ["a cross-site fetch", { "Sec-Fetch-Site": "cross-site" }],
+    ["a same-site fetch from another origin", { "Sec-Fetch-Site": "same-site" }],
+    ["no fetch metadata", { "Sec-Fetch-Site": "" }],
+  ])("refuses %s, before reading anything", async (_label, headers) => {
+    const fakes = deps();
+    const response = await handleAgentEdit(mascotOf("assistant", PICKED, { headers }), fakes);
+    expect(response.status).toBe(403);
+    expect(fakes.admit).not.toHaveBeenCalled();
+    expect(fakes.editor.setMascot).not.toHaveBeenCalled();
+  });
+
+  it("refuses anyone the Directory doesn't resolve to the owner of an agent it admits", async () => {
+    const member = deps({
+      admit: vi.fn(
+        async (): Promise<Admission> => ({
+          admitted: true,
+          userId: "u-member",
+          role: "member",
+          timeZone: null,
+        }),
+      ),
+    });
+    expect((await handleAgentEdit(mascotOf(), member)).status).toBe(403);
+    expect(member.editor.setMascot).not.toHaveBeenCalled();
+    const stranger = deps({
+      admit: vi.fn(async (): Promise<Admission> => ({ admitted: false, reason: "no_grant" })),
+    });
+    expect((await handleAgentEdit(mascotOf(), stranger)).status).toBe(403);
+    expect(stranger.editor.setMascot).not.toHaveBeenCalled();
+  });
+
+  it("refuses an agent the registry doesn't list, or an id that isn't one", async () => {
+    const fakes = deps();
+    for (const agent of ["ghost", "Assistant", "../assistant", "%2e%2e"]) {
+      expect((await handleAgentEdit(mascotOf(agent), fakes)).status, agent).toBe(404);
+    }
+    expect((await handleAgentEdit(edit("/webchat/agents/assistant/soul", {}), fakes)).status).toBe(
+      404,
+    );
+    expect(fakes.admit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a shape it doesn't know", { ...KELPIE_MASCOT, shape: "triangle" }],
+    ["another setting beside it", { ...KELPIE_MASCOT, tier: "frontier" }],
+    ["a mascot wrapped in another field", { mascot: KELPIE_MASCOT }],
+    ["null, which would go back to the default", null],
+    ["text that isn't JSON", "{not json"],
+  ])("refuses %s as a mascot", async (_label, body) => {
+    const fakes = deps();
+    expect((await handleAgentEdit(mascotOf("assistant", body), fakes)).status).toBe(400);
+    expect(fakes.editor.setMascot).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["no field", {}],
+    ["a field it doesn't take", { name: "Agenda", tier: "frontier" }],
+    ["a name that breaks the line", { name: "Two\nlines" }],
+    ["a name that shows nothing", { name: "   " }],
+    ["a remit that is too long", { remit: "a".repeat(201) }],
+    ["a specialty that is too long", { specialty: "a".repeat(41) }],
+    ["a field that isn't text", { remit: 7 }],
+    ["a list", [{ name: "Agenda" }]],
+  ])("refuses %s as a profile, before changing any field", async (_label, body) => {
+    const fakes = deps();
+    expect((await handleAgentEdit(profileOf(body), fakes)).status).toBe(400);
+    expect(fakes.editor.rename).not.toHaveBeenCalled();
+    expect(fakes.editor.setRemit).not.toHaveBeenCalled();
+    expect(fakes.editor.setSpecialty).not.toHaveBeenCalled();
+  });
+
+  it("takes only a JSON PUT of a small body", async () => {
+    const fakes = deps();
+    const text = await handleAgentEdit(
+      mascotOf("assistant", PICKED, { headers: { "Content-Type": "text/plain" } }),
+      fakes,
+    );
+    expect(text.status).toBe(415);
+    const big = await handleAgentEdit(profileOf({ remit: "a".repeat(5_000) }), deps());
+    expect(big.status).toBe(413);
+    expect(fakes.editor.setMascot).not.toHaveBeenCalled();
+  });
+
+  it("reads at most 4 KB of a body, counted in bytes, even with no Content-Length", async () => {
+    // A stream that names no length: each pull hands over 1 KB, and counts it.
+    let pulled = 0;
+    const stream = new ReadableStream({
+      pull(controller) {
+        pulled += 1;
+        if (pulled > 64) controller.close();
+        else controller.enqueue(new TextEncoder().encode("a".repeat(1_024)));
+      },
+    });
+    const request = new Request(`${ORIGIN}/webchat/agents/assistant/profile`, {
+      method: "PUT",
+      headers: {
+        Origin: ORIGIN,
+        "Sec-Fetch-Site": "same-origin",
+        "Content-Type": "application/json",
+      },
+      body: stream,
+    });
+    expect(request.headers.get("content-length")).toBeNull();
+    const fakes = deps();
+    expect((await handleAgentEdit(request, fakes)).status).toBe(413);
+    expect(pulled).toBeLessThan(10);
+    // Two bytes a letter: 2,100 of them pass a count of characters, not of bytes.
+    expect((await handleAgentEdit(profileOf({ remit: "ç".repeat(2_100) }), deps())).status).toBe(
+      413,
+    );
+    expect(fakes.editor.setRemit).not.toHaveBeenCalled();
+  });
+
+  it("reads no body for a login the Directory doesn't resolve to the owner", async () => {
+    const member = deps({
+      admit: vi.fn(
+        async (): Promise<Admission> => ({
+          admitted: true,
+          userId: "u-member",
+          role: "member",
+          timeZone: null,
+        }),
+      ),
+    });
+    const request = mascotOf();
+    expect((await handleAgentEdit(request, member)).status).toBe(403);
+    expect(request.bodyUsed).toBe(false);
+  });
+
+  it("says which profile fields saved when a later one fails, and checks what the editor answers", async () => {
+    const failing = deps({
+      editor: {
+        ...editorFake(),
+        rename: vi.fn(async () => {
+          throw new Error("Registry unavailable");
+        }),
+      },
+    });
+    const response = await handleAgentEdit(
+      profileOf({ name: "Agendas", remit: "Meetings.", specialty: "Agenda" }),
+      failing,
+    );
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ saved: { specialty: "Agenda", remit: "Meetings." } });
+    // A value that isn't a mascot never goes back to the page.
+    const odd = deps({
+      editor: {
+        ...editorFake(),
+        setMascot: vi.fn(async () => ({ ok: true, value: { shape: "<b>" } }) as never),
+      },
+    });
+    expect((await handleAgentEdit(mascotOf(), odd)).status).toBe(503);
+  });
+
+  it("answers the editor's refusals with their status, and says so for the main agent's specialty", async () => {
+    const refusing = (reason: string) =>
+      deps({
+        editor: {
+          ...editorFake(),
+          setMascot: vi.fn(async () => ({ ok: false, reason }) as never),
+          setSpecialty: vi.fn(async () => ({ ok: false, reason }) as never),
+        },
+      });
+    expect((await handleAgentEdit(mascotOf(), refusing("forbidden"))).status).toBe(403);
+    expect((await handleAgentEdit(mascotOf(), refusing("unknown_agent"))).status).toBe(404);
+    expect((await handleAgentEdit(mascotOf(), refusing("invalid_input"))).status).toBe(400);
+    const main = refusing("not_allowed");
+    expect(
+      (await handleAgentEdit(profileOf({ specialty: "Agenda", name: "Kelpie" }), main)).status,
+    ).toBe(409);
+    // The field refused first: nothing after it was asked.
+    expect(main.editor.rename).not.toHaveBeenCalled();
+    const down = deps({
+      editor: {
+        ...editorFake(),
+        setMascot: vi.fn(async () => {
+          throw new Error("conversation-runtime is down");
+        }),
+      },
+    });
+    expect((await handleAgentEdit(mascotOf(), down)).status).toBe(503);
+  });
+});
+
+describe("the agent editor's route", () => {
+  it("answers 404 in production wiring while Access isn't configured", async () => {
+    const response = await exports.default.fetch(`${ORIGIN}/webchat/agents/assistant/mascot`, {
+      method: "PUT",
+      headers: {
+        Origin: ORIGIN,
+        "Sec-Fetch-Site": "same-origin",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(KELPIE_MASCOT),
+    });
+    expect(response.status).toBe(404);
   });
 });

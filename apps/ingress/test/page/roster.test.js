@@ -58,6 +58,7 @@ let note;
 let waiting;
 let refused;
 let openOwnCard;
+let edits;
 
 function make(agents = AGENTS, current = "assistant") {
   document.body.innerHTML =
@@ -68,6 +69,7 @@ function make(agents = AGENTS, current = "assistant") {
   waiting = [];
   refused = vi.fn();
   openOwnCard = vi.fn(() => true);
+  edits = [];
   roster = new Roster(nav, {
     texts: TEXTS.en,
     locale: "en",
@@ -85,6 +87,7 @@ function make(agents = AGENTS, current = "assistant") {
     onRefused: refused,
     onAnnounce: () => {},
     openOwnCard,
+    onEdit: (agent, how) => edits.push({ agent, ...how }),
   });
   roster.setAgents(agents, current);
 }
@@ -120,6 +123,92 @@ beforeEach(() => {
   setMotion("still");
 });
 afterEach(() => vi.useRealTimers());
+
+describe("the pencil on each mascot (#379)", () => {
+  const penOf = (name) => rowOf(name).querySelector(".pen");
+
+  it("is a button on each mascot, named for its agent and saying so in a tooltip", () => {
+    make();
+    expect(penOf("Kelpie").getAttribute("aria-label")).toBe("Edit Kelpie");
+    expect(penOf("Agenda").getAttribute("aria-label")).toBe("Edit Agenda");
+    expect(penOf("Agenda").querySelector(".tip").textContent).toBe("Edit Agenda");
+    expect(penOf("Agenda").hasAttribute("title")).toBe(false);
+    expect(penOf("Agenda").getAttribute("aria-controls")).toBe("editor");
+    // An agent the list drew no mascot for has nothing to edit from.
+    expect(penOf("Pesquisa").hidden).toBe(true);
+    expect(penOf("Agenda").hidden).toBe(false);
+  });
+
+  it("joins the row's tab order after its link, and only the row the list's tab stop is on", () => {
+    make();
+    const link = rowOf("Kelpie").querySelector(".row-link");
+    // In the page's order, so Tab reaches the link first, then its pencil.
+    expect(link.compareDocumentPosition(penOf("Kelpie")) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(penOf("Kelpie").tabIndex).toBe(0);
+    expect(penOf("Agenda").tabIndex).toBe(-1);
+    rowOf("Kelpie").querySelector(".row-link").focus();
+    rowOf("Kelpie")
+      .querySelector(".row-link")
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(penOf("Agenda").tabIndex).toBe(0);
+    expect(penOf("Kelpie").tabIndex).toBe(-1);
+  });
+
+  it("shows while the pointer rests on the mascot, though the row's link takes the hover", () => {
+    make();
+    const box = rowOf("Agenda").querySelector(".arow");
+    const avatar = box.querySelector(".avw");
+    avatar.getBoundingClientRect = () => ({
+      left: 10,
+      top: 10,
+      right: 50,
+      bottom: 50,
+      width: 40,
+      height: 40,
+    });
+    const move = (x, y) =>
+      box.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: x, clientY: y }));
+    move(30, 30);
+    expect(box.hasAttribute("data-mascot-hover")).toBe(true);
+    move(120, 30);
+    expect(box.hasAttribute("data-mascot-hover")).toBe(false);
+    move(30, 30);
+    box.dispatchEvent(new PointerEvent("pointerleave"));
+    expect(box.hasAttribute("data-mascot-hover")).toBe(false);
+  });
+
+  it("opens that row's agent's editor, from the row, and says when it is open", () => {
+    make();
+    // A pointer's click counts its presses; a key's counts none.
+    penOf("Agenda").dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+    penOf("Kelpie").click();
+    expect(edits).toEqual([
+      { agent: AGENTS[1], trigger: penOf("Agenda"), from: rowOf("Agenda"), keyboard: false },
+      { agent: AGENTS[0], trigger: penOf("Kelpie"), from: rowOf("Kelpie"), keyboard: true },
+    ]);
+    roster.editing("agenda");
+    expect(penOf("Agenda").getAttribute("aria-expanded")).toBe("true");
+    expect(penOf("Kelpie").getAttribute("aria-expanded")).toBe("false");
+    roster.editing(null);
+    expect(penOf("Agenda").getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("follows a save: a new name, and a new mascot drawn with its jump", () => {
+    make();
+    const row = rowOf("Agenda");
+    const change = vi.spyOn(row.querySelector(".mascot-host").mascot, "change");
+    const look = { ...KELPIE, color: "pink" };
+    roster.setAgents(
+      [AGENTS[0], { ...AGENTS[1], name: "Agendas", mascot: look }, AGENTS[2]],
+      "assistant",
+    );
+    expect(row.querySelector(".row-link").textContent).toBe("Agendas");
+    expect(row.querySelector(".pen").getAttribute("aria-label")).toBe("Edit Agendas");
+    expect(change).toHaveBeenCalledWith(look);
+  });
+});
 
 describe("the roster's rows", () => {
   it("lists every agent in the Registry's order, each a link to its conversation", () => {

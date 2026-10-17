@@ -438,6 +438,50 @@ export class Mascot {
     this.excite();
   }
 
+  /**
+   * The editor's preview tries a look on (#379): the figure crossfades from the old one in
+   * --dur-fade, and the part that changed moves. A shape squashes and settles with --spring-pop, a
+   * head or an accessory drops in with --spring-moment-fast, new eyes blink once, and a color only
+   * crossfades, with no overshoot. A draw of every axis is the Excite: a 12 px hop and a blink.
+   * Each change starts from the figure as it is now, without queueing; in Still it only fades.
+   */
+  restyle(mascot, axis) {
+    if (JSON.stringify(mascot) === JSON.stringify(this.mascot)) return;
+    const old = this.svg;
+    this.mascot = mascot;
+    this.clearTimers();
+    this.render();
+    old.classList.add("m-leaving");
+    this.host.append(old);
+    animate(old, [{ opacity: 1 }, { opacity: 0 }], {
+      duration: 150,
+      easing: "cubic-bezier(0, 0, .2, 1)",
+      fill: "forwards",
+    }).finished.then(
+      () => old.remove(),
+      () => old.remove(),
+    );
+    if (world.motion === "still") return;
+    if (axis === "random") {
+      this.excite();
+    } else if (axis === "shape") {
+      this.play(this.squash, [{ transform: "scale(1.1, .88)" }, { transform: "none" }], {
+        ...SPRINGS.pop,
+        from: false,
+      });
+    } else if (axis === "head" || axis === "accessory") {
+      const name = axis === "head" ? ".m-head" : ".m-acc";
+      for (const group of this.svg.querySelectorAll(name)) {
+        this.play(group, [{ transform: "translate(0px, -8px)" }, { transform: "none" }], {
+          ...SPRINGS.momentFast,
+          from: false,
+        });
+      }
+    } else if (axis === "eyes" || axis === "cheeks") {
+      this.blink();
+    }
+  }
+
   /** The setting changed: stop what it no longer allows, keep the pose. */
   settle() {
     if (world.motion !== "alive" && this.state === "dozing") {
