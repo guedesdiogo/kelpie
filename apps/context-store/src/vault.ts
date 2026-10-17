@@ -429,6 +429,7 @@ CREATE TABLE IF NOT EXISTS staged_skills (
   name TEXT NOT NULL,
   origin TEXT NOT NULL,
   hash TEXT NOT NULL,
+  blocked INTEGER NOT NULL DEFAULT 0,
   at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS staged_files (
@@ -557,6 +558,8 @@ interface StagedRow {
   name: string;
   origin: SkillOrigin;
   hash: string;
+  /** Its scan found hidden characters: it never installs (ADR-0058 §5). */
+  blocked: boolean;
   files: SkillFile[];
 }
 
@@ -995,7 +998,9 @@ export class Vault extends DurableObject<VaultEnv> {
       return { ok: false, reason: "unavailable" };
     }
     this.#dropStaged();
-    const { id, hash } = await this.#stage(agentId, skill, origin);
+    // Hidden characters block the install here, not only in the page (ADR-0058 §5).
+    const scan = scanSkill(skill.files);
+    const { id, hash } = await this.#stage(agentId, skill, origin, scan.verdict === "blocked");
     const skillMd = skill.files[0]?.content ?? "";
     return {
       ok: true,
@@ -1014,7 +1019,7 @@ export class Vault extends DurableObject<VaultEnv> {
         skillMd,
         bytes: skill.bytes,
         hash,
-        scan: scanSkill(skill.files),
+        scan,
         replaces: await this.#replaces(agentId, skill),
       },
     };
@@ -1025,18 +1030,21 @@ export class Vault extends DurableObject<VaultEnv> {
     agentId: string,
     skill: Pick<ParsedSkill, "name" | "files">,
     origin: SkillOrigin,
+    blocked = false,
   ): Promise<{ id: string; hash: string }> {
     const id = stageId();
     const hash = await skillHash(skill.files);
     const now = Date.now();
     this.ctx.storage.transactionSync(() => {
       this.#exec(
-        "INSERT INTO staged_skills (id, agent, name, origin, hash, at) VALUES (?, ?, ?, ?, ?, ?)",
+        `INSERT INTO staged_skills (id, agent, name, origin, hash, blocked, at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         id,
         agentId,
         skill.name,
         JSON.stringify(origin),
         hash,
+        blocked ? 1 : 0,
         now,
       );
       for (const file of skill.files) {
@@ -1338,8 +1346,11 @@ export class Vault extends DurableObject<VaultEnv> {
       let record: SavedSkill["record"];
       if (change.file === "install") {
         const row = staged.get(change.staged);
-        if (!row || row.hash !== change.hash) {
-          plan.outcomes.push({ status: "refused", reason: row ? "invalid" : "staged_gone" });
+        if (!row || row.hash !== change.hash || row.blocked) {
+          plan.outcomes.push({
+            status: "refused",
+            reason: !row ? "staged_gone" : row.blocked ? "blocked" : "invalid",
+          });
           continue;
         }
         files = row.files;
@@ -1424,8 +1435,8 @@ export class Vault extends DurableObject<VaultEnv> {
   }
 
   #staged(agentId: string, id: string): StagedRow | null {
-    const row = this.#exec<{ name: string; origin: string; hash: string }>(
-      "SELECT name, origin, hash FROM staged_skills WHERE id = ? AND agent = ? AND at > ?",
+    const row = this.#exec<{ name: string; origin: string; hash: string; blocked: number }>(
+      "SELECT name, origin, hash, blocked FROM staged_skills WHERE id = ? AND agent = ? AND at > ?",
       id,
       agentId,
       Date.now() - STAGED_FOR_MS,
@@ -1439,7 +1450,13 @@ export class Vault extends DurableObject<VaultEnv> {
       content: file.content,
       ...(file.binary ? { binary: true as const } : {}),
     }));
-    return { name: row.name, origin: JSON.parse(row.origin) as SkillOrigin, hash: row.hash, files };
+    return {
+      name: row.name,
+      origin: JSON.parse(row.origin) as SkillOrigin,
+      hash: row.hash,
+      blocked: row.blocked === 1,
+      files,
+    };
   }
 
   /** The commit landed: the working copy, the installs and Undo follow it. */

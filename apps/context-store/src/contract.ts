@@ -374,7 +374,9 @@ export type AgentFileOutcome =
         | "memory_format"
         | "memory_too_long"
         | "skill_invalid"
-        | "staged_gone";
+        | "staged_gone"
+        /** A staged skill whose scan blocked it: hidden characters. */
+        | "blocked";
     };
 
 export type SaveAgentFilesResult =
