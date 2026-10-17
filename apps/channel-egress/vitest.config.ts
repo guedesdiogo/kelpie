@@ -1,27 +1,6 @@
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineConfig, type Plugin } from "vitest/config";
-import { RUNNER_PROTOCOL } from "../../packages/channels/src/runner.ts";
-
-// A runner on this protocol, and an outdated one on another.
-const RUNNER_SECRETS: Record<string, { version: string; protocol: number }> = {
-  ["r".repeat(64)]: { version: "0.1.0", protocol: RUNNER_PROTOCOL },
-  ["o".repeat(64)]: { version: "0.0.9", protocol: RUNNER_PROTOCOL + 1 },
-};
-
-/**
- * A stand-in for the VPS runner behind its VPC Service (#294). Its answer depends on the secret, so
- * each test picks one (test/runner.test.ts): a known secret gets its health, `b…` a server error,
- * and any other a 401.
- */
-function fakeRunner(request: Request): Response {
-  const secret = (request.headers.get("authorization") ?? "").replace(/^Bearer /, "");
-  if (new URL(request.url).pathname !== "/health") return new Response(null, { status: 404 });
-  if (secret === "b".repeat(64)) return new Response("boom", { status: 500 });
-  const health = RUNNER_SECRETS[secret];
-  return health
-    ? Response.json({ ok: true, ...health })
-    : Response.json({ ok: false }, { status: 401 });
-}
+import { fakeRunner } from "./test/fake-runner.ts";
 
 /**
  * The webchat's mascot files, linked into src/photo/webchat as `.txt` (ADR-0046), stay at the path

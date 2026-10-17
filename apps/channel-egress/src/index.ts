@@ -12,6 +12,11 @@ import {
   isLocale,
   type Localized,
   RecipientUnavailableError,
+  type RunnerAnswer,
+  type RunnerChatContract,
+  type RunnerClose,
+  type RunnerToolResult,
+  type RunnerTurnRequest,
   type SendOptions,
   type SendOutcome,
   type SetupFormsContract,
@@ -24,12 +29,19 @@ import { TELEGRAM_SECRET_HEADER, TelegramAdapter } from "@kelpie/channels/telegr
 import { isAgentId, type Mascot, parseMascot } from "@kelpie/config";
 import { drawPhotos, type Photos } from "./photo/draw.ts";
 import {
+  checkedResult,
   checkRunner,
+  closeSession,
+  giveResult,
+  isSessionId,
   parseRunnerSecret,
   RUNNER_NAME,
   RUNNER_SECRET,
   type RunnerCheck,
   runnerOf,
+  startTurn,
+  type TurnStart,
+  turnBody,
 } from "./runner.ts";
 import { randomToken } from "./secrets/crypto.ts";
 import { type ReadResult, SECRET_STORE_NAME, SecretStore } from "./secrets/secret-store.ts";
@@ -346,6 +358,44 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
       console.warn("channel-egress: Telegram refused a webhook", errorName(error));
       return { ok: false, reason: "channel_refused" };
     }
+  }
+}
+
+const invalidInput = { ok: false as const, reason: "invalid_input" as const };
+
+/**
+ * The `claude-code` route's way to the runner (#295, #420), which llm-gateway binds: a turn, a
+ * tool's result and a close, each sent with the stored secret, which never leaves this Worker. A
+ * separate entrypoint, so that Worker can't open forms or read a secret. Each input is checked
+ * again, since this is an RPC boundary, and each answer is a value.
+ */
+export class RunnerChat extends WorkerEntrypoint<Env> implements RunnerChatContract {
+  async turn(sessionId: string, request: RunnerTurnRequest): Promise<TurnStart> {
+    const body = turnBody(sessionId, request);
+    if (!body) return invalidInput;
+    const found = await this.#runner();
+    return found.ok ? startTurn(found.runner, found.secret, sessionId, body) : found;
+  }
+
+  async answer(sessionId: string, result: RunnerToolResult): Promise<RunnerAnswer> {
+    const checked = checkedResult(sessionId, result);
+    if (!checked) return invalidInput;
+    const found = await this.#runner();
+    return found.ok ? giveResult(found.runner, found.secret, sessionId, checked) : found;
+  }
+
+  async close(sessionId: string): Promise<RunnerClose> {
+    if (!isSessionId(sessionId)) return invalidInput;
+    const found = await this.#runner();
+    return found.ok ? closeSession(found.runner, found.secret, sessionId) : found;
+  }
+
+  /** The runner's binding and its stored secret. */
+  async #runner() {
+    const runner = runnerOf(this.env);
+    if (!runner) return { ok: false as const, reason: "not_configured" as const };
+    const found = await runnerSecret(this.env);
+    return found.ok ? { ok: true as const, runner, secret: found.secret } : found;
   }
 }
 

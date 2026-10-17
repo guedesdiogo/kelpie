@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { PROTOCOL, VERSION } from "../src/protocol.ts";
-import { MAX_RESULT_BYTES, MAX_TURN_BYTES } from "../src/requests.ts";
+import { MAX_RESULT_BYTES, MAX_TURN_BYTES, PROTOCOL, VERSION } from "../src/protocol.ts";
 import { createHandler, type HandlerOptions, type LogEntry } from "../src/server.ts";
 import { Sessions } from "../src/sessions.ts";
 import { fakeClaude, frames, reply, result, SESSION, turnRequest } from "./fake-claude.ts";
