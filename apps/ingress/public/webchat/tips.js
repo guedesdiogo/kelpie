@@ -58,6 +58,12 @@ export function tips(root) {
     }
     // A tip may say more than the name: an empty Send says why it waits.
     tip.textContent = button.dataset.tip || (button.getAttribute("aria-label") ?? "");
+    // Its shortcut, in Geist Mono inside the tip: "Edit ⌘E" (#381).
+    if (button.dataset.kbd) {
+      const kbd = document.createElement("kbd");
+      kbd.textContent = button.dataset.kbd;
+      tip.append(kbd);
+    }
     if (timers.has(button)) continue;
     timers.set(button, null);
     button.addEventListener("pointerenter", () => {
