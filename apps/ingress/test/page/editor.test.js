@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Editor } from "../../public/webchat/editor.js";
+import { Editor, SAVE_TIMEOUT_MS } from "../../public/webchat/editor.js";
 import { setMotion } from "../../public/webchat/mascot.js";
 import { APPROVED_MS } from "../../public/webchat/mascot-states.js";
 import { TEXTS } from "../../public/webchat/texts.js";
@@ -105,6 +105,9 @@ beforeEach(() => {
 });
 afterEach(() => {
   editor.close({ force: true, instant: true });
+  // A test that fails halfway leaves no stub behind for the next.
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -864,7 +867,74 @@ describe("the review's cases (#379, round 2)", () => {
     release({ ok: true, value: { mascot: { ...AGENDA.mascot, shape: "mark" } } });
     await saving;
     expect($("#editor")).toBeNull();
-    expect(history.back).not.toHaveBeenCalled();
+    // It takes back the place Back gave it while the save was on its way.
+    expect(history.back).toHaveBeenCalledOnce();
     vi.restoreAllMocks();
+  });
+});
+
+describe("the review's cases (#379, round 3)", () => {
+  it("keeps the sheet's place in history when Back comes during a save that fails", async () => {
+    const push = vi.spyOn(history, "pushState");
+    vi.spyOn(history, "back").mockImplementation(() => {});
+    open(AGENDA, { sheet: true });
+    radios("Shape")[0].click();
+    let release;
+    answers.mascot = new Promise((done) => {
+      release = done;
+    });
+    const saving = editor.save();
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(push).toHaveBeenCalledTimes(2);
+    release({ ok: false, status: 503 });
+    await saving;
+    expect($("#editor")).not.toBeNull();
+    expect(footer().textContent).toContain("The Mascot wasn't saved");
+    // The next Back asks, as Back with changes always does, and never leaves the page.
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(footer().textContent).toContain("Discard 1 change?");
+    expect(push).toHaveBeenCalledTimes(3);
+  });
+
+  it("counts a save that doesn't answer in 15 s as failed, and offers it again", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new DOMException("The operation timed out.", "TimeoutError");
+      }),
+    );
+    editor = new Editor({ texts: T, toasts: { show: () => {} }, onSaved: () => {} });
+    open();
+    radios("Shape")[0].click();
+    await editor.save();
+    expect(timeout).toHaveBeenCalledWith(SAVE_TIMEOUT_MS);
+    expect(SAVE_TIMEOUT_MS).toBe(15_000);
+    expect(footer().textContent).toContain("The Mascot wasn't saved");
+    expect(footer().textContent).toContain(T.editor.tryAgain);
+    expect(button("Save the Mascot")).toBeDefined();
+  });
+
+  it("forgets a partial save's Undo once a save completes it", async () => {
+    open();
+    tab("Profile").click();
+    const type = (id, value) => {
+      const input = $(`#${id}`);
+      input.value = value;
+      input.dispatchEvent(new Event("input"));
+    };
+    type("editor-specialty", "Agenda");
+    type("editor-remit", "Meetings.");
+    answers.profile = { ok: false, status: 503, value: { specialty: "Agenda" } };
+    await editor.save();
+    delete answers.profile;
+    await editor.save();
+    // Edited again before it closes, then saved: the toast's Undo is this save's alone.
+    type("editor-name", "Agendas");
+    await editor.save();
+    vi.advanceTimersByTime(APPROVED_MS);
+    sent.length = 0;
+    await shown.at(-1).action.run();
+    expect(sent).toEqual([{ agentId: "agenda", section: "profile", body: { name: "Agenda" } }]);
   });
 });

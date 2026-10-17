@@ -97,8 +97,11 @@ export class Editor {
       const open = this.#open;
       if (!open?.sheet || open.closing) return;
       open.pushed = false;
-      // During a save, Back closes the sheet once the save ends.
+      // During a save, Back closes the sheet once the save ends. Its place in history comes back,
+      // so a save that fails leaves the sheet where Back still asks before leaving the page.
       if (open.saving) {
+        history.pushState({ editor: open.agent.id }, "");
+        open.pushed = true;
         open.closeWhenSaved = true;
         return;
       }

@@ -812,7 +812,7 @@ Moment for its Save and its open; frequent for its sections and choices (#379, [
   - Under the specialty and the description, what each is for, and its count, "15 of 40", in Geist Mono.
   - The main agent's specialty is a read-only field with a lock: "principal", and why.
   - A name that shows nothing can't be saved: the field turns its boundary `--danger`, says "Write a name", and Save waits. A specialty or a description that shows nothing is an empty one.
-  - What a line can't hold leaves as it is pasted: tabs and breaks become spaces, and control and format characters go, as do runs of variation selectors, which the agent's settings would refuse (ADR-0056).
+  - What a line can't hold leaves as it is pasted, as the agent's settings would refuse it (ADR-0056): tabs and breaks become spaces, control, format and unassigned characters go, and a run of variation selectors shrinks to one.
   - Inputs use 16 px text on the phone (5.15).
 - **Mascot, the mascot lab's Construtor.**
   - The preview stands on a small stage, 160 px (120 on the phone), and stays pettable. Beside it, the summary line, which is also its text alternative ("Pebble · Fawn · Dots eyes with cheeks · floppy ears · a bow tie"), then Undo and Randomize all as icon buttons (5.26), then one line on what a tap does and when the look counts.
