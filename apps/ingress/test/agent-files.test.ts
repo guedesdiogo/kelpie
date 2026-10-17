@@ -1,6 +1,6 @@
 import { exports } from "cloudflare:workers";
 import type { Admission } from "@kelpie/access";
-import type { AgentFilesContract } from "@kelpie/context-store/contract";
+import type { AgentFilesContract, AgentFilesState } from "@kelpie/context-store/contract";
 import { describe, expect, it, vi } from "vitest";
 import { type AgentFilesDeps, handleAgentFiles, isAgentFilesPath } from "../src/agent-files.ts";
 
@@ -13,7 +13,7 @@ const ROLES: Record<string, string> = {
   "helper-1": "subagent",
   legacy: "",
 };
-const FILES = {
+const FILES: AgentFilesState = {
   soul: { content: "# Kelpie", version: "a".repeat(40) },
   rules: null,
   memory: null,
@@ -22,36 +22,39 @@ const FILES = {
 
 function filesFake() {
   return {
-    files: vi.fn(async () => ({ ok: true as const, files: FILES })),
-    save: vi.fn(async () => ({
-      ok: true as const,
+    files: vi.fn<AgentFilesContract["files"]>(async () => ({ ok: true, files: FILES })),
+    save: vi.fn<AgentFilesContract["save"]>(async () => ({
+      ok: true,
       outcomes: [],
       commit: null,
       undo: [],
       files: FILES,
     })),
-    fetchSkill: vi.fn(async () => ({ ok: false as const, reason: "not_found" as const })),
-  } satisfies AgentFilesContract;
+    fetchSkill: vi.fn<AgentFilesContract["fetchSkill"]>(async () => ({
+      ok: false,
+      reason: "not_found",
+    })),
+  };
 }
 
-function deps(overrides: Partial<AgentFilesDeps> = {}) {
+function deps(overrides: Partial<Pick<AgentFilesDeps, "authenticate" | "admit">> = {}) {
   return {
-    authenticate: vi.fn(async () => ({
-      ok: true as const,
-      sub: "access-sub",
-      email: "diogo@exemplo.com",
-    })),
-    admit: vi.fn(async (): Promise<Admission> => owner),
+    authenticate:
+      overrides.authenticate ??
+      vi.fn(async () => ({ ok: true as const, sub: "access-sub", email: "diogo@exemplo.com" })),
+    admit: overrides.admit ?? vi.fn(async (): Promise<Admission> => owner),
     agentRole: vi.fn(async (id: string) => ROLES[id] ?? null),
     files: filesFake(),
-    ...overrides,
-  } satisfies AgentFilesDeps;
+  };
 }
 
 function request(
   method: string,
   path: string,
-  { body, headers = {} }: { body?: BodyInit; headers?: Record<string, string> } = {},
+  {
+    body,
+    headers = {},
+  }: { body?: BodyInit | undefined; headers?: Record<string, string> | undefined } = {},
 ) {
   const sent = new Headers({
     "Sec-Fetch-Site": "same-origin",
@@ -59,7 +62,11 @@ function request(
     ...headers,
   });
   for (const [name, value] of Object.entries(headers)) if (value === "") sent.delete(name);
-  return new Request(`${ORIGIN}${path}`, { method, headers: sent, body });
+  return new Request(`${ORIGIN}${path}`, {
+    method,
+    headers: sent,
+    ...(body === undefined ? {} : { body }),
+  });
 }
 
 const read = (agent = "kelpie", headers?: Record<string, string>) =>
@@ -132,11 +139,11 @@ describe("the editor's files routes", () => {
       ok: false,
       reason: "many_skills",
       names: ["a", "b"],
-    } as never);
+    });
     const response = await handleAgentFiles(stage({ github: "github.com/o/r" }), fakes);
     expect(response.status).toBe(422);
     expect(await response.json()).toEqual({ ok: false, reason: "many_skills", names: ["a", "b"] });
-    fakes.files.fetchSkill.mockResolvedValue({ ok: false, reason: "vault_off" } as never);
+    fakes.files.fetchSkill.mockResolvedValue({ ok: false, reason: "vault_off" });
     expect((await handleAgentFiles(stage({ github: "x" }), fakes)).status).toBe(503);
   });
 
@@ -148,7 +155,7 @@ describe("the editor's files routes", () => {
       ["unavailable", 503],
     ] as const) {
       const fakes = deps();
-      fakes.files.files.mockResolvedValue({ ok: false, reason } as never);
+      fakes.files.files.mockResolvedValue({ ok: false, reason });
       const response = await handleAgentFiles(read(), fakes);
       expect(response.status).toBe(status);
       expect(await response.json()).toEqual({ reason });

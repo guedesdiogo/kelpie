@@ -369,7 +369,7 @@ describe("a GitHub address", () => {
   });
 
   it("resolves a branch, a tag, a commit and the default branch, asking github.com only", async () => {
-    const asked: { url: string; redirect?: string }[] = [];
+    const asked: { url: string; redirect: string | undefined }[] = [];
     const fetcher = async (url: string, init?: RequestInit) => {
       asked.push({ url, redirect: init?.redirect });
       return new Response(
