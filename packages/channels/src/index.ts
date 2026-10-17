@@ -53,7 +53,16 @@ export {
   RUNNER_PROTOCOL,
   RUNNER_VERSION,
   type RunnerAnswered,
+  type RunnerErrorCode,
+  type RunnerFrame,
+  type RunnerReply,
   type RunnerState,
+  type RunnerText,
+  type RunnerToolCall,
+  type RunnerToolResult,
+  type RunnerToolSpec,
+  type RunnerTurnRequest,
+  type RunnerUsage,
 } from "./runner.ts";
 
 // Adapters have their own entry points (`@kelpie/channels/telegram`): they need the runtime's fetch

@@ -74,6 +74,8 @@ describe("loadSecrets", () => {
   });
 
   it("refuses a file that belongs to another user", () => {
-    expect(() => loadSecrets(write(CURRENT), process.getuid() + 1)).toThrow(/another user/);
+    expect(() => loadSecrets(write(CURRENT), (process.getuid as () => number)() + 1)).toThrow(
+      /another user/,
+    );
   });
 });
