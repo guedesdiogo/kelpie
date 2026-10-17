@@ -1,6 +1,6 @@
 # Design system
 
-Kelpie's interface follows one visual identity and one motion system, decided in [ADR-0043](adr/0043-design-system.md) and extended by its first review in [ADR-0044](adr/0044-design-system-review.md), by the agent mascot in [ADR-0045](adr/0045-agent-mascot.md), by its Telegram photo in [ADR-0046](adr/0046-telegram-bot-photo.md), by the logo in [ADR-0049](adr/0049-logo-main-mascot-silhouette.md) and by the subagents' pups in [ADR-0051](adr/0051-subagent-pups-return-one-by-one.md) and [ADR-0053](adr/0053-pups-in-the-conversation-header.md). This document holds the values. A page, component or animation takes its colors, type, spacing, radii and motion from the tokens below. A literal number is allowed only where a pattern in section 5 sets it.
+Kelpie's interface follows one visual identity and one motion system, decided in [ADR-0043](adr/0043-design-system.md) and extended by its first review in [ADR-0044](adr/0044-design-system-review.md), by the agent mascot in [ADR-0045](adr/0045-agent-mascot.md), by its Telegram photo in [ADR-0046](adr/0046-telegram-bot-photo.md), by the logo in [ADR-0049](adr/0049-logo-main-mascot-silhouette.md), by the subagents' pups in [ADR-0051](adr/0051-subagent-pups-return-one-by-one.md) and [ADR-0053](adr/0053-pups-in-the-conversation-header.md), and by the agent's editor in [ADR-0056](adr/0056-agent-editor-and-random-mascot.md). This document holds the values. A page, component or animation takes its colors, type, spacing, radii and motion from the tokens below. A literal number is allowed only where a pattern in section 5 sets it.
 
 The direction is called **Mistura** ("mix"): the identity of the water spirit (kelp colors, shapes that change) with the discipline of the herding dog (Pastoreio, "herding": fast, grouped, no bounce). What the owner does a hundred times a day moves quickly and plainly. The moments that matter (approving, spending, delegating, remembering) get the expressive motion. Each agent is one of those changing shapes: a plush drop of water that stays alive in its place (5.19).
 
@@ -221,7 +221,7 @@ Changing a spring means simulating it again the same way, and updating its row, 
     - This also meets WCAG 2.3.3 (level AAA): motion from interactions can be turned off.
 
 Two engineering rules come with them:
-- in anything that runs daily, animate only `transform`, `opacity` and color. The exceptions are the contained size changes in 5.1, 5.2, 5.3, 5.9, 5.17 and 5.18, and the one mask reveal in 5.7;
+- in anything that runs daily, animate only `transform`, `opacity` and color. The exceptions are the contained size changes in 5.1, 5.2, 5.3, 5.9, 5.17, 5.18 and 5.25 (the editor's panel growing from its row, its content kept at its final size), and the one mask reveal in 5.7;
 - never write `transition: all`.
 
 ### 4.5 Sound
@@ -440,6 +440,11 @@ Moment grammar. Every place that shows an agent shows its mascot (5.19), at the 
     - Safari keeps the favicon the page loaded with ([WebKit bug 266426](https://bugs.webkit.org/show_bug.cgi?id=266426)), so the title carries the count there.
   - A free tier past 90% joins the count (5.16).
 - **A row** (decision 15, #378): the agent's 36px mascot with only 5.19's badge, and no ring around it; its name; a line with the glyph, then "state · what it does"; and the time on the right in Geist Mono with tabular figures, `m:ss` while it works and "3 min ago" while it waits. The open conversation's row stands on `--surface`.
+- **The pencil** (#379): a 24 px badge on the mascot's top right, in `--surface` with a `--muted` ring, opens the agent's editor (5.25).
+  - It shows while the pointer rests on the mascot, fading in and scaling from 0.9 with `--spring-fast`. Under reduced motion it only fades.
+  - It is a real button, "Edit Agenda", in the tab order right after the row that holds the list's tab stop, and it shows while it has focus.
+  - Where nothing hovers, it rests on every mascot.
+  - It belongs to the mascot: a row that draws no mascot has none. A press on the mascot itself never opens the editor.
 - **Each row follows its own agent** ([ADR-0052](adr/0052-webchat-presence-sockets.md)).
   - The open conversation's row reads that conversation's own socket. Every other row, up to 16 in the Registry's order, reads a presence socket of its own. Past 16, a row shows its mascot and name with no state, and the list says once that it follows the first 16.
   - A row shows no state until its first frame arrives; it is never Idle by default.
@@ -574,7 +579,8 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 | Head | `none`; `ears`: `pointed`, `floppy`, `round`; `horns`: `two`, `one`, `antennae`; `hair`: `strands`, `curl`, `mohawk`; `leaves`: `one`, `two`, `kelp` |
 | Accessory | `none`; `glasses`: `round`, `dark`; `bow`: `tie`, `head`; `hat`: `beret`, `top`, `beanie`; `belt`: `belt`, `collar` |
 
-- **The main agent starts as Kelpie:** `mark`, `kelp`, `big` eyes, round ears and no accessory ([ADR-0049](adr/0049-logo-main-mascot-silhouette.md)). Its silhouette is the logo (5.23). Every other agent starts with a mascot derived from its id, until the owner picks one. A new option goes at the end of its axis; derived mascots draw from the options above, frozen, so a new one never changes them.
+- **The main agent starts as Kelpie:** `mark`, `kelp`, `big` eyes, round ears and no accessory ([ADR-0049](adr/0049-logo-main-mascot-silhouette.md)). Its silhouette is the logo (5.23).
+- **A new agent starts with a random mascot,** saved as its setting, which the owner edits from there (5.25, [ADR-0056](adr/0056-agent-editor-and-random-mascot.md)). An agent created before shows a mascot derived from its id until its first edit saves one. A new option goes at the end of its axis; derived mascots draw from the options above, frozen, so a new one never changes them.
 - **A hat hides what sits in the middle of the head:** one horn, antennae, hair and leaves. Ears and two horns stay.
 - **Body colors are tokens with one value in both themes,** since they color the figure, not the page. None is amber, which means the owner needs to act.
 
@@ -701,7 +707,8 @@ Frequent.
 - **While the agent's subagents work,** their pups stand in a row between the mascot and the name, and their count follows the status line on its row (5.6, [ADR-0053](adr/0053-pups-in-the-conversation-header.md)).
 - **On a wide screen the sidebar's roster is the switcher** (5.24), and the name is only a heading.
 - **The switcher.** Below the sidebar's width, with more than one agent, the name is a button that opens the list. From a click it grows from the name as 5.8 does; from the keyboard it appears at once. On a phone the list is a sheet (5.15) that stops at 40% and 90%.
-  - Each agent is a link to its conversation (`?agent=<id>`), with its still 36 px mascot in the Idle pose (5.19), its name, and its id in Geist Mono. Back and new tabs work.
+  - Each agent is a link to its conversation (`?agent=<id>`), with its still 36 px mascot in the Idle pose (5.19), its name followed by its specialty in `--muted` ("principal" for the main agent, 5.25), and its id in Geist Mono. Back and new tabs work.
+  - The open agent's mascot carries 5.9's pencil at rest, with a 44 px target, since a phone has no pointer to rest on it. It closes the list and opens the editor (5.25): its sheet, on a phone.
   - The current one is marked with `aria-current`.
   - Arrows, Home and End move through the list, and Escape closes it.
 - **The order** is the registry's and never changes with activity (5.9).
@@ -779,6 +786,74 @@ Frequent. On a screen 56rem wide or more, the agents sit in a sidebar beside the
 - **Below 56rem** the sidebar gives way: the header's name switches agents (5.21) and the header's avatar opens the menu. What waits for the owner still counts in the tab's title and on the favicon.
 - **Reduced motion:** the strip and an opening request fade, and the rows' times count in minutes.
 
+### 5.25 Editing an agent
+
+Moment for its Save and its open; frequent for its sections and choices (#379, [ADR-0056](adr/0056-agent-editor-and-random-mascot.md)). The owner edits an agent from the pencil on its mascot (5.9, 5.21), never from a tap on the mascot, which pets it (5.19). The research and the reference projects' findings are on #379; the lab is "O editor do agente em movimento".
+
+- **The container.**
+  - On a wide screen, a non-modal panel beside the sidebar: 820 × 690 px at most, 8 px from it, on `--surface` with `--shadow-pop` and `--r-panel`. The conversation stays visible and live behind it.
+  - Below the sidebar's width, the same panel over the conversation.
+  - On the phone, 5.15's sheet at 90% over a `--scrim`, with a visible Close of 44 px. Back and Escape close it, and the page behind it is inert. It never stacks over the switcher, which closes first.
+- **Opening.**
+  - From a click, the panel grows from its row with `--spring-slow`: its box goes from the row's to its own, while its content, laid out at its final size, fades in from 6 px once the panel can hold it, `--stagger` apart. This is one of §4.4's contained sizes.
+  - A copy of the row's mascot flies out and grows from 36 to 160 px into the preview, 5.14's shared element. The preview shows when it lands and looks at the owner.
+  - From the keyboard, it appears at once, with focus on the open section's tab. On the phone, the sheet rises with `--spring-slow`.
+  - It opens on Mascot.
+- **Closing.** Close and Escape leave in `--dur-exit`, and focus goes back to the pencil, or to the switcher's name when the pencil is hidden by then.
+- **The frame.**
+  - On the left: the agent's mascot at 56 px, its name in Bricolage Grotesque, and its specialty. The name, the specialty and the mascot follow what the owner changes before saving.
+  - Below them, the sections as APG tabs: Profile, Mascot, Soul, Rules, Memory and Skills, each an icon beside its name (5.26). ↑ and ↓ move and select, Home and End go to the ends.
+  - The highlight slides with `--spring-fast`, and a new section's content rises with `--rise` and `--spring-base`. From the keyboard, both change at once.
+  - Soul, Rules, Memory and Skills show, dimmed, with "Soon", until #381. The arrows skip them, and a press does nothing.
+  - On the phone, the agent sits in the sheet's head beside Close, and the sections are a row, each icon over its short name. An icon never replaces a label the owner hasn't learned (§8).
+- **The mascot acts out the section,** with 5.19's poses: in Profile it looks at the owner, and while the owner types it only blinks. #381's sections bring their own: writing on paper in Soul and Rules, reading in Memory, the magnifier in Skills.
+- **A changed section** shows a 6 px `--accent` dot after its name, which enters from 0.6 with `--spring-fast`; its tab's name adds "changed". Nothing waits on the owner, so it isn't `--warm`.
+- **Profile.** The name (80 characters), the specialty (40) and the short description (200), each one line, as the agent's settings take them.
+  - Under the specialty and the description, what each is for, and its count, "15 of 40", in Geist Mono.
+  - The main agent's specialty is a read-only field with a lock: "principal", and why.
+  - A name that shows nothing can't be saved: the field turns its boundary `--danger`, says "Write a name", and Save waits.
+  - Inputs use 16 px text on the phone (5.15).
+- **Mascot, the mascot lab's Construtor.**
+  - The preview stands on a small stage, 160 px (120 on the phone), and stays pettable. Beside it, the summary line, which is also its text alternative ("Pebble · Fawn · Dots eyes with cheeks · floppy ears · a bow tie"), then Undo and Randomize all as icon buttons (5.26), then one line on what a tap does and when the look counts.
+  - One tab per axis, Shape, Color, Eyes, Head and Accessory, as APG tabs in a segmented track. Each tab says how many options it has and offers "Randomize <axis>".
+  - Each axis is a named radiogroup (APG radio): the arrows move and select, and wrap; Tab enters on the checked option. Each tile draws its option on this agent's mascot, Still, at 46 px, with its name under it.
+  - Colors are named swatches, six to a row. A head or an accessory picks its type, then its variation in a second radiogroup, which follows the type. Cheeks is a switch beside the eyes.
+  - There is no "Back to default": a new agent's look is already a random one (5.19).
+- **On a change,** the preview crossfades from its old look in `--dur-fade`, and the part that changed moves:
+  - a new shape squashes and settles with `--spring-pop`;
+  - a new head or accessory drops in from 8 px with `--spring-moment-fast`;
+  - new eyes, or cheeks, blink once;
+  - a color only crossfades, with no overshoot (rule 3);
+  - a new change starts from the figure as it is, without queueing.
+- **Randomize.** The die turns 90° with `--spring-moment-fast`, and the mascot swaps its look and jumps, the engine's Excite: a 12 px hop and a blink. From the keyboard, the swap happens without the die's turn.
+- **Undo.** ⌘Z, outside a text field, and the U-turn button undo every step since the panel opened. The tooltip names the step ("Undo color", "Undo randomize"), and says "Nothing to undo" when there is none. The option that came back takes `--accent` at 22%, fading over 400 ms (5.5); a color swatch, which can't show a tint, pops back from 1.25 with `--spring-pop`.
+- **Save, once.** The preview changes live inside the editor, and nothing is saved until Save. It writes each changed section once, through its own route: the mascot whole, so the bot's photo is drawn once (ADR-0046), and the profile's changed fields.
+  - The footer says what is unsaved, "1 unsaved change" with the count in Geist Mono, or "All saved". On Mascot, a line under it says the change applies everywhere and the bot's photo changes in a few minutes.
+  - The button says what it does, keeping the letters its labels share (Family Values): Salv-ar, Salv-ando, Salv-o; Sav-e, Sav-ing, Sav-ed. The suffix rolls with `--spring-fast`, and a spinner joins after 200 ms (rule 8). ⌘S saves.
+  - Success is 5.3 without its ring, which stays the owner's yes: `--ok` in `--dur-fade`, the check drawn in 280 ms, and a pop from 1.03 with `--spring-pop`. The changed dots leave, `--stagger` apart, and the mascots play Approved for 1.1 s. From the keyboard, the pop is skipped.
+  - Then the panel closes, and a toast (5.13) says what saved, "Agenda: mascot saved", and that the bot's photo changes in a few minutes, with Undo for 10 s. Undo sends back what was saved before. A change made before it closes keeps it open, and Save reads Save again.
+- **The two ways a save can end early.** Each takes the footer's place, inside the panel; neither is a dialog over it.
+  - Closing or Cancel with changes asks, on a 10% `--warm` tint: "Discard 3 changes?", what goes back, Keep editing, which takes focus, and Discard in `--danger`. Escape keeps editing. Back on the phone asks the same.
+  - A save that fails in part names what didn't save and what did, on a 9% `--danger` tint: "The Profile wasn't saved. The Mascot is saved." The failed section's mark turns to `--danger`'s alert, its tab's name says "not saved", and the footer offers "Save the Profile". When every section fails, it says "Nothing was saved". An expired login also brings 5.12's dialog.
+  - Opening another agent's editor over changes asks first, the same way.
+- **What it never does:** a Save per section, a modal for unsaved changes, blur in a crossfade, or the ring or confetti on Save.
+- **Reduced motion and Still:** every change is a 150 ms crossfade, and the mascot is Still. The panel, the sheet and a section's content fade in place, and the highlight moves at once. The check, the colors, the dots and the count stay.
+
+### 5.26 Icon buttons and tooltips
+
+Frequent. An icon stands in for a word only where the owner knows the action; it always says its name.
+
+- **The icons** are 16 px, with a 1.5 stroke and round caps, drawn by `icons.js`. Undo is a U-turn arrow, since a circle reads as refresh; Randomize is a die with three pips, since a shuffle means reorder. The editor's sections are an ID card, the mascot's own outline (5.22), a page with a heart, a list, two stacked notes and a puzzle piece. None is a lone diamond, a triangle, or a hollow or dashed circle: those are 5.9's glyphs.
+- **An icon button** is 34 px with its boundary in `--muted`, or borderless for a small one inside a header, and 44 px on the phone. A disabled one stays focusable, `aria-disabled`, and its tooltip says why.
+- **Its name** is its `aria-label`, and its tooltip shows the same words, verb first ("Randomize all"), or why it waits. Nothing uses `title` (WCAG 1.4.13).
+- **The tooltip's timing:**
+  - the first waits 400 ms, then rises from 4 px and 0.97 with `--spring-fast`;
+  - another within 300 ms of one hiding shows at once, with no animation;
+  - keyboard focus shows one at once, a click's focus none, and Escape hides it without moving focus;
+  - it has no timer, and leaves in `--dur-exit`.
+- **Near a top edge,** a tooltip opens below its button.
+- **Reduced motion:** tooltips appear and leave with a fade.
+
 ## 6. Implementation notes
 
 - **CSS first.** Tokens are custom properties. Springs are the `linear()` values above, supported in every current browser. Enter and exit use transitions with `@starting-style`. Choreographed sequences use the Web Animations API, which takes the same easings.
@@ -794,7 +869,7 @@ Frequent. On a screen 56rem wide or more, the agents sit in a sidebar beside the
 A pull request that changes the interface answers yes to each line:
 
 - [ ] Every color, size, radius, duration and easing comes from a token, unless a pattern in section 5 sets the number.
-- [ ] Only `transform`, `opacity` and color animate, apart from the contained sizes in 5.1, 5.2, 5.3, 5.9, 5.17 and 5.18 and the mask reveal in 5.7; no `transition: all`.
+- [ ] Only `transform`, `opacity` and color animate, apart from the contained sizes in 5.1, 5.2, 5.3, 5.9, 5.17, 5.18 and 5.25 and the mask reveal in 5.7; no `transition: all`.
 - [ ] Keyboard-triggered actions don't animate their way in or out; progress and results still show.
 - [ ] Loops stop within 5 s, apart from the mascot's life in place (5.19), and the steady state reads without motion.
 - [ ] Exits are faster than entries, and staggers stop at 300 ms.
@@ -896,6 +971,14 @@ The rules above cite these. The first set was read on 2026-10-15; a source added
   - [Linear's Inbox](https://linear.app/docs/inbox), its keys on the selected row, and [Linear's agent sessions](https://linear.app/developers/agent-interaction), where the server sets `awaitingInput`;
   - [Cursor's agents window](https://forum.cursor.com/t/agents-approval-window/170388) and [GitHub's agent sessions](https://github.blog/changelog/2026-03-26-agent-activity-in-github-issues-and-projects/);
   - [Hermes Agent's roster](https://github.com/NousResearch/hermes-agent/tree/848fc0ad8be766b9dc10fe42bd80b5fc2d45d95c/apps/desktop/src/plugins/hermes-bots): its still status mark and one place that settles states, adopted, and its polling and reordering, avoided.
+- The agent's editor (5.25, 5.26, [ADR-0056](adr/0056-agent-editor-and-random-mascot.md)), read on 2026-10-16; the findings and the reference projects' check are on #379:
+  - the trigger beside the figure: [ChatGPT's dots](https://help.openai.com/en/articles/20001530), [Duolingo's avatar creator](https://blog.duolingo.com/avatar-creator/) and [Memoji](https://support.apple.com/en-us/111115); [NN/g on contextual menus](https://www.nngroup.com/articles/contextual-menus-guidelines/), against a menu as the only way in;
+  - the container: [Notion Faces](https://faces.notion.com), a grid next to a big preview, and [NN/g's bottom-sheet rules](https://www.nngroup.com/articles/bottom-sheet/);
+  - a live preview: [Tolan](https://intercom.help/portola/en/articles/17508617-styling-your-tolan), [Apple Watch's face editor](https://support.apple.com/guide/watch/change-your-watch-face-apda6559ad78/11.0) and [Lily on Rive](https://rive.app/blog/duolingo-s-ai-powered-video-call-brings-lily-to-life); [ChatGPT pets](https://learn.chatgpt.com/docs/pets), a still frame under reduced motion;
+  - the choices: the [APG radio group](https://www.w3.org/WAI/ARIA/apg/patterns/radio/) and [WCAG 2.5.8](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html);
+  - saving: [Discord's unsaved-changes bar](https://support.discord.com/hc/vi/community/posts/4405364026903--Save-Changes-Hotkey-for-Server-Settings), made a quiet line, and [Benji Taylor's Family Values](https://benji.org/family-values);
+  - tooltips: [Emil Kowalski's rules](https://github.com/emilkowalski/skills/blob/main/skills/emil-design-eng/SKILL.md), [Radix's Tooltip](https://www.radix-ui.com/primitives/docs/components/tooltip), [Primer's](https://primer.style/product/components/tooltip/), [Geist's](https://vercel.com/geist/tooltip), the HIG on [help](https://developer.apple.com/design/human-interface-guidelines/offering-help) and [undo](https://developer.apple.com/design/human-interface-guidelines/undo-and-redo), [WCAG 1.4.13](https://www.w3.org/WAI/WCAG22/Understanding/content-on-hover-or-focus.html), and [Linear's 2026 refresh](https://linear.app/now/behind-the-latest-design-refresh), against icons that replace labels;
+  - [Hermes Agent's profile editor](https://github.com/NousResearch/hermes-agent/blob/9c002cb941de1e1708294d0cd58e060b6a417b5e/apps/desktop/src/plugins/hermes-bots/edit-profile-dialog.tsx): one Save and a dirty flag per section, adopted; its 64 px preview and its swatches named by their hex, avoided.
 - Accessibility:
   - [WCAG 2.2.2 Pause, Stop, Hide](https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html);
   - [WCAG 2.3.3 Animation from Interactions](https://www.w3.org/WAI/WCAG22/Understanding/animation-from-interactions.html);

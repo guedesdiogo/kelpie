@@ -335,6 +335,52 @@ describe("the Mascot section", () => {
     expect(undo.getAttribute("aria-disabled")).toBe("true");
   });
 
+  it("marks what Undo brought back: a tint on a tile, a pop on a swatch, the switch for cheeks", () => {
+    open();
+    const animate = vi.spyOn(HTMLElement.prototype, "animate");
+    const undo = $(".pv-act .icb");
+    const axisTab = (name) => $$(".axis-tab").find((each) => each.textContent === name);
+    radios("Shape")[0].click();
+    undo.click();
+    const tinted = animate.mock.calls.find(([frames]) => "backgroundColor" in frames[0]);
+    expect(tinted[0][0].backgroundColor).toContain("22%");
+    expect(animate.mock.contexts.at(animate.mock.calls.indexOf(tinted))).toBe(checked("Shape"));
+    axisTab("Color").click();
+    radios("Color")[0].click();
+    animate.mockClear();
+    undo.click();
+    const popped = animate.mock.calls.findIndex(
+      ([frames]) => frames[0].transform === "scale(1.25)",
+    );
+    expect(animate.mock.contexts[popped]).toBe(checked("Color"));
+    axisTab("Eyes").click();
+    $("[role='switch']").click();
+    expect(undo.getAttribute("aria-label")).toBe("Undo cheeks");
+    animate.mockClear();
+    undo.click();
+    expect($("[role='switch']").getAttribute("aria-checked")).toBe("false");
+    expect(animate.mock.contexts).toContain($("[role='switch']"));
+    animate.mockRestore();
+  });
+
+  it("randomizes a part's type and variation together, its variations following", () => {
+    open();
+    $$(".axis-tab")
+      .find((each) => each.textContent === "Accessory")
+      .click();
+    expect(nameOf(checked("Accessory"))).toBe("None");
+    radios("Accessory")
+      .find((radio) => nameOf(radio) === "Bow")
+      .click();
+    expect(radios("Variation").map(nameOf)).toEqual(["Bow tie", "On the head"]);
+    expect(nameOf(checked("Variation"))).toBe("Bow tie");
+    radios("Variation")[1].click();
+    expect($(".pv-sum").textContent).toContain("a bow on its head");
+    $(".tabp-h .icb").click();
+    expect($(".pv-sum").textContent).not.toContain("a bow on its head");
+    expect($(".pv-act .icb").getAttribute("aria-label")).toBe("Undo accessory");
+  });
+
   it("randomizes every axis, or one, without a Back to default", () => {
     open();
     const before = $(".pv-sum").textContent;

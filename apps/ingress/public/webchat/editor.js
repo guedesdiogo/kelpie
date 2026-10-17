@@ -4,7 +4,7 @@
 // here first, and one Save writes it: the mascot whole, and the profile's changed fields, each
 // through its owner-only route. The conversation stays behind it, still live.
 
-import { Construtor } from "./construtor.js";
+import { Construtor, PREVIEW_PX, SHEET_PREVIEW_PX } from "./construtor.js";
 import {
   changedSections,
   LIMITS,
@@ -305,8 +305,11 @@ export class Editor {
     open.construtor = new Construtor({
       names,
       look: open.draft.mascot,
+      previewPx: open.sheet ? SHEET_PREVIEW_PX : PREVIEW_PX,
       onChange: (look) => {
         open.draft.mascot = look;
+        // The agent on the left follows too, with a crossfade only: the preview carries the motion.
+        open.idMascot?.restyle(look, "color");
         this.#edited();
       },
     });
@@ -552,7 +555,7 @@ export class Editor {
       words.id = `${input.id}-help`;
       words.textContent = help ?? "";
       below.append(words);
-      if (!locked) {
+      if (!locked && key !== "name") {
         const count = element("span", "count");
         below.append(count);
         fields[`${key}Count`] = count;
@@ -724,16 +727,14 @@ export class Editor {
     } else {
       const dot = element("i");
       dot.setAttribute("aria-hidden", "true");
+      // The count in Geist Mono, inside one line of words.
+      const words = element("span");
       const digits = element("span", "digits");
       const text = names.unsaved(count);
       const at = text.indexOf(String(count));
       digits.textContent = String(count);
-      open.dirty.replaceChildren(
-        dot,
-        text.slice(0, at),
-        digits,
-        text.slice(at + String(count).length),
-      );
+      words.append(text.slice(0, at), digits, text.slice(at + String(count).length));
+      open.dirty.replaceChildren(dot, words);
     }
     open.meta.textContent = open.section === "mascot" ? names.photoNote(open.agent.name) : "";
     open.meta.hidden = open.section !== "mascot";

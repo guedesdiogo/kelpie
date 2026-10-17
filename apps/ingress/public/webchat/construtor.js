@@ -19,8 +19,9 @@ import { Mascot } from "./mascot.js";
 import { fadeIn, fromKeyboard, play, reduced, SPRINGS } from "./motion.js";
 import { tips } from "./tips.js";
 
-/** The preview and the tiles, at the sizes 5.25 sets. */
+/** The preview and the tiles, at the sizes 5.25 sets; the phone's sheet draws a smaller preview. */
 export const PREVIEW_PX = 160;
+export const SHEET_PREVIEW_PX = 120;
 export const TILE_PX = 46;
 /** An option Undo brought back takes a tint this long (5.5's landing tint). */
 export const UNDONE_MS = 400;
@@ -49,13 +50,15 @@ export class Construtor {
   #groups;
   #undo;
   #summary;
+  #previewPx;
 
   /**
    * @param {{ names: object, look: object, onChange: (look: object) => void,
-   *   random?: () => number }} options `names` is the page's `editor` texts.
+   *   previewPx?: number, random?: () => number }} options `names` is the page's `editor` texts.
    */
-  constructor({ names, look, onChange, random = Math.random }) {
+  constructor({ names, look, onChange, previewPx = PREVIEW_PX, random = Math.random }) {
     this.#names = names;
+    this.#previewPx = previewPx;
     this.#onChange = onChange;
     this.#random = random;
     this.look = look;
@@ -126,7 +129,11 @@ export class Construtor {
   /** Draws the preview, once the section is on the page: the engine reads its color from it. */
   mount() {
     if (!this.preview) {
-      this.preview = new Mascot(this.host, { mascot: this.look, px: PREVIEW_PX, mode: "large" });
+      this.preview = new Mascot(this.host, {
+        mascot: this.look,
+        px: this.#previewPx,
+        mode: "large",
+      });
     }
     this.show(this.#axis, { instant: true });
     this.#refresh();
