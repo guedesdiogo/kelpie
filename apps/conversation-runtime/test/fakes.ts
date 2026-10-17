@@ -49,9 +49,13 @@ type ModelScript =
   /**
    * Sends these events as they are, as a route that runs its own tool loop would (#295): read on
    * past a `tool_request` the turn didn't answer, it fails. With `reply`, `text` then answers,
-   * naming the call's session, if it had one, as `clean` or not.
+   * naming the call's session, if it had one, as `clean` or not, under `id` if given.
    */
-  | { kind: "events"; events: RouterEvent[]; reply?: { text: string; clean: boolean } }
+  | {
+      kind: "events";
+      events: RouterEvent[];
+      reply?: { text: string; clean: boolean; id?: string };
+    }
   /** The router fell back from these routes, then `route` failed with `code` (#293). */
   | {
       kind: "noRoute";
@@ -89,12 +93,16 @@ export const noRoute = (
 export const events = (...sent: RouterEvent[]): ModelScript => ({ kind: "events", events: sent });
 /**
  * A route that runs its own tool loop (#295): its rounds, then `text` as the reply, which names the
- * call's session as clean unless `clean` is false.
+ * call's session as clean unless `clean` is false, by the call's id unless `id` is given.
  */
-export const routeReply = (text: string, sent: RouterEvent[] = [], clean = true): ModelScript => ({
+export const routeReply = (
+  text: string,
+  sent: RouterEvent[] = [],
+  { clean = true, id }: { clean?: boolean; id?: string } = {},
+): ModelScript => ({
   kind: "events",
   events: sent,
-  reply: { text, clean },
+  reply: { text, clean, ...(id === undefined ? {} : { id }) },
 });
 /** One round of a route's own tool loop (#295): the reply asking for the calls, then each request. */
 export function round(...calls: { id: string; name: string; input?: unknown }[]): RouterEvent[] {
@@ -183,6 +191,8 @@ export interface FakeWorld {
   sessions: (RouteSession | undefined)[];
   /** Every tool result a call was answered with, in order (#295). */
   answers: ToolResult[];
+  /** Answers with these numbers (0-based, across the world) wait until removed from the set. */
+  holdAnswers: Set<number>;
   /** The tier of each model call, in call order. */
   /** What each model call asked for: its area and the agent's model settings (#286). */
   selections: ModelSelection[];
@@ -250,6 +260,7 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
   let sleeps = 0;
   let sends = 0;
   let calls = 0;
+  let answers = 0;
   const world: FakeWorld = {
     tools: [],
     steps: [],
@@ -258,6 +269,7 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
     requests: [],
     sessions: [],
     answers: [],
+    holdAnswers: new Set(),
     selections: [],
     modelHeld: false,
     cancelled: 0,
@@ -367,7 +379,9 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
                 reason: "stop",
                 message: { role: "assistant", parts: [{ type: "text", text: script.reply.text }] },
                 usage: FAKE_USAGE,
-                ...(session ? { session: { id: session.id, clean: script.reply.clean } } : {}),
+                ...(session
+                  ? { session: { id: script.reply.id ?? session.id, clean: script.reply.clean } }
+                  : {}),
               };
               return;
             case "fellBack":
@@ -397,8 +411,13 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
             release?.();
           },
           async answer(result) {
+            const number = answers++;
             world.answers.push(structuredClone(result));
             answered.add(result.callId);
+            // Polls a plain set: a promise created here can't be resolved from the test's context.
+            while (world.holdAnswers.has(number)) {
+              await new Promise((resolve) => setTimeout(resolve, 5));
+            }
           },
         };
       },

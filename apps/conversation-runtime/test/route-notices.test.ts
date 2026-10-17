@@ -160,6 +160,26 @@ describe("Claude Code's failures (#295)", () => {
     );
   });
 
+  it.each([
+    ["not a number", Number.NaN],
+    ["infinite", Number.POSITIVE_INFINITY],
+    ["past any date", 1e20],
+    ["text", "soon"],
+  ])("words a limit whose reset is %s as plain rate limiting", (_label, resetsAt) => {
+    const unreadable = resetsAt as number;
+    expect(
+      failureNotice([], { code: "rate_limited", route: claudeCode, resetsAt: unreadable }, "en"),
+    ).toBe(
+      "I couldn't answer this message: Claude Code (claude-sonnet-5-5) is rate limiting requests.",
+    );
+    expect(
+      routeNotice([fellBackFrom({ code: "rate_limited", resetsAt: unreadable })], {}, NOW, "en")
+        .text,
+    ).toBe(
+      "Note: Claude Code (claude-sonnet-5-5) is rate limiting requests, so Anthropic (claude-sonnet-5-5) answered.",
+    );
+  });
+
   it("names a limit once a day, whatever its reset, apart from plain rate limiting", () => {
     const first = routeNotice([limit], {}, NOW, "en");
     const later = fellBackFrom({ code: "rate_limited", resetsAt: RESETS_AT + 5 * 60 * 60_000 });

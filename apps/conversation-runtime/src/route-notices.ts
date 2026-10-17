@@ -140,9 +140,21 @@ function resetTime(epochMs: number, locale: Locale, timeZone: string | null): st
   return timeZone ? text : `${text} UTC`;
 }
 
-/** When a usage limit resets, if the route said so (#295). */
+/** The furthest instant a date holds, either side of 1970. */
+const MAX_DATE_MS = 8.64e15;
+
+/**
+ * When a usage limit resets, if the route said so (#295) as a time a date can hold. It comes off
+ * the wire, and a notice that couldn't be written would cost the reply it follows: anything else
+ * is plain rate limiting.
+ */
 const resetOf = ({ code, resetsAt }: Failure): number | undefined =>
-  code === "rate_limited" ? resetsAt : undefined;
+  code === "rate_limited" &&
+  typeof resetsAt === "number" &&
+  Number.isFinite(resetsAt) &&
+  Math.abs(resetsAt) <= MAX_DATE_MS
+    ? resetsAt
+    : undefined;
 
 /** The reason as the person reads it: a limit says when it resets, in the conversation's zone. */
 function wording(failure: Failure, locale: Locale, timeZone: string | null): string {

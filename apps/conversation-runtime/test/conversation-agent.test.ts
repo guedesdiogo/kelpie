@@ -85,6 +85,16 @@ async function setPromptKeys(stub: ReturnType<typeof agent>, key: string | null)
   });
 }
 
+/**
+ * Cancels the schedules a test left armed: a flush that fires during a later test runs through that
+ * test's ports, and takes its script.
+ */
+async function disarm(stub: ReturnType<typeof agent>) {
+  await runInDurableObject(stub, async (instance: ConversationAgent) => {
+    for (const schedule of instance.getSchedules()) await instance.cancelSchedule(schedule.id);
+  });
+}
+
 async function statuses(stub: ReturnType<typeof agent>) {
   return (await stub.outbox()).map((row) => row.status);
 }
@@ -114,6 +124,7 @@ describe("ConversationAgent buffering", () => {
       instance.getSchedules(),
     );
     expect(schedules).toHaveLength(1);
+    await disarm(stub);
   });
 
   it("answers at once when the owner removes the wait", async () => {
@@ -141,10 +152,7 @@ describe("ConversationAgent buffering", () => {
       instance.getSchedules(),
     );
     expect(schedules).toHaveLength(1);
-    // Left armed, its flush fires during a later test, and takes that test's script.
-    await runInDurableObject(stub, (instance: ConversationAgent) =>
-      Promise.all(schedules.map((schedule) => instance.cancelSchedule(schedule.id))),
-    );
+    await disarm(stub);
   });
 
   it("ignores a flush from a schedule that a newer message replaced", async () => {
@@ -248,6 +256,7 @@ describe("ConversationAgent buffering", () => {
     const lastRequest = JSON.stringify(world.requests.at(-1)?.messages);
     expect(lastRequest).toContain("first part");
     expect(lastRequest).toContain("second part");
+    await disarm(stub);
   });
 
   it("starts one turn when two flushes race, and doesn't interrupt it", async () => {
