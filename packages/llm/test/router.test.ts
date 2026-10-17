@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { LlmError } from "../src/errors.ts";
 import { ModelRouter, parseRouteTable, type RouteTable } from "../src/router.ts";
-import type { LlmEvent, LlmProvider, LlmRequest, ProviderId } from "../src/types.ts";
+import type {
+  LlmEvent,
+  LlmProvider,
+  LlmRequest,
+  ProviderId,
+  RouteSession,
+  StreamOptions,
+  ToolAnswers,
+} from "../src/types.ts";
 import { collect } from "./fake-fetch.ts";
 
 function finish(model: string): LlmEvent {
@@ -17,19 +25,29 @@ function finish(model: string): LlmEvent {
   };
 }
 
-/** A provider that plays a script per model: events to send, then an optional error. */
-function scripted(id: ProviderId, scripts: Record<string, { events?: LlmEvent[]; error?: Error }>) {
+/**
+ * A provider that plays a script per model: events to send, then an optional error. With
+ * `needsSession`, it serves only calls with a session, as `claude-code` will (#295).
+ */
+function scripted(
+  id: ProviderId,
+  scripts: Record<string, { events?: LlmEvent[]; error?: Error }>,
+  { needsSession = false } = {},
+) {
   const requests: LlmRequest[] = [];
+  const options: (StreamOptions | undefined)[] = [];
   const provider: LlmProvider = {
     id,
-    async *stream(request) {
+    ...(needsSession ? { needsSession: true as const } : {}),
+    async *stream(request, sent) {
       requests.push(request);
+      options.push(sent);
       const script = scripts[request.model] ?? {};
       yield* script.events ?? [finish(request.model)];
       if (script.error) throw script.error;
     },
   };
-  return { provider, requests };
+  return { provider, requests, options };
 }
 
 const routes: RouteTable = {
@@ -213,6 +231,150 @@ describe("ModelRouter", () => {
     await expect(collect(router.stream({ tier: "medium" }, request))).rejects.toMatchObject({
       code: "unavailable",
       retryable: false,
+    });
+  });
+});
+
+describe("ModelRouter and a route that needs a session (#295)", () => {
+  // A route like `claude-code` keeps the conversation itself, so only a call with a session reaches
+  // it: checkpoints, Dream and resolve never do.
+  const withSessionRoute: RouteTable = {
+    ...routes,
+    medium: [
+      { provider: "claude-code", model: "claude-sonnet-5-5" },
+      { provider: "anthropic", model: "claude-sonnet-5-5" },
+    ],
+  };
+  const session: RouteSession = {
+    conversation: "kelpie:telegram:42",
+    id: "6c1f2a9e-3b7d-4e51-9a0c-2f8d7e6b5a41",
+    resume: false,
+  };
+  const answers: ToolAnswers = { wait: async (callId) => ({ callId, output: "done" }) };
+
+  it("skips it for a call without a session, even when it is the chosen provider", async () => {
+    const claudeCode = scripted("claude-code", {}, { needsSession: true });
+    const anthropic = scripted("anthropic", {});
+    const router = new ModelRouter(withSessionRoute, {
+      "claude-code": claudeCode.provider,
+      anthropic: anthropic.provider,
+    });
+
+    expect(
+      await collect(router.stream({ tier: "medium", provider: "claude-code" }, request)),
+    ).toEqual([finish("claude-sonnet-5-5")]);
+    expect(claudeCode.requests).toEqual([]);
+    expect(anthropic.requests).toHaveLength(1);
+  });
+
+  it("uses it with a session, and passes the session and the answers on", async () => {
+    const claudeCode = scripted("claude-code", {}, { needsSession: true });
+    const anthropic = scripted("anthropic", {});
+    const router = new ModelRouter(withSessionRoute, {
+      "claude-code": claudeCode.provider,
+      anthropic: anthropic.provider,
+    });
+
+    await collect(
+      router.stream({ tier: "medium", provider: "claude-code" }, request, { session, answers }),
+    );
+    expect(claudeCode.requests).toEqual([{ ...request, model: "claude-sonnet-5-5" }]);
+    expect(claudeCode.options).toEqual([{ session, answers }]);
+    expect(anthropic.requests).toEqual([]);
+  });
+
+  it("falls back from it to the next route, which gets the same options", async () => {
+    const claudeCode = scripted(
+      "claude-code",
+      { "claude-sonnet-5-5": { events: [], error: overloaded } },
+      { needsSession: true },
+    );
+    const anthropic = scripted("anthropic", {});
+    const router = new ModelRouter(withSessionRoute, {
+      "claude-code": claudeCode.provider,
+      anthropic: anthropic.provider,
+    });
+
+    const events = await collect(router.stream({ tier: "medium" }, request, { session, answers }));
+    expect(events[0]).toMatchObject({
+      type: "fallback",
+      failed: { provider: "claude-code" },
+      next: { provider: "anthropic" },
+    });
+    expect(anthropic.options).toEqual([{ session, answers }]);
+  });
+
+  it("finds no route in a tier it alone serves, for a call without a session", async () => {
+    const claudeCode = scripted("claude-code", {}, { needsSession: true });
+    const router = new ModelRouter(withSessionRoute, { "claude-code": claudeCode.provider });
+
+    await expect(collect(router.stream({ tier: "medium" }, request))).rejects.toMatchObject({
+      code: "unavailable",
+    });
+    expect(claudeCode.requests).toEqual([]);
+  });
+
+  it("lists it in a tier's route only for a call with a session", () => {
+    const claudeCode = scripted("claude-code", {}, { needsSession: true });
+    const anthropic = scripted("anthropic", {});
+    const router = new ModelRouter(withSessionRoute, {
+      "claude-code": claudeCode.provider,
+      anthropic: anthropic.provider,
+    });
+    const providers = (candidates: { provider: ProviderId }[]) =>
+      candidates.map((candidate) => candidate.provider);
+
+    // An instance's auto-pin takes the cheap tier's first route without a session: never this one.
+    expect(providers(router.route("medium"))).toEqual(["anthropic"]);
+    expect(providers(router.route("medium", "claude-code"))).toEqual(["anthropic"]);
+    expect(providers(router.route("medium", null, { session: true }))).toEqual([
+      "claude-code",
+      "anthropic",
+    ]);
+    expect(providers(router.route("medium", "anthropic", { session: true }))).toEqual([
+      "anthropic",
+      "claude-code",
+    ]);
+  });
+
+  it("carries a failed route's reset time and an unverified reason on its fallback", async () => {
+    const limited = new LlmError("usage limit", "rate_limited", true);
+    limited.resetsAt = 1_793_000_000_000;
+    const billing = new LlmError("out of extra usage", "out_of_credits", true);
+    billing.unverified = true;
+    const fallbackFrom = async (error: LlmError) => {
+      const claudeCode = scripted(
+        "claude-code",
+        { "claude-sonnet-5-5": { events: [], error } },
+        { needsSession: true },
+      );
+      const anthropic = scripted("anthropic", {});
+      const router = new ModelRouter(withSessionRoute, {
+        "claude-code": claudeCode.provider,
+        anthropic: anthropic.provider,
+      });
+      return (await collect(router.stream({ tier: "medium" }, request, { session })))[0];
+    };
+
+    expect(await fallbackFrom(limited)).toEqual({
+      type: "fallback",
+      failed: {
+        provider: "claude-code",
+        model: "claude-sonnet-5-5",
+        code: "rate_limited",
+        resetsAt: 1_793_000_000_000,
+      },
+      next: { provider: "anthropic", model: "claude-sonnet-5-5" },
+    });
+    expect(await fallbackFrom(billing)).toEqual({
+      type: "fallback",
+      failed: {
+        provider: "claude-code",
+        model: "claude-sonnet-5-5",
+        code: "out_of_credits",
+        unverified: true,
+      },
+      next: { provider: "anthropic", model: "claude-sonnet-5-5" },
     });
   });
 });

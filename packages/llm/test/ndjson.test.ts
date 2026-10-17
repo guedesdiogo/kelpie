@@ -70,6 +70,79 @@ describe("NDJSON stream", () => {
     expect(decoded).toEqual([fallback]);
   });
 
+  it("carries a limit's reset time and an unverified reason, on a fallback and on the error (#295)", async () => {
+    const fallback: RouterEvent = {
+      type: "fallback",
+      failed: {
+        provider: "claude-code",
+        model: "claude-sonnet-5-5",
+        code: "out_of_credits",
+        unverified: true,
+      },
+      next: { provider: "anthropic", model: "claude-sonnet-5-5" },
+    };
+    const limited = new LlmError("You've hit your limit · resets 3pm", "rate_limited", true);
+    limited.route = { provider: "anthropic", model: "claude-sonnet-5-5" };
+    limited.resetsAt = 1_793_000_000_000;
+    limited.unverified = false;
+    const decoded: RouterEvent[] = [];
+    const failure = (async () => {
+      for await (const event of fromNdjsonStream(
+        toNdjsonStream(
+          (async function* () {
+            yield fallback;
+            throw limited;
+          })(),
+          () => {},
+        ),
+      )) {
+        decoded.push(event);
+      }
+    })();
+    await expect(failure).rejects.toMatchObject({
+      code: "rate_limited",
+      retryable: true,
+      message: "The provider is rate limiting requests",
+      route: { provider: "anthropic", model: "claude-sonnet-5-5" },
+      resetsAt: 1_793_000_000_000,
+      unverified: false,
+    });
+    expect(decoded).toEqual([fallback]);
+  });
+
+  it("leaves the reset time and the unverified mark off an error frame that has neither", async () => {
+    const stream = toNdjsonStream(
+      events([], new LlmError("overloaded", "server_error", true)),
+      () => {},
+    );
+    expect(JSON.parse(await new Response(stream).text())).toEqual({
+      type: "error",
+      code: "server_error",
+      retryable: true,
+      message: "The provider failed",
+    });
+  });
+
+  it("round-trips a route's own tool rounds and tool requests, and its session (#295)", async () => {
+    const call = { type: "tool_call" as const, id: "toolu_01", name: "search_memory", input: {} };
+    const sent: LlmEvent[] = [
+      {
+        type: "tool_round",
+        message: { role: "assistant", parts: [{ type: "text", text: "Vou procurar." }, call] },
+        usage: [
+          { model: "claude-sonnet-5-5", inputUncached: 9, cacheRead: 0, cacheWrite: 7, output: 3 },
+        ],
+      },
+      { type: "tool_request", call },
+      {
+        ...(finish as Extract<LlmEvent, { type: "finish" }>),
+        session: { id: "6c1f2a9e-3b7d-4e51-9a0c-2f8d7e6b5a41", clean: true },
+      },
+    ];
+
+    expect(await collect(fromNdjsonStream(toNdjsonStream(events(sent), () => {})))).toEqual(sent);
+  });
+
   it("round-trips events, even when chunks split frames and characters", async () => {
     const sent: LlmEvent[] = [
       { type: "text", delta: "Olá, " },

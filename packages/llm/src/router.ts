@@ -47,11 +47,17 @@ export interface RouteChoice {
 /**
  * A route that failed before sending anything, and the one tried next (#293). The router sends it
  * before the next route's events, so the caller can tell the owner: no route fails silently
- * (ADR-0037 §4).
+ * (ADR-0037 §4). `failed` carries the error's `resetsAt` and `unverified` when it has them (#295).
  */
 export interface FallbackEvent {
   type: "fallback";
-  failed: { provider: ProviderId; model: string; code: LlmErrorCode };
+  failed: {
+    provider: ProviderId;
+    model: string;
+    code: LlmErrorCode;
+    resetsAt?: number;
+    unverified?: boolean;
+  };
   next: { provider: ProviderId; model: string };
 }
 
@@ -70,8 +76,9 @@ export interface RouterOptions {
  * Streams the choice's first candidate: the chosen provider's, or the tier's first. When a provider
  * fails with a retryable error before it has sent anything, the next candidate takes over. Once an
  * event has gone out, a failure ends the turn: another model would start the reply again, and
- * reasoning doesn't carry across providers. Candidates whose provider isn't configured are skipped.
- * Each fallback is announced with a `fallback` event; with fallback off, the first failure ends it.
+ * reasoning doesn't carry across providers. Candidates whose provider isn't configured are skipped,
+ * and so are those whose provider needs a session, for a call without one (#295). Each fallback is
+ * announced with a `fallback` event; with fallback off, the first failure ends it.
  */
 export class ModelRouter {
   readonly #routes: RouteTable;
@@ -95,7 +102,9 @@ export class ModelRouter {
   ): AsyncIterable<RouterEvent> {
     // RPC callers aren't type-checked, so the choice and the request fields are taken explicitly.
     const { tier } = choice;
-    const candidates = this.route(tier, choice.provider);
+    const candidates = this.route(tier, choice.provider, {
+      session: options.session !== undefined,
+    });
     for (const [index, candidate] of candidates.entries()) {
       const provider = this.#providers[candidate.provider] as LlmProvider;
       const effort = lowerEffort(candidate.model, choice.effort ?? candidate.effort);
@@ -122,7 +131,13 @@ export class ModelRouter {
         if (started || !error.retryable || !this.#fallback || !next) throw error;
         yield {
           type: "fallback",
-          failed: { provider: candidate.provider, model: candidate.model, code: error.code },
+          failed: {
+            provider: candidate.provider,
+            model: candidate.model,
+            code: error.code,
+            ...(error.resetsAt === undefined ? {} : { resetsAt: error.resetsAt }),
+            ...(error.unverified === undefined ? {} : { unverified: error.unverified }),
+          },
           next: { provider: next.provider, model: next.model },
         };
       }
@@ -133,13 +148,19 @@ export class ModelRouter {
 
   /**
    * The tier's candidates `stream` would try, in order: those whose provider is configured, the
-   * chosen provider's first.
+   * chosen provider's first. Without `session`, as for a call that has none, a provider that needs
+   * one is left out, so a description or an instance's auto-pin never names it.
    */
-  route(tier: ModelTier, provider?: ProviderId | null): RouteCandidate[] {
+  route(
+    tier: ModelTier,
+    provider?: ProviderId | null,
+    { session = false }: { session?: boolean } = {},
+  ): RouteCandidate[] {
     checkTier(tier);
-    const configured = this.#routes[tier].filter(
-      (candidate) => this.#providers[candidate.provider],
-    );
+    const configured = this.#routes[tier].filter((candidate) => {
+      const serving = this.#providers[candidate.provider];
+      return serving !== undefined && (session || !serving.needsSession);
+    });
     return [
       ...configured.filter((candidate) => candidate.provider === provider),
       ...configured.filter((candidate) => candidate.provider !== provider),

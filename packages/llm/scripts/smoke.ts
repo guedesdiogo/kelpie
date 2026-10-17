@@ -119,7 +119,7 @@ async function turn(llm: LlmProvider, request: LlmRequest) {
   let finish: Extract<LlmEvent, { type: "finish" }> | undefined;
   for await (const event of llm.stream(request)) {
     if (event.type === "text") deltas += 1;
-    else finish = event;
+    else if (event.type === "finish") finish = event;
   }
   if (!finish) fail("the stream ended without a finish event");
   const nativeTypes = (finish.message.native?.content ?? []).map(

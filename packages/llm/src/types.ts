@@ -1,5 +1,9 @@
-/** Providers with a native adapter (ADR-0008). */
-export type ProviderId = "anthropic" | "openai";
+/**
+ * Providers with a native adapter (ADR-0008), and `claude-code`, Claude Code on the owner's
+ * subscription through the VPS runner (ADR-0037). That one has no adapter yet (#295), so route
+ * tables and model settings still refuse it (`PROVIDERS`).
+ */
+export type ProviderId = "anthropic" | "openai" | "claude-code";
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -86,8 +90,34 @@ export interface LlmRequest {
   context?: string;
 }
 
+/**
+ * A conversation's session on a route that keeps the conversation itself, such as `claude-code`
+ * (ADR-0037 §2, #295): one live session per conversation.
+ */
+export interface RouteSession {
+  /** The conversation the session belongs to. */
+  conversation: string;
+  /** The session's id: the one to resume, or the one a new session takes. */
+  id: string;
+  /** Whether `id` names a session to resume. Otherwise a new session starts with that id. */
+  resume: boolean;
+}
+
+/**
+ * The caller's answers to `tool_request` events, for a route that runs its own tool loop (#295).
+ * `wait` resolves with the result of the call `callId` once the caller answers it, and rejects when
+ * `signal` aborts or the call ends first.
+ */
+export interface ToolAnswers {
+  wait(callId: string, signal?: AbortSignal): Promise<ToolResult>;
+}
+
 export interface StreamOptions {
   signal?: AbortSignal;
+  /** The conversation's session. Only a call with one reaches a provider that `needsSession`. */
+  session?: RouteSession;
+  /** Where a provider that sends `tool_request` events gets their results. */
+  answers?: ToolAnswers;
 }
 
 /** Token counts for one model attempt. The four counts don't overlap. */
@@ -107,11 +137,35 @@ export interface Usage {
  */
 export type StopReason = "stop" | "tool_calls" | "length" | "refusal";
 
+/**
+ * - `text`: a piece of the reply's text, as it streams.
+ * - `tool_round`: a reply whose tool calls the route's own loop runs, as `claude-code`'s does
+ *   (#295). The stream goes on with the model's next reply. `usage` is that reply's.
+ * - `tool_request`: a call of that loop the caller must run now. Its result goes back through
+ *   `StreamOptions.answers`, and the stream waits for it.
+ * - `finish`: the last reply. A route that keeps a session names it in `session`. `clean` is false
+ *   when the session no longer matches the conversation's history, as after its own compaction or
+ *   a cut.
+ */
 export type LlmEvent =
   | { type: "text"; delta: string }
-  | { type: "finish"; reason: StopReason; message: AssistantMessage; usage: Usage[] };
+  | { type: "tool_round"; message: AssistantMessage; usage: Usage[] }
+  | { type: "tool_request"; call: ToolCallPart }
+  | {
+      type: "finish";
+      reason: StopReason;
+      message: AssistantMessage;
+      usage: Usage[];
+      session?: { id: string; clean: boolean };
+    };
 
 export interface LlmProvider {
   readonly id: ProviderId;
+  /**
+   * Set by a provider that serves only a call with a session (`StreamOptions.session`), because the
+   * conversation lives in the route. The router skips it for any other call, so checkpoints, Dream
+   * and conflict resolve never reach it (#295).
+   */
+  readonly needsSession?: true;
   stream(request: LlmRequest, options?: StreamOptions): AsyncIterable<LlmEvent>;
 }
