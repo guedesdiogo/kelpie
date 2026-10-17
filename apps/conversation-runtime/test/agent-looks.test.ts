@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { derivedMascot, KELPIE_MASCOT, type Mascot, REGISTRY_NAME } from "@kelpie/config";
 import { describe, expect, it } from "vitest";
 import { AgentLooks } from "../src/agent-looks.ts";
+import * as worker from "../src/index.ts";
 
 // What ingress reads for the webchat's list of agents (ADR-0052 §7): each agent's mascot, through
 // an entrypoint that reads and does nothing else, so ingress never binds an AgentHost.
@@ -15,6 +16,10 @@ const owned = { userId: "u-owner", role: "owner", via: "test" } as const;
 const looks = new AgentLooks(createExecutionContext(), env);
 
 describe("AgentLooks", () => {
+  it("is an entrypoint of the Worker, which ingress's AGENT_LOOKS binding names", () => {
+    expect(worker.AgentLooks).toBe(AgentLooks);
+  });
+
   it("names each listed agent's mascot: the owner's pick, or its default by its role", async () => {
     await env.REGISTRY.getByName(REGISTRY_NAME).add("sales", "Sales", owner);
     const picked: Mascot = { ...KELPIE_MASCOT, shape: "star", head: { type: "none" } };
