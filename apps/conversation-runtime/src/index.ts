@@ -1,3 +1,4 @@
+export { AgentEditor } from "./agent-editor.ts";
 export { AgentHost } from "./agent-host/agent-host.ts";
 export { AgentLooks } from "./agent-looks.ts";
 export { ConversationAgent } from "./conversation-agent.ts";

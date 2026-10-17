@@ -61,6 +61,12 @@ export interface AgentSettings {
   /** The agent's remit, one line: what it is for, as its identity tells it (ADR-0036 §4). */
   remit: string;
   /**
+   * What the agent specializes in, one line for the owner's eyes, such as "Agenda e e-mail" (#379).
+   * It never reaches the prompt. The main agent's is always "principal", whatever this holds, and
+   * the configuration commands refuse to change it.
+   */
+  specialty: string;
+  /**
    * Skills kept on the agent's AgentHost, not in the vault: a subagent's, which last only as long
    * as it does (ADR-0036 §5).
    */
@@ -94,11 +100,15 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   maxConcurrentTasks: 3,
   spawn: false,
   remit: "",
+  specialty: "",
   skills: [],
   tools: null,
   mascot: null,
 };
 
+/** The longest remit and specialty (#379): one line each. */
+export const MAX_REMIT_CHARS = 200;
+export const MAX_SPECIALTY_CHARS = 40;
 /** The most skills one agent keeps, and the longest one. */
 const MAX_SKILLS = 10;
 const MAX_SKILL_CHARS = 4_000;
@@ -202,8 +212,12 @@ export function parseSettings(input: unknown): Partial<AgentSettings> | null {
         parsed.spawn = value;
         break;
       case "remit":
-        if (!isLine(value, 200)) return null;
+        if (!isLine(value, MAX_REMIT_CHARS)) return null;
         parsed.remit = value.trim();
+        break;
+      case "specialty":
+        if (!isLine(value, MAX_SPECIALTY_CHARS)) return null;
+        parsed.specialty = value.trim();
         break;
       case "skills": {
         const skills = parseSkills(value);

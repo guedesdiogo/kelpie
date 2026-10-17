@@ -11,7 +11,7 @@ import {
 } from "@kelpie/access";
 import type { ChannelFormsContract, ChannelId, RunnerState } from "@kelpie/channels";
 import { type ModelSettings, type ProviderId, parseModelSettings } from "@kelpie/llm/models";
-import { type Mascot, mascotFor } from "./mascot.ts";
+import { type Mascot, mascotFor, randomMascot } from "./mascot.ts";
 import {
   type AgentSettings,
   isAgentId,
@@ -187,11 +187,37 @@ export interface SetupEventsContract {
 }
 
 /**
- * conversation-runtime's `AgentLooks` entrypoint: ingress reads each listed agent's mascot for the
+ * How an agent shows in the webchat's list (ADR-0052 §7, #379): its mascot, its specialty for the
+ * owner's eyes ("" for none; the main agent's is the page's own "principal"), and its remit, the
+ * short description its editor shows.
+ */
+export interface AgentLook {
+  mascot: Mascot;
+  specialty: string;
+  remit: string;
+}
+
+/**
+ * conversation-runtime's `AgentLooks` entrypoint: ingress reads how each listed agent shows for the
  * webchat's list (ADR-0052 §7), and nothing else.
  */
 export interface AgentLooksContract {
+  looks(agentIds: string[]): Promise<Record<string, AgentLook>>;
+  /** The mascots alone, for the ingress of the release before while a deploy replaces it. */
   mascots(agentIds: string[]): Promise<Record<string, Mascot>>;
+}
+
+/**
+ * conversation-runtime's `AgentEditor` entrypoint: the webchat's agent editor (#379) changes an
+ * agent's mascot, name, remit and specialty, and nothing else. Each runs the configuration command
+ * with the actor ingress built from the Directory's admission, and the command checks again that
+ * it is the owner. ADR-0055 §5 adds the model chip's one field here, in its own story.
+ */
+export interface AgentEditorContract {
+  setMascot(actor: Actor, agentId: string, mascot: unknown): Promise<CommandResult<Mascot>>;
+  rename(actor: Actor, agentId: string, name: unknown): Promise<CommandResult<string>>;
+  setRemit(actor: Actor, agentId: string, remit: unknown): Promise<CommandResult<string>>;
+  setSpecialty(actor: Actor, agentId: string, specialty: unknown): Promise<CommandResult<string>>;
 }
 
 /** A vault file pushed with conflict markers that still waits: on the model, or on a pull request. */
@@ -452,6 +478,15 @@ export function createConfigCommands(ports: ConfigPorts) {
       if (!isAgentId(id) || id === SETUP_AGENT_ID || !isAgentName(name)) return invalid;
       const result = await ports.registry.add(id, name.trim(), actor);
       if (!result.ok) return result;
+      // A new agent's look is a random one, saved as its setting, which the owner edits from there
+      // (#379). Without it, the agent shows the mascot derived from its id.
+      if (result.created) {
+        try {
+          await ports.agents.configure(id, { mascot: randomMascot() }, actor);
+        } catch (error) {
+          console.warn("createAgent: the new agent's mascot wasn't saved", errorName(error));
+        }
+      }
       return { ok: true, value: { id, name: name.trim(), created: result.created } };
     },
 
@@ -482,7 +517,12 @@ export function createConfigCommands(ports: ConfigPorts) {
       if (!isAgentId(id)) return invalid;
       const changes = parseSettings(settings);
       if (!changes) return invalid;
-      if (!(await ports.registry.get(id))) return { ok: false, reason: "unknown_agent" };
+      const agent = await ports.registry.get(id);
+      if (!agent) return { ok: false, reason: "unknown_agent" };
+      // The main agent's specialty is always "principal", by its role (#379).
+      if (changes.specialty !== undefined && agent.role === "main") {
+        return { ok: false, reason: "not_allowed" };
+      }
       if (changes.model && !(await keyed(changes.model))) return noKey;
       return ports.agents.configure(id, changes, actor);
     },
@@ -858,6 +898,8 @@ export function createConfigCommands(ports: ConfigPorts) {
 }
 
 export type ConfigCommands = ReturnType<typeof createConfigCommands>;
+
+const errorName = (error: unknown) => (error instanceof Error ? error.name : "unknown");
 
 function parseIdentity(input: unknown): ChannelIdentity | null {
   const { channel, channelUserId } = (input ?? {}) as Partial<Record<string, unknown>>;

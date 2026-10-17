@@ -5,7 +5,17 @@ import {
   type Verification,
 } from "@kelpie/access";
 import { MAX_LANGUAGE_CHARS } from "@kelpie/channels";
-import { type AgentEntry, isAgentId, type Mascot, parseMascot } from "@kelpie/config";
+import {
+  type Actor,
+  type AgentEditorContract,
+  type AgentEntry,
+  type CommandResult,
+  isAgentId,
+  isAgentName,
+  type Mascot,
+  parseMascot,
+  parseSettings,
+} from "@kelpie/config";
 import { WEBCHAT_ADMISSION_HEADER, type WebchatAdmission } from "@kelpie/conversation/contract";
 import { conversationName } from "./telegram-webhook.ts";
 
@@ -23,8 +33,13 @@ export interface WebchatDeps {
   agentExists(agentId: string): Promise<boolean>;
   /** The registry's agents, in its order, for the page's switcher (#140). */
   listAgents(): Promise<Pick<AgentEntry, "id" | "name" | "role" | "chat">[]>;
-  /** Each agent's mascot, through conversation-runtime's read-only AgentLooks (ADR-0052 §7). */
-  mascots(agentIds: string[]): Promise<Record<string, unknown>>;
+  /**
+   * How each agent shows, its mascot, specialty and remit, through conversation-runtime's
+   * read-only AgentLooks (ADR-0052 §7, #379).
+   */
+  looks(agentIds: string[]): Promise<Record<string, unknown>>;
+  /** conversation-runtime's AgentEditor, the editor's one way to change an agent (#379). */
+  editor: AgentEditorContract;
   /** The static page, from Workers assets. */
   page(request: Request): Promise<Response>;
   /** Opens the socket on the conversation's object. */
@@ -142,15 +157,24 @@ async function agentList(sub: string, deps: WebchatDeps): Promise<Response> {
   const listed = chatting.filter((_, index) => admitted[index]);
   if (listed.length === 0) return new Response(null, { status: 403 });
   // Each row draws its agent's mascot before its socket opens (ADR-0052 §7). Without them, the list
-  // still answers; a value that isn't a mascot never reaches the page.
+  // still answers; a value that isn't a mascot, or a line, never reaches the page.
   const looks = await within(
     MASCOTS_WITHIN_MS,
-    deps.mascots(listed.map(({ id }) => id)).catch(() => ({})),
+    deps.looks(listed.map(({ id }) => id)).catch(() => ({})),
     {},
   );
   const agents = listed.map(({ id, name, role }) => {
-    const mascot: Mascot | null = parseMascot((looks as Record<string, unknown>)[id] ?? null);
-    return { id, name, main: role === "main", ...(mascot ? { mascot } : {}) };
+    const look = ((looks as Record<string, unknown>)[id] ?? {}) as Record<string, unknown>;
+    const mascot: Mascot | null = parseMascot(look.mascot ?? null);
+    // The editor's profile (#379): one line each, as the settings hold them.
+    const lines = parseSettings({ specialty: look.specialty, remit: look.remit });
+    return {
+      id,
+      name,
+      main: role === "main",
+      ...(mascot ? { mascot } : {}),
+      ...(lines ? lines : {}),
+    };
   });
   return Response.json(
     { agents },
@@ -170,4 +194,114 @@ export function connectWebchat(
   return env.CONVERSATION_AGENT.getByName(name).fetch("https://conversation/webchat", {
     headers: { Upgrade: "websocket", [WEBCHAT_ADMISSION_HEADER]: JSON.stringify(admission) },
   });
+}
+
+/** The editor's routes (#379): `/webchat/agents/<id>/mascot` and `/webchat/agents/<id>/profile`. */
+const EDIT_PATH = new RegExp(`^${AGENTS_PATH}/([^/]+)/(mascot|profile)$`);
+export const isAgentEditPath = (pathname: string) => pathname.startsWith(`${AGENTS_PATH}/`);
+/** Far more than a mascot or a profile takes. */
+const MAX_EDIT_BODY = 4_096;
+const EDIT_HEADERS = { "cache-control": "no-store", "x-content-type-options": "nosniff" };
+/** The profile's fields, in the order they are set: the one the main agent refuses goes first. */
+const PROFILE_FIELDS = ["specialty", "remit", "name"] as const;
+
+const STATUS_OF: Partial<Record<Extract<CommandResult<unknown>, { ok: false }>["reason"], number>> =
+  {
+    forbidden: 403,
+    invalid_input: 400,
+    unknown_agent: 404,
+    not_allowed: 409,
+  };
+const refused = (result: Extract<CommandResult<unknown>, { ok: false }>) =>
+  new Response(null, { status: STATUS_OF[result.reason] ?? 503, headers: EDIT_HEADERS });
+
+/**
+ * The agent editor's saves (#379): a `PUT` from the webchat's own page, with the owner's Access
+ * login, for an agent the Directory admits this login to. The mascot is set whole, from a body
+ * `parseMascot` takes; the profile sets the fields it names, each checked before any is set. Each
+ * goes through conversation-runtime's AgentEditor, as the actor the Directory resolved, and the
+ * command checks again that it is the owner. Browsers send the Access cookie with any site's
+ * request, so the origin and the fetch's metadata must both say it came from this page.
+ */
+export async function handleAgentEdit(request: Request, deps: WebchatDeps): Promise<Response> {
+  const verification = await deps.authenticate(request);
+  if (!verification.ok) {
+    return new Response(null, { status: verification.reason === "not_configured" ? 404 : 403 });
+  }
+  const url = new URL(request.url);
+  if (
+    request.headers.get("origin") !== url.origin ||
+    request.headers.get("sec-fetch-site") !== "same-origin"
+  ) {
+    return new Response(null, { status: 403 });
+  }
+  const matched = EDIT_PATH.exec(url.pathname);
+  const agentId = matched?.[1] ?? null;
+  if (!matched || !isAgentId(agentId) || !(await deps.agentExists(agentId))) {
+    return new Response(null, { status: 404 });
+  }
+  if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
+    return new Response(null, { status: 415 });
+  }
+  const length = Number(request.headers.get("content-length") ?? 0);
+  const text = length > MAX_EDIT_BODY ? null : await request.text();
+  if (text === null || text.length > MAX_EDIT_BODY) return new Response(null, { status: 413 });
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return new Response(null, { status: 400 });
+  }
+  const admission = await deps.admit(
+    { channel: ACCESS_SOURCE, channelUserId: verification.sub },
+    agentId,
+  );
+  if (!admission.admitted || admission.role !== "owner") return new Response(null, { status: 403 });
+  const actor: Actor = { userId: admission.userId, role: admission.role, via: "webchat" };
+  try {
+    if (matched[2] === "mascot") {
+      const mascot = parseMascot(body);
+      if (!mascot) return new Response(null, { status: 400 });
+      const result = await deps.editor.setMascot(actor, agentId, mascot);
+      return result.ok
+        ? Response.json({ mascot: result.value }, { headers: EDIT_HEADERS })
+        : refused(result);
+    }
+    const profile = parseProfile(body);
+    if (!profile) return new Response(null, { status: 400 });
+    const saved: Partial<Record<(typeof PROFILE_FIELDS)[number], string>> = {};
+    for (const field of PROFILE_FIELDS) {
+      const value = profile[field];
+      if (value === undefined) continue;
+      const result =
+        field === "name"
+          ? await deps.editor.rename(actor, agentId, value)
+          : field === "remit"
+            ? await deps.editor.setRemit(actor, agentId, value)
+            : await deps.editor.setSpecialty(actor, agentId, value);
+      if (!result.ok) return refused(result);
+      saved[field] = result.value;
+    }
+    return Response.json(saved, { headers: EDIT_HEADERS });
+  } catch (error) {
+    console.warn("webchat: an agent's edit wasn't saved", error instanceof Error ? error.name : "");
+    return new Response(null, { status: 503, headers: EDIT_HEADERS });
+  }
+}
+
+/** The profile's fields the page sent, each one a value the agent takes, or null. */
+function parseProfile(
+  body: unknown,
+): Partial<Record<(typeof PROFILE_FIELDS)[number], string>> | null {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
+  const { name, remit, specialty, ...rest } = body as Record<string, unknown>;
+  if (Object.keys(rest).length > 0) return null;
+  if (name === undefined && remit === undefined && specialty === undefined) return null;
+  if (name !== undefined && !isAgentName(name)) return null;
+  const lines = parseSettings({
+    ...(remit === undefined ? {} : { remit }),
+    ...(specialty === undefined ? {} : { specialty }),
+  });
+  if (!lines) return null;
+  return { ...(name === undefined ? {} : { name: name as string }), ...lines };
 }

@@ -94,6 +94,19 @@ describe("parseSettings", () => {
     expect(parseSettings(input)).toBeNull();
   });
 
+  it("takes a specialty, one line of up to 40 characters, none by default (#379)", () => {
+    expect(DEFAULT_SETTINGS.specialty).toBe("");
+    expect(parseSettings({ specialty: " Agenda e e-mail " })).toEqual({
+      specialty: "Agenda e e-mail",
+    });
+    expect(parseSettings({ specialty: "" })).toEqual({ specialty: "" });
+    expect(parseSettings({ specialty: "a".repeat(40) })).toEqual({ specialty: "a".repeat(40) });
+    const separator = String.fromCharCode(0x2028);
+    for (const specialty of ["a".repeat(41), "Two\nlines", `Two${separator}lines`, 4, null]) {
+      expect(parseSettings({ specialty }), JSON.stringify(specialty)).toBeNull();
+    }
+  });
+
   it("keeps a skill's name with an emoji's presentation selector (#401)", () => {
     const skills = [{ name: "Fact check \u2764\uFE0F", instructions: "x" }];
     expect(parseSettings({ skills })).toEqual({ skills });

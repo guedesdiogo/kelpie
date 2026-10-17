@@ -35,6 +35,21 @@ describe("AgentLooks", () => {
     expect(await looks.mascots(["sales"])).toEqual({ sales: derivedMascot("sales") });
   });
 
+  it("names how each listed agent shows: its mascot, its specialty and its remit (#379)", async () => {
+    await env.REGISTRY.getByName(REGISTRY_NAME).add("looks-agenda", "Agenda", owner);
+    const picked: Mascot = { ...KELPIE_MASCOT, shape: "bean", color: "fawn" };
+    await env.AGENT_HOST.getByName("looks-agenda").configure(
+      { mascot: picked, specialty: "Agenda e e-mail", remit: "Books meetings." },
+      owned,
+    );
+
+    expect(await looks.looks(["kelpie", "looks-agenda", "nobody", "../kelpie"])).toEqual({
+      kelpie: expect.objectContaining({ mascot: KELPIE_MASCOT, specialty: "" }),
+      "looks-agenda": { mascot: picked, specialty: "Agenda e e-mail", remit: "Books meetings." },
+    });
+    expect(await looks.looks("kelpie" as unknown as string[])).toEqual({});
+  });
+
   it("answers nothing for an id the Registry doesn't list, or one that isn't an id", async () => {
     expect(await looks.mascots(["nobody", "../kelpie", "kelpie", "kelpie"])).toEqual({
       kelpie: KELPIE_MASCOT,

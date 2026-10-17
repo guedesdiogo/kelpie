@@ -197,9 +197,35 @@ export function derivedMascot(agentId: string): Mascot {
   };
 }
 
+/** Every option of a part's types, each type without a variation once, in their lists' order. */
+function partsOf<Types extends Record<string, readonly string[]>>(types: Types): Part<Types>[] {
+  return Object.entries(types).flatMap(([type, variations]) =>
+    variations.length === 0
+      ? [{ type } as Part<Types>]
+      : variations.map((variation) => ({ type, variation }) as Part<Types>),
+  );
+}
+
+/**
+ * A new agent's mascot (#379): drawn from every option there is now, then saved as its setting, so
+ * an option added later never changes it.
+ */
+export function randomMascot(random: () => number = Math.random): Mascot {
+  const pick = <T>(options: readonly T[]): T => options[Math.floor(random() * options.length)] as T;
+  return {
+    shape: pick(MASCOT_SHAPES),
+    color: pick(MASCOT_COLORS),
+    eyes: pick(MASCOT_EYES),
+    cheeks: random() < 0.5,
+    head: pick(partsOf(MASCOT_HEADS)),
+    accessory: pick(partsOf(MASCOT_ACCESSORIES)),
+  };
+}
+
 /**
  * The mascot an agent shows: the one the owner picked, or else Kelpie for the main agent and one
- * derived from its id for any other, new agents included.
+ * derived from its id for any other created before #379, which saves a random one for each new
+ * agent.
  */
 export function mascotFor(agentId: string, role: AgentRole | null, picked: Mascot | null): Mascot {
   if (picked) return picked;
