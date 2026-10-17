@@ -21,7 +21,7 @@ On 2026-10-17 the owner asked Master in the webchat: «o que esta rolando no run
 - **`claude agents --json`.** The docs call it the supported way to read session state from outside. It adds a `waiting` status.
 - **User-level hooks.**
   - The docs say they apply to remote sessions.
-  - On the VPS, the Claude app's sessions ran the user-level `PreToolUse`, `PostToolUse`, `Stop` and `SessionStart` hooks.
+  - On the VPS, the Claude app's transcripts record the user-level `PreToolUse`, `PostToolUse`, `Stop` and `SessionStart` hooks running, by the research's count of their entries.
   - `Notification` would tell when a session shows a permission prompt (`permission_prompt`), asks a question (`elicitation_dialog`), or sits idle after its reply (`idle_prompt`).
   - `Stop` carries the last reply.
   - Today's user-level hooks are herdr's, `rtk`'s and ai-memory's. None listens to `Notification` or `PermissionRequest`.
@@ -32,6 +32,7 @@ On 2026-10-17 the owner asked Master in the webchat: «o que esta rolando no run
 - whether a session that is already running picks up hooks added later;
 - whether `Notification` (with each of its three types) and `PermissionRequest` fire in the Claude app's sessions;
 - whether a session file's `name` is the title the app shows;
+- how to tell what started a session: every session file seen said `entrypoint: claude-desktop`, so no terminal value has been observed;
 - whether `claude agents --json` starts a background process, and whether it lists the app's sessions.
 
 **The reference check** (#413):
@@ -46,6 +47,7 @@ On 2026-10-17 the owner asked Master in the webchat: «o que esta rolando no run
 - **This feature only observes.** Through it, Kelpie never sends input, never answers a prompt, and never ends or archives a session.
 - **Sessions Kelpie starts** are listed like any other, but raise no notice here. Their waits go through ADR-0035 §3's relay, which this ADR doesn't change.
 - **The sessions behind Kelpie's own chat route** (ADR-0037) aren't listed.
+- **Telling them apart:** the runner marks the sessions it starts itself, Kelpie Code's and the chat route's, by their ids. It takes a terminal from the session file's `entrypoint`, once the story has seen what a terminal session writes there.
 
 **2. The runner knows the state from two sources.**
 - **The session files** say which sessions run, and whether each is busy or idle, since when.
@@ -53,7 +55,7 @@ On 2026-10-17 the owner asked Master in the webchat: «o que esta rolando no run
   - **`claude agents --json`** replaces the files only if the story's check finds it starts no background process and lists the app's sessions, and the owner agrees.
 - **Hooks in the owner's `~/.claude/settings.json`** tell when a session waits on him, and when it ends.
   - **Command hooks, not `type: "http"` ones.** They ship in `tools/runner`. An HTTP hook would need the runner's secret in every session's environment.
-  - **What a hook writes:** one line to a spool only the runner reads, holding the event, its type, the session's id and the time. No network, and no secret.
+  - **What a hook writes:** one line to a spool only the runner reads, holding the event, its type or `SessionEnd`'s reason, the session's id and the time. No network, and no secret.
   - **Never in the way:** each hook runs asynchronously where Claude Code allows it, has a timeout of 2 seconds, and always exits 0. A hook that fails never stops a session.
   - **The events:**
     - `Notification`;
@@ -67,8 +69,8 @@ On 2026-10-17 the owner asked Master in the webchat: «o que esta rolando no run
     - `SessionEnd`.
 
     The events past "permission, question and end" are there to close a wait (§4).
-  - **The excerpt:** `Stop` also writes the last reply, cut to 500 characters. The owner's second answer had the hooks write only the event, the session and the time; his third answer adds this excerpt.
-- **The PR link:** the owner's third answer includes it. The runner reads only the transcript's `pr-link` entries, and never its messages. The read stops after 1 MB, and the address must be a GitHub pull request.
+  - **The excerpt:** `Stop` also writes the last reply. The hook first redacts the whole reply (§3), then cuts it to 500 characters, dropping a trailing partial word. The owner's second answer had the hooks write only the event, the session and the time; his third answer adds this excerpt.
+- **The PR link:** the owner's third answer includes it. The runner reads only the transcript's `pr-link` entries, and never its messages. It reads at most the transcript's last 1 MB, where a PR link is written, and the address must be a GitHub pull request.
 - **Bounds on disk:**
   - The spool and the excerpts live in a directory only the owner's user can open (`0700`), in files only it can read (`0600`).
   - The spool keeps at most 1 MB, and drops the oldest lines past that.
@@ -84,15 +86,14 @@ On 2026-10-17 the owner asked Master in the webchat: «o que esta rolando no run
 - its PR link, when there is one;
 - the excerpt of its last reply.
 
-The owner accepted that the title and the excerpt, which describe his work, reach Cloudflare and the model's provider.
-
-- **Secrets never leave.** Before anything goes out, the runner redacts:
+- **The owner accepted** that the title and the excerpt, which describe his work, reach Cloudflare and the model's provider.
+- **Secrets never leave.** The hook redacts the excerpt before cutting it (§2), and the runner redacts everything again before it goes out:
   - its own secret;
   - lines shaped like `NAME=value` whose name says key, token, secret or password;
   - bearer tokens;
   - well-known key formats.
 
-  A test covers each.
+  A test covers each, including a token that straddles the cut.
 - **Where it stays:**
   - **Kelpie keeps no copy of its own.** Master's tool asks the runner when it runs.
   - **The tool's result** stays in that conversation's history, as every tool result does (ADR-0025). The story keeps it out of checkpoints, session pages and the vault's memory, as [ADR-0028](0028-setup-step-notes.md) does for Kelpie's notes.
@@ -103,7 +104,7 @@ The owner accepted that the title and the excerpt, which describe his work, reac
 - **A wait opens** on `PermissionRequest`, or on a `Notification` of type `permission_prompt` or `elicitation_dialog`. A session has at most one open wait, so a `permission_prompt` that follows a `PermissionRequest` joins the same wait.
 - **A wait closes** in two cases:
   - on the session's next `UserPromptSubmit`, `PermissionDenied`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `StopFailure` or `SessionEnd`;
-  - when its session file's status changes after the wait opened.
+  - when its session file turns `idle`, or `busy` again, with a change time later than the wait's opening. Whatever status the file held when the wait opened doesn't close it.
 
   So an answer the owner gives in the Claude app clears the wait too.
 - **A session has ended** when its process is gone, or after a `SessionEnd` whose reason isn't `clear` or `resume`. Any later event from a live process brings it back.
@@ -147,7 +148,7 @@ Kelpie doesn't call the runner while it isn't connected.
 ## Alternatives considered
 
 - **Session files only.** This needs no change to the owner's settings, but it can't tell that a session waits on him: no session was `waiting` in the research's snapshot.
-- **Hooks only.** Sessions started before the hooks, or whose event was lost, stay invisible until their next event.
+- **Hooks only.** Sessions started before the hooks, or whose event was lost, stay invisible: until their next event, or until they restart if running sessions don't pick up new hooks.
 - **`type: "http"` hooks to the runner.** Each session's environment would need the runner's secret. A local spool, as ai-memory does, avoids it.
 - **The runner calling Kelpie.** It doesn't today, and this design needs no outbound connection: Kelpie polls.
 - **Reading transcripts.** Their format is undocumented, they can't tell a pending permission from a long tool, and they hold the whole conversation.
