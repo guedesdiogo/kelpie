@@ -1,0 +1,16 @@
+/* DisplayMenu (5.22): the account at the sidebar's foot and its menu (#378, mockup board 8). */
+.k-dm { grid-template-columns: minmax(0, 300px) minmax(0, 1fr); align-items: end; gap: var(--space-4); }
+.k-dm-side { position: relative; display: grid; gap: var(--space-2); }
+.k-dmenu { display: grid; gap: 14px; padding: 14px; border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-pop); transform-origin: bottom left; }
+.k-dm-who { display: flex; align-items: center; gap: var(--space-3); }
+.k-ava { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-weight: 600; font-size: 12.5px; }
+.k-ava.sm { width: 24px; height: 24px; font-size: 10.5px; }
+.k-dm-row { display: grid; gap: 6px; font-weight: 500; }
+.k-dm-ver { justify-self: stretch; text-align: left; padding: var(--space-2) 0 0; border: 0; border-top: 1px solid var(--line); background: none; color: var(--muted); cursor: copy; }
+.k-acct { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); padding: var(--space-2); border: 0; border-radius: var(--r-btn); background: none; color: var(--fg); text-align: left; cursor: pointer; }
+@media (hover: hover) { .k-acct:hover { background: var(--sunken); } }
+.k-acct-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.k-acct .k-icon { color: var(--muted); }
+.k-dm-panel { display: grid; gap: var(--space-3); padding: var(--space-4); border-radius: var(--r-panel); background: var(--bg); color: var(--fg); border: 1px solid var(--line); }
+@media (max-width: 560px) { .k-dm { grid-template-columns: minmax(0, 1fr); } }
+.k-dm-who b { font-weight: 600; }

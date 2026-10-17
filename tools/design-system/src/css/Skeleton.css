@@ -1,0 +1,5 @@
+/* Skeleton (5.11): still, never a shimmer. */
+.k-sk-box { max-width: 420px; padding: var(--space-3); display: grid; gap: var(--space-3); min-block-size: 132px; }
+.k-sk-row { display: flex; align-items: center; gap: var(--space-3); min-block-size: 44px; }
+.k-sk { display: block; height: 12px; border-radius: var(--r-sm); background: var(--sunken); }
+.k-sk.round { width: 36px; height: 36px; flex: none; border-radius: 50%; }

@@ -1,0 +1,80 @@
+<!-- @dsCard group="Agents" height=440 subtitle="5.9 · press a row to change its state, or lose the connection" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Presence</title></head>
+<body>
+<div class="k-stage">
+  <div class="k-roster k-card">
+    <div class="k-strip-slot"><button type="button" class="k-btn text-sm k-net" id="net">Lose the connection</button><div class="k-strip text-sm" id="strip" role="status" hidden><svg class="k-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 11V7.5a4 4 0 0 1 8 0V11l1 1.5H3Z"/><path d="M6.5 14h3"/></svg><span class="k-roll k-mono" id="count"><span class="n">0</span></span><span id="strip-t">agent waiting for you</span></div></div>
+    <div id="list" role="list"></div>
+  </div>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui;
+  var LBL = { working: "working", waiting: "waiting for you", idle: "idle", error: "error", noResponse: "no response for 1 min", offline: "no connection" };
+  var CYCLE = ["working", "waiting", "idle", "error", "noResponse"];
+  var now = Date.now();
+  var AG = [
+    { id: "kelpie", name: "Kelpie", state: "working", act: "vault", since: now - 42e3, det: { working: "Reading people/ana-souza.md", waiting: "Confirm the note", idle: "No conversation open", error: "Couldn't read the vault", noResponse: "Writing the reply" } },
+    { id: "agenda", name: "Agenda", state: "waiting", act: "email", since: now - 120e3, det: { working: "Sending 3 invites", waiting: "Approve the invite to Ana", idle: "Nothing queued", error: "Google refused access", noResponse: "Sending 3 invites" } },
+    { id: "research", name: "Research", state: "working", act: "search", since: now - 190e3, det: { working: "2 subagents comparing flights", waiting: "Pick one of 3 flights", idle: "Nothing queued", error: "Search is down", noResponse: "Comparing flights" } },
+    { id: "code", name: "Code", state: "idle", act: "code", since: now, det: { working: "Running the tests", waiting: "Turn on the computer?", idle: "Computer off", error: "A test failed", noResponse: "Running the tests" } },
+    { id: "notes", name: "Notes", state: "noResponse", act: "think", since: now - 75e3, det: { working: "Summarizing the week", waiting: "Keep this note?", idle: "Nothing queued", error: "The summary failed", noResponse: "Summarizing the week" } },
+  ];
+  var LOOK = { kelpie: ui.LOOKS.kelpie, agenda: ui.LOOKS.agenda, research: ui.LOOKS.research, code: ui.LOOKS.code, notes: ui.LOOKS.notes };
+  var list = document.getElementById("list");
+  function line(a) { return '<span class="k-st-' + a.state + '"><b>' + ui.glyph(a.state) + LBL[a.state] + "</b> · " + a.det[a.state] + "</span>"; }
+  list.innerHTML = AG.map(function (a) {
+    return '<button type="button" role="listitem" class="k-agent" data-state="' + a.state + '"><span class="k-mh s36"></span><span class="k-col" style="gap:0"><span class="k-agent-name text-ui">' + a.name + ' <span class="k-mono text-xs k-muted">' + a.id + '</span></span><span class="k-roll text-sm k-agent-st"><span class="n">' + line(a) + '</span></span></span><span class="k-mono text-xs k-agent-time"></span></button>';
+  }).join("");
+  var rows = Array.prototype.slice.call(list.children);
+  rows.forEach(function (row, i) {
+    var a = AG[i];
+    a.m = ui.mascot(row.querySelector(".k-mh"), LOOK[a.id], 36, { mode: "list", state: a.state, activity: a.state === "working" ? a.act : null });
+    row.addEventListener("click", function (e) {
+      if (offline) return;
+      a.state = CYCLE[(CYCLE.indexOf(a.state) + 1) % CYCLE.length]; a.since = Date.now();
+      row.dataset.state = a.state;
+      ui.roll(row.querySelector(".k-agent-st"), line(a));
+      // From the keyboard (detail 0) the pose changes without its announcement.
+      a.m.setState(a.state, { activity: a.state === "working" ? a.act : null, instant: e.detail === 0 });
+      tick(); strip();
+    });
+  });
+  var shown = 0, stripEl = document.getElementById("strip");
+  function strip() {
+    var n = AG.filter(function (a) { return a.state === "waiting"; }).length;
+    if (n === shown) return;
+    if (n && stripEl.hidden) { stripEl.hidden = false; ui.enter(stripEl, { spring: "fast" }); }
+    if (!n && !stripEl.hidden) { ui.exit(stripEl).finished.then(function () { if (!shown) stripEl.hidden = true; }); }
+    if (n) { ui.roll(document.getElementById("count"), String(n)); document.getElementById("strip-t").textContent = n === 1 ? "agent waiting for you" : "agents waiting for you"; }
+    shown = n;
+  }
+  function tick() {
+    rows.forEach(function (row, i) {
+      var a = AG[i], s = Math.floor((Date.now() - a.since) / 1000), el = row.querySelector(".k-agent-time");
+      el.textContent = a.state === "working" ? (ui.reduced() ? Math.max(1, Math.floor(s / 60)) + " min" : Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0")) : a.state === "waiting" ? (s < 60 ? "now" : Math.floor(s / 60) + " min") : "";
+    });
+  }
+  // A lost connection is the page's state: every agent reads "no connection" at once (ADR-0047),
+  // and coming back brings each one the state its history holds, as the plug clicks home.
+  var offline = false, saved = null, net = document.getElementById("net");
+  net.addEventListener("click", function (e) {
+    offline = !offline;
+    if (offline) saved = AG.map(function (a) { return a.state; });
+    rows.forEach(function (row, i) {
+      var a = AG[i];
+      a.state = offline ? "offline" : saved[i];
+      row.dataset.state = a.state;
+      ui.roll(row.querySelector(".k-agent-st"), offline ? '<span class="k-st-offline"><b>' + ui.glyph("offline") + LBL.offline + "</b></span>" : line(a));
+      a.m.setState(a.state, { activity: a.state === "working" ? a.act : null, instant: e.detail === 0 });
+    });
+    net.textContent = offline ? "Reconnect" : "Lose the connection";
+    tick(); strip();
+  });
+  setInterval(tick, 1000); tick(); strip();
+})();
+</script>
+</body>
+</html>

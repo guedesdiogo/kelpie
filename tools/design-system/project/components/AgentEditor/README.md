@@ -1,0 +1,47 @@
+# AgentEditor
+
+The agent's editor opens from the pencil on its mascot, never from a tap on the mascot, which pets it: a panel with the agent's sections, a live mascot to try looks on, and one Save (5.25, moment grammar for its Save and its open, frequent for its sections and choices; #379, ADR-0056).
+
+- **The container.**
+  - On a wide screen, a non-modal panel beside the Sidebar: 820 × 690px at most, 8px from it, on `surface` with `shadow-pop` and `r-panel`. The conversation stays visible and live behind it.
+  - Below the sidebar's width, the same panel over the conversation.
+  - On the phone, the sheet of 5.15 at 90% over a `--scrim`, with a visible Close of 44px. Back and Escape close it, and the page behind it is inert. It never stacks over the AgentHeader's switcher, which closes first.
+- **Opening.**
+  - From a click, the panel grows from its row with `spring-slow`: its box goes from the row's to its own, while its content, laid out at its final size, fades in from 6px once the panel can hold it, `stagger` apart. It is one of the contained sizes §4.4 allows.
+  - A copy of the row's mascot flies out and grows from 36 to 160px into the preview, the shared element of 5.14. The preview shows when it lands and looks at the owner.
+  - From the keyboard it appears at once, with focus on the open section's tab. On the phone, the sheet rises with `spring-slow`. It opens on Mascot.
+- **Closing.** Close and Escape leave in `dur-exit`, and focus goes back to the pencil, or to the switcher's name when the pencil is hidden by then.
+- **The frame.**
+  - On the left, on `bg`: the agent's mascot at 56px, its name in Bricolage Grotesque at 19px, and its specialty in `muted`. The name, the specialty and the mascot follow what the owner changes before saving.
+  - Below them, the sections as APG tabs: Profile, Mascot, Soul, Rules, Memory and Skills, each an icon beside its name (IconButton). ↑ and ↓ move and select, Home and End go to the ends. The highlight slides with `spring-fast`, and a new section's content rises with `rise` and `spring-base`; from the keyboard, both change at once.
+  - Soul, Rules, Memory and Skills show, dimmed, with "Soon", until #381. The arrows skip them, and a press does nothing.
+  - On the phone, the agent sits in the sheet's head beside Close, and the sections are a row, each icon over its short name. An icon never replaces a label the owner hasn't learned.
+- **The mascot acts out the section,** with the Mascot card's poses: in Profile it looks at the owner, and while the owner types it only blinks.
+- **A changed section** shows a 6px `accent` dot after its name, which enters from 0.6 with `spring-fast`; its tab's name adds "changed". Nothing waits on the owner, so it isn't `warm`.
+- **Profile.** The name (80 characters), the specialty (40) and the short description (200), each one line, as the agent's settings take them.
+  - Under the specialty and the description, what each is for, and its count, "15 of 40", in Geist Mono.
+  - The main agent's specialty is a read-only field with a lock: "main", and why.
+  - A name that shows nothing can't be saved: its boundary turns `danger`, it says "Write a name", and Save waits. A specialty or a description that shows nothing is an empty one.
+  - What a line can't hold leaves as it is pasted: tabs and breaks become spaces, and control, format, private-use and unassigned characters go (ADR-0056). Inputs use 16px text on the phone.
+- **Mascot, the mascot lab's Construtor.**
+  - The preview stands on a small stage, 160px (120 on the phone), and stays pettable. Beside it, the summary line, which is also its text alternative ("Pebble · Fawn · Dots eyes with cheeks · floppy ears · a bow tie"), then Undo and Randomize all as icon buttons, then one line on what a tap does and when the look counts.
+  - One tab per axis, Shape, Color, Eyes, Head and Accessory, as APG tabs in a segmented track. Each tab says how many options it has and offers "Randomize <axis>".
+  - Each axis is a named radiogroup (APG radio): the arrows move and select, and wrap; Tab enters on the checked option. Each tile draws its option on this agent's mascot, Still, at 46px, with its name under it.
+  - Colors are named swatches, six to a row. A head or an accessory picks its type, then its variation in a second radiogroup, which follows the type. Cheeks is a switch beside the eyes.
+  - There is no "Back to default": a new agent's look is already a random one (Mascot).
+- **On a change,** the preview crossfades from its old look in `dur-fade`, and the part that changed moves: a new shape squashes and settles with `spring-pop`; a new head or accessory drops in from 8px with `spring-moment-fast`; new eyes, or cheeks, blink once; a color only crossfades, with no overshoot. A new change starts from the figure as it is, without queueing. The engine does this: `mascot.restyle(look, axis)`.
+- **Randomize.** The die turns 90° with `spring-moment-fast`, and the mascot swaps its look and jumps, the engine's Excite: a 12px hop and a blink. From the keyboard, the swap happens without the die's turn.
+- **Undo.** ⌘Z, outside a text field, and the U-turn button undo every step since the panel opened. The tooltip names the step ("Undo color", "Undo randomize"), and says "Nothing to undo" when there is none. The option that came back takes `--landed` (`accent` at 22%), fading over 400 ms; a color swatch, which can't show a tint, pops back from 1.25 with `spring-pop`.
+- **Save, once.** The preview changes live inside the editor, and nothing is saved until Save. It writes each changed section once, through its own route: the mascot whole, so the bot's photo is drawn once (ADR-0046), and the profile's changed fields.
+  - The footer says what is unsaved, "1 unsaved change" with the count in Geist Mono, or "All saved". On Mascot, a line under it says the change applies everywhere and the bot's photo changes in a few minutes.
+  - The button keeps the letters its labels share (Family Values): Sav-e, Sav-ing, Sav-ed. The suffix rolls with `spring-fast`, and a spinner joins after 200 ms (rule 8). ⌘S saves.
+  - Success is the ConfirmCard's without its ring, which stays the owner's yes: `ok` in `dur-fade`, the check drawn in 280 ms, and a pop from 1.03 with `spring-pop`. The changed dots leave, `stagger` apart, and the mascots play Approved for 1.1 s. From the keyboard, the pop is skipped.
+  - Then the panel closes, and a Toast says what saved, "Agenda: mascot saved", and that the bot's photo changes in a few minutes, with Undo for 10 s. Undo sends back what was saved before.
+  - A change made while it saves, or before it closes, keeps it open, still to save. Closing while it saves closes it once the save ends, and opening another agent's editor waits for it.
+- **The two ways a save can end early.** Each takes the footer's place, inside the panel; neither is a dialog over it.
+  - Closing or Cancel with changes asks, on a 10% `warm` tint: "Discard 1 change?", what goes back, Keep editing, which takes focus, and Discard in `danger`. Escape keeps editing.
+  - A save that fails in part names what didn't save and what did, on a 9% `danger` tint: "The Profile wasn't saved. The Mascot is saved." The failed section's mark turns to the `danger` alert, its tab's name says "not saved", and the footer offers "Save the Profile". When every section fails, it says "Nothing was saved".
+- **What it never does:** a Save per section, a modal for unsaved changes, blur in a crossfade, or the ring or confetti on Save.
+- **Research (§8),** read on 2026-10-16, with the findings on #379: adopt Notion Faces' grid beside a big preview, a live preview as Tolan's and Apple Watch's face editor have, the APG radio group, and Hermes Agent's one Save with a dirty flag per section ([code](https://github.com/NousResearch/hermes-agent/blob/9c002cb941de1e1708294d0cd58e060b6a417b5e/apps/desktop/src/plugins/hermes-bots/edit-profile-dialog.tsx)); adapt Discord's unsaved-changes bar into a quiet line and Benji Taylor's Family Values for the Save label; avoid a menu as the only way in, Hermes' 64px preview and swatches named by their hex.
+- **The consumer provides** the agent (id, name, specialty, short description, mascot, whether it is the main agent), the save routes and the toast.
+- **Reduced motion and Still:** every change is a 150 ms crossfade, and the mascot is Still. The panel, the sheet and a section's content fade in place, and the highlight moves at once. The check, the colors, the dots and the count stay.

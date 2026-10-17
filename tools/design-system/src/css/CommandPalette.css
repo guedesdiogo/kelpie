@@ -1,0 +1,12 @@
+/* CommandPalette (5.8). */
+.k-palapp { min-block-size: 340px; justify-items: center; }
+.k-cmdk { display: inline-flex; align-items: center; gap: var(--space-2); width: min(100%, 320px); min-block-size: 40px; padding: 0 var(--space-2) 0 var(--space-3); border: 1px solid var(--muted); border-radius: var(--r-btn); background: var(--surface); color: var(--muted); cursor: pointer; }
+.k-cmdk span { flex: 1; text-align: left; }
+kbd { padding: 1px var(--space-1); border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--sunken); color: var(--fg); }
+.k-scrim { position: absolute; inset: 0; background: var(--scrim); z-index: 4; }
+.k-pal { position: absolute; top: 60px; left: 50%; translate: -50% 0; z-index: 5; width: min(92%, 420px); border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-pop); overflow: hidden; transform-origin: top center; }
+.k-pal-in { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3); border-bottom: 1px solid var(--line); color: var(--muted); }
+.k-pal-in input { flex: 1; min-width: 0; border: 0; background: none; color: var(--fg); outline: none; }
+.k-pal-list { position: relative; list-style: none; margin: 0; padding: var(--space-1); }
+.k-pal-hi { position: absolute; left: var(--space-1); right: var(--space-1); top: 0; border-radius: calc(var(--r-card) - var(--space-1)); background: var(--sunken); pointer-events: none; }
+.k-pal-it { position: relative; padding: var(--space-2) var(--space-3); cursor: pointer; }

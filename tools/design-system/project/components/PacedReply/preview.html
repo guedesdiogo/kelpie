@@ -1,0 +1,90 @@
+<!-- @dsCard group="Conversation" height=470 subtitle="5.1 · the wait is 2.4 s here, quietMs in the product" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>PacedReply</title></head>
+<body>
+<div class="k-stage">
+  <button type="button" class="k-replay text-sm" id="again">Replay</button>
+  <div class="k-chat k-card text-ui">
+    <div class="k-ahead"><span class="k-mh s48" id="fig"></span><span class="k-display text-h3">Kelpie</span></div>
+    <div class="k-chat-thread" id="thread"><p class="k-bubble">Good morning. You are free after 15:00 today.</p></div>
+    <div class="k-buffer text-sm" id="buffer" aria-hidden="true"><span class="k-wait" id="wait"><i></i></span><span id="blabel"></span></div>
+    <div class="k-compose" aria-hidden="true"><span class="k-composer-text" id="ctext"></span><span class="k-caret"></span><span class="k-round pz">__pause__</span><span class="k-round send">__send__</span></div>
+  </div>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui, K = window.Kelpie;
+  var chat = document.querySelector(".k-chat");
+  chat.innerHTML = chat.innerHTML.replace("__pause__", ui.icon("pause")).replace("__send__", ui.icon("send"));
+  var thread = document.getElementById("thread"), bar = document.getElementById("wait").firstElementChild, ctext = document.getElementById("ctext"), buffer = document.getElementById("buffer"), blabel = document.getElementById("blabel");
+  var m = ui.mascot(document.getElementById("fig"), ui.LOOKS.kelpie, 48, { quietable: true });
+  var CLOCK = '<svg class="k-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11Z"/><path d="M8 5v3.2l2 1.3"/></svg>';
+  var waitAnim = null;
+  function add(el) {
+    var olds = Array.prototype.slice.call(thread.children), first = olds.map(function (e) { return e.getBoundingClientRect().top; });
+    thread.append(el);
+    olds.forEach(function (e, i) { var dy = first[i] - e.getBoundingClientRect().top; if (Math.abs(dy) > 0.5) ui.animate(e, [{ transform: "translateY(" + dy + "px)" }, { transform: "none" }], { spring: "base" }); });
+    while (thread.children.length > 9) thread.firstElementChild.remove();
+    return el;
+  }
+  function scaleX() { var t = getComputedStyle(bar).transform; return !t || t === "none" ? 0 : new DOMMatrixReadOnly(t).a; }
+  // A new message refills the bar in the first 7% of the time; then it drains linearly. It is progress.
+  function refill() {
+    var cur = waitAnim ? scaleX() : 1;
+    if (waitAnim) waitAnim.cancel();
+    waitAnim = bar.animate([{ transform: "scaleX(" + cur + ")" }, { transform: "scaleX(1)", offset: 0.07 }, { transform: "scaleX(0)" }], { duration: 2400, easing: "linear", fill: "forwards" });
+  }
+  var play = ui.runner(async function (run) {
+    thread.innerHTML = '<p class="k-bubble">Good morning. You are free after 15:00 today.</p>';
+    if (waitAnim) waitAnim.cancel(); waitAnim = null; bar.style.transform = "scaleX(0)"; buffer.classList.remove("on"); blabel.textContent = "";
+    m.setState("idle", { instant: true });
+    await run.sleep(500);
+    var held = [];
+    var frags = ["hi", "do I have anything tomorrow morning?", "I want 30 min with Ana"];
+    for (var i = 0; i < frags.length; i++) {
+      K.mascot.ownerTyping(); m.watch();
+      for (var c = 0; c < frags[i].length; c++) { ctext.textContent += frags[i][c]; await run.sleep(26); }
+      await run.sleep(160);
+      ctext.textContent = "";
+      var g = document.createElement("div");
+      g.className = "k-msg me";
+      g.innerHTML = '<p class="k-bubble me">' + frags[i] + '</p><p class="k-mark text-sm">' + CLOCK + "held</p>";
+      add(g);
+      ui.animate(g.firstElementChild, [{ opacity: 0, transform: "translateY(" + ui.num("rise", 8) + "px) scale(" + ui.num("scale-in", 0.97) + ")" }, { opacity: 1, transform: "none" }], { spring: "base" });
+      held.push(g.lastElementChild);
+      refill();
+      buffer.classList.add("on"); blabel.textContent = "Waiting for you to finish";
+      m.setState("listening");
+      if (i < frags.length - 1) await run.sleep(700);
+    }
+    await waitAnim.finished;
+    if (!run.alive) return;
+    // The turn reads them: the held marks fade out.
+    held.forEach(function (h) { ui.animate(h, [{ opacity: 1 }, { opacity: 0 }], { dur: ui.num("dur-fade", 150), ease: ui.ease("fade"), fill: "forwards" }); });
+    blabel.textContent = "Kelpie is writing";
+    var replies = ["Tomorrow you have a meeting at 9:00, and you are free from 10:00 to 11:30.", "Shall I book 30 min with Ana at 10:00?"];
+    for (var r = 0; r < replies.length; r++) {
+      var t = add(Object.assign(document.createElement("p"), { className: "k-bubble typing", innerHTML: '<i></i><i></i><i></i><span class="k-phase"></span>' }));
+      ui.enter(t, {});
+      m.setState("typing");
+      // Past 3 s the bubble names the phase and the elapsed time (rule 7; #378, decision 12).
+      if (!r) { await run.sleep(3000); t.querySelector(".k-phase").textContent = "Thinking · 3 s"; await run.sleep(900); }
+      else await run.sleep(900);
+      var r0 = t.getBoundingClientRect();
+      t.classList.remove("typing");
+      t.innerHTML = "<span>" + replies[r] + "</span>";
+      var r1 = t.getBoundingClientRect();
+      ui.animate(t, [{ width: r0.width + "px", height: r0.height + "px" }, { width: r1.width + "px", height: r1.height + "px" }], { spring: "base" });
+      ui.animate(t.firstChild, [{ opacity: 0 }, { opacity: 1 }], { dur: ui.num("dur-word", 110) + 60, ease: ui.ease("fade"), delay: 70 });
+      m.setState("idle"); m.arrive();
+      await run.sleep(1000);
+    }
+    buffer.classList.remove("on");
+  });
+  document.getElementById("again").addEventListener("click", function () { play(); });
+  play();
+})();
+</script>
+</body>
+</html>

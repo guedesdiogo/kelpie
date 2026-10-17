@@ -1,0 +1,110 @@
+/* Kelpie components: the shared base. Every value is a token (tokens.css) or a tint made from
+ * one; a literal number appears only where a pattern in docs/design-system.md section 5 sets it. */
+:root {
+  /* Section 1's tints: from a token, never a new literal. */
+  --focus-halo: color-mix(in srgb, var(--accent) 18%, transparent);
+  --hold-fill: color-mix(in srgb, var(--accent) 28%, transparent);
+  --landed: color-mix(in srgb, var(--accent) 22%, transparent);
+  --highlight: color-mix(in srgb, var(--accent) 24%, transparent);
+  --receipt-well: color-mix(in srgb, var(--ok) 16%, transparent);
+  --scrim: color-mix(in srgb, var(--fg) 16%, transparent);
+}
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.k-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.k-display { font-family: var(--font-display); font-weight: 680; letter-spacing: -0.03em; text-wrap: balance; }
+.k-muted { color: var(--muted); }
+.k-eyebrow { text-transform: uppercase; color: var(--muted); }
+.k-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* A preview's frame: the stage, with the replay control in its corner. */
+.k-stage { position: relative; padding: var(--space-4); display: grid; gap: var(--space-3); align-content: start; }
+.k-replay {
+  position: absolute; top: var(--space-3); right: var(--space-3); z-index: 20;
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  padding: var(--space-1) var(--space-3); border-radius: var(--r-chip);
+  border: 1px solid var(--muted); background: var(--surface); color: var(--fg); cursor: pointer;
+}
+.k-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.k-col { display: grid; gap: var(--space-2); align-content: start; min-width: 0; }
+.k-caption { color: var(--muted); }
+
+.k-icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.k-icon.draw path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: k-draw 280ms var(--ease-standard) forwards; }
+@keyframes k-draw { to { stroke-dashoffset: 0; } }
+.k-glyph { width: 11px; height: 11px; flex: none; fill: currentColor; stroke: currentColor; stroke-width: 1.4; vertical-align: -1px; }
+
+/* A label that rolls (5.2): one cell, its lines stacked in it. */
+.k-roll { display: inline-grid; overflow: hidden; vertical-align: bottom; }
+.k-roll > .n { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; }
+
+/* The spinner of rule 8: it turns for at most 5 s, then a still ring and the elapsed time take over. */
+.k-spinner {
+  width: 12px; height: 12px; flex: none; border-radius: 50%;
+  border: 1.5px solid currentColor; border-right-color: transparent;
+  animation: k-spin 1s linear 5;
+}
+.k-spinner.still { animation: none; border-right-color: currentColor; opacity: 0.55; }
+@keyframes k-spin { to { transform: rotate(1turn); } }
+
+/* A mascot's box: kept before the figure arrives, so nothing in the layout moves (5.19). */
+.k-mh { display: block; flex: none; line-height: 0; }
+.k-mh.s20 { width: 20px; height: 20px; }
+.k-mh.s26 { width: 26px; height: 26px; }
+.k-mh.s36 { width: 36px; height: 36px; }
+.k-mh.s40 { width: 40px; height: 40px; }
+.k-mh.s48 { width: 48px; height: 48px; }
+.k-mh.s64 { width: 64px; height: 64px; }
+.k-mh.s96 { width: 96px; height: 96px; }
+.k-mh.s160 { width: 160px; height: 160px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .k-spinner { animation: none; border-right-color: currentColor; opacity: 0.55; }
+  .k-icon.draw path { stroke-dasharray: none; animation: none; }
+}
+
+/* A segmented choice, as the webchat's lab draws it (#378, decision 8): a sunken track with its
+ * boundary in muted, and the chosen option lifted onto surface. Icons or words, never both crowded. */
+.k-seg { position: relative; display: inline-flex; gap: 2px; padding: 3px; border-radius: calc(var(--r-btn) + 3px); background: var(--sunken); border: 1px solid var(--muted); justify-self: start; }
+.k-seg > button { position: relative; min-block-size: 28px; min-inline-size: 34px; display: inline-grid; place-items: center; padding: 0 var(--space-2); border: 0; border-radius: var(--r-btn); background: none; color: var(--muted); font-weight: 500; cursor: pointer; transition: background-color var(--dur-fade) var(--ease-fade), color var(--dur-fade) var(--ease-fade); }
+.k-seg > button[aria-checked="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14); }
+.k-seg > button:disabled { cursor: not-allowed; opacity: 0.55; }
+.k-seg .k-icon { width: 16px; height: 16px; }
+.k-seg .k-icon.m20 { width: 20px; height: 20px; }
+.k-seg.wide { display: flex; justify-self: stretch; }
+.k-seg.wide > button { flex: 1; }
+
+/* A switch: a track in line with a muted boundary; on, it fills with accent. */
+.k-switch { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); font-weight: 500; cursor: pointer; }
+.k-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.k-switch .k-sw { position: relative; width: 30px; height: 18px; flex: none; border-radius: var(--r-chip); background: var(--line); border: 1px solid var(--muted); transition: background-color var(--dur-fade) var(--ease-fade); }
+.k-switch .k-sw::after { content: ""; position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: transform var(--spring-fast-dur) var(--spring-fast); }
+.k-switch input:checked + .k-sw { background: var(--accent); border-color: var(--accent); }
+.k-switch input:checked + .k-sw::after { transform: translateX(12px); }
+.k-switch input:focus-visible + .k-sw { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Icon buttons (#378): square with a muted boundary, or quiet; every one names itself in a tooltip. */
+.k-icb { position: relative; width: 34px; height: 34px; flex: none; display: inline-grid; place-items: center; padding: 0; border: 1px solid var(--muted); border-radius: var(--r-btn); background: transparent; color: var(--fg); cursor: pointer; transition: transform var(--dur-press) var(--ease-standard); }
+.k-icb:active { transform: scale(var(--scale-press)); }
+.k-icb.quiet { width: 28px; height: 28px; border-color: transparent; color: var(--muted); }
+@media (hover: hover) { .k-icb.quiet:hover { background: var(--sunken); color: var(--fg); } }
+.k-tip { position: absolute; bottom: calc(100% + 6px); left: 50%; translate: -50% 0; z-index: 30; padding: var(--space-1) var(--space-2); border-radius: var(--r-sm); background: var(--fg); color: var(--bg); font-weight: 500; white-space: nowrap; pointer-events: none; opacity: 0; transform: translateY(4px) scale(var(--scale-in)); transform-origin: bottom center; transition: opacity var(--dur-exit) var(--ease-exit), transform var(--dur-exit) var(--ease-exit); }
+.k-tip.on { opacity: 1; transform: none; pointer-events: auto; transition: opacity var(--dur-fade) var(--ease-fade), transform var(--spring-fast-dur) var(--spring-fast); }
+.k-tip.instant { transition: none; }
+@media (prefers-reduced-motion: reduce) { .k-tip, .k-tip.on { transform: none; } }
+.k-tip.below { bottom: auto; top: calc(100% + 6px); }
+.k-seg-ind { position: absolute; top: 0; left: 0; width: 0; height: 0; border-radius: var(--r-btn); background: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14); pointer-events: none; }
+.k-seg.has-ind > button { z-index: 1; }
+.k-seg.has-ind > button[aria-checked="true"] { background: none; box-shadow: none; }
+.k-sw-l { display: inline-flex; align-items: center; gap: var(--space-2); }
+.k-sw-l .k-icon { color: var(--muted); }

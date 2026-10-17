@@ -1,0 +1,74 @@
+<!-- @dsCard group="Work" height=420 subtitle="5.5 · a routine fires at 08:00" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>TaskBoard</title></head>
+<body>
+<div class="k-stage">
+  <button type="button" class="k-replay text-sm" id="again">Replay</button>
+  <div class="k-board" id="board"></div>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui, board = document.getElementById("board");
+  var LOOP = '<svg class="k-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8a5 5 0 018.5-3.5L13 6M13 2.5V6H9.5M13 8a5 5 0 01-8.5 3.5L3 10M3 13.5V10h3.5"/></svg>';
+  function card(t, who, meta, extra, done) {
+    var c = document.createElement("div");
+    c.className = "k-task text-sm" + (done ? " done" : "");
+    c.innerHTML = '<span class="k-task-t">' + t + "</span>" + (extra ? '<span class="k-task-x k-muted">' + extra + "</span>" : "") + '<span class="k-task-m"><span class="k-mh s20' + (who ? "" : " empty") + '"' + (who ? ' data-look="' + who + '"' : "") + '></span><span class="k-roll k-task-s"><span class="n">' + meta + "</span></span></span>";
+    return c;
+  }
+  // A mascot reads its color from the page, so it is drawn once its card is in place.
+  function mount(el) {
+    el.querySelectorAll(".k-mh[data-look]").forEach(function (h) { if (!h.mascot) ui.mascot(h, ui.bare(ui.LOOKS[h.dataset.look]), 20, { mode: "still" }); });
+  }
+  function flip(els, mutate) {
+    var first = els.map(function (e) { return e.getBoundingClientRect(); });
+    mutate();
+    els.forEach(function (e, i) { var l = e.getBoundingClientRect(), dx = first[i].left - l.left, dy = first[i].top - l.top; if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) ui.animate(e, [{ transform: "translate(" + dx + "px, " + dy + "px)" }, { transform: "none" }], { spring: "base" }); });
+  }
+  var play = ui.runner(async function (run) {
+    var col = function (k, t, n) { return '<section class="k-col-b" data-col="' + k + '"><h3 class="k-col-h text-sm"><span>' + t + '</span><span class="k-roll k-mono count"><span class="n">' + n + '</span></span></h3><div class="k-col-cards"></div></section>'; };
+    board.innerHTML = '<div class="k-routine text-sm">' + LOOP + '<span>Routine <b>Morning brief</b></span><span class="k-roll k-mono clock"><span class="n">07:59:57</span></span></div><div class="k-cols">' + col("todo", "To do", 1) + col("doing", "In progress", 1) + col("done", "Done", 3) + "</div>";
+    var cards = function (k) { return board.querySelector('[data-col="' + k + '"] .k-col-cards'); };
+    var count = function (k, n, d) { ui.roll(board.querySelector('[data-col="' + k + '"] .count'), String(n), { delay: d }); };
+    cards("todo").append(card("Review the meeting notes", "agenda", "20 min ago", "Delegated by you"));
+    cards("doing").append(card("Compare flights to Recife", "research", '<span class="k-spinner still"></span> 3 min'));
+    cards("done").append(card("Sort this week's notes", "kelpie", ui.icon("check") + " Ran 2 min 05 s", null, true));
+    mount(board);
+    var clock = board.querySelector(".clock"), rt = board.querySelector(".k-routine");
+    await run.sleep(500);
+    for (var t of ["07:59:58", "07:59:59", "08:00:00"]) { ui.roll(clock, t); await run.sleep(520); }
+    rt.classList.add("fired");
+    ui.animate(rt, [{ transform: "scale(1.05)" }, { transform: "none" }], { spring: "fast" });
+    await run.sleep(160);
+    var nc = card("Morning brief", null, "routine · 08:00"), todo = cards("todo"), rr = rt.getBoundingClientRect();
+    flip(Array.prototype.slice.call(todo.children), function () { todo.prepend(nc); });
+    var r1 = nc.getBoundingClientRect();
+    ui.animate(nc, [{ transform: "translate(" + (rr.left - r1.left) + "px, " + (rr.top - r1.top) + "px) scale(0.7)", opacity: 0 }, { transform: "none", opacity: 1 }], { spring: "base" });
+    count("todo", 2);
+    await run.sleep(1100);
+    rt.classList.remove("fired");
+    // The agent that takes the task enters the card as its 20 px mascot.
+    var fig = nc.querySelector(".k-mh"); fig.classList.remove("empty");
+    ui.mascot(fig, ui.bare(ui.LOOKS.kelpie), 20, { mode: "still" });
+    ui.enter(fig, { y: 0, spring: "fast" });
+    ui.roll(nc.querySelector(".k-task-s"), '<span class="k-spinner"></span> now');
+    await run.sleep(380);
+    flip(Array.prototype.slice.call(board.querySelectorAll(".k-task")), function () { cards("doing").prepend(nc); });
+    count("todo", 1); count("doing", 2, 40);
+    await run.sleep(260);
+    var bar = document.createElement("span"); bar.className = "k-task-bar"; bar.innerHTML = "<i></i>"; nc.append(bar);
+    await bar.firstChild.animate([{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }], { duration: 1500, easing: "linear", fill: "forwards" }).finished;
+    if (!run.alive) return;
+    bar.remove();
+    flip(Array.prototype.slice.call(board.querySelectorAll(".k-task")), function () { cards("done").prepend(nc); });
+    count("doing", 1); count("done", 4, 40);
+    nc.classList.add("done");
+    ui.roll(nc.querySelector(".k-task-s"), ui.icon("check", "draw") + " Ran 1 min 30 s", { spring: "pop" });
+  });
+  document.getElementById("again").addEventListener("click", function () { play(); });
+  play();
+})();
+</script>
+</body>
+</html>

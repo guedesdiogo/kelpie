@@ -1,0 +1,18 @@
+/* ToolRow (5.2): the webchat's .tool-row. */
+.k-turn { display: grid; gap: var(--space-2); justify-items: start; max-width: 48rem; }
+.k-stream { margin: 0; }
+.k-tool { inline-size: min(29rem, 100%); overflow: hidden; }
+.k-tool-head { display: flex; align-items: center; gap: var(--space-2); inline-size: 100%; min-block-size: 32px; padding: var(--space-1) var(--space-3); border: 1px solid var(--line); border-radius: var(--r-bubble); background: var(--surface); color: var(--fg); text-align: start; cursor: pointer; }
+.k-tool-head:disabled { cursor: default; }
+.k-tool-ic { color: var(--accent); width: 14px; }
+.k-tool.done .k-tool-ic { color: var(--ok); }
+.k-tool-ic .k-icon { width: 14px; height: 14px; }
+.k-tool-lbl > .n { overflow: hidden; text-overflow: ellipsis; }
+.k-tool-tag { padding: 0 var(--space-2); border-radius: var(--r-chip); border: 1px solid var(--muted); color: var(--fg); }
+.k-tool-time { margin-inline-start: auto; color: var(--muted); white-space: nowrap; }
+.k-tool-time:empty { display: none; }
+.k-tool-steps { margin: var(--space-1) 0 0; padding: 0 var(--space-3); list-style: none; display: grid; gap: 2px; }
+.k-tool-steps li { display: flex; align-items: center; gap: var(--space-2); color: var(--muted); }
+.k-tool-steps .k-icon { width: 14px; height: 14px; color: var(--ok); }
+.k-result { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3); border-radius: var(--r-card); border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); }
+.k-result .k-icon { color: var(--accent); width: 20px; height: 20px; }

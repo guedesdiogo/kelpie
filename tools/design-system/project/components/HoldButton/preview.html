@@ -1,0 +1,67 @@
+<!-- @dsCard group="Decisions" height=230 subtitle="5.4 · moment" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>HoldButton</title></head>
+<body>
+<div class="k-stage">
+  <button type="button" class="k-replay text-sm" id="again">Reset</button>
+  <div class="k-col" style="max-width:360px">
+    <span class="text-sm k-muted"><code class="k-id k-mono">code</code> wants a computer</span>
+    <p class="text-ui" style="margin:0">Turn on the <b>Cloudflare Sandbox</b> for this agent. It costs beyond the Workers Paid plan; you can turn it off at any time.</p>
+    <div class="k-hold-wrap">
+      <button type="button" class="k-hold text-ui" id="hold"><span class="k-hold-fill"></span><span class="k-roll" id="lbl"><span class="n">Hold to turn on</span></span></button>
+    </div>
+    <p class="k-caption text-sm" style="margin:0">Rather type? Answer in the chat with the code Kelpie sent.</p>
+  </div>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui, b = document.getElementById("hold"), fill = b.firstElementChild, lbl = document.getElementById("lbl");
+  var held = false, pressing = false, anim = null;
+  var CHECK = ui.icon("check", "draw");
+  function scaleX() { var m = getComputedStyle(fill).transform; return !m || m === "none" ? 0 : new DOMMatrixReadOnly(m).a; }
+  function start() {
+    if (held || pressing) return;
+    pressing = true;
+    var cur = anim ? scaleX() : 0;
+    if (anim) anim.cancel();
+    ui.roll(lbl, "Keep holding…");
+    // Progress: linear, over dur-hold, and it runs under reduced motion too.
+    anim = fill.animate([{ transform: "scaleX(" + cur + ")" }, { transform: "scaleX(1)" }], { duration: Math.max(1, ui.num("dur-hold", 1200) * (1 - cur)), easing: "linear", fill: "forwards" });
+    var mine = anim;
+    anim.finished.then(function () { if (anim === mine) done(); }, function () {});
+  }
+  function end() {
+    if (held || !pressing) return;
+    pressing = false;
+    var cur = scaleX();
+    if (anim) anim.cancel();
+    anim = ui.animate(fill, [{ transform: "scaleX(" + cur + ")" }, { transform: "scaleX(0)" }], { spring: "moment-fast", essential: true, fill: "forwards" });
+    ui.roll(lbl, "Hold to turn on");
+  }
+  function done() {
+    held = true; pressing = false;
+    b.classList.add("ok");
+    fill.style.opacity = 0;
+    ui.roll(lbl, CHECK + "<span>Sandbox on</span>", { spring: "pop" });
+    if (!ui.reduced()) {
+      ui.animate(b, [{ transform: "scale(1.03)" }, { transform: "none" }], { spring: "pop" });
+      var r = document.createElement("span");
+      r.className = "k-ring";
+      b.parentElement.append(r);
+      r.animate([{ transform: "scale(1)", opacity: 0.7 }, { transform: "scale(1.5)", opacity: 0 }], { duration: 650, easing: ui.ease("standard"), fill: "forwards" }).finished.then(function () { r.remove(); });
+    }
+  }
+  b.addEventListener("pointerdown", function (e) { if (e.button > 0) return; e.preventDefault(); start(); });
+  ["pointerup", "pointerleave", "pointercancel"].forEach(function (t) { b.addEventListener(t, end); });
+  b.addEventListener("keydown", function (e) { if ((e.key === " " || e.key === "Enter") && !e.repeat) { e.preventDefault(); start(); } });
+  b.addEventListener("keyup", function (e) { if (e.key === " " || e.key === "Enter") { e.preventDefault(); end(); } });
+  b.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+  document.getElementById("again").addEventListener("click", function () {
+    held = false; pressing = false; if (anim) anim.cancel(); anim = null;
+    b.classList.remove("ok"); fill.style.opacity = ""; lbl.innerHTML = '<span class="n">Hold to turn on</span>';
+  });
+})();
+</script>
+</body>
+</html>

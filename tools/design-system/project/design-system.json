@@ -1,0 +1,324 @@
+{
+ "v": 3,
+ "layout": "files",
+ "createdOnFiles": {
+  "v": 1,
+  "at": "2026-10-16T14:09:43Z"
+ },
+ "title": "Kelpie",
+ "namespace": "Kelpie",
+ "libraries": [],
+ "sections": {},
+ "groups": [
+  "Logos",
+  "Icons",
+  "Licenses"
+ ],
+ "assetGroups": {
+  "Icons": {
+   "name": "Icons",
+   "tile": "s",
+   "order": [
+    "clock.svg",
+    "alert.svg",
+    "check.svg",
+    "neutral.svg",
+    "chevron.svg",
+    "close.svg",
+    "display.svg",
+    "pause.svg",
+    "send.svg",
+    "monitor.svg",
+    "sun.svg",
+    "moon.svg",
+    "wifi-off.svg",
+    "bell.svg",
+    "mascot-alive.svg",
+    "mascot-states.svg",
+    "mascot-still.svg",
+    "text-small.svg",
+    "text-large.svg",
+    "less-motion.svg",
+    "contrast.svg",
+    "chevron-up.svg",
+    "pencil.svg",
+    "undo.svg",
+    "dice.svg",
+    "lock.svg",
+    "profile.svg",
+    "mascot-body.svg",
+    "soul.svg",
+    "rules.svg",
+    "memory.svg",
+    "skills.svg"
+   ],
+   "files": {
+    "clock.svg": {
+     "name": "clock.svg",
+     "blob": "3a7e92f4b0a484bcabdc9018b738dcea",
+     "size": 279,
+     "type": "image/svg+xml"
+    },
+    "alert.svg": {
+     "name": "alert.svg",
+     "blob": "adcc654ae5402bceb13186d74a5d35f5",
+     "size": 301,
+     "type": "image/svg+xml"
+    },
+    "check.svg": {
+     "name": "check.svg",
+     "blob": "38f191d2707a6259c94e785a1c399bca",
+     "size": 220,
+     "type": "image/svg+xml"
+    },
+    "neutral.svg": {
+     "name": "neutral.svg",
+     "blob": "1ee36ce27c1cdeda3a64a3d7512bd26a",
+     "size": 273,
+     "type": "image/svg+xml"
+    },
+    "chevron.svg": {
+     "name": "chevron.svg",
+     "blob": "55379c9c77005ed0bf1b6ff6ab308f85",
+     "size": 226,
+     "type": "image/svg+xml"
+    },
+    "close.svg": {
+     "name": "close.svg",
+     "blob": "825f57790e5f054d7edad682f78ca301",
+     "size": 246,
+     "type": "image/svg+xml"
+    },
+    "display.svg": {
+     "name": "display.svg",
+     "blob": "0ea7aadc1a6bcef46187c10786dbf0eb",
+     "size": 274,
+     "type": "image/svg+xml"
+    },
+    "pause.svg": {
+     "name": "pause.svg",
+     "blob": "897e2e0baa5f83132f669c3a4081ff9f",
+     "size": 237,
+     "type": "image/svg+xml"
+    },
+    "send.svg": {
+     "name": "send.svg",
+     "blob": "7a7d4c51c22fb379443a9590cc493623",
+     "size": 243,
+     "type": "image/svg+xml"
+    },
+    "monitor.svg": {
+     "name": "monitor.svg",
+     "blob": "c7fc95f32716b2c1872eb3c5a68e53f3",
+     "size": 357,
+     "type": "image/svg+xml"
+    },
+    "sun.svg": {
+     "name": "sun.svg",
+     "blob": "f4d172ee4b578f0ed367597aee5b33e6",
+     "size": 361,
+     "type": "image/svg+xml"
+    },
+    "moon.svg": {
+     "name": "moon.svg",
+     "blob": "b1ad5658e60d6457be9f720d358d4a38",
+     "size": 252,
+     "type": "image/svg+xml"
+    },
+    "wifi-off.svg": {
+     "name": "wifi-off.svg",
+     "blob": "8ddccc137c898b3fb6d3e33f4d17979b",
+     "size": 390,
+     "type": "image/svg+xml"
+    },
+    "bell.svg": {
+     "name": "bell.svg",
+     "blob": "7028eb7a36ad7f8e0d6889a226167b45",
+     "size": 264,
+     "type": "image/svg+xml"
+    },
+    "mascot-alive.svg": {
+     "name": "mascot-alive.svg",
+     "blob": "ecb6bf752c66c77ae443af5f22731596",
+     "size": 699,
+     "type": "image/svg+xml"
+    },
+    "mascot-states.svg": {
+     "name": "mascot-states.svg",
+     "blob": "e3b070dd877e56637839aa2ee82dc443",
+     "size": 685,
+     "type": "image/svg+xml"
+    },
+    "mascot-still.svg": {
+     "name": "mascot-still.svg",
+     "blob": "47adb85de280ced666df73e119f55c18",
+     "size": 630,
+     "type": "image/svg+xml"
+    },
+    "text-small.svg": {
+     "name": "text-small.svg",
+     "blob": "c2c948f6cfd8bca37bb5c366656b191d",
+     "size": 246,
+     "type": "image/svg+xml"
+    },
+    "text-large.svg": {
+     "name": "text-large.svg",
+     "blob": "e65a4c191983e368825249858c3bf811",
+     "size": 246,
+     "type": "image/svg+xml"
+    },
+    "less-motion.svg": {
+     "name": "less-motion.svg",
+     "blob": "184a29c3036609ebf9da4f8ce7cd7014",
+     "size": 282,
+     "type": "image/svg+xml"
+    },
+    "contrast.svg": {
+     "name": "contrast.svg",
+     "blob": "51ecbd95bc025079c55cdda15653e1e5",
+     "size": 347,
+     "type": "image/svg+xml"
+    },
+    "chevron-up.svg": {
+     "name": "chevron-up.svg",
+     "blob": "412f917e4f7328e4ca01e313c8229443",
+     "size": 222,
+     "type": "image/svg+xml"
+    },
+    "pencil.svg": {
+     "name": "pencil.svg",
+     "blob": "1f40f6f11670380cae57e2e47651412d",
+     "size": 273,
+     "type": "image/svg+xml"
+    },
+    "undo.svg": {
+     "name": "undo.svg",
+     "blob": "5254cb1c0e856b1fe843afa56cc5dd27",
+     "size": 264,
+     "type": "image/svg+xml"
+    },
+    "dice.svg": {
+     "name": "dice.svg",
+     "blob": "ddb41a74b4d217cbe6d82205b06a8faa",
+     "size": 550,
+     "type": "image/svg+xml"
+    },
+    "lock.svg": {
+     "name": "lock.svg",
+     "blob": "180bea79330a1bbdf668eee304870cae",
+     "size": 348,
+     "type": "image/svg+xml"
+    },
+    "profile.svg": {
+     "name": "profile.svg",
+     "blob": "8c32cdf509fb5d3f4027b2ea4d2bb8fa",
+     "size": 446,
+     "type": "image/svg+xml"
+    },
+    "mascot-body.svg": {
+     "name": "mascot-body.svg",
+     "blob": "b4b7f4bf3440b18b10ed331caa7bdff4",
+     "size": 603,
+     "type": "image/svg+xml"
+    },
+    "soul.svg": {
+     "name": "soul.svg",
+     "blob": "886ee4e94a984e92c4872a55e66a465c",
+     "size": 340,
+     "type": "image/svg+xml"
+    },
+    "rules.svg": {
+     "name": "rules.svg",
+     "blob": "9ec9ffa593ed6524f5f0972178ab2b39",
+     "size": 502,
+     "type": "image/svg+xml"
+    },
+    "memory.svg": {
+     "name": "memory.svg",
+     "blob": "62276a5242a86bd9038a616477dc2e81",
+     "size": 344,
+     "type": "image/svg+xml"
+    },
+    "skills.svg": {
+     "name": "skills.svg",
+     "blob": "3ec8ed817f11cb53143963e40c48e709",
+     "size": 323,
+     "type": "image/svg+xml"
+    }
+   }
+  },
+  "Licenses": {
+   "name": "Licenses",
+   "tile": "s",
+   "order": [],
+   "files": {}
+  },
+  "Logos": {
+   "name": "Logos",
+   "tile": "l",
+   "order": [
+    "kelpie-mark.svg",
+    "kelpie-lockup-light.svg",
+    "kelpie-lockup-dark.svg",
+    "favicon-16.svg",
+    "app-icon.svg",
+    "app-icon-rounded.svg",
+    "app-icon-maskable.svg"
+   ],
+   "files": {
+    "kelpie-mark.svg": {
+     "name": "kelpie-mark.svg",
+     "blob": "828ea9d800d272b2248dfeeb7bbdecba",
+     "size": 395,
+     "type": "image/svg+xml"
+    },
+    "kelpie-lockup-light.svg": {
+     "name": "kelpie-lockup-light.svg",
+     "blob": "ec5e704804b920c02f9eb06995585e9a",
+     "size": 3748,
+     "type": "image/svg+xml"
+    },
+    "kelpie-lockup-dark.svg": {
+     "name": "kelpie-lockup-dark.svg",
+     "blob": "297499921675c77cd2057b2c3f9caf9a",
+     "size": 3748,
+     "type": "image/svg+xml"
+    },
+    "favicon-16.svg": {
+     "name": "favicon-16.svg",
+     "blob": "7971462c9ac7c4c6cdd6d8b07263d3c6",
+     "size": 371,
+     "type": "image/svg+xml"
+    },
+    "app-icon.svg": {
+     "name": "app-icon.svg",
+     "blob": "45c7833fc819690c1481e2320ce9620b",
+     "size": 500,
+     "type": "image/svg+xml"
+    },
+    "app-icon-rounded.svg": {
+     "name": "app-icon-rounded.svg",
+     "blob": "9fd1606b8755291c84d514eb9489e420",
+     "size": 510,
+     "type": "image/svg+xml"
+    },
+    "app-icon-maskable.svg": {
+     "name": "app-icon-maskable.svg",
+     "blob": "d6aa6393e6a29b33ced72d411f20a997",
+     "size": 500,
+     "type": "image/svg+xml"
+    }
+   }
+  }
+ },
+ "blobs": {},
+ "docs": {
+  "sections": []
+ },
+ "lastChange": {
+  "by": "Diogo Guedes",
+  "at": "2026-10-17T18:55:18Z",
+  "via": "Claude Code · guedesdiogo/kelpie@59907ec",
+  "note": "The webchat's sidebar (5.24, #412) and the agent's editor with icon buttons and tooltips (5.25 and 5.26, #414): Sidebar and AgentEditor cards, IconButton, AgentHeader, DisplayMenu, Mascot, Presence, ConfirmCard, Thread and other cards brought to main, 11 new icons, the guide regenerated, and the engine rebuilt from main alone, Offline included."
+ }
+}

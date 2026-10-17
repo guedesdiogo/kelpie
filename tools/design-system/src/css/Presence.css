@@ -1,0 +1,18 @@
+/* Presence (5.9). */
+.k-roster { max-width: 460px; padding: var(--space-2); }
+.k-strip-slot { min-block-size: 30px; padding: var(--space-1) var(--space-2); display: flex; flex-direction: row-reverse; justify-content: space-between; align-items: center; gap: var(--space-2); }
+.k-net { min-block-size: 30px; }
+.k-strip { display: inline-flex; align-items: center; gap: var(--space-2); padding: 6px var(--space-3); border-radius: var(--r-btn); background: color-mix(in srgb, var(--warm) 14%, transparent); color: var(--fg); font-weight: 600; }
+.k-strip .k-icon { color: var(--warm); }
+.k-agent { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding: var(--space-2); border: 0; border-radius: calc(var(--r-card) - var(--space-2)); background: none; text-align: left; cursor: pointer; }
+@media (hover: hover) { .k-agent:hover { background: var(--sunken); } }
+.k-agent-name { font-weight: 600; }
+.k-agent-st { color: var(--muted); max-width: 100%; }
+.k-agent-st b { font-weight: 600; color: var(--fg); }
+/* The label stays fg: accent and danger miss AA as text on a hovered (sunken) row; the glyph carries the color (3:1 for icons). */
+.k-st-working .k-glyph { color: var(--accent); }
+.k-st-waiting .k-glyph { color: var(--warm); }
+.k-st-error .k-glyph { color: var(--danger); }
+.k-st-idle .k-glyph, .k-st-noResponse .k-glyph, .k-st-offline .k-glyph { color: var(--muted); }
+.k-agent-time { color: var(--muted); }
+.k-agent-st .k-glyph { margin-inline-end: var(--space-1); }

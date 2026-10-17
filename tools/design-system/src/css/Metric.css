@@ -1,0 +1,15 @@
+/* Metric (5.16). */
+.k-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--space-3); max-width: 560px; }
+.k-metric { padding: var(--space-3) var(--space-4); display: grid; gap: var(--space-1); align-content: start; transition: border-color var(--dur-fade) var(--ease-fade); }
+.k-metric-v { font-size: 22px; font-weight: 500; line-height: 1.2; }
+.k-spark { width: 100%; height: 24px; overflow: visible; }
+.k-spark path { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.k-spark circle { fill: var(--accent); }
+.k-tier-h { display: inline-flex; align-items: center; gap: var(--space-1); }
+.k-tier-h .k-icon { width: 14px; height: 14px; color: var(--muted); }
+.k-metric.over { border-color: var(--warm); }
+.k-metric.over .k-tier-h .k-icon { color: var(--warm); }
+.k-meter { display: block; height: 4px; border-radius: 4px; background: var(--sunken); overflow: hidden; }
+.k-meter i { display: block; height: 100%; background: var(--accent); transform-origin: left; transition: transform var(--spring-fast-dur) var(--spring-fast); }
+.k-metric.over .k-meter i { background: var(--warm); }
+.k-metric .k-btn { justify-self: start; min-block-size: 32px; }

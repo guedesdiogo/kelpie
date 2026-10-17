@@ -1,0 +1,7 @@
+/* FirstRun (5.17). */
+.k-first { max-width: 480px; padding: var(--space-4); display: grid; gap: var(--space-4); }
+.k-first-grid { display: grid; gap: 14px; max-width: 320px; }
+
+.k-first-slot { display: flex; align-items: center; gap: var(--space-3); min-block-size: 48px; }
+.k-first-slot .k-mh:empty { border-radius: 50%; border: 1px dashed var(--muted); }
+.k-first-empty { display: grid; gap: var(--space-3); overflow: hidden; }

@@ -1,0 +1,88 @@
+<!-- @dsCard group="Work" height=400 subtitle="5.7 · moment" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>MemorySave</title></head>
+<body>
+<div class="k-stage k-mem" id="stage">
+  <button type="button" class="k-replay text-sm" id="again">Replay</button>
+  <div class="k-mem-top"><span class="k-mh s48" id="fig"></span><span class="k-vault text-sm" id="vault"><svg class="k-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="3.5" rx="1"/><path d="M3 6.5v6a1 1 0 001 1h8a1 1 0 001-1v-6M6.5 9h3"/></svg><span>Vault</span><span class="k-roll k-mono k-muted" id="vcount"><span class="n">128</span></span></span></div>
+  <div class="k-chat-thread text-ui" id="thread"></div>
+  <div class="k-toast-slot" id="toasts"></div>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui, stage = document.getElementById("stage"), thread = document.getElementById("thread"), vault = document.getElementById("vault");
+  var m = ui.mascot(document.getElementById("fig"), ui.LOOKS.kelpie, 48);
+  var NOTE = '<svg class="k-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h5.5l3 3v8H4z"/><path d="M9.5 2.5v3h3M6 8.5h4M6 11h3"/></svg>';
+  function arc(x0, y0, x1, y1) {
+    var fr = [], N = 18, cx = (x0 + x1) / 2, cy = Math.min(y0, y1) - 60;
+    for (var i = 0; i <= N; i++) {
+      var t = i / N, u = 1 - t, s = t;
+      fr.push({ translate: (u * u * x0 + 2 * u * t * cx + t * t * x1) + "px " + (u * u * y0 + 2 * u * t * cy + t * t * y1) + "px", scale: String(1 - 0.65 * s * s), opacity: s > 0.82 ? Math.max(0, 1 - (s - 0.82) / 0.18) : 1 });
+    }
+    return fr;
+  }
+  var play = ui.runner(async function (run) {
+    thread.innerHTML = '<p class="k-bubble me">Ana can only meet after 10:00. Can you note that?</p>';
+    document.getElementById("toasts").innerHTML = "";
+    document.getElementById("vcount").innerHTML = '<span class="n">128</span>';
+    m.setState("idle", { instant: true });
+    await run.sleep(300);
+    m.setState("typing");
+    await run.sleep(900);
+    var b = document.createElement("p");
+    b.className = "k-bubble";
+    b.innerHTML = 'Noted: Ana prefers <span class="k-hl"><span class="k-hl-bg"></span>meetings after 10:00</span>.';
+    thread.append(b); ui.enter(b, {});
+    m.setState("idle"); m.arrive();
+    await run.sleep(550);
+    var hl = b.querySelector(".k-hl");
+    hl.classList.add("on");
+    ui.animate(hl.firstChild, [{ transform: "scaleX(0)", opacity: 0 }, { transform: "none", opacity: 1 }], { spring: "moment" });
+    await run.sleep(500);
+    var sr = stage.getBoundingClientRect(), hr = hl.getBoundingClientRect(), vr = vault.getBoundingClientRect();
+    var chip = document.createElement("div");
+    chip.className = "k-notechip k-mono text-xs";
+    chip.innerHTML = NOTE + "<span>people/ana-souza.md</span>";
+    stage.append(chip);
+    var cw = chip.offsetWidth, ch = chip.offsetHeight;
+    var x0 = Math.min(Math.max(8, hr.left - sr.left + hr.width / 2 - cw / 2), sr.width - cw - 8), y0 = hr.top - sr.top - ch - 6;
+    var x1 = vr.left - sr.left + vr.width / 2 - cw / 2, y1 = vr.top - sr.top + vr.height / 2 - ch / 2;
+    chip.style.translate = x0 + "px " + y0 + "px";
+    // While the agent writes to the vault, its mascot holds the paper and pencil.
+    m.setState("working", { activity: "vault" });
+    await ui.enter(chip, { moment: true }).finished;
+    await run.sleep(260);
+    if (ui.reduced()) await ui.animate(chip, [{ opacity: 1 }, { opacity: 0 }], { fill: "forwards" }).finished;
+    else await chip.animate(arc(x0, y0, x1, y1), { duration: ui.num("dur-travel", 720), easing: ui.ease("travel"), fill: "forwards" }).finished;
+    if (!run.alive) return;
+    chip.remove();
+    ui.animate(vault, [{ transform: "scale(1.14)" }, { transform: "none" }], { spring: "pop" });
+    ui.roll(document.getElementById("vcount"), "129");
+    m.setState("idle");
+    var t = document.createElement("div");
+    t.className = "k-toast text-sm";
+    t.setAttribute("role", "status");
+    t.innerHTML = '<span>Saved to <code class="k-mono">people/ana-souza.md</code> · From this conversation, today at 14:32 · by Kelpie</span><button type="button" class="k-btn text-sm">Open</button><button type="button" class="k-btn text-sm undo">Undo</button><i class="k-toast-time"></i>';
+    document.getElementById("toasts").append(t);
+    ui.enter(t, {});
+    t.lastElementChild.animate([{ transform: "scaleX(1)" }, { transform: "scaleX(0)" }], { duration: 10000, easing: "linear", fill: "forwards" });
+    t.querySelector(".undo").onclick = async function () {
+      play.takeover();
+      ui.exit(t).finished.then(function () { t.remove(); });
+      stage.append(chip);
+      chip.style.translate = x0 + "px " + y0 + "px";
+      if (!ui.reduced()) await chip.animate(arc(x0, y0, x1, y1).reverse(), { duration: ui.num("dur-travel", 720), easing: ui.ease("travel"), fill: "forwards" }).finished;
+      chip.remove();
+      ui.roll(document.getElementById("vcount"), "128");
+      ui.animate(hl.firstChild, [{ opacity: 1 }, { opacity: 0 }], { dur: ui.num("dur-fade", 150), ease: ui.ease("fade"), fill: "forwards" });
+    };
+    await run.sleep(10000);
+    ui.exit(t).finished.then(function () { t.remove(); });
+  });
+  document.getElementById("again").addEventListener("click", function () { play(); });
+  play();
+})();
+</script>
+</body>
+</html>

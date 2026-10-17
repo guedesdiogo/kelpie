@@ -1,0 +1,54 @@
+<!-- @dsCard group="Conversation" height=330 subtitle="5.10 · scroll up, then press the pill" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>FollowPill</title></head>
+<body>
+<div class="k-stage">
+  <div class="k-follow k-card">
+    <div class="k-follow-scroll text-ui" id="scroll"></div>
+    <button type="button" class="k-pill text-sm" id="pill" hidden><span aria-hidden="true">↓</span> <span class="k-roll k-mono" id="n"><span class="n">1</span></span> <span id="what">new</span></button>
+  </div>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui, sc = document.getElementById("scroll"), pill = document.getElementById("pill"), nEl = document.getElementById("n");
+  for (var i = 1; i <= 14; i++) sc.insertAdjacentHTML("beforeend", '<p class="k-bubble' + (i % 3 ? "" : " me") + '">' + (i % 3 ? "Step " + i + " of the weekly summary is ready." : "Thanks") + "</p>");
+  sc.scrollTop = sc.scrollHeight;
+  var unseen = 0, approval = false, k = 15;
+  function nearEnd() { return sc.scrollHeight - sc.scrollTop - sc.clientHeight < 150; }
+  function show() {
+    var txt = approval ? "Approval waiting" : "new";
+    document.getElementById("what").textContent = txt;
+    nEl.hidden = approval;
+    pill.toggleAttribute("data-approval", approval);
+    if (pill.hidden) { pill.hidden = false; ui.enter(pill, { spring: "fast" }); }
+    if (!approval) ui.roll(nEl, String(unseen));
+  }
+  function hide() { if (pill.hidden) return; ui.exit(pill).finished.then(function () { pill.hidden = true; }); unseen = 0; approval = false; }
+  setInterval(function () {
+    var follow = nearEnd() && !String(getSelection());
+    var approvalNow = k % 5 === 0;
+    sc.insertAdjacentHTML("beforeend", '<p class="k-bubble">' + (approvalNow ? "Agenda asks you to confirm an invite." : "Step " + k + " of the weekly summary is ready.") + "</p>");
+    k++;
+    if (follow) sc.scrollTop = sc.scrollHeight;
+    else { unseen++; approval = approval || approvalNow; show(); }
+  }, 1800);
+  sc.addEventListener("scroll", function () { if (nearEnd()) hide(); });
+  // A press scrolls to the end with spring-base: its linear() points, read from the token.
+  function springScroll(el, to) {
+    var pts = (ui.token("spring-base").match(/[\d.]+/g) || ["0", "1"]).map(Number), dur = ui.num("spring-base-dur", 266), from = el.scrollTop, t0 = performance.now();
+    (function step(now) {
+      var t = Math.min(1, (now - t0) / dur), x = t * (pts.length - 1), i = Math.floor(x), f = x - i;
+      var v = i >= pts.length - 1 ? 1 : pts[i] + (pts[i + 1] - pts[i]) * f;
+      el.scrollTop = from + (to - from) * v;
+      if (t < 1) requestAnimationFrame(step);
+    })(t0);
+  }
+  pill.addEventListener("click", function (e) {
+    var end = sc.scrollHeight - sc.clientHeight;
+    if (ui.reduced() || e.detail === 0) sc.scrollTop = end; else springScroll(sc, end);
+  });
+})();
+</script>
+</body>
+</html>

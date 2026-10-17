@@ -1,0 +1,19 @@
+/* TaskBoard (5.5). */
+.k-board { display: grid; gap: var(--space-3); max-width: 620px; }
+.k-routine { justify-self: start; display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3) var(--space-1) var(--space-2); border-radius: var(--r-chip); background: var(--surface); border: 1px solid var(--line); transition: border-color var(--dur-fade) var(--ease-fade), box-shadow var(--dur-fade) var(--ease-fade); }
+.k-routine .k-icon { color: var(--accent); }
+.k-routine.fired { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-halo); }
+.k-routine .clock { color: var(--muted); }
+.k-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
+.k-col-b { min-width: 0; padding: var(--space-2); border-radius: calc(var(--r-card) - var(--space-1)); background: var(--sunken); display: grid; gap: var(--space-2); align-content: start; min-block-size: 230px; }
+.k-col-h { margin: 0; display: flex; justify-content: space-between; color: var(--muted); font-weight: 600; padding: 0 var(--space-1); }
+.k-col-cards { display: grid; gap: var(--space-2); }
+.k-task { display: grid; gap: var(--space-1); padding: var(--space-2); border-radius: calc(var(--r-card) - var(--space-2)); background: var(--surface); border: 1px solid var(--line); transform-origin: top left; }
+.k-task-t { font-weight: 600; line-height: 1.3; }
+.k-task.done .k-task-t { color: var(--muted); }
+.k-task-m { display: flex; align-items: center; gap: var(--space-2); color: var(--muted); min-width: 0; }
+.k-task-m .k-icon { width: 14px; height: 14px; color: var(--ok); }
+.k-task-m .k-spinner { width: 10px; height: 10px; color: var(--accent); }
+.k-mh.s20.empty { border-radius: 50%; border: 1px dashed var(--muted); }
+.k-task-bar { display: block; height: 3px; border-radius: 3px; background: var(--sunken); overflow: hidden; }
+.k-task-bar i { display: block; height: 100%; background: var(--accent); transform: scaleX(0); transform-origin: left; }

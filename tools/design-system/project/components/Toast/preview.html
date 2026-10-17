@@ -1,0 +1,49 @@
+<!-- @dsCard group="Feedback" height=280 subtitle="5.13 · hover a toast to pause it" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Toast</title></head>
+<body>
+<div class="k-stage">
+  <div class="k-row">
+    <button type="button" class="k-btn text-sm" id="t1">Task done out of sight</button>
+    <button type="button" class="k-btn text-sm" id="t2">Archive with Undo</button>
+    <button type="button" class="k-btn text-sm" id="t3">An error</button>
+  </div>
+  <div class="k-toasts" id="stack" aria-live="polite"></div>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui, stack = document.getElementById("stack");
+  function layout() {
+    var list = Array.prototype.slice.call(stack.children).reverse();
+    list.forEach(function (t, i) {
+      var s = ui.reduced() ? 1 : 1 - 0.05 * i, y = ui.reduced() ? 0 : -i * 10;
+      t.style.transform = "translateY(" + y + "px) scale(" + s + ")"; t.style.zIndex = String(10 - i);
+      t.style.visibility = i > 2 ? "hidden" : "visible";
+    });
+  }
+  function toast(html, kind) {
+    var t = document.createElement("div"), ms = kind === "undo" ? 10000 : 5000;
+    t.className = "k-toast text-sm" + (kind === "error" ? " error" : "");
+    t.setAttribute("role", kind === "error" ? "alert" : "status");
+    t.innerHTML = html + (kind === "error" ? '<button type="button" class="k-btn text-sm close">Dismiss</button>' : "") + (kind === "error" ? "" : '<i class="k-toast-time"></i>');
+    stack.append(t); layout(); ui.enter(t, {});
+    var close = function () { ui.exit(t).finished.then(function () { t.remove(); layout(); }); };
+    if (kind === "error") { t.querySelector(".close").onclick = close; return; }
+    var bar = t.querySelector(".k-toast-time").animate([{ transform: "scaleX(1)" }, { transform: "scaleX(0)" }], { duration: ms, easing: "linear", fill: "forwards" });
+    bar.finished.then(close, function () {});
+    // The timer pauses on hover, on focus and while the tab is hidden.
+    var pause = function () { bar.pause(); }, resume = function () { if (!t.matches(":hover, :focus-within") && !document.hidden) bar.play(); };
+    t.addEventListener("pointerenter", pause); t.addEventListener("pointerleave", resume);
+    t.addEventListener("focusin", pause); t.addEventListener("focusout", resume);
+    document.addEventListener("visibilitychange", function () { document.hidden ? pause() : resume(); });
+    var u = t.querySelector(".undo"); if (u) u.onclick = function () { bar.cancel(); close(); toast("<span>Restored <b>Trip to Recife</b>.</span>", "done"); };
+  }
+  document.getElementById("t1").onclick = function () { toast("<span><b>Weekly summary</b> is done. Kelpie ran it in 4 min 12 s.</span>", "done"); };
+  document.getElementById("t2").onclick = function () { toast('<span>Archived <b>Trip to Recife</b>.</span><button type="button" class="k-btn text-sm undo">Undo</button>', "undo"); };
+  document.getElementById("t3").onclick = function () { toast('<svg class="k-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11Z"/><path d="M8 5v3.5"/><path d="M8 10.6v.4"/></svg><span>Couldn\'t save the note. The vault answered 503; try again in a minute.</span>', "error"); };
+  toast("<span><b>Weekly summary</b> is done. Kelpie ran it in 4 min 12 s.</span>", "done");
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+/* Toast (5.13): the webchat's .toast. */
+.k-toasts { position: relative; display: grid; justify-items: center; align-items: end; min-block-size: 140px; }
+.k-toasts .k-toast { grid-area: 1 / 1; transform-origin: bottom center; transition: transform var(--spring-base-dur) var(--spring-base); }
+.k-toast { position: relative; overflow: hidden; display: flex; align-items: center; gap: var(--space-3); max-width: min(30rem, 100%); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4); border-radius: var(--r-chip); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-pop); }
+.k-toast .k-btn { min-block-size: 32px; flex: none; }
+.k-toast.error { border-color: var(--danger); }
+.k-toast.error > .k-icon { color: var(--danger); }
+.k-toast-time { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--muted); transform-origin: left; }

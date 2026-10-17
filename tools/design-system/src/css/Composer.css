@@ -1,0 +1,11 @@
+/* Composer (5.20; #378, decision 4): the approved demo's one row, from the mockup's ref.css. */
+.k-cwrap { display: grid; gap: var(--space-2); max-width: 600px; padding: var(--space-2) 0 var(--space-5); }
+.k-compose { display: flex; align-items: flex-end; gap: 6px; min-block-size: 40px; padding: 6px 6px 6px var(--space-3); border: 1px solid var(--muted); border-radius: var(--r-panel); background: var(--bg); transition: border-color var(--dur-fade) var(--ease-fade), box-shadow var(--dur-fade) var(--ease-fade); }
+.k-compose:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-halo); }
+.k-compose-input { flex: 1; min-width: 0; field-sizing: content; min-block-size: 26px; max-block-size: 160px; margin: 0; padding: 2px 0; resize: none; border: 0; outline: none; background: none; color: var(--fg); font-size: 15px; line-height: 1.45; unicode-bidi: plaintext; }
+.k-compose-input::placeholder { color: var(--muted); }
+/* Pause keeps 12 px from Send, so a tap meant for one never lands on the other. */
+.k-compose .k-round.pz { margin-inline-end: 6px; }
+.k-paused { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); }
+.k-paused .k-icon { width: 14px; height: 14px; }
+@media (pointer: coarse), (max-width: 600px) { .k-compose-input { font-size: 16px; } }

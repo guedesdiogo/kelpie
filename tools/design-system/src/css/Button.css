@@ -1,0 +1,14 @@
+/* Button: the webchat's .send and .pause (style.css). */
+.k-btn {
+  min-block-size: 36px; padding: var(--space-2) 15px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid var(--muted); border-radius: var(--r-btn);
+  background: none; color: var(--fg); font-weight: 600; cursor: pointer; white-space: nowrap;
+  transition: transform var(--dur-press) var(--ease-standard), background-color var(--dur-fade) var(--ease-fade), color var(--dur-fade) var(--ease-fade);
+}
+.k-btn.primary { background: var(--accent); border-color: transparent; color: var(--on-accent); }
+.k-btn.ok { background: var(--ok); border-color: transparent; color: var(--surface); }
+.k-btn:active:not(:disabled) { transform: scale(var(--scale-press)); }
+.k-btn:disabled { color: var(--muted); cursor: not-allowed; }
+.k-btn.primary:disabled { background: var(--sunken); }
+@media (prefers-reduced-motion: reduce) { .k-btn:active:not(:disabled) { transform: none; } }

@@ -1,0 +1,44 @@
+<!-- @dsCard group="Conversation" height=560 subtitle="5.20 · hover or tap a bubble for its time" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Thread</title></head>
+<body>
+<div class="k-stage">
+  <div class="k-thread text-ui" role="log" aria-live="off">
+    <h2 class="k-day text-sm"><time datetime="2026-10-16">Today</time></h2>
+    <section class="k-group me">
+      <h3 class="k-sr">You, 14:31</h3>
+      <p class="k-bubble me">Am I free tomorrow morning?<time class="k-at k-mono text-xs" datetime="2026-10-16T14:30">14:30</time></p>
+      <p class="k-bubble me">I want to see Ana<time class="k-at k-mono text-xs" datetime="2026-10-16T14:31">14:31</time></p>
+      <p class="k-mark text-sm"><svg class="k-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11Z"/><path d="M8 5v3.2l2 1.3"/></svg>Held</p>
+    </section>
+    <section class="k-group">
+      <h3 class="k-sr">Agenda, 14:33</h3>
+      <p class="k-bubble">You have a meeting at 9:00 and you are free from 10:00 to 11:30.<time class="k-at k-mono text-xs" datetime="2026-10-16T14:33">14:33</time></p>
+      <p class="k-bubble">Ana prefers coffee in the morning; the place she likes is <a class="k-link" href="https://example.com/cafe-lagoa">Café Lagoa</a> <span class="k-host k-mono text-sm">example.com</span><span aria-hidden="true"> ↗</span><span class="k-sr"> (opens in a new tab)</span>.<time class="k-at k-mono text-xs" datetime="2026-10-16T14:33">14:33</time></p>
+    </section>
+    <section class="k-group me">
+      <h3 class="k-sr">You, 14:35</h3>
+      <p class="k-bubble me queued">Book 10:00 then</p>
+      <p class="k-mark text-sm"><svg class="k-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11Z"/><path d="M8 5v3.2l2 1.3"/></svg>Queued</p>
+    </section>
+    <section class="k-group">
+      <p class="k-notice"><svg class="k-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11Z"/><path d="M8 5v3.5"/><path d="M8 10.6v.4"/></svg><span>No agent answered this turn. Write again to retry.</span></p>
+    </section>
+    <section class="k-group me">
+      <p class="k-bubble me">And invite Bruno</p>
+      <p class="k-mark text-sm notsent"><svg class="k-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11Z"/><path d="M8 5v3.5"/><path d="M8 10.6v.4"/></svg>Not sent: the message is longer than 4,000 characters. It is back in the composer.</p>
+    </section>
+  </div>
+</div>
+<script>
+(function () {
+  // A bubble's own time, beside it on hover or a tap (#378, decision 1); no sideways drag.
+  document.querySelectorAll(".k-bubble").forEach(function (b) {
+    if (!b.querySelector(".k-at")) return;
+    b.addEventListener("click", function (e) { if (!e.target.closest("a")) b.classList.toggle("reveal"); });
+  });
+})();
+</script>
+</body>
+</html>

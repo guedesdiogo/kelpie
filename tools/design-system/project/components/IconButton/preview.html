@@ -1,0 +1,34 @@
+<!-- @dsCard group="Decisions" height=190 subtitle="5.26 · hover or tab across them: the first tooltip waits 400 ms, the next ones show at once" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>IconButton</title></head>
+<body>
+<div class="k-stage" style="padding-top:48px">
+  <div class="k-row" id="row">
+    <button type="button" class="k-icb" id="undo" aria-label="Undo" aria-disabled="true" data-tip="Nothing to undo">__undo__</button>
+    <button type="button" class="k-icb" id="dice" aria-label="Randomize all" data-tip="Randomize all">__dice__</button>
+    <button type="button" class="k-icb quiet" aria-label="Randomize shape" data-tip="Randomize shape">__dice__</button>
+    <button type="button" class="k-icb close" aria-label="Close" data-tip="Close">__close__</button>
+    <span class="k-sep" aria-hidden="true"></span>
+    <button type="button" class="k-round pz" aria-label="Pause this conversation" data-tip="Pause this conversation">__pause__</button>
+    <button type="button" class="k-round send" aria-label="Send" data-tip="Send">__send__</button>
+  </div>
+  <p class="k-caption text-sm" style="margin:0">Undo waits, focusable, and says why. Press Randomize all, then Undo. Escape hides a tooltip without moving focus; on a phone, each button grows to 44 px.</p>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui, row = document.getElementById("row");
+  row.innerHTML = row.innerHTML.replace("__undo__", ui.icon("undo")).split("__dice__").join(ui.icon("dice")).replace("__close__", ui.icon("close")).replace("__pause__", ui.icon("pause")).replace("__send__", ui.icon("send"));
+  ui.tooltips(row);
+  var undo = document.getElementById("undo"), steps = 0;
+  function say() {
+    undo.setAttribute("aria-disabled", String(!steps));
+    undo.setAttribute("aria-label", steps ? "Undo randomize" : "Undo");
+    undo.querySelector(".k-tip").textContent = steps ? "Undo randomize" : "Nothing to undo";
+  }
+  document.getElementById("dice").addEventListener("click", function () { steps++; say(); });
+  undo.addEventListener("click", function () { if (steps) { steps--; say(); } });
+})();
+</script>
+</body>
+</html>

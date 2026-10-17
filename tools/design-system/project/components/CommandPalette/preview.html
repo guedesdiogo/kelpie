@@ -1,0 +1,64 @@
+<!-- @dsCard group="Navigation" height=360 subtitle="5.8 · click the field, or press Ctrl K / ⌘K here" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>CommandPalette</title></head>
+<body>
+<div class="k-stage k-palapp" id="app">
+  <button type="button" class="k-cmdk text-ui" id="trigger"><svg class="k-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg><span>Search or run</span><kbd class="k-mono text-xs" id="mod">Ctrl K</kbd></button>
+  <div class="k-scrim" id="scrim" hidden></div>
+  <div class="k-pal" id="pal" role="dialog" aria-label="Command palette" hidden>
+    <label class="k-pal-in"><svg class="k-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg><input id="q" type="text" autocomplete="off" spellcheck="false" placeholder="Type a command" aria-label="Command" class="text-ui"></label>
+    <ul class="k-pal-list text-ui" role="listbox" id="list"><li class="k-pal-hi" aria-hidden="true" id="hi"></li></ul>
+  </div>
+  <p class="k-caption text-sm" id="said" aria-live="polite"></p>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui, pal = document.getElementById("pal"), scrim = document.getElementById("scrim"), q = document.getElementById("q"), list = document.getElementById("list"), hi = document.getElementById("hi");
+  if (/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) document.getElementById("mod").textContent = "⌘ K";
+  var CMDS = ["New conversation with Kelpie", "Open the task board", "Routines: Morning brief", "Routines: new routine", "Agent code: computer", "Vault: find a note"];
+  list.insertAdjacentHTML("beforeend", CMDS.map(function (c) { return '<li class="k-pal-it" role="option">' + c + "</li>"; }).join(""));
+  var items = Array.prototype.slice.call(list.querySelectorAll(".k-pal-it")), sel = 0, hiY = null, moved = false;
+  function vis() { return items.filter(function (li) { return !li.hidden; }); }
+  function select(i, animate) {
+    var v = vis(); v.forEach(function (li) { li.removeAttribute("aria-selected"); });
+    if (!v.length) { hi.style.opacity = "0"; hiY = null; return; }
+    sel = Math.max(0, Math.min(i, v.length - 1));
+    var li = v[sel], y = li.offsetTop, prev = hiY;
+    li.setAttribute("aria-selected", "true");
+    hi.style.opacity = "1"; hi.style.height = li.offsetHeight + "px"; hi.style.transform = "translateY(" + y + "px)";
+    if (animate && prev != null && prev !== y) ui.animate(hi, [{ transform: "translateY(" + prev + "px)" }, { transform: "translateY(" + y + "px)" }], { spring: "fast" });
+    hiY = y;
+  }
+  function open(animate) {
+    if (!pal.hidden) return;
+    pal.hidden = false; scrim.hidden = false; q.value = ""; items.forEach(function (li) { li.hidden = false; }); hiY = null; moved = false; select(0, false);
+    if (animate) {
+      ui.animate(pal, [{ opacity: 0, transform: "translateY(-6px) scale(" + ui.num("scale-in", 0.97) + ")" }, { opacity: 1, transform: "none" }], { spring: "fast" });
+      ui.animate(scrim, [{ opacity: 0 }, { opacity: 1 }], { dur: ui.num("dur-fade", 150), ease: ui.ease("fade") });
+    }
+    q.focus({ preventScroll: true });
+  }
+  function close(animate) {
+    if (pal.hidden) return;
+    var end = function () { pal.hidden = true; scrim.hidden = true; };
+    if (!animate) { end(); return; }
+    ui.exit(scrim); ui.exit(pal).finished.then(end);
+  }
+  function choose(animate) { var li = vis()[sel]; if (!li) return; document.getElementById("said").textContent = "Opening: " + li.textContent; close(animate); }
+  document.getElementById("trigger").addEventListener("click", function (e) { open(e.detail !== 0); });
+  scrim.addEventListener("click", function () { close(true); });
+  q.addEventListener("input", function () { var t = q.value.toLowerCase(); items.forEach(function (li) { li.hidden = !!t && li.textContent.toLowerCase().indexOf(t) < 0; }); hiY = null; select(0, false); });
+  q.addEventListener("keydown", function (e) {
+    var n = vis().length;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); if (n) select((sel + (e.key === "ArrowDown" ? 1 : -1) + n) % n, false); }
+    else if (e.key === "Enter") { e.preventDefault(); choose(false); }
+    else if (e.key === "Escape") { e.preventDefault(); close(false); }
+  });
+  list.addEventListener("pointermove", function (e) { var li = e.target.closest(".k-pal-it"); if (!li) return; if (!moved) { moved = true; } var i = vis().indexOf(li); if (i >= 0 && i !== sel) select(i, true); });
+  list.addEventListener("click", function (e) { var li = e.target.closest(".k-pal-it"); if (!li) return; sel = vis().indexOf(li); choose(true); });
+  document.addEventListener("keydown", function (e) { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); pal.hidden ? open(false) : close(false); } });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,166 @@
+<!-- @dsCard group="Agents" height=580 subtitle="5.24 · Research asks for you; open its request, rest on a mascot for its pencil, or use the arrows" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Sidebar</title></head>
+<body>
+<div class="k-stage">
+  <div class="k-sideapp">
+    <nav class="k-side" aria-label="Agents">
+      <a class="k-brand" href="#" id="home"><svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><path d="M32,8.563H32A25,25 0 0 1 57,33.563V33.563A25,25 0 0 1 32,58.563H14.986A7.986,7.986 0 0 1 7,50.576V33.563A25,25 0 0 1 32,8.563ZM9.431,12.729a7.292,7.292 0 1 1 14.583,0a7.292,7.292 0 1 1 -14.583,0ZM39.986,12.729a7.292,7.292 0 1 1 14.583,0a7.292,7.292 0 1 1 -14.583,0Z"/></svg><span>Kelpie</span></a>
+      <div class="k-slot"><p class="k-strip" id="strip" role="status" hidden>__bell__<span><span class="k-roll k-mono" id="count"></span> <span id="strip-t">agent waiting for you</span></span></p></div>
+      <ul class="k-arows" id="rows"></ul>
+      <div class="k-side-foot"><button type="button" class="k-acct" id="acct" aria-haspopup="true" aria-expanded="false"><span class="k-ava sm" aria-hidden="true">AS</span><span class="text-ui k-acct-n">Ana Souza</span>__chevronUp__</button></div>
+    </nav>
+    <section class="k-chatpane" aria-label="Conversation">
+      <p class="k-mono text-xs k-muted" style="margin:0" id="title">Agenda · Kelpie</p>
+      <header class="k-ahead"><span class="k-mh s48" id="fig"></span><div class="k-col" style="gap:2px"><h2 class="k-display text-h3" style="margin:0" id="name">Agenda</h2><span class="text-sm k-muted" id="status">Ready</span></div></header>
+      <p class="k-bubble text-ui">You're free after 15:00 today.</p>
+      <p class="k-bubble me text-ui">Hold 16:00 for the dentist</p>
+      <p class="k-caption text-sm" id="note" aria-live="polite" style="margin:0"></p>
+    </section>
+  </div>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui, side = document.querySelector(".k-side"), note = document.getElementById("note");
+  side.innerHTML = side.innerHTML.replace("__bell__", ui.icon("bell")).replace("__chevronUp__", ui.icon("chevronUp"));
+  var now = Date.now();
+  var AG = [
+    { id: "kelpie", name: "Kelpie", state: "working", act: "vault", what: "Reading people/ana-souza.md", since: now - 42e3 },
+    { id: "agenda", name: "Agenda", state: "idle", what: "", since: now },
+    { id: "research", name: "Research", state: "working", act: "search", what: "Comparing 3 flights", since: now - 102e3 },
+    { id: "code", name: "Code", state: "idle", what: "", since: now },
+  ];
+  var LABEL = { working: "working", approved: "working", waiting: "waiting for you", idle: "idle" };
+  var open = "agenda", rowsEl = document.getElementById("rows");
+  rowsEl.innerHTML = AG.map(function (a) {
+    return '<li><div class="k-arow" data-id="' + a.id + '"><span class="k-avw"><span class="k-mh s36"></span></span>' +
+      '<span class="k-an"><a class="k-rlink" href="?agent=' + a.id + '">' + a.name + '</a><span class="k-ast text-sm"><span class="k-gs"></span><span class="k-tx"></span>' +
+      '<button type="button" class="k-ropen" aria-expanded="false" aria-label="waiting for you" hidden></button></span></span>' +
+      '<span class="k-atime"></span><button type="button" class="k-pen" aria-label="Edit ' + a.name + '" data-tip="Edit ' + a.name + '">' + ui.icon("pencil") + "</button></div>" +
+      '<div class="k-rreq" hidden></div></li>';
+  }).join("");
+  var links = Array.prototype.slice.call(rowsEl.querySelectorAll(".k-rlink"));
+  AG.forEach(function (a, i) {
+    a.row = rowsEl.children[i].firstElementChild;
+    a.req = rowsEl.children[i].lastElementChild;
+    a.disc = a.row.querySelector(".k-ropen");
+    a.m = ui.mascot(a.row.querySelector(".k-mh"), ui.LOOKS[a.id], 36, { mode: "list", state: a.state, activity: a.act });
+    paint(a);
+  });
+  ui.tooltips(rowsEl);
+  // The open conversation's header: the 48 px mascot and the name, only a heading beside the sidebar.
+  var fig = document.getElementById("fig"), head = ui.mascot(fig, ui.LOOKS.agenda, 48);
+  function paint(a) {
+    a.row.dataset.state = a.state;
+    var g = a.row.querySelector(".k-gs"), t = a.row.querySelector(".k-tx");
+    g.className = "k-gs k-st-" + (a.state === "approved" ? "working" : a.state);
+    g.innerHTML = ui.glyph(a.state === "approved" ? "working" : a.state);
+    t.innerHTML = '<span class="k-lbl">' + LABEL[a.state] + "</span>" + (a.what ? " · " + a.what : "");
+    a.disc.hidden = a.state !== "waiting";
+  }
+  function clock(a) {
+    var s = Math.max(0, Math.round((Date.now() - a.since) / 1000));
+    if (a.state === "working" || a.state === "approved") return ui.reduced() ? Math.max(1, Math.floor(s / 60)) + " min" : Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+    if (a.state === "waiting") return s < 60 ? "now" : Math.floor(s / 60) + " min ago";
+    return "";
+  }
+  function tick() { AG.forEach(function (a) { a.row.querySelector(".k-atime").textContent = clock(a); }); }
+  setInterval(tick, 1000); tick();
+  // The strip counts what waits; its slot is kept, so the rows never move.
+  var strip = document.getElementById("strip"), title = document.getElementById("title"), shown = 0;
+  function count() {
+    var n = AG.filter(function (a) { return a.state === "waiting"; }).length;
+    if (n === shown) return;
+    shown = n;
+    title.textContent = (n ? "(" + n + ") " : "") + AG.filter(function (a) { return a.id === open; })[0].name + " · Kelpie";
+    if (n) {
+      ui.roll(document.getElementById("count"), String(n));
+      document.getElementById("strip-t").textContent = n === 1 ? "agent waiting for you" : "agents waiting for you";
+      if (strip.hidden) { strip.hidden = false; ui.enter(strip, { spring: "fast" }); }
+    } else if (!strip.hidden) {
+      ui.exit(strip).finished.then(function () { if (!shown) strip.hidden = true; });
+    }
+  }
+  function set(a, state, o) {
+    o = o || {};
+    a.state = state; a.since = Date.now();
+    if (o.what != null) a.what = o.what;
+    a.m.setState(state, { activity: state === "working" ? a.act : null, instant: !!o.instant, quiet: !!o.quiet });
+    paint(a); tick(); count();
+  }
+  // A waiting row's state is a disclosure: the request grows under the row with the ConfirmCard.
+  function openReq(a, keyboard) {
+    if (a.state !== "waiting" || !a.req.hidden) return;
+    a.disc.setAttribute("aria-expanded", "true");
+    a.req.innerHTML = '<div class="k-card k-confirm text-sm"><div class="k-confirm-in"><span class="text-ui"><code class="k-id k-mono">' + a.id + '</code> asks for your confirmation</span>' +
+      '<span>Book the 08:10 flight to Recife, R$ 612.</span><span class="k-muted">Open for 10 min</span>' +
+      '<div class="k-actions"><button type="button" class="k-btn text-ui" data-a="deny">Deny this call</button><button type="button" class="k-btn primary text-ui" data-a="ok">Confirm</button></div></div></div>';
+    a.req.hidden = false;
+    // A press in the card's first 400 ms is ignored: it may have appeared under the pointer (5.3).
+    var ready = Date.now() + 400;
+    a.req.querySelector(".k-actions").addEventListener("click", function (e) {
+      var b = e.target.closest("button");
+      if (!b || Date.now() < ready) return;
+      answer(a, b.dataset.a === "ok", e.detail === 0);
+    });
+    if (!keyboard) {
+      var h = a.req.offsetHeight;
+      ui.animate(a.req, [{ height: "0px", opacity: 0 }, { height: h + "px", opacity: 1 }], { spring: "moment" });
+    }
+  }
+  function closeReq(a, keyboard) {
+    if (a.req.hidden) return;
+    a.disc.setAttribute("aria-expanded", "false");
+    if (keyboard) { a.req.hidden = true; a.req.innerHTML = ""; return; }
+    ui.animate(a.req, [{ height: a.req.offsetHeight + "px", opacity: 1 }, { height: "0px", opacity: 0 }], { dur: ui.num("dur-exit-moment", 180), ease: ui.ease("exit"), fill: "forwards" }).finished.then(function () { a.req.hidden = true; a.req.innerHTML = ""; a.req.getAnimations().forEach(function (x) { x.cancel(); }); });
+  }
+  function answer(a, yes, keyboard) {
+    var at = new Date().toTimeString().slice(0, 5);
+    a.req.firstElementChild.innerHTML = '<div class="k-receipt"><span class="k-receipt-ic' + (yes ? "" : " neutral") + '">' + ui.icon(yes ? "check" : "neutral", yes && !keyboard ? "draw" : "") + '</span><span class="text-sm">' + (yes ? "You confirmed at " + at : "You denied at " + at + ". <code class=\"k-id k-mono\">" + a.id + "</code> goes on without it.") + "</span></div>";
+    // Confirm brings Approved for 1.1 s; a deny brings no announcement.
+    if (yes) { set(a, "approved", { what: "Booking the 08:10 flight", instant: keyboard }); setTimeout(function () { set(a, "working", { instant: true }); }, 1100); }
+    else set(a, "working", { what: "Comparing 3 flights", quiet: true, instant: keyboard });
+    setTimeout(function () { closeReq(a, keyboard); }, 1600);
+    setTimeout(function () { if (a.state !== "waiting") ask(a); }, 9000);
+  }
+  function ask(a) { set(a, "waiting", { what: "Pick one of 3 flights" }); }
+  setTimeout(function () { ask(AG[2]); }, 2400);
+  AG.forEach(function (a) {
+    a.disc.addEventListener("click", function (e) { a.req.hidden ? openReq(a, e.detail === 0) : closeReq(a, e.detail === 0); });
+    // The pencil shows while the pointer rests on the mascot; a press on the mascot still opens the row.
+    a.row.addEventListener("pointermove", function (e) {
+      var r = a.row.querySelector(".k-avw").getBoundingClientRect(), on = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+      if (on) a.row.dataset.mascotHover = ""; else delete a.row.dataset.mascotHover;
+    });
+    a.row.addEventListener("pointerleave", function () { delete a.row.dataset.mascotHover; });
+    a.row.querySelector(".k-pen").addEventListener("click", function () { note.textContent = "Opens " + a.name + "'s editor beside the sidebar (AgentEditor)."; });
+  });
+  // One tab stop with roving focus; the pencil of the row that holds it follows in the tab order.
+  function rove(i) {
+    links.forEach(function (l, j) { l.tabIndex = j === i ? 0 : -1; AG[j].row.querySelector(".k-pen").tabIndex = j === i ? 0 : -1; });
+  }
+  function openAgent(i) {
+    open = AG[i].id;
+    links.forEach(function (l, j) { if (j === i) l.setAttribute("aria-current", "page"); else l.removeAttribute("aria-current"); });
+    document.getElementById("name").textContent = AG[i].name;
+    var host = document.createElement("span"); host.className = "k-mh s48"; fig.replaceWith(host); fig = host;
+    head = ui.mascot(fig, ui.LOOKS[AG[i].id], 48);
+    shown = -1; count();
+  }
+  rove(1); openAgent(1);
+  links.forEach(function (l, i) { l.addEventListener("click", function (e) { e.preventDefault(); rove(i); openAgent(i); }); });
+  rowsEl.addEventListener("keydown", function (e) {
+    var i = links.indexOf(document.activeElement);
+    if (i < 0) return;
+    var to = { ArrowDown: (i + 1) % links.length, ArrowUp: (i - 1 + links.length) % links.length, Home: 0, End: links.length - 1 }[e.key];
+    if (to != null) { e.preventDefault(); rove(to); links[to].focus(); return; }
+    if (e.key === "ArrowRight") { e.preventDefault(); openReq(AG[i], true); }
+    else if (e.key === "ArrowLeft" || e.key === "Escape") { e.preventDefault(); closeReq(AG[i], true); }
+  });
+  document.getElementById("acct").addEventListener("click", function () { note.textContent = "Opens the Display menu upward from the account (DisplayMenu)."; });
+  document.getElementById("home").addEventListener("click", function (e) { e.preventDefault(); });
+})();
+</script>
+</body>
+</html>

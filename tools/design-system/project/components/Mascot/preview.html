@@ -1,0 +1,100 @@
+<!-- @dsCard group="Agents" height=600 subtitle="5.19 · the engine, live" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Mascot</title></head>
+<body>
+<div class="k-stage k-mascot-lab">
+  <div class="k-ml-fig"><span class="k-mh s160" id="big"></span></div>
+  <form class="k-ml-form text-sm" id="form" onsubmit="return false">
+    <label>Shape <select id="shape"></select></label>
+    <label>Color <select id="color"></select></label>
+    <label>Eyes <select id="eyes"></select></label>
+    <label class="k-check"><input type="checkbox" id="cheeks"> Cheeks</label>
+    <label>Head <select id="head"></select></label>
+    <label>Accessory <select id="accessory"></select></label>
+  </form>
+  <div class="k-col k-ml-wide">
+    <span class="text-sm k-muted">State</span>
+    <div class="k-seg k-seg-wrap text-sm" aria-label="State" id="states"></div>
+    <label class="text-sm k-ml-act">Working on <select id="activity"><option value="search">search</option><option value="vault">the vault</option><option value="code">code</option><option value="calendar">the calendar</option><option value="email">email</option><option value="think">no tool: thinking</option></select></label>
+    <span class="text-sm k-muted">The pause</span>
+    <div class="k-seg text-sm" aria-label="Mascot motion" id="motion"></div>
+    <p class="k-caption text-sm" id="why" hidden>Reduced motion is on, so every mascot is Still.</p>
+  </div>
+  <div class="k-ml-sizes k-ml-wide">
+    <figure><span class="k-mh s20" id="s20"></span><figcaption class="k-mono text-xs">20 · card</figcaption></figure>
+    <figure><span class="k-mh s36" id="s36"></span><figcaption class="k-mono text-xs">36 · roster</figcaption></figure>
+    <figure><span class="k-mh s48" id="s48"></span><figcaption class="k-mono text-xs">48 · header</figcaption></figure>
+  </div>
+</div>
+<script>
+(function () {
+  var K = window.Kelpie, ui = K.ui, E = K.mascot;
+  var look = Object.assign({}, ui.LOOKS.kelpie), state = "idle", motion = "alive";
+  function fill(id, values, label) {
+    var s = document.getElementById(id);
+    s.innerHTML = values.map(function (v) { return '<option value="' + v + '">' + (label ? label(v) : v) + "</option>"; }).join("");
+    return s;
+  }
+  function parts(types) {
+    var out = [];
+    Object.keys(types).forEach(function (t) { if (!types[t].length) out.push(t); else types[t].forEach(function (v) { out.push(t + ":" + v); }); });
+    return out;
+  }
+  fill("shape", Object.keys(E.SHAPES)); fill("color", E.COLORS); fill("eyes", Object.keys(E.EYES));
+  fill("head", parts(E.HEADS), function (v) { return v.replace(":", ": "); });
+  fill("accessory", parts(E.ACCESSORIES), function (v) { return v.replace(":", ": "); });
+  function sync() {
+    document.getElementById("shape").value = look.shape; document.getElementById("color").value = look.color;
+    document.getElementById("eyes").value = look.eyes; document.getElementById("cheeks").checked = look.cheeks;
+    document.getElementById("head").value = look.head.type + (look.head.variation ? ":" + look.head.variation : "");
+    document.getElementById("accessory").value = look.accessory.type + (look.accessory.variation ? ":" + look.accessory.variation : "");
+  }
+  sync();
+  var big = ui.mascot(document.getElementById("big"), look, 160, { mode: "large" });
+  var s48 = ui.mascot(document.getElementById("s48"), look, 48);
+  var s36 = ui.mascot(document.getElementById("s36"), look, 36, { mode: "list" });
+  var s20 = ui.mascot(document.getElementById("s20"), ui.bare(look), 20, { mode: "still" });
+  function part(v) { var p = v.split(":"); return p[1] ? { type: p[0], variation: p[1] } : { type: p[0] }; }
+  document.getElementById("form").addEventListener("change", function () {
+    look = {
+      shape: document.getElementById("shape").value, color: document.getElementById("color").value,
+      eyes: document.getElementById("eyes").value, cheeks: document.getElementById("cheeks").checked,
+      head: part(document.getElementById("head").value), accessory: part(document.getElementById("accessory").value),
+    };
+    [big, s48, s36].forEach(function (m) { m.change(look); });
+    s20.change(ui.bare(look));
+  });
+  var STATES = [["idle", "Idle"], ["listening", "Listening"], ["typing", "Typing"], ["working", "Working"], ["waiting", "Waiting"], ["approved", "Approved"], ["error", "Error"], ["dozing", "Dozing"], ["noResponse", "No response"], ["offline", "Offline"]];
+  function seg(id, items, current, onPick, icons) {
+    var box = document.getElementById(id);
+    box.innerHTML = items.map(function (it) {
+      return '<button type="button" data-v="' + it[0] + '" aria-checked="' + (it[0] === current) + '"' + (icons ? ' aria-label="' + it[1] + '" data-tip="' + it[1] + '">' + ui.pauseIcon(it[0]) : ">" + it[1]) + "</button>";
+    }).join("");
+    var s = ui.segment(box, onPick);
+    if (icons) ui.tooltips(box);
+    return s;
+  }
+  function show(keyboard) {
+    var act = state === "working" ? document.getElementById("activity").value : null;
+    [big, s48, s36].forEach(function (m) { m.setState(state, { activity: act, instant: keyboard }); });
+    document.querySelector(".k-ml-act").hidden = state !== "working";
+  }
+  seg("states", STATES, state, function (v, kb) { state = v; show(kb); });
+  document.getElementById("activity").addEventListener("change", function () { show(false); });
+  document.querySelector(".k-ml-act").hidden = true;
+  var mseg = seg("motion", [["alive", "Alive"], ["states", "States only"], ["still", "Still"]], motion, function (v) { motion = v; E.setMotion(v); }, true);
+  var mbox = document.getElementById("motion");
+  function reducedNow() {
+    var r = ui.reduced();
+    mbox.querySelectorAll("button").forEach(function (b) { b.disabled = r && b.dataset.v !== "still"; });
+    mseg.set(r ? "still" : motion);
+    document.getElementById("why").hidden = !r;
+    E.setMotion(r ? "still" : motion);
+  }
+  window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", reducedNow);
+  reducedNow();
+})();
+</script>
+</body>
+</html>
