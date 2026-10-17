@@ -123,8 +123,10 @@ describe("a task's run (#335)", () => {
     );
     const task = await queue("runs-no-session", "Water the plants");
 
+    // The task is done once `complete_task` runs, before the turn's second model call: wait for both.
     await until(async () => {
       expect(await statusOf("runs-no-session", task.id)).toMatchObject({ status: "done" });
+      expect(world.sessions).toHaveLength(2);
     });
     expect(world.sessions).toEqual([undefined, undefined]);
   });

@@ -141,6 +141,10 @@ describe("ConversationAgent buffering", () => {
       instance.getSchedules(),
     );
     expect(schedules).toHaveLength(1);
+    // Left armed, its flush fires during a later test, and takes that test's script.
+    await runInDurableObject(stub, (instance: ConversationAgent) =>
+      Promise.all(schedules.map((schedule) => instance.cancelSchedule(schedule.id))),
+    );
   });
 
   it("ignores a flush from a schedule that a newer message replaced", async () => {
