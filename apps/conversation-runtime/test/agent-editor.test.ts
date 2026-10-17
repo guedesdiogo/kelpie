@@ -117,6 +117,17 @@ describe("AgentEditor", () => {
     expect((await registry.get("editor-guarded"))?.name).toBe("Guarded");
   });
 
+  it("refuses an actor that isn't one, before running anything", async () => {
+    await registry.add("editor-actor", "Actor", admin);
+    for (const actor of [null, { role: "owner" }, { userId: "u-owner", role: "owner" }, "owner"]) {
+      expect(
+        await editor.setRemit(actor as unknown as Actor, "editor-actor", "Mine"),
+        JSON.stringify(actor),
+      ).toEqual({ ok: false, reason: "forbidden" });
+    }
+    expect((await settingsOf("editor-actor")).remit).toBe("");
+  });
+
   it("answers for an agent the Registry lists, and an id that is one", async () => {
     expect(await editor.setMascot(owner, "nobody", picked)).toEqual({
       ok: false,

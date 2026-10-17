@@ -152,7 +152,11 @@ const editor = new Editor({
   texts: T,
   toasts,
   onSaved: (agentId, changes) => saved(agentId, changes),
-  onClose: () => roster.editing(null),
+  onClose: () => {
+    roster.editing(null);
+    for (const pen of $("agents").querySelectorAll(".pen"))
+      pen.setAttribute("aria-expanded", "false");
+  },
   onExpired: () => showLogin(),
 });
 
@@ -879,11 +883,18 @@ function showAgents() {
   showTab();
   roster.setAgents(agents, agent);
   const switcher = $("switcher");
-  const several = agents.length > 1 && !wide.matches;
-  switcher.setAttribute("aria-disabled", String(!several));
-  switcher.setAttribute("aria-label", several ? `${agentName()}, ${T.switchAgent}` : agentName());
+  const several = agents.length > 1;
+  // Below the sidebar's width, the list opens with one agent too when it carries the editor's
+  // pencil (#379): it is the only way to the editor there.
+  const editable = isDrawable(agents.find((entry) => entry.id === agent)?.mascot);
+  const opens = !wide.matches && (several || editable);
+  switcher.setAttribute("aria-disabled", String(!opens));
+  switcher.setAttribute(
+    "aria-label",
+    opens ? `${agentName()}, ${several ? T.switchAgent : T.agents}` : agentName(),
+  );
   switcher.querySelector(".icon")?.remove();
-  if (several) switcher.append(icon("chevron"));
+  if (opens) switcher.append(icon("chevron"));
   // 5.21's list: each agent's still 36 px mascot in the Idle pose, its name with its specialty,
   // and its id. The open agent's mascot carries the editor's pencil at rest (#379): a phone has no
   // pointer to rest on it.

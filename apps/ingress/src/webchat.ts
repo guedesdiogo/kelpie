@@ -199,7 +199,7 @@ export function connectWebchat(
 /** The editor's routes (#379): `/webchat/agents/<id>/mascot` and `/webchat/agents/<id>/profile`. */
 const EDIT_PATH = new RegExp(`^${AGENTS_PATH}/([^/]+)/(mascot|profile)$`);
 export const isAgentEditPath = (pathname: string) => pathname.startsWith(`${AGENTS_PATH}/`);
-/** Far more than a mascot or a profile takes. */
+/** Far more than a mascot or a profile takes, in bytes. */
 const MAX_EDIT_BODY = 4_096;
 const EDIT_HEADERS = { "cache-control": "no-store", "x-content-type-options": "nosniff" };
 /** The profile's fields, in the order they are set: the one the main agent refuses goes first. */
@@ -212,16 +212,50 @@ const STATUS_OF: Partial<Record<Extract<CommandResult<unknown>, { ok: false }>["
     unknown_agent: 404,
     not_allowed: 409,
   };
-const refused = (result: Extract<CommandResult<unknown>, { ok: false }>) =>
-  new Response(null, { status: STATUS_OF[result.reason] ?? 503, headers: EDIT_HEADERS });
+/** A refusal's status; a profile names the fields it set before the refused one, if any. */
+function refused(result: Extract<CommandResult<unknown>, { ok: false }> | null, saved = {}) {
+  const status = result ? (STATUS_OF[result.reason] ?? 503) : 503;
+  if (Object.keys(saved).length === 0) return new Response(null, { status, headers: EDIT_HEADERS });
+  return Response.json({ saved }, { status, headers: EDIT_HEADERS });
+}
+
+/**
+ * The body as text, or null past `most` bytes: it stops reading there, whatever the request says
+ * its length is, or when it says none.
+ */
+async function bounded(request: Request, most: number): Promise<string | null> {
+  if (Number(request.headers.get("content-length") ?? 0) > most) return null;
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > most) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
 
 /**
  * The agent editor's saves (#379): a `PUT` from the webchat's own page, with the owner's Access
  * login, for an agent the Directory admits this login to. The mascot is set whole, from a body
  * `parseMascot` takes; the profile sets the fields it names, each checked before any is set. Each
- * goes through conversation-runtime's AgentEditor, as the actor the Directory resolved, and the
- * command checks again that it is the owner. Browsers send the Access cookie with any site's
- * request, so the origin and the fetch's metadata must both say it came from this page.
+ * goes through conversation-runtime's AgentEditor, as the actor the Directory resolved: the
+ * binding's four methods are what ingress can change. Browsers send the Access cookie with any
+ * site's request, so the origin and the fetch's metadata must both say it came from this page. The
+ * body is read only for the owner, and never past 4 KB.
  */
 export async function handleAgentEdit(request: Request, deps: WebchatDeps): Promise<Response> {
   const verification = await deps.authenticate(request);
@@ -243,51 +277,59 @@ export async function handleAgentEdit(request: Request, deps: WebchatDeps): Prom
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
     return new Response(null, { status: 415 });
   }
-  const length = Number(request.headers.get("content-length") ?? 0);
-  const text = length > MAX_EDIT_BODY ? null : await request.text();
-  if (text === null || text.length > MAX_EDIT_BODY) return new Response(null, { status: 413 });
+  const admission = await deps.admit(
+    { channel: ACCESS_SOURCE, channelUserId: verification.sub },
+    agentId,
+  );
+  if (!admission.admitted || admission.role !== "owner") return new Response(null, { status: 403 });
+  const text = await bounded(request, MAX_EDIT_BODY);
+  if (text === null) return new Response(null, { status: 413 });
   let body: unknown;
   try {
     body = JSON.parse(text);
   } catch {
     return new Response(null, { status: 400 });
   }
-  const admission = await deps.admit(
-    { channel: ACCESS_SOURCE, channelUserId: verification.sub },
-    agentId,
-  );
-  if (!admission.admitted || admission.role !== "owner") return new Response(null, { status: 403 });
   const actor: Actor = { userId: admission.userId, role: admission.role, via: "webchat" };
-  try {
-    if (matched[2] === "mascot") {
-      const mascot = parseMascot(body);
-      if (!mascot) return new Response(null, { status: 400 });
+  if (matched[2] === "mascot") {
+    const mascot = parseMascot(body);
+    if (!mascot) return new Response(null, { status: 400 });
+    try {
       const result = await deps.editor.setMascot(actor, agentId, mascot);
-      return result.ok
-        ? Response.json({ mascot: result.value }, { headers: EDIT_HEADERS })
-        : refused(result);
+      if (!result.ok) return refused(result);
+      // What goes back to the page is a mascot, checked as the list checks it.
+      const shown = parseMascot(result.value);
+      return shown ? Response.json({ mascot: shown }, { headers: EDIT_HEADERS }) : refused(null);
+    } catch (error) {
+      console.warn("webchat: an agent's mascot wasn't saved", errorName(error));
+      return refused(null);
     }
-    const profile = parseProfile(body);
-    if (!profile) return new Response(null, { status: 400 });
-    const saved: Partial<Record<(typeof PROFILE_FIELDS)[number], string>> = {};
-    for (const field of PROFILE_FIELDS) {
-      const value = profile[field];
-      if (value === undefined) continue;
+  }
+  const profile = parseProfile(body);
+  if (!profile) return new Response(null, { status: 400 });
+  const saved: Partial<Record<(typeof PROFILE_FIELDS)[number], string>> = {};
+  for (const field of PROFILE_FIELDS) {
+    const value = profile[field];
+    if (value === undefined) continue;
+    try {
       const result =
         field === "name"
           ? await deps.editor.rename(actor, agentId, value)
           : field === "remit"
             ? await deps.editor.setRemit(actor, agentId, value)
             : await deps.editor.setSpecialty(actor, agentId, value);
-      if (!result.ok) return refused(result);
+      if (!result.ok) return refused(result, saved);
+      if (typeof result.value !== "string") return refused(null, saved);
       saved[field] = result.value;
+    } catch (error) {
+      console.warn("webchat: an agent's profile wasn't saved", errorName(error));
+      return refused(null, saved);
     }
-    return Response.json(saved, { headers: EDIT_HEADERS });
-  } catch (error) {
-    console.warn("webchat: an agent's edit wasn't saved", error instanceof Error ? error.name : "");
-    return new Response(null, { status: 503, headers: EDIT_HEADERS });
   }
+  return Response.json(saved, { headers: EDIT_HEADERS });
 }
+
+const errorName = (error: unknown) => (error instanceof Error ? error.name : "");
 
 /** The profile's fields the page sent, each one a value the agent takes, or null. */
 function parseProfile(

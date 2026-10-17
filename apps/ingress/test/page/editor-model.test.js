@@ -4,6 +4,7 @@ import {
   CHOICES,
   changedAxis,
   changedSections,
+  cleanLine,
   PARTS,
   partOptions,
   profileChanges,
@@ -12,6 +13,7 @@ import {
   randomizeAxis,
   randomLook,
   SECTIONS,
+  shows,
   summaryOf,
   withType,
 } from "../../public/webchat/editor-model.js";
@@ -234,5 +236,30 @@ describe("what changed", () => {
   it("takes a profile only with a name that shows", () => {
     expect(profileValid({ name: "Agenda" })).toBe(true);
     expect(profileValid({ name: "   " })).toBe(false);
+    expect(profileValid({ name: String.fromCodePoint(0x3164, 0x2800) })).toBe(false);
+  });
+
+  it("keeps a pasted line to what the agent's settings take", () => {
+    const zeroWidth = String.fromCodePoint(0x200b);
+    const separator = String.fromCodePoint(0x2028);
+    const selectors = String.fromCodePoint(0xfe01, 0xe0100, 0xe0101);
+    expect(cleanLine(`Agen${zeroWidth}da\tand mail`)).toBe("Agenda and mail");
+    expect(cleanLine(`Two\nlines${separator}here`)).toBe("Two lines here");
+    expect(cleanLine(`Agenda${selectors}`)).toBe(`Agenda${String.fromCodePoint(0xfe01)}`);
+    const heart = String.fromCodePoint(0x2764, 0xfe0f);
+    expect(cleanLine(heart)).toBe(heart);
+    expect(shows(heart)).toBe(true);
+    expect(shows(String.fromCodePoint(0x3164))).toBe(false);
+  });
+
+  it("clears a remit or a specialty that shows nothing", () => {
+    const blank = String.fromCodePoint(0x3164);
+    expect(
+      profileChanges(
+        saved.profile,
+        { ...saved.profile, remit: blank, specialty: blank },
+        { main: false },
+      ),
+    ).toEqual({ remit: "", specialty: "" });
   });
 });

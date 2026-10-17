@@ -141,6 +141,11 @@ describe("the pencil on each mascot (#379)", () => {
 
   it("joins the row's tab order after its link, and only the row the list's tab stop is on", () => {
     make();
+    const link = rowOf("Kelpie").querySelector(".row-link");
+    // In the page's order, so Tab reaches the link first, then its pencil.
+    expect(link.compareDocumentPosition(penOf("Kelpie")) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
     expect(penOf("Kelpie").tabIndex).toBe(0);
     expect(penOf("Agenda").tabIndex).toBe(-1);
     rowOf("Kelpie").querySelector(".row-link").focus();

@@ -118,10 +118,15 @@ const isToolName = (value: unknown): value is string =>
   typeof value === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(value);
 /**
  * One line of printable text, as a remit or a skill's name. U+2028 and U+2029 aren't `\p{C}`, but
- * some surfaces break the line on them (#397, #401).
+ * some surfaces break the line on them (#397, #401). A variation sequence takes one selector after
+ * its character, as an emoji or an ideograph does (#401); a run of them shows nothing and can carry
+ * hidden text into a prompt (#379).
  */
 const isLine = (value: unknown, max: number): value is string =>
-  typeof value === "string" && value.length <= max && !/[\p{C}\p{Zl}\p{Zp}]/u.test(value);
+  typeof value === "string" &&
+  value.length <= max &&
+  !/[\p{C}\p{Zl}\p{Zp}]/u.test(value) &&
+  !/\p{Variation_Selector}\p{Variation_Selector}/u.test(value);
 /**
  * Whether the text shows a character (#401). Spaces, default-ignorable characters such as the Hangul
  * fillers and variation selectors, and the Braille blank show nothing on their own, and `trim()`
@@ -211,12 +216,17 @@ export function parseSettings(input: unknown): Partial<AgentSettings> | null {
         if (typeof value !== "boolean") return null;
         parsed.spawn = value;
         break;
+      // Empty clears them; otherwise each must show something (#379).
       case "remit":
-        if (!isLine(value, MAX_REMIT_CHARS)) return null;
+        if (!isLine(value, MAX_REMIT_CHARS) || !(value.trim() === "" || isVisible(value))) {
+          return null;
+        }
         parsed.remit = value.trim();
         break;
       case "specialty":
-        if (!isLine(value, MAX_SPECIALTY_CHARS)) return null;
+        if (!isLine(value, MAX_SPECIALTY_CHARS) || !(value.trim() === "" || isVisible(value))) {
+          return null;
+        }
         parsed.specialty = value.trim();
         break;
       case "skills": {

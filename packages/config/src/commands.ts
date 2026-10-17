@@ -210,8 +210,8 @@ export interface AgentLooksContract {
 /**
  * conversation-runtime's `AgentEditor` entrypoint: the webchat's agent editor (#379) changes an
  * agent's mascot, name, remit and specialty, and nothing else. Each runs the configuration command
- * with the actor ingress built from the Directory's admission, and the command checks again that
- * it is the owner. ADR-0055 §5 adds the model chip's one field here, in its own story.
+ * as the actor ingress built from the Directory's admission. ADR-0055 §5 adds the model chip's one
+ * field here, in its own story.
  */
 export interface AgentEditorContract {
   setMascot(actor: Actor, agentId: string, mascot: unknown): Promise<CommandResult<Mascot>>;

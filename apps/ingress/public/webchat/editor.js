@@ -7,6 +7,7 @@
 import { Construtor, PREVIEW_PX, SHEET_PREVIEW_PX } from "./construtor.js";
 import {
   changedSections,
+  cleanLine,
   LIMITS,
   profileChanges,
   profileOf,
@@ -17,14 +18,14 @@ import {
 import { icon, outline } from "./icons.js";
 import { Mascot, ownerTyping } from "./mascot.js";
 import { APPROVED_MS } from "./mascot-states.js";
-import { SPINNER_AFTER_MS } from "./model.js";
+import { loginState, SPINNER_AFTER_MS } from "./model.js";
 import { DUR, EASE, enter, fadeIn, fromKeyboard, play, reduced, SPRINGS } from "./motion.js";
 import { roll, rollText } from "./roll.js";
 import { tips } from "./tips.js";
 
 /** The agent's mascot beside its name, on the left. */
 export const ID_PX = 56;
-/** A save's undo lasts as long as its toast (5.13). */
+/** Siblings leave and enter this far apart (`--stagger`). */
 export const STAGGER_MS = 30;
 
 const element = (tag, className) => {
@@ -45,7 +46,13 @@ async function put(agentId, section, body) {
       redirect: "manual",
       cache: "no-store",
     });
-    if (!response.ok) return { ok: false, status: response.status };
+    // Access answers an expired login with 401, or a redirect to its sign-in (5.12).
+    if (loginState(response) === "expired") return { ok: false, status: 401 };
+    if (!response.ok) {
+      // A profile that failed after some of its fields were set names them.
+      const body = await response.json().catch(() => null);
+      return { ok: false, status: response.status, ...(body?.saved ? { value: body.saved } : {}) };
+    }
     return { ok: true, value: await response.json() };
   } catch {
     return { ok: false, status: 0 };
@@ -115,6 +122,8 @@ export class Editor {
    */
   open(agent, { trigger, from = null, keyboard = false, sheet = false, returnTo = trigger }) {
     if (this.#open) {
+      // A save on its way finishes in the editor that sent it.
+      if (this.#open.saving) return false;
       if (this.#changed().length > 0) {
         this.#ask();
         return false;
@@ -133,9 +142,11 @@ export class Editor {
       footer: "edit",
       failed: new Set(),
       saving: false,
+      closeWhenSaved: false,
       closing: false,
       pushed: false,
       closeTimer: null,
+      toast: null,
     };
     this.#open = open;
     this.#build(open);
@@ -180,6 +191,11 @@ export class Editor {
   close({ force = false, instant = false } = {}) {
     const open = this.#open;
     if (!open || open.closing) return;
+    // A save on its way closes the editor once it ends, with its toast.
+    if (open.saving) {
+      open.closeWhenSaved = true;
+      return;
+    }
     if (!force && this.#changed().length > 0) {
       this.#ask();
       return;
@@ -197,6 +213,8 @@ export class Editor {
       open.trigger?.isConnected && !open.trigger.closest("[hidden]") ? open.trigger : open.returnTo;
     back?.focus({ preventScroll: true });
     this.#onClose(open.agent.id);
+    // A save that ended, closed within its Approved moment or after: its toast and its Undo.
+    if (open.toast) this.#toast(open.toast);
     const gone = () => {
       open.root.remove();
       open.scrim?.remove();
@@ -313,6 +331,8 @@ export class Editor {
         this.#edited();
       },
     });
+    // Both sections stay on the page, so the preview's mascot stays alive while Profile shows.
+    open.body.append(open.profile.element, open.construtor.element);
     this.#identity();
 
     root.addEventListener("keydown", (event) => this.#key(event));
@@ -341,7 +361,8 @@ export class Editor {
     open.title.textContent = this.#names.sections[section];
     const content = section === "profile" ? open.profile.element : open.construtor.element;
     open.body.dataset.section = section;
-    open.body.replaceChildren(content);
+    open.profile.element.hidden = content !== open.profile.element;
+    open.construtor.element.hidden = content !== open.construtor.element;
     if (section === "mascot") open.construtor.mount();
     this.#placeHighlight(instant || previous === undefined);
     this.#renderFooter();
@@ -564,6 +585,14 @@ export class Editor {
       box.append(below);
       if (!locked) {
         input.addEventListener("input", () => {
+          // What the line can't hold goes, as a paste often brings it.
+          const clean = cleanLine(input.value);
+          if (clean !== input.value) {
+            const caret = (input.selectionStart ?? input.value.length) - input.value.length;
+            input.value = clean;
+            const at = Math.max(0, clean.length + caret);
+            input.setSelectionRange?.(at, at);
+          }
           open.draft.profile[key] = input.value;
           // Reading comes first: while the owner types, the mascot only breathes and blinks.
           ownerTyping();
@@ -611,7 +640,13 @@ export class Editor {
     const open = this.#open;
     // A change after a save keeps the panel open, and its button says Save again.
     this.#timers.clear(open.closeTimer);
-    if (open.save?.dataset.state === "done") this.#resetSave(open);
+    if (open.save?.dataset.state === "done") {
+      this.#resetSave(open);
+      open.toast = null;
+    }
+    // A failed section the owner took back to what is saved has nothing left to save.
+    const changed = new Set(this.#changed());
+    for (const id of [...open.failed]) if (!changed.has(id)) open.failed.delete(id);
     if (open.footer !== "edit" && !open.saving) {
       this.#plainFooter();
       open.footer = "edit";
@@ -834,8 +869,9 @@ export class Editor {
     open.saving = false;
     const changes = {};
     for (const result of results) {
-      if (!result.ok) continue;
-      open.failed.delete(result.section);
+      if (result.ok) open.failed.delete(result.section);
+      // A profile that failed part of the way says what it set before.
+      if (!result.value) continue;
       if (result.section === "mascot") {
         open.saved.mascot = result.value.mascot;
         changes.mascot = result.value.mascot;
@@ -849,6 +885,7 @@ export class Editor {
     if (failed.some((result) => result.status === 401)) this.#onExpired();
     if (this.#open !== open) return;
     if (failed.length > 0) {
+      open.closeWhenSaved = false;
       for (const result of failed) open.failed.add(result.section);
       this.#failed(
         failed.map((result) => result.section),
@@ -863,6 +900,16 @@ export class Editor {
         Object.keys(bodies.profile).map((key) => [key, before.profile[key]]),
       ),
     };
+    // What the owner changed while it saved is still to save: the editor stays, and says so.
+    if (this.#changed().length > 0) {
+      this.#marks({ leaving: true });
+      this.#resetSave(open);
+      if (open.closeWhenSaved) {
+        open.closeWhenSaved = false;
+        this.close();
+      }
+      return;
+    }
     this.#saved(open, { keyboard, undo, sections });
   }
 
@@ -880,14 +927,19 @@ export class Editor {
     for (const mascot of [open.construtor.preview, open.idMascot]) {
       mascot?.setState("approved", { instant: keyboard });
     }
-    // Approved lasts 1.1 s, then the panel closes, unless the owner went on editing.
+    // The toast waits for the panel to close: after Approved's 1.1 s, or sooner if the owner
+    // closes it, unless they went on editing.
+    open.toast = { agentId: open.agent.id, name: open.saved.profile.name, undo, sections };
     this.#timers.set(() => {
       for (const mascot of [open.construtor.preview, open.idMascot]) mascot?.setState("idle");
     }, APPROVED_MS);
-    open.closeTimer = this.#timers.set(() => {
-      if (this.#open !== open) return;
+    if (open.closeWhenSaved) {
+      open.closeWhenSaved = false;
       this.close({ force: true });
-      this.#toast(open.agent.id, open.saved.profile.name, undo, sections);
+      return;
+    }
+    open.closeTimer = this.#timers.set(() => {
+      if (this.#open === open) this.close({ force: true });
     }, APPROVED_MS);
   }
 
@@ -900,7 +952,7 @@ export class Editor {
   }
 
   /** A toast says it saved, and Undo sends back what was saved before, for 10 s (5.13). */
-  #toast(agentId, name, undo, sections) {
+  #toast({ agentId, name, undo, sections }) {
     const names = this.#names;
     const what = { profile: sections.includes("profile"), mascot: sections.includes("mascot") };
     this.#toasts.show({

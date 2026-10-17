@@ -54,15 +54,18 @@ And on what it edits besides the look:
   - `setRemit`, the agent's short description, through `configureAgent`;
   - `setSpecialty`, through `configureAgent`.
 - **Each method builds its setting itself, from its one value.** Nothing else of the input reaches the agent's settings.
-- **Ingress binds it, and still no `AgentHost`.** It passes the actor the Directory resolved, as `via: "webchat"`, and the command checks again that the actor is the owner.
+- **Ingress binds it, and still no `AgentHost`.** It passes the actor the Directory resolved, as `via: "webchat"`.
+  - The binding's shape is the control: these four settings are all ingress can change.
+  - The command checks that the actor is the owner. The actor is ingress's word, so that check catches a mistake in ingress, not a compromised ingress, which could already open the owner's conversation.
 - **The routes:** `PUT /webchat/agents/<id>/mascot` and `PUT /webchat/agents/<id>/profile`. Each:
   - verifies the Access token, as the page and its socket do;
   - takes only a request whose `Origin` is the page's and whose `Sec-Fetch-Site` is `same-origin`, since browsers send the Access cookie with any site's request;
-  - takes only JSON, of at most 4 KB;
-  - needs an agent the Registry lists and the Directory admits this login to, and the owner as the actor;
+  - needs an agent the Registry lists and the Directory admits this login to, and the owner as the actor, before it reads the body;
+  - takes only JSON, and reads at most 4 KB of it, counted in bytes, whatever length the request names;
   - validates the body before changing anything: the mascot with `parseMascot`, and the profile's name, remit and specialty as the settings take them;
   - answers with what the agent now shows.
-- **The profile sets the fields it names,** the specialty first, so the field the main agent refuses changes nothing after it.
+- **The profile sets the fields it names,** the specialty first, so the field the main agent refuses changes nothing after it. When a later field fails, the answer names the fields already set.
+- **A line the agent keeps** (a name, a remit, a specialty) takes no run of variation selectors, which show nothing and can carry hidden text into a prompt, and a remit or a specialty that isn't empty must show something, as a name must.
 - **ADR-0055 §5's model chip** adds one method to this entrypoint, in its own story.
 
 ### 4. The owner's Save is the yes
@@ -78,7 +81,7 @@ And on what it edits besides the look:
 ## Consequences
 
 - The owner changes an agent's look, name, specialty and short description from its pencil in the webchat (`docs/design-system.md` 5.25), and the change reaches the header, the sidebar and the bot's photo (ADR-0046).
-- Ingress has a write path into agents, limited to these four settings by the entrypoint's shape and by the commands' owner check. A stolen Access session that is the owner's could change them, as it could talk to Master.
+- Ingress has a write path into agents, limited to these four settings by the entrypoint's shape. A stolen Access session that is the owner's could change them, as it could talk to Master. A remit reaches the agent's prompt with no confirmation, behind Access, the origin checks and the page's content policy.
 - Each mascot save asks Browser Run for a new bot photo, which ADR-0046 already limits to one every 5 minutes.
 - A new agent's look is no longer reproducible from its id. Nothing depends on that: the derived mascot stays only for agents that never saved one.
 - `AgentLooks.mascots` can go in a later change to this entrypoint.

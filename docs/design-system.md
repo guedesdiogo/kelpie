@@ -706,7 +706,7 @@ Frequent.
 - **The header** holds the 48px mascot (5.19), the agent's name in Bricolage Grotesque at `--text-h3`, and the status line. Below the sidebar's width, the owner's avatar sits at its end (5.24).
 - **While the agent's subagents work,** their pups stand in a row between the mascot and the name, and their count follows the status line on its row (5.6, [ADR-0053](adr/0053-pups-in-the-conversation-header.md)).
 - **On a wide screen the sidebar's roster is the switcher** (5.24), and the name is only a heading.
-- **The switcher.** Below the sidebar's width, with more than one agent, the name is a button that opens the list. From a click it grows from the name as 5.8 does; from the keyboard it appears at once. On a phone the list is a sheet (5.15) that stops at 40% and 90%.
+- **The switcher.** Below the sidebar's width, with more than one agent, or with one the owner can edit there (5.25), the name is a button that opens the list. From a click it grows from the name as 5.8 does; from the keyboard it appears at once. On a phone the list is a sheet (5.15) that stops at 40% and 90%.
   - Each agent is a link to its conversation (`?agent=<id>`), with its still 36 px mascot in the Idle pose (5.19), its name followed by its specialty in `--muted` ("principal" for the main agent, 5.25), and its id in Geist Mono. Back and new tabs work.
   - The open agent's mascot carries 5.9's pencil at rest, with a 44 px target, since a phone has no pointer to rest on it. It closes the list and opens the editor (5.25): its sheet, on a phone.
   - The current one is marked with `aria-current`.
@@ -811,7 +811,8 @@ Moment for its Save and its open; frequent for its sections and choices (#379, [
 - **Profile.** The name (80 characters), the specialty (40) and the short description (200), each one line, as the agent's settings take them.
   - Under the specialty and the description, what each is for, and its count, "15 of 40", in Geist Mono.
   - The main agent's specialty is a read-only field with a lock: "principal", and why.
-  - A name that shows nothing can't be saved: the field turns its boundary `--danger`, says "Write a name", and Save waits.
+  - A name that shows nothing can't be saved: the field turns its boundary `--danger`, says "Write a name", and Save waits. A specialty or a description that shows nothing is an empty one.
+  - What a line can't hold leaves as it is pasted: tabs and breaks become spaces, and control, format and invisible characters go, as the agent's settings would refuse them (ADR-0056).
   - Inputs use 16 px text on the phone (5.15).
 - **Mascot, the mascot lab's Construtor.**
   - The preview stands on a small stage, 160 px (120 on the phone), and stays pettable. Beside it, the summary line, which is also its text alternative ("Pebble · Fawn · Dots eyes with cheeks · floppy ears · a bow tie"), then Undo and Randomize all as icon buttons (5.26), then one line on what a tap does and when the look counts.
@@ -831,7 +832,8 @@ Moment for its Save and its open; frequent for its sections and choices (#379, [
   - The footer says what is unsaved, "1 unsaved change" with the count in Geist Mono, or "All saved". On Mascot, a line under it says the change applies everywhere and the bot's photo changes in a few minutes.
   - The button says what it does, keeping the letters its labels share (Family Values): Salv-ar, Salv-ando, Salv-o; Sav-e, Sav-ing, Sav-ed. The suffix rolls with `--spring-fast`, and a spinner joins after 200 ms (rule 8). ⌘S saves.
   - Success is 5.3 without its ring, which stays the owner's yes: `--ok` in `--dur-fade`, the check drawn in 280 ms, and a pop from 1.03 with `--spring-pop`. The changed dots leave, `--stagger` apart, and the mascots play Approved for 1.1 s. From the keyboard, the pop is skipped.
-  - Then the panel closes, and a toast (5.13) says what saved, "Agenda: mascot saved", and that the bot's photo changes in a few minutes, with Undo for 10 s. Undo sends back what was saved before. A change made before it closes keeps it open, and Save reads Save again.
+  - Then the panel closes, and a toast (5.13) says what saved, "Agenda: mascot saved", and that the bot's photo changes in a few minutes, with Undo for 10 s. Undo sends back what was saved before. Closing it sooner shows the toast at once.
+  - A change made while it saves, or before it closes, keeps it open, still to save, and Save reads Save again. Closing while it saves closes it once the save ends, and opening another agent's editor waits for it.
 - **The two ways a save can end early.** Each takes the footer's place, inside the panel; neither is a dialog over it.
   - Closing or Cancel with changes asks, on a 10% `--warm` tint: "Discard 3 changes?", what goes back, Keep editing, which takes focus, and Discard in `--danger`. Escape keeps editing. Back on the phone asks the same.
   - A save that fails in part names what didn't save and what did, on a 9% `--danger` tint: "The Profile wasn't saved. The Mascot is saved." The failed section's mark turns to `--danger`'s alert, its tab's name says "not saved", and the footer offers "Save the Profile". When every section fails, it says "Nothing was saved". An expired login also brings 5.12's dialog.

@@ -100,11 +100,30 @@ export function profileOf(agent) {
   };
 }
 
-/** The profile's fields that differ from what is saved, trimmed as the agent keeps them. */
+/**
+ * What a line the agent keeps can hold, as packages/config checks it: tabs and breaks become
+ * spaces, and control, format and unassigned characters go, as does a run of variation selectors
+ * after the first. Pasted text often carries them, and the line would be refused.
+ */
+export function cleanLine(text) {
+  return text
+    .replace(/[\t\n\r\p{Zl}\p{Zp}]/gu, " ")
+    .replace(/\p{C}/gu, "")
+    .replace(/(\p{Variation_Selector})\p{Variation_Selector}+/gu, "$1");
+}
+
+/** Whether a line shows something: spaces, fillers and the Braille blank alone don't (#401). */
+export const shows = (text) =>
+  /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\u2800]/u.test(text);
+
+/**
+ * The profile's fields that differ from what is saved, trimmed as the agent keeps them. A remit or
+ * a specialty that shows nothing is an empty one.
+ */
 export function profileChanges(saved, draft, { main }) {
   const changes = {};
   for (const field of ["name", "remit", ...(main ? [] : ["specialty"])]) {
-    const value = draft[field].trim();
+    const value = field === "name" || shows(draft[field]) ? draft[field].trim() : "";
     if (value !== saved[field]) changes[field] = value;
   }
   return changes;
@@ -121,4 +140,4 @@ export function changedSections({ saved, draft, main }) {
 }
 
 /** Whether the profile can be saved: a name that shows something. */
-export const profileValid = (draft) => draft.name.trim() !== "";
+export const profileValid = (draft) => shows(draft.name);

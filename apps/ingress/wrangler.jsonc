@@ -37,8 +37,7 @@
       "entrypoint": "AgentLooks"
     },
     // The webchat's agent editor (#379): an agent's mascot, name, remit and specialty, each through
-    // its configuration command, which checks again that the actor is the owner. Nothing else of
-    // any agent's configuration.
+    // its configuration command, and nothing else of any agent's configuration.
     {
       "binding": "AGENT_EDITOR",
       "service": "kelpie-conversation-runtime",

@@ -59,7 +59,7 @@ function make() {
     send: async (agentId, section, body) => {
       sent.push({ agentId, section, body });
       const answer = answers[section];
-      if (answer) return answer;
+      if (answer) return await answer;
       return { ok: true, value: section === "mascot" ? { mascot: body } : body };
     },
   });
@@ -626,5 +626,171 @@ describe("on the phone", () => {
     editor.close();
     expect(document.activeElement).toBe(document.getElementById("switcher"));
     vi.restoreAllMocks();
+  });
+});
+
+describe("the review's cases (#379, round 1)", () => {
+  /** A save's answer the test lets go of. */
+  const held = () => {
+    let release;
+    const promise = new Promise((done) => {
+      release = done;
+    });
+    return { promise, release };
+  };
+
+  it("keeps edits made while a save is on its way, and stays open for them", async () => {
+    open();
+    radios("Shape")[0].click();
+    const answer = held();
+    answers.mascot = answer.promise;
+    const saving = editor.save();
+    $$(".axis-tab")
+      .find((each) => each.textContent === "Color")
+      .click();
+    radios("Color")[0].click();
+    answer.release({ ok: true, value: { mascot: { ...AGENDA.mascot, shape: "mark" } } });
+    await saving;
+    vi.advanceTimersByTime(APPROVED_MS);
+    expect($("#editor")).not.toBeNull();
+    expect(shown).toEqual([]);
+    expect(footer().querySelector(".dirty").textContent).toBe("1 unsaved change");
+    expect(saveLabel()).toBe("Save");
+    delete answers.mascot;
+    sent.length = 0;
+    await editor.save();
+    expect(sent).toEqual([
+      {
+        agentId: "agenda",
+        section: "mascot",
+        body: { ...AGENDA.mascot, shape: "mark", color: "kelp" },
+      },
+    ]);
+  });
+
+  it("closes once a save it was asked to close during ends, with its toast", async () => {
+    open();
+    radios("Shape")[0].click();
+    const answer = held();
+    answers.mascot = answer.promise;
+    const saving = editor.save();
+    key(tab("Mascot"), "Escape");
+    expect(footer().getAttribute("role")).toBeNull();
+    expect($("#editor")).not.toBeNull();
+    answer.release({ ok: true, value: { mascot: { ...AGENDA.mascot, shape: "mark" } } });
+    await saving;
+    expect($("#editor")).toBeNull();
+    expect(shown.map((toast) => toast.text)).toEqual(["Agenda: mascot saved"]);
+  });
+
+  it("shows its toast when the owner closes it while it says Saved", async () => {
+    open();
+    radios("Shape")[0].click();
+    await editor.save();
+    key(tab("Mascot"), "Escape");
+    expect($("#editor")).toBeNull();
+    expect(shown.map((toast) => toast.text)).toEqual(["Agenda: mascot saved"]);
+    vi.advanceTimersByTime(APPROVED_MS);
+    expect(shown).toHaveLength(1);
+  });
+
+  it("follows a part's new type in its variations, after Undo and Randomize too", () => {
+    open();
+    $$(".axis-tab")
+      .find((each) => each.textContent === "Head")
+      .click();
+    radios("Head")
+      .find((radio) => nameOf(radio) === "Horns")
+      .click();
+    expect(radios("Variation").map(nameOf)).toEqual(["Two", "One", "Antennae"]);
+    $(".pv-act .icb").click();
+    expect(radios("Variation").map(nameOf)).toEqual(["Pointed", "Floppy", "Round"]);
+    expect(nameOf(checked("Variation"))).toBe("Round");
+    for (let draw = 0; draw < 12; draw++) {
+      $(".tabp-h .icb").click();
+      const type = nameOf(checked("Head"));
+      const group = $(".tiles.variations");
+      if (type === "Nothing") expect(group.hidden).toBe(true);
+      else expect(radios("Variation").filter((radio) => radio.tabIndex === 0)).toHaveLength(1);
+    }
+  });
+
+  it("keeps the preview on the page while another section shows, so it stays alive", () => {
+    open();
+    const preview = $(".mascot-host.preview");
+    tab("Profile").click();
+    expect(preview.isConnected).toBe(true);
+    expect(preview.closest(".construtor").hidden).toBe(true);
+    tab("Mascot").click();
+    expect($(".mascot-host.preview")).toBe(preview);
+  });
+
+  it("knows the login expired when Access redirects the save", async () => {
+    const fetch = vi.fn(async () => ({ type: "opaqueredirect", status: 0, ok: false }));
+    vi.stubGlobal("fetch", fetch);
+    editor = new Editor({
+      texts: T,
+      toasts: { show: () => {} },
+      onSaved: () => {},
+      onExpired: expired,
+    });
+    open();
+    radios("Shape")[0].click();
+    await editor.save();
+    expect(fetch).toHaveBeenCalledWith(
+      "/webchat/agents/agenda/mascot",
+      expect.objectContaining({ method: "PUT", redirect: "manual" }),
+    );
+    expect(expired).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+  });
+
+  it("drops what a pasted line can't hold, and an invisible name can't be saved", () => {
+    open();
+    tab("Profile").click();
+    const name = $("#editor-name");
+    name.value = `Agen${String.fromCodePoint(0x200b)}da\tOne`;
+    name.dispatchEvent(new Event("input"));
+    expect(name.value).toBe("Agenda One");
+    name.value = String.fromCodePoint(0x3164);
+    name.dispatchEvent(new Event("input"));
+    expect($(".save").getAttribute("aria-disabled")).toBe("true");
+    expect($("#editor-name-error").hidden).toBe(false);
+  });
+
+  it("clears a failed mark once its change is undone", async () => {
+    open();
+    tab("Profile").click();
+    const remit = $("#editor-remit");
+    remit.value = "Meetings.";
+    remit.dispatchEvent(new Event("input"));
+    answers.profile = { ok: false, status: 503 };
+    await editor.save();
+    expect(tab("Profile").getAttribute("aria-label")).toBe("Profile, not saved");
+    remit.value = AGENDA.remit;
+    remit.dispatchEvent(new Event("input"));
+    expect(tab("Profile").getAttribute("aria-label")).toBe("Profile");
+    expect(tab("Profile").querySelector(".mark-dot").dataset.state).toBeUndefined();
+  });
+
+  it("keeps what a profile save set before it failed", async () => {
+    open();
+    tab("Profile").click();
+    for (const [id, value] of [
+      ["editor-name", "Agendas"],
+      ["editor-specialty", "Agenda"],
+    ]) {
+      const input = $(`#${id}`);
+      input.value = value;
+      input.dispatchEvent(new Event("input"));
+    }
+    answers.profile = { ok: false, status: 503, value: { specialty: "Agenda" } };
+    await editor.save();
+    expect(saved).toEqual([["agenda", { specialty: "Agenda" }]]);
+    expect(footer().textContent).toContain("The Profile wasn't saved");
+    delete answers.profile;
+    sent.length = 0;
+    await editor.save();
+    expect(sent).toEqual([{ agentId: "agenda", section: "profile", body: { name: "Agendas" } }]);
   });
 });

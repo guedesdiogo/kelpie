@@ -48,6 +48,8 @@ export class Construtor {
   #count;
   #randomAxis;
   #groups;
+  /** The part's type the variation group lists, while a part's tab shows. */
+  #builtType = null;
   #undo;
   #summary;
   #previewPx;
@@ -200,9 +202,15 @@ export class Construtor {
 
   #set(look, axis) {
     this.look = look;
-    if (axis) this.preview?.restyle(look, axis);
-    else if (this.preview) this.preview.restyle(look, "color");
-    this.#refresh();
+    this.preview?.restyle(look, axis ?? "color");
+    // A part's new type, from a pick, Undo or a draw, brings its own variations: the groups follow.
+    if (Object.hasOwn(PARTS, this.#axis) && look[this.#axis].type !== this.#builtType) {
+      const focused = this.#groups.contains(document.activeElement);
+      this.show(this.#axis, { instant: true });
+      if (focused) this.#groups.querySelector("[role='radio'][tabindex='0']")?.focus();
+    } else {
+      this.#refresh();
+    }
     this.#onChange(look);
   }
 
@@ -248,6 +256,7 @@ export class Construtor {
 
   #build(axis) {
     const names = this.#names;
+    this.#builtType = null;
     if (axis === "color") {
       this.#count.textContent = names.options(axis, CHOICES.color.length);
       return [
@@ -287,6 +296,7 @@ export class Construtor {
       },
     );
     const type = this.look[axis].type;
+    this.#builtType = type;
     const variationGroup = this.#group(
       names.variation,
       types[type].map((variation) => ({ type, variation })),
@@ -298,13 +308,6 @@ export class Construtor {
       },
     );
     variationGroup.classList.add("variations");
-    // A new type brings its own variations: the second group follows the first.
-    typeGroup.addEventListener("picked", () => {
-      if (this.look[axis].type === type) return;
-      const focused = typeGroup.contains(document.activeElement);
-      this.show(axis, { instant: true });
-      if (focused) this.#groups.querySelector("[role='radio'][tabindex='0']")?.focus();
-    });
     return [typeGroup, variationGroup];
   }
 
@@ -336,10 +339,7 @@ export class Construtor {
       const name = element("span", "opt-name");
       name.textContent = nameOf(option);
       radio.append(name);
-      radio.addEventListener("click", () => {
-        pick(option);
-        group.dispatchEvent(new Event("picked"));
-      });
+      radio.addEventListener("click", () => pick(option));
       return radio;
     });
     group.append(...radios);

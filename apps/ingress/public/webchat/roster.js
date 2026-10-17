@@ -150,7 +150,7 @@ export class Roster {
       if (row.agent.name !== agent.name) {
         row.link.textContent = agent.name;
         row.pen.setAttribute("aria-label", this.#texts.editor.edit(agent.name));
-        tips(row.avatar);
+        tips(row.box);
       }
       row.agent = agent;
       if (isDrawable(agent.mascot)) {
@@ -245,7 +245,8 @@ export class Roster {
     const avatar = element("span", "avw");
     const host = element("span", "mascot-host");
     host.setAttribute("aria-hidden", "true");
-    // A 24 px badge on the mascot's top right, the editor's one way in (#379).
+    // A 24 px badge on the mascot's top right, the editor's one way in (#379). It comes after the
+    // row's link, so Tab reaches it next; the stylesheet places it on the mascot.
     const pen = element("button", "pen");
     pen.type = "button";
     pen.tabIndex = -1;
@@ -255,7 +256,7 @@ export class Roster {
     pen.setAttribute("aria-expanded", "false");
     pen.setAttribute("aria-controls", "editor");
     pen.append(icon("pencil"));
-    avatar.append(host, pen);
+    avatar.append(host);
     const who = element("span", "an");
     const link = element("a", "row-link");
     link.href = `?agent=${encodeURIComponent(agent.id)}`;
@@ -281,7 +282,7 @@ export class Roster {
     time.id = `${id}-time`;
     link.setAttribute("aria-describedby", `${words.id} ${time.id}`);
     who.append(link, line);
-    box.append(avatar, who, time);
+    box.append(avatar, who, time, pen);
     const request = element("div", "row-request");
     request.id = `${id}-request`;
     request.hidden = true;
@@ -290,7 +291,7 @@ export class Roster {
       agent,
       li,
       link,
-      avatar,
+      box,
       pen,
       host,
       mascot: null,
@@ -313,7 +314,7 @@ export class Roster {
     pen.addEventListener("click", (event) =>
       this.#onEdit(row.agent, { trigger: pen, from: li, keyboard: event.detail === 0 }),
     );
-    tips(avatar);
+    tips(box);
     // Whether the owner is in the request, which a fold or a close takes from under them.
     request.addEventListener("focusin", () => {
       row.focusInside = true;

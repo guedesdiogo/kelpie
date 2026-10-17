@@ -1781,15 +1781,13 @@ dialog h2 {
 
 /* ── The agent's editor (5.25, #379): mockup v33, boards 13 to 17 ─────────────────────────────── */
 
-/* The pencil: a 24 px badge on the mascot's top right. It shows while the pointer rests on the
-   mascot and while it has focus; it fades in and scales from 0.9 with --spring-fast. */
-.avw {
-  position: relative;
-}
+/* The pencil: a 24 px badge on the mascot's top right, after the row's link in the page. It shows
+   while the pointer rests on the mascot and while it has focus; it fades in and scales from 0.9
+   with --spring-fast. */
 .pen {
   position: absolute;
-  inset-block-start: -4px;
-  inset-inline-end: -6px;
+  inset-block-start: 1px;
+  inset-inline-start: 30px;
   z-index: 2;
   display: grid;
   place-items: center;
@@ -1815,7 +1813,8 @@ dialog h2 {
   inline-size: 12px;
   block-size: 12px;
 }
-.avw:hover .pen,
+.arow:has(.avw:hover) .pen,
+.pen:hover,
 .pen:focus-visible,
 .pen[aria-expanded="true"] {
   opacity: 1;
@@ -1840,7 +1839,7 @@ dialog h2 {
 }
 .pen.at-rest {
   inset-block-start: 0;
-  inset-inline: -8px auto;
+  inset-inline-start: 4px;
   inline-size: 44px;
   block-size: 44px;
   border: 0;
@@ -2761,7 +2760,7 @@ dialog h2 {
 }
 
 /* Under reduced motion the pencil only fades (rule 10). */
-:root[data-reduced] .pen {
+:root[data-reduced] :is(.arow, li) .pen {
   scale: 1;
 }
 :root[data-reduced] .btn:active:not([aria-disabled="true"]) {

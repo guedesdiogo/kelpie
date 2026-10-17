@@ -33,9 +33,9 @@ const AGENTS = [
 ];
 
 /** The page's fetch: the list, the version, and the editor's saves, which it keeps. */
-function editorFetch(puts) {
+function editorFetch(puts, listed = AGENTS) {
   return vi.fn(async (url, init = {}) => {
-    if (url === "/webchat/agents") return Response.json({ agents: AGENTS });
+    if (url === "/webchat/agents") return Response.json({ agents: listed });
     if (url === "/version") return Response.json({ version: "1.2.3", commit: "abc1234" });
     if (init.method === "PUT") {
       const body = JSON.parse(init.body);
@@ -131,6 +131,23 @@ describe("the agent's editor in the page", () => {
     expect($("switcher").getAttribute("aria-expanded")).toBe("false");
     expect($("editor").classList.contains("sheet")).toBe(true);
     expect($("editor").getAttribute("aria-label")).toBe("Edit Agenda");
+    expect(pen.getAttribute("aria-expanded")).toBe("true");
+    $("editor").querySelector(".icb.close").click();
+    expect(pen.getAttribute("aria-expanded")).toBe("false");
     vi.restoreAllMocks();
+  });
+
+  it("opens the switcher for a single agent below the sidebar's width, its one way to the editor", async () => {
+    const narrow = narrowScreen();
+    await loadPage({ search: "?agent=assistant", fetch: editorFetch([], [AGENTS[0]]) });
+    narrow.mockRestore();
+    const switcher = $("switcher");
+    expect(switcher.getAttribute("aria-disabled")).toBe("false");
+    expect(switcher.getAttribute("aria-label")).toBe("Assistant, Agents");
+    switcher.click();
+    expect($("agents").hidden).toBe(false);
+    expect($("agents").querySelector(".pen.at-rest").getAttribute("aria-label")).toBe(
+      "Edit Assistant",
+    );
   });
 });

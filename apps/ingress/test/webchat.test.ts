@@ -588,6 +588,77 @@ describe("the webchat's agent editor (#379)", () => {
     expect(fakes.editor.setMascot).not.toHaveBeenCalled();
   });
 
+  it("reads at most 4 KB of a body, counted in bytes, even with no Content-Length", async () => {
+    // A stream that names no length: each pull hands over 1 KB, and counts it.
+    let pulled = 0;
+    const stream = new ReadableStream({
+      pull(controller) {
+        pulled += 1;
+        if (pulled > 64) controller.close();
+        else controller.enqueue(new TextEncoder().encode("a".repeat(1_024)));
+      },
+    });
+    const request = new Request(`${ORIGIN}/webchat/agents/assistant/profile`, {
+      method: "PUT",
+      headers: {
+        Origin: ORIGIN,
+        "Sec-Fetch-Site": "same-origin",
+        "Content-Type": "application/json",
+      },
+      body: stream,
+    });
+    expect(request.headers.get("content-length")).toBeNull();
+    const fakes = deps();
+    expect((await handleAgentEdit(request, fakes)).status).toBe(413);
+    expect(pulled).toBeLessThan(10);
+    // Two bytes a letter: 2,100 of them pass a count of characters, not of bytes.
+    expect((await handleAgentEdit(profileOf({ remit: "ç".repeat(2_100) }), deps())).status).toBe(
+      413,
+    );
+    expect(fakes.editor.setRemit).not.toHaveBeenCalled();
+  });
+
+  it("reads no body for a login the Directory doesn't resolve to the owner", async () => {
+    const member = deps({
+      admit: vi.fn(
+        async (): Promise<Admission> => ({
+          admitted: true,
+          userId: "u-member",
+          role: "member",
+          timeZone: null,
+        }),
+      ),
+    });
+    const request = mascotOf();
+    expect((await handleAgentEdit(request, member)).status).toBe(403);
+    expect(request.bodyUsed).toBe(false);
+  });
+
+  it("says which profile fields saved when a later one fails, and checks what the editor answers", async () => {
+    const failing = deps({
+      editor: {
+        ...editorFake(),
+        rename: vi.fn(async () => {
+          throw new Error("Registry unavailable");
+        }),
+      },
+    });
+    const response = await handleAgentEdit(
+      profileOf({ name: "Agendas", remit: "Meetings.", specialty: "Agenda" }),
+      failing,
+    );
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ saved: { specialty: "Agenda", remit: "Meetings." } });
+    // A value that isn't a mascot never goes back to the page.
+    const odd = deps({
+      editor: {
+        ...editorFake(),
+        setMascot: vi.fn(async () => ({ ok: true, value: { shape: "<b>" } }) as never),
+      },
+    });
+    expect((await handleAgentEdit(mascotOf(), odd)).status).toBe(503);
+  });
+
   it("answers the editor's refusals with their status, and says so for the main agent's specialty", async () => {
     const refusing = (reason: string) =>
       deps({
