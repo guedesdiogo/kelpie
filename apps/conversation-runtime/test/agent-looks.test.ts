@@ -1,6 +1,8 @@
-import { env, exports } from "cloudflare:workers";
+import { createExecutionContext } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { derivedMascot, KELPIE_MASCOT, type Mascot, REGISTRY_NAME } from "@kelpie/config";
-import { beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
+import { AgentLooks } from "../src/agent-looks.ts";
 
 // What ingress reads for the webchat's list of agents (ADR-0052 §7): each agent's mascot, through
 // an entrypoint that reads and does nothing else, so ingress never binds an AgentHost.
@@ -8,12 +10,11 @@ import { beforeAll, describe, expect, it } from "vitest";
 const owner = { userId: "u-owner", role: "owner", via: "admin-api" } as const;
 const owned = { userId: "u-owner", role: "owner", via: "test" } as const;
 
-describe("AgentLooks", () => {
-  // The first call starts the Worker; it does so here, in a hook with room for a cold start.
-  beforeAll(async () => {
-    await exports.AgentLooks.mascots([]);
-  }, 30_000);
+// The entrypoint is called in place, not through the Worker's own RPC: in a run of many files that
+// loopback sometimes can't find its handler and hangs. Ingress's tests cover the binding.
+const looks = new AgentLooks(createExecutionContext(), env);
 
+describe("AgentLooks", () => {
   it("names each listed agent's mascot: the owner's pick, or its default by its role", async () => {
     await env.REGISTRY.getByName(REGISTRY_NAME).add("sales", "Sales", owner);
     const picked: Mascot = { ...KELPIE_MASCOT, shape: "star", head: { type: "none" } };
@@ -21,18 +22,18 @@ describe("AgentLooks", () => {
       await env.AGENT_HOST.getByName("sales").configure({ mascot: picked }, owned),
     ).toMatchObject({ ok: true });
 
-    expect(await exports.AgentLooks.mascots(["kelpie", "sales"])).toEqual({
+    expect(await looks.mascots(["kelpie", "sales"])).toEqual({
       kelpie: KELPIE_MASCOT,
       sales: picked,
     });
     await env.AGENT_HOST.getByName("sales").configure({ mascot: null }, owned);
-    expect(await exports.AgentLooks.mascots(["sales"])).toEqual({ sales: derivedMascot("sales") });
+    expect(await looks.mascots(["sales"])).toEqual({ sales: derivedMascot("sales") });
   });
 
   it("answers nothing for an id the Registry doesn't list, or one that isn't an id", async () => {
-    expect(await exports.AgentLooks.mascots(["nobody", "../kelpie", "kelpie", "kelpie"])).toEqual({
+    expect(await looks.mascots(["nobody", "../kelpie", "kelpie", "kelpie"])).toEqual({
       kelpie: KELPIE_MASCOT,
     });
-    expect(await exports.AgentLooks.mascots("kelpie" as unknown as string[])).toEqual({});
+    expect(await looks.mascots("kelpie" as unknown as string[])).toEqual({});
   });
 });
