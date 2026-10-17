@@ -186,6 +186,14 @@ export interface SetupEventsContract {
   setupDone(agentId: string, event: SetupEvent): Promise<void>;
 }
 
+/**
+ * conversation-runtime's `AgentLooks` entrypoint: ingress reads each listed agent's mascot for the
+ * webchat's list (ADR-0052 §7), and nothing else.
+ */
+export interface AgentLooksContract {
+  mascots(agentIds: string[]): Promise<Record<string, Mascot>>;
+}
+
 /** A vault file pushed with conflict markers that still waits: on the model, or on a pull request. */
 export interface HeldVaultFile {
   path: string;

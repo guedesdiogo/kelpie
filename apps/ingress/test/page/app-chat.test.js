@@ -95,10 +95,14 @@ describe("the conversation", () => {
       deadline: { remainingMs: 10_000, spanMs: 10_000, holding: false },
     });
     expect($("wait").hidden).toBe(false);
+    expect($("wait-label").textContent).toBe("Waiting for you to finish");
     expect(marks()).toEqual(["Held"]);
 
     socket.receive({ type: "wait", deadline: null });
-    expect($("wait").hidden).toBe(true);
+    // The demo's track says the agent writes until its reply comes (decision 10, #378).
+    expect($("wait").hidden).toBe(false);
+    expect($("wait").dataset.state).toBe("writing");
+    expect($("wait-label").textContent).toBe("Assistant is writing");
     // "Held" fades out as the turn starts reading.
     vi.advanceTimersByTime(200);
     await vi.waitFor(() => expect(marks()).toEqual([""]));
@@ -111,10 +115,35 @@ describe("the conversation", () => {
     expect(document.querySelector(".tool-row")).not.toBeNull();
 
     socket.receive({ type: "bubble", text: "Sim, está marcado." });
+    expect($("wait").hidden).toBe(true);
     expect(document.querySelector(".bubble.typing")).toBeNull();
     expect(typing.textContent).toContain("Sim, está marcado.");
     expect($("announcer").textContent).toBe("Assistant: Sim, está marcado.");
     expect($("status").textContent).toBe("");
+  });
+
+  it("has one row: the text, then Pause and Send as round icon buttons that say their name", async () => {
+    await opened();
+    const row = $("text").parentElement;
+    expect([...row.querySelectorAll("textarea, button")].map((element) => element.id)).toEqual([
+      "text",
+      "pause",
+      "send",
+    ]);
+    expect($("pause").getAttribute("aria-label")).toBe("Pause");
+    expect($("pause").getAttribute("aria-pressed")).toBe("false");
+    expect($("send").getAttribute("aria-label")).toBe("Send");
+    expect($("send").querySelector("svg")).not.toBeNull();
+    // Empty, Send waits: focusable, `aria-disabled`, and its tip says why (Geist's rule).
+    expect($("send").disabled).toBe(false);
+    expect($("send").getAttribute("aria-disabled")).toBe("true");
+    expect($("send").querySelector(".tip").textContent).toBe("Write a message to send");
+    $("text").value = "O";
+    $("text").dispatchEvent(new Event("input", { bubbles: true }));
+    expect($("send").getAttribute("aria-disabled")).toBe("false");
+    expect($("send").querySelector(".tip").textContent).toBe("Send");
+    // No keyboard hint on screen, and no `title` anywhere (#378).
+    expect(document.querySelector("[title]")).toBeNull();
   });
 
   it("keeps Enter for an input method and Shift+Enter, and sends nothing empty", async () => {
@@ -168,12 +197,13 @@ describe("the conversation", () => {
       deadline: { remainingMs: 9_000, spanMs: 10_000, holding: false },
     });
     $("pause").click();
-    expect(socket.sentOf("pause")).toEqual([{ type: "pause" }]);
+    expect(socket.sentOf("pause")).toEqual([{ type: "pause", agent: "assistant" }]);
     socket.receive({ type: "paused" });
     expect($("paused-line").hidden).toBe(false);
     expect($("paused-line").textContent).toBe("Paused. Assistant answers after your next message.");
     expect($("status").textContent).toBe("Paused");
     expect($("pause").disabled).toBe(true);
+    expect($("pause").getAttribute("aria-pressed")).toBe("true");
     expect($("wait").hidden).toBe(true);
     // A pause doesn't bring the typing bubble.
     expect(document.querySelector(".bubble.typing")).toBeNull();
@@ -244,8 +274,10 @@ describe("the conversation", () => {
     const { socket } = await opened();
     socket.receive({ type: "bubble", text: "Change the tier?", confirmation: 4 });
     const confirm = document.querySelector("button.confirm");
+    // A press in the card's first 400 ms doesn't count (ADR-0052 §5).
+    vi.advanceTimersByTime(400);
     confirm.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
-    expect(socket.sentOf("confirm")).toEqual([{ type: "confirm", id: 4 }]);
+    expect(socket.sentOf("confirm")).toEqual([{ type: "confirm", id: 4, agent: "assistant" }]);
     socket.receive({ type: "confirmation", id: 4, status: "accepted" });
     const toast = document.querySelector(".toast");
     expect(toast.textContent).toContain("You confirmed at 2:32 PM");
@@ -262,7 +294,8 @@ describe("the conversation", () => {
     socket.receive("not json");
     socket.receive({ nope: true });
     socket.receive({ type: "something-new" });
-    expect(FakeSocket.all).toHaveLength(1);
+    // Nothing closed the conversation's socket, so it opened no other.
+    expect(FakeSocket.all.filter((each) => !each.url.includes("view=presence"))).toHaveLength(1);
   });
 });
 
@@ -336,6 +369,13 @@ describe("following the chat (5.10)", () => {
 });
 
 describe("the keyboard", () => {
+  it("tells screen readers what Enter does, with no hint on the screen (decision 4)", async () => {
+    await opened();
+    const hint = $($("text").getAttribute("aria-describedby"));
+    expect(hint.classList.contains("visually-hidden")).toBe(true);
+    expect(hint.textContent).toBe("Enter sends, and Shift+Enter starts a new line.");
+  });
+
   it("sends a printable key to the composer, but not from a button or a field", async () => {
     await opened();
     const key = (target, init) =>

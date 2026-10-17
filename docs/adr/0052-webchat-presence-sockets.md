@@ -1,9 +1,9 @@
 # ADR-0052: The webchat's sidebar follows each agent through a socket that carries only its presence
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-16
 - Issue: [#393](https://github.com/guedesdiogo/kelpie/issues/393)
-- Proposed in step 3 of [#378](https://github.com/guedesdiogo/kelpie/issues/378)'s plan. The owner approved that plan on 2026-10-16. This text goes further than step 3, so it waits for his yes on #393 (Consequences).
+- Proposed in step 3 of [#378](https://github.com/guedesdiogo/kelpie/issues/378)'s plan, which the owner approved on 2026-10-16. This text goes further than step 3, and he approved it on 2026-10-16: «Aprovo o texto da ADR-0052.»
 - Amends:
   - [ADR-0023](0023-webchat-access-login.md) §2 to §4: the webchat's socket has a second view, admitted the same way;
   - [ADR-0026](0026-confirmation-by-owner-act.md) §3, so a press names its agent and may come from that view, and the line in its Consequences that a notice doesn't come back once its turn has settled;
@@ -162,7 +162,7 @@ This stays within the Workers Paid plan, so it ships on with no switch.
   - Offline for one row;
   - the mascots in the list.
 
-  It becomes Accepted once he approves it on #393.
+  He approved it on 2026-10-16 (#393), and it is Accepted.
 - **[#378](https://github.com/guedesdiogo/kelpie/issues/378) implements it.** Its tests cover:
   - **ingress:**
     - a presence socket is admitted exactly as the conversation's own, from the page's origin only, and passes the view;

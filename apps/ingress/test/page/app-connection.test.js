@@ -56,9 +56,9 @@ describe("a lost connection (5.12)", () => {
     // The socket and two retries fail; the waits grow, from 300 ms to 600 ms to 1.2 s.
     socket.close();
     vi.advanceTimersByTime(300);
-    FakeSocket.last.close();
+    FakeSocket.own.close();
     vi.advanceTimersByTime(600);
-    FakeSocket.last.close();
+    FakeSocket.own.close();
     vi.advanceTimersByTime(1_099);
     expect($("banner").hidden).toBe(true);
     vi.advanceTimersByTime(1);
@@ -80,7 +80,7 @@ describe("a lost connection (5.12)", () => {
     expect(document.querySelector(".mark").textContent).toBe("Queued");
 
     $("retry").click();
-    const next = FakeSocket.last;
+    const next = FakeSocket.own;
     expect(next).not.toBe(socket);
     next.open();
     next.receive(historyFrame());
@@ -102,9 +102,9 @@ describe("a lost connection (5.12)", () => {
     const { socket } = await connected();
     socket.close();
     vi.advanceTimersByTime(2_000);
-    const connecting = FakeSocket.last;
+    const connecting = FakeSocket.own;
     $("retry").click();
-    const fresh = FakeSocket.last;
+    const fresh = FakeSocket.own;
     expect(fresh).not.toBe(connecting);
     expect(connecting.readyState).toBe(3);
     connecting.open();
@@ -125,8 +125,8 @@ describe("a lost connection (5.12)", () => {
     scroller.dispatchEvent(new Event("scroll"));
     socket.close();
     vi.advanceTimersByTime(300);
-    FakeSocket.last.open();
-    FakeSocket.last.receive(historyFrame([{ role: "assistant", text: "Antiga.", at: NOW }]));
+    FakeSocket.own.open();
+    FakeSocket.own.receive(historyFrame([{ role: "assistant", text: "Antiga.", at: NOW }]));
     expect(scroller.scrollTop).toBe(0);
   });
 
@@ -134,7 +134,7 @@ describe("a lost connection (5.12)", () => {
     const { socket } = await connected();
     socket.close();
     vi.advanceTimersByTime(300);
-    const next = FakeSocket.last;
+    const next = FakeSocket.own;
     expect(next).not.toBe(socket);
     next.open();
     next.receive(historyFrame());
@@ -159,6 +159,62 @@ describe("a lost connection (5.12)", () => {
     expect(document.querySelector(".toast[data-error]").textContent).toContain(
       "No connection. Pause again once it's back.",
     );
+  });
+});
+
+/** The main agent's default mascot (ADR-0049), as the socket names it. */
+const KELPIE = {
+  shape: "mark",
+  color: "kelp",
+  eyes: "big",
+  cheeks: false,
+  head: { type: "ears", variation: "round" },
+  accessory: { type: "none" },
+};
+
+const headerState = () => $("mascot").mascot?.state;
+
+describe("Offline, when the page loses its connection (ADR-0047)", () => {
+  it("shows when the banner enters, not before, and the new socket's history ends it", async () => {
+    const { socket } = await connected();
+    socket.receive({ type: "agent", mascot: KELPIE });
+    socket.receive({ type: "status", status: "thinking" });
+    expect(headerState()).toBe("working");
+    socket.close();
+    vi.advanceTimersByTime(1_999);
+    // The page can't vouch for the turn, but Offline waits for the banner (5.12).
+    expect(headerState()).toBe("working");
+    vi.advanceTimersByTime(1);
+    expect($("banner").hidden).toBe(false);
+    expect(headerState()).toBe("offline");
+    $("retry").click();
+    FakeSocket.own.open();
+    FakeSocket.own.receive(historyFrame());
+    expect(headerState()).toBe("idle");
+  });
+
+  it("shows on the expired-login dialog, at 160 px, holding its plug", async () => {
+    const fetch = fakeFetch();
+    const page = await loadPage({ fetch });
+    page.socket.open();
+    page.socket.receive(historyFrame());
+    page.socket.receive({ type: "agent", mascot: KELPIE });
+    fetch.mockImplementation(async (url) =>
+      url === "/webchat/agents"
+        ? { type: "opaqueredirect", status: 0, ok: false }
+        : Response.json({ version: "1.2.3" }),
+    );
+    FakeSocket.own.close();
+    vi.advanceTimersByTime(300);
+    // A socket that never opened asks whether the login expired.
+    FakeSocket.own.close();
+    await settle();
+    expect($("login").open).toBe(true);
+    const shown = $("login-mascot").mascot;
+    expect(shown.px).toBe(160);
+    expect(shown.state).toBe("offline");
+    // Behind the dialog, the header's mascot is Offline too.
+    expect(headerState()).toBe("offline");
   });
 });
 
@@ -273,8 +329,15 @@ describe("the agents (#140)", () => {
     expect(location.search).toBe("?agent=assistant");
   });
 
-  it("lists the agents to switch to, marking the current one", async () => {
+  it("lists the agents to switch to below the sidebar's width, marking the current one", async () => {
+    // Below 56rem the sidebar gives way to the header's switcher.
+    const narrow = vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+      matches: false,
+      media: query,
+      addEventListener() {},
+    }));
     await loadPage();
+    narrow.mockRestore();
     const switcher = $("switcher");
     expect(switcher.getAttribute("aria-disabled")).toBe("false");
     expect(switcher.getAttribute("aria-label")).toBe("Assistant, Switch agent");
@@ -286,6 +349,128 @@ describe("the agents (#140)", () => {
     );
     expect(links[1].getAttribute("aria-current")).toBe("page");
     expect(links[2].textContent).toBe("Agendaagenda");
+  });
+
+  it("leaves the switching to the sidebar on a wide screen", async () => {
+    await loadPage();
+    expect($("switcher").getAttribute("aria-disabled")).toBe("true");
+    const rows = [...$("roster").querySelectorAll(".row-link")];
+    expect(rows.map((row) => row.getAttribute("href"))).toEqual(
+      AGENTS.map((agent) => `?agent=${agent.id}`),
+    );
+    expect(rows[1].getAttribute("aria-current")).toBe("page");
+    // A presence socket for each agent but the open one (ADR-0052 §1).
+    expect(
+      FakeSocket.all.filter((each) => each.url.includes("view=presence")).map((each) => each.url),
+    ).toEqual([
+      "ws://localhost:3000/webchat/ws?agent=kelpie-setup&view=presence&lang=en-US",
+      "ws://localhost:3000/webchat/ws?agent=agenda&view=presence&lang=en-US",
+    ]);
+  });
+
+  it("reloads the list once when rows are refused, and retries the rows it still names", async () => {
+    const { fetch } = await loadPage();
+    const listCalls = () => fetch.mock.calls.filter(([url]) => url === "/webchat/agents").length;
+    expect(listCalls()).toBe(1);
+    // Neither row's socket opened: a refusal and a dropped network look the same (ADR-0052 §5).
+    FakeSocket.presence("kelpie-setup").close(1006);
+    FakeSocket.presence("agenda").close(1006);
+    vi.advanceTimersByTime(0);
+    await settle();
+    expect(listCalls()).toBe(2);
+    const before = FakeSocket.all.length;
+    vi.advanceTimersByTime(300);
+    expect(FakeSocket.all.length).toBe(before + 2);
+  });
+
+  it("retries the rows with their backoff when the list can't be read again", async () => {
+    let failing = false;
+    const base = fakeFetch();
+    const fetch = vi.fn(async (url, init) =>
+      failing && url === "/webchat/agents" ? new Response(null, { status: 503 }) : base(url, init),
+    );
+    await loadPage({ fetch });
+    failing = true;
+    FakeSocket.presence("agenda").close(1006);
+    vi.advanceTimersByTime(0);
+    await settle();
+    const before = FakeSocket.all.length;
+    vi.advanceTimersByTime(300);
+    expect(FakeSocket.all.length).toBe(before + 1);
+    expect(FakeSocket.all.at(-1).url).toContain("agent=agenda&view=presence");
+  });
+
+  it("reads the list again when it fails after the conversation answered", async () => {
+    let fail;
+    const base = fakeFetch();
+    let calls = 0;
+    const failing = new Promise((resolve) => {
+      fail = resolve;
+    });
+    const fetch = vi.fn(async (url, init) => {
+      if (url !== "/webchat/agents") return base(url, init);
+      calls += 1;
+      if (calls === 1) {
+        await failing;
+        return new Response(null, { status: 503 });
+      }
+      return base(url, init);
+    });
+    const { socket } = await loadPage({ fetch });
+    socket.open();
+    socket.receive(historyFrame());
+    fail();
+    await settle();
+    expect(calls).toBe(2);
+    expect($("roster").querySelectorAll(".row-link")).toHaveLength(AGENTS.length);
+  });
+
+  it("keeps what the conversation said before the list arrived, for its row and the tab", async () => {
+    let answer;
+    const base = fakeFetch();
+    const listed = new Promise((resolve) => {
+      answer = resolve;
+    });
+    const fetch = vi.fn(async (url, init) => {
+      if (url === "/webchat/agents") await listed;
+      return base(url, init);
+    });
+    const { socket } = await loadPage({ fetch });
+    socket.open();
+    socket.receive(historyFrame());
+    socket.receive({
+      type: "requests",
+      requests: [{ id: 4, summary: "Change the tier?", askedAgoMs: 0, expiresInMs: 600_000 }],
+      more: 0,
+    });
+    answer();
+    await settle();
+    const row = $("roster").querySelector('[data-agent="assistant"]');
+    expect(row.dataset.state).toBe("waiting");
+    expect(document.title).toBe("(1) Assistant · Kelpie");
+  });
+
+  it("hands the header's names to the row being opened, for 5.14's transition", async () => {
+    await loadPage();
+    const swap = (url, transition) => {
+      const event = new Event("pageswap");
+      event.viewTransition = transition;
+      event.activation = { entry: { url } };
+      window.dispatchEvent(event);
+    };
+    const transition = { skipTransition: vi.fn() };
+    window.dispatchEvent(new PointerEvent("pointerdown"));
+    swap("http://localhost:3000/webchat/?agent=agenda", transition);
+    const row = $("roster").querySelector('[data-agent="agenda"]');
+    expect(row.querySelector(".mascot-host").style.viewTransitionName).toBe("agent-mascot");
+    expect(row.querySelector(".row-link").style.viewTransitionName).toBe("agent-name");
+    expect($("mascot").style.viewTransitionName).toBe("none");
+    expect(transition.skipTransition).not.toHaveBeenCalled();
+    // From the keyboard, the view changes at once.
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    swap("http://localhost:3000/webchat/?agent=agenda", transition);
+    // Each page this file loaded listens on the same window, so it may be skipped more than once.
+    expect(transition.skipTransition).toHaveBeenCalled();
   });
 
   it("opens the main agent instead of one the list doesn't name", async () => {

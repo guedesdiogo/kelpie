@@ -4,6 +4,7 @@ export {
   type AgentConfig,
   type AgentEntry,
   type AgentHostContract,
+  type AgentLooksContract,
   type AgentRole,
   type AgentSummary,
   type CommandResult,

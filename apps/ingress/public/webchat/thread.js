@@ -4,6 +4,7 @@
 // reaches the page as text nodes and the blocks of blocks.js.
 
 import { renderBlocks } from "./blocks.js";
+import { Card, defaultTimers } from "./card.js";
 import { icon } from "./icons.js";
 import { CONFIRMATION_MS } from "./mascot-states.js";
 import {
@@ -30,16 +31,10 @@ import {
   resize,
   SPRINGS,
 } from "./motion.js";
+import { roll, rollText } from "./roll.js";
 
-const defaultTimers = {
-  set: (run, ms) => setTimeout(run, ms),
-  clear: (timer) => clearTimeout(timer),
-  every: (run, ms) => setInterval(run, ms),
-  stop: (timer) => clearInterval(timer),
-};
-
-/** How long a confirmation's success shows before the card folds into its receipt (5.3). */
-export const RING_MS = 650;
+/** At most this many of the latest messages slide up when one arrives below them (5.1). */
+const FLIP_AT_MOST = 12;
 /** At most this many steps of a row enter staggered; a stagger stops at 300 ms (§4.3). */
 const STAGGER_MS = 30;
 const STAGGER_UNTIL_MS = 300;
@@ -53,6 +48,8 @@ export class Thread {
   #agentName;
   #less;
   #onConfirm;
+  #onPause;
+  #cardMascot;
   #onAnnounce;
   #onChange;
   #days = new Map();
@@ -69,7 +66,8 @@ export class Thread {
    * @param {HTMLElement} root
    * @param {{
    *   texts: object, locale: string, agentName: () => string, less: () => boolean,
-   *   onConfirm: (id: number) => boolean, onAnnounce: (text: string) => void,
+   *   onConfirm: (id: number) => boolean, onPause?: () => boolean,
+   *   cardMascot?: (host: HTMLElement) => void, onAnnounce: (text: string) => void,
    *   onChange: (change: { kind: string, element: Element }) => void,
    *   now?: () => number, timers?: typeof defaultTimers,
    * }} options
@@ -81,6 +79,8 @@ export class Thread {
     this.#agentName = options.agentName;
     this.#less = options.less;
     this.#onConfirm = options.onConfirm;
+    this.#onPause = options.onPause ?? (() => false);
+    this.#cardMascot = options.cardMascot ?? (() => {});
     this.#onAnnounce = options.onAnnounce;
     this.#onChange = options.onChange;
     this.#now = options.now ?? Date.now;
@@ -121,14 +121,17 @@ export class Thread {
   owner({ id, text, queued = false }) {
     // A new message interrupts the turn in flight (ADR-0024); its reply won't come.
     this.stop("idle");
-    const bubble = this.#ownerBubble(id, text, this.#now(), { queued });
+    let bubble;
+    this.#flip(() => {
+      bubble = this.#ownerBubble(id, text, this.#now(), { queued });
+      enter(bubble.parentElement, { origin: "100% 100%" });
+      this.#onChange({ kind: "owner", element: bubble });
+    });
     const entry = this.#owner.get(id);
     entry.slowTimer = this.#timers.set(() => {
       entry.slow = true;
       this.#mark(entry);
     }, SENDING_AFTER_MS);
-    enter(bubble.parentElement, { origin: "100% 100%" });
-    this.#onChange({ kind: "owner", element: bubble });
     return bubble;
   }
 
@@ -224,9 +227,12 @@ export class Thread {
     activity.phase = null;
     if (!activity.row) {
       activity.row = toolRow();
-      activity.bubble.parentElement.before(activity.row.element);
-      activity.row.label.append(rollText(label));
-      enter(activity.row.element, { spring: SPRINGS.fast });
+      this.#flip(() => {
+        activity.bubble.parentElement.before(activity.row.element);
+        activity.row.label.append(rollText(label));
+        enter(activity.row.element, { spring: SPRINGS.fast });
+        this.#onChange({ kind: "tool", element: activity.row.element });
+      });
     } else {
       roll(activity.row.label, label);
       activity.row.element.dataset.state = "running";
@@ -256,20 +262,22 @@ export class Thread {
       bubble.removeAttribute("aria-hidden");
       bubble.replaceChildren();
       this.#join(bubble, at);
-    } else {
-      bubble = this.#bubble("assistant", at);
     }
-    this.#reply(bubble, frame, at);
+    const kind = Number.isSafeInteger(frame.confirmation) ? "approval" : "reply";
     if (before) {
+      this.#reply(bubble, frame, at);
       resize(bubble, before);
       const content = bubble.querySelector(":scope > .text");
       if (content) fadeIn(content, REPLY_TEXT_DELAY);
-    } else {
-      enter(bubble.parentElement, { origin: "0% 100%" });
+      this.#onChange({ kind, element: bubble });
+      return bubble;
     }
-    this.#onChange({
-      kind: Number.isSafeInteger(frame.confirmation) ? "approval" : "reply",
-      element: bubble,
+    // A new bubble: the ones above slide up as it arrives below them (5.1).
+    this.#flip(() => {
+      bubble = this.#bubble("assistant", at);
+      this.#reply(bubble, frame, at);
+      enter(bubble.parentElement, { origin: "0% 100%" });
+      this.#onChange({ kind, element: bubble });
     });
     return bubble;
   }
@@ -306,13 +314,16 @@ export class Thread {
     const phase = document.createElement("span");
     phase.className = "phase";
     bubble.append(dots, phase);
-    place(this.#groupFor("assistant", this.#now()), messageOf("assistant", bubble));
     this.#activity = { bubble, phaseElement: phase, phase: null, steps: [], row: null };
     this.#activity.started = this.#now();
     this.#activity.ticker = this.#timers.every(() => this.#tick(), this.#less() ? 60_000 : 1_000);
-    enter(bubble.parentElement, { origin: "0% 100%" });
-    this.#onChange({ kind: "typing", element: bubble });
-    return this.#activity;
+    const activity = this.#activity;
+    this.#flip(() => {
+      place(this.#groupFor("assistant", this.#now()), messageOf("assistant", bubble));
+      enter(bubble.parentElement, { origin: "0% 100%" });
+      this.#onChange({ kind: "typing", element: bubble });
+    });
+    return activity;
   }
 
   /** The elapsed times: from 3 s, once a second, or once a minute under less motion (rule 8). */
@@ -372,6 +383,24 @@ export class Thread {
     row.head.addEventListener("click", () => openRow(row));
   }
 
+  /**
+   * Adds something below the latest messages, and they slide up from where they were (FLIP,
+   * `--spring-base`, 5.1). `add` also tells the page, so the scroll that follows is measured too.
+   */
+  #flip(add) {
+    const olds = this.#less()
+      ? []
+      : [...this.#root.querySelectorAll(".message, .tool-row")].slice(-FLIP_AT_MOST);
+    const first = olds.map((element) => element.getBoundingClientRect().top);
+    add();
+    olds.forEach((element, index) => {
+      if (!element.isConnected) return;
+      const shift = first[index] - element.getBoundingClientRect().top;
+      if (Math.abs(shift) < 0.5) return;
+      play(element, [{ transform: `translateY(${shift}px)` }, { transform: "none" }], SPRINGS.base);
+    });
+  }
+
   // ── Days, groups and bubbles ─────────────────────────────────────────────────────────────────
 
   #clear() {
@@ -412,8 +441,6 @@ export class Thread {
 
   #seen(sender, at, group) {
     this.#last = { sender, at, group };
-    const time = group.querySelector(":scope > .group-time");
-    time?.replaceChildren(timeOf(at, this.#locale));
   }
 
   /**
@@ -441,11 +468,8 @@ export class Thread {
       sender === "user" ? this.#texts.you : this.#agentName(),
       heading.dataset.time,
     );
-    const time = document.createElement("p");
-    time.className = "group-time";
-    time.setAttribute("aria-hidden", "true");
-    time.append(timeOf(at, this.#locale));
-    group.append(heading, time);
+    // No time under the group: each bubble's shows on hover or a tap (decision 1, #378).
+    group.append(heading);
     day.append(group);
     // The typing bubble's group counts as the latest, so the next message from the owner opens
     // its own group after it.
@@ -497,129 +521,42 @@ export class Thread {
   // ── The confirmation card (5.3) ──────────────────────────────────────────────────────────────
 
   #card(bubble, id, at) {
-    bubble.classList.add("card");
-    const actions = document.createElement("div");
-    actions.className = "card-actions";
-    const confirm = document.createElement("button");
-    confirm.type = "button";
-    confirm.className = "confirm";
-    confirm.dataset.confirmation = String(id);
-    const label = document.createElement("span");
-    label.className = "label";
-    label.append(rollText(this.#texts.confirm));
-    const status = document.createElement("span");
-    status.className = "confirm-icon";
-    confirm.append(status, label);
-    actions.append(confirm);
-    bubble.append(actions);
-    const card = { id, bubble, actions, confirm, label, status, open: true, viaKeyboard: false };
+    const card = new Card(bubble, {
+      id,
+      until: at + CONFIRMATION_MS,
+      who: this.#agentName(),
+      texts: this.#texts,
+      locale: this.#locale,
+      onConfirm: this.#onConfirm,
+      onPause: this.#onPause,
+      mascot: this.#cardMascot,
+      onAnnounce: this.#onAnnounce,
+      onChange: this.#onChange,
+      now: this.#now,
+      timers: this.#timers,
+    });
     if (!this.#cards.has(id)) this.#cards.set(id, []);
     this.#cards.get(id).push(card);
-    // A key held down since before the card appeared doesn't count: only one pressed on it.
-    let pressedHere = false;
-    confirm.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") pressedHere = !event.repeat;
-    });
-    confirm.addEventListener("click", (event) => {
-      const viaKey = event.detail === 0;
-      if (viaKey && !pressedHere) return;
-      pressedHere = false;
-      if (!card.open || card.pressed) return;
-      if (!this.#onConfirm(id)) return;
-      this.#press(card, viaKey || fromKeyboard());
-    });
-    // A confirmation nobody answers expires after its 10 minutes (ADR-0026 §3).
-    const left = at + CONFIRMATION_MS - this.#now();
-    if (left <= 0) {
-      this.#fold(card, "neutral", this.#texts.expired, { announce: false, instant: true });
-      return;
-    }
-    card.expiry = this.#timers.set(() => {
-      if (card.open && !card.pressed) this.#fold(card, "neutral", this.#texts.expired);
-    }, left);
   }
 
-  /** The press: the button grows to the card's width and says what it does (5.3). */
-  #press(card, viaKeyboard) {
-    card.pressed = true;
-    card.viaKeyboard = viaKeyboard;
-    const before = card.confirm.getBoundingClientRect();
-    card.confirm.disabled = true;
-    card.bubble.dataset.state = "working";
-    if (!viaKeyboard) resize(card.confirm, before, SPRINGS.moment);
-    roll(card.label, this.#texts.confirming);
-    card.status.dataset.state = "waiting";
-    card.spin = this.#timers.set(() => {
-      card.status.dataset.state = "spinning";
-    }, SPINNER_AFTER_MS);
+  /**
+   * The open confirmations the conversation lists (ADR-0052 §4). One with no card in the thread,
+   * from a turn that settled before this socket opened, gets its card at the thread's end, with the
+   * time it was asked; one with a card already gets no other.
+   */
+  requests(list) {
+    for (const request of list) {
+      if (this.#cards.has(request.id)) continue;
+      const at = this.#now() - request.askedAgoMs;
+      const bubble = this.#bubble("assistant", at);
+      this.#reply(bubble, { text: request.summary, confirmation: request.id }, at);
+      this.#onChange({ kind: "approval", element: bubble });
+    }
   }
 
   /** What a press did, on every notice of that confirmation. */
   confirmation(id, status) {
-    for (const card of this.#cards.get(id) ?? []) {
-      if (!card.open) continue;
-      this.#timers.clear(card.spin);
-      this.#timers.clear(card.expiry);
-      if (status !== "accepted") {
-        this.#fold(card, "neutral", this.#texts.stale);
-        continue;
-      }
-      this.#succeed(card);
-    }
-  }
-
-  #succeed(card) {
-    card.open = false;
-    card.bubble.dataset.state = "done";
-    card.status.dataset.state = "done";
-    card.status.replaceChildren(icon("check", "icon draw"));
-    const quiet = card.viaKeyboard || reduced();
-    if (!quiet) {
-      play(card.confirm, [{ transform: "scale(1.03)" }, { transform: "scale(1)" }], SPRINGS.pop);
-      const ring = document.createElement("span");
-      ring.className = "ring";
-      ring.setAttribute("aria-hidden", "true");
-      card.confirm.append(ring);
-      play(
-        ring,
-        [
-          { opacity: 0.7, transform: "scale(1)" },
-          { opacity: 0, transform: "scale(1.5)" },
-        ],
-        { duration: RING_MS, easing: EASE.fade, fill: "forwards" },
-      );
-    }
-    const receipt = this.#texts.confirmedAt(clock(this.#now(), this.#locale));
-    this.#timers.set(() => this.#fold(card, "check", receipt), quiet ? DUR.fade : RING_MS);
-  }
-
-  /** The card folds into its receipt: who decided what and when (5.3). */
-  #fold(card, glyph, text, { announce = true, instant = false } = {}) {
-    card.open = false;
-    const { bubble } = card;
-    const before = bubble.getBoundingClientRect();
-    bubble.dataset.state = glyph === "check" ? "confirmed" : "closed";
-    const receipt = document.createElement("p");
-    receipt.className = "receipt";
-    receipt.append(icon(glyph), text);
-    card.actions.replaceWith(receipt);
-    bubble.querySelector(":scope > .text")?.remove();
-    bubble.classList.add("receipt-only");
-    if (!instant) {
-      resize(bubble, before, SPRINGS.moment);
-      if (reduced()) fadeIn(receipt);
-      else
-        play(
-          receipt,
-          [
-            { opacity: 0, transform: "translateY(4px)" },
-            { opacity: 1, transform: "none" },
-          ],
-          { duration: SPRINGS.moment.duration, easing: SPRINGS.moment.easing },
-        );
-    }
-    if (announce) this.#onAnnounce(text);
-    this.#onChange({ kind: "receipt", element: bubble, text });
+    for (const card of this.#cards.get(id) ?? []) card.confirmation(status);
   }
 }
 
@@ -632,9 +569,8 @@ function messageOf(sender, bubble) {
   return message;
 }
 
-/** Messages go before the group's time, which closes it. */
 function place(group, element) {
-  group.insertBefore(element, group.querySelector(":scope > .group-time"));
+  group.append(element);
 }
 
 function textOf(text) {
@@ -644,7 +580,7 @@ function textOf(text) {
   return content;
 }
 
-/** A bubble's exact time, shown on hover or a tap; or a group's time. */
+/** A bubble's exact time, shown on hover or a tap. */
 function timeOf(at, locale, className) {
   const time = document.createElement("time");
   // The group's heading says the time to screen readers; these are for the eye.
@@ -699,48 +635,4 @@ function openRow(row) {
       { duration: SPRINGS.base.duration, easing: SPRINGS.base.easing, delay, fill: "backwards" },
     );
   });
-}
-
-function rollText(text) {
-  const span = document.createElement("span");
-  span.className = "roll";
-  span.textContent = text;
-  return span;
-}
-
-/** A label that changes rolls: the old one leaves upward, the new one rises (5.2). */
-export function roll(container, text) {
-  const old = container.querySelector(":scope > .roll:last-child");
-  if (old?.textContent === text) return;
-  const next = rollText(text);
-  container.append(next);
-  if (!old) return;
-  if (reduced()) {
-    old.remove();
-    fadeIn(next);
-    return;
-  }
-  old.classList.add("leaving");
-  const leaving = play(
-    old,
-    [
-      { opacity: 1, transform: "translateY(0)" },
-      { opacity: 0, transform: "translateY(-75%)" },
-    ],
-    { duration: DUR.exit, easing: EASE.exit, fill: "forwards" },
-  );
-  if (leaving)
-    leaving.finished.then(
-      () => old.remove(),
-      () => old.remove(),
-    );
-  else old.remove();
-  play(
-    next,
-    [
-      { opacity: 0, transform: "translateY(75%)" },
-      { opacity: 1, transform: "none" },
-    ],
-    SPRINGS.fast,
-  );
 }

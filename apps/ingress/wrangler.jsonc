@@ -30,6 +30,13 @@
       "service": "kelpie-conversation-runtime",
       "entrypoint": "SetupEvents"
     },
+    // Each agent's mascot for the webchat's list (ADR-0052 §7): it reads and does nothing else,
+    // so this Worker still can't configure an agent.
+    {
+      "binding": "AGENT_LOOKS",
+      "service": "kelpie-conversation-runtime",
+      "entrypoint": "AgentLooks"
+    },
     {
       "binding": "CHANNEL_WEBHOOKS",
       "service": "kelpie-channel-egress",

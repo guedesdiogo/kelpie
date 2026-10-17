@@ -1,9 +1,14 @@
 import { env, exports } from "cloudflare:workers";
 import type { Admission, Verification } from "@kelpie/access";
-import type { AgentEntry } from "@kelpie/config";
+import { type AgentEntry, KELPIE_MASCOT } from "@kelpie/config";
 import { WEBCHAT_ADMISSION_HEADER } from "@kelpie/conversation/contract";
 import { describe, expect, it, vi } from "vitest";
-import { connectWebchat, handleWebchat, type WebchatDeps } from "../src/webchat.ts";
+import {
+  connectWebchat,
+  handleWebchat,
+  MASCOTS_WITHIN_MS,
+  type WebchatDeps,
+} from "../src/webchat.ts";
 
 const ORIGIN = "https://ingress.test";
 const owner: Admission = { admitted: true, userId: "u-owner", role: "owner", timeZone: null };
@@ -23,6 +28,7 @@ function deps(overrides: Partial<WebchatDeps> = {}) {
     admit: vi.fn(async (): Promise<Admission> => owner),
     agentExists: vi.fn(async (agentId: string) => agentId === "assistant"),
     listAgents: vi.fn(async () => REGISTRY),
+    mascots: vi.fn(async (): Promise<Record<string, unknown>> => ({})),
     page: vi.fn(async () => new Response("<!doctype html>", { status: 200 })),
     connect: vi.fn(async () => new Response("socket", { status: 200 })),
     ...overrides,
@@ -131,6 +137,44 @@ describe("the webchat's agent list", () => {
     expect(fakes.page).not.toHaveBeenCalled();
   });
 
+  it("names each admitted agent's mascot, as AgentLooks reads it, and only a valid one (ADR-0052 §7)", async () => {
+    const fakes = deps({
+      mascots: vi.fn(async () => ({
+        assistant: KELPIE_MASCOT,
+        agenda: { ...KELPIE_MASCOT, shape: "<img src=x onerror=alert(1)>" },
+      })),
+    });
+    const { agents } = (await (await handleWebchat(listRequest(), fakes)).json()) as {
+      agents: unknown[];
+    };
+    expect(fakes.mascots).toHaveBeenCalledWith(["atlas", "assistant", "agenda"]);
+    expect(agents).toEqual([
+      { id: "atlas", name: "Atlas", main: false },
+      { id: "assistant", name: "Assistant", main: true, mascot: KELPIE_MASCOT },
+      { id: "agenda", name: "Agenda", main: false },
+    ]);
+  });
+
+  it("lists the agents without their mascots when AgentLooks fails", async () => {
+    const fakes = deps({
+      mascots: vi.fn(async () => {
+        throw new Error("down");
+      }),
+    });
+    const response = await handleWebchat(listRequest(), fakes);
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as { agents: unknown[] }).agents).toHaveLength(3);
+  });
+
+  it("lists the agents without their mascots when AgentLooks is slow", async () => {
+    const fakes = deps({ mascots: vi.fn(() => new Promise<Record<string, unknown>>(() => {})) });
+    const started = Date.now();
+    const response = await handleWebchat(listRequest(), fakes);
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as { agents: { mascot?: unknown }[] }).agents).toHaveLength(3);
+    expect(Date.now() - started).toBeLessThan(MASCOTS_WITHIN_MS + 1_000);
+  });
+
   it("lists an agent from a registry before #288 that names no chat, as the Directory admits it", async () => {
     const fakes = deps({
       listAgents: vi.fn(async () => [{ id: "legacy", name: "Legacy" } as AgentEntry]),
@@ -225,6 +269,37 @@ describe("the webchat's socket", () => {
       "assistant:webchat:u-owner",
       expect.objectContaining({ language: "x".repeat(200) }),
     );
+  });
+
+  it("opens the sidebar's presence view, admitted the same way, and refuses a view it doesn't know (ADR-0052 §1)", async () => {
+    const fakes = deps();
+    await handleWebchat(socketRequest("/webchat/ws?agent=assistant&view=presence"), fakes);
+    expect(fakes.admit).toHaveBeenCalledOnce();
+    expect(fakes.connect).toHaveBeenCalledWith("assistant:webchat:u-owner", {
+      agentId: "assistant",
+      userId: "u-owner",
+      role: "owner",
+      chatType: "direct",
+      timeZone: null,
+      view: "presence",
+    });
+
+    const other = deps();
+    const unknown = await handleWebchat(
+      socketRequest("/webchat/ws?agent=assistant&view=all"),
+      other,
+    );
+    expect(unknown.status).toBe(400);
+    expect(other.admit).not.toHaveBeenCalled();
+    expect(other.connect).not.toHaveBeenCalled();
+
+    // The page's origin is checked first, whatever the view.
+    const elsewhere = deps();
+    const foreign = socketRequest("/webchat/ws?agent=assistant&view=presence", {
+      Origin: "https://evil.example",
+    });
+    expect((await handleWebchat(foreign, elsewhere)).status).toBe(403);
+    expect(elsewhere.admit).not.toHaveBeenCalled();
   });
 
   it("refuses a socket from another origin, or with no origin", async () => {

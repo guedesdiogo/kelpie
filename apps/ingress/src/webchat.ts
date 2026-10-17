@@ -5,7 +5,7 @@ import {
   type Verification,
 } from "@kelpie/access";
 import { MAX_LANGUAGE_CHARS } from "@kelpie/channels";
-import { type AgentEntry, isAgentId } from "@kelpie/config";
+import { type AgentEntry, isAgentId, type Mascot, parseMascot } from "@kelpie/config";
 import { WEBCHAT_ADMISSION_HEADER, type WebchatAdmission } from "@kelpie/conversation/contract";
 import { conversationName } from "./telegram-webhook.ts";
 
@@ -23,6 +23,8 @@ export interface WebchatDeps {
   agentExists(agentId: string): Promise<boolean>;
   /** The registry's agents, in its order, for the page's switcher (#140). */
   listAgents(): Promise<Pick<AgentEntry, "id" | "name" | "role" | "chat">[]>;
+  /** Each agent's mascot, through conversation-runtime's read-only AgentLooks (ADR-0052 §7). */
+  mascots(agentIds: string[]): Promise<Record<string, unknown>>;
   /** The static page, from Workers assets. */
   page(request: Request): Promise<Response>;
   /** Opens the socket on the conversation's object. */
@@ -77,6 +79,9 @@ export async function handleWebchat(request: Request, deps: WebchatDeps): Promis
   if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
     return new Response(null, { status: 426 });
   }
+  // The sidebar's presence view (ADR-0052 §1), or the conversation's own socket; nothing else.
+  const view = url.searchParams.get("view");
+  if (view !== null && view !== "presence") return new Response(null, { status: 400 });
   const agentId = url.searchParams.get("agent");
   if (!isAgentId(agentId) || !(await deps.agentExists(agentId))) {
     return new Response(null, { status: 404 });
@@ -102,7 +107,24 @@ export async function handleWebchat(request: Request, deps: WebchatDeps): Promis
     chatType: "direct",
     timeZone,
     ...(language === "" ? {} : { language }),
+    ...(view === "presence" ? { view } : {}),
   });
+}
+
+/** The mascots are only how the rows look: the list waits this long for them, then answers without. */
+export const MASCOTS_WITHIN_MS = 1_500;
+
+/** `promise`'s value, or `fallback` once `ms` have passed. */
+async function within<T>(ms: number, promise: Promise<T>, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const late = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  try {
+    return await Promise.race([promise, late]);
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
 }
 
 /**
@@ -117,10 +139,19 @@ async function agentList(sub: string, deps: WebchatDeps): Promise<Response> {
   const admitted = await Promise.all(
     chatting.map(async (agent) => (await deps.admit(identity, agent.id)).admitted),
   );
-  const agents = chatting
-    .filter((_, index) => admitted[index])
-    .map(({ id, name, role }) => ({ id, name, main: role === "main" }));
-  if (agents.length === 0) return new Response(null, { status: 403 });
+  const listed = chatting.filter((_, index) => admitted[index]);
+  if (listed.length === 0) return new Response(null, { status: 403 });
+  // Each row draws its agent's mascot before its socket opens (ADR-0052 §7). Without them, the list
+  // still answers; a value that isn't a mascot never reaches the page.
+  const looks = await within(
+    MASCOTS_WITHIN_MS,
+    deps.mascots(listed.map(({ id }) => id)).catch(() => ({})),
+    {},
+  );
+  const agents = listed.map(({ id, name, role }) => {
+    const mascot: Mascot | null = parseMascot((looks as Record<string, unknown>)[id] ?? null);
+    return { id, name, main: role === "main", ...(mascot ? { mascot } : {}) };
+  });
   return Response.json(
     { agents },
     { headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } },

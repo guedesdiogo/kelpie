@@ -247,6 +247,7 @@
   display: none;
 }
 .mascot[data-act="search"] .act-search,
+.mascot[data-act="plug"] .act-plug,
 .mascot[data-act="vault"] .act-vault,
 .mascot[data-act="code"] .act-code,
 .mascot[data-act="calendar"] .act-calendar,
@@ -382,6 +383,9 @@
 .mascot[data-badge="error"] .bd-c {
   fill: url(#kg-err);
 }
+.mascot[data-badge="offline"] .bd-c {
+  fill: url(#kg-off);
+}
 .mascot[data-badge="work"] .bd-c {
   fill: url(#kg-acc);
 }
@@ -430,6 +434,46 @@
 .mascot[data-badge="error"] .bd-ring {
   stroke: var(--danger);
 }
+.mascot[data-badge="offline"] .bd-ring {
+  stroke: var(--muted);
+}
+
+/* Offline (#380): a plug with a slash in the grey bubble, and the plug in the mittens */
+.mascot .bd-off {
+  display: none;
+  fill: none;
+  stroke: var(--on-accent);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.mascot .bd-off .slash {
+  stroke-width: 2;
+}
+.mascot[data-badge="offline"] .speech .bd-off {
+  display: inline;
+}
+.mascot .p-plugb {
+  fill: url(#kg-alu);
+  stroke: rgb(0 0 0 / 0.18);
+  stroke-width: 0.6;
+}
+.mascot .p-prong {
+  fill: url(#kg-metal);
+}
+.mascot .p-plughl {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  opacity: 0.6;
+}
+.mascot .p-cord {
+  fill: none;
+  stroke: #4f5d5a;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
 
 /* The bubble's colors come from the theme tokens. */
 .kg-warm-1 {
@@ -449,6 +493,15 @@
 }
 .kg-danger-3 {
   stop-color: color-mix(in oklab, var(--danger) 72%, black);
+}
+.kg-muted-1 {
+  stop-color: color-mix(in oklab, var(--muted) 45%, white);
+}
+.kg-muted-2 {
+  stop-color: var(--muted);
+}
+.kg-muted-3 {
+  stop-color: color-mix(in oklab, var(--muted) 72%, black);
 }
 .kg-accent-1 {
   stop-color: color-mix(in oklab, var(--accent) 45%, white);

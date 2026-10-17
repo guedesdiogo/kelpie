@@ -656,6 +656,8 @@ export function buildMascot(mascot, { uid, px, hex, work = true, hands = true })
               "",
             )}<path class="p-check" pathLength="1" d="M-4,2.5 L-1,5.5 L5,-1.5"/></g>${mitt(-11, -5, -15, true)}<g class="aw w-stamp">${mitt(10, 0, -20)}</g></g>`,
           `<g class="act act-email"><ellipse class="csh" cx="1" cy="12" rx="13" ry="3"/><g class="aw w-env"><rect class="p-paper" x="-9" y="-6" width="18" height="12" rx="1.5"/><path class="p-flap" d="M-9,-5.5 L0,1 L9,-5.5"/></g><g class="aw w-er">${mitt(11, 5, -25)}</g></g>`,
+          // Offline (#380): the plug that came out, its cord hanging loose, in one mitten.
+          `<g class="act act-plug"><path class="p-cord" d="M0,8 C0,11 -4,12 -7,12 S-12,10 -14,13"/><g class="aw w-plug"><ellipse class="csh" cx="1" cy="10" rx="8" ry="2.4"/><rect class="p-prong" x="-3.6" y="-11" width="2.4" height="7" rx=".9"/><rect class="p-prong" x="1.2" y="-11" width="2.4" height="7" rx=".9"/><rect class="p-plugb" x="-6" y="-5" width="12" height="13" rx="3"/><path class="p-plughl" d="M-3.6,-2.6 V4.6"/>${mitt(9, 3, -28)}</g></g>`,
         ].join("")}</g></g>`;
   const handsSvg =
     hands && size !== "s"
@@ -721,7 +723,7 @@ export function buildMascot(mascot, { uid, px, hex, work = true, hands = true })
         )
           .map(([name, d]) => `<g class="ico ico-${name}">${d}</g>`)
           .join("")}</g></g></g></g>`
-      : `<g transform="translate(${fx + spread + 25} ${ty - 9}) scale(${size === "m" ? 1.6 : 1.4})"><g class="m-bdw speech"><g class="bd-bob"><g class="bd-dot"><path class="bd-c bub3d" d="M0,-11 C7,-11 11,-7 11,-2 C11,3.5 7,7 1,7 L-5,11.5 L-3.6,6.2 C-8.5,5 -11,2 -11,-2 C-11,-7 -7,-11 0,-11 Z"/><ellipse class="bd-hl" cx="-4.6" cy="-6.2" rx="4.4" ry="2.1" transform="rotate(-20 -4.6 -6.2)"/><text class="bd-g" y="3" text-anchor="middle"></text></g></g></g></g>`;
+      : `<g transform="translate(${fx + spread + 25} ${ty - 9}) scale(${size === "m" ? 1.6 : 1.4})"><g class="m-bdw speech"><g class="bd-bob"><g class="bd-dot"><path class="bd-c bub3d" d="M0,-11 C7,-11 11,-7 11,-2 C11,3.5 7,7 1,7 L-5,11.5 L-3.6,6.2 C-8.5,5 -11,2 -11,-2 C-11,-7 -7,-11 0,-11 Z"/><ellipse class="bd-hl" cx="-4.6" cy="-6.2" rx="4.4" ry="2.1" transform="rotate(-20 -4.6 -6.2)"/><text class="bd-g" y="3" text-anchor="middle"></text><g class="bd-off"><path d="M-2.2,-6.4 V-3.8 M2.2,-6.4 V-3.8"/><rect x="-4.2" y="-3.8" width="8.4" height="5.6" rx="1.6"/><path d="M0,1.8 V4.4"/><path class="slash" d="M-6.2,4.6 L6.2,-7"/></g></g></g></g></g>`;
   const html =
     `<svg class="mascot" viewBox="10 14 100 100" width="${px}" height="${px}" data-size="${size}" data-eyes="open" data-mouth="none" data-brows="none" data-fx="none" data-badge="none" aria-hidden="true" focusable="false">` +
     `<defs><clipPath id="mc${uid}"><path d="${shape.d}"/></clipPath><radialGradient id="mg${uid}" cx=".36" cy=".3" r=".85"><stop offset="0" stop-color="${color.light}"/><stop offset=".55" stop-color="${color.body}"/><stop offset="1" stop-color="${color.edge}"/></radialGradient></defs>` +
@@ -784,6 +786,7 @@ export const SHARED_DEFS = `<defs>
 <radialGradient id="kg-wait" cx=".35" cy=".28" r=".85"><stop offset="0" class="kg-warm-1"/><stop offset=".55" class="kg-warm-2"/><stop offset="1" class="kg-warm-3"/></radialGradient>
 <radialGradient id="kg-err" cx=".35" cy=".28" r=".85"><stop offset="0" class="kg-danger-1"/><stop offset=".55" class="kg-danger-2"/><stop offset="1" class="kg-danger-3"/></radialGradient>
 <radialGradient id="kg-acc" cx=".35" cy=".28" r=".85"><stop offset="0" class="kg-accent-1"/><stop offset=".55" class="kg-accent-2"/><stop offset="1" class="kg-accent-3"/></radialGradient>
+<radialGradient id="kg-off" cx=".35" cy=".28" r=".85"><stop offset="0" class="kg-muted-1"/><stop offset=".55" class="kg-muted-2"/><stop offset="1" class="kg-muted-3"/></radialGradient>
 <radialGradient id="kg-shadow"><stop offset=".25" stop-color="#0C2523" stop-opacity=".38"/><stop offset="1" stop-color="#0C2523" stop-opacity="0"/></radialGradient>
 <radialGradient id="kg-gloss" cx=".32" cy=".28" r=".85"><stop offset="0" stop-color="#5B6866"/><stop offset=".45" stop-color="#1A2120"/><stop offset="1" stop-color="#030505"/></radialGradient>
 <radialGradient id="kg-metal" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#FFFFFF"/><stop offset=".5" stop-color="#D3DCDA"/><stop offset="1" stop-color="#7F8E8B"/></radialGradient>

@@ -28,6 +28,18 @@ export class FakeSocket {
     return FakeSocket.all.at(-1);
   }
 
+  /** The newest socket a sidebar row opened for `agent` (ADR-0052). */
+  static presence(agent) {
+    return FakeSocket.all.findLast(
+      (socket) => socket.url.includes("view=presence") && socket.url.includes(`agent=${agent}&`),
+    );
+  }
+
+  /** The newest of the open conversation's own sockets. */
+  static get own() {
+    return FakeSocket.all.findLast((socket) => !socket.url.includes("view=presence"));
+  }
+
   addEventListener(type, listener) {
     if (!this.listeners.has(type)) this.listeners.set(type, []);
     this.listeners.get(type).push(listener);
@@ -55,9 +67,9 @@ export class FakeSocket {
     this.#emit("message", { data: typeof frame === "string" ? frame : JSON.stringify(frame) });
   }
 
-  close() {
+  close(code = 1006) {
     this.readyState = 3;
-    this.#emit("close");
+    this.#emit("close", { code });
   }
 }
 
@@ -115,7 +127,7 @@ export async function loadPage({
   await import("../../public/webchat/boot.js");
   await import("../../public/webchat/app.js");
   await settle();
-  return { socket: FakeSocket.last, fetch };
+  return { socket: FakeSocket.own, fetch };
 }
 
 export const $ = (id) => document.getElementById(id);

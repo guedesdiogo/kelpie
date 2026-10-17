@@ -80,6 +80,9 @@ export const POSES = {
   // beside a still, dashed bubble, as the label's dashed circle (ADR-0044). The
   // webchat doesn't show it: it gets no streamed tokens, so it can't tell a slow model from none.
   noResponse: pose({ gaze: [0, -1.5], tilt: 2, eye: 0.92, brows: "up", badge: "silent" }),
+  // Offline (#380): the page lost its connection, so it says that and nothing about the agent
+  // (rule 7). It holds the plug that came out and looks at it, puzzled, beside a grey bubble.
+  offline: pose({ gaze: [3, 3.5], tilt: 3, eye: 0.96, brows: "up", badge: "offline" }),
 };
 
 function pose(over) {
@@ -100,6 +103,8 @@ function pose(over) {
 
 /** The states whose pose holds the task's object. */
 export const WORKING_STATES = new Set(["working", "noResponse"]);
+/** The states whose mittens hold something: the task's object, or offline's plug. */
+export const HOLDING_STATES = new Set([...WORKING_STATES, "offline"]);
 
 /**
  * The mittens each state keeps, by side; reduced motion keeps them too, so the state still reads.
@@ -121,11 +126,13 @@ export const ACTIVITIES = {
   calendar: { gaze: [2, 4.5] },
   email: { gaze: [3, 3.5] },
   think: { gaze: [0, -3] },
+  plug: { gaze: [3, 3.5] },
 };
 
 /** A tool's activity, or thinking for a tool without its own object (ADR-0045 §10). */
 export function activityOf(value) {
-  return Object.hasOwn(ACTIVITIES, value) ? value : "think";
+  // The plug is Offline's object, never a tool's.
+  return value !== "plug" && Object.hasOwn(ACTIVITIES, value) ? value : "think";
 }
 
 /** Breathing in "Alive": its period and depth per state. */
@@ -139,6 +146,7 @@ export const BREATH = {
   approved: [2400, 0.012],
   error: [1700, 0.016],
   noResponse: [4200, 0.01],
+  offline: [4400, 0.01],
 };
 
 /** Gestures that need a moment since the last of their kind. */
@@ -200,6 +208,17 @@ export const REPERTOIRES = {
     gesture("lookDown", 1),
   ],
   noResponse: [],
+  // Calm, and without a hop: the owner may be worried about the connection already.
+  offline: [
+    gesture("blink", 2, { list: true }),
+    gesture("glance", 1.2, { list: true }),
+    gesture("lookAtPlug", 1.6),
+    gesture("tryPlug", 1.4),
+    gesture("shakePlug", 1),
+    gesture("lookAround", 1),
+    gesture("sigh", 0.8),
+    gesture("yawn", 0.5),
+  ],
 };
 
 /** The gestures a mascot may draw now: its size's, and those its figure and timing allow. */
@@ -239,6 +258,7 @@ const GAPS = {
   working: [2500, 5000],
   waiting: [3000, 6000],
   error: [3000, 6000],
+  offline: [4000, 8000],
 };
 
 export function gapAfter(state, mode, random = Math.random) {
@@ -300,6 +320,8 @@ export function allowed(timing, motion) {
  *   turn settles right after it, and that clears only the step.
  * - The wait before a reply, where its bar shows (ADR-0045 §5), is listening; its end goes back
  *   to idle, unless typing or work has taken over.
+ * - A lost socket changes nothing at once; when the banner enters, 2 s later, every mascot shows
+ *   Offline (ADR-0047). The history of a new socket ends it.
  */
 export function presenceAfter(presence, event) {
   switch (event.type) {
@@ -330,6 +352,14 @@ export function presenceAfter(presence, event) {
           : { state: "listening", activity: null, tool: false };
       }
       return presence.state === "listening" ? idle() : presence;
+    // The open confirmations (ADR-0052 §4): after a reconnect, one still open is still waited on.
+    case "requests":
+      if (Array.isArray(event.requests) && event.requests.length > 0) {
+        return presence.state === "working" || presence.state === "typing"
+          ? presence
+          : { state: "waiting", activity: null, tool: false };
+      }
+      return presence.state === "waiting" ? idle() : presence;
     case "confirmation":
       return event.status === "accepted"
         ? { state: "approved", activity: null, tool: false }
@@ -337,12 +367,12 @@ export function presenceAfter(presence, event) {
     // The owner's message ends a wait or an error; a turn already running goes on showing.
     case "sent":
       return presence.state === "working" || presence.state === "typing" ? presence : idle();
-    // A pause holds every answer; a lost socket hears nothing more of the turn, and a new one
-    // starts from the history.
+    // A pause holds every answer, and a new socket starts from the history.
     case "paused":
-    case "closed":
     case "history":
       return idle();
+    case "offline":
+      return { state: "offline", activity: null, tool: false };
     default:
       return presence;
   }
@@ -359,8 +389,10 @@ const same = (a, b) => a.state === b.state && a.activity === b.activity && a.too
 /**
  * Keeps the conversation's presence over time and calls `show` on each change: the approval's
  * pose for 1.1 s, then what arrived meanwhile; a wait that ends when the confirmation expires.
+ * `show` also learns how: `instant` for a change the keyboard caused (§4.1), `quiet` for an expiry
+ * or a refused press, which bring no announcement (5.3).
  *
- * @param {(presence: { state: string, activity: string | null, tool: boolean }) => void} show
+ * @param {(presence: { state: string, activity: string | null, tool: boolean }, how: { instant?: boolean, quiet?: boolean }) => void} show
  * @param {{ set: (run: () => void, ms: number) => unknown, clear: (timer: unknown) => void }} [timers]
  */
 export function presenceKeeper(
@@ -370,23 +402,28 @@ export function presenceKeeper(
   let presence = IDLE;
   let afterApproval = IDLE;
   let timer = null;
-  const apply = (next) => {
+  const apply = (next, how = {}, waitMs = CONFIRMATION_MS) => {
     timers.clear(timer);
     timer = null;
     presence = next;
-    show(presence);
+    show(presence, how);
     if (presence.state === "approved") {
       afterApproval = IDLE;
       timer = timers.set(() => apply(afterApproval), APPROVED_MS);
     } else if (presence.state === "waiting") {
-      timer = timers.set(() => apply(IDLE), CONFIRMATION_MS);
+      timer = timers.set(() => apply(IDLE, { quiet: true }), waitMs);
     }
   };
+  // A notice waits its 10 minutes; the open list says how long each confirmation has left.
+  const waitOf = (event) =>
+    event.type === "requests" && event.requests.length > 0
+      ? Math.max(...event.requests.map((request) => request.expiresInMs))
+      : CONFIRMATION_MS;
   return {
     get current() {
       return presence;
     },
-    event(event) {
+    event(event, { instant = false } = {}) {
       if (presence.state === "approved") {
         afterApproval = presenceAfter(afterApproval, event);
         return;
@@ -394,7 +431,8 @@ export function presenceKeeper(
       const next = presenceAfter(presence, event);
       // A new notice while one waits starts its own 10 minutes.
       const renewed = next.state === "waiting" && event.type === "bubble";
-      if (renewed || !same(next, presence)) apply(next);
+      const refused = event.type === "confirmation" && event.status !== "accepted";
+      if (renewed || !same(next, presence)) apply(next, { instant, quiet: refused }, waitOf(event));
     },
   };
 }

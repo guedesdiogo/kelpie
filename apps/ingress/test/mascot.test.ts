@@ -40,6 +40,7 @@ import {
   effectiveMotion,
   gapAfter,
   HAND_POSES,
+  HOLDING_STATES,
   IDLE,
   POSES,
   presenceAfter,
@@ -72,7 +73,14 @@ function keeperWith() {
     },
   };
   const shown: { state: string }[] = [];
-  const keeper = presenceKeeper((presence: { state: string }) => shown.push(presence), timers);
+  const hows: { instant?: boolean; quiet?: boolean }[] = [];
+  const keeper = presenceKeeper(
+    (presence: { state: string }, how: { instant?: boolean; quiet?: boolean }) => {
+      shown.push(presence);
+      hows.push(how);
+    },
+    timers,
+  );
   const clock = {
     advance(ms: number) {
       now += ms;
@@ -83,7 +91,7 @@ function keeperWith() {
       }
     },
   };
-  return { shown, keeper, clock };
+  return { shown, hows, keeper, clock };
 }
 
 /** A fixed sequence of random numbers, repeating. */
@@ -232,6 +240,7 @@ describe("poses per state (ADR-0045 §6)", () => {
       "approved",
       "error",
       "noResponse",
+      "offline",
     ]);
     for (const state of STATES) expect(BREATH, state).toHaveProperty(state);
   });
@@ -258,8 +267,9 @@ describe("poses per state (ADR-0045 §6)", () => {
       error: { l: "cheekL", r: "cheekR" },
       dozing: { r: "pillowR" },
     });
-    // At work, the mittens come with the task's object.
+    // At work, the mittens come with the task's object; offline, with its plug (ADR-0047).
     expect([...WORKING_STATES]).toEqual(["working", "noResponse"]);
+    expect([...HOLDING_STATES]).toEqual(["working", "noResponse", "offline"]);
   });
 
   it("shows only a real activity: a tool without its own object shows thinking", () => {
@@ -270,8 +280,11 @@ describe("poses per state (ADR-0045 §6)", () => {
       "calendar",
       "email",
       "think",
+      "plug",
     ]);
     expect(activityOf("vault")).toBe("vault");
+    // The plug is Offline's, never a tool's.
+    expect(activityOf("plug")).toBe("think");
     expect(activityOf(undefined)).toBe("think");
     expect(activityOf("teleport")).toBe("think");
     expect(activityOf("toString")).toBe("think");
@@ -460,6 +473,118 @@ describe("the pause's announcements", () => {
   });
 });
 
+describe("how a change shows (§4.1, 5.3)", () => {
+  it("passes a keyboard's change on to show at once", () => {
+    const { hows, keeper } = keeperWith();
+    keeper.event({ type: "bubble", text: "No model answered.", failed: true });
+    // The owner's message, sent with Enter, ends the error.
+    keeper.event({ type: "sent" }, { instant: true });
+    expect(hows).toEqual([
+      { instant: false, quiet: false },
+      { instant: true, quiet: false },
+    ]);
+  });
+
+  it("brings no announcement for an expiry or a refused press", () => {
+    const { shown, hows, keeper, clock } = keeperWith();
+    keeper.event({ type: "bubble", text: "Confirm?", confirmation: 1 });
+    clock.advance(CONFIRMATION_MS);
+    expect(shown.at(-1)?.state).toBe("idle");
+    expect(hows.at(-1)).toEqual({ quiet: true });
+    keeper.event({ type: "bubble", text: "Confirm?", confirmation: 2 });
+    keeper.event({ type: "confirmation", id: 2, status: "refused" });
+    expect(hows.at(-1)).toEqual({ instant: false, quiet: true });
+    // A confirm still announces its Approved.
+    keeper.event({ type: "bubble", text: "Confirm?", confirmation: 3 });
+    keeper.event({ type: "confirmation", id: 3, status: "accepted" });
+    expect(shown.at(-1)?.state).toBe("approved");
+    expect(hows.at(-1)).toEqual({ instant: false, quiet: false });
+  });
+
+  it("waits only as long as an open confirmation has left, after a reconnect", () => {
+    const { shown, keeper, clock } = keeperWith();
+    keeper.event({ type: "history" });
+    const open = { id: 7, summary: "Create the event.", askedAgoMs: 570_000, expiresInMs: 30_000 };
+    keeper.event({ type: "requests", requests: [open], more: 0 });
+    expect(shown.at(-1)?.state).toBe("waiting");
+    clock.advance(29_999);
+    expect(shown.at(-1)?.state).toBe("waiting");
+    clock.advance(1);
+    expect(shown.at(-1)?.state).toBe("idle");
+  });
+
+  it("moves a quiet mascot to its pose without the announcement", () => {
+    expect(engine).toContain("if (!quiet) this.announce(next);");
+  });
+});
+
+describe("Offline, when the page loses its connection (ADR-0047)", () => {
+  const working = presenceAfter(IDLE, { type: "status", status: "thinking" });
+  const offline = presenceAfter(working, { type: "offline" });
+
+  it("holds the plug that came out, looking at it, beside a grey bubble", () => {
+    expect(POSES.offline).toMatchObject({ brows: "up", badge: "offline" });
+    expect(POSES.offline.gaze).toEqual(ACTIVITIES.plug.gaze);
+    expect(styles).toContain('.mascot[data-act="plug"] .act-plug');
+    expect(styles).toContain('.mascot[data-badge="offline"] .bd-c');
+    expect(SHARED_DEFS).toContain('id="kg-off"');
+    expect(buildMascot(KELPIE_MASCOT, { uid: 1, px: 160, hex: "#2e9e8e" }).html).toContain(
+      "act-plug",
+    );
+  });
+
+  it("is calm: it never hops, and rests 4 to 8 s between gestures", () => {
+    const names = REPERTOIRES.offline.map((gesture: { name: string }) => gesture.name);
+    expect(names).toEqual([
+      "blink",
+      "glance",
+      "lookAtPlug",
+      "tryPlug",
+      "shakePlug",
+      "lookAround",
+      "sigh",
+      "yawn",
+    ]);
+    for (const at of [0, 0.5, 0.999]) {
+      const gap = gapAfter("offline", "header", () => at);
+      expect(gap).toBeGreaterThanOrEqual(4_000);
+      expect(gap).toBeLessThanOrEqual(8_000);
+    }
+  });
+
+  it("comes only when the banner enters, not when the socket closes", () => {
+    // The page can't vouch for the turn, but Offline waits for the banner's 2 s (5.12).
+    expect(presenceAfter(working, { type: "closed" })).toBe(working);
+    expect(offline).toEqual({ state: "offline", activity: null, tool: false });
+  });
+
+  it("leaves with the history, whatever it held", () => {
+    expect(presenceAfter(offline, { type: "history" })).toEqual(IDLE);
+    expect(presenceAfter(offline, { type: "status", status: "thinking" })).toEqual(working);
+  });
+
+  it("returns to Waiting after a reconnect while a confirmation is still open (5.12)", () => {
+    const back = presenceAfter(offline, { type: "history" });
+    const open = { id: 7, summary: "Create the event.", askedAgoMs: 1, expiresInMs: 600_000 };
+    expect(presenceAfter(back, { type: "requests", requests: [open], more: 0 })).toEqual({
+      state: "waiting",
+      activity: null,
+      tool: false,
+    });
+    // A turn at work keeps showing its work; an answered request ends the wait.
+    expect(presenceAfter(working, { type: "requests", requests: [open], more: 0 })).toBe(working);
+    const waiting = presenceAfter(back, { type: "requests", requests: [open], more: 0 });
+    expect(presenceAfter(waiting, { type: "requests", requests: [], more: 0 })).toEqual(IDLE);
+    expect(presenceAfter(working, { type: "requests", requests: [], more: 0 })).toBe(working);
+  });
+
+  it("drops the plug and swings it on arrival, and clicks it home with a small hop", () => {
+    expect(engine).toContain('if (state === "offline") {');
+    expect(engine).toContain('if (previous === "offline") {');
+    expect(engine).toContain("this.hop(8);");
+  });
+});
+
 describe("the mascot's state from the conversation", () => {
   const working = presenceAfter(IDLE, { type: "status", status: "thinking" });
 
@@ -517,10 +642,9 @@ describe("the mascot's state from the conversation", () => {
     expect(presenceAfter(waiting, { type: "status", status: "idle" })).toBe(waiting);
   });
 
-  it("is idle after a reply, a pause, a lost socket or a new one, and never listens without the bar", () => {
+  it("is idle after a reply, a pause or a new socket, and never listens without the bar", () => {
     expect(presenceAfter(working, { type: "bubble" })).toEqual(IDLE);
     expect(presenceAfter(working, { type: "paused" })).toEqual(IDLE);
-    expect(presenceAfter(working, { type: "closed" })).toEqual(IDLE);
     expect(presenceAfter(working, { type: "history" })).toEqual(IDLE);
     expect(presenceAfter(working, { type: "sent" })).toBe(working);
     expect(presenceAfter(IDLE, { type: "sent" }).state).not.toBe("listening");
