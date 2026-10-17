@@ -790,7 +790,8 @@ export class FileSections {
     const result = await this.#io.fetchSkill(this.#agent.id, { update: name });
     look.removeAttribute("aria-disabled");
     if (result.ok) {
-      this.#openInstall({ staged: result.value.staged });
+      const from = this.files.skills.find((skill) => skill.name === name)?.origin?.commit ?? null;
+      this.#openInstall({ staged: result.value.staged, from });
       return;
     }
     const reason = result.value?.reason;
@@ -800,7 +801,7 @@ export class FileSections {
         : (names.installing.errors[reason] ?? names.installing.errors.failed);
   }
 
-  #openInstall({ staged } = {}) {
+  #openInstall({ staged, from = null } = {}) {
     this.installer = new SkillInstall({
       names: this.#names,
       blockTexts: this.#blockTexts,
@@ -812,7 +813,7 @@ export class FileSections {
     this.skillView = "install";
     this.openSkill = null;
     this.#drawSkills();
-    if (staged) this.installer.review(staged, { update: true });
+    if (staged) this.installer.review(staged, { update: from });
     this.#onChange();
     this.shown("skills");
     this.installer.focus();

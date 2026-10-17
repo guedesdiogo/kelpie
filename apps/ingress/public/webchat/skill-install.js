@@ -310,7 +310,8 @@ export class SkillInstall {
   }
 
   /** The review card: the field's place opens into it, its height on --spring-moment. */
-  review(staged, { update = false } = {}) {
+  /** `update` names the installed commit, when the card shows an update from it. */
+  review(staged, { update = null } = {}) {
     const t = this.#t;
     this.staged = staged;
     if (update) {
@@ -330,7 +331,9 @@ export class SkillInstall {
     description.textContent = staged.description;
     head.append(name, description);
     const meta = element("span", "src");
+    const to = staged.origin.kind === "github" ? staged.origin.commit.slice(0, 7) : "";
     meta.textContent = [
+      update && to ? t.update(update.slice(0, 7), to) : "",
       originLine(staged.origin, this.#names.files) || this.#names.files.origins[staged.origin.kind],
       t.files(staged.files.length, sizeLabel(staged.bytes, document.documentElement.lang || "en")),
     ]

@@ -614,6 +614,7 @@ describe("the skills", () => {
     await settle();
     expect($(".editor-title").textContent).toBe(F.install);
     expect($(".rev-replaces").textContent).toBe(F.installing.replaces("brief"));
+    expect($(".rev .src").textContent).toContain(F.installing.update("9999999", "3f2a91c"));
     expect($(".rev-warn").textContent).toBe(F.installing.editedWarning);
     expect($(".rev-changes .tag").textContent).toBe(F.installing.changes.changed);
     expect($(".rev-diff .del").textContent).toBe("- old\n");
