@@ -61,6 +61,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0055](0055-composer-files-dictation-and-model.md) | The composer attaches files and dictates text, and the owner's own pick of an agent's model is the yes | [#406](https://github.com/guedesdiogo/kelpie/issues/406) |
 | [0056](0056-agent-editor-and-random-mascot.md) | A new agent starts with a random mascot, and the owner edits an agent from the webchat | [#379](https://github.com/guedesdiogo/kelpie/issues/379) |
 | [0057](0057-vps-claude-code-sessions.md) | Kelpie sees every Claude Code session on the owner's VPS, and tells the owner when one waits on him | [#413](https://github.com/guedesdiogo/kelpie/issues/413) |
+| [0058](0058-owner-edits-agent-files-from-the-webchat.md) | The owner edits an agent's own files from the webchat, committed directly as the owner's edit | [#381](https://github.com/guedesdiogo/kelpie/issues/381) |
 
 ## Format
 

@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-17
 - Issue: [#379](https://github.com/guedesdiogo/kelpie/issues/379)
+- Amended by: [ADR-0058](0058-owner-edits-agent-files-from-the-webchat.md), ingress also binds context-store's `AgentFiles`, its only path into the vault (§3)
 - The owner approved #379's plan, which proposed this amendment, on 2026-10-16: «Aprovo os planos da #378, #379 e #381, incluindo a ADR proposta na #381 e os três preenchimentos da #377.»
 - Amends:
   - [ADR-0045](0045-agent-mascot.md) §2: a new agent starts with a random mascot, saved as its setting, instead of one derived from its id; the owner changes it in the webchat's editor too;
