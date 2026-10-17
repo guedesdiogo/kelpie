@@ -19,7 +19,7 @@ const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i;
  * name: none of `\ : * ? " < > |`, no control or format characters (bidirectional overrides,
  * zero-width spaces), no segment ending in a dot or a space, and no reserved Windows names.
  */
-function isCleanPath(path: string): boolean {
+export function isCleanPath(path: string): boolean {
   return (
     path.length > 0 &&
     path.length <= 300 &&

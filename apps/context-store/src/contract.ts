@@ -292,3 +292,187 @@ export interface ContextStoreAdminContract {
 export type SetDreamResult =
   | { ok: true; mode: "off" | "dry"; writes: string[] }
   | { ok: false; reason: "invalid" };
+
+/** An actor as ingress builds it from the Directory's admission (ADR-0058 §2). */
+export interface FilesActor {
+  userId: string;
+  role: string;
+  via: string;
+}
+
+/** One of an agent's own files that isn't a skill (ADR-0058 §2). */
+export type AgentFileKind = "soul" | "rules" | "memory";
+
+/** A file as the editor reads it: its text, and the version a save names back. */
+export interface AgentFileState {
+  content: string;
+  /** Git's blob SHA of `content`. */
+  version: string;
+}
+
+/** Where an installed skill came from, as the Vault object recorded it. */
+export type SkillOrigin =
+  | {
+      kind: "github";
+      owner: string;
+      repo: string;
+      ref: string | null;
+      path: string;
+      commit: string;
+    }
+  | { kind: "archive"; filename: string }
+  | { kind: "text" }
+  | { kind: "created" };
+
+/** One of the agent's own skills: `agents/<id>/skills/<name>/SKILL.md`. */
+export interface AgentSkillState extends AgentFileState {
+  name: string;
+  description: string;
+  /** Null for a skill the editor didn't write, as one added on GitHub. */
+  origin: SkillOrigin | null;
+  /** An installed skill whose `SKILL.md` changed since it was installed. */
+  edited: boolean;
+}
+
+export interface AgentFilesState {
+  soul: AgentFileState | null;
+  rules: AgentFileState | null;
+  memory: AgentFileState | null;
+  skills: AgentSkillState[];
+}
+
+export type AgentFilesResult =
+  | { ok: true; files: AgentFilesState }
+  | { ok: false; reason: "vault_off" | "forbidden" | "invalid_input" | "unavailable" };
+
+/**
+ * A change one Save makes, with the version the editor started from (null for a file the vault
+ * didn't have). A null content removes the file: rules, or a whole skill.
+ */
+export type AgentFileChange =
+  | { file: AgentFileKind; content: string | null; version: string | null }
+  | { file: "skill"; name: string; content: string | null; version: string | null }
+  | {
+      file: "install";
+      /** What `fetchSkill` staged, and the hash the owner reviewed. */
+      staged: string;
+      hash: string;
+      /** The `SKILL.md` it replaces, as the editor read it, or null for a new skill. */
+      version: string | null;
+    };
+
+/** What became of one change: saved, or why not. A conflict shows the newer version. */
+export type AgentFileOutcome =
+  | { status: "saved"; version: string | null }
+  | { status: "conflict"; current: AgentFileState | null }
+  | {
+      status: "refused";
+      reason:
+        | "invalid"
+        | "too_large"
+        | "held"
+        | "memory_format"
+        | "memory_too_long"
+        | "skill_invalid"
+        | "staged_gone";
+    };
+
+export type SaveAgentFilesResult =
+  | {
+      ok: true;
+      /** One per change, in the save's order. */
+      outcomes: AgentFileOutcome[];
+      /** The commit, or null when nothing was written. */
+      commit: string | null;
+      /** The changes that put back what this save replaced, for Undo. */
+      undo: AgentFileChange[];
+      files: AgentFilesState;
+    }
+  | { ok: false; reason: "vault_off" | "forbidden" | "invalid_input" | "unavailable" };
+
+/** Where a skill to stage comes from (ADR-0058 §5). */
+export type SkillSourceInput =
+  | { kind: "github"; url: string }
+  | { kind: "archive"; filename: string; bytes: Uint8Array }
+  | { kind: "text"; content: string }
+  /** The installed skill's branch or tag again, for "Look for an update". */
+  | { kind: "update"; name: string };
+
+/** A skill staged for the owner's review, outside the vault. */
+export interface StagedSkill {
+  id: string;
+  name: string;
+  description: string;
+  origin: SkillOrigin;
+  /** Every file kept, `SKILL.md` first, relative to the skill's folder. */
+  files: { path: string; bytes: number; script: boolean; binary: boolean }[];
+  /** The files left out: hidden ones, such as `.DS_Store`. */
+  leftOut: { path: string; why: "hidden" }[];
+  skillMd: string;
+  bytes: number;
+  hash: string;
+  scan: {
+    verdict: "clean" | "caution" | "blocked";
+    findings: { path: string; line: number; kind: string; excerpt: string }[];
+    more: number;
+  };
+  /** The skill of the same name it would replace, if the agent has one. */
+  replaces: {
+    version: string;
+    /** Changed since it was installed, so the owner's edits would go. */
+    edited: boolean;
+    /** Each file that differs from what is installed now, when the Vault object knows it. */
+    changes: { path: string; change: "added" | "changed" | "removed" }[];
+    /** The `SKILL.md`'s lines, as a difference from the one in the vault. */
+    diff: { op: "=" | "+" | "-"; text: string }[];
+  } | null;
+}
+
+export type FetchSkillResult =
+  | { ok: true; staged: StagedSkill }
+  | {
+      ok: false;
+      reason:
+        | "vault_off"
+        | "forbidden"
+        | "invalid_input"
+        | "invalid_address"
+        | "not_found"
+        | "unreachable"
+        | "too_large"
+        | "too_many_files"
+        | "not_zip"
+        | "no_skill"
+        | "many_skills"
+        | "unsafe_path"
+        | "link"
+        | "encrypted"
+        | "invalid_skill"
+        | "up_to_date"
+        | "no_source"
+        | "unavailable";
+      /** The path at fault, the skills an archive holds, or what a `SKILL.md` gets wrong. */
+      detail?: string;
+      names?: string[];
+    };
+
+/**
+ * The owner's edits of one agent's own files from the webchat (ADR-0058), on an entrypoint only
+ * ingress binds. It reaches `SOUL.md`, `AGENTS.md`, `memories/MEMORY.md` and `skills/<name>/` under
+ * `agents/<id>/`, and nothing else in the vault.
+ */
+export interface AgentFilesContract {
+  files(actor: FilesActor, agentId: string): Promise<AgentFilesResult>;
+  /** Every change in one commit, with `Kelpie-Via: webchat`; a newer version is a conflict. */
+  save(
+    actor: FilesActor,
+    agentId: string,
+    changes: AgentFileChange[],
+  ): Promise<SaveAgentFilesResult>;
+  /** Fetches, checks and stages a skill for the owner's review, outside the vault, for an hour. */
+  fetchSkill(
+    actor: FilesActor,
+    agentId: string,
+    source: SkillSourceInput,
+  ): Promise<FetchSkillResult>;
+}

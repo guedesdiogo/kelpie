@@ -54,13 +54,34 @@ import {
   type FileChange,
   GitHubVaultBackend,
   gitBlobSha,
+  isVaultText,
   type VaultBackend,
   type VaultFile,
 } from "@kelpie/vault";
 import { parseDocument } from "yaml";
+import {
+  fileKindPath,
+  heldOnSync,
+  lineDiff,
+  memoryProblem,
+  parseChanges,
+  STAGED_FOR_MS,
+  saveHeadline,
+  skillFolder,
+  skillTrailers,
+  stageId,
+} from "./agent-files.ts";
 import { hasConflictMarkers } from "./conflicts.ts";
 import type {
+  AgentFileChange,
+  AgentFileKind,
+  AgentFileOutcome,
+  AgentFileState,
+  AgentFilesResult,
+  AgentFilesState,
+  AgentSkillState,
   CompiledContext,
+  FetchSkillResult,
   ForgetResult,
   HeldFile,
   MemoryCoreResult,
@@ -74,8 +95,11 @@ import type {
   ReadNoteResult,
   RecallOptions,
   RecallResult,
+  SaveAgentFilesResult,
   SetDreamResult,
   SkillEntry,
+  SkillOrigin,
+  StagedSkill,
   WriteNoteOptions,
   WriteNoteResult,
   WriteResult,
@@ -93,6 +117,17 @@ import {
   skillPath,
 } from "./paths.ts";
 import { RESOLVE_MAX_CHARS, type ResolveGateway, resolveConflict } from "./resolve.ts";
+import { scanSkill } from "./skill-scan.ts";
+import {
+  checkSkillMd,
+  fileBytes,
+  fromBase64,
+  isScript,
+  isSpecSkillName,
+  type ParsedSkill,
+  type SkillFile,
+  skillHash,
+} from "./skills.ts";
 import { VAULT_README } from "./vault-readme.ts";
 
 /** Set by the owner at deploy, as Worker secrets (ADR-0021, docs/context-store.md). */
@@ -388,6 +423,38 @@ CREATE TABLE IF NOT EXISTS dream_landing (
   blob_sha TEXT NOT NULL,
   day INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS staged_skills (
+  id TEXT PRIMARY KEY NOT NULL,
+  agent TEXT NOT NULL,
+  name TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  hash TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS staged_files (
+  stage TEXT NOT NULL,
+  path TEXT NOT NULL,
+  content TEXT NOT NULL,
+  binary INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (stage, path)
+);
+CREATE TABLE IF NOT EXISTS skill_installs (
+  agent TEXT NOT NULL,
+  name TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  hash TEXT NOT NULL,
+  skill_sha TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (agent, name)
+);
+CREATE TABLE IF NOT EXISTS skill_files (
+  agent TEXT NOT NULL,
+  name TEXT NOT NULL,
+  path TEXT NOT NULL,
+  content TEXT NOT NULL,
+  binary INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (agent, name, path)
+);
 CREATE TABLE IF NOT EXISTS proposals (
   id INTEGER PRIMARY KEY,
   agent TEXT NOT NULL,
@@ -484,6 +551,43 @@ function callFailure(error: unknown): { error: string; code?: string; retryable?
     ? { error: error.name, code: error.code, retryable: error.retryable }
     : { error: errorName(error) };
 }
+
+/** A skill staged for the owner's review, as a Save reads it back. */
+interface StagedRow {
+  name: string;
+  origin: SkillOrigin;
+  hash: string;
+  files: SkillFile[];
+}
+
+/** One skill a Save changes, and how Undo puts it back (ADR-0058 §1). */
+interface SavedSkill {
+  name: string;
+  /** Its `SKILL.md`'s version once saved, or null once removed. */
+  version: string | null;
+  /** What the Vault object keeps of it: an install, the record it had ("keep"), or nothing. */
+  record: { origin: SkillOrigin; hash: string; files: SkillFile[] } | "keep" | null;
+  stage: string | null;
+  undo:
+    | { kind: "remove"; version: string | null }
+    | { kind: "edit"; content: string; version: string | null }
+    | { kind: "restore"; files: SkillFile[]; origin: SkillOrigin; version: string | null };
+}
+
+/** What one Save would write, against the vault as it is now. */
+interface SavePlan {
+  outcomes: AgentFileOutcome[];
+  writes: Map<string, { content: string; binary?: true }>;
+  deletions: Set<string>;
+  /** Removals of files outside the working copy, which the vault may no longer have. */
+  unknown: number;
+  trailers: string[];
+  what: { files: AgentFileKind[]; skills: number };
+  skills: SavedSkill[];
+  undo: AgentFileChange[];
+}
+
+const sizeOf = (text: string) => encoder.encode(text).byteLength;
 
 interface QueuedRow extends Record<string, SqlStorageValue> {
   id: number;
@@ -834,6 +938,602 @@ export class Vault extends DurableObject<VaultEnv> {
       }
       return { ok: false, reason: "failed" };
     }
+  }
+
+  // ── The owner's edits from the webchat (ADR-0058) ─────────────────────────────────────────
+
+  /** Whether the vault is configured, before a skill is fetched for it. */
+  isOn(): boolean {
+    return this.#backend() !== null;
+  }
+
+  /** One agent's own files, as the editor shows them. */
+  async agentFiles(agentId: string): Promise<AgentFilesResult> {
+    if (this.#backend() === null) return { ok: false, reason: "vault_off" };
+    if (!isAgentId(agentId)) return { ok: false, reason: "invalid_input" };
+    try {
+      await this.#ready();
+    } catch (error) {
+      console.error("Vault: an agent's files couldn't be read", errorName(error));
+      return { ok: false, reason: "unavailable" };
+    }
+    return { ok: true, files: await this.#agentFilesState(agentId) };
+  }
+
+  /**
+   * One Save: every change in one commit on the branch, with `Kelpie-Via: webchat` and no pull
+   * request (ADR-0058 §1). It syncs first, so a version pushed from elsewhere counts; a change whose
+   * file moved past the version it names is a conflict, and the others still commit.
+   */
+  async saveAgentFiles(agentId: string, input: unknown): Promise<SaveAgentFilesResult> {
+    const backend = this.#backend();
+    if (backend === null) return { ok: false, reason: "vault_off" };
+    const changes = parseChanges(input);
+    if (!isAgentId(agentId) || changes === null) return { ok: false, reason: "invalid_input" };
+    try {
+      return await this.#serialize(() => this.#saveAgentFiles(backend, agentId, changes));
+    } catch (error) {
+      console.error("Vault: an owner's save failed", errorName(error));
+      return { ok: false, reason: "unavailable" };
+    }
+  }
+
+  /** Stages a skill the AgentFiles entrypoint fetched and checked, for the owner's review. */
+  async stageSkill(
+    agentId: string,
+    skill: ParsedSkill,
+    origin: SkillOrigin,
+  ): Promise<FetchSkillResult> {
+    if (this.#backend() === null) return { ok: false, reason: "vault_off" };
+    if (!isAgentId(agentId) || !isSpecSkillName(skill.name)) {
+      return { ok: false, reason: "invalid_input" };
+    }
+    try {
+      await this.#ready();
+    } catch (error) {
+      console.error("Vault: a skill couldn't be staged", errorName(error));
+      return { ok: false, reason: "unavailable" };
+    }
+    this.#dropStaged();
+    const { id, hash } = await this.#stage(agentId, skill, origin);
+    const skillMd = skill.files[0]?.content ?? "";
+    return {
+      ok: true,
+      staged: {
+        id,
+        name: skill.name,
+        description: skill.description,
+        origin,
+        files: skill.files.map((file) => ({
+          path: file.path,
+          bytes: fileBytes(file).byteLength,
+          script: !file.binary && isScript(file.path),
+          binary: file.binary === true,
+        })),
+        leftOut: skill.leftOut.slice(0, 50),
+        skillMd,
+        bytes: skill.bytes,
+        hash,
+        scan: scanSkill(skill.files),
+        replaces: await this.#replaces(agentId, skill),
+      },
+    };
+  }
+
+  /** A skill's files, kept outside the vault under an id the Save names. */
+  async #stage(
+    agentId: string,
+    skill: Pick<ParsedSkill, "name" | "files">,
+    origin: SkillOrigin,
+  ): Promise<{ id: string; hash: string }> {
+    const id = stageId();
+    const hash = await skillHash(skill.files);
+    const now = Date.now();
+    this.ctx.storage.transactionSync(() => {
+      this.#exec(
+        "INSERT INTO staged_skills (id, agent, name, origin, hash, at) VALUES (?, ?, ?, ?, ?, ?)",
+        id,
+        agentId,
+        skill.name,
+        JSON.stringify(origin),
+        hash,
+        now,
+      );
+      for (const file of skill.files) {
+        this.#exec(
+          "INSERT INTO staged_files (stage, path, content, binary) VALUES (?, ?, ?, ?)",
+          id,
+          file.path,
+          file.content,
+          file.binary ? 1 : 0,
+        );
+      }
+    });
+    return { id, hash };
+  }
+
+  /** Where an installed skill came from, for "Look for an update". */
+  skillOrigin(agentId: string, name: string): SkillOrigin | null {
+    if (!isAgentId(agentId) || !isSpecSkillName(name)) return null;
+    return this.#install(agentId, name)?.origin ?? null;
+  }
+
+  async #agentFilesState(agentId: string): Promise<AgentFilesState> {
+    const state = async (path: string): Promise<AgentFileState | null> => {
+      const content = this.#visible(path);
+      return content === null ? null : { content, version: await gitBlobSha(content) };
+    };
+    const prefix = `agents/${agentId}/skills/`;
+    const skills: AgentSkillState[] = [];
+    for (const { path } of this.#exec<{ path: string }>(
+      "SELECT path FROM files WHERE path LIKE ? ORDER BY path",
+      `${prefix}%/SKILL.md`,
+    )) {
+      const name = path.slice(prefix.length, -"/SKILL.md".length);
+      if (!isSpecSkillName(name)) continue;
+      const file = await state(path);
+      if (file === null) continue;
+      const install = this.#install(agentId, name);
+      skills.push({
+        ...file,
+        name,
+        description: skillEntry(path, file.content).description,
+        origin: install?.origin ?? null,
+        edited:
+          install !== null &&
+          install.origin.kind !== "created" &&
+          install.skillSha !== file.version,
+      });
+    }
+    return {
+      soul: await state(fileKindPath(agentId, "soul")),
+      rules: await state(fileKindPath(agentId, "rules")),
+      memory: await state(fileKindPath(agentId, "memory")),
+      skills,
+    };
+  }
+
+  #install(agentId: string, name: string): { origin: SkillOrigin; skillSha: string } | null {
+    const row = this.#exec<{ origin: string; skill_sha: string }>(
+      "SELECT origin, skill_sha FROM skill_installs WHERE agent = ? AND name = ?",
+      agentId,
+      name,
+    )[0];
+    return row ? { origin: JSON.parse(row.origin) as SkillOrigin, skillSha: row.skill_sha } : null;
+  }
+
+  /** Staged skills an hour old go, and the vault keeps at most 10 waiting. */
+  #dropStaged(): void {
+    const old = this.#exec<{ id: string }>(
+      `SELECT id FROM staged_skills WHERE at <= ? OR id NOT IN
+         (SELECT id FROM staged_skills ORDER BY at DESC LIMIT 9)`,
+      Date.now() - STAGED_FOR_MS,
+    );
+    for (const { id } of old) this.#dropStage(id);
+  }
+
+  #dropStage(id: string): void {
+    this.#exec("DELETE FROM staged_files WHERE stage = ?", id);
+    this.#exec("DELETE FROM staged_skills WHERE id = ?", id);
+  }
+
+  /**
+   * A skill's files as the vault has them now: its Markdown from the working copy, and the other
+   * files Kelpie installed, as it wrote them. A file added elsewhere that isn't Markdown is unknown.
+   */
+  #skillFiles(agentId: string, name: string): SkillFile[] {
+    const folder = skillFolder(agentId, name);
+    const files = new Map<string, SkillFile>();
+    for (const row of this.#exec<{ path: string; content: string; binary: number }>(
+      "SELECT path, content, binary FROM skill_files WHERE agent = ? AND name = ?",
+      agentId,
+      name,
+    )) {
+      if (isVaultText(`${folder}${row.path}`)) continue;
+      files.set(row.path, {
+        path: row.path,
+        content: row.content,
+        ...(row.binary ? { binary: true as const } : {}),
+      });
+    }
+    for (const { path } of this.#exec<{ path: string }>(
+      "SELECT path FROM files WHERE path LIKE ?",
+      `${folder}%`,
+    )) {
+      const content = this.#visible(path);
+      if (content !== null) {
+        files.set(path.slice(folder.length), { path: path.slice(folder.length), content });
+      }
+    }
+    return [...files.values()];
+  }
+
+  /** What a staged skill would replace: the agent's skill of the same name, and how they differ. */
+  async #replaces(agentId: string, skill: ParsedSkill): Promise<StagedSkill["replaces"]> {
+    const current = this.#visible(skillPath(agentId, skill.name));
+    if (current === null) return null;
+    const version = await gitBlobSha(current);
+    const install = this.#install(agentId, skill.name);
+    const before = new Map(
+      await Promise.all(
+        this.#skillFiles(agentId, skill.name).map(
+          async (file) => [file.path, await gitBlobSha(fileBytes(file))] as const,
+        ),
+      ),
+    );
+    const changes: NonNullable<StagedSkill["replaces"]>["changes"] = [];
+    for (const file of skill.files) {
+      const sha = await gitBlobSha(fileBytes(file));
+      const was = before.get(file.path);
+      if (was === undefined) changes.push({ path: file.path, change: "added" });
+      else if (was !== sha) changes.push({ path: file.path, change: "changed" });
+      before.delete(file.path);
+    }
+    for (const path of before.keys()) changes.push({ path, change: "removed" });
+    changes.sort((a, b) => (a.path < b.path ? -1 : 1));
+    return {
+      version,
+      edited: install !== null && install.origin.kind !== "created" && install.skillSha !== version,
+      changes,
+      diff: lineDiff(current, skill.files[0]?.content ?? ""),
+    };
+  }
+
+  /** The Save itself. Runs inside `#serialize`. */
+  async #saveAgentFiles(
+    backend: VaultBackend,
+    agentId: string,
+    changes: readonly AgentFileChange[],
+  ): Promise<SaveAgentFilesResult> {
+    this.#dropStaged();
+    let keepUnknown = false;
+    for (let attempt = 1; ; attempt += 1) {
+      await this.#sync();
+      const plan = await this.#planSave(agentId, changes, keepUnknown);
+      if (plan.writes.size === 0 && plan.deletions.size === 0) {
+        return {
+          ok: true,
+          outcomes: plan.outcomes,
+          commit: null,
+          undo: [],
+          files: await this.#agentFilesState(agentId),
+        };
+      }
+      const previousHead = this.#get("head");
+      const outcome = await backend.commit({
+        branch: await this.#branch(backend),
+        expectedHead: previousHead ?? "",
+        headline: saveHeadline(agentId, plan.what),
+        body: ["Kelpie-Via: webchat", ...plan.trailers].join("\n"),
+        writes: [...plan.writes].map(([path, file]) => ({
+          path,
+          content: file.binary ? fromBase64(file.content) : file.content,
+        })),
+        deletions: [...plan.deletions],
+      });
+      if (outcome.kind === "stale") {
+        if (attempt >= MAX_COMMIT_ATTEMPTS) throw new Error("the vault kept moving while saving");
+        continue;
+      }
+      if (outcome.kind === "refused") {
+        // A file Kelpie installed may have gone since, on GitHub: try once without removing those.
+        if (!keepUnknown && plan.unknown > 0) {
+          keepUnknown = true;
+          continue;
+        }
+        throw new Error(`GitHub refused the owner's save (${outcome.reason})`);
+      }
+      return this.#applySave(agentId, plan, previousHead, outcome.commit);
+    }
+  }
+
+  /**
+   * What a Save would write, file by file, against the vault as it is now. `keepUnknown` leaves
+   * alone the files outside the working copy that a removed skill's install wrote.
+   */
+  async #planSave(
+    agentId: string,
+    changes: readonly AgentFileChange[],
+    keepUnknown: boolean,
+  ): Promise<SavePlan> {
+    const plan: SavePlan = {
+      outcomes: [],
+      writes: new Map(),
+      deletions: new Set(),
+      unknown: 0,
+      trailers: [],
+      what: { files: [], skills: 0 },
+      skills: [],
+      undo: [],
+    };
+    const held = new Set(
+      this.#exec<{ path: string }>(
+        `SELECT held.path AS path FROM held JOIN files ON files.path = held.path
+         AND files.content = held.content WHERE held.state != 'resolved'`,
+      ).map((row) => row.path),
+    );
+    const current = async (path: string) => {
+      const content = this.#visible(path);
+      return content === null ? null : { content, version: await gitBlobSha(content) };
+    };
+    // A skill that two changes touch is one change too many; the second is refused.
+    const touched = new Set<string>();
+    const staged = new Map<string, StagedRow>();
+    for (const change of changes) {
+      if (change.file !== "install") continue;
+      const row = this.#staged(agentId, change.staged);
+      if (row) staged.set(change.staged, row);
+    }
+    let total = 0;
+    for (const change of changes) {
+      if (change.file === "soul" || change.file === "rules" || change.file === "memory") {
+        const path = fileKindPath(agentId, change.file);
+        const now = await current(path);
+        const refusal = held.has(path)
+          ? "held"
+          : change.content === null
+            ? null
+            : change.file === "memory"
+              ? memoryProblem(change.content)
+              : null;
+        if (refusal) {
+          plan.outcomes.push({ status: "refused", reason: refusal });
+          continue;
+        }
+        if ((now?.version ?? null) !== change.version) {
+          plan.outcomes.push({ status: "conflict", current: now });
+          continue;
+        }
+        if (
+          change.content !== null &&
+          (sizeOf(change.content) > MAX_FILE_BYTES || heldOnSync(change.content))
+        ) {
+          plan.outcomes.push({
+            status: "refused",
+            reason: sizeOf(change.content) > MAX_FILE_BYTES ? "too_large" : "invalid",
+          });
+          continue;
+        }
+        const written = change.content === null ? null : await gitBlobSha(change.content);
+        plan.outcomes.push({ status: "saved", version: written });
+        if ((now?.content ?? null) === change.content) continue;
+        if (change.content === null) plan.deletions.add(path);
+        else {
+          plan.writes.set(path, { content: change.content });
+          total += sizeOf(change.content);
+        }
+        plan.what.files.push(change.file);
+        plan.undo.push({ file: change.file, content: now?.content ?? null, version: written });
+        continue;
+      }
+      const name =
+        change.file === "install"
+          ? (staged.get(change.staged)?.name ?? null)
+          : change.file === "skill"
+            ? change.name
+            : null;
+      if (name === null) {
+        plan.outcomes.push({ status: "refused", reason: "staged_gone" });
+        continue;
+      }
+      const folder = skillFolder(agentId, name);
+      const path = skillPath(agentId, name);
+      if (touched.has(name)) {
+        plan.outcomes.push({ status: "refused", reason: "invalid" });
+        continue;
+      }
+      touched.add(name);
+      if ([...held].some((heldPath) => heldPath.startsWith(folder))) {
+        plan.outcomes.push({ status: "refused", reason: "held" });
+        continue;
+      }
+      const now = await current(path);
+      if ((now?.version ?? null) !== change.version) {
+        plan.outcomes.push({ status: "conflict", current: now });
+        continue;
+      }
+      const before = now === null ? [] : this.#skillFiles(agentId, name);
+      const install = this.#install(agentId, name);
+      let files: SkillFile[] | null;
+      let record: SavedSkill["record"];
+      if (change.file === "install") {
+        const row = staged.get(change.staged);
+        if (!row || row.hash !== change.hash) {
+          plan.outcomes.push({ status: "refused", reason: row ? "invalid" : "staged_gone" });
+          continue;
+        }
+        files = row.files;
+        record = { origin: row.origin, hash: row.hash, files: row.files };
+        plan.trailers.push(...skillTrailers(name, row.origin, row.hash));
+      } else if (change.content === null) {
+        files = null;
+        record = null;
+      } else {
+        const checked = checkSkillMd(change.content, name);
+        const tooLarge = sizeOf(change.content) > MAX_FILE_BYTES;
+        if (!checked.ok || tooLarge || heldOnSync(change.content)) {
+          plan.outcomes.push({
+            status: "refused",
+            reason: tooLarge ? "too_large" : checked.ok ? "invalid" : "skill_invalid",
+          });
+          continue;
+        }
+        // An edit keeps every other file of the skill; a new one is the editor's own.
+        files = [
+          ...before.filter((file) => file.path !== "SKILL.md"),
+          { path: "SKILL.md", content: change.content },
+        ];
+        record =
+          now === null
+            ? { origin: { kind: "created" }, hash: await skillHash(files), files: [] }
+            : "keep";
+      }
+      const after = new Map((files ?? []).map((file) => [file.path, file]));
+      for (const file of after.values()) {
+        const previous = before.find((was) => was.path === file.path);
+        if (
+          previous?.content === file.content &&
+          Boolean(previous.binary) === Boolean(file.binary)
+        ) {
+          continue;
+        }
+        plan.writes.set(`${folder}${file.path}`, file);
+        total += fileBytes(file).byteLength;
+      }
+      for (const file of before) {
+        if (after.has(file.path)) continue;
+        const known = isVaultText(`${folder}${file.path}`);
+        if (!known && keepUnknown) continue;
+        if (!known) plan.unknown += 1;
+        plan.deletions.add(`${folder}${file.path}`);
+      }
+      const written =
+        files === null ? null : await gitBlobSha(after.get("SKILL.md")?.content ?? "");
+      plan.outcomes.push({ status: "saved", version: written });
+      plan.what.skills += 1;
+      plan.skills.push({
+        name,
+        version: written,
+        record,
+        stage: change.file === "install" ? change.staged : null,
+        // Undo puts the skill back as it was, through a stage of its own once the commit lands.
+        undo:
+          now === null
+            ? { kind: "remove", version: written }
+            : change.file === "skill" && change.content !== null
+              ? { kind: "edit", content: now.content, version: written }
+              : {
+                  kind: "restore",
+                  files: before,
+                  origin: install?.origin ?? { kind: "created" },
+                  version: written,
+                },
+      });
+    }
+    if (total > MAX_WRITE_BYTES) {
+      return {
+        ...plan,
+        outcomes: plan.outcomes.map((outcome) =>
+          outcome.status === "saved" ? { status: "refused", reason: "too_large" } : outcome,
+        ),
+        writes: new Map(),
+        deletions: new Set(),
+      };
+    }
+    return plan;
+  }
+
+  #staged(agentId: string, id: string): StagedRow | null {
+    const row = this.#exec<{ name: string; origin: string; hash: string }>(
+      "SELECT name, origin, hash FROM staged_skills WHERE id = ? AND agent = ? AND at > ?",
+      id,
+      agentId,
+      Date.now() - STAGED_FOR_MS,
+    )[0];
+    if (!row) return null;
+    const files = this.#exec<{ path: string; content: string; binary: number }>(
+      "SELECT path, content, binary FROM staged_files WHERE stage = ? ORDER BY path",
+      id,
+    ).map((file) => ({
+      path: file.path,
+      content: file.content,
+      ...(file.binary ? { binary: true as const } : {}),
+    }));
+    return { name: row.name, origin: JSON.parse(row.origin) as SkillOrigin, hash: row.hash, files };
+  }
+
+  /** The commit landed: the working copy, the installs and Undo follow it. */
+  async #applySave(
+    agentId: string,
+    plan: SavePlan,
+    previousHead: string | null,
+    commit: string,
+  ): Promise<SaveAgentFilesResult> {
+    const shas = new Map(
+      await Promise.all(
+        [...plan.writes].map(
+          async ([path, file]) => [path, await gitBlobSha(fileBytes(file))] as const,
+        ),
+      ),
+    );
+    const indexed = new Map<string, string | null>();
+    this.ctx.storage.transactionSync(() => {
+      for (const [path, file] of plan.writes) {
+        this.#exec("DELETE FROM authored WHERE path = ?", path);
+        this.#exec("DELETE FROM owner_merges WHERE path = ?", path);
+        // The working copy holds Markdown only, as a sync would bring it.
+        if (!isVaultText(path) || file.binary) continue;
+        this.#exec(
+          "INSERT OR REPLACE INTO files (path, content, blob_sha) VALUES (?, ?, ?)",
+          path,
+          file.content,
+          shas.get(path) ?? "",
+        );
+        indexed.set(path, file.content);
+      }
+      for (const path of plan.deletions) {
+        this.#exec("DELETE FROM files WHERE path = ?", path);
+        this.#exec("DELETE FROM authored WHERE path = ?", path);
+        this.#exec("DELETE FROM owner_merges WHERE path = ?", path);
+        if (isVaultText(path)) indexed.set(path, null);
+      }
+      for (const skill of plan.skills) {
+        if (skill.record === "keep") continue;
+        this.#exec("DELETE FROM skill_files WHERE agent = ? AND name = ?", agentId, skill.name);
+        this.#exec("DELETE FROM skill_installs WHERE agent = ? AND name = ?", agentId, skill.name);
+        if (skill.record === null) continue;
+        this.#exec(
+          `INSERT INTO skill_installs (agent, name, origin, hash, skill_sha, at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          agentId,
+          skill.name,
+          JSON.stringify(skill.record.origin),
+          skill.record.hash,
+          skill.version ?? "",
+          Date.now(),
+        );
+        for (const file of skill.record.files) {
+          this.#exec(
+            "INSERT INTO skill_files (agent, name, path, content, binary) VALUES (?, ?, ?, ?, ?)",
+            agentId,
+            skill.name,
+            file.path,
+            file.content,
+            file.binary ? 1 : 0,
+          );
+        }
+      }
+      for (const skill of plan.skills) if (skill.stage) this.#dropStage(skill.stage);
+      this.#set("head", commit);
+    });
+    await this.#index(previousHead, commit, indexed);
+    const undo: AgentFileChange[] = [...plan.undo];
+    for (const skill of plan.skills) {
+      if (skill.undo.kind === "remove") {
+        undo.push({ file: "skill", name: skill.name, content: null, version: skill.undo.version });
+      } else if (skill.undo.kind === "edit") {
+        undo.push({
+          file: "skill",
+          name: skill.name,
+          content: skill.undo.content,
+          version: skill.undo.version,
+        });
+      } else {
+        const { id, hash } = await this.#stage(
+          agentId,
+          { name: skill.name, files: skill.undo.files },
+          skill.undo.origin,
+        );
+        undo.push({ file: "install", staged: id, hash, version: skill.undo.version });
+      }
+    }
+    return {
+      ok: true,
+      outcomes: plan.outcomes,
+      commit,
+      undo,
+      files: await this.#agentFilesState(agentId),
+    };
   }
 
   /** The webhook's call: a push reached `ref`. The alarm syncs a moment later, once per burst. */
