@@ -539,6 +539,7 @@ export class SkillInstall {
       if (fold) fold.finished.then(hand, hand);
       else hand();
     };
-    requestAnimationFrame(finish);
+    // Adding is the pending change itself: the check follows as soon as the label has rolled.
+    queueMicrotask(finish);
   }
 }
