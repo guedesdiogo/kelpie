@@ -8,8 +8,12 @@ import {
   LlmError,
   type LlmErrorCode,
   type ModelSelection,
+  type ProviderId,
   type RoutedRequest,
   type RouterEvent,
+  type RouteSession,
+  type ToolCallPart,
+  type ToolResult,
   type Usage,
 } from "@kelpie/llm";
 import type { ConversationPorts, ModelCall } from "../src/ports.ts";
@@ -42,14 +46,24 @@ type ModelScript =
     }
   /** The router fell back from these routes, then `text` answered (#293). */
   | { kind: "fellBack"; fallbacks: FallbackEvent[]; text: string }
-  /** Sends these events as they are. */
-  | { kind: "events"; events: RouterEvent[] }
+  /**
+   * Sends these events as they are, as a route that runs its own tool loop would (#295): read on
+   * past a `tool_request` the turn didn't answer, it fails. With `reply`, `text` then answers,
+   * naming the call's session, if it had one, as `clean` or not, under `id` if given.
+   */
+  | {
+      kind: "events";
+      events: RouterEvent[];
+      reply?: { text: string; clean: boolean; id?: string };
+    }
   /** The router fell back from these routes, then `route` failed with `code` (#293). */
   | {
       kind: "noRoute";
       fallbacks: FallbackEvent[];
       code: LlmErrorCode;
-      route?: { provider: "anthropic" | "openai"; model: string };
+      route?: { provider: ProviderId; model: string };
+      /** The error's `resetsAt` and `unverified` (#295). */
+      details?: { resetsAt?: number; unverified?: boolean };
     };
 
 export const reply = (text: string, usage?: Usage[]): ModelScript =>
@@ -67,9 +81,42 @@ export const fellBack = (fallbacks: FallbackEvent[], text: string): ModelScript 
 export const noRoute = (
   code: LlmErrorCode,
   fallbacks: FallbackEvent[] = [],
-  route?: { provider: "anthropic" | "openai"; model: string },
-): ModelScript => ({ kind: "noRoute", fallbacks, code, ...(route ? { route } : {}) });
+  route?: { provider: ProviderId; model: string },
+  details?: { resetsAt?: number; unverified?: boolean },
+): ModelScript => ({
+  kind: "noRoute",
+  fallbacks,
+  code,
+  ...(route ? { route } : {}),
+  ...(details ? { details } : {}),
+});
 export const events = (...sent: RouterEvent[]): ModelScript => ({ kind: "events", events: sent });
+/**
+ * A route that runs its own tool loop (#295): its rounds, then `text` as the reply, which names the
+ * call's session as clean unless `clean` is false, by the call's id unless `id` is given.
+ */
+export const routeReply = (
+  text: string,
+  sent: RouterEvent[] = [],
+  { clean = true, id }: { clean?: boolean; id?: string } = {},
+): ModelScript => ({
+  kind: "events",
+  events: sent,
+  reply: { text, clean, ...(id === undefined ? {} : { id }) },
+});
+/** One round of a route's own tool loop (#295): the reply asking for the calls, then each request. */
+export function round(...calls: { id: string; name: string; input?: unknown }[]): RouterEvent[] {
+  const parts: ToolCallPart[] = calls.map(({ id, name, input }) => ({
+    type: "tool_call",
+    id,
+    name,
+    input: input ?? {},
+  }));
+  return [
+    { type: "tool_round", message: { role: "assistant", parts }, usage: FAKE_USAGE },
+    ...parts.map((call) => ({ type: "tool_request" as const, call })),
+  ];
+}
 export const toolCalls = (...calls: { name: string; input?: unknown }[]): ModelScript => ({
   kind: "tools",
   calls: calls.map(({ name, input }) => ({ name, input: input ?? {} })),
@@ -140,6 +187,12 @@ export interface FakeWorld {
   /** The time `now()` returns; tests move it. Starts a minute ahead so no schedule comes due. */
   clock: number;
   requests: RoutedRequest[];
+  /** The session each model call carried, in call order, undefined for none (#295). */
+  sessions: (RouteSession | undefined)[];
+  /** Every tool result a call was answered with, in order (#295). */
+  answers: ToolResult[];
+  /** Answers with these numbers (0-based, across the world) wait until removed from the set. */
+  holdAnswers: Set<number>;
   /** The tier of each model call, in call order. */
   /** What each model call asked for: its area and the agent's model settings (#286). */
   selections: ModelSelection[];
@@ -207,12 +260,16 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
   let sleeps = 0;
   let sends = 0;
   let calls = 0;
+  let answers = 0;
   const world: FakeWorld = {
     tools: [],
     steps: [],
     expireDeadlines: false,
     clock: Date.now() + 60_000,
     requests: [],
+    sessions: [],
+    answers: [],
+    holdAnswers: new Set(),
     selections: [],
     modelHeld: false,
     cancelled: 0,
@@ -250,9 +307,11 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
         world.awaits.push({ agentId, conversation, step, until });
         await world.onAwait?.({ agentId, conversation, step, until });
       },
-      async generate(selection, request): Promise<ModelCall> {
+      async generate(selection, request, session): Promise<ModelCall> {
         world.requests.push(structuredClone(request));
         world.selections.push(structuredClone(selection));
+        world.sessions.push(session && structuredClone(session));
+        const answered = new Set<string>();
         const script = scripts.shift() ?? reply("(no script left)");
         let release: (() => void) | undefined;
         const cancelledPromise = new Promise<void>((resolve) => {
@@ -303,10 +362,27 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
               yield* script.fallbacks;
               const error = new LlmError("no route answered", script.code, false);
               if (script.route) error.route = script.route;
+              Object.assign(error, script.details);
               throw error;
             }
             case "events":
-              yield* script.events;
+              for (const event of script.events) {
+                yield event;
+                if (event.type === "tool_request" && !answered.has(event.call.id)) {
+                  throw new Error("The route went on without the call's result");
+                }
+              }
+              if (!script.reply) return;
+              yield { type: "text", delta: script.reply.text };
+              yield {
+                type: "finish",
+                reason: "stop",
+                message: { role: "assistant", parts: [{ type: "text", text: script.reply.text }] },
+                usage: FAKE_USAGE,
+                ...(session
+                  ? { session: { id: script.reply.id ?? session.id, clean: script.reply.clean } }
+                  : {}),
+              };
               return;
             case "fellBack":
               yield* script.fallbacks;
@@ -333,6 +409,15 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
           cancel() {
             world.cancelled += 1;
             release?.();
+          },
+          async answer(result) {
+            const number = answers++;
+            world.answers.push(structuredClone(result));
+            answered.add(result.callId);
+            // Polls a plain set: a promise created here can't be resolved from the test's context.
+            while (world.holdAnswers.has(number)) {
+              await new Promise((resolve) => setTimeout(resolve, 5));
+            }
           },
         };
       },

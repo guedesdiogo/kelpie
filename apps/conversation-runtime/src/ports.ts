@@ -26,9 +26,12 @@ import type {
 import type { Destination } from "@kelpie/conversation/contract";
 import {
   fromNdjsonStream,
+  LlmError,
   type ModelSelection,
   type RoutedRequest,
   type RouterEvent,
+  type RouteSession,
+  type ToolResult,
 } from "@kelpie/llm";
 import type { ModelDescription, ModelSettings } from "@kelpie/llm/models";
 import { configurationTools, heldTools } from "./configuration.ts";
@@ -37,10 +40,15 @@ import { subagentTools } from "./subagent-tools.ts";
 import { taskTools } from "./task-tools.ts";
 import type { ToolActivity, ToolProvider } from "./tools.ts";
 
-/** One model call: its events, the router's fallbacks among them, and a way to stop it. */
+/**
+ * One model call: its events, the router's fallbacks among them, and a way to stop it. A route that
+ * runs its own tool loop asks for each call's result with a `tool_request` event, and `answer`
+ * gives it (#295). It rejects when the gateway refuses the result, unless the call already ended.
+ */
 export interface ModelCall {
   events: AsyncIterable<RouterEvent>;
   cancel(): void;
+  answer(result: ToolResult): Promise<void>;
 }
 
 /**
@@ -51,8 +59,16 @@ export type TurnStep = "memory" | "thinking" | "tool" | "idle";
 
 /** Everything the ConversationAgent needs from outside, so tests can replace it (ADR-0002). */
 export interface ConversationPorts {
-  /** One model call, for an area with the agent's model settings (ADR-0036 §2). */
-  generate(selection: ModelSelection, request: RoutedRequest): Promise<ModelCall>;
+  /**
+   * One model call, for an area with the agent's model settings (ADR-0036 §2). `session` is the
+   * conversation's on a route that keeps one (#295); the gateway takes it only for the
+   * `conversation` area.
+   */
+  generate(
+    selection: ModelSelection,
+    request: RoutedRequest,
+    session?: RouteSession,
+  ): Promise<ModelCall>;
   /** The providers of the agents' tools (ADR-0014). */
   tools: readonly ToolProvider[];
   /**
@@ -133,9 +149,11 @@ interface LlmGatewayBinding {
   generate(
     selection: ModelSelection,
     request: RoutedRequest,
+    session?: RouteSession,
   ): Promise<{
     events(): Promise<ReadableStream<Uint8Array>>;
     cancel(): Promise<void>;
+    answer(result: ToolResult): Promise<{ ok: true } | { ok: false; reason: string }>;
   }>;
 }
 
@@ -223,8 +241,8 @@ function productionPorts(env: Env): ConversationPorts {
     env.AGENT_HOST.getByName(id) as unknown as Remote<AgentHostContract>;
   const commands = configCommands(env);
   return {
-    async generate(selection, request) {
-      const generation = await gateway.generate(selection, request);
+    async generate(selection, request, session) {
+      const generation = await gateway.generate(selection, request, session);
       const dispose = () => (generation as Partial<Disposable>)[Symbol.dispose]?.();
       // Cancelling the stream doesn't cross RPC, so stopping early calls cancel() explicitly.
       const cancel = () => {
@@ -245,6 +263,14 @@ function productionPorts(env: Env): ConversationPorts {
         cancel: () => {
           cancel();
           dispose();
+        },
+        async answer(result) {
+          const outcome = await generation.answer(result);
+          // A call that ended has nothing left to answer, and its stream says why. Otherwise the
+          // route would wait for a result that never comes, until its own deadline.
+          if (!outcome.ok && outcome.reason !== "ended") {
+            throw new LlmError("The gateway refused a tool's result", "protocol", false);
+          }
         },
       };
     },

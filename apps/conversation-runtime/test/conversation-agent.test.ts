@@ -85,6 +85,16 @@ async function setPromptKeys(stub: ReturnType<typeof agent>, key: string | null)
   });
 }
 
+/**
+ * Cancels the schedules a test left armed: a flush that fires during a later test runs through that
+ * test's ports, and takes its script.
+ */
+async function disarm(stub: ReturnType<typeof agent>) {
+  await runInDurableObject(stub, async (instance: ConversationAgent) => {
+    for (const schedule of instance.getSchedules()) await instance.cancelSchedule(schedule.id);
+  });
+}
+
 async function statuses(stub: ReturnType<typeof agent>) {
   return (await stub.outbox()).map((row) => row.status);
 }
@@ -114,6 +124,7 @@ describe("ConversationAgent buffering", () => {
       instance.getSchedules(),
     );
     expect(schedules).toHaveLength(1);
+    await disarm(stub);
   });
 
   it("answers at once when the owner removes the wait", async () => {
@@ -141,6 +152,7 @@ describe("ConversationAgent buffering", () => {
       instance.getSchedules(),
     );
     expect(schedules).toHaveLength(1);
+    await disarm(stub);
   });
 
   it("ignores a flush from a schedule that a newer message replaced", async () => {
@@ -244,6 +256,7 @@ describe("ConversationAgent buffering", () => {
     const lastRequest = JSON.stringify(world.requests.at(-1)?.messages);
     expect(lastRequest).toContain("first part");
     expect(lastRequest).toContain("second part");
+    await disarm(stub);
   });
 
   it("starts one turn when two flushes race, and doesn't interrupt it", async () => {
@@ -518,6 +531,42 @@ describe("ConversationAgent turns", () => {
       expect(world.sent).toEqual([]);
     });
 
+    it("tells a limit's reset in the conversation's time zone (#295)", async () => {
+      const claudeCode = { provider: "claude-code" as const, model: "claude-sonnet-5-5" };
+      // 18:00 in São Paulo.
+      const resetsAt = Date.UTC(2026, 9, 17, 21, 0);
+      const limit = {
+        type: "fallback" as const,
+        failed: { ...claudeCode, code: "rate_limited" as const, resetsAt },
+        next: { provider: "anthropic" as const, model: "claude-haiku-5-5" },
+      };
+      const world = use(
+        fakeWorld([
+          fellBack([limit], "Here it is."),
+          noRoute("rate_limited", [], claudeCode, { resetsAt }),
+        ]),
+      );
+      const stub = agent("route-limit-zone");
+      const zone = { timeZone: "America/Sao_Paulo" };
+      await stub.ingest(message("m1", "what is the plan?", zone));
+      await stub.flush();
+      const until = "until Oct 17, 18:00";
+      await vi.waitFor(() =>
+        expect(world.sent).toEqual([
+          "Here it is.",
+          `Note: Claude Code (claude-sonnet-5-5) reached its usage limit ${until}, so Anthropic (claude-haiku-5-5) answered.`,
+        ]),
+      );
+
+      await stub.ingest(message("m2", "and now?", zone));
+      await stub.flush();
+      await vi.waitFor(() =>
+        expect(world.sent.at(-1)).toBe(
+          `I couldn't answer this message: Claude Code (claude-sonnet-5-5) reached its usage limit ${until}.`,
+        ),
+      );
+    });
+
     it("says a notice again when it didn't go out", async () => {
       const world = use(fakeWorld([fellBack([spent], "One."), fellBack([spent], "Two.")]));
       world.failSends.add(1);
@@ -536,37 +585,38 @@ describe("ConversationAgent turns", () => {
 
   describe("a route that runs its own tool loop (#295)", () => {
     const call = { type: "tool_call" as const, id: "toolu_01", name: "search_memory", input: {} };
-    const round = {
+    const empty = {
       type: "tool_round" as const,
-      message: { role: "assistant" as const, parts: [call] },
+      message: { role: "assistant" as const, parts: [{ type: "text" as const, text: "Hm." }] },
       usage: FAKE_USAGE,
     };
 
     it.each([
-      ["a tool round", "route-loop-round", round],
-      ["a tool request", "route-loop-request", { type: "tool_request" as const, call }],
-    ])(
-      "fails the turn on %s, which this runtime can't handle yet, and says so",
-      async (_label, name, event) => {
-        const world = use(fakeWorld([events(event), reply("Back.")]));
-        const stub = agent(name);
-        await stub.ingest(message("m1", "what do you remember?"));
-        await stub.flush();
+      ["a round that asks for no call", "route-loop-round", empty],
+      [
+        "a request no round asked for",
+        "route-loop-request",
+        { type: "tool_request" as const, call },
+      ],
+    ])("fails the turn on %s, and says so", async (_label, name, event) => {
+      const world = use(fakeWorld([events(event), reply("Back.")]));
+      const stub = agent(name);
+      await stub.ingest(message("m1", "what do you remember?"));
+      await stub.flush();
 
-        await vi.waitFor(async () =>
-          expect(await stub.turns()).toMatchObject([{ status: "failed" }]),
-        );
-        expect(world.sent).toEqual([
-          "I couldn't answer this message: the model answered in a way Kelpie can't read.",
-        ]);
-        // Nothing of the route's loop reaches history.
-        expect(await stub.history()).toEqual([user("what do you remember?")]);
+      await vi.waitFor(async () =>
+        expect(await stub.turns()).toMatchObject([{ status: "failed" }]),
+      );
+      expect(world.sent).toEqual([
+        "I couldn't answer this message: the model answered in a way Kelpie can't read.",
+      ]);
+      // Nothing of the route's loop reaches history.
+      expect(await stub.history()).toEqual([user("what do you remember?")]);
 
-        await stub.ingest(message("m2", "and now?"));
-        await stub.flush();
-        await vi.waitFor(() => expect(world.sent.at(-1)).toBe("Back."));
-      },
-    );
+      await stub.ingest(message("m2", "and now?"));
+      await stub.flush();
+      await vi.waitFor(() => expect(world.sent.at(-1)).toBe("Back."));
+    });
   });
 
   it("fails the turn when a send fails, keeping what was already sent", async () => {

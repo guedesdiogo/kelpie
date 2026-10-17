@@ -114,6 +114,23 @@ describe("a task's run (#335)", () => {
     expect(await agent(`runs-done:task:${task.id}`).turns()).not.toHaveLength(0);
   });
 
+  it("carries no route session: a task's conversation stays off a route that keeps one (#295)", async () => {
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "complete_task", input: { result: "Watered." } }),
+        reply("Done."),
+      ]),
+    );
+    const task = await queue("runs-no-session", "Water the plants");
+
+    // The task is done once `complete_task` runs, before the turn's second model call: wait for both.
+    await until(async () => {
+      expect(await statusOf("runs-no-session", task.id)).toMatchObject({ status: "done" });
+      expect(world.sessions).toHaveLength(2);
+    });
+    expect(world.sessions).toEqual([undefined, undefined]);
+  });
+
   it("nudges once a turn that leaves its task running, then counts the run as failed", async () => {
     const world = use(
       fakeWorld([
