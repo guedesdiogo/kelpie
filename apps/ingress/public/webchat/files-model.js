@@ -9,9 +9,6 @@ export const MEMORY_SEPARATOR = "\n§\n";
 export const MEMORY_NEAR = 0.8;
 export const MAX_DESCRIPTION = 1_024;
 
-/** The file sections, in the editor's order. */
-export const FILE_SECTIONS = ["soul", "rules", "memory", "skills"];
-
 export const characters = (text) => [...text].length;
 
 /** A MEMORY.md's entries: split on Hermes's separator; an empty file has none. */
@@ -52,27 +49,34 @@ export const isSkillName = (value) =>
 
 /**
  * A SKILL.md's name and description, read from the plain lines of its frontmatter, and what is
- * wrong with them, as the vault will check (ADR-0058 §4). The vault reads the YAML in full.
+ * certainly wrong with them, as the vault will check (ADR-0058 §4). YAML these lines can't read
+ * for sure, as a block scalar, a flow value or an alias, is left to the vault, which reads it in
+ * full; its field reads as undefined.
  */
 export function skillFields(content) {
   const block = FRONTMATTER.exec(content)?.[1];
   if (block === undefined) return { name: null, description: null, problem: "frontmatter" };
   const field = (key) => {
-    const line = new RegExp(`^${key}:[ \\t]*(.*)$`, "m").exec(block)?.[1]?.trim() ?? null;
-    if (line === null) return null;
-    const quoted = /^(["'])(.*)\1$/.exec(line);
-    return quoted ? quoted[2] : line;
+    const match = new RegExp(`^${key}:(?:[ \\t]+(.*))?$`, "m").exec(block);
+    if (!match) return null;
+    const value = (match[1] ?? "").trim();
+    const quoted = /^(["'])(.*)\1$/.exec(value);
+    if (quoted) return quoted[1] === '"' && quoted[2].includes("\\") ? undefined : quoted[2];
+    // Empty, as before an indented value, or the start of something other than plain text.
+    if (value === "" || /^[|>[{&*!%@`"']/.test(value)) return undefined;
+    return value.replace(/[ \t]+#.*$/, "");
   };
   const name = field("name");
   const description = field("description");
-  const problem = !isSkillName(name)
-    ? "name"
-    : !description
-      ? "description"
-      : characters(description) > MAX_DESCRIPTION
-        ? "description_too_long"
-        : null;
-  return { name, description, problem };
+  const problem =
+    name === null || (name !== undefined && !isSkillName(name))
+      ? "name"
+      : description === null || description?.trim() === ""
+        ? "description"
+        : description !== undefined && characters(description) > MAX_DESCRIPTION
+          ? "description_too_long"
+          : null;
+  return { name: name ?? null, description: description ?? null, problem };
 }
 
 /** A new skill's SKILL.md, with the frontmatter the specification asks for. */

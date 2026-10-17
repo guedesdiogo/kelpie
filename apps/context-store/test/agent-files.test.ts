@@ -253,6 +253,24 @@ describe("AgentFiles", () => {
     expect(again.outcomes[0]?.status).toBe("conflict");
   });
 
+  it("takes a save the vault already holds as saved, as a retry whose answer was lost", async () => {
+    const backend = vaultWith({
+      [SOUL]: "# Read",
+      "agents/kelpie/skills/pdf/SKILL.md": skillMd("pdf"),
+    });
+    const read = await version("# Read");
+    await saved([{ file: "soul", content: "# Mine", version: read }]);
+    const retried = await saved([
+      { file: "soul", content: "# Mine", version: read },
+      { file: "skill", name: "pdf", content: skillMd("pdf"), version: NEXT },
+    ]);
+    expect(retried.outcomes).toEqual([
+      { status: "saved", version: await version("# Mine") },
+      { status: "saved", version: await version(skillMd("pdf")) },
+    ]);
+    expect(backend.commitRequests).toHaveLength(1);
+  });
+
   it("writes nothing when nothing changed", async () => {
     const backend = vaultWith({ [SOUL]: "# Same" });
     const result = await saved([

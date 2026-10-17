@@ -243,7 +243,7 @@ describe("reading and editing a file", () => {
     expect(changes).toEqual([`${SOUL}\n- New.`]);
     expect(shown.marks.children).toHaveLength(8);
     // A fence's lines are code, not marks.
-    shown.setContent("```\n# not a heading\n```");
+    type(shown.input, "```\n# not a heading\n```");
     expect(shown.marks.children[1].querySelector(".mk")).toBeNull();
     expect(shown.value).toBe("```\n# not a heading\n```");
   });
@@ -257,8 +257,23 @@ describe("reading and editing a file", () => {
     expect(document.activeElement).toBe(shown.input);
     shown.toggle({ keyboard: true });
     expect(shown.mode).toBe("read");
-    shown.setContent("# Changed");
-    expect(shown.view.textContent).toBe("Changed");
+    // The field that had the keys hid: the switch has them now.
+    expect(document.activeElement).toBe(shown.radios.read);
+  });
+
+  it("keeps the place by a list's item in view, not by the list it is in", () => {
+    const shown = view();
+    const rect = (top, bottom) => () => ({ top, bottom, left: 0, right: 0, width: 0, height: 0 });
+    shown.element.getBoundingClientRect = rect(100, 600);
+    for (const node of shown.view.querySelectorAll("[data-line]")) {
+      node.getBoundingClientRect = rect(0, 50);
+    }
+    const [first, second] = shown.view.querySelectorAll("li");
+    shown.view.querySelector("ul").getBoundingClientRect = rect(70, 140);
+    first.getBoundingClientRect = rect(70, 95);
+    second.getBoundingClientRect = rect(110, 140);
+    shown.setMode("edit", { keyboard: true });
+    expect(shown.input.selectionStart).toBe(SOUL.indexOf("- Confirms"));
   });
 
   it("keeps working where the browser stores nothing", () => {
@@ -324,6 +339,36 @@ describe("the files in the editor", () => {
     });
     $("#editor-name").dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("keeps the keys in the editor when Ctrl+E leaves the edit view", async () => {
+    await open();
+    tab("Soul").click();
+    $(".editor-head [role='radio'][aria-label='Edit']").click();
+    const input = $(".files-soul .doc-input");
+    input.focus();
+    key(input, "e", { ctrlKey: true });
+    expect($(".files-soul .fileview").dataset.mode).toBe("read");
+    expect(document.activeElement).toBe($(".editor-head [role='radio'][aria-label='View']"));
+    key(document.activeElement, "e", { ctrlKey: true });
+    expect($(".files-soul .fileview").dataset.mode).toBe("edit");
+  });
+
+  it("keeps the focus and the caret in an open SKILL.md through a save", async () => {
+    await open();
+    tab("Skills").click();
+    $(".skl-r").click();
+    key($(".files-skills"), "e", { ctrlKey: true });
+    const input = $(".files-skills .doc-input");
+    expect(input.getAttribute("aria-label")).toBe(F.fileOf("SKILL.md", "brief"));
+    type(input, SKILL.replace("Writes a brief.", "Writes briefs."));
+    input.focus();
+    input.setSelectionRange(5, 5);
+    await editor.save();
+    const now = $(".files-skills .doc-input");
+    expect(document.activeElement).toBe(now);
+    expect(now.selectionStart).toBe(5);
+    expect($(".files-skills .fileview").dataset.mode).toBe("edit");
   });
 
   it("saves the soul with the version it read, in one request beside the profile", async () => {
@@ -531,6 +576,34 @@ describe("the memory", () => {
     ]);
   });
 
+  it("shows the rows as saved after a save that left an emptied one out", async () => {
+    await open();
+    tab("Memory").click();
+    const rows = () => $$(".files-memory .mem-t");
+    type(rows()[0], "");
+    io.save.mockImplementationOnce(async (_agentId, changes) => {
+      sent.push(changes);
+      return {
+        ok: true,
+        status: 200,
+        value: {
+          ok: true,
+          commit: V(7),
+          outcomes: [{ status: "saved", version: V(8) }],
+          undo: [],
+          files: files({ memory: { content: "Ana is in Lisbon.", version: V(8) } }),
+        },
+      };
+    });
+    await editor.save();
+    expect(rows().map((row) => row.value)).toEqual(["Ana is in Lisbon."]);
+    type(rows()[0], "Ana is in Lisbon this week.");
+    await editor.save();
+    expect(sent[1]).toEqual([
+      { file: "memory", content: "Ana is in Lisbon this week.", version: V(8) },
+    ]);
+  });
+
   it("counts its budget, turns --warm past 80%, and holds Save over the limit", async () => {
     await open();
     tab("Memory").click();
@@ -676,6 +749,33 @@ describe("the skills", () => {
   });
 });
 
+describe("a pending skill", () => {
+  it("keeps a new skill's name while its frontmatter is gone", async () => {
+    await open();
+    tab("Skills").click();
+    button(F.create).click();
+    type($(".files-skills .doc-input"), "");
+    expect($(".editor-head .path").textContent).toBe("agents/kelpie/skills/new-skill/SKILL.md");
+    expect($("#skill-problem").textContent).toBe(F.skillProblems.frontmatter);
+    $(".backb").click();
+    const row = $$(".skl-r").find((each) => each.querySelector("b").textContent === "new-skill");
+    row.click();
+    expect($(".editor-title").textContent).toBe("new-skill");
+  });
+
+  it("cancels a pending new skill or install from its row", async () => {
+    await open();
+    tab("Skills").click();
+    button(F.create).click();
+    $(".backb").click();
+    const cancel = $(`[aria-label="${F.cancelPending("new-skill")}"]`);
+    cancel.click();
+    expect($$(".skl-r b").map((name) => name.textContent)).toEqual(["brief"]);
+    expect(document.activeElement).toBe($(".skl-r"));
+    expect(tab("Skills").getAttribute("aria-label")).toBe("Skills");
+  });
+});
+
 describe("installing a skill", () => {
   const installView = async () => {
     await open();
@@ -715,12 +815,28 @@ describe("installing a skill", () => {
     );
     expect($$(".rev .files .tag").map((tag) => tag.textContent)).toEqual([I.script, I.binary]);
     expect(card.querySelector(".rev-left").textContent).toBe(I.leftOut(1));
+    // A branch vouches for this commit; one named in the address alone would say it isn't checked.
+    expect(card.querySelector(".rev-pin")).toBeNull();
     expect(card.querySelector(".scan").textContent).toBe(I.verdict.clean);
     button(I.showSkillMd).click();
     expect(card.querySelector(".rev-md").hidden).toBe(false);
     expect(card.querySelector(".rev-md .md-h1").textContent).toBe("PDF forms");
     button(I.hideSkillMd).click();
     expect(card.querySelector(".rev-md").hidden).toBe(true);
+  });
+
+  it("says a commit named in the address alone isn't checked against the repository", async () => {
+    await installView();
+    const commit = STAGED.origin.commit;
+    io.fetchSkill.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      value: { ok: true, staged: { ...STAGED, origin: { ...STAGED.origin, ref: commit } } },
+    });
+    $(".inst .field .txt").value = `github.com/exemplo/skills/tree/${commit}/pdf-forms`;
+    $(".get").click();
+    await settle();
+    expect($(".rev .rev-pin").textContent).toBe(I.pinnedCommit);
   });
 
   it("installs it as a pending change Save writes, and says so", async () => {
@@ -734,8 +850,10 @@ describe("installing a skill", () => {
     expect($(".editor-title").textContent).toBe("Skills");
     const row = $$(".skl-r").find((each) => each.querySelector("b").textContent === "pdf-forms");
     expect(row.querySelector(".so").textContent).toBe(F.pending.install);
-    expect(row.disabled).toBe(true);
-    expect($(".skl-wrap [aria-live='polite']").textContent).toBe(I.added("pdf-forms"));
+    expect(row.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(row);
+    // The announcement sits outside the list the install redrew, so it is heard.
+    expect($(".files-skills > [aria-live='polite']").textContent).toBe(I.added("pdf-forms"));
     expect(tab("Skills").getAttribute("aria-label")).toBe("Skills, changed");
     await editor.save();
     expect(sent[0]).toEqual([
@@ -785,7 +903,11 @@ describe("installing a skill", () => {
       [{ reason: "no_skill" }, I.errors.no_skill(I.where.github)],
       [{ reason: "too_large" }, I.errors.too_large(null)],
       [{ reason: "link", detail: "evil" }, I.errors.link("evil")],
+      [{ reason: "nested_skill", detail: "a/SKILL.md" }, I.errors.nested_skill("a/SKILL.md")],
+      [{ reason: "path_clash", detail: "README.md" }, I.errors.path_clash("README.md")],
+      [{ reason: "not_text", detail: "x.md" }, I.errors.not_text("x.md")],
       [{ reason: "invalid_skill", detail: "name" }, F.skillProblems.name],
+      [{ reason: "invalid_skill", detail: "name_mismatch" }, I.errors.name_mismatch],
       [{ reason: "vault_off" }, F.vaultOff],
       [{ reason: "whatever" }, I.errors.failed],
     ]) {

@@ -83,6 +83,27 @@ describe("a SKILL.md's fields", () => {
     expect(skillFields(`---\nname: ok\ndescription: ${"x".repeat(1_025)}\n---\n`).problem).toBe(
       "description_too_long",
     );
+    expect(skillFields('---\nname: ok\ndescription: ""\n---\n').problem).toBe("description");
+  });
+
+  it("holds Save only on what is certain, and leaves other YAML to the vault", () => {
+    const fields = (frontmatter) => skillFields(`---\n${frontmatter}\n---\n`);
+    expect(fields("name: pdf # the folder's\ndescription: Fills.")).toEqual({
+      name: "pdf",
+      description: "Fills.",
+      problem: null,
+    });
+    for (const unsure of [
+      "name: pdf\ndescription:\n  Fills forms,\n  in two lines.",
+      "name: pdf\ndescription: >\n  Folded.",
+      "name: pdf\ndescription: |\n  Literal.",
+      'name: pdf\ndescription: "Escaped \\" quote"',
+      "name: pdf\ndescription: [a, b]",
+      "name: &n pdf\ndescription: Fills.",
+    ]) {
+      expect(fields(unsure).problem, unsure).toBeNull();
+    }
+    expect(fields("name: pdf\ndescription: >\n  Folded.").description).toBeNull();
   });
 
   it("names a new skill with a name no other skill has", () => {

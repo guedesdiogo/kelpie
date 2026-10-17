@@ -188,6 +188,9 @@ describe("the editor's texts", () => {
     expect(pt.discardWhat(["Perfil", "Mascote"])).toBe(
       "Perfil e Mascote voltam ao que estava salvo.",
     );
+    expect(pt.discardWhat(["Alma", "Regras", "Memória"])).toBe(
+      "Alma, Regras e Memória voltam ao que estava salvo.",
+    );
     expect(`${pt.save.stem}${pt.save.idle}`).toBe("Salvar");
     expect(`${pt.save.stem}${pt.save.busy}`).toBe("Salvando");
     expect(`${pt.save.stem}${pt.save.done}`).toBe("Salvo");

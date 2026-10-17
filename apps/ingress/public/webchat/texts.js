@@ -161,7 +161,7 @@ export const TEXTS = {
         `Applies to ${name} everywhere. The Telegram bot's photo changes in a few minutes.`,
       discardAsk: (count) => `Discard ${count} ${count === 1 ? "change" : "changes"}?`,
       discardWhat: (sections) =>
-        `${sections.join(" and ")} ${sections.length === 1 ? "goes" : "go"} back to what was saved.`,
+        `${list("en", sections)} ${sections.length === 1 ? "goes" : "go"} back to what was saved.`,
       keepEditing: "Keep editing",
       discard: "Discard",
       failed: {
@@ -231,7 +231,8 @@ export const TEXTS = {
         openSkill: (skill) => `Open ${skill}`,
         origins: { created: "created here", archive: ".zip file", text: "pasted text" },
         edited: "edited here",
-        pending: { install: "installs on Save", remove: "removed on Save", new: "new" },
+        pending: { install: "installs on Save", new: "new" },
+        cancelPending: (name) => `Cancel ${name}'s pending change`,
         removeSkill: "Remove skill",
         keepSkill: "Keep skill",
         lookForUpdate: "Look for an update",
@@ -268,6 +269,9 @@ export const TEXTS = {
           skill_invalid: "The SKILL.md isn't valid: check its name and description.",
           staged_gone: "The reviewed skill expired. Fetch it again.",
           blocked: "The skill is blocked: hidden characters in its files.",
+          taken:
+            "The vault already has files in this skill's folder, with no SKILL.md. Move them in Obsidian or on GitHub, or pick another name.",
+          changed: "Its folder changed in the vault since the review. Fetch it again.",
           memory_too_long: "The Memory is over Hermes's 2,200 characters.",
           memory_format: "The Memory isn't in Hermes's format.",
         },
@@ -289,6 +293,8 @@ export const TEXTS = {
           ready: "Ready for you to review",
           pinned:
             "Installs at this version of the repository. To change versions, use «Look for an update» on the skill.",
+          pinnedCommit:
+            "Installs at the commit in the address. Kelpie doesn't check it against the repository's branches and tags, and GitHub also serves its forks' commits under its name.",
           files: (count, size) =>
             `${number("en", count)} ${count === 1 ? "file" : "files"}, ${size}`,
           script: "script: kept, not runnable in Kelpie",
@@ -341,6 +347,11 @@ export const TEXTS = {
             many_skills: (names) => `It holds several skills: ${names}. Point to one folder.`,
             unsafe_path: (path) => `A path leaves the skill's folder: ${path}.`,
             link: (path) => `It holds a link, which isn't installed: ${path}.`,
+            name_mismatch: "Its SKILL.md's name isn't its folder's, as the specification asks.",
+            nested_skill: (path) =>
+              `It holds a second SKILL.md, at ${path}. A skill has exactly one.`,
+            path_clash: (path) => `Two files share a name on a Mac or on Windows: ${path}.`,
+            not_text: (path) => `${path} isn't UTF-8 text, as Markdown and scripts must be.`,
             encrypted: "It holds an encrypted file.",
             no_source: "Only a skill installed from GitHub has an update to look for.",
             failed: "Couldn't fetch it. Try again in a moment.",
@@ -597,7 +608,7 @@ export const TEXTS = {
         `Vale para ${name} em todo lugar. A foto do bot no Telegram muda em alguns minutos.`,
       discardAsk: (count) => `Descartar ${count} ${count === 1 ? "alteração" : "alterações"}?`,
       discardWhat: (sections) =>
-        `${sections.join(" e ")} ${sections.length === 1 ? "volta" : "voltam"} ao que estava salvo.`,
+        `${list("pt-BR", sections)} ${sections.length === 1 ? "volta" : "voltam"} ao que estava salvo.`,
       keepEditing: "Continuar editando",
       discard: "Descartar",
       failed: {
@@ -669,7 +680,8 @@ export const TEXTS = {
         openSkill: (skill) => `Abrir ${skill}`,
         origins: { created: "criada aqui", archive: "arquivo .zip", text: "texto colado" },
         edited: "editada aqui",
-        pending: { install: "instala ao salvar", remove: "sai ao salvar", new: "nova" },
+        pending: { install: "instala ao salvar", new: "nova" },
+        cancelPending: (name) => `Cancelar a mudança pendente de ${name}`,
         removeSkill: "Remover skill",
         keepSkill: "Manter skill",
         lookForUpdate: "Procurar atualização",
@@ -706,6 +718,9 @@ export const TEXTS = {
           skill_invalid: "O SKILL.md não é válido: confira o nome e a descrição.",
           staged_gone: "A skill revisada expirou. Busque de novo.",
           blocked: "A skill está bloqueada: há caracteres escondidos nos arquivos.",
+          taken:
+            "O cofre já tem arquivos na pasta desta skill, sem SKILL.md. Mova-os no Obsidian ou no GitHub, ou escolha outro nome.",
+          changed: "A pasta dela mudou no cofre depois da revisão. Busque de novo.",
           memory_too_long: "A Memória passou de 2.200 caracteres.",
           memory_format: "A Memória não está no formato do Hermes.",
         },
@@ -727,6 +742,8 @@ export const TEXTS = {
           ready: "Pronta para você revisar",
           pinned:
             "Instala nesta versão do repositório. Para trocar de versão, use «Procurar atualização» na skill.",
+          pinnedCommit:
+            "Instala no commit do endereço. O Kelpie não o confere com as branches e tags do repositório, e o GitHub também serve sob esse nome os commits dos forks.",
           files: (count, size) =>
             `${number("pt-BR", count)} ${count === 1 ? "arquivo" : "arquivos"}, ${size}`,
           script: "script: fica guardado, não roda no Kelpie",
@@ -780,6 +797,11 @@ export const TEXTS = {
             many_skills: (names) => `Tem várias skills: ${names}. Aponte para uma pasta.`,
             unsafe_path: (path) => `Um caminho sai da pasta da skill: ${path}.`,
             link: (path) => `Tem um link, que não é instalado: ${path}.`,
+            name_mismatch: "O nome no SKILL.md não é o da pasta, como a especificação pede.",
+            nested_skill: (path) => `Tem um segundo SKILL.md, em ${path}. Uma skill tem só um.`,
+            path_clash: (path) => `Dois arquivos têm o mesmo nome num Mac ou no Windows: ${path}.`,
+            not_text: (path) =>
+              `${path} não é texto em UTF-8, como Markdown e scripts precisam ser.`,
             encrypted: "Tem um arquivo criptografado.",
             no_source: "Só uma skill instalada do GitHub tem atualização para procurar.",
             failed: "Não deu para buscar. Tente de novo em instantes.",
@@ -1035,7 +1057,7 @@ export const TEXTS = {
         `Vale para ${name} en todas partes. La foto del bot de Telegram cambia en unos minutos.`,
       discardAsk: (count) => `¿Descartar ${count} ${count === 1 ? "cambio" : "cambios"}?`,
       discardWhat: (sections) =>
-        `${sections.join(" y ")} ${sections.length === 1 ? "vuelve" : "vuelven"} a lo que estaba guardado.`,
+        `${list("es", sections)} ${sections.length === 1 ? "vuelve" : "vuelven"} a lo que estaba guardado.`,
       keepEditing: "Seguir editando",
       discard: "Descartar",
       failed: {
@@ -1107,7 +1129,8 @@ export const TEXTS = {
         openSkill: (skill) => `Abrir ${skill}`,
         origins: { created: "creada aquí", archive: "archivo .zip", text: "texto pegado" },
         edited: "editada aquí",
-        pending: { install: "se instala al guardar", remove: "sale al guardar", new: "nueva" },
+        pending: { install: "se instala al guardar", new: "nueva" },
+        cancelPending: (name) => `Cancelar el cambio pendiente de ${name}`,
         removeSkill: "Quitar skill",
         keepSkill: "Mantener skill",
         lookForUpdate: "Buscar actualización",
@@ -1144,6 +1167,9 @@ export const TEXTS = {
           skill_invalid: "El SKILL.md no es válido: revisa el nombre y la descripción.",
           staged_gone: "La skill revisada caducó. Búscala de nuevo.",
           blocked: "La skill está bloqueada: hay caracteres ocultos en sus archivos.",
+          taken:
+            "El cofre ya tiene archivos en la carpeta de esta skill, sin SKILL.md. Muévelos en Obsidian o en GitHub, o elige otro nombre.",
+          changed: "Su carpeta cambió en el cofre después de la revisión. Búscala de nuevo.",
           memory_too_long: "La Memoria pasó de 2200 caracteres.",
           memory_format: "La Memoria no está en el formato de Hermes.",
         },
@@ -1165,6 +1191,8 @@ export const TEXTS = {
           ready: "Lista para que la revises",
           pinned:
             "Se instala en esta versión del repositorio. Para cambiar de versión, usa «Buscar actualización» en la skill.",
+          pinnedCommit:
+            "Se instala en el commit de la dirección. Kelpie no lo comprueba con las ramas y etiquetas del repositorio, y GitHub también sirve con ese nombre los commits de sus forks.",
           files: (count, size) =>
             `${number("es", count)} ${count === 1 ? "archivo" : "archivos"}, ${size}`,
           script: "script: se guarda, no se ejecuta en Kelpie",
@@ -1218,6 +1246,14 @@ export const TEXTS = {
             many_skills: (names) => `Tiene varias skills: ${names}. Apunta a una carpeta.`,
             unsafe_path: (path) => `Una ruta sale de la carpeta de la skill: ${path}.`,
             link: (path) => `Tiene un enlace, que no se instala: ${path}.`,
+            name_mismatch:
+              "El nombre del SKILL.md no es el de su carpeta, como pide la especificación.",
+            nested_skill: (path) =>
+              `Tiene un segundo SKILL.md, en ${path}. Una skill tiene solo uno.`,
+            path_clash: (path) =>
+              `Dos archivos tienen el mismo nombre en un Mac o en Windows: ${path}.`,
+            not_text: (path) =>
+              `${path} no es texto UTF-8, como deben serlo el Markdown y los scripts.`,
             encrypted: "Tiene un archivo cifrado.",
             no_source: "Solo una skill instalada desde GitHub tiene actualización que buscar.",
             failed: "No se pudo buscar. Inténtalo de nuevo en un momento.",

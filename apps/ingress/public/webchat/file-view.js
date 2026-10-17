@@ -122,15 +122,6 @@ export class FileView {
     return this.input.value;
   }
 
-  /** New text from outside, as when the owner takes the vault's version. */
-  setContent(text) {
-    this.input.value = text;
-    this.#drawLines();
-    this.#fit();
-    if (this.mode === "read") this.#drawView();
-    this.#count();
-  }
-
   /** Lays the switch's indicator under its checked segment, once the section shows. */
   mount() {
     this.#placeIndicator(true);
@@ -152,6 +143,7 @@ export class FileView {
     const before = keyboard || reduced() ? null : this.#rects();
     const leaving = this.mode === "read" ? this.view : this.doc;
     const was = leaving.getBoundingClientRect();
+    const typing = document.activeElement === this.input;
     this.mode = mode;
     remember(mode);
     this.#show(mode);
@@ -168,6 +160,9 @@ export class FileView {
       this.input.focus({ preventScroll: true });
       this.input.setSelectionRange(at, at);
       this.#markCaret();
+    } else if (typing) {
+      // The field that had the keys hides: they go to the switch, so ⌘E and ⌘S still reach the editor.
+      this.radios.read.focus({ preventScroll: true });
     }
     if (keyboard) return;
     this.#crossfade(leaving, was, mode === "edit" ? this.doc : this.view);
@@ -307,12 +302,21 @@ export class FileView {
 
   // ── Keeping the place ───────────────────────────────────────────────────────────────────────
 
+  /**
+   * What holds each line in the view now showing: the read view's innermost blocks, a list's items
+   * rather than the list, or the edit view's lines.
+   */
+  #blocks() {
+    if (this.mode === "edit") return [...this.marks.children];
+    return [...this.view.querySelectorAll("[data-line]")].filter(
+      (node) => !node.querySelector("[data-line]"),
+    );
+  }
+
   /** The first block, or line, in view, and how far it sits below the scroller's top. */
   #firstInView(scroller) {
     const top = scroller.getBoundingClientRect().top;
-    const nodes =
-      this.mode === "read" ? this.view.querySelectorAll("[data-line]") : this.marks.children;
-    for (const node of nodes) {
+    for (const node of this.#blocks()) {
       const rect = node.getBoundingClientRect();
       if (rect.bottom > top)
         return { line: Number(node.dataset.line), offset: Math.max(0, rect.top - top) };
@@ -325,7 +329,7 @@ export class FileView {
     if (this.mode === "edit")
       return this.marks.children[Math.min(line, this.marks.children.length - 1)] ?? null;
     let found = null;
-    for (const node of this.view.querySelectorAll("[data-line]")) {
+    for (const node of this.#blocks()) {
       if (Number(node.dataset.line) > line) break;
       found = node;
     }
@@ -334,9 +338,7 @@ export class FileView {
 
   #rects() {
     const rects = new Map();
-    const nodes =
-      this.mode === "read" ? this.view.querySelectorAll("[data-line]") : this.marks.children;
-    for (const node of nodes) rects.set(node.dataset.line, node.getBoundingClientRect());
+    for (const node of this.#blocks()) rects.set(node.dataset.line, node.getBoundingClientRect());
     return rects;
   }
 
@@ -344,10 +346,8 @@ export class FileView {
   #slide(before) {
     const scroller = this.element.closest(".editor-body") ?? this.element;
     const view = scroller.getBoundingClientRect();
-    const nodes =
-      this.mode === "read" ? this.view.querySelectorAll("[data-line]") : this.marks.children;
     let moved = 0;
-    for (const node of nodes) {
+    for (const node of this.#blocks()) {
       if (moved >= MAX_SLIDES) break;
       const from = before.get(node.dataset.line);
       const to = node.getBoundingClientRect();

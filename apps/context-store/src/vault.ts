@@ -1304,7 +1304,12 @@ export class Vault extends DurableObject<VaultEnv> {
           continue;
         }
         if ((now?.version ?? null) !== change.version) {
-          plan.outcomes.push({ status: "conflict", current: now });
+          // The vault holds this text already, as after a save whose answer the page never got.
+          plan.outcomes.push(
+            (now?.content ?? null) === change.content
+              ? { status: "saved", version: now?.version ?? null }
+              : { status: "conflict", current: now },
+          );
           continue;
         }
         if (
@@ -1352,7 +1357,12 @@ export class Vault extends DurableObject<VaultEnv> {
       }
       const now = await current(path);
       if ((now?.version ?? null) !== change.version) {
-        plan.outcomes.push({ status: "conflict", current: now });
+        const already = change.file === "skill" && (now?.content ?? null) === change.content;
+        plan.outcomes.push(
+          already
+            ? { status: "saved", version: now?.version ?? null }
+            : { status: "conflict", current: now },
+        );
         continue;
       }
       // A folder with files and no SKILL.md is no skill the owner has seen: nothing lands over it.

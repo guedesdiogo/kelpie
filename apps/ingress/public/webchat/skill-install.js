@@ -28,6 +28,8 @@ const button = (className, text) => {
 };
 
 const ICONS = { github: "link", archive: "file", text: "paste" };
+/** Refusals that name the file at fault. */
+const PATH_REASONS = ["unsafe_path", "link", "nested_skill", "path_clash", "not_text"];
 
 export class SkillInstall {
   #names;
@@ -296,11 +298,13 @@ export class SkillInstall {
     if (reason === "too_large") message = errors.too_large(value.detail ?? null);
     else if (reason === "no_skill") message = errors.no_skill(t.where[this.source]);
     else if (reason === "many_skills") message = errors.many_skills((value.names ?? []).join(", "));
-    else if (reason === "unsafe_path" || reason === "link")
-      message = errors[reason](value.detail ?? "");
+    else if (PATH_REASONS.includes(reason)) message = errors[reason](value.detail ?? "");
     else if (reason === "invalid_skill") {
+      // A saved skill's name advice doesn't fit a fetched folder whose SKILL.md names another.
       message =
-        this.#names.files.skillProblems[value.detail] ?? this.#names.files.refusals.skill_invalid;
+        (value.detail === "name_mismatch" ? errors.name_mismatch : null) ??
+        this.#names.files.skillProblems[value.detail] ??
+        this.#names.files.refusals.skill_invalid;
     } else if (reason === "vault_off") message = this.#names.files.vaultOff;
     else message = errors[reason] ?? errors.failed;
     const line = element("p", "inst-error");
@@ -340,6 +344,12 @@ export class SkillInstall {
       .filter(Boolean)
       .join(" · ");
     card.append(head, meta);
+    // A commit from the address itself, which no branch or tag of the repository vouches for.
+    if (staged.origin.kind === "github" && staged.origin.ref === staged.origin.commit) {
+      const pin = element("p", "rev-pin");
+      pin.textContent = t.pinnedCommit;
+      card.append(pin);
+    }
     if (staged.replaces) card.append(...this.#replaces(staged));
     card.append(this.#files(staged));
     if (staged.leftOut.length > 0) {

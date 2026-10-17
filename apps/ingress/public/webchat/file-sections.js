@@ -6,10 +6,12 @@
 import { FileView } from "./file-view.js";
 import {
   changedFileSections,
+  entriesOf,
   entryBreaks,
   fileChanges,
   freeSkillName,
   freshDrafts,
+  isSkillName,
   memoryBudget,
   memoryOf,
   newSkill,
@@ -92,6 +94,11 @@ export class FileSections {
       box.hidden = true;
       this.elements[section] = box;
     }
+    // The skills redraw inside their body; what they announce stays put, so it is heard.
+    this.skillsBody = element("div", "files-body");
+    this.live = element("p", "visually-hidden");
+    this.live.setAttribute("aria-live", "polite");
+    this.elements.skills.append(this.skillsBody, this.live);
     this.views = {};
     this.skillView = "list";
     this.openSkill = null;
@@ -178,6 +185,10 @@ export class FileSections {
           return;
         }
         delete this.bases[key];
+        // Rows the save trimmed or left out, as an emptied entry, show as the vault keeps them.
+        if (change.file === "memory" && !sameRows(this.drafts.memory, entriesOf(change.content))) {
+          redraw.add("memory");
+        }
         if (name !== null) this.drafts.skills.delete(name);
         else this.drafts[change.file] = undefined;
         return;
@@ -192,13 +203,33 @@ export class FileSections {
       }
     });
     this.files = files;
-    for (const section of redraw) this.#redraw(section);
+    for (const section of redraw) this.#keepingFocus(section, () => this.#redraw(section));
     const sections = [...outcome];
     return {
       saved: sections.filter(([, ok]) => ok).map(([section]) => section),
       failed: sections.filter(([, ok]) => !ok).map(([section]) => section),
       undo,
     };
+  }
+
+  /**
+   * Draws a section again where the owner may be typing: the field that had focus, by its place
+   * among the section's fields, gets it back with its caret.
+   */
+  #keepingFocus(section, draw) {
+    const box = this.elements[section];
+    const active = document.activeElement;
+    const fields = () => [...box.querySelectorAll("textarea")];
+    const at = active instanceof HTMLTextAreaElement ? fields().indexOf(active) : -1;
+    const caret = at >= 0 ? [active.selectionStart, active.selectionEnd] : null;
+    draw();
+    if (at < 0) return;
+    const now = fields();
+    const field = now[Math.min(at, now.length - 1)];
+    if (!field || field.closest("[hidden]")) return;
+    field.focus({ preventScroll: true });
+    const end = field.value.length;
+    field.setSelectionRange(Math.min(caret[0], end), Math.min(caret[1], end));
   }
 
   /** Whether the draft is still what this change sent. */
@@ -299,16 +330,17 @@ export class FileSections {
     return true;
   }
 
-  #fileView(section, path, content, about, onInput) {
-    const view = new FileView({
+  /** A file's view; drawn again, it keeps the view it was in. */
+  #fileView(section, path, content, about, onInput, { label, mode } = {}) {
+    return new FileView({
       names: { ...this.#files, blockTexts: this.#blockTexts },
-      label: this.#files.fileOf(this.#names.sections[section], this.#agent.name),
+      label: label ?? this.#files.fileOf(this.#names.sections[section], this.#agent.name),
       path,
       content,
       about,
       onInput,
+      mode,
     });
-    return view;
   }
 
   #drawSoul() {
@@ -325,6 +357,7 @@ export class FileSections {
         delete this.refusals.soul;
         this.#onChange();
       },
+      { mode: this.views.soul?.mode },
     );
     this.views.soul = view;
     box.replaceChildren(...this.#banners("soul"), view.element);
@@ -350,6 +383,7 @@ export class FileSections {
         delete this.refusals.rules;
         this.#onChange();
       },
+      { mode: this.views.rules?.mode },
     );
     this.views.rules = view;
     box.replaceChildren(...this.#banners("rules"), view.element);
@@ -609,7 +643,7 @@ export class FileSections {
   // ── Skills ──────────────────────────────────────────────────────────────────────────────────
 
   #drawSkills() {
-    const box = this.elements.skills;
+    const box = this.skillsBody;
     if (this.#notReady(box)) return;
     if (this.skillView === "install") {
       box.replaceChildren(this.installer.element);
@@ -653,9 +687,7 @@ export class FileSections {
     const create = button("addb", names.create);
     create.addEventListener("click", () => this.#createSkill());
     add.append(install, create);
-    this.live = element("p", "visually-hidden");
-    this.live.setAttribute("aria-live", "polite");
-    wrap.append(path, list, add, this.live);
+    wrap.append(path, list, add);
     return wrap;
   }
 
@@ -692,24 +724,55 @@ export class FileSections {
       row.append(alert);
     }
     if (change?.install) {
-      row.disabled = true;
-    } else {
-      row.setAttribute("aria-label", names.openSkill(name));
-      row.append(icon("chevronRight"));
-      row.addEventListener("click", () => this.#openSkill(name));
+      // It opens nothing until it is saved, and stays in the tab order, where Install puts focus.
+      row.setAttribute("aria-disabled", "true");
+      item.append(row, this.#cancelPending(name));
+      tips(item);
+      return item;
+    }
+    row.setAttribute("aria-label", names.openSkill(name));
+    row.append(icon("chevronRight"));
+    row.addEventListener("click", () => this.#openSkill(name));
+    if (skill === null) {
+      item.append(row, this.#cancelPending(name));
+      tips(item);
+      return item;
     }
     item.append(row);
     return item;
+  }
+
+  /** A skill's pending install or new SKILL.md goes, before Save: ✕ on its row. */
+  #cancelPending(name) {
+    const cancel = button("icb sm xbtn");
+    cancel.setAttribute("aria-label", this.#files.cancelPending(name));
+    cancel.dataset.tip = "";
+    cancel.append(icon("close"));
+    cancel.addEventListener("click", () => {
+      const rows = [...this.skillRows.querySelectorAll(".skl-i")];
+      const at = rows.findIndex((row) => row.dataset.skill === name);
+      this.drafts.skills.delete(name);
+      delete this.bases[`skill:${name}`];
+      delete this.conflicts[`skill:${name}`];
+      delete this.refusals[`skill:${name}`];
+      this.#drawSkills();
+      this.#onChange();
+      const left = [...this.skillRows.querySelectorAll(".skl-r")];
+      const next =
+        left[Math.min(at, left.length - 1)] ?? this.skillsBody.querySelector(".skl-add .btn");
+      next?.focus({ preventScroll: true });
+    });
+    return cancel;
   }
 
   #openSkill(name, { mode } = {}) {
     this.skillView = "detail";
     this.openSkill = name;
     this.#drawSkills();
-    if (mode) this.skillDetail.view.setMode(mode, { keyboard: true, line: 5 });
+    if (mode) this.skillDetail?.view.setMode(mode, { keyboard: true, line: 5 });
     this.#onChange();
     this.shown("skills");
-    this.skillDetail.focusTarget?.focus({ preventScroll: true });
+    this.skillDetail?.focusTarget?.focus({ preventScroll: true });
   }
 
   /** "Criar do zero": a new SKILL.md with its frontmatter, open to edit. */
@@ -752,7 +815,7 @@ export class FileSections {
           const taken =
             this.files.skills.some((skill) => skill.name === fields.name) ||
             (fields.name !== key && this.drafts.skills.has(fields.name));
-          if (fields.problem !== "name" && !taken && fields.name !== key) {
+          if (isSkillName(fields.name) && !taken && fields.name !== key) {
             this.drafts.skills.delete(key);
             key = fields.name;
             this.openSkill = key;
@@ -763,6 +826,10 @@ export class FileSections {
         delete this.refusals[`skill:${key}`];
         this.#showProblem(problem, key, text);
         this.#onChange();
+      },
+      {
+        label: names.fileOf("SKILL.md", name),
+        mode: this.skillDetail?.name === name ? this.skillDetail.view.mode : undefined,
       },
     );
     view.input.setAttribute("aria-describedby", problem.id);
@@ -776,7 +843,7 @@ export class FileSections {
       actions.append(look, this.updateNote);
     }
     wrap.append(back, ...this.#banners(`skill:${name}`), view.element, problem, actions);
-    this.skillDetail = { view, focusTarget: back };
+    this.skillDetail = { name, view, focusTarget: back };
     return wrap;
   }
 
@@ -912,6 +979,11 @@ export class FileSections {
     if (flight) flight.finished.then(land, land);
     else land();
   }
+}
+
+/** Two lists of memory rows, the same row for row. */
+function sameRows(a = [], b = []) {
+  return a.length === b.length && a.every((row, index) => row === b[index]);
 }
 
 /** The I/O the sections use: the files routes, answering `{ ok, value }` or `{ ok: false, status, reason }`. */

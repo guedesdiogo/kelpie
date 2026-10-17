@@ -2994,8 +2994,18 @@ dialog h2 {
   text-align: start;
   cursor: pointer;
 }
-.editor .skl-r:disabled {
+/* A pending install opens nothing until Save; its ✕ sits beside it. */
+.editor .skl-r[aria-disabled="true"] {
   cursor: default;
+}
+.editor .skl-i {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.editor .skl-i > .skl-r {
+  flex: 1;
+  min-inline-size: 0;
 }
 .editor .skl-r .skt {
   display: grid;
@@ -3257,6 +3267,7 @@ dialog h2 {
 }
 .editor .rev .src,
 .editor .rev-left,
+.editor .rev-pin,
 .editor .rev-replaces {
   margin: 0;
   color: var(--muted);
@@ -3264,6 +3275,7 @@ dialog h2 {
   font-size: 11.5px;
 }
 .editor .rev-left,
+.editor .rev-pin,
 .editor .rev-replaces {
   font-family: var(--font-body);
   font-size: 12.5px;
