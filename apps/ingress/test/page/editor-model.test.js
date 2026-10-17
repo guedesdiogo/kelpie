@@ -140,12 +140,17 @@ describe("the editor's texts", () => {
   /** Every leaf of a text tree: a string, or a function that writes one. */
   function leaves(tree, path = []) {
     return Object.entries(tree).flatMap(([key, value]) =>
-      typeof value === "object" ? leaves(value, [...path, key]) : [[[...path, key].join("."), value]],
+      typeof value === "object"
+        ? leaves(value, [...path, key])
+        : [[[...path, key].join("."), value]],
     );
   }
 
   it("has every text in all three languages, each one written", () => {
-    const shape = (texts) => leaves(texts.editor).map(([path]) => path).sort();
+    const shape = (texts) =>
+      leaves(texts.editor)
+        .map(([path]) => path)
+        .sort();
     expect(shape(TEXTS["pt-BR"])).toEqual(shape(TEXTS.en));
     expect(shape(TEXTS.es)).toEqual(shape(TEXTS.en));
     for (const locale of ["en", "pt-BR", "es"]) {
@@ -176,7 +181,9 @@ describe("the editor's texts", () => {
     expect(pt.unsaved(3)).toBe("3 alterações não salvas");
     expect(pt.discardAsk(3)).toBe("Descartar 3 alterações?");
     expect(pt.discardWhat(["Mascote"])).toBe("Mascote volta ao que estava salvo.");
-    expect(pt.discardWhat(["Perfil", "Mascote"])).toBe("Perfil e Mascote voltam ao que estava salvo.");
+    expect(pt.discardWhat(["Perfil", "Mascote"])).toBe(
+      "Perfil e Mascote voltam ao que estava salvo.",
+    );
     expect(`${pt.save.stem}${pt.save.idle}`).toBe("Salvar");
     expect(`${pt.save.stem}${pt.save.busy}`).toBe("Salvando");
     expect(`${pt.save.stem}${pt.save.done}`).toBe("Salvo");

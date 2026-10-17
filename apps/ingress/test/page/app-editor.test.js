@@ -14,7 +14,14 @@ const KELPIE = {
   accessory: { type: "none" },
 };
 const AGENTS = [
-  { id: "assistant", name: "Assistant", main: true, mascot: KELPIE, specialty: "", remit: "Your day." },
+  {
+    id: "assistant",
+    name: "Assistant",
+    main: true,
+    mascot: KELPIE,
+    specialty: "",
+    remit: "Your day.",
+  },
   {
     id: "agenda",
     name: "Agenda",

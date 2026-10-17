@@ -70,9 +70,11 @@ const $$ = (selector) => [...document.querySelectorAll(selector)];
 const pen = () => document.getElementById("pen");
 const open = (agent = AGENDA, how = {}) =>
   editor.open(agent, { trigger: pen(), from: document.getElementById("row"), ...how });
-const tab = (name) => $$(".editor-tabs [role='tab']").find((each) => each.textContent.startsWith(name));
-const radios = (label) =>
-  [...$(`[role='radiogroup'][aria-label='${label}']`).querySelectorAll("[role='radio']")];
+const tab = (name) =>
+  $$(".editor-tabs [role='tab']").find((each) => each.textContent.startsWith(name));
+const radios = (label) => [
+  ...$(`[role='radiogroup'][aria-label='${label}']`).querySelectorAll("[role='radio']"),
+];
 /** A radio's name: its tile's figure is hidden from screen readers. */
 const nameOf = (radio) => radio.querySelector(".opt-name").textContent;
 /** What the Save button says now: a suffix that rolled out may still be leaving. */
@@ -87,7 +89,8 @@ const settle = async () => {
   for (let round = 0; round < 20; round += 1) await Promise.resolve();
 };
 const footer = () => $(".editor-foot");
-const button = (text) => [...document.querySelectorAll("button")].find((each) => each.textContent === text);
+const button = (text) =>
+  [...document.querySelectorAll("button")].find((each) => each.textContent === text);
 
 beforeEach(() => {
   vi.useFakeTimers({
@@ -256,16 +259,16 @@ describe("the Mascot section", () => {
     const preview = $(".mascot-host.preview");
     expect(preview.getAttribute("role")).toBe("img");
     const summary = $(`#${preview.getAttribute("aria-labelledby")}`);
-    expect(summary.textContent).toBe(
-      "Pebble · Fawn · Big eyes · round ears · no accessory",
-    );
+    expect(summary.textContent).toBe("Pebble · Fawn · Big eyes · round ears · no accessory");
     radios("Shape")[0].click();
     expect(summary.textContent).toBe("Mark · Fawn · Big eyes · round ears · no accessory");
   });
 
   it("names its colors, six to a row, and puts cheeks on a switch beside the eyes", () => {
     open();
-    $$(".axis-tab").find((each) => each.textContent === "Color").click();
+    $$(".axis-tab")
+      .find((each) => each.textContent === "Color")
+      .click();
     expect(radios("Color").map(nameOf)).toEqual([
       "Kelp",
       "Lagoon",
@@ -281,7 +284,9 @@ describe("the Mascot section", () => {
       "Slate",
     ]);
     expect($(".tiles.swatches")).not.toBeNull();
-    $$(".axis-tab").find((each) => each.textContent === "Eyes").click();
+    $$(".axis-tab")
+      .find((each) => each.textContent === "Eyes")
+      .click();
     const cheeks = $("[role='switch']");
     expect(cheeks.textContent).toBe("Rosy cheeks");
     cheeks.click();
@@ -292,27 +297,13 @@ describe("the Mascot section", () => {
     open();
     const axisTab = (name) => $$(".axis-tab").find((each) => each.textContent === name);
     axisTab("Head").click();
-    expect(radios("Head").map(nameOf)).toEqual([
-      "Nothing",
-      "Ears",
-      "Horns",
-      "Hair",
-      "Leaves",
-    ]);
-    expect(radios("Variation").map(nameOf)).toEqual([
-      "Pointed",
-      "Floppy",
-      "Round",
-    ]);
+    expect(radios("Head").map(nameOf)).toEqual(["Nothing", "Ears", "Horns", "Hair", "Leaves"]);
+    expect(radios("Variation").map(nameOf)).toEqual(["Pointed", "Floppy", "Round"]);
     checked("Head").focus();
     key(document.activeElement, "ArrowRight");
     expect(nameOf(checked("Head"))).toBe("Horns");
     expect(document.activeElement).toBe(checked("Head"));
-    expect(radios("Variation").map(nameOf)).toEqual([
-      "Two",
-      "One",
-      "Antennae",
-    ]);
+    expect(radios("Variation").map(nameOf)).toEqual(["Two", "One", "Antennae"]);
     radios("Head")[0].click();
     expect($(".tiles.variations").hidden).toBe(true);
     // The axis tabs are APG tabs too.
@@ -330,7 +321,9 @@ describe("the Mascot section", () => {
     expect(undo.getAttribute("aria-disabled")).toBe("true");
     expect(undo.querySelector(".tip").textContent).toBe("Nothing to undo");
     radios("Shape")[0].click();
-    $$(".axis-tab").find((each) => each.textContent === "Color").click();
+    $$(".axis-tab")
+      .find((each) => each.textContent === "Color")
+      .click();
     radios("Color")[6].click();
     expect(undo.getAttribute("aria-label")).toBe("Undo color");
     undo.click();
