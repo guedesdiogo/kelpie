@@ -17,6 +17,7 @@ import {
   parseSettings,
 } from "@kelpie/config";
 import { WEBCHAT_ADMISSION_HEADER, type WebchatAdmission } from "@kelpie/conversation/contract";
+import { bounded } from "./agent-files.ts";
 import { conversationName } from "./telegram-webhook.ts";
 
 export const WEBCHAT_PATH = "/webchat";
@@ -220,35 +221,6 @@ function refused(result: Extract<CommandResult<unknown>, { ok: false }> | null, 
 }
 
 /**
- * The body as text, or null past `most` bytes: it stops reading there, whatever the request says
- * its length is, or when it says none.
- */
-async function bounded(request: Request, most: number): Promise<string | null> {
-  if (Number(request.headers.get("content-length") ?? 0) > most) return null;
-  if (!request.body) return "";
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > most) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(size);
-  let at = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, at);
-    at += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
-}
-
-/**
  * The agent editor's saves (#379): a `PUT` from the webchat's own page, with the owner's Access
  * login, for an agent the Directory admits this login to. The mascot is set whole, from a body
  * `parseMascot` takes; the profile sets the fields it names, each checked before any is set. Each
@@ -282,11 +254,11 @@ export async function handleAgentEdit(request: Request, deps: WebchatDeps): Prom
     agentId,
   );
   if (!admission.admitted || admission.role !== "owner") return new Response(null, { status: 403 });
-  const text = await bounded(request, MAX_EDIT_BODY);
-  if (text === null) return new Response(null, { status: 413 });
+  const bytes = await bounded(request, MAX_EDIT_BODY);
+  if (bytes === null) return new Response(null, { status: 413 });
   let body: unknown;
   try {
-    body = JSON.parse(text);
+    body = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     return new Response(null, { status: 400 });
   }

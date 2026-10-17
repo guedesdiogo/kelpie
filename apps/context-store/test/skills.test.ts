@@ -179,7 +179,9 @@ describe("a skill in an archive", () => {
   });
 
   it("refuses an archive with no skill, or several", async () => {
-    expect(await skillFromEntries(readZip(await makeZip([{ path: "README.md", content: "x" }])), "")).toEqual({
+    expect(
+      await skillFromEntries(readZip(await makeZip([{ path: "README.md", content: "x" }])), ""),
+    ).toEqual({
       ok: false,
       problem: { reason: "no_skill" },
     });
@@ -246,7 +248,10 @@ describe("a skill in an archive", () => {
       readZip(await makeZip([{ path: "pdf/SKILL.md", content: skillMd("other") }])),
       "",
     );
-    expect(mismatch).toEqual({ ok: false, problem: { reason: "invalid_skill", problem: "name_mismatch" } });
+    expect(mismatch).toEqual({
+      ok: false,
+      problem: { reason: "invalid_skill", problem: "name_mismatch" },
+    });
     const marked = await skillFromEntries(
       readZip(
         await makeZip([
@@ -256,7 +261,10 @@ describe("a skill in an archive", () => {
       ),
       "",
     );
-    expect(marked).toEqual({ ok: false, problem: { reason: "invalid_skill", problem: "conflict_markers" } });
+    expect(marked).toEqual({
+      ok: false,
+      problem: { reason: "invalid_skill", problem: "conflict_markers" },
+    });
   });
 
   it("takes pasted text as a SKILL.md alone", () => {
@@ -285,13 +293,19 @@ describe("a skill in an archive", () => {
 
 describe("a GitHub address", () => {
   it("reads a repository, a folder at a ref, and a link to a SKILL.md", () => {
-    expect(parseGitHubAddress("github.com/owner/repo")).toEqual({ owner: "owner", repo: "repo", rest: [] });
+    expect(parseGitHubAddress("github.com/owner/repo")).toEqual({
+      owner: "owner",
+      repo: "repo",
+      rest: [],
+    });
     expect(parseGitHubAddress("https://www.github.com/owner/repo.git")).toEqual({
       owner: "owner",
       repo: "repo",
       rest: [],
     });
-    expect(parseGitHubAddress(" https://github.com/o/r/tree/feature/x/skills/pdf?tab=readme ")).toEqual({
+    expect(
+      parseGitHubAddress(" https://github.com/o/r/tree/feature/x/skills/pdf?tab=readme "),
+    ).toEqual({
       owner: "o",
       repo: "r",
       rest: ["feature", "x", "skills", "pdf"],
@@ -377,7 +391,11 @@ describe("a GitHub address", () => {
     });
     expect(await at(["v1", "pdf"])).toMatchObject({ ref: "v1", path: "pdf", commit: PEELED });
     await expect(at(["nope", "pdf"])).rejects.toThrow("not_found");
-    expect(asked.every((call) => call.url === "https://github.com/o/r.git/info/refs?service=git-upload-pack")).toBe(true);
+    expect(
+      asked.every(
+        (call) => call.url === "https://github.com/o/r.git/info/refs?service=git-upload-pack",
+      ),
+    ).toBe(true);
     expect(asked.every((call) => call.redirect === "manual")).toBe(true);
     // A commit in full needs no listing.
     asked.length = 0;
@@ -385,7 +403,9 @@ describe("a GitHub address", () => {
     expect(asked).toEqual([]);
     expect(await resolveRef({ owner: "o", repo: "r", ref: "v1" }, fetcher)).toBe(PEELED);
     expect(await resolveRef({ owner: "o", repo: "r", ref: null }, fetcher)).toBe(SHA);
-    await expect(resolveRef({ owner: "o", repo: "r", ref: "gone" }, fetcher)).rejects.toThrow("not_found");
+    await expect(resolveRef({ owner: "o", repo: "r", ref: "gone" }, fetcher)).rejects.toThrow(
+      "not_found",
+    );
   });
 
   it("fetches the archive from codeload, refusing redirects, failures and what is too large", async () => {
@@ -398,18 +418,26 @@ describe("a GitHub address", () => {
     expect(asked).toBe(`https://codeload.github.com/o/r/zip/${SHA}`);
     expect(ok).toEqual(new Uint8Array([1, 2, 3]));
     const answer = (response: Response) => fetchArchive(source, async () => response);
-    await expect(answer(new Response(null, { status: 302, headers: { location: "https://evil.example" } }))).rejects.toThrow("not_found");
+    await expect(
+      answer(new Response(null, { status: 302, headers: { location: "https://evil.example" } })),
+    ).rejects.toThrow("not_found");
     await expect(answer(new Response(null, { status: 404 }))).rejects.toThrow("not_found");
     await expect(answer(new Response(null, { status: 500 }))).rejects.toThrow("unreachable");
-    await expect(answer(new Response("x", { headers: { "content-length": "20000001" } }))).rejects.toThrow("too_large");
+    await expect(
+      answer(new Response("x", { headers: { "content-length": "20000001" } })),
+    ).rejects.toThrow("too_large");
     const endless = new ReadableStream<Uint8Array>({
       pull(controller) {
         controller.enqueue(new Uint8Array(1_000_000));
       },
     });
     await expect(answer(new Response(endless))).rejects.toThrow("too_large");
-    await expect(fetchArchive(source, async () => Promise.reject(new Error("down")))).rejects.toThrow("unreachable");
-    await expect(fetchArchive({ ...source, commit: "main" }, async () => new Response())).rejects.toThrow("invalid_address");
+    await expect(
+      fetchArchive(source, async () => Promise.reject(new Error("down"))),
+    ).rejects.toThrow("unreachable");
+    await expect(
+      fetchArchive({ ...source, commit: "main" }, async () => new Response()),
+    ).rejects.toThrow("invalid_address");
   });
 });
 
@@ -458,7 +486,9 @@ describe("the static scan", () => {
   it("flags executables among binary files, and reads no binary as text", () => {
     const binary = (path: string, bytes: number[]) =>
       scanSkill([{ path, content: btoa(String.fromCharCode(...bytes)), binary: true }]);
-    expect(binary("tool.exe", [0]).findings).toEqual([{ path: "tool.exe", line: 0, kind: "executable", excerpt: "" }]);
+    expect(binary("tool.exe", [0]).findings).toEqual([
+      { path: "tool.exe", line: 0, kind: "executable", excerpt: "" },
+    ]);
     expect(binary("tool", [0x7f, 0x45, 0x4c, 0x46]).verdict).toBe("caution");
     expect(binary("tool", [0x4d, 0x5a, 0, 0]).verdict).toBe("caution");
     expect(binary("tool", [0xcf, 0xfa, 0xed, 0xfe]).verdict).toBe("caution");
@@ -519,13 +549,24 @@ describe("a Save's changes", () => {
       [{ file: "memory", content: 1, version: null }],
       [{ file: "soul", content: "a", version: null, extra: true }],
       [{ file: "soul", content: "a", version: null, name: "x" }],
-      [{ file: "soul", content: "a", version: null }, { file: "soul", content: "b", version: null }],
+      [
+        { file: "soul", content: "a", version: null },
+        { file: "soul", content: "b", version: null },
+      ],
       [{ file: "skill", name: "Bad Name", content: "x", version: null }],
       [{ file: "skill", name: "pdf", content: 3, version: null }],
       [{ file: "skill", name: "pdf", content: "x", version: null, staged: "f".repeat(32) }],
       [{ file: "install", staged: "nope", hash: `sha256:${"0".repeat(64)}`, version: null }],
       [{ file: "install", staged: "f".repeat(32), hash: "md5:x", version: null }],
-      [{ file: "install", staged: "f".repeat(32), hash: `sha256:${"0".repeat(64)}`, version: null, name: "x" }],
+      [
+        {
+          file: "install",
+          staged: "f".repeat(32),
+          hash: `sha256:${"0".repeat(64)}`,
+          version: null,
+          name: "x",
+        },
+      ],
       [{ file: "agents", content: "x", version: null }],
       ["soul"],
     ]) {
@@ -540,9 +581,20 @@ describe("a Save's changes", () => {
     expect(saveHeadline("kelpie", { files: ["soul", "memory"], skills: 2 })).toBe(
       "Edit kelpie's soul, memory and 2 skills from the webchat",
     );
-    expect(saveHeadline("kelpie", { files: [], skills: 1 })).toBe("Edit kelpie's a skill from the webchat");
-    expect(saveHeadline("kelpie", { files: [], skills: 0 })).toBe("Edit kelpie's files from the webchat");
-    const github = { kind: "github", owner: "o", repo: "r", ref: "main", path: "s/pdf", commit: SHA } as const;
+    expect(saveHeadline("kelpie", { files: [], skills: 1 })).toBe(
+      "Edit kelpie's a skill from the webchat",
+    );
+    expect(saveHeadline("kelpie", { files: [], skills: 0 })).toBe(
+      "Edit kelpie's files from the webchat",
+    );
+    const github = {
+      kind: "github",
+      owner: "o",
+      repo: "r",
+      ref: "main",
+      path: "s/pdf",
+      commit: SHA,
+    } as const;
     expect(skillTrailers("pdf", github, "sha256:x")).toEqual([
       "Kelpie-Skill: pdf",
       `Kelpie-Skill-Source: github.com/o/r/tree/${SHA}/s/pdf`,
