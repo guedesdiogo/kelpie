@@ -2716,8 +2716,11 @@ dialog h2 {
   background: color-mix(in srgb, var(--accent) 24%, transparent);
   color: transparent;
 }
-.editor .doc:focus-within {
-  box-shadow: inset 0 0 0 2px var(--focus-halo, var(--accent));
+/* Focused, the caret and its marked line show where the owner is; no frame around the page. */
+.editor .doc-input:focus,
+.editor .doc-input:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 .editor .doc-m {
   display: flex;
@@ -2917,6 +2920,11 @@ dialog h2 {
   border-color: var(--danger);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 14%, transparent);
 }
+/* The row's ring shows the focus; the field inside it needs no second one. */
+.editor .mem-t:focus-visible,
+.editor .field .txt:focus-visible {
+  outline: none;
+}
 .editor .mem-t {
   flex: 1;
   min-inline-size: 0;
@@ -3054,6 +3062,10 @@ dialog h2 {
   display: grid;
   gap: 12px;
   margin: 0 22px var(--space-5);
+}
+.editor .inst > .doc-m {
+  display: block;
+  margin: 0;
 }
 .editor .inst > .backb {
   margin: 14px 0 0;

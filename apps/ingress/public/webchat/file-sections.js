@@ -37,6 +37,12 @@ const element = (tag, className) => {
   return made;
 };
 
+/** A field as tall as its text; one not laid out yet, as in a hidden section, keeps its rows. */
+function growField(field) {
+  field.style.blockSize = "auto";
+  if (field.scrollHeight > 0) field.style.blockSize = `${field.scrollHeight}px`;
+}
+
 const button = (className, text) => {
   const made = element("button", className);
   made.type = "button";
@@ -235,6 +241,8 @@ export class FileSections {
   /** The section just showed: its file's switch lays out, and the mascot acts it out. */
   shown(section) {
     this.views[section]?.mount();
+    // A memory's rows take their text's height once they can be measured.
+    if (section === "memory") this.memoryList?.querySelectorAll("textarea").forEach(growField);
     if (section === "skills") this.skillDetail?.view.mount();
     this.#onMascot(section === "skills" ? "search" : "vault");
   }
@@ -495,10 +503,7 @@ export class FileSections {
     field.rows = 1;
     field.value = text;
     field.setAttribute("aria-label", names.entry(index + 1));
-    const grow = () => {
-      field.style.blockSize = "auto";
-      field.style.blockSize = `${field.scrollHeight}px`;
-    };
+    const grow = () => growField(field);
     field.addEventListener("input", () => {
       const now = this.#entries();
       now[[...this.memoryList.children].indexOf(row)] = field.value;
