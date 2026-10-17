@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { PROTOCOL, VERSION } from "../src/protocol.ts";
-import { MAX_RESULT_BYTES, MAX_TURN_BYTES } from "../src/requests.ts";
+import { MAX_RESULT_BYTES, MAX_TURN_BYTES, PROTOCOL, VERSION } from "../src/protocol.ts";
 import { createHandler, type HandlerOptions, type LogEntry } from "../src/server.ts";
 import { Sessions } from "../src/sessions.ts";
 import { fakeClaude, frames, reply, result, SESSION, turnRequest } from "./fake-claude.ts";
@@ -285,6 +284,7 @@ describe("the session routes", () => {
       arguments: { query: "Ana" },
       _meta: { "claudecode/toolUseId": "toolu_1" },
     });
+    expect(await turn.next()).toEqual({ type: "ping" });
     expect(await turn.next()).toMatchObject({ type: "round" });
     expect(await turn.next()).toMatchObject({ type: "tool_call", call: { id: "toolu_1" } });
     expect((await post(RESULTS, { callId: "toolu_1", output: "Lisbon" })).status).toBe(200);

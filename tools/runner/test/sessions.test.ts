@@ -89,11 +89,13 @@ function setup({
     warn: (message) => warnings.push(message),
     ...limits,
   });
-  /** Starts a turn that must start, and reads its frames. */
+  /** Starts a turn that must start, and reads its frames after the `ping` every turn opens with. */
   const start = async (id = SESSION, overrides: Parameters<typeof turnRequest>[0] = {}) => {
     const started = await sessions.turn(id, turnRequest(overrides));
     if (!("stream" in started)) throw new Error(`${started.status} ${started.reason}`);
-    return frames(started.stream);
+    const turn = frames(started.stream);
+    expect(await turn.next()).toEqual({ type: "ping" });
+    return turn;
   };
   const conflict = async (id: string, overrides: Parameters<typeof turnRequest>[0] = {}) => {
     const started = await sessions.turn(id, turnRequest(overrides));
@@ -1136,6 +1138,26 @@ describe("a reply that didn't stream", () => {
 });
 
 describe("a turn's keepalive", () => {
+  it("opens each turn's stream with a ping, at once, so its headers go out before Claude Code answers", async () => {
+    const { sessions, last } = setup();
+    for (const resume of [false, true]) {
+      const started = await sessions.turn(SESSION, turnRequest({ resume }));
+      if (!("stream" in started)) throw new Error(`${started.status} ${started.reason}`);
+      const reader = started.stream.getReader();
+      // Nothing from Claude Code yet: the first chunk is there without it, and without any wait.
+      const first = await Promise.race([reader.read(), settle().then(() => "nothing")]);
+      expect(first).toEqual({
+        done: false,
+        value: new TextEncoder().encode('{"type":"ping"}\n'),
+      });
+      reader.releaseLock();
+      const turn = frames(started.stream);
+      await last().next();
+      last().send(...answered("Hi."));
+      expect((await turn.rest()).at(-1)).toMatchObject({ type: "finish", reason: "stop" });
+    }
+  });
+
   it("sends a ping after each 20 s the stream stays silent, until the turn ends", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { start, last } = setup();

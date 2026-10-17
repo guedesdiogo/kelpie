@@ -102,8 +102,9 @@ export type RunnerErrorCode = "rate_limited" | "out_of_credits" | "auth" | "serv
  *   after Claude Code compacted it;
  * - `error`: the turn failed. `resetsAt` is in epoch ms; `unverified` marks a code read from a
  *   signal other failures share;
- * - `ping`: nothing happened for a while, as while Kelpie runs a tool. It keeps the connections
- *   between Kelpie and the runner open, and maps onto no event.
+ * - `ping`: the stream's first frame, so its headers go out at once, and again after each 20 s of
+ *   silence, as while Kelpie runs a tool. It keeps the connections between Kelpie and the runner
+ *   open, and maps onto no event.
  */
 export type RunnerFrame =
   | { type: "text"; delta: string }
@@ -125,3 +126,201 @@ export type RunnerFrame =
       resetsAt?: number;
       unverified?: boolean;
     };
+
+// The checks a request to the runner passes. The runner checks what it receives, and
+// `channel-egress` checks what it relays at its RPC boundary (#420): with one set of checks, a
+// request one side takes, the other takes too.
+
+/** A session's id in a path: a lowercase UUID, as Kelpie picks them and Claude Code takes them. */
+export const RUNNER_SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** The largest turn's body, in bytes: a seed carries a conversation's transcript and checkpoint. */
+export const RUNNER_MAX_TURN_BYTES = 8 * 1024 * 1024;
+/** The largest tool result's body, in bytes. */
+export const RUNNER_MAX_RESULT_BYTES = 256 * 1024;
+
+const MAX_CONVERSATION_CHARS = 256;
+const MAX_SYSTEM_CHARS = 200_000;
+const MAX_TOOLS = 128;
+const MAX_DESCRIPTION_CHARS = 10_000;
+/** A tool's input schema as JSON, and all the tools' schemas together, in UTF-16 code units. */
+const MAX_SCHEMA_CHARS = 64 * 1024;
+const MAX_SCHEMAS_CHARS = 1024 * 1024;
+/** How deep a schema's JSON may nest objects and arrays. */
+const MAX_SCHEMA_DEPTH = 64;
+const MAX_MESSAGES = 1_000;
+const MAX_PARTS = 1_000;
+const MAX_CALL_ID_CHARS = 256;
+/** llm-gateway's own bound on an answer. The runner then cuts it as Kelpie's tools do. */
+const MAX_OUTPUT_CHARS = 20_000;
+const MIN_TOOL_LOOP_MS = 1_000;
+const MAX_TOOL_LOOP_MS = 3_600_000;
+const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,127}$/;
+/** The Messages API's rule for a tool's name. */
+const TOOL_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** A turn's body, checked field by field and rebuilt: anything else, or anything more, is refused. */
+export function parseRunnerTurnRequest(value: unknown): RunnerTurnRequest | null {
+  if (
+    !hasKeys(value, [
+      "conversation",
+      "resume",
+      "model",
+      "system",
+      "tools",
+      "messages",
+      "toolLoopMs",
+    ])
+  ) {
+    return null;
+  }
+  const { conversation, resume, model, system, tools, messages, toolLoopMs } = value;
+  if (!isText(conversation, MAX_CONVERSATION_CHARS) || typeof resume !== "boolean") return null;
+  if (typeof model !== "string" || !MODEL.test(model) || !isText(system, MAX_SYSTEM_CHARS)) {
+    return null;
+  }
+  if (
+    typeof toolLoopMs !== "number" ||
+    !Number.isInteger(toolLoopMs) ||
+    toolLoopMs < MIN_TOOL_LOOP_MS ||
+    toolLoopMs > MAX_TOOL_LOOP_MS
+  ) {
+    return null;
+  }
+  const specs = parseTools(tools);
+  const sent = parseMessages(messages);
+  if (specs === null || sent === null) return null;
+  return {
+    conversation,
+    resume,
+    model,
+    system,
+    tools: specs,
+    messages: sent,
+    toolLoopMs,
+  };
+}
+
+/** A tool call's result, as llm-gateway checks it, rebuilt. */
+export function parseRunnerToolResult(value: unknown): RunnerToolResult | null {
+  if (!hasKeys(value, ["callId", "output"], ["isError"])) return null;
+  const { callId, output, isError } = value;
+  if (!isText(callId, MAX_CALL_ID_CHARS)) return null;
+  if (typeof output !== "string" || output.length > MAX_OUTPUT_CHARS) return null;
+  if (isError !== undefined && typeof isError !== "boolean") return null;
+  return { callId, output, ...(isError === undefined ? {} : { isError }) };
+}
+
+function parseTools(value: unknown): RunnerToolSpec[] | null {
+  if (!Array.isArray(value) || value.length > MAX_TOOLS) return null;
+  const names = new Set<string>();
+  const specs: RunnerToolSpec[] = [];
+  let schemas = 0;
+  for (const entry of value) {
+    if (!hasKeys(entry, ["name", "description", "inputSchema"])) return null;
+    const { name, description, inputSchema } = entry;
+    if (typeof name !== "string" || !TOOL_NAME.test(name) || names.has(name)) return null;
+    if (typeof description !== "string" || description.length > MAX_DESCRIPTION_CHARS) return null;
+    if (!isObject(inputSchema) || inputSchema.type !== "object") return null;
+    const length = runnerJsonLength(
+      inputSchema,
+      Math.min(MAX_SCHEMA_CHARS, MAX_SCHEMAS_CHARS - schemas),
+    );
+    if (length === null) return null;
+    schemas += length;
+    names.add(name);
+    specs.push({ name, description, inputSchema: inputSchema as RunnerToolSpec["inputSchema"] });
+  }
+  return specs;
+}
+
+function parseMessages(value: unknown): RunnerTurnRequest["messages"] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_MESSAGES) return null;
+  const messages: RunnerTurnRequest["messages"] = [];
+  for (const entry of value) {
+    if (!hasKeys(entry, ["role", "parts"]) || entry.role !== "user") return null;
+    const { parts } = entry;
+    if (!Array.isArray(parts) || parts.length === 0 || parts.length > MAX_PARTS) return null;
+    const texts: RunnerText[] = [];
+    for (const part of parts) {
+      if (!hasKeys(part, ["type", "text"]) || part.type !== "text") return null;
+      // The Messages API refuses an empty text block. The body's size bounds the text.
+      if (typeof part.text !== "string" || part.text === "") return null;
+      texts.push({ type: "text", text: part.text });
+    }
+    messages.push({ role: "user", parts: texts });
+  }
+  return messages;
+}
+
+/**
+ * The length of `value` as `JSON.stringify` writes it, in UTF-16 code units, escapes left out; or
+ * null past `budget`, or for what JSON can't carry as written: a BigInt, a function, a number that
+ * isn't finite, an object other than a plain one or an array, or nesting deeper than
+ * MAX_SCHEMA_DEPTH, which a cycle reaches. It stops as soon as the count passes the budget, so a huge
+ * value costs no more than the budget to measure.
+ */
+export function runnerJsonLength(value: unknown, budget: number): number | null {
+  let length = 0;
+  const visit = (node: unknown, depth: number): boolean => {
+    if (node === null) length += 4;
+    else if (typeof node === "boolean") length += node ? 4 : 5;
+    else if (typeof node === "string") length += node.length + 2;
+    else if (typeof node === "number") {
+      if (!Number.isFinite(node)) return false;
+      length += String(node).length;
+    } else if (Array.isArray(node)) {
+      if (depth >= MAX_SCHEMA_DEPTH) return false;
+      length += 2 + Math.max(node.length - 1, 0);
+      for (const item of node) {
+        // As JSON.stringify does, a list writes a missing value as null.
+        if (!visit(item === undefined ? null : item, depth + 1)) return false;
+      }
+    } else if (typeof node === "object" && isPlain(node)) {
+      if (depth >= MAX_SCHEMA_DEPTH) return false;
+      length += 2;
+      let first = true;
+      for (const key of Object.keys(node)) {
+        const item = (node as Record<string, unknown>)[key];
+        // As JSON.stringify does, an object leaves out a property without a value.
+        if (item === undefined) continue;
+        length += key.length + 3 + (first ? 0 : 1);
+        first = false;
+        if (!visit(item, depth + 1)) return false;
+      }
+    } else return false;
+    return length <= budget;
+  };
+  return visit(value, 0) ? length : null;
+}
+
+function isPlain(value: object): boolean {
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** An object with every required key, and no key outside `required` and `optional`. */
+function hasKeys<K extends string, O extends string = never>(
+  value: unknown,
+  required: readonly K[],
+  optional: readonly O[] = [],
+): value is Record<K, unknown> & Partial<Record<O, unknown>> {
+  if (!isObject(value)) return false;
+  const keys = Object.keys(value);
+  return (
+    required.every((key) => Object.hasOwn(value, key)) &&
+    keys.every(
+      (key) =>
+        (required as readonly string[]).includes(key) ||
+        (optional as readonly string[]).includes(key),
+    )
+  );
+}
+
+function isText(value: unknown, max: number): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= max;
+}

@@ -22,6 +22,12 @@ export type {
   ChannelWebhooksContract,
   DeliveryFailure,
   EgressDestination,
+  RunnerAnswerOutcome,
+  RunnerChatContract,
+  RunnerCloseOutcome,
+  RunnerRelayFailure,
+  RunnerTurnStart,
+  RunnerTurnStream,
   SendOutcome,
   SetupFormsContract,
   TelegramDisconnection,
@@ -50,7 +56,12 @@ export {
   webLinks,
 } from "./markdown.ts";
 export {
+  parseRunnerToolResult,
+  parseRunnerTurnRequest,
+  RUNNER_MAX_RESULT_BYTES,
+  RUNNER_MAX_TURN_BYTES,
   RUNNER_PROTOCOL,
+  RUNNER_SESSION_ID,
   RUNNER_VERSION,
   type RunnerAnswered,
   type RunnerErrorCode,
@@ -63,6 +74,7 @@ export {
   type RunnerToolSpec,
   type RunnerTurnRequest,
   type RunnerUsage,
+  runnerJsonLength,
 } from "./runner.ts";
 
 // Adapters have their own entry points (`@kelpie/channels/telegram`): they need the runtime's fetch

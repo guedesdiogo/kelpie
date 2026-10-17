@@ -1,13 +1,14 @@
 import { isAuthorized } from "./auth.ts";
-import { PROTOCOL, VERSION } from "./protocol.ts";
 import {
   MAX_RESULT_BYTES,
   MAX_TURN_BYTES,
+  PROTOCOL,
   parseToolResult,
   parseTurnRequest,
-  readJson,
   SESSION_ID,
-} from "./requests.ts";
+  VERSION,
+} from "./protocol.ts";
+import { readJson } from "./requests.ts";
 import type { Sessions } from "./sessions.ts";
 
 /** One request, as the runner logs it: never its headers, its query or its body. */
