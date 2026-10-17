@@ -50,6 +50,14 @@ export const MAX_LIVE = 4;
 export const TURNS_PER_MINUTE = 30;
 /** Unfinished sessions remembered, so that none is resumed. Their transcripts are deleted too. */
 export const MAX_UNFINISHED = 1_000;
+/**
+ * How long a closed session's process may take to exit. Past it, its room is released and its id
+ * is never resumed, as the process may still write its transcript.
+ */
+export const CLOSING_MS = 30_000;
+
+/** Messages only a process that began with its `system/init` may send: the turn's output. */
+const OUTPUT = new Set(["assistant", "stream_event", "result"]);
 
 /**
  * Why a turn can't start, which `409` carries. The provider then seeds a new session (#295):
@@ -76,8 +84,8 @@ export class Sessions {
   readonly #options: SessionsOptions;
   readonly #live = new Map<string, Session>();
   readonly #conversations = new Map<string, Session>();
-  // Closed sessions whose process hasn't exited yet: they still take their room.
-  readonly #closing = new Set<Session>();
+  // Closed sessions whose process hasn't exited yet: they still take their room, for a while.
+  readonly #closing = new Map<Session, ReturnType<typeof setTimeout>>();
   // Sessions whose last turn didn't finish: never resumed. Their transcripts are deleted as well,
   // for after a restart.
   readonly #unfinished = new Set<string>();
@@ -161,7 +169,7 @@ export class Sessions {
   ): { stream: ReadableStream<Uint8Array> } | Refusal | undefined {
     if (this.#unfinished.has(id)) return { status: 409, reason: "unfinished" };
     // Its process may still write the transcript: a new one mustn't take it yet.
-    for (const session of this.#closing) {
+    for (const session of this.#closing.keys()) {
       if (session.id === id) return { status: 409, reason: "unfinished" };
     }
     const live = this.#live.get(id);
@@ -185,9 +193,29 @@ export class Sessions {
   #closed(session: Session, clean: boolean): void {
     this.#live.delete(session.id);
     this.#conversations.delete(session.conversation);
-    this.#closing.add(session);
-    if (clean) return;
-    this.#unfinished.add(session.id);
+    this.#closing.set(
+      session,
+      setTimeout(() => this.#abandon(session), CLOSING_MS),
+    );
+    if (!clean) this.#markUnfinished(session.id);
+  }
+
+  /**
+   * A closed session whose process hasn't exited in CLOSING_MS: its room is released, its id is
+   * never resumed, and its transcript stays, as the process may still be alive.
+   */
+  #abandon(session: Session): void {
+    this.#closing.delete(session);
+    this.#markUnfinished(session.id);
+    this.#options.warn(
+      forLog(
+        `Claude Code's session ${session.id} didn't exit ${CLOSING_MS / 1000} s after it closed: its room is released, and it won't be resumed`,
+      ),
+    );
+  }
+
+  #markUnfinished(id: string): void {
+    this.#unfinished.add(id);
     if (this.#unfinished.size > (this.#options.maxUnfinished ?? MAX_UNFINISHED)) {
       this.#unfinished.delete(this.#unfinished.values().next().value as string);
     }
@@ -198,6 +226,7 @@ export class Sessions {
    * can write it again. One Claude Code never wrote is fine.
    */
   async #exited(session: Session, clean: boolean): Promise<void> {
+    clearTimeout(this.#closing.get(session));
     this.#closing.delete(session);
     if (clean) return;
     try {
@@ -320,20 +349,24 @@ class Session {
   }
 
   /**
-   * Hands Claude Code's messages to the turn. A process that doesn't begin with its init can't be
-   * checked, so it fails the turn. The process ending ends the session.
+   * Hands Claude Code's messages to the turn. A process whose output comes before its init can't
+   * have been checked, so it fails the turn; other messages before the init pass, unread. The
+   * process ending ends the session.
    */
   async #read(): Promise<void> {
     let ending = "ended";
     try {
       for await (const message of this.#query) {
         if (!this.#initialized && !this.#closed) {
-          this.#initialized = message.type === "system" && message.subtype === "init";
-          if (!this.#initialized) {
+          if (message.type === "system" && message.subtype === "init") {
+            this.#initialized = true;
+          } else if (OUTPUT.has(message.type)) {
             this.#options.warn(
-              `Claude Code's session ${this.id} didn't begin with its init, but ${forLog(message.type)}`,
+              `Claude Code's session ${this.id} sent ${forLog(message.type)} before its init`,
             );
             this.#shutdown(false);
+          } else {
+            continue;
           }
         }
         this.#turn?.handle(message);

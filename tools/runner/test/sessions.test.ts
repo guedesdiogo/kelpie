@@ -4,6 +4,7 @@ import { ENV_ALLOWLIST, MAX_TURNS } from "../src/claude.ts";
 import { VERSION } from "../src/protocol.ts";
 import {
   CALL_TIMEOUT_MARGIN_MS,
+  CLOSING_MS,
   IDLE_MS,
   MAX_LIVE,
   MAX_UNFINISHED,
@@ -1236,21 +1237,43 @@ describe("the runner's limits", () => {
 });
 
 describe("a session's process", () => {
-  it("fails the turn when it doesn't begin with its init, and the session closes unfinished", async () => {
-    const { start, last, warnings, deleted, conflict } = setup();
+  it.each<[string, SDKMessage[]]>([
+    ["stream_event", answered("Hi.")],
+    ["assistant", [whole("msg_1", ["Hi."]), result(SESSION)]],
+    ["result", [result(SESSION)]],
+  ])(
+    "fails the turn when its %s comes before its init, and the session closes unfinished",
+    async (type, messages) => {
+      const { start, last, warnings, deleted, conflict } = setup();
+      const turn = await start();
+      const session = last();
+      await session.next();
+      session.begins = false;
+      session.send(...messages);
+      expect(await turn.rest()).toEqual([errorFrame("server_error")]);
+      await settle();
+      expect(warnings).toEqual([`Claude Code's session ${SESSION} sent ${type} before its init`]);
+      expect(session.closed).toBe(true);
+      expect(deleted).toEqual([SESSION]);
+      expect(await conflict(SESSION, { resume: true })).toBe("unfinished");
+    },
+  );
+
+  it("lets other messages before its init pass, unread", async () => {
+    const { start, last, warnings } = setup();
     const turn = await start();
     const session = last();
     await session.next();
     session.begins = false;
-    session.send(...answered("Hi."));
-    expect(await turn.rest()).toEqual([errorFrame("server_error")]);
-    await settle();
-    expect(warnings).toEqual([
-      `Claude Code's session ${SESSION} didn't begin with its init, but stream_event`,
-    ]);
-    expect(session.closed).toBe(true);
-    expect(deleted).toEqual([SESSION]);
-    expect(await conflict(SESSION, { resume: true })).toBe("unfinished");
+    session.send(
+      system("status"),
+      // Read, it would fail the turn: it is the turn's own signal only after the init.
+      rateLimit({ status: "rejected", resetsAt: 1 }),
+      init(),
+      ...answered("Hi."),
+    );
+    expect((await turn.rest()).at(-1)).toMatchObject({ type: "finish", reason: "stop" });
+    expect(warnings).toEqual([]);
   });
 
   it("isn't asked for its init once its session closed", async () => {
@@ -1275,6 +1298,66 @@ describe("a session's process", () => {
     session.exit();
     await settle();
     expect(deleted).toEqual([SESSION]);
+  });
+
+  it("releases the room of a closed session whose process doesn't exit in 30 s, never to resume it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { sessions, start, last, warnings, deleted, conflict } = setup({ maxLive: 1 });
+    await start();
+    const session = last();
+    session.lingers = true;
+    // A running turn, so the session closes unfinished.
+    sessions.close(SESSION);
+    await settle();
+    // One more process may run while it closes; another may not.
+    const other = await start(OTHER_SESSION, { conversation: "c2" });
+    await last().next();
+    last().send(...answered("Hi.", OTHER_SESSION));
+    await other.rest();
+    const third = "77777777-8888-4999-8aaa-bbbbbbbbbbbb";
+    expect(await conflict(third, { conversation: "c3" })).toBe("full");
+    vi.advanceTimersByTime(CLOSING_MS - 1);
+    expect(warnings).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(warnings).toEqual([
+      `Claude Code's session ${SESSION} didn't exit 30 s after it closed: its room is released, and it won't be resumed`,
+    ]);
+    await settle();
+    expect(deleted).toEqual([]);
+    expect(await conflict(third, { conversation: "c3" })).toBe("started");
+    expect(await conflict(SESSION, { resume: true })).toBe("unfinished");
+    expect(CLOSING_MS).toBe(30_000);
+  });
+
+  it("never resumes a cleanly closed session whose process didn't exit in time", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { sessions, start, last, conflict } = setup();
+    const turn = await start();
+    const session = last();
+    await session.next();
+    session.send(...answered("Hi."));
+    await turn.rest();
+    session.lingers = true;
+    sessions.close(SESSION);
+    vi.advanceTimersByTime(CLOSING_MS);
+    session.exit();
+    await settle();
+    expect(await conflict(SESSION, { resume: true })).toBe("unfinished");
+  });
+
+  it("stops watching a closed session once its process exits", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { sessions, start, last, warnings, conflict } = setup();
+    const turn = await start();
+    const session = last();
+    await session.next();
+    session.send(...answered("Hi."));
+    await turn.rest();
+    sessions.close(SESSION);
+    await settle();
+    vi.advanceTimersByTime(10 * CLOSING_MS);
+    expect(warnings).toEqual([]);
+    expect(await conflict(SESSION, { resume: true })).toBe("started");
   });
 
   it("leaves alone an unfinished session whose transcript Claude Code never wrote", async () => {
