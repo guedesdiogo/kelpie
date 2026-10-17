@@ -13,7 +13,7 @@ const MIN_LENGTH = 32;
  * a private key. It is opened once, without following a symlink, and checked through that same
  * handle, so it can't be swapped between the check and the read.
  */
-export function loadSecrets(path: string, uid = process.getuid()): string[] {
+export function loadSecrets(path: string, uid = ownUid()): string[] {
   let fd: number;
   try {
     fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -48,4 +48,9 @@ export function loadSecrets(path: string, uid = process.getuid()): string[] {
     );
   }
   return secrets;
+}
+
+/** The runner's user. Node's types make `getuid` optional, as Windows lacks it; the runner is Linux's. */
+function ownUid(): number {
+  return (process.getuid as () => number)();
 }

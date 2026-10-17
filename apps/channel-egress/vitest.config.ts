@@ -1,9 +1,11 @@
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineConfig, type Plugin } from "vitest/config";
+import { RUNNER_PROTOCOL } from "../../packages/channels/src/runner.ts";
 
+// A runner on this protocol, and an outdated one on another.
 const RUNNER_SECRETS: Record<string, { version: string; protocol: number }> = {
-  ["r".repeat(64)]: { version: "0.1.0", protocol: 1 },
-  ["o".repeat(64)]: { version: "0.0.9", protocol: 2 },
+  ["r".repeat(64)]: { version: "0.1.0", protocol: RUNNER_PROTOCOL },
+  ["o".repeat(64)]: { version: "0.0.9", protocol: RUNNER_PROTOCOL + 1 },
 };
 
 /**

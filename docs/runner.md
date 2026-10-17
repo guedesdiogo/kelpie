@@ -1,26 +1,49 @@
 # The runner
 
-The runner is the process on the owner's VPS that Kelpie's Workers call to use that machine ([ADR-0035](adr/0035-agent-computer.md)). Its code is in `tools/runner`. It runs with Bun, from a checkout of this repository, and needs no `bun install`.
+The runner is the process on the owner's VPS that Kelpie's Workers call to use that machine ([ADR-0035](adr/0035-agent-computer.md)). Its code is in `tools/runner`. It runs with Bun, from a checkout of this repository, with only its own dependencies installed: the Claude Agent SDK and the MCP SDK, both pinned.
 
 - **It listens on `127.0.0.1` only.** The server opens no port: Workers reach it through a Cloudflare Tunnel and a Workers VPC Service.
 - **Every request needs its secret**, as `Authorization: Bearer <secret>`. Without it the runner answers 401, on any path.
 - **It never calls Kelpie.** Its answers go back on the requests `channel-egress` makes (#294).
-- **What it serves today:** `GET /health`, which answers its version and protocol version:
+- **What it serves:**
+  - `GET /health`, which answers its version and protocol version:
 
-  ```json
-  { "ok": true, "version": "0.1.0", "protocol": 1 }
-  ```
+    ```json
+    { "ok": true, "version": "0.2.0", "protocol": 2 }
+    ```
+
+  - the `claude-code` route's sessions (ADR-0037 §2, #295), described below:
+    - `POST /sessions/:id/turns` runs a turn and streams its frames as NDJSON;
+    - `POST /sessions/:id/tool-results` answers a tool call the turn asked for;
+    - `DELETE /sessions/:id` closes a session.
+
+## Claude Code sessions
+
+The `claude-code` route reaches Claude through the runner ([ADR-0037](adr/0037-conversations-through-claude-code.md)). Each conversation has one live session: one `query()` of the Agent SDK, fed by streaming input.
+
+- **Its id is Kelpie's,** a lowercase UUID. A new session takes it, and a resumed one goes on from it: live, or from its transcript after a restart or an idle close.
+- **A turn's frames** are `text`, `round` (a reply whose tool calls Claude Code runs, with its usage), `tool_call` (a call to run now), `finish` and `error`. Each maps onto one of Kelpie's model events, or onto its error. Their shapes are in `packages/channels/src/runner.ts`.
+- **Kelpie's tools** are an in-process MCP server, `kelpie`. A tool call goes out as a `tool_call` frame, and its result comes back on `/tool-results`. Without a result within the agent's tool bound plus 2 minutes, the turn fails.
+- **Isolation, on every call:** no built-in tool, no settings file or `CLAUDE.md`, no MCP server but Kelpie's, and no claude.ai connector. Kelpie's system prompt replaces Claude Code's, and a message's text goes as written, so `@path` and slash commands do nothing. `canUseTool` lets only Kelpie's own tools run.
+- **The environment:** Claude Code's process gets only `HOME`, `PATH`, `LANG` and `TMPDIR` from the runner's, plus Kelpie's client name and the switches that turn off its compaction and its memory. So `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_CUSTOM_HEADERS` never reach it, and it uses the server's own login.
+- **Failures** come from Claude Code's structured signals: a usage limit (with its reset), spent usage, a billing error (unverified), a failed login, or any other error. Each is a retryable `error` frame with a fixed message. What Claude Code writes on stderr goes to the runner's journal only.
+- **Closing:** a session closes after 15 minutes without a turn, when its conversation starts a new one, on `DELETE`, or when a turn fails or its stream is dropped. A session whose turn didn't finish can't be resumed, until the runner restarts.
+- **409:** a turn answers 409 with a `reason` when its session is `lost` (neither live nor on disk), `unfinished` (a turn still runs, or the last one failed) or `mismatched` (another conversation, prompt, model, tools or tool bound, or a new session's id already taken). Kelpie then starts a new session.
+- **Transcripts:** Claude Code keeps them under `~/.claude/projects/`, in the folder for the runner's working directory, `~/kelpie`.
 
 ## Setting it up
 
 On the VPS, as the user whose claude.ai login Claude Code uses:
 
-1. **Install Bun** and clone this repository into `~/kelpie`:
+1. **Install Bun,** clone this repository into `~/kelpie`, and install the runner's dependencies only. `--production` leaves out the test tools, and `--frozen-lockfile` installs exactly the versions in `bun.lock`:
 
    ```bash
    curl -fsSL https://bun.sh/install | bash
    git clone https://github.com/guedesdiogo/kelpie.git ~/kelpie
+   cd ~/kelpie && bun install --production --frozen-lockfile --filter @kelpie/runner
    ```
+
+   This user must be logged in to Claude Code with the claude.ai account that the `claude-code` route uses (ADR-0037 §5): the Agent SDK's Claude Code reads that login from `~/.claude`.
 
 2. **Create the secret.** It is 32 random bytes, in a file only this user can read. The runner refuses to start on a file others can read, or without a secret.
 
@@ -57,6 +80,7 @@ The service reads these from its environment, through `Environment=` lines in th
 |---|---|---|
 | `KELPIE_RUNNER_PORT` | `47832` | the loopback port, which the VPC Service points at |
 | `KELPIE_RUNNER_SECRET_FILE` | `~/.config/kelpie-runner/secret` | the secret file |
+| `KELPIE_RUNNER_WORK_DIR` | `~/.local/state/kelpie-runner/claude-code` | the empty folder Claude Code runs in, created `0700`; its sessions' transcripts are kept for this folder, apart from the owner's own sessions |
 
 ## The tunnel and the VPC Service
 
@@ -128,8 +152,8 @@ A rollback to a build deployed before the variable was set leaves `channel-egres
 
 ## Operating it
 
-- **Logs:** `journalctl --user -u kelpie-runner`. Each request logs its method, path and status, never its headers.
-- **Updating:** `git -C ~/kelpie pull --ff-only`, then `systemctl --user restart kelpie-runner`. A merge into `main` doesn't deploy the runner: it is the owner's server.
+- **Logs:** `journalctl --user -u kelpie-runner`. Each request logs its method, path and status, never its headers or body. Claude Code's stderr, and how a session ended, are logged there too.
+- **Updating:** `git -C ~/kelpie pull --ff-only`, then `bun install --production --frozen-lockfile --filter @kelpie/runner` in `~/kelpie`, then `systemctl --user restart kelpie-runner`. A merge into `main` doesn't deploy the runner: it is the owner's server.
 - **Rotating the secret:**
   1. Add the new secret as a second line of the file, and restart the runner. It now accepts both.
   2. Give Kelpie the new secret, through a new `connectRunner` form.
