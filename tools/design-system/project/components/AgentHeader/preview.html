@@ -1,0 +1,61 @@
+<!-- @dsCard group="Agents" height=400 subtitle="5.21 · below the sidebar's width: press the name, then the pencil or the avatar" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>AgentHeader</title></head>
+<body>
+<div class="k-stage">
+  <header class="k-ahead">
+    <span class="k-mh s48" id="fig"></span>
+    <div class="k-col" style="gap:2px">
+      <button type="button" class="k-ahead-name" id="name" aria-haspopup="true" aria-expanded="false" aria-controls="menu"><span class="k-display text-h3">Agenda</span><svg class="k-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6.5l3.5 3.5l3.5-3.5"/></svg></button>
+      <span class="k-roll text-sm k-muted" id="status"><span class="n">Reading your calendar for tomorrow</span></span>
+    </div>
+    <button type="button" class="k-ahead-acct" id="acct" aria-label="Account and display" data-tip="Ana Souza"><span class="k-ava" aria-hidden="true">AS</span></button>
+  </header>
+  <nav class="k-switcher" id="menu" hidden aria-label="Agents"><ul id="items"></ul></nav>
+  <p class="k-caption text-sm" id="note" aria-live="polite" style="margin:0"></p>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui;
+  var AG = [["kelpie", "Kelpie", "main"], ["agenda", "Agenda", "Calendar"], ["research", "Research", "Flights and prices"], ["code", "Code", "Code review"]], note = document.getElementById("note");
+  var head = ui.mascot(document.getElementById("fig"), ui.LOOKS.agenda, 48, { state: "working", activity: "calendar" });
+  var items = document.getElementById("items"), menu = document.getElementById("menu"), name = document.getElementById("name");
+  items.innerHTML = AG.map(function (a) {
+    // The open agent's mascot carries the pencil at rest, with a 44 px target (no pointer rests on a phone).
+    var cur = a[0] === "agenda";
+    return '<li' + (cur ? ' class="editable"' : "") + '><a href="?agent=' + a[0] + '"' + (cur ? ' aria-current="page"' : "") + '><span class="k-mh s36"></span><span class="text-ui">' + a[1] + ' <span class="k-spec">' + a[2] + '</span></span><span class="k-mono text-xs k-muted">' + a[0] + "</span></a>" +
+      (cur ? '<button type="button" class="k-pen at-rest" aria-label="Edit ' + a[1] + '" data-tip="Edit ' + a[1] + '">' + ui.icon("pencil") + "</button>" : "") + "</li>";
+  }).join("");
+  // The list's mascots are still, in the Idle pose, with no badge: the list carries no state.
+  Array.prototype.forEach.call(items.querySelectorAll(".k-mh"), function (h, i) { ui.mascot(h, ui.LOOKS[AG[i][0]], 36, { mode: "still" }); });
+  var links = Array.prototype.slice.call(items.querySelectorAll("a"));
+  links.forEach(function (a) { a.addEventListener("click", function (e) { e.preventDefault(); close(false); }); });
+  ui.tooltips(document.querySelector(".k-stage"));
+  items.querySelector(".k-pen").addEventListener("click", function () { close(false); note.textContent = "Opens Agenda's editor: a panel over the conversation, or its sheet on a phone (AgentEditor)."; });
+  document.getElementById("acct").addEventListener("click", function () { note.textContent = "Opens the Display menu downward from the avatar (DisplayMenu)."; });
+  function open(animate) {
+    menu.hidden = false; name.setAttribute("aria-expanded", "true");
+    if (animate) ui.animate(menu, [{ opacity: 0, transform: "translateY(-6px) scale(" + ui.num("scale-in", 0.97) + ")" }, { opacity: 1, transform: "none" }], { spring: "fast" });
+    links[1].focus({ preventScroll: true });
+  }
+  function close(animate) {
+    name.setAttribute("aria-expanded", "false");
+    if (!animate) { menu.hidden = true; name.focus(); return; }
+    ui.exit(menu, { y: -4 }).finished.then(function () { menu.hidden = true; });
+  }
+  name.addEventListener("click", function (e) { menu.hidden ? open(e.detail !== 0) : close(e.detail !== 0); });
+  menu.addEventListener("keydown", function (e) {
+    var i = links.indexOf(document.activeElement);
+    if (e.key === "ArrowDown") { e.preventDefault(); links[(i + 1) % links.length].focus(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); links[(i - 1 + links.length) % links.length].focus(); }
+    else if (e.key === "Home") { e.preventDefault(); links[0].focus(); }
+    else if (e.key === "End") { e.preventDefault(); links[links.length - 1].focus(); }
+    else if (e.key === "Escape") { e.preventDefault(); close(false); }
+  });
+  var phases = ["Reading your calendar for tomorrow", "Looking for a free hour", "Writing the reply"], k = 0;
+  setInterval(function () { k = (k + 1) % phases.length; ui.roll(document.getElementById("status"), phases[k]); head.setState(k === 2 ? "typing" : "working", { activity: k === 1 ? "think" : "calendar" }); }, 3200);
+})();
+</script>
+</body>
+</html>

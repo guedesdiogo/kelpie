@@ -1,0 +1,14 @@
+/* Mascot lab: the configurator around the engine. */
+.k-mascot-lab { grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: var(--space-4) var(--space-6); }
+.k-ml-fig { width: 176px; display: grid; place-items: center; padding: var(--space-2); border-radius: var(--r-panel); background: var(--surface); border: 1px solid var(--line); }
+.k-ml-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2) var(--space-3); align-content: start; }
+.k-ml-form label { display: grid; gap: var(--space-1); color: var(--muted); }
+.k-ml-form .k-check { display: flex; align-items: center; gap: var(--space-2); align-self: end; color: var(--fg); }
+.k-ml-form select, .k-ml-act select { min-block-size: 32px; padding: 0 var(--space-2); border: 1px solid var(--muted); border-radius: var(--r-btn); background: var(--surface); color: var(--fg); }
+.k-ml-wide { grid-column: 1 / -1; }
+.k-ml-act { display: flex; align-items: center; gap: var(--space-2); color: var(--muted); }
+.k-ml-sizes { display: flex; align-items: end; gap: var(--space-6); }
+.k-ml-sizes figure { margin: 0; display: grid; justify-items: center; gap: var(--space-2); }
+.k-ml-sizes figcaption { color: var(--muted); }
+@media (max-width: 520px) { .k-mascot-lab { grid-template-columns: minmax(0, 1fr); } .k-ml-fig { justify-self: center; } }
+.k-seg.k-seg-wrap { flex-wrap: wrap; }

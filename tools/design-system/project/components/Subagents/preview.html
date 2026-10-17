@@ -1,0 +1,157 @@
+<!-- @dsCard group="Agents" height=490 subtitle="5.6 · the pups leave beside the parent, in the header and on the profile; each comes back when its task ends and the rest close up; the third fails (3 s here, 30 s in the product)" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Subagents</title></head>
+<body>
+<div class="k-stage">
+  <button type="button" class="k-replay text-sm" id="again">Delegate again</button>
+  <div class="k-pups">
+    <p class="k-pups-l text-sm k-muted">The conversation's header</p>
+    <header class="k-ahead k-pups-head">
+      <span class="k-mh s48" id="hp"></span>
+      <span class="k-hpups" id="hrow" role="list" aria-label="Research's subagents"></span>
+      <div class="k-col" id="who" style="gap:2px">
+        <span class="k-display text-h3">Research</span>
+        <p class="k-hline text-sm k-muted"><span class="k-hphase" id="hphase"></span><span class="k-hcount" id="hcount" role="status"></span></p>
+      </div>
+    </header>
+    <p class="k-pups-l text-sm k-muted">The agent's profile</p>
+    <div class="k-pups-stage">
+      <span class="k-mh s160" id="pp"></span>
+      <div class="k-pups-row" id="prow"></div>
+    </div>
+    <p class="k-pups-cap text-ui" id="cap" role="status">Research is about to delegate three tasks.</p>
+  </div>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui;
+  var look = ui.LOOKS.research, hex = ui.lighter(ui.token("mascot-" + look.color), 0.38);
+  var who = document.getElementById("who"), hcount = document.getElementById("hcount"), cap = document.getElementById("cap");
+  // The same subagents show in both places: 20 px in the header, beside its 48 px mascot, and 64 px on the profile.
+  var S = [
+    { parentEl: document.getElementById("hp"), row: document.getElementById("hrow"), px: 20, header: true },
+    { parentEl: document.getElementById("pp"), row: document.getElementById("prow"), px: 64 },
+  ];
+  S[0].parent = ui.mascot(S[0].parentEl, look, 48);
+  S[1].parent = ui.mascot(S[1].parentEl, look, 160, { mode: "large" });
+  function offset(s, h) {
+    var a = s.parentEl.getBoundingClientRect(), b = h.getBoundingClientRect();
+    return [a.left + a.width / 2 - (b.left + b.width / 2), a.top + a.height * 0.6 - (b.top + b.height / 2)];
+  }
+  function gulp(s, from) { ui.animate(s.parentEl, [{ transform: "scale(" + from + ")" }, { transform: "none" }], { spring: "pop" }); }
+  // Whatever moved because the row changed slides from where it was, as a transform, with spring-moment.
+  function slide(els, change) {
+    var before = els.map(function (e) { return e.getBoundingClientRect().left; });
+    change();
+    els.forEach(function (e, i) {
+      var dx = before[i] - e.getBoundingClientRect().left;
+      if (dx) ui.animate(e, [{ transform: "translateX(" + dx + "px)" }, { transform: "none" }], { spring: "moment" });
+    });
+  }
+  var TASKS = ["compare flights", "check hotels", "read the reviews"];
+  // The header's count: what failed first, then what waits, then how many work (5.6).
+  function count() {
+    var out = S[0].pups.filter(function (p) { return p && p.el.isConnected && !p.leaving; });
+    var failed = out.filter(function (p) { return p.failed; }).length, work = out.length - failed;
+    var parts = [];
+    if (failed) parts.push(failed + " failed");
+    if (work) parts.push(work + (work === 1 ? " subagent" : " subagents") + " at work");
+    // When the last pup heads home, the count says the end instead of going blank.
+    if (!parts.length && S[0].pups.length) parts.push("All subagents are back");
+    hcount.textContent = parts.join(" · ");
+  }
+  var play = ui.runner(async function (run) {
+    S.forEach(function (s) {
+      s.row.innerHTML = ""; s.row.style.minWidth = ""; s.pups = [];
+      s.parent.setState("idle", { instant: true });
+    });
+    who.getAnimations().forEach(function (a) { a.cancel(); });
+    hcount.textContent = ""; cap.textContent = "Research is about to delegate three tasks.";
+    await run.sleep(700);
+    cap.textContent = "Research delegated three tasks: " + TASKS.join(", ") + ".";
+    var gap = ui.num("stagger-moment", 60);
+    TASKS.forEach(function (t, i) {
+      run.later(i * gap, function () {
+        S.forEach(function (s) {
+          var el, h = document.createElement("span");
+          h.className = "k-mh s" + s.px + " k-pup";
+          h.style.setProperty("--mascot-pup", hex);
+          if (s.header) {
+            // A list item named by its task and state; the figure is hidden.
+            el = document.createElement("span");
+            el.className = "k-hpup"; el.setAttribute("role", "listitem");
+            h.setAttribute("aria-hidden", "true");
+            el.innerHTML = '<span class="k-sr">' + t + ", at work</span>";
+            el.prepend(h);
+          } else el = h;
+          // In the header the name and status line make room for the row; they slide, never jump.
+          slide(s.header ? [who] : [], function () { s.row.append(el); });
+          // At 20 px a pup carries no object and no badge: it breathes and blinks.
+          var m = ui.mascot(h, ui.pup(look), s.px, s.header ? { mode: "list", calm: true } : {});
+          if (!s.header) m.setState("working", { activity: "search" });
+          s.pups[i] = { el: el, m: m };
+          var d = offset(s, el);
+          // Each pup leaves the parent's middle, stagger-moment apart; the parent pulses as it goes.
+          if (ui.reduced()) ui.animate(el, [{ opacity: 0 }, { opacity: 1 }], {});
+          else ui.animate(el, [{ transform: "translate(" + d[0] + "px, " + d[1] + "px) scale(0.3)", opacity: 0 }, { transform: "none", opacity: 1 }], { spring: "moment" });
+          gulp(s, 0.9);
+        });
+        count();
+      });
+    });
+    var back = 0, failed = 0;
+    function line() { return (back < 3 ? back + " of 3 back" : "All 3 are back") + (failed ? " · 1 failed" : ""); }
+    await Promise.all([2300, 3400, 4500].map(async function (ms, i) {
+      await run.sleep(ms);
+      if (i === 2) {
+        // A failed task: on the profile the pup takes Error; in the header it shows 5.9's triangle.
+        // It stays (30 s in the product), then goes back with no hop.
+        S[1].pups[i].m.setState("error");
+        var hp = S[0].pups[i];
+        hp.failed = true;
+        hp.el.querySelector(".k-sr").textContent = TASKS[i] + ", failed";
+        hp.el.insertAdjacentHTML("beforeend", '<span class="k-hpup-x" aria-hidden="true">' + ui.glyph("error") + "</span>");
+        ui.animate(hp.el.lastElementChild, [{ transform: "scale(0.5)", opacity: 0 }, { transform: "none", opacity: 1 }], { spring: "pop" });
+        failed++;
+        count();
+        cap.textContent = line() + ": the reviews site didn't answer.";
+        await run.sleep(3000);
+      } else {
+        S.forEach(function (s) { s.pups[i].m.arrive(); });
+        if (!ui.reduced()) ui.animate(S[0].pups[i].el, [{ transform: "none" }, { transform: "translateY(-5px)" }, { transform: "none" }], { spring: "pop" });
+        await run.sleep(520);
+      }
+      // It comes back faster than it left, and the parent swallows it.
+      S[0].pups[i].leaving = true;
+      count();
+      await Promise.all(S.map(function (s) {
+        var el = s.pups[i].el, d = offset(s, el);
+        var a = ui.reduced()
+          ? el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: ui.num("dur-fade", 150), fill: "forwards" })
+          : el.animate([{ transform: "none", opacity: 1 }, { transform: "translate(" + d[0] + "px, " + d[1] + "px) scale(0.3)", opacity: 0 }], { duration: ui.num("dur-exit-moment", 170), easing: ui.ease("exit"), fill: "forwards" });
+        return a.finished.then(function () {
+          if (!run.alive) return;
+          gulp(s, 1.12);
+          var rest = s.pups.filter(function (p, k) { return k !== i && p.el.isConnected; }).map(function (p) { return p.el; });
+          // The pups still out close up toward the parent. The header's row keeps its width.
+          if (s.header) s.row.style.minWidth = s.row.getBoundingClientRect().width + "px";
+          slide(rest, function () { el.remove(); });
+        });
+      }));
+      if (!run.alive) return;
+      back++;
+      cap.textContent = line() + ".";
+    }));
+    // The header's count says the end for 5 s; the row empties 1 s after the last pup is back.
+    run.later(5000, function () { hcount.textContent = ""; });
+    await run.sleep(1000);
+    slide([who], function () { S[0].row.style.minWidth = ""; });
+    // The parent keeps its own state; the result reaches the owner in its reply (5.1).
+  });
+  document.getElementById("again").addEventListener("click", function () { play(); });
+  play();
+})();
+</script>
+</body>
+</html>

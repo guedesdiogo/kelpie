@@ -1,0 +1,32 @@
+<!-- @dsCard group="Feedback" height=250 subtitle="5.11 · 200 ms, then a still skeleton" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Skeleton</title></head>
+<body>
+<div class="k-stage">
+  <button type="button" class="k-replay text-sm" id="again">Load again</button>
+  <div class="k-card k-sk-box" id="box" role="status"></div>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui, box = document.getElementById("box");
+  var CONTENT = '<div class="k-sk-row"><span class="k-mh s36" id="m1"></span><div class="k-col" style="gap:0"><b class="text-ui">Agenda</b><span class="text-sm k-muted">3 events tomorrow, first at 9:00</span></div></div><div class="k-sk-row"><span class="k-mh s36" id="m2"></span><div class="k-col" style="gap:0"><b class="text-ui">Research</b><span class="text-sm k-muted">Flights to Recife compared</span></div></div>';
+  var SKEL = '<div class="k-sk-row" aria-hidden="true"><i class="k-sk round"></i><div class="k-col"><i class="k-sk" style="width:30%"></i><i class="k-sk" style="width:62%"></i></div></div><div class="k-sk-row" aria-hidden="true"><i class="k-sk round"></i><div class="k-col"><i class="k-sk" style="width:36%"></i><i class="k-sk" style="width:54%"></i></div></div><span class="k-sr">Loading agents</span>';
+  function show(html) { box.innerHTML = html; ui.animate(box, [{ opacity: 0 }, { opacity: 1 }], { dur: ui.num("dur-fade", 150), ease: ui.ease("fade") }); }
+  var play = ui.runner(async function (run) {
+    await run.sleep(200);
+    show(SKEL);
+    await run.sleep(1400);
+    show(CONTENT);
+    ui.mascot(document.getElementById("m1"), ui.LOOKS.agenda, 36, { mode: "list" });
+    ui.mascot(document.getElementById("m2"), ui.LOOKS.research, 36, { mode: "list" });
+  });
+  document.getElementById("again").addEventListener("click", function () { play(); });
+  box.innerHTML = CONTENT;
+  ui.mascot(document.getElementById("m1"), ui.LOOKS.agenda, 36, { mode: "list" });
+  ui.mascot(document.getElementById("m2"), ui.LOOKS.research, 36, { mode: "list" });
+  setTimeout(play, 900);
+})();
+</script>
+</body>
+</html>

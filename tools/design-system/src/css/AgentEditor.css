@@ -1,0 +1,80 @@
+/* AgentEditor (5.25): the webchat's .editor, from the pencil on a mascot (#379, mockup v33). */
+.k-edstage { min-block-size: 600px; }
+.k-ed-row { position: relative; display: inline-flex; align-items: center; gap: 10px; justify-self: start; padding: 5px var(--space-3) 5px var(--space-2); border-radius: var(--r-btn); background: var(--surface); }
+.k-ed-row .k-pen { opacity: 1; scale: 1; }
+.k-ed { position: absolute; top: var(--space-4); left: var(--space-4); right: var(--space-4); z-index: 5; height: 560px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); box-shadow: var(--shadow-pop); transform-origin: top left; }
+.k-ed-in { display: grid; grid-template-columns: 200px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; grid-template-areas: "id head" "tabs body" "foot foot"; width: 100%; height: 100%; }
+.k-ed-id { grid-area: id; display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: var(--space-3); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--bg); }
+.k-ed-id .k-mh { width: 56px; height: 56px; }
+.k-ed-who { display: grid; min-width: 0; }
+.k-ed-name { overflow: hidden; font-family: var(--font-display); font-size: 19px; font-weight: 680; line-height: 1.1; letter-spacing: -0.03em; text-overflow: ellipsis; white-space: nowrap; }
+.k-ed-spec { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.k-ed-spec:empty { display: none; }
+/* The sections, on the left: each an icon beside its name, never an icon alone (§8). */
+.k-ed-tabs { grid-area: tabs; position: relative; display: flex; flex-direction: column; gap: 2px; padding: var(--space-2) 10px; border-right: 1px solid var(--line); background: var(--bg); }
+.k-ed-hl { position: absolute; top: 0; left: 0; border-radius: var(--r-btn); background: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); pointer-events: none; }
+.k-navi { position: relative; display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border: 0; border-radius: var(--r-btn); background: none; color: var(--muted); font-weight: 500; text-align: left; cursor: pointer; transition: color var(--dur-fade) var(--ease-fade); }
+.k-navi[aria-selected="true"] { color: var(--fg); }
+.k-navi[aria-disabled="true"] { cursor: default; opacity: 0.55; }
+.k-navi .nl { flex: 1; min-width: 0; }
+.k-navi .k-icon.m20 { width: 16px; height: 16px; }
+/* A changed section's 6 px dot: accent, since nothing waits on the owner. */
+.k-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--accent); }
+.k-ed-head { grid-area: head; display: flex; align-items: center; gap: var(--space-3); min-width: 0; padding: 10px 10px 10px 22px; border-bottom: 1px solid var(--line); }
+.k-ed-title { flex: 1; margin: 0; }
+.k-icb.close { border-color: transparent; }
+/* Near the panel's top edge, a tip opens below its button. */
+.k-ed-head .k-tip { bottom: auto; top: calc(100% + 6px); left: auto; right: 0; translate: none; }
+.k-pv-act .k-tip, .k-tabp-h .k-tip { bottom: auto; top: calc(100% + 6px); }
+.k-ed-body { grid-area: body; min-height: 0; overflow-y: auto; }
+/* Profile: the name, the specialty and the short description. */
+.k-flds { display: grid; gap: var(--space-4); max-width: 520px; margin: 18px 22px var(--space-5); }
+.k-fld { display: grid; gap: 6px; }
+.k-fld label { font-size: 13px; font-weight: 500; }
+.k-inrow { display: flex; align-items: center; gap: var(--space-2); min-block-size: 40px; padding: 0 var(--space-3); border: 1px solid var(--muted); border-radius: var(--r-btn); background: var(--bg); }
+.k-inrow:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-halo); }
+.k-fld:has([aria-invalid="true"]) .k-inrow { border-color: var(--danger); }
+.k-inp { flex: 1; min-width: 0; padding: var(--space-2) 0; border: 0; background: none; font-size: 14px; line-height: 1.45; }
+.k-inp:focus-visible { outline: none; }
+.k-help { display: flex; justify-content: space-between; gap: var(--space-2); color: var(--muted); }
+.k-help .cnt { flex: none; white-space: nowrap; }
+.k-ferr { display: flex; align-items: center; gap: 6px; margin: 0; }
+.k-ferr .k-icon { color: var(--danger); }
+/* Mascot: the preview on a small stage, the tools, and one tab per axis. */
+.k-ed-top { display: grid; grid-template-columns: 200px minmax(0, 1fr); align-items: center; gap: var(--space-5); padding: 14px 22px; border-bottom: 1px solid var(--line); }
+.k-stagebox { display: grid; place-items: center; height: 168px; border-radius: var(--r-card); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.k-pv-side { display: grid; align-content: center; gap: var(--space-3); }
+.k-pv-sum { max-width: 34ch; margin: 0; font-size: 14px; }
+.k-pv-act { display: flex; gap: var(--space-2); }
+.k-pv-hint { max-width: 40ch; margin: 0; color: var(--muted); line-height: 1.45; }
+.k-axis-tabs { display: flex; gap: 2px; margin: 14px 22px 0; padding: 3px; border: 1px solid var(--muted); border-radius: calc(var(--r-btn) + 3px); background: var(--sunken); }
+.k-axis-tab { flex: 1; padding: 6px var(--space-1); border: 0; border-radius: var(--r-btn); background: none; color: var(--muted); font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.k-axis-tab[aria-selected="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14); }
+.k-axis-panel { display: grid; align-content: start; gap: 10px; padding: var(--space-3) 22px var(--space-4); }
+.k-tabp-h { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); color: var(--muted); font-size: 13px; }
+.k-tabp-h .k-icb.quiet { margin-right: -6px; }
+.k-tiles { display: flex; flex-wrap: wrap; gap: 6px; }
+.k-tiles.sw { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--space-2); }
+.k-opt { display: grid; justify-items: center; min-width: 70px; padding: var(--space-1) 6px 6px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); color: var(--muted); font-size: 12px; line-height: 1.3; cursor: pointer; transition: border-color var(--dur-fade) var(--ease-fade), color var(--dur-fade) var(--ease-fade); }
+.k-opt[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); color: var(--fg); }
+.k-opt .k-mh { width: 46px; height: 46px; }
+.k-opt.sw { gap: var(--space-1); min-width: 0; padding: var(--space-2) 6px 6px; }
+.k-swc { width: 28px; height: 28px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08); }
+.k-axis-panel .k-switch { justify-content: flex-start; justify-self: start; }
+/* The footer: one Save, and the two ways a save can end early, inside the panel. */
+.k-ed-foot { grid-area: foot; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: var(--space-3) var(--space-4) 14px 22px; border-top: 1px solid var(--line); }
+.k-ed-foot .dirty { display: inline-flex; flex: 1; align-items: center; gap: 6px; margin: 0; color: var(--muted); }
+.k-ed-foot .dirty i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.k-ed-foot .meta { flex-basis: 100%; order: 3; margin: 0; color: var(--muted); font-size: 12px; }
+.k-ed-foot.ask { flex-wrap: nowrap; gap: var(--space-3); background: color-mix(in srgb, var(--warm) 10%, var(--surface)); }
+.k-ed-foot.ask > .k-icon { width: 18px; height: 18px; color: var(--warm); }
+.k-ed-foot.ask p { display: grid; flex: 1; margin: 0; font-size: 13px; line-height: 1.4; }
+.k-ed-foot.ask p span { color: var(--muted); }
+.k-btn.danger { background: var(--danger); border-color: transparent; color: var(--on-accent); }
+.k-btn.primary[aria-disabled="true"]:not([data-state]) { background: var(--sunken); color: var(--muted); cursor: default; }
+/* Sav-e, Sav-ing, Sav-ed: the stem stays, the suffix rolls with spring-fast. */
+.k-save .k-word { display: inline-flex; }
+.k-save .k-roll { vertical-align: baseline; }
+.k-save[data-state="done"] { background: var(--ok); color: var(--surface); }
+.k-edstage .k-toast { position: absolute; left: 50%; bottom: var(--space-4); translate: -50% 0; }
+.k-toast .detail { display: block; color: var(--muted); }

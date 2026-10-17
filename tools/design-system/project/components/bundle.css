@@ -1,0 +1,1143 @@
+/* Kelpie components: the shared base. Every value is a token (tokens.css) or a tint made from
+ * one; a literal number appears only where a pattern in docs/design-system.md section 5 sets it. */
+:root {
+  /* Section 1's tints: from a token, never a new literal. */
+  --focus-halo: color-mix(in srgb, var(--accent) 18%, transparent);
+  --hold-fill: color-mix(in srgb, var(--accent) 28%, transparent);
+  --landed: color-mix(in srgb, var(--accent) 22%, transparent);
+  --highlight: color-mix(in srgb, var(--accent) 24%, transparent);
+  --receipt-well: color-mix(in srgb, var(--ok) 16%, transparent);
+  --scrim: color-mix(in srgb, var(--fg) 16%, transparent);
+}
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.k-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.k-display { font-family: var(--font-display); font-weight: 680; letter-spacing: -0.03em; text-wrap: balance; }
+.k-muted { color: var(--muted); }
+.k-eyebrow { text-transform: uppercase; color: var(--muted); }
+.k-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* A preview's frame: the stage, with the replay control in its corner. */
+.k-stage { position: relative; padding: var(--space-4); display: grid; gap: var(--space-3); align-content: start; }
+.k-replay {
+  position: absolute; top: var(--space-3); right: var(--space-3); z-index: 20;
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  padding: var(--space-1) var(--space-3); border-radius: var(--r-chip);
+  border: 1px solid var(--muted); background: var(--surface); color: var(--fg); cursor: pointer;
+}
+.k-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.k-col { display: grid; gap: var(--space-2); align-content: start; min-width: 0; }
+.k-caption { color: var(--muted); }
+
+.k-icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.k-icon.draw path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: k-draw 280ms var(--ease-standard) forwards; }
+@keyframes k-draw { to { stroke-dashoffset: 0; } }
+.k-glyph { width: 11px; height: 11px; flex: none; fill: currentColor; stroke: currentColor; stroke-width: 1.4; vertical-align: -1px; }
+
+/* A label that rolls (5.2): one cell, its lines stacked in it. */
+.k-roll { display: inline-grid; overflow: hidden; vertical-align: bottom; }
+.k-roll > .n { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; }
+
+/* The spinner of rule 8: it turns for at most 5 s, then a still ring and the elapsed time take over. */
+.k-spinner {
+  width: 12px; height: 12px; flex: none; border-radius: 50%;
+  border: 1.5px solid currentColor; border-right-color: transparent;
+  animation: k-spin 1s linear 5;
+}
+.k-spinner.still { animation: none; border-right-color: currentColor; opacity: 0.55; }
+@keyframes k-spin { to { transform: rotate(1turn); } }
+
+/* A mascot's box: kept before the figure arrives, so nothing in the layout moves (5.19). */
+.k-mh { display: block; flex: none; line-height: 0; }
+.k-mh.s20 { width: 20px; height: 20px; }
+.k-mh.s26 { width: 26px; height: 26px; }
+.k-mh.s36 { width: 36px; height: 36px; }
+.k-mh.s40 { width: 40px; height: 40px; }
+.k-mh.s48 { width: 48px; height: 48px; }
+.k-mh.s64 { width: 64px; height: 64px; }
+.k-mh.s96 { width: 96px; height: 96px; }
+.k-mh.s160 { width: 160px; height: 160px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .k-spinner { animation: none; border-right-color: currentColor; opacity: 0.55; }
+  .k-icon.draw path { stroke-dasharray: none; animation: none; }
+}
+
+/* A segmented choice, as the webchat's lab draws it (#378, decision 8): a sunken track with its
+ * boundary in muted, and the chosen option lifted onto surface. Icons or words, never both crowded. */
+.k-seg { position: relative; display: inline-flex; gap: 2px; padding: 3px; border-radius: calc(var(--r-btn) + 3px); background: var(--sunken); border: 1px solid var(--muted); justify-self: start; }
+.k-seg > button { position: relative; min-block-size: 28px; min-inline-size: 34px; display: inline-grid; place-items: center; padding: 0 var(--space-2); border: 0; border-radius: var(--r-btn); background: none; color: var(--muted); font-weight: 500; cursor: pointer; transition: background-color var(--dur-fade) var(--ease-fade), color var(--dur-fade) var(--ease-fade); }
+.k-seg > button[aria-checked="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14); }
+.k-seg > button:disabled { cursor: not-allowed; opacity: 0.55; }
+.k-seg .k-icon { width: 16px; height: 16px; }
+.k-seg .k-icon.m20 { width: 20px; height: 20px; }
+.k-seg.wide { display: flex; justify-self: stretch; }
+.k-seg.wide > button { flex: 1; }
+
+/* A switch: a track in line with a muted boundary; on, it fills with accent. */
+.k-switch { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); font-weight: 500; cursor: pointer; }
+.k-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.k-switch .k-sw { position: relative; width: 30px; height: 18px; flex: none; border-radius: var(--r-chip); background: var(--line); border: 1px solid var(--muted); transition: background-color var(--dur-fade) var(--ease-fade); }
+.k-switch .k-sw::after { content: ""; position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: transform var(--spring-fast-dur) var(--spring-fast); }
+.k-switch input:checked + .k-sw { background: var(--accent); border-color: var(--accent); }
+.k-switch input:checked + .k-sw::after { transform: translateX(12px); }
+.k-switch input:focus-visible + .k-sw { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Icon buttons (#378): square with a muted boundary, or quiet; every one names itself in a tooltip. */
+.k-icb { position: relative; width: 34px; height: 34px; flex: none; display: inline-grid; place-items: center; padding: 0; border: 1px solid var(--muted); border-radius: var(--r-btn); background: transparent; color: var(--fg); cursor: pointer; transition: transform var(--dur-press) var(--ease-standard); }
+.k-icb:active { transform: scale(var(--scale-press)); }
+.k-icb.quiet { width: 28px; height: 28px; border-color: transparent; color: var(--muted); }
+@media (hover: hover) { .k-icb.quiet:hover { background: var(--sunken); color: var(--fg); } }
+.k-tip { position: absolute; bottom: calc(100% + 6px); left: 50%; translate: -50% 0; z-index: 30; padding: var(--space-1) var(--space-2); border-radius: var(--r-sm); background: var(--fg); color: var(--bg); font-weight: 500; white-space: nowrap; pointer-events: none; opacity: 0; transform: translateY(4px) scale(var(--scale-in)); transform-origin: bottom center; transition: opacity var(--dur-exit) var(--ease-exit), transform var(--dur-exit) var(--ease-exit); }
+.k-tip.on { opacity: 1; transform: none; pointer-events: auto; transition: opacity var(--dur-fade) var(--ease-fade), transform var(--spring-fast-dur) var(--spring-fast); }
+.k-tip.instant { transition: none; }
+@media (prefers-reduced-motion: reduce) { .k-tip, .k-tip.on { transform: none; } }
+.k-tip.below { bottom: auto; top: calc(100% + 6px); }
+.k-seg-ind { position: absolute; top: 0; left: 0; width: 0; height: 0; border-radius: var(--r-btn); background: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14); pointer-events: none; }
+.k-seg.has-ind > button { z-index: 1; }
+.k-seg.has-ind > button[aria-checked="true"] { background: none; box-shadow: none; }
+.k-sw-l { display: inline-flex; align-items: center; gap: var(--space-2); }
+.k-sw-l .k-icon { color: var(--muted); }
+
+/* AgentEditor (5.25): the webchat's .editor, from the pencil on a mascot (#379, mockup v33). */
+.k-edstage { min-block-size: 600px; }
+.k-ed-row { position: relative; display: inline-flex; align-items: center; gap: 10px; justify-self: start; padding: 5px var(--space-3) 5px var(--space-2); border-radius: var(--r-btn); background: var(--surface); }
+.k-ed-row .k-pen { opacity: 1; scale: 1; }
+.k-ed { position: absolute; top: var(--space-4); left: var(--space-4); right: var(--space-4); z-index: 5; height: 560px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); box-shadow: var(--shadow-pop); transform-origin: top left; }
+.k-ed-in { display: grid; grid-template-columns: 200px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; grid-template-areas: "id head" "tabs body" "foot foot"; width: 100%; height: 100%; }
+.k-ed-id { grid-area: id; display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: var(--space-3); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--bg); }
+.k-ed-id .k-mh { width: 56px; height: 56px; }
+.k-ed-who { display: grid; min-width: 0; }
+.k-ed-name { overflow: hidden; font-family: var(--font-display); font-size: 19px; font-weight: 680; line-height: 1.1; letter-spacing: -0.03em; text-overflow: ellipsis; white-space: nowrap; }
+.k-ed-spec { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.k-ed-spec:empty { display: none; }
+/* The sections, on the left: each an icon beside its name, never an icon alone (§8). */
+.k-ed-tabs { grid-area: tabs; position: relative; display: flex; flex-direction: column; gap: 2px; padding: var(--space-2) 10px; border-right: 1px solid var(--line); background: var(--bg); }
+.k-ed-hl { position: absolute; top: 0; left: 0; border-radius: var(--r-btn); background: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); pointer-events: none; }
+.k-navi { position: relative; display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border: 0; border-radius: var(--r-btn); background: none; color: var(--muted); font-weight: 500; text-align: left; cursor: pointer; transition: color var(--dur-fade) var(--ease-fade); }
+.k-navi[aria-selected="true"] { color: var(--fg); }
+.k-navi[aria-disabled="true"] { cursor: default; opacity: 0.55; }
+.k-navi .nl { flex: 1; min-width: 0; }
+.k-navi .k-icon.m20 { width: 16px; height: 16px; }
+/* A changed section's 6 px dot: accent, since nothing waits on the owner. */
+.k-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--accent); }
+.k-ed-head { grid-area: head; display: flex; align-items: center; gap: var(--space-3); min-width: 0; padding: 10px 10px 10px 22px; border-bottom: 1px solid var(--line); }
+.k-ed-title { flex: 1; margin: 0; }
+.k-icb.close { border-color: transparent; }
+/* Near the panel's top edge, a tip opens below its button. */
+.k-ed-head .k-tip { bottom: auto; top: calc(100% + 6px); left: auto; right: 0; translate: none; }
+.k-pv-act .k-tip, .k-tabp-h .k-tip { bottom: auto; top: calc(100% + 6px); }
+.k-ed-body { grid-area: body; min-height: 0; overflow-y: auto; }
+/* Profile: the name, the specialty and the short description. */
+.k-flds { display: grid; gap: var(--space-4); max-width: 520px; margin: 18px 22px var(--space-5); }
+.k-fld { display: grid; gap: 6px; }
+.k-fld label { font-size: 13px; font-weight: 500; }
+.k-inrow { display: flex; align-items: center; gap: var(--space-2); min-block-size: 40px; padding: 0 var(--space-3); border: 1px solid var(--muted); border-radius: var(--r-btn); background: var(--bg); }
+.k-inrow:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-halo); }
+.k-fld:has([aria-invalid="true"]) .k-inrow { border-color: var(--danger); }
+.k-inp { flex: 1; min-width: 0; padding: var(--space-2) 0; border: 0; background: none; font-size: 14px; line-height: 1.45; }
+.k-inp:focus-visible { outline: none; }
+.k-help { display: flex; justify-content: space-between; gap: var(--space-2); color: var(--muted); }
+.k-help .cnt { flex: none; white-space: nowrap; }
+.k-ferr { display: flex; align-items: center; gap: 6px; margin: 0; }
+.k-ferr .k-icon { color: var(--danger); }
+/* Mascot: the preview on a small stage, the tools, and one tab per axis. */
+.k-ed-top { display: grid; grid-template-columns: 200px minmax(0, 1fr); align-items: center; gap: var(--space-5); padding: 14px 22px; border-bottom: 1px solid var(--line); }
+.k-stagebox { display: grid; place-items: center; height: 168px; border-radius: var(--r-card); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.k-pv-side { display: grid; align-content: center; gap: var(--space-3); }
+.k-pv-sum { max-width: 34ch; margin: 0; font-size: 14px; }
+.k-pv-act { display: flex; gap: var(--space-2); }
+.k-pv-hint { max-width: 40ch; margin: 0; color: var(--muted); line-height: 1.45; }
+.k-axis-tabs { display: flex; gap: 2px; margin: 14px 22px 0; padding: 3px; border: 1px solid var(--muted); border-radius: calc(var(--r-btn) + 3px); background: var(--sunken); }
+.k-axis-tab { flex: 1; padding: 6px var(--space-1); border: 0; border-radius: var(--r-btn); background: none; color: var(--muted); font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.k-axis-tab[aria-selected="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14); }
+.k-axis-panel { display: grid; align-content: start; gap: 10px; padding: var(--space-3) 22px var(--space-4); }
+.k-tabp-h { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); color: var(--muted); font-size: 13px; }
+.k-tabp-h .k-icb.quiet { margin-right: -6px; }
+.k-tiles { display: flex; flex-wrap: wrap; gap: 6px; }
+.k-tiles.sw { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--space-2); }
+.k-opt { display: grid; justify-items: center; min-width: 70px; padding: var(--space-1) 6px 6px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); color: var(--muted); font-size: 12px; line-height: 1.3; cursor: pointer; transition: border-color var(--dur-fade) var(--ease-fade), color var(--dur-fade) var(--ease-fade); }
+.k-opt[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); color: var(--fg); }
+.k-opt .k-mh { width: 46px; height: 46px; }
+.k-opt.sw { gap: var(--space-1); min-width: 0; padding: var(--space-2) 6px 6px; }
+.k-swc { width: 28px; height: 28px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08); }
+.k-axis-panel .k-switch { justify-content: flex-start; justify-self: start; }
+/* The footer: one Save, and the two ways a save can end early, inside the panel. */
+.k-ed-foot { grid-area: foot; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: var(--space-3) var(--space-4) 14px 22px; border-top: 1px solid var(--line); }
+.k-ed-foot .dirty { display: inline-flex; flex: 1; align-items: center; gap: 6px; margin: 0; color: var(--muted); }
+.k-ed-foot .dirty i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.k-ed-foot .meta { flex-basis: 100%; order: 3; margin: 0; color: var(--muted); font-size: 12px; }
+.k-ed-foot.ask { flex-wrap: nowrap; gap: var(--space-3); background: color-mix(in srgb, var(--warm) 10%, var(--surface)); }
+.k-ed-foot.ask > .k-icon { width: 18px; height: 18px; color: var(--warm); }
+.k-ed-foot.ask p { display: grid; flex: 1; margin: 0; font-size: 13px; line-height: 1.4; }
+.k-ed-foot.ask p span { color: var(--muted); }
+.k-btn.danger { background: var(--danger); border-color: transparent; color: var(--on-accent); }
+.k-btn.primary[aria-disabled="true"]:not([data-state]) { background: var(--sunken); color: var(--muted); cursor: default; }
+/* Sav-e, Sav-ing, Sav-ed: the stem stays, the suffix rolls with spring-fast. */
+.k-save .k-word { display: inline-flex; }
+.k-save .k-roll { vertical-align: baseline; }
+.k-save[data-state="done"] { background: var(--ok); color: var(--surface); }
+.k-edstage .k-toast { position: absolute; left: 50%; bottom: var(--space-4); translate: -50% 0; }
+.k-toast .detail { display: block; color: var(--muted); }
+
+/* AgentHeader (5.21). */
+.k-ahead { display: flex; align-items: center; gap: var(--space-3); padding-bottom: var(--space-3); border-bottom: 1px solid var(--line); }
+.k-ahead-name { display: inline-flex; align-items: center; gap: var(--space-1); padding: 0; border: 0; background: none; color: var(--fg); cursor: pointer; justify-self: start; }
+.k-switcher { position: absolute; left: var(--space-4); top: 76px; z-index: 10; min-width: 240px; padding: var(--space-1); border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-pop); transform-origin: top left; }
+.k-switcher ul { list-style: none; margin: 0; padding: 0; display: grid; }
+.k-switcher a { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding: var(--space-2); border-radius: calc(var(--r-card) - var(--space-1)); color: var(--fg); text-decoration: none; }
+.k-switcher a:hover { background: var(--sunken); }
+.k-switcher a[aria-current] { background: var(--sunken); font-weight: 600; }
+.k-switcher li { position: relative; }
+.k-spec { color: var(--muted); font-weight: 400; }
+/* The open agent's pencil rests on its mascot, with a 44 px target (5.21). */
+.k-pen.at-rest { top: 0; left: 0; width: 44px; height: 44px; border: 0; background: none; opacity: 1; scale: 1; }
+.k-pen.at-rest::before { content: ""; position: absolute; top: 2px; right: 2px; width: 22px; height: 22px; border: 1px solid var(--muted); border-radius: 50%; background: var(--surface); }
+.k-pen.at-rest > .k-icon { position: absolute; top: 7px; right: 7px; }
+/* Below the sidebar's width, the owner's avatar at the header's end opens the Display menu. */
+.k-ahead-acct { position: relative; display: grid; place-items: center; width: 44px; height: 44px; flex: none; margin-left: auto; padding: 0; border: 0; border-radius: var(--r-btn); background: none; cursor: pointer; }
+.k-ahead-acct .k-ava { width: 32px; height: 32px; }
+.k-ahead-acct .k-tip { bottom: auto; top: calc(100% + 6px); left: auto; right: 0; translate: none; }
+
+/* Button: the webchat's .send and .pause (style.css). */
+.k-btn {
+  min-block-size: 36px; padding: var(--space-2) 15px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid var(--muted); border-radius: var(--r-btn);
+  background: none; color: var(--fg); font-weight: 600; cursor: pointer; white-space: nowrap;
+  transition: transform var(--dur-press) var(--ease-standard), background-color var(--dur-fade) var(--ease-fade), color var(--dur-fade) var(--ease-fade);
+}
+.k-btn.primary { background: var(--accent); border-color: transparent; color: var(--on-accent); }
+.k-btn.ok { background: var(--ok); border-color: transparent; color: var(--surface); }
+.k-btn:active:not(:disabled) { transform: scale(var(--scale-press)); }
+.k-btn:disabled { color: var(--muted); cursor: not-allowed; }
+.k-btn.primary:disabled { background: var(--sunken); }
+@media (prefers-reduced-motion: reduce) { .k-btn:active:not(:disabled) { transform: none; } }
+
+/* CodeBlock (5.20): the webchat's .code and .copy. */
+.k-code { position: relative; }
+.k-code pre { margin: 0; max-block-size: 400px; overflow: auto; padding: var(--space-2) var(--space-3); padding-inline-end: calc(var(--space-12) + var(--space-6)); border: 1px solid var(--line); border-radius: calc(var(--r-bubble) - var(--space-1)); background: var(--surface); white-space: pre-wrap; overflow-wrap: anywhere; }
+.k-copy { position: absolute; inset-block-start: var(--space-1); inset-inline-end: var(--space-1); min-block-size: 28px; padding: 0 var(--space-2); border: 1px solid var(--muted); border-radius: var(--r-sm); background: var(--surface); color: var(--fg); cursor: pointer; opacity: 0; transition: opacity var(--dur-fade) var(--ease-fade); }
+.k-code:hover .k-copy, .k-code:focus-within .k-copy, .k-copy[data-state] { opacity: 1; }
+@media (hover: none) { .k-copy { opacity: 1; } }
+.k-code-inline { padding: 0.1em 0.35em; border-radius: var(--r-sm); background: var(--surface); font-size: 0.92em; }
+
+/* CommandPalette (5.8). */
+.k-palapp { min-block-size: 340px; justify-items: center; }
+.k-cmdk { display: inline-flex; align-items: center; gap: var(--space-2); width: min(100%, 320px); min-block-size: 40px; padding: 0 var(--space-2) 0 var(--space-3); border: 1px solid var(--muted); border-radius: var(--r-btn); background: var(--surface); color: var(--muted); cursor: pointer; }
+.k-cmdk span { flex: 1; text-align: left; }
+kbd { padding: 1px var(--space-1); border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--sunken); color: var(--fg); }
+.k-scrim { position: absolute; inset: 0; background: var(--scrim); z-index: 4; }
+.k-pal { position: absolute; top: 60px; left: 50%; translate: -50% 0; z-index: 5; width: min(92%, 420px); border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-pop); overflow: hidden; transform-origin: top center; }
+.k-pal-in { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3); border-bottom: 1px solid var(--line); color: var(--muted); }
+.k-pal-in input { flex: 1; min-width: 0; border: 0; background: none; color: var(--fg); outline: none; }
+.k-pal-list { position: relative; list-style: none; margin: 0; padding: var(--space-1); }
+.k-pal-hi { position: absolute; left: var(--space-1); right: var(--space-1); top: 0; border-radius: calc(var(--r-card) - var(--space-1)); background: var(--sunken); pointer-events: none; }
+.k-pal-it { position: relative; padding: var(--space-2) var(--space-3); cursor: pointer; }
+
+/* Composer (5.20; #378, decision 4): the approved demo's one row, from the mockup's ref.css. */
+.k-cwrap { display: grid; gap: var(--space-2); max-width: 600px; padding: var(--space-2) 0 var(--space-5); }
+.k-compose { display: flex; align-items: flex-end; gap: 6px; min-block-size: 40px; padding: 6px 6px 6px var(--space-3); border: 1px solid var(--muted); border-radius: var(--r-panel); background: var(--bg); transition: border-color var(--dur-fade) var(--ease-fade), box-shadow var(--dur-fade) var(--ease-fade); }
+.k-compose:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-halo); }
+.k-compose-input { flex: 1; min-width: 0; field-sizing: content; min-block-size: 26px; max-block-size: 160px; margin: 0; padding: 2px 0; resize: none; border: 0; outline: none; background: none; color: var(--fg); font-size: 15px; line-height: 1.45; unicode-bidi: plaintext; }
+.k-compose-input::placeholder { color: var(--muted); }
+/* Pause keeps 12 px from Send, so a tap meant for one never lands on the other. */
+.k-compose .k-round.pz { margin-inline-end: 6px; }
+.k-paused { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); }
+.k-paused .k-icon { width: 14px; height: 14px; }
+@media (pointer: coarse), (max-width: 600px) { .k-compose-input { font-size: 16px; } }
+
+/* ConfirmCard (5.3). */
+.k-head { display: flex; align-items: center; gap: var(--space-3); }
+.k-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card); box-shadow: var(--shadow); overflow: hidden; }
+.k-confirm { max-width: 370px; padding: var(--space-4); background: var(--bg); }
+.k-confirm-h { display: flex; align-items: center; gap: 10px; }
+.k-confirm-h .k-mh { margin: -4px; }
+.k-confirm.done { padding-block: var(--space-3); }
+.k-confirm-in { display: grid; gap: var(--space-3); }
+.k-id { padding: 0 var(--space-1); border-radius: var(--r-sm); background: var(--sunken); }
+.k-evidence { display: grid; gap: var(--space-1); }
+.k-evidence ul { margin: 0; padding: var(--space-2) var(--space-3) var(--space-2) 26px; border-radius: calc(var(--r-card) - var(--space-2)); background: var(--sunken); display: grid; gap: 2px; overflow-wrap: anywhere; }
+.k-actions { position: relative; display: flex; justify-content: flex-end; gap: var(--space-2); }
+.k-btn.wide { flex: 1; }
+/* The smaller hold under the answers (ADR-0044 §2): a pill on the right, as the mockup draws it. */
+.k-hold-s { justify-self: end; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: var(--r-btn); border: 1px solid var(--muted); background: var(--sunken); color: var(--fg); font-weight: 600; cursor: pointer; }
+.k-hold-s .k-icon { width: 14px; height: 14px; }
+.k-receipt { display: flex; align-items: center; gap: var(--space-3); }
+.k-receipt-ic { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--receipt-well); color: var(--ok); }
+.k-receipt-ic.neutral { background: var(--sunken); color: var(--muted); }
+
+/* ConnectionBanner (5.12). */
+.k-chat { position: relative; overflow: hidden; }
+/* The webchat mockup's banner (#378, decision 14): a dark pill at the top, the no-Wi-Fi icon, Try now. */
+.k-banner { position: absolute; top: var(--space-2); left: 50%; translate: -50% 0; z-index: 5; display: flex; align-items: center; gap: var(--space-2); padding: 6px var(--space-2) 6px var(--space-3); border-radius: var(--r-chip); background: var(--fg); color: var(--bg); box-shadow: var(--shadow-pop); white-space: nowrap; }
+.k-banner .k-icon { width: 14px; height: 14px; }
+.k-banner-b { border: 0; border-radius: var(--r-chip); padding: var(--space-1) 10px; background: color-mix(in srgb, var(--bg) 18%, transparent); color: inherit; font-weight: 600; cursor: pointer; }
+.k-banner.back { background: var(--ok); color: var(--surface); padding-inline-end: var(--space-3); }
+.k-net-ctl { justify-content: flex-start; }
+.k-dialog { position: absolute; left: 50%; top: 50%; translate: -50% -50%; z-index: 6; width: min(86%, 320px); display: grid; justify-items: center; gap: var(--space-2); padding: var(--space-4); text-align: center; border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-pop); }
+.k-dialog .k-mh.s160 { margin-bottom: var(--space-3); }
+
+/* DisplayMenu (5.22): the account at the sidebar's foot and its menu (#378, mockup board 8). */
+.k-dm { grid-template-columns: minmax(0, 300px) minmax(0, 1fr); align-items: end; gap: var(--space-4); }
+.k-dm-side { position: relative; display: grid; gap: var(--space-2); }
+.k-dmenu { display: grid; gap: 14px; padding: 14px; border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-pop); transform-origin: bottom left; }
+.k-dm-who { display: flex; align-items: center; gap: var(--space-3); }
+.k-ava { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-weight: 600; font-size: 12.5px; }
+.k-ava.sm { width: 24px; height: 24px; font-size: 10.5px; }
+.k-dm-row { display: grid; gap: 6px; font-weight: 500; }
+.k-dm-ver { justify-self: stretch; text-align: left; padding: var(--space-2) 0 0; border: 0; border-top: 1px solid var(--line); background: none; color: var(--muted); cursor: copy; }
+.k-acct { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); padding: var(--space-2); border: 0; border-radius: var(--r-btn); background: none; color: var(--fg); text-align: left; cursor: pointer; }
+@media (hover: hover) { .k-acct:hover { background: var(--sunken); } }
+.k-acct-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.k-acct .k-icon { color: var(--muted); }
+.k-dm-panel { display: grid; gap: var(--space-3); padding: var(--space-4); border-radius: var(--r-panel); background: var(--bg); color: var(--fg); border: 1px solid var(--line); }
+@media (max-width: 560px) { .k-dm { grid-template-columns: minmax(0, 1fr); } }
+.k-dm-who b { font-weight: 600; }
+
+/* FirstRun (5.17). */
+.k-first { max-width: 480px; padding: var(--space-4); display: grid; gap: var(--space-4); }
+.k-first-grid { display: grid; gap: 14px; max-width: 320px; }
+
+.k-first-slot { display: flex; align-items: center; gap: var(--space-3); min-block-size: 48px; }
+.k-first-slot .k-mh:empty { border-radius: 50%; border: 1px dashed var(--muted); }
+.k-first-empty { display: grid; gap: var(--space-3); overflow: hidden; }
+
+/* FollowPill (5.10): the webchat's .pill. */
+.k-follow { position: relative; max-width: 460px; height: 280px; }
+.k-follow-scroll { height: 100%; overflow: auto; padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-1); }
+.k-follow-scroll .k-bubble { align-self: flex-start; }
+.k-follow-scroll .k-bubble.me { align-self: flex-end; }
+.k-pill { position: absolute; left: 50%; bottom: var(--space-3); translate: -50% 0; display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-3); border: 1px solid var(--muted); border-radius: var(--r-chip); background: var(--surface); color: var(--fg); box-shadow: var(--shadow-pop); cursor: pointer; }
+.k-pill[data-approval] { border-color: var(--warm); }
+
+/* HoldButton (5.4). */
+.k-hold-wrap { position: relative; }
+.k-hold {
+  position: relative; overflow: hidden; width: 100%; min-block-size: 44px; padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--muted); border-radius: var(--r-btn); background: var(--surface); color: var(--fg);
+  font-weight: 600; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none;
+  transition: background-color var(--dur-fade) var(--ease-fade), color var(--dur-fade) var(--ease-fade);
+}
+.k-hold-fill { position: absolute; inset: 0; background: var(--hold-fill); transform: scaleX(0); transform-origin: left; }
+.k-hold .k-roll { position: relative; }
+.k-hold.ok { background: var(--ok); border-color: transparent; color: var(--surface); }
+.k-ring { position: absolute; inset: 0; border: 2px solid var(--ok); border-radius: var(--r-btn); pointer-events: none; }
+
+/* IconButton: the composer's round buttons; the square ones live in the base sheet. */
+.k-round { position: relative; width: 26px; height: 26px; flex: none; display: inline-grid; place-items: center; padding: 0; border-radius: 50%; cursor: pointer; transition: transform var(--dur-press) var(--ease-standard), background-color var(--dur-fade) var(--ease-fade), color var(--dur-fade) var(--ease-fade); }
+.k-round .k-icon { width: 14px; height: 14px; }
+.k-round.send { border: 0; background: var(--accent); color: var(--on-accent); }
+/* Empty, Send waits in sunken with a muted arrow; it stays focusable and says why in its tooltip. */
+.k-round.send[aria-disabled="true"] { background: var(--sunken); color: var(--muted); cursor: default; }
+.k-round.send[aria-disabled="true"]:active { transform: none; }
+.k-round.pz { border: 1px solid var(--muted); background: transparent; color: var(--fg); }
+.k-round.pz[aria-pressed="true"] { background: var(--sunken); color: var(--muted); }
+.k-round:active:not(:disabled) { transform: scale(var(--scale-press)); }
+.k-sep { width: 1px; height: 24px; background: var(--line); }
+@media (pointer: coarse) { .k-round, .k-icb { width: 44px; height: 44px; } .k-round .k-icon { width: 18px; height: 18px; } }
+/* 5.26: a disabled one stays focusable, aria-disabled, and its tooltip says why. */
+@media (hover: hover) { .k-icb:not(.quiet):not([aria-disabled="true"]):hover { background: var(--sunken); } }
+.k-icb[aria-disabled="true"] { color: var(--muted); cursor: default; }
+.k-icb[aria-disabled="true"]:active { transform: none; }
+@media (prefers-reduced-motion: reduce) { .k-round:active:not(:disabled), .k-icb:active { transform: none; } }
+
+/* Logo (5.23): the docs/brand drawings, inked from the tokens. */
+.k-logo { gap: var(--space-4); }
+.k-logo-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-4); }
+.k-logo-fig { margin: 0; display: grid; justify-items: center; gap: var(--space-2); padding: var(--space-3); border-radius: var(--r-card); }
+.k-logo-fig figcaption { color: var(--muted); }
+.k-logo-fig.on-bg { background: var(--bg); border: 1px solid var(--line); }
+.k-logo-fig.on-surface { background: var(--surface); border: 1px solid var(--line); }
+.k-logo-fig.on-sunken { background: var(--sunken); }
+.k-logo-lock { height: 44px; width: auto; color: var(--accent); fill: currentColor; }
+.k-logo-mark { width: 48px; height: 48px; color: var(--accent); fill: currentColor; }
+.k-logo-tile { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 22%; background: var(--accent); }
+.k-logo-tile .k-logo-mark { width: 40px; height: 40px; color: var(--on-accent); }
+.k-logo-fig.on-photo { background: linear-gradient(135deg, var(--mascot-tide), var(--mascot-anemone)); }
+.k-logo-fig.on-photo figcaption { padding: 0 var(--space-1); border-radius: var(--r-sm); background: var(--surface); color: var(--fg); }
+.k-fav .t { fill: var(--accent); }
+.k-fav .m { fill: var(--on-accent); }
+.k-fav.s16 { width: 32px; height: 32px; image-rendering: pixelated; }
+.k-fav.s64 { width: 64px; height: 64px; }
+
+/* Mascot lab: the configurator around the engine. */
+.k-mascot-lab { grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: var(--space-4) var(--space-6); }
+.k-ml-fig { width: 176px; display: grid; place-items: center; padding: var(--space-2); border-radius: var(--r-panel); background: var(--surface); border: 1px solid var(--line); }
+.k-ml-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2) var(--space-3); align-content: start; }
+.k-ml-form label { display: grid; gap: var(--space-1); color: var(--muted); }
+.k-ml-form .k-check { display: flex; align-items: center; gap: var(--space-2); align-self: end; color: var(--fg); }
+.k-ml-form select, .k-ml-act select { min-block-size: 32px; padding: 0 var(--space-2); border: 1px solid var(--muted); border-radius: var(--r-btn); background: var(--surface); color: var(--fg); }
+.k-ml-wide { grid-column: 1 / -1; }
+.k-ml-act { display: flex; align-items: center; gap: var(--space-2); color: var(--muted); }
+.k-ml-sizes { display: flex; align-items: end; gap: var(--space-6); }
+.k-ml-sizes figure { margin: 0; display: grid; justify-items: center; gap: var(--space-2); }
+.k-ml-sizes figcaption { color: var(--muted); }
+@media (max-width: 520px) { .k-mascot-lab { grid-template-columns: minmax(0, 1fr); } .k-ml-fig { justify-self: center; } }
+.k-seg.k-seg-wrap { flex-wrap: wrap; }
+
+/* MemorySave (5.7). */
+.k-mem { height: 390px; max-width: 520px; grid-template-rows: auto minmax(0, 1fr) auto; }
+.k-mem-top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding-right: 84px; }
+.k-vault { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3); border-radius: var(--r-chip); background: var(--surface); border: 1px solid var(--line); font-weight: 600; }
+.k-vault .k-icon { color: var(--accent); }
+.k-mem .k-chat-thread { overflow: visible; }
+.k-mem .k-bubble.me { align-self: flex-end; }
+.k-hl { position: relative; white-space: nowrap; isolation: isolate; }
+.k-hl-bg { position: absolute; left: -2px; right: -2px; bottom: 1px; height: 45%; border-radius: 3px; background: var(--highlight); transform: scaleX(0); transform-origin: left; z-index: -1; }
+.k-hl.on .k-hl-bg { transform: none; }
+.k-notechip { position: absolute; left: 0; top: 0; z-index: 5; display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2); border-radius: var(--r-chip); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); white-space: nowrap; }
+.k-notechip .k-icon { width: 14px; height: 14px; color: var(--accent); }
+.k-toast-slot { display: grid; justify-items: center; }
+
+/* Metric (5.16). */
+.k-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--space-3); max-width: 560px; }
+.k-metric { padding: var(--space-3) var(--space-4); display: grid; gap: var(--space-1); align-content: start; transition: border-color var(--dur-fade) var(--ease-fade); }
+.k-metric-v { font-size: 22px; font-weight: 500; line-height: 1.2; }
+.k-spark { width: 100%; height: 24px; overflow: visible; }
+.k-spark path { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.k-spark circle { fill: var(--accent); }
+.k-tier-h { display: inline-flex; align-items: center; gap: var(--space-1); }
+.k-tier-h .k-icon { width: 14px; height: 14px; color: var(--muted); }
+.k-metric.over { border-color: var(--warm); }
+.k-metric.over .k-tier-h .k-icon { color: var(--warm); }
+.k-meter { display: block; height: 4px; border-radius: 4px; background: var(--sunken); overflow: hidden; }
+.k-meter i { display: block; height: 100%; background: var(--accent); transform-origin: left; transition: transform var(--spring-fast-dur) var(--spring-fast); }
+.k-metric.over .k-meter i { background: var(--warm); }
+.k-metric .k-btn { justify-self: start; min-block-size: 32px; }
+
+/* PacedReply (5.1). */
+.k-chat { max-width: 520px; padding: var(--space-3) var(--space-4) var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); height: 400px; }
+.k-chat-thread { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; gap: var(--space-1); }
+.k-chat-thread > * { flex: none; }
+.k-chat-thread > .k-bubble:not(.me) { align-self: flex-start; transform-origin: bottom left; }
+.k-msg.me { display: grid; justify-items: end; gap: 2px; }
+.k-msg.me .k-bubble { transform-origin: bottom right; }
+.k-bubble.typing { display: flex; gap: 4px; align-items: center; padding: var(--space-3); overflow: hidden; }
+.k-bubble.typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: k-dot 0.8s steps(1, end) 5 forwards; }
+.k-bubble.typing i:nth-child(2) { animation-delay: 0.16s; }
+.k-bubble.typing i:nth-child(3) { animation-delay: 0.32s; }
+@keyframes k-dot { 0%, 100% { opacity: 0.6; } 33% { opacity: 1; } 66% { opacity: 0.3; } }
+/* The wait (#378, decision 10): the demo's 64 px track and its words, then who is writing. */
+.k-buffer { display: flex; align-items: center; gap: 10px; height: 18px; flex: none; color: var(--muted); opacity: 0; transition: opacity var(--dur-fade) var(--ease-fade); }
+.k-buffer.on { opacity: 1; }
+.k-wait { width: 64px; height: 3px; flex: none; background: var(--line); border-radius: 3px; overflow: hidden; }
+.k-wait i { display: block; height: 100%; background: var(--accent); transform: scaleX(0); transform-origin: left center; }
+.k-chat .k-compose { align-items: center; }
+.k-composer-text { white-space: nowrap; overflow: hidden; font-size: 15px; }
+.k-phase { margin-left: 4px; color: var(--muted); font-size: 12.5px; }
+.k-caret { width: 1.5px; height: 16px; background: var(--accent); margin-right: auto; animation: k-caret 1s steps(1) 5; }
+.k-chat .k-round { cursor: default; }
+@keyframes k-caret { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .k-bubble.typing i { animation: none; opacity: 0.6; } .k-caret { animation: none; } }
+
+/* Presence (5.9). */
+.k-roster { max-width: 460px; padding: var(--space-2); }
+.k-strip-slot { min-block-size: 30px; padding: var(--space-1) var(--space-2); display: flex; flex-direction: row-reverse; justify-content: space-between; align-items: center; gap: var(--space-2); }
+.k-net { min-block-size: 30px; }
+.k-strip { display: inline-flex; align-items: center; gap: var(--space-2); padding: 6px var(--space-3); border-radius: var(--r-btn); background: color-mix(in srgb, var(--warm) 14%, transparent); color: var(--fg); font-weight: 600; }
+.k-strip .k-icon { color: var(--warm); }
+.k-agent { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding: var(--space-2); border: 0; border-radius: calc(var(--r-card) - var(--space-2)); background: none; text-align: left; cursor: pointer; }
+@media (hover: hover) { .k-agent:hover { background: var(--sunken); } }
+.k-agent-name { font-weight: 600; }
+.k-agent-st { color: var(--muted); max-width: 100%; }
+.k-agent-st b { font-weight: 600; color: var(--fg); }
+/* The label stays fg: accent and danger miss AA as text on a hovered (sunken) row; the glyph carries the color (3:1 for icons). */
+.k-st-working .k-glyph { color: var(--accent); }
+.k-st-waiting .k-glyph { color: var(--warm); }
+.k-st-error .k-glyph { color: var(--danger); }
+.k-st-idle .k-glyph, .k-st-noResponse .k-glyph, .k-st-offline .k-glyph { color: var(--muted); }
+.k-agent-time { color: var(--muted); }
+.k-agent-st .k-glyph { margin-inline-end: var(--space-1); }
+
+/* ReceiptFold (5.18). */
+.k-fold { max-width: 460px; padding: var(--space-3) var(--space-4); overflow: hidden; transform-origin: top; }
+.k-fold-in { display: grid; gap: var(--space-2); }
+.k-fold-paths { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
+
+/* Sidebar (5.24): the agents beside the conversation, from 56rem (the webchat's .side). */
+.k-sideapp { display: grid; grid-template-columns: 296px minmax(0, 1fr); min-block-size: 500px; padding: 0; gap: 0; border: 1px solid var(--line); border-radius: var(--r-panel); overflow: hidden; }
+.k-side { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4) var(--space-3) 14px; border-inline-end: 1px solid var(--line); background: var(--bg); }
+/* The lockup (5.23): the mark 1.3 cap heights tall, half a cap from the K, the word at 17 px. */
+.k-brand { align-self: flex-start; display: inline-flex; align-items: center; gap: calc(0.5cap - 2px); padding: 2px var(--space-2); border-radius: var(--r-sm); color: var(--accent); font-family: var(--font-display); font-size: 17px; font-weight: 680; line-height: 1.05; letter-spacing: -0.03em; text-decoration: none; }
+.k-brand svg { block-size: calc(1.3cap * 64 / 53.13); inline-size: auto; aspect-ratio: 1; fill: currentColor; }
+/* The strip's slot is kept, so the rows never move when it comes (5.9). */
+.k-slot { min-block-size: 34px; }
+.k-side .k-strip { display: flex; padding: 7px var(--space-3); font-size: 13px; line-height: 1.4; }
+.k-arows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.k-arow { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 5px var(--space-2); border-radius: var(--r-btn); transition: background-color var(--dur-fade) var(--ease-fade); }
+@media (hover: hover) { .k-arow:hover { background: color-mix(in srgb, var(--surface) 60%, transparent); } }
+.k-arow:has(.k-rlink[aria-current]) { background: var(--surface); }
+.k-avw { display: grid; place-items: center; width: 40px; height: 40px; flex: none; }
+.k-an { display: grid; min-width: 0; }
+/* The row's link covers the whole row; its state's disclosure sits above it. */
+.k-rlink { overflow: hidden; color: var(--fg); font-size: 14px; font-weight: 600; line-height: 1.3; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+.k-rlink::after { content: ""; position: absolute; inset: 0; border-radius: var(--r-btn); }
+.k-rlink:focus-visible { outline: none; }
+.k-rlink:focus-visible::after { outline: 2px solid var(--accent); outline-offset: -2px; box-shadow: 0 0 0 4px var(--focus-halo); }
+.k-ast { position: relative; display: flex; align-items: center; gap: 5px; min-width: 0; min-block-size: 1.4em; color: var(--muted); white-space: nowrap; }
+.k-ast .k-tx { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.k-arow[data-state="waiting"] .k-lbl { color: var(--warm); font-weight: 600; }
+.k-ropen { position: absolute; inset: -2px -4px; z-index: 1; padding: 0; border: 0; border-radius: var(--r-sm); background: none; cursor: pointer; }
+@media (hover: hover) { .k-ropen:hover { background: color-mix(in srgb, var(--warm) 10%, transparent); } }
+.k-atime { color: var(--muted); font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.k-rreq { overflow: hidden; padding: var(--space-1) 0 var(--space-2) var(--space-2); }
+.k-rreq .k-confirm { max-width: none; padding: var(--space-3); background: var(--surface); }
+/* The pencil (5.9): a 24 px badge on the mascot's top right; it shows while the pointer rests on
+ * the mascot and while it has focus, fading in and scaling from 0.9 with spring-fast. */
+.k-pen { position: absolute; top: 1px; left: 30px; z-index: 2; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 1px solid var(--muted); border-radius: 50%; background: var(--surface); color: var(--fg); cursor: pointer; opacity: 0; scale: 0.9; transition: opacity var(--dur-fade) var(--ease-fade), scale var(--spring-fast-dur) var(--spring-fast); }
+.k-pen .k-icon { width: 12px; height: 12px; }
+.k-arow[data-mascot-hover] .k-pen, .k-pen:hover, .k-pen:focus-visible { opacity: 1; scale: 1; }
+@media (hover: none) { .k-pen { opacity: 1; scale: 1; } }
+.k-pen .k-tip { bottom: auto; top: calc(100% + 6px); }
+.k-side-note { margin: 0; padding: 0 var(--space-2); color: var(--muted); }
+/* The sidebar's foot is the owner's account: it opens the Display menu upward. */
+.k-side-foot { display: flex; margin-top: auto; padding: 0 var(--space-1); }
+.k-side-foot .k-acct { flex: 1; }
+.k-chatpane { display: grid; align-content: start; gap: var(--space-3); padding: var(--space-3) var(--space-8); background: var(--surface); }
+.k-chatpane .k-bubble { justify-self: start; }
+.k-chatpane .k-bubble.me { justify-self: end; }
+@media (prefers-reduced-motion: reduce) { .k-pen { scale: 1; } }
+
+/* Skeleton (5.11): still, never a shimmer. */
+.k-sk-box { max-width: 420px; padding: var(--space-3); display: grid; gap: var(--space-3); min-block-size: 132px; }
+.k-sk-row { display: flex; align-items: center; gap: var(--space-3); min-block-size: 44px; }
+.k-sk { display: block; height: 12px; border-radius: var(--r-sm); background: var(--sunken); }
+.k-sk.round { width: 36px; height: 36px; flex: none; border-radius: 50%; }
+
+/* Subagents (5.6): the pups demo of the mascot's concept page, with no links, in the header and on the profile. */
+.k-pups { display: grid; gap: var(--space-2); max-width: 520px; }
+.k-pups-l { margin: var(--space-1) 0 0; }
+.k-pups-head { padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); }
+/* The header's row stands on the parent's ground, a space-1 from its box. */
+.k-hpups { display: flex; align-items: flex-end; gap: var(--space-1); align-self: stretch; margin-inline-start: calc(var(--space-1) - var(--space-3)); padding-bottom: 2px; }
+.k-hpups:empty { display: none; }
+.k-hpup { position: relative; display: inline-flex; }
+/* A failed header pup shows 5.9's triangle above its head, on the header's background, where --danger
+   passes 3:1; the figure has no badge. */
+.k-hpup-x { position: absolute; left: 50%; bottom: calc(100% + 2px); margin-left: -5px; display: inline-flex; color: var(--danger); }
+.k-hpup-x .k-glyph { width: 10px; height: 10px; }
+/* The status line's row: the phase ends in an ellipsis first; the count is its own live region. */
+.k-hline { display: flex; min-width: 0; margin: 0; white-space: nowrap; }
+.k-hphase { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.k-hcount { flex: none; }
+.k-hphase:not(:empty) + .k-hcount:not(:empty)::before { content: "\00a0·\00a0"; }
+.k-pups-stage { position: relative; display: flex; align-items: flex-end; gap: var(--space-2); height: 250px; padding: 0 var(--space-5) var(--space-6); border-radius: var(--r-panel); background: var(--surface); border: 1px solid var(--line); overflow: hidden; }
+.k-pups-stage::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 40px; background: var(--sunken); }
+.k-pups-stage > .k-mh, .k-pups-row { position: relative; }
+.k-pups-row { display: flex; align-items: flex-end; gap: var(--space-2); }
+.k-pups-cap { margin: 0; min-block-size: 1.5em; }
+
+/* TaskBoard (5.5). */
+.k-board { display: grid; gap: var(--space-3); max-width: 620px; }
+.k-routine { justify-self: start; display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3) var(--space-1) var(--space-2); border-radius: var(--r-chip); background: var(--surface); border: 1px solid var(--line); transition: border-color var(--dur-fade) var(--ease-fade), box-shadow var(--dur-fade) var(--ease-fade); }
+.k-routine .k-icon { color: var(--accent); }
+.k-routine.fired { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-halo); }
+.k-routine .clock { color: var(--muted); }
+.k-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
+.k-col-b { min-width: 0; padding: var(--space-2); border-radius: calc(var(--r-card) - var(--space-1)); background: var(--sunken); display: grid; gap: var(--space-2); align-content: start; min-block-size: 230px; }
+.k-col-h { margin: 0; display: flex; justify-content: space-between; color: var(--muted); font-weight: 600; padding: 0 var(--space-1); }
+.k-col-cards { display: grid; gap: var(--space-2); }
+.k-task { display: grid; gap: var(--space-1); padding: var(--space-2); border-radius: calc(var(--r-card) - var(--space-2)); background: var(--surface); border: 1px solid var(--line); transform-origin: top left; }
+.k-task-t { font-weight: 600; line-height: 1.3; }
+.k-task.done .k-task-t { color: var(--muted); }
+.k-task-m { display: flex; align-items: center; gap: var(--space-2); color: var(--muted); min-width: 0; }
+.k-task-m .k-icon { width: 14px; height: 14px; color: var(--ok); }
+.k-task-m .k-spinner { width: 10px; height: 10px; color: var(--accent); }
+.k-mh.s20.empty { border-radius: 50%; border: 1px dashed var(--muted); }
+.k-task-bar { display: block; height: 3px; border-radius: 3px; background: var(--sunken); overflow: hidden; }
+.k-task-bar i { display: block; height: 100%; background: var(--accent); transform: scaleX(0); transform-origin: left; }
+
+/* Thread (5.20). */
+.k-thread { display: grid; gap: var(--space-3); }
+.k-day { position: sticky; top: 0; z-index: 2; justify-self: center; margin: 0; padding: 2px var(--space-3); border-radius: var(--r-chip); background: var(--surface); border: 1px solid var(--line); color: var(--muted); font-weight: 500; }
+.k-group { display: grid; gap: var(--space-1); justify-items: start; }
+.k-group.me { justify-items: end; }
+.k-bubble { position: relative; margin: 0; max-width: min(29rem, 86%); padding: var(--space-2) var(--space-3); border-radius: var(--r-bubble); background: var(--sunken); color: var(--fg); unicode-bidi: plaintext; overflow-wrap: anywhere; }
+.k-bubble.me { background: var(--accent); color: var(--on-accent); }
+.k-bubble.me.queued { background: var(--sunken); color: var(--muted); }
+/* A bubble's own time shows beside it on hover or a tap (#378, decision 1), without moving the layout. */
+.k-at { position: absolute; bottom: var(--space-1); color: var(--muted); white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity var(--dur-fade) var(--ease-fade); }
+.k-bubble.me > .k-at { right: calc(100% + var(--space-2)); }
+.k-bubble:not(.me) > .k-at { left: calc(100% + var(--space-2)); }
+@media (hover: hover) { .k-bubble:hover > .k-at { opacity: 1; } }
+.k-bubble.reveal > .k-at { opacity: 1; }
+.k-mark { margin: 0; display: inline-flex; align-items: center; gap: var(--space-1); color: var(--muted); }
+.k-mark .k-icon { width: 14px; height: 14px; }
+.k-mark.notsent { color: var(--fg); max-width: 29rem; text-align: right; }
+.k-mark.notsent .k-icon { color: var(--danger); }
+.k-notice { margin: 0; display: flex; align-items: center; gap: var(--space-2); max-width: 29rem; padding: var(--space-2) var(--space-3); border-radius: var(--r-bubble); background: var(--sunken); }
+.k-notice .k-icon { color: var(--danger); }
+.k-link { color: var(--fg); text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 1.5px; text-underline-offset: 2px; }
+.k-host { color: var(--muted); }
+
+/* Toast (5.13): the webchat's .toast. */
+.k-toasts { position: relative; display: grid; justify-items: center; align-items: end; min-block-size: 140px; }
+.k-toasts .k-toast { grid-area: 1 / 1; transform-origin: bottom center; transition: transform var(--spring-base-dur) var(--spring-base); }
+.k-toast { position: relative; overflow: hidden; display: flex; align-items: center; gap: var(--space-3); max-width: min(30rem, 100%); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4); border-radius: var(--r-chip); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-pop); }
+.k-toast .k-btn { min-block-size: 32px; flex: none; }
+.k-toast.error { border-color: var(--danger); }
+.k-toast.error > .k-icon { color: var(--danger); }
+.k-toast-time { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--muted); transform-origin: left; }
+
+/* ToolRow (5.2): the webchat's .tool-row. */
+.k-turn { display: grid; gap: var(--space-2); justify-items: start; max-width: 48rem; }
+.k-stream { margin: 0; }
+.k-tool { inline-size: min(29rem, 100%); overflow: hidden; }
+.k-tool-head { display: flex; align-items: center; gap: var(--space-2); inline-size: 100%; min-block-size: 32px; padding: var(--space-1) var(--space-3); border: 1px solid var(--line); border-radius: var(--r-bubble); background: var(--surface); color: var(--fg); text-align: start; cursor: pointer; }
+.k-tool-head:disabled { cursor: default; }
+.k-tool-ic { color: var(--accent); width: 14px; }
+.k-tool.done .k-tool-ic { color: var(--ok); }
+.k-tool-ic .k-icon { width: 14px; height: 14px; }
+.k-tool-lbl > .n { overflow: hidden; text-overflow: ellipsis; }
+.k-tool-tag { padding: 0 var(--space-2); border-radius: var(--r-chip); border: 1px solid var(--muted); color: var(--fg); }
+.k-tool-time { margin-inline-start: auto; color: var(--muted); white-space: nowrap; }
+.k-tool-time:empty { display: none; }
+.k-tool-steps { margin: var(--space-1) 0 0; padding: 0 var(--space-3); list-style: none; display: grid; gap: 2px; }
+.k-tool-steps li { display: flex; align-items: center; gap: var(--space-2); color: var(--muted); }
+.k-tool-steps .k-icon { width: 14px; height: 14px; color: var(--ok); }
+.k-result { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3); border-radius: var(--r-card); border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); }
+.k-result .k-icon { color: var(--accent); width: 20px; height: 20px; }
+
+/* The mascot (ADR-0045): apps/ingress/public/webchat/mascot.css, without its color tokens,
+ * which live in tokens.json (mascot-*). */
+.mascot-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+.mascot {
+  display: block;
+  overflow: visible;
+}
+.mascot .g {
+  transform-box: view-box;
+  transform-origin: 60px 108px;
+}
+.mascot
+  :is(
+    .m-eyeW,
+    .m-eyeP,
+    .m-blink,
+    .m-brow,
+    .bub,
+    .star-a,
+    .zz,
+    .bd-dot,
+    .bd-ring,
+    .m-shadow,
+    .mo-o-w
+  ) {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.mascot .m-ear {
+  transform-box: fill-box;
+  transform-origin: 50% 88%;
+}
+.mascot :is(.m-leaf, .m-ant) {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+.mascot .m-flop {
+  transform-origin: 75% 8%;
+}
+
+/* Eyes, mouth and lines */
+.mascot .ink {
+  fill: var(--mascot-ink);
+}
+.mascot .wht {
+  fill: var(--mascot-eye-white);
+}
+.mascot .stk {
+  fill: none;
+  stroke: var(--mascot-ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.mascot .eink {
+  fill: url(#kg-bead);
+}
+.mascot .scl {
+  fill: url(#kg-sclera);
+}
+.mascot .eao {
+  fill: url(#kg-ao);
+}
+.mascot .esh {
+  fill: url(#kg-esh);
+}
+.mascot .espec {
+  fill: url(#kg-spec);
+}
+.mascot .btn-r {
+  fill: none;
+  stroke: color-mix(in oklab, var(--body) 64%, white);
+  stroke-width: 0.9;
+  opacity: 0.6;
+}
+.mascot .btn-h {
+  fill: color-mix(in oklab, var(--body) 64%, white);
+}
+.mascot .chk {
+  fill: url(#kg-blush);
+}
+
+/* Hard parts: crisp vectors with volume, gloss and a soft shadow on the fur */
+.mascot .csh {
+  fill: url(#kg-shadow);
+}
+.mascot .gloss {
+  fill: url(#kg-gloss);
+}
+.mascot .satin {
+  fill: url(#kg-satin);
+}
+.mascot .knot {
+  fill: #b8456f;
+}
+.mascot .strap {
+  fill: url(#kg-strap);
+}
+.mascot .strap-hl {
+  fill: none;
+  stroke: #ffffff;
+  stroke-opacity: 0.22;
+  stroke-width: 0.8;
+}
+.mascot .stitch {
+  fill: none;
+  stroke: #ffffff;
+  stroke-opacity: 0.32;
+  stroke-width: 0.7;
+  stroke-dasharray: 1.6 1.4;
+}
+.mascot .ring {
+  fill: none;
+  stroke: #8e9c99;
+  stroke-width: 1.6;
+}
+.mascot .tagc {
+  fill: url(#kg-metal);
+  stroke: #5e6d6a;
+  stroke-width: 0.8;
+}
+.mascot .buckle {
+  fill: none;
+  stroke: url(#kg-metal);
+  stroke-width: 2;
+}
+.mascot .hl {
+  fill: none;
+  stroke: #ffffff;
+  stroke-opacity: 0.55;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+}
+.mascot .hl.thin {
+  stroke-opacity: 0.3;
+  stroke-width: 0.8;
+}
+.mascot .lens {
+  fill: url(#kg-lens);
+  stroke: url(#kg-frame);
+  stroke-width: 2.4;
+}
+.mascot .lens-d {
+  fill: url(#kg-lensd);
+  stroke: url(#kg-frame);
+  stroke-width: 2.4;
+}
+.mascot .frame {
+  fill: none;
+  stroke: url(#kg-frame);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+.mascot .horn {
+  fill: url(#kg-horn);
+}
+.mascot .hornl {
+  fill: none;
+  stroke: #6e5a36;
+  stroke-opacity: 0.45;
+  stroke-width: 1.1;
+  stroke-linecap: round;
+}
+.mascot .hornhi {
+  fill: none;
+  stroke: #ffffff;
+  stroke-opacity: 0.65;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+}
+.mascot .ant {
+  fill: none;
+  stroke: color-mix(in oklab, var(--body) 66%, var(--mascot-ink));
+  stroke-width: 2.6;
+  stroke-linecap: round;
+}
+.mascot .anthi {
+  fill: none;
+  stroke: #ffffff;
+  stroke-opacity: 0.4;
+  stroke-width: 0.8;
+  stroke-linecap: round;
+}
+.mascot .vein {
+  fill: none;
+  stroke: #000000;
+  stroke-opacity: 0.22;
+  stroke-width: 0.8;
+  stroke-linecap: round;
+}
+.mascot .drop {
+  fill: #a9d8f2;
+  stroke: var(--mascot-ink);
+  stroke-opacity: 0.35;
+  stroke-width: 1;
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.mascot .m-shadow {
+  fill: var(--mascot-shadow);
+}
+
+/* The task's objects, one at a time, as the activity the conversation names */
+.mascot .bd-ico {
+  fill: none;
+  stroke: var(--on-accent);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.mascot :is(.act, .bd-ico, .ico) {
+  display: none;
+}
+.mascot[data-act="search"] .act-search,
+.mascot[data-act="plug"] .act-plug,
+.mascot[data-act="vault"] .act-vault,
+.mascot[data-act="code"] .act-code,
+.mascot[data-act="calendar"] .act-calendar,
+.mascot[data-act="email"] .act-email {
+  display: inline;
+}
+.mascot[data-badge="work"] .bd-ico,
+.mascot[data-act="search"] .ico-search,
+.mascot[data-act="vault"] .ico-vault,
+.mascot[data-act="code"] .ico-code,
+.mascot[data-act="calendar"] .ico-calendar,
+.mascot[data-act="email"] .ico-email,
+.mascot[data-act="think"] .ico-think {
+  display: inline;
+}
+.mascot .bd-ico .dots {
+  stroke-width: 3.4;
+}
+.mascot :is(.m-work, .aw) {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.mascot .p-glass {
+  fill: url(#kg-lens);
+  stroke: url(#kg-frame);
+  stroke-width: 2.2;
+}
+.mascot .p-handle {
+  stroke: var(--mascot-ink);
+  stroke-width: 3.2;
+  stroke-linecap: round;
+}
+.mascot .p-glint {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+.mascot .p-paper {
+  fill: url(#kg-paper);
+  stroke: var(--mascot-ink);
+  stroke-opacity: 0.18;
+  stroke-width: 0.8;
+}
+.mascot :is(.p-line, .p-code, .p-check) {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+.mascot .p-line {
+  stroke: var(--mascot-ink);
+  stroke-opacity: 0.55;
+  stroke-width: 1.4;
+}
+.mascot .p-pencil {
+  fill: url(#kg-pencil);
+}
+.mascot .p-tip {
+  fill: var(--mascot-ink);
+}
+.mascot .p-screen {
+  fill: url(#kg-screen);
+}
+.mascot .p-code {
+  stroke: #7ee0cf;
+  stroke-width: 1.6;
+}
+.mascot .p-base {
+  fill: url(#kg-alu);
+  stroke: var(--mascot-ink);
+  stroke-opacity: 0.25;
+  stroke-width: 0.6;
+}
+.mascot .p-band {
+  fill: var(--mascot-kelp);
+}
+.mascot .p-cell {
+  fill: var(--mascot-ink);
+  opacity: 0.22;
+}
+.mascot .p-check {
+  stroke: #1b7c45;
+  stroke-width: 2.4;
+}
+.mascot .p-flap {
+  fill: none;
+  stroke: var(--mascot-ink);
+  stroke-opacity: 0.5;
+  stroke-width: 1.2;
+}
+
+/* Floating mittens: shown where a pose or gesture puts them */
+.mascot .hand {
+  opacity: 0;
+  transition: opacity 150ms ease;
+  transform-box: view-box;
+  transform-origin: 0 0;
+}
+.mascot .hand[data-on] {
+  opacity: 1;
+}
+.mascot .hg {
+  transform-box: fill-box;
+  transform-origin: 50% 85%;
+}
+
+/* Effects */
+.mascot .bub {
+  fill: color-mix(in oklab, var(--body) 22%, transparent);
+  stroke: var(--body);
+  stroke-width: 2.2;
+}
+.mascot .star {
+  fill: var(--ok);
+}
+.mascot .zz {
+  font-family: system-ui, sans-serif;
+  font-weight: 700;
+  fill: var(--muted);
+}
+
+/* The glossy 3D bubble beside the head, and the badge at roster size */
+.mascot .bd-c {
+  stroke: var(--surface);
+  stroke-width: 4;
+  paint-order: stroke;
+}
+.mascot[data-badge="wait"] .bd-c {
+  fill: url(#kg-wait);
+}
+.mascot[data-badge="error"] .bd-c {
+  fill: url(#kg-err);
+}
+.mascot[data-badge="offline"] .bd-c {
+  fill: url(#kg-off);
+}
+.mascot[data-badge="work"] .bd-c {
+  fill: url(#kg-acc);
+}
+.mascot .bd-hl {
+  fill: #ffffff;
+  opacity: 0.5;
+}
+.mascot[data-badge="silent"] .bd-c {
+  fill: var(--surface);
+  stroke: var(--muted);
+  stroke-width: 1.2;
+  stroke-dasharray: 2.4 1.8;
+}
+.mascot[data-badge="silent"] :is(.bd-hl, .bd-g) {
+  fill: var(--muted);
+}
+.mascot[data-badge="silent"] .bd-hl {
+  opacity: 0;
+}
+.mascot .bub3d {
+  stroke: rgb(0 0 0 / 0.18);
+  stroke-width: 0.6;
+}
+.mascot .bd-bob {
+  transform-box: fill-box;
+  transform-origin: 30% 90%;
+}
+.mascot .speech .bd-dot {
+  transform-origin: 25% 95%;
+}
+.mascot .bd-g {
+  font-family: system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 16px;
+  fill: var(--on-accent);
+}
+.mascot .speech .bd-g {
+  font-size: 14.5px;
+}
+.mascot .bd-ring {
+  fill: none;
+  stroke: var(--warm);
+  stroke-width: 2.5;
+  opacity: 0;
+}
+.mascot[data-badge="error"] .bd-ring {
+  stroke: var(--danger);
+}
+.mascot[data-badge="offline"] .bd-ring {
+  stroke: var(--muted);
+}
+
+/* Offline (#380): a plug with a slash in the grey bubble, and the plug in the mittens */
+.mascot .bd-off {
+  display: none;
+  fill: none;
+  stroke: var(--on-accent);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.mascot .bd-off .slash {
+  stroke-width: 2;
+}
+.mascot[data-badge="offline"] .speech .bd-off {
+  display: inline;
+}
+.mascot .p-plugb {
+  fill: url(#kg-alu);
+  stroke: rgb(0 0 0 / 0.18);
+  stroke-width: 0.6;
+}
+.mascot .p-prong {
+  fill: url(#kg-metal);
+}
+.mascot .p-plughl {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  opacity: 0.6;
+}
+.mascot .p-cord {
+  fill: none;
+  stroke: #4f5d5a;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+
+/* The bubble's colors come from the theme tokens. */
+.kg-warm-1 {
+  stop-color: color-mix(in oklab, var(--warm) 45%, white);
+}
+.kg-warm-2 {
+  stop-color: var(--warm);
+}
+.kg-warm-3 {
+  stop-color: color-mix(in oklab, var(--warm) 72%, black);
+}
+.kg-danger-1 {
+  stop-color: color-mix(in oklab, var(--danger) 45%, white);
+}
+.kg-danger-2 {
+  stop-color: var(--danger);
+}
+.kg-danger-3 {
+  stop-color: color-mix(in oklab, var(--danger) 72%, black);
+}
+.kg-muted-1 {
+  stop-color: color-mix(in oklab, var(--muted) 45%, white);
+}
+.kg-muted-2 {
+  stop-color: var(--muted);
+}
+.kg-muted-3 {
+  stop-color: color-mix(in oklab, var(--muted) 72%, black);
+}
+.kg-accent-1 {
+  stop-color: color-mix(in oklab, var(--accent) 45%, white);
+}
+.kg-accent-2 {
+  stop-color: var(--accent);
+}
+.kg-accent-3 {
+  stop-color: color-mix(in oklab, var(--accent) 72%, black);
+}
+
+/* What shows per state: crossfades, never movement */
+.mascot .sw {
+  opacity: 0;
+  transition: opacity var(--sw, 140ms) ease;
+}
+.mascot[data-eyes="open"] .e-open,
+.mascot[data-eyes="happy"] .e-happy,
+.mascot[data-eyes="closed"] .e-closed,
+.mascot[data-mouth="o"] .mo-o,
+.mascot[data-mouth="smile"] .mo-smile,
+.mascot[data-mouth="wave"] .mo-wave,
+.mascot[data-fx="bubbles"] .fx-bub,
+.mascot[data-fx="spark"] .fx-spark,
+.mascot[data-fx="zzz"] .fx-zzz {
+  opacity: 1;
+}
+.mascot :is(.m-brows, .m-bdw) {
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.mascot:not([data-brows="none"]) .m-brows,
+.mascot:not([data-badge="none"]) .m-bdw {
+  opacity: 1;
+}
+
+/* At 36 px: no mouth or brows, eyes 15% larger, and the badge (ADR-0045 §4) */
+.mascot[data-size="s"] :is(.m-mouth, .m-brows, .fx-zzz, .bd-g) {
+  display: none;
+}
+.mascot[data-size="s"] .m-eyeW {
+  transform: scale(1.15);
+}
+.mascot[data-size="s"] .m-bdw {
+  transform: scale(1.3);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* The editor's preview crossfades from the look it had (#379): the old figure fades out on top. */
+.mascot-host:has(> .m-leaving) {
+  position: relative;
+}
+.mascot.m-leaving {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}

@@ -1,0 +1,12 @@
+/* HoldButton (5.4). */
+.k-hold-wrap { position: relative; }
+.k-hold {
+  position: relative; overflow: hidden; width: 100%; min-block-size: 44px; padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--muted); border-radius: var(--r-btn); background: var(--surface); color: var(--fg);
+  font-weight: 600; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none;
+  transition: background-color var(--dur-fade) var(--ease-fade), color var(--dur-fade) var(--ease-fade);
+}
+.k-hold-fill { position: absolute; inset: 0; background: var(--hold-fill); transform: scaleX(0); transform-origin: left; }
+.k-hold .k-roll { position: relative; }
+.k-hold.ok { background: var(--ok); border-color: transparent; color: var(--surface); }
+.k-ring { position: absolute; inset: 0; border: 2px solid var(--ok); border-radius: var(--r-btn); pointer-events: none; }

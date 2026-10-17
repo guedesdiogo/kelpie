@@ -1,0 +1,81 @@
+# Sources
+
+The rules above cite these. The first set was read on 2026-10-15; a source added later says when it was read.
+
+- Award winners studied:
+  - [Awwwards annual awards](https://www.awwwards.com/annual-awards/winners);
+  - [CSS Design Awards, website of the year](https://www.cssdesignawards.com/woty-award-winners);
+  - Apple Design Awards [2024](https://www.apple.com/newsroom/2024/06/apple-announces-winners-of-the-2024-apple-design-awards/), [2025](https://www.apple.com/newsroom/2025/06/apple-unveils-winners-and-finalists-of-the-2025-apple-design-awards/) and [2026](https://www.apple.com/newsroom/2026/06/apple-reveals-winners-of-the-2026-apple-design-awards/);
+  - [the Dropbox Brand case study](https://www.awwwards.com/case-study-dropbox-brand-guidelines.html).
+- Motion craft:
+  - [Apple, Designing Fluid Interfaces](https://developer.apple.com/videos/play/wwdc2018/803/) and [Animate with springs](https://developer.apple.com/videos/play/wwdc2023/10158/);
+  - [Rauno Freiberg, Invisible Details of Interaction Design](https://rauno.me/craft/interaction-design);
+  - [Benji Taylor, Family Values](https://benji.org/family-values);
+  - [Emil Kowalski's animation rules](https://github.com/emilkowalski/skills);
+  - [Vercel's interface guidelines](https://vercel.com/design/guidelines);
+  - [Linear's agent interaction guidelines](https://linear.app/developers/agent-interaction), the source of the activity states behind tool rows and presence.
+- Design systems:
+  - [Material 3's motion tokens](https://github.com/androidx/androidx/tree/androidx-main/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/tokens), the source of six of the seven springs;
+  - [IBM Carbon motion](https://carbondesignsystem.com/elements/motion/overview/), for productive versus expressive motion.
+- Streaming: [Streamdown animation](https://streamdown.ai/docs/animation).
+- The mascot ([ADR-0045](https://github.com/guedesdiogo/kelpie/blob/main/docs/adr/0045-agent-mascot.md)), read on 2026-10-15; the findings are on #364:
+  - [OpenAI's dots documentation](https://learn.chatgpt.com/docs/dots);
+  - the Apple Design Awards [2024](https://www.apple.com/newsroom/2024/06/apple-announces-winners-of-the-2024-apple-design-awards/) and [2026](https://www.apple.com/newsroom/2026/06/apple-reveals-winners-of-the-2026-apple-design-awards/);
+  - [Hermes Agent's StatusPulse](https://github.com/NousResearch/hermes-agent/blob/b51e8b850494e0a95a4b410c3d9b9a26df9ae261/apps/desktop/src/components/ui/status-pulse.tsx#L1-L130).
+- The offline state ([ADR-0047](https://github.com/guedesdiogo/kelpie/blob/main/docs/adr/0047-mascot-offline.md)), read on 2026-10-16; the findings are on #380:
+  - [Chrome's offline dinosaur](https://blog.google/products/chrome/chrome-dino/), kept for offline only;
+  - [Telegram's presence line](https://github.com/DrKLO/Telegram/blob/f32ffeec763f0bdbf4bec25b52d654f77bff733d/TMessagesProj/src/main/java/org/telegram/ui/Components/ChatAvatarContainer.java#L1582-L1620), replaced while it waits for the network;
+  - [Slack's connection troubleshooting](https://slack.com/help/articles/205138367-Troubleshoot-connection-issues) and [Apple Watch's status icons](https://support.apple.com/en-us/108038).
+- The bot's photo ([ADR-0046](https://github.com/guedesdiogo/kelpie/blob/main/docs/adr/0046-telegram-bot-photo.md)), read on 2026-10-16; the findings are on #368:
+  - Telegram's [profile videos](https://core.telegram.org/api/files) and [sticker rules](https://core.telegram.org/stickers);
+  - Apple's [app icons](https://developer.apple.com/design/human-interface-guidelines/app-icons) and Android's [adaptive icons](https://developer.android.com/develop/ui/views/launch/icon_design_adaptive), on content in a round crop;
+  - [Discord's reduced motion](https://support.discord.com/hc/en-us/articles/360040613412), which stills avatars outside the profile.
+- The logo ([ADR-0049](https://github.com/guedesdiogo/kelpie/blob/main/docs/adr/0049-logo-main-mascot-silhouette.md)), read on 2026-10-16; the findings and the reference-project check are on #385:
+  - a mark that reduces the mascot, never replaced by it: [GitHub's logo](https://brand.github.com/foundations/logo) and [Mailchimp's brand assets](https://mailchimp.com/about/brand-assets/), with a reverse drawn for dark backgrounds;
+  - small sizes: [Dropbox's logo](https://brand.dropbox.com/logo), a separate glyph at 32 px and below; [Discord's 2021 refresh](https://discord.com/blog/happy-blurpthday-to-discord-a-place-for-everything-you-can-imagine), blunt shapes for small surfaces; [Primer's icons](https://primer.style/foundations/icons), whole pixels and 1 px gaps;
+  - [Copilot's Mico](https://thenextweb.com/news/microsoft-copilot-mico-retired-features-killed-app-merge), a mascot retired while the logo stayed;
+  - favicons: [Safari 26's release notes](https://developer.apple.com/documentation/safari-release-notes/safari-26-release-notes), [WebKit bug 309949](https://bugs.webkit.org/show_bug.cgi?id=309949) and [Evil Martians' "How to Favicon in 2026"](https://evilmartians.com/chronicles/how-to-favicon-in-2021-six-files-that-fit-most-needs);
+  - home-screen icons: [Apple's app icons](https://developer.apple.com/design/human-interface-guidelines/app-icons) and [web.dev on maskable icons](https://web.dev/articles/maskable-icon);
+  - [invokta's favicon](https://github.com/vinilana/invokta/blob/f1e2f04f98c967ab4bb73bd02c3fa581f04ce0e5/apps/docs/public/favicon.svg#L1-L10), drawn apart from its mark, and [Hermes Agent's icon script](https://github.com/NousResearch/hermes-agent/blob/b65e078cdc77ebe83979a2d5355179535f340e89/scripts/generate_icons.py#L1-L90), every size from one master.
+- The tab's count and the favicon's dot (5.9, 5.23), read on 2026-10-16; the findings and the reference-project check are on #389:
+  - [Claude Code's agent view](https://code.claude.com/docs/en/agent-view), which counts the sessions awaiting input in the tab until each is answered;
+  - [GitHub's pending favicon](https://github.githubassets.com/favicons/favicon-pending.svg), a static file with an amber dot in the bottom-right corner;
+  - [Mattermost's title and favicons](https://github.com/mattermost/mattermost/blob/f5485a5c6e3c65542e35077cc6777ad197617709/webapp/channels/src/components/unreads_status_handler/unreads_status_handler.tsx#L102-L175), `(N) ` before the title and pre-made favicons swapped by `href`;
+  - [Chromium's link element](https://github.com/chromium/chromium/blob/1ac7132d0190493dbeb52e8625ad8d3cfb25adca/third_party/blink/renderer/core/html/html_link_element.cc#L143-L151), which ignores setting the same `href` again;
+  - [WebKit bug 266426](https://bugs.webkit.org/show_bug.cgi?id=266426), still open: Safari keeps the first favicon;
+  - [Hermes Agent's session dot](https://github.com/NousResearch/hermes-agent/blob/848fc0ad8be766b9dc10fe42bd80b5fc2d45d95c/apps/desktop/src/app/chat/session-status-dot.tsx#L23-L37), one amber state for what needs the user, which never moves.
+- The pups in the conversation's header ([ADR-0053](https://github.com/guedesdiogo/kelpie/blob/main/docs/adr/0053-pups-in-the-conversation-header.md)), read on 2026-10-16; the findings and the reference-project check are on #403:
+  - [Hermes Agent's subagent glyphs](https://github.com/NousResearch/hermes-agent/blob/848fc0ad8be766b9dc10fe42bd80b5fc2d45d95c/ui-tui/src/lib/subagentGlyph.ts#L16-L34), a shape for each status and never a success for an unknown ending;
+  - figures kept apart while there is room: [Primer's avatar stack](https://primer.style/product/components/avatar-stack/) and [Fluent 2's avatar group](https://fluent2.microsoft.design/components/web/react/core/avatargroup/usage), which also asks for text beside a small badge;
+  - closing a gap with transforms: [Motion's `popLayout`](https://motion.dev/docs/react-animate-presence) and [FLIP](https://aerotwist.com/blog/flip-your-animations/);
+  - [WCAG 4.1.3 Status Messages](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html), for the polite count.
+- The sidebar ([ADR-0052](https://github.com/guedesdiogo/kelpie/blob/main/docs/adr/0052-webchat-presence-sockets.md), 5.9 and 5.24), read on 2026-10-16; the findings are on #378:
+  - [Slack's notifications](https://slack.com/help/articles/360025446073), where only a mention gets a counted badge;
+  - [Things 3](https://culturedcode.com/things/support/articles/2785159/) (Apple Design Award 2017), whose sidebar counts and never reorders;
+  - [iOS 14's Messages](https://www.apple.com/newsroom/2020/06/apple-reimagines-the-iphone-experience-with-ios-14/), typing shown without moving the pinned contact;
+  - [Linear's Inbox](https://linear.app/docs/inbox), its keys on the selected row, and [Linear's agent sessions](https://linear.app/developers/agent-interaction), where the server sets `awaitingInput`;
+  - [Cursor's agents window](https://forum.cursor.com/t/agents-approval-window/170388) and [GitHub's agent sessions](https://github.blog/changelog/2026-03-26-agent-activity-in-github-issues-and-projects/);
+  - [Hermes Agent's roster](https://github.com/NousResearch/hermes-agent/tree/848fc0ad8be766b9dc10fe42bd80b5fc2d45d95c/apps/desktop/src/plugins/hermes-bots): its still status mark and one place that settles states, adopted, and its polling and reordering, avoided.
+- The agent's editor (5.25, 5.26, [ADR-0056](https://github.com/guedesdiogo/kelpie/blob/main/docs/adr/0056-agent-editor-and-random-mascot.md)), read on 2026-10-16; the findings and the reference projects' check are on #379:
+  - the trigger beside the figure: [ChatGPT's dots](https://help.openai.com/en/articles/20001530), [Duolingo's avatar creator](https://blog.duolingo.com/avatar-creator/) and [Memoji](https://support.apple.com/en-us/111115); [NN/g on contextual menus](https://www.nngroup.com/articles/contextual-menus-guidelines/), against a menu as the only way in;
+  - the container: [Notion Faces](https://faces.notion.com), a grid next to a big preview, and [NN/g's bottom-sheet rules](https://www.nngroup.com/articles/bottom-sheet/);
+  - a live preview: [Tolan](https://intercom.help/portola/en/articles/17508617-styling-your-tolan), [Apple Watch's face editor](https://support.apple.com/guide/watch/change-your-watch-face-apda6559ad78/11.0) and [Lily on Rive](https://rive.app/blog/duolingo-s-ai-powered-video-call-brings-lily-to-life); [ChatGPT pets](https://learn.chatgpt.com/docs/pets), a still frame under reduced motion;
+  - the choices: the [APG radio group](https://www.w3.org/WAI/ARIA/apg/patterns/radio/) and [WCAG 2.5.8](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html);
+  - saving: [Discord's unsaved-changes bar](https://support.discord.com/hc/vi/community/posts/4405364026903--Save-Changes-Hotkey-for-Server-Settings), made a quiet line, and [Benji Taylor's Family Values](https://benji.org/family-values);
+  - tooltips: [Emil Kowalski's rules](https://github.com/emilkowalski/skills/blob/main/skills/emil-design-eng/SKILL.md), [Radix's Tooltip](https://www.radix-ui.com/primitives/docs/components/tooltip), [Primer's](https://primer.style/product/components/tooltip/), [Geist's](https://vercel.com/geist/tooltip), the HIG on [help](https://developer.apple.com/design/human-interface-guidelines/offering-help) and [undo](https://developer.apple.com/design/human-interface-guidelines/undo-and-redo), [WCAG 1.4.13](https://www.w3.org/WAI/WCAG22/Understanding/content-on-hover-or-focus.html), and [Linear's 2026 refresh](https://linear.app/now/behind-the-latest-design-refresh), against icons that replace labels;
+  - [Hermes Agent's profile editor](https://github.com/NousResearch/hermes-agent/blob/9c002cb941de1e1708294d0cd58e060b6a417b5e/apps/desktop/src/plugins/hermes-bots/edit-profile-dialog.tsx): one Save and a dirty flag per section, adopted; its 64 px preview and its swatches named by their hex, avoided.
+- Accessibility:
+  - [WCAG 2.2.2 Pause, Stop, Hide](https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html);
+  - [WCAG 2.3.3 Animation from Interactions](https://www.w3.org/WAI/WCAG22/Understanding/animation-from-interactions.html);
+  - [web.dev on prefers-reduced-motion](https://web.dev/articles/prefers-reduced-motion).
+- The first review (ADR-0044), read on 2026-10-15; the findings and the reference-project check are on #358:
+  - [the Webby Awards 2026 winners](https://www.webbyawards.com/press/press-releases/30th-annual-webby-awards-announce-2026-winners/), and [Claude Code's agent view](https://code.claude.com/docs/en/agent-view), the source of the state glyphs and of counting what waits in the tab title;
+  - Apple Design Award winners: [Crouton](https://developer.apple.com/news/?id=9x75y43e), [Pine Hearts](https://developer.apple.com/news/?id=p9gxlwd0), [Guitar Wiz](https://developer.apple.com/news/?id=5zi5a25j), [grug](https://developer.apple.com/news/?id=ux44ymcr), [Tide Guide](https://developer.apple.com/news/?id=4r9b23wx);
+  - [iA Writer's Authorship](https://ia.net/writer/support/editor/authorship), [Moonlock at Red Dot 2026](https://macpaw.com/news/moonlock-wins-red-dot-award-2026), [Google at Fast Company 2026](https://fastcompanybrasil.com/design/google-adidas-e-nordeste-vencem-premio-de-design-da-fast-company/);
+  - craft: [Primer on loading](https://primer.style/product/ui-patterns/loading) and [degraded experiences](https://primer.style/product/ui-patterns/degraded-experiences), [Sonner](https://emilkowal.ski/ui/building-a-toast-component), [Vaul](https://emilkowal.ski/ui/building-a-drawer-component), [Atlassian on drag and drop](https://atlassian.design/components/pragmatic-drag-and-drop/design-guidelines), [MUI X Chat on scrolling](https://mui.com/x/react-chat/behavior/scrolling), [NumberFlow](https://number-flow.barvian.me), [Chrome on View Transitions](https://developer.chrome.com/docs/web-platform/view-transitions/same-document).
+- The webchat's redesign (#140), read on 2026-10-15; the findings are on #140:
+  - [Telegram Web A](https://github.com/Ajaxy/telegram-tt/tree/090e38f1dffec3e0a9aefbec8159a9931fbeec8f), the source of groups, day labels, the composer's limits and links that show where they go;
+  - [Claude Code's accessibility](https://code.claude.com/docs/en/accessibility) and [interactive mode](https://code.claude.com/docs/en/interactive-mode), for the spoken labels and the queued messages;
+  - [Apple Messages' delivery states](https://support.apple.com/guide/messages/ichtee6857f6/mac), [Streamdown's code blocks](https://streamdown.ai/docs/code-blocks), [Chromium's URL display guidelines](https://chromium.googlesource.com/chromium/src/+/main/docs/security/url_display_guidelines/url_display_guidelines.md) and [Geist's theme switcher](https://vercel.com/geist/theme-switcher);
+  - [Cloudflare Access's session management](https://developers.cloudflare.com/cloudflare-one/identity/users/session-management/) and [WCAG 2.2.5 Re-authenticating](https://www.w3.org/WAI/WCAG22/Understanding/re-authenticating), for the expired login;
+  - [Hermes Agent](https://github.com/NousResearch/hermes-agent/tree/acc3cada0da86c81efc8aa6c5a291989549ca900), for the input-method guard, the phone's keyboard and the restored draft.

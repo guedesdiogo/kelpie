@@ -1,0 +1,18 @@
+/* Logo (5.23): the docs/brand drawings, inked from the tokens. */
+.k-logo { gap: var(--space-4); }
+.k-logo-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-4); }
+.k-logo-fig { margin: 0; display: grid; justify-items: center; gap: var(--space-2); padding: var(--space-3); border-radius: var(--r-card); }
+.k-logo-fig figcaption { color: var(--muted); }
+.k-logo-fig.on-bg { background: var(--bg); border: 1px solid var(--line); }
+.k-logo-fig.on-surface { background: var(--surface); border: 1px solid var(--line); }
+.k-logo-fig.on-sunken { background: var(--sunken); }
+.k-logo-lock { height: 44px; width: auto; color: var(--accent); fill: currentColor; }
+.k-logo-mark { width: 48px; height: 48px; color: var(--accent); fill: currentColor; }
+.k-logo-tile { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 22%; background: var(--accent); }
+.k-logo-tile .k-logo-mark { width: 40px; height: 40px; color: var(--on-accent); }
+.k-logo-fig.on-photo { background: linear-gradient(135deg, var(--mascot-tide), var(--mascot-anemone)); }
+.k-logo-fig.on-photo figcaption { padding: 0 var(--space-1); border-radius: var(--r-sm); background: var(--surface); color: var(--fg); }
+.k-fav .t { fill: var(--accent); }
+.k-fav .m { fill: var(--on-accent); }
+.k-fav.s16 { width: 32px; height: 32px; image-rendering: pixelated; }
+.k-fav.s64 { width: 64px; height: 64px; }

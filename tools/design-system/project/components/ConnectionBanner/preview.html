@@ -1,0 +1,82 @@
+<!-- @dsCard group="Feedback" height=480 subtitle="5.12 · the connection drops and comes back; then the login expires" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>ConnectionBanner</title></head>
+<body>
+<div class="k-stage">
+  <div class="k-row k-net-ctl"><button type="button" class="k-btn text-sm" id="again">Drop the connection</button><button type="button" class="k-btn text-sm" id="expire">Expire the login</button></div>
+  <div class="k-chat k-card text-ui" style="height:390px">
+    <div class="k-banner text-sm" id="banner" hidden></div>
+    <div class="k-ahead"><span class="k-mh s48" id="fig"></span><div class="k-col" style="gap:0"><span class="k-display text-h3">Agenda</span><span class="k-roll text-sm k-muted" id="status"><span class="n">Looking for a free hour</span></span></div></div>
+    <div class="k-chat-thread" id="thread"></div>
+    <div class="k-scrim" id="scrim" hidden></div>
+    <div class="k-dialog" id="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-t" hidden>
+      <span class="k-mh s160" id="big"></span>
+      <h2 class="k-display text-h3" id="dlg-t" style="margin:0">Your login expired</h2>
+      <p class="text-ui" style="margin:0">Sign in again to keep going. Your unsent message stays here.</p>
+      <button type="button" class="k-btn primary text-ui" id="signin">Sign in again</button>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui, banner = document.getElementById("banner"), thread = document.getElementById("thread"), status = document.getElementById("status");
+  var m = ui.mascot(document.getElementById("fig"), ui.LOOKS.agenda, 48), big = null;
+  var CLOCK = '<svg class="k-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11Z"/><path d="M8 5v3.2l2 1.3"/></svg>';
+  function reset() {
+    banner.hidden = true; banner.className = "k-banner text-sm";
+    document.getElementById("dialog").hidden = true; document.getElementById("scrim").hidden = true;
+    thread.innerHTML = '<p class="k-bubble">Looking for a free hour tomorrow.</p>';
+    status.innerHTML = '<span class="n">Looking for a free hour</span>';
+    m.setState("working", { activity: "calendar", instant: true });
+  }
+  var play = ui.runner(async function (run) {
+    reset();
+    await run.sleep(1200);
+    // The connection drops. For 2 s nothing changes; then the banner enters, and the mascot shows Offline.
+    await run.sleep(2000);
+    banner.innerHTML = ui.icon("wifiOff") + '<span>No connection. Trying again in <span class="k-roll k-mono" id="sec"><span class="n">8</span></span> s</span><button type="button" class="k-banner-b text-xs">Try now</button>';
+    banner.hidden = false;
+    ui.animate(banner, [{ opacity: 0, transform: "translateY(-8px)" }, { opacity: 1, transform: "none" }], { spring: "base" });
+    m.setState("offline");
+    ui.roll(status, ui.glyph("offline") + " no connection");
+    await run.sleep(900);
+    var q = document.createElement("div");
+    q.className = "k-msg me";
+    q.innerHTML = '<p class="k-bubble me queued">Make it 10:30 instead</p><p class="k-mark text-sm">' + CLOCK + "queued</p>";
+    thread.append(q); ui.enter(q, {});
+    for (var s = 7; s >= 4; s--) { await run.sleep(1000); ui.roll(document.getElementById("sec"), String(s)); }
+    await run.sleep(600);
+    // Back: the plug clicks home, and the history brings the agent's state.
+    banner.classList.add("back");
+    banner.innerHTML = ui.icon("check") + "<span>Back. 1 message sent.</span>";
+    q.querySelector(".k-bubble").classList.remove("queued");
+    ui.animate(q.querySelector(".k-mark"), [{ opacity: 1 }, { opacity: 0 }], { fill: "forwards" });
+    m.setState("working", { activity: "calendar" });
+    ui.roll(status, "Looking for a free hour");
+    await run.sleep(2600);
+    await ui.exit(banner).finished;
+    banner.hidden = true;
+  });
+  document.getElementById("again").addEventListener("click", function () { play(); });
+  document.getElementById("expire").addEventListener("click", function (e) {
+    play.takeover(); reset();
+    var dlg = document.getElementById("dialog"), scrim = document.getElementById("scrim");
+    // Behind the dialog every mascot that shows a state is Offline too.
+    m.setState("offline", { instant: e.detail === 0 });
+    ui.roll(status, ui.glyph("offline") + " no connection");
+    scrim.hidden = false; dlg.hidden = false;
+    if (!big) big = ui.mascot(document.getElementById("big"), ui.LOOKS.agenda, 160, { mode: "large", state: "offline" });
+    if (e.detail !== 0) { ui.animate(scrim, [{ opacity: 0 }, { opacity: 1 }], {}); ui.enter(dlg, { moment: true }); }
+    document.getElementById("signin").focus({ preventScroll: true });
+  });
+  document.getElementById("signin").addEventListener("click", function () {
+    document.getElementById("dialog").hidden = true; document.getElementById("scrim").hidden = true;
+    thread.insertAdjacentHTML("beforeend", '<p class="k-bubble">Restored your unsent message.</p>');
+    m.setState("idle"); ui.roll(status, "Ready");
+  });
+  play();
+})();
+</script>
+</body>
+</html>

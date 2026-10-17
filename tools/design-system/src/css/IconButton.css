@@ -1,0 +1,17 @@
+/* IconButton: the composer's round buttons; the square ones live in the base sheet. */
+.k-round { position: relative; width: 26px; height: 26px; flex: none; display: inline-grid; place-items: center; padding: 0; border-radius: 50%; cursor: pointer; transition: transform var(--dur-press) var(--ease-standard), background-color var(--dur-fade) var(--ease-fade), color var(--dur-fade) var(--ease-fade); }
+.k-round .k-icon { width: 14px; height: 14px; }
+.k-round.send { border: 0; background: var(--accent); color: var(--on-accent); }
+/* Empty, Send waits in sunken with a muted arrow; it stays focusable and says why in its tooltip. */
+.k-round.send[aria-disabled="true"] { background: var(--sunken); color: var(--muted); cursor: default; }
+.k-round.send[aria-disabled="true"]:active { transform: none; }
+.k-round.pz { border: 1px solid var(--muted); background: transparent; color: var(--fg); }
+.k-round.pz[aria-pressed="true"] { background: var(--sunken); color: var(--muted); }
+.k-round:active:not(:disabled) { transform: scale(var(--scale-press)); }
+.k-sep { width: 1px; height: 24px; background: var(--line); }
+@media (pointer: coarse) { .k-round, .k-icb { width: 44px; height: 44px; } .k-round .k-icon { width: 18px; height: 18px; } }
+/* 5.26: a disabled one stays focusable, aria-disabled, and its tooltip says why. */
+@media (hover: hover) { .k-icb:not(.quiet):not([aria-disabled="true"]):hover { background: var(--sunken); } }
+.k-icb[aria-disabled="true"] { color: var(--muted); cursor: default; }
+.k-icb[aria-disabled="true"]:active { transform: none; }
+@media (prefers-reduced-motion: reduce) { .k-round:active:not(:disabled), .k-icb:active { transform: none; } }

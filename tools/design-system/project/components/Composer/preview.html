@@ -1,0 +1,53 @@
+<!-- @dsCard group="Conversation" height=170 subtitle="5.20 · one row, as the approved demo: type, then press Pause" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Composer</title></head>
+<body>
+<div class="k-stage">
+  <div class="k-cwrap" id="wrap">
+    <p class="k-paused text-sm" id="paused" hidden>__pause__<span>Paused. Agenda answers after your next message.</span></p>
+    <form class="k-compose" id="form" onsubmit="return false">
+      <label class="k-sr" for="text">Message to Agenda. Enter sends, Shift+Enter breaks the line.</label>
+      <textarea id="text" class="k-compose-input" rows="1" placeholder="Write to Agenda"></textarea>
+      <button type="button" class="k-round pz" id="pause" aria-pressed="false" aria-label="Pause this conversation" data-tip="Pause this conversation">__pause__</button>
+      <button type="submit" class="k-round send" id="send" aria-label="Send" aria-disabled="true" data-tip="Write a message to send">__send__</button>
+    </form>
+  </div>
+  <p class="k-caption text-sm" id="note" aria-live="polite"></p>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui, wrap = document.getElementById("wrap");
+  wrap.innerHTML = wrap.innerHTML.split("__pause__").join(ui.icon("pause")).replace("__send__", ui.icon("send"));
+  var text = document.getElementById("text"), paused = document.getElementById("paused"), note = document.getElementById("note"), pz = document.getElementById("pause");
+  ui.tooltips(wrap);
+  var sendBtn = document.getElementById("send"), tip = function () { return sendBtn.querySelector(".k-tip"); };
+  // The first character turns Send ready: a color change in dur-fade, with no scale.
+  function ready() {
+    var on = !!text.value.trim();
+    sendBtn.setAttribute("aria-disabled", String(!on));
+    if (tip()) tip().textContent = on ? "Send" : "Write a message to send";
+  }
+  text.addEventListener("input", ready);
+  function send() {
+    if (!text.value.trim()) return;
+    note.textContent = "Sent: “" + text.value.trim().slice(0, 60) + "”";
+    text.value = "";
+    ready();
+    // Writing is how the owner resumes a paused conversation.
+    if (!paused.hidden) { paused.hidden = true; pz.setAttribute("aria-pressed", "false"); }
+  }
+  text.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); send(); }
+  });
+  document.getElementById("form").addEventListener("submit", send);
+  pz.addEventListener("click", function () {
+    if (pz.getAttribute("aria-pressed") === "true") return;
+    pz.setAttribute("aria-pressed", "true");
+    paused.hidden = false;
+    ui.animate(paused, [{ opacity: 0 }, { opacity: 1 }], { dur: ui.num("dur-fade", 150), ease: ui.ease("fade") });
+  });
+})();
+</script>
+</body>
+</html>

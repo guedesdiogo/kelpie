@@ -1,0 +1,67 @@
+<!-- @dsCard group="Navigation" height=520 subtitle="5.17 · choose, continue, then create the agent" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>FirstRun</title></head>
+<body>
+<div class="k-stage">
+  <button type="button" class="k-replay text-sm" id="again">Start over</button>
+  <section class="k-card k-first" id="comfort">
+    <h2 class="k-display text-h3" style="margin:0">Before we start: how should Kelpie look and move?</h2>
+    <div class="k-first-grid text-sm" id="opts">
+      <label class="k-switch"><span class="k-sw-l">__less__Less motion</span><input type="checkbox" id="less"><span class="k-sw"></span></label>
+      <label class="k-switch"><span class="k-sw-l">__contrast__More contrast</span><input type="checkbox" id="more"><span class="k-sw"></span></label>
+      <div class="k-dm-row"><span id="f-t">Text size</span>
+        <div class="k-seg" aria-labelledby="f-t" id="size">
+          <button type="button" data-v="default" aria-checked="true" aria-label="Default" data-tip="Default">__tsmall__</button>
+          <button type="button" data-v="larger" aria-checked="false" aria-label="Larger" data-tip="Larger">__tlarge__</button>
+        </div>
+      </div>
+      <div class="k-dm-row"><span id="f-p">The mascot</span>
+        <div class="k-seg" aria-labelledby="f-p" id="pause">
+          <button type="button" data-v="alive" aria-checked="true" aria-label="Alive" data-tip="Alive">__alive__</button>
+          <button type="button" data-v="states" aria-checked="false" aria-label="States only" data-tip="States only">__states__</button>
+          <button type="button" data-v="still" aria-checked="false" aria-label="Still" data-tip="Still">__still__</button>
+        </div>
+      </div>
+    </div>
+    <button type="button" class="k-btn primary text-ui" id="go" style="justify-self:start">Continue</button>
+  </section>
+  <section class="k-card k-first" id="roster" hidden>
+    <span class="text-sm k-muted">Agents</span>
+    <div class="k-first-slot"><span class="k-mh s48" id="slot"></span><div class="k-col" style="gap:0" id="who" hidden><b class="text-ui">Kelpie</b><span class="text-sm k-muted">Idle</span></div></div>
+    <div class="k-first-empty" id="empty"><p class="text-ui" style="margin:0">No agents yet, so nothing can answer you. Create one to start.</p><button type="button" class="k-btn primary text-ui" id="create">Create your first agent</button></div>
+  </section>
+</div>
+<script>
+(function () {
+  var ui = window.Kelpie.ui, comfort = document.getElementById("comfort"), roster = document.getElementById("roster"), empty = document.getElementById("empty");
+  var opts = document.getElementById("opts");
+  opts.innerHTML = opts.innerHTML.replace("__less__", ui.icon("lessMotion")).replace("__contrast__", ui.icon("contrast")).replace("__tsmall__", ui.icon("textSmall")).replace("__tlarge__", ui.icon("textLarge")).replace("__alive__", ui.pauseIcon("alive")).replace("__states__", ui.pauseIcon("states")).replace("__still__", ui.pauseIcon("still"));
+  ui.segment(document.getElementById("size"));
+  var pauseSeg = ui.segment(document.getElementById("pause"));
+  ui.tooltips(opts);
+  // Less motion leaves the mascot Still, and says so by disabling the other two.
+  document.getElementById("less").addEventListener("change", function () {
+    var less = this.checked;
+    document.querySelectorAll("#pause > button").forEach(function (b) { b.disabled = less && b.dataset.v !== "still"; });
+    if (less) pauseSeg.set("still");
+  });
+  document.getElementById("go").onclick = function () { comfort.hidden = true; roster.hidden = false; ui.enter(roster, {}); document.getElementById("create").focus({ preventScroll: true }); };
+  document.getElementById("create").onclick = function () {
+    var slot = document.getElementById("slot");
+    var m = ui.mascot(slot, ui.LOOKS.kelpie, 48);
+    ui.animate(slot, [{ opacity: 0, transform: "scale(0.6)" }, { opacity: 1, transform: "none" }], { spring: "pop" });
+    setTimeout(function () { m.arrive(); }, 180);
+    document.getElementById("who").hidden = false;
+    // The empty block collapses with spring-moment.
+    var h0 = empty.getBoundingClientRect().height;
+    ui.animate(empty, [{ height: h0 + "px", opacity: 1 }, { height: "0px", opacity: 0 }], { spring: "moment", fill: "forwards" }).finished.then(function () { empty.hidden = true; });
+  };
+  document.getElementById("again").onclick = function () {
+    comfort.hidden = false; roster.hidden = true; empty.hidden = false; empty.getAnimations().forEach(function (a) { a.cancel(); });
+    document.getElementById("slot").innerHTML = ""; document.getElementById("who").hidden = true;
+  };
+})();
+</script>
+</body>
+</html>

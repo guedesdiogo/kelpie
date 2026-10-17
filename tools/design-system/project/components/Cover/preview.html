@@ -1,0 +1,56 @@
+<!-- @dsCard height=300 -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Kelpie</title>
+<style>
+  html, body { margin: 0; background: var(--bg); }
+  .cover { position: relative; width: 960px; height: 300px; overflow: hidden; background: var(--bg); }
+  .cover svg { position: absolute; inset: 0; }
+  .c-accent { fill: var(--accent); }
+  .c-ink { fill: var(--fg); }
+  .c-relief { fill: var(--line); }
+  .c-warm { fill: var(--warm); }
+  .c-drop { fill: var(--on-accent); }
+  .c-drop-2 { fill: var(--accent); }
+  .c-slab { rx: var(--r-panel); }
+  .c-block { rx: var(--r-card); }
+  .text { position: absolute; left: 48px; bottom: 40px; max-width: 440px; }
+  .name { margin: 0; font-family: var(--font-display); font-weight: 680; font-size: 120px; line-height: 0.92; letter-spacing: -0.03em; color: var(--fg); }
+  .tag { margin: 16px 0 0; font-family: var(--font-body); font-size: 14px; line-height: 1.4; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="cover">
+  <!--
+    blocks: accent slab 256x248 (r-panel), fg block 176x176 (r-card), line relief band 480x96 (r-panel), warm disc r 24 (space-6).
+    arrangement: one tall slab with satellites, bleeding off the top, the right and the bottom edge.
+    pattern: a literal motif, drops built from the radius scale (discs), because each agent is a drop of water and a subagent leaves its parent as one.
+    steps and radii: pitch 48 (space-12), gaps 16 and 32 (space-4, space-8), discs r 4 to 12 (space-1 to space-3), corners r-panel and r-card.
+  -->
+  <svg viewBox="0 0 960 300" width="960" height="300" aria-hidden="true">
+    <rect class="c-relief c-slab" x="496" y="224" width="480" height="96"/>
+    <rect class="c-accent c-slab" x="560" y="-16" width="256" height="248"/>
+    <rect class="c-ink c-block" x="832" y="48" width="176" height="176"/>
+    <circle class="c-warm" cx="520" cy="72" r="24"/>
+    <g class="c-drop">
+      <circle cx="608" cy="40" r="4"/><circle cx="656" cy="40" r="6"/><circle cx="704" cy="40" r="4"/><circle cx="752" cy="40" r="8"/>
+      <circle cx="608" cy="88" r="6"/><circle cx="656" cy="88" r="10"/><circle cx="704" cy="88" r="8"/><circle cx="752" cy="88" r="12"/>
+      <circle cx="608" cy="136" r="8"/><circle cx="656" cy="136" r="12"/><circle cx="704" cy="136" r="10"/><circle cx="752" cy="136" r="6"/>
+      <circle cx="608" cy="184" r="10"/><circle cx="656" cy="184" r="8"/><circle cx="704" cy="184" r="12"/><circle cx="752" cy="184" r="4"/>
+    </g>
+    <g class="c-drop-2">
+      <circle cx="864" cy="272" r="8"/><circle cx="912" cy="272" r="12"/>
+    </g>
+  </svg>
+  <div class="text">
+    <p class="name">Kelpie</p>
+    <p class="tag">Calm for daily work, expressive when it matters.</p>
+  </div>
+</div>
+<script>
+(function () {
+  // The cover is still: no motion.
+})();
+</script>
+</body>
+</html>
