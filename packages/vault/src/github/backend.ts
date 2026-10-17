@@ -314,7 +314,7 @@ export class GitHubVaultBackend implements VaultBackend {
       fileChanges: {
         additions: request.writes.map(({ path, content }) => ({
           path,
-          contents: base64(encoder.encode(content)),
+          contents: base64(typeof content === "string" ? encoder.encode(content) : content),
         })),
         deletions: request.deletions.map((path) => ({ path })),
       },
