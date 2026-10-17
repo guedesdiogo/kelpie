@@ -376,7 +376,11 @@ export type AgentFileOutcome =
         | "skill_invalid"
         | "staged_gone"
         /** A staged skill whose scan blocked it: hidden characters. */
-        | "blocked";
+        | "blocked"
+        /** A skill's folder already holds files, with no `SKILL.md`. */
+        | "taken"
+        /** A staged skill's folder changed in the vault since its review. */
+        | "changed";
     };
 
 export type SaveAgentFilesResult =
@@ -448,6 +452,9 @@ export type FetchSkillResult =
         | "many_skills"
         | "unsafe_path"
         | "link"
+        | "nested_skill"
+        | "path_clash"
+        | "not_text"
         | "encrypted"
         | "invalid_skill"
         | "up_to_date"

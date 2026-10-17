@@ -15,7 +15,7 @@ export const STAGED_FOR_MS = 60 * 60_000;
 /** One Save, at most: Soul, Rules and Memory, and this many skills besides. */
 export const MAX_SAVE_CHANGES = 24;
 /** A SKILL.md difference past this many lines on either side isn't drawn. */
-const MAX_DIFF_LINES = 3_000;
+const MAX_DIFF_LINES = 1_000;
 
 export const memoryPath = (agentId: string) => `agents/${agentId}/memories/MEMORY.md`;
 export const skillFolder = (agentId: string, name: string) => `agents/${agentId}/skills/${name}/`;
@@ -123,7 +123,7 @@ const HASH = /^sha256:[0-9a-f]{64}$/;
 
 /**
  * A Save's changes as the page sent them, or null: each a known file once, with a version that is a
- * blob SHA or null. Only the rules and a skill can be removed.
+ * blob SHA or null. Content null removes the file, as Undo does after a Save that created it.
  */
 export function parseChanges(value: unknown): AgentFileChange[] | null {
   if (!Array.isArray(value) || value.length === 0 || value.length > MAX_SAVE_CHANGES) return null;
@@ -137,7 +137,7 @@ export function parseChanges(value: unknown): AgentFileChange[] | null {
     let key: string;
     if (file === "soul" || file === "rules" || file === "memory") {
       if (name !== undefined || staged !== undefined || hash !== undefined) return null;
-      if (typeof content !== "string" && !(content === null && file === "rules")) return null;
+      if (typeof content !== "string" && content !== null) return null;
       key = file;
       changes.push({ file, content, version });
     } else if (file === "skill") {

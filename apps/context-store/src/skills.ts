@@ -47,7 +47,7 @@ export interface ParsedSkill {
 export type SkillProblem =
   | { reason: "no_skill" }
   | { reason: "many_skills"; names: string[] }
-  | { reason: "unsafe_path" | "link"; path: string }
+  | { reason: "unsafe_path" | "link" | "nested_skill" | "path_clash" | "not_text"; path: string }
   | { reason: "encrypted" | "too_many_files" }
   | { reason: "too_large"; path?: string }
   | { reason: "invalid_skill"; problem: SkillMdProblem };
@@ -101,6 +101,9 @@ export function checkSkillMd(
   return { ok: true, name, description: description.replace(/\s+/g, " ").trim() };
 }
 
+/** Markdown and scripts, which the agent and the scan read as text. */
+const TEXT = /\.(?:md|txt|py|sh|bash|zsh|js|mjs|cjs|ts|rb|pl|php|ps1|bat|cmd|go|rs|lua)$/i;
+
 /** `.DS_Store`, `.git/` or `__MACOSX/`; `.` and `..` are unsafe paths, refused whole. */
 const hidden = (segment: string) =>
   (segment.startsWith(".") && segment !== "." && segment !== "..") || segment === "__MACOSX";
@@ -134,6 +137,8 @@ export async function skillFromEntries(
   }
   const leftOut: LeftOut[] = [];
   const kept: { entry: ZipEntry; path: string }[] = [];
+  // Two paths a Mac's or Windows' checkout would take as one, by case or by Unicode's form.
+  const seen = new Set<string>();
   let declared = 0;
   for (const { entry, path: full } of under) {
     if (!full.startsWith(folder)) continue;
@@ -143,6 +148,13 @@ export async function skillFromEntries(
       continue;
     }
     if (!isCleanPath(path)) return { ok: false, problem: { reason: "unsafe_path", path } };
+    const key = path.normalize("NFC").toLowerCase();
+    if (seen.has(key)) return { ok: false, problem: { reason: "path_clash", path } };
+    seen.add(key);
+    // The vault would read a second one as a skill of its own, which the owner never reviewed.
+    if (path !== "SKILL.md" && path.split("/").at(-1)?.toLowerCase() === "skill.md") {
+      return { ok: false, problem: { reason: "nested_skill", path } };
+    }
     if (entry.link) return { ok: false, problem: { reason: "link", path } };
     if (entry.encrypted) return { ok: false, problem: { reason: "encrypted" } };
     if (entry.size > MAX_SKILL_FILE_BYTES)
@@ -156,6 +168,10 @@ export async function skillFromEntries(
   for (const { entry, path } of kept) {
     const raw = await entry.read();
     const content = decoded(raw);
+    // Markdown or a script that isn't text would slip past the scan, and the review.
+    if (content === null && TEXT.test(path)) {
+      return { ok: false, problem: { reason: "not_text", path } };
+    }
     files.push(
       content === null ? { path, content: toBase64(raw), binary: true } : { path, content },
     );

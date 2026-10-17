@@ -107,7 +107,14 @@ export async function resolveAddress(
   const { owner, repo, rest } = address;
   const first = rest[0];
   if (first !== undefined && SHA.test(first)) {
-    return { kind: "github", owner, repo, ref: null, path: rest.slice(1).join("/"), commit: first };
+    return {
+      kind: "github",
+      owner,
+      repo,
+      ref: first,
+      path: rest.slice(1).join("/"),
+      commit: first,
+    };
   }
   const refs = await listRefs(owner, repo, fetcher);
   if (rest.length === 0) {
@@ -125,11 +132,15 @@ export async function resolveAddress(
   throw new GitHubFetchError("not_found");
 }
 
-/** A source's branch or tag again, for "Look for an update": the commit it names now. */
+/**
+ * A source's branch or tag again, for "Look for an update": the commit it names now. A commit the
+ * address named stays that commit.
+ */
 export async function resolveRef(
   source: Pick<GitHubSource, "owner" | "repo" | "ref">,
   fetcher: Fetch,
 ): Promise<string> {
+  if (source.ref !== null && SHA.test(source.ref)) return source.ref;
   const refs = await listRefs(source.owner, source.repo, fetcher);
   const commit =
     source.ref === null
@@ -167,12 +178,14 @@ async function listRefs(owner: string, repo: string, fetcher: Fetch): Promise<Ma
 
 /** git's pkt-lines: four hex digits of length, then the line; `0000` ends a section. */
 export function parseRefs(body: Uint8Array): Map<string, string> {
-  const text = new TextDecoder().decode(body);
+  // Lengths count bytes, so the lines are cut from the bytes and only then read as text.
+  const decoder = new TextDecoder();
   const refs = new Map<string, string>();
   let at = 0;
   let sections = 0;
-  while (at + 4 <= text.length) {
-    const length = Number.parseInt(text.slice(at, at + 4), 16);
+  while (at + 4 <= body.length) {
+    const digits = decoder.decode(body.subarray(at, at + 4));
+    const length = /^[0-9a-f]{4}$/i.test(digits) ? Number.parseInt(digits, 16) : Number.NaN;
     if (Number.isNaN(length)) throw new GitHubFetchError("unreachable");
     if (length === 0) {
       at += 4;
@@ -180,8 +193,8 @@ export function parseRefs(body: Uint8Array): Map<string, string> {
       if (sections === 2) break;
       continue;
     }
-    if (length < 4 || at + length > text.length) throw new GitHubFetchError("unreachable");
-    const line = text.slice(at + 4, at + length).replace(/\n$/, "");
+    if (length < 4 || at + length > body.length) throw new GitHubFetchError("unreachable");
+    const line = decoder.decode(body.subarray(at + 4, at + length)).replace(/\n$/, "");
     at += length;
     if (line.startsWith("#")) continue;
     const [ref] = line.split("\0");

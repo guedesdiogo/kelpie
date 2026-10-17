@@ -175,6 +175,9 @@ function refusal(problem: SkillProblem): FetchSkillResult {
       return { ok: false, reason: "many_skills", names: problem.names };
     case "unsafe_path":
     case "link":
+    case "nested_skill":
+    case "path_clash":
+    case "not_text":
       return { ok: false, reason: problem.reason, detail: problem.path };
     case "too_large":
       return { ok: false, reason: "too_large", ...(problem.path ? { detail: problem.path } : {}) };

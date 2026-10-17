@@ -430,6 +430,7 @@ CREATE TABLE IF NOT EXISTS staged_skills (
   origin TEXT NOT NULL,
   hash TEXT NOT NULL,
   blocked INTEGER NOT NULL DEFAULT 0,
+  base TEXT NOT NULL DEFAULT '',
   at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS staged_files (
@@ -560,6 +561,8 @@ interface StagedRow {
   hash: string;
   /** Its scan found hidden characters: it never installs (ADR-0058 §5). */
   blocked: boolean;
+  /** The skill's folder in the vault when it was staged, as `#skillBase` names it. */
+  base: string;
   files: SkillFile[];
 }
 
@@ -1034,17 +1037,19 @@ export class Vault extends DurableObject<VaultEnv> {
   ): Promise<{ id: string; hash: string }> {
     const id = stageId();
     const hash = await skillHash(skill.files);
+    const base = await this.#skillBase(agentId, skill.name);
     const now = Date.now();
     this.ctx.storage.transactionSync(() => {
       this.#exec(
-        `INSERT INTO staged_skills (id, agent, name, origin, hash, blocked, at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO staged_skills (id, agent, name, origin, hash, blocked, base, at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
         agentId,
         skill.name,
         JSON.stringify(origin),
         hash,
         blocked ? 1 : 0,
+        base,
         now,
       );
       for (const file of skill.files) {
@@ -1058,6 +1063,15 @@ export class Vault extends DurableObject<VaultEnv> {
       }
     });
     return { id, hash };
+  }
+
+  /**
+   * A skill's folder as the vault has it, so a Save can tell it changed since a review: the hash of
+   * its files, or empty when it has no `SKILL.md`.
+   */
+  async #skillBase(agentId: string, name: string): Promise<string> {
+    if (this.#visible(skillPath(agentId, name)) === null) return "";
+    return skillHash(this.#skillFiles(agentId, name));
   }
 
   /** Where an installed skill came from, for "Look for an update". */
@@ -1074,8 +1088,9 @@ export class Vault extends DurableObject<VaultEnv> {
     const prefix = `agents/${agentId}/skills/`;
     const skills: AgentSkillState[] = [];
     for (const { path } of this.#exec<{ path: string }>(
-      "SELECT path FROM files WHERE path LIKE ? ORDER BY path",
-      `${prefix}%/SKILL.md`,
+      // GLOB, not LIKE, which would take `Agents/` for `agents/`; ids and names hold no wildcard.
+      "SELECT path FROM files WHERE path GLOB ? ORDER BY path",
+      `${prefix}*/SKILL.md`,
     )) {
       const name = path.slice(prefix.length, -"/SKILL.md".length);
       if (!isSpecSkillName(name)) continue;
@@ -1145,8 +1160,8 @@ export class Vault extends DurableObject<VaultEnv> {
       });
     }
     for (const { path } of this.#exec<{ path: string }>(
-      "SELECT path FROM files WHERE path LIKE ?",
-      `${folder}%`,
+      "SELECT path FROM files WHERE path GLOB ?",
+      `${folder}*`,
     )) {
       const content = this.#visible(path);
       if (content !== null) {
@@ -1340,6 +1355,12 @@ export class Vault extends DurableObject<VaultEnv> {
         plan.outcomes.push({ status: "conflict", current: now });
         continue;
       }
+      // A folder with files and no SKILL.md is no skill the owner has seen: nothing lands over it.
+      const adds = change.file === "install" || change.content !== null;
+      if (now === null && adds && this.#occupied(folder)) {
+        plan.outcomes.push({ status: "refused", reason: "taken" });
+        continue;
+      }
       const before = now === null ? [] : this.#skillFiles(agentId, name);
       const install = this.#install(agentId, name);
       let files: SkillFile[] | null;
@@ -1351,6 +1372,11 @@ export class Vault extends DurableObject<VaultEnv> {
             status: "refused",
             reason: !row ? "staged_gone" : row.blocked ? "blocked" : "invalid",
           });
+          continue;
+        }
+        // The review showed what the install replaces; a file changed since then would go unseen.
+        if (row.base !== (now === null ? "" : await skillHash(before))) {
+          plan.outcomes.push({ status: "refused", reason: "changed" });
           continue;
         }
         files = row.files;
@@ -1434,9 +1460,24 @@ export class Vault extends DurableObject<VaultEnv> {
     return plan;
   }
 
+  /** Whether the working copy has any file in a folder. */
+  #occupied(folder: string): boolean {
+    return this.#exec<{ path: string }>(
+      "SELECT path FROM files WHERE path GLOB ?",
+      `${folder}*`,
+    ).some(({ path }) => this.#visible(path) !== null);
+  }
+
   #staged(agentId: string, id: string): StagedRow | null {
-    const row = this.#exec<{ name: string; origin: string; hash: string; blocked: number }>(
-      "SELECT name, origin, hash, blocked FROM staged_skills WHERE id = ? AND agent = ? AND at > ?",
+    const row = this.#exec<{
+      name: string;
+      origin: string;
+      hash: string;
+      blocked: number;
+      base: string;
+    }>(
+      `SELECT name, origin, hash, blocked, base FROM staged_skills
+       WHERE id = ? AND agent = ? AND at > ?`,
       id,
       agentId,
       Date.now() - STAGED_FOR_MS,
@@ -1455,6 +1496,7 @@ export class Vault extends DurableObject<VaultEnv> {
       origin: JSON.parse(row.origin) as SkillOrigin,
       hash: row.hash,
       blocked: row.blocked === 1,
+      base: row.base,
       files,
     };
   }

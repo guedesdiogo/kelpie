@@ -214,6 +214,22 @@ describe("AgentFiles", () => {
     ]);
   });
 
+  it("takes its own Undo back, removing the files the Save created", async () => {
+    const backend = vaultWith({ [SOUL]: "# Before" });
+    const first = await saved([
+      { file: "soul", content: "# After", version: await version("# Before") },
+      { file: "memory", content: "first", version: null },
+    ]);
+    const undone = await saved(first.undo);
+    expect(undone.outcomes).toEqual([
+      { status: "saved", version: await version("# Before") },
+      { status: "saved", version: null },
+    ]);
+    expect(backend.files()[SOUL]).toBe("# Before");
+    expect(backend.files()[MEMORY]).toBeUndefined();
+    expect(undone.files.memory).toBeNull();
+  });
+
   it("answers a version pushed since as a conflict, and still commits the rest", async () => {
     const backend = vaultWith({ [SOUL]: "# Read" });
     const read = await version("# Read");
@@ -631,6 +647,55 @@ describe("AgentFiles", () => {
       edited: false,
       changes: [{ path: "SKILL.md", change: "changed" }],
     });
+  });
+
+  it("installs nothing over a folder that holds files and no SKILL.md", async () => {
+    const backend = vaultWith({ "agents/kelpie/skills/pdf/notes.md": "# Mine" });
+    const fetched = await agentFiles().fetchSkill(owner, "kelpie", {
+      kind: "text",
+      content: skillMd("pdf"),
+    });
+    if (!fetched.ok) throw new Error(fetched.reason);
+    const install = await saved([
+      { file: "install", staged: fetched.staged.id, hash: fetched.staged.hash, version: null },
+    ]);
+    const create = await saved([
+      { file: "skill", name: "pdf", content: skillMd("pdf"), version: null },
+    ]);
+    expect([install.outcomes, create.outcomes]).toEqual([
+      [{ status: "refused", reason: "taken" }],
+      [{ status: "refused", reason: "taken" }],
+    ]);
+    expect(backend.commitRequests).toEqual([]);
+  });
+
+  it("installs nothing over a skill whose files changed since its review", async () => {
+    const backend = vaultWith({
+      "agents/kelpie/skills/pdf/SKILL.md": skillMd("pdf", "Old."),
+      "agents/kelpie/skills/pdf/references/x.md": "# One",
+    });
+    const fetched = await agentFiles().fetchSkill(owner, "kelpie", {
+      kind: "text",
+      content: skillMd("pdf", "New."),
+    });
+    if (!fetched.ok) throw new Error(fetched.reason);
+    backend.push({ "agents/kelpie/skills/pdf/references/x.md": "# Edited on GitHub" });
+    const result = await saved([
+      {
+        file: "install",
+        staged: fetched.staged.id,
+        hash: fetched.staged.hash,
+        version: await version(skillMd("pdf", "Old.")),
+      },
+    ]);
+    expect(result.outcomes).toEqual([{ status: "refused", reason: "changed" }]);
+    expect(backend.files()["agents/kelpie/skills/pdf/references/x.md"]).toBe("# Edited on GitHub");
+  });
+
+  it("takes a skill's folder by its exact case", async () => {
+    vaultWith({ "Agents/kelpie/skills/pdf/SKILL.md": skillMd("pdf") });
+    const read = await agentFiles().files(owner, "kelpie");
+    expect(read.ok && read.files.skills).toEqual([]);
   });
 
   it("keeps at most ten staged skills", async () => {

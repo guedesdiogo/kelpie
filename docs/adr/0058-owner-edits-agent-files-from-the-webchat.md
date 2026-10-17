@@ -87,13 +87,14 @@ What belongs to one agent only sits under `agents/<agent-id>/` (ADR-0016): `SOUL
 
   Not supported: registry slugs, following a branch, automatic updates, plugin manifests, npm packages, and an agent that fetches a skill and saves it without this review.
 - **The fetch reaches two GitHub hosts and nothing else,** so the address can't send it anywhere.
-  - It resolves the branch or tag to a commit through `github.com`'s Git refs, with no token. A commit SHA in full stands as it is.
+  - It resolves the branch or tag to a commit through `github.com`'s Git refs, with no token. A commit SHA in full stands as it is, and the review says no branch or tag vouches for it, since GitHub serves a fork's commits under the repository's name too.
   - It takes the repository's archive at that commit from `codeload.github.com`.
   - The owner, the repository, the ref and the folder are checked before any fetch. It follows no redirect, and stops reading past the archive's size limit.
 - **Staged outside the vault,** in the Vault object's own storage, for an hour. It never reaches git until Save.
 - **Validated before the owner sees it:**
-  - exactly one `SKILL.md`, valid as §4 says;
-  - paths that stay inside the skill's folder, with no `..`, no absolute path, no link and no name a checkout would break on;
+  - exactly one `SKILL.md`, valid as §4 says, and no second one inside the folder, in any case;
+  - paths that stay inside the skill's folder, with no `..`, no absolute path, no link and no name a checkout would break on, nor two that differ only by case or Unicode's form;
+  - Markdown and scripts that are UTF-8 text, so none slips past the scan;
   - at most 200 files, 1 MiB each and 2 MB in all, uncompressed;
   - no encrypted entry. Hidden files, such as `.DS_Store`, and `__MACOSX/` are left out.
 - **Every file is kept, binary ones too,** as Hermes keeps them, so the folder in the vault is the folder at that commit. A binary file, such as a font, is committed as bytes and labeled in the review; an executable one, such as an `.exe` or a `.so`, is a finding. Kelpie's working copy still holds Markdown only (ADR-0005).
@@ -101,10 +102,11 @@ What belongs to one agent only sits under `agents/<agent-id>/` (ADR-0016): `SOUL
   - Scripts are kept and labeled "kept, not runnable in Kelpie", since no agent runs code by default.
   - The scan advises, with one exception: hidden characters, which can carry instructions the owner can't see, block the install.
 - **The owner's Install adds a pending change,** and Save commits it under `agents/<id>/skills/<name>/`.
+  - Save refuses it when the skill's folder changed in the vault since the review, or when the folder holds files and no `SKILL.md`, which no review showed.
   - The commit's trailers name its source, its commit and its content's hash: `Kelpie-Skill: <name>`, `Kelpie-Skill-Source`, `Kelpie-Skill-Commit` and `Kelpie-Skill-Hash`.
   - The Vault object also keeps them, with the files it wrote, to show an update's difference and to undo it.
 - **Updates are explicit.**
-  - "Look for an update" resolves the same branch or tag again and stages what it finds, with the difference.
+  - "Look for an update" resolves the same branch or tag again and stages what it finds, with the difference. A skill pinned to a commit in its address stays at that commit.
   - A skill the owner edited since it was installed is never overwritten silently: the review says so before Install.
 
 ### 6. Who changes what
