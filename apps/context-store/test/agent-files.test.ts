@@ -427,11 +427,15 @@ describe("AgentFiles", () => {
         `Kelpie-Skill-Hash: ${fetched.staged.hash}`,
       ].join("\n"),
     );
-    // A stage is used once.
+    // A stage is used once; sent again, as a retry whose answer was lost, it answers what landed.
+    const commits = backend.commitRequests.length;
     const twice = await saved([
       { file: "install", staged: fetched.staged.id, hash: fetched.staged.hash, version: null },
     ]);
-    expect(twice.outcomes).toEqual([{ status: "refused", reason: "staged_gone" }]);
+    expect(twice.outcomes).toEqual([
+      { status: "saved", version: await version(skillMd("pasted", "From the clipboard.")) },
+    ]);
+    expect(backend.commitRequests).toHaveLength(commits);
     // Another agent can't use it either.
     const other = await agentFiles().fetchSkill(owner, "kelpie", {
       kind: "text",
@@ -665,6 +669,25 @@ describe("AgentFiles", () => {
       edited: false,
       changes: [{ path: "SKILL.md", change: "changed" }],
     });
+  });
+
+  it("records an install whose files the vault already holds, with nothing to commit", async () => {
+    const content = skillMd("pasted", "From the clipboard.");
+    const backend = vaultWith({ "agents/kelpie/skills/pasted/SKILL.md": content });
+    const fetched = await agentFiles().fetchSkill(owner, "kelpie", { kind: "text", content });
+    if (!fetched.ok) throw new Error(fetched.reason);
+    const result = await saved([
+      {
+        file: "install",
+        staged: fetched.staged.id,
+        hash: fetched.staged.hash,
+        version: await version(content),
+      },
+    ]);
+    expect(result.outcomes).toEqual([{ status: "saved", version: await version(content) }]);
+    expect(result.commit).toBeNull();
+    expect(backend.commitRequests).toEqual([]);
+    expect(result.files.skills).toMatchObject([{ name: "pasted", origin: { kind: "text" } }]);
   });
 
   it("installs nothing over a folder that holds files and no SKILL.md", async () => {

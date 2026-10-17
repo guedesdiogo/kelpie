@@ -49,16 +49,20 @@ export const isSkillName = (value) =>
 
 /**
  * A SKILL.md's name and description, read from the plain lines of its frontmatter, and what is
- * certainly wrong with them, as the vault will check (ADR-0058 §4). YAML these lines can't read
- * for sure, as a block scalar, a flow value or an alias, is left to the vault, which reads it in
- * full; its field reads as undefined.
+ * certainly wrong with them, as the vault will check (ADR-0058 §4). A field is null when the
+ * frontmatter has none, and undefined when these lines can't read it for sure, as a block scalar,
+ * a flow value or an alias: the vault, which reads the YAML in full, decides then.
  */
 export function skillFields(content) {
   const block = FRONTMATTER.exec(content)?.[1];
   if (block === undefined) return { name: null, description: null, problem: "frontmatter" };
   const field = (key) => {
     const match = new RegExp(`^${key}:(?:[ \\t]+(.*))?$`, "m").exec(block);
-    if (!match) return null;
+    // No plain `key:` line: none, unless the key shows up in a form these lines don't read.
+    if (!match)
+      return new RegExp(`(?:^|[{,\\s])["']?${key}["']?[ \\t]*:`, "m").test(block)
+        ? undefined
+        : null;
     const value = (match[1] ?? "").trim();
     const quoted = /^(["'])(.*)\1$/.exec(value);
     if (quoted) return quoted[1] === '"' && quoted[2].includes("\\") ? undefined : quoted[2];
@@ -76,7 +80,7 @@ export function skillFields(content) {
         : description !== undefined && characters(description) > MAX_DESCRIPTION
           ? "description_too_long"
           : null;
-  return { name: name ?? null, description: description ?? null, problem };
+  return { name, description, problem };
 }
 
 /** A new skill's SKILL.md, with the frontmatter the specification asks for. */

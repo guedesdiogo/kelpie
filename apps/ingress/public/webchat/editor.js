@@ -1028,8 +1028,14 @@ export class Editor {
     const files = filesResult
       ? open.files.applySave(sent, filesResult)
       : { saved: [], failed: [], undo: [] };
-    // A section drawn again brings its own path and switch to the header.
-    if (filesResult) this.#head();
+    // A section drawn again brings its own path and switch to the header. Focus that went with what
+    // it replaced comes back to the section's tab, so the editor's keys still reach it.
+    if (filesResult) {
+      this.#head();
+      if (!open.root.contains(document.activeElement)) {
+        open.tabs.get(open.section)?.focus({ preventScroll: true });
+      }
+    }
     for (const section of files.saved) open.failed.delete(section);
     if (Object.keys(changes).length > 0) this.#onSaved(open.agent.id, changes);
     const failed = [

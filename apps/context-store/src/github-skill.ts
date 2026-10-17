@@ -29,7 +29,7 @@ export interface GitHubSource {
   kind: "github";
   owner: string;
   repo: string;
-  /** The branch or tag it was asked at, or null for a commit or the default branch's head. */
+  /** The branch or tag it was asked at, the commit an address named, or null for the default branch. */
   ref: string | null;
   /** The folder in the repository, "" for its root. */
   path: string;

@@ -1214,6 +1214,8 @@ export class Vault extends DurableObject<VaultEnv> {
       await this.#sync();
       const plan = await this.#planSave(agentId, changes, keepUnknown);
       if (plan.writes.size === 0 && plan.deletions.size === 0) {
+        // An install of files the vault already holds still records where they came from.
+        this.ctx.storage.transactionSync(() => this.#recordSkills(agentId, plan));
         return {
           ok: true,
           outcomes: plan.outcomes,
@@ -1341,7 +1343,14 @@ export class Vault extends DurableObject<VaultEnv> {
             ? change.name
             : null;
       if (name === null) {
-        plan.outcomes.push({ status: "refused", reason: "staged_gone" });
+        // A stage is used once: an install whose answer the page never got is known by its hash.
+        const landed =
+          change.file === "install" ? await this.#landedInstall(agentId, change.hash) : null;
+        plan.outcomes.push(
+          landed === null
+            ? { status: "refused", reason: "staged_gone" }
+            : { status: "saved", version: landed },
+        );
         continue;
       }
       const folder = skillFolder(agentId, name);
@@ -1465,9 +1474,26 @@ export class Vault extends DurableObject<VaultEnv> {
         ),
         writes: new Map(),
         deletions: new Set(),
+        skills: [],
+        undo: [],
       };
     }
     return plan;
+  }
+
+  /**
+   * The version of the skill an install with this hash wrote, if it is still as installed; null
+   * when no install of this agent's has it.
+   */
+  async #landedInstall(agentId: string, hash: string): Promise<string | null> {
+    const row = this.#exec<{ name: string; skill_sha: string }>(
+      "SELECT name, skill_sha FROM skill_installs WHERE agent = ? AND hash = ?",
+      agentId,
+      hash,
+    )[0];
+    if (!row) return null;
+    const content = this.#visible(skillPath(agentId, row.name));
+    return content !== null && (await gitBlobSha(content)) === row.skill_sha ? row.skill_sha : null;
   }
 
   /** Whether the working copy has any file in a folder. */
@@ -1546,36 +1572,50 @@ export class Vault extends DurableObject<VaultEnv> {
         this.#exec("DELETE FROM owner_merges WHERE path = ?", path);
         if (isVaultText(path)) indexed.set(path, null);
       }
-      for (const skill of plan.skills) {
-        if (skill.record === "keep") continue;
-        this.#exec("DELETE FROM skill_files WHERE agent = ? AND name = ?", agentId, skill.name);
-        this.#exec("DELETE FROM skill_installs WHERE agent = ? AND name = ?", agentId, skill.name);
-        if (skill.record === null) continue;
-        this.#exec(
-          `INSERT INTO skill_installs (agent, name, origin, hash, skill_sha, at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          agentId,
-          skill.name,
-          JSON.stringify(skill.record.origin),
-          skill.record.hash,
-          skill.version ?? "",
-          Date.now(),
-        );
-        for (const file of skill.record.files) {
-          this.#exec(
-            "INSERT INTO skill_files (agent, name, path, content, binary) VALUES (?, ?, ?, ?, ?)",
-            agentId,
-            skill.name,
-            file.path,
-            file.content,
-            file.binary ? 1 : 0,
-          );
-        }
-      }
-      for (const skill of plan.skills) if (skill.stage) this.#dropStage(skill.stage);
+      this.#recordSkills(agentId, plan);
       this.#set("head", commit);
     });
     await this.#index(previousHead, commit, indexed);
+    return this.#undoAndState(agentId, plan, commit);
+  }
+
+  /** What the Vault object keeps of a Save's skills: each install's source and files; its stages go. */
+  #recordSkills(agentId: string, plan: SavePlan): void {
+    for (const skill of plan.skills) {
+      if (skill.record === "keep") continue;
+      this.#exec("DELETE FROM skill_files WHERE agent = ? AND name = ?", agentId, skill.name);
+      this.#exec("DELETE FROM skill_installs WHERE agent = ? AND name = ?", agentId, skill.name);
+      if (skill.record === null) continue;
+      this.#exec(
+        `INSERT INTO skill_installs (agent, name, origin, hash, skill_sha, at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        agentId,
+        skill.name,
+        JSON.stringify(skill.record.origin),
+        skill.record.hash,
+        skill.version ?? "",
+        Date.now(),
+      );
+      for (const file of skill.record.files) {
+        this.#exec(
+          "INSERT INTO skill_files (agent, name, path, content, binary) VALUES (?, ?, ?, ?, ?)",
+          agentId,
+          skill.name,
+          file.path,
+          file.content,
+          file.binary ? 1 : 0,
+        );
+      }
+    }
+    for (const skill of plan.skills) if (skill.stage) this.#dropStage(skill.stage);
+  }
+
+  /** The changes that undo a Save that committed, and the agent's files as they now are. */
+  async #undoAndState(
+    agentId: string,
+    plan: SavePlan,
+    commit: string,
+  ): Promise<SaveAgentFilesResult> {
     const undo: AgentFileChange[] = [...plan.undo];
     for (const skill of plan.skills) {
       if (skill.undo.kind === "remove") {

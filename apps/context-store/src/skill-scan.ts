@@ -59,6 +59,12 @@ const LETTER_OR_MARK = /[\p{L}\p{M}]/u;
 /** The scripts that shape with joiners: Arabic and its neighbours, Mongolian, India's and Southeast Asia's. */
 const JOINS =
   /[\p{scx=Arab}\p{scx=Syrc}\p{scx=Mong}\p{scx=Nkoo}\p{scx=Mand}\p{scx=Mani}\p{scx=Phlp}\p{scx=Adlm}\p{scx=Rohg}\p{scx=Sogd}\p{scx=Phag}\p{scx=Deva}\p{scx=Beng}\p{scx=Guru}\p{scx=Gujr}\p{scx=Orya}\p{scx=Taml}\p{scx=Telu}\p{scx=Knda}\p{scx=Mlym}\p{scx=Sinh}\p{scx=Khmr}\p{scx=Mymr}]/u;
+/** Unicode's tags, which a model reads as letters though nothing shows them. */
+const TAG = /[\u{E0000}-\u{E007F}]/u;
+/** In binary data, a run this long of characters that show nothing spells something. */
+const MIN_RUN = 8;
+/** Bytes whose text is at least this share printable read as text with a stray byte. */
+const TEXT_SHARE = 0.9;
 /** Past this many ideographic or Mongolian variants on one line, they read as a code, not as text. */
 const MAX_VARIANTS = 8;
 /** Rules read a line in windows this long, so a line of any length costs the same per character. */
@@ -173,7 +179,8 @@ const RULES: Rule[] = [
 
 /**
  * Scans each text file of a skill, line by line. A binary file no format explains is read as text
- * too, so one stray byte can't keep a file's lines from the scan.
+ * too, so one stray byte can't keep a file's lines from the scan; when its bytes aren't mostly text,
+ * only what can spell words in them counts: tags, and long runs of characters that show nothing.
  */
 export function scanSkill(files: readonly SkillFile[]): ScanResult {
   const findings: ScanFinding[] = [];
@@ -185,12 +192,14 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
   };
   for (const file of files) {
     let content = file.content;
+    let data = false;
     if (file.binary) {
       // One a machine would run is a finding of its own.
       const executable = isExecutable(file);
       if (executable) add({ path: file.path, line: 0, kind: "executable" }, () => "");
       if (executable || isKnownBinary(file)) continue;
       content = asText(fileBytes(file));
+      data = !mostlyText(content);
     }
     const script = isScript(file.path);
     const instructions = file.path.toLowerCase().endsWith(".md");
@@ -199,7 +208,11 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
       // A BOM opens a file legitimately; anywhere else it hides.
       const scanned = index === 0 ? line.replace(/^\u{FEFF}/u, "") : line;
       const at = { path: file.path, line: index + 1 };
-      const hidden = MAYBE_HIDDEN.test(scanned) ? hiddenIn(scanned) : new Set<number>();
+      const hidden = !MAYBE_HIDDEN.test(scanned)
+        ? new Set<number>()
+        : data
+          ? spelledIn(scanned)
+          : hiddenIn(scanned);
       if (hidden.size > 0) {
         blocked = true;
         let first = Number.POSITIVE_INFINITY;
@@ -208,6 +221,7 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
           excerpt(scanned, first, (_char, offset) => hidden.has(offset)),
         );
       }
+      if (data) return;
       // A run of spaces counts as one, so padding can't push a phrase's words apart.
       const spaced = scanned.replace(/\s+/gu, " ");
       const parts = windows(spaced);
@@ -269,6 +283,38 @@ function hiddenIn(line: string): Set<number> {
 }
 
 const joins = (char: string) => LETTER_OR_MARK.test(char) && JOINS.test(char);
+
+/** Where binary data spells words that don't show: tags, and runs of eight or more invisibles. */
+function spelledIn(line: string): Set<number> {
+  const found = new Set<number>();
+  let run: number[] = [];
+  const close = () => {
+    if (run.length >= MIN_RUN) for (const at of run) found.add(at);
+    run = [];
+  };
+  let offset = 0;
+  for (const char of line) {
+    if (TAG.test(char)) found.add(offset);
+    if (MAYBE_HIDDEN.test(char)) run.push(offset);
+    else close();
+    offset += char.length;
+  }
+  close();
+  return found;
+}
+
+/** Whether decoded bytes are mostly text: few replacement characters and controls. */
+function mostlyText(text: string): boolean {
+  let all = 0;
+  let printable = 0;
+  for (const char of text) {
+    all += 1;
+    const code = char.codePointAt(0) ?? 0;
+    const control = (code < 0x20 && !"\t\n\r\f".includes(char)) || code === 0x7f;
+    if (!control && code !== 0xfffd) printable += 1;
+  }
+  return all === 0 || printable / all >= TEXT_SHARE;
+}
 
 /** A long line in overlapping windows, so no rule reads more than WINDOW characters at a time. */
 function windows(line: string): { text: string; start: number }[] {

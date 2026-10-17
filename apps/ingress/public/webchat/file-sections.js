@@ -751,6 +751,8 @@ export class FileSections {
     cancel.addEventListener("click", () => {
       const rows = [...this.skillRows.querySelectorAll(".skl-i")];
       const at = rows.findIndex((row) => row.dataset.skill === name);
+      // The same name installed again is announced again.
+      this.live.textContent = "";
       this.drafts.skills.delete(name);
       delete this.bases[`skill:${name}`];
       delete this.conflicts[`skill:${name}`];
@@ -817,6 +819,9 @@ export class FileSections {
             (fields.name !== key && this.drafts.skills.has(fields.name));
           if (isSkillName(fields.name) && !taken && fields.name !== key) {
             this.drafts.skills.delete(key);
+            // What the old name met, a refusal or a conflict, stays with it.
+            for (const kept of [this.bases, this.conflicts, this.refusals])
+              delete kept[`skill:${key}`];
             key = fields.name;
             this.openSkill = key;
             view.path.textContent = `agents/${this.#agent.id}/skills/${key}/SKILL.md`;
@@ -858,7 +863,7 @@ export class FileSections {
     const problems = this.#files.skillProblems;
     const fields = skillFields(content);
     if (fields.problem) return problems[fields.problem];
-    if (fields.name !== name) {
+    if (fields.name !== undefined && fields.name !== name) {
       const saved = this.files.skills.some((skill) => skill.name === name);
       return saved ? problems.name_mismatch : problems.taken(fields.name);
     }

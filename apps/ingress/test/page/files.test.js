@@ -371,6 +371,20 @@ describe("the files in the editor", () => {
     expect($(".files-skills .fileview").dataset.mode).toBe("edit");
   });
 
+  it("gives focus back to the section's tab when a save redraws what had it", async () => {
+    await open();
+    tab("Skills").click();
+    $(".skl-r").click();
+    key($(".files-skills"), "e", { ctrlKey: true });
+    const input = $(".files-skills .doc-input");
+    type(input, SKILL.replace("Writes a brief.", "Writes briefs."));
+    input.focus();
+    key(input, "e", { ctrlKey: true });
+    expect(document.activeElement.getAttribute("aria-label")).toBe("View");
+    await editor.save();
+    expect(document.activeElement).toBe(tab("Skills"));
+  });
+
   it("saves the soul with the version it read, in one request beside the profile", async () => {
     await open();
     tab("Soul").click();
@@ -728,6 +742,17 @@ describe("the skills", () => {
     expect($(".rev-diff .del").textContent).toBe("- old\n");
   });
 
+  it("leaves YAML it can't read for sure to the vault", async () => {
+    await open();
+    tab("Skills").click();
+    $(".skl-r").click();
+    key($(".files-skills"), "e", { ctrlKey: true });
+    type($(".files-skills .doc-input"), SKILL.replace("name: brief", "name: 'brief' # the skill"));
+    expect($("#skill-problem").hidden).toBe(true);
+    await editor.save();
+    expect(sent[0]).toMatchObject([{ file: "skill", name: "brief" }]);
+  });
+
   it("creates one from scratch, which takes the name its frontmatter gives it", async () => {
     await open();
     tab("Skills").click();
@@ -750,6 +775,34 @@ describe("the skills", () => {
 });
 
 describe("a pending skill", () => {
+  it("leaves what the old name met behind when a new skill takes another", async () => {
+    await open();
+    tab("Skills").click();
+    button(F.create).click();
+    io.save.mockImplementationOnce(async (_agentId, changes) => {
+      sent.push(changes);
+      return {
+        ok: true,
+        status: 200,
+        value: {
+          ok: true,
+          commit: null,
+          outcomes: [{ status: "refused", reason: "taken" }],
+          undo: [],
+          files: files(),
+        },
+      };
+    });
+    await editor.save();
+    expect($(".files-skills .files-refused").textContent).toBe(F.refusals.taken);
+    const input = $(".files-skills .doc-input");
+    type(input, input.value.replace("name: new-skill", "name: my-skill"));
+    $(".backb").click();
+    button(F.create).click();
+    expect($(".editor-title").textContent).toBe("new-skill");
+    expect($(".files-skills .files-refused")).toBeNull();
+  });
+
   it("keeps a new skill's name while its frontmatter is gone", async () => {
     await open();
     tab("Skills").click();

@@ -103,7 +103,14 @@ describe("a SKILL.md's fields", () => {
     ]) {
       expect(fields(unsure).problem, unsure).toBeNull();
     }
-    expect(fields("name: pdf\ndescription: >\n  Folded.").description).toBeNull();
+    expect(fields("name: pdf\ndescription: >\n  Folded.").description).toBeUndefined();
+    // A key in a form the plain lines don't read is unknown, never missing.
+    expect(fields("name: 'pdf' # the folder's\ndescription: x")).toMatchObject({
+      name: undefined,
+      problem: null,
+    });
+    expect(fields('"name": pdf\ndescription: x')).toMatchObject({ name: undefined, problem: null });
+    expect(fields("description: names things")).toMatchObject({ name: null, problem: "name" });
   });
 
   it("names a new skill with a name no other skill has", () => {

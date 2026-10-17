@@ -233,8 +233,6 @@ export const TEXTS = {
         edited: "edited here",
         pending: { install: "installs on Save", new: "new" },
         cancelPending: (name) => `Cancel ${name}'s pending change`,
-        removeSkill: "Remove skill",
-        keepSkill: "Keep skill",
         lookForUpdate: "Look for an update",
         upToDate: "It's up to date with its branch.",
         newSkill: {
@@ -682,8 +680,6 @@ export const TEXTS = {
         edited: "editada aqui",
         pending: { install: "instala ao salvar", new: "nova" },
         cancelPending: (name) => `Cancelar a mudança pendente de ${name}`,
-        removeSkill: "Remover skill",
-        keepSkill: "Manter skill",
         lookForUpdate: "Procurar atualização",
         upToDate: "Está atualizada com o seu branch.",
         newSkill: {
@@ -1131,8 +1127,6 @@ export const TEXTS = {
         edited: "editada aquí",
         pending: { install: "se instala al guardar", new: "nueva" },
         cancelPending: (name) => `Cancelar el cambio pendiente de ${name}`,
-        removeSkill: "Quitar skill",
-        keepSkill: "Mantener skill",
         lookForUpdate: "Buscar actualización",
         upToDate: "Está al día con su rama.",
         newSkill: {
