@@ -102,8 +102,9 @@ export function profileOf(agent) {
 
 /**
  * What a line the agent keeps can hold, as packages/config checks it: tabs and breaks become
- * spaces, and control, format and unassigned characters go, as does a run of variation selectors
- * after the first. Pasted text often carries them, and the line would be refused.
+ * spaces, and control, format, private-use and unassigned characters go, as does a run of
+ * variation selectors after the first. Pasted text often carries them, and the line would be
+ * refused.
  */
 export function cleanLine(text) {
   return text
