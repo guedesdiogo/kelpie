@@ -30,6 +30,8 @@ export default { fetch: () => new Response(null, { status: 404 }) };`,
         modules: true,
         compatibilityDate: "2026-10-01",
         script: `import { WorkerEntrypoint } from "cloudflare:workers";
+// The editor's files (ADR-0058): the routing tests never reach it, since Access isn't configured.
+export class AgentFiles extends WorkerEntrypoint {}
 export class GitHubWebhooks extends WorkerEntrypoint {
   receive(delivery) {
     if (delivery.signature !== "sha256=${"a".repeat(64)}") return { status: 401 };

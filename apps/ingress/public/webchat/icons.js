@@ -86,6 +86,27 @@ const PATHS = {
   skills: [
     "M6.5 3.5h1.7a1.3 1.3 0 0 1 2.6 0h1.7v2.2a1.3 1.3 0 0 1 0 2.6V11h-2.3a1.3 1.3 0 0 0-2.6 0H5.4V8.3a1.3 1.3 0 0 1 0-2.6V3.5z",
   ],
+  // The agent's files (#381, the lab's interactions 4 and 5): Visualizar is a book and Editar a
+  // pencil on its line, two segments, never one glyph that flips (Obsidian's, avoided). The
+  // install's sources: a link, a file and a pasted page.
+  book: [
+    "M8 4.3C6.5 3.3 4.5 3 2.5 3.3v9c2-.3 4 0 5.5 1c1.5-1 3.5-1.3 5.5-1v-9C11.5 3 9.5 3.3 8 4.3Z",
+    "M8 4.3v9",
+  ],
+  pencilLine: ["M10.5 2.8l2.4 2.4L6.2 11.9l-3 .8.8-3z", "M9.2 4.1l2.4 2.4", "M8.5 14h5"],
+  link: [
+    "M6.5 9.5l3-3",
+    "M7.2 4.6l1-1a2.6 2.6 0 0 1 3.7 3.7l-1 1",
+    "M8.8 11.4l-1 1a2.6 2.6 0 0 1-3.7-3.7l1-1",
+  ],
+  file: ["M4 2.5h5.5l3 3v8H4z", "M9.5 2.5v3h3"],
+  paste: [
+    "M10.5 3.5h1A1.5 1.5 0 0 1 13 5v7.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 12.5V5a1.5 1.5 0 0 1 1.5-1.5h1",
+    "M6.5 2.5h3a1 1 0 0 1 1 1v.5a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-.5a1 1 0 0 1 1-1Z",
+  ],
+  plus: ["M8 3.5v9", "M3.5 8h9"],
+  chevronRight: ["M6.5 4.5L10 8l-3.5 3.5"],
+  chevronLeft: ["M9.5 4.5L6 8l3.5 3.5"],
 };
 
 /**

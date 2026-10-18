@@ -10,8 +10,10 @@ import {
   type SetupEventsContract,
   versionReport,
 } from "@kelpie/config";
+import type { AgentFilesContract } from "@kelpie/context-store/contract";
 import type { ConversationContract } from "@kelpie/conversation/contract";
 import { admitSender } from "./admission.ts";
+import { type AgentFilesDeps, handleAgentFiles, isAgentFilesPath } from "./agent-files.ts";
 import { DEPLOY_PROBE_PATH, type DeployProbeDeps, handleDeployProbe } from "./deploy-probe.ts";
 import {
   GITHUB_WEBHOOK_PATH,
@@ -86,6 +88,22 @@ function webchatDeps(env: Env): WebchatDeps {
   };
 }
 
+function agentFilesDeps(env: Env): AgentFilesDeps {
+  const { authenticate, admit } = webchatDeps(env);
+  return {
+    authenticate,
+    admit,
+    agentRole: async (agentId) => {
+      const entry = await (
+        env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<Pick<RegistryContract, "get">>
+      ).get(agentId);
+      return entry === null ? null : (entry.role ?? "");
+    },
+    // context-store's AgentFiles: one agent's own files, and nothing else of the vault (ADR-0058).
+    files: env.AGENT_FILES as unknown as AgentFilesContract,
+  };
+}
+
 function deployProbeDeps(env: Env): DeployProbeDeps {
   return {
     // Optional, unlike a secret in `secrets.required`: a deploy without it still works.
@@ -121,6 +139,11 @@ export default {
     if (request.method === "POST" && pathname === GITHUB_WEBHOOK_PATH) {
       // A service binding to context-store's GitHubWebhooks entrypoint, which answers with a status.
       return handleGitHubWebhook(request, env.GITHUB_WEBHOOKS as unknown as GitHubWebhookDeps);
+    }
+
+    // The editor's reads and writes of an agent's own files (ADR-0058).
+    if (isAgentFilesPath(pathname) && ["GET", "PUT", "POST"].includes(request.method)) {
+      return handleAgentFiles(request, agentFilesDeps(env));
     }
 
     if (

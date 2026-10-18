@@ -2,7 +2,12 @@
 // its vaults and cleans up after its tests the same way (#245).
 import { reset } from "cloudflare:test";
 import { afterEach } from "vitest";
-import { replaceBackendForTesting, replaceGatewayForTesting, Vault } from "../src/index.ts";
+import {
+  replaceBackendForTesting,
+  replaceFetchForTesting,
+  replaceGatewayForTesting,
+  Vault,
+} from "../src/index.ts";
 
 // Tests run a vault's alarm by hand, with `runDurableObjectAlarm`. The runtime also fires it by the
 // clock, a second or five after it's set, and would overtake a test that stalls that long (#243).
@@ -22,6 +27,7 @@ vault.alarm = async function (this: Vault, ...info: unknown[]) {
 afterEach(async () => {
   replaceBackendForTesting(undefined);
   replaceGatewayForTesting(undefined);
+  replaceFetchForTesting(undefined);
   // A test's vaults go, alarms and all (#223): one left with an alarm wakes in a later test, where
   // it syncs with that test's backend and asks that test's model.
   await reset();

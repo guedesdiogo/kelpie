@@ -43,6 +43,13 @@
       "service": "kelpie-conversation-runtime",
       "entrypoint": "AgentEditor"
     },
+    // The editor's edits of one agent's own files (ADR-0058): its SOUL.md, AGENTS.md,
+    // memories/MEMORY.md and skills, and nothing else of the vault.
+    {
+      "binding": "AGENT_FILES",
+      "service": "kelpie-context-store",
+      "entrypoint": "AgentFiles"
+    },
     {
       "binding": "CHANNEL_WEBHOOKS",
       "service": "kelpie-channel-egress",

@@ -1,36 +1,75 @@
 // A reply's formatting (#188), built with createElement: model output is never parsed as HTML.
 // The blocks are the ones the runtime read, and its links the ones it allowed; only web links
 // become anchors. Each link shows its host, so a label the model wrote can't hide where it goes,
-// and each code block has a Copy button (docs/design-system.md §5.20).
+// and each code block has a Copy button (docs/design-system.md §5.20). An agent's own files (#381)
+// add headings, quotes, rules and a skill's frontmatter, and each block names its source lines, so
+// the editor can keep the place when it switches views.
 
-/** A reply's blocks as elements. Anything not one of the known kinds is left out. */
+/** A reply's or a file's blocks as elements. Anything not one of the known kinds is left out. */
 export function renderBlocks(blocks, texts) {
   const fragment = document.createDocumentFragment();
   for (const block of Array.isArray(blocks) ? blocks : []) {
-    switch (block?.type) {
-      case "paragraph": {
-        const paragraph = document.createElement("p");
-        paragraph.append(renderInline(block.children, texts));
-        fragment.append(paragraph);
-        break;
-      }
-      case "list": {
-        const list = document.createElement(block.ordered ? "ol" : "ul");
-        if (block.ordered && Number.isInteger(block.start)) list.start = block.start;
-        for (const item of Array.isArray(block.items) ? block.items : []) {
-          const entry = document.createElement("li");
-          entry.append(renderInline(item, texts));
-          list.append(entry);
-        }
-        fragment.append(list);
-        break;
-      }
-      case "code":
-        fragment.append(codeBlock(String(block.text ?? ""), texts));
-        break;
+    const made = renderBlock(block, texts);
+    if (!made) continue;
+    if (Number.isInteger(block.line)) {
+      made.dataset.line = String(block.line);
+      made.dataset.end = String(Number.isInteger(block.end) ? block.end : block.line);
     }
+    fragment.append(made);
   }
   return fragment;
+}
+
+function renderBlock(block, texts) {
+  switch (block?.type) {
+    case "paragraph": {
+      const paragraph = document.createElement("p");
+      paragraph.append(renderInline(block.children, texts));
+      return paragraph;
+    }
+    case "list": {
+      const list = document.createElement(block.ordered ? "ol" : "ul");
+      if (block.ordered && Number.isInteger(block.start)) list.start = block.start;
+      for (const item of Array.isArray(block.items) ? block.items : []) {
+        const entry = document.createElement("li");
+        // A reply's item is its inline nodes; a file's names its line too.
+        entry.append(renderInline(Array.isArray(item) ? item : item?.children, texts));
+        if (Number.isInteger(item?.line)) entry.dataset.line = String(item.line);
+        list.append(entry);
+      }
+      return list;
+    }
+    case "code":
+      return codeBlock(String(block.text ?? ""), texts);
+    case "heading": {
+      // The editor's title is the dialog's heading, so a file's own start below it.
+      const level = Math.min(6, Math.max(1, Number(block.level) || 1));
+      const heading = document.createElement(`h${Math.min(6, level + 2)}`);
+      heading.className = `md-h${level}`;
+      heading.append(renderInline(block.children, texts));
+      return heading;
+    }
+    case "quote": {
+      const quote = document.createElement("blockquote");
+      quote.append(renderInline(block.children, texts));
+      return quote;
+    }
+    case "rule":
+      return document.createElement("hr");
+    case "frontmatter": {
+      const box = document.createElement("div");
+      box.className = "frontmatter";
+      const pre = document.createElement("pre");
+      const code = document.createElement("code");
+      code.dir = "ltr";
+      code.textContent = String(block.text ?? "");
+      pre.append(code);
+      box.append(pre);
+      return box;
+    }
+    default:
+      return null;
+  }
 }
 
 export function renderInline(nodes, texts) {

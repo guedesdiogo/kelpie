@@ -1,13 +1,15 @@
 // The agent's editor (#379, docs/design-system.md 5.25): opened from the pencil on an agent's
 // mascot, a panel beside the sidebar on a wide screen and a 90% sheet on the phone. Its sections
-// sit on the left: Profile and Mascot now, the agent's own files with #381. Everything changes
-// here first, and one Save writes it: the mascot whole, and the profile's changed fields, each
-// through its owner-only route. The conversation stays behind it, still live.
+// sit on the left: Profile and Mascot, then the agent's own files, Soul, Rules, Memory and Skills
+// (#381). Everything changes here first, and one Save writes it: the mascot whole and the profile's
+// changed fields, each through its owner-only route, and every changed file in one request, so in
+// one commit (ADR-0058). The conversation stays behind it, still live.
 
 import { Construtor, PREVIEW_PX, SHEET_PREVIEW_PX } from "./construtor.js";
 import {
   changedSections,
   cleanLine,
+  FILE_SECTIONS,
   LIMITS,
   profileChanges,
   profileOf,
@@ -15,6 +17,7 @@ import {
   SAVED_SECTIONS,
   SECTIONS,
 } from "./editor-model.js";
+import { FileSections, filesIo } from "./file-sections.js";
 import { icon, outline } from "./icons.js";
 import { Mascot, ownerTyping } from "./mascot.js";
 import { APPROVED_MS } from "./mascot-states.js";
@@ -29,6 +32,8 @@ export const ID_PX = 56;
 export const STAGGER_MS = 30;
 /** A save that hasn't answered by then has failed, and can be tried again. */
 export const SAVE_TIMEOUT_MS = 15_000;
+/** A skill's fetch reaches GitHub and checks every file, so it waits longer. */
+export const FETCH_TIMEOUT_MS = 60_000;
 
 const element = (tag, className) => {
   const made = document.createElement(tag);
@@ -62,8 +67,36 @@ async function put(agentId, section, body) {
   }
 }
 
+/**
+ * The files' routes (#381): `{ ok, status, value }`, with the answer's JSON as `value` either way,
+ * so a refusal can say why.
+ */
+async function filesRequest(path, { method, json, headers = {}, body }) {
+  try {
+    const response = await fetch(path, {
+      method,
+      headers: {
+        "X-Requested-With": "XMLHttpRequest",
+        ...(json ? { "Content-Type": "application/json" } : {}),
+        ...headers,
+      },
+      body: json ? JSON.stringify(json) : body,
+      redirect: "manual",
+      cache: "no-store",
+      signal: AbortSignal.timeout(method === "POST" ? FETCH_TIMEOUT_MS : SAVE_TIMEOUT_MS),
+    });
+    if (loginState(response) === "expired") return { ok: false, status: 401, value: null };
+    const value = await response.json().catch(() => null);
+    return { ok: response.ok && value?.ok !== false, status: response.status, value };
+  } catch {
+    return { ok: false, status: 0, value: null };
+  }
+}
+
 export class Editor {
   #names;
+  #texts;
+  #files;
   #toasts;
   #onSaved;
   #onClose;
@@ -78,11 +111,23 @@ export class Editor {
    *   texts: object, toasts: { show: Function },
    *   onSaved: (agentId: string, changes: object) => void,
    *   onClose?: (agentId: string) => void, onExpired?: () => void,
-   *   send?: typeof put, timers?: { set: Function, clear: Function },
+   *   send?: typeof put, files?: ReturnType<typeof filesIo>,
+   *   timers?: { set: Function, clear: Function },
    * }} options
    */
-  constructor({ texts, toasts, onSaved, onClose = () => {}, onExpired = () => {}, send, timers }) {
+  constructor({
+    texts,
+    toasts,
+    onSaved,
+    onClose = () => {},
+    onExpired = () => {},
+    send,
+    files,
+    timers,
+  }) {
     this.#names = texts.editor;
+    this.#texts = texts;
+    this.#files = files ?? filesIo(filesRequest);
     this.#toasts = toasts;
     this.#onSaved = onSaved;
     this.#onClose = onClose;
@@ -183,6 +228,8 @@ export class Editor {
     this.#select(open.section, { instant: true });
     this.#renderFooter();
     tips(open.root);
+    // The agent's own files arrive while the panel opens; their sections say so meanwhile.
+    open.files.load();
     open.tabs.get(open.section).focus({ preventScroll: true });
     if (keyboard || fromKeyboard()) return true;
     if (reduced()) {
@@ -295,15 +342,7 @@ export class Editor {
       const label = element("span", "nl");
       label.textContent = names.sections[section.id];
       tab.append(section.icon === "body" ? outline("body") : icon(section.icon), label);
-      if (section.ready) {
-        tab.addEventListener("click", () => this.#select(section.id));
-      } else {
-        // The agent's own files are #381's: shown, so the frame doesn't change when they arrive.
-        tab.setAttribute("aria-disabled", "true");
-        const soon = element("span", "soon");
-        soon.textContent = names.soon;
-        tab.append(soon);
-      }
+      tab.addEventListener("click", () => this.#select(section.id));
       const mark = element("span", "mark-dot");
       mark.setAttribute("aria-hidden", "true");
       tab.append(mark);
@@ -344,8 +383,25 @@ export class Editor {
         this.#edited();
       },
     });
-    // Both sections stay on the page, so the preview's mascot stays alive while Profile shows.
-    open.body.append(open.profile.element, open.construtor.element);
+    open.files = new FileSections({
+      names,
+      blockTexts: this.#texts,
+      agent,
+      io: this.#files,
+      timers: this.#timers,
+      onChange: () => {
+        if (this.#open === open) this.#edited();
+      },
+      onMascot: (state) => {
+        if (this.#open === open) this.#pose(state);
+      },
+    });
+    // Every section stays on the page, so the preview's mascot stays alive while another shows.
+    open.body.append(
+      open.profile.element,
+      open.construtor.element,
+      ...FILE_SECTIONS.map((id) => open.files.elements[id]),
+    );
     this.#identity();
 
     root.addEventListener("keydown", (event) => this.#key(event));
@@ -371,19 +427,62 @@ export class Editor {
       tab.tabIndex = id === section ? 0 : -1;
     }
     open.body.setAttribute("aria-labelledby", `editor-tab-${section}`);
-    open.title.textContent = this.#names.sections[section];
-    const content = section === "profile" ? open.profile.element : open.construtor.element;
+    const contents = {
+      profile: open.profile.element,
+      mascot: open.construtor.element,
+      ...open.files.elements,
+    };
+    const content = contents[section];
     open.body.dataset.section = section;
-    open.profile.element.hidden = content !== open.profile.element;
-    open.construtor.element.hidden = content !== open.construtor.element;
+    for (const [id, each] of Object.entries(contents)) each.hidden = id !== section;
     if (section === "mascot") open.construtor.mount();
+    this.#head();
     this.#placeHighlight(instant || previous === undefined);
     this.#renderFooter();
     const quiet = instant || fromKeyboard();
     if (previous !== undefined && previous !== section && !quiet) enter(content);
-    // The mascot acts out the section (5.19's poses): it looks at the owner in Profile.
+    // The mascot acts out the section (5.19's poses): it looks at the owner in Profile, writes in
+    // Soul, Rules and Memory, and holds the magnifier in Skills.
+    if (FILE_SECTIONS.includes(section)) {
+      open.files.shown(section);
+      return;
+    }
+    open.idMascot?.setState("idle", { instant: true });
     if (section === "profile") open.idMascot?.lookYou(1800);
     else open.idMascot?.blink();
+  }
+
+  /** The header: the section's title, or a skill's, and a file's path and switch beside it. */
+  #head() {
+    const open = this.#open;
+    open.title.textContent = open.files.title(open.section) ?? this.#names.sections[open.section];
+    const controls = FILE_SECTIONS.includes(open.section)
+      ? open.files.controls(open.section)
+      : null;
+    if (open.headControls && open.headControls !== controls) open.headControls.remove();
+    open.headControls = controls;
+    if (controls && open.title.nextElementSibling !== controls) {
+      open.title.after(controls);
+      tips(controls);
+    }
+  }
+
+  /** The mascot's pose for a file section, or a moment of its own. */
+  #pose(state) {
+    const mascot = this.#open?.idMascot;
+    if (!mascot) return;
+    if (state === "vault" || state === "search") {
+      mascot.setState("working", { activity: state, instant: fromKeyboard() });
+    } else if (state === "approved") {
+      mascot.setState("approved", { instant: fromKeyboard() });
+      this.#timers.set(() => {
+        if (this.#open?.idMascot === mascot && FILE_SECTIONS.includes(this.#open.section)) {
+          mascot.setState("working", { activity: "search" });
+        }
+      }, APPROVED_MS);
+    } else {
+      mascot.setState("idle");
+    }
   }
 
   #placeHighlight(instant) {
@@ -409,7 +508,7 @@ export class Editor {
 
   #tabKey(event) {
     const open = this.#open;
-    const order = SECTIONS.filter((section) => section.ready).map((section) => section.id);
+    const order = SECTIONS.map((section) => section.id);
     const index = order.indexOf(document.activeElement?.dataset?.section);
     if (index === -1) return;
     const step = {
@@ -445,6 +544,16 @@ export class Editor {
     if (command && event.key.toLowerCase() === "s") {
       event.preventDefault();
       this.save({ keyboard: true });
+      return;
+    }
+    // ⌘E or Ctrl+E: the shown file's other view (#381).
+    if (
+      command &&
+      !event.shiftKey &&
+      event.key.toLowerCase() === "e" &&
+      open.files.toggleView(open.section)
+    ) {
+      event.preventDefault();
       return;
     }
     if (command && !event.shiftKey && event.key.toLowerCase() === "z" && !isField(event.target)) {
@@ -645,7 +754,15 @@ export class Editor {
   #changed() {
     const open = this.#open;
     if (!open) return [];
-    return changedSections({ saved: open.saved, draft: open.draft, main: open.agent.main });
+    const routes = changedSections({ saved: open.saved, draft: open.draft, main: open.agent.main });
+    const files = open.files.changed();
+    return SAVED_SECTIONS.filter((id) => routes.includes(id) || files.includes(id));
+  }
+
+  /** Whether Save can run: a name that shows something, and files the vault would take. */
+  #valid() {
+    const open = this.#open;
+    return profileValid(open.draft.profile) && open.files.blocked() === null;
   }
 
   /** Something changed: the marks, the identity and the footer follow, and an ask goes. */
@@ -672,6 +789,7 @@ export class Editor {
     else open.profile.fields.name.setAttribute("aria-errormessage", open.profile.error.id);
     this.#identity();
     this.#marks();
+    this.#head();
     this.#renderFooter();
   }
 
@@ -764,10 +882,7 @@ export class Editor {
       foot.append(open.dirty, cancel, open.save, open.meta);
     }
     if (!open.saving && open.save.dataset.state !== "done") {
-      open.save.setAttribute(
-        "aria-disabled",
-        String(changed.length === 0 || !profileValid(open.draft.profile)),
-      );
+      open.save.setAttribute("aria-disabled", String(changed.length === 0 || !this.#valid()));
     }
     const count = changed.length;
     if (count === 0) {
@@ -839,9 +954,10 @@ export class Editor {
   }
 
   /**
-   * Saves every changed section once: the mascot whole, the profile's changed fields. The button
-   * says what it does, Sav-e, Sav-ing, Sav-ed; success is 5.3 without its ring, which stays the
-   * owner's yes. Then the panel closes, and a toast offers Undo for 10 s.
+   * Saves every changed section once: the mascot whole, the profile's changed fields, and every
+   * changed file in one request, so one commit (ADR-0058). The button says what it does, Sav-e,
+   * Sav-ing, Sav-ed; success is 5.3 without its ring, which stays the owner's yes. Then the panel
+   * closes, and a toast offers Undo for 10 s.
    */
   async save({ keyboard = false } = {}) {
     const open = this.#open;
@@ -851,6 +967,11 @@ export class Editor {
     if (!profileValid(open.draft.profile)) {
       this.#select("profile");
       open.profile.fields.name.focus();
+      return;
+    }
+    const blocked = open.files.blocked();
+    if (blocked) {
+      this.#select(blocked);
       return;
     }
     open.saving = true;
@@ -872,12 +993,18 @@ export class Editor {
       profile: profileChanges(open.saved.profile, open.draft.profile, { main: open.agent.main }),
       mascot: open.draft.mascot,
     };
-    const results = await Promise.all(
-      sections.map(async (section) => ({
-        section,
-        ...(await this.#send(open.agent.id, section, bodies[section])),
-      })),
-    );
+    const routes = sections.filter((section) => !FILE_SECTIONS.includes(section));
+    const fileSections = sections.filter((section) => FILE_SECTIONS.includes(section));
+    const sent = open.files.changes(fileSections);
+    const [results, filesResult] = await Promise.all([
+      Promise.all(
+        routes.map(async (section) => ({
+          section,
+          ...(await this.#send(open.agent.id, section, bodies[section])),
+        })),
+      ),
+      sent.length > 0 ? this.#files.save(open.agent.id, sent) : null,
+    ]);
     this.#timers.clear(spin);
     open.saving = false;
     const changes = {};
@@ -898,26 +1025,53 @@ export class Editor {
         Object.assign(changes, result.value);
       }
     }
+    // Where focus was before the answer redraws anything: in the editor, or nowhere, as when the
+    // footer that held Retry went; not when the owner went back to the chat meanwhile.
+    const active = document.activeElement;
+    const focused = !active || active === document.body || open.root.contains(active);
+    const files = filesResult
+      ? open.files.applySave(sent, filesResult)
+      : { saved: [], failed: [], undo: [] };
+    // A section drawn again brings its own path and switch to the header. Focus that went with what
+    // it replaced comes back to the section's tab, so the editor's keys still reach it.
+    if (filesResult) {
+      this.#head();
+      if (focused && !open.root.contains(document.activeElement)) {
+        open.tabs.get(open.section)?.focus({ preventScroll: true });
+      }
+    }
+    for (const section of files.saved) open.failed.delete(section);
     if (Object.keys(changes).length > 0) this.#onSaved(open.agent.id, changes);
-    const failed = results.filter((result) => !result.ok);
-    if (failed.some((result) => result.status === 401)) this.#onExpired();
+    const failed = [
+      ...results.filter((result) => !result.ok).map((result) => result.section),
+      ...files.failed,
+    ];
+    const saved = [
+      ...results.filter((result) => result.ok).map((result) => result.section),
+      ...files.saved,
+    ];
+    if (results.some((result) => result.status === 401) || filesResult?.status === 401) {
+      this.#onExpired();
+    }
     if (this.#open !== open) return;
     if (failed.length > 0) {
       open.closeWhenSaved = false;
-      for (const result of failed) open.failed.add(result.section);
+      for (const section of failed) open.failed.add(section);
       this.#failed(
-        failed.map((result) => result.section),
-        results.filter((result) => result.ok).map((result) => result.section),
+        SAVED_SECTIONS.filter((section) => failed.includes(section)),
+        SAVED_SECTIONS.filter((section) => saved.includes(section)),
       );
       return;
     }
-    // Undo sends back what was saved before each changed field, and the mascot whole.
+    // Undo sends back what was saved before each changed field, the mascot whole, and the files
+    // as they were, from the versions this save wrote.
     const undo = {
       mascot: before.mascot,
       profile: {
         ...Object.fromEntries(Object.keys(bodies.profile).map((key) => [key, before.profile[key]])),
         ...(sections.includes("profile") ? open.undoBase : {}),
       },
+      files: files.undo,
     };
     if (sections.includes("profile")) open.undoBase = {};
     // What the owner changed while it saved is still to save: the editor stays, and says so.
@@ -974,29 +1128,47 @@ export class Editor {
   /** A toast says it saved, and Undo sends back what was saved before, for 10 s (5.13). */
   #toast({ agentId, name, undo, sections }) {
     const names = this.#names;
+    const routes = sections.filter((section) => !FILE_SECTIONS.includes(section));
     const what = { profile: sections.includes("profile"), mascot: sections.includes("mascot") };
     this.#toasts.show({
-      text: names.saved(name, what),
+      text: this.#savedText(name, sections),
       detail: what.mascot ? names.photoSoon : "",
       undo: true,
       action: {
         label: names.undo,
         run: async () => {
-          const back = await Promise.all(
-            sections.map(async (section) => this.#send(agentId, section, undo[section])),
-          );
+          const [back, files] = await Promise.all([
+            Promise.all(routes.map(async (section) => this.#send(agentId, section, undo[section]))),
+            undo.files.length > 0 ? this.#files.save(agentId, undo.files) : null,
+          ]);
           const changes = Object.assign(
             {},
             ...back.filter((result) => result.ok).map((result) => result.value),
           );
           if (Object.keys(changes).length > 0) this.#onSaved(agentId, changes);
-          const ok = back.every((result) => result.ok);
+          const filesUndone =
+            files === null ||
+            (files.ok && files.value.outcomes.every((outcome) => outcome.status === "saved"));
+          const ok = back.every((result) => result.ok) && filesUndone;
           this.#toasts.show(
             ok ? { text: names.undone(name) } : { text: names.undoFailed, error: true },
           );
         },
       },
     });
+  }
+
+  /** "Agenda: mascot saved", "Kelpie: soul and memory saved". */
+  #savedText(name, sections) {
+    const names = this.#names;
+    if (sections.every((section) => section === "profile" || section === "mascot")) {
+      return names.saved(name, {
+        profile: sections.includes("profile"),
+        mascot: sections.includes("mascot"),
+      });
+    }
+    if (sections.length === 1) return `${name}: ${names.savedOne[sections[0]]}`;
+    return names.savedMany(name, sections, names.sections);
   }
 
   /**
@@ -1009,20 +1181,31 @@ export class Editor {
     open.footer = "failed";
     this.#resetSave(open);
     this.#marks();
-    const both = failed.length > 1;
     const { foot } = open;
     foot.className = "editor-foot fail";
     foot.replaceChildren();
     foot.setAttribute("role", "alert");
     const text = element("p");
     const title = element("b");
-    title.textContent = both ? names.failed.both : names.failed[failed[0]];
+    title.textContent =
+      failed.length === 1
+        ? names.failed[failed[0]]
+        : saved.length === 0
+          ? names.failed.both
+          : names.failedMany(failed, names.sections);
     const detail = element("span");
-    detail.textContent = saved.length > 0 ? names.stillSaved[saved[0]] : names.tryAgain;
+    const still =
+      saved.length === 0
+        ? names.tryAgain
+        : saved.length === 1
+          ? names.stillSaved[saved[0]]
+          : names.stillSavedMany(saved, names.sections);
+    const why = failed.length === 1 ? open.files.why(failed[0]) : "";
+    detail.textContent = why ? `${still} ${why}` : still;
     text.append(title, detail);
     const retry = element("button", "btn primary");
     retry.type = "button";
-    retry.textContent = both ? names.retry.both : names.retry[failed[0]];
+    retry.textContent = failed.length === 1 ? names.retry[failed[0]] : names.retry.both;
     retry.addEventListener("click", () => this.save({ keyboard: fromKeyboard() }));
     foot.append(icon("alert"), text, retry);
     if (!fromKeyboard() && !reduced()) enter(foot, { spring: SPRINGS.fast, rise: 4 });
