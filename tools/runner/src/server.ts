@@ -10,6 +10,7 @@ import {
 } from "./protocol.ts";
 import { readJson } from "./requests.ts";
 import type { Sessions } from "./sessions.ts";
+import type { VpsSessions } from "./vps-sessions.ts";
 
 /** One request, as the runner logs it: never its headers, its query or its body. */
 export interface LogEntry {
@@ -22,6 +23,8 @@ export interface HandlerOptions {
   secrets: readonly string[];
   log: (entry: LogEntry) => void;
   sessions: Pick<Sessions, "turn" | "answer" | "close">;
+  /** The VPS's Claude Code sessions, read only (ADR-0057). */
+  vps: Pick<VpsSessions, "list" | "waits">;
 }
 
 /** What the handler uses of Bun's server: a request's own idle timeout, in seconds. */
@@ -31,16 +34,19 @@ export interface ServerTimeouts {
 
 /** `/sessions/:id`, `/sessions/:id/turns` or `/sessions/:id/tool-results`. */
 const SESSION_PATH = /^\/sessions\/([^/]+)(\/turns|\/tool-results)?$/;
+/** `since` in `/sessions/waits?since=`: epoch ms, digits only. */
+const SINCE = /^\d{1,16}$/;
 
 /** The runner's HTTP handler. Bun's server calls it for each request that reaches loopback. */
 export function createHandler({
   secrets,
   log,
   sessions,
+  vps,
 }: HandlerOptions): (request: Request, server: ServerTimeouts) => Promise<Response> {
   return async (request, server) => {
     const path = pathOf(request.url);
-    const response = await route(request, path, secrets, sessions, server);
+    const response = await route(request, path, secrets, sessions, vps, server);
     log({ method: request.method, path: path ?? "?", status: response.status });
     return response;
   };
@@ -60,6 +66,7 @@ async function route(
   path: string | null,
   secrets: readonly string[],
   sessions: HandlerOptions["sessions"],
+  vps: HandlerOptions["vps"],
   server: ServerTimeouts,
 ): Promise<Response> {
   // The secret comes first, so a caller without it learns nothing, not even which paths exist.
@@ -70,6 +77,13 @@ async function route(
   if (path === "/health") {
     if (request.method !== "GET") return notAllowed("GET");
     return Response.json({ ok: true, version: VERSION, protocol: PROTOCOL });
+  }
+  if (path === "/sessions" || path === "/sessions/waits") {
+    if (request.method !== "GET") return notAllowed("GET");
+    if (path === "/sessions") return Response.json(vps.list());
+    const since = sinceOf(request.url);
+    if (since === null) return Response.json({ ok: false }, { status: 400 });
+    return Response.json(vps.waits(since));
   }
   const match = SESSION_PATH.exec(path);
   if (!match) return Response.json({ ok: false }, { status: 404 });
@@ -131,6 +145,12 @@ async function toolResult(
   return sessions.answer(id, result)
     ? Response.json({ ok: true })
     : Response.json({ ok: false }, { status: 409 });
+}
+
+/** The `since` of a waits request, in epoch ms; null when it is missing or isn't one. */
+function sinceOf(url: string): number | null {
+  const since = new URL(url).searchParams.get("since") ?? "";
+  return SINCE.test(since) && Number(since) <= Number.MAX_SAFE_INTEGER ? Number(since) : null;
 }
 
 function notAllowed(allow: string): Response {

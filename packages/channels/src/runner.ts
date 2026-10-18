@@ -1,8 +1,11 @@
 // What Kelpie and its VPS runner say to each other (ADR-0035, #294). This file imports nothing, so
 // the runner, which installs only its own dependencies, imports it by path.
 
-/** The protocol's version. It changes when a request or an answer changes shape. */
-export const RUNNER_PROTOCOL = 2;
+/**
+ * The protocol's version. It changes when a request or an answer changes shape: 3 added the VPS's
+ * sessions (ADR-0057, #433).
+ */
+export const RUNNER_PROTOCOL = 3;
 
 /** A version as the runner reports it, such as `0.1.0`; anything else isn't the runner's answer. */
 export const RUNNER_VERSION = /^[0-9A-Za-z.+-]{1,64}$/;
@@ -329,4 +332,230 @@ function hasKeys<K extends string, O extends string = never>(
 
 function isText(value: unknown, max: number): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= max;
+}
+
+// The Claude Code sessions on the owner's VPS, read only (ADR-0057, #433): every session but the
+// runner's own, whatever started it. `GET /sessions` lists them; `GET /sessions/waits?since=` lists
+// the waits on the owner opened since then and still open. Titles and excerpts are the owner's
+// work, as untrusted text: the runner redacts secrets from them before they leave.
+
+/**
+ * A session's state (ADR-0057 §4):
+ * - `working`: its session file says `busy`;
+ * - `waiting_permission` and `waiting_answer`: a hook, or its session file's `waiting`, opened a
+ *   wait that hasn't closed yet. A file's wait of unknown kind reads as one on an answer;
+ * - `idle`: its session file says `idle`, since its last reply;
+ * - `ended`: its process is gone, or it ended (`SessionEnd`) and nothing happened since;
+ * - `unknown`: its session file has no status the runner knows.
+ */
+export type RunnerVpsState =
+  | "working"
+  | "waiting_permission"
+  | "waiting_answer"
+  | "idle"
+  | "ended"
+  | "unknown";
+
+/** What its session file says, as Claude Code writes it: `waiting` opens a wait too (ADR-0058). */
+export type RunnerVpsStatus = "busy" | "idle" | "waiting" | "unknown";
+
+/** One session. Times are epoch ms; null where its session file didn't say, or a field was dropped. */
+export interface RunnerVpsSession {
+  /** Claude Code's id for the session, a lowercase UUID. */
+  id: string;
+  state: RunnerVpsState;
+  /** When the state began, so its age is the answer's `now` minus this. */
+  since: number | null;
+  /**
+   * Whether the owner could archive it in the Claude app: a session the app started that ended, or
+   * has been idle for 3 hours or more. A terminal's shows only as ended.
+   */
+  archivable: boolean;
+  status: RunnerVpsStatus;
+  statusUpdatedAt: number | null;
+  startedAt: number | null;
+  /** Whether its process runs; null when its session file names none. */
+  alive: boolean | null;
+  /** From its `entrypoint`: `claude-desktop` is the app, and `cli` a terminal. */
+  startedBy: "app" | "terminal" | "unknown";
+  entrypoint: string | null;
+  /** Its session file's `name`: the title the Claude app shows. */
+  title: string | null;
+  /** The main checkout's folder name, and the branch, of the folder it runs in. */
+  repository: string | null;
+  branch: string | null;
+  /** Its transcript's last GitHub pull request link, if its last 1 MiB has one. */
+  prUrl: string | null;
+  /** Its last reply's first 500 characters, redacted. */
+  excerpt: string | null;
+}
+
+/**
+ * `GET /sessions`. `truncated` says the runner dropped fields, or sessions, to keep the answer
+ * within RUNNER_MAX_SESSIONS_BYTES and RUNNER_MAX_VPS_SESSIONS.
+ */
+export interface RunnerVpsSessions {
+  ok: true;
+  /** The runner's clock, in epoch ms, for the ages. */
+  now: number;
+  sessions: RunnerVpsSession[];
+  truncated: boolean;
+}
+
+/**
+ * A wait on the owner: a permission, or an answer to a question. A session has one at most, and
+ * its id and `openedAt` name it, whether a hook or its session file opened it.
+ */
+export interface RunnerVpsWait {
+  sessionId: string;
+  kind: "permission" | "question";
+  openedAt: number;
+  title: string | null;
+  repository: string | null;
+}
+
+/** `GET /sessions/waits?since=`: the open waits opened at `since` or later, oldest first. */
+export interface RunnerVpsWaits {
+  ok: true;
+  now: number;
+  waits: RunnerVpsWait[];
+  truncated: boolean;
+}
+
+/** The largest `/sessions` answer, in bytes of JSON. */
+export const RUNNER_MAX_SESSIONS_BYTES = 512 * 1024;
+/** The largest `/sessions/waits` answer, in bytes of JSON. */
+export const RUNNER_MAX_WAITS_BYTES = 64 * 1024;
+/** The most sessions, or waits, in one answer. */
+export const RUNNER_MAX_VPS_SESSIONS = 200;
+export const RUNNER_MAX_TITLE_CHARS = 200;
+export const RUNNER_MAX_EXCERPT_CHARS = 500;
+export const RUNNER_MAX_REPOSITORY_CHARS = 200;
+export const RUNNER_MAX_BRANCH_CHARS = 255;
+/** An `entrypoint` as Claude Code writes them: `claude-desktop`, `cli`, `sdk-cli`. */
+export const RUNNER_ENTRYPOINT = /^[a-z0-9_-]{1,32}$/;
+/** A GitHub pull request's address, the only link a session's entry carries. */
+export const RUNNER_PR_URL =
+  /^https:\/\/github\.com\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}\/pull\/[1-9][0-9]{0,9}$/;
+
+const VPS_STATES: readonly string[] = [
+  "working",
+  "waiting_permission",
+  "waiting_answer",
+  "idle",
+  "ended",
+  "unknown",
+];
+const VPS_STATUSES: readonly string[] = ["busy", "idle", "waiting", "unknown"];
+const STARTED_BY: readonly string[] = ["app", "terminal", "unknown"];
+const VPS_SESSION_KEYS = [
+  "id",
+  "state",
+  "since",
+  "archivable",
+  "status",
+  "statusUpdatedAt",
+  "startedAt",
+  "alive",
+  "startedBy",
+  "entrypoint",
+  "title",
+  "repository",
+  "branch",
+  "prUrl",
+  "excerpt",
+] as const;
+
+/** `/sessions`'s answer, checked field by field and rebuilt; null for anything else. */
+export function parseRunnerVpsSessions(value: unknown): RunnerVpsSessions | null {
+  if (!hasKeys(value, ["ok", "now", "sessions", "truncated"]) || value.ok !== true) return null;
+  const { now, sessions, truncated } = value;
+  if (!isRunnerTime(now) || typeof truncated !== "boolean") return null;
+  if (!Array.isArray(sessions) || sessions.length > RUNNER_MAX_VPS_SESSIONS) return null;
+  const parsed: RunnerVpsSession[] = [];
+  for (const entry of sessions) {
+    const session = parseVpsSession(entry);
+    if (!session) return null;
+    parsed.push(session);
+  }
+  return { ok: true, now, sessions: parsed, truncated };
+}
+
+function parseVpsSession(value: unknown): RunnerVpsSession | null {
+  if (!hasKeys(value, VPS_SESSION_KEYS)) return null;
+  const { id, state, since, archivable, status, statusUpdatedAt, startedAt, alive } = value;
+  const { startedBy, entrypoint, title, repository, branch, prUrl, excerpt } = value;
+  if (typeof id !== "string" || !RUNNER_SESSION_ID.test(id)) return null;
+  if (typeof state !== "string" || !VPS_STATES.includes(state)) return null;
+  if (typeof status !== "string" || !VPS_STATUSES.includes(status)) return null;
+  if (typeof startedBy !== "string" || !STARTED_BY.includes(startedBy)) return null;
+  if (typeof archivable !== "boolean" || (alive !== null && typeof alive !== "boolean")) {
+    return null;
+  }
+  if (![since, statusUpdatedAt, startedAt].every((time) => time === null || isRunnerTime(time))) {
+    return null;
+  }
+  if (
+    entrypoint !== null &&
+    (typeof entrypoint !== "string" || !RUNNER_ENTRYPOINT.test(entrypoint))
+  )
+    return null;
+  if (prUrl !== null && (typeof prUrl !== "string" || !RUNNER_PR_URL.test(prUrl))) return null;
+  if (
+    !isOptionalText(title, RUNNER_MAX_TITLE_CHARS) ||
+    !isOptionalText(repository, RUNNER_MAX_REPOSITORY_CHARS) ||
+    !isOptionalText(branch, RUNNER_MAX_BRANCH_CHARS) ||
+    !isOptionalText(excerpt, RUNNER_MAX_EXCERPT_CHARS)
+  ) {
+    return null;
+  }
+  return {
+    id,
+    state: state as RunnerVpsState,
+    since: since as number | null,
+    archivable,
+    status: status as RunnerVpsStatus,
+    statusUpdatedAt: statusUpdatedAt as number | null,
+    startedAt: startedAt as number | null,
+    alive,
+    startedBy: startedBy as RunnerVpsSession["startedBy"],
+    entrypoint,
+    title,
+    repository,
+    branch,
+    prUrl,
+    excerpt,
+  };
+}
+
+/** `/sessions/waits`'s answer, checked field by field and rebuilt; null for anything else. */
+export function parseRunnerVpsWaits(value: unknown): RunnerVpsWaits | null {
+  if (!hasKeys(value, ["ok", "now", "waits", "truncated"]) || value.ok !== true) return null;
+  const { now, waits, truncated } = value;
+  if (!isRunnerTime(now) || typeof truncated !== "boolean") return null;
+  if (!Array.isArray(waits) || waits.length > RUNNER_MAX_VPS_SESSIONS) return null;
+  const parsed: RunnerVpsWait[] = [];
+  for (const entry of waits) {
+    if (!hasKeys(entry, ["sessionId", "kind", "openedAt", "title", "repository"])) return null;
+    const { sessionId, kind, openedAt, title, repository } = entry;
+    if (typeof sessionId !== "string" || !RUNNER_SESSION_ID.test(sessionId)) return null;
+    if ((kind !== "permission" && kind !== "question") || !isRunnerTime(openedAt)) return null;
+    if (
+      !isOptionalText(title, RUNNER_MAX_TITLE_CHARS) ||
+      !isOptionalText(repository, RUNNER_MAX_REPOSITORY_CHARS)
+    ) {
+      return null;
+    }
+    parsed.push({ sessionId, kind, openedAt, title, repository });
+  }
+  return { ok: true, now, waits: parsed, truncated };
+}
+
+/** A time in epoch ms: a whole number, from 0. */
+export function isRunnerTime(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function isOptionalText(value: unknown, max: number): value is string | null {
+  return value === null || isText(value, max);
 }

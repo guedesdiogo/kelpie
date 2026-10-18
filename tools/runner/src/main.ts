@@ -5,6 +5,7 @@ import { PROTOCOL, VERSION } from "./protocol.ts";
 import { loadSecrets, RunnerConfigError } from "./secrets.ts";
 import { createHandler } from "./server.ts";
 import { Sessions } from "./sessions.ts";
+import { VpsSessions } from "./vps-sessions.ts";
 import { prepareWorkDir } from "./workdir.ts";
 
 // EX_CONFIG. The systemd unit doesn't restart the runner on it: a setting needs fixing first.
@@ -25,10 +26,20 @@ try {
     cwd,
     warn: (message) => console.error(`kelpie-runner: ${message}`),
   });
+  // Every other Claude Code session on the server, read only (ADR-0057).
+  const vps = new VpsSessions({
+    claudeDir: config.claudeDir,
+    spoolDir: config.spoolDir,
+    workDir: cwd,
+    holds: (id) => sessions.holds(id),
+    secrets,
+    warn: (message) => console.error(`kelpie-runner: ${message}`),
+  });
   const fetch = createHandler({
     secrets,
     log: (entry) => console.log(JSON.stringify(entry)),
     sessions,
+    vps,
   });
   // Loopback only: the tunnel's connector reaches the runner there, and nothing else should. Bun's
   // idle timeout stands, but for a turn's stream, which lifts it.

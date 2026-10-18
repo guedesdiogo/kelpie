@@ -4,6 +4,7 @@
 - Date: 2026-10-17
 - Issue: [#413](https://github.com/guedesdiogo/kelpie/issues/413)
 - Decided by the owner in the session of 2026-10-17; his answers are quoted on #413
+- Amended by: [ADR-0058](0058-session-file-waits.md), a session file's own `waiting` also opens a wait (§2, §4)
 
 ## Context
 

@@ -10,13 +10,17 @@ import {
   type DeliveryFailure,
   type EgressDestination,
   isLocale,
+  isRunnerTime,
   type Localized,
   RecipientUnavailableError,
   type RunnerAnswerOutcome,
   type RunnerChatContract,
   type RunnerCloseOutcome,
+  type RunnerSessionsContract,
+  type RunnerSessionsOutcome,
   type RunnerToolResult,
   type RunnerTurnRequest,
+  type RunnerWaitsOutcome,
   type SendOptions,
   type SendOutcome,
   type SetupFormsContract,
@@ -34,6 +38,8 @@ import {
   closeSession,
   giveResult,
   isSessionId,
+  listSessions,
+  listWaits,
   parseRunnerSecret,
   RUNNER_NAME,
   RUNNER_SECRET,
@@ -384,7 +390,7 @@ export class RunnerChat extends WorkerEntrypoint<Env> implements RunnerChatContr
         release();
         return invalidInput;
       }
-      const found = await this.#runner();
+      const found = await storedRunner(this.env);
       if (!found.ok) {
         release();
         return found;
@@ -400,23 +406,42 @@ export class RunnerChat extends WorkerEntrypoint<Env> implements RunnerChatContr
   async answer(sessionId: string, result: RunnerToolResult): Promise<RunnerAnswerOutcome> {
     const checked = checkedResult(sessionId, result);
     if (!checked) return invalidInput;
-    const found = await this.#runner();
+    const found = await storedRunner(this.env);
     return found.ok ? giveResult(found.runner, found.secret, sessionId, checked) : found;
   }
 
   async close(sessionId: string): Promise<RunnerCloseOutcome> {
     if (!isSessionId(sessionId)) return invalidInput;
-    const found = await this.#runner();
+    const found = await storedRunner(this.env);
     return found.ok ? closeSession(found.runner, found.secret, sessionId) : found;
   }
+}
 
-  /** The runner's binding and its stored secret. */
-  async #runner() {
-    const runner = runnerOf(this.env);
-    if (!runner) return { ok: false as const, reason: "not_configured" as const };
-    const found = await runnerSecret(this.env);
-    return found.ok ? { ok: true as const, runner, secret: found.secret } : found;
+/**
+ * Reads the Claude Code sessions on the owner's VPS (ADR-0057 §5, #433), for Master's tool and the
+ * notices: only reads, sent with the stored secret, which never leaves this Worker. A separate
+ * entrypoint, so whatever binds it can't open forms, read a secret, or reach the `claude-code`
+ * route's sessions. Each answer is a value, checked against the protocol before it crosses RPC.
+ */
+export class RunnerSessions extends WorkerEntrypoint<Env> implements RunnerSessionsContract {
+  async list(): Promise<RunnerSessionsOutcome> {
+    const found = await storedRunner(this.env);
+    return found.ok ? listSessions(found.runner, found.secret) : found;
   }
+
+  async waits(since: number): Promise<RunnerWaitsOutcome> {
+    if (!isRunnerTime(since)) return invalidInput;
+    const found = await storedRunner(this.env);
+    return found.ok ? listWaits(found.runner, found.secret, since) : found;
+  }
+}
+
+/** The runner's binding and its stored secret, or why there is none. */
+async function storedRunner(env: Env) {
+  const runner = runnerOf(env);
+  if (!runner) return { ok: false as const, reason: "not_configured" as const };
+  const found = await runnerSecret(env);
+  return found.ok ? { ok: true as const, runner, secret: found.secret } : found;
 }
 
 /**
