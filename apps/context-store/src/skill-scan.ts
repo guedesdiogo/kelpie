@@ -237,6 +237,8 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
   // Each line is reported once, whatever finds it.
   const flagged = new Set<string>();
   const flag = (path: string, line: number) => {
+    // Past the listed findings only the count matters, so the lines stop being kept.
+    if (hiddenFindings.length >= MAX_FINDINGS) return true;
     const key = `${line}:${path}`;
     const fresh = !flagged.has(key);
     flagged.add(key);
@@ -335,6 +337,7 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
   const variants = variantLines.reduce((sum, { offsets }) => sum + offsets.length, 0);
   if (variants > MAX_VARIANTS) {
     for (const { text, offsets, ...at } of variantLines) {
+      if (!flag(at.path, at.line)) continue;
       const shown = new Set(offsets);
       hide(at, () => excerpt(text, offsets[0] ?? 0, (_char, offset) => shown.has(offset)));
     }

@@ -756,6 +756,9 @@ describe("the static scan", () => {
       decoded('description: "Reads PDFs\\uFEFF and merges"', "Reads PDFs and merges").verdict,
     ).toBe("blocked");
     expect(decoded('description: "Reads PDFs\\L and merges"').verdict).toBe("blocked");
+    // A line with a hidden character and past eight variants is still one finding.
+    const both = scan("a.md", `x\u{200B} ${"\u{8FBB}\u{E0100}".repeat(9)}`);
+    expect(both.findings).toHaveLength(1);
     const quoted = decoded("description: 'it''s \u{200B} hidden'");
     expect(quoted.findings.map((finding) => finding.line)).toEqual([3]);
     // A key that only starts like the one at fault doesn't take its line.
