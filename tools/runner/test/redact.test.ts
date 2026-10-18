@@ -379,7 +379,7 @@ describe("redact's cost", () => {
     ["-----BEGIN A-----", "-----BEGIN A-----"],
     ["x://:", "x://:"],
     ["commit ", "commit "],
-  ])("takes linear time on %j: 4 times the text, under 8 times the cost", (_, unit) => {
+  ])("takes linear time on %j: 8 times the text, well under quadratic cost", (_, unit) => {
     const of = (length: number) => unit.repeat(Math.ceil(length / unit.length)).slice(0, length);
     // The best of three runs, after a warm-up, so a pause of the collector doesn't count.
     const cost = (text: string) => {
@@ -391,14 +391,15 @@ describe("redact's cost", () => {
       }
       return best;
     };
-    const small = of(50_000);
+    const small = of(25_000);
     const large = of(200_000);
     redact(small);
     const smallCost = cost(small);
     const largeCost = cost(large);
-    // Quadratic would cost about 16 times as much, and took 12 to 60 s on the larger text: the
-    // ceiling is a generous one, for a CI runner under coverage.
-    expect(largeCost / Math.max(smallCost, 1)).toBeLessThan(8);
+    // Linear costs about 8 times as much on 8 times the text, and quadratic about 64 times; it
+    // took 12 to 60 s on the larger text. The bound sits far from both, and the floor keeps a
+    // sub-millisecond baseline from turning a CI runner's noise into a failure.
+    expect(largeCost / Math.max(smallCost, 5)).toBeLessThan(24);
     expect(largeCost).toBeLessThan(1_000);
   });
 });
