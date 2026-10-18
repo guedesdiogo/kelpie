@@ -125,7 +125,10 @@ export class FakeVaultBackend implements VaultBackend {
     const head = this.#branches.get(request.branch);
     if (head !== request.expectedHead) return { kind: "stale" };
     const files = new Map(this.#commit(head).files);
-    for (const { path, content } of request.writes) files.set(path, content);
+    // A binary file is kept as one character per byte, so a test reads it back as a string.
+    for (const { path, content } of request.writes) {
+      files.set(path, typeof content === "string" ? content : String.fromCharCode(...content));
+    }
     for (const path of request.deletions) {
       // As GitHub does, a commit that removes a missing file is refused.
       if (!files.has(path)) return { kind: "refused", reason: "UNPROCESSABLE" };

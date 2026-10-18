@@ -3,7 +3,7 @@
 A pull request that changes the interface answers yes to each line:
 
 - [ ] Every color, size, radius, duration and easing comes from a token, unless a pattern in section 5 sets the number.
-- [ ] Only `transform`, `opacity` and color animate, apart from the contained sizes in 5.1, 5.2, 5.3, 5.9, 5.17, 5.18 and 5.25 and the mask reveal in 5.7; no `transition: all`.
+- [ ] Only `transform`, `opacity` and color animate, apart from the contained sizes in 5.1, 5.2, 5.3, 5.9, 5.17, 5.18 and 5.25 (the panel's grow, a skill's review card and a new skill's gap) and the mask reveal in 5.7; no `transition: all`.
 - [ ] Keyboard-triggered actions don't animate their way in or out; progress and results still show.
 - [ ] Loops stop within 5 s, apart from the mascot's life in place (5.19), and the steady state reads without motion.
 - [ ] Exits are faster than entries, and staggers stop at 300 ms.

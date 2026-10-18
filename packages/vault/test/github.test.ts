@@ -335,6 +335,27 @@ describe("GitHubVaultBackend", () => {
     });
   });
 
+  it("commits a binary file's bytes as they are", async () => {
+    const github = fakeGitHub({});
+    await backend(github).commit({
+      branch: "main",
+      expectedHead: HEAD,
+      headline: "Install a skill",
+      writes: [
+        { path: "agents/kelpie/skills/fonts/assets/a.ttf", content: new Uint8Array([0, 1, 255]) },
+      ],
+      deletions: [],
+    });
+    const last = github.calls.at(-1);
+    if (!last) throw new Error("no request was made");
+    const { input } = (
+      last.body as { variables: { input: { fileChanges: { additions: unknown[] } } } }
+    ).variables;
+    expect(input.fileChanges.additions).toEqual([
+      { path: "agents/kelpie/skills/fonts/assets/a.ttf", contents: "AAH/" },
+    ]);
+  });
+
   it("reports a stale head as such, not as an error", async () => {
     const outcome = await backend(fakeGitHub({}, { stale: true })).commit({
       branch: "main",
@@ -405,5 +426,12 @@ describe("GitHubVaultBackend", () => {
 
   it("hashes text like git", async () => {
     expect(await gitBlobSha("# Plain\n")).toBe("adf3919bcec218dd4aabbca517159195c3d04d3f");
+  });
+
+  it("hashes a binary file's bytes like git", async () => {
+    // `printf '\x00\xff' | git hash-object --stdin`
+    expect(await gitBlobSha(new Uint8Array([0, 255]))).toBe(
+      "ba01f6b05bdbb386b35f4d086e268c5d422cafb9",
+    );
   });
 });

@@ -5,20 +5,22 @@
 import { ACCESSORIES, COLORS, EYES, HEADS, SHAPES } from "./mascot-art.js";
 
 /**
- * The editor's sections, in the nav's order. Profile and Mascot ship with #379; the agent's own
- * files arrive with #381, and until then show, disabled, so the frame doesn't change.
+ * The editor's sections, in the nav's order: Profile and Mascot (#379), then the agent's own files
+ * (#381).
  */
 export const SECTIONS = [
-  { id: "profile", icon: "profile", ready: true },
-  { id: "mascot", icon: "body", ready: true },
-  { id: "soul", icon: "soul", ready: false },
-  { id: "rules", icon: "rules", ready: false },
-  { id: "memory", icon: "memory", ready: false },
-  { id: "skills", icon: "skills", ready: false },
+  { id: "profile", icon: "profile" },
+  { id: "mascot", icon: "body" },
+  { id: "soul", icon: "soul" },
+  { id: "rules", icon: "rules" },
+  { id: "memory", icon: "memory" },
+  { id: "skills", icon: "skills" },
 ];
 
-/** The sections a save writes, each through its own route. */
-export const SAVED_SECTIONS = ["profile", "mascot"];
+/** The sections a save writes: the profile and the mascot each through its own route. */
+export const SAVED_SECTIONS = ["profile", "mascot", "soul", "rules", "memory", "skills"];
+/** The agent's own files, which one save writes together, in one commit (ADR-0058). */
+export const FILE_SECTIONS = ["soul", "rules", "memory", "skills"];
 
 /** The mascot's axes, one tab each, in the order the summary reads them (ADR-0045 §2). */
 export const AXES = ["shape", "color", "eyes", "head", "accessory"];

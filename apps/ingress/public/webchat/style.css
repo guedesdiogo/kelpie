@@ -1983,16 +1983,9 @@ dialog h2 {
 .navi[aria-selected="true"] {
   color: var(--fg);
 }
-.navi[aria-disabled="true"] {
-  cursor: default;
-  opacity: 0.55;
-}
 .navi .nl {
   flex: 1;
   min-inline-size: 0;
-}
-.navi .soon {
-  font-size: var(--text-xs);
 }
 .navi .icon-m20 {
   inline-size: 16px;
@@ -2508,6 +2501,942 @@ dialog h2 {
   font-size: var(--text-sm);
 }
 
+/* ── The agent's own files (5.25, #381): mockup v33, boards 13b to 13h and 17 ──────────────────── */
+
+.editor .files-section[hidden] {
+  display: none;
+}
+.editor .files-path {
+  margin: 18px 22px 0;
+}
+.editor .path {
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* In the header: the file's path, then the switch, between the title and Close. */
+.editor .file-controls {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-3);
+  min-inline-size: 0;
+}
+.editor .file-controls .path {
+  flex: 1;
+}
+.editor .editor-head:has(.file-controls) .editor-title {
+  flex: none;
+}
+
+/* Visualizar / Editar: two icon segments and an indicator that slides with --spring-fast. */
+.editor .mode {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  border: 1px solid var(--muted);
+  border-radius: 11px;
+  background: var(--sunken);
+}
+.editor .mode-ind {
+  position: absolute;
+  inset-block: 2px;
+  inset-inline-start: 0;
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.14);
+  pointer-events: none;
+}
+.editor .mode .seg-b {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color var(--dur-fade) var(--ease-fade);
+}
+.editor .mode .seg-b[aria-checked="true"] {
+  color: var(--fg);
+}
+.editor .mode .icon {
+  inline-size: 15px;
+  block-size: 15px;
+}
+.editor .tip kbd {
+  margin-inline-start: 6px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg) 18%, transparent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* The file: formatted to read, plain text to edit. */
+.editor .fileview {
+  position: relative;
+}
+.editor .fileview .leaving {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+}
+.editor .anchor {
+  position: absolute;
+  inset-inline-start: 8px;
+  inline-size: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0;
+  pointer-events: none;
+}
+.editor .md {
+  max-inline-size: 62ch;
+  margin: 20px 22px 0;
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.editor .md > :first-child {
+  margin-block-start: 0;
+}
+.editor .md p,
+.editor .md ul,
+.editor .md ol,
+.editor .md blockquote {
+  margin: 0 0 10px;
+}
+.editor .md ul,
+.editor .md ol {
+  display: grid;
+  gap: 4px;
+  padding-inline-start: 20px;
+}
+.editor .md .md-h1 {
+  margin: 0 0 10px;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 680;
+  line-height: var(--leading-h);
+  letter-spacing: var(--tracking-display);
+}
+.editor .md :is(.md-h2, .md-h3, .md-h4, .md-h5, .md-h6) {
+  margin: 18px 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.editor .md blockquote {
+  padding-inline-start: 12px;
+  border-inline-start: 2px solid var(--line);
+  color: var(--muted);
+}
+.editor .md hr {
+  margin: 14px 0;
+  border: 0;
+  border-block-start: 1px solid var(--line);
+}
+/* Inline code in a file, as a reply's: Geist Mono. */
+.editor .md :not(pre) > code[dir] {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+.editor .md .frontmatter pre,
+.editor .md .code pre {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.editor .md-empty {
+  color: var(--muted);
+}
+
+/* Editing: the plain text, the Markdown's marks dimmed and the caret's line marked (iA Writer, VS
+   Code). The textarea is the field; the lines under it are its copy, for the eye only. */
+.editor .doc {
+  position: relative;
+  padding: 18px 22px 8px 0;
+  background: var(--surface);
+}
+.editor .doc[hidden] {
+  display: none;
+}
+.editor .doc-lines,
+.editor .doc-input {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.editor .doc-lines > div {
+  min-block-size: 1.75em;
+  padding-inline-start: 22px;
+  border-inline-start: 2px solid transparent;
+  color: var(--fg);
+}
+.editor .doc-lines .mk {
+  color: var(--muted);
+  opacity: 0.75;
+}
+.editor .doc-lines .h {
+  font-weight: 600;
+}
+.editor .doc-lines .cur {
+  border-inline-start-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.editor .doc-input {
+  position: absolute;
+  inset: 18px 22px 8px 0;
+  inline-size: calc(100% - 22px);
+  padding: 0 0 0 24px;
+  overflow: hidden;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--fg);
+  resize: none;
+}
+.editor .doc-input::selection {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  color: transparent;
+}
+/* Focused, the caret and its marked line show where the owner is; no frame around the page. */
+.editor .doc-input:focus,
+.editor .doc-input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.editor .doc-m {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 6px 22px var(--space-5);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.editor .doc-m .count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+/* A note in a section: its files loading, a vault that is off, or a read that failed. */
+.editor .files-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 18px 22px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.editor .files-note:empty {
+  display: none;
+}
+.editor .files-note .spinner {
+  inline-size: 12px;
+  block-size: 12px;
+  border: 2px solid currentColor;
+  border-inline-end-color: transparent;
+  border-radius: 50%;
+  animation: files-spin 1s linear 5;
+}
+@keyframes files-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* Rules, still empty: the mascot taking notes, one line, one action. */
+.editor .files-empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-3);
+  margin: 48px 22px 0;
+  text-align: center;
+}
+.editor .files-empty .mascot-host {
+  inline-size: 104px;
+  block-size: 104px;
+}
+.editor .files-empty b {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+}
+.editor .files-empty .why {
+  display: block;
+  max-inline-size: 40ch;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+/* A conflict keeps the owner's draft and shows the vault's version (ADR-0058 §3). */
+.editor .files-conflict,
+.editor .files-refused {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin: 16px 22px 0;
+  padding: 10px 12px;
+  border-radius: var(--r-card);
+  background: color-mix(in srgb, var(--warm) 10%, var(--surface));
+  font-size: var(--text-sm);
+}
+.editor .files-refused {
+  background: color-mix(in srgb, var(--danger) 9%, var(--surface));
+}
+.editor .files-conflict > .icon {
+  color: var(--warm);
+}
+.editor .files-refused > .icon {
+  color: var(--danger);
+}
+.editor .files-conflict p {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  margin: 0;
+}
+.editor .files-conflict b {
+  font-weight: 600;
+}
+.editor .files-conflict p span {
+  color: var(--muted);
+}
+.editor .files-conflict-a {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.editor .files-theirs {
+  max-block-size: 220px;
+  margin: 8px 22px 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.editor .btn.sm {
+  padding: 4px 10px;
+  font-size: var(--text-sm);
+}
+
+/* Memory: Hermes's budget before the entries. Past 80% --warm, over the limit --danger. */
+.editor .budget {
+  display: grid;
+  gap: 6px;
+  margin: 16px 22px 0;
+}
+.editor .budget .bt {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.editor .budget-count {
+  display: inline-grid;
+  overflow: hidden;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.editor .budget-count > .roll {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+}
+.editor .budget .bar {
+  block-size: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--sunken);
+}
+/* The fill scales from its start, a transform, never its width. */
+.editor .budget .bar i {
+  display: block;
+  block-size: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transform-origin: 0 50%;
+  transition:
+    transform var(--spring-base-dur) var(--spring-base),
+    background-color var(--dur-fade) var(--ease-fade);
+}
+[dir="rtl"] .editor .budget .bar i {
+  transform-origin: 100% 50%;
+}
+.editor .budget[data-level="near"] .bar i {
+  background: var(--warm);
+}
+.editor .budget[data-level="over"] .bar i {
+  background: var(--danger);
+}
+.editor .budget[data-level="over"] .budget-note {
+  color: var(--danger);
+  font-weight: 500;
+}
+.editor .mems {
+  display: grid;
+  gap: 6px;
+  margin: 12px 22px 0;
+}
+.editor .mem-e {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 6px 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-btn);
+  background: var(--bg);
+}
+.editor .mem-e:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.editor .mem-e.bad {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 14%, transparent);
+}
+/* The row's ring shows the focus; the field inside it needs no second one. */
+.editor .mem-t:focus-visible,
+.editor .field .txt:focus-visible {
+  outline: none;
+}
+.editor .mem-t {
+  flex: 1;
+  min-inline-size: 0;
+  padding: 2px 0;
+  overflow: hidden;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.45;
+  resize: none;
+}
+.editor .mems-empty,
+.editor .skl-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.editor .addb,
+.editor .backb {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--muted);
+  border-radius: var(--r-btn);
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.editor .files-memory > .addb {
+  margin: 10px 22px 0;
+}
+.editor .files-memory > .doc-m {
+  display: block;
+}
+.editor .backb {
+  margin: 14px 22px 0;
+  border-color: transparent;
+  color: var(--muted);
+  padding-inline-start: 4px;
+}
+
+/* Skills: where each came from; one primary action. */
+.editor .skl {
+  display: grid;
+  gap: 6px;
+  margin: 12px 22px 0;
+}
+.editor .skl-r {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 1px 12px;
+  inline-size: 100%;
+  padding: 10px 10px 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-btn);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+/* A pending install opens nothing until Save; its ✕ sits beside it. */
+.editor .skl-r[aria-disabled="true"] {
+  cursor: default;
+}
+.editor .skl-i {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.editor .skl-i > .skl-r {
+  flex: 1;
+  min-inline-size: 0;
+}
+.editor .skl-r .skt {
+  display: grid;
+  grid-row: 1 / span 2;
+  place-items: center;
+  inline-size: 34px;
+  block-size: 34px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  color: var(--accent);
+}
+.editor .skl-r b {
+  grid-column: 2;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.editor .skl-r .sd {
+  grid-column: 2;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editor .skl-r .so {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.editor .skl-r > .icon,
+.editor .skl-alert {
+  grid-column: 4;
+  grid-row: 1 / span 2;
+  color: var(--muted);
+}
+.editor .skl-alert {
+  color: var(--warm);
+}
+.editor .skl-add {
+  display: flex;
+  gap: var(--space-2);
+  margin: 12px 22px var(--space-5);
+}
+.editor .skl-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 22px var(--space-5);
+}
+.editor .skl-actions .files-note {
+  margin: 0;
+}
+.editor .skl-detail .field-error {
+  margin: 0 22px var(--space-3);
+}
+
+/* Installing a skill: from GitHub, a file or pasted text, always reviewed first (research on #381). */
+.editor .inst {
+  display: grid;
+  gap: 12px;
+  margin: 0 22px var(--space-5);
+}
+.editor .inst > .doc-m {
+  display: block;
+  margin: 0;
+}
+.editor .inst > .backb {
+  margin: 14px 0 0;
+}
+.editor .inst[data-dragging] {
+  outline: 2px dashed var(--accent);
+  outline-offset: 6px;
+}
+.editor .inst-seg {
+  display: flex;
+  max-inline-size: 440px;
+  padding: 3px;
+  border: 1px solid var(--muted);
+  border-radius: 12px;
+  background: var(--sunken);
+}
+.editor .inst-seg .seg-b {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.editor .inst-seg .seg-b[aria-checked="true"] {
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.14);
+}
+.editor .inst .field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 12px;
+  border: 1px solid var(--muted);
+  border-radius: 12px;
+  background: var(--bg);
+}
+.editor .inst .field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.editor .inst .field[hidden],
+.editor .drop[hidden],
+.editor .paste[hidden],
+.editor .inst > .doc-m[hidden] {
+  display: none;
+}
+.editor .field > .icon {
+  color: var(--muted);
+}
+.editor .inst .field .txt {
+  flex: 1;
+  min-inline-size: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+/* The App Store's Get: one element, a pill that becomes its own ring, then a check. */
+.editor .get {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  block-size: 30px;
+  min-inline-size: 72px;
+  padding: 0 12px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.editor .get.busy,
+.editor .get.ok {
+  inline-size: 30px;
+  min-inline-size: 30px;
+  padding: 0;
+}
+.editor .get.ok {
+  background: var(--ok);
+  color: var(--surface);
+}
+/* It turns while the fetch waits, and stops within 5 s (rule 8). */
+.editor .get .ring {
+  inline-size: 24px;
+  block-size: 24px;
+  animation: files-spin 1s linear 5;
+}
+.editor .get .ring circle {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+}
+.editor .get .ring .track {
+  stroke-opacity: 0.3;
+}
+.editor .get .ring .arc {
+  stroke-dasharray: 0.3 1;
+  stroke-linecap: round;
+}
+.editor .drop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 14px;
+  border: 1px dashed var(--muted);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.editor .paste {
+  display: grid;
+  justify-items: end;
+  gap: var(--space-2);
+}
+.editor .paste-t {
+  inline-size: 100%;
+  min-block-size: 160px;
+  padding: 10px 12px;
+  border: 1px solid var(--muted);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  resize: vertical;
+}
+.editor .says .phase {
+  display: inline-grid;
+  min-block-size: 1.4em;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.editor .says .phase > .roll {
+  grid-area: 1 / 1;
+}
+.editor .inst-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
+/* The review card: the field's place opens into it, its height on --spring-moment (§4.4). */
+.editor .rev {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  transform-origin: top center;
+}
+.editor .rev-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+.editor .rev-h b {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+}
+.editor .rev-h .rd {
+  font-size: 13px;
+}
+.editor .rev .src,
+.editor .rev-left,
+.editor .rev-pin,
+.editor .rev-replaces {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.editor .rev-left,
+.editor .rev-pin,
+.editor .rev-replaces {
+  font-family: var(--font-body);
+  font-size: 12.5px;
+}
+.editor .rev-warn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--fg);
+  font-size: 12.5px;
+}
+.editor .rev-warn > .icon {
+  color: var(--warm);
+}
+.editor .rev .files {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 10px;
+  list-style: none;
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  font-size: 12.5px;
+}
+.editor .rev .files li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 0;
+}
+.editor .rev .files .mono {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editor .rev .files .tag {
+  margin-inline-start: auto;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.editor .rev-diff summary {
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.editor .rev .rev-diff pre {
+  max-block-size: 240px;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.editor .rev-diff .add {
+  color: var(--ok);
+}
+.editor .rev-diff .del {
+  color: var(--danger);
+}
+.editor .scan {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.scan.clean > .icon {
+  color: var(--ok);
+}
+.scan.caution > .icon {
+  color: var(--warm);
+}
+.editor .scan.blocked {
+  color: var(--danger);
+  font-weight: 500;
+}
+.editor .findings {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.editor .rev .findings li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+.editor .rev .findings .mono {
+  font-family: var(--font-mono);
+}
+.editor .findings .kind {
+  color: var(--muted);
+}
+.editor .rev .findings li > code {
+  flex-basis: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editor .rev-md {
+  max-block-size: 260px;
+  margin: 0;
+  overflow: auto;
+}
+.editor .rev-md[hidden] {
+  display: none;
+}
+.editor .rev-a {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.editor .rev-a .il {
+  display: inline-grid;
+  overflow: hidden;
+}
+.editor .rev-a .il > .roll {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+}
+.editor .rev-a .ib.ok {
+  background: var(--ok);
+  color: var(--surface);
+}
+.editor .rev-a .ib.ok .il {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* The card folds into a chip that travels on an arc to its row (5.7's travel). */
+.chipfly {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  z-index: 30;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 /* ── Moving between agents (5.14): the mascot and the name travel, the rest crossfades ───────── */
 
 @view-transition {
@@ -2631,12 +3560,8 @@ dialog h2 {
     padding: 6px 2px 5px;
     font-size: 11px;
   }
-  .editor.sheet .navi .soon,
   .editor.sheet .navi .mark-dot[data-state="changed"] {
     position: absolute;
-  }
-  .editor.sheet .navi .soon {
-    display: none;
   }
   .editor.sheet .navi .mark-dot {
     position: absolute;
@@ -2666,8 +3591,27 @@ dialog h2 {
     min-block-size: 44px;
     font-size: 12.5px;
   }
-  .editor.sheet .inp {
+  .editor.sheet .inp,
+  .editor.sheet .doc-input,
+  .editor.sheet .doc-lines,
+  .editor.sheet .mem-t,
+  .editor.sheet .inst .field .txt,
+  .editor.sheet .paste-t {
     font-size: var(--text-input-phone);
+  }
+  /* On the phone, a file's path gives its room to the switch. */
+  .editor.sheet .file-controls .path {
+    display: none;
+  }
+  .editor.sheet .mode .seg-b,
+  .editor.sheet .addb,
+  .editor.sheet .backb,
+  .editor.sheet .get {
+    min-block-size: 44px;
+  }
+  .editor.sheet .get.busy,
+  .editor.sheet .get.ok {
+    inline-size: 44px;
   }
   .editor.sheet .opt,
   .editor.sheet .btn,
@@ -2764,6 +3708,11 @@ dialog h2 {
   transform: none;
 }
 
+/* A file's spinner and the fetch's ring stand still; the words say what happens (rule 10). */
+:root[data-reduced] .files-note .spinner,
+:root[data-reduced] .get .ring {
+  animation: none;
+}
 /* Under reduced motion the pencil only fades (rule 10). */
 :root[data-reduced] :is(.arow, li) .pen {
   scale: 1;

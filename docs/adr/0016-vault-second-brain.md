@@ -5,6 +5,7 @@
 - Issue: [#58](https://github.com/guedesdiogo/kelpie/issues/58)
 - Amended by: [ADR-0020](0020-shared-memory-engine.md), third parties' data may enter the vault, an agent may change its own persona, rules or skills without review when that item's approval is off, or at or above the confidence floor when it is on, and sharing goes through the single writer instead of symlinks and git sync; [ADR-0036](0036-agent-roles-models-and-subagents.md), subagents have no `agents/<id>/` folder in the vault
 - Amended by: [ADR-0032](0032-file-bytes-in-r2.md), the original bytes of files that arrive on a channel live in R2 behind a pointer note, so they leave with the vault only through the export; [ADR-0039](0039-routines-as-vault-files.md), the layout gains `agents/<agent-id>/schedules/`, which Kelpie writes through configuration commands, with no pull request
+- Amended by: [ADR-0058](0058-owner-edits-agent-files-from-the-webchat.md), the owner's edits in the webchat's editor are committed directly, with `Kelpie-Via: webchat` and no pull request, and neither the personal-data gate nor the sanitizer runs on them
 
 ## Context
 

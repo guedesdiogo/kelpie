@@ -1,4 +1,4 @@
-# ADR-0058: A session file's own "waiting" also opens a wait, beside the hooks
+# ADR-0059: A session file's own "waiting" also opens a wait, beside the hooks
 
 - Status: Accepted
 - Date: 2026-10-17

@@ -34,7 +34,8 @@ export interface CommitRequest {
   headline: string;
   /** Trailers go here, such as `Kelpie-Agent: <agent-id>` (ADR-0016). */
   body?: string;
-  writes: readonly { path: string; content: string }[];
+  /** Text, written as UTF-8, or a binary file's bytes, such as a skill's font (ADR-0058 §5). */
+  writes: readonly { path: string; content: string | Uint8Array }[];
   deletions: readonly string[];
 }
 

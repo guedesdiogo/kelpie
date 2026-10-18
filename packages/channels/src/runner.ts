@@ -356,7 +356,7 @@ export type RunnerVpsState =
   | "ended"
   | "unknown";
 
-/** What its session file says, as Claude Code writes it: `waiting` opens a wait too (ADR-0058). */
+/** What its session file says, as Claude Code writes it: `waiting` opens a wait too (ADR-0059). */
 export type RunnerVpsStatus = "busy" | "idle" | "waiting" | "unknown";
 
 /** One session. Times are epoch ms; null where its session file didn't say, or a field was dropped. */
