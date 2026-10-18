@@ -21,6 +21,7 @@ type ModelsGateway = {
   providers: ConfigPorts["models"]["providers"];
   instanceModels: ConfigPorts["models"]["view"];
   configureDefaults: ConfigPorts["models"]["configure"];
+  setClaudeCode: ConfigPorts["models"]["setClaudeCode"];
 };
 
 /** The admin API's dependencies on this Worker's bindings; exported for the Worker's own test. */
@@ -82,6 +83,7 @@ export function depsFor(env: Env): AdminDeps {
         providers: () => gateway.providers(),
         view: () => gateway.instanceModels(),
         configure: (settings, actor) => gateway.configureDefaults(settings, actor),
+        setClaudeCode: (on, actor) => gateway.setClaudeCode(on, actor),
       },
       vault: {
         held: () => vault.held(),

@@ -49,7 +49,7 @@ function fakePorts() {
   let main: string | null = null;
   const roleOf = (id: string) =>
     id === main ? { ...SPECIALIST, role: "main" as const } : SPECIALIST;
-  const models: { settings: object } = { settings: {} };
+  const models: { settings: object; claudeCode: boolean } = { settings: {}, claudeCode: false };
   /** What channel-egress answers about the runner; a test changes it to another case. */
   const runner: {
     form: Awaited<ReturnType<ChannelFormsContract["createRunnerForm"]>>;
@@ -97,14 +97,24 @@ function fakePorts() {
     models: {
       async providers() {
         calls.push("models.providers");
-        return ["anthropic"];
+        return models.claudeCode ? ["anthropic", "claude-code"] : ["anthropic"];
       },
       async view() {
-        return { settings: models.settings, pinned: "anthropic", providers: ["anthropic"] };
+        return {
+          settings: models.settings,
+          pinned: "anthropic",
+          providers: ["anthropic"],
+          claudeCode: models.claudeCode,
+        };
       },
       async configure(settings, actor) {
         calls.push(`models.configure ${JSON.stringify(settings)} ${actor.via}`);
         models.settings = settings;
+        return { ok: true };
+      },
+      async setClaudeCode(on, actor) {
+        calls.push(`models.setClaudeCode ${on} ${actor.via}`);
+        models.claudeCode = on;
         return { ok: true };
       },
     },
@@ -380,7 +390,7 @@ describe("configuration commands", () => {
     expect(calls).toContain(`models.configure ${JSON.stringify(settings)} admin-api`);
     expect(await commands.getModels(owner)).toEqual({
       ok: true,
-      value: { settings, pinned: "anthropic", providers: ["anthropic"] },
+      value: { settings, pinned: "anthropic", providers: ["anthropic"], claudeCode: false },
     });
     expect(await commands.configureModels(owner, { settings: { tier: "medium" } })).toEqual({
       ok: false,
@@ -413,6 +423,62 @@ describe("configuration commands", () => {
         settings: { model: { provider: "anthropic", conversation: { tier: "frontier" } } },
       }),
     ).toMatchObject({ ok: true });
+  });
+
+  it("lets only the owner turn the claude-code route on and off, audited with them (#421)", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+
+    expect(await commands.setClaudeCode(member, { on: true })).toMatchObject({
+      reason: "forbidden",
+    });
+    for (const input of [null, {}, { on: "yes" }, { on: true, also: 1 }, "on"]) {
+      expect(await commands.setClaudeCode(owner, input)).toEqual({
+        ok: false,
+        reason: "invalid_input",
+      });
+    }
+    expect(calls).not.toContain("models.setClaudeCode true admin-api");
+
+    expect(await commands.setClaudeCode(owner, { on: true })).toEqual({ ok: true, value: {} });
+    expect(await commands.getModels(owner)).toMatchObject({ value: { claudeCode: true } });
+    expect(await commands.setClaudeCode(owner, { on: false })).toEqual({ ok: true, value: {} });
+    expect(calls.filter((call) => call.startsWith("models.setClaudeCode"))).toEqual([
+      "models.setClaudeCode true admin-api",
+      "models.setClaudeCode false admin-api",
+    ]);
+  });
+
+  it("names claude-code only while it is on, and never for memory (#421)", async () => {
+    const { ports, calls } = fakePorts();
+    const commands = createConfigCommands(ports);
+    await commands.createAgent(owner, { id: "sales", name: "Sales" });
+    const conversation = { conversation: { provider: "claude-code" } };
+
+    expect(await commands.configureModels(owner, { settings: conversation })).toEqual({
+      ok: false,
+      reason: "no_key",
+    });
+    await commands.setClaudeCode(owner, { on: true });
+    expect(await commands.configureModels(owner, { settings: conversation })).toEqual({
+      ok: true,
+      value: {},
+    });
+    expect(
+      await commands.configureAgent(owner, { id: "sales", settings: { model: conversation } }),
+    ).toMatchObject({ ok: true });
+
+    // Memory's calls carry no session, so the route can't serve them: refused before llm-gateway.
+    const before = calls.length;
+    const memory = { memory: { provider: "claude-code" } };
+    expect(await commands.configureModels(owner, { settings: memory })).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(
+      await commands.configureAgent(owner, { id: "sales", settings: { model: memory } }),
+    ).toEqual({ ok: false, reason: "invalid_input" });
+    expect(calls.slice(before)).toEqual([]);
   });
 
   it("asks llm-gateway for its keys only when a change names a provider", async () => {

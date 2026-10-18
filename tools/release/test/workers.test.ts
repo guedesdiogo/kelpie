@@ -49,6 +49,18 @@ describe("WORKERS", () => {
     });
   });
 
+  // A conversation's session reaches the claude-code route, on the owner's subscription, so only
+  // conversation-runtime may bind the entrypoint that takes one (#431). context-store reads outside
+  // content and binds LlmGateway, which never does.
+  it("binds llm-gateway's LlmChat from conversation-runtime alone", () => {
+    const binders = WORKERS.filter((worker) =>
+      (configs.get(worker.app)?.services ?? []).some(
+        (service) => service.service === "kelpie-llm-gateway" && service.entrypoint === "LlmChat",
+      ),
+    ).map((worker) => worker.app);
+    expect(binders).toEqual(["conversation-runtime"]);
+  });
+
   // A binding to a missing entrypoint deploys, and fails only when called: ingress's DEPLOY_PROBE,
   // for one, is called only by the deploy's deep probe (#234). Tests stub these Workers, so the
   // names are checked here against the real ones.

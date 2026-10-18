@@ -4,6 +4,14 @@ export {
   modelAliasDescription,
   type ResolvedAlias,
 } from "./anthropic.ts";
+export {
+  type ClaudeCodeAnswerOutcome,
+  type ClaudeCodeClient,
+  ClaudeCodeProvider,
+  type ClaudeCodeTurn,
+  type ClaudeCodeTurnRequest,
+  type ClaudeCodeTurnStart,
+} from "./claude-code.ts";
 export { EFFORTS, lowerEffort } from "./efforts.ts";
 export {
   EMBEDDING_BATCH_CHARS,
@@ -25,6 +33,7 @@ export {
   type ModelDescription,
   type ModelSelection,
   type ModelSettings,
+  memoryOnSessionRoute,
   parseModelSettings,
   type ResolvedModel,
   resolveModel,

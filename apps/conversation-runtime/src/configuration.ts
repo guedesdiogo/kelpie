@@ -12,7 +12,7 @@ import {
   type SetupEvent,
   type ShownAgent,
 } from "@kelpie/config";
-import { type ModelSettings, parseModelSettings } from "@kelpie/llm/models";
+import { type ModelSettings, memoryOnSessionRoute, parseModelSettings } from "@kelpie/llm/models";
 // The router module only: the package root also loads the provider SDKs.
 import { MODEL_TIERS } from "@kelpie/llm/router";
 import { MASCOT_SCHEMA } from "./mascot-schema.ts";
@@ -43,12 +43,13 @@ You also configure Kelpie for the owner, with your configuration tools. They wor
 - For a first setup, go in this order: see which agents exist (list_agents); connect your own Telegram bot (connect_telegram); then pair the owner's Telegram account with it (pair_telegram). Create another agent, with a short id of lowercase letters, digits and hyphens, and a name (create_agent), only when the owner asks for one; to talk to it, its chat must be on. Changing an agent's model, prompt or mascot (configure_agent), yours included, is optional.
 - Your own settings change as any agent's do, with the owner's confirmation. Your configuration, subagent and task tools are always yours: a tools list narrows only your other tools. Before you lower your own tier, tell the owner.
 - Delete an agent (delete_agent) only when the owner asks for it: its subagents go with it, and nothing it held can be recovered. Master can't be deleted.
-- Changing an agent's settings or the instance's models, which agent is Master or an agent's chat, or deleting an agent, needs the owner's confirmation. Kelpie itself shows them what will change, with a Confirm button in the webchat or a code to reply with: don't ask them to confirm in other words, and never make up a code. Once they confirm, call the same tool again with the same input.
+- Changing an agent's settings or the instance's models, which agent is Master or an agent's chat, turning the claude-code route on or off, or deleting an agent, needs the owner's confirmation. Kelpie itself shows them what will change, with a Confirm button in the webchat or a code to reply with: don't ask them to confirm in other words, and never make up a code. Once they confirm, call the same tool again with the same input.
 - Kelpie itself sends the owner the links of connect_telegram, pair_telegram and connect_runner, in a message of its own after your reply. Never write those links yourself, and never make one up: just tell the owner to open the link Kelpie sent. What the owner does on that page is their yes.
 - When the owner finishes on one of those pages, Kelpie tells you in this conversation, in a note that starts "Kelpie, automatically". Don't ask them to tell you when they're done: when the note comes, go on with the next step.
 - Never ask for a secret in the chat, such as a bot token, the runner's secret or an API key. A bot token goes only into the secure form connect_telegram has Kelpie send, and the runner's secret only into connect_runner's. If the owner pastes a secret in the chat anyway, tell them to revoke it and make a new one: for the runner, a new secret in its file on the server (docs/runner.md).
 - To make a Telegram bot, the owner sends /newbot to BotFather on Telegram, which answers with the bot's token. Have them do that first, and only then call connect_telegram: its form works once and only for a few minutes. Tell them to submit the form once and wait for its page; a page that says the link was already used means the bot is connected.
 - The owner's VPS runner is the computer Kelpie's agents use. To connect it, call connect_runner: Kelpie sends a secure form where the owner pastes the runner's secret from their server, never in the chat. When the runner accepts it, Kelpie tells you here, so don't ask the owner to say they submitted it. Call runner_status when they ask how the runner is.
+- The claude-code route lets the owner's conversations reach Claude through Claude Code on their VPS runner, on their own Claude subscription, after the Anthropic API route or wherever the model settings name claude-code for conversations. Turn it on (set_claude_code) only when the owner asks: it spends the subscription's weekly usage limit, which their own coding with Claude Code shares. It never serves tasks or memory.
 - Some steps are outside what you can do: deploying Kelpie's Workers, their bindings and secrets, Cloudflare Access, and the model keys. For those, point the owner to the setup checklist in docs/admin-api.md.`;
 
 /** The commands the configuration tools run; the identity and vault commands stay off them. */
@@ -61,6 +62,7 @@ export type ConfigurationCommands = Pick<
   | "configureAgent"
   | "getModels"
   | "configureModels"
+  | "setClaudeCode"
   | "setMainAgent"
   | "setAgentChat"
   | "deleteAgent"
@@ -197,6 +199,17 @@ const SPECS = {
       additionalProperties: false,
     },
   },
+  set_claude_code: {
+    name: "set_claude_code",
+    description:
+      "Turn the claude-code route on or off. On, the owner's own conversations may reach Claude through Claude Code on their VPS runner, on their Claude subscription: after the Anthropic API route fails, or first where the model settings name claude-code for conversations. It spends the subscription's weekly usage limit, which the owner's own coding with Claude Code shares. Tasks and memory never use it. It needs the owner's confirmation, as set_main_agent does.",
+    inputSchema: {
+      type: "object",
+      properties: { on: { type: "boolean" } },
+      required: ["on"],
+      additionalProperties: false,
+    },
+  },
   set_main_agent: {
     name: "set_main_agent",
     description:
@@ -272,7 +285,10 @@ const fields = (input: unknown): Record<string, unknown> =>
 
 const NOT_OWNER = failed("Only the owner can change Kelpie's configuration.");
 const NO_KEY = failed(
-  "That provider has no key in llm-gateway, so it can't serve: the owner sets one as a deploy secret (docs/secrets.md). get_models lists the providers that have one.",
+  "That provider doesn't serve in llm-gateway: a provider needs its key, which the owner sets as a deploy secret (docs/secrets.md), and claude-code needs set_claude_code to turn it on. get_models lists the providers that serve.",
+);
+const MEMORY_ROUTE = failed(
+  "claude-code serves only conversations, never memory: name another provider for memory, or none.",
 );
 const NOT_MAIN = failed("A subagent can't be Master.");
 const NOT_SPECIALIST = failed(
@@ -404,6 +420,8 @@ const TEXTS: Localized<{
   masterKeeps: string;
   mainAgent: (agent: string, id: string) => string;
   models: (before: string, after: string) => string;
+  /** Turning the claude-code route on or off: either way it names the weekly limit it spends. */
+  claudeCode: (on: boolean) => string;
   chat: (agent: string, id: string, on: boolean) => string;
   /** `subagents` are already formatted, as `"Name" (id)`. */
   deleteAgent: (agent: string, id: string, subagents: string[]) => string;
@@ -421,6 +439,10 @@ const TEXTS: Localized<{
       `make the agent ${agent} (${id}) Master, the one you talk to, which also configures Kelpie.`,
     models: (before, after) =>
       `set the models every agent uses unless it has its own, from ${before} to ${after}.`,
+    claudeCode: (on) =>
+      on
+        ? "turn on the claude-code route: your conversations may reach Claude through Claude Code on your VPS runner, on your Claude subscription, when the Anthropic API route fails or where the model settings name claude-code. Each such turn spends the subscription's weekly usage limit, which your own coding with Claude Code shares, and may also draw extra usage if the account has it on."
+        : "turn off the claude-code route: your conversations stop reaching Claude through Claude Code on your VPS runner, so they no longer spend your Claude subscription's weekly usage limit, which your own coding shares.",
     chat: (agent, id, on) =>
       on
         ? `let you chat with the agent ${agent} (${id}).`
@@ -447,6 +469,10 @@ const TEXTS: Localized<{
       `tornar o agente ${agent} (${id}) o Master, o que conversa com você e configura o Kelpie.`,
     models: (before, after) =>
       `definir os modelos que todo agente usa quando não tem os seus, de ${before} para ${after}.`,
+    claudeCode: (on) =>
+      on
+        ? "ativar a rota claude-code: suas conversas podem chegar ao Claude pelo Claude Code no runner da sua VPS, na sua assinatura do Claude, quando a rota da API da Anthropic falhar ou onde as configurações de modelo indicarem claude-code. Cada turno assim gasta o limite de uso semanal da assinatura, que o seu próprio trabalho de código no Claude Code também usa, e também pode consumir uso extra se a conta o tiver ativado."
+        : "desativar a rota claude-code: suas conversas deixam de chegar ao Claude pelo Claude Code no runner da sua VPS, e assim deixam de gastar o limite de uso semanal da sua assinatura do Claude, que o seu próprio trabalho de código também usa.",
     chat: (agent, id, on) =>
       on
         ? `permitir que você converse com o agente ${agent} (${id}).`
@@ -473,6 +499,10 @@ const TEXTS: Localized<{
       `convertir el agente ${agent} (${id}) en el Master, el que conversa contigo y configura Kelpie.`,
     models: (before, after) =>
       `definir los modelos que usa todo agente que no tenga los suyos, de ${before} a ${after}.`,
+    claudeCode: (on) =>
+      on
+        ? "activar la ruta claude-code: tus conversaciones pueden llegar a Claude a través de Claude Code en el runner de tu VPS, con tu suscripción de Claude, cuando la ruta de la API de Anthropic falle o donde la configuración de modelos indique claude-code. Cada turno así gasta el límite de uso semanal de la suscripción, que también usa tu propio trabajo de código con Claude Code, y también puede consumir uso adicional si la cuenta lo tiene activado."
+        : "desactivar la ruta claude-code: tus conversaciones dejan de llegar a Claude a través de Claude Code en el runner de tu VPS, y así dejan de gastar el límite de uso semanal de tu suscripción de Claude, que también usa tu propio trabajo de código.",
     chat: (agent, id, on) =>
       on
         ? `permitir que converses con el agente ${agent} (${id}).`
@@ -703,6 +733,7 @@ export function configurationTools(
             "Those settings aren't valid. Pass only the settings to change, each with an allowed value.",
           );
         }
+        if (parsed.model && memoryOnSessionRoute(parsed.model)) return MEMORY_ROUTE;
         const agent = await agentOf(context, id);
         if (!("id" in agent)) return agent;
         const change = { id: agent.id, settings: parsed };
@@ -758,6 +789,8 @@ export function configurationTools(
             "Those model settings aren't valid: a provider, and each area's provider, tier and effort, from the allowed values.",
           );
         }
+        // Checked before the owner is asked: a yes that can't change anything isn't asked for.
+        if (memoryOnSessionRoute(settings)) return MEMORY_ROUTE;
         // They replace what the instance has, so the owner sees what that was.
         const current = await commands.getModels(context.actor);
         if (!current.ok) return refusal(current);
@@ -774,6 +807,43 @@ export function configurationTools(
         const result = await commands.configureModels(context.actor, change);
         if (!result.ok) return refusal(result);
         return { output: "Changed the models every agent uses unless it has its own." };
+      },
+    },
+    {
+      spec: SPECS.set_claude_code,
+      label: {
+        en: "Switching the claude-code route",
+        "pt-BR": "Ligando ou desligando a rota claude-code",
+        es: "Activando o desactivando la ruta claude-code",
+      },
+      async run(input, context) {
+        if (!isOwner(context)) return NOT_OWNER;
+        const { on } = fields(input);
+        if (typeof on !== "boolean") {
+          return failed("Say whether the claude-code route is on: true or false.");
+        }
+        // Checked before the owner is asked: a yes that can't change anything isn't asked for.
+        const current = await commands.getModels(context.actor);
+        if (!current.ok) return refusal(current);
+        if ((current.value.claudeCode ?? false) === on) {
+          return {
+            output: `The claude-code route is already ${on ? "on" : "off"}; nothing changed.`,
+          };
+        }
+        const change = { on };
+        const confirmed = await context.confirm({
+          command: "setClaudeCode",
+          input: change,
+          summary: TEXTS[context.locale].claudeCode(on),
+        });
+        if (!confirmed) return { output: WAITING };
+        const result = await commands.setClaudeCode(context.actor, change);
+        if (!result.ok) return refusal(result);
+        return {
+          output: on
+            ? "The claude-code route is on: the owner's conversations may now reach Claude through Claude Code on their runner, after the Anthropic API route, or first where the model settings name claude-code for conversations. Each such turn spends their subscription's weekly usage limit. runner_status tells whether the runner is ready."
+            : "The claude-code route is off: the owner's conversations no longer reach Claude through Claude Code.",
+        };
       },
     },
     {

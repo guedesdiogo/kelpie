@@ -1,7 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2024", "DOM", "DOM.Iterable", "DOM.AsyncIterable"],
+    "lib": ["ES2024", "ESNext.Disposable", "DOM", "DOM.Iterable", "DOM.AsyncIterable"],
     "types": []
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]

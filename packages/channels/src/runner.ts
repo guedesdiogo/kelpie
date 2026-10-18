@@ -179,14 +179,7 @@ export function parseRunnerTurnRequest(value: unknown): RunnerTurnRequest | null
   if (typeof model !== "string" || !MODEL.test(model) || !isText(system, MAX_SYSTEM_CHARS)) {
     return null;
   }
-  if (
-    typeof toolLoopMs !== "number" ||
-    !Number.isInteger(toolLoopMs) ||
-    toolLoopMs < MIN_TOOL_LOOP_MS ||
-    toolLoopMs > MAX_TOOL_LOOP_MS
-  ) {
-    return null;
-  }
+  if (!isRunnerToolLoopMs(toolLoopMs)) return null;
   const specs = parseTools(tools);
   const sent = parseMessages(messages);
   if (specs === null || sent === null) return null;
@@ -199,6 +192,19 @@ export function parseRunnerTurnRequest(value: unknown): RunnerTurnRequest | null
     messages: sent,
     toolLoopMs,
   };
+}
+
+/**
+ * A turn's tool bound, in ms: whole, from 1 s to an hour. llm-gateway checks a session's with it, at
+ * its RPC boundary (#421).
+ */
+export function isRunnerToolLoopMs(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= MIN_TOOL_LOOP_MS &&
+    value <= MAX_TOOL_LOOP_MS
+  );
 }
 
 /** A tool call's result, as llm-gateway checks it, rebuilt. */

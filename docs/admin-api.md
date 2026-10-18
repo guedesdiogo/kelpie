@@ -30,8 +30,9 @@ Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`
 | `/commands/renameAgent` | `{ "id": "sales", "name": "Sales team" }` |
 | `/commands/getAgent` | `{ "id": "sales" }` |
 | `/commands/configureAgent` | `{ "id": "sales", "settings": { "systemPrompt": "…", "quietMs": 5000, "qualifier": "jev" } }` |
-| `/commands/getModels` | none; the instance's model settings, the provider pinned as the default, and the providers with a key (#289) |
-| `/commands/configureModels` | `{ "settings": { "conversation": { "tier": "medium" }, "memory": { "tier": "cheap" } } }`; replaces the instance's model settings, which every agent follows unless it has its own. A provider without a key answers `409 no_key` |
+| `/commands/getModels` | none; the instance's model settings, the provider pinned as the default, the providers that serve, and `claudeCode`, whether the `claude-code` route is on (#289, #295) |
+| `/commands/configureModels` | `{ "settings": { "conversation": { "tier": "medium" }, "memory": { "tier": "cheap" } } }`; replaces the instance's model settings, which every agent follows unless it has its own. A provider without a key, or `claude-code` while it is off, answers `409 no_key`; `claude-code` for `memory` answers `400 invalid_input` |
+| `/commands/setClaudeCode` | `{ "on": true }` or `{ "on": false }`; turns the `claude-code` route on or off for the instance ("The claude-code route"). It is off until you turn it on |
 | `/commands/setMainAgent` | `{ "id": "sales" }`; makes the agent Master, the one the owner talks to (ADR-0036 §1). The previous one becomes a specialist that keeps its chat |
 | `/commands/setAgentChat` | `{ "id": "sales", "chat": true }`; lets the owner reach a specialist on its channels, or stops it. Master always chats |
 | `/commands/deleteAgent` | `{ "id": "sales" }`, or with `"ids": ["sales", …]`, the agents you expect it to delete; deletes the agent and its subagents for good ("Deleting an agent"). It answers `{ "deleted", "webhooksLeft", "everyThread" }`. Master and an `ids` that no longer matches answer `409 not_allowed`; a deletion cut short answers `503 unavailable`, and running it again finishes it |
@@ -67,7 +68,7 @@ Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`
 | 401 | `unauthenticated` |
 | 403 | `forbidden`, `no_owner`, `invalid_bootstrap_token`, `invalid_recovery_token`, `cross_origin` (sent from another origin's page) |
 | 404 | `unknown_agent`, `unknown_identity`, `unknown_user`, `not_found` |
-| 409 | `not_paired` (a pending identity; pair it instead), `not_connected` (the agent has no bot), `identity_taken` (a recovery to a login another user holds), `not_allowed` (the agent's role doesn't take the change, such as a subagent as Master), `no_key` (a model setting names a provider llm-gateway has no key for) |
+| 409 | `not_paired` (a pending identity; pair it instead), `not_connected` (the agent has no bot), `identity_taken` (a recovery to a login another user holds), `not_allowed` (the agent's role doesn't take the change, such as a subagent as Master), `no_key` (a model setting names a provider llm-gateway has no key for, or `claude-code` while it is off) |
 | 410 | `bootstrap_disabled`, `recovery_token_spent` |
 | 413 | `too_large` |
 | 415 | `not_json` (a `Content-Type` other than `application/json`) |
@@ -83,12 +84,26 @@ Identity values in answers are masked.
   - `conversation` covers the agent's turns;
   - `memory` covers its history checkpoints.
 - **What each scope sets:** tier and effort are set per area, so a costlier conversation never makes the agent's memory costlier. `provider` covers both areas, and an area may name its own.
+- **Providers:** `anthropic`, `openai`, and `claude-code`, which serves only conversations, and only while it is on ("The claude-code route"). `memory` can't name it.
 - **Unset fields** come from the instance's settings (`configureModels`), then the defaults:
   - the provider is the first one llm-gateway saw with a key, in the cheap tier's order, pinned then. The pin leads every tier, so a route table that lists another provider first in `medium` or `frontier` follows the pin there too;
   - the tier is `cheap`;
   - the effort is the model's own.
 - **An effort a model doesn't take** is lowered to the nearest one it does.
 - **The older `tier` setting** still counts as `model.conversation.tier` when `model` doesn't set one.
+
+**The claude-code route** (ADR-0037, #295). Each tier lists `claude-code` after `anthropic`, with the same Claude models pinned (`MODEL_ROUTES` in `llm-gateway`'s `wrangler.jsonc`). It reaches Claude through Claude Code on the owner's VPS runner ([runner.md](runner.md)), on the owner's own Claude subscription, through `channel-egress`'s `RunnerChat` entrypoint.
+- **It is off until you turn it on,** with `setClaudeCode` or by asking Master, which asks for your confirmation (CLAUDE.md: extra cost is opt-in). It spends the subscription's weekly usage limit, which your own coding with Claude Code on that server shares (ADR-0037 §5), and a turn may draw extra usage if the account has it on.
+  - The switch lives in `llm-gateway`'s `ModelDefaults` object, with the instance's settings, and each change is audited with who made it.
+  - `getModels` shows it as `claudeCode`, and lists `claude-code` among the providers that serve while it is on.
+- **When it serves:** on, it is the tier's next route after `anthropic`, so it answers when the API route fails before replying. To try it first, name it for conversations: `{ "conversation": { "provider": "claude-code" } }`, for the instance or an agent.
+  - It serves only the owner's own direct conversations, which carry the conversation's session. Tasks, history checkpoints, Dream and conflict resolve never reach it, and `memory` can't name it, nor inherit it from a scope-wide `provider`.
+  - A session reaches `llm-gateway` only through its `LlmChat` entrypoint, which only `conversation-runtime` binds (#431). `LlmGateway`, which `context-store` binds to embed and rerank the vault's notes, leaves out any session, so a Worker that reads outside content can't reach the route.
+  - It is never pinned as the instance's default provider.
+  - An agent's prompt names it among the routes it may run on, after `anthropic`.
+- **How a turn runs on it:** the conversation keeps one session on the runner. A turn that follows the session's last one sends only its new messages; otherwise a new session starts, seeded with the conversation so far as one transcript, its checkpoint and core included. The tool loop runs inside Claude Code, within the agent's `toolLoopMs` and 5 rounds, and each tool call still runs in Kelpie, behind Kelpie's confirmations. A turn ends after `toolLoopMs` plus 10 minutes at most.
+- **When it fails** it falls back like any route, with a notice: a usage limit with its reset, usage that may have run out, a login on the server that needs renewing, or a runner that can't be reached, isn't connected or is busy. A call cut on its way to the runner, as when `channel-egress` is redeployed mid-turn, counts as a runner that can't be reached. A reset more than a day back or 35 days ahead isn't named. Effort and the output token limit aren't sent on this route.
+- **Turning it off** stops new turns from reaching it. Settings that still name it fall through to the tier's other routes.
 
 **When a route fails** (ADR-0037 §4, #293), the conversation hears it from Kelpie, in its language:
 - **Fallback.** A route that fails before answering hands the turn to the tier's next one: on a rate limit, an outage, or credits that ran out or a spend limit reached. A refused key ends the turn. After the reply, a notice names the route that failed, why, and the one that answered. A conversation hears the same route and reason at most once a day.
@@ -218,7 +233,8 @@ Form pages are HTML:
 ## Setting it up
 
 1. **Deploy the other Workers first, in this order.** Each one's bindings point only at Workers before it:
-   1. `llm-gateway`, with a model key (`docs/secrets.md`). To send its calls through AI Gateway:
+   1. `channel-egress`, with its `SECRETS_KEY` and `--var INGRESS_ORIGIN:https://<ingress hostname>` (`docs/secrets.md`). `llm-gateway` binds its `RunnerChat` entrypoint, for the `claude-code` route;
+   2. `llm-gateway`, with a model key (`docs/secrets.md`). To send its calls through AI Gateway:
       - create a gateway with "Require provider credentials" (`byok_only`), so a missing key fails instead of billing Cloudflare credits;
       - pass each provider's passthrough URL as a flag, for example `--var OPENAI_BASE_URL:https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/openai`. The deploy workflow carries it to later deploys (`docs/deploy.md`). A deploy by hand without it sends calls straight to the provider, without a warning;
       - if the gateway requires authentication, set `AI_GATEWAY_TOKEN` to a Cloudflare API token with only `AI Gateway Run`. Such a token works on every gateway in the account. The Worker sends it only to `gateway.ai.cloudflare.com`.
@@ -240,7 +256,6 @@ Form pages are HTML:
       - **`openai`:** OpenAI's `text-embedding-3-small`, 1,536 dimensions, through `OPENAI_BASE_URL`. It needs `OPENAI_API_KEY`. The notes' text, personal data included, then goes to OpenAI, and through AI Gateway when that is configured; their retention policies apply.
 
       Each text is cut to its first 6,000 characters. Vectors are kept per model, so changing the var means every note is embedded again.
-   2. `channel-egress`, with its `SECRETS_KEY` and `--var INGRESS_ORIGIN:https://<ingress hostname>` (`docs/secrets.md`);
    3. `context-store`, with the vault's GitHub App values and secrets (`docs/context-store.md`). Without them it runs with the vault off. It calls `llm-gateway` for memory's embeddings and rerank;
    4. `conversation-runtime`, with `--var ADMIN_ORIGIN:https://<admin hostname>`, so Master can link to the secure form and the pairing page ("Configuring Kelpie through Master"). The deploy workflow carries it to later deploys (`docs/deploy.md`). Without it, Master says it can't give those links;
    5. `ingress`, with `--domain <ingress hostname>`. Telegram's and GitHub's webhooks reach it there; like the admin API, it has no `workers.dev` URL. Later deploys keep the domain without the flag, and the deploy workflow carries the webchat's Access values once they are set ("Webchat").
@@ -324,7 +339,8 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
 - **Its tools** run the commands above, as the owner, through Master (`via: agent:<Master's id>`), and only the agent with the role `main` has them, on every channel it answers: in the webchat, and on Telegram with the typed code. They are checked again when one runs, and a task's run has none:
   - `list_agents`, `get_agent`, `create_agent` and `rename_agent` run directly. Other agents' task news reaches Master's conversation, so Kelpie itself announces each agent those tools create or rename (#387). After the reply, it names the agent by its id and its name, in the conversation's language: `Kelpie created the agent "Sales" (sales).` or `Kelpie renamed the agent sales to "Sales team".` As with a subagent, the name is quoted, the model can't change or omit the text, and a turn that sends no reply leaves it for the next one. So that a notice always fits one Telegram message, each line names at most four agents and counts the rest, and a name longer than 80 characters once written out is cut with "…". No number of other changes pushes an agent's creation or rename out of the notice;
   - `get_models` reads the instance's model settings, and `configure_models` replaces them;
-  - `configure_agent` (its `model` included), `configure_models`, `set_main_agent`, `set_agent_chat` and `delete_agent` wait for the owner's confirmation (below);
+  - `set_claude_code` turns the `claude-code` route on or off ("The claude-code route"). Its confirmation says, in the conversation's language, that the route spends the subscription's weekly usage limit, which the owner's own coding shares;
+  - `configure_agent` (its `model` included), `configure_models`, `set_claude_code`, `set_main_agent`, `set_agent_chat` and `delete_agent` wait for the owner's confirmation (below);
   - `connect_telegram` opens a secure form ("Secure forms"), and `pair_telegram` leads to the pairing page ("Pairing"). Kelpie sends each link itself (below), and the owner's submitting that page is their yes (ADR-0026).
   - `connect_runner` opens the VPS runner's secure form, whose link Kelpie sends as well, and `runner_status` reads the runner's state, as `describeRunner` does ([runner.md](runner.md)). When the runner accepts the secret, the conversation learns it, as for a bot's form ("Steps the owner finishes", #328).
 

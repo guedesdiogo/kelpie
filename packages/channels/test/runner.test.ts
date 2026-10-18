@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isRunnerToolLoopMs,
   parseRunnerToolResult,
   parseRunnerTurnRequest,
   RUNNER_SESSION_ID,
@@ -246,6 +247,15 @@ describe("runnerJsonLength", () => {
     }
     expect(runnerJsonLength(wide, 1_000)).toBeNull();
     expect(read).toBeLessThanOrEqual(10);
+  });
+});
+
+describe("isRunnerToolLoopMs", () => {
+  it("takes a whole bound from a second to an hour, as llm-gateway checks a session's (#421)", () => {
+    for (const bound of [1_000, 120_000, 3_600_000]) expect(isRunnerToolLoopMs(bound)).toBe(true);
+    for (const bound of [999, 3_600_001, 120_000.5, "120000", null, Number.NaN]) {
+      expect(isRunnerToolLoopMs(bound)).toBe(false);
+    }
   });
 });
 

@@ -100,6 +100,7 @@
     "apps/llm-gateway": {
       "name": "@kelpie/llm-gateway",
       "dependencies": {
+        "@kelpie/channels": "workspace:*",
         "@kelpie/llm": "workspace:*",
         "@kelpie/qualifier": "workspace:*",
       },

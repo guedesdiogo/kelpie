@@ -173,7 +173,8 @@ describe("planDeploy", () => {
     });
     deps.git = (args) => (args[0] === "show" ? config : shippingGit(args));
     const plan = await planDeploy(deps);
-    expect(plan.live[0]?.vars).toEqual({ OPENAI_BASE_URL: gateway });
+    // llm-gateway deploys second, after channel-egress, whose entrypoint it binds (#421).
+    expect(plan.live[1]?.vars).toEqual({ OPENAI_BASE_URL: gateway });
   });
 
   it("stops when the token can't read analytics", async () => {
@@ -352,7 +353,7 @@ describe("deploy", () => {
     expect(wranglerCalls.map((call) => call.spec.script)).toEqual(
       WORKERS.map((worker) => worker.script),
     );
-    expect(wranglerCalls[1]?.args).toEqual([
+    expect(wranglerCalls[0]?.args).toEqual([
       "deploy",
       "--tag",
       "96-abc1234",
@@ -373,11 +374,11 @@ describe("deploy", () => {
     expect(report.outcome).toBe("rolled-back");
     expect(report.reason).toBe("kelpie-context-store didn't deploy: wrangler exited with 1");
     expect(api.made.map((deployment) => deployment.script)).toEqual([
-      "kelpie-channel-egress",
       "kelpie-llm-gateway",
+      "kelpie-channel-egress",
     ]);
     expect(api.made[0]).toMatchObject({
-      traffic: [{ version_id: "channel-egress-95-25c5076", percentage: 100 }],
+      traffic: [{ version_id: "llm-gateway-95-25c5076", percentage: 100 }],
       message: "Automatic rollback of 96-abc1234",
       force: false,
     });
@@ -393,8 +394,8 @@ describe("deploy", () => {
     expect(report.workers[2]?.deployed).toBe("context-store-new");
     expect(api.made.map((deployment) => deployment.script)).toEqual([
       "kelpie-context-store",
-      "kelpie-channel-egress",
       "kelpie-llm-gateway",
+      "kelpie-channel-egress",
     ]);
   });
 

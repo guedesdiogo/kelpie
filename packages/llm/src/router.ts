@@ -174,7 +174,15 @@ function checkTier(tier: ModelTier): void {
   }
 }
 
-export const PROVIDERS: readonly string[] = ["anthropic", "openai"] satisfies ProviderId[];
+/**
+ * Kelpie's providers, in its provider order: what route tables and model settings may name.
+ * `claude-code` serves only while the owner's switch is on (#295).
+ */
+export const PROVIDERS: readonly string[] = [
+  "anthropic",
+  "openai",
+  "claude-code",
+] satisfies ProviderId[];
 
 /** Checks a route table read from configuration. */
 export function parseRouteTable(value: unknown): RouteTable {

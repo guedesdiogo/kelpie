@@ -76,7 +76,7 @@ After the gates pass on `main`, the `Deploy` job runs `tools/release`. It:
    The comparison is with production, not with the previous commit. A deploy that was missed, because its run failed or was replaced while it waited, goes out with the next merge, whatever that merge changes. `deploy.yml` by hand deploys regardless ([By hand](#by-hand)). `release deploy --plan` shows the decision.
 3. **Reads the analytics once.** A token without Account Analytics Read stops the deploy here, before anything changes: the watch would otherwise judge by the probes alone.
 4. **Finds the rollback barriers** between the live commit and the new one.
-5. **Deploys the Workers in order** (`llm-gateway`, `channel-egress`, `context-store`, `conversation-runtime`, `ingress`, `admin-api`):
+5. **Deploys the Workers in order** (`channel-egress`, `llm-gateway`, `context-store`, `conversation-runtime`, `ingress`, `admin-api`). Each one's bindings point only at Workers before it: `llm-gateway` binds `channel-egress`'s `RunnerChat` (#421):
    - each is tagged `<build>-<sha>` and carries its instance vars;
    - ingress also gets `DEPLOY_PROBE_TOKEN` when the environment has it and the live ingress doesn't, or on a rotation ("The deep probe's token"). It goes through `wrangler deploy --secrets-file`: the file sits in a private temporary folder and is deleted right after, no other process gets the token, and it is masked in the logs. Uploading once matters: each upload is a secret change, which a rollback can cross only with `force`;
    - channel-egress also gets the runner's VPC Service as its `RUNNER` binding when the environment has the variable `RUNNER_VPC_SERVICE_ID` ([runner.md](runner.md)). `wrangler deploy` takes no binding as a flag, so the release tool deploys channel-egress's config with the binding merged in, from a file it deletes right after;
@@ -148,6 +148,7 @@ The run's summary has the table of versions, the probes and the barriers. The pr
 - **`plan-only`** shows the Workers that would move and the barriers they would cross, and changes nothing.
 - **`reason` and `target` are public:** they show on the run's page and in the issue, like everything in this repository's Actions.
 - **`force`** crosses a destructive SQL migration, and restores the secrets of a version whose secrets were changed since. Use it only after checking that the older code can run on today's data.
+- **Across #421, the `claude-code` route,** first remove `claude-code` from every model setting that names it, the instance's (`configureModels`) and each agent's (`configureAgent`). Builds before #421 don't know the provider: they refuse an agent's settings that name it, and that agent's turns fail.
 
 The rollback:
 - **Moves every Worker to the same build, or none.** A Worker that refuses undoes the ones moved before it.

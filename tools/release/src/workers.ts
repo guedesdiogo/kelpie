@@ -17,13 +17,14 @@ export interface WorkerSpec {
  * (docs/admin-api.md, "Setting it up"). Rollbacks go in the reverse order.
  */
 export const WORKERS: readonly WorkerSpec[] = [
+  // llm-gateway binds its RunnerChat entrypoint, for the claude-code route (#421).
+  { app: "channel-egress", script: "kelpie-channel-egress", instanceVars: ["INGRESS_ORIGIN"] },
   // AI Gateway's passthrough URLs carry the account id.
   {
     app: "llm-gateway",
     script: "kelpie-llm-gateway",
     instanceVars: ["ANTHROPIC_BASE_URL", "OPENAI_BASE_URL"],
   },
-  { app: "channel-egress", script: "kelpie-channel-egress", instanceVars: ["INGRESS_ORIGIN"] },
   {
     app: "context-store",
     script: "kelpie-context-store",

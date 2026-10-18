@@ -71,6 +71,9 @@ export class LlmGatewayAdmin extends WorkerEntrypoint {
   configureDefaults() {
     return { ok: true };
   }
+  setClaudeCode(on) {
+    return typeof on === "boolean" ? { ok: true } : { ok: false, reason: "invalid_input" };
+  }
 }
 export default { fetch: () => new Response(null, { status: 404 }) };`,
           },

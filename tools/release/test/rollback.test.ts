@@ -109,14 +109,14 @@ describe("rollback", () => {
       live,
       versions: [previous],
       failDeploy: (script, force) =>
-        script === "kelpie-llm-gateway" && !force
+        script === "kelpie-channel-egress" && !force
           ? new CloudflareError("secrets changed", [SECRETS_CHANGED])
           : undefined,
     });
     const plan = await planRollback({ api, git: quietGit }, "previous");
     await expect(
       rollback(deps(api), plan, { force: false, reason: "r", settle: settleOptions }),
-    ).rejects.toThrow("kelpie-llm-gateway's secrets changed since 94-cc8e179");
+    ).rejects.toThrow("kelpie-channel-egress's secrets changed since 94-cc8e179");
     // Five Workers moved; the undo puts them back on 95, in deploy order.
     const undone = api.made.slice(5);
     expect(undone.map((deployment) => deployment.traffic[0]?.version_id)).toEqual(
@@ -125,7 +125,7 @@ describe("rollback", () => {
         "ingress-95-25c5076",
         "conversation-runtime-95-25c5076",
         "context-store-95-25c5076",
-        "channel-egress-95-25c5076",
+        "llm-gateway-95-25c5076",
       ].reverse(),
     );
 
@@ -133,7 +133,7 @@ describe("rollback", () => {
       live,
       versions: [previous],
       failDeploy: (script, force) =>
-        script === "kelpie-llm-gateway" && !force
+        script === "kelpie-channel-egress" && !force
           ? new CloudflareError("secrets changed", [SECRETS_CHANGED])
           : undefined,
     });
@@ -143,7 +143,7 @@ describe("rollback", () => {
       reason: "r",
       settle: settleOptions,
     });
-    expect(forced.made.at(-1)).toMatchObject({ script: "kelpie-llm-gateway", force: true });
+    expect(forced.made.at(-1)).toMatchObject({ script: "kelpie-channel-egress", force: true });
     expect(report.warnings).toEqual([]);
   });
 
@@ -183,7 +183,7 @@ describe("rollback", () => {
       live,
       versions: [previous],
       failDeploy: (script, force) => {
-        if (script === "kelpie-llm-gateway") return new CloudflareError("internal", [10000]);
+        if (script === "kelpie-channel-egress") return new CloudflareError("internal", [10000]);
         return force ? undefined : new CloudflareError("secrets changed", [SECRETS_CHANGED]);
       },
     });

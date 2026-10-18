@@ -47,7 +47,9 @@ A `Response` created in a test can't have its body read inside a Worker call eit
 
 Fiber recovery after an eviction runs when the fiber's heartbeat alarm fires on the new instance. To test it, call `evictDurableObject(stub)`, then `runDurableObjectAlarm(stub)`.
 
-`llm-gateway` and `channel-egress` are service bindings that don't exist in tests, so `vitest.config.ts` replaces them with stubs; the fake model and channel ports mean they're never called. The `llm-gateway` stub answers `ping()`, which the deploy probe's tests call (#234), and `describe()`, which a turn's identity section reads (#286); its `LlmGatewayAdmin` entrypoint is empty (#289).
+`llm-gateway` and `channel-egress` are service bindings that don't exist in tests, so `vitest.config.ts` replaces them with stubs; the fake model and channel ports mean they're never called. The `llm-gateway` stub answers `ping()`, which the deploy probe's tests call (#234), and `describe()`, which a turn's identity section reads (#286); its `LlmGatewayAdmin` (#289) and `LlmChat` (#431) entrypoints are empty.
+
+`llm-gateway`'s `vitest.config.ts` stubs `channel-egress`'s `RunnerChat` as a runner that isn't connected. Tests that run a `claude-code` turn pass a fake client in its place (#421).
 
 `ingress`'s `vitest.config.ts` does the same for the Workers it binds: stub Workers with the entrypoints and objects it calls, among them a `DeployProbe` that finds every part ok, and the probe's token as a binding.
 
