@@ -62,7 +62,7 @@ export interface ConversationPorts {
   /**
    * One model call, for an area with the agent's model settings (ADR-0036 §2). `session` is the
    * conversation's on a route that keeps one (#295); the gateway takes it only for the
-   * `conversation` area.
+   * `conversation` area, and only through its `LlmChat` entrypoint (#431).
    */
   generate(
     selection: ModelSelection,
@@ -144,7 +144,7 @@ export interface ConversationPorts {
   deadline(ms: number, signal: AbortSignal): Promise<void>;
 }
 
-/** The part of llm-gateway's RPC surface this Worker uses. */
+/** The part of llm-gateway's RPC surface this Worker uses: `LlmGateway`'s, and `LlmChat`'s. */
 interface LlmGatewayBinding {
   generate(
     selection: ModelSelection,
@@ -234,6 +234,8 @@ export function configCommands(env: Env) {
 
 function productionPorts(env: Env): ConversationPorts {
   const gateway = env.LLM_GATEWAY as unknown as LlmGatewayBinding;
+  // llm-gateway's LlmChat, the only entrypoint that takes a conversation's session (#431).
+  const chat = env.LLM_CHAT as unknown as LlmGatewayBinding;
   // A service binding to channel-egress's ChannelEgress entrypoint, which answers with values.
   const egress = env.CHANNEL_EGRESS as unknown as ChannelEgressContract;
   // A service binding to context-store's ContextStore entrypoint.
@@ -244,7 +246,10 @@ function productionPorts(env: Env): ConversationPorts {
   const commands = configCommands(env);
   return {
     async generate(selection, request, session) {
-      const generation = await gateway.generate(selection, request, session);
+      const generation =
+        session === undefined
+          ? await gateway.generate(selection, request)
+          : await chat.generate(selection, request, session);
       const dispose = () => (generation as Partial<Disposable>)[Symbol.dispose]?.();
       // Cancelling the stream doesn't cross RPC, so stopping early calls cancel() explicitly.
       const cancel = () => {

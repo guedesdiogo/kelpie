@@ -231,7 +231,7 @@ const isConversationCall = (call: ModelSelection): boolean =>
 /**
  * A session as RPC sent it, rebuilt from the fields Kelpie knows; null when malformed. Its id goes
  * in the runner's paths, and its tool bound to the runner, so both pass the runner's own checks
- * (#421). A build of conversation-runtime from before the bound sends none.
+ * (#421).
  */
 function parseSession(value: unknown): RouteSession | null {
   if (typeof value !== "object" || value === null) return null;
@@ -240,19 +240,23 @@ function parseSession(value: unknown): RouteSession | null {
   >;
   if (!isBoundedText(conversation, MAX_ID_CHARS)) return null;
   if (typeof id !== "string" || !RUNNER_SESSION_ID.test(id)) return null;
-  if (toolLoopMs !== undefined && !isRunnerToolLoopMs(toolLoopMs)) return null;
-  if (typeof resume !== "boolean") return null;
-  return { conversation, id, resume, ...(toolLoopMs === undefined ? {} : { toolLoopMs }) };
+  if (!isRunnerToolLoopMs(toolLoopMs) || typeof resume !== "boolean") return null;
+  return { conversation, id, resume, toolLoopMs };
 }
 
 /** Model access for Kelpie's other Workers, through a service binding. */
 export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
   /**
-   * One model call. `session` is the conversation's, for a route that keeps one (#295): only a call
-   * with a session reaches such a route, and only a `conversation` call may send one.
+   * One model call, without a session: a route that keeps one, as `claude-code` does, never serves
+   * it. Sessions go through `LlmChat`, which only conversation-runtime binds (#431). A session sent
+   * here, as a conversation-runtime from before `LlmChat` sends one during a rollout, is left out,
+   * and the call goes on without it.
    */
   generate(call: ModelSelection, request: RoutedRequest, session?: RouteSession): Generation {
-    return generateWith(this.env, call, request, session);
+    if (session !== undefined) {
+      console.warn("llm-gateway: LlmGateway left out a session; only LlmChat takes one");
+    }
+    return generateWith(this.env, call, request);
   }
 
   /**
@@ -293,6 +297,21 @@ export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
   /** For the deploy's probe (#234), through conversation-runtime. See `pingWith`. */
   ping(): Promise<{ ok: true }> {
     return pingWith(this.env);
+  }
+}
+
+/**
+ * A conversation's model calls, with its session (#295, #431): bound by conversation-runtime alone,
+ * so a Worker that reads outside content, as context-store does through `LlmGateway`, can't reach a
+ * route that runs on the owner's subscription.
+ */
+export class LlmChat extends WorkerEntrypoint<GatewayEnv> {
+  /**
+   * One model call. `session` is the conversation's, for a route that keeps one: only a call with a
+   * session reaches such a route, and only a `conversation` call may send one.
+   */
+  generate(call: ModelSelection, request: RoutedRequest, session?: RouteSession): Generation {
+    return generateWith(this.env, call, request, session);
   }
 }
 

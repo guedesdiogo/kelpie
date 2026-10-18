@@ -249,6 +249,7 @@ describe("ModelRouter and a route that needs a session (#295)", () => {
     conversation: "kelpie:telegram:42",
     id: "6c1f2a9e-3b7d-4e51-9a0c-2f8d7e6b5a41",
     resume: false,
+    toolLoopMs: 120_000,
   };
   const answers: ToolAnswers = { wait: async (callId) => ({ callId, output: "done" }) };
 

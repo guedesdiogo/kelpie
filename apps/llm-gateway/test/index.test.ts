@@ -16,6 +16,7 @@ import {
   describeWith,
   embedWith,
   generateWith,
+  LlmChat,
   LlmGateway,
   LlmGatewayAdmin,
   pingWith,
@@ -894,17 +895,27 @@ describe("a route that runs its own tool loop (#295)", () => {
 
   it("passes a session to the route over RPC, only with the fields it knows", async () => {
     const seen = routeLoop([]);
-    using generation = await exports.LlmGateway.generate(conversation, request, {
+    using generation = await exports.LlmChat.generate(conversation, request, {
       ...session,
       token: "not a session field",
     } as RouteSession);
     expect(await read(await generation.events())).toMatchObject([{ type: "finish" }]);
     expect(seen.session).toEqual(session);
-    // A build of conversation-runtime from before the tool bound sends none (#421).
-    const { toolLoopMs: _bound, ...older } = session;
-    using again = await exports.LlmGateway.generate(conversation, request, older);
-    expect(await read(await again.events())).toMatchObject([{ type: "finish" }]);
-    expect(seen.session).toEqual(older);
+  });
+
+  it("takes a session only on LlmChat, which only conversation-runtime binds (#431)", async () => {
+    const seen = routeLoop([]);
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect("generate" in LlmChat.prototype).toBe(true);
+    // context-store binds LlmGateway and reads outside content: its calls never carry a session.
+    // One sent there, as a conversation-runtime from before LlmChat sends it during a rollout,
+    // is left out, and the call goes on without it.
+    using generation = await exports.LlmGateway.generate(conversation, request, session);
+    expect(await read(await generation.events())).toMatchObject([{ type: "finish" }]);
+    expect(seen.session).toBeUndefined();
+    expect(warned).toHaveBeenCalledWith(
+      "llm-gateway: LlmGateway left out a session; only LlmChat takes one",
+    );
   });
 
   it("refuses a malformed session as a bad request, before any route", async () => {
@@ -920,13 +931,14 @@ describe("a route that runs its own tool loop (#295)", () => {
       { ...session, conversation: "c".repeat(257) },
       { ...session, resume: "yes" },
       { conversation: session.conversation, id: session.id },
+      { conversation: session.conversation, id: session.id, resume: true },
       { ...session, id: "6C1F2A9E-3B7D-4E51-9A0C-2F8D7E6B5A41" },
       { ...session, toolLoopMs: 999 },
       { ...session, toolLoopMs: 3_600_001 },
       { ...session, toolLoopMs: 120_000.5 },
       { ...session, toolLoopMs: "120000" },
     ]) {
-      using generation = await exports.LlmGateway.generate(
+      using generation = await exports.LlmChat.generate(
         conversation,
         request,
         malformed as RouteSession,
@@ -942,7 +954,7 @@ describe("a route that runs its own tool loop (#295)", () => {
     routeLoop([]);
     vi.spyOn(console, "error").mockImplementation(() => {});
     for (const selection of ["medium", { area: "memory" }] as const) {
-      using generation = await exports.LlmGateway.generate(selection, request, session);
+      using generation = await exports.LlmChat.generate(selection, request, session);
       await expect(read(await generation.events())).rejects.toMatchObject({
         code: "bad_request",
       });
@@ -952,7 +964,7 @@ describe("a route that runs its own tool loop (#295)", () => {
 
   it("gives the route each result the caller answers over RPC, before or after it waits", async () => {
     const seen = routeLoop(["toolu_01", "toolu_02"]);
-    using generation = await exports.LlmGateway.generate(conversation, request, session);
+    using generation = await exports.LlmChat.generate(conversation, request, session);
     const events = fromNdjsonStream(await generation.events())[Symbol.asyncIterator]();
 
     expect((await events.next()).value).toEqual({ type: "tool_request", call: call("toolu_01") });
@@ -1013,7 +1025,7 @@ describe("a route that runs its own tool loop (#295)", () => {
 
   it("rejects the route's wait when the call is cancelled", async () => {
     const seen = routeLoop(["toolu_01"]);
-    using generation = await exports.LlmGateway.generate(conversation, request, session);
+    using generation = await exports.LlmChat.generate(conversation, request, session);
     const events = fromNdjsonStream(await generation.events())[Symbol.asyncIterator]();
     await events.next();
     const next = events.next();
@@ -1031,7 +1043,7 @@ describe("a route that runs its own tool loop (#295)", () => {
   it("rejects the route's wait when the caller drops its stub without cancelling", async () => {
     const seen = routeLoop(["toolu_01"]);
     {
-      using generation = await exports.LlmGateway.generate(conversation, request, session);
+      using generation = await exports.LlmChat.generate(conversation, request, session);
       const events = fromNdjsonStream(await generation.events())[Symbol.asyncIterator]();
       await events.next();
       void events.next().catch(() => undefined);
@@ -1191,7 +1203,7 @@ describe("the claude-code route (#421)", () => {
       { provider: "anthropic", model: "haiku", standsFor: "the newest Claude Haiku" },
     ]);
     // Even a call that names it, with a session, goes to the API route.
-    using generation = await exports.LlmGateway.generate(onClaudeCode, request, session);
+    using generation = await exports.LlmChat.generate(onClaudeCode, request, session);
     expect(await read(await generation.events())).toMatchObject([
       { type: "text" },
       { type: "finish", reason: "stop" },
@@ -1253,6 +1265,19 @@ describe("the claude-code route (#421)", () => {
     ]);
   });
 
+  it("describes memory without it when a scope-wide provider names it (#431)", async () => {
+    await reset({ claudeCode: true, instance: { provider: "claude-code" } });
+    expect(await exports.LlmGateway.describe("memory")).toEqual({
+      provider: "anthropic",
+      tier: "cheap",
+      route: [{ provider: "anthropic", model: "haiku", standsFor: "the newest Claude Haiku" }],
+    });
+    expect(await exports.LlmGateway.describe("conversation")).toMatchObject({
+      provider: "claude-code",
+      route: [{ provider: "claude-code" }, { provider: "anthropic" }],
+    });
+  });
+
   it("is never pinned, even when it is the only route that serves", async () => {
     await reset({ claudeCode: true });
     const { ANTHROPIC_API_KEY: _key, ...keyless } = env as GatewayEnv;
@@ -1276,7 +1301,7 @@ describe("the claude-code route (#421)", () => {
       anthropic(() => sseResponse([start, ...text, ...end])),
     );
     // The test's channel-egress has no runner connected.
-    using generation = await exports.LlmGateway.generate(onClaudeCode, request, session);
+    using generation = await exports.LlmChat.generate(onClaudeCode, request, session);
     expect(await read(await generation.events())).toMatchObject([
       {
         type: "fallback",

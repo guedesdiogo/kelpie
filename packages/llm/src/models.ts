@@ -52,7 +52,8 @@ export interface ModelDescription extends ResolvedModel {
 /**
  * Each field from the first scope that sets it: the agent's area, the agent, the instance's area,
  * the instance, then the built-in: the pinned provider, `tier` (the caller's, `cheap` unless it
- * names another) and the model's own effort.
+ * names another) and the model's own effort. `memory` passes over a `claude-code` it would inherit
+ * from a scope-wide provider, since its calls carry no session (#431): the next scope names its own.
  */
 export function resolveModel(input: {
   area: ModelArea;
@@ -62,12 +63,16 @@ export function resolveModel(input: {
   tier?: ModelTier;
 }): ResolvedModel {
   const { area, agent, instance } = input;
+  const named = [
+    agent?.[area]?.provider,
+    agent?.provider,
+    instance?.[area]?.provider,
+    instance?.provider,
+  ];
   const provider =
-    agent?.[area]?.provider ??
-    agent?.provider ??
-    instance?.[area]?.provider ??
-    instance?.provider ??
-    input.pinned;
+    named.find(
+      (choice) => choice !== undefined && !(area === "memory" && choice === "claude-code"),
+    ) ?? input.pinned;
   const tier = agent?.[area]?.tier ?? instance?.[area]?.tier ?? input.tier ?? "cheap";
   const effort = agent?.[area]?.effort ?? instance?.[area]?.effort;
   return { provider, tier, ...(effort ? { effort } : {}) };

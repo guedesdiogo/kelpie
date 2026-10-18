@@ -97,11 +97,12 @@ Identity values in answers are masked.
   - The switch lives in `llm-gateway`'s `ModelDefaults` object, with the instance's settings, and each change is audited with who made it.
   - `getModels` shows it as `claudeCode`, and lists `claude-code` among the providers that serve while it is on.
 - **When it serves:** on, it is the tier's next route after `anthropic`, so it answers when the API route fails before replying. To try it first, name it for conversations: `{ "conversation": { "provider": "claude-code" } }`, for the instance or an agent.
-  - It serves only the owner's own direct conversations, which carry the conversation's session. Tasks, history checkpoints, Dream and conflict resolve never reach it, and `memory` can't name it.
+  - It serves only the owner's own direct conversations, which carry the conversation's session. Tasks, history checkpoints, Dream and conflict resolve never reach it, and `memory` can't name it, nor inherit it from a scope-wide `provider`.
+  - A session reaches `llm-gateway` only through its `LlmChat` entrypoint, which only `conversation-runtime` binds (#431). `LlmGateway`, which `context-store` binds to embed and rerank the vault's notes, leaves out any session, so a Worker that reads outside content can't reach the route.
   - It is never pinned as the instance's default provider.
   - An agent's prompt names it among the routes it may run on, after `anthropic`.
 - **How a turn runs on it:** the conversation keeps one session on the runner. A turn that follows the session's last one sends only its new messages; otherwise a new session starts, seeded with the conversation so far as one transcript, its checkpoint and core included. The tool loop runs inside Claude Code, within the agent's `toolLoopMs` and 5 rounds, and each tool call still runs in Kelpie, behind Kelpie's confirmations. A turn ends after `toolLoopMs` plus 10 minutes at most.
-- **When it fails** it falls back like any route, with a notice: a usage limit with its reset, usage that may have run out, a login on the server that needs renewing, or a runner that can't be reached, isn't connected or is busy. Effort and the output token limit aren't sent on this route.
+- **When it fails** it falls back like any route, with a notice: a usage limit with its reset, usage that may have run out, a login on the server that needs renewing, or a runner that can't be reached, isn't connected or is busy. A call cut on its way to the runner, as when `channel-egress` is redeployed mid-turn, counts as a runner that can't be reached. A reset more than a day back or 35 days ahead isn't named. Effort and the output token limit aren't sent on this route.
 - **Turning it off** stops new turns from reaching it. Settings that still name it fall through to the tier's other routes.
 
 **When a route fails** (ADR-0037 §4, #293), the conversation hears it from Kelpie, in its language:

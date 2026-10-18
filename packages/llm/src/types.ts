@@ -103,10 +103,9 @@ export interface RouteSession {
   resume: boolean;
   /**
    * The agent's bound on the turn's tools, in ms (ADR-0025), which a route that runs the tool loop
-   * itself keeps too (#421). A build of conversation-runtime from before it sends none, and the
-   * route then takes the agents' default, 120 s.
+   * itself keeps too (#421).
    */
-  toolLoopMs?: number;
+  toolLoopMs: number;
 }
 
 /**

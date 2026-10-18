@@ -148,6 +148,7 @@ The run's summary has the table of versions, the probes and the barriers. The pr
 - **`plan-only`** shows the Workers that would move and the barriers they would cross, and changes nothing.
 - **`reason` and `target` are public:** they show on the run's page and in the issue, like everything in this repository's Actions.
 - **`force`** crosses a destructive SQL migration, and restores the secrets of a version whose secrets were changed since. Use it only after checking that the older code can run on today's data.
+- **Across #421, the `claude-code` route,** first remove `claude-code` from every model setting that names it, the instance's (`configureModels`) and each agent's (`configureAgent`). Builds before #421 don't know the provider: they refuse an agent's settings that name it, and that agent's turns fail.
 
 The rollback:
 - **Moves every Worker to the same build, or none.** A Worker that refuses undoes the ones moved before it.

@@ -441,7 +441,7 @@ const TEXTS: Localized<{
       `set the models every agent uses unless it has its own, from ${before} to ${after}.`,
     claudeCode: (on) =>
       on
-        ? "turn on the claude-code route: your conversations may reach Claude through Claude Code on your VPS runner, on your Claude subscription, when the Anthropic API route fails or where the model settings name claude-code. Each such turn spends the subscription's weekly usage limit, which your own coding with Claude Code shares."
+        ? "turn on the claude-code route: your conversations may reach Claude through Claude Code on your VPS runner, on your Claude subscription, when the Anthropic API route fails or where the model settings name claude-code. Each such turn spends the subscription's weekly usage limit, which your own coding with Claude Code shares, and may also draw extra usage if the account has it on."
         : "turn off the claude-code route: your conversations stop reaching Claude through Claude Code on your VPS runner, so they no longer spend your Claude subscription's weekly usage limit, which your own coding shares.",
     chat: (agent, id, on) =>
       on
@@ -471,7 +471,7 @@ const TEXTS: Localized<{
       `definir os modelos que todo agente usa quando não tem os seus, de ${before} para ${after}.`,
     claudeCode: (on) =>
       on
-        ? "ativar a rota claude-code: suas conversas podem chegar ao Claude pelo Claude Code no runner da sua VPS, na sua assinatura do Claude, quando a rota da API da Anthropic falhar ou onde as configurações de modelo indicarem claude-code. Cada turno assim gasta o limite de uso semanal da assinatura, que o seu próprio trabalho de código no Claude Code também usa."
+        ? "ativar a rota claude-code: suas conversas podem chegar ao Claude pelo Claude Code no runner da sua VPS, na sua assinatura do Claude, quando a rota da API da Anthropic falhar ou onde as configurações de modelo indicarem claude-code. Cada turno assim gasta o limite de uso semanal da assinatura, que o seu próprio trabalho de código no Claude Code também usa, e também pode consumir uso extra se a conta o tiver ativado."
         : "desativar a rota claude-code: suas conversas deixam de chegar ao Claude pelo Claude Code no runner da sua VPS, e assim deixam de gastar o limite de uso semanal da sua assinatura do Claude, que o seu próprio trabalho de código também usa.",
     chat: (agent, id, on) =>
       on
@@ -501,7 +501,7 @@ const TEXTS: Localized<{
       `definir los modelos que usa todo agente que no tenga los suyos, de ${before} a ${after}.`,
     claudeCode: (on) =>
       on
-        ? "activar la ruta claude-code: tus conversaciones pueden llegar a Claude a través de Claude Code en el runner de tu VPS, con tu suscripción de Claude, cuando la ruta de la API de Anthropic falle o donde la configuración de modelos indique claude-code. Cada turno así gasta el límite de uso semanal de la suscripción, que también usa tu propio trabajo de código con Claude Code."
+        ? "activar la ruta claude-code: tus conversaciones pueden llegar a Claude a través de Claude Code en el runner de tu VPS, con tu suscripción de Claude, cuando la ruta de la API de Anthropic falle o donde la configuración de modelos indique claude-code. Cada turno así gasta el límite de uso semanal de la suscripción, que también usa tu propio trabajo de código con Claude Code, y también puede consumir uso adicional si la cuenta lo tiene activado."
         : "desactivar la ruta claude-code: tus conversaciones dejan de llegar a Claude a través de Claude Code en el runner de tu VPS, y así dejan de gastar el límite de uso semanal de tu suscripción de Claude, que también usa tu propio trabajo de código.",
     chat: (agent, id, on) =>
       on

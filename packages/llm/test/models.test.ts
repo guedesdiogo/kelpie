@@ -53,6 +53,25 @@ describe("resolveModel", () => {
     });
   });
 
+  it("passes over claude-code for memory, which carries no session, when it is inherited (#431)", () => {
+    const agent = { provider: "claude-code" as const };
+    expect(
+      resolveModel({
+        area: "memory",
+        agent,
+        instance: { provider: "openai" },
+        pinned: "anthropic",
+      }),
+    ).toEqual({ provider: "openai", tier: "cheap" });
+    expect(
+      resolveModel({ area: "memory", instance: { provider: "claude-code" }, pinned: "anthropic" }),
+    ).toEqual({ provider: "anthropic", tier: "cheap" });
+    expect(resolveModel({ area: "conversation", agent, pinned: "anthropic" })).toEqual({
+      provider: "claude-code",
+      tier: "cheap",
+    });
+  });
+
   it("uses the caller's tier as the built-in, until the area sets one", () => {
     expect(resolveModel({ area: "memory", pinned: "anthropic", tier: "medium" }).tier).toBe(
       "medium",

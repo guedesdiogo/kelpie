@@ -601,7 +601,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
         command: "setClaudeCode",
         input: { on: true },
         summary:
-          "turn on the claude-code route: your conversations may reach Claude through Claude Code on your VPS runner, on your Claude subscription, when the Anthropic API route fails or where the model settings name claude-code. Each such turn spends the subscription's weekly usage limit, which your own coding with Claude Code shares.",
+          "turn on the claude-code route: your conversations may reach Claude through Claude Code on your VPS runner, on your Claude subscription, when the Anthropic API route fails or where the model settings name claude-code. Each such turn spends the subscription's weekly usage limit, which your own coding with Claude Code shares, and may also draw extra usage if the account has it on.",
       },
     ]);
     expect(calls).toEqual([]);
@@ -649,6 +649,11 @@ describe("Master's configuration tools (ADR-0048)", () => {
       "pt-BR": "limite de uso semanal",
       es: "límite de uso semanal",
     };
+    const extra: Record<Locale, string> = {
+      en: "may also draw extra usage if the account has it on",
+      "pt-BR": "também pode consumir uso extra se a conta o tiver ativado",
+      es: "también puede consumir uso adicional si la cuenta lo tiene activado",
+    };
     for (const [locale, words] of Object.entries(weekly) as [Locale, string][]) {
       for (const on of [true, false]) {
         models.claudeCode = !on;
@@ -656,6 +661,8 @@ describe("Master's configuration tools (ADR-0048)", () => {
         await run(tools, "set_claude_code", { on }, waiting.context);
         expect(waiting.asked[0]?.summary, `${locale} ${on}`).toContain(words);
         expect(waiting.asked[0]?.summary, `${locale} ${on}`).toContain("claude-code");
+        // Turning it on also says a turn may draw extra usage, where the account has it on (#431).
+        if (on) expect(waiting.asked[0]?.summary, locale).toContain(extra[locale]);
       }
     }
   });

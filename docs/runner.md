@@ -24,8 +24,9 @@ The `claude-code` route reaches Claude through the runner ([ADR-0037](adr/0037-c
 - **Who calls these routes:** `llm-gateway`'s `claude-code` provider, through `channel-egress`'s `RunnerChat` entrypoint, and only while the owner has the route on ("Using the route", below).
   - A turn that follows its session's last one sends only its new messages. Any other turn starts a new session, seeded with the conversation so far: one marked transcript, one JSON line per message, its checkpoint and core included.
   - On `409` (`lost`, `unfinished` or `mismatched`), the provider starts a new session, once, with a new id.
-  - It reads the runner's own `429` and `503`, and an unreachable or refused runner, as a route that can't serve now, never as a Claude usage limit or login: those come only as `error` frames. Kelpie then falls back to the tier's next route, with a notice.
-  - It skips `ping` frames, fails a turn whose line passes 4 MiB, and gives a turn the agent's tool bound plus 10 minutes, after which it cancels the turn.
+  - It reads the runner's own `429` and `503`, an unreachable or refused runner, and a call cut on the way, as when `channel-egress` is redeployed, as a route that can't serve now, never as a Claude usage limit or login: those come only as `error` frames. Kelpie then falls back to the tier's next route, with a notice.
+  - It skips `ping` frames, and fails a turn whose line passes 4 MiB, or whose reply passes 1 MiB, more than a history row holds.
+  - It gives a turn the agent's tool bound plus 10 minutes. Every call to the runner races that deadline, and the turn is cancelled when it passes, as is one whose start comes after it.
 
 - **Its id is Kelpie's,** a lowercase UUID. A new session takes it, and a resumed one goes on from it: live, or from its transcript after a restart or an idle close.
 - **A turn's frames** are `text`, `round` (a reply whose tool calls Claude Code runs, with its usage), `tool_call` (a call to run now), `finish` and `error`. Each maps onto one of Kelpie's model events, or onto its error. Their shapes are in `packages/channels/src/runner.ts`.
