@@ -215,6 +215,7 @@ describe("a skill in an archive", () => {
     expect(await clash("a\u{A9}.md", "a\u{A9}\u{FE0F}.md")).toMatchObject({
       problem: { reason: "path_clash" },
     });
+    expect((await clash("a.md", "1\u{FE0F}\u{20E3}-setup.md")).ok).toBe(true);
     expect(await clash("a1.md", "b1\u{FE0F}.md")).toMatchObject({
       problem: { reason: "unsafe_path" },
     });
@@ -743,6 +744,36 @@ describe("the static scan", () => {
     expect(decoded('description: "Reads.\\x1b[8m hidden"').findings[0]?.excerpt).toBe(
       "Reads.⟨U+001B⟩[8m hidden",
     );
+  });
+
+  it("reads every frontmatter string however many come first, and each line once", () => {
+    const decoded = (frontmatter: string, body = "# PDF") =>
+      scan("SKILL.md", `---\nname: pdf\n${frontmatter}\n---\n${body}\n`);
+    const filler = `metadata:\n${"  - a\n".repeat(1_100)}`;
+    expect(decoded(`${filler}description: "Reads.\\U000E0049\\U000E0067"`).verdict).toBe("blocked");
+    // A copy of the text elsewhere in the file doesn't vouch for what an escape wrote.
+    expect(
+      decoded('description: "Reads PDFs\\uFEFF and merges"', "Reads PDFs and merges").verdict,
+    ).toBe("blocked");
+    expect(decoded('description: "Reads PDFs\\L and merges"').verdict).toBe("blocked");
+    const quoted = decoded("description: 'it''s \u{200B} hidden'");
+    expect(quoted.findings.map((finding) => finding.line)).toEqual([3]);
+    // A key that only starts like the one at fault doesn't take its line.
+    const longer = decoded('description-long: ok\ndescription: "x.\\U000E0049"');
+    expect(longer.findings[0]?.line).toBe(4);
+  });
+
+  it("reads the strings inside a YAML set or ordered map too", () => {
+    const tagged = '"a\\U000E0049\\U000E0067"';
+    for (const value of [`!!set {${tagged}: null}`, `!!omap [k: ${tagged}]`]) {
+      const content = `---\n%YAML 1.1\n--- \nname: pdf\ndescription: x.\nmeta: ${value}\n---\n# PDF\n`;
+      expect(scan("SKILL.md", content).verdict, value).toBe("blocked");
+    }
+  });
+
+  it("finds a text file's control characters, but a tab or a form feed", () => {
+    expect(scan("SKILL.md", `${skillMd("pdf")}\nHide \u{1B}[8mthis`).verdict).toBe("blocked");
+    expect(scan("scripts/a.py", "import os\n\u{C}\nx = 1\ty = 2").verdict).toBe("clean");
   });
 
   it("counts ideographic variants across the whole skill", () => {

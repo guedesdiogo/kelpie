@@ -104,9 +104,6 @@ export function checkSkillMd(
 /** Markdown and scripts, which the agent and the scan read as text. */
 const TEXT = /\.(?:md|txt|py|sh|bash|zsh|js|mjs|cjs|ts|rb|pl|php|ps1|bat|cmd|go|rs|lua)$/i;
 
-/** A frontmatter's strings past this many aren't read for the scan. */
-const MAX_FRONTMATTER_STRINGS = 1_000;
-
 /**
  * Every string a SKILL.md's frontmatter holds as its YAML decodes it, keys and values, each with the
  * top-level key it sits under, and the frontmatter's own text; null without one the vault reads.
@@ -126,10 +123,17 @@ export function frontmatterStrings(
   }
   const strings: { key: string; text: string }[] = [];
   const walk = (value: unknown, key: string) => {
-    if (strings.length >= MAX_FRONTMATTER_STRINGS) return;
+    // Every one, however many: the frontmatter's 16 KiB bounds the walk.
     if (typeof value === "string") strings.push({ key, text: value });
-    else if (Array.isArray(value)) for (const item of value) walk(item, key);
-    else if (typeof value === "object" && value !== null) {
+    else if (Array.isArray(value) || value instanceof Set)
+      for (const item of value) walk(item, key);
+    else if (value instanceof Map) {
+      // YAML 1.1's !!omap and complex keys arrive as a Map.
+      for (const [name, item] of value) {
+        walk(name, key || String(name));
+        walk(item, key || String(name));
+      }
+    } else if (typeof value === "object" && value !== null) {
       for (const [name, item] of Object.entries(value)) {
         walk(name, key || name);
         walk(item, key || name);
@@ -185,7 +189,9 @@ export async function skillFromEntries(
     }
     // A name with a character that shows nothing, as a Hangul filler, could pass for another.
     // An emoji's presentation selector shows as the emoji does, in a name as in text.
-    const bare = path.replace(/(\p{Extended_Pictographic})[\u{FE0E}\u{FE0F}]/gu, "$1");
+    const bare = path
+      .replace(/(\p{Extended_Pictographic})[\u{FE0E}\u{FE0F}]/gu, "$1")
+      .replace(/([0-9#*])\u{FE0F}(?=\u{20E3})/gu, "$1");
     if (!isCleanPath(path) || /\p{Default_Ignorable_Code_Point}/u.test(bare)) {
       return { ok: false, problem: { reason: "unsafe_path", path } };
     }

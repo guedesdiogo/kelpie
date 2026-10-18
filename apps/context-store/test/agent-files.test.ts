@@ -715,12 +715,12 @@ describe("AgentFiles", () => {
   it("keeps what shows nothing out of a skill's entry in the agent's prompt", async () => {
     vaultWith({
       "agents/kelpie/skills/pdf/SKILL.md":
-        '---\nname: pdf\ndescription: "Reads PDFs.\\U000E0049\\U000E0067 For \u{1F468}\u{200D}\u{1F469}, \u{645}\u{6CC}\u{200C}\u{62E}"\n---\n# PDF\n',
+        '---\nname: pdf\ndescription: "Reads PDFs.\\U000E0049\\U000E0067 For \u{1F468}\u{200D}\u{1F469}, \u{645}\u{6CC}\u{200C}\u{62E} \u{8FBB}\u{E0100}"\n---\n# PDF\n',
     });
     const compiled = await stub().compile("kelpie");
-    // Emoji sequences and a joining script keep their joiners.
+    // Emoji sequences and a joining script keep their joiners; an ideographic variant goes.
     expect(compiled.skills.find((skill) => skill.name === "pdf")?.description).toBe(
-      "Reads PDFs. For \u{1F468}\u{200D}\u{1F469}, \u{645}\u{6CC}\u{200C}\u{62E}",
+      "Reads PDFs. For \u{1F468}\u{200D}\u{1F469}, \u{645}\u{6CC}\u{200C}\u{62E} \u{8FBB}",
     );
   });
 

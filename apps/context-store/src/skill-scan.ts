@@ -57,6 +57,8 @@ const KEYCAP_BASE = /[0-9#*]/u;
 const KEYCAP = "\u{20E3}";
 /** Control characters but tabs and line ends: an escape can write them where nothing shows. */
 const CONTROL = /(?![\t\n\r])\p{Cc}/u;
+/** In a text file's line, a control character but a tab, a form feed or a lone CR, as old sources hold. */
+const LINE_CONTROL = /(?![\t\f\r])\p{Cc}/u;
 const BEFORE_JOINER = /\p{Extended_Pictographic}|\p{Emoji_Modifier}|\u{FE0F}/u;
 const PICTOGRAPH = /\p{Extended_Pictographic}/u;
 const HAN = /\p{sc=Han}/u;
@@ -232,9 +234,20 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
   };
   // Variants count across the whole skill, so spreading them over lines or files hides nothing.
   const variantLines: { path: string; line: number; text: string; offsets: number[] }[] = [];
+  // Each line is reported once, whatever finds it.
+  const flagged = new Set<string>();
+  const flag = (path: string, line: number) => {
+    const key = `${line}:${path}`;
+    const fresh = !flagged.has(key);
+    flagged.add(key);
+    return fresh;
+  };
 
-  /** Scans a file's text; whether it found hidden characters. */
-  const scanText = (path: string, content: string, data: boolean): boolean => {
+  /**
+   * Scans a file's text; whether it found hidden characters. A text file's control characters
+   * count too: one read as text with a stray byte has them by chance.
+   */
+  const scanText = (path: string, content: string, data: boolean, controls: boolean): boolean => {
     let hid = false;
     const script = isScript(path);
     const instructions = path.toLowerCase().endsWith(".md");
@@ -244,7 +257,7 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
       // A BOM opens a file legitimately; anywhere else it hides.
       const scanned = index === 0 ? line.replace(/^\u{FEFF}/u, "") : line;
       const at = { path, line: index + 1 };
-      if (MAYBE_HIDDEN.test(scanned)) {
+      if (MAYBE_HIDDEN.test(scanned) || (controls && LINE_CONTROL.test(scanned))) {
         const { found, variants } = data
           ? {
               found: spelledIn(scanned, (tags) =>
@@ -253,8 +266,15 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
               variants: [],
             }
           : hiddenIn(scanned);
+        if (controls) {
+          let offset = 0;
+          for (const char of scanned) {
+            if (LINE_CONTROL.test(char)) found.add(offset);
+            offset += char.length;
+          }
+        }
         if (variants.length > 0) variantLines.push({ ...at, text: scanned, offsets: variants });
-        if (found.size > 0) {
+        if (found.size > 0 && flag(path, at.line)) {
           hid = true;
           let first = Number.POSITIVE_INFINITY;
           for (const offset of found) first = Math.min(first, offset);
@@ -282,6 +302,7 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
     if (scattered >= MIN_SCATTERED_TAGS) {
       hid = true;
       for (const { line, text, tags } of tagLines) {
+        if (!flag(path, line)) continue;
         const shown = new Set(tags);
         hide({ path, line }, () =>
           excerpt(text, tags[0] ?? 0, (_char, offset) => shown.has(offset)),
@@ -293,8 +314,8 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
 
   for (const file of files) {
     if (!file.binary) {
-      scanText(file.path, file.content, false);
-      if (file.path === "SKILL.md") scanFrontmatter(file, variantLines, hide);
+      scanText(file.path, file.content, false, true);
+      if (file.path === "SKILL.md") scanFrontmatter(file, variantLines, hide, flag);
       continue;
     }
     const bytes = fileBytes(file);
@@ -304,7 +325,8 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
       add({ path: file.path, line: 0, kind: "container" }, () => "");
     }
     let hid = false;
-    for (const text of decodings(bytes)) hid = scanText(file.path, text, !mostlyText(text)) || hid;
+    for (const text of decodings(bytes))
+      hid = scanText(file.path, text, !mostlyText(text), false) || hid;
     // Tags in UTF-16 no decoding read, as with no BOM, once.
     const tags = hid ? null : utf16Tags(bytes);
     if (tags !== null) hide({ path: file.path, line: 0 }, () => tags);
@@ -326,12 +348,14 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
 }
 
 /**
- * Text with what hides in it left out, as the scan finds it: an agent's prompt takes a skill's
- * name and description this way, emoji sequences and joining scripts whole.
+ * Text with what hides in it left out, as the scan finds it, variants too: an agent's prompt takes
+ * a skill's name and description this way, from files no scan may have read, emoji sequences and
+ * joining scripts whole.
  */
 export function withoutHidden(text: string): string {
   if (!MAYBE_HIDDEN.test(text)) return text;
-  const { found } = hiddenIn(text);
+  const { found, variants } = hiddenIn(text);
+  for (const at of variants) found.add(at);
   let kept = "";
   let offset = 0;
   for (const char of text) {
@@ -350,26 +374,32 @@ function scanFrontmatter(
   file: SkillFile,
   variantLines: { path: string; line: number; text: string; offsets: number[] }[],
   hide: (finding: Omit<ScanFinding, "excerpt" | "kind">, excerpt: () => string) => void,
+  flag: (path: string, line: number) => boolean,
 ): void {
   const parsed = frontmatterStrings(file.content);
   if (!parsed) return;
-  const raw = file.content.replace(/\s+/gu, "");
+  // Only the plain spaces and line ends YAML folds; anything else must show as it is.
+  const plain = (text: string) => text.replace(/[ \t\r\n]+/g, "");
+  const raw = plain(parsed.head);
   const lines = parsed.head.split(/\r?\n/);
   for (const { key, text } of parsed.strings) {
     if (!MAYBE_HIDDEN.test(text) && !CONTROL.test(text)) continue;
-    if (raw.includes(text.replace(/\s+/gu, ""))) continue;
+    if (raw.includes(plain(text))) continue;
     const { found, variants } = hiddenIn(text);
     let offset = 0;
     for (const char of text) {
       if (CONTROL.test(char)) found.add(offset);
       offset += char.length;
     }
-    const index =
-      key === "" ? -1 : lines.findIndex((line) => line.replace(/^["']/, "").startsWith(key));
+    const keyed = (line: string) => {
+      const rest = line.replace(/^["']/, "");
+      return rest.startsWith(key) && /^["']?\s*:/.test(rest.slice(key.length));
+    };
+    const index = key === "" ? -1 : lines.findIndex(keyed);
     // The frontmatter's lines start after its opening `---`.
     const at = { path: file.path, line: index === -1 ? 1 : index + 2 };
     if (variants.length > 0) variantLines.push({ ...at, text, offsets: variants });
-    if (found.size === 0) continue;
+    if (found.size === 0 || !flag(at.path, at.line)) continue;
     let first = Number.POSITIVE_INFINITY;
     for (const hidden of found) first = Math.min(first, hidden);
     hide(at, () => excerpt(text, first, (_char, offset) => found.has(offset)));
