@@ -139,6 +139,23 @@ describe("docs/runner.md's hook snippets", () => {
     expect(settings()).toEqual(SETTINGS);
   });
 
+  it.each([
+    ["a folder that isn't there", "gone/claude-settings.json"],
+    ["a file that isn't there", "dotfiles/claude-settings.json"],
+  ])("stop, writing and removing nothing, when settings.json links to %s", (_, target) => {
+    mkdirSync(join(home, "dotfiles"));
+    run(`ln -s "${join(home, target)}" "${file}"`);
+    const spool = join(home, ".local", "state", "kelpie-runner", "session-events");
+    mkdirSync(spool, { recursive: true });
+    for (const snippet of [INSTALL, REMOVE]) {
+      const result = run(snippet);
+      expect(result.stdout).toContain("settings.json unchanged");
+      expect(readlinkSync(file)).toBe(join(home, target));
+    }
+    expect(existsSync(spool)).toBe(true);
+    expect(run(`find "${home}" -name '*.bak' -o -name '*.new'`).stdout).toBe("");
+  });
+
   it("back the settings up first, when no backup is there", () => {
     write(SETTINGS);
     const original = readFileSync(file, "utf8");

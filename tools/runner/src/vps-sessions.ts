@@ -257,7 +257,7 @@ export class VpsSessions {
       excerpt === null
         ? ""
         : excerptOf(
-            redact(cut(excerpt.text, MAX_REDACTED_CHARS), secrets).replace(INVISIBLES, ""),
+            redact(cut(excerpt.text, MAX_REDACTED_CHARS).replace(INVISIBLES, ""), secrets),
             MAX_EXCERPT_CHARS,
           );
     const startedBy = STARTED_BY.get(file.entrypoint ?? "") ?? "unknown";
@@ -283,14 +283,14 @@ export class VpsSessions {
   }
 
   /**
-   * Untrusted text for a one-line field: redacted, each break a space, without what shows nothing,
-   * and cut to `max`; null when nothing is left.
+   * Untrusted text for a one-line field: without what shows nothing, then redacted, each break a
+   * space, and cut to `max`; null when nothing is left.
    */
   #line(value: string | null, max: number): string | null {
     if (value === null) return null;
-    const line = redact(cut(value, MAX_REDACTED_CHARS), this.#options.secrets)
-      .replace(LINE_BREAKS, " ")
-      .replace(INVISIBLES, "");
+    // What shows nothing goes first: it could split a key, which would then pass, rejoined.
+    const visible = cut(value, MAX_REDACTED_CHARS).replace(INVISIBLES, "");
+    const line = redact(visible, this.#options.secrets).replace(LINE_BREAKS, " ");
     const text = cut(line, max);
     return text.trim() === "" ? null : text;
   }

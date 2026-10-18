@@ -24,8 +24,11 @@ const NAME = `(?!(?:old)?pwd(?!${NAME_CHAR}))(?=${NAME_CHAR}{0,63}?(?:${SECRET_W
 const NAME_START = "(?<![A-Za-z0-9_.-])";
 /** Where a flag may start: after a space, a quote or a parenthesis, or at the start. */
 const FLAG_START = "(?<=^|[\\s\"'(])";
-/** On a line of its own, `name: value` with a status's name isn't a secret: "Auth: ok". */
-const NOT_A_STATUS = "(?!(?:pass|auth)[\"']?[ \\t]{0,8}:)";
+/** A name that may say a status rather than hold a secret: "Pass: all green", "Auth: ok". */
+const STATUS_NAME = /^(?:pass|auth)$/i;
+/** A status, or a count of tests, as `pass` and `auth` say one. */
+const STATUS =
+  /^(?:ok|yes|no|true|false|on|off|passed|failed|green|red|n\/a|all green|\d{1,9}(?:\/\d{1,9})?)\.?[ \t]*$/i;
 /** `=`, but not `==` or `=>`. */
 const ASSIGN = "[ \\t]{0,8}=(?![=>])";
 /** A value up to its closing quote, or up to the next space. */
@@ -42,7 +45,7 @@ const SECRET_LINE = new RegExp(
 );
 /** A YAML or header line, `name: value`, maybe a list's item: its value goes. */
 const SECRET_FIELD = new RegExp(
-  `^([ \\t]{0,64}(?:-[ \\t]{1,8})?${NOT_A_STATUS}${NAME}[ \\t]{0,8}:[ \\t]{1,8})([^\\n]*)`,
+  `^([ \\t]{0,64}(?:-[ \\t]{1,8})?(${NAME})[ \\t]{0,8}:[ \\t]{1,8})([^\\n]*)`,
   "gim",
 );
 /** A quoted name, as JSON and code write it: `"name": value`. */
@@ -88,21 +91,22 @@ const SLACK_WEBHOOK =
 const HEX = /[0-9a-fA-F]{32,}/g;
 /** A commit's SHA-1, as git writes it: 40 lowercase hex digits. */
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
-/** What says, just before it, that 40 hex digits are a commit: whole words only. */
+/**
+ * What says, just before it, that 40 hex digits are a commit: a whole word, then only separators,
+ * as `commit `, `sha: `, `HEAD = ` or a URL's `/commit/`. "sha1 secret: " names something else.
+ */
 const COMMIT_CONTEXT =
-  /(?:^|[^A-Za-z])(?:commits?|committed|sha1?|merged?|merges|merging|reverts?|reverted|cherry-picked|blob|tree|rev|head|parent)(?![A-Za-z])[^\n]{0,24}$/i;
+  /(?:^|[^A-Za-z])(?:commits?|committed|sha1?|merged?|merges|merging|reverts?|reverted|cherry-picked|blob|tree|rev|head|parent)[\s:=#/-]{1,8}$/i;
 /**
- * Exactly 40 base64 characters, `/` and `+` included, as an AWS secret access key: they go when
- * they mix cases and digits, unless they read as a path.
+ * A folder's or a file's name in a path: a word of four letters or more, maybe capitalized, maybe
+ * numbered. A random key's pieces between its slashes almost never read so.
  */
-const KEY_40 = /(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/]{40}(?![A-Za-z0-9+/=_-])/g;
-/** A folder's or a file's name in a path: a word, maybe capitalized, maybe numbered. */
-const PATH_SEGMENT = /^(?:[a-z]{2,}|[A-Z][a-z]{2,})[0-9]?$/;
+const PATH_SEGMENT = /^(?:[a-z]{4,}|[A-Z][a-z]{3,})[0-9]?$/;
 /**
- * 32 base64 or base64url characters or more; they go when they mix cases and digits. A `/`
- * isn't one of them, so a path is never taken whole.
+ * 32 base64 or base64url characters or more, `/` and `+` included, as AWS's secret keys and
+ * `openssl rand -base64`: they go when they mix cases and digits, unless they read as a path.
  */
-const BASE64 = /[A-Za-z0-9+_-]{32,}={0,2}/g;
+const BASE64 = /[A-Za-z0-9+/_-]{32,}={0,2}/g;
 
 /**
  * `text` without the secrets it shows, each replaced by REDACTED:
@@ -112,8 +116,7 @@ const BASE64 = /[A-Za-z0-9+_-]{32,}={0,2}/g;
  *   signature: `NAME=value`, `--name value`, `name: value` on a line of its own, `"name": value`,
  *   and a quoted header;
  * - a URL's password, curl's `-u user:password`, bearer and basic tokens, a Slack webhook's path;
- * - keys of a known format, 40 base64 characters that aren't a path, as AWS's secret keys, and
- *   long runs of hex or base64, but a commit's SHA.
+ * - keys of a known format, and long runs of hex, but a commit's SHA, or of base64, but a path.
  */
 export function redact(text: string, secrets: readonly string[] = []): string {
   let redacted = text;
@@ -123,8 +126,10 @@ export function redact(text: string, secrets: readonly string[] = []): string {
   redacted = redacted
     .replace(PEM, REDACTED)
     .replace(SECRET_LINE, `$1${REDACTED}`)
-    .replace(SECRET_FIELD, (field, name: string, value: string) =>
-      NO_SECRET.test(value) ? field : `${name}${schemeOf(value)}${REDACTED}`,
+    .replace(SECRET_FIELD, (field, lead: string, name: string, value: string) =>
+      NO_SECRET.test(value) || (STATUS_NAME.test(name) && STATUS.test(value))
+        ? field
+        : `${lead}${schemeOf(value)}${REDACTED}`,
     )
     .replace(QUOTED_FIELD, (field, quote: string, name: string, colon: string, value: string) => {
       if (/^(?:null|true|false|-?\d+(?:\.\d+)?)$/.test(value)) return field;
@@ -147,22 +152,20 @@ export function redact(text: string, secrets: readonly string[] = []): string {
     .replace(SLACK_WEBHOOK, `$1${REDACTED}`);
   for (const pattern of KNOWN_KEYS) redacted = redacted.replace(pattern, REDACTED);
   return redacted
-    .replace(KEY_40, (run) => (mixesCasesAndDigits(run) && !isPath(run) ? REDACTED : run))
     .replace(HEX, (run, offset: number, whole: string) =>
       COMMIT_SHA.test(run) && COMMIT_CONTEXT.test(whole.slice(Math.max(0, offset - 40), offset))
         ? run
         : REDACTED,
     )
-    .replace(BASE64, (run) => (mixesCasesAndDigits(run) ? REDACTED : run));
+    .replace(BASE64, (run) => (mixesCasesAndDigits(run) && !isPath(run) ? REDACTED : run));
 }
 
 function mixesCasesAndDigits(run: string): boolean {
   return /[0-9]/.test(run) && /[A-Z]/.test(run) && /[a-z]/.test(run);
 }
 
-/** A run that reads as a path: a `/` at either end, or two names of folders or files. */
+/** A run that reads as a path: two names of folders or files, or more. */
 function isPath(run: string): boolean {
-  if (run.startsWith("/") || run.endsWith("/")) return true;
   return run.split("/").filter((segment) => PATH_SEGMENT.test(segment)).length >= 2;
 }
 

@@ -560,6 +560,17 @@ describe("the review's fixes", () => {
     });
   });
 
+  it("removes invisible characters before it redacts a title or an excerpt", () => {
+    const anthropic = ["sk", "-\u200bant-api03-", "Ab3dEf6hIj9kLm2nOp5qRs8t"].join("");
+    const github = ["gh", "p_\ufeff", "A1b2C3d4".repeat(5)].join("");
+    writeSessionFile(vps, sessionFields({ pid: 101, name: `Use ${anthropic}` }));
+    prepareSpoolDir(vps.spoolDir, ownUid());
+    // Written as the hook wouldn't, to show the runner's own pass.
+    writeExcerpt(vps.spoolDir, SESSION_A, { at: NOW, text: `Token ${github}\u2800 ok` });
+    const [session] = listed(service().sessions).sessions;
+    expect(session).toMatchObject({ title: `Use ${REDACTED}`, excerpt: `Token ${REDACTED} ok` });
+  });
+
   it("redacts a field's first 4,096 characters only, so a huge title stays cheap", () => {
     writeSessionFile(vps, sessionFields({ pid: 101, name: `Big ${"a-".repeat(30_000)}` }));
     const started = performance.now();

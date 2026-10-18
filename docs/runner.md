@@ -68,12 +68,13 @@ The runner tells Kelpie what every Claude Code session on the server is doing: t
   - `ended`: its process is gone, or a `SessionEnd` whose reason isn't `clear` or `resume` came, and no event since. A running process whose session file started after that end took the session up again, as the app does after a reboot: the end is stale, and the session's excerpt stays.
   - otherwise, its session file's `status`: `working` for `busy`, `idle` for `idle`. The list shows the file's own status beside the state.
   - **Archive candidates** (`archivable`): the app's sessions that ended, or have been idle for 3 hours or more. Only the app archives a session, so a terminal's shows only as ended.
-- **Each session's details:** its repository (the main checkout's folder name) and branch, read from git's own files in its folder, never by running git; what started it (`app` for `claude-desktop`, `terminal` for `cli`, else `unknown`); its title; its last GitHub pull request link, from its transcript's last 1 MiB, of which only the `pr-link` entries are read; and the excerpt of its last reply. A transcript not where its folder's name says is found in an index of the project folders, built once per list. The title, the repository and the branch go on one line: each break becomes a space, and what shows nothing (Unicode's default-ignorable characters: bidi controls, zero-width spaces and joiners, the BOM, fillers, tag characters) is removed, from the excerpt too. `channel-egress` refuses an answer whose one-line field still holds either.
-- **Secrets never leave.** The hook redacts the reply's first 16 KiB before it cuts it to 1,000 characters, and the runner redacts every text again on the way out, at most 4,096 characters of each, its own secret by value first, before it cuts the excerpt to 500. Every pattern runs in linear time, so a hostile reply of any size costs milliseconds. So a secret only the runner knows, as a passphrase, is whole when it is redacted, even where it straddles the 500th character. What goes:
-  - the value of a name that says key, token, secret, pass, pwd, credential, auth, cookie, dsn or signature: `NAME=value`, a flag's `--name=value` or `--name value`, a YAML or header line's `name: value`, a quoted `"name": value`, and a header within a quoted command. Not the counts `tokens` names, `author`, `passed`, `passing` and `passes`, a flag such as `--passWithNoTests`, a status line such as `Pass: all green` or `Auth: ok`, the shell's `PWD` and `OLDPWD`, a quoted `null`, `true`, `false` or number, nor a line that only says a type, as `token: string;`;
+- **Each session's details:** its repository (the main checkout's folder name) and branch, read from git's own files in its folder, never by running git; what started it (`app` for `claude-desktop`, `terminal` for `cli`, else `unknown`); its title; its last GitHub pull request link, from its transcript's last 1 MiB, of which only the `pr-link` entries are read; and the excerpt of its last reply. A transcript not where its folder's name says is found in an index of the project folders, built once per list. The title, the repository and the branch go on one line: each break becomes a space, and what shows nothing (Unicode's default-ignorable characters: bidi controls, zero-width spaces and joiners, the BOM, fillers, tag characters; and the Braille blank) is removed, from the excerpt too. `channel-egress` refuses an answer whose one-line field still holds either.
+- **Secrets never leave.** The hook redacts the reply's first 16 KiB before it cuts it to 1,000 characters, and the runner redacts every text again on the way out, at most 4,096 characters of each, its own secret by value first, before it cuts the excerpt to 500. What shows nothing is removed first, in the hook and in the runner, so it can't split a key that would then pass redaction and show rejoined. Every pattern runs in linear time, so a hostile reply of any size costs milliseconds. So a secret only the runner knows, as a passphrase, is whole when it is redacted, even where it straddles the 500th character. What goes:
+  - the value of a name that says key, token, secret, pass, pwd, credential, auth, cookie, dsn or signature: `NAME=value`, a flag's `--name=value` or `--name value`, a YAML or header line's `name: value`, a quoted `"name": value`, and a header within a quoted command. Not the counts `tokens` names, `author`, `passed`, `passing` and `passes`, a flag such as `--passWithNoTests`, a line `pass: ` or `auth: ` whose value is a status (`ok`, `yes`, `no`, `true`, `false`, `on`, `off`, `passed`, `failed`, `green`, `red`, `n/a`, `all green`) or a count such as `458/458`, the shell's `PWD` and `OLDPWD`, a quoted `null`, `true`, `false` or number, nor a line that only says a type, as `token: string;`;
   - a URL's password (`scheme://user:password@`, the user maybe empty, as `redis://:password@`), curl's `-u user:password`, a Slack webhook's path, and bearer and basic tokens that look like one: a digit, a symbol, or a capital past the first letter, so `Bearer authentication` stays;
   - keys of a known format (`sk-`, `ghp_`, `gho_`, `github_pat_`, AWS's `AKIA` and `ASIA`) and PEM blocks;
-  - runs of 32 or more hex digits, but a commit's 40 lowercase ones where a whole word just before says so, as `commit`, `merged`, `sha`, `HEAD` or `/commit/`, and not `header` or `review`; runs of 32 or more base64 characters that mix cases and digits, without `/`, so a path is never taken whole; and exactly 40 base64 characters, `/` and `+` included, that mix cases and digits, as an AWS secret key, unless they read as a path: a `/` at either end, or two folder or file names.
+  - runs of 32 or more hex digits, but a commit's 40 lowercase ones right after a whole word that says so, with only separators between (spaces, `:`, `=`, `#`, `-`, `/`), as `commit `, `merged `, `sha: `, `HEAD = ` or `/commit/`. Not after `header` or `review`, nor after `sha1 secret: `;
+  - runs of 32 or more base64 characters, `/` and `+` included, that mix cases and digits, as AWS's secret keys and `openssl rand -base64`, unless they read as a path: two or more of their `/`-separated pieces are a word of four letters or more, maybe capitalized, maybe numbered. Of 30,000 random keys of each shape, about 0.13% of 40-character keys, 0.06% of 44-character ones, and none of 88 pass whole, nearly all for want of a digit or a case.
 
   A PR link the redaction would change isn't shown.
 - **Bounds:** at most 200 sessions or waits per answer, 512 KiB for the list and 64 KiB for the waits. Past those, the runner drops excerpts, then titles, PR links, branches and repositories, from the least recent session up, then sessions, and says `truncated`. It reads at most 1,000 session files, and a transcript's last 1 MiB.
@@ -92,19 +93,28 @@ Running sessions pick up an edit to `settings.json` without a restart (#416). On
 
 ```bash
 f=$(readlink -f ~/.claude/settings.json)
-[ -e "$f.bak" ] || cp -p "$f" "$f.bak"
-hook='{"type":"command","command":"cd \"$HOME/kelpie/tools/runner\" && exec \"$HOME/.bun/bin/bun\" --no-env-file --config=hooks/bunfig.toml hooks/session-event.ts","async":true,"timeout":2}'
-if cp -p "$f" "$f.new" && jq --argjson hook "$hook" '
+if [ -z "$f" ] || [ ! -f "$f" ]; then
+  echo "settings.json unchanged: ~/.claude/settings.json doesn't lead to a file"
+else
+  [ -e "$f.bak" ] || cp -p "$f" "$f.bak"
+  hook='{"type":"command","command":"cd \"$HOME/kelpie/tools/runner\" && exec \"$HOME/.bun/bin/bun\" --no-env-file --config=hooks/bunfig.toml hooks/session-event.ts","async":true,"timeout":2}'
+  if cp -p "$f" "$f.new" && jq --argjson hook "$hook" '
   def ours: any((.hooks // [])[]; (.command // "") | tostring
     | contains("kelpie/tools/runner") and contains("hooks/session-event.ts"));
   reduce ("Notification", "PermissionRequest", "PermissionDenied", "PostToolUse",
           "PostToolUseFailure", "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd") as $event
     (.; .hooks = (.hooks // {})
       | .hooks[$event] = (((.hooks[$event] // []) | map(select(ours | not))) + [{ hooks: [$hook] }]))
-' "$f" > "$f.new" && jq -e . "$f.new" > /dev/null; then mv "$f.new" "$f"; else rm -f "$f.new"; echo "settings.json unchanged"; fi
+  ' "$f" > "$f.new" && jq -e . "$f.new" > /dev/null; then
+    mv "$f.new" "$f"
+  else
+    rm -f "$f.new"
+    echo "settings.json unchanged"
+  fi
+fi
 ```
 
-- **It keeps the file safe:** it follows `settings.json` to the real file when it is a symlink, so the link stays. It backs that file up to `settings.json.bak` unless a backup is already there, writes the result beside it with the same mode, checks that it is JSON, and only then moves it over. A `settings.json` that isn't JSON stays as it was, and the command says `settings.json unchanged`.
+- **It keeps the file safe:** it follows `settings.json` to the real file when it is a symlink, so the link stays. It backs that file up to `settings.json.bak` unless a backup is already there, writes the result beside it with the same mode, checks that it is JSON, and only then moves it over. A `settings.json` that isn't JSON, or a link that leads to no file, stays as it was, and the command says `settings.json unchanged`.
 - **It adds one group per event,** beside the hooks already there, and replaces its own on a second run: any hook whose command names `kelpie/tools/runner` and `hooks/session-event.ts`.
 - **The command moves to the runner's checkout first.** Claude Code runs a hook from the session's folder, and Bun would load that folder's `bunfig.toml`, its `preload` included, and its `.env`: a repository could then run code as you on its first event. So the hook runs from `~/kelpie/tools/runner`, with the empty `hooks/bunfig.toml` as its settings and no `.env`. Claude Code runs the command through `sh`, which expands `$HOME`.
 
@@ -135,8 +145,11 @@ The same goes under `PermissionRequest`, `PermissionDenied`, `PostToolUse`, `Pos
 
 ```bash
 f=$(readlink -f ~/.claude/settings.json)
-[ -e "$f.bak" ] || cp -p "$f" "$f.bak"
-if cp -p "$f" "$f.new" && jq '
+if [ -z "$f" ] || [ ! -f "$f" ]; then
+  echo "settings.json unchanged: ~/.claude/settings.json doesn't lead to a file"
+else
+  [ -e "$f.bak" ] || cp -p "$f" "$f.bak"
+  if cp -p "$f" "$f.new" && jq '
   def ours: (.command // "") | tostring
     | contains("kelpie/tools/runner") and contains("hooks/session-event.ts");
   def mine: any((.hooks // [])[]; ours);
@@ -149,8 +162,14 @@ if cp -p "$f" "$f.new" && jq '
         else . end)
       | if .hooks == {} and $before.hooks != {} then del(.hooks) else . end
     end
-' "$f" > "$f.new" && jq -e . "$f.new" > /dev/null; then mv "$f.new" "$f"; else rm -f "$f.new"; echo "settings.json unchanged"; fi
-rm -rf ~/.local/state/kelpie-runner/session-events
+  ' "$f" > "$f.new" && jq -e . "$f.new" > /dev/null; then
+    mv "$f.new" "$f"
+    rm -rf ~/.local/state/kelpie-runner/session-events
+  else
+    rm -f "$f.new"
+    echo "settings.json unchanged"
+  fi
+fi
 ```
 
 ## Setting it up

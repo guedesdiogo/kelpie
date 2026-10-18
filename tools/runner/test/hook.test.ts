@@ -126,6 +126,17 @@ describe("recordEvent", () => {
     expect(HOOK_REDACT_CHARS).toBe(16 * 1024);
   });
 
+  it("removes invisible characters before it redacts, so none can split a key past it", () => {
+    const github = ["gh", "p_\u200b", "A1b2C3d4".repeat(5)].join("");
+    const anthropic = ["sk", "-\u2060ant-api03-", "Ab3dEf6hIj9kLm2nOp5qRs8t"].join("");
+    const aws = ["AK", "IA\u{e0041}", "Z7Q4M2X9L5K8P3N6"].join("");
+    const braille = ["gh", "o_\u2800", "Q9w8E7r6".repeat(5)].join("");
+    const reply = `Found ${github}, ${anthropic}, ${aws} and ${braille}.`;
+    recordEvent(input("Stop", { last_assistant_message: reply }), options);
+    const text = readExcerpt(options.dir, SESSION_A)?.text;
+    expect(text).toBe(`Found ${REDACTED}, ${REDACTED}, ${REDACTED} and ${REDACTED}.`);
+  });
+
   it("drops a session's excerpt when its last reply has no text", () => {
     recordEvent(input("Stop", { last_assistant_message: "Older reply." }), options);
     recordEvent(input("Stop", { last_assistant_message: "  " }), options);

@@ -70,6 +70,12 @@ describe("redact", () => {
     "Passed: 458/458",
     "Pass: all green",
     "Auth: ok",
+    "pass: 458/458",
+    "Pass: passed",
+    "auth: n/a",
+    "AUTH: Off",
+    "pass: yes.",
+    "auth: 12",
     "TESTS_PASSED=458",
     "PASSING=12",
     "bun test --passWithNoTests src",
@@ -141,6 +147,9 @@ describe("redact", () => {
     ["auth_token: abc", `auth_token: ${REDACTED}`],
     ["Authorization: Basic Zm9vOmJhcg==", `Authorization: Basic ${REDACTED}`],
     ["run --pass hunter2", `run --pass ${REDACTED}`],
+    ["pass: hunter2", `pass: ${REDACTED}`],
+    ["auth: abcdef123", `auth: ${REDACTED}`],
+    ["Pass: all green-ish", `Pass: ${REDACTED}`],
   ])("still redacts pass and auth where they name a secret: %s", (text, expected) => {
     expect(redact(text)).toBe(expected);
   });
@@ -168,8 +177,42 @@ describe("redact", () => {
     "/src/Components2/Button/IconButtonWithTi",
     "src/Components2/Button/IconButtonWithTi/",
     "app/Models2/Users/Profile/Edit/Views/Tab",
+    "/home/ubuntu/Repos/gclinic-r3-api/src/modules",
+    "/srv/Projects2/Kelpie/apps/channel-egress/src",
+    "/Users/Owner/Library/Caches/Kelpie2/Sessions",
+    "packages/Memory2/source/Sanitize/rules/tests",
   ])("leaves a path of 40 characters or so: %s", (path) => {
     expect(redact(path)).toBe(path);
+  });
+
+  it("redacts random base64 keys whole, with a slash or not, almost always", () => {
+    // A seeded generator, so the run is the same every time.
+    let state = 0x2545f491;
+    const next = () => {
+      state = (state + 0x6d2b79f5) | 0;
+      let t = Math.imul(state ^ (state >>> 15), 1 | state);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
+    };
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const random = (length: number) =>
+      Array.from({ length }, () => alphabet[Math.floor(next() * 64)]).join("");
+    const shapes = [
+      ["AWS-shaped", () => random(40), 0.005],
+      ["openssl rand -base64 32", () => `${random(43)}=`, 0.005],
+      ["64 characters", () => random(64), 0],
+      ["88 characters", () => `${random(86)}==`, 0],
+    ] as const;
+    const started = performance.now();
+    for (const [, make, most] of shapes) {
+      let leaked = 0;
+      for (let trial = 0; trial < 2_000; trial += 1) {
+        const secret = make();
+        if (redact(`key ${secret} here`).includes(secret)) leaked += 1;
+      }
+      expect(leaked / 2_000).toBeLessThanOrEqual(most);
+    }
+    expect(performance.now() - started).toBeLessThan(2_000);
   });
 
   it("redacts a Slack webhook's secret path", () => {
@@ -252,8 +295,10 @@ describe("redact", () => {
       `commit ${sha}`,
       `Merged ${sha} into main`,
       `https://github.com/guedesdiogo/kelpie/commit/${sha}`,
-      `HEAD is now at ${sha}`,
       `sha: ${sha}`,
+      `HEAD = ${sha}`,
+      `revert #${sha}`,
+      `parent - ${sha}`,
     ]) {
       expect(redact(text)).toBe(text);
     }
@@ -261,6 +306,15 @@ describe("redact", () => {
     expect(redact(`it printed ${sha}`)).toBe(`it printed ${REDACTED}`);
     // Words that only start like one aren't a commit's context, and a token stays one.
     for (const lead of ["header", "review of", "the shared secret is", "headers:", "treetop"]) {
+      expect(redact(`${lead} ${sha}`)).toBe(`${lead} ${REDACTED}`);
+    }
+    // Only separators may stand between the word and the hex: more words name something else.
+    for (const lead of [
+      "sha1 secret:",
+      "blob storage key:",
+      "merge webhook secret:",
+      "HEAD is now at",
+    ]) {
       expect(redact(`${lead} ${sha}`)).toBe(`${lead} ${REDACTED}`);
     }
     expect(redact(`GITHUB_TOKEN=${sha}`)).toBe(`GITHUB_TOKEN=${REDACTED}`);
@@ -325,12 +379,27 @@ describe("redact's cost", () => {
     ["-----BEGIN A-----", "-----BEGIN A-----"],
     ["x://:", "x://:"],
     ["commit ", "commit "],
-  ])("takes linear time on 200,000 characters of %j", (_, unit) => {
-    const text = unit.repeat(Math.ceil(200_000 / unit.length)).slice(0, 200_000);
-    redact(text.slice(0, 1_000));
-    const started = performance.now();
-    redact(text, ["correct horse battery staple"]);
-    expect(performance.now() - started).toBeLessThan(50);
+  ])("takes linear time on %j: 4 times the text, under 8 times the cost", (_, unit) => {
+    const of = (length: number) => unit.repeat(Math.ceil(length / unit.length)).slice(0, length);
+    // The best of three runs, after a warm-up, so a pause of the collector doesn't count.
+    const cost = (text: string) => {
+      let best = Number.POSITIVE_INFINITY;
+      for (let run = 0; run < 3; run += 1) {
+        const started = performance.now();
+        redact(text, ["correct horse battery staple"]);
+        best = Math.min(best, performance.now() - started);
+      }
+      return best;
+    };
+    const small = of(50_000);
+    const large = of(200_000);
+    redact(small);
+    const smallCost = cost(small);
+    const largeCost = cost(large);
+    // Quadratic would cost about 16 times as much, and took 12 to 60 s on the larger text: the
+    // ceiling is a generous one, for a CI runner under coverage.
+    expect(largeCost / Math.max(smallCost, 1)).toBeLessThan(8);
+    expect(largeCost).toBeLessThan(1_000);
   });
 });
 

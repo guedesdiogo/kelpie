@@ -439,12 +439,13 @@ export const RUNNER_LINE_BREAK =
   // biome-ignore lint/suspicious/noControlCharactersInRegex: finding control characters is its job.
   /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 /**
- * What shows nothing but can reorder or hide text: Unicode's default-ignorable code points, which
- * hold the bidi controls, zero-width spaces and joiners, the word joiner, the BOM, fillers such as
- * U+3164, variation selectors and the tag characters. As in `packages/memory/src/sanitize.ts`, the
- * property stays outside a character class, which workerd matched inconsistently.
+ * What shows nothing but can reorder or hide text, or split a secret: Unicode's default-ignorable
+ * code points, which hold the bidi controls, zero-width spaces and joiners, the word joiner, the
+ * BOM, fillers such as U+3164, variation selectors and the tag characters; and the Braille blank.
+ * As in `packages/memory/src/sanitize.ts`, the property stays outside a character class, which
+ * workerd matched inconsistently.
  */
-export const RUNNER_INVISIBLE = /\p{Default_Ignorable_Code_Point}/u;
+export const RUNNER_INVISIBLE = /\u2800|\p{Default_Ignorable_Code_Point}/u;
 /**
  * What a one-line field can't hold: a break or an invisible character. The runner sends a title,
  * a repository and a branch without them, and an answer whose field holds one isn't the runner's.

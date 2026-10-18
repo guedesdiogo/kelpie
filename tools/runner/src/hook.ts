@@ -1,4 +1,4 @@
-import { MAX_EXCERPT_CHARS, SESSION_ID } from "./protocol.ts";
+import { INVISIBLE, MAX_EXCERPT_CHARS, SESSION_ID } from "./protocol.ts";
 import { cut, excerptOf, redact } from "./redact.ts";
 import {
   appendEvent,
@@ -42,6 +42,8 @@ export const HOOK_REDACT_CHARS = 16 * 1024;
  */
 export const HOOK_COMMAND =
   'cd "$HOME/kelpie/tools/runner" && exec "$HOME/.bun/bin/bun" --no-env-file --config=hooks/bunfig.toml hooks/session-event.ts';
+/** What shows nothing, removed from a reply before it is redacted. */
+const INVISIBLES = new RegExp(INVISIBLE.source, "gu");
 /** The tool whose permission request is a question to the owner. */
 const QUESTION_TOOL = "AskUserQuestion";
 
@@ -111,9 +113,13 @@ export function recordEvent(input: string, { dir, now, uid }: HookOptions): void
   if (event === "Stop") {
     const reply = payload.last_assistant_message;
     // The whole reply is redacted before it is cut, so no secret straddles the cut.
+    // What shows nothing goes first: it could split a key, which would then pass, rejoined.
     const text =
       typeof reply === "string"
-        ? excerptOf(redact(cut(reply, HOOK_REDACT_CHARS)), HOOK_EXCERPT_CHARS)
+        ? excerptOf(
+            redact(cut(reply, HOOK_REDACT_CHARS).replace(INVISIBLES, "")),
+            HOOK_EXCERPT_CHARS,
+          )
         : "";
     // Only the latest reply's excerpt is kept: a reply without text leaves none.
     if (text.trim() === "") deleteExcerpt(dir, session);

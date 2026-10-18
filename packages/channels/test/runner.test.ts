@@ -423,6 +423,7 @@ describe("the VPS's one-line fields", () => {
     ["a Hangul filler", "a\u3164b"],
     ["a tag character", "a\u{e0041}b"],
     ["a cancel tag", "a\u{e007f}b"],
+    ["a Braille blank", "a\u2800b"],
   ])("refuses %s in a title, a repository or a branch", (_, text) => {
     for (const field of ["title", "repository", "branch"] as const) {
       expect(parseRunnerVpsSessions(sessionsAnswer([vpsSession({ [field]: text })]))).toBeNull();

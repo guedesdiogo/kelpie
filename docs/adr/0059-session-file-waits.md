@@ -35,7 +35,7 @@
 
 **4. A live session that started after its last `SessionEnd` hasn't ended.** A file whose process is alive, and whose `startedAt` comes after that event, means the session was started again, as after a reboot. ADR-0057 §4 had only a later hook event bring an ended session back. Its excerpt, deleted at that end, comes back with its next reply.
 
-**5. The hook keeps a longer excerpt, and the runner cuts it.** The hook redacts the last reply and keeps up to 1,000 characters on disk. The runner then redacts again, including its own secret by value, and cuts to 500 before anything leaves. A hook can't read that secret, so cutting first could leave a prefix of a secret that isn't hex. ADR-0057 §2 had the hook cut to 500.
+**5. The hook keeps a longer excerpt, and the runner cuts it.** The hook redacts the first 16 KiB of the last reply and keeps up to 1,000 characters on disk. The runner redacts again at most 4,096 characters of each field, including its own secret by value, and cuts the excerpt to 500 before anything leaves. Both caps sit far above what is kept, so cutting before redacting loses nothing that would leave. A hook can't read that secret, so cutting first could leave a prefix of a secret that isn't hex. ADR-0057 §2 had the hook cut to 500.
 
 ## Consequences
 
