@@ -724,6 +724,17 @@ describe("AgentFiles", () => {
     );
   });
 
+  it("keeps controls out of a skill's entry, and cuts it at a whole character", async () => {
+    vaultWith({
+      "agents/kelpie/skills/pdf/SKILL.md": `---\nname: pdf\ndescription: "Reads.\\x1b[8m ${"\u{1F600}".repeat(1_100)}"\n---\n`,
+    });
+    const compiled = await stub().compile("kelpie");
+    const description = compiled.skills.find((skill) => skill.name === "pdf")?.description ?? "";
+    expect(description.startsWith("Reads. [8m \u{1F600}")).toBe(true);
+    expect([...description]).toHaveLength(1_024);
+    expect(description.endsWith("\u{1F600}")).toBe(true);
+  });
+
   it("records an install whose files the vault already holds, with nothing to commit", async () => {
     const content = skillMd("pasted", "From the clipboard.");
     const backend = vaultWith({ "agents/kelpie/skills/pasted/SKILL.md": content });

@@ -104,6 +104,42 @@ export function checkSkillMd(
 /** Markdown and scripts, which the agent and the scan read as text. */
 const TEXT = /\.(?:md|txt|py|sh|bash|zsh|js|mjs|cjs|ts|rb|pl|php|ps1|bat|cmd|go|rs|lua)$/i;
 
+/** A frontmatter's strings past this many aren't read for the scan. */
+const MAX_FRONTMATTER_STRINGS = 1_000;
+
+/**
+ * Every string a SKILL.md's frontmatter holds as its YAML decodes it, keys and values, each with the
+ * top-level key it sits under, and the frontmatter's own text; null without one the vault reads.
+ */
+export function frontmatterStrings(
+  content: string,
+): { head: string; strings: { key: string; text: string }[] } | null {
+  const match = FRONTMATTER.exec(content);
+  if (match?.[1] === undefined || match[1].length > 16_384) return null;
+  let fields: unknown;
+  try {
+    const doc = parseDocument(match[1], { uniqueKeys: true });
+    if (doc.errors.length > 0) return null;
+    fields = doc.toJS({ maxAliasCount: 0 });
+  } catch {
+    return null;
+  }
+  const strings: { key: string; text: string }[] = [];
+  const walk = (value: unknown, key: string) => {
+    if (strings.length >= MAX_FRONTMATTER_STRINGS) return;
+    if (typeof value === "string") strings.push({ key, text: value });
+    else if (Array.isArray(value)) for (const item of value) walk(item, key);
+    else if (typeof value === "object" && value !== null) {
+      for (const [name, item] of Object.entries(value)) {
+        walk(name, key || name);
+        walk(item, key || name);
+      }
+    }
+  };
+  walk(fields, "");
+  return { head: match[1], strings };
+}
+
 /** `.DS_Store`, `.git/` or `__MACOSX/`; `.` and `..` are unsafe paths, refused whole. */
 const hidden = (segment: string) =>
   (segment.startsWith(".") && segment !== "." && segment !== "..") || segment === "__MACOSX";
@@ -153,7 +189,10 @@ export async function skillFromEntries(
     if (!isCleanPath(path) || /\p{Default_Ignorable_Code_Point}/u.test(bare)) {
       return { ok: false, problem: { reason: "unsafe_path", path } };
     }
-    const key = path.normalize("NFKC").toLowerCase();
+    const key = path
+      .normalize("NFKC")
+      .replace(/[\u{FE0E}\u{FE0F}]/gu, "")
+      .toLowerCase();
     if (seen.has(key)) return { ok: false, problem: { reason: "path_clash", path } };
     seen.add(key);
     // The vault would read a second one as a skill of its own, which the owner never reviewed.

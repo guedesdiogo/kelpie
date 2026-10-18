@@ -4251,12 +4251,17 @@ function skillEntry(path: string, content: string): SkillEntry {
   }
   const line = (value: unknown, max: number) => {
     if (typeof value !== "string") return null;
-    // What hides text, as tags a YAML escape writes, never reaches the agent's prompt.
-    const text = withoutHidden(value)
-      .replace(/\s+/g, " ")
-      .replace(/^[#\s]+/, "")
-      .trim()
-      .slice(0, max);
+    // What hides text, as tags a YAML escape writes, or a control character, never reaches the
+    // agent's prompt; the cut keeps whole characters.
+    const text = [
+      ...withoutHidden(value)
+        .replace(/\p{Cc}/gu, " ")
+        .replace(/\s+/g, " ")
+        .replace(/^[#\s]+/, "")
+        .trim(),
+    ]
+      .slice(0, max)
+      .join("");
     return text === "" ? null : text;
   };
   return {

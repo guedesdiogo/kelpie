@@ -2,7 +2,7 @@
 // `skills_guard`: patterns by category, found by file and line. It advises; Kelpie runs no script,
 // and the owner reads what the agent will. Hidden characters are the exception, since they carry
 // instructions the owner can't see, so they block the install.
-import { checkSkillMd, fileBytes, isScript, type SkillFile } from "./skills.ts";
+import { fileBytes, frontmatterStrings, isScript, type SkillFile } from "./skills.ts";
 
 export type FindingKind =
   | "hidden_characters"
@@ -52,7 +52,11 @@ const MONGOLIAN_SELECTOR = /[\u{180B}-\u{180D}\u{180F}]/u;
 /** The zero-width joiner and non-joiner, which shape emoji and the letters of some scripts. */
 const JOINER = /[\u{200C}\u{200D}]/u;
 const MAYBE_HIDDEN = new RegExp(`${FORMAT.source}|${SELECTOR.source}`, "u");
-const EMOJI = /\p{Emoji}/u;
+/** A keycap's digit, `#` or `*`, which a presentation selector serves before U+20E3. */
+const KEYCAP_BASE = /[0-9#*]/u;
+const KEYCAP = "\u{20E3}";
+/** Control characters but tabs and line ends: an escape can write them where nothing shows. */
+const CONTROL = /(?![\t\n\r])\p{Cc}/u;
 const BEFORE_JOINER = /\p{Extended_Pictographic}|\p{Emoji_Modifier}|\u{FE0F}/u;
 const PICTOGRAPH = /\p{Extended_Pictographic}/u;
 const HAN = /\p{sc=Han}/u;
@@ -85,7 +89,7 @@ const JOINING_SCRIPTS = [
 ];
 /** A letter of one of them, by its script extensions, or a mark, as a virama, of one by its own. */
 const JOINING_LETTER = new RegExp(
-  `(?=\\p{L})[${JOINING_SCRIPTS.map((script) => `\\p{scx=${script}}`).join("")}]`,
+  `(?=\\p{Lo})[${JOINING_SCRIPTS.map((script) => `\\p{scx=${script}}`).join("")}]`,
   "u",
 );
 const JOINING_MARK = new RegExp(
@@ -97,6 +101,8 @@ const TAG = /[\u{E0000}-\u{E007F}]/u;
 /** In binary data, a run this long of characters that show nothing, or of tags, spells something. */
 const MIN_RUN = 8;
 const MIN_TAGS = 4;
+/** Tags this many in a file spell something however they are spread; by chance, never. */
+const MIN_SCATTERED_TAGS = 8;
 /** Bytes whose text is at least this share printable read as text with a stray byte. */
 const TEXT_SHARE = 0.9;
 /** Past this many ideographic or Mongolian variants in a skill, they read as a code, not as text. */
@@ -107,7 +113,7 @@ const OVERLAP = 400;
 /** An excerpt starts this many characters before what it shows. */
 const EXCERPT_LEAD = 40;
 
-/** Archives and PDFs, by their first bytes: what they pack, the scan can't read. */
+/** Archives, PDFs and other packed formats, by their first bytes: what they pack, the scan can't read. */
 const CONTAINERS: readonly (readonly number[])[] = [
   [0x50, 0x4b, 0x03, 0x04],
   [0x50, 0x4b, 0x05, 0x06],
@@ -118,6 +124,12 @@ const CONTAINERS: readonly (readonly number[])[] = [
   [0x52, 0x61, 0x72, 0x21],
   [0x28, 0xb5, 0x2f, 0xfd],
   [0x25, 0x50, 0x44, 0x46],
+  [0x50, 0x4b, 0x07, 0x08],
+  [0x04, 0x22, 0x4d, 0x18],
+  [0x1f, 0x9d],
+  [0x4d, 0x53, 0x43, 0x46],
+  [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1],
+  [0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x20, 0x33, 0x00],
 ];
 
 interface Rule {
@@ -226,13 +238,20 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
     let hid = false;
     const script = isScript(path);
     const instructions = path.toLowerCase().endsWith(".md");
+    // In binary data, tags spread over the file count together.
+    const tagLines: { line: number; text: string; tags: number[] }[] = [];
     content.split(/\r?\n/).forEach((line, index) => {
       // A BOM opens a file legitimately; anywhere else it hides.
       const scanned = index === 0 ? line.replace(/^\u{FEFF}/u, "") : line;
       const at = { path, line: index + 1 };
       if (MAYBE_HIDDEN.test(scanned)) {
         const { found, variants } = data
-          ? { found: spelledIn(scanned), variants: [] }
+          ? {
+              found: spelledIn(scanned, (tags) =>
+                tagLines.push({ line: index + 1, text: scanned, tags }),
+              ),
+              variants: [],
+            }
           : hiddenIn(scanned);
         if (variants.length > 0) variantLines.push({ ...at, text: scanned, offsets: variants });
         if (found.size > 0) {
@@ -259,19 +278,29 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
         }
       }
     });
+    const scattered = tagLines.reduce((sum, { tags }) => sum + tags.length, 0);
+    if (scattered >= MIN_SCATTERED_TAGS) {
+      hid = true;
+      for (const { line, text, tags } of tagLines) {
+        const shown = new Set(tags);
+        hide({ path, line }, () =>
+          excerpt(text, tags[0] ?? 0, (_char, offset) => shown.has(offset)),
+        );
+      }
+    }
     return hid;
   };
 
   for (const file of files) {
     if (!file.binary) {
       scanText(file.path, file.content, false);
-      if (file.path === "SKILL.md") scanDescription(file, variantLines, hide);
+      if (file.path === "SKILL.md") scanFrontmatter(file, variantLines, hide);
       continue;
     }
     const bytes = fileBytes(file);
     // One a machine would run, or one that packs what the scan can't read, is a finding of its own.
     if (isExecutable(file)) add({ path: file.path, line: 0, kind: "executable" }, () => "");
-    else if (CONTAINERS.some((magic) => starts(bytes, magic))) {
+    else if (isContainer(bytes)) {
       add({ path: file.path, line: 0, kind: "container" }, () => "");
     }
     let hid = false;
@@ -313,30 +342,38 @@ export function withoutHidden(text: string): string {
 }
 
 /**
- * The SKILL.md's description as its YAML decodes it: an escape such as `\U000E0049` writes a
- * hidden character the file's text doesn't show.
+ * The SKILL.md's frontmatter as its YAML decodes it: an escape such as `\U000E0049` writes a
+ * hidden character, or a control one, the file's text doesn't show. A string the file shows as it
+ * is, its own lines were scanned for.
  */
-function scanDescription(
+function scanFrontmatter(
   file: SkillFile,
   variantLines: { path: string; line: number; text: string; offsets: number[] }[],
   hide: (finding: Omit<ScanFinding, "excerpt" | "kind">, excerpt: () => string) => void,
 ): void {
-  // Only an escape, a backslash in a double-quoted scalar, writes what the file's text doesn't show;
-  // the rest the file's own lines were scanned for.
-  const head = /^\u{FEFF}?---\r?\n([\s\S]*?)\r?\n---/u.exec(file.content)?.[1];
-  if (head === undefined || !head.includes("\\")) return;
-  const checked = checkSkillMd(file.content, null);
-  if (!checked.ok || !MAYBE_HIDDEN.test(checked.description)) return;
-  const { found, variants } = hiddenIn(checked.description);
-  const index = head.split(/\r?\n/).findIndex((line) => /^["']?description["']?\s*:/.test(line));
-  // The frontmatter's lines start after its opening `---`.
-  const at = { path: file.path, line: index === -1 ? 1 : index + 2 };
-  if (variants.length > 0)
-    variantLines.push({ ...at, text: checked.description, offsets: variants });
-  if (found.size === 0) return;
-  let first = Number.POSITIVE_INFINITY;
-  for (const offset of found) first = Math.min(first, offset);
-  hide(at, () => excerpt(checked.description, first, (_char, offset) => found.has(offset)));
+  const parsed = frontmatterStrings(file.content);
+  if (!parsed) return;
+  const raw = file.content.replace(/\s+/gu, "");
+  const lines = parsed.head.split(/\r?\n/);
+  for (const { key, text } of parsed.strings) {
+    if (!MAYBE_HIDDEN.test(text) && !CONTROL.test(text)) continue;
+    if (raw.includes(text.replace(/\s+/gu, ""))) continue;
+    const { found, variants } = hiddenIn(text);
+    let offset = 0;
+    for (const char of text) {
+      if (CONTROL.test(char)) found.add(offset);
+      offset += char.length;
+    }
+    const index =
+      key === "" ? -1 : lines.findIndex((line) => line.replace(/^["']/, "").startsWith(key));
+    // The frontmatter's lines start after its opening `---`.
+    const at = { path: file.path, line: index === -1 ? 1 : index + 2 };
+    if (variants.length > 0) variantLines.push({ ...at, text, offsets: variants });
+    if (found.size === 0) continue;
+    let first = Number.POSITIVE_INFINITY;
+    for (const hidden of found) first = Math.min(first, hidden);
+    hide(at, () => excerpt(text, first, (_char, offset) => found.has(offset)));
+  }
 }
 
 /**
@@ -362,7 +399,8 @@ function hiddenIn(line: string): { found: Set<number>; variants: number[] } {
     } else if (SELECTOR.test(char)) {
       const base = before !== "" && !SELECTOR.test(before);
       if (EMOJI_SELECTOR.test(char)) {
-        if (!base || !EMOJI.test(before)) found.add(at);
+        const serves = PICTOGRAPH.test(before) || (KEYCAP_BASE.test(before) && after === KEYCAP);
+        if (!base || !serves) found.add(at);
       } else if (base && (MONGOLIAN_SELECTOR.test(char) ? MONGOLIAN : HAN).test(before)) {
         variants.push(at);
       } else {
@@ -379,10 +417,12 @@ const joins = (char: string) => JOINING_LETTER.test(char) || JOINING_MARK.test(c
 
 /**
  * Where binary data spells words that don't show: runs of four or more tags, or of eight or more
- * invisible characters. One alone happens by chance in compressed bytes.
+ * invisible characters. One alone happens by chance in compressed bytes; `onTags` hears every tag
+ * a line holds, for the count over the whole file.
  */
-function spelledIn(line: string): Set<number> {
+function spelledIn(line: string, onTags: (tags: number[]) => void): Set<number> {
   const found = new Set<number>();
+  const all: number[] = [];
   const tags: number[] = [];
   const invisibles: number[] = [];
   const close = (run: number[], least: number) => {
@@ -391,14 +431,17 @@ function spelledIn(line: string): Set<number> {
   };
   let offset = 0;
   for (const char of line) {
-    if (TAG.test(char)) tags.push(offset);
-    else close(tags, MIN_TAGS);
+    if (TAG.test(char)) {
+      tags.push(offset);
+      all.push(offset);
+    } else close(tags, MIN_TAGS);
     if (MAYBE_HIDDEN.test(char)) invisibles.push(offset);
     else close(invisibles, MIN_RUN);
     offset += char.length;
   }
   close(tags, MIN_TAGS);
   close(invisibles, MIN_RUN);
+  if (all.length > 0) onTags(all);
   return found;
 }
 
@@ -425,7 +468,7 @@ function windows(line: string): { text: string; start: number }[] {
   return out;
 }
 
-/** An executable, by its name or its first bytes: Windows' MZ, ELF and Mach-O. */
+/** An executable, by its name or its first bytes: Windows' MZ, ELF, Mach-O and WebAssembly. */
 function isExecutable(file: SkillFile): boolean {
   if (/\.(?:exe|dll|so|dylib|bin|com|msi|scr|app)$/i.test(file.path)) return true;
   const head = fileBytes(file).subarray(0, 4);
@@ -433,12 +476,24 @@ function isExecutable(file: SkillFile): boolean {
   return (
     magic.startsWith("4d5a") ||
     magic === "7f454c46" ||
+    magic === "0061736d" ||
     ["feedface", "feedfacf", "cefaedfe", "cffaedfe", "cafebabe"].includes(magic)
   );
 }
 
 function starts(bytes: Uint8Array, prefix: readonly number[]): boolean {
   return prefix.every((byte, index) => bytes[index] === byte);
+}
+
+/** An archive or a PDF: by its first bytes, a tar's `ustar` at 257, or a PDF's header within 1 KiB. */
+function isContainer(bytes: Uint8Array): boolean {
+  if (CONTAINERS.some((magic) => starts(bytes, magic))) return true;
+  if (starts(bytes.subarray(257), [0x75, 0x73, 0x74, 0x61, 0x72])) return true;
+  const head = bytes.subarray(0, 1_024);
+  for (let at = 0; at + 3 < head.length; at += 1) {
+    if (starts(head.subarray(at), [0x25, 0x50, 0x44, 0x46])) return true;
+  }
+  return false;
 }
 
 /**
@@ -459,7 +514,7 @@ function decodings(bytes: Uint8Array): string[] {
 
 /**
  * Tags in UTF-16, of either byte order and at any offset, found in the bytes, so a file with no
- * BOM can't hide them: a run of four or more, spelled out, or null.
+ * BOM can't hide them: a run of four or more, or eight or more however spread, spelled out; or null.
  */
 function utf16Tags(bytes: Uint8Array): string | null {
   const tagAt = (at: number): number | null => {
@@ -468,20 +523,24 @@ function utf16Tags(bytes: Uint8Array): string | null {
     if (a === 0xdb && b === 0x40 && c === 0xdc && d !== undefined && d < 0x80) return d;
     return null;
   };
+  const lows: number[] = [];
+  let total = 0;
+  let longest = 0;
   for (let align = 0; align < 4; align += 1) {
-    const run: number[] = [];
+    let run = 0;
     for (let at = align; at + 3 < bytes.length; at += 4) {
       const low = tagAt(at);
-      if (low !== null) {
-        run.push(low);
+      if (low === null) {
+        run = 0;
         continue;
       }
-      if (run.length >= MIN_TAGS) return spellTags(run);
-      run.length = 0;
+      run += 1;
+      total += 1;
+      longest = Math.max(longest, run);
+      if (lows.length < 12) lows.push(low);
     }
-    if (run.length >= MIN_TAGS) return spellTags(run);
   }
-  return null;
+  return longest >= MIN_TAGS || total >= MIN_SCATTERED_TAGS ? spellTags(lows) : null;
 }
 
 const spellTags = (lows: readonly number[]) =>

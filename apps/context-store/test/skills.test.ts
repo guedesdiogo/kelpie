@@ -212,6 +212,9 @@ describe("a skill in an archive", () => {
     });
     // An emoji's presentation selector is part of how a name shows; after a digit it only hides.
     expect((await clash("a.md", "\u{26A0}\u{FE0F} notes.md")).ok).toBe(true);
+    expect(await clash("a\u{A9}.md", "a\u{A9}\u{FE0F}.md")).toMatchObject({
+      problem: { reason: "path_clash" },
+    });
     expect(await clash("a1.md", "b1\u{FE0F}.md")).toMatchObject({
       problem: { reason: "unsafe_path" },
     });
@@ -595,6 +598,8 @@ describe("the static scan", () => {
       "\u{1D400}\u{200D}\u{1D401}",
       "\u{4E00}\u{E0100}".repeat(9),
       "ig\u{303}\u{200D}\u{303}nore",
+      "\u{2BC}\u{200D}\u{2BC}",
+      "1\u{FE0F}2\u{FE0F}",
       " \u{FE0F}",
       "ig\u{200D}nore",
       "\u{200C}start",
@@ -684,6 +689,16 @@ describe("the static scan", () => {
       findings: [{ path: "assets/forms.zip", line: 0, kind: "container", excerpt: "" }],
       more: 0,
     });
+    const kinds = (bytes: number[]) =>
+      scanSkill([
+        { path: "assets/x", content: toBase64(new Uint8Array(bytes)), binary: true },
+      ]).findings.map((finding) => finding.kind);
+    const pdfLate = [0xff, 0xfe, 0, 1, ...new TextEncoder().encode("%PDF-1.7"), 0];
+    const tar = [...new Uint8Array(257), ...new TextEncoder().encode("ustar"), 0, 0];
+    const ole = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0];
+    const sqlite = [...new TextEncoder().encode("SQLite format 3"), 0, 0];
+    for (const bytes of [pdfLate, tar, ole, sqlite]) expect(kinds(bytes)).toEqual(["container"]);
+    expect(kinds([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0])).toEqual(["executable"]);
   });
 
   it("reads the SKILL.md's description as its YAML decodes it", () => {
@@ -715,6 +730,19 @@ describe("the static scan", () => {
     expect(late.findings[0]).toMatchObject({ line: 61, kind: "hidden_characters" });
     expect(late.findings).toHaveLength(50);
     expect(late.more).toBe(11);
+  });
+
+  it("reads every string the frontmatter decodes to, however its keys look", () => {
+    const decoded = (frontmatter: string) =>
+      scan("SKILL.md", `---\nname: pdf\n${frontmatter}\n---\n# PDF\n`);
+    // A key that starts with --- doesn't end the frontmatter for the scan either.
+    const dashes = decoded('---: x\ndescription: "read \\U000E0049\\U000E0047 this"');
+    expect(dashes.verdict).toBe("blocked");
+    expect(dashes.findings[0]).toMatchObject({ line: 4, kind: "hidden_characters" });
+    expect(decoded('description: x.\nlicense: "x\\U000E0049y"').verdict).toBe("blocked");
+    expect(decoded('description: "Reads.\\x1b[8m hidden"').findings[0]?.excerpt).toBe(
+      "Reads.⟨U+001B⟩[8m hidden",
+    );
   });
 
   it("counts ideographic variants across the whole skill", () => {
@@ -752,6 +780,29 @@ describe("the static scan", () => {
     expect(scanSkill([{ path: "audio/clip.mp3", content: tagged(4), binary: true }]).verdict).toBe(
       "blocked",
     );
+    // Spread out, eight or more spell something too, in UTF-8 or in UTF-16's bytes.
+    const spread = toBase64(
+      new Uint8Array([
+        ...noise.subarray(0, 1_000),
+        ...[0, 1, 2].flatMap((group) => [
+          ...[0, 1, 2].flatMap((i) => tag(0x80 + group * 3 + i)),
+          0x20,
+        ]),
+      ]),
+    );
+    expect(scanSkill([{ path: "audio/clip.mp3", content: spread, binary: true }]).verdict).toBe(
+      "blocked",
+    );
+    const utf16 = toBase64(
+      new Uint8Array(
+        [0, 1, 2].flatMap((group) => [
+          ...[0, 1, 2].flatMap((i) => [0x40, 0xdb, 0x40 + group * 3 + i, 0xdc]),
+          0x20,
+          0,
+        ]),
+      ),
+    );
+    expect(scanSkill([{ path: "data.dat", content: utf16, binary: true }]).verdict).toBe("blocked");
   });
 
   it("finds a phrase padded apart, and one at the end of a long line", () => {
