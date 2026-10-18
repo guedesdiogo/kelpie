@@ -149,7 +149,7 @@ export async function skillFromEntries(
     }
     // A name with a character that shows nothing, as a Hangul filler, could pass for another.
     // An emoji's presentation selector shows as the emoji does, in a name as in text.
-    const bare = path.replace(/(\p{Emoji})[\u{FE0E}\u{FE0F}]/gu, "$1");
+    const bare = path.replace(/(\p{Extended_Pictographic})[\u{FE0E}\u{FE0F}]/gu, "$1");
     if (!isCleanPath(path) || /\p{Default_Ignorable_Code_Point}/u.test(bare)) {
       return { ok: false, problem: { reason: "unsafe_path", path } };
     }

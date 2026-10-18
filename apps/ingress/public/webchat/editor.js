@@ -1025,8 +1025,10 @@ export class Editor {
         Object.assign(changes, result.value);
       }
     }
-    // Where focus was, in the editor or back in the chat, before the answer redraws anything.
-    const focused = open.root.contains(document.activeElement);
+    // Where focus was before the answer redraws anything: in the editor, or nowhere, as when the
+    // footer that held Retry went; not when the owner went back to the chat meanwhile.
+    const active = document.activeElement;
+    const focused = !active || active === document.body || open.root.contains(active);
     const files = filesResult
       ? open.files.applySave(sent, filesResult)
       : { saved: [], failed: [], undo: [] };

@@ -418,6 +418,19 @@ describe("the files in the editor", () => {
     expect(document.activeElement).toBe(composer);
   });
 
+  it("keeps the keys in the editor when Retry fails again", async () => {
+    await open();
+    tab("Memory").click();
+    type($$(".files-memory .mem-t")[0], "Diogo likes early mornings.");
+    io.save.mockResolvedValue({ ok: false, status: 0, value: null });
+    await editor.save();
+    const retry = button(T.editor.retry.memory);
+    retry.focus();
+    retry.click();
+    await settle();
+    expect($(".editor").contains(document.activeElement)).toBe(true);
+  });
+
   it("saves the soul with the version it read, in one request beside the profile", async () => {
     await open();
     tab("Soul").click();

@@ -117,7 +117,7 @@ import {
   skillPath,
 } from "./paths.ts";
 import { RESOLVE_MAX_CHARS, type ResolveGateway, resolveConflict } from "./resolve.ts";
-import { scanSkill } from "./skill-scan.ts";
+import { scanSkill, withoutHidden } from "./skill-scan.ts";
 import {
   checkSkillMd,
   fileBytes,
@@ -4251,9 +4251,8 @@ function skillEntry(path: string, content: string): SkillEntry {
   }
   const line = (value: unknown, max: number) => {
     if (typeof value !== "string") return null;
-    // What shows nothing, as tags a YAML escape writes, never reaches the agent's prompt.
-    const text = value
-      .replace(/\p{Default_Ignorable_Code_Point}|\p{Cf}/gu, "")
+    // What hides text, as tags a YAML escape writes, never reaches the agent's prompt.
+    const text = withoutHidden(value)
       .replace(/\s+/g, " ")
       .replace(/^[#\s]+/, "")
       .trim()

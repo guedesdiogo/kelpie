@@ -204,12 +204,15 @@ const RULES: Rule[] = [
  * it, since that is what reaches the agent.
  */
 export function scanSkill(files: readonly SkillFile[]): ScanResult {
-  const findings: ScanFinding[] = [];
+  // Hidden characters are listed first, so the finding that blocks is never past the list's end.
+  const hiddenFindings: ScanFinding[] = [];
+  const otherFindings: ScanFinding[] = [];
   let total = 0;
   let blocked = false;
   const add = (finding: Omit<ScanFinding, "excerpt">, excerpt: () => string) => {
     total += 1;
-    if (findings.length < MAX_FINDINGS) findings.push({ ...finding, excerpt: excerpt() });
+    const list = finding.kind === "hidden_characters" ? hiddenFindings : otherFindings;
+    if (list.length < MAX_FINDINGS) list.push({ ...finding, excerpt: excerpt() });
   };
   const hide = (finding: Omit<ScanFinding, "excerpt" | "kind">, excerpt: () => string) => {
     blocked = true;
@@ -218,7 +221,9 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
   // Variants count across the whole skill, so spreading them over lines or files hides nothing.
   const variantLines: { path: string; line: number; text: string; offsets: number[] }[] = [];
 
-  const scanText = (path: string, content: string, data: boolean) => {
+  /** Scans a file's text; whether it found hidden characters. */
+  const scanText = (path: string, content: string, data: boolean): boolean => {
+    let hid = false;
     const script = isScript(path);
     const instructions = path.toLowerCase().endsWith(".md");
     content.split(/\r?\n/).forEach((line, index) => {
@@ -231,6 +236,7 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
           : hiddenIn(scanned);
         if (variants.length > 0) variantLines.push({ ...at, text: scanned, offsets: variants });
         if (found.size > 0) {
+          hid = true;
           let first = Number.POSITIVE_INFINITY;
           for (const offset of found) first = Math.min(first, offset);
           hide(at, () => excerpt(scanned, first, (_char, offset) => found.has(offset)));
@@ -253,6 +259,7 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
         }
       }
     });
+    return hid;
   };
 
   for (const file of files) {
@@ -267,8 +274,10 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
     else if (CONTAINERS.some((magic) => starts(bytes, magic))) {
       add({ path: file.path, line: 0, kind: "container" }, () => "");
     }
-    for (const text of decodings(bytes)) scanText(file.path, text, !mostlyText(text));
-    const tags = utf16Tags(bytes);
+    let hid = false;
+    for (const text of decodings(bytes)) hid = scanText(file.path, text, !mostlyText(text)) || hid;
+    // Tags in UTF-16 no decoding read, as with no BOM, once.
+    const tags = hid ? null : utf16Tags(bytes);
     if (tags !== null) hide({ path: file.path, line: 0 }, () => tags);
   }
 
@@ -279,11 +288,28 @@ export function scanSkill(files: readonly SkillFile[]): ScanResult {
       hide(at, () => excerpt(text, offsets[0] ?? 0, (_char, offset) => shown.has(offset)));
     }
   }
+  const findings = [...hiddenFindings, ...otherFindings].slice(0, MAX_FINDINGS);
   return {
     verdict: blocked ? "blocked" : total > 0 ? "caution" : "clean",
     findings,
     more: total - findings.length,
   };
+}
+
+/**
+ * Text with what hides in it left out, as the scan finds it: an agent's prompt takes a skill's
+ * name and description this way, emoji sequences and joining scripts whole.
+ */
+export function withoutHidden(text: string): string {
+  if (!MAYBE_HIDDEN.test(text)) return text;
+  const { found } = hiddenIn(text);
+  let kept = "";
+  let offset = 0;
+  for (const char of text) {
+    if (!found.has(offset)) kept += char;
+    offset += char.length;
+  }
+  return kept;
 }
 
 /**
@@ -295,11 +321,16 @@ function scanDescription(
   variantLines: { path: string; line: number; text: string; offsets: number[] }[],
   hide: (finding: Omit<ScanFinding, "excerpt" | "kind">, excerpt: () => string) => void,
 ): void {
+  // Only an escape, a backslash in a double-quoted scalar, writes what the file's text doesn't show;
+  // the rest the file's own lines were scanned for.
+  const head = /^\u{FEFF}?---\r?\n([\s\S]*?)\r?\n---/u.exec(file.content)?.[1];
+  if (head === undefined || !head.includes("\\")) return;
   const checked = checkSkillMd(file.content, null);
   if (!checked.ok || !MAYBE_HIDDEN.test(checked.description)) return;
   const { found, variants } = hiddenIn(checked.description);
-  const index = file.content.split(/\r?\n/).findIndex((line) => /^description\s*:/.test(line));
-  const at = { path: file.path, line: index + 1 || 1 };
+  const index = head.split(/\r?\n/).findIndex((line) => /^["']?description["']?\s*:/.test(line));
+  // The frontmatter's lines start after its opening `---`.
+  const at = { path: file.path, line: index === -1 ? 1 : index + 2 };
   if (variants.length > 0)
     variantLines.push({ ...at, text: checked.description, offsets: variants });
   if (found.size === 0) return;

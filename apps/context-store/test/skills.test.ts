@@ -210,8 +210,11 @@ describe("a skill in an archive", () => {
     expect(await clash("strasse.md", "\u{17F}trasse.md")).toMatchObject({
       problem: { reason: "path_clash" },
     });
-    // An emoji's presentation selector is part of how a name shows.
+    // An emoji's presentation selector is part of how a name shows; after a digit it only hides.
     expect((await clash("a.md", "\u{26A0}\u{FE0F} notes.md")).ok).toBe(true);
+    expect(await clash("a1.md", "b1\u{FE0F}.md")).toMatchObject({
+      problem: { reason: "unsafe_path" },
+    });
     // A name with a character that shows nothing could pass for another.
     expect(await clash("notes.md", "not\u{3164}es.md")).toMatchObject({
       problem: { reason: "unsafe_path" },
@@ -645,9 +648,10 @@ describe("the static scan", () => {
       { path: "references/data.json", content: bytes(`MZ${tags}`, 0), binary: true },
     ]);
     expect(exe.verdict).toBe("blocked");
+    // The hidden characters come first: they are what blocks.
     expect(exe.findings.map((finding) => finding.kind)).toEqual([
-      "executable",
       "hidden_characters",
+      "executable",
     ]);
     // Two bytes of BOM in front of UTF-8 text don't change how it is read.
     const bom = toBase64(
@@ -688,6 +692,29 @@ describe("the static scan", () => {
     expect(found.verdict).toBe("blocked");
     expect(found.findings[0]).toMatchObject({ line: 3, kind: "hidden_characters" });
     expect(found.findings[0]?.excerpt).toBe("Reads PDFs.⟨U+E0049⟩⟨U+E0067⟩⟨U+E006E⟩");
+  });
+
+  it("reports each hidden character once, and lists them before every other finding", () => {
+    const literal = scan("SKILL.md", skillMd("pdf", "Reads PDFs.\u{E0049}\u{E0067}"));
+    expect(literal.findings.map((finding) => finding.line)).toEqual([3]);
+    const variants = "\u{8FBB}\u{E0100}".repeat(5);
+    expect(scan("SKILL.md", skillMd("pdf", `Reads ${variants}.`)).verdict).toBe("clean");
+    const utf16 = toBase64(
+      new Uint8Array([
+        0xff,
+        0xfe,
+        0x61,
+        0,
+        ...[0x49, 0x67, 0x6e, 0x6f].flatMap((low) => [0x40, 0xdb, low, 0xdc]),
+      ]),
+    );
+    expect(scanSkill([{ path: "notes.dat", content: utf16, binary: true }]).findings).toHaveLength(
+      1,
+    );
+    const late = scan("scripts/a.sh", `${"sudo ls\n".repeat(60)}x\u{200B}`);
+    expect(late.findings[0]).toMatchObject({ line: 61, kind: "hidden_characters" });
+    expect(late.findings).toHaveLength(50);
+    expect(late.more).toBe(11);
   });
 
   it("counts ideographic variants across the whole skill", () => {
