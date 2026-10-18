@@ -30,8 +30,9 @@ export interface SessionLife {
 /**
  * The session's state now:
  * - a hook's wait opens on `PermissionRequest`, or on a `Notification` of type
- *   `permission_prompt` or `elicitation_dialog`. A prompt that follows a request joins it. A
- *   question is `AskUserQuestion`'s request, or an elicitation; anything else a permission;
+ *   `permission_prompt` or `elicitation_dialog`. A prompt within WAIT_JOIN_MS of an open wait
+ *   joins it; a later one is the next prompt, and replaces it. A question is `AskUserQuestion`'s
+ *   request, or an elicitation; anything else a permission;
  * - it closes on the session's next `UserPromptSubmit`, `PermissionDenied`, `PostToolUse`,
  *   `PostToolUseFailure`, `Stop`, `StopFailure` or `SessionEnd`, or when the session file turns
  *   `idle`, or `busy` again, after the wait opened;
@@ -58,11 +59,18 @@ export function lifeOf(file: SessionFile, events: readonly SpoolEvent[], now: nu
     endedAt = null;
     switch (event.event) {
       case "PermissionRequest":
-        wait ??= { kind: event.question ? "question" : "permission", openedAt: event.at };
+        wait = opened(wait, {
+          kind: event.question ? "question" : "permission",
+          openedAt: event.at,
+        });
         break;
       case "Notification":
-        if (event.type === "permission_prompt") wait ??= { kind: "permission", openedAt: event.at };
-        if (event.type === "elicitation_dialog") wait ??= { kind: "question", openedAt: event.at };
+        if (event.type === "permission_prompt") {
+          wait = opened(wait, { kind: "permission", openedAt: event.at });
+        }
+        if (event.type === "elicitation_dialog") {
+          wait = opened(wait, { kind: "question", openedAt: event.at });
+        }
         break;
       case "SessionEnd":
         wait = null;
@@ -110,6 +118,14 @@ export function lifeOf(file: SessionFile, events: readonly SpoolEvent[], now: nu
   }
   const state = file.status === "unknown" ? "unknown" : "working";
   return { state, since: changed, wait: null, archivable: false };
+}
+
+/**
+ * The wait once a hook says one opens: the open one, which it joins, within WAIT_JOIN_MS; past it,
+ * the new one, as the open one's close was lost.
+ */
+function opened(open: Wait | null, next: Wait): Wait {
+  return open && next.openedAt - open.openedAt <= WAIT_JOIN_MS ? open : next;
 }
 
 function latest(a: number | null, b: number | null): number | null {

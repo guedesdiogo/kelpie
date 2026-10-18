@@ -45,9 +45,14 @@ export function readSmall(path: string, maxBytes: number): string | null {
 
 /**
  * The names in a directory, at most `max` of them, and whether that was all; null when it can't
- * be read. A directory of more than `max` entries is never read whole.
+ * be read. A directory of more than `max` entries is never read whole. With `filesOnly`, only its
+ * regular files count, as the directory says, without a `stat` each.
  */
-export function listNames(dir: string, max: number): { names: string[]; complete: boolean } | null {
+export function listNames(
+  dir: string,
+  max: number,
+  filesOnly = false,
+): { names: string[]; complete: boolean } | null {
   let handle: ReturnType<typeof opendirSync> | undefined;
   try {
     handle = opendirSync(dir);
@@ -55,6 +60,7 @@ export function listNames(dir: string, max: number): { names: string[]; complete
     for (;;) {
       const entry = handle.readSync();
       if (entry === null) return { names, complete: true };
+      if (filesOnly && !entry.isFile()) continue;
       if (names.length === max) return { names, complete: false };
       names.push(entry.name);
     }

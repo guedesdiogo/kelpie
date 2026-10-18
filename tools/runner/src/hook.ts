@@ -1,5 +1,5 @@
 import { MAX_EXCERPT_CHARS, SESSION_ID } from "./protocol.ts";
-import { excerptOf, redact } from "./redact.ts";
+import { cut, excerptOf, redact } from "./redact.ts";
 import {
   appendEvent,
   CONTINUING_REASONS,
@@ -29,6 +29,11 @@ export const HOOK_DEADLINE_MS = 1_500;
  * whatever its shape.
  */
 export const HOOK_EXCERPT_CHARS = 2 * MAX_EXCERPT_CHARS;
+/**
+ * How much of a reply the hook redacts: far more than it keeps, so a secret near the cut is whole,
+ * and bounded, so a huge reply costs no more than this.
+ */
+export const HOOK_REDACT_CHARS = 16 * 1024;
 /**
  * The hook's command in `settings.json` (docs/runner.md). Claude Code runs it through `sh`, from
  * the session's folder: Bun would load that folder's `bunfig.toml`, its `preload` included, and
@@ -106,7 +111,10 @@ export function recordEvent(input: string, { dir, now, uid }: HookOptions): void
   if (event === "Stop") {
     const reply = payload.last_assistant_message;
     // The whole reply is redacted before it is cut, so no secret straddles the cut.
-    const text = typeof reply === "string" ? excerptOf(redact(reply), HOOK_EXCERPT_CHARS) : "";
+    const text =
+      typeof reply === "string"
+        ? excerptOf(redact(cut(reply, HOOK_REDACT_CHARS)), HOOK_EXCERPT_CHARS)
+        : "";
     // Only the latest reply's excerpt is kept: a reply without text leaves none.
     if (text.trim() === "") deleteExcerpt(dir, session);
     else writeExcerpt(dir, session, { at: now, text });

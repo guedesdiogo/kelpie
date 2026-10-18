@@ -65,6 +65,8 @@ export {
   parseRunnerTurnRequest,
   parseRunnerVpsSessions,
   parseRunnerVpsWaits,
+  RUNNER_INVISIBLE,
+  RUNNER_LINE_BREAK,
   RUNNER_MAX_RESULT_BYTES,
   RUNNER_MAX_SESSIONS_BYTES,
   RUNNER_MAX_TURN_BYTES,

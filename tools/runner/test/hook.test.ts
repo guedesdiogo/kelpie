@@ -19,6 +19,7 @@ import {
   HOOK_COMMAND,
   HOOK_DEADLINE_MS,
   HOOK_EXCERPT_CHARS,
+  HOOK_REDACT_CHARS,
   type HookOptions,
   MAX_INPUT_BYTES,
   readInput,
@@ -114,6 +115,15 @@ describe("recordEvent", () => {
     expect(excerpt?.text).not.toContain("hunter2");
     expect(excerpt?.text).not.toContain(RUNNER_SECRET);
     expect(excerpt?.text).toMatch(/ (more|words|follow|here)$/);
+  });
+
+  it("redacts only the reply's first 16 KiB, so a huge or hostile reply stays cheap", () => {
+    const hostile = `Done. ${"a-".repeat(500_000)}`;
+    const started = performance.now();
+    recordEvent(input("Stop", { last_assistant_message: hostile }), options);
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(readExcerpt(options.dir, SESSION_A)?.text).toBe("Done.");
+    expect(HOOK_REDACT_CHARS).toBe(16 * 1024);
   });
 
   it("drops a session's excerpt when its last reply has no text", () => {

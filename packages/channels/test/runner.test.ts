@@ -415,6 +415,14 @@ describe("the VPS's one-line fields", () => {
     ["a right-to-left override", "a\u202eb"],
     ["a left-to-right isolate", "a\u2066b"],
     ["a right-to-left mark", "a\u200fb"],
+    ["a zero-width space", "a\u200bb"],
+    ["a zero-width non-joiner", "a\u200cb"],
+    ["a zero-width joiner", "a\u200db"],
+    ["a word joiner", "a\u2060b"],
+    ["a byte-order mark", "a\ufeffb"],
+    ["a Hangul filler", "a\u3164b"],
+    ["a tag character", "a\u{e0041}b"],
+    ["a cancel tag", "a\u{e007f}b"],
   ])("refuses %s in a title, a repository or a branch", (_, text) => {
     for (const field of ["title", "repository", "branch"] as const) {
       expect(parseRunnerVpsSessions(sessionsAnswer([vpsSession({ [field]: text })]))).toBeNull();

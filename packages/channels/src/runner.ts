@@ -434,14 +434,25 @@ export const RUNNER_MAX_REPOSITORY_CHARS = 200;
 export const RUNNER_MAX_BRANCH_CHARS = 255;
 /** An `entrypoint` as Claude Code writes them: `claude-desktop`, `cli`, `sdk-cli`. */
 export const RUNNER_ENTRYPOINT = /^[a-z0-9_-]{1,32}$/;
-/**
- * What a one-line field can't hold: control characters, line and paragraph separators, and the
- * bidi controls that reorder what follows them. The runner sends a title, a repository and a
- * branch without them, and an answer whose field holds one isn't the runner's.
- */
-export const RUNNER_NOT_ONE_LINE =
+/** A line's breaks: C0 and C1 controls, DEL, and the line and paragraph separators. */
+export const RUNNER_LINE_BREAK =
   // biome-ignore lint/suspicious/noControlCharactersInRegex: finding control characters is its job.
-  /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
+  /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+/**
+ * What shows nothing but can reorder or hide text: Unicode's default-ignorable code points, which
+ * hold the bidi controls, zero-width spaces and joiners, the word joiner, the BOM, fillers such as
+ * U+3164, variation selectors and the tag characters. As in `packages/memory/src/sanitize.ts`, the
+ * property stays outside a character class, which workerd matched inconsistently.
+ */
+export const RUNNER_INVISIBLE = /\p{Default_Ignorable_Code_Point}/u;
+/**
+ * What a one-line field can't hold: a break or an invisible character. The runner sends a title,
+ * a repository and a branch without them, and an answer whose field holds one isn't the runner's.
+ */
+export const RUNNER_NOT_ONE_LINE = new RegExp(
+  `${RUNNER_LINE_BREAK.source}|${RUNNER_INVISIBLE.source}`,
+  "u",
+);
 /** A GitHub pull request's address, the only link a session's entry carries. */
 export const RUNNER_PR_URL =
   /^https:\/\/github\.com\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}\/pull\/[1-9][0-9]{0,9}$/;

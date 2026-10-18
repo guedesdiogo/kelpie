@@ -4,6 +4,8 @@ import { isPrivateDir } from "./files.ts";
 import { checkoutOf } from "./git.ts";
 import { forLog } from "./journal.ts";
 import {
+  INVISIBLE,
+  LINE_BREAK,
   MAX_BRANCH_CHARS,
   MAX_EXCERPT_CHARS,
   MAX_REPOSITORY_CHARS,
@@ -11,7 +13,6 @@ import {
   MAX_TITLE_CHARS,
   MAX_VPS_SESSIONS,
   MAX_WAITS_BYTES,
-  NOT_ONE_LINE,
   type RunnerVpsSession,
   type RunnerVpsSessions,
   type RunnerVpsWait,
@@ -33,8 +34,15 @@ export const EXCERPT_RETENTION_MS = 7 * 24 * 60 * 60_000;
 /** A hook's temporary file older than this was left by a hook that was stopped. */
 const TEMPORARY_RETENTION_MS = 60_000;
 
-/** What a one-line field loses before it leaves: each becomes a space. */
-const NOT_ONE_LINE_ALL = new RegExp(NOT_ONE_LINE.source, "g");
+/** A one-line field's breaks, each made a space before it leaves. */
+const LINE_BREAKS = new RegExp(LINE_BREAK.source, "g");
+/** What shows nothing, removed from every text before it leaves. */
+const INVISIBLES = new RegExp(INVISIBLE.source, "gu");
+/**
+ * The most of a field redacted: a session's `name` can take most of its 64 KiB file, and every
+ * field leaves far shorter than this, so a secret near its cut is whole when it is redacted.
+ */
+export const MAX_REDACTED_CHARS = 4_096;
 
 /**
  * The fields `/sessions` drops, in this order, from the least recent session up, before it drops
@@ -246,7 +254,12 @@ export class VpsSessions {
     const excerpt =
       spool && life.state !== "ended" ? readExcerpt(this.#options.spoolDir, file.id) : null;
     const text =
-      excerpt === null ? "" : excerptOf(redact(excerpt.text, secrets), MAX_EXCERPT_CHARS);
+      excerpt === null
+        ? ""
+        : excerptOf(
+            redact(cut(excerpt.text, MAX_REDACTED_CHARS), secrets).replace(INVISIBLES, ""),
+            MAX_EXCERPT_CHARS,
+          );
     const startedBy = STARTED_BY.get(file.entrypoint ?? "") ?? "unknown";
     return {
       id: file.id,
@@ -270,12 +283,14 @@ export class VpsSessions {
   }
 
   /**
-   * Untrusted text for a one-line field: redacted, each control or bidi character a space, and cut
-   * to `max`; null when nothing is left.
+   * Untrusted text for a one-line field: redacted, each break a space, without what shows nothing,
+   * and cut to `max`; null when nothing is left.
    */
   #line(value: string | null, max: number): string | null {
     if (value === null) return null;
-    const line = redact(value, this.#options.secrets).replace(NOT_ONE_LINE_ALL, " ");
+    const line = redact(cut(value, MAX_REDACTED_CHARS), this.#options.secrets)
+      .replace(LINE_BREAKS, " ")
+      .replace(INVISIBLES, "");
     const text = cut(line, max);
     return text.trim() === "" ? null : text;
   }

@@ -1,9 +1,11 @@
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -119,6 +121,22 @@ describe("docs/runner.md's hook snippets", () => {
     run(INSTALL);
     expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(readFileSync(`${file}.bak`, "utf8")).toBe("the owner's older backup");
+  });
+
+  it("follow a symlinked settings.json, and leave the link in place", () => {
+    const real = join(home, "dotfiles", "claude-settings.json");
+    mkdirSync(join(home, "dotfiles"));
+    writeFileSync(real, `${JSON.stringify(SETTINGS, null, 2)}\n`);
+    run(`ln -s "${real}" "${file}"`);
+    expect(run(INSTALL).status).toBe(0);
+    expect(lstatSync(file).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(file)).toBe(real);
+    expect(Object.keys(settings().hooks as object)).toContain("Notification");
+    expect(existsSync(`${real}.bak`)).toBe(true);
+    expect(existsSync(`${file}.bak`)).toBe(false);
+    expect(run(REMOVE).status).toBe(0);
+    expect(lstatSync(file).isSymbolicLink()).toBe(true);
+    expect(settings()).toEqual(SETTINGS);
   });
 
   it("back the settings up first, when no backup is there", () => {

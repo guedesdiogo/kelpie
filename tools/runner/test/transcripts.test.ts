@@ -44,14 +44,14 @@ describe("transcriptFinder", () => {
     expect(transcriptOf(vps.claudeDir, SESSION_A, null)).toBe(path);
   });
 
-  it("lists the project folders once for all the sessions it looks up, and only when it must", () => {
+  it("indexes the project folders once for all the sessions it looks up, and only when it must", () => {
     const paths = [SESSION_A, SESSION_B].map((id) =>
       writeTranscript(vps, id, `/elsewhere/${id}`, []),
     );
     let listed = 0;
-    const counting: typeof listNames = (dir, max) => {
-      listed += 1;
-      return listNames(dir, max);
+    const counting: typeof listNames = (dir, max, filesOnly) => {
+      if (dir === join(vps.claudeDir, "projects")) listed += 1;
+      return listNames(dir, max, filesOnly);
     };
     const find = transcriptFinder(vps.claudeDir, counting);
     expect(find(SESSION_A, `/elsewhere/${SESSION_A}`)).toBe(paths[0]);
@@ -60,6 +60,42 @@ describe("transcriptFinder", () => {
     expect(find(SESSION_B, CWD)).toBe(paths[1]);
     expect(find("cccccccc-1111-4222-8333-444444444444", CWD)).toBeNull();
     expect(listed).toBe(1);
+  });
+
+  it("finds 200 sessions' transcripts among 1,000 project folders quickly", () => {
+    const ids = Array.from(
+      { length: 200 },
+      (_, index) => `${String(index).padStart(8, "0")}-1111-4222-8333-444444444444`,
+    );
+    for (let folder = 0; folder < 1_000; folder += 1) {
+      const dir = join(vps.claudeDir, "projects", `-folder-${folder}`);
+      mkdirSync(dir);
+      const id = ids[folder % 200] as string;
+      if (folder >= 800) writeFileSync(join(dir, `${id}.jsonl`), "");
+      else writeFileSync(join(dir, "notes.txt"), "");
+    }
+    const started = performance.now();
+    const find = transcriptFinder(vps.claudeDir);
+    const found = ids.map((id) => find(id, `/nowhere/${id}`));
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(found.every((path) => path?.endsWith(".jsonl"))).toBe(true);
+  });
+
+  it("takes the first folder's transcript when two hold one for the session", () => {
+    for (const folder of ["-first", "-second"]) {
+      mkdirSync(join(vps.claudeDir, "projects", folder));
+      writeFileSync(join(vps.claudeDir, "projects", folder, `${SESSION_A}.jsonl`), "");
+    }
+    expect(transcriptOf(vps.claudeDir, SESSION_A, CWD)).toMatch(/-(?:first|second)\/[^/]+\.jsonl$/);
+  });
+
+  it("leaves out a folder's entry that isn't a transcript", () => {
+    const dir = join(vps.claudeDir, "projects", "-odd");
+    mkdirSync(join(dir, `${SESSION_A}.jsonl`), { recursive: true });
+    writeFileSync(join(dir, "README.jsonl"), "");
+    // A file where a project folder would be.
+    writeFileSync(join(vps.claudeDir, "projects", `${SESSION_A}.jsonl`), "");
+    expect(transcriptOf(vps.claudeDir, SESSION_A, CWD)).toBeNull();
   });
 
   it("finds none for a session without one, or an id that isn't a UUID", () => {

@@ -13,33 +13,44 @@ export const MAX_PROJECT_DIRS = 1_000;
 const PR_LINK_PREFIX = '{"type":"pr-link"';
 const MAX_PR_LINK_LINE = 4_096;
 
+/** The most entries read in one project folder, for its index. */
+export const MAX_PROJECT_ENTRIES = 10_000;
+const TRANSCRIPT_NAME = /^([0-9a-f-]{36})\.jsonl$/;
+
 /**
  * Finds sessions' transcripts, `<claudeDir>/projects/<project>/<id>.jsonl`: first in the folder
- * Claude Code names after the session's working folder, then in each project folder, up to
- * MAX_PROJECT_DIRS of them. The project folders are listed once, when a session first needs it.
+ * Claude Code names after the session's working folder, then in an index of every project
+ * folder, up to MAX_PROJECT_DIRS of them, built in one pass when a session first needs it.
  */
 export function transcriptFinder(
   claudeDir: string,
   list: typeof listNames = listNames,
 ): (id: string, cwd: string | null) => string | null {
   const projects = join(claudeDir, "projects");
-  let names: string[] | undefined;
+  let index: Map<string, string> | undefined;
   return (id, cwd) => {
     if (!SESSION_ID.test(id)) return null;
-    const file = `${id}.jsonl`;
     if (cwd !== null) {
       // Claude Code names the folder after the working folder, each character but letters and
       // digits made a dash.
-      const path = join(projects, cwd.replace(/[^A-Za-z0-9]/g, "-"), file);
+      const path = join(projects, cwd.replace(/[^A-Za-z0-9]/g, "-"), `${id}.jsonl`);
       if (isFile(path)) return path;
     }
-    names ??= list(projects, MAX_PROJECT_DIRS)?.names ?? [];
-    for (const name of names) {
-      const path = join(projects, name, file);
-      if (isFile(path)) return path;
-    }
-    return null;
+    index ??= indexOf(projects, list);
+    return index.get(id) ?? null;
   };
+}
+
+/** Each session id's transcript in the project folders, the first found when two have one. */
+function indexOf(projects: string, list: typeof listNames): Map<string, string> {
+  const index = new Map<string, string>();
+  for (const folder of list(projects, MAX_PROJECT_DIRS)?.names ?? []) {
+    for (const name of list(join(projects, folder), MAX_PROJECT_ENTRIES, true)?.names ?? []) {
+      const id = TRANSCRIPT_NAME.exec(name)?.[1];
+      if (id !== undefined && !index.has(id)) index.set(id, join(projects, folder, name));
+    }
+  }
+  return index;
 }
 
 /** The last GitHub pull request link in the transcript's last 1 MiB, or null. */

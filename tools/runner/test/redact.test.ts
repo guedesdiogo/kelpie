@@ -66,6 +66,14 @@ describe("redact", () => {
     "PWD=/home/owner/Repos/kelpie",
     "OLDPWD=/home/owner",
     "GIT_AUTHOR_NAME=Diogo",
+    // Test results and statuses: pass and auth as words.
+    "Passed: 458/458",
+    "Pass: all green",
+    "Auth: ok",
+    "TESTS_PASSED=458",
+    "PASSING=12",
+    "bun test --passWithNoTests src",
+    "vitest run --passWithNoTests",
   ])("leaves code and prose that only mention a name: %s", (text) => {
     expect(redact(text)).toBe(text);
   });
@@ -124,6 +132,55 @@ describe("redact", () => {
   it("redacts a header within a quoted command, keeping its scheme", () => {
     expect(redact(`curl -H 'Authorization: Basic Zm9vOmJhcg==' -H "x-api-key: abc123" x`)).toBe(
       `curl -H 'Authorization: Basic ${REDACTED}' -H "x-api-key: ${REDACTED}" x`,
+    );
+  });
+
+  it.each([
+    ["pass=hunter2", `pass=${REDACTED}`],
+    ["password: hunter2", `password: ${REDACTED}`],
+    ["auth_token: abc", `auth_token: ${REDACTED}`],
+    ["Authorization: Basic Zm9vOmJhcg==", `Authorization: Basic ${REDACTED}`],
+    ["run --pass hunter2", `run --pass ${REDACTED}`],
+  ])("still redacts pass and auth where they name a secret: %s", (text, expected) => {
+    expect(redact(text)).toBe(expected);
+  });
+
+  it("redacts the password of a URL whose user is empty", () => {
+    expect(redact("REDIS_URL is redis://:s3cret@cache.example:6379/0")).toBe(
+      `REDIS_URL is redis://:${REDACTED}@cache.example:6379/0`,
+    );
+  });
+
+  it("redacts a bare 40-character AWS secret key, slashes and pluses included", () => {
+    for (const secret of [
+      key("wJalrXUtnFEMI", "/K7MDENG/", "bPxRfiCYEXAMPLEKEY"),
+      key("9dP+aB3/", "QzX1y7W", "kLm0Np2+", "Rs5Tu8Vw", "Yz4C6e1Qx"),
+    ]) {
+      expect(secret).toHaveLength(40);
+      expect(redact(`aws key ${secret} here`)).toBe(`aws key ${REDACTED} here`);
+    }
+  });
+
+  it.each([
+    "/home/owner/Repos/gclinic-r3-api/src/modules/patients",
+    "Repos/gclinic/r3/api/src/modules/patients",
+    "src/Components2/Button/IconButtonWithTip",
+    "/src/Components2/Button/IconButtonWithTi",
+    "src/Components2/Button/IconButtonWithTi/",
+    "app/Models2/Users/Profile/Edit/Views/Tab",
+  ])("leaves a path of 40 characters or so: %s", (path) => {
+    expect(redact(path)).toBe(path);
+  });
+
+  it("redacts a Slack webhook's secret path", () => {
+    const hook = key(
+      "https://hooks.slack.com/services/",
+      "T0123ABCD/",
+      "B0456EFGH/",
+      "aBcDeFgHiJkLmNoPqRsTuVwX",
+    );
+    expect(redact(`post to ${hook} now`)).toBe(
+      `post to https://hooks.slack.com/services/${REDACTED} now`,
     );
   });
 
@@ -202,6 +259,12 @@ describe("redact", () => {
     }
     // Without that, or longer, or in capitals, a run of hex reads as a secret.
     expect(redact(`it printed ${sha}`)).toBe(`it printed ${REDACTED}`);
+    // Words that only start like one aren't a commit's context, and a token stays one.
+    for (const lead of ["header", "review of", "the shared secret is", "headers:", "treetop"]) {
+      expect(redact(`${lead} ${sha}`)).toBe(`${lead} ${REDACTED}`);
+    }
+    expect(redact(`GITHUB_TOKEN=${sha}`)).toBe(`GITHUB_TOKEN=${REDACTED}`);
+    expect(redact(`my github token is ${sha}`)).toBe(`my github token is ${REDACTED}`);
     expect(redact(`commit ${sha}${"0".repeat(24)}`)).toBe(`commit ${REDACTED}`);
     expect(redact(`commit ${sha.toUpperCase()}`)).toBe(`commit ${REDACTED}`);
   });
@@ -238,6 +301,36 @@ describe("redact", () => {
 
   it("takes no secret by value when none is given, or an empty one", () => {
     expect(redact("plain text", [""])).toBe("plain text");
+  });
+});
+
+describe("redact's cost", () => {
+  it.each([
+    ["a-", "a-"],
+    ["a.", "a."],
+    ["-u=", "-u="],
+    ["--a", "--a"],
+    ["a.://", "a."],
+    ["a:", "a:"],
+    ['"a', '"a'],
+    ["'a: ", "'a: "],
+    ["a=", "a="],
+    ["key-", "key-"],
+    ["key.", "key."],
+    ["--key ", "--key "],
+    ["a/", "a/"],
+    ["Ab1+", "Ab1+"],
+    ["Bearer ", "Bearer "],
+    ["sk-", "sk-"],
+    ["-----BEGIN A-----", "-----BEGIN A-----"],
+    ["x://:", "x://:"],
+    ["commit ", "commit "],
+  ])("takes linear time on 200,000 characters of %j", (_, unit) => {
+    const text = unit.repeat(Math.ceil(200_000 / unit.length)).slice(0, 200_000);
+    redact(text.slice(0, 1_000));
+    const started = performance.now();
+    redact(text, ["correct horse battery staple"]);
+    expect(performance.now() - started).toBeLessThan(50);
   });
 });
 

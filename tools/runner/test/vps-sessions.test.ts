@@ -21,6 +21,7 @@ import { prepareSpoolDir, readExcerpt, writeExcerpt } from "../src/spool.ts";
 import {
   EXCERPT_RETENTION_MS,
   LIST_DROP_ORDER,
+  MAX_REDACTED_CHARS,
   VpsSessions,
   type VpsSessionsOptions,
   withinBytes,
@@ -533,19 +534,39 @@ describe("the review's fixes", () => {
     expect(session?.excerpt).not.toContain("correct");
   });
 
-  it("sends a title, a repository and a branch on one line, without control or bidi characters", () => {
-    const repo = join(vps.repos, "evil\u202erepo");
-    makeCheckout(repo, "fix/\u2066line\tbreak");
+  it("sends a title, a repository and a branch on one line, without control or invisible characters", () => {
+    const repo = join(vps.repos, "evil\u202erepo\u200b");
+    makeCheckout(repo, "fix/\u2066line\tbreak\u{e0041}");
     writeSessionFile(
       vps,
-      sessionFields({ pid: 101, cwd: repo, name: "Title\nwith\u0007bell\u202eand\u2028breaks" }),
+      sessionFields({
+        pid: 101,
+        cwd: repo,
+        name: "\ufeffTitle\nwith\u0007bell \u202eand\u2028breaks\u200c\u200d\u2060\u3164\u{e0001}",
+      }),
     );
+    prepareSpoolDir(vps.spoolDir, ownUid());
+    writeExcerpt(vps.spoolDir, SESSION_A, {
+      at: NOW,
+      text: "Done.\nThe PR\u200b is\u{e0049} open\u2066.\u3164",
+    });
     const [session] = listed(service().sessions).sessions;
     expect(session).toMatchObject({
       title: "Title with bell and breaks",
-      repository: "evil repo",
-      branch: "fix/ line break",
+      repository: "evilrepo",
+      branch: "fix/line break",
+      // An excerpt keeps its lines, and loses what doesn't show.
+      excerpt: "Done.\nThe PR is open.",
     });
+  });
+
+  it("redacts a field's first 4,096 characters only, so a huge title stays cheap", () => {
+    writeSessionFile(vps, sessionFields({ pid: 101, name: `Big ${"a-".repeat(30_000)}` }));
+    const started = performance.now();
+    const [session] = listed(service().sessions).sessions;
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(session?.title).toHaveLength(MAX_TITLE_CHARS);
+    expect(MAX_REDACTED_CHARS).toBe(4_096);
   });
 
   it("leaves out the runner's own sessions by their real folder, or by name when it can't tell", () => {

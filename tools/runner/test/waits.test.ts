@@ -82,6 +82,32 @@ describe("lifeOf", () => {
     expect(WAIT_JOIN_MS).toBe(60_000);
   });
 
+  it("takes a hook's request 120 s after an open one for the next prompt, the first's close lost", () => {
+    const events = [ev("PermissionRequest", 0), ev("PermissionRequest", 120, { question: true })];
+    // The file turned busy at 30 s, after the first prompt, before the second.
+    const busy = file({ status: "busy", statusUpdatedAt: at(30) });
+    expect(lifeOf(busy, events, NOW)).toMatchObject({
+      state: "waiting_answer",
+      since: at(120),
+      wait: { kind: "question", openedAt: at(120) },
+    });
+    // The file busy before both.
+    const before = file({ status: "busy", statusUpdatedAt: at(-10) });
+    expect(lifeOf(before, events, NOW).wait).toEqual({ kind: "question", openedAt: at(120) });
+    // The file waiting at 118 s, with the second request: one wait, from 118 s.
+    const waiting = file({ status: "waiting", waitingFor: "permission", statusUpdatedAt: at(118) });
+    expect(lifeOf(waiting, events, NOW).wait).toEqual({ kind: "question", openedAt: at(118) });
+  });
+
+  it("joins a hook's prompt 6 s after its request, and its next one within 60 s", () => {
+    const events = [
+      ev("PermissionRequest", 0, { question: true }),
+      ev("Notification", 6, { type: "permission_prompt" }),
+      ev("PermissionRequest", 60),
+    ];
+    expect(lifeOf(file(), events, NOW).wait).toEqual({ kind: "question", openedAt: at(0) });
+  });
+
   it("takes a file's wait 120 s after a hook's for the next prompt, dropping the stale one", () => {
     const hook = [ev("PermissionRequest", 0, { question: true })];
     const waiting = file({ status: "waiting", waitingFor: "permission", statusUpdatedAt: at(120) });
