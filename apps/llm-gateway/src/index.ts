@@ -1,6 +1,14 @@
 import { RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
 import {
+  isRunnerToolLoopMs,
+  parseRunnerToolResult,
+  RUNNER_SESSION_ID,
+  type RunnerChatContract,
+} from "@kelpie/channels";
+import {
   AnthropicMessagesProvider,
+  type ClaudeCodeClient,
+  ClaudeCodeProvider,
   EMBEDDING_PROVIDERS,
   type Embedder,
   type EmbeddingProviderId,
@@ -15,6 +23,7 @@ import {
   type ModelSelection,
   type ModelSettings,
   type ModelTier,
+  memoryOnSessionRoute,
   modelAliasDescription,
   OpenAIEmbedder,
   OpenAIResponsesProvider,
@@ -64,19 +73,23 @@ const MAX_QUALIFY_TIMEOUT_MS = 3_000;
 /** One `embed` call takes at most this many texts, and this long. */
 const MAX_EMBED_TEXTS = 256;
 const EMBED_TIMEOUT_MS = 30_000;
-/** The longest conversation name or tool call id a caller may send (#295). */
+/** The longest conversation name a caller may send (#295). */
 const MAX_ID_CHARS = 256;
-/** A route session's id: a UUID, as Claude Code's are. The runner puts it in a path (#295). */
-const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-/**
- * The longest tool result an answer may carry. The turn cuts a result at 10,000 characters, plus a
- * note, before it gets here (ADR-0025), so this only stops a caller sending more than any needs.
- */
-const MAX_ANSWER_CHARS = 20_000;
 
-/** Vars a deploy may set to any string, whatever the generated types say (`docs/admin-api.md`). */
-type GatewayEnv = Omit<Env, "EMBEDDING_PROVIDER" | "OPENAI_BASE_URL" | "MODEL_FALLBACK"> &
-  Secrets & { EMBEDDING_PROVIDER: string; OPENAI_BASE_URL: string; MODEL_FALLBACK: string };
+/**
+ * Vars a deploy may set to any string, whatever the generated types say (`docs/admin-api.md`). The
+ * runner's binding may be missing, as in a build from before it.
+ */
+type GatewayEnv = Omit<
+  Env,
+  "EMBEDDING_PROVIDER" | "OPENAI_BASE_URL" | "MODEL_FALLBACK" | "RUNNER_CHAT"
+> &
+  Secrets & {
+    EMBEDDING_PROVIDER: string;
+    OPENAI_BASE_URL: string;
+    MODEL_FALLBACK: string;
+    RUNNER_CHAT?: Env["RUNNER_CHAT"];
+  };
 
 /**
  * What `Generation.answer` did with a result: taken, or ignored because it is malformed
@@ -125,9 +138,13 @@ export class Generation extends RpcTarget {
     this.cancel();
   }
 
-  /** The result of a call a `tool_request` event asked for. It is an RPC boundary, so it is checked. */
+  /**
+   * The result of a call a `tool_request` event asked for. It is an RPC boundary, so it is checked,
+   * with the runner's own checks: a result taken here is one the relay takes too. The turn cuts a
+   * result at 10,000 characters, plus a note, before it gets here (ADR-0025); they stop at 20,000.
+   */
   answer(result: ToolResult): AnswerOutcome {
-    const checked = parseToolResult(result);
+    const checked = parseRunnerToolResult(result);
     return checked ? this.#answers.answer(checked) : { ok: false, reason: "invalid_input" };
   }
 }
@@ -211,23 +228,21 @@ const isBoundedText = (value: unknown, max: number): value is string =>
 const isConversationCall = (call: ModelSelection): boolean =>
   typeof call === "object" && call !== null && call.area === "conversation";
 
-/** A session as RPC sent it, rebuilt from the fields Kelpie knows; null when malformed. */
+/**
+ * A session as RPC sent it, rebuilt from the fields Kelpie knows; null when malformed. Its id goes
+ * in the runner's paths, and its tool bound to the runner, so both pass the runner's own checks
+ * (#421). A build of conversation-runtime from before the bound sends none.
+ */
 function parseSession(value: unknown): RouteSession | null {
   if (typeof value !== "object" || value === null) return null;
-  const { conversation, id, resume } = value as Partial<Record<keyof RouteSession, unknown>>;
+  const { conversation, id, resume, toolLoopMs } = value as Partial<
+    Record<keyof RouteSession, unknown>
+  >;
   if (!isBoundedText(conversation, MAX_ID_CHARS)) return null;
-  if (typeof id !== "string" || !SESSION_ID.test(id)) return null;
-  return typeof resume === "boolean" ? { conversation, id, resume } : null;
-}
-
-/** A tool's result as RPC sent it, rebuilt from the fields Kelpie knows; null when malformed. */
-function parseToolResult(value: unknown): ToolResult | null {
-  if (typeof value !== "object" || value === null) return null;
-  const { callId, output, isError } = value as Partial<Record<keyof ToolResult, unknown>>;
-  if (!isBoundedText(callId, MAX_ID_CHARS)) return null;
-  if (typeof output !== "string" || output.length > MAX_ANSWER_CHARS) return null;
-  if (isError !== undefined && typeof isError !== "boolean") return null;
-  return { callId, output, ...(isError === undefined ? {} : { isError }) };
+  if (typeof id !== "string" || !RUNNER_SESSION_ID.test(id)) return null;
+  if (toolLoopMs !== undefined && !isRunnerToolLoopMs(toolLoopMs)) return null;
+  if (typeof resume !== "boolean") return null;
+  return { conversation, id, resume, ...(toolLoopMs === undefined ? {} : { toolLoopMs }) };
 }
 
 /** Model access for Kelpie's other Workers, through a service binding. */
@@ -288,12 +303,15 @@ export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
  * what every agent costs.
  */
 export class LlmGatewayAdmin extends WorkerEntrypoint<GatewayEnv> {
-  /** The providers with a key, in Kelpie's provider order. */
-  providers(): ProviderId[] {
+  /** The providers that serve, in Kelpie's provider order. See `providersWith`. */
+  providers(): Promise<ProviderId[]> {
     return providersWith(this.env);
   }
 
-  /** The instance's model settings, its pinned provider and the providers with a key. */
+  /**
+   * The instance's model settings, its pinned provider, the providers that serve, and whether the
+   * `claude-code` route is on.
+   */
   instanceModels(): Promise<InstanceModels> {
     return instanceModelsWith(this.env);
   }
@@ -305,12 +323,17 @@ export class LlmGatewayAdmin extends WorkerEntrypoint<GatewayEnv> {
   ): Promise<ConfigureDefaultsResult> {
     return configureDefaultsWith(this.env, settings, actor);
   }
+
+  /** Turns the `claude-code` route on or off. See `setClaudeCodeWith`. */
+  setClaudeCode(on: boolean, actor: DefaultsActor): Promise<ConfigureDefaultsResult> {
+    return setClaudeCodeWith(this.env, on, actor);
+  }
 }
 
 /**
  * One model call. When ModelDefaults can't answer, the call goes on with no instance settings, in
- * the route table's order, as before #286: a model call never fails for them. A malformed session
- * is refused as a bad request.
+ * the route table's order, as before #286, and with the `claude-code` route off: a model call never
+ * fails for them. A malformed session is refused as a bad request.
  */
 export function generateWith(
   env: GatewayEnv,
@@ -318,7 +341,7 @@ export function generateWith(
   request: RoutedRequest,
   session?: RouteSession,
 ): Generation {
-  const router = modelRouter(env);
+  const keyed = modelRouter(env);
   const controller = new AbortController();
   const answers = new PendingAnswers();
   controller.signal.addEventListener("abort", () => answers.end(), { once: true });
@@ -330,7 +353,8 @@ export function generateWith(
       if (checked && !isConversationCall(call)) {
         throw new LlmError("A session goes only with a conversation's call", "bad_request", false);
       }
-      const choice = await choiceFor(call, () => defaultsOrNone(env, router));
+      const { choice, claudeCode } = await choiceFor(call, () => defaultsOrNone(env, keyed));
+      const router = claudeCode ? modelRouter(env, true) : keyed;
       const options: StreamOptions = {
         signal: controller.signal,
         answers,
@@ -360,25 +384,36 @@ export interface InstanceModels {
   settings: ModelSettings;
   pinned: ProviderId | null;
   providers: ProviderId[];
+  /** Whether the owner turned the `claude-code` route on (#295). */
+  claudeCode: boolean;
 }
 
 export type ConfigureDefaultsResult = { ok: true } | { ok: false; reason: "invalid_input" };
 
-/** The providers whose key is set, in Kelpie's provider order (`PROVIDERS`). */
-export function providersWith(env: GatewayEnv): ProviderId[] {
-  const configured = providers(env);
+/**
+ * The providers that serve, in Kelpie's provider order (`PROVIDERS`): those whose key is set, and
+ * `claude-code` while the owner's switch is on and the runner's binding exists (#295).
+ */
+export async function providersWith(env: GatewayEnv): Promise<ProviderId[]> {
+  const { claudeCode } = await env.MODEL_DEFAULTS.getByName("instance").view();
+  return serving(env, claudeCode);
+}
+
+function serving(env: GatewayEnv, claudeCode: boolean): ProviderId[] {
+  const configured = providers(env, claudeCode);
   return (PROVIDERS as readonly ProviderId[]).filter((id) => configured[id] !== undefined);
 }
 
 export async function instanceModelsWith(env: GatewayEnv): Promise<InstanceModels> {
-  const { instance, pinned } = await env.MODEL_DEFAULTS.getByName("instance").view();
-  return { settings: instance, pinned, providers: providersWith(env) };
+  const { instance, pinned, claudeCode } = await env.MODEL_DEFAULTS.getByName("instance").view();
+  return { settings: instance, pinned, providers: serving(env, claudeCode), claudeCode };
 }
 
 /**
  * Replaces the instance's model settings (ADR-0036 §2), audited with `actor`. The configuration
  * commands are its callers and authorize the actor (ADR-0013); this validates the settings again,
- * because it is an RPC boundary, and refuses a provider that has no key.
+ * because it is an RPC boundary. It refuses a provider that doesn't serve, and `claude-code` for
+ * the `memory` area, whose calls carry no session (#295).
  */
 export async function configureDefaultsWith(
   env: GatewayEnv,
@@ -386,27 +421,43 @@ export async function configureDefaultsWith(
   actor: DefaultsActor,
 ): Promise<ConfigureDefaultsResult> {
   const parsed = parseModelSettings(settings);
-  if (!parsed || !keyedProviders(env, parsed)) return { ok: false, reason: "invalid_input" };
-  // Bounded: the audit keeps who asked, not whatever a caller sends as such.
-  const who = {
-    userId: String(actor?.userId ?? "").slice(0, AUDIT_FIELD_CHARS),
-    via: String(actor?.via ?? "").slice(0, AUDIT_FIELD_CHARS),
-  };
-  await env.MODEL_DEFAULTS.getByName("instance").configure(parsed, who);
+  if (!parsed || memoryOnSessionRoute(parsed)) return { ok: false, reason: "invalid_input" };
+  const served = await providersWith(env);
+  const named = [parsed.provider, parsed.conversation?.provider, parsed.memory?.provider];
+  if (!named.every((provider) => provider === undefined || served.includes(provider))) {
+    return { ok: false, reason: "invalid_input" };
+  }
+  await env.MODEL_DEFAULTS.getByName("instance").configure(parsed, auditActor(actor));
   return { ok: true };
 }
 
-/** Whether every provider `settings` names has a key. */
-function keyedProviders(env: GatewayEnv, settings: ModelSettings): boolean {
-  const keyed = providersWith(env);
-  return [settings.provider, settings.conversation?.provider, settings.memory?.provider].every(
-    (provider) => provider === undefined || keyed.includes(provider),
-  );
+/**
+ * Turns the `claude-code` route on or off for the instance (#295), audited with `actor`. Its
+ * callers are the configuration commands, which authorize the actor and, through Master, ask for
+ * the owner's confirmation first (ADR-0013): it spends the subscription's weekly limit.
+ */
+export async function setClaudeCodeWith(
+  env: GatewayEnv,
+  on: boolean,
+  actor: DefaultsActor,
+): Promise<ConfigureDefaultsResult> {
+  if (typeof on !== "boolean") return { ok: false, reason: "invalid_input" };
+  await env.MODEL_DEFAULTS.getByName("instance").setClaudeCode(on, auditActor(actor));
+  return { ok: true };
+}
+
+/** Bounded: the audit keeps who asked, not whatever a caller sends as such. */
+function auditActor(actor: DefaultsActor): DefaultsActor {
+  return {
+    userId: String(actor?.userId ?? "").slice(0, AUDIT_FIELD_CHARS),
+    via: String(actor?.via ?? "").slice(0, AUDIT_FIELD_CHARS),
+  };
 }
 
 /**
  * For each tier, its candidates whose provider has a key, in the order they are tried, an alias
- * with what it stands for. Like `ping`, it calls no provider: an alias isn't resolved.
+ * with what it stands for. Like `ping`, it calls no provider: an alias isn't resolved. Its callers'
+ * calls carry no session, so `claude-code` is never among them.
  */
 export function routesWith(env: GatewayEnv): Record<ModelTier, RouteModel[]> {
   const router = modelRouter(env);
@@ -418,7 +469,9 @@ export function routesWith(env: GatewayEnv): Record<ModelTier, RouteModel[]> {
 /**
  * The trio `area` resolves to, and the models it would try in order. It calls no provider. When
  * ModelDefaults can't answer, it throws, so the caller keeps the last description it had rather
- * than one that would change its prompt for a turn.
+ * than one that would change its prompt for a turn. A `conversation` is described as the owner's
+ * own conversations run, with their session, so the route names `claude-code` while it is on: the
+ * agent's prompt then names the route it may run on (#295).
  */
 export async function describeWith(
   env: GatewayEnv,
@@ -426,14 +479,17 @@ export async function describeWith(
   agent?: ModelSettings,
   tier?: ModelTier,
 ): Promise<ModelDescription> {
-  const router = modelRouter(env);
+  const keyed = modelRouter(env);
   const call = { area, ...(agent ? { agent } : {}), ...(tier ? { tier } : {}) };
-  const choice = await choiceFor(call, () => defaultsOf(env, router));
+  const { choice, claudeCode } = await choiceFor(call, () => defaultsOf(env, keyed));
+  const router = claudeCode ? modelRouter(env, true) : keyed;
   return {
     provider: choice.provider ?? null,
     tier: choice.tier,
     ...(choice.effort ? { effort: choice.effort } : {}),
-    route: router.route(choice.tier, choice.provider).map(describeModel),
+    route: router
+      .route(choice.tier, choice.provider, { session: area === "conversation" })
+      .map(describeModel),
   };
 }
 
@@ -443,50 +499,52 @@ function describeModel({ provider, model }: RouteModel): RouteModel {
 }
 
 /**
- * Resolves a call's trio (ADR-0036 §2). RPC callers aren't type-checked, so an area, tier or
- * setting Kelpie doesn't know is refused rather than guessed. A tier alone, as callers before #286
- * send it, keeps the route table's order and the candidates' efforts.
+ * Resolves a call's trio (ADR-0036 §2), and whether the `claude-code` route is on for it. RPC
+ * callers aren't type-checked, so an area, tier or setting Kelpie doesn't know is refused rather
+ * than guessed. A tier alone, as callers before #286 send it, keeps the route table's order and the
+ * candidates' efforts; such a call carries no session, so the switch isn't read for it.
  */
 async function choiceFor(
   call: ModelSelection,
   defaults: () => Promise<InstanceDefaults>,
-): Promise<RouteChoice> {
-  if (typeof call === "string") return { tier: call };
+): Promise<{ choice: RouteChoice; claudeCode: boolean }> {
+  if (typeof call === "string") return { choice: { tier: call }, claudeCode: false };
   const invalid = (what: string) => new LlmError(`Unknown ${what}`, "bad_request", false);
   if (!(MODEL_AREAS as readonly string[]).includes(call?.area)) throw invalid("model area");
   if (call.tier !== undefined && !MODEL_TIERS.includes(call.tier)) throw invalid("tier");
   const agent = call.agent === undefined ? undefined : parseModelSettings(call.agent);
   if (agent === null) throw invalid("model setting");
-  const { instance, pinned } = await defaults();
-  return resolveModel({
+  const { instance, pinned, claudeCode } = await defaults();
+  const choice = resolveModel({
     area: call.area,
     ...(agent ? { agent } : {}),
     instance,
     pinned,
     ...(call.tier ? { tier: call.tier } : {}),
   });
+  return { choice, claudeCode };
 }
 
 /**
- * The instance's settings and pinned provider. With nothing pinned yet, ModelDefaults pins the
- * first provider with a key in the cheap tier's order, and that pin then leads every tier. A route
- * that needs a session is never pinned: without one, `route` leaves it out (#295).
+ * The instance's settings, pinned provider and switch. With nothing pinned yet, ModelDefaults pins
+ * the first provider with a key in the cheap tier's order, and that pin then leads every tier.
+ * `claude-code` is never pinned: `keyed` routes over the providers with a key alone (#295).
  */
-function defaultsOf(env: GatewayEnv, router: ModelRouter): Promise<InstanceDefaults> {
-  const withKey = router.route("cheap")[0]?.provider ?? null;
+function defaultsOf(env: GatewayEnv, keyed: ModelRouter): Promise<InstanceDefaults> {
+  const withKey = keyed.route("cheap")[0]?.provider ?? null;
   return env.MODEL_DEFAULTS.getByName("instance").defaults(withKey);
 }
 
 /** `defaultsOf`, or none when ModelDefaults can't answer, logged by the error's name only. */
-async function defaultsOrNone(env: GatewayEnv, router: ModelRouter): Promise<InstanceDefaults> {
+async function defaultsOrNone(env: GatewayEnv, keyed: ModelRouter): Promise<InstanceDefaults> {
   try {
-    return await defaultsOf(env, router);
+    return await defaultsOf(env, keyed);
   } catch (error) {
     console.error(
       "llm-gateway: ModelDefaults failed; using the route table's order",
       errorName(error),
     );
-    return { instance: {}, pinned: null };
+    return { instance: {}, pinned: null, claudeCode: false };
   }
 }
 
@@ -505,8 +563,13 @@ export async function pingWith(env: GatewayEnv): Promise<{ ok: true }> {
   return { ok: true };
 }
 
-function modelRouter(env: GatewayEnv): ModelRouter {
-  return new ModelRouter(parseRouteTable(env.MODEL_ROUTES), providers(env), routerOptions(env));
+/** The router over the providers that serve: `claude-code` among them only while `claudeCode`. */
+function modelRouter(env: GatewayEnv, claudeCode = false): ModelRouter {
+  return new ModelRouter(
+    parseRouteTable(env.MODEL_ROUTES),
+    providers(env, claudeCode),
+    routerOptions(env),
+  );
 }
 
 /** Only "off" stops at the first failed route: a typo keeps the default, falling back (#293). */
@@ -627,7 +690,13 @@ function qualifierFor(env: GatewayEnv, backend: QualifierBackend): Qualifier | n
   });
 }
 
-function providers(env: GatewayEnv): Partial<Record<ProviderId, LlmProvider>> {
+/**
+ * The providers that serve: each one whose key is set, and `claude-code` when `claudeCode`, the
+ * owner's switch, is on and the runner's binding exists (#295). Extra cost is opt-in: the route
+ * spends the subscription's weekly limit, which the owner's own coding shares (ADR-0037 §5).
+ */
+function providers(env: GatewayEnv, claudeCode = false): Partial<Record<ProviderId, LlmProvider>> {
+  const runner = claudeCode ? runnerChat(env) : undefined;
   return {
     ...(env.ANTHROPIC_API_KEY
       ? {
@@ -643,7 +712,16 @@ function providers(env: GatewayEnv): Partial<Record<ProviderId, LlmProvider>> {
           ),
         }
       : {}),
+    ...(runner ? { "claude-code": new ClaudeCodeProvider(runner) } : {}),
   };
+}
+
+/** channel-egress's `RunnerChat` entrypoint, which answers with values, as the route's client. */
+function runnerChat(env: GatewayEnv): ClaudeCodeClient | undefined {
+  // The binding's stub types each call as RPC; the entrypoint implements the contract, and the
+  // contract is a client.
+  const contract = env.RUNNER_CHAT as unknown as RunnerChatContract | undefined;
+  return contract;
 }
 
 const AI_GATEWAY_HOST = "gateway.ai.cloudflare.com";

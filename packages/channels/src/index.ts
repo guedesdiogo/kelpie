@@ -56,6 +56,7 @@ export {
   webLinks,
 } from "./markdown.ts";
 export {
+  isRunnerToolLoopMs,
   parseRunnerToolResult,
   parseRunnerTurnRequest,
   RUNNER_MAX_RESULT_BYTES,

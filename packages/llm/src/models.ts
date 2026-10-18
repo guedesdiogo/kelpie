@@ -73,6 +73,15 @@ export function resolveModel(input: {
   return { provider, tier, ...(effort ? { effort } : {}) };
 }
 
+/**
+ * Whether the settings give the `memory` area the `claude-code` route (#295). That route serves only
+ * a conversation's turns, which carry the session it keeps, and memory's calls carry none, so the
+ * commands that set models refuse it there.
+ */
+export function memoryOnSessionRoute(settings: ModelSettings): boolean {
+  return settings.memory?.provider === "claude-code";
+}
+
 /** Accepts only known keys with known values; anything else invalidates the whole value. */
 export function parseModelSettings(value: unknown): ModelSettings | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;

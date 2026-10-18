@@ -162,6 +162,7 @@ interface LlmGatewayAdminBinding {
   providers: ConfigPorts["models"]["providers"];
   instanceModels: ConfigPorts["models"]["view"];
   configureDefaults: ConfigPorts["models"]["configure"];
+  setClaudeCode: ConfigPorts["models"]["setClaudeCode"];
 }
 
 let portsForTesting: ConversationPorts | undefined;
@@ -225,6 +226,7 @@ export function configCommands(env: Env) {
       providers: () => gatewayAdmin.providers(),
       view: () => gatewayAdmin.instanceModels(),
       configure: (settings, actor) => gatewayAdmin.configureDefaults(settings, actor),
+      setClaudeCode: (on, actor) => gatewayAdmin.setClaudeCode(on, actor),
     },
     vault: { held: notBound, forget: notBound, setDream: notBound },
   });

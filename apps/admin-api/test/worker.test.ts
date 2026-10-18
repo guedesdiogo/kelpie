@@ -17,6 +17,8 @@ describe("admin-api Worker", () => {
       ok: true,
       value: {},
     });
+    // The claude-code route's switch (#421).
+    expect(await commands.setClaudeCode(owner, { on: true })).toEqual({ ok: true, value: {} });
   });
 
   it("reaches the agent's AgentHost for each task command (#54)", async () => {

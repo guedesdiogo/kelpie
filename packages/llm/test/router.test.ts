@@ -476,6 +476,17 @@ describe("parseRouteTable", () => {
     expect(parseRouteTable(withExtra)).toEqual(routes);
   });
 
+  it("accepts the claude-code route after anthropic's, as ADR-0037 §1 orders them (#295)", () => {
+    const table = {
+      ...routes,
+      medium: [
+        { provider: "anthropic", model: "claude-sonnet-5-5" },
+        { provider: "claude-code", model: "claude-sonnet-5-5" },
+      ],
+    };
+    expect(parseRouteTable(table)).toEqual(table);
+  });
+
   it.each([
     ["a missing tier", { cheap: routes.cheap, medium: routes.medium }, /"frontier"/],
     ["an unknown provider", { ...routes, medium: [{ provider: "gemini", model: "x" }] }, /gemini/],

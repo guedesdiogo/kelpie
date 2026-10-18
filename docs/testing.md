@@ -49,6 +49,8 @@ Fiber recovery after an eviction runs when the fiber's heartbeat alarm fires on 
 
 `llm-gateway` and `channel-egress` are service bindings that don't exist in tests, so `vitest.config.ts` replaces them with stubs; the fake model and channel ports mean they're never called. The `llm-gateway` stub answers `ping()`, which the deploy probe's tests call (#234), and `describe()`, which a turn's identity section reads (#286); its `LlmGatewayAdmin` entrypoint is empty (#289).
 
+`llm-gateway`'s `vitest.config.ts` stubs `channel-egress`'s `RunnerChat` as a runner that isn't connected. Tests that run a `claude-code` turn pass a fake client in its place (#421).
+
 `ingress`'s `vitest.config.ts` does the same for the Workers it binds: stub Workers with the entrypoints and objects it calls, among them a `DeployProbe` that finds every part ok, and the probe's token as a binding.
 
 `admin-api` binds Durable Objects and entrypoints that live in other Workers. Its `vitest.config.ts` adds stub Workers that only declare those classes, so the runtime starts; its tests pass fakes to `handle()` and never call the objects. The one exception is `llm-gateway`'s `LlmGatewayAdmin` stub, which answers the Worker's own test of the model commands' wiring (#289).

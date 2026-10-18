@@ -66,6 +66,8 @@ function fakeCommands() {
     state: { state: "ready", version: "0.1.0", protocol: 1 },
   };
   const forbidden = { ok: false, reason: "forbidden" } as const;
+  /** The instance's claude-code switch, as llm-gateway holds it (#421). */
+  const models = { claudeCode: false };
   const commands: ConfigurationCommands = {
     async listAgents(actor) {
       if (actor.role !== "owner") return forbidden;
@@ -123,6 +125,7 @@ function fakeCommands() {
           settings: { memory: { tier: "cheap" } },
           pinned: "anthropic",
           providers: ["anthropic"],
+          claudeCode: models.claudeCode,
         },
       };
     },
@@ -133,6 +136,12 @@ function fakeCommands() {
       return settings.provider === "openai"
         ? { ok: false, reason: "no_key" }
         : { ok: true, value: {} };
+    },
+    async setClaudeCode(actor, input) {
+      calls.push(`setClaudeCode ${JSON.stringify(input)}`);
+      if (actor.role !== "owner") return forbidden;
+      models.claudeCode = (input as { on: boolean }).on;
+      return { ok: true, value: {} };
     },
     async setMainAgent(actor, input) {
       calls.push(`setMainAgent ${JSON.stringify(input)}`);
@@ -183,7 +192,7 @@ function fakeCommands() {
       return { ok: true, value: runner.state };
     },
   };
-  return { commands, agents, calls, runner, allowlists };
+  return { commands, agents, calls, runner, allowlists, models };
 }
 
 /**
@@ -245,7 +254,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
     }
     // A task's run has no owner to confirm anything (#335).
     expect(await provider.tools(MASTER, { channel: "task" })).toEqual([]);
-    expect(await provider.tools(MASTER, { channel: "telegram" })).toHaveLength(14);
+    expect(await provider.tools(MASTER, { channel: "telegram" })).toHaveLength(15);
 
     const tools = await toolsOf(provider);
     expect([...tools.keys()]).toEqual([
@@ -256,6 +265,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
       "configure_agent",
       "get_models",
       "configure_models",
+      "set_claude_code",
       "set_main_agent",
       "set_agent_chat",
       "delete_agent",
@@ -539,6 +549,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
       settings: { memory: { tier: "cheap" } },
       pinned: "anthropic",
       providers: ["anthropic"],
+      claudeCode: false,
     });
 
     const settings = { conversation: { tier: "medium", effort: "high" } };
@@ -566,12 +577,120 @@ describe("Master's configuration tools (ADR-0048)", () => {
       confirmed.context,
     );
     expect(noKey).toMatchObject({ isError: true });
-    expect(noKey.output).toContain("has no key");
+    expect(noKey.output).toContain("doesn't serve in llm-gateway: a provider needs its key");
     expect(
       await run(tools, "configure_models", { settings: { tier: "x" } }, confirmed.context),
     ).toMatchObject({
       isError: true,
     });
+  });
+
+  it("turns the claude-code route on and off behind the owner's confirmation, never in a task's run (#421)", async () => {
+    const { commands, calls, models } = fakeCommands();
+    const provider = configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN });
+    const tools = await toolsOf(provider);
+    // No one confirms anything in a task's run (#335), so the switch isn't there either.
+    expect(await provider.tools(MASTER, { channel: "task" })).toEqual([]);
+
+    const waiting = contextOf(false);
+    expect((await run(tools, "set_claude_code", { on: true }, waiting.context)).output).toContain(
+      "Not done yet",
+    );
+    expect(waiting.asked).toEqual([
+      {
+        command: "setClaudeCode",
+        input: { on: true },
+        summary:
+          "turn on the claude-code route: your conversations may reach Claude through Claude Code on your VPS runner, on your Claude subscription, when the Anthropic API route fails or where the model settings name claude-code. Each such turn spends the subscription's weekly usage limit, which your own coding with Claude Code shares.",
+      },
+    ]);
+    expect(calls).toEqual([]);
+
+    const confirmed = contextOf(true);
+    expect((await run(tools, "set_claude_code", { on: true }, confirmed.context)).output).toMatch(
+      /^The claude-code route is on/,
+    );
+    expect(models.claudeCode).toBe(true);
+    // Checked before the owner is asked: a yes that changes nothing isn't asked for.
+    const again = contextOf(true);
+    expect(await run(tools, "set_claude_code", { on: true }, again.context)).toEqual({
+      output: "The claude-code route is already on; nothing changed.",
+    });
+    expect(again.asked).toEqual([]);
+    expect(await run(tools, "set_claude_code", { on: false }, confirmed.context)).toEqual({
+      output:
+        "The claude-code route is off: the owner's conversations no longer reach Claude through Claude Code.",
+    });
+    expect(calls).toEqual(['setClaudeCode {"on":true}', 'setClaudeCode {"on":false}']);
+
+    const member: Actor = { userId: "u-member", role: "member", via: `agent:${MASTER}` };
+    expect(
+      await run(tools, "set_claude_code", { on: true }, contextOf(true, member).context),
+    ).toEqual({
+      output: "Only the owner can change Kelpie's configuration.",
+      isError: true,
+    });
+    expect(await run(tools, "set_claude_code", { on: "yes" }, confirmed.context)).toMatchObject({
+      isError: true,
+    });
+    expect(calls).toHaveLength(2);
+  });
+
+  it("says, in each of Kelpie's languages, that the claude-code route spends the subscription's weekly limit (#421)", async () => {
+    const { commands, models } = fakeCommands();
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
+    expect(tools.get("set_claude_code")?.spec.description).toContain(
+      "It spends the subscription's weekly usage limit, which the owner's own coding with Claude Code shares.",
+    );
+    const weekly: Record<Locale, string> = {
+      en: "weekly usage limit",
+      "pt-BR": "limite de uso semanal",
+      es: "límite de uso semanal",
+    };
+    for (const [locale, words] of Object.entries(weekly) as [Locale, string][]) {
+      for (const on of [true, false]) {
+        models.claudeCode = !on;
+        const waiting = contextOf(false, owner, locale);
+        await run(tools, "set_claude_code", { on }, waiting.context);
+        expect(waiting.asked[0]?.summary, `${locale} ${on}`).toContain(words);
+        expect(waiting.asked[0]?.summary, `${locale} ${on}`).toContain("claude-code");
+      }
+    }
+  });
+
+  it("keeps claude-code out of memory before the owner is asked, and out of memory's schema (#421)", async () => {
+    const { commands, calls } = fakeCommands();
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
+    const memory = { memory: { provider: "claude-code" } };
+    const refused = {
+      output:
+        "claude-code serves only conversations, never memory: name another provider for memory, or none.",
+      isError: true,
+    };
+    const asked = contextOf(true);
+    expect(await run(tools, "configure_models", { settings: memory }, asked.context)).toEqual(
+      refused,
+    );
+    expect(
+      await run(
+        tools,
+        "configure_agent",
+        { id: "ana", settings: { model: memory } },
+        asked.context,
+      ),
+    ).toEqual(refused);
+    expect(asked.asked).toEqual([]);
+    expect(calls).toEqual([]);
+
+    const schema = JSON.parse(JSON.stringify(tools.get("configure_models")?.spec.inputSchema));
+    const { properties } = schema.properties.settings;
+    expect(properties.provider.enum).toContain("claude-code");
+    expect(properties.conversation.properties.provider.enum).toContain("claude-code");
+    expect(properties.memory.properties.provider.enum).toEqual(["anthropic", "openai"]);
   });
 
   it("says configure_agent's model replaces the agent's whole model settings (ADR-0048)", async () => {
@@ -610,7 +729,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
       confirmed.context,
     );
     expect(noKey).toMatchObject({ isError: true });
-    expect(noKey.output).toContain("has no key");
+    expect(noKey.output).toContain("doesn't serve in llm-gateway: a provider needs its key");
     expect(calls.filter((call) => call.startsWith("configureAgent"))).toHaveLength(2);
   });
 

@@ -1,7 +1,7 @@
 /**
  * Providers with a native adapter (ADR-0008), and `claude-code`, Claude Code on the owner's
- * subscription through the VPS runner (ADR-0037). That one has no adapter yet (#295), so route
- * tables and model settings still refuse it (`PROVIDERS`).
+ * subscription through the VPS runner (ADR-0037, #295). That one serves only while the owner's
+ * switch is on (`docs/admin-api.md`).
  */
 export type ProviderId = "anthropic" | "openai" | "claude-code";
 
@@ -101,6 +101,12 @@ export interface RouteSession {
   id: string;
   /** Whether `id` names a session to resume. Otherwise a new session starts with that id. */
   resume: boolean;
+  /**
+   * The agent's bound on the turn's tools, in ms (ADR-0025), which a route that runs the tool loop
+   * itself keeps too (#421). A build of conversation-runtime from before it sends none, and the
+   * route then takes the agents' default, 120 s.
+   */
+  toolLoopMs?: number;
 }
 
 /**

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { lowerEffort } from "../src/efforts.ts";
-import { parseModelSettings, resolveModel } from "../src/models.ts";
+import { memoryOnSessionRoute, parseModelSettings, resolveModel } from "../src/models.ts";
 
 describe("resolveModel", () => {
   it("falls back to the pinned provider, the cheap tier and the model's own effort", () => {
@@ -73,6 +73,14 @@ describe("parseModelSettings", () => {
     };
     expect(parseModelSettings(settings)).toEqual(settings);
     expect(parseModelSettings({})).toEqual({});
+  });
+
+  it("accepts the claude-code route, which the commands keep out of memory (#295)", () => {
+    const settings = { provider: "claude-code", conversation: { provider: "claude-code" } };
+    expect(parseModelSettings(settings)).toEqual(settings);
+    expect(memoryOnSessionRoute(settings as never)).toBe(false);
+    expect(memoryOnSessionRoute({ memory: { provider: "claude-code" } })).toBe(true);
+    expect(memoryOnSessionRoute({ memory: { provider: "anthropic" } })).toBe(false);
   });
 
   it.each([

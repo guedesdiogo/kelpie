@@ -7,8 +7,29 @@ export default defineConfig({
       wrangler: { configPath: "./wrangler.jsonc" },
       // The AI binding is remote-only; tests pass a fake one, so no Cloudflare session is opened.
       remoteBindings: false,
-      // Only Anthropic has a model key, so the OpenAI candidates are skipped. Jev has its key.
-      miniflare: { bindings: { ANTHROPIC_API_KEY: "sk-ant-test", TYPESAFE_API_KEY: "ts-test" } },
+      miniflare: {
+        // Only Anthropic has a model key, so the OpenAI candidates are skipped. Jev has its key.
+        bindings: { ANTHROPIC_API_KEY: "sk-ant-test", TYPESAFE_API_KEY: "ts-test" },
+        // channel-egress's RunnerChat, as a runner that isn't connected yet: the `claude-code`
+        // route's tests that need a turn swap in a client of their own.
+        workers: [
+          {
+            name: "kelpie-channel-egress",
+            modules: true,
+            compatibilityDate: "2026-10-01",
+            script: `import { WorkerEntrypoint } from "cloudflare:workers";
+export class RunnerChat extends WorkerEntrypoint {
+  turn() {
+    return { ok: false, reason: "not_connected" };
+  }
+  answer() {
+    return { ok: false, reason: "not_connected" };
+  }
+}
+export default { fetch: () => new Response(null, { status: 404 }) };`,
+          },
+        ],
+      },
     }),
   ],
   // The first test of each file waits for the workerd runtime to start, which takes seconds on a

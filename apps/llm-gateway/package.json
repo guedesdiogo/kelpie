@@ -9,6 +9,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@kelpie/channels": "workspace:*",
     "@kelpie/llm": "workspace:*",
     "@kelpie/qualifier": "workspace:*"
   },
