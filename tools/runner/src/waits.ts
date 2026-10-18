@@ -6,6 +6,11 @@ import { CONTINUING_REASONS, type SpoolEvent } from "./spool.ts";
 
 /** A session idle this long could be archived (ADR-0057 §4). */
 export const ARCHIVE_IDLE_MS = 3 * 60 * 60_000;
+/**
+ * A file's wait and a hook's this close are one prompt's: the file follows the hook's request by
+ * a moment, and its `permission_prompt` by 6 s.
+ */
+export const WAIT_JOIN_MS = 60_000;
 
 /** A wait on the owner, from the hook event that opened it. */
 export interface Wait {
@@ -33,10 +38,12 @@ export interface SessionLife {
  * - a file's wait opens while the session file says `waiting`, at the time it said so, and closes
  *   on one of those events after that. Its kind is the file's `waitingFor`: a permission prompt, or
  *   needed input, which is a question, as is anything else;
- * - a session has one wait at most: a file's wait and a hook's are one, opened at the earlier
- *   time, of the hook's kind, which says more;
+ * - a session has one wait at most. A file's wait and a hook's within WAIT_JOIN_MS are one,
+ *   opened at the earlier time, of the hook's kind, which says more. Further apart, the later is
+ *   the next prompt and the earlier is stale, as when a hook's close was lost;
  * - a session has ended when its process is gone, or after a `SessionEnd` whose reason isn't
- *   `clear` or `resume`, until another event comes;
+ *   `clear` or `resume`, until another event comes. A process that started after the end, as
+ *   after a reboot, took the session up again: its end is stale;
  * - otherwise its file says: `busy` is working.
  */
 export function lifeOf(file: SessionFile, events: readonly SpoolEvent[], now: number): SessionLife {
@@ -78,11 +85,14 @@ export function lifeOf(file: SessionFile, events: readonly SpoolEvent[], now: nu
   }
   if (file.status === "waiting" && changed !== null && (closedAt === null || closedAt <= changed)) {
     const kind = file.waitingFor === "permission" ? "permission" : "question";
-    wait = wait
-      ? { kind: wait.kind, openedAt: Math.min(wait.openedAt, changed) }
-      : { kind, openedAt: changed };
+    if (!wait || changed - wait.openedAt > WAIT_JOIN_MS) wait = { kind, openedAt: changed };
+    else if (wait.openedAt - changed <= WAIT_JOIN_MS) {
+      wait = { kind: wait.kind, openedAt: Math.min(wait.openedAt, changed) };
+    }
   }
-  if (file.alive === false || endedAt !== null) {
+  const restarted =
+    endedAt !== null && file.alive === true && file.startedAt !== null && file.startedAt > endedAt;
+  if (file.alive === false || (endedAt !== null && !restarted)) {
     return {
       state: "ended",
       since: endedAt ?? latest(changed, lastAt),

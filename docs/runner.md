@@ -58,22 +58,29 @@ The runner tells Kelpie what every Claude Code session on the server is doing: t
 - **Two sources:**
   - **The session files** Claude Code keeps in `~/.claude/sessions/`, one per running session: its id, its folder, its title (`name`), its `status` and when that changed, when it started, what started it (`entrypoint`), and its process, checked with signal 0. Their fields aren't documented: a field that is missing, or holds a value the runner doesn't know, reads as unknown, never as an error.
   - **The session-event hook,** which the owner installs in `~/.claude/settings.json` (below). It writes one line per event to a spool only the runner reads, and the last reply's excerpt.
-- **Left out:** the `claude-code` route's own sessions, those in the runner's work folder (`KELPIE_RUNNER_WORK_DIR`) or whose id the runner holds.
+- **Left out:** the `claude-code` route's own sessions, those in the runner's work folder (`KELPIE_RUNNER_WORK_DIR`), compared by real path and by name, or whose id the runner holds.
 - **Each session's state,** with the time it began (ADR-0057 §4, and ADR-0059 for the session file's own waits):
   - `waiting_permission` or `waiting_answer`: a wait is open. A session has one at most, opened by a hook or by its session file:
     - **a hook's wait** opens on `PermissionRequest`, or on a `Notification` of type `permission_prompt` or `elicitation_dialog`. A prompt that follows a request joins its wait. `AskUserQuestion`'s request and an elicitation are questions; anything else is a permission. It closes on the session's next `UserPromptSubmit`, `PermissionDenied`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `StopFailure` or `SessionEnd`, or when its session file turns `idle`, or `busy` again, after the wait opened. So an answer in the Claude app clears it too;
     - **a file's wait** opens while the session file says `status: "waiting"`, at its `statusUpdatedAt`; a file that doesn't say since when opens none. Its kind comes from `waitingFor`: `permission prompt` is a permission, `input needed` a question, and anything else, or nothing, a wait of unknown kind, shown as waiting on an answer. Only that kind is kept, never Claude Code's text. It closes when the file no longer says `waiting`, or is gone, or on one of the hook events above after it opened;
-    - **the two are one wait** when both are open, as when the same prompt fires the hooks and changes the file: it opened at the earlier time, and has the hook's kind, which says more. So `/sessions/waits` gives each wait one session id and one opening time, and a notice tells it once.
-  - `ended`: its process is gone, or a `SessionEnd` whose reason isn't `clear` or `resume` came, and no event since.
+    - **the two are one wait** when both are open within 60 s of each other, as when the same prompt fires the hooks and changes the file: it opened at the earlier time, and has the hook's kind, which says more. So `/sessions/waits` gives each wait one session id and one opening time, and a notice tells it once;
+    - **further apart,** the later one is the next prompt, and the earlier is stale and dropped, as when a hook's close was lost: a file that says `waiting` again 90 s after a hook's wait opened is a new wait.
+  - `ended`: its process is gone, or a `SessionEnd` whose reason isn't `clear` or `resume` came, and no event since. A running process whose session file started after that end took the session up again, as the app does after a reboot: the end is stale, and the session's excerpt stays.
   - otherwise, its session file's `status`: `working` for `busy`, `idle` for `idle`. The list shows the file's own status beside the state.
   - **Archive candidates** (`archivable`): the app's sessions that ended, or have been idle for 3 hours or more. Only the app archives a session, so a terminal's shows only as ended.
-- **Each session's details:** its repository (the main checkout's folder name) and branch, read from git's own files in its folder, never by running git; what started it (`app` for `claude-desktop`, `terminal` for `cli`, else `unknown`); its title; its last GitHub pull request link, from its transcript's last 1 MiB, of which only the `pr-link` entries are read; and the excerpt of its last reply.
-- **Secrets never leave.** The hook redacts the whole reply before it cuts its 500 characters, and the runner redacts every text again on the way out: its own secret by value; `NAME=value` whose name says key, token, secret or password; bearer tokens; keys of a known format (`sk-`, `ghp_`, `gho_`, `github_pat_`, AWS's `AKIA`); PEM blocks; and runs of 32 or more hex digits, or base64 characters that mix cases and digits. It errs toward redacting: a long path that mixes them goes too. A PR link the redaction would change isn't shown.
+- **Each session's details:** its repository (the main checkout's folder name) and branch, read from git's own files in its folder, never by running git; what started it (`app` for `claude-desktop`, `terminal` for `cli`, else `unknown`); its title; its last GitHub pull request link, from its transcript's last 1 MiB, of which only the `pr-link` entries are read; and the excerpt of its last reply. The title, the repository and the branch go on one line: each control or bidi character becomes a space, and `channel-egress` refuses an answer whose field still holds one.
+- **Secrets never leave.** The hook redacts the whole reply before it cuts it to 1,000 characters, and the runner redacts every text again on the way out, its own secret by value first, before it cuts the excerpt to 500. So a secret only the runner knows, as a passphrase, is whole when it is redacted, even where it straddles the 500th character. What goes:
+  - the value of a name that says key, token, secret, pass, pwd, credential, auth, cookie, dsn or signature: `NAME=value`, a flag's `--name=value` or `--name value`, a YAML or header line's `name: value`, a quoted `"name": value`, and a header within a quoted command. Not the counts `tokens` names, `author`, the shell's `PWD` and `OLDPWD`, a quoted `null`, `true`, `false` or number, nor a line that only says a type, as `token: string;`;
+  - a URL's password (`scheme://user:password@`), curl's `-u user:password`, and bearer and basic tokens that look like one: a digit, a symbol, or a capital past the first letter, so `Bearer authentication` stays;
+  - keys of a known format (`sk-`, `ghp_`, `gho_`, `github_pat_`, AWS's `AKIA` and `ASIA`) and PEM blocks;
+  - runs of 32 or more hex digits, but a commit's 40 lowercase ones where the line says so just before, as `commit`, `merge`, `sha`, `HEAD` or `/commit/`; and runs of 32 or more base64 characters that mix cases and digits. A `/` isn't one of them, so a path is never taken whole.
+
+  A PR link the redaction would change isn't shown.
 - **Bounds:** at most 200 sessions or waits per answer, 512 KiB for the list and 64 KiB for the waits. Past those, the runner drops excerpts, then titles, PR links, branches and repositories, from the least recent session up, then sessions, and says `truncated`. It reads at most 1,000 session files, and a transcript's last 1 MiB.
 - **The spool,** in `~/.local/state/kelpie-runner/session-events/`:
   - a directory only the runner's user may open (`0700`), with files only it may read (`0600`). The runner ignores, and logs once, a spool directory others may open;
   - `events.ndjson`, one line per event: its name, a notification's type or a `SessionEnd`'s reason, the session's id, whether a permission request is `AskUserQuestion`'s, and the time. Never a prompt, a tool's input or output, or a path. At 512 KiB it becomes `events.1.ndjson`, replacing the older one, so the spool keeps at most 1 MiB;
-  - `excerpt-<session id>.json`, each session's last reply, redacted and cut to 500 characters at a word. It is deleted when its session ends, when its session file is gone, or after 7 days;
+  - `excerpt-<session id>.json`, each session's last reply, redacted and cut to 1,000 characters at a word. It is deleted when its session ends, when its session file is gone, or after 7 days. A file the runner can't delete is logged once, and never stops an answer;
   - a session id is checked as a UUID before it names a file.
 - **Who calls these routes:** `channel-egress`'s read-only `RunnerSessions` entrypoint, with its calls `list()` and `waits(since)`. Master's tool and the notices that use it come with #434.
 
@@ -81,20 +88,27 @@ The runner tells Kelpie what every Claude Code session on the server is doing: t
 
 The hook is `tools/runner/hooks/session-event.ts`, run with Bun from the runner's checkout. It reads the event from its input, writes the spool, and always exits 0, within 1.5 seconds even when its input never ends: Claude Code doesn't time out a hook that runs in the background. It never uses the network, and holds no secret. It takes about 25 ms and 26 MB per event, on every tool call, since `PostToolUse` is one of its events.
 
-Running sessions pick up an edit to `settings.json` without a restart (#416). On the server, as the runner's user, with the runner's checkout in `~/kelpie`:
+Running sessions pick up an edit to `settings.json` without a restart (#416). On the server, as the runner's user, with the runner's checkout in `~/kelpie` and `jq` installed:
 
 ```bash
-cp ~/.claude/settings.json ~/.claude/settings.json.bak
-hook='{"type":"command","command":"$HOME/.bun/bin/bun $HOME/kelpie/tools/runner/hooks/session-event.ts","async":true,"timeout":2}'
-jq --argjson hook "$hook" '
-  def ours: any(.hooks[]?; (.command // "") | contains("tools/runner/hooks/session-event.ts"));
+f=~/.claude/settings.json
+[ -e "$f.bak" ] || cp -p "$f" "$f.bak"
+hook='{"type":"command","command":"cd \"$HOME/kelpie/tools/runner\" && exec \"$HOME/.bun/bin/bun\" --no-env-file --config=hooks/bunfig.toml hooks/session-event.ts","async":true,"timeout":2}'
+if cp -p "$f" "$f.new" && jq --argjson hook "$hook" '
+  def ours: any((.hooks // [])[]; (.command // "") | tostring
+    | contains("kelpie/tools/runner") and contains("hooks/session-event.ts"));
   reduce ("Notification", "PermissionRequest", "PermissionDenied", "PostToolUse",
           "PostToolUseFailure", "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd") as $event
-    (.; .hooks[$event] = ((.hooks[$event] // []) | map(select(ours | not))) + [{ hooks: [$hook] }])
-' ~/.claude/settings.json.bak > ~/.claude/settings.json
+    (.; .hooks = (.hooks // {})
+      | .hooks[$event] = (((.hooks[$event] // []) | map(select(ours | not))) + [{ hooks: [$hook] }]))
+' "$f" > "$f.new" && jq -e . "$f.new" > /dev/null; then mv "$f.new" "$f"; else rm -f "$f.new"; echo "settings.json unchanged"; fi
 ```
 
-It adds one group per event, beside the hooks already there, and replaces its own on a second run. Each event gets this entry, which the command keeps unexpanded: Claude Code runs it through `sh`, which expands `$HOME`.
+- **It keeps the file safe:** it backs the file up to `settings.json.bak` unless a backup is already there, writes the result beside it with the same mode, checks that it is JSON, and only then moves it over. A `settings.json` that isn't JSON stays as it was, and the command says `settings.json unchanged`.
+- **It adds one group per event,** beside the hooks already there, and replaces its own on a second run: any hook whose command names `kelpie/tools/runner` and `hooks/session-event.ts`.
+- **The command moves to the runner's checkout first.** Claude Code runs a hook from the session's folder, and Bun would load that folder's `bunfig.toml`, its `preload` included, and its `.env`: a repository could then run code as you on its first event. So the hook runs from `~/kelpie/tools/runner`, with the empty `hooks/bunfig.toml` as its settings and no `.env`. Claude Code runs the command through `sh`, which expands `$HOME`.
+
+Each event gets this entry:
 
 ```json
 {
@@ -104,7 +118,7 @@ It adds one group per event, beside the hooks already there, and replaces its ow
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/.bun/bin/bun $HOME/kelpie/tools/runner/hooks/session-event.ts",
+            "command": "cd \"$HOME/kelpie/tools/runner\" && exec \"$HOME/.bun/bin/bun\" --no-env-file --config=hooks/bunfig.toml hooks/session-event.ts",
             "async": true,
             "timeout": 2
           }
@@ -115,18 +129,27 @@ It adds one group per event, beside the hooks already there, and replaces its ow
 }
 ```
 
-The same goes under `PermissionRequest`, `PermissionDenied`, `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit`, `Stop`, `StopFailure` and `SessionEnd`. Updating the runner's checkout updates the hook too.
+The same goes under `PermissionRequest`, `PermissionDenied`, `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit`, `Stop`, `StopFailure` and `SessionEnd`. Updating the runner's checkout updates the hook too. The runner's tests run both snippets on made-up settings (`tools/runner/test/docs.test.ts`).
 
-**Removing it** turns the hooks' waits, the endings it reports and the excerpts off. The list still shows each session's busy or idle state, and the waits its session file says. It leaves every other hook as it was:
+**Removing it** turns the hooks' waits, the endings it reports and the excerpts off. The list still shows each session's busy or idle state, and the waits its session file says. It leaves every other hook as it was, with the same care:
 
 ```bash
-cp ~/.claude/settings.json ~/.claude/settings.json.bak
-jq '
-  .hooks |= (map_values(
-      map(.hooks |= map(select((.command // "") | contains("tools/runner/hooks/session-event.ts") | not)))
-      | map(select(.hooks | length > 0)))
-    | with_entries(select(.value | length > 0)))
-' ~/.claude/settings.json.bak > ~/.claude/settings.json
+f=~/.claude/settings.json
+[ -e "$f.bak" ] || cp -p "$f" "$f.bak"
+if cp -p "$f" "$f.new" && jq '
+  def ours: (.command // "") | tostring
+    | contains("kelpie/tools/runner") and contains("hooks/session-event.ts");
+  def mine: any((.hooks // [])[]; ours);
+  . as $before
+  | if (.hooks | type) != "object" then . else
+      reduce (.hooks | keys[]) as $event (.;
+        if (.hooks[$event] | type) == "array" and any(.hooks[$event][]; mine) then
+          .hooks[$event] |= map(if mine then (.hooks |= map(select(ours | not))) | select(.hooks != []) else . end)
+          | if .hooks[$event] == [] then del(.hooks[$event]) else . end
+        else . end)
+      | if .hooks == {} and $before.hooks != {} then del(.hooks) else . end
+    end
+' "$f" > "$f.new" && jq -e . "$f.new" > /dev/null; then mv "$f.new" "$f"; else rm -f "$f.new"; echo "settings.json unchanged"; fi
 rm -rf ~/.local/state/kelpie-runner/session-events
 ```
 

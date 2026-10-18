@@ -1,7 +1,8 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { MAX_TRANSCRIPT_TAIL_BYTES, prLinkOf, transcriptOf } from "../src/transcripts.ts";
+import { listNames } from "../src/files.ts";
+import { MAX_TRANSCRIPT_TAIL_BYTES, prLinkOf, transcriptFinder } from "../src/transcripts.ts";
 import {
   type FakeVps,
   fakeVps,
@@ -26,7 +27,10 @@ const message = (text: string) => ({
   message: { content: [{ type: "text", text }] },
 });
 
-describe("transcriptOf", () => {
+const transcriptOf = (claudeDir: string, id: string, cwd: string | null) =>
+  transcriptFinder(claudeDir)(id, cwd);
+
+describe("transcriptFinder", () => {
   it("finds a transcript in the folder Claude Code names after the working folder", () => {
     const path = writeTranscript(vps, SESSION_A, CWD, [message("Hi")]);
     expect(path).toContain("-home-owner-Repos-kelpie--claude-worktrees-runner");
@@ -38,6 +42,24 @@ describe("transcriptOf", () => {
     mkdirSync(join(vps.claudeDir, "projects", "empty"));
     expect(transcriptOf(vps.claudeDir, SESSION_A, CWD)).toBe(path);
     expect(transcriptOf(vps.claudeDir, SESSION_A, null)).toBe(path);
+  });
+
+  it("lists the project folders once for all the sessions it looks up, and only when it must", () => {
+    const paths = [SESSION_A, SESSION_B].map((id) =>
+      writeTranscript(vps, id, `/elsewhere/${id}`, []),
+    );
+    let listed = 0;
+    const counting: typeof listNames = (dir, max) => {
+      listed += 1;
+      return listNames(dir, max);
+    };
+    const find = transcriptFinder(vps.claudeDir, counting);
+    expect(find(SESSION_A, `/elsewhere/${SESSION_A}`)).toBe(paths[0]);
+    expect(listed).toBe(0);
+    expect(find(SESSION_A, CWD)).toBe(paths[0]);
+    expect(find(SESSION_B, CWD)).toBe(paths[1]);
+    expect(find("cccccccc-1111-4222-8333-444444444444", CWD)).toBeNull();
+    expect(listed).toBe(1);
   });
 
   it("finds none for a session without one, or an id that isn't a UUID", () => {

@@ -405,6 +405,31 @@ describe("parseRunnerVpsSessions", () => {
   });
 });
 
+describe("the VPS's one-line fields", () => {
+  it.each([
+    ["a line break", "a\nb"],
+    ["a carriage return", "a\rb"],
+    ["a bell", "a\u0007b"],
+    ["a C1 control", "a\u0085b"],
+    ["a line separator", "a\u2028b"],
+    ["a right-to-left override", "a\u202eb"],
+    ["a left-to-right isolate", "a\u2066b"],
+    ["a right-to-left mark", "a\u200fb"],
+  ])("refuses %s in a title, a repository or a branch", (_, text) => {
+    for (const field of ["title", "repository", "branch"] as const) {
+      expect(parseRunnerVpsSessions(sessionsAnswer([vpsSession({ [field]: text })]))).toBeNull();
+    }
+    for (const field of ["title", "repository"] as const) {
+      expect(parseRunnerVpsWaits(waitsAnswer([vpsWait({ [field]: text })]))).toBeNull();
+    }
+  });
+
+  it("takes an excerpt of several lines, and a title in any script", () => {
+    const session = vpsSession({ excerpt: "Done.\nThe PR is open.", title: "Revisão do 漢 🦭" });
+    expect(parseRunnerVpsSessions(sessionsAnswer([session]))).toEqual(sessionsAnswer([session]));
+  });
+});
+
 describe("parseRunnerVpsWaits", () => {
   it("takes the runner's waits as they are", () => {
     const answer = waitsAnswer([

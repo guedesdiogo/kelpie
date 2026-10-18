@@ -31,8 +31,14 @@ describe("redact", () => {
     ["  db.password = hunter2 # old", `  db.password =${REDACTED}`],
     ["client_secret=s3cr3t", `client_secret=${REDACTED}`],
     ["Stripe_Key=x", `Stripe_Key=${REDACTED}`],
-    // It errs toward redacting: any name that says token.
-    ["tokens = 3", `tokens =${REDACTED}`],
+    ["DB_PASS=hunter2", `DB_PASS=${REDACTED}`],
+    ["MYSQL_PWD=hunter2", `MYSQL_PWD=${REDACTED}`],
+    ["GOOGLE_CREDENTIALS={...}", `GOOGLE_CREDENTIALS=${REDACTED}`],
+    ["AUTH_HEADER=x", `AUTH_HEADER=${REDACTED}`],
+    ["SESSION_COOKIE=abc", `SESSION_COOKIE=${REDACTED}`],
+    ["SENTRY_DSN=https://k@o1.ingest.example/1", `SENTRY_DSN=${REDACTED}`],
+    ["WEBHOOK_SIGNATURE=v1abc", `WEBHOOK_SIGNATURE=${REDACTED}`],
+    ["PASSPHRASE=correct horse", `PASSPHRASE=${REDACTED}`],
     ["GH_TOKEN=abc123 gh pr list", `GH_TOKEN=${REDACTED}`],
   ])("redacts a NAME=value line to its end: %s", (line, expected) => {
     expect(redact(`before\n${line}\nafter`)).toBe(`before\n${expected}\nafter`);
@@ -54,16 +60,97 @@ describe("redact", () => {
     "if (token == expected) return;",
     "const pick = (key) => key.name;",
     "the key is in the vault",
+    // Counts of tokens, the shell's folder, and a commit's author are no secrets.
+    "max_tokens=4096",
+    "tokens = 3",
+    "PWD=/home/owner/Repos/kelpie",
+    "OLDPWD=/home/owner",
+    "GIT_AUTHOR_NAME=Diogo",
   ])("leaves code and prose that only mention a name: %s", (text) => {
     expect(redact(text)).toBe(text);
   });
 
-  it("redacts a bearer token, whatever its case, and leaves the word", () => {
-    expect(redact("curl -H 'Authorization: Bearer abc.DEF-123_xyz~+/='")).toBe(
-      `curl -H 'Authorization: Bearer ${REDACTED}'`,
+  it.each([
+    ["mysql --password=hunter2 -h db", `mysql --password=${REDACTED} -h db`],
+    ["gh auth login --token=abc123", `gh auth login --token=${REDACTED}`],
+    ["tool --api-key=xyz789 run", `tool --api-key=${REDACTED} run`],
+    ["mysql --password hunter2 -h db", `mysql --password ${REDACTED} -h db`],
+    ['tool --api-key "a b" run', `tool --api-key ${REDACTED} run`],
+    ["curl -u admin:hunter2 https://x.test", `curl -u admin:${REDACTED} https://x.test`],
+    [
+      "curl --user 'admin:hunter2' https://x.test",
+      `curl --user 'admin:${REDACTED}' https://x.test`,
+    ],
+  ])("redacts a command's secret flag: %s", (text, expected) => {
+    expect(redact(text)).toBe(expected);
+  });
+
+  it("leaves flags whose value isn't one, and `-u` without a password", () => {
+    for (const text of ["git push -u origin main", "tool --password --verbose", "sort -u list"]) {
+      expect(redact(text)).toBe(text);
+    }
+  });
+
+  it("redacts a quoted name's value, as JSON writes it, and leaves its counts and nulls", () => {
+    const json =
+      '{"api_key": "abc def", "password":"x", "max_tokens": 1024, "token": null, \'auth\': \'y\'}';
+    expect(redact(json)).toBe(
+      `{"api_key": "${REDACTED}", "password":"${REDACTED}", "max_tokens": 1024, "token": null, 'auth': '${REDACTED}'}`,
+    );
+    expect(redact('{"session_token": abc123}')).toBe(`{"session_token": ${REDACTED}}`);
+  });
+
+  it.each([
+    ["password: hunter2 and more", `password: ${REDACTED}`],
+    ["  - auth_token: abc", `  - auth_token: ${REDACTED}`],
+    ['"client_secret": "x"', `"client_secret": "${REDACTED}"`],
+    ["Authorization: Basic Zm9vOmJhcg==", `Authorization: Basic ${REDACTED}`],
+    ["x-api-key: abc123", `x-api-key: ${REDACTED}`],
+    ["Cookie: session=abc; theme=dark", `Cookie: ${REDACTED}`],
+  ])("redacts a YAML or header line's value: %s", (line, expected) => {
+    expect(redact(`before\n${line}\nafter`)).toBe(`before\n${expected}\nafter`);
+  });
+
+  it.each([
+    "token:",
+    "  token: string;",
+    "password: boolean,",
+    "auth: null",
+    "The token: we rotate it",
+  ])("leaves a line that only names one, or a type: %s", (line) => {
+    expect(redact(line)).toBe(line);
+  });
+
+  it("redacts a header within a quoted command, keeping its scheme", () => {
+    expect(redact(`curl -H 'Authorization: Basic Zm9vOmJhcg==' -H "x-api-key: abc123" x`)).toBe(
+      `curl -H 'Authorization: Basic ${REDACTED}' -H "x-api-key: ${REDACTED}" x`,
+    );
+  });
+
+  it("redacts the password in a URL's userinfo, and leaves the rest", () => {
+    expect(redact("connect to postgres://kelpie:s3cret@db.example:5432/app now")).toBe(
+      `connect to postgres://kelpie:${REDACTED}@db.example:5432/app now`,
+    );
+    expect(redact("see https://github.com/guedesdiogo/kelpie and git@github.com:x/y")).toBe(
+      "see https://github.com/guedesdiogo/kelpie and git@github.com:x/y",
+    );
+  });
+
+  it("redacts a bearer or basic token, whatever its case, and leaves the words", () => {
+    expect(redact("send Authorization Bearer abc.DEF-123_xyz~+/=")).toBe(
+      `send Authorization Bearer ${REDACTED}`,
     );
     expect(redact("bearer   0123456789")).toBe(`bearer   ${REDACTED}`);
-    expect(redact("Bearer tokens are short-lived")).toBe("Bearer tokens are short-lived");
+    expect(redact("basic Zm9vOmJhcg== ok")).toBe(`basic ${REDACTED} ok`);
+    expect(redact("token eyJhbGciOiJIUzI1NiJ9")).toBe(`token ${REDACTED}`);
+    for (const text of [
+      "Bearer tokens are short-lived",
+      "Bearer authentication",
+      "Bearer Authentication",
+      "Basic usage first",
+    ]) {
+      expect(redact(text)).toBe(text);
+    }
   });
 
   it.each([
@@ -95,9 +182,28 @@ describe("redact", () => {
   });
 
   it("redacts runs of 32 hex digits or more, and leaves shorter ones", () => {
-    expect(redact(`commit ${"a1".repeat(20)} merged`)).toBe(`commit ${REDACTED} merged`);
+    expect(redact(`id ${"a1".repeat(16)} merged`)).toBe(`id ${REDACTED} merged`);
+    expect(redact(`id ${"a1".repeat(20)} merged`)).toBe(`id ${REDACTED} merged`);
+    expect(redact(`id ${"A1".repeat(32)}`)).toBe(`id ${REDACTED}`);
     expect(redact("commit 19d3f93 merged")).toBe("commit 19d3f93 merged");
     expect(redact(`id ${"f".repeat(31)}`)).toBe(`id ${"f".repeat(31)}`);
+  });
+
+  it("leaves a commit's 40-hex SHA where the text says it is one", () => {
+    const sha = "19d3f93a6b0c1d2e3f40516273849a0b1c2d3e4f";
+    for (const text of [
+      `commit ${sha}`,
+      `Merged ${sha} into main`,
+      `https://github.com/guedesdiogo/kelpie/commit/${sha}`,
+      `HEAD is now at ${sha}`,
+      `sha: ${sha}`,
+    ]) {
+      expect(redact(text)).toBe(text);
+    }
+    // Without that, or longer, or in capitals, a run of hex reads as a secret.
+    expect(redact(`it printed ${sha}`)).toBe(`it printed ${REDACTED}`);
+    expect(redact(`commit ${sha}${"0".repeat(24)}`)).toBe(`commit ${REDACTED}`);
+    expect(redact(`commit ${sha.toUpperCase()}`)).toBe(`commit ${REDACTED}`);
   });
 
   it("redacts base64 and base64url runs of 32 or more that mix cases and digits", () => {
@@ -115,8 +221,13 @@ describe("redact", () => {
     expect(redact(text)).toBe(text);
   });
 
-  it("errs toward redacting a long path that mixes cases and digits", () => {
-    expect(redact("/home/owner/Repos/gclinic-r3-api/src/modules")).toBe(REDACTED);
+  it("leaves a long path, even one that mixes cases and digits", () => {
+    for (const path of [
+      "/home/owner/Repos/gclinic-r3-api/src/modules",
+      "src/Components2/Button/IconButtonWithTooltip3.tsx",
+    ]) {
+      expect(redact(path)).toBe(path);
+    }
   });
 
   it("is idempotent, so the runner can redact the hook's output again", () => {

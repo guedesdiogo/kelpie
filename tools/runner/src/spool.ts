@@ -29,7 +29,7 @@ export const OLDER_EVENTS_FILE = "events.1.ndjson";
  * its oldest half when the newer file fills up.
  */
 export const MAX_EVENTS_FILE_BYTES = 512 * 1024;
-/** An excerpt's file: 500 characters, even all escaped, and its time. */
+/** An excerpt's file: 1,000 characters, even all escaped, and its time. */
 export const MAX_EXCERPT_FILE_BYTES = 8 * 1024;
 /** The most entries of the spool's directory looked at: two events files and one excerpt a session. */
 export const MAX_SPOOL_ENTRIES = 2_000;

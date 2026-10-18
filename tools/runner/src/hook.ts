@@ -23,6 +23,20 @@ export const MAX_INPUT_BYTES = 4 * 1024 * 1024;
  * keeps its own, below the 2 s its settings give it.
  */
 export const HOOK_DEADLINE_MS = 1_500;
+/**
+ * How much of a reply the hook keeps, redacted: twice what leaves. The runner redacts its own
+ * secret by value before it cuts to 500, so a secret the hook can't know is whole when it does,
+ * whatever its shape.
+ */
+export const HOOK_EXCERPT_CHARS = 2 * MAX_EXCERPT_CHARS;
+/**
+ * The hook's command in `settings.json` (docs/runner.md). Claude Code runs it through `sh`, from
+ * the session's folder: Bun would load that folder's `bunfig.toml`, its `preload` included, and
+ * its `.env`, so a repository could run code as the owner. The command moves to the runner's
+ * checkout first, and gives Bun an empty bunfig of its own and no `.env`.
+ */
+export const HOOK_COMMAND =
+  'cd "$HOME/kelpie/tools/runner" && exec "$HOME/.bun/bin/bun" --no-env-file --config=hooks/bunfig.toml hooks/session-event.ts';
 /** The tool whose permission request is a question to the owner. */
 const QUESTION_TOOL = "AskUserQuestion";
 
@@ -92,7 +106,7 @@ export function recordEvent(input: string, { dir, now, uid }: HookOptions): void
   if (event === "Stop") {
     const reply = payload.last_assistant_message;
     // The whole reply is redacted before it is cut, so no secret straddles the cut.
-    const text = typeof reply === "string" ? excerptOf(redact(reply), MAX_EXCERPT_CHARS) : "";
+    const text = typeof reply === "string" ? excerptOf(redact(reply), HOOK_EXCERPT_CHARS) : "";
     // Only the latest reply's excerpt is kept: a reply without text leaves none.
     if (text.trim() === "") deleteExcerpt(dir, session);
     else writeExcerpt(dir, session, { at: now, text });

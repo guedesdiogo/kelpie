@@ -1,7 +1,8 @@
-import { lstatSync, rmSync } from "node:fs";
+import { lstatSync, realpathSync, rmSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { isPrivateDir } from "./files.ts";
 import { checkoutOf } from "./git.ts";
+import { forLog } from "./journal.ts";
 import {
   MAX_BRANCH_CHARS,
   MAX_EXCERPT_CHARS,
@@ -10,6 +11,7 @@ import {
   MAX_TITLE_CHARS,
   MAX_VPS_SESSIONS,
   MAX_WAITS_BYTES,
+  NOT_ONE_LINE,
   type RunnerVpsSession,
   type RunnerVpsSessions,
   type RunnerVpsWait,
@@ -19,7 +21,7 @@ import { cut, excerptOf, redact } from "./redact.ts";
 import { ownUid } from "./secrets.ts";
 import { readSessionFiles, type SessionFile } from "./session-files.ts";
 import { deleteExcerpt, listExcerpts, readEvents, readExcerpt, type SpoolEvent } from "./spool.ts";
-import { prLinkOf, transcriptOf } from "./transcripts.ts";
+import { prLinkOf, transcriptFinder } from "./transcripts.ts";
 import { lifeOf, type SessionLife } from "./waits.ts";
 
 // Every Claude Code session on the VPS but the runner's own, read only (ADR-0057, #433): from the
@@ -30,6 +32,15 @@ import { lifeOf, type SessionLife } from "./waits.ts";
 export const EXCERPT_RETENTION_MS = 7 * 24 * 60 * 60_000;
 /** A hook's temporary file older than this was left by a hook that was stopped. */
 const TEMPORARY_RETENTION_MS = 60_000;
+
+/** What a one-line field loses before it leaves: each becomes a space. */
+const NOT_ONE_LINE_ALL = new RegExp(NOT_ONE_LINE.source, "g");
+
+/**
+ * The fields `/sessions` drops, in this order, from the least recent session up, before it drops
+ * sessions themselves.
+ */
+export const LIST_DROP_ORDER = ["excerpt", "title", "prUrl", "branch", "repository"] as const;
 
 /** What started a session, by its `entrypoint`: the spike saw `claude-desktop`, and `cli`. */
 const STARTED_BY = new Map<string, RunnerVpsSession["startedBy"]>([
@@ -60,10 +71,18 @@ interface Observed {
   life: SessionLife;
 }
 
+/** A folder by its real path, and by its name, for when the real one can't be known. */
+interface Place {
+  real: string | null;
+  lexical: string;
+}
+
 export class VpsSessions {
   readonly #options: VpsSessionsOptions;
-  // The spool's directory is refused once per run in the log, not on every call.
+  // The spool's directory is refused once per run in the log, not on every call; so is a failed
+  // deletion.
   #refusedSpool = false;
+  #failedSweep = false;
 
   constructor(options: VpsSessionsOptions) {
     this.#options = options;
@@ -75,12 +94,14 @@ export class VpsSessions {
     observed.sort(
       (a, b) => (b.life.since ?? -1) - (a.life.since ?? -1) || (a.file.id < b.file.id ? -1 : 1),
     );
+    // The project folders are listed once for all the sessions, if any needs them.
+    const transcriptOf = transcriptFinder(this.#options.claudeDir);
     const sessions = observed
       .slice(0, MAX_VPS_SESSIONS)
-      .map((entry) => this.#describe(entry, spool));
+      .map((entry) => this.#describe(entry, spool, transcriptOf));
     return withinBytes(
       sessions,
-      ["excerpt", "title", "prUrl", "branch", "repository"],
+      LIST_DROP_ORDER,
       (kept, truncated) => ({ ok: true, now, sessions: kept, truncated }),
       MAX_SESSIONS_BYTES,
       observed.length > MAX_VPS_SESSIONS,
@@ -102,8 +123,8 @@ export class VpsSessions {
         sessionId: file.id,
         kind: wait.kind,
         openedAt: wait.openedAt,
-        title: this.#text(file.name, MAX_TITLE_CHARS),
-        repository: this.#text(checkoutOf(file.cwd).repository, MAX_REPOSITORY_CHARS),
+        title: this.#line(file.name, MAX_TITLE_CHARS),
+        repository: this.#line(checkoutOf(file.cwd).repository, MAX_REPOSITORY_CHARS),
       }),
     );
     return withinBytes(
@@ -127,19 +148,26 @@ export class VpsSessions {
       if (list) list.push(event);
       else events.set(event.session, [event]);
     }
+    const work = placeOf(this.#options.workDir);
     const observed = (read?.files ?? [])
-      .filter((file) => !this.#isOwn(file))
+      .filter((file) => !this.#isOwn(file, work))
       .map((file) => ({ file, life: lifeOf(file, events.get(file.id) ?? [], now) }));
     if (spool) this.#sweep(now, observed, read?.complete === true);
     return { now, observed, spool };
   }
 
-  /** The `claude-code` route's sessions: in the runner's work folder, or held by their id. */
-  #isOwn(file: SessionFile): boolean {
-    const work = resolve(this.#options.workDir);
-    const cwd = file.cwd === null ? null : resolve(file.cwd);
-    return (
-      cwd === work || (cwd?.startsWith(`${work}${sep}`) ?? false) || this.#options.holds(file.id)
+  /**
+   * The `claude-code` route's sessions: in the runner's work folder, or held by their id. A folder
+   * is compared by its real path, through any symlink, and by its name, for when it is gone.
+   */
+  #isOwn(file: SessionFile, work: Place): boolean {
+    if (this.#options.holds(file.id)) return true;
+    if (file.cwd === null) return false;
+    const cwd = placeOf(file.cwd);
+    const within = (inner: string | null, outer: string | null) =>
+      inner !== null && outer !== null && (inner === outer || inner.startsWith(`${outer}${sep}`));
+    return [cwd.real, cwd.lexical].some(
+      (inner) => within(inner, work.real) || within(inner, work.lexical),
     );
   }
 
@@ -172,6 +200,8 @@ export class VpsSessions {
     const dir = this.#options.spoolDir;
     const lives = new Map(observed.map(({ file, life }) => [file.id, life]));
     const { sessions, temporary } = listExcerpts(dir);
+    // Each file on its own: one that can't be deleted, as a directory in an excerpt's name or one
+    // the runner may not remove, never stops the others, or the answer.
     for (const session of sessions) {
       const excerpt = readExcerpt(dir, session);
       const life = lives.get(session);
@@ -181,23 +211,37 @@ export class VpsSessions {
         life?.state === "ended" ||
         (life === undefined && complete)
       ) {
-        deleteExcerpt(dir, session);
+        this.#tryRemoving(() => deleteExcerpt(dir, session));
       }
     }
     for (const name of temporary) {
       const path = join(dir, name);
-      try {
+      this.#tryRemoving(() => {
         if (now - lstatSync(path).mtimeMs >= TEMPORARY_RETENTION_MS) rmSync(path, { force: true });
-      } catch {
-        // Its hook renamed it meanwhile.
-      }
+      });
     }
   }
 
-  #describe({ file, life }: Observed, spool: boolean): RunnerVpsSession {
-    const { claudeDir, secrets } = this.#options;
+  #tryRemoving(remove: () => void): void {
+    try {
+      remove();
+    } catch (error) {
+      if (this.#failedSweep) return;
+      this.#failedSweep = true;
+      this.#options.warn(
+        `Couldn't delete an excerpt in the spool ${this.#options.spoolDir}: ${forLog(String(error))}`,
+      );
+    }
+  }
+
+  #describe(
+    { file, life }: Observed,
+    spool: boolean,
+    transcriptOf: ReturnType<typeof transcriptFinder>,
+  ): RunnerVpsSession {
+    const { secrets } = this.#options;
     const checkout = checkoutOf(file.cwd);
-    const transcript = transcriptOf(claudeDir, file.id, file.cwd);
+    const transcript = transcriptOf(file.id, file.cwd);
     const prUrl = transcript === null ? null : prLinkOf(transcript);
     const excerpt =
       spool && life.state !== "ended" ? readExcerpt(this.#options.spoolDir, file.id) : null;
@@ -216,20 +260,33 @@ export class VpsSessions {
       alive: file.alive,
       startedBy,
       entrypoint: file.entrypoint,
-      title: this.#text(file.name, MAX_TITLE_CHARS),
-      repository: this.#text(checkout.repository, MAX_REPOSITORY_CHARS),
-      branch: this.#text(checkout.branch, MAX_BRANCH_CHARS),
+      title: this.#line(file.name, MAX_TITLE_CHARS),
+      repository: this.#line(checkout.repository, MAX_REPOSITORY_CHARS),
+      branch: this.#line(checkout.branch, MAX_BRANCH_CHARS),
       // An address the redaction would change isn't shown at all.
       prUrl: prUrl !== null && redact(prUrl, secrets) === prUrl ? prUrl : null,
       excerpt: text.trim() === "" ? null : text,
     };
   }
 
-  /** Untrusted text, redacted and cut to `max`; null when nothing is left. */
-  #text(value: string | null, max: number): string | null {
+  /**
+   * Untrusted text for a one-line field: redacted, each control or bidi character a space, and cut
+   * to `max`; null when nothing is left.
+   */
+  #line(value: string | null, max: number): string | null {
     if (value === null) return null;
-    const text = cut(redact(value, this.#options.secrets), max);
+    const line = redact(value, this.#options.secrets).replace(NOT_ONE_LINE_ALL, " ");
+    const text = cut(line, max);
     return text.trim() === "" ? null : text;
+  }
+}
+
+function placeOf(path: string): Place {
+  const lexical = resolve(path);
+  try {
+    return { real: realpathSync(lexical), lexical };
+  } catch {
+    return { real: null, lexical };
   }
 }
 

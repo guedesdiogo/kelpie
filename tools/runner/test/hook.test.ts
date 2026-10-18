@@ -5,15 +5,20 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  HOOK_COMMAND,
   HOOK_DEADLINE_MS,
+  HOOK_EXCERPT_CHARS,
   type HookOptions,
   MAX_INPUT_BYTES,
   readInput,
@@ -96,12 +101,15 @@ describe("recordEvent", () => {
     expect(statSync(join(options.dir, `excerpt-${SESSION_A}.json`)).mode & 0o777).toBe(0o600);
   });
 
-  it("keeps Stop's reply redacted whole, then cut to 500 characters at a word", () => {
-    const reply = `${"Updated the runner. ".repeat(20)}It used ${RUNNER_SECRET} and API_KEY=hunter2\n${"more words follow here ".repeat(5)}`;
+  it("keeps Stop's reply redacted whole, then cut to 1,000 characters at a word", () => {
+    const reply = `${"Updated the runner. ".repeat(45)}It used ${RUNNER_SECRET} and API_KEY=hunter2\n${"more words follow here ".repeat(10)}`;
     recordEvent(input("Stop", { last_assistant_message: reply }), options);
     const excerpt = readExcerpt(options.dir, SESSION_A);
-    expect(excerpt).toEqual({ at: NOW, text: excerptOf(redact(reply), MAX_EXCERPT_CHARS) });
-    expect(excerpt?.text.length).toBeLessThanOrEqual(MAX_EXCERPT_CHARS);
+    expect(excerpt).toEqual({ at: NOW, text: excerptOf(redact(reply), HOOK_EXCERPT_CHARS) });
+    // Twice what leaves, so the runner can redact a secret it knows whole before it cuts.
+    expect(HOOK_EXCERPT_CHARS).toBe(2 * MAX_EXCERPT_CHARS);
+    expect(excerpt?.text.length).toBeLessThanOrEqual(HOOK_EXCERPT_CHARS);
+    expect(excerpt?.text.length).toBeGreaterThan(MAX_EXCERPT_CHARS);
     expect(excerpt?.text).toContain(`It used ${REDACTED} and API_KEY=${REDACTED}`);
     expect(excerpt?.text).not.toContain("hunter2");
     expect(excerpt?.text).not.toContain(RUNNER_SECRET);
@@ -196,6 +204,88 @@ const hookEnv = (home: string) => ({
   HOME: home,
   PATH: process.env.PATH,
   BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0",
+});
+
+/** Bun, as the hook's command finds it under the owner's home. */
+const BUN = realpathSync(
+  spawnSync("sh", ["-c", "command -v bun"], { encoding: "utf8" }).stdout.trim(),
+);
+const RUNNER_DIR = fileURLToPath(new URL("..", import.meta.url));
+
+/**
+ * A home where the hook's command finds Bun and the runner's checkout, and a project folder to run
+ * it from. Both hold a hostile `bunfig.toml`, whose preload would leave a mark, and a `.env`.
+ * The checkout's `hooks/` links the real hook and its bunfig, beside a probe that says what Bun
+ * loaded.
+ */
+function hostileSetup() {
+  const home = join(root, "home");
+  const runner = join(home, "kelpie", "tools", "runner");
+  const project = join(root, "project");
+  mkdirSync(join(home, ".bun", "bin"), { recursive: true });
+  symlinkSync(BUN, join(home, ".bun", "bin", "bun"));
+  mkdirSync(join(runner, "hooks"), { recursive: true });
+  for (const name of ["session-event.ts", "bunfig.toml"]) {
+    symlinkSync(join(RUNNER_DIR, "hooks", name), join(runner, "hooks", name));
+  }
+  writeFileSync(
+    join(runner, "hooks", "probe.ts"),
+    "console.log(JSON.stringify({ env: process.env.KELPIE_HOSTILE ?? null, preload: (globalThis as { pwned?: boolean }).pwned ?? false }));\n",
+  );
+  mkdirSync(project);
+  for (const [dir, label] of [
+    [runner, "checkout"],
+    [project, "project"],
+  ] as const) {
+    writeFileSync(join(dir, "bunfig.toml"), 'preload = ["./evil.ts"]\n');
+    writeFileSync(
+      join(dir, "evil.ts"),
+      `(globalThis as { pwned?: boolean }).pwned = true;\nrequire("node:fs").writeFileSync(${JSON.stringify(join(root, `pwned-${label}`))}, "");\n`,
+    );
+    writeFileSync(join(dir, ".env"), `KELPIE_HOSTILE=${label}\n`);
+  }
+  const run = (command: string, stdin = "") =>
+    spawnSync("sh", ["-c", command], {
+      cwd: project,
+      input: stdin,
+      env: hookEnv(home),
+      encoding: "utf8",
+      timeout: 15_000,
+    });
+  return { home, runner, project, run };
+}
+
+describe("the hook's command, as settings.json holds it", () => {
+  it("runs the hook from the runner's checkout, with no project's bunfig or .env", () => {
+    const { home, run } = hostileSetup();
+    const result = run(HOOK_COMMAND, input("Stop", { last_assistant_message: "Done." }));
+    expect(result.status).toBe(0);
+    expect(readExcerpt(spoolDirOf(home), SESSION_A)?.text).toBe("Done.");
+    expect(readdirSync(root).filter((name) => name.startsWith("pwned"))).toEqual([]);
+    // The same command, with the probe in the hook's place: Bun loaded neither file.
+    const probe = run(HOOK_COMMAND.replace("hooks/session-event.ts", "hooks/probe.ts"));
+    expect(JSON.parse(probe.stdout)).toEqual({ env: null, preload: false });
+    expect(readdirSync(root).filter((name) => name.startsWith("pwned"))).toEqual([]);
+  });
+
+  it("would load both, were Bun run plainly from either folder: the files above are live", () => {
+    const { run } = hostileSetup();
+    const plain = run('exec "$HOME/.bun/bin/bun" "$HOME/kelpie/tools/runner/hooks/probe.ts"');
+    expect(JSON.parse(plain.stdout)).toEqual({ env: "project", preload: true });
+    const inCheckout = run(
+      'cd "$HOME/kelpie/tools/runner" && exec "$HOME/.bun/bin/bun" hooks/probe.ts',
+    );
+    expect(JSON.parse(inCheckout.stdout)).toEqual({ env: "checkout", preload: true });
+  });
+
+  it("is the one docs/runner.md installs, and its bunfig sets nothing", () => {
+    const docs = readFileSync(join(RUNNER_DIR, "..", "..", "docs", "runner.md"), "utf8");
+    expect(docs.split(JSON.stringify(HOOK_COMMAND)).length - 1).toBeGreaterThanOrEqual(2);
+    const bunfig = readFileSync(join(RUNNER_DIR, "hooks", "bunfig.toml"), "utf8");
+    expect(
+      bunfig.split("\n").filter((line) => line.trim() !== "" && !line.startsWith("#")),
+    ).toEqual([]);
+  });
 });
 
 describe("hooks/session-event.ts, as Claude Code runs it with Bun", () => {

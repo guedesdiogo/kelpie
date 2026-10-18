@@ -434,6 +434,14 @@ export const RUNNER_MAX_REPOSITORY_CHARS = 200;
 export const RUNNER_MAX_BRANCH_CHARS = 255;
 /** An `entrypoint` as Claude Code writes them: `claude-desktop`, `cli`, `sdk-cli`. */
 export const RUNNER_ENTRYPOINT = /^[a-z0-9_-]{1,32}$/;
+/**
+ * What a one-line field can't hold: control characters, line and paragraph separators, and the
+ * bidi controls that reorder what follows them. The runner sends a title, a repository and a
+ * branch without them, and an answer whose field holds one isn't the runner's.
+ */
+export const RUNNER_NOT_ONE_LINE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: finding control characters is its job.
+  /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
 /** A GitHub pull request's address, the only link a session's entry carries. */
 export const RUNNER_PR_URL =
   /^https:\/\/github\.com\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}\/pull\/[1-9][0-9]{0,9}$/;
@@ -502,9 +510,9 @@ function parseVpsSession(value: unknown): RunnerVpsSession | null {
     return null;
   if (prUrl !== null && (typeof prUrl !== "string" || !RUNNER_PR_URL.test(prUrl))) return null;
   if (
-    !isOptionalText(title, RUNNER_MAX_TITLE_CHARS) ||
-    !isOptionalText(repository, RUNNER_MAX_REPOSITORY_CHARS) ||
-    !isOptionalText(branch, RUNNER_MAX_BRANCH_CHARS) ||
+    !isOptionalLine(title, RUNNER_MAX_TITLE_CHARS) ||
+    !isOptionalLine(repository, RUNNER_MAX_REPOSITORY_CHARS) ||
+    !isOptionalLine(branch, RUNNER_MAX_BRANCH_CHARS) ||
     !isOptionalText(excerpt, RUNNER_MAX_EXCERPT_CHARS)
   ) {
     return null;
@@ -541,8 +549,8 @@ export function parseRunnerVpsWaits(value: unknown): RunnerVpsWaits | null {
     if (typeof sessionId !== "string" || !RUNNER_SESSION_ID.test(sessionId)) return null;
     if ((kind !== "permission" && kind !== "question") || !isRunnerTime(openedAt)) return null;
     if (
-      !isOptionalText(title, RUNNER_MAX_TITLE_CHARS) ||
-      !isOptionalText(repository, RUNNER_MAX_REPOSITORY_CHARS)
+      !isOptionalLine(title, RUNNER_MAX_TITLE_CHARS) ||
+      !isOptionalLine(repository, RUNNER_MAX_REPOSITORY_CHARS)
     ) {
       return null;
     }
@@ -558,4 +566,9 @@ export function isRunnerTime(value: unknown): value is number {
 
 function isOptionalText(value: unknown, max: number): value is string | null {
   return value === null || isText(value, max);
+}
+
+/** Null, or text of one line, without control or bidi characters. */
+function isOptionalLine(value: unknown, max: number): value is string | null {
+  return value === null || (isText(value, max) && !RUNNER_NOT_ONE_LINE.test(value));
 }

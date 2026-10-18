@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionFile } from "../src/session-files.ts";
 import type { SpoolEvent } from "../src/spool.ts";
-import { ARCHIVE_IDLE_MS, lifeOf } from "../src/waits.ts";
+import { ARCHIVE_IDLE_MS, lifeOf, WAIT_JOIN_MS } from "../src/waits.ts";
 import { HOUR, MINUTE, NOW, SESSION_A, spoolEvent } from "./fake-vps.ts";
 
 const T = NOW - 30 * MINUTE;
@@ -67,6 +67,44 @@ describe("lifeOf", () => {
       since: at(1),
       wait: { kind: "permission", openedAt: at(1) },
     });
+  });
+
+  it("joins the file's wait to a hook's 6 s before, as for one prompt, up to 60 s apart", () => {
+    const hook = [ev("PermissionRequest", 0, { question: true })];
+    for (const seconds of [6, 60]) {
+      const waiting = file({
+        status: "waiting",
+        waitingFor: "permission",
+        statusUpdatedAt: at(seconds),
+      });
+      expect(lifeOf(waiting, hook, NOW).wait).toEqual({ kind: "question", openedAt: at(0) });
+    }
+    expect(WAIT_JOIN_MS).toBe(60_000);
+  });
+
+  it("takes a file's wait 120 s after a hook's for the next prompt, dropping the stale one", () => {
+    const hook = [ev("PermissionRequest", 0, { question: true })];
+    const waiting = file({ status: "waiting", waitingFor: "permission", statusUpdatedAt: at(120) });
+    expect(lifeOf(waiting, hook, NOW)).toMatchObject({
+      state: "waiting_permission",
+      since: at(120),
+      wait: { kind: "permission", openedAt: at(120) },
+    });
+    const justPast = file({ status: "waiting", statusUpdatedAt: at(60) + 1 });
+    expect(lifeOf(justPast, hook, NOW).wait?.openedAt).toBe(at(60) + 1);
+  });
+
+  it("sees the next prompt after waiting, busy and waiting again, though the hooks' close was lost", () => {
+    // The hook's wait opened at 0; the file went busy at 30, unseen, and waits again since 90.
+    const events = [ev("PermissionRequest", 0)];
+    const again = file({ status: "waiting", waitingFor: "question", statusUpdatedAt: at(90) });
+    expect(lifeOf(again, events, NOW).wait).toEqual({ kind: "question", openedAt: at(90) });
+  });
+
+  it("keeps a hook's wait over a file's `waiting` more than 60 s older, the stale one then", () => {
+    const waiting = file({ status: "waiting", waitingFor: "question", statusUpdatedAt: at(0) });
+    const events = [ev("PermissionRequest", 120)];
+    expect(lifeOf(waiting, events, NOW).wait).toEqual({ kind: "permission", openedAt: at(120) });
   });
 
   it.each([
@@ -215,6 +253,18 @@ describe("lifeOf", () => {
       });
     },
   );
+
+  it("comes back when a new process took the session after its end, as after a reboot", () => {
+    const end = [ev("SessionEnd", 0, { reason: "other" })];
+    const restarted = file({ startedAt: at(10), status: "idle", statusUpdatedAt: at(20) });
+    expect(lifeOf(restarted, end, NOW)).toMatchObject({ state: "idle", since: at(20) });
+    // Still ended: the same process, a process gone, or one whose start isn't known.
+    expect(lifeOf(file({ startedAt: at(-10) }), end, NOW).state).toBe("ended");
+    expect(lifeOf(file({ startedAt: at(0) }), end, NOW).state).toBe("ended");
+    expect(lifeOf({ ...restarted, alive: false }, end, NOW).state).toBe("ended");
+    expect(lifeOf({ ...restarted, alive: null }, end, NOW).state).toBe("ended");
+    expect(lifeOf({ ...restarted, startedAt: null }, end, NOW).state).toBe("ended");
+  });
 
   it.each(["clear", "resume"])("hasn't ended after a SessionEnd for %s", (reason) => {
     expect(lifeOf(file(), [ev("SessionEnd", 10, { reason })], NOW).state).toBe("working");

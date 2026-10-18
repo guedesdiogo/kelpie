@@ -382,7 +382,8 @@ describe("the VPS's sessions routes", () => {
           sessionFields({
             pid,
             sessionId: `${String(pid).padStart(8, "0")}-1111-4222-8333-444444444444`,
-            name: "\u0001".repeat(200),
+            // Three bytes each in JSON, and legal in a title.
+            name: "漢".repeat(200),
           }),
         );
       }

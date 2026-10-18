@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -7,6 +7,7 @@ import {
   type RunnerVpsSessions,
   type RunnerVpsWaits,
 } from "../../../packages/channels/src/runner.ts";
+import { recordEvent } from "../src/hook.ts";
 import {
   MAX_EXCERPT_CHARS,
   MAX_SESSIONS_BYTES,
@@ -19,6 +20,7 @@ import { ownUid } from "../src/secrets.ts";
 import { prepareSpoolDir, readExcerpt, writeExcerpt } from "../src/spool.ts";
 import {
   EXCERPT_RETENTION_MS,
+  LIST_DROP_ORDER,
   VpsSessions,
   type VpsSessionsOptions,
   withinBytes,
@@ -234,7 +236,7 @@ describe("VpsSessions.list", () => {
     prepareSpoolDir(vps.spoolDir, ownUid());
     writeExcerpt(vps.spoolDir, SESSION_A, {
       at: NOW,
-      text: `Token: ${RUNNER_SECRET}, and GH_TOKEN=abc ok. ${"word ".repeat(120)}`,
+      text: `It used ${RUNNER_SECRET}, and GH_TOKEN=abc ok. ${"word ".repeat(120)}`,
     });
     const secret = "the-runner-secret-of-another-shape";
     makeWorktree(main, join(vps.repos, "wt2"), `fix/${secret}`);
@@ -245,7 +247,7 @@ describe("VpsSessions.list", () => {
     const { sessions } = listed(service({ secrets: [RUNNER_SECRET, secret] }).sessions);
     const a = sessions.find((session) => session.id === SESSION_A);
     expect(a?.title).toBe(`Use ${REDACTED}`);
-    expect(a?.excerpt?.startsWith(`Token: ${REDACTED}, and GH_TOKEN=${REDACTED} ok.`)).toBe(true);
+    expect(a?.excerpt?.startsWith(`It used ${REDACTED}, and GH_TOKEN=${REDACTED} ok.`)).toBe(true);
     expect(a?.excerpt?.length).toBeLessThanOrEqual(MAX_EXCERPT_CHARS);
     expect(sessions.find((session) => session.id === SESSION_B)?.branch).toBe(`fix/${REDACTED}`);
     expect(JSON.stringify(sessions)).not.toContain(RUNNER_SECRET);
@@ -492,6 +494,126 @@ describe("a session file's own wait", () => {
   });
 });
 
+describe("the review's fixes", () => {
+  it("keeps the session, and its excerpt, of a process that took it up after its end", () => {
+    writeSessionFile(
+      vps,
+      sessionFields({
+        pid: 101,
+        startedAt: NOW - HOUR,
+        status: "idle",
+        statusUpdatedAt: NOW - MINUTE,
+      }),
+    );
+    writeEvents(vps, [spoolEvent("SessionEnd", NOW - 2 * HOUR, { reason: "other" })]);
+    writeExcerpt(vps.spoolDir, SESSION_A, { at: NOW - MINUTE, text: "Back after the reboot." });
+    const [session] = listed(service().sessions).sessions;
+    expect(session).toMatchObject({ state: "idle", excerpt: "Back after the reboot." });
+    expect(readExcerpt(vps.spoolDir, SESSION_A)).not.toBeNull();
+  });
+
+  it("redacts a passphrase secret whole, though it straddles the 500th character", () => {
+    const passphrase = "correct horse battery staple";
+    const reply = `${"word ".repeat(98)}is ${passphrase} and more words after it`;
+    expect(reply.indexOf(passphrase)).toBeLessThan(MAX_EXCERPT_CHARS);
+    expect(reply.indexOf(passphrase) + passphrase.length).toBeGreaterThan(MAX_EXCERPT_CHARS);
+    writeSessionFile(vps, sessionFields({ pid: 101 }));
+    prepareSpoolDir(vps.spoolDir, ownUid());
+    recordEvent(
+      JSON.stringify({
+        session_id: SESSION_A,
+        hook_event_name: "Stop",
+        last_assistant_message: reply,
+      }),
+      { dir: vps.spoolDir, now: NOW, uid: ownUid() },
+    );
+    const [session] = listed(service({ secrets: [passphrase] }).sessions).sessions;
+    expect(session?.excerpt?.length).toBeLessThanOrEqual(MAX_EXCERPT_CHARS);
+    expect(session?.excerpt?.endsWith("is")).toBe(true);
+    expect(session?.excerpt).not.toContain("correct");
+  });
+
+  it("sends a title, a repository and a branch on one line, without control or bidi characters", () => {
+    const repo = join(vps.repos, "evil\u202erepo");
+    makeCheckout(repo, "fix/\u2066line\tbreak");
+    writeSessionFile(
+      vps,
+      sessionFields({ pid: 101, cwd: repo, name: "Title\nwith\u0007bell\u202eand\u2028breaks" }),
+    );
+    const [session] = listed(service().sessions).sessions;
+    expect(session).toMatchObject({
+      title: "Title with bell and breaks",
+      repository: "evil repo",
+      branch: "fix/ line break",
+    });
+  });
+
+  it("leaves out the runner's own sessions by their real folder, or by name when it can't tell", () => {
+    const link = join(vps.root, "work-link");
+    symlinkSync(vps.workDir, link);
+    writeSessionFile(vps, sessionFields({ pid: 101, cwd: vps.workDir }));
+    writeSessionFile(vps, sessionFields({ pid: 102, sessionId: SESSION_B, cwd: link }));
+    writeSessionFile(
+      vps,
+      sessionFields({ pid: 103, sessionId: SESSION_C, cwd: join(vps.workDir, "gone", "sub") }),
+    );
+    for (const workDir of [vps.workDir, link]) {
+      expect(listed(service({ workDir }).sessions).sessions).toEqual([]);
+    }
+    // A work folder that can't be resolved is matched by its name alone.
+    const missing = join(vps.root, "missing-work");
+    writeSessionFile(
+      vps,
+      sessionFields({ pid: 104, sessionId: "dddddddd-1111-4222-8333-444444444444", cwd: missing }),
+    );
+    const ids = listed(service({ workDir: missing }).sessions).sessions.map(
+      (session) => session.id,
+    );
+    expect(ids.sort()).toEqual([SESSION_A, SESSION_B, SESSION_C]);
+  });
+
+  it("keeps answering when an excerpt can't be deleted, and says so once", () => {
+    writeSessionFile(vps, sessionFields({ pid: 9_101 }));
+    writeSessionFile(vps, sessionFields({ pid: 102, sessionId: SESSION_B }));
+    prepareSpoolDir(vps.spoolDir, ownUid());
+    // A directory named like an excerpt, and an ended session's excerpt behind it.
+    mkdirSync(join(vps.spoolDir, `excerpt-${"eeeeeeee-1111-4222-8333-444444444444"}.json`));
+    writeExcerpt(vps.spoolDir, SESSION_A, { at: NOW, text: "ended" });
+    const { sessions, warnings } = service();
+    expect(listed(sessions).sessions).toHaveLength(2);
+    expect(waited(sessions, 0).waits).toEqual([]);
+    expect(readExcerpt(vps.spoolDir, SESSION_A)).toBeNull();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/^Couldn't delete an excerpt in the spool .*: /);
+  });
+
+  it("drops fields in its order, excerpt, title, PR, branch, repository, then sessions", () => {
+    expect(LIST_DROP_ORDER).toEqual(["excerpt", "title", "prUrl", "branch", "repository"]);
+    const item = {
+      excerpt: "e".repeat(10),
+      title: "t".repeat(10),
+      prUrl: "p".repeat(10),
+      branch: "b".repeat(10),
+      repository: "r".repeat(10),
+    };
+    const wrap = (items: (typeof item)[], truncated: boolean) => ({ items, truncated });
+    const size = bytes(wrap([item], false));
+    const nulls = (count: number) =>
+      Object.fromEntries(
+        LIST_DROP_ORDER.map((field, index) => [field, index < count ? null : item[field]]),
+      );
+    for (let dropped = 1; dropped <= LIST_DROP_ORDER.length; dropped += 1) {
+      // Each dropped field saves 8 bytes: 10 characters and their quotes become `null`.
+      const result = withinBytes([item], LIST_DROP_ORDER, wrap, size - 8 * dropped, false);
+      expect(result).toEqual({ items: [nulls(dropped)], truncated: true });
+    }
+    expect(withinBytes([item], LIST_DROP_ORDER, wrap, size - 8 * 5 - 1, false)).toEqual({
+      items: [],
+      truncated: true,
+    });
+  });
+});
+
 describe("the answers' bounds", () => {
   it("keeps the list within its bytes, dropping excerpts first, then titles, then sessions", () => {
     prepareSpoolDir(vps.spoolDir, ownUid());
@@ -521,7 +643,8 @@ describe("the answers' bounds", () => {
   });
 
   it("keeps the waits within theirs", () => {
-    const heavy = "\u0001".repeat(MAX_TITLE_CHARS);
+    // Three bytes each in JSON, and legal in a title, unlike a control character.
+    const heavy = "漢".repeat(MAX_TITLE_CHARS);
     const events = [];
     for (let index = 0; index < MAX_VPS_SESSIONS + 1; index += 1) {
       const id = `${String(index).padStart(8, "0")}-1111-4222-8333-444444444444`;

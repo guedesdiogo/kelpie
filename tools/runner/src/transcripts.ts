@@ -14,25 +14,32 @@ const PR_LINK_PREFIX = '{"type":"pr-link"';
 const MAX_PR_LINK_LINE = 4_096;
 
 /**
- * The session's transcript, `<claudeDir>/projects/<project>/<id>.jsonl`: first in the folder
+ * Finds sessions' transcripts, `<claudeDir>/projects/<project>/<id>.jsonl`: first in the folder
  * Claude Code names after the session's working folder, then in each project folder, up to
- * MAX_PROJECT_DIRS of them.
+ * MAX_PROJECT_DIRS of them. The project folders are listed once, when a session first needs it.
  */
-export function transcriptOf(claudeDir: string, id: string, cwd: string | null): string | null {
-  if (!SESSION_ID.test(id)) return null;
+export function transcriptFinder(
+  claudeDir: string,
+  list: typeof listNames = listNames,
+): (id: string, cwd: string | null) => string | null {
   const projects = join(claudeDir, "projects");
-  const file = `${id}.jsonl`;
-  if (cwd !== null) {
-    // Claude Code names the folder after the working folder, each character but letters and
-    // digits made a dash.
-    const path = join(projects, cwd.replace(/[^A-Za-z0-9]/g, "-"), file);
-    if (isFile(path)) return path;
-  }
-  for (const name of listNames(projects, MAX_PROJECT_DIRS)?.names ?? []) {
-    const path = join(projects, name, file);
-    if (isFile(path)) return path;
-  }
-  return null;
+  let names: string[] | undefined;
+  return (id, cwd) => {
+    if (!SESSION_ID.test(id)) return null;
+    const file = `${id}.jsonl`;
+    if (cwd !== null) {
+      // Claude Code names the folder after the working folder, each character but letters and
+      // digits made a dash.
+      const path = join(projects, cwd.replace(/[^A-Za-z0-9]/g, "-"), file);
+      if (isFile(path)) return path;
+    }
+    names ??= list(projects, MAX_PROJECT_DIRS)?.names ?? [];
+    for (const name of names) {
+      const path = join(projects, name, file);
+      if (isFile(path)) return path;
+    }
+    return null;
+  };
 }
 
 /** The last GitHub pull request link in the transcript's last 1 MiB, or null. */
