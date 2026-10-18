@@ -210,6 +210,8 @@ describe("a skill in an archive", () => {
     expect(await clash("strasse.md", "\u{17F}trasse.md")).toMatchObject({
       problem: { reason: "path_clash" },
     });
+    // An emoji's presentation selector is part of how a name shows.
+    expect((await clash("a.md", "\u{26A0}\u{FE0F} notes.md")).ok).toBe(true);
     // A name with a character that shows nothing could pass for another.
     expect(await clash("notes.md", "not\u{3164}es.md")).toMatchObject({
       problem: { reason: "unsafe_path" },
@@ -589,6 +591,7 @@ describe("the static scan", () => {
       "ig\u{34F}\u{200D}\u{34F}nore",
       "\u{1D400}\u{200D}\u{1D401}",
       "\u{4E00}\u{E0100}".repeat(9),
+      "ig\u{303}\u{200D}\u{303}nore",
       " \u{FE0F}",
       "ig\u{200D}nore",
       "\u{200C}start",
@@ -613,7 +616,7 @@ describe("the static scan", () => {
     expect(scan("SKILL.md", "x\u{FE00}\u{FE01}").findings[0]?.excerpt).toBe("x⟨U+FE00⟩⟨U+FE01⟩");
   });
 
-  it("reads a binary file no format explains as text, and leaves a known format alone", () => {
+  it("reads every binary file for the text it may hold, whatever its name or first bytes", () => {
     const bytes = (text: string, ...more: number[]) =>
       toBase64(new Uint8Array([...new TextEncoder().encode(text), ...more]));
     const tags = "visible\u{E0049}\u{E0067}\u{E006E}";
@@ -625,15 +628,77 @@ describe("the static scan", () => {
       "blocked",
     );
     const png = toBase64(
-      new Uint8Array([0x89, 0x50, 0x4e, 0x47, ...new TextEncoder().encode(tags), 0]),
+      new Uint8Array([
+        0x89,
+        0x50,
+        0x4e,
+        0x47,
+        ...new TextEncoder().encode(`${"Plain words here. ".repeat(3)}${tags}`),
+        0,
+      ]),
     );
+    // A format's first bytes, or an executable's, don't keep the rest from being read.
     expect(scanSkill([{ path: "assets/logo.png", content: png, binary: true }]).verdict).toBe(
-      "clean",
-    );
-    // The same bytes under another name are read.
-    expect(scanSkill([{ path: "assets/logo.json", content: png, binary: true }]).verdict).toBe(
       "blocked",
     );
+    const exe = scanSkill([
+      { path: "references/data.json", content: bytes(`MZ${tags}`, 0), binary: true },
+    ]);
+    expect(exe.verdict).toBe("blocked");
+    expect(exe.findings.map((finding) => finding.kind)).toEqual([
+      "executable",
+      "hidden_characters",
+    ]);
+    // Two bytes of BOM in front of UTF-8 text don't change how it is read.
+    const bom = toBase64(
+      new Uint8Array([
+        0xff,
+        0xfe,
+        ...new TextEncoder().encode(`${"Plain words here. ".repeat(3)}${tags}`),
+        0,
+      ]),
+    );
+    expect(scanSkill([{ path: "references/data.json", content: bom, binary: true }]).verdict).toBe(
+      "blocked",
+    );
+    // Tags in UTF-16 with no BOM are found in the bytes, in either order.
+    const le = [0x61, 0, ...[0x49, 0x67, 0x6e, 0x6f].flatMap((low) => [0x40, 0xdb, low, 0xdc])];
+    const be = [0, 0x61, ...[0x49, 0x67, 0x6e, 0x6f].flatMap((low) => [0xdb, 0x40, 0xdc, low])];
+    for (const order of [le, be]) {
+      const found = scanSkill([
+        { path: "references/data.json", content: toBase64(new Uint8Array(order)), binary: true },
+      ]);
+      expect(found.verdict).toBe("blocked");
+      expect(found.findings[0]?.excerpt).toBe("⟨U+E0049⟩⟨U+E0067⟩⟨U+E006E⟩⟨U+E006F⟩");
+    }
+  });
+
+  it("says when a file packs what the scan can't read", () => {
+    const zip = toBase64(new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0, 0, 0, 8, 0]));
+    expect(scanSkill([{ path: "assets/forms.zip", content: zip, binary: true }])).toEqual({
+      verdict: "caution",
+      findings: [{ path: "assets/forms.zip", line: 0, kind: "container", excerpt: "" }],
+      more: 0,
+    });
+  });
+
+  it("reads the SKILL.md's description as its YAML decodes it", () => {
+    const escaped = `---\nname: pdf\ndescription: "Reads PDFs.\\U000E0049\\U000E0067\\U000E006E"\n---\n# PDF\n`;
+    const found = scan("SKILL.md", escaped);
+    expect(found.verdict).toBe("blocked");
+    expect(found.findings[0]).toMatchObject({ line: 3, kind: "hidden_characters" });
+    expect(found.findings[0]?.excerpt).toBe("Reads PDFs.⟨U+E0049⟩⟨U+E0067⟩⟨U+E006E⟩");
+  });
+
+  it("counts ideographic variants across the whole skill", () => {
+    const line = "\u{8FBB}\u{E0100}".repeat(5);
+    expect(scanSkill([{ path: "a.md", content: line }]).verdict).toBe("clean");
+    expect(
+      scanSkill([
+        { path: "a.md", content: line },
+        { path: "b.md", content: `x\n${line}` },
+      ]).verdict,
+    ).toBe("blocked");
   });
 
   it("reads binary data only for what spells words in it, so a real file still installs", () => {
@@ -645,17 +710,21 @@ describe("the static scan", () => {
     expect(
       scanSkill([{ path: "audio/clip.mp3", content: toBase64(noise), binary: true }]).verdict,
     ).toBe("clean");
-    const tagged = new Uint8Array([
-      ...noise.subarray(0, 1_000),
-      ...new TextEncoder().encode("TAGS"),
-      0xf3,
-      0xa0,
-      0x81,
-      0x89,
-    ]);
-    expect(
-      scanSkill([{ path: "audio/clip.mp3", content: toBase64(tagged), binary: true }]).verdict,
-    ).toBe("blocked");
+    // One tag happens by chance in compressed bytes; a run of them spells something.
+    const tag = (low: number) => [0xf3, 0xa0, 0x81, low];
+    const tagged = (count: number) =>
+      toBase64(
+        new Uint8Array([
+          ...noise.subarray(0, 1_000),
+          ...Array.from({ length: count }, (_, i) => tag(0x80 + i)).flat(),
+        ]),
+      );
+    expect(scanSkill([{ path: "audio/clip.mp3", content: tagged(1), binary: true }]).verdict).toBe(
+      "clean",
+    );
+    expect(scanSkill([{ path: "audio/clip.mp3", content: tagged(4), binary: true }]).verdict).toBe(
+      "blocked",
+    );
   });
 
   it("finds a phrase padded apart, and one at the end of a long line", () => {

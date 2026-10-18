@@ -385,6 +385,39 @@ describe("the files in the editor", () => {
     expect(document.activeElement).toBe(tab("Skills"));
   });
 
+  it("leaves focus where the owner took it while a save was on its way", async () => {
+    await open();
+    tab("Skills").click();
+    $(".skl-r").click();
+    key($(".files-skills"), "e", { ctrlKey: true });
+    type($(".files-skills .doc-input"), SKILL.replace("Writes a brief.", "Writes briefs."));
+    let answer;
+    io.save.mockImplementationOnce(
+      (_agentId, changes) =>
+        new Promise((resolve) => {
+          sent.push(changes);
+          answer = resolve;
+        }),
+    );
+    const saving = editor.save();
+    const composer = document.createElement("textarea");
+    $(".app").append(composer);
+    composer.focus();
+    answer({
+      ok: true,
+      status: 200,
+      value: {
+        ok: true,
+        commit: V(7),
+        outcomes: [{ status: "saved", version: V(8) }],
+        undo: [],
+        files: files(),
+      },
+    });
+    await saving;
+    expect(document.activeElement).toBe(composer);
+  });
+
   it("saves the soul with the version it read, in one request beside the profile", async () => {
     await open();
     tab("Soul").click();

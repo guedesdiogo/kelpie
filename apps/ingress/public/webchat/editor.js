@@ -1025,6 +1025,8 @@ export class Editor {
         Object.assign(changes, result.value);
       }
     }
+    // Where focus was, in the editor or back in the chat, before the answer redraws anything.
+    const focused = open.root.contains(document.activeElement);
     const files = filesResult
       ? open.files.applySave(sent, filesResult)
       : { saved: [], failed: [], undo: [] };
@@ -1032,7 +1034,7 @@ export class Editor {
     // it replaced comes back to the section's tab, so the editor's keys still reach it.
     if (filesResult) {
       this.#head();
-      if (!open.root.contains(document.activeElement)) {
+      if (focused && !open.root.contains(document.activeElement)) {
         open.tabs.get(open.section)?.focus({ preventScroll: true });
       }
     }

@@ -671,6 +671,56 @@ describe("AgentFiles", () => {
     });
   });
 
+  it("keeps a stage whose Save was refused whole, and answers a retried install by what landed", async () => {
+    const backend = vaultWith({});
+    const content = skillMd("pasted", "From the clipboard.");
+    const fetched = await agentFiles().fetchSkill(owner, "kelpie", { kind: "text", content });
+    if (!fetched.ok) throw new Error(fetched.reason);
+    const install = {
+      file: "install" as const,
+      staged: fetched.staged.id,
+      hash: fetched.staged.hash,
+      version: null,
+    };
+    const big = "x".repeat(1_000_000);
+    const refused = await saved([
+      { file: "soul", content: big, version: null },
+      { file: "rules", content: big, version: null },
+      install,
+    ]);
+    expect(refused.outcomes.map((outcome) => outcome.status)).toEqual([
+      "refused",
+      "refused",
+      "refused",
+    ]);
+    expect(refused.files.skills).toEqual([]);
+    // The stage is still there to install.
+    const alone = await saved([install]);
+    expect(alone.outcomes).toEqual([{ status: "saved", version: await version(content) }]);
+    // Once the owner edits the skill, a retry of that install no longer matches what is there.
+    await saved([
+      {
+        file: "skill",
+        name: "pasted",
+        content: skillMd("pasted", "Edited."),
+        version: await version(content),
+      },
+    ]);
+    expect((await saved([install])).outcomes).toEqual([
+      { status: "refused", reason: "staged_gone" },
+    ]);
+    expect(backend.commitRequests).toHaveLength(2);
+  });
+
+  it("keeps what shows nothing out of a skill's entry in the agent's prompt", async () => {
+    vaultWith({
+      "agents/kelpie/skills/pdf/SKILL.md":
+        '---\nname: pdf\ndescription: "Reads PDFs.\\U000E0049\\U000E0067"\n---\n# PDF\n',
+    });
+    const compiled = await stub().compile("kelpie");
+    expect(compiled.skills.find((skill) => skill.name === "pdf")?.description).toBe("Reads PDFs.");
+  });
+
   it("records an install whose files the vault already holds, with nothing to commit", async () => {
     const content = skillMd("pasted", "From the clipboard.");
     const backend = vaultWith({ "agents/kelpie/skills/pasted/SKILL.md": content });
