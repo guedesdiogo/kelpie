@@ -3,6 +3,8 @@ import { env, exports } from "cloudflare:workers";
 import {
   AnthropicMessagesProvider,
   fromNdjsonStream,
+  MODEL_TIERS,
+  parseRouteTable,
   type RoutedRequest,
   type RouterEvent,
   type RouteSession,
@@ -14,10 +16,12 @@ import {
   describeWith,
   embedWith,
   generateWith,
+  LlmChat,
   LlmGateway,
   LlmGatewayAdmin,
   pingWith,
   providerConfig,
+  providersWith,
   qualifyWith,
   routerOptions,
   routesWith,
@@ -787,6 +791,7 @@ describe("the instance's model settings (#289)", () => {
       settings,
       pinned: null,
       providers: ["anthropic"],
+      claudeCode: false,
     });
     expect(await exports.LlmGateway.describe("conversation")).toMatchObject({
       tier: "medium",
@@ -838,6 +843,7 @@ describe("a route that runs its own tool loop (#295)", () => {
     conversation: "assistant:telegram:chat-1",
     id: "6c1f2a9e-3b7d-4e51-9a0c-2f8d7e6b5a41",
     resume: true,
+    toolLoopMs: 180_000,
   };
   const conversation = { area: "conversation" } as const;
   const call = (id: string) => ({
@@ -889,12 +895,27 @@ describe("a route that runs its own tool loop (#295)", () => {
 
   it("passes a session to the route over RPC, only with the fields it knows", async () => {
     const seen = routeLoop([]);
-    using generation = await exports.LlmGateway.generate(conversation, request, {
+    using generation = await exports.LlmChat.generate(conversation, request, {
       ...session,
       token: "not a session field",
     } as RouteSession);
     expect(await read(await generation.events())).toMatchObject([{ type: "finish" }]);
     expect(seen.session).toEqual(session);
+  });
+
+  it("takes a session only on LlmChat, which only conversation-runtime binds (#431)", async () => {
+    const seen = routeLoop([]);
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect("generate" in LlmChat.prototype).toBe(true);
+    // context-store binds LlmGateway and reads outside content: its calls never carry a session.
+    // One sent there, as a conversation-runtime from before LlmChat sends it during a rollout,
+    // is left out, and the call goes on without it.
+    using generation = await exports.LlmGateway.generate(conversation, request, session);
+    expect(await read(await generation.events())).toMatchObject([{ type: "finish" }]);
+    expect(seen.session).toBeUndefined();
+    expect(warned).toHaveBeenCalledWith(
+      "llm-gateway: LlmGateway left out a session; only LlmChat takes one",
+    );
   });
 
   it("refuses a malformed session as a bad request, before any route", async () => {
@@ -910,8 +931,14 @@ describe("a route that runs its own tool loop (#295)", () => {
       { ...session, conversation: "c".repeat(257) },
       { ...session, resume: "yes" },
       { conversation: session.conversation, id: session.id },
+      { conversation: session.conversation, id: session.id, resume: true },
+      { ...session, id: "6C1F2A9E-3B7D-4E51-9A0C-2F8D7E6B5A41" },
+      { ...session, toolLoopMs: 999 },
+      { ...session, toolLoopMs: 3_600_001 },
+      { ...session, toolLoopMs: 120_000.5 },
+      { ...session, toolLoopMs: "120000" },
     ]) {
-      using generation = await exports.LlmGateway.generate(
+      using generation = await exports.LlmChat.generate(
         conversation,
         request,
         malformed as RouteSession,
@@ -927,7 +954,7 @@ describe("a route that runs its own tool loop (#295)", () => {
     routeLoop([]);
     vi.spyOn(console, "error").mockImplementation(() => {});
     for (const selection of ["medium", { area: "memory" }] as const) {
-      using generation = await exports.LlmGateway.generate(selection, request, session);
+      using generation = await exports.LlmChat.generate(selection, request, session);
       await expect(read(await generation.events())).rejects.toMatchObject({
         code: "bad_request",
       });
@@ -937,7 +964,7 @@ describe("a route that runs its own tool loop (#295)", () => {
 
   it("gives the route each result the caller answers over RPC, before or after it waits", async () => {
     const seen = routeLoop(["toolu_01", "toolu_02"]);
-    using generation = await exports.LlmGateway.generate(conversation, request, session);
+    using generation = await exports.LlmChat.generate(conversation, request, session);
     const events = fromNdjsonStream(await generation.events())[Symbol.asyncIterator]();
 
     expect((await events.next()).value).toEqual({ type: "tool_request", call: call("toolu_01") });
@@ -968,6 +995,8 @@ describe("a route that runs its own tool loop (#295)", () => {
       { callId: "toolu_01", output: 42 },
       { callId: "toolu_01", output: "x".repeat(20_001) },
       { callId: "toolu_01", output: "Ana", isError: "no" },
+      // The runner's own checks, which refuse anything more (#421).
+      { callId: "toolu_01", output: "Ana", note: "x" },
     ]) {
       expect(generation.answer(malformed as never)).toEqual({
         ok: false,
@@ -996,7 +1025,7 @@ describe("a route that runs its own tool loop (#295)", () => {
 
   it("rejects the route's wait when the call is cancelled", async () => {
     const seen = routeLoop(["toolu_01"]);
-    using generation = await exports.LlmGateway.generate(conversation, request, session);
+    using generation = await exports.LlmChat.generate(conversation, request, session);
     const events = fromNdjsonStream(await generation.events())[Symbol.asyncIterator]();
     await events.next();
     const next = events.next();
@@ -1014,7 +1043,7 @@ describe("a route that runs its own tool loop (#295)", () => {
   it("rejects the route's wait when the caller drops its stub without cancelling", async () => {
     const seen = routeLoop(["toolu_01"]);
     {
-      using generation = await exports.LlmGateway.generate(conversation, request, session);
+      using generation = await exports.LlmChat.generate(conversation, request, session);
       const events = fromNdjsonStream(await generation.events())[Symbol.asyncIterator]();
       await events.next();
       void events.next().catch(() => undefined);
@@ -1071,5 +1100,294 @@ describe("a route that runs its own tool loop (#295)", () => {
       type: "finish",
       message: { parts: [{ type: "text", text: "Ana" }] },
     });
+  });
+});
+
+describe("the claude-code route (#421)", () => {
+  type GatewayEnv = Parameters<typeof generateWith>[0];
+  const defaults = () => env.MODEL_DEFAULTS.getByName("instance");
+  const owner = { userId: "u-owner", role: "owner", via: "agent:kelpie" } as const;
+  const session: RouteSession = {
+    conversation: "assistant:telegram:chat-1",
+    id: "6c1f2a9e-3b7d-4e51-9a0c-2f8d7e6b5a41",
+    resume: true,
+    toolLoopMs: 180_000,
+  };
+  const onClaudeCode = { area: "conversation", agent: { provider: "claude-code" } } as const;
+  const encoder = new TextEncoder();
+  const line = (frame: unknown) => encoder.encode(`${JSON.stringify(frame)}\n`);
+
+  async function reset(values: Record<string, unknown> = {}) {
+    await runInDurableObject(defaults(), (_instance, state) => {
+      state.storage.deleteAll();
+      for (const [key, value] of Object.entries(values)) state.storage.kv.put(key, value);
+    });
+  }
+
+  const read = async (stream: ReadableStream<Uint8Array>) => {
+    const events: RouterEvent[] = [];
+    for await (const event of fromNdjsonStream(stream)) events.push(event);
+    return events;
+  };
+
+  /**
+   * A runner in place of channel-egress's RunnerChat: its turn streams `frames`, and stays open
+   * until the call's result comes back, which `after` follows.
+   */
+  function runner(frames: unknown[], after: unknown[] = []) {
+    const turns: { sessionId: string; request: unknown }[] = [];
+    const answered: unknown[] = [];
+    let stream: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let cancelled = 0;
+    const client = {
+      async turn(sessionId: string, sent: unknown) {
+        turns.push({ sessionId, request: sent });
+        const events = new ReadableStream<Uint8Array>({
+          start(controller) {
+            stream = controller;
+            for (const frame of frames) controller.enqueue(line(frame));
+            if (after.length === 0) controller.close();
+          },
+        });
+        return {
+          ok: true,
+          turn: {
+            events: () => events,
+            cancel: () => {
+              cancelled += 1;
+            },
+          },
+        };
+      },
+      async answer(sessionId: string, result: unknown) {
+        answered.push({ sessionId, result });
+        for (const frame of after) stream?.enqueue(line(frame));
+        stream?.close();
+        return { ok: true };
+      },
+    };
+    return { client, turns, answered, cancelled: () => cancelled };
+  }
+
+  const finish = {
+    type: "finish",
+    reason: "stop",
+    message: { role: "assistant", parts: [{ type: "text", text: "Ana lives in Porto." }] },
+    usage: [],
+    session: { id: session.id, clean: true },
+  };
+
+  it("follows anthropic in every tier of the committed routes, on the same Claude models (ADR-0037 §1)", () => {
+    const routes = parseRouteTable((env as GatewayEnv).MODEL_ROUTES);
+    for (const tier of MODEL_TIERS) {
+      const providers = routes[tier].map((candidate) => candidate.provider);
+      const at = providers.indexOf("anthropic");
+      expect(providers[at + 1], tier).toBe("claude-code");
+      const api = routes[tier][at]?.model;
+      // "haiku" is Kelpie's alias for the newest Claude Haiku: the runner gets a pinned id.
+      expect(routes[tier][at + 1]?.model, tier).toBe(api === "haiku" ? "claude-haiku-5-5" : api);
+    }
+  });
+
+  it("is off until the owner turns it on: no turn reaches it, and no list names it", async () => {
+    await reset();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      anthropic(() => sseResponse([start, ...text, ...end])),
+    );
+    expect(await exports.LlmGatewayAdmin.instanceModels()).toMatchObject({
+      providers: ["anthropic"],
+      claudeCode: false,
+    });
+    expect((await exports.LlmGateway.describe("conversation")).route).toEqual([
+      { provider: "anthropic", model: "haiku", standsFor: "the newest Claude Haiku" },
+    ]);
+    // Even a call that names it, with a session, goes to the API route.
+    using generation = await exports.LlmChat.generate(onClaudeCode, request, session);
+    expect(await read(await generation.events())).toMatchObject([
+      { type: "text" },
+      { type: "finish", reason: "stop" },
+    ]);
+  });
+
+  it("is turned on and off on the admin entrypoint only, audited like the settings", async () => {
+    await reset();
+    expect("setClaudeCode" in LlmGateway.prototype).toBe(false);
+    expect(await exports.LlmGatewayAdmin.setClaudeCode(true, owner)).toEqual({ ok: true });
+    expect(await exports.LlmGatewayAdmin.instanceModels()).toEqual({
+      settings: {},
+      pinned: null,
+      providers: ["anthropic", "claude-code"],
+      claudeCode: true,
+    });
+    expect(await exports.LlmGatewayAdmin.providers()).toEqual(["anthropic", "claude-code"]);
+    const long = { ...owner, userId: "u".repeat(500) };
+    expect(await exports.LlmGatewayAdmin.setClaudeCode(false, long)).toEqual({ ok: true });
+    expect(await exports.LlmGatewayAdmin.setClaudeCode("yes" as never, owner)).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(await exports.LlmGatewayAdmin.providers()).toEqual(["anthropic"]);
+    const audit = await runInDurableObject(defaults(), (_instance, state) =>
+      [...state.storage.kv.list({ prefix: "audit:" })].map(([, value]) => value),
+    );
+    expect(audit).toEqual([
+      { at: expect.any(Number), userId: "u-owner", via: "agent:kelpie", claudeCode: true },
+      { at: expect.any(Number), userId: "u".repeat(128), via: "agent:kelpie", claudeCode: false },
+    ]);
+  });
+
+  it("serves only with the switch on and the runner's binding", async () => {
+    const { RUNNER_CHAT: _binding, ...unbound } = env as GatewayEnv;
+    await reset({ claudeCode: true });
+    expect(await providersWith(env as GatewayEnv)).toEqual(["anthropic", "claude-code"]);
+    expect(await providersWith(unbound as GatewayEnv)).toEqual(["anthropic"]);
+    await reset();
+    expect(await providersWith(env as GatewayEnv)).toEqual(["anthropic"]);
+  });
+
+  it("describes a conversation's route as its session runs it, after anthropic's, and memory's without it", async () => {
+    await reset({ claudeCode: true });
+    expect(await exports.LlmGateway.describe("conversation", undefined, "medium")).toEqual({
+      provider: "anthropic",
+      tier: "medium",
+      route: [
+        { provider: "anthropic", model: "claude-sonnet-5-5" },
+        { provider: "claude-code", model: "claude-sonnet-5-5" },
+      ],
+    });
+    expect((await exports.LlmGateway.describe("memory")).route).toEqual([
+      { provider: "anthropic", model: "haiku", standsFor: "the newest Claude Haiku" },
+    ]);
+    // Calls without a session, as before #286, never list it.
+    expect((await exports.LlmGateway.routes()).frontier).toEqual([
+      { provider: "anthropic", model: "claude-opus-5-5" },
+    ]);
+  });
+
+  it("describes memory without it when a scope-wide provider names it (#431)", async () => {
+    await reset({ claudeCode: true, instance: { provider: "claude-code" } });
+    expect(await exports.LlmGateway.describe("memory")).toEqual({
+      provider: "anthropic",
+      tier: "cheap",
+      route: [{ provider: "anthropic", model: "haiku", standsFor: "the newest Claude Haiku" }],
+    });
+    expect(await exports.LlmGateway.describe("conversation")).toMatchObject({
+      provider: "claude-code",
+      route: [{ provider: "claude-code" }, { provider: "anthropic" }],
+    });
+  });
+
+  it("is never pinned, even when it is the only route that serves", async () => {
+    await reset({ claudeCode: true });
+    const { ANTHROPIC_API_KEY: _key, ...keyless } = env as GatewayEnv;
+    expect(await describeWith(keyless as GatewayEnv, "conversation")).toEqual({
+      provider: null,
+      tier: "cheap",
+      route: [{ provider: "claude-code", model: "claude-haiku-5-5" }],
+    });
+    await runInDurableObject(defaults(), (_instance, state) => {
+      expect(state.storage.kv.get("pinnedProvider")).toBeUndefined();
+    });
+    // A call that isn't a conversation's has no route at all then.
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const memory = generateWith(keyless as GatewayEnv, { area: "memory" }, request);
+    await expect(read(memory.events())).rejects.toMatchObject({ code: "unavailable" });
+  });
+
+  it("reaches channel-egress's RunnerChat over RPC, and falls back when the runner can't take the turn", async () => {
+    await reset({ claudeCode: true });
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      anthropic(() => sseResponse([start, ...text, ...end])),
+    );
+    // The test's channel-egress has no runner connected.
+    using generation = await exports.LlmChat.generate(onClaudeCode, request, session);
+    expect(await read(await generation.events())).toMatchObject([
+      {
+        type: "fallback",
+        failed: { provider: "claude-code", model: "claude-haiku-5-5", code: "unavailable" },
+        next: { provider: "anthropic", model: "haiku" },
+      },
+      { type: "text", delta: "Olá!" },
+      { type: "finish", reason: "stop" },
+    ]);
+  });
+
+  it("runs a turn on the runner, with the session's bound, and gives it the call's result", async () => {
+    await reset({ claudeCode: true });
+    const call = { type: "tool_call", id: "toolu_01", name: "search_memory", input: { q: "Ana" } };
+    const fake = runner(
+      [
+        { type: "ping" },
+        {
+          type: "round",
+          message: { role: "assistant", parts: [{ ...call, name: "mcp__kelpie__search_memory" }] },
+          usage: [],
+        },
+        { type: "tool_call", call },
+      ],
+      [finish],
+    );
+    const withRunner = {
+      ...(env as GatewayEnv),
+      RUNNER_CHAT: fake.client,
+    } as unknown as GatewayEnv;
+    const generation = generateWith(
+      withRunner,
+      onClaudeCode,
+      {
+        ...request,
+        tools: [{ name: "search_memory", description: "x", inputSchema: { type: "object" } }],
+      },
+      session,
+    );
+    const events = fromNdjsonStream(generation.events())[Symbol.asyncIterator]();
+    expect((await events.next()).value).toMatchObject({
+      type: "tool_round",
+      message: { parts: [call] },
+    });
+    expect((await events.next()).value).toEqual({ type: "tool_request", call });
+    expect(generation.answer({ callId: "toolu_01", output: "Ana lives in Porto." })).toEqual({
+      ok: true,
+    });
+    expect((await events.next()).value).toEqual({
+      ...finish,
+      message: { role: "assistant", parts: [{ type: "text", text: "Ana lives in Porto." }] },
+    });
+    expect((await events.next()).done).toBe(true);
+    expect(fake.turns).toEqual([
+      {
+        sessionId: session.id,
+        request: expect.objectContaining({
+          conversation: session.conversation,
+          resume: true,
+          model: "claude-haiku-5-5",
+          toolLoopMs: 180_000,
+          messages: [{ role: "user", parts: [{ type: "text", text: "Hi" }] }],
+        }),
+      },
+    ]);
+    expect(fake.answered).toEqual([
+      { sessionId: session.id, result: { callId: "toolu_01", output: "Ana lives in Porto." } },
+    ]);
+    expect(fake.cancelled()).toBe(1);
+  });
+
+  it("keeps it out of memory, and refuses it while it is off, for the instance's settings", async () => {
+    await reset();
+    const refused = { ok: false, reason: "invalid_input" };
+    const conversationOn = { conversation: { provider: "claude-code" } } as const;
+    expect(await exports.LlmGatewayAdmin.configureDefaults(conversationOn, owner)).toEqual(refused);
+    await exports.LlmGatewayAdmin.setClaudeCode(true, owner);
+    expect(await exports.LlmGatewayAdmin.configureDefaults(conversationOn, owner)).toEqual({
+      ok: true,
+    });
+    expect(
+      await exports.LlmGatewayAdmin.configureDefaults(
+        { memory: { provider: "claude-code" } },
+        owner,
+      ),
+    ).toEqual(refused);
+    expect((await exports.LlmGatewayAdmin.instanceModels()).settings).toEqual(conversationOn);
   });
 });

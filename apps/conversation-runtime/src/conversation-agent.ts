@@ -11,6 +11,7 @@ import {
   linksOf,
   localeOf,
   MAX_LANGUAGE_CHARS,
+  RUNNER_SESSION_ID,
   type SendOutcome,
   webLinks,
 } from "@kelpie/channels";
@@ -353,8 +354,6 @@ interface RoundProgress extends ToolProgress {
 
 /** Where a conversation keeps its session on a route that keeps one (#295). */
 const ROUTE_SESSION = "routeSession";
-/** A route session's id, as the gateway takes it: a UUID (#295). */
-const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * A conversation's session on a route that keeps the conversation itself, such as `claude-code`
@@ -2005,7 +2004,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       step("thinking");
       // A turn's settings from before #286 have no `model`, and their tier was the conversation's.
       const agent = settings.model ?? { conversation: { tier: settings.tier } };
-      const session = this.#routeSession(turn, promptKey, toolsKey);
+      const session = this.#routeSession(turn, promptKey, toolsKey, toolLoopMs);
       const call = await this.#ports.generate(
         { area: "conversation", agent },
         {
@@ -2088,7 +2087,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           flight &&
           session &&
           finish.session?.clean &&
-          SESSION_ID.test(finish.session.id) &&
+          RUNNER_SESSION_ID.test(finish.session.id) &&
           !last
         ) {
           flight.session = {
@@ -2122,12 +2121,14 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    * it, the router never picks such a route. It resumes the stored session only while that holds
    * exactly this history, under the same prompt version, checkpoint, prompt and tools, with no reply
    * or tool result after its last row. A turn retried after an eviction may already be in it, so
-   * the retry seeds a new session, as does any other mismatch.
+   * the retry seeds a new session, as does any other mismatch. It carries the turn's tool bound,
+   * which the route keeps in its own loop (#421): the runner seeds again when that changes.
    */
   #routeSession(
     turn: { systemVersion: number; checkpointId: number | null; attempts: number } & TurnAccess,
     promptKey: string,
     toolsKey: string | null,
+    toolLoopMs: number,
   ): RouteSession | undefined {
     if (turn.role !== "owner" || turn.chatType !== "direct") return undefined;
     if (this.#destination().channel === "task") return undefined;
@@ -2142,9 +2143,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       stored.toolsKey === toolsKey &&
       !this.#answeredAfter(stored.throughHistoryId)
     ) {
-      return { conversation, id: stored.id, resume: true };
+      return { conversation, id: stored.id, resume: true, toolLoopMs };
     }
-    return { conversation, id: crypto.randomUUID(), resume: false };
+    return { conversation, id: crypto.randomUUID(), resume: false, toolLoopMs };
   }
 
   /** Whether a reply or a tool's result follows this history row. */

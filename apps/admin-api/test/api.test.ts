@@ -96,6 +96,10 @@ function world({
         ran.push(`models.configure ${JSON.stringify(settings)}`);
         return { ok: true };
       },
+      async setClaudeCode(on, actor) {
+        ran.push(`models.setClaudeCode ${on} ${actor.via}`);
+        return { ok: true };
+      },
     },
     agents: {
       async configure() {
@@ -371,6 +375,19 @@ describe("admin API commands", () => {
     ).toEqual({
       status: 409,
       body: { ok: false, reason: "no_key" },
+    });
+  });
+
+  it("turns the claude-code route on for the owner, and refuses an input it doesn't know (#421)", async () => {
+    const { deps, ran } = world();
+    expect(await call(deps, "/commands/setClaudeCode", { on: true })).toEqual({
+      status: 200,
+      body: { ok: true, value: {} },
+    });
+    expect(ran).toContain("models.setClaudeCode true admin-api");
+    expect(await call(deps, "/commands/setClaudeCode", { on: "yes" })).toEqual({
+      status: 400,
+      body: { ok: false, reason: "invalid_input" },
     });
   });
 

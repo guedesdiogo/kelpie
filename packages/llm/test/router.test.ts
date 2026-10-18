@@ -249,6 +249,7 @@ describe("ModelRouter and a route that needs a session (#295)", () => {
     conversation: "kelpie:telegram:42",
     id: "6c1f2a9e-3b7d-4e51-9a0c-2f8d7e6b5a41",
     resume: false,
+    toolLoopMs: 120_000,
   };
   const answers: ToolAnswers = { wait: async (callId) => ({ callId, output: "done" }) };
 
@@ -474,6 +475,17 @@ describe("parseRouteTable", () => {
   it("accepts a complete table and drops unknown keys", () => {
     const withExtra = { ...routes, medium: [{ ...routes.medium[0], note: "x" }] };
     expect(parseRouteTable(withExtra)).toEqual(routes);
+  });
+
+  it("accepts the claude-code route after anthropic's, as ADR-0037 §1 orders them (#295)", () => {
+    const table = {
+      ...routes,
+      medium: [
+        { provider: "anthropic", model: "claude-sonnet-5-5" },
+        { provider: "claude-code", model: "claude-sonnet-5-5" },
+      ],
+    };
+    expect(parseRouteTable(table)).toEqual(table);
   });
 
   it.each([

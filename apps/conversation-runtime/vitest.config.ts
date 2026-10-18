@@ -44,7 +44,8 @@ export default { fetch: () => new Response(null, { status: 404 }) };`,
     // llm-gateway answers the deploy probe's ping (#234), and describes an area's trio for an
     // agent's prompt (#286) as `withIdentity` in test/prompts.ts expects it: the agent's
     // area tier and effort, cheap by default, on one model named after the tier. It has no
-    // other method, so a model call is refused by the runtime.
+    // other method, so a model call is refused by the runtime. Its LlmGatewayAdmin and LlmChat
+    // entrypoints are empty.
     {
       name: "kelpie-llm-gateway",
       modules: true,
@@ -66,6 +67,7 @@ export class LlmGateway extends WorkerEntrypoint {
   }
 }
 export class LlmGatewayAdmin extends WorkerEntrypoint {}
+export class LlmChat extends WorkerEntrypoint {}
 export default { fetch: () => new Response(null, { status: 404 }) };`,
     },
   ],

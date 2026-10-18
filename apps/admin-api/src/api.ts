@@ -107,6 +107,7 @@ const COMMANDS: Record<string, Command> = {
   getTask: (commands, actor, input) => commands.getTask(actor, input),
   getModels: (commands, actor) => commands.getModels(actor),
   configureModels: (commands, actor, input) => commands.configureModels(actor, input),
+  setClaudeCode: (commands, actor, input) => commands.setClaudeCode(actor, input),
   listIdentities: (commands, actor) => commands.listIdentities(actor),
   enableIdentity: (commands, actor, input) => commands.enableIdentity(actor, input),
   disableIdentity: (commands, actor, input) => commands.disableIdentity(actor, input),

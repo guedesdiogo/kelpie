@@ -14,6 +14,12 @@
     "bindings": [{ "name": "MODEL_DEFAULTS", "class_name": "ModelDefaults" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ModelDefaults"] }],
+  // The `claude-code` route's way to the VPS runner (ADR-0037, #295): channel-egress's entrypoint,
+  // which holds the runner's secret and can't open forms. The route serves only once the owner turns
+  // it on (docs/admin-api.md), so channel-egress deploys first.
+  "services": [
+    { "binding": "RUNNER_CHAT", "service": "kelpie-channel-egress", "entrypoint": "RunnerChat" }
+  ],
   "vars": {
     // To go through AI Gateway, override these with --var when deploying (docs/admin-api.md),
     // so the instance's account id stays out of the repository:
@@ -30,17 +36,22 @@
     // For each tier, the models to try in order. Owner configuration; edit freely.
     // "haiku" is Kelpie's alias for the newest Claude Haiku, looked up in Anthropic's Models API
     // once an hour; a pinned id such as "claude-haiku-5-5" works too (issue #199).
+    // "claude-code" follows "anthropic" (ADR-0037 §1), with the same Claude models pinned. It is
+    // tried only for the owner's own conversations, and only while the owner's switch is on (#295).
     "MODEL_ROUTES": {
       "cheap": [
         { "provider": "anthropic", "model": "haiku" },
+        { "provider": "claude-code", "model": "claude-haiku-5-5" },
         { "provider": "openai", "model": "gpt-6-luna" }
       ],
       "medium": [
         { "provider": "anthropic", "model": "claude-sonnet-5-5" },
+        { "provider": "claude-code", "model": "claude-sonnet-5-5" },
         { "provider": "openai", "model": "gpt-6.1-sol" }
       ],
       "frontier": [
         { "provider": "anthropic", "model": "claude-opus-5-5" },
+        { "provider": "claude-code", "model": "claude-opus-5-5" },
         { "provider": "openai", "model": "gpt-6-astra" }
       ]
     },

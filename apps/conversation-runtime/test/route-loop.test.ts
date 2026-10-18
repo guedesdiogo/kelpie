@@ -372,8 +372,22 @@ describe("a route's session", () => {
       conversation: "route-resume",
       id: expect.stringMatching(UUID),
       resume: false,
+      // The agents' default bound on a turn's tools, which the route keeps in its own loop (#421).
+      toolLoopMs: 120_000,
     });
     expect(second).toEqual({ ...first, resume: true });
+  });
+
+  it("carries the agent's own bound on a turn's tools (#421)", async () => {
+    const world = use(fakeWorld([routeReply("Hi.")]));
+    expect(
+      await env.AGENT_HOST.getByName("route-bound").configure(
+        { toolLoopMs: 300_000 },
+        { userId: "u-owner", role: "owner", via: "test" },
+      ),
+    ).toMatchObject({ ok: true });
+    await converse(agent("route-bound"), ["hello"], 0, "route-bound");
+    expect(world.sessions[0]).toMatchObject({ resume: false, toolLoopMs: 300_000 });
   });
 
   it("is seeded again after a turn another route answered", async () => {

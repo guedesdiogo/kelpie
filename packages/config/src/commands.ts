@@ -10,7 +10,12 @@ import {
   type TimeZoneResult,
 } from "@kelpie/access";
 import type { ChannelFormsContract, ChannelId, RunnerState } from "@kelpie/channels";
-import { type ModelSettings, type ProviderId, parseModelSettings } from "@kelpie/llm/models";
+import {
+  type ModelSettings,
+  memoryOnSessionRoute,
+  type ProviderId,
+  parseModelSettings,
+} from "@kelpie/llm/models";
 import { type Mascot, mascotFor, randomMascot } from "./mascot.ts";
 import {
   type AgentSettings,
@@ -288,8 +293,16 @@ function deletionOrder(agents: AgentEntry[], agent: AgentEntry): AgentEntry[] {
 export interface InstanceModels {
   settings: ModelSettings;
   pinned: ProviderId | null;
-  /** The providers with a key, in Kelpie's provider order. */
+  /**
+   * The providers that serve, in Kelpie's provider order: those with a key, and `claude-code`
+   * while it is on.
+   */
   providers: ProviderId[];
+  /**
+   * Whether the owner turned the `claude-code` route on (#295). An llm-gateway from before the
+   * switch, during a rollout, says nothing, which is off.
+   */
+  claudeCode?: boolean;
 }
 
 /** What the commands need from the objects that hold configuration. */
@@ -310,6 +323,11 @@ export interface ConfigPorts {
     view(): Promise<InstanceModels>;
     configure(
       settings: ModelSettings,
+      actor: Actor,
+    ): Promise<{ ok: true } | { ok: false; reason: "invalid_input" }>;
+    /** Turns the `claude-code` route on or off for the instance, audited with `actor` (#295). */
+    setClaudeCode(
+      on: boolean,
       actor: Actor,
     ): Promise<{ ok: true } | { ok: false; reason: "invalid_input" }>;
   };
@@ -407,7 +425,10 @@ export function createConfigCommands(ports: ConfigPorts) {
   const invalid = { ok: false, reason: "invalid_input" } as const;
   const isOwner = (actor: Actor) => actor.role === "owner";
   const noKey = { ok: false, reason: "no_key" } as const;
-  /** Whether every provider the settings name has a key in llm-gateway (#289). */
+  /**
+   * Whether every provider the settings name serves in llm-gateway (#289): has its key, or, for
+   * `claude-code`, is on.
+   */
   const keyed = async (settings: ModelSettings) => {
     const named = [settings.provider, settings.conversation?.provider, settings.memory?.provider];
     if (named.every((provider) => provider === undefined)) return true;
@@ -523,6 +544,8 @@ export function createConfigCommands(ports: ConfigPorts) {
       if (changes.specialty !== undefined && agent.role === "main") {
         return { ok: false, reason: "not_allowed" };
       }
+      // Memory's calls carry no session, which the claude-code route needs (#295).
+      if (changes.model && memoryOnSessionRoute(changes.model)) return invalid;
       if (changes.model && !(await keyed(changes.model))) return noKey;
       return ports.agents.configure(id, changes, actor);
     },
@@ -535,14 +558,30 @@ export function createConfigCommands(ports: ConfigPorts) {
 
     /**
      * Replaces the instance's model settings (ADR-0036 §2): what agents leave unset comes from
-     * them. It changes cost, so Master asks for the owner's confirmation first.
+     * them. It changes cost, so Master asks for the owner's confirmation first. The `memory` area
+     * can't name `claude-code`, whose route needs a conversation's session (#295).
      */
     async configureModels(actor: Actor, input: unknown): Promise<CommandResult<object>> {
       if (!isOwner(actor)) return forbidden;
       const settings = parseModelSettings((input as { settings?: unknown } | null)?.settings);
-      if (!settings) return invalid;
+      if (!settings || memoryOnSessionRoute(settings)) return invalid;
       if (!(await keyed(settings))) return noKey;
       const result = await ports.models.configure(settings, actor);
+      return result.ok ? { ok: true, value: {} } : result;
+    },
+
+    /**
+     * Turns the `claude-code` route on or off (ADR-0037, #295): the owner's own conversations then
+     * may reach Claude through Claude Code on the VPS runner, on the owner's subscription, after
+     * the API route or wherever the model settings name it. It spends the subscription's weekly
+     * limit, which the owner's own coding shares, so it is off until the owner turns it on, and
+     * Master asks for their confirmation first (CLAUDE.md, extra cost is opt-in).
+     */
+    async setClaudeCode(actor: Actor, input: unknown): Promise<CommandResult<object>> {
+      if (!isOwner(actor)) return forbidden;
+      const { on, ...rest } = (input ?? {}) as { on?: unknown };
+      if (typeof on !== "boolean" || Object.keys(rest).length > 0) return invalid;
+      const result = await ports.models.setClaudeCode(on, actor);
       return result.ok ? { ok: true, value: {} } : result;
     },
 

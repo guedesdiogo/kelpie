@@ -10,6 +10,9 @@
   "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
   "services": [
     { "binding": "LLM_GATEWAY", "service": "kelpie-llm-gateway", "entrypoint": "LlmGateway" },
+    // A conversation's calls with its session, the only ones that reach the claude-code route on
+    // the owner's subscription (#431). Only this Worker binds it.
+    { "binding": "LLM_CHAT", "service": "kelpie-llm-gateway", "entrypoint": "LlmChat" },
     // The instance's model settings, for Master's configuration tools only (#289).
     {
       "binding": "LLM_GATEWAY_ADMIN",
