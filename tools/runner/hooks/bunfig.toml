@@ -1,0 +1,3 @@
+# The session-event hook's own Bun settings, which its command passes with --config
+# (docs/runner.md): none. Bun then never reads the bunfig.toml of the session's folder, whose
+# preload could run a repository's code as the owner.

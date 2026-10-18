@@ -2,7 +2,11 @@ import { RpcTarget } from "cloudflare:workers";
 import {
   parseRunnerToolResult,
   parseRunnerTurnRequest,
+  parseRunnerVpsSessions,
+  parseRunnerVpsWaits,
+  RUNNER_MAX_SESSIONS_BYTES,
   RUNNER_MAX_TURN_BYTES,
+  RUNNER_MAX_WAITS_BYTES,
   RUNNER_PROTOCOL,
   RUNNER_SESSION_ID,
   RUNNER_VERSION,
@@ -10,10 +14,12 @@ import {
   type RunnerAnswerOutcome,
   type RunnerCloseOutcome,
   type RunnerRelayFailure,
+  type RunnerSessionsOutcome,
   type RunnerToolResult,
   type RunnerTurnRequest,
   type RunnerTurnStart,
   type RunnerTurnStream,
+  type RunnerWaitsOutcome,
   runnerJsonLength,
 } from "@kelpie/channels";
 
@@ -34,6 +40,11 @@ const TURN_START_TIMEOUT_MS = 15_000;
 const IDLE_MS = 60_000;
 /** The most of an answer read when it isn't a turn's stream: the runner's take a few dozen bytes. */
 const MAX_ANSWER_BYTES = 4_096;
+/**
+ * How long a read of the VPS's sessions waits for the runner's whole answer: it reads every
+ * session's files, and a transcript's last 1 MiB for each one's PR link.
+ */
+const SESSIONS_TIMEOUT_MS = 10_000;
 /** The turns this isolate relays at once: the runner keeps 4 sessions live. */
 const MAX_TURNS_IN_FLIGHT = 4;
 /** The wait after a 429 without a `Retry-After` to read: the runner counts turns by the minute. */
@@ -75,7 +86,7 @@ export async function checkRunner(runner: Fetcher, secret: string): Promise<Runn
     console.warn("channel-egress: the runner couldn't be reached", errorName(error));
     return { state: "unreachable" };
   }
-  const health = await readJson(response, timeout.signal);
+  const health = await readJson(response, timeout.signal, MAX_ANSWER_BYTES);
   timeout.clear();
   if (response.status === 401) return { state: "refused" };
   if (!response.ok || !isHealth(health)) {
@@ -380,6 +391,71 @@ export async function closeSession(
   return failureOf(answer) ?? unexpected(answer, "a close");
 }
 
+// The VPS's Claude Code sessions, read only (ADR-0057, #433). Each answer is checked and rebuilt
+// by the shared parsers, so only what the protocol carries crosses RPC.
+
+/** `GET /sessions`: every session on the VPS but the runner's own, read up to 512 KiB. */
+export async function listSessions(
+  runner: Fetcher,
+  secret: string,
+): Promise<RunnerSessionsOutcome> {
+  const answer = await read(runner, secret, "/sessions", RUNNER_MAX_SESSIONS_BYTES);
+  if (answer.status !== 200) return readFailure(answer, "the sessions");
+  return parseRunnerVpsSessions(answer.value) ?? unexpected(answer, "the sessions");
+}
+
+/** `GET /sessions/waits?since=`: the open waits opened at `since` or later, read up to 64 KiB. */
+export async function listWaits(
+  runner: Fetcher,
+  secret: string,
+  since: number,
+): Promise<RunnerWaitsOutcome> {
+  const path = `/sessions/waits?since=${since}`;
+  const answer = await read(runner, secret, path, RUNNER_MAX_WAITS_BYTES);
+  if (answer.status !== 200) return readFailure(answer, "the waits");
+  return parseRunnerVpsWaits(answer.value) ?? unexpected(answer, "the waits");
+}
+
+/** A GET's answer: its status, 0 when the call failed or timed out, and its JSON, if any. */
+interface ReadAnswer extends Answer {
+  value: unknown;
+}
+
+/** A GET to the runner, its answer read whole, up to `maxBytes`, within SESSIONS_TIMEOUT_MS. */
+async function read(
+  runner: Fetcher,
+  secret: string,
+  path: string,
+  maxBytes: number,
+): Promise<ReadAnswer> {
+  const timeout = deadline(SESSIONS_TIMEOUT_MS);
+  try {
+    const response = await runner.fetch(`http://runner${path}`, {
+      headers: { authorization: `Bearer ${secret}` },
+      redirect: "manual",
+      signal: timeout.signal,
+    });
+    const value = await readJson(response, timeout.signal, maxBytes);
+    const ok = (value as { ok?: unknown } | null)?.ok;
+    return { status: response.status, value, ...(typeof ok === "boolean" ? { ok } : {}) };
+  } catch (error) {
+    console.warn("channel-egress: the runner couldn't be reached", errorName(error));
+    return { status: 0, value: null };
+  } finally {
+    timeout.clear();
+  }
+}
+
+/**
+ * A read the runner didn't answer with 200. A runner below protocol 3 answers 404 to
+ * `/sessions`, as every runner below 2 does to every path but `/health`, and 405 to
+ * `/sessions/waits`, which protocol 2 takes for a session's id.
+ */
+function readFailure(answer: Answer, what: string): RunnerRelayFailure {
+  if (answer.status === 405) return outdated;
+  return failureOf(answer) ?? unexpected(answer, what);
+}
+
 /** The runner's answer: its status and its JSON's `ok` and `reason`, when it has them. */
 interface Answer {
   /** 0 when the call failed or timed out. */
@@ -413,22 +489,26 @@ async function call(
 }
 
 async function answerOf(response: Response, signal: AbortSignal): Promise<Answer> {
-  const value = (await readJson(response, signal)) as Answer | null;
+  const value = (await readJson(response, signal, MAX_ANSWER_BYTES)) as Answer | null;
   return typeof value === "object" && value !== null && typeof value.ok === "boolean"
     ? { status: response.status, ok: value.ok, reason: value.reason }
     : { status: response.status };
 }
 
 /**
- * An answer's body as JSON, read up to MAX_ANSWER_BYTES while `signal` allows; null when it is
- * longer, cut short or not JSON. The body is cancelled either way, which frees its connection.
+ * An answer's body as JSON, read up to `maxBytes` while `signal` allows; null when it is longer,
+ * cut short or not JSON. The body is cancelled either way, which frees its connection.
  */
-async function readJson(response: Response, signal: AbortSignal): Promise<unknown> {
+async function readJson(
+  response: Response,
+  signal: AbortSignal,
+  maxBytes: number,
+): Promise<unknown> {
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   const stop = () => void reader?.cancel().catch(() => undefined);
   signal.addEventListener("abort", stop, { once: true });
-  // Checked before each chunk is kept, so no more than MAX_ANSWER_BYTES is ever kept.
-  const bytes = new Uint8Array(MAX_ANSWER_BYTES);
+  // Checked before each chunk is kept, so no more than `maxBytes` is ever kept.
+  const bytes = new Uint8Array(maxBytes);
   let size = 0;
   try {
     if (!response.body || signal.aborted) return null;
@@ -437,7 +517,7 @@ async function readJson(response: Response, signal: AbortSignal): Promise<unknow
       const chunk = await reader.read();
       if (signal.aborted) return null;
       if (chunk.done) break;
-      if (size + chunk.value.byteLength > MAX_ANSWER_BYTES) return null;
+      if (size + chunk.value.byteLength > maxBytes) return null;
       bytes.set(chunk.value, size);
       size += chunk.value.byteLength;
     }

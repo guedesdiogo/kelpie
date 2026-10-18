@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  isRunnerTime,
   isRunnerToolLoopMs,
   parseRunnerToolResult,
   parseRunnerTurnRequest,
+  parseRunnerVpsSessions,
+  parseRunnerVpsWaits,
+  RUNNER_MAX_EXCERPT_CHARS,
+  RUNNER_MAX_TITLE_CHARS,
+  RUNNER_MAX_VPS_SESSIONS,
+  RUNNER_PROTOCOL,
   RUNNER_SESSION_ID,
   type RunnerTurnRequest,
+  type RunnerVpsSession,
+  type RunnerVpsWait,
   runnerJsonLength,
 } from "../src/runner.ts";
 
@@ -265,5 +274,210 @@ describe("RUNNER_SESSION_ID", () => {
     expect(RUNNER_SESSION_ID.test(crypto.randomUUID())).toBe(true);
     expect(RUNNER_SESSION_ID.test(SESSION.replace("1", "A"))).toBe(false);
     expect(RUNNER_SESSION_ID.test(`${SESSION}\n`)).toBe(false);
+  });
+});
+
+// The VPS's sessions (ADR-0057, #433): channel-egress checks the runner's answers with these.
+
+const NOW = Date.UTC(2026, 9, 17, 18, 0, 0);
+
+function vpsSession(overrides: Partial<RunnerVpsSession> = {}): RunnerVpsSession {
+  return {
+    id: SESSION,
+    state: "waiting_permission",
+    since: NOW - 60_000,
+    archivable: false,
+    status: "busy",
+    statusUpdatedAt: NOW - 600_000,
+    startedAt: NOW - 3_600_000,
+    alive: true,
+    startedBy: "app",
+    entrypoint: "claude-desktop",
+    title: "Review the runner",
+    repository: "kelpie",
+    branch: "feat/runner-vps-sessions",
+    prUrl: "https://github.com/guedesdiogo/kelpie/pull/433",
+    excerpt: "Opened the PR.",
+    ...overrides,
+  };
+}
+
+const sessionsAnswer = (sessions: unknown[], extra: Record<string, unknown> = {}) => ({
+  ok: true,
+  now: NOW,
+  sessions,
+  truncated: false,
+  ...extra,
+});
+
+function vpsWait(overrides: Partial<RunnerVpsWait> = {}): RunnerVpsWait {
+  return {
+    sessionId: SESSION,
+    kind: "question",
+    openedAt: NOW - 60_000,
+    title: "Review the runner",
+    repository: "kelpie",
+    ...overrides,
+  };
+}
+
+const waitsAnswer = (waits: unknown[], extra: Record<string, unknown> = {}) => ({
+  ok: true,
+  now: NOW,
+  waits,
+  truncated: false,
+  ...extra,
+});
+
+describe("parseRunnerVpsSessions", () => {
+  it("is protocol 3's", () => {
+    expect(RUNNER_PROTOCOL).toBe(3);
+  });
+
+  it("takes the runner's list as it is, nulls included", () => {
+    const blank = vpsSession({
+      state: "unknown",
+      since: null,
+      status: "unknown",
+      statusUpdatedAt: null,
+      startedAt: null,
+      alive: null,
+      startedBy: "unknown",
+      entrypoint: null,
+      title: null,
+      repository: null,
+      branch: null,
+      prUrl: null,
+      excerpt: null,
+    });
+    const answer = sessionsAnswer([vpsSession(), blank], { truncated: true });
+    expect(parseRunnerVpsSessions(answer)).toEqual(answer);
+    expect(parseRunnerVpsSessions(sessionsAnswer([]))).toEqual(sessionsAnswer([]));
+  });
+
+  it.each([
+    ["a body that isn't an object", null],
+    ["ok false", { ...sessionsAnswer([]), ok: false }],
+    ["an extra field", { ...sessionsAnswer([]), extra: 1 }],
+    ["no now", { ok: true, sessions: [], truncated: false }],
+    ["a now that isn't a time", sessionsAnswer([], { now: -1 })],
+    ["a truncated that isn't a boolean", sessionsAnswer([], { truncated: "no" })],
+    ["sessions that aren't a list", sessionsAnswer([], { sessions: {} })],
+    [
+      "too many sessions",
+      sessionsAnswer(Array.from({ length: RUNNER_MAX_VPS_SESSIONS + 1 }, () => vpsSession())),
+    ],
+    ["a session that isn't an object", sessionsAnswer(["x"])],
+    ["a session with an extra field", sessionsAnswer([{ ...vpsSession(), cwd: "/home" }])],
+    ["a session without its excerpt", sessionsAnswer([{ ...vpsSession(), excerpt: undefined }])],
+    ["an id that isn't a UUID", sessionsAnswer([vpsSession({ id: "../x" })])],
+    ["another state", sessionsAnswer([vpsSession({ state: "sleeping" as never })])],
+    ["another status", sessionsAnswer([vpsSession({ status: "busy!" as never })])],
+    ["another starter", sessionsAnswer([vpsSession({ startedBy: "kelpie" as never })])],
+    [
+      "an archivable that isn't a boolean",
+      sessionsAnswer([vpsSession({ archivable: 1 as never })]),
+    ],
+    ["an alive that isn't a boolean", sessionsAnswer([vpsSession({ alive: "yes" as never })])],
+    ["a since that isn't a time", sessionsAnswer([vpsSession({ since: 1.5 })])],
+    ["a statusUpdatedAt that isn't a time", sessionsAnswer([vpsSession({ statusUpdatedAt: -1 })])],
+    ["a startedAt that isn't a time", sessionsAnswer([vpsSession({ startedAt: "now" as never })])],
+    ["an entrypoint with markup", sessionsAnswer([vpsSession({ entrypoint: "<b>" })])],
+    ["an entrypoint that isn't text", sessionsAnswer([vpsSession({ entrypoint: 1 as never })])],
+    [
+      "a link that isn't a pull request's",
+      sessionsAnswer([vpsSession({ prUrl: "https://evil.example/pull/1" })]),
+    ],
+    ["a link that isn't text", sessionsAnswer([vpsSession({ prUrl: 1 as never })])],
+    [
+      "a title too long",
+      sessionsAnswer([vpsSession({ title: "t".repeat(RUNNER_MAX_TITLE_CHARS + 1) })]),
+    ],
+    ["an empty title", sessionsAnswer([vpsSession({ title: "" })])],
+    ["a repository too long", sessionsAnswer([vpsSession({ repository: "r".repeat(201) })])],
+    ["a branch too long", sessionsAnswer([vpsSession({ branch: "b".repeat(256) })])],
+    [
+      "an excerpt too long",
+      sessionsAnswer([vpsSession({ excerpt: "e".repeat(RUNNER_MAX_EXCERPT_CHARS + 1) })]),
+    ],
+  ])("refuses %s", (_, value) => {
+    expect(parseRunnerVpsSessions(value)).toBeNull();
+  });
+});
+
+describe("the VPS's one-line fields", () => {
+  it.each([
+    ["a line break", "a\nb"],
+    ["a carriage return", "a\rb"],
+    ["a bell", "a\u0007b"],
+    ["a C1 control", "a\u0085b"],
+    ["a line separator", "a\u2028b"],
+    ["a right-to-left override", "a\u202eb"],
+    ["a left-to-right isolate", "a\u2066b"],
+    ["a right-to-left mark", "a\u200fb"],
+    ["a zero-width space", "a\u200bb"],
+    ["a zero-width non-joiner", "a\u200cb"],
+    ["a zero-width joiner", "a\u200db"],
+    ["a word joiner", "a\u2060b"],
+    ["a byte-order mark", "a\ufeffb"],
+    ["a Hangul filler", "a\u3164b"],
+    ["a tag character", "a\u{e0041}b"],
+    ["a cancel tag", "a\u{e007f}b"],
+    ["a Braille blank", "a\u2800b"],
+  ])("refuses %s in a title, a repository or a branch", (_, text) => {
+    for (const field of ["title", "repository", "branch"] as const) {
+      expect(parseRunnerVpsSessions(sessionsAnswer([vpsSession({ [field]: text })]))).toBeNull();
+    }
+    for (const field of ["title", "repository"] as const) {
+      expect(parseRunnerVpsWaits(waitsAnswer([vpsWait({ [field]: text })]))).toBeNull();
+    }
+  });
+
+  it("takes an excerpt of several lines, and a title in any script", () => {
+    const session = vpsSession({ excerpt: "Done.\nThe PR is open.", title: "Revisão do 漢 🦭" });
+    expect(parseRunnerVpsSessions(sessionsAnswer([session]))).toEqual(sessionsAnswer([session]));
+  });
+});
+
+describe("parseRunnerVpsWaits", () => {
+  it("takes the runner's waits as they are", () => {
+    const answer = waitsAnswer([
+      vpsWait(),
+      vpsWait({ kind: "permission", title: null, repository: null }),
+    ]);
+    expect(parseRunnerVpsWaits(answer)).toEqual(answer);
+  });
+
+  it.each([
+    ["a body that isn't an object", "x"],
+    ["ok false", { ...waitsAnswer([]), ok: false }],
+    ["a now that isn't a time", waitsAnswer([], { now: "now" })],
+    ["a truncated that isn't a boolean", waitsAnswer([], { truncated: null })],
+    ["waits that aren't a list", waitsAnswer([], { waits: "none" })],
+    [
+      "too many waits",
+      waitsAnswer(Array.from({ length: RUNNER_MAX_VPS_SESSIONS + 1 }, () => vpsWait())),
+    ],
+    ["a wait with an extra field", waitsAnswer([{ ...vpsWait(), excerpt: "x" }])],
+    [
+      "a session id that isn't a UUID",
+      waitsAnswer([vpsWait({ sessionId: "ABCDEF11-2222-4333-8444-555555555555" })]),
+    ],
+    ["another kind", waitsAnswer([vpsWait({ kind: "idle" as never })])],
+    ["an openedAt that isn't a time", waitsAnswer([vpsWait({ openedAt: -5 })])],
+    ["a title too long", waitsAnswer([vpsWait({ title: "t".repeat(RUNNER_MAX_TITLE_CHARS + 1) })])],
+    ["a repository that isn't text", waitsAnswer([vpsWait({ repository: 7 as never })])],
+  ])("refuses %s", (_, value) => {
+    expect(parseRunnerVpsWaits(value)).toBeNull();
+  });
+});
+
+describe("isRunnerTime", () => {
+  it("takes whole epoch ms from 0", () => {
+    expect(isRunnerTime(0)).toBe(true);
+    expect(isRunnerTime(NOW)).toBe(true);
+    for (const value of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, "1", null, Number.NaN]) {
+      expect(isRunnerTime(value)).toBe(false);
+    }
   });
 });

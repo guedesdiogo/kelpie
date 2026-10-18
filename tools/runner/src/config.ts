@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { RunnerConfigError } from "./secrets.ts";
+import { spoolDirOf } from "./spool.ts";
 
 /** The port the agent-computer spike used. The tunnel's VPC Service points at it. */
 export const DEFAULT_PORT = 47832;
@@ -12,6 +13,10 @@ export interface RunnerConfig {
    * transcripts apart from the ones the owner's own sessions keep.
    */
   workDir: string;
+  /** Claude Code's own folder, whose `sessions/` and `projects/` the runner reads (ADR-0057). */
+  claudeDir: string;
+  /** The session-event hook's spool, which the runner reads. */
+  spoolDir: string;
 }
 
 /** The runner's settings, from its environment. It always listens on loopback, so no host is read. */
@@ -22,7 +27,8 @@ export function readConfig(env: Record<string, string | undefined>, home: string
     env.KELPIE_RUNNER_SECRET_FILE || join(home, ".config", "kelpie-runner", "secret");
   const workDir =
     env.KELPIE_RUNNER_WORK_DIR || join(home, ".local", "state", "kelpie-runner", "claude-code");
-  return { port, secretFile, workDir };
+  const claudeDir = env.KELPIE_RUNNER_CLAUDE_DIR || join(home, ".claude");
+  return { port, secretFile, workDir, claudeDir, spoolDir: spoolDirOf(home) };
 }
 
 function parsePort(text: string): number {

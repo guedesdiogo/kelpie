@@ -1,4 +1,8 @@
-import { RUNNER_PROTOCOL } from "../../../packages/channels/src/runner.ts";
+import {
+  RUNNER_PROTOCOL,
+  type RunnerVpsSessions,
+  type RunnerVpsWaits,
+} from "../../../packages/channels/src/runner.ts";
 
 // A stand-in for the VPS runner behind its VPC Service (#294, #420), which vitest.config.ts binds
 // as RUNNER. It runs in Node, outside the Worker's isolate: a test reads what it saw through
@@ -11,6 +15,8 @@ export const READY = "r".repeat(64);
 export const OUTDATED = "o".repeat(64);
 /** A runner on protocol 1, which serves `/health` only, as before #295. */
 export const PROTOCOL_1 = "p".repeat(64);
+/** A runner on protocol 2, which serves the `claude-code` route but not the VPS's sessions. */
+export const PROTOCOL_2 = "q".repeat(64);
 /** A runner that fails with a 500 on every path. */
 export const BROKEN = "b".repeat(64);
 
@@ -18,6 +24,69 @@ const RUNNERS: Record<string, { version: string; protocol: number }> = {
   [READY]: { version: "0.1.0", protocol: RUNNER_PROTOCOL },
   [OUTDATED]: { version: "0.0.9", protocol: RUNNER_PROTOCOL + 1 },
   [PROTOCOL_1]: { version: "0.1.0", protocol: 1 },
+  [PROTOCOL_2]: { version: "0.2.0", protocol: 2 },
+};
+
+const NOW = Date.UTC(2026, 9, 17, 18, 0, 0);
+
+/** The VPS's sessions, as the runner lists them on protocol 3 (ADR-0057). */
+export const VPS_SESSIONS: RunnerVpsSessions = {
+  ok: true,
+  now: NOW,
+  truncated: false,
+  sessions: [
+    {
+      id: "aaaaaaaa-1111-4222-8333-444444444444",
+      state: "waiting_answer",
+      since: NOW - 60_000,
+      archivable: false,
+      status: "waiting",
+      statusUpdatedAt: NOW - 55_000,
+      startedAt: NOW - 3_600_000,
+      alive: true,
+      startedBy: "app",
+      entrypoint: "claude-desktop",
+      title: "Review the runner",
+      repository: "kelpie",
+      branch: "feat/runner-vps-sessions",
+      prUrl: "https://github.com/guedesdiogo/kelpie/pull/433",
+      excerpt: "Which option should I take?",
+    },
+    {
+      id: "bbbbbbbb-1111-4222-8333-444444444444",
+      state: "ended",
+      since: NOW - 7_200_000,
+      // A terminal's session: only the app archives one.
+      archivable: false,
+      status: "idle",
+      statusUpdatedAt: NOW - 7_200_000,
+      startedAt: NOW - 9_000_000,
+      alive: false,
+      startedBy: "terminal",
+      entrypoint: "cli",
+      title: null,
+      repository: null,
+      branch: null,
+      prUrl: null,
+      excerpt: null,
+    },
+  ],
+};
+
+/** The waits on the owner, as the runner lists them; the fake keeps those opened since `since`. */
+export const VPS_WAITS: RunnerVpsWaits = {
+  ok: true,
+  now: NOW,
+  truncated: false,
+  waits: [
+    {
+      sessionId: "aaaaaaaa-1111-4222-8333-444444444444",
+      kind: "question",
+      openedAt: NOW - 60_000,
+      title: "Review the runner",
+      repository: "kelpie",
+    },
+  ],
 };
 
 /** The frames of a scripted turn, as the runner writes them, `ping` among them. */
@@ -62,7 +131,9 @@ const REFUSALS: Record<string, () => Response> = {
 /** What one request looked like, for the tests: never its secret. */
 export interface Seen {
   method: string;
-  action: "turns" | "tool-results" | "close";
+  action: "turns" | "tool-results" | "close" | "sessions" | "waits";
+  /** The query of a waits request. */
+  query?: string;
   /** Whether it carried the stored secret as a bearer token. */
   bearer: boolean;
   body?: unknown;
@@ -85,6 +156,8 @@ export async function fakeRunner(request: Request): Promise<Response> {
   const runner = RUNNERS[secret];
   if (!runner) return Response.json({ ok: false }, { status: 401 });
   if (path === "/health") return Response.json({ ok: true, ...runner });
+  if (path === "/sessions" || path === "/sessions/waits")
+    return vps(request, path, runner.protocol);
   const session = /^\/sessions\/([^/]+)(?:\/(turns|tool-results))?$/.exec(path);
   if (!session || runner.protocol < 2) return Response.json({ ok: false }, { status: 404 });
   const id = session[1] as string;
@@ -113,4 +186,27 @@ export async function fakeRunner(request: Request): Promise<Response> {
     },
   });
   return new Response(stream, { headers: ndjson });
+}
+
+/**
+ * The VPS's sessions, by the runner's protocol: below 3, `/sessions` is a path the runner doesn't
+ * have (404), and protocol 2 takes `/sessions/waits` for a session's id, which only `DELETE` (405).
+ */
+function vps(request: Request, path: string, protocol: number): Response {
+  const bearer = request.headers.get("authorization") === `Bearer ${READY}`;
+  const { search } = new URL(request.url);
+  if (protocol < 3 && (protocol < 2 || path === "/sessions")) {
+    return Response.json({ ok: false }, { status: 404 });
+  }
+  if (protocol < 3) return new Response(null, { status: 405, headers: { allow: "DELETE" } });
+  if (path === "/sessions") {
+    see("vps", { method: request.method, action: "sessions", bearer });
+    return Response.json(VPS_SESSIONS);
+  }
+  see("vps", { method: request.method, action: "waits", bearer, query: search });
+  const since = Number(new URL(request.url).searchParams.get("since"));
+  return Response.json({
+    ...VPS_WAITS,
+    waits: VPS_WAITS.waits.filter((wait) => wait.openedAt >= since),
+  });
 }

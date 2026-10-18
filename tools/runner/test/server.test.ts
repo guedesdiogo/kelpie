@@ -1,16 +1,33 @@
 import { describe, expect, it, vi } from "vitest";
-import { MAX_RESULT_BYTES, MAX_TURN_BYTES, PROTOCOL, VERSION } from "../src/protocol.ts";
+import {
+  MAX_RESULT_BYTES,
+  MAX_SESSIONS_BYTES,
+  MAX_TURN_BYTES,
+  MAX_WAITS_BYTES,
+  PROTOCOL,
+  VERSION,
+} from "../src/protocol.ts";
 import { createHandler, type HandlerOptions, type LogEntry } from "../src/server.ts";
 import { Sessions } from "../src/sessions.ts";
+import { VpsSessions } from "../src/vps-sessions.ts";
 import { fakeClaude, frames, reply, result, SESSION, turnRequest } from "./fake-claude.ts";
+import { fakeVps, NOW, sessionFields, writeSessionFile } from "./fake-vps.ts";
 
 const SECRET = "a".repeat(64);
 const TURNS = `/sessions/${SESSION}/turns`;
 const RESULTS = `/sessions/${SESSION}/tool-results`;
 
-function setup(sessions: HandlerOptions["sessions"] = stubSessions()) {
+function setup(
+  sessions: HandlerOptions["sessions"] = stubSessions(),
+  vps: HandlerOptions["vps"] = stubVps(),
+) {
   const logs: LogEntry[] = [];
-  const handle = createHandler({ secrets: [SECRET], log: (entry) => logs.push(entry), sessions });
+  const handle = createHandler({
+    secrets: [SECRET],
+    log: (entry) => logs.push(entry),
+    sessions,
+    vps,
+  });
   // Bun's server, whose idle timeout a turn's stream lifts.
   const server = { timeout: vi.fn() };
   const call = (path: string, init: RequestInit = {}) =>
@@ -18,7 +35,14 @@ function setup(sessions: HandlerOptions["sessions"] = stubSessions()) {
   const auth = { authorization: `Bearer ${SECRET}` };
   const post = (path: string, body: unknown) =>
     call(path, { method: "POST", headers: auth, body: JSON.stringify(body) });
-  return { logs, call, auth, post, sessions, server };
+  return { logs, call, auth, post, sessions, vps, server };
+}
+
+const LISTED = { ok: true as const, now: NOW, sessions: [], truncated: false };
+const WAITED = { ok: true as const, now: NOW, waits: [], truncated: false };
+
+function stubVps() {
+  return { list: vi.fn(() => LISTED), waits: vi.fn((_since: number) => WAITED) };
 }
 
 function stubSessions() {
@@ -42,17 +66,19 @@ describe("the runner's handler", () => {
     const response = await call("/health", { headers: auth });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, version: VERSION, protocol: PROTOCOL });
-    expect(PROTOCOL).toBe(2);
+    expect(PROTOCOL).toBe(3);
   });
 
   it("answers 401 without the secret, on any path and method, and says nothing more", async () => {
-    const { call, sessions } = setup();
+    const { call, sessions, vps } = setup();
     for (const [method, path] of [
       ["GET", "/health"],
       ["GET", "/anything"],
       ["POST", TURNS],
       ["POST", RESULTS],
       ["DELETE", `/sessions/${SESSION}`],
+      ["GET", "/sessions"],
+      ["GET", "/sessions/waits?since=0"],
     ] as const) {
       const response = await call(path, {
         method,
@@ -65,6 +91,8 @@ describe("the runner's handler", () => {
     expect(sessions.turn).not.toHaveBeenCalled();
     expect(sessions.answer).not.toHaveBeenCalled();
     expect(sessions.close).not.toHaveBeenCalled();
+    expect(vps.list).not.toHaveBeenCalled();
+    expect(vps.waits).not.toHaveBeenCalled();
   });
 
   it("answers a URL that doesn't parse, as a malformed Host makes, with 401, or 400 once authorized", async () => {
@@ -73,6 +101,7 @@ describe("the runner's handler", () => {
       secrets: [SECRET],
       log: (entry) => logs.push(entry),
       sessions: stubSessions(),
+      vps: stubVps(),
     });
     const broken = (authorization: string) =>
       ({
@@ -106,6 +135,8 @@ describe("the runner's handler", () => {
     [TURNS, "GET", "POST"],
     [RESULTS, "PUT", "POST"],
     [`/sessions/${SESSION}`, "POST", "DELETE"],
+    ["/sessions", "POST", "GET"],
+    ["/sessions/waits", "DELETE", "GET"],
   ])("answers 405 for another method on %s", async (path, method, allow) => {
     const { call, auth } = setup();
     const response = await call(path, { method, headers: auth });
@@ -200,10 +231,12 @@ describe("the session routes", () => {
       headers: auth,
       body: JSON.stringify(turnRequest()),
     });
-    const response = await createHandler({ secrets: [SECRET], log: () => {}, sessions })(
-      request,
-      server,
-    );
+    const response = await createHandler({
+      secrets: [SECRET],
+      log: () => {},
+      sessions,
+      vps: stubVps(),
+    })(request, server);
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/x-ndjson");
     expect(await response.text()).toBe('{"type":"text","delta":"Hi"}\n');
@@ -295,5 +328,82 @@ describe("the session routes", () => {
       200,
     );
     expect(session.closed).toBe(true);
+  });
+});
+
+describe("the VPS's sessions routes", () => {
+  it("lists the sessions, and logs neither the query nor the answer", async () => {
+    const { call, auth, vps, logs } = setup();
+    const response = await call("/sessions", { headers: auth });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(LISTED);
+    expect(vps.list).toHaveBeenCalledOnce();
+    await call("/sessions/waits?since=1760700000000&x=1", { headers: auth });
+    expect(logs).toEqual([
+      { method: "GET", path: "/sessions", status: 200 },
+      { method: "GET", path: "/sessions/waits", status: 200 },
+    ]);
+  });
+
+  it.each([
+    ["0", 0],
+    ["1760700000000", 1_760_700_000_000],
+    [String(Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER],
+  ])("lists the waits since %s", async (since, expected) => {
+    const { call, auth, vps } = setup();
+    const response = await call(`/sessions/waits?since=${since}`, { headers: auth });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(WAITED);
+    expect(vps.waits).toHaveBeenCalledExactlyOnceWith(expected);
+  });
+
+  it.each([
+    ["no since", "/sessions/waits"],
+    ["an empty since", "/sessions/waits?since="],
+    ["a negative since", "/sessions/waits?since=-1"],
+    ["a fractional since", "/sessions/waits?since=1.5"],
+    ["a since in words", "/sessions/waits?since=yesterday"],
+    ["a since past a safe integer", "/sessions/waits?since=9007199254740992"],
+    ["a since of 17 digits", "/sessions/waits?since=10000000000000000"],
+  ])("answers 400 for %s", async (_, path) => {
+    const { call, auth, vps } = setup();
+    const response = await call(path, { headers: auth });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ ok: false });
+    expect(vps.waits).not.toHaveBeenCalled();
+  });
+
+  it("answers within its bounds, from the session files on disk", async () => {
+    const disk = fakeVps();
+    try {
+      for (let pid = 1; pid <= 250; pid += 1) {
+        writeSessionFile(
+          disk,
+          sessionFields({
+            pid,
+            sessionId: `${String(pid).padStart(8, "0")}-1111-4222-8333-444444444444`,
+            // Three bytes each in JSON, and legal in a title.
+            name: "漢".repeat(200),
+          }),
+        );
+      }
+      const vps = new VpsSessions({
+        claudeDir: disk.claudeDir,
+        spoolDir: disk.spoolDir,
+        workDir: disk.workDir,
+        holds: () => false,
+        secrets: [SECRET],
+        warn: () => {},
+        alive: () => true,
+      });
+      const { call, auth } = setup(stubSessions(), vps);
+      const list = await (await call("/sessions", { headers: auth })).arrayBuffer();
+      expect(list.byteLength).toBeLessThanOrEqual(MAX_SESSIONS_BYTES);
+      expect(JSON.parse(new TextDecoder().decode(list))).toMatchObject({ truncated: true });
+      const waits = await (await call("/sessions/waits?since=0", { headers: auth })).arrayBuffer();
+      expect(waits.byteLength).toBeLessThanOrEqual(MAX_WAITS_BYTES);
+    } finally {
+      disk.cleanup();
+    }
   });
 });

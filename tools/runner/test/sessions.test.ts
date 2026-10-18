@@ -1309,6 +1309,33 @@ describe("a session's process", () => {
     expect(warnings).toEqual([]);
   });
 
+  it("holds a session's id while it is live, while it closes, and once it is unfinished", async () => {
+    const { sessions, start, last } = setup();
+    expect(sessions.holds(SESSION)).toBe(false);
+    const turn = await start();
+    expect(sessions.holds(SESSION)).toBe(true);
+    expect(sessions.holds(OTHER_SESSION)).toBe(false);
+    const session = last();
+    await session.next();
+    session.send(...answered("Hi."));
+    await turn.rest();
+    session.lingers = true;
+    // A clean close: its process hasn't exited yet.
+    sessions.close(SESSION);
+    await settle();
+    expect(sessions.holds(SESSION)).toBe(true);
+    expect(sessions.holds(OTHER_SESSION)).toBe(false);
+    session.exit();
+    await settle();
+    expect(sessions.holds(SESSION)).toBe(false);
+    // A turn still running when its session closes leaves it unfinished, for good.
+    await start(OTHER_SESSION, { conversation: "c2" });
+    sessions.close(OTHER_SESSION);
+    last().exit();
+    await settle();
+    expect(sessions.holds(OTHER_SESSION)).toBe(true);
+  });
+
   it("deletes an unfinished session's transcript only once its process exited", async () => {
     const { sessions, start, last, deleted } = setup();
     await start();

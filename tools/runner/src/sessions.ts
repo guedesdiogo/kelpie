@@ -162,6 +162,15 @@ export class Sessions {
     this.#live.get(id)?.close();
   }
 
+  /** Whether the id is one of the route's sessions: live, closing, or unfinished. */
+  holds(id: string): boolean {
+    if (this.#live.has(id) || this.#unfinished.has(id)) return true;
+    for (const session of this.#closing.keys()) {
+      if (session.id === id) return true;
+    }
+    return false;
+  }
+
   /** A live or unfinished session's answer to a turn, or nothing when Claude Code must start one. */
   #known(
     id: string,

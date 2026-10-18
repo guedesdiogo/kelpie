@@ -1,7 +1,14 @@
 import type { SendOptions } from "./adapter.ts";
 import type { ChannelId } from "./events.ts";
 import type { Locale } from "./locale.ts";
-import type { RunnerAnswered, RunnerState, RunnerToolResult, RunnerTurnRequest } from "./runner.ts";
+import type {
+  RunnerAnswered,
+  RunnerState,
+  RunnerToolResult,
+  RunnerTurnRequest,
+  RunnerVpsSessions,
+  RunnerVpsWaits,
+} from "./runner.ts";
 
 // The contracts of the channel-egress Worker (ADR-0002), the only place that reads a channel's
 // secrets. Other Workers reach it through service bindings, and every answer is a value: thrown
@@ -184,7 +191,7 @@ export type SetupFormsContract = Pick<
  *   (the call failed, its answer didn't begin in time, or it isn't one the runner gives to this
  *   request, as a tunnel's 502 or a 400 to a request checked here), as in `RunnerState`;
  * - `outdated`: the runner answers 404, as a runner below protocol 2 does to every path but
- *   `/health`;
+ *   `/health`, or, for the VPS's sessions, a 404 or a 405, as a runner below protocol 3 does;
  * - `store_unavailable`: the secret store failed.
  *
  * None of them is a Claude usage limit, or a failed claude.ai login: the runner reports those on
@@ -262,4 +269,22 @@ export interface RunnerChatContract {
   answer(sessionId: string, result: RunnerToolResult): Promise<RunnerAnswerOutcome>;
   /** Closes the session. A turn it was running fails. */
   close(sessionId: string): Promise<RunnerCloseOutcome>;
+}
+
+/** `RunnerSessions.list()`: the VPS's sessions, as the runner answered them, checked. */
+export type RunnerSessionsOutcome = RunnerVpsSessions | RunnerRelayFailure;
+
+/** `RunnerSessions.waits(since)`: the open waits on the owner, as the runner answered them. */
+export type RunnerWaitsOutcome = RunnerVpsWaits | RunnerRelayFailure;
+
+/**
+ * What reads the Claude Code sessions on the owner's VPS (ADR-0057 §5, #433): only reads, through
+ * the runner, with the secret that stays in `channel-egress`. A separate entrypoint, so whatever
+ * binds it can't open forms, read a secret, or reach the `claude-code` route's sessions.
+ */
+export interface RunnerSessionsContract {
+  /** Every session but the runner's own, with its state, its age and its details. */
+  list(): Promise<RunnerSessionsOutcome>;
+  /** The waits on the owner opened at `since` (epoch ms) or later, and still open. */
+  waits(since: number): Promise<RunnerWaitsOutcome>;
 }

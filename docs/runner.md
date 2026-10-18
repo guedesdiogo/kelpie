@@ -9,13 +9,16 @@ The runner is the process on the owner's VPS that Kelpie's Workers call to use t
   - `GET /health`, which answers its version and protocol version:
 
     ```json
-    { "ok": true, "version": "0.2.0", "protocol": 2 }
+    { "ok": true, "version": "0.3.0", "protocol": 3 }
     ```
 
   - the `claude-code` route's sessions (ADR-0037 §2, #295), described below:
     - `POST /sessions/:id/turns` runs a turn and streams its frames as NDJSON;
     - `POST /sessions/:id/tool-results` answers a tool call the turn asked for;
     - `DELETE /sessions/:id` closes a session.
+  - every other Claude Code session on the server, read only (ADR-0057, #433), described in "The server's Claude Code sessions" below:
+    - `GET /sessions` lists them;
+    - `GET /sessions/waits?since=<epoch ms>` lists the waits on the owner opened since then and still open.
 
 ## Claude Code sessions
 
@@ -47,6 +50,127 @@ The `claude-code` route reaches Claude through the runner ([ADR-0037](adr/0037-c
   - A turn counts toward the minute's when it is admitted, so a burst can't go past 30. A turn the runner then refuses gives its place back. Past 30, a turn answers 429 with `reason: "rate"`, and `Retry-After` in seconds.
 - **409:** a turn answers 409 with a `reason` when its session is `lost` (neither live nor on disk), `unfinished` (a turn still runs, or the last one failed) or `mismatched` (another conversation, prompt, model, tools or tool bound, or a new session's id already taken). Kelpie then starts a new session.
 - **Transcripts:** Claude Code keeps them under `~/.claude/projects/`, in the folder for the work folder (`KELPIE_RUNNER_WORK_DIR`).
+
+## The server's Claude Code sessions
+
+The runner tells Kelpie what every Claude Code session on the server is doing: the owner's, from the Claude app or a terminal, and Kelpie Code's once it exists ([ADR-0057](adr/0057-vps-claude-code-sessions.md)). It only reads: it never sends a session input, answers its prompts, or ends or archives it.
+
+- **Two sources:**
+  - **The session files** Claude Code keeps in `~/.claude/sessions/`, one per running session: its id, its folder, its title (`name`), its `status` and when that changed, when it started, what started it (`entrypoint`), and its process, checked with signal 0. Their fields aren't documented: a field that is missing, or holds a value the runner doesn't know, reads as unknown, never as an error.
+  - **The session-event hook,** which the owner installs in `~/.claude/settings.json` (below). It writes one line per event to a spool only the runner reads, and the last reply's excerpt.
+- **Left out:** the `claude-code` route's own sessions, those in the runner's work folder (`KELPIE_RUNNER_WORK_DIR`), compared by real path and by name, or whose id the runner holds.
+- **Each session's state,** with the time it began (ADR-0057 §4, and ADR-0059 for the session file's own waits):
+  - `waiting_permission` or `waiting_answer`: a wait is open. A session has one at most, opened by a hook or by its session file:
+    - **a hook's wait** opens on `PermissionRequest`, or on a `Notification` of type `permission_prompt` or `elicitation_dialog`. A prompt within 60 s of an open wait joins it, as the `permission_prompt` that follows a request by 6 s; a later one is the next prompt, and replaces it, so a lost close can't hide it. `AskUserQuestion`'s request and an elicitation are questions; anything else is a permission. It closes on the session's next `UserPromptSubmit`, `PermissionDenied`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `StopFailure` or `SessionEnd`, or when its session file turns `idle`, or `busy` again, after the wait opened. So an answer in the Claude app clears it too;
+    - **a file's wait** opens while the session file says `status: "waiting"`, at its `statusUpdatedAt`; a file that doesn't say since when opens none. Its kind comes from `waitingFor`: `permission prompt` is a permission, `input needed` a question, and anything else, or nothing, a wait of unknown kind, shown as waiting on an answer. Only that kind is kept, never Claude Code's text. It closes when the file no longer says `waiting`, or is gone, or on one of the hook events above after it opened;
+    - **the two are one wait** when both are open within 60 s of each other, as when the same prompt fires the hooks and changes the file: it opened at the earlier time, and has the hook's kind, which says more. So `/sessions/waits` gives each wait one session id and one opening time, and a notice tells it once;
+    - **further apart,** the later one is the next prompt, and the earlier is stale and dropped, as when a hook's close was lost: a file that says `waiting` again 90 s after a hook's wait opened is a new wait.
+  - `ended`: its process is gone, or a `SessionEnd` whose reason isn't `clear` or `resume` came, and no event since. A running process whose session file started after that end took the session up again, as the app does after a reboot: the end is stale, and the session's excerpt stays.
+  - otherwise, its session file's `status`: `working` for `busy`, `idle` for `idle`. The list shows the file's own status beside the state.
+  - **Archive candidates** (`archivable`): the app's sessions that ended, or have been idle for 3 hours or more. Only the app archives a session, so a terminal's shows only as ended.
+- **Each session's details:** its repository (the main checkout's folder name) and branch, read from git's own files in its folder, never by running git; what started it (`app` for `claude-desktop`, `terminal` for `cli`, else `unknown`); its title; its last GitHub pull request link, from its transcript's last 1 MiB, of which only the `pr-link` entries are read; and the excerpt of its last reply. A transcript not where its folder's name says is found in an index of the project folders, built once per list. The title, the repository and the branch go on one line: each break becomes a space, and what shows nothing (Unicode's default-ignorable characters: bidi controls, zero-width spaces and joiners, the BOM, fillers, tag characters; and the Braille blank) is removed, from the excerpt too. `channel-egress` refuses an answer whose one-line field still holds either.
+- **Secrets never leave.** The hook redacts the reply's first 16 KiB before it cuts it to 1,000 characters, and the runner redacts every text again on the way out, at most 4,096 characters of each, its own secret by value first, before it cuts the excerpt to 500. What shows nothing is removed first, in the hook and in the runner, so it can't split a key that would then pass redaction and show rejoined. Every pattern runs in linear time, so a hostile reply of any size costs milliseconds. So a secret only the runner knows, as a passphrase, is whole when it is redacted, even where it straddles the 500th character. What goes:
+  - the value of a name that says key, token, secret, pass, pwd, credential, auth, cookie, dsn or signature: `NAME=value`, a flag's `--name=value` or `--name value`, a YAML or header line's `name: value`, a quoted `"name": value`, and a header within a quoted command. Not the counts `tokens` names, `author`, `passed`, `passing` and `passes`, a flag such as `--passWithNoTests`, a line `pass: ` or `auth: ` whose value is a status (`ok`, `yes`, `no`, `true`, `false`, `on`, `off`, `passed`, `failed`, `green`, `red`, `n/a`, `all green`) or a count such as `458/458`, the shell's `PWD` and `OLDPWD`, a quoted `null`, `true`, `false` or number, nor a line that only says a type, as `token: string;`;
+  - a URL's password (`scheme://user:password@`, the user maybe empty, as `redis://:password@`), curl's `-u user:password`, a Slack webhook's path, and bearer and basic tokens that look like one: a digit, a symbol, or a capital past the first letter, so `Bearer authentication` stays;
+  - keys of a known format (`sk-`, `ghp_`, `gho_`, `github_pat_`, AWS's `AKIA` and `ASIA`) and PEM blocks;
+  - runs of 32 or more hex digits, but a commit's 40 lowercase ones right after a whole word that says so, with only separators between (spaces, `:`, `=`, `#`, `-`, `/`), as `commit `, `merged `, `sha: `, `HEAD = ` or `/commit/`. Not after `header` or `review`, nor after `sha1 secret: `;
+  - runs of 32 or more base64 characters, `/` and `+` included, that mix cases and digits, as AWS's secret keys and `openssl rand -base64`, unless they read as a path: two or more of their `/`-separated pieces are a word of four letters or more, maybe capitalized, maybe numbered. Of 30,000 random keys of each shape, about 0.13% of 40-character keys, 0.06% of 44-character ones, and none of 88 pass whole, nearly all for want of a digit or a case.
+
+  A PR link the redaction would change isn't shown.
+- **Bounds:** at most 200 sessions or waits per answer, 512 KiB for the list and 64 KiB for the waits. Past those, the runner drops excerpts, then titles, PR links, branches and repositories, from the least recent session up, then sessions, and says `truncated`. It reads at most 1,000 session files, and a transcript's last 1 MiB.
+- **The spool,** in `~/.local/state/kelpie-runner/session-events/`:
+  - a directory only the runner's user may open (`0700`), with files only it may read (`0600`). The runner ignores, and logs once, a spool directory others may open;
+  - `events.ndjson`, one line per event: its name, a notification's type or a `SessionEnd`'s reason, the session's id, whether a permission request is `AskUserQuestion`'s, and the time. Never a prompt, a tool's input or output, or a path. At 512 KiB it becomes `events.1.ndjson`, replacing the older one, so the spool keeps at most 1 MiB;
+  - `excerpt-<session id>.json`, each session's last reply, redacted and cut to 1,000 characters at a word. It is deleted when its session ends, when its session file is gone, or after 7 days. A file the runner can't delete is logged once, and never stops an answer;
+  - a session id is checked as a UUID before it names a file.
+- **Who calls these routes:** `channel-egress`'s read-only `RunnerSessions` entrypoint, with its calls `list()` and `waits(since)`. Master's tool and the notices that use it come with #434.
+
+### Installing the session-event hook
+
+The hook is `tools/runner/hooks/session-event.ts`, run with Bun from the runner's checkout. It reads the event from its input, writes the spool, and always exits 0, within 1.5 seconds even when its input never ends: Claude Code doesn't time out a hook that runs in the background. It never uses the network, and holds no secret. It takes about 25 ms and 26 MB per event, on every tool call, since `PostToolUse` is one of its events.
+
+Running sessions pick up an edit to `settings.json` without a restart (#416). On the server, as the runner's user, with the runner's checkout in `~/kelpie` and `jq` installed:
+
+```bash
+f=$(readlink -f ~/.claude/settings.json)
+if [ -z "$f" ] || [ ! -f "$f" ]; then
+  echo "settings.json unchanged: ~/.claude/settings.json doesn't lead to a file"
+else
+  [ -e "$f.bak" ] || cp -p "$f" "$f.bak"
+  hook='{"type":"command","command":"cd \"$HOME/kelpie/tools/runner\" && exec \"$HOME/.bun/bin/bun\" --no-env-file --config=hooks/bunfig.toml hooks/session-event.ts","async":true,"timeout":2}'
+  if cp -p "$f" "$f.new" && jq --argjson hook "$hook" '
+  def ours: any((.hooks // [])[]; (.command // "") | tostring
+    | contains("kelpie/tools/runner") and contains("hooks/session-event.ts"));
+  reduce ("Notification", "PermissionRequest", "PermissionDenied", "PostToolUse",
+          "PostToolUseFailure", "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd") as $event
+    (.; .hooks = (.hooks // {})
+      | .hooks[$event] = (((.hooks[$event] // []) | map(select(ours | not))) + [{ hooks: [$hook] }]))
+  ' "$f" > "$f.new" && jq -e . "$f.new" > /dev/null; then
+    mv "$f.new" "$f"
+  else
+    rm -f "$f.new"
+    echo "settings.json unchanged"
+  fi
+fi
+```
+
+- **It keeps the file safe:** it follows `settings.json` to the real file when it is a symlink, so the link stays. It backs that file up to `settings.json.bak` unless a backup is already there, writes the result beside it with the same mode, checks that it is JSON, and only then moves it over. A `settings.json` that isn't JSON, or a link that leads to no file, stays as it was, and the command says `settings.json unchanged`.
+- **It adds one group per event,** beside the hooks already there, and replaces its own on a second run: any hook whose command names `kelpie/tools/runner` and `hooks/session-event.ts`.
+- **The command moves to the runner's checkout first.** Claude Code runs a hook from the session's folder, and Bun would load that folder's `bunfig.toml`, its `preload` included, and its `.env`: a repository could then run code as you on its first event. So the hook runs from `~/kelpie/tools/runner`, with the empty `hooks/bunfig.toml` as its settings and no `.env`. Claude Code runs the command through `sh`, which expands `$HOME`.
+
+Each event gets this entry:
+
+```json
+{
+  "hooks": {
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$HOME/kelpie/tools/runner\" && exec \"$HOME/.bun/bin/bun\" --no-env-file --config=hooks/bunfig.toml hooks/session-event.ts",
+            "async": true,
+            "timeout": 2
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The same goes under `PermissionRequest`, `PermissionDenied`, `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit`, `Stop`, `StopFailure` and `SessionEnd`. Updating the runner's checkout updates the hook too. The runner's tests run both snippets on made-up settings (`tools/runner/test/docs.test.ts`).
+
+**Removing it** turns the hooks' waits, the endings it reports and the excerpts off. The list still shows each session's busy or idle state, and the waits its session file says. It leaves every other hook as it was, with the same care:
+
+```bash
+f=$(readlink -f ~/.claude/settings.json)
+if [ -z "$f" ] || [ ! -f "$f" ]; then
+  echo "settings.json unchanged: ~/.claude/settings.json doesn't lead to a file"
+else
+  [ -e "$f.bak" ] || cp -p "$f" "$f.bak"
+  if cp -p "$f" "$f.new" && jq '
+  def ours: (.command // "") | tostring
+    | contains("kelpie/tools/runner") and contains("hooks/session-event.ts");
+  def mine: any((.hooks // [])[]; ours);
+  . as $before
+  | if (.hooks | type) != "object" then . else
+      reduce (.hooks | keys[]) as $event (.;
+        if (.hooks[$event] | type) == "array" and any(.hooks[$event][]; mine) then
+          .hooks[$event] |= map(if mine then (.hooks |= map(select(ours | not))) | select(.hooks != []) else . end)
+          | if .hooks[$event] == [] then del(.hooks[$event]) else . end
+        else . end)
+      | if .hooks == {} and $before.hooks != {} then del(.hooks) else . end
+    end
+  ' "$f" > "$f.new" && jq -e . "$f.new" > /dev/null; then
+    mv "$f.new" "$f"
+    rm -rf ~/.local/state/kelpie-runner/session-events
+  else
+    rm -f "$f.new"
+    echo "settings.json unchanged"
+  fi
+fi
+```
 
 ## Setting it up
 
@@ -103,6 +227,7 @@ The service reads these from its environment, through `Environment=` lines in th
 | `KELPIE_RUNNER_PORT` | `47832` | the loopback port, which the VPC Service points at |
 | `KELPIE_RUNNER_SECRET_FILE` | `~/.config/kelpie-runner/secret` | the secret file |
 | `KELPIE_RUNNER_WORK_DIR` | `~/.local/state/kelpie-runner/claude-code` | the empty folder Claude Code runs in, created `0700`; its sessions' transcripts are kept for this folder, apart from the owner's own sessions. A folder already there must be a directory of the runner's user that no one else may open, or the runner doesn't start (exit 78) |
+| `KELPIE_RUNNER_CLAUDE_DIR` | `~/.claude` | Claude Code's own folder, whose `sessions/` and `projects/` the runner reads for the server's sessions |
 
 ## The tunnel and the VPC Service
 
@@ -177,7 +302,7 @@ A rollback to a build deployed before the variable was set leaves `channel-egres
 The `claude-code` route is off until you turn it on (#295, #421): ask Master, which asks for your confirmation, or use the admin API's `setClaudeCode` command (`docs/admin-api.md`, "The claude-code route").
 - **What it spends:** each turn on it spends the weekly usage limit of the claude.ai account logged in on this server, which your own coding with Claude Code here shares (ADR-0037 §5). If the account has extra usage on, a turn may draw from it.
 - **What it serves:** your own direct conversations with Kelpie's agents, after the Anthropic API route fails, or first where the model settings name `claude-code` for conversations. Tasks and memory never reach it.
-- **Before you turn it on:** `describeRunner` must answer `ready`, on protocol 2, and the account must be logged in. Until then, every turn on the route fails, with a notice, and the tier's next route answers it.
+- **Before you turn it on:** `describeRunner` must answer `ready`, on protocol 3, and the account must be logged in. Until then, every turn on the route fails, with a notice, and the tier's next route answers it.
 - **Turning it off** stops new turns from reaching the runner. Its sessions close by themselves after 15 minutes.
 
 ## Operating it
