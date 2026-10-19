@@ -71,8 +71,9 @@ export const proposals = sqliteTable(
     createdAt: integer("created_at").notNull(),
     expiresAt: integer("expires_at").notNull(),
     /**
-     * When an approval claimed it, then when the alarm last looked at it: the alarm looks again
-     * five minutes after this, or an hour after it once its target couldn't be read past expiry.
+     * When an approval claimed it, then when the alarm last looked at it; the alarm looks again
+     * five minutes after this. Once its target couldn't be read past expiry, the alarm stores a
+     * time 55 minutes ahead instead, so it looks again an hour later.
      */
     claimedAt: integer("claimed_at"),
     decidedAt: integer("decided_at"),

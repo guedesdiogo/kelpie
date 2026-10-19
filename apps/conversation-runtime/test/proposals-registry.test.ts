@@ -172,10 +172,13 @@ describe("Registry proposals (#302)", () => {
     ).toEqual(tooMany);
   });
 
-  it("counts an approval being applied against the caps until it expires", async () => {
+  it("counts an approval being applied as pending for its target's cap", async () => {
     const stub = await withAgents("proposals-caps-applying");
     const id = await idOf(await stub.propose(proposal(), byMaster));
-    await stub.claimProposal(id, page);
+    expect(await stub.claimProposal(id, page)).toMatchObject({
+      ok: true,
+      value: { status: "applying" },
+    });
 
     expect(
       await stub.propose(proposal({ changes: { remit: "x" }, before: { remit: "" } }), byMaster),
@@ -655,11 +658,14 @@ describe("Registry proposals' abandoned approvals (#302)", () => {
       "released",
       "expired",
     ]);
-    // And its proposer is told, in that same alarm.
+    // And telling its proposer is tried in that same alarm; it fails here, with no conversation.
     const told = await runInDurableObject(stub, (_instance, state) =>
-      state.storage.sql.exec("SELECT tell_attempts FROM proposals WHERE id = ?", id).one(),
+      state.storage.sql
+        .exec("SELECT tell_attempts, next_tell_at FROM proposals WHERE id = ?", id)
+        .one(),
     );
     expect(told.tell_attempts).toBe(1);
+    expect(told.next_tell_at).not.toBeNull();
   });
 
   it("puts one back to pending when its target doesn't hold the change", async () => {

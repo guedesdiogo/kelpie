@@ -130,7 +130,7 @@ Neither Hermes nor ai-memory expires a proposal, and neither tells the proposer 
 
 ## Consequences
 
-- **An abandoned approval is labeled by the target's values,** not by the target's audit. When another approved change to the same fields lands before the alarm reads the target, the first may read as expired without its change applied, or as applied, though the target's audit shows the first one's `via: proposal:<id>`. The target's state is always one the owner approved. An approval whose target stays unreadable has no end until the target is deleted, and its proposer isn't told meanwhile.
+- **An abandoned approval is labeled by the target's values,** not by the target's audit. When another approved change to the same fields lands before the alarm reads the target, the first may read as expired, though the target's audit shows its `via: proposal:<id>`, or as applied, though the audit shows only the other approval's. The target's state is always one the owner approved. An approval whose target stays unreadable has no end until the target is deleted, and its proposer isn't told meanwhile.
 - **What the owner sees:**
   - a notice in their conversation with Master, after its reply, with the page's link;
   - the page, where the whole change shows before they decide;
