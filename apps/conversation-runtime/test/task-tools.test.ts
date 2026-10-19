@@ -227,7 +227,7 @@ describe("what a task's run is given (#335)", () => {
 
   it("leaves Master's configuration tools out of it, and memory writes", async () => {
     const configuration = configurationTools({} as never, {
-      roleOf: async () => "main",
+      roleOf: async () => "master",
       adminOrigin: "https://admin.example",
     });
     expect(await configuration.tools("kelpie", { channel: "task" })).toEqual([]);

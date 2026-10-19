@@ -1,4 +1,4 @@
-// The handoff evaluation's roster and prompts (#287). A bakery owner's main agent owns four
+// The handoff evaluation's roster and prompts (#287). A bakery owner's Master owns four
 // specialists with remits, and one with none. Each prompt expects the specialist it belongs to, or
 // none: the near misses touch a remit's topic without being its work.
 

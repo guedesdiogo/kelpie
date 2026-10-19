@@ -55,7 +55,7 @@ export class AgentEditor extends WorkerEntrypoint<Env> implements AgentEditorCon
     return result.ok ? { ok: true, value: result.value.settings.remit } : result;
   }
 
-  /** The main agent's is always "principal": the command refuses it, by the agent's role. */
+  /** Master's is always "Master": the command refuses it, by the agent's role. */
   async setSpecialty(
     actor: Actor,
     agentId: string,

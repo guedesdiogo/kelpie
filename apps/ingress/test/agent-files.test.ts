@@ -8,7 +8,7 @@ const ORIGIN = "https://ingress.test";
 const owner: Admission = { admitted: true, userId: "u-owner", role: "owner", timeZone: null };
 const actor = { userId: "u-owner", role: "owner", via: "webchat" };
 const ROLES: Record<string, string> = {
-  kelpie: "main",
+  kelpie: "master",
   agenda: "specialist",
   "helper-1": "subagent",
   legacy: "",

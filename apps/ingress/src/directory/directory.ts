@@ -17,7 +17,7 @@ import {
   type TimeZoneResult,
 } from "@kelpie/access";
 import { type ChannelId, MAX_LANGUAGE_TAG_CHARS } from "@kelpie/channels";
-import { REGISTRY_NAME, type RegistryContract, SETUP_AGENT_ID } from "@kelpie/config";
+import { REGISTRY_NAME, RETIRED_AGENT_ID, type RegistryContract } from "@kelpie/config";
 import { and, count, eq, gt, isNull, lt, or } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
@@ -428,7 +428,7 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
 
   /**
    * Decides whether a sender may reach an agent. The owner reaches every agent whose chat is on:
-   * Master and the specialists the owner opened (ADR-0036 §1, #288), never the retired setup agent
+   * Master and the specialists the owner opened (ADR-0036 §1, #288), never the retired id
    * (ADR-0048). The admin API's `*` names no agent. Other roles don't exist until multi-user lands;
    * then they'll need a grant for `agentId` (ADR-0015).
    */
@@ -451,7 +451,7 @@ export class Directory extends DurableObject<Env> implements DirectoryContract {
       )
       .get();
     if (!user) return { admitted: false, reason: "unknown_identity" };
-    if (user.role !== "owner" || agentId === SETUP_AGENT_ID) {
+    if (user.role !== "owner" || agentId === RETIRED_AGENT_ID) {
       return { admitted: false, reason: "no_grant" };
     }
     if (agentId !== "*") {

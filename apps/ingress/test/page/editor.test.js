@@ -32,12 +32,19 @@ const KELPIE = {
 const AGENDA = {
   id: "agenda",
   name: "Agenda",
-  main: false,
+  master: false,
   mascot: { ...KELPIE, color: "fawn", shape: "pebble" },
   specialty: "Agenda e e-mail",
   remit: "Books meetings.",
 };
-const MAIN = { id: "kelpie", name: "Kelpie", main: true, mascot: KELPIE, specialty: "", remit: "" };
+const MASTER = {
+  id: "kelpie",
+  name: "Kelpie",
+  master: true,
+  mascot: KELPIE,
+  specialty: "",
+  remit: "",
+};
 
 let editor;
 let sent;
@@ -213,16 +220,16 @@ describe("the Profile section", () => {
     expect($(".editor-specialty").textContent).toBe("Agenda");
   });
 
-  it("keeps the main agent's specialty locked, and says why", () => {
-    open(MAIN);
+  it("keeps Master's specialty locked, and says why", () => {
+    open(MASTER);
     tab("Profile").click();
     const specialty = $("#editor-specialty");
     expect(specialty.readOnly).toBe(true);
-    expect(specialty.value).toBe("main");
+    expect(specialty.value).toBe("Master");
     expect($(`#${specialty.getAttribute("aria-describedby")}`).textContent).toBe(
       T.editor.specialtyLocked,
     );
-    expect($(".editor-specialty").textContent).toBe("main");
+    expect($(".editor-specialty").textContent).toBe("Master");
   });
 
   it("won't save a name that shows nothing, and says what to write", async () => {
@@ -466,8 +473,8 @@ describe("saving", () => {
     expect(shown.at(-1)).toEqual({ text: "Agenda: change undone" });
   });
 
-  it("undoes only the profile's fields it changed, never the main agent's specialty", async () => {
-    open(MAIN);
+  it("undoes only the profile's fields it changed, never Master's specialty", async () => {
+    open(MASTER);
     tab("Profile").click();
     const remit = $("#editor-remit");
     remit.value = "Your day.";
@@ -588,11 +595,11 @@ describe("closing with changes", () => {
   it("asks before opening another agent's editor over its changes", () => {
     open();
     radios("Shape")[0].click();
-    expect(open(MAIN)).toBe(false);
+    expect(open(MASTER)).toBe(false);
     expect(editor.agentId).toBe("agenda");
     expect(footer().textContent).toContain("Discard 1 change?");
     button("Discard").click();
-    expect(open(MAIN)).toBe(true);
+    expect(open(MASTER)).toBe(true);
     expect(editor.agentId).toBe("kelpie");
   });
 });

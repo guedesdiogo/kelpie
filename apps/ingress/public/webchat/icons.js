@@ -110,7 +110,7 @@ const PATHS = {
 };
 
 /**
- * The mascot's outline on a 20 px grid, as the main mascot now looks: round ears (ADR-0049), its
+ * The mascot's outline on a 20 px grid, as Master's mascot now looks: round ears (ADR-0049), its
  * ears and eyes filled. The shapes of its motion setting, as the design system draws them.
  */
 const BODY = [
