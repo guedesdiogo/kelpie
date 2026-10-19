@@ -4,6 +4,7 @@ import {
   type ChannelCapabilities,
   type ChannelEgressContract,
   type ChannelId,
+  type RunnerSessionsContract,
   type SendOutcome,
   type SetupFormsContract,
   typingRenewIntervalMs,
@@ -40,6 +41,7 @@ import { proposalTools } from "./proposal-tools.ts";
 import { subagentTools } from "./subagent-tools.ts";
 import { taskTools } from "./task-tools.ts";
 import type { ToolActivity, ToolProvider } from "./tools.ts";
+import { vpsSessionsTools } from "./vps-sessions.ts";
 
 /**
  * One model call: its events, the router's fallbacks among them, and a way to stop it. A route that
@@ -346,6 +348,11 @@ function productionPorts(env: Env): ConversationPorts {
       configurationTools(commands, {
         roleOf: async (id) => (await registry.get(id))?.role ?? null,
         adminOrigin: env.ADMIN_ORIGIN,
+      }),
+      // Master's view of the VPS's Claude Code sessions (ADR-0057 §5, #434), through
+      // channel-egress's RunnerSessions, which only reads them.
+      vpsSessionsTools(env.RUNNER_SESSIONS as unknown as RunnerSessionsContract, {
+        roleOf: async (id) => (await registry.get(id))?.role ?? null,
       }),
       // Temporary subagents (#290): an agent with spawn creates them, within its own limits.
       subagentTools({

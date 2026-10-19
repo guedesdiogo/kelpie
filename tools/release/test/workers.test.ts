@@ -61,6 +61,19 @@ describe("WORKERS", () => {
     expect(binders).toEqual(["conversation-runtime"]);
   });
 
+  // The VPS's Claude Code sessions reach Master's tool and the notices of waits (ADR-0057 §5,
+  // #434): their titles and excerpts are the owner's work, so only conversation-runtime may bind
+  // the entrypoint that reads them.
+  it("binds channel-egress's RunnerSessions from conversation-runtime alone", () => {
+    const binders = WORKERS.filter((worker) =>
+      (configs.get(worker.app)?.services ?? []).some(
+        (service) =>
+          service.service === "kelpie-channel-egress" && service.entrypoint === "RunnerSessions",
+      ),
+    ).map((worker) => worker.app);
+    expect(binders).toEqual(["conversation-runtime"]);
+  });
+
   // A binding to a missing entrypoint deploys, and fails only when called: ingress's DEPLOY_PROBE,
   // for one, is called only by the deploy's deep probe (#234). Tests stub these Workers, so the
   // names are checked here against the real ones.

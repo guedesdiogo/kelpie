@@ -1,5 +1,9 @@
 import type { Remote } from "@kelpie/access";
-import type { ChannelEgressContract } from "@kelpie/channels";
+import type {
+  ChannelEgressContract,
+  RunnerSessionsContract,
+  RunnerVpsWait,
+} from "@kelpie/channels";
 import type {
   Actor,
   AgentConfig,
@@ -63,6 +67,14 @@ import { readRole } from "../registry/schema.ts";
 import { identitySection } from "./identity.ts";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
+import {
+  bounded,
+  checkWaits,
+  NEW_WATCH,
+  type SessionWatch,
+  shouldArm,
+  WATCH_INTERVAL_S,
+} from "./session-watch.ts";
 import { composeSystemPrompt, hasVaultContext } from "./system-prompt.ts";
 import {
   kelpieWriter,
@@ -90,6 +102,26 @@ let botPhotosForTesting: BotPhotos | undefined;
 export function replaceChannelEgressForTesting(egress: BotPhotos | undefined): void {
   botPhotosForTesting = egress;
 }
+
+type RunnerWaits = Pick<RunnerSessionsContract, "waits">;
+
+let runnerSessionsForTesting: RunnerWaits | undefined;
+
+/**
+ * Tests run in the Worker's isolate and swap channel-egress's RunnerSessions with this, for the
+ * check of the VPS's waits (#434). Production never calls it.
+ */
+export function replaceRunnerSessionsForTesting(sessions: RunnerWaits | undefined): void {
+  runnerSessionsForTesting = sessions;
+}
+
+/** How long the check of the VPS's waits gives channel-egress, which gives the runner 10 s. */
+const WAITS_TIMEOUT_MS = 12_000;
+/**
+ * How long a notice of a wait gives its conversations, Telegram's and the webchat's together. One
+ * that takes longer may still go out, so it counts as told.
+ */
+const NOTICE_TIMEOUT_MS = 4_000;
 
 /**
  * Starts a run of a task the agent claimed (#54). The run reports back through `heartbeatTask` and
@@ -379,6 +411,8 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     const pinned = this.#get<string | null>("creator", null);
     // A role cached before ADR-0060 reads as `master` too.
     const role = pinned !== null ? "subagent" : readRole(listed.value?.role);
+    // Master's turns keep the check of the VPS's waits running (ADR-0057 §5, #434).
+    if (role === "master") await this.#armSessionWatch();
     const owner = pinned ?? listed.value?.owner ?? null;
     const limits = role === "subagent" && owner ? await this.#creatorLimits(owner) : null;
     // A subagent never runs above its creator (ADR-0036 §5), field by field, at every turn.
@@ -734,6 +768,125 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       console.error("AgentHost: a task's news wasn't told", errorName(error));
       return false;
     }
+  }
+
+  /**
+   * Kelpie's check of the waits on the owner (ADR-0057 §5, #434), as the SDK runs it once a minute:
+   * it asks channel-egress's RunnerSessions for the waits opened since a little before its last
+   * answer, and tells the owner of each one not told yet. It stops while the runner isn't
+   * connected, after three outdated answers in a row, or once this agent isn't Master; Master's
+   * next turn starts it again (`#armSessionWatch`).
+   */
+  async watchSessions(): Promise<void> {
+    const agentId = this.ctx.id.name ?? "";
+    try {
+      const sources = this.#identitySources();
+      const sessions =
+        runnerSessionsForTesting ?? (this.env.RUNNER_SESSIONS as unknown as RunnerWaits);
+      const watch = await checkWaits(
+        this.#get<SessionWatch>("sessionWatch", NEW_WATCH),
+        {
+          isMaster: async () =>
+            readRole((await bounded(sources.agent(agentId), IDENTITY_TIMEOUT_MS))?.role) ===
+            "master",
+          waits: (since) => bounded(sessions.waits(since), WAITS_TIMEOUT_MS),
+          // Only the deadline rejects: a slow send may yet land, so it isn't sent again.
+          tell: (wait) =>
+            bounded(this.#tellWait(agentId, wait), NOTICE_TIMEOUT_MS).catch(() => {
+              console.warn("AgentHost: a notice of a wait timed out; it counts as told");
+              return true;
+            }),
+          keep: (kept) => this.#put("sessionWatch", kept),
+        },
+        Date.now(),
+      );
+      // The schedule goes before the stop is kept, so a turn of Master's that arms the check
+      // meanwhile never leaves it marked running without a schedule.
+      if (watch.stopped) await this.#cancelSessionWatch();
+      this.#put("sessionWatch", watch);
+    } catch (error) {
+      console.error("AgentHost: the check of the VPS's waits failed", errorName(error));
+    }
+  }
+
+  /**
+   * Starts the check of the VPS's waits, from a turn of Master's, unless it runs already or an
+   * outdated runner stopped it within the hour. The SDK keeps one schedule per interval, so this
+   * never doubles it. Best effort: a turn never waits on its failure.
+   */
+  async #armSessionWatch(): Promise<void> {
+    try {
+      if (!shouldArm(this.#get<SessionWatch>("sessionWatch", NEW_WATCH), Date.now())) return;
+      await this.scheduleEvery(WATCH_INTERVAL_S, "watchSessions");
+      // Read again: a check may have written it meanwhile, and what it told stays told.
+      const watch = this.#get<SessionWatch>("sessionWatch", NEW_WATCH);
+      if (watch.stopped) {
+        this.#put("sessionWatch", { ...watch, stopped: null });
+        // A check that stopped meanwhile may have cancelled the schedule just found.
+        await this.scheduleEvery(WATCH_INTERVAL_S, "watchSessions");
+      }
+    } catch (error) {
+      console.warn("AgentHost: the check of the VPS's waits didn't start", errorName(error));
+    }
+  }
+
+  async #cancelSessionWatch(): Promise<void> {
+    for (const schedule of await this.listSchedules()) {
+      if (schedule.callback === "watchSessions") await this.cancelSchedule(schedule.id);
+    }
+  }
+
+  /**
+   * Tells the owner of one wait in their conversation with this agent (#434): a fixed notice,
+   * which the conversation writes in its own language. False when none took it; it never throws.
+   */
+  async #tellWait(agentId: string, wait: RunnerVpsWait): Promise<boolean> {
+    const notice = { kind: wait.kind, title: wait.title, repository: wait.repository };
+    let names: string[];
+    try {
+      names = this.#noticeConversations(agentId);
+    } catch (error) {
+      console.warn("AgentHost: the conversations for a wait weren't read", errorName(error));
+      return false;
+    }
+    for (const name of names) {
+      try {
+        if (await this.env.CONVERSATION_AGENT.getByName(name).sessionWait(agentId, notice)) {
+          return true;
+        }
+      } catch (error) {
+        console.warn("AgentHost: a conversation wasn't told of a wait", errorName(error));
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Where a notice reaches the owner (#434): this agent's latest conversation on each channel,
+   * Telegram's before the webchat's, which shows it only while its page is open. Kelpie serves the
+   * owner alone, in direct chats (ADR-0015), so each is theirs; a task's has no one in it.
+   */
+  #noticeConversations(agentId: string): string[] {
+    const rows = this.#db
+      .select({ name: schema.conversations.name })
+      .from(schema.conversations)
+      .where(
+        and(
+          isNotNull(schema.conversations.lastTurnAt),
+          notLike(schema.conversations.name, `${agentId}:task:%`),
+        ),
+      )
+      .orderBy(desc(schema.conversations.lastTurnAt))
+      .all();
+    const latest = new Map<string, string>();
+    for (const { name } of rows) {
+      if (!isConversationOf(agentId, name)) continue;
+      const channel = name.slice(agentId.length + 1).split(":", 1)[0] ?? "";
+      if (!latest.has(channel)) latest.set(channel, name);
+    }
+    return [...latest]
+      .sort(([a], [b]) => Number(a === "webchat") - Number(b === "webchat"))
+      .map(([, name]) => name);
   }
 
   /**
@@ -1249,6 +1402,14 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     this.#db
       .delete(schema.setupWaits)
       .where(lte(schema.setupWaits.until, now - SETUP_WAIT_GRACE_MS))
+      .run();
+  }
+
+  #put(key: string, value: unknown): void {
+    this.#db
+      .insert(schema.state)
+      .values({ key, value })
+      .onConflictDoUpdate({ target: schema.state.key, set: { value } })
       .run();
   }
 

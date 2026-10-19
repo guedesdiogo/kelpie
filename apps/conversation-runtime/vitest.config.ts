@@ -28,7 +28,9 @@ export class ContextStore extends WorkerEntrypoint {
 export default { fetch: () => new Response(null, { status: 404 }) };`,
     },
     // channel-egress answers that no agent has a bot, for the photo every AgentHost asks for when it
-    // starts (#388). It has no other method: tests replace the channel ports.
+    // starts (#388), and that no runner is connected, for the check of the VPS's waits that
+    // Master's turns start (#434). It has no other method: tests replace the channel ports, and
+    // the runner's sessions with fakes.
     {
       name: "kelpie-channel-egress",
       modules: true,
@@ -36,6 +38,14 @@ export default { fetch: () => new Response(null, { status: 404 }) };`,
       script: `import { WorkerEntrypoint } from "cloudflare:workers";
 export class ChannelEgress extends WorkerEntrypoint {
   updateBotPhoto() {
+    return { ok: false, reason: "not_connected" };
+  }
+}
+export class RunnerSessions extends WorkerEntrypoint {
+  list() {
+    return { ok: false, reason: "not_connected" };
+  }
+  waits() {
     return { ok: false, reason: "not_connected" };
   }
 }
