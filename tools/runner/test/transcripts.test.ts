@@ -62,7 +62,7 @@ describe("transcriptFinder", () => {
     expect(listed).toBe(1);
   });
 
-  it("finds 200 sessions' transcripts among 1,000 project folders quickly", () => {
+  it("finds 200 sessions' transcripts among 1,000 project folders, the first lookup paying for all", () => {
     const ids = Array.from(
       { length: 200 },
       (_, index) => `${String(index).padStart(8, "0")}-1111-4222-8333-444444444444`,
@@ -74,10 +74,25 @@ describe("transcriptFinder", () => {
       if (folder >= 800) writeFileSync(join(dir, `${id}.jsonl`), "");
       else writeFileSync(join(dir, "notes.txt"), "");
     }
-    const started = performance.now();
-    const find = transcriptFinder(vps.claudeDir);
-    const found = ids.map((id) => find(id, `/nowhere/${id}`));
-    expect(performance.now() - started).toBeLessThan(200);
+    // The best of three runs, each with a new finder, so a pause of the collector doesn't count.
+    let first = Number.POSITIVE_INFINITY;
+    let rest = Number.POSITIVE_INFINITY;
+    let found: (string | null)[] = [];
+    for (let run = 0; run < 3; run += 1) {
+      const find = transcriptFinder(vps.claudeDir);
+      const lookUp = (id: string) => find(id, `/nowhere/${id}`);
+      let started = performance.now();
+      found = ids.slice(0, 1).map(lookUp);
+      first = Math.min(first, performance.now() - started);
+      started = performance.now();
+      found.push(...ids.slice(1).map(lookUp));
+      rest = Math.min(rest, performance.now() - started);
+    }
+    // The first lookup reads the 1,000 folders into the index, and the other 199 cost about a
+    // tenth of it, under coverage too. Scanning the folders on each lookup made them cost 95 to 216
+    // times as much. The bound sits far from both, a ratio holds on a slow CI runner where a fixed
+    // bound didn't, and the floor keeps a fast first lookup from turning noise into a failure.
+    expect(rest / Math.max(first, 5)).toBeLessThan(4);
     expect(found.every((path) => path?.endsWith(".jsonl"))).toBe(true);
   });
 
