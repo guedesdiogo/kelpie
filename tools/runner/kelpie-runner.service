@@ -1,11 +1,12 @@
-# Kelpie's runner, as a systemd user service (docs/runner.md). Copy it to
-# ~/.config/systemd/user/ and adjust the two paths if the checkout or Bun live elsewhere.
+# Kelpie's runner, as a systemd user service (docs/runner.md). Copy it to ~/.config/systemd/user/.
+# It runs the checkout in ~/Repos/kelpie with the Bun in ~/.bun: adjust both paths if they live
+# elsewhere.
 [Unit]
 Description=Kelpie's runner
 
 [Service]
 Type=simple
-WorkingDirectory=%h/kelpie
+WorkingDirectory=%h/Repos/kelpie
 ExecStart=%h/.bun/bin/bun tools/runner/src/main.ts
 Restart=on-failure
 RestartSec=5

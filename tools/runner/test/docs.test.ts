@@ -18,10 +18,15 @@ import { HOOK_COMMAND } from "../src/hook.ts";
 import { HOOK_EVENTS } from "../src/spool.ts";
 
 // docs/runner.md's snippets that install and remove the session-event hook, run as written on a
-// made-up `~/.claude/settings.json`, with bash and jq.
+// made-up `~/.claude/settings.json`, with bash and jq. And the one checkout the docs, the unit and
+// the hook's command all name.
 
 const DOCS = readFileSync(
   fileURLToPath(new URL("../../../docs/runner.md", import.meta.url)),
+  "utf8",
+);
+const UNIT = readFileSync(
+  fileURLToPath(new URL("../kelpie-runner.service", import.meta.url)),
   "utf8",
 );
 const BLOCKS = [...DOCS.matchAll(/```bash\n([\s\S]*?)```/g)].map((match) => match[1] as string);
@@ -81,6 +86,16 @@ describe("docs/runner.md's hook snippets", () => {
     expect(run(INSTALL).status).toBe(0);
     expect(readFileSync(file, "utf8")).toBe(once);
     expect(existsSync(`${file}.new`)).toBe(false);
+  });
+
+  it("replace a hook installed from the checkout's old folder, ~/kelpie", () => {
+    const old = HOOK_COMMAND.replace("$HOME/Repos/kelpie/", "$HOME/kelpie/");
+    expect(old).toContain('cd "$HOME/kelpie/tools/runner"');
+    const hook = { type: "command", async: true, timeout: 2 };
+    write({ hooks: { Stop: [{ hooks: [{ ...hook, command: old }] }] } });
+    expect(run(INSTALL).status).toBe(0);
+    const hooks = settings().hooks as Record<string, unknown>;
+    expect(hooks.Stop).toEqual([{ hooks: [{ ...hook, command: HOOK_COMMAND }] }]);
   });
 
   it("remove it again, leaving the settings as they were", () => {
@@ -161,5 +176,15 @@ describe("docs/runner.md's hook snippets", () => {
     const original = readFileSync(file, "utf8");
     run(INSTALL);
     expect(readFileSync(`${file}.bak`, "utf8")).toBe(original);
+  });
+});
+
+describe("the runner's checkout", () => {
+  it("is ~/Repos/kelpie, for the docs, the unit and the hook's command alike", () => {
+    expect(UNIT).toMatch(/^WorkingDirectory=%h\/Repos\/kelpie$/m);
+    expect(HOOK_COMMAND).toMatch(/^cd "\$HOME\/Repos\/kelpie\/tools\/runner" && /);
+    expect(DOCS).toContain("git clone https://github.com/guedesdiogo/kelpie.git ~/Repos/kelpie\n");
+    expect(DOCS).toContain("cp ~/Repos/kelpie/tools/runner/kelpie-runner.service ");
+    expect(`${DOCS}\n${UNIT}\n${HOOK_COMMAND}`).not.toMatch(/(~|\$HOME|%h)\/kelpie(?![\w-])/);
   });
 });
