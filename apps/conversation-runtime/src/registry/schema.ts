@@ -70,7 +70,10 @@ export const proposals = sqliteTable(
     status: text("status", { enum: PROPOSAL_STATUSES }).notNull(),
     createdAt: integer("created_at").notNull(),
     expiresAt: integer("expires_at").notNull(),
-    /** When an approval claimed it; one no finish followed for five minutes, the alarm settles. */
+    /**
+     * When an approval claimed it, then when the alarm last looked at it: the alarm looks again
+     * five minutes after this, or an hour after it once its target couldn't be read past expiry.
+     */
     claimedAt: integer("claimed_at"),
     decidedAt: integer("decided_at"),
     /** The person who decided it; null when it expired or went void by itself. */

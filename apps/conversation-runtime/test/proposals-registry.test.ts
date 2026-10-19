@@ -172,6 +172,16 @@ describe("Registry proposals (#302)", () => {
     ).toEqual(tooMany);
   });
 
+  it("counts an approval being applied against the caps until it expires", async () => {
+    const stub = await withAgents("proposals-caps-applying");
+    const id = await idOf(await stub.propose(proposal(), byMaster));
+    await stub.claimProposal(id, page);
+
+    expect(
+      await stub.propose(proposal({ changes: { remit: "x" }, before: { remit: "" } }), byMaster),
+    ).toEqual({ ok: false, reason: "too_many" });
+  });
+
   it("refuses once, and a repeat or an approval after it changes nothing", async () => {
     const stub = await withAgents("proposals-refuse");
     const id = await idOf(await stub.propose(proposal(), byMaster));
@@ -542,7 +552,9 @@ describe("Registry proposals' abandoned approvals (#302)", () => {
       state.storage.sql.exec("SELECT status, claimed_at FROM proposals WHERE id = ?", id).one(),
     );
     expect(row.status).toBe("applying");
+    // Five minutes later before its expiry, not an hour.
     expect(Number(row.claimed_at)).toBeGreaterThan(Date.now() - 60_000);
+    expect(Number(row.claimed_at)).toBeLessThan(Date.now() + 60_000);
   });
 
   it("doesn't release an approval that finished during its read", async () => {
@@ -611,6 +623,8 @@ describe("Registry proposals' abandoned approvals (#302)", () => {
     );
     expect(row.status).toBe("applying");
     expect(Number(row.claimed_at)).toBeGreaterThan(Date.now() + 50 * 60_000);
+    const alarm = await runInDurableObject(stub, (_instance, state) => state.storage.getAlarm());
+    expect(alarm).toBe(Number(row.claimed_at) + 5 * 60_000);
     // It holds no cap any more: its proposer may propose about that agent again.
     expect(await stub.propose(proposal({ target: "ab-unread-due" }), byMaster)).toMatchObject({
       ok: true,
@@ -641,6 +655,11 @@ describe("Registry proposals' abandoned approvals (#302)", () => {
       "released",
       "expired",
     ]);
+    // And its proposer is told, in that same alarm.
+    const told = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql.exec("SELECT tell_attempts FROM proposals WHERE id = ?", id).one(),
+    );
+    expect(told.tell_attempts).toBe(1);
   });
 
   it("puts one back to pending when its target doesn't hold the change", async () => {

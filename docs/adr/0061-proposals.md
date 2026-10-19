@@ -60,11 +60,13 @@ Neither Hermes nor ai-memory expires a proposal, and neither tells the proposer 
 
 - **It waits 72 hours,** then expires, and nothing changes.
 - **Its statuses:** `pending`, `applying` while an approval runs, then `applied`, `refused`, `expired`, `conflict` or `void`.
-- **The caps,** checked by the Registry in one synchronous step, count a proposal until it expires, an approval still being applied included:
+- **The caps,** checked by the Registry in one synchronous step:
   - one pending per proposer and target;
   - three pending per proposer;
-  - ten a day per proposer;
-  - twenty pending in all.
+  - twenty pending in all;
+  - ten made a day per proposer, whatever became of them.
+
+  A proposal counts as pending until it expires, an approval still being applied included.
 - **It applies only to what was proposed against.**
   - It records the fields as they were (`before`).
   - It applies only while the target still holds them: a target that changed since is a `conflict`, and so is one whose owner changed.
@@ -128,6 +130,7 @@ Neither Hermes nor ai-memory expires a proposal, and neither tells the proposer 
 
 ## Consequences
 
+- **An abandoned approval is labeled by the target's values,** not by the target's audit. When another approved change to the same fields lands before the alarm reads the target, the first may read as expired without its change applied, or as applied, though the target's audit shows the first one's `via: proposal:<id>`. The target's state is always one the owner approved. An approval whose target stays unreadable has no end until the target is deleted, and its proposer isn't told meanwhile.
 - **What the owner sees:**
   - a notice in their conversation with Master, after its reply, with the page's link;
   - the page, where the whole change shows before they decide;
