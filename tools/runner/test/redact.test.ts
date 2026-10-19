@@ -123,16 +123,20 @@ describe("redact", () => {
     ['{"password": 12345678, "user": "ana"}', `{"password": ${REDACTED}, "user": "ana"}`],
     ["{'auth': 123456}", `{'auth': ${REDACTED}}`],
     ['{"token": 4815.1623}', `{"token": ${REDACTED}}`],
+    // At the bounds: four digits, or a fourth decimal.
+    ['{"pass": 1234}', `{"pass": ${REDACTED}}`],
+    ['{"key": 1.1234}', `{"key": ${REDACTED}}`],
   ])("redacts a quoted name's bare number that could be a PIN: %s", (json, expected) => {
     expect(redact(json)).toBe(expected);
   });
 
-  it.each(['{"pass": 458, "auth": -1, "key_count": 12.5}', '{"max_tokens": 1024, "retries": 3}'])(
-    "leaves a quoted name's short number, a count: %s",
-    (json) => {
-      expect(redact(json)).toBe(json);
-    },
-  );
+  it.each([
+    '{"pass": 458, "auth": -1, "key_count": 12.5}',
+    '{"max_tokens": 1024, "retries": 3}',
+    '{"pass": 999, "key": 123.456}',
+  ])("leaves a quoted name's short number, a count: %s", (json) => {
+    expect(redact(json)).toBe(json);
+  });
 
   it.each([
     ["password: hunter2 and more", `password: ${REDACTED}`],
@@ -157,6 +161,7 @@ describe("redact", () => {
     "auth: null",
     "The token: we rotate it",
     "token:   ",
+    `token:${" ".repeat(9)}`,
     "auth:ok",
     "pass:458/458",
     "password:string;",
