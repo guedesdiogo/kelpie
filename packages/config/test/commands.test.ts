@@ -33,6 +33,8 @@ const taskView = (fields: Partial<TaskView>): TaskView => ({
   ...fields,
 });
 
+const notUsed = (): Promise<never> => Promise.reject(new Error("not used here"));
+
 function fakePorts() {
   const agents = new Map<
     string,
@@ -240,6 +242,16 @@ function fakePorts() {
         calls.push(`tasks.get ${agentId} ${taskId}`);
         return { ok: false, reason: "unknown_task" };
       },
+    },
+    // The proposal commands have their own tests (proposal-commands.test.ts).
+    proposals: {
+      propose: notUsed,
+      get: notUsed,
+      list: notUsed,
+      refuse: notUsed,
+      claim: notUsed,
+      finish: notUsed,
+      notify: notUsed,
     },
     vault: {
       async held() {

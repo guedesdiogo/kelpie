@@ -27,6 +27,8 @@ const NOW_MS = 1_791_000_000_000;
 const TOKEN = `${NOW_MS / 1_000 + 3_600}.${"c0ffee".repeat(6)}`;
 const RECOVERY = `${NOW_MS / 1_000 + 3_600}.${"5eed".repeat(8)}`;
 
+const notUsed = (): Promise<never> => Promise.reject(new Error("not used here"));
+
 /** A world with a Directory that knows `subs` and an in-memory agent registry. */
 function world({
   owner = true,
@@ -195,6 +197,16 @@ function world({
         ran.push(`channels.disconnectTelegram ${agentId}`);
         return { ok: true, webhook: "removed" };
       },
+    },
+    // The proposals' pages have their own tests (proposals.test.ts).
+    proposals: {
+      propose: notUsed,
+      get: notUsed,
+      list: notUsed,
+      refuse: notUsed,
+      claim: notUsed,
+      finish: notUsed,
+      notify: notUsed,
     },
     vault: {
       async held() {

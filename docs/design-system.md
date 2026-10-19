@@ -313,6 +313,12 @@ Moment. The owner's press is the yes ([ADR-0026](adr/0026-confirmation-by-owner-
   - A key already held down when the card appeared doesn't count.
   - A keyboard confirm or deny skips the grow, the pop and the ring. A confirm goes from the label to the spinner, to the check, to the receipt; a deny, which runs nothing, goes straight to the receipt.
 - **Reduced motion:** the grow, the pop and the ring go. The color change, the check and the receipt stay, each with a fade. The mascot is Still (5.19).
+- **On an admin API page,** such as a proposal's ([ADR-0060](adr/0060-proposals.md)), the card is a page with no script:
+  - who asks, by id, and the task it came from;
+  - the agent's reason, as its own words;
+  - a table of each setting as it is now and as proposed;
+  - Approve, the primary button in `--accent`, and Refuse beside it, outlined in `--muted`. A target that changed since leaves only Refuse, with the reason in `--warm`.
+  - The answer is a new page, the receipt, so nothing moves. The colors, sizes and radii are the tokens of sections 1 to 3.
 
 ### 5.4 Turn on something that costs
 

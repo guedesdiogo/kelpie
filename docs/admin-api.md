@@ -55,6 +55,8 @@ Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`
 | `/commands/listHeldFiles` | none; the vault's files pushed with conflict markers that still wait, as `{ "path", "state": "held" \| "proposed", "attempts", "at" }` ([context-store.md](context-store.md)) |
 | `/commands/forgetVaultPaths` | `{ "paths": ["memory/people/ana.md", "memory/old/"] }`, at most 1,000; a path ending in `/` names a folder. After you rewrote the vault's history, Kelpie forgets its copies of them; answers `{ "forgotten": <rows>, "stillInVault": [<named files the vault still has>] }` (see "Erasing content" in [context-store.md](context-store.md#erasing-content)) |
 | `/commands/setDream` | `{ "mode": "off" }`, or `{ "mode": "dry", "writes": ["abstracts"] }`, where `dry` is the default and `writes` is optional. Turns Dream, memory's consolidation, off or on. `writes` names the operations that may write: only `abstracts` for now, since `summaries` and `merges` wait on #182's measurement. The others only propose: the daily memory report shows the abstracts' plan, and `memory/_lint/dream.md` the day summaries and merges. Off forgets `writes`, so each operation is dry again until named, and deletes what Dream proposed. It answers `{ "mode", "writes" }` ([memory-format.md](memory-format.md#dream)) |
+| `/commands/listProposals` | none, or `{ "status": "pending" }`; the 100 newest proposals, newest first ("Proposals"). Reading changes nothing |
+| `/commands/getProposal` | `{ "id": "…" }`; a proposal, with its target's values now (`current`) and whether they changed since (`stale`). An unknown one answers `404 unknown_proposal`. No command decides a proposal: only its page does |
 | `/bootstrap` | `{ "token": "…" }` |
 | `/recover` | `{ "token": "…" }`, with the recovery token ("Recovering access") |
 
@@ -181,7 +183,8 @@ Each agent has a task board in its `AgentHost` (ADR-0011, #54). The `AgentHost` 
   - **Kelpie announces it.** After the reply, Kelpie names the agent that has the work, by name and id, in the conversation's language: `Kelpie handed a task to "Sales" (sales).` The text is Kelpie's own, so the model can't change or omit it. A turn that sends no reply, because it was refused or cut short, leaves the notice for the next reply in that conversation. Past four agents, the notice counts the rest instead of naming them (#387).
   - **An agent it doesn't own** is refused, and the refusal lists the ones it does own. No task goes to another agent in its place.
   - **Who hears the news:** the agent that created the task; for a task a person created, the assignee's owner, or the assignee itself. Kelpie tells it, in the owner's latest conversation with it, when the task is done, cancelled by its agent, waiting for an answer, or failed twice. A `dependency` wait reaches no one.
-  - **How it answers:** with `comment_task`. A comment on a waiting task, by a person or an agent, puts it back in To do.
+  - **How it answers:** with `comment_task`. A comment on a waiting task, by a person, an agent or Kelpie, puts it back in To do.
+  - **Kelpie's own comments** tell a task's agent the outcome of a proposal its run made ("Proposals"). Their author is `kelpie`, and a run reads them as Kelpie's words.
 
 ## Pairing
 
@@ -204,6 +207,28 @@ What a sender who isn't paired gets:
 - **Nothing**, ever.
 - **A wrong code** counts against that sender only. Five wrong codes with no hour-long pause between them lock that sender out of pairing for an hour; there is no reset command. A stranger's guesses can't lock the owner's account. The owner can lock only the account they are pairing, by mistyping five times.
 - **The owner is told about each stranger once**, on the owner's own chat with the bot. That starts once the owner has paired a Telegram account. At most ten notices a day per channel; a stranger is remembered for 30 days. A notice that can't be sent, for example because the owner never opened that bot, doesn't count. The notice has the stranger's name, kept to letters and digits, and their id masked.
+
+## Proposals
+
+An owner agent asks for a change to an agent it owns, and only your act on the proposal's page applies it (ADR-0036 §3, [ADR-0060](adr/0060-proposals.md), #302).
+
+- **Who proposes what:**
+  - Master, about a specialist: its model, tools, remit, `spawn`, or its chat on its own;
+  - Master or a specialist with `spawn`, about a subagent of its own: its tier or effort, tools, remit, soul or skills, never above what its creator holds.
+- **Where:** the `propose_agent_change` tool is offered where the agent has no `configure_agent`: in every turn of a specialist that owns a subagent, and in Master's task runs. In your conversations with Master, it changes agents with `configure_agent`, after your confirmation.
+- **What you get:** after Master's next reply, Kelpie sends a notice of its own in your latest conversation with Master, in its language, naming the agents by id and the fields: `The agent sales proposes a change to the agent sales-sub-a1b2c3: model. Review it, then approve or refuse it here: https://<admin hostname>/proposals/<id>?lang=en`. The proposal starts that Master turn, one model call. The notice never quotes the agent's words, and no model sees its link.
+- **The page,** `https://<admin hostname>/proposals/<id>`, behind the same Access login and owner check as the pairing page:
+  - it shows who proposes, the task it came from, the agent's reason as its own words, and each field as it is now and as proposed;
+  - Approve and Refuse are its answers. A target that changed since leaves only Refuse;
+  - its own `POST` (`Sec-Fetch-Site: same-origin` or, without it, a matching `Origin`, form-encoded) decides: 200 when it applied or refused it, 409 for a conflict, a void proposal or one already decided, 410 for an expired one, 404 for an unknown one, 503 when a service didn't answer. A `GET` changes nothing.
+- **`/proposals`** lists what waits, each linking to its page.
+- **Its life:**
+  - it waits 72 hours, then expires;
+  - at most one pending per proposer and target, three per proposer, ten a day per proposer, and twenty in all;
+  - it applies only while the target holds the values it was proposed against; otherwise it ends as a conflict, and nothing changes;
+  - the applied change is audited on the target as `via: proposal:<id>`, and every step of the proposal in the Registry, with the proposer, the person it acted for and who decided;
+  - deleting an agent voids the open proposals by it or about it.
+- **The proposer hears the outcome** from Kelpie: as a comment on the task whose run made it, which resumes it, or else as a note in its latest conversation with you.
 
 ## Secure forms
 

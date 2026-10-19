@@ -1,5 +1,6 @@
 import type {
   Actor,
+  CommentAuthor,
   CommentSource,
   NewTask,
   RunOutcome,
@@ -50,6 +51,19 @@ export interface TaskWriter {
   actingUserId: string;
   source: CommentSource;
 }
+
+/** Who writes a comment: a task's writer, or Kelpie itself, as when it tells an outcome (#302). */
+export type CommentWriter = Omit<TaskWriter, "author"> & { author: CommentAuthor };
+
+const KELPIE: CommentAuthor = { kind: "kelpie", id: "kelpie" };
+
+/** Kelpie, commenting in its own words through `via`, for the person the task acts for. */
+export const kelpieWriter = (via: string, actingUserId: string): CommentWriter => ({
+  author: KELPIE,
+  via,
+  actingUserId,
+  source: "kelpie",
+});
 
 /** The owner, writing on the board through the admin API. */
 export const personWriter = (actor: Actor): TaskWriter => ({
@@ -138,7 +152,7 @@ export class TaskBoard {
    * Adds a comment, at any status. A comment on a task in Waiting is the answer it waited for
    * (#335): the task goes back to To do, its failures forgotten.
    */
-  comment(id: string, text: string, writer: TaskWriter, now: number): TaskResult<TaskView> {
+  comment(id: string, text: string, writer: CommentWriter, now: number): TaskResult<TaskView> {
     const task = this.#row(id);
     if (!task) return notFound;
     const comments = this.#db
@@ -265,7 +279,7 @@ export class TaskBoard {
         ...viewOf(task),
         comments: comments.map((row) => ({
           at: row.at,
-          author: { kind: row.authorKind, id: row.authorId },
+          author: row.authorKind === "kelpie" ? KELPIE : { kind: row.authorKind, id: row.authorId },
           source: row.source,
           text: row.text,
         })),
@@ -551,7 +565,11 @@ export class TaskBoard {
 }
 
 const person = (actor: Actor): Step => stepOf(personWriter(actor));
-const stepOf = (writer: TaskWriter): Step => ({ actor: writer.author, via: writer.via });
+/** Kelpie's own steps carry no actor, as a lease that ran out doesn't. */
+const stepOf = (writer: CommentWriter): Step => ({
+  actor: writer.author.kind === "kelpie" ? null : writer.author,
+  via: writer.via,
+});
 
 function event(
   taskId: string,

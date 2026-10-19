@@ -9,6 +9,8 @@ import type {
   ConfigureResult,
   EraseResult,
   NewTask,
+  ProposalNotice,
+  ProposalOutcome,
   RegistryContract,
   RunOutcome,
   SetupEvent,
@@ -27,6 +29,7 @@ import {
   agentModel,
   DEFAULT_SETTINGS,
   isAgentId,
+  isProposalId,
   isTaskId,
   isTaskStatus,
   MAX_TASK_TITLE,
@@ -38,6 +41,7 @@ import {
   parseSettings,
   parseTaskEdit,
   REGISTRY_NAME,
+  sameValue,
 } from "@kelpie/config";
 import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
 import type {
@@ -57,7 +61,7 @@ import { identitySection } from "./identity.ts";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
 import { composeSystemPrompt, hasVaultContext } from "./system-prompt.ts";
-import { personWriter, TaskBoard, type TaskWriter } from "./tasks.ts";
+import { kelpieWriter, personWriter, TaskBoard, type TaskWriter } from "./tasks.ts";
 
 let contextStoreForTesting: ContextStoreContract | undefined;
 
@@ -683,20 +687,10 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   async taskNews(news: TaskNews): Promise<boolean> {
     const agentId = this.ctx.id.name ?? "";
     if (!isTaskNews(news)) return false;
-    const latest = this.#db
-      .select({ name: schema.conversations.name })
-      .from(schema.conversations)
-      .where(
-        and(
-          isNotNull(schema.conversations.lastTurnAt),
-          notLike(schema.conversations.name, `${agentId}:task:%`),
-        ),
-      )
-      .orderBy(desc(schema.conversations.lastTurnAt))
-      .get();
-    if (!latest) return false;
+    const latest = this.#latestOwnerConversation();
+    if (latest === null) return false;
     try {
-      return await this.env.CONVERSATION_AGENT.getByName(latest.name).kelpieNote(
+      return await this.env.CONVERSATION_AGENT.getByName(latest).kelpieNote(
         agentId,
         news.actingUserId,
         newsNote(news),
@@ -705,6 +699,98 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       console.error("AgentHost: a task's news wasn't told", errorName(error));
       return false;
     }
+  }
+
+  /**
+   * The owner's latest conversation with this agent, by its object's name, a task's own excluded:
+   * where Kelpie tells the agent what it should hear (#335, #302). Null before it has one.
+   */
+  #latestOwnerConversation(): string | null {
+    const agentId = this.ctx.id.name ?? "";
+    return (
+      this.#db
+        .select({ name: schema.conversations.name })
+        .from(schema.conversations)
+        .where(
+          and(
+            isNotNull(schema.conversations.lastTurnAt),
+            notLike(schema.conversations.name, `${agentId}:task:%`),
+          ),
+        )
+        .orderBy(desc(schema.conversations.lastTurnAt))
+        .get()?.name ?? null
+    );
+  }
+
+  /**
+   * Kelpie's notice of a proposal (ADR-0060, #302), on Master's AgentHost: the owner's latest
+   * conversation with Master takes it, and sends the page's link after its next reply. False when
+   * Master has no such conversation yet: the proposal still waits on the admin API's page.
+   */
+  async proposalNotice(notice: ProposalNotice): Promise<boolean> {
+    if (!isProposalNotice(notice)) return false;
+    const latest = this.#latestOwnerConversation();
+    if (latest === null) return false;
+    try {
+      return await this.env.CONVERSATION_AGENT.getByName(latest).proposalNotice(
+        this.ctx.id.name ?? "",
+        notice,
+      );
+    } catch (error) {
+      console.error("AgentHost: a proposal's notice wasn't sent", errorName(error));
+      return false;
+    }
+  }
+
+  /**
+   * A proposal's outcome, on its proposer's AgentHost (ADR-0060, #302), in Kelpie's words: a
+   * comment on the task whose run made it, which resumes it when it waits, or else a note in the
+   * proposer's latest conversation with the owner. False when neither took it, so the Registry
+   * tries again.
+   */
+  async proposalOutcome(outcome: ProposalOutcome): Promise<boolean> {
+    if (!isProposalOutcome(outcome)) return false;
+    const text = outcomeNote(outcome);
+    if (outcome.taskId !== null) {
+      const commented = await this.#kelpieComment(outcome.taskId, text, `proposal:${outcome.id}`);
+      if (commented) return true;
+    }
+    const latest = this.#latestOwnerConversation();
+    if (latest === null) return false;
+    try {
+      return await this.env.CONVERSATION_AGENT.getByName(latest).kelpieNote(
+        this.ctx.id.name ?? "",
+        outcome.actingUserId,
+        `${KELPIE_SAYS} ${text}`,
+      );
+    } catch (error) {
+      console.error("AgentHost: a proposal's outcome wasn't told", errorName(error));
+      return false;
+    }
+  }
+
+  /**
+   * Kelpie's comment on an open task of this agent's (#302): it resumes a waiting task, as any
+   * answer does, and reaches a running one's run. False for a task that is gone or closed.
+   */
+  async #kelpieComment(taskId: string, text: string, via: string): Promise<boolean> {
+    const task = this.#tasks.get(taskId);
+    if (!task.ok || task.value.status === "done" || task.value.status === "cancelled") return false;
+    const actingUserId = this.#tasks.actingUserOf(taskId) ?? "";
+    const commented = this.#tasks.comment(
+      taskId,
+      text,
+      kelpieWriter(via, actingUserId),
+      Date.now(),
+    );
+    if (!commented.ok) return false;
+    if (commented.value.status === "in_progress") {
+      await this.#toRun((runner, agentId) =>
+        runner.comment?.(agentId, taskId, actingUserId, `${KELPIE_SAYS} ${text}`),
+      );
+    }
+    await this.#afterPickup(commented);
+    return true;
   }
 
   /** The board's wake, as the SDK schedules it: sweeps leases, picks up tasks, sets the next one. */
@@ -963,14 +1049,25 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
    * system prompt bumps the prompt version, and so does turning the memory core on or off (#112).
    * Setting the current values changes nothing, so it isn't audited.
    */
-  configure(changes: Partial<AgentSettings>, actor: Actor): ConfigureResult {
+  configure(
+    changes: Partial<AgentSettings>,
+    actor: Actor,
+    expect?: Partial<AgentSettings>,
+  ): ConfigureResult {
     const parsed = parseSettings(changes);
-    if (!parsed) return { ok: false, reason: "invalid_input" };
+    const expected = expect === undefined ? {} : parseSettings(expect);
+    if (!parsed || !expected) return { ok: false, reason: "invalid_input" };
     const current = this.config();
     const fields = (Object.keys(parsed) as (keyof AgentSettings)[]).filter(
       (key) => JSON.stringify(parsed[key]) !== JSON.stringify(current.settings[key]),
     );
+    // Settings that already hold the change answer as applied: a proposal applied again is safe.
     if (fields.length === 0) return { ok: true, value: current };
+    // A proposal's change applies only while the settings hold what it was proposed against (#302).
+    const changedSince = (Object.keys(expected) as (keyof AgentSettings)[]).some(
+      (key) => !sameValue(expected[key], current.settings[key]),
+    );
+    if (changedSince) return { ok: false, reason: "conflict" };
     const settings = { ...current.settings, ...parsed };
     const promptVersion =
       settings.systemPrompt === current.settings.systemPrompt &&
@@ -1212,6 +1309,8 @@ These agents are yours, each with a remit. When a demand falls within a speciali
 
 A demand within no remit is yours to do. A specialist with no remit set takes work only when the owner names it. Only the owner's own turns in a direct conversation hand work off.
 
+In a task's run, where your configuration tools aren't, ask for a change to a specialist with propose_agent_change: only the owner's approval on a page Kelpie sends them applies it.
+
 ${lines.join("\n")}`,
   ];
 }
@@ -1226,7 +1325,8 @@ You can create temporary subagents with create_subagent, and hand them work with
 - Worth it: a demand that would crowd this conversation, or work that can run while you go on. Not for anything that needs the owner: a subagent can't talk to them, can't confirm, and can't write memory.
 - Brief it completely. It knows nothing of this conversation: give it a soul and skills for the work, and put in the task every fact, constraint and the result you want back.
 - Its result is its own report, not a verified fact. Check what matters before you rely on it, and write to memory yourself what is worth keeping.
-- You have at most three live at once. Delete each one with delete_subagent once its demand ends: it lives until you do.`;
+- You have at most three live at once. Delete each one with delete_subagent once its demand ends: it lives until you do.
+- A live subagent's soul, skills, remit, tools or tier change only with the owner's yes: propose it with propose_agent_change, and only their approval on a page Kelpie sends them applies it. Master, in a conversation with the owner, changes it with configure_agent instead.`;
 
 const isUserId = (value: unknown): value is string =>
   typeof value === "string" && value !== "" && value.length <= 128;
@@ -1298,6 +1398,63 @@ export function newsNote({
   return lines.join("\n");
 }
 
+/** How Kelpie's own words start where a person's or an agent's could be (#206, #335). */
+const KELPIE_SAYS = "Kelpie, automatically (not the owner):";
+
+/**
+ * Kelpie's words of a proposal's outcome, for its proposer (ADR-0060, #302): what happened, and
+ * that nothing changed unless the owner approved it. Ids and field names only.
+ */
+export function outcomeNote({ id, target, status, fields }: ProposalOutcome): string {
+  const what = `your proposal ${id} to change ${fields.join(", ")} of the agent ${target}`;
+  const again = "Nothing changed. Don't propose the same again unless the need is new.";
+  switch (status) {
+    case "applied":
+      return `The owner approved ${what}: it is applied.`;
+    case "refused":
+      return `The owner refused ${what}. ${again}`;
+    case "expired":
+      return `Y${what.slice(1)} expired: the owner didn't decide it in time. ${again}`;
+    case "conflict":
+      return `The owner approved ${what}, but the agent ${target} changed since you proposed it, so it wasn't applied. ${again}`;
+  }
+}
+
+const OUTCOMES: readonly string[] = ["applied", "refused", "expired", "conflict"];
+const isFields = (fields: unknown): fields is string[] =>
+  Array.isArray(fields) &&
+  fields.length > 0 &&
+  fields.length <= 8 &&
+  fields.every((field) => typeof field === "string" && /^[a-zA-Z]{1,32}$/.test(field));
+
+function isProposalOutcome(outcome: unknown): outcome is ProposalOutcome {
+  const { id, target, taskId, actingUserId, status, fields } = (outcome ??
+    {}) as Partial<ProposalOutcome>;
+  return (
+    isProposalId(id) &&
+    isAgentId(target) &&
+    (taskId === null || isTaskId(taskId)) &&
+    isUserId(actingUserId) &&
+    OUTCOMES.includes(status as string) &&
+    isFields(fields)
+  );
+}
+
+function isProposalNotice(notice: unknown): notice is ProposalNotice {
+  const { id, proposer, target, actingUserId, reason, expiresAt, fields } = (notice ??
+    {}) as Partial<ProposalNotice>;
+  return (
+    isProposalId(id) &&
+    isAgentId(proposer) &&
+    isAgentId(target) &&
+    isUserId(actingUserId) &&
+    typeof reason === "string" &&
+    reason.length <= 500 &&
+    Number.isFinite(expiresAt) &&
+    isFields(fields)
+  );
+}
+
 /**
  * The run's input (#335), in two parts. The owner's words, when the task holds any: a task they
  * wrote, and their comments. Then Kelpie's note: another agent's task or comments, fenced as data,
@@ -1316,6 +1473,7 @@ export function runInput(task: TaskDetail): { text: string | null; note: string 
   }
   const ownerComments = kept.filter((comment) => comment.author.kind === "user");
   const agentComments = kept.filter((comment) => comment.author.kind === "agent");
+  const kelpieComments = kept.filter((comment) => comment.author.kind === "kelpie");
 
   const owner: string[] = [];
   if (!byAgent) owner.push("A task on your board, from the owner.", "", asTask(task.title));
@@ -1335,6 +1493,13 @@ export function runInput(task: TaskDetail): { text: string | null; note: string 
     note.push(
       "Agents' comments on it, oldest first:",
       ...agentComments.map((comment) => `The agent ${comment.author.id}: ${fenced(comment.text)}`),
+    );
+  }
+  // Kelpie's own words, as a proposal's outcome (#302): never fenced as another agent's.
+  if (kelpieComments.length > 0) {
+    note.push(
+      "Kelpie's notes on it, oldest first:",
+      ...kelpieComments.map((comment) => `- ${comment.text}`),
     );
   }
   note.push(

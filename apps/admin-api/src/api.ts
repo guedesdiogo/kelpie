@@ -12,6 +12,7 @@ import {
   type CommandResult,
   type ConfigCommands,
   isAgentId,
+  isProposalId,
   SETUP_AGENT_ID,
   type SetupEvent,
 } from "@kelpie/config";
@@ -32,6 +33,15 @@ import {
   pairingAgentOf,
   pairingPage,
 } from "./pairing.ts";
+import {
+  chooseAnswerPage,
+  decidedPage,
+  noProposalPage,
+  proposalListPage,
+  proposalPage,
+  proposalPathOf,
+  proposalsUnavailablePage,
+} from "./proposals.ts";
 import { PAGES, pageLocale } from "./texts.ts";
 
 /** What the API needs from outside, so tests can replace it. */
@@ -77,6 +87,10 @@ const STATUS: Record<Failure, number> = {
   not_connected: 409,
   not_allowed: 409,
   no_key: 409,
+  unknown_proposal: 404,
+  not_pending: 409,
+  too_many: 409,
+  conflict: 409,
   unavailable: 503,
   not_configured: 503,
   channel_refused: 502,
@@ -121,6 +135,9 @@ const COMMANDS: Record<string, Command> = {
   listHeldFiles: (commands, actor) => commands.listHeldFiles(actor),
   forgetVaultPaths: (commands, actor, input) => commands.forgetVaultPaths(actor, input),
   setDream: (commands, actor, input) => commands.setDream(actor, input),
+  // Proposals are read here; only their page decides them (#302).
+  listProposals: (commands, actor, input) => commands.listProposals(actor, input),
+  getProposal: (commands, actor, input) => commands.getProposal(actor, input),
 };
 
 /**
@@ -132,6 +149,8 @@ export async function handle(request: Request, deps: AdminDeps): Promise<Respons
   if (pathname.startsWith("/forms/")) return handleForm(request, pathname, deps);
   const pairing = pairingAgentOf(pathname);
   if (pairing !== null) return handlePairing(request, pairing, deps);
+  const proposal = proposalPathOf(pathname);
+  if (proposal !== null) return handleProposal(request, proposal, deps);
   const command = pathname.startsWith("/commands/") ? pathname.slice("/commands/".length) : null;
   const tokenRoute = pathname === "/bootstrap" || pathname === "/recover";
   if (request.method !== "POST" || (!tokenRoute && !command)) {
@@ -280,6 +299,66 @@ async function handlePairing(
   } catch (error) {
     console.error("admin-api: pairing page failed", errorName(error));
     return unavailablePage(locale);
+  }
+}
+
+/**
+ * The proposals' pages (#302), for the owner only, with the pairing page's checks: the list and a
+ * proposal's page (`GET`), which change nothing, and that page's own `POST`, the owner's decision
+ * (ADR-0026 §1). Answers are pages, never JSON.
+ */
+async function handleProposal(request: Request, id: string, deps: AdminDeps): Promise<Response> {
+  const locale = pageLocale(request);
+  const texts = PAGES[locale];
+  const answer = (status: number, { title }: { title: string }, body: string) =>
+    page(status, title, `<p>${body}</p>`, locale);
+  const list = id === "";
+  const method = request.method;
+  if (
+    (method !== "GET" && method !== "POST") ||
+    (list && method !== "GET") ||
+    (!list && !isProposalId(id))
+  ) {
+    return noProposalPage(locale);
+  }
+  try {
+    const identity = await deps.authenticate(request);
+    if (!identity.ok) return answer(401, texts.signIn, texts.signIn.body);
+    if (method === "POST" && !isSameOriginSubmission(request)) {
+      return answer(403, texts.notAllowed, texts.notAllowed.ownPage);
+    }
+    const admission = await deps.directory.admit(
+      { channel: ACCESS_SOURCE, channelUserId: identity.sub },
+      ADMIN_AGENT_ID,
+    );
+    if (!admission.admitted || admission.role !== "owner") {
+      return answer(403, texts.notAllowed, texts.notAllowed.ownerOnly);
+    }
+    const actor: Actor = { userId: admission.userId, role: admission.role, via: "admin-api" };
+    if (list) {
+      const listed = await deps.commands.listProposals(actor, { status: "pending" });
+      return listed.ok
+        ? proposalListPage(listed.value, locale, deps.now())
+        : proposalsUnavailablePage(locale);
+    }
+    if (method === "GET") {
+      const detail = await deps.commands.getProposal(actor, { id });
+      if (detail.ok) return proposalPage(detail.value, locale, deps.now());
+      return detail.reason === "unknown_proposal"
+        ? noProposalPage(locale)
+        : proposalsUnavailablePage(locale);
+    }
+    if (!request.headers.get("content-type")?.startsWith("application/x-www-form-urlencoded")) {
+      return answer(415, texts.notSubmission, texts.notSubmission.page);
+    }
+    const body = await readBody(request);
+    if (!body.ok) return answer(body.status, texts.tooLarge, texts.tooLarge.body);
+    const decision = new URLSearchParams(body.text).get("decision");
+    if (decision !== "approve" && decision !== "refuse") return chooseAnswerPage(locale);
+    return decidedPage(await deps.commands.decideProposal(actor, { id, decision }), locale);
+  } catch (error) {
+    console.error("admin-api: proposal page failed", errorName(error));
+    return proposalsUnavailablePage(locale);
   }
 }
 
