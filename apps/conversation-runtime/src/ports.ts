@@ -385,6 +385,9 @@ function productionPorts(env: Env): ConversationPorts {
           (await registry.get(assignee))
             ? env.AGENT_HOST.getByName(assignee).commentTaskAs(taskId, text, by, "chat")
             : { ok: false, reason: "unknown_task" },
+        // The creator's own object counts what its turns no person typed hand off (#345).
+        takeHandoff: (id) => env.AGENT_HOST.getByName(id).takeHandoff(),
+        returnHandoff: (id) => env.AGENT_HOST.getByName(id).returnHandoff(),
       }),
     ],
     awaitSetup: (agentId, conversation, step, until) =>

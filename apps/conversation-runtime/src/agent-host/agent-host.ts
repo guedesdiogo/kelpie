@@ -76,7 +76,13 @@ import {
   WATCH_INTERVAL_S,
 } from "./session-watch.ts";
 import { composeSystemPrompt, hasVaultContext } from "./system-prompt.ts";
-import { kelpieWriter, personWriter, TaskBoard, type TaskWriter } from "./tasks.ts";
+import {
+  kelpieWriter,
+  MAX_UNATTENDED_HANDOFFS,
+  personWriter,
+  TaskBoard,
+  type TaskWriter,
+} from "./tasks.ts";
 
 let contextStoreForTesting: ContextStoreContract | undefined;
 
@@ -590,6 +596,31 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       source: "agent",
     };
     return this.#afterPickup(this.#tasks.create(task, writer, crypto.randomUUID(), now));
+  }
+
+  /**
+   * Takes one of this agent's handoffs from turns no person typed (#345): false once it made
+   * MAX_UNATTENDED_HANDOFFS in the last 24 hours. Kept as their times, in one `state` key.
+   */
+  takeHandoff(): boolean {
+    const now = Date.now();
+    const times = this.#get<number[]>("handoffs", []).filter((at) => at > now - HANDOFF_WINDOW_MS);
+    if (times.length >= MAX_UNATTENDED_HANDOFFS) return false;
+    this.#setHandoffs([...times, now]);
+    return true;
+  }
+
+  /** Gives back the handoff a task the board refused took (#345). */
+  returnHandoff(): void {
+    this.#setHandoffs(this.#get<number[]>("handoffs", []).slice(0, -1));
+  }
+
+  #setHandoffs(value: number[]): void {
+    this.#db
+      .insert(schema.state)
+      .values({ key: "handoffs", value })
+      .onConflictDoUpdate({ target: schema.state.key, set: { value } })
+      .run();
   }
 
   async editTask(id: string, changes: TaskEdit, actor: Actor): Promise<TaskResult<TaskView>> {
@@ -1402,6 +1433,8 @@ const isSetupStep = (step: unknown): step is SetupStep =>
   typeof step === "string" && Object.hasOwn(SETUP_STEPS, step);
 /** The longest a link lasts: a day for the pairing page, whose Telegram code starts later. */
 const MAX_SETUP_WAIT_MS = 24 * 60 * 60_000;
+/** The window MAX_UNATTENDED_HANDOFFS counts over (#345). */
+const HANDOFF_WINDOW_MS = 24 * 60 * 60_000;
 /** How long past its end a wait still takes a report. */
 const SETUP_WAIT_GRACE_MS = 5 * 60_000;
 /** A conversation object's name is an agent id, a channel and a thread id. */
@@ -1476,7 +1509,7 @@ function specialistsSection(specialists: readonly Specialist[]): string[] {
 
 These agents are yours, each with a remit. When a demand falls within a specialist's remit, hand it to that specialist with create_task, even when the owner didn't name it, instead of doing it yourself. It knows nothing of this conversation: put in the task's body every fact and constraint it needs, and the result you want back. Say in your reply that you handed it off; Kelpie also tells the owner who has it. When the task ends or asks something, Kelpie tells you: relay its result, naming the specialist that did the work, or ask the owner its question.
 
-A demand within no remit is yours to do. A specialist with no remit set takes work only when the owner names it. Only the owner's own turns in a direct conversation hand work off.
+A demand within no remit is yours to do. A specialist with no remit set takes work only when the owner names it. Only turns for the owner hand work off: in a direct conversation with them, or in a task's run. A turn no person typed, a task's run or Kelpie's note, hands off at most ${MAX_UNATTENDED_HANDOFFS} tasks in 24 hours.
 
 In a task's run, where your configuration tools aren't, ask for a change to a specialist with propose_agent_change: only the owner's approval on a page Kelpie sends them applies it.
 

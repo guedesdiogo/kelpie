@@ -1,5 +1,6 @@
 import type { NewTask, RunOutcome, TaskView } from "@kelpie/config";
 import { describe, expect, it } from "vitest";
+import { MAX_UNATTENDED_HANDOFFS } from "../src/agent-host/tasks.ts";
 import { configurationTools } from "../src/configuration.ts";
 import { memoryTools } from "../src/memory-tools.ts";
 import { type TaskToolPorts, taskTools } from "../src/task-tools.ts";
@@ -17,6 +18,8 @@ function world(
       { id: "sales", name: "Sales" },
     ],
   },
+  /** The handoffs left today to turns no person typed (#345), per creating agent. */
+  slots: Record<string, number> = {},
 ) {
   const calls: string[] = [];
   const view = (fields: Partial<TaskView>): TaskView => ({
@@ -42,6 +45,8 @@ function world(
       calls.push(
         `create ${assignee} ${task.title} by ${creator.agentId} for ${creator.actingUserId}`,
       );
+      if (assignee === "full") return { ok: false, reason: "not_allowed" };
+      if (assignee === "broken") throw new Error("The object reset.");
       return { ok: true, value: view({ title: task.title }) };
     },
     async comment(assignee, taskId, text, by) {
@@ -50,6 +55,16 @@ function world(
         ? { ok: false, reason: "not_allowed" }
         : { ok: true, value: view({ status: "todo" }) };
     },
+    async takeHandoff(agentId) {
+      const left = slots[agentId] ?? 0;
+      calls.push(`take ${agentId}${left > 0 ? "" : " refused"}`);
+      if (left > 0) slots[agentId] = left - 1;
+      return left > 0;
+    },
+    async returnHandoff(agentId) {
+      calls.push(`return ${agentId}`);
+      slots[agentId] = (slots[agentId] ?? 0) + 1;
+    },
   };
   return { provider: taskTools(ports), calls };
 }
@@ -57,12 +72,17 @@ function world(
 /** The handoffs the tools had Kelpie announce, as `agentId name taskId`. */
 const handedOff: string[] = [];
 
-function contextOf(agentId: string, task?: TaskRunHandle): ToolContext {
+function contextOf(
+  agentId: string,
+  task?: TaskRunHandle,
+  trigger: ToolContext["trigger"] = task ? "task" : "person",
+): ToolContext {
   return {
     locale: "en",
     actor: { userId: "u-owner", role: "owner", via: `agent:${agentId}` },
     agentId,
     scopes: "all",
+    trigger,
     qualifier: "clef",
     turn: "1",
     source: "task:x, 2026-10-14",
@@ -291,5 +311,116 @@ describe("what a task's run is given (#335)", () => {
       await comment.run({ agentId: "helper", taskId: TASK, text: "Elsewhere." }, run),
     ).toMatchObject({ isError: true, output: expect.stringContaining("only on your own task") });
     expect(calls).toEqual([]);
+  });
+});
+
+describe("handoffs from turns no person typed (#345)", () => {
+  const AT_CAP = `Turns no person typed hand off at most ${MAX_UNATTENDED_HANDOFFS} tasks in 24 hours for you, and you reached that.`;
+
+  it("take one of the day's slots in a task's run or after Kelpie's note, and none in a person's turn", async () => {
+    const { provider, calls } = world(undefined, { kelpie: 2 });
+    const create = byName(await provider.tools("kelpie", { channel: "telegram" }), "create_task");
+    const person = contextOf("kelpie");
+    const run = { ...contextOf("kelpie", handle().task), turn: "2" };
+    const note = { ...contextOf("kelpie", undefined, "note"), turn: "3" };
+    handedOff.length = 0;
+
+    expect(
+      await create.run({ agentId: "helper", title: "Mine", body: "x" }, person),
+    ).not.toHaveProperty("isError");
+    expect(
+      await create.run({ agentId: "helper", title: "From a run", body: "x" }, run),
+    ).not.toHaveProperty("isError");
+    expect(
+      await create.run({ agentId: "sales", title: "From news", body: "x" }, note),
+    ).not.toHaveProperty("isError");
+    // The day's slots are gone: each says what to do instead.
+    expect(
+      await create.run({ agentId: "helper", title: "One more", body: "x" }, { ...run, turn: "4" }),
+    ).toEqual({
+      isError: true,
+      output: `${AT_CAP} Do the work yourself, or ask the owner with wait_on_task.`,
+    });
+    expect(
+      await create.run({ agentId: "helper", title: "One more", body: "x" }, { ...note, turn: "5" }),
+    ).toEqual({
+      isError: true,
+      output: `${AT_CAP} Tell the owner what you would hand off: their message can hand it off.`,
+    });
+    // A person's turn still hands off, and takes no slot.
+    expect(
+      await create.run(
+        { agentId: "helper", title: "Still mine", body: "x" },
+        { ...person, turn: "6" },
+      ),
+    ).not.toHaveProperty("isError");
+    expect(calls).toEqual([
+      "create helper Mine by kelpie for u-owner",
+      "take kelpie",
+      "create helper From a run by kelpie for u-owner",
+      "take kelpie",
+      "create sales From news by kelpie for u-owner",
+      "take kelpie refused",
+      "take kelpie refused",
+      "create helper Still mine by kelpie for u-owner",
+    ]);
+    expect(handedOff).toHaveLength(4);
+  });
+
+  it("give a slot back when the board refuses the task, and keep it when the create failed", async () => {
+    const owned = {
+      kelpie: [
+        { id: "full", name: "Full" },
+        { id: "broken", name: "Broken" },
+      ],
+    };
+    const { provider, calls } = world(owned, { kelpie: 1 });
+    const create = byName(await provider.tools("kelpie", { channel: "telegram" }), "create_task");
+    const run = contextOf("kelpie", handle().task);
+
+    // A turn the gate or the input refuses takes no slot.
+    const group = { ...run, scopes: ["conversation/telegram-group"] } as ToolContext;
+    expect(await create.run({ agentId: "full", title: "Book", body: "x" }, group)).toMatchObject({
+      isError: true,
+    });
+    expect(await create.run({ agentId: "stranger", title: "Book", body: "x" }, run)).toMatchObject({
+      isError: true,
+    });
+    expect(await create.run({ agentId: "full", title: " ", body: "x" }, run)).toMatchObject({
+      isError: true,
+      output: expect.stringContaining("one line"),
+    });
+    expect(calls).toEqual([]);
+
+    expect(await create.run({ agentId: "full", title: "Book", body: "x" }, run)).toMatchObject({
+      isError: true,
+      output: expect.stringContaining("its board is full"),
+    });
+    // The slot came back; a create that throws may have made its task, so it keeps it.
+    await expect(
+      create.run({ agentId: "broken", title: "Book", body: "x" }, { ...run, turn: "2" }),
+    ).rejects.toThrow();
+    expect(
+      await create.run({ agentId: "full", title: "Book", body: "x" }, { ...run, turn: "3" }),
+    ).toMatchObject({ isError: true, output: expect.stringContaining(AT_CAP) });
+    expect(calls).toEqual([
+      "take kelpie",
+      "create full Book by kelpie for u-owner",
+      "return kelpie",
+      "take kelpie",
+      "create broken Book by kelpie for u-owner",
+      "take kelpie refused",
+    ]);
+  });
+
+  it("count a turn's three before its day: a fourth call in one turn takes no slot", async () => {
+    const { provider, calls } = world(undefined, { kelpie: 5 });
+    const create = byName(await provider.tools("kelpie", { channel: "telegram" }), "create_task");
+    const note = contextOf("kelpie", undefined, "note");
+    for (let i = 0; i < 4; i++) {
+      await create.run({ agentId: "helper", title: `T${i}`, body: "x" }, note);
+    }
+    expect(calls.filter((call) => call.startsWith("take"))).toHaveLength(3);
+    expect(calls.at(-1)).toBe("create helper T2 by kelpie for u-owner");
   });
 });

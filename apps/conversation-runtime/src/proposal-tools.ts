@@ -177,9 +177,12 @@ export function proposalTools(ports: ProposalToolPorts): ToolProvider {
       es: "Proponiendo un cambio",
     },
     async run(input, context) {
-      // A proposal acts for the owner, so only their own turn, which reads all their memory, makes one.
+      // A proposal acts for the owner, so only a turn for them, which reads all their memory, makes
+      // one, whatever started it (#345): nothing applies until the owner approves it.
       if (context.actor.role !== "owner" || context.scopes !== "all") {
-        return failed("Only the owner's own turns, in a direct conversation, propose changes.");
+        return failed(
+          "Only turns for the owner propose changes: in a direct conversation with them, or in a task's run.",
+        );
       }
       // Checked again as it runs: the role may have moved since the turn listed its tools.
       const role = await ports.roleOf(context.agentId);

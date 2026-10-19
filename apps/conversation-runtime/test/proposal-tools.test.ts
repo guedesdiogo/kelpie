@@ -66,6 +66,7 @@ const context = (fields: Partial<ToolContext> = {}): ToolContext => ({
   actor: { userId: "u-owner", role: "owner", via: "agent:sales" },
   agentId: "sales",
   scopes: "all",
+  trigger: "person",
   qualifier: "clef",
   turn: "1",
   source: "webchat:u-owner, 2026-10-18",
@@ -213,11 +214,11 @@ describe("the proposal tool (#302)", () => {
     const change = { agentId: "sales-sub-a1b2c3", changes: { remit: "Quotes." }, reason: "Why." };
 
     expect((await tool.run(change, context({ scopes: ["webchat:x"] }))).output).toContain(
-      "Only the owner's own turns",
+      "Only turns for the owner",
     );
     expect(
       (await tool.run(change, context({ actor: { ...context().actor, role: "member" } }))).output,
-    ).toContain("Only the owner's own turns");
+    ).toContain("Only turns for the owner");
     expect((await tool.run({ ...change, agentId: "books" }, context())).output).toBe(
       "You don't own an agent books. You can propose changes only to the agents you own: sales-sub-a1b2c3.",
     );

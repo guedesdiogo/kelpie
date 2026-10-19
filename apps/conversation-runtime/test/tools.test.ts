@@ -256,6 +256,8 @@ describe("a turn's tools", () => {
           actor: { userId: "u-owner", role: "owner", via: "agent:assistant" },
           agentId: "assistant",
           scopes: "all",
+          // The owner typed it (#345).
+          trigger: "person",
           qualifier: "clef",
           turn: expect.any(String),
           source: expect.stringMatching(/^telegram:chat-1, \d{4}-\d{2}-\d{2}$/),
@@ -565,6 +567,48 @@ describe("a turn's tools and interruption", () => {
       withMemory("try the stuck one"),
       toolUse([{ id: "call-0", name: "stuck", input: {} }]),
       results({ callId: "call-0", output: TOOL_STOPPED_RESULT, isError: true }),
+    ]);
+  });
+
+  it("tells each call who started its turn, from the turn's own messages, after an eviction too (#345)", async () => {
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "lookup", input: { q: "ana" } }),
+        reply("Ok."),
+        toolCalls({ name: "stuck" }),
+        toolCalls({ name: "lookup", input: { q: "news" } }),
+        reply("Noted."),
+        toolCalls({ name: "lookup", input: { q: "bruno" } }),
+        reply("Both."),
+      ]),
+    );
+    const runs = provide(world, {
+      lookup: answer,
+      stuck: () => new Promise<ToolOutcome>(() => {}),
+    });
+    const stub = agent("tools-trigger");
+    await stub.ingest(message("m1", "who is Ana?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Ok."]));
+
+    // Kelpie's note starts a turn of its own, and an eviction mid-call doesn't make it a person's.
+    expect(await stub.kelpieNote("assistant", "u-owner", "A task ended.")).toBe(true);
+    await vi.waitFor(() => expect(runs.map((run) => run.name)).toEqual(["lookup", "stuck"]));
+    await evictDurableObject(stub);
+    await runDurableObjectAlarm(stub);
+    await vi.waitFor(() => expect(world.sent).toEqual(["Ok.", "Noted."]));
+
+    // A person's message and Kelpie's note in one turn: the person started it.
+    await stub.ingest(message("m2", "and Bruno?"));
+    expect(await stub.kelpieNote("assistant", "u-owner", "Another task ended.")).toBe(true);
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent).toEqual(["Ok.", "Noted.", "Both."]));
+
+    expect(runs.map(({ name, context }) => `${name} ${context.trigger}`)).toEqual([
+      "lookup person",
+      "stuck note",
+      "lookup note",
+      "lookup person",
     ]);
   });
 

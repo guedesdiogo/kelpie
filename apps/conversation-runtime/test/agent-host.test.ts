@@ -18,6 +18,7 @@ import {
   replaceContextStoreForTesting,
   replaceIdentitySourcesForTesting,
 } from "../src/agent-host/agent-host.ts";
+import { MAX_UNATTENDED_HANDOFFS } from "../src/agent-host/tasks.ts";
 import { CONFIGURE_KELPIE_SKILL } from "../src/configuration.ts";
 import { withIdentity } from "./prompts.ts";
 
@@ -1055,6 +1056,36 @@ describe("a subagent's trio, held to its creator's (#290)", () => {
     // Unset counts as the model's default, which may be above the creator's: it takes the creator's.
     expect(effortOf({}, { effort: "low" })).toEqual({ tier: "cheap", effort: "low" });
     expect(effortOf({ effort: "high" }, {})).toEqual({ tier: "cheap" });
+  });
+});
+
+describe("the handoffs of turns no person typed (#345)", () => {
+  it("allows the most a day, gives a slot back, and frees one 24 hours after it was taken", async () => {
+    const stub = host("handoffs-cap");
+    for (let i = 0; i < MAX_UNATTENDED_HANDOFFS; i++) {
+      expect(await stub.takeHandoff(), `slot ${i}`).toBe(true);
+    }
+    expect(await stub.takeHandoff()).toBe(false);
+    await stub.returnHandoff();
+    expect(await stub.takeHandoff()).toBe(true);
+    expect(await stub.takeHandoff()).toBe(false);
+
+    // The first slot was taken a day ago: it is free again, and only it.
+    await runInDurableObject(stub, (_instance, state) => {
+      const [row] = state.storage.sql
+        .exec<{ value: string }>("SELECT value FROM state WHERE key = 'handoffs'")
+        .toArray();
+      const times = JSON.parse(row?.value ?? "[]") as number[];
+      times[0] = Date.now() - 24 * 60 * 60_000 - 1;
+      state.storage.sql.exec(
+        "UPDATE state SET value = ? WHERE key = 'handoffs'",
+        JSON.stringify(times),
+      );
+    });
+    expect(await stub.takeHandoff()).toBe(true);
+    expect(await stub.takeHandoff()).toBe(false);
+    // Another agent counts its own.
+    expect(await host("handoffs-other").takeHandoff()).toBe(true);
   });
 });
 
