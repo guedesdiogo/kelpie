@@ -599,6 +599,10 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 
 - **The plush.** Soft parts (the body, ears, hair, leaves, felt and knit hats, mittens) are painted once per piece and size on a canvas: the shape shaded as a volume lit from the top left, then short strands in three layers. The painting is kept as an image, and motion only moves finished images and vectors. Until it is painted, the flat vector shows.
 - **Hard parts** (eyes, mouth, glasses, bow tie, horns, antennae, tag, buckle) are crisp vectors with gloss and a soft shadow on the fur.
+- **The pointed ear is a kelpie's** ([#455](https://github.com/guedesdiogo/kelpie/issues/455)).
+  - It is traced from a photo of the breed: a domed top with no vertex, an outer edge nearly upright, a straight inner diagonal and a base set at the corner of the head.
+  - It has a light shell inside, the body's color mixed 55% toward cream. The shell is what makes it read as an ear in every color: without it, the shape reads as a horn, and a short triangle on top reads as a cat's ear.
+  - It keeps the mascot's frame, so it stands lower than the dog's. A shape with no room above its head (`buoy`) sets it lower than its other heads.
 
 **States.** Each state has a pose that reads when still, a short announcement when it starts, and a repertoire while it lasts. In Alive the mascot breathes all the time, and draws a gesture from its state's repertoire by weight, never one of the last two (with only two, never the last one).
 
@@ -981,6 +985,10 @@ The rules above cite these. The first set was read on 2026-10-15; a source added
   - [OpenAI's dots documentation](https://learn.chatgpt.com/docs/dots);
   - the Apple Design Awards [2024](https://www.apple.com/newsroom/2024/06/apple-announces-winners-of-the-2024-apple-design-awards/) and [2026](https://www.apple.com/newsroom/2026/06/apple-reveals-winners-of-the-2026-apple-design-awards/);
   - [Hermes Agent's StatusPulse](https://github.com/NousResearch/hermes-agent/blob/b51e8b850494e0a95a4b410c3d9b9a26df9ae261/apps/desktop/src/components/ui/status-pulse.tsx#L1-L130).
+- The pointed ear (5.19), read on 2026-10-19; the findings, the owner's photo of a kelpie and the reference-project check are on #455:
+  - [FCI Standard No. 293, Australian Kelpie](https://kusa.co.za/images/HERDING%20GROUP%202025/Australian%20Kelpie%20-%20FCI%20[02-2017].pdf) and the [Working Kelpie Council](https://www.wkc.org.au/About-Kelpies/Charateristics-and-Confirmation.php), on the breed's ear;
+  - [Rusty in *Bluey*](https://www.bluey.tv/characters/rusty/) (International Emmy Kids 2020), a red kelpie in flat shapes;
+  - [Hermes Agent's `ip-as-logo`](https://github.com/NousResearch/hermes-agent/blob/d20b3daa49d7ec5642397c8e994bb82a69376263/optional-skills/creative/ip-as-logo/SKILL.md), blunt tips so a mascot reads at 32 px.
 - The offline state ([ADR-0047](adr/0047-mascot-offline.md)), read on 2026-10-16; the findings are on #380:
   - [Chrome's offline dinosaur](https://blog.google/products/chrome/chrome-dino/), kept for offline only;
   - [Telegram's presence line](https://github.com/DrKLO/Telegram/blob/f32ffeec763f0bdbf4bec25b52d654f77bff733d/TMessagesProj/src/main/java/org/telegram/ui/Components/ChatAvatarContainer.java#L1582-L1620), replaced while it waits for the network;
