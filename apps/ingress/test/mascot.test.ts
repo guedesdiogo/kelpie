@@ -190,6 +190,52 @@ describe("the engine's figure", () => {
     }
   });
 
+  it("draws the pointed ear as a kelpie's, with a light shell, inside the frame on every shape (#455)", () => {
+    const points = (d: string) =>
+      Array.from(
+        d.matchAll(/(-?[\d.]+),(-?[\d.]+)/g),
+        ([, x, y]) => [Number(x), Number(y)] as const,
+      );
+    const channels = (hex: string) =>
+      [1, 3, 5].reduce((sum, i) => sum + Number.parseInt(hex.slice(i, i + 2), 16), 0);
+    for (const shape of MASCOT_SHAPES) {
+      const built = buildMascot(
+        { ...KELPIE_MASCOT, shape, head: { type: "ears", variation: "pointed" } },
+        { uid: 6, px: 160, hex: "#2e9e8e" },
+      );
+      const ears = Array.from(
+        built.html.matchAll(
+          /translate\(([\d.]+) ([\d.]+)\) translate\(0 -2\.8\) rotate\((-?[\d.]+)\)"><g class="m-ear"><g class="fp" data-piece="(\d+)"/g,
+        ),
+        ([, x, y, a, index]) => ({
+          x: Number(x),
+          y: Number(y),
+          a: Number(a),
+          piece: built.pieces[Number(index)],
+        }),
+      );
+      expect(ears, shape).toHaveLength(2);
+      // The listening mitten goes to the ear the shape shows.
+      expect(built.anchors.ear, shape).toEqual([ears[1]?.x, ears[1]?.y, ears[1]?.a]);
+      const [left = [], right] = ears.map(({ piece }) => points(piece.shapes[0].d));
+      // The right ear mirrors the left (0 - x, so the top's 0 stays 0 and not -0).
+      expect(right, shape).toEqual(left.map(([x, y]) => [0 - x, y]));
+      for (const { x, y, a, piece } of ears) {
+        const [ear, shell] = piece.shapes;
+        expect(channels(shell.fill), shape).toBeGreaterThan(channels(ear.fill));
+        // Every point, control points included, stays in the frame (viewBox 10 14 100 100), with room for the fur.
+        const r = (a * Math.PI) / 180;
+        for (const [px, py] of points(ear.d)) {
+          const fx = x + px * Math.cos(r) - py * Math.sin(r);
+          const fy = y - 2.8 + px * Math.sin(r) + py * Math.cos(r);
+          expect(fy, `${shape} ${px},${py}`).toBeGreaterThan(15);
+          expect(fx, `${shape} ${px},${py}`).toBeGreaterThan(11);
+          expect(fx, `${shape} ${px},${py}`).toBeLessThan(109);
+        }
+      }
+    }
+  });
+
   it("draws only a mascot it knows, so a bad frame never reaches the markup", () => {
     expect(isDrawable(KELPIE_MASCOT)).toBe(true);
     expect(isDrawable({ ...KELPIE_MASCOT, head: { type: "none" } })).toBe(true);
