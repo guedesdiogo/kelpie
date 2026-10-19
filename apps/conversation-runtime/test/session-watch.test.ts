@@ -293,7 +293,7 @@ describe("Master's AgentHost watching the VPS's waits (#434)", () => {
   const agent = (name: string) => env.CONVERSATION_AGENT.getByName(name);
 
   /** Identity sources where each listed agent has its role. */
-  function roster(roles: Record<string, "main" | "specialist">) {
+  function roster(roles: Record<string, "master" | "specialist">) {
     replaceIdentitySourcesForTesting({
       agent: async (id) => {
         const role = roles[id];
@@ -357,7 +357,7 @@ describe("Master's AgentHost watching the VPS's waits (#434)", () => {
   }
 
   it("starts with Master's turns, once a minute, and never with a specialist's", async () => {
-    roster({ "watch-main": "main", "watch-specialist": "specialist" });
+    roster({ "watch-main": "master", "watch-specialist": "specialist" });
     runner(() => ok([]));
     await host("watch-main").turnConfig();
     await host("watch-main").turnConfig();
@@ -370,7 +370,7 @@ describe("Master's AgentHost watching the VPS's waits (#434)", () => {
   });
 
   it("tells the owner's conversation of each new wait once, on Telegram before the webchat", async () => {
-    roster({ "watch-tell": "main" });
+    roster({ "watch-tell": "master" });
     const world = use(fakeWorld([]));
     const now = Date.now();
     let waits = [wait(A, now - 5_000, { title: "Fix\nthe login" })];
@@ -433,7 +433,7 @@ describe("Master's AgentHost watching the VPS's waits (#434)", () => {
     async (how) => {
       vi.spyOn(console, "warn").mockImplementation(() => {});
       const agentId = `watch-fallback-${how === "throws" ? "t" : "f"}`;
-      roster({ [agentId]: "main" });
+      roster({ [agentId]: "master" });
       const world = use(fakeWorld([]));
       const now = Date.now();
       runner(() => ok([wait(A, now - 5_000)], now));
@@ -460,7 +460,7 @@ describe("Master's AgentHost watching the VPS's waits (#434)", () => {
   );
 
   it("counts a notice that takes too long as told, so a slow send that lands isn't repeated", async () => {
-    roster({ "watch-slow": "main" });
+    roster({ "watch-slow": "master" });
     const world = use(fakeWorld([]));
     const now = Date.now();
     runner(() => ok([wait(A, now - 5_000)], now));
@@ -477,7 +477,7 @@ describe("Master's AgentHost watching the VPS's waits (#434)", () => {
   });
 
   it("keeps what a check wrote while Master's turn starts the check again", async () => {
-    roster({ "watch-rearm": "main" });
+    roster({ "watch-rearm": "master" });
     runner(() => ok([]));
     const stopped: SessionWatch = {
       since: Date.now() - WAIT_OVERLAP_MS,
@@ -515,7 +515,7 @@ describe("Master's AgentHost watching the VPS's waits (#434)", () => {
   });
 
   it("never leaves the check running without its schedule when Master's turn comes as it stops", async () => {
-    roster({ "watch-race": "main" });
+    roster({ "watch-race": "master" });
     runner(() => ({ ok: false, reason: "not_connected" }));
     await host("watch-race").turnConfig();
     const cancel = AgentHost.prototype.cancelSchedule;
@@ -535,7 +535,7 @@ describe("Master's AgentHost watching the VPS's waits (#434)", () => {
   });
 
   it("tells nothing of idle or ended sessions, whose waits the runner doesn't list", async () => {
-    roster({ "watch-quiet": "main" });
+    roster({ "watch-quiet": "master" });
     const world = use(fakeWorld([]));
     const now = Date.now();
     const sessions: Pick<RunnerVpsSession, "id" | "state" | "since" | "title">[] = [
@@ -567,7 +567,7 @@ describe("Master's AgentHost watching the VPS's waits (#434)", () => {
   });
 
   it("stops while the runner isn't connected, and starts again with Master's next turn", async () => {
-    roster({ "watch-off": "main" });
+    roster({ "watch-off": "master" });
     let outcome: RunnerWaitsOutcome = { ok: false, reason: "not_connected" };
     const asked = runner(() => outcome);
     await host("watch-off").turnConfig();
@@ -583,7 +583,7 @@ describe("Master's AgentHost watching the VPS's waits (#434)", () => {
   });
 
   it("stops after an outdated runner answers three times, and Master's turn doesn't start it at once", async () => {
-    roster({ "watch-old": "main" });
+    roster({ "watch-old": "master" });
     runner(() => ({ ok: false, reason: "outdated" }));
     await host("watch-old").turnConfig();
     for (let check = 0; check < 3; check += 1) await host("watch-old").watchSessions();
@@ -594,7 +594,7 @@ describe("Master's AgentHost watching the VPS's waits (#434)", () => {
   });
 
   it("stops once its agent isn't Master any more, without asking the runner", async () => {
-    const roles = roster({ "watch-was": "main" });
+    const roles = roster({ "watch-was": "master" });
     const asked = runner(() => ok([]));
     await host("watch-was").turnConfig();
     roles["watch-was"] = "specialist";

@@ -52,7 +52,7 @@ const lastLists = new WeakMap<object, { at: number; list: RunnerVpsSessions }>()
 
 /**
  * Master's tool that lists the VPS's sessions (ADR-0057 §5). Only the agent whose Registry role is
- * `main` gets it, as its configuration tools (ADR-0048); a task's run never does; and only the
+ * `master` gets it, as its configuration tools (ADR-0048); a task's run never does; and only the
  * owner's turn may run it. Kelpie keeps no copy: a call asks the runner, unless one did in the
  * last LIST_REUSE_MS. `now` is the clock that measures that.
  */
@@ -70,7 +70,7 @@ export function vpsSessionsTools(
     },
     async run(_input, context) {
       // Again when it runs: a turn that listed it may outlive the agent's role (ADR-0048).
-      if ((await options.roleOf(context.agentId)) !== "main") return NOT_MASTER;
+      if ((await options.roleOf(context.agentId)) !== "master") return NOT_MASTER;
       if (context.actor.role !== "owner") return NOT_OWNER;
       const now = clock();
       const last = lastLists.get(sessions);
@@ -93,7 +93,7 @@ export function vpsSessionsTools(
     // A task's conversation has no owner to read them to (#335).
     async tools(agentId, place) {
       if (place?.channel === "task") return [];
-      return (await options.roleOf(agentId)) === "main" ? [tool] : [];
+      return (await options.roleOf(agentId)) === "master" ? [tool] : [];
     },
   };
 }

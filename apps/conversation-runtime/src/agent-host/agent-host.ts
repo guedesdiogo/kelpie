@@ -760,7 +760,8 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
         this.#get<SessionWatch>("sessionWatch", NEW_WATCH),
         {
           isMaster: async () =>
-            (await bounded(sources.agent(agentId), IDENTITY_TIMEOUT_MS))?.role === "main",
+            readRole((await bounded(sources.agent(agentId), IDENTITY_TIMEOUT_MS))?.role) ===
+            "master",
           waits: (since) => bounded(sessions.waits(since), WAITS_TIMEOUT_MS),
           // Only the deadline rejects: a slow send may yet land, so it isn't sent again.
           tell: (wait) =>

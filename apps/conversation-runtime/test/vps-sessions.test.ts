@@ -143,7 +143,7 @@ function fakeSessions(outcome: RunnerSessionsOutcome | (() => Promise<RunnerSess
 }
 
 const roleIn = async (id: string): Promise<AgentRole | null> =>
-  id === MASTER ? "main" : id === "ghost" ? null : "specialist";
+  id === MASTER ? "master" : id === "ghost" ? null : "specialist";
 
 function contextOf(actor: Actor = owner): ToolContext {
   return {
@@ -214,13 +214,13 @@ describe("Master's vps_sessions tool (ADR-0057 §5)", () => {
     // It isn't one of the orchestration tools ADR-0050 names, so a tools list the owner sets on
     // Master narrows it, as it does Master's other tools.
     expect(MASTER_TOOLS.has("vps_sessions")).toBe(false);
-    expect(heldTools("main", ["memory_search"])).not.toContain("vps_sessions");
-    expect(heldTools("main", null)).toBeNull();
+    expect(heldTools("master", ["memory_search"])).not.toContain("vps_sessions");
+    expect(heldTools("master", null)).toBeNull();
   });
 
   it("is the owner's alone, and follows the role when it runs", async () => {
     const { sessions, calls } = fakeSessions(answer(SESSIONS));
-    let role: AgentRole = "main";
+    let role: AgentRole = "master";
     const tool = await toolOf(vpsSessionsTools(sessions, { roleOf: async () => role }));
     expect(await tool.run({}, contextOf(member))).toEqual({
       output: "Only the owner can see the VPS's sessions.",
