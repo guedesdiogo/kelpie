@@ -1422,7 +1422,7 @@ export function outcomeNote({ id, target, status, fields }: ProposalOutcome): st
     case "refused":
       return `The owner refused ${what}. ${again}`;
     case "expired":
-      return `Y${what.slice(1)} expired: the owner didn't decide it in time. ${again}`;
+      return `Y${what.slice(1)} expired without being applied. ${again}`;
     case "conflict":
       return `The owner approved ${what}, but the agent ${target} changed since you proposed it, so it wasn't applied. ${again}`;
     case "void":

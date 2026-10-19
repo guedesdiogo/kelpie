@@ -60,7 +60,7 @@ Neither Hermes nor ai-memory expires a proposal, and neither tells the proposer 
 
 - **It waits 72 hours,** then expires, and nothing changes.
 - **Its statuses:** `pending`, `applying` while an approval runs, then `applied`, `refused`, `expired`, `conflict` or `void`.
-- **The caps,** checked by the Registry in one synchronous step:
+- **The caps,** checked by the Registry in one synchronous step, count a proposal until it expires, an approval still being applied included:
   - one pending per proposer and target;
   - three pending per proposer;
   - ten a day per proposer;
@@ -73,7 +73,7 @@ Neither Hermes nor ai-memory expires a proposal, and neither tells the proposer 
 - **An approval that doesn't finish,** as when a service fails mid-way, is settled by the Registry's alarm five minutes later:
   - applied when the target holds the change, since a change applies in one step;
   - back to pending otherwise, for the owner to decide again while it hasn't expired;
-  - when the target can't be read, tried again every five minutes until the proposal expires, then back to pending, which expires it.
+  - when the target can't be read, still being applied, since unread isn't unapplied: tried again every five minutes, and every hour once the proposal expired.
 
   A proposal is claimed once, so no approval applies past its expiry. The page answers such an approval as taken, never as "nothing changed".
 - **The applied change is audited on the target,** as `via: proposal:<id>`. Every step of a proposal is audited too, with the proposer, the person its turn acted for, and who decided.

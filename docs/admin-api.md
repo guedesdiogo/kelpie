@@ -226,7 +226,7 @@ An owner agent asks for a change to an agent it owns, and only your act on the p
   - it waits 72 hours, then expires;
   - at most one pending per proposer and target, three per proposer, ten a day per proposer, and twenty in all;
   - it applies only while the target holds the values it was proposed against; otherwise it ends as a conflict, and nothing changes;
-  - an approval that doesn't finish, as when a service fails mid-way, is settled about five minutes later: applied when the target holds the change, else back to pending for you to decide again;
+  - an approval that doesn't finish, as when a service fails mid-way, is settled about five minutes later: applied when the target holds the change, else back to pending for you to decide again, unless it expired. One whose target can't be read stays being applied, and is tried again;
   - the applied change is audited on the target as `via: proposal:<id>`, and every step of the proposal in the Registry, with the proposer, the person it acted for and who decided;
   - deleting an agent voids the open proposals by it or about it.
 - **The proposer hears the outcome** from Kelpie, void included: as a comment on the task whose run made it, which resumes a task waiting on other work, or else as a note in its latest conversation with you. A task that waits for your answer keeps waiting for it.

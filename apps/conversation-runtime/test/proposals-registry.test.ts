@@ -545,7 +545,7 @@ describe("Registry proposals' abandoned approvals (#302)", () => {
     expect(Number(row.claimed_at)).toBeGreaterThan(Date.now() - 60_000);
   });
 
-  it("settles only the claim it read, when the approval finished during the read", async () => {
+  it("doesn't release an approval that finished during its read", async () => {
     const stub = await withAgents("proposals-abandoned-raced");
     await stub.add("ab-raced", "Raced", owner);
     const id = await abandoned(stub, "ab-raced");
@@ -578,7 +578,7 @@ describe("Registry proposals' abandoned approvals (#302)", () => {
     );
   });
 
-  it("gives up on a target that can't be read once the proposal expired", async () => {
+  it("keeps an unreadable approval being applied past its expiry, tried hourly, out of the caps", async () => {
     const stub = await withAgents("proposals-abandoned-unread-due");
     await stub.add("ab-unread-due", "Unread", owner);
     const id = await abandoned(stub, "ab-unread-due");
@@ -605,8 +605,42 @@ describe("Registry proposals' abandoned approvals (#302)", () => {
       }
     });
 
-    // Back to pending, then expired in the same alarm: it holds no cap any more.
-    expect(await stub.proposal(id)).toMatchObject({ status: "expired" });
+    // Unread isn't unapplied: nothing claims it didn't apply.
+    const row = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql.exec("SELECT status, claimed_at FROM proposals WHERE id = ?", id).one(),
+    );
+    expect(row.status).toBe("applying");
+    expect(Number(row.claimed_at)).toBeGreaterThan(Date.now() + 50 * 60_000);
+    // It holds no cap any more: its proposer may propose about that agent again.
+    expect(await stub.propose(proposal({ target: "ab-unread-due" }), byMaster)).toMatchObject({
+      ok: true,
+    });
+  });
+
+  it("puts one that didn't apply back to pending, and expires it when it is due", async () => {
+    const stub = await withAgents("proposals-abandoned-due");
+    await stub.add("ab-due", "Due", owner);
+    const id = await abandoned(stub, "ab-due");
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE proposals SET expires_at = ? WHERE id = ?",
+        Date.now() - 1,
+        id,
+      );
+    });
+
+    await runDurableObjectAlarm(stub);
+
+    const status = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql.exec("SELECT status FROM proposals WHERE id = ?", id).one(),
+    );
+    expect(status).toEqual({ status: "expired" });
+    expect((await eventsOf(stub)).map((event) => (event as { kind: string }).kind)).toEqual([
+      "proposed",
+      "claimed",
+      "released",
+      "expired",
+    ]);
   });
 
   it("puts one back to pending when its target doesn't hold the change", async () => {

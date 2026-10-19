@@ -41,6 +41,8 @@ const DAY_MS = 24 * 60 * 60_000;
  * the alarm settles it (#302).
  */
 const ABANDONED_CLAIM_MS = 5 * 60_000;
+/** How often an abandoned approval whose target can't be read is tried, once its proposal expired. */
+const UNREAD_RETRY_MS = 60 * 60_000;
 /** How long a void a deletion caused waits to be told, so the cascade's next deletion comes first. */
 const CASCADE_GRACE_MS = 60_000;
 /** The most a proposal's change and its snapshot hold together, as JSON. */
@@ -365,8 +367,9 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
       return { ok: false, reason: "invalid_input" };
     }
     const now = Date.now();
+    // Until it expires: an approval still being applied past then holds no cap.
     const open = and(
-      or(eq(schema.proposals.status, "applying"), gt(schema.proposals.expiresAt, now)),
+      gt(schema.proposals.expiresAt, now),
       inArray(schema.proposals.status, OPEN_PROPOSALS),
     );
     const counted = (...where: Parameters<typeof and>) =>
@@ -566,15 +569,12 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
         );
       } catch (error) {
         console.error("Registry: an abandoned approval's target wasn't read", errorName(error));
-        // Tried again five minutes later, until the proposal expires: then it goes back to
-        // pending, which expires it, so no cap is held for good.
-        if (Date.now() > row.expiresAt) {
-          this.#release(row.id, null, Date.now());
-          return;
-        }
+        // Unread isn't unapplied: it stays being applied, and is tried again five minutes later,
+        // or an hour later once the proposal expired, when it no longer holds a cap.
+        const later = Date.now() > row.expiresAt ? UNREAD_RETRY_MS - ABANDONED_CLAIM_MS : 0;
         this.#db
           .update(schema.proposals)
-          .set({ claimedAt: Date.now() })
+          .set({ claimedAt: Date.now() + later })
           .where(
             and(
               eq(schema.proposals.id, row.id),
