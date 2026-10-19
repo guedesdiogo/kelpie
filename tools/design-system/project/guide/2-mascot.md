@@ -28,6 +28,10 @@ Moment for its states, frequent for its life in place ([ADR-0045](https://github
 
 - **The plush.** Soft parts (the body, ears, hair, leaves, felt and knit hats, mittens) are painted once per piece and size on a canvas: the shape shaded as a volume lit from the top left, then short strands in three layers. The painting is kept as an image, and motion only moves finished images and vectors. Until it is painted, the flat vector shows.
 - **Hard parts** (eyes, mouth, glasses, bow tie, horns, antennae, tag, buckle) are crisp vectors with gloss and a soft shadow on the fur.
+- **The pointed ear is a kelpie's** ([#455](https://github.com/guedesdiogo/kelpie/issues/455)).
+  - It is traced from a photo of the breed: a domed top with no vertex, an outer edge nearly upright, a straight inner diagonal and a base set at the corner of the head.
+  - It has a light shell inside, the body's color mixed 55% toward cream. The shell is what makes it read as an ear in every color: without it, the shape reads as a horn, and a short triangle on top reads as a cat's ear.
+  - It keeps the mascot's frame, so it stands lower than the dog's. A shape with no room above its head (`buoy`) sets it lower than its other heads.
 
 **States.** Each state has a pose that reads when still, a short announcement when it starts, and a repertoire while it lasts. In Alive the mascot breathes all the time, and draws a gesture from its state's repertoire by weight, never one of the last two (with only two, never the last one).
 
