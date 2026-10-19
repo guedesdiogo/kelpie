@@ -62,6 +62,7 @@ const context = (turn = `turn-${turns++}`): ToolContext => ({
   agentId: "assistant",
   turn,
   scopes: ["conversation/familia"],
+  trigger: "person",
   qualifier: "jev",
   source: "telegram:chat-1, 2026-10-06",
   signal: new AbortController().signal,

@@ -119,9 +119,12 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
     },
     async run(input, context) {
       // Only a turn that reads all of the owner's memory makes one: a subagent reads all of its
-      // creator's (ADR-0036 §5), never more than the turn that made it.
+      // creator's (ADR-0036 §5), never more than the turn that made it. A turn no person typed
+      // makes one too, within the creator's live and daily limits (#345).
       if (context.actor.role !== "owner" || context.scopes !== "all") {
-        return failed("Only the owner's own turns, in a direct conversation, create subagents.");
+        return failed(
+          "Only turns for the owner create subagents: in a direct conversation with them, or in a task's run.",
+        );
       }
       if (!(await ports.canSpawn(context.agentId))) {
         return failed(
@@ -262,7 +265,9 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
     },
     async run(input, context) {
       if (context.actor.role !== "owner" || context.scopes !== "all") {
-        return failed("Only the owner's own turns, in a direct conversation, delete subagents.");
+        return failed(
+          "Only turns for the owner delete subagents: in a direct conversation with them, or in a task's run.",
+        );
       }
       const { id } = fields(input);
       const mine = (await ports.owned(context.agentId)).find(
@@ -278,7 +283,7 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
       }
       return failed(
         result.reason === "forbidden"
-          ? "Only the owner's own turns delete subagents."
+          ? "Only turns for the owner delete subagents."
           : "The deletion didn't finish: call delete_subagent again.",
       );
     },

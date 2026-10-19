@@ -125,6 +125,7 @@ import {
   type Tool,
   type ToolActivity,
   type ToolContext,
+  type TurnTrigger,
   visible,
 } from "./tools.ts";
 import { chatTypeOf, leastAccess, roleOf, type TurnAccess, turnScopes } from "./turn-access.ts";
@@ -958,6 +959,27 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       }
     }
     return tools;
+  }
+
+  /**
+   * What started the turn (#345), from its own messages in history, so a turn picked up after an
+   * eviction keeps it: a task's run in a task's conversation, whoever wrote its input; a person's
+   * message when it took one; else Kelpie's notes alone.
+   */
+  #trigger(turnId: number): TurnTrigger {
+    if (this.#destination().channel === "task") return "task";
+    const typed = this.#db
+      .select({ id: schema.history.id })
+      .from(schema.history)
+      .where(
+        and(
+          eq(schema.history.turnId, turnId),
+          eq(schema.history.role, "user"),
+          eq(schema.history.fromKelpie, false),
+        ),
+      )
+      .get();
+    return typed ? "person" : "note";
   }
 
   /** The latest person in this conversation's history, whom a note of Kelpie's is written as. */
@@ -1969,6 +1991,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           actor,
           agentId,
           scopes: turnScopes(turn, this.#destination()),
+          trigger: this.#trigger(turn.id),
           qualifier: settings.qualifier,
           turn: String(turn.id),
           source: this.#source(),

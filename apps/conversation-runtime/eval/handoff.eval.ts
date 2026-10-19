@@ -111,6 +111,8 @@ const TOOLS: ToolProvider[] = [
         .map((entry) => ({ id: entry.id, name: entry.name })),
     create: async (_assignee, task) => ({ ok: true, value: made(task.title) }),
     comment: async () => ({ ok: false, reason: "unknown_task" }),
+    takeHandoff: async () => true,
+    returnHandoff: async () => undefined,
   }),
 ].map(noted);
 

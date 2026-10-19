@@ -179,6 +179,12 @@ export function canonicalJson(value: unknown): string {
   );
 }
 
+/**
+ * What started a turn (#345): a person's message, a task's run, or Kelpie's note alone, such as a
+ * task's news or a setup step done. A turn that took a person's message with a note is theirs.
+ */
+export type TurnTrigger = "person" | "task" | "note";
+
 /** What a tool's run knows about the turn. None of it comes from model output. */
 export interface ToolContext {
   /** The conversation's language, for the texts a tool has Kelpie show the owner (#187). */
@@ -188,6 +194,8 @@ export interface ToolContext {
   agentId: string;
   /** The memory scopes the turn may read, as its recall uses them. */
   scopes: RecallOptions["scopes"];
+  /** What started the turn (#345): what a turn no person typed hands off is capped. */
+  trigger: TurnTrigger;
   /** The agent's qualifier, for tools that rank as recall does: Clef unless the agent chose Jev. */
   qualifier: NonNullable<RecallOptions["qualifier"]>;
   /** The turn, the same for all its calls: what a tool counts per turn is keyed by it. */
