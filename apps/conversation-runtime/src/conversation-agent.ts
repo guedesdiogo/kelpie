@@ -964,7 +964,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   /**
    * What started the turn (#345), from its own messages in history, so a turn picked up after an
    * eviction keeps it: a task's run in a task's conversation, whoever wrote its input; a person's
-   * message when it took one; else Kelpie's notes alone.
+   * message when it took one; else Kelpie's notes alone, even when it also answers a person's
+   * earlier message, which is the stricter reading.
    */
   #trigger(turnId: number): TurnTrigger {
     if (this.#destination().channel === "task") return "task";

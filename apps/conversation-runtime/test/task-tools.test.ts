@@ -386,6 +386,10 @@ describe("handoffs from turns no person typed (#345)", () => {
     expect(await create.run({ agentId: "stranger", title: "Book", body: "x" }, run)).toMatchObject({
       isError: true,
     });
+    expect(await create.run({ agentId: "full", title: " ", body: "x" }, run)).toMatchObject({
+      isError: true,
+      output: expect.stringContaining("one line"),
+    });
     expect(calls).toEqual([]);
 
     expect(await create.run({ agentId: "full", title: "Book", body: "x" }, run)).toMatchObject({
@@ -407,5 +411,16 @@ describe("handoffs from turns no person typed (#345)", () => {
       "create broken Book by kelpie for u-owner",
       "take kelpie refused",
     ]);
+  });
+
+  it("count a turn's three before its day: a fourth call in one turn takes no slot", async () => {
+    const { provider, calls } = world(undefined, { kelpie: 5 });
+    const create = byName(await provider.tools("kelpie", { channel: "telegram" }), "create_task");
+    const note = contextOf("kelpie", undefined, "note");
+    for (let i = 0; i < 4; i++) {
+      await create.run({ agentId: "helper", title: `T${i}`, body: "x" }, note);
+    }
+    expect(calls.filter((call) => call.startsWith("take"))).toHaveLength(3);
+    expect(calls.at(-1)).toBe("create helper T2 by kelpie for u-owner");
   });
 });

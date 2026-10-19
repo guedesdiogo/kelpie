@@ -430,6 +430,10 @@ describe("tasks between agents (#335)", () => {
       ],
     });
     expect(await host("runs-capped").listTasks()).toEqual([]);
+    // Master's day starts over for the tests after this one.
+    for (let i = 0; i < MAX_UNATTENDED_HANDOFFS; i++) await host("kelpie").returnHandoff();
+    expect(await host("kelpie").takeHandoff()).toBe(true);
+    await host("kelpie").returnHandoff();
   });
 
   it("lets only the owning agent hand an agent work, and records both", async () => {
