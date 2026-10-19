@@ -92,9 +92,10 @@ export const taskComments = sqliteTable(
     id: integer("id").primaryKey({ autoIncrement: true }),
     taskId: text("task_id").notNull(),
     at: integer("at").notNull(),
-    authorKind: text("author_kind", { enum: ["user", "agent"] }).notNull(),
+    // Kelpie writes too, as when it tells a proposal's outcome (#302).
+    authorKind: text("author_kind", { enum: ["user", "agent", "kelpie"] }).notNull(),
     authorId: text("author_id").notNull(),
-    source: text("source", { enum: ["board", "chat", "agent"] }).notNull(),
+    source: text("source", { enum: ["board", "chat", "agent", "kelpie"] }).notNull(),
     text: text("text").notNull(),
   },
   (table) => [index("task_comments_task").on(table.taskId)],

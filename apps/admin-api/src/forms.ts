@@ -175,9 +175,16 @@ export function unavailablePage(locale: Locale): Response {
 
 /**
  * A page in `locale`, with headers that keep the form out of caches, referrers and frames. `title`
- * is escaped; `body` is HTML, with whatever came from elsewhere already escaped.
+ * is escaped; `body` is HTML, with whatever came from elsewhere already escaped. `style` adds a
+ * page's own rules after the base ones.
  */
-export function page(status: number, title: string, body: string, locale: Locale): Response {
+export function page(
+  status: number,
+  title: string,
+  body: string,
+  locale: Locale,
+  style = "",
+): Response {
   const html = `<!doctype html>
 <html lang="${locale}">
 <head>
@@ -197,7 +204,7 @@ export function page(status: number, title: string, body: string, locale: Locale
     input { background: #111; color: #eee; border-color: #444; }
     button { background: #eee; color: #111; }
     .error { color: #ff6b81; }
-  }
+  }${style}
 </style>
 </head>
 <body><main><h1>${escapeHtml(title)}</h1>${body}</main></body>

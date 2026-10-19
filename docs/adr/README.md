@@ -64,6 +64,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0058](0058-owner-edits-agent-files-from-the-webchat.md) | The owner edits an agent's own files from the webchat, committed directly as the owner's edit | [#381](https://github.com/guedesdiogo/kelpie/issues/381) |
 | [0059](0059-session-file-waits.md) | A session file's own "waiting" also opens a wait, beside the hooks | [#416](https://github.com/guedesdiogo/kelpie/issues/416) |
 | [0060](0060-master-is-the-only-name.md) | Master is the role's only name, and nothing calls the setup agent | [#439](https://github.com/guedesdiogo/kelpie/issues/439) |
+| [0061](0061-proposals.md) | Proposals come from where no configure_agent is, wait 72 hours on their page, and Kelpie tells their proposer | [#302](https://github.com/guedesdiogo/kelpie/issues/302) |
 
 ## Format
 

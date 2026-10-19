@@ -18,14 +18,20 @@ export type TaskStatus = (typeof TASK_STATUSES)[number];
  */
 export type WaitingReason = "needs_input" | "dependency" | "failed";
 
-/** Where a comment was written: on the board, in a chat, or by an agent. */
-export type CommentSource = "board" | "chat" | "agent";
+/**
+ * Where a comment was written: on the board, in a chat, by an agent, or by Kelpie itself, as when
+ * it tells a proposal's outcome (#302).
+ */
+export type CommentSource = "board" | "chat" | "agent" | "kelpie";
 
 /** Who wrote something: a person, by their user id, or an agent, by its id. */
 export interface TaskAuthor {
   kind: "user" | "agent";
   id: string;
 }
+
+/** Who wrote a comment: a person, an agent, or Kelpie itself (ADR-0061, #302). */
+export type CommentAuthor = TaskAuthor | { kind: "kelpie"; id: "kelpie" };
 
 /** A task as a list shows it. */
 export interface TaskSummary {
@@ -50,7 +56,7 @@ export interface TaskView extends TaskSummary {
 
 export interface TaskComment {
   at: number;
-  author: TaskAuthor;
+  author: CommentAuthor;
   source: CommentSource;
   text: string;
 }
