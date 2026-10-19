@@ -110,7 +110,7 @@ describe("a proposal's page (#302)", () => {
     expect(html).not.toContain("\u200b");
   });
 
-  it("says a tools setting of null means every tool, in both columns", async () => {
+  it("says a tools setting of null means every tool, as proposed or as it is now", async () => {
     const widening = world({
       detail: {
         ...proposal({ changes: { tools: null }, before: { tools: ["memory_search"] } }),
@@ -122,6 +122,17 @@ describe("a proposal's page (#302)", () => {
 
     expect(html).toContain("Every tool it is given: no list limits it.");
     expect(html).not.toContain("<pre>null</pre>");
+    // Narrowing an agent that holds every tool.
+    const narrowing = world({
+      detail: {
+        ...proposal({ changes: { tools: ["memory_search"] }, before: { tools: null } }),
+        current: { tools: null },
+        stale: false,
+      },
+    });
+    const now = await (await handle(new Request(pageUrl()), narrowing.deps)).text();
+    expect(now).toContain("Every tool it is given: no list limits it.");
+    expect(now).toContain("&quot;memory_search&quot;");
   });
 
   it("leaves only Refuse, saying why, for a target that changed since", async () => {
@@ -192,6 +203,8 @@ describe("deciding on a proposal's page (#302)", () => {
       [{ ok: false, reason: "not_pending" }, 409, "already decided"],
       [{ ok: false, reason: "unknown_proposal" }, 404, "No such proposal"],
       [{ ok: false, reason: "unavailable" }, 503, "didn't answer"],
+      // Taken, but its result didn't come back: Kelpie settles it.
+      [{ ok: true, value: proposal({ status: "applying" }) }, 202, "Approval taken"],
     ] as const) {
       const response = await handle(submit("approve"), world({ decided }).deps);
       expect(response.status, JSON.stringify(decided)).toBe(status);
@@ -314,6 +327,7 @@ describe("the proposals' pages in each language (#302)", () => {
         { ok: true, value: proposal({ status: "conflict" }) },
         { ok: true, value: proposal({ status: "void" }) },
         { ok: true, value: proposal({ status: "pending" }) },
+        { ok: true, value: proposal({ status: "applying" }) },
         { ok: false, reason: "not_pending" },
         { ok: false, reason: "unknown_proposal" },
         { ok: false, reason: "invalid_input" },

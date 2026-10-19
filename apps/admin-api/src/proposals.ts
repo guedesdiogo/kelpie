@@ -36,6 +36,8 @@ interface Texts {
   /** What became of a proposal, on its page and after a decision. */
   settled: Record<Settled, { title: string; body: (target: string) => string }>;
   already: { title: string; body: string };
+  /** An approval taken whose result a service didn't report: Kelpie settles it. */
+  taken: { title: string; body: string };
   unknown: { title: string; body: string };
   unavailable: { title: string; body: string };
   choose: { title: string; body: string };
@@ -70,7 +72,7 @@ const TEXTS: Localized<Texts> = {
       "The agent changed since this proposal, so approving it would apply nothing. Refuse it; the agent can propose again if it still needs the change.",
     approve: "Approve",
     refuse: "Refuse",
-    applying: "This proposal is being applied. Open this page again in a moment.",
+    applying: "This proposal is being applied. Open this page again in a few minutes.",
     settled: {
       applied: {
         title: "Approved",
@@ -97,6 +99,10 @@ const TEXTS: Localized<Texts> = {
     already: {
       title: "Already decided",
       body: "This proposal was already decided. Open its page again to see how.",
+    },
+    taken: {
+      title: "Approval taken",
+      body: "Your approval was taken, but a Kelpie service didn't answer while it was applied. Kelpie settles it within a few minutes: open the proposal's page again to see how it ended.",
     },
     unknown: { title: "No such proposal", body: "Check the link Kelpie sent you." },
     unavailable: {
@@ -136,7 +142,7 @@ const TEXTS: Localized<Texts> = {
       "O agente mudou desde esta proposta, então aprová-la não aplicaria nada. Recuse; o agente pode propor de novo se ainda precisar da mudança.",
     approve: "Aprovar",
     refuse: "Recusar",
-    applying: "Esta proposta está sendo aplicada. Abra esta página de novo daqui a pouco.",
+    applying: "Esta proposta está sendo aplicada. Abra esta página de novo daqui a alguns minutos.",
     settled: {
       applied: {
         title: "Aprovada",
@@ -163,6 +169,10 @@ const TEXTS: Localized<Texts> = {
     already: {
       title: "Já decidida",
       body: "Esta proposta já foi decidida. Abra a página dela de novo para ver como.",
+    },
+    taken: {
+      title: "Aprovação recebida",
+      body: "Sua aprovação foi recebida, mas um serviço do Kelpie não respondeu enquanto ela era aplicada. O Kelpie resolve isso em alguns minutos: abra a página da proposta de novo para ver como terminou.",
     },
     unknown: { title: "Essa proposta não existe", body: "Confira o link que o Kelpie enviou." },
     unavailable: {
@@ -205,7 +215,7 @@ const TEXTS: Localized<Texts> = {
       "El agente cambió desde esta propuesta, así que aprobarla no aplicaría nada. Recházala; el agente puede proponerla de nuevo si aún necesita el cambio.",
     approve: "Aprobar",
     refuse: "Rechazar",
-    applying: "Esta propuesta se está aplicando. Abre esta página de nuevo en un momento.",
+    applying: "Esta propuesta se está aplicando. Abre esta página de nuevo en unos minutos.",
     settled: {
       applied: {
         title: "Aprobada",
@@ -232,6 +242,10 @@ const TEXTS: Localized<Texts> = {
     already: {
       title: "Ya decidida",
       body: "Esta propuesta ya se decidió. Abre su página de nuevo para ver cómo.",
+    },
+    taken: {
+      title: "Aprobación recibida",
+      body: "Tu aprobación se recibió, pero un servicio de Kelpie no respondió mientras se aplicaba. Kelpie lo resuelve en unos minutos: abre la página de la propuesta de nuevo para ver cómo terminó.",
     },
     unknown: { title: "Esa propuesta no existe", body: "Revisa el enlace que Kelpie te envió." },
     unavailable: {
@@ -363,9 +377,10 @@ export function proposalListPage(proposals: Proposal[], locale: Locale, now: num
 }
 
 /**
- * What the owner's decision came to (#302): 200 when it applied or refused it, 409 for a conflict,
- * a void proposal or one already decided, 410 for an expired one, 404 for an unknown one and 503
- * when a service didn't answer. A repeat is never a 500.
+ * What the owner's decision came to (#302): 200 when it applied or refused it, 202 when the approval
+ * was taken but its result didn't come back, 409 for a conflict, a void proposal or one already
+ * decided, 410 for an expired one, 404 for an unknown one and 503 when a service didn't answer. A
+ * repeat is never a 500.
  */
 export function decidedPage(result: CommandResult<Proposal>, locale: Locale): Response {
   const texts = TEXTS[locale];
@@ -378,7 +393,9 @@ export function decidedPage(result: CommandResult<Proposal>, locale: Locale): Re
     return answer(503, texts.unavailable);
   }
   const { status, target } = result.value;
-  if (status === "pending" || status === "applying") return answer(503, texts.unavailable);
+  // Taken, but not finished: the Registry's alarm reads the target and settles it.
+  if (status === "applying") return answer(202, texts.taken);
+  if (status === "pending") return answer(503, texts.unavailable);
   const settled = texts.settled[status];
   const code409 = status === "conflict" || status === "void" ? 409 : 200;
   return answer(status === "expired" ? 410 : code409, {

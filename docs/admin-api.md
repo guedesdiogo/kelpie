@@ -218,9 +218,9 @@ An owner agent asks for a change to an agent it owns, and only your act on the p
 - **Where:** the `propose_agent_change` tool is offered where the agent has no `configure_agent`: in every turn of a specialist that owns a subagent, and in Master's task runs. In your conversations with Master, it changes agents with `configure_agent`, after your confirmation.
 - **What you get:** after Master's next reply, Kelpie sends a notice of its own in your latest conversation with Master, in its language, naming the agents by id and the fields: `The agent sales proposes a change to the agent sales-sub-a1b2c3: model. Review it, then approve or refuse it here: https://<admin hostname>/proposals/<id>?lang=en`. The proposal starts that Master turn, one model call. The notice never quotes the agent's words, and no model sees its link.
 - **The page,** `https://<admin hostname>/proposals/<id>`, behind the same Access login and owner check as the pairing page:
-  - it shows who proposes, the task it came from, the agent's reason as its own words, and each field as it is now and as proposed;
+  - it shows who proposes, the task it came from, the agent's reason as its own words, and each field as it is now and as proposed. A tools setting of `null` reads "every tool it is given";
   - Approve and Refuse are its answers. A target that changed since leaves only Refuse;
-  - its own `POST` (`Sec-Fetch-Site: same-origin` or, without it, a matching `Origin`, form-encoded) decides: 200 when it applied or refused it, 409 for a conflict, a void proposal or one already decided, 410 for an expired one, 404 for an unknown one, 503 when a service didn't answer. A `GET` changes nothing.
+  - its own `POST` (`Sec-Fetch-Site: same-origin` or, without it, a matching `Origin`, form-encoded) decides: 200 when it applied or refused it, 202 when your approval was taken but its result didn't come back, which Kelpie settles within minutes, 409 for a conflict, a void proposal or one already decided, 410 for an expired one, 404 for an unknown one, 503 when a service didn't answer. A `GET` changes nothing.
 - **`/proposals`** lists what waits, each linking to its page.
 - **Its life:**
   - it waits 72 hours, then expires;

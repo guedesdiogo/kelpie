@@ -302,7 +302,7 @@ describe("Registry proposals (#302)", () => {
     expect(Number(told.due)).toBeGreaterThan(0);
   });
 
-  it("tells nothing to a proposer deleted since, and makes no object for it", async () => {
+  it("tells nothing to a proposer deleted since", async () => {
     const stub = await withAgents("proposals-untold");
     const id = await idOf(
       await stub.propose(
@@ -315,14 +315,12 @@ describe("Registry proposals (#302)", () => {
         { ...owner, via: "agent:sales" },
       ),
     );
+    // A cascade deletes the subagent, then its creator, within the void's grace.
     await stub.remove("sales-sub-a1b2c3", owner);
-    // The void is told at once, and the first try fails: sales has no conversation yet.
-    await vi.waitFor(async () => {
-      const row = await runInDurableObject(stub, (_instance, state) =>
-        state.storage.sql.exec("SELECT tell_attempts FROM proposals WHERE id = ?", id).one(),
-      );
-      expect(row.tell_attempts).toBe(1);
-    });
+    const due = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql.exec("SELECT next_tell_at FROM proposals WHERE id = ?", id).one(),
+    );
+    expect(Number(due.next_tell_at)).toBeGreaterThan(Date.now() + 50_000);
     await stub.remove("sales", owner);
     await runInDurableObject(stub, (_instance, state) => {
       state.storage.sql.exec(
@@ -335,12 +333,29 @@ describe("Registry proposals (#302)", () => {
     await runDurableObjectAlarm(stub);
 
     const row = await runInDurableObject(stub, (_instance, state) =>
-      state.storage.sql.exec("SELECT next_tell_at, told_at FROM proposals WHERE id = ?", id).one(),
+      state.storage.sql
+        .exec("SELECT tell_attempts, next_tell_at, told_at FROM proposals WHERE id = ?", id)
+        .one(),
     );
-    expect(row).toEqual({ next_tell_at: null, told_at: null });
+    expect(row).toEqual({ tell_attempts: 0, next_tell_at: null, told_at: null });
     expect((await eventsOf(stub)).at(-1)).toEqual({ kind: "untold", user_id: null, via: "kelpie" });
   });
 
+  it("stores the change as its target's role takes it", async () => {
+    const stub = await withAgents("proposals-parsed");
+    const made = await stub.propose(
+      proposal({
+        target: "books",
+        changes: { tools: ["memory_search", "memory_search"], remit: "  Books.  " },
+        before: { tools: null, remit: "" },
+      }),
+      byMaster,
+    );
+    expect(made).toMatchObject({
+      ok: true,
+      value: { changes: { tools: ["memory_search"], remit: "Books." } },
+    });
+  });
   it("validates a step's input, because it is an RPC boundary", async () => {
     const stub = await withAgents("proposals-validates");
     const invalid = { ok: false, reason: "invalid_input" };
@@ -463,6 +478,72 @@ describe("Registry proposals' abandoned approvals (#302)", () => {
     await runDurableObjectAlarm(stub);
 
     expect(await stub.proposal(id)).toMatchObject({ status: "applied", decidedBy: "u-owner" });
+  });
+
+  it("is woken for five minutes after its claim", async () => {
+    const stub = await withAgents("proposals-abandoned-wake");
+    const id = await idOf(await stub.propose(proposal(), byMaster));
+    await stub.claimProposal(id, page);
+
+    const [claimedAt, alarm] = await runInDurableObject(stub, async (_instance, state) => [
+      Number(state.storage.sql.exec("SELECT claimed_at FROM proposals").one().claimed_at),
+      await state.storage.getAlarm(),
+    ]);
+    expect(alarm).toBe(claimedAt + 5 * 60_000);
+  });
+
+  it("settles a chat change by the Registry's own chat, and one whose target went as void", async () => {
+    const stub = await withAgents("proposals-abandoned-chat");
+    const chat = await idOf(
+      await stub.propose(proposal({ changes: { chat: true }, before: { chat: false } }), byMaster),
+    );
+    await stub.claimProposal(chat, page);
+    await stub.setChat("sales", true, owner);
+    const gone = await abandoned(stub, "books");
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE proposals SET claimed_at = ? WHERE id = ?",
+        Date.now() - 6 * 60_000,
+        chat,
+      );
+      // As if the target's row went with no deletion to void it.
+      state.storage.sql.exec("DELETE FROM agents WHERE id = 'books'");
+    });
+
+    await runDurableObjectAlarm(stub);
+
+    expect((await stub.proposal(chat))?.status).toBe("applied");
+    expect((await stub.proposal(gone))?.status).toBe("void");
+  });
+
+  it("waits for the next alarm when its target can't be read", async () => {
+    const stub = await withAgents("proposals-abandoned-unread");
+    await stub.add("ab-unread", "Unread", owner);
+    const id = await abandoned(stub, "ab-unread");
+
+    await runInDurableObject(stub, async (instance) => {
+      const real = (instance as unknown as { env: Env }).env;
+      const failing = {
+        ...real,
+        AGENT_HOST: { getByName: () => ({ config: () => Promise.reject(new Error("down")) }) },
+      };
+      Object.defineProperty(instance, "env", {
+        value: failing,
+        configurable: true,
+        writable: true,
+      });
+      try {
+        await instance.alarm();
+      } finally {
+        Object.defineProperty(instance, "env", { value: real, configurable: true, writable: true });
+      }
+    });
+
+    const row = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql.exec("SELECT status, claimed_at FROM proposals WHERE id = ?", id).one(),
+    );
+    expect(row.status).toBe("applying");
+    expect(Number(row.claimed_at)).toBeGreaterThan(Date.now() - 60_000);
   });
 
   it("puts one back to pending when its target doesn't hold the change", async () => {

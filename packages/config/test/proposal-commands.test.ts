@@ -314,29 +314,32 @@ describe("the owner's decision (#302)", () => {
     expect(stale.settings.get("sales")?.remit).toBe("Changed by the owner.");
   });
 
-  it("voids a proposal whose target went, and releases its claim when a service didn't answer", async () => {
+  it("voids a proposal whose target went, and leaves an approval whose change didn't answer to the Registry", async () => {
     const gone = await proposed({ chat: true });
     gone.agents.delete("sales");
     expect(
       await gone.commands.decideProposal(page, { id: PROPOSAL, decision: "approve" }),
     ).toMatchObject({ ok: true, value: { status: "void" } });
 
+    // It may have applied before its answer was lost: the Registry's alarm reads the target.
     const down = await proposed({ spawn: true });
     down.state.failApply = true;
-    expect(await down.commands.decideProposal(page, { id: PROPOSAL, decision: "approve" })).toEqual(
-      { ok: false, reason: "unavailable" },
-    );
-    expect(down.calls.at(-1)).toBe(`finish ${PROPOSAL} released`);
-    expect(down.proposals.get(PROPOSAL)?.status).toBe("pending");
+    expect(
+      await down.commands.decideProposal(page, { id: PROPOSAL, decision: "approve" }),
+    ).toMatchObject({ ok: true, value: { status: "applying" } });
+    expect(down.calls.filter((call) => call.startsWith("finish"))).toEqual([]);
+    expect(down.proposals.get(PROPOSAL)?.status).toBe("applying");
   });
 
-  it("answers unavailable when the approval can't be finished, and leaves it to the Registry", async () => {
+  it("answers the approval as taken when it can't be finished, and leaves it to the Registry", async () => {
     const { commands, state, settings, proposals } = await proposed({ remit: "Sales." });
     state.failFinish = true;
 
-    expect(await commands.decideProposal(page, { id: PROPOSAL, decision: "approve" })).toEqual({
-      ok: false,
-      reason: "unavailable",
+    expect(
+      await commands.decideProposal(page, { id: PROPOSAL, decision: "approve" }),
+    ).toMatchObject({
+      ok: true,
+      value: { status: "applying" },
     });
     // The change applied; the claim waits for the Registry's alarm to settle it.
     expect(settings.get("sales")?.remit).toBe("Sales.");

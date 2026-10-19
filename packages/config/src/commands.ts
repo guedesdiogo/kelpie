@@ -860,9 +860,10 @@ export function createConfigCommands(ports: ConfigPorts) {
      * The owner's decision on a proposal's page (ADR-0026 §1, #302), and nothing else's: no tool
      * and no JSON command call it. A refusal is one conditional step. An approval claims the
      * proposal, applies it as `proposal:<id>` only while the target holds the values it was
-     * proposed against, and finishes it as applied, a conflict, or void; a service that doesn't
-     * answer releases the claim, and the Registry's alarm settles one that can't even be finished.
-     * The answer is the proposal as this call left it; `not_pending` means it was already decided.
+     * proposed against, and finishes it as applied, a conflict, or void. When a service doesn't
+     * answer meanwhile, it answers the proposal as `applying`: the Registry's alarm reads the target
+     * and settles it. The answer is the proposal as this call left it; `not_pending` means it was
+     * already decided.
      */
     async decideProposal(actor: Actor, input: unknown): Promise<CommandResult<Proposal>> {
       if (!isOwner(actor)) return forbidden;
@@ -881,9 +882,10 @@ export function createConfigCommands(ports: ConfigPorts) {
             ? await ports.registry.setChat(target, changes.chat, by, before.chat as boolean)
             : await ports.agents.configure(target, changes, by, before as Partial<AgentSettings>);
       } catch (error) {
-        console.warn("decideProposal: the change wasn't applied", errorName(error));
-        await ports.proposals.finish(id, "released", actor).catch(() => undefined);
-        return unavailable;
+        // It may have applied before its answer was lost: the Registry's alarm reads the target
+        // and settles it, so the answer says only that the approval was taken (#302).
+        console.warn("decideProposal: the change's answer didn't come", errorName(error));
+        return claimed;
       }
       const outcome = applied.ok
         ? "applied"
@@ -895,7 +897,7 @@ export function createConfigCommands(ports: ConfigPorts) {
       } catch (error) {
         // The Registry's alarm settles the approval that didn't finish (#302).
         console.warn("decideProposal: the approval wasn't finished", errorName(error));
-        return unavailable;
+        return claimed;
       }
     },
 

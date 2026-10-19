@@ -41,6 +41,8 @@ const DAY_MS = 24 * 60 * 60_000;
  * the alarm settles it (#302).
  */
 const ABANDONED_CLAIM_MS = 5 * 60_000;
+/** How long a void a deletion caused waits to be told, so the cascade's next deletion comes first. */
+const CASCADE_GRACE_MS = 60_000;
 /** The most a proposal's change and its snapshot hold together, as JSON. */
 const MAX_PROPOSAL_JSON = 200_000;
 /** The most tries at telling a proposer an outcome, and the wait before the next (#302). */
@@ -307,9 +309,15 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
       .all();
     this.#db.transaction((tx) => {
       for (const { id: proposal } of voided) {
-        // A proposer that remains hears it, as of any outcome.
+        // A proposer that remains hears it, as of any outcome, once a deletion's cascade is done:
+        // the agents it deletes go one by one.
         tx.update(schema.proposals)
-          .set({ status: "void", decidedAt: now, decidedBy: actor.userId, nextTellAt: now })
+          .set({
+            status: "void",
+            decidedAt: now,
+            decidedBy: actor.userId,
+            nextTellAt: now + CASCADE_GRACE_MS,
+          })
           .where(eq(schema.proposals.id, proposal))
           .run();
         tx.insert(schema.proposalEvents)
@@ -491,14 +499,16 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     return this.#settled(this.#result(id));
   }
 
-  /** An approval that didn't apply goes back to pending. */
+  /** An approval that didn't apply goes back to pending, audited only when it did. */
   #release(id: string, by: Actor | null, now: number): void {
     this.#db.transaction((tx) => {
-      tx.update(schema.proposals)
+      const released = tx
+        .update(schema.proposals)
         .set({ status: "pending", claimedAt: null })
         .where(and(eq(schema.proposals.id, id), eq(schema.proposals.status, "applying")))
-        .run();
-      this.#event(tx, id, now, "released", by);
+        .returning({ id: schema.proposals.id })
+        .all();
+      if (released.length > 0) this.#event(tx, id, now, "released", by);
     });
   }
 
@@ -568,6 +578,9 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
         return;
       }
     }
+    // The approval may have finished during the read: only the same claim is settled.
+    const still = this.#proposalRow(row.id);
+    if (still?.status !== "applying" || still.claimedAt !== row.claimedAt) return;
     if (!holds) {
       this.#release(row.id, null, Date.now());
       return;
@@ -827,6 +840,8 @@ function parseNewProposal(input: unknown): NewProposal | null {
     !(taskId === null || isTaskId(taskId)) ||
     !isRecord(changes) ||
     !isRecord(before) ||
+    // A snapshot names a value for each field: an undefined one would lose its stale check.
+    Object.values(before).some((value) => value === undefined) ||
     why === null ||
     JSON.stringify([changes, before]).length > MAX_PROPOSAL_JSON
   ) {

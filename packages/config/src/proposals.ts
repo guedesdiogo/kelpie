@@ -1,6 +1,6 @@
 import type { ModelSettings } from "@kelpie/llm/models";
 import type { AgentRole } from "./commands.ts";
-import { type AgentSettings, parseSettings } from "./settings.ts";
+import { type AgentSettings, isVisible, parseSettings } from "./settings.ts";
 
 // Proposals (ADR-0036 §3, ADR-0061, #302): an owner agent asks for a change to an agent it owns,
 // and only the owner's act on the admin API's page applies it. A proposal is a typed pending
@@ -172,15 +172,11 @@ export function mergeModel(current: ModelSettings, proposed: ModelSettings): Mod
   return merged;
 }
 
-/**
- * The agent's reason: up to MAX_PROPOSAL_REASON characters, with something that shows. The Braille
- * blank shows nothing, as `isAgentName` counts it (#401).
- */
+/** The agent's reason: up to MAX_PROPOSAL_REASON characters, with something that shows (#401). */
 export function parseProposalReason(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const reason = value.trim();
-  const shows = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\u2800]/u.test(reason);
-  return shows && reason.length <= MAX_PROPOSAL_REASON ? reason : null;
+  return isVisible(reason) && reason.length <= MAX_PROPOSAL_REASON ? reason : null;
 }
 
 /** Whether two values are the same, as JSON with every object's keys sorted. */

@@ -70,7 +70,11 @@ Neither Hermes nor ai-memory expires a proposal, and neither tells the proposer 
   - It applies only while the target still holds them: a target that changed since is a `conflict`, and so is one whose owner changed.
   - The comparison is JSON with sorted keys.
   - A change already in place counts as applied, so an approval that ran again is safe.
-- **An approval that doesn't finish,** as when a service fails mid-way, is settled by the Registry's alarm five minutes later. It is applied when the target holds the change, since a change applies in one step, and goes back to pending otherwise, for the owner to decide again. An approval is claimed once: a stuck one is never claimed again past its expiry.
+- **An approval that doesn't finish,** as when a service fails mid-way, is settled by the Registry's alarm five minutes later:
+  - applied when the target holds the change, since a change applies in one step;
+  - back to pending otherwise, for the owner to decide again while it hasn't expired.
+
+  A proposal is claimed once, so no approval applies past its expiry. The page answers such an approval as taken, never as "nothing changed".
 - **The applied change is audited on the target,** as `via: proposal:<id>`. Every step of a proposal is audited too, with the proposer, the person its turn acted for, and who decided.
 - **Deleting an agent voids** the open proposals by it or about it.
 - **The Registry's alarm** expires the proposals that are due, and tells each proposer that remains its outcome, in three tries at most.
@@ -100,7 +104,7 @@ Neither Hermes nor ai-memory expires a proposal, and neither tells the proposer 
 
   Its form offers Approve and Refuse. A target that changed since leaves only Refuse, and says why. It follows the design system's "Confirm an action" (`docs/design-system.md` 5.3), as a page with no script.
 - **Its `POST` has the pairing page's checks:** the Access login, the owner, the same origin, and a form submission.
-  - It answers 200 for applied or refused, 409 for a conflict, a void proposal or one already decided, 410 for an expired one, 404 for an unknown one, and 503 when a service didn't answer.
+  - It answers 200 for applied or refused, 202 for an approval taken whose result didn't come back, 409 for a conflict, a void proposal or one already decided, 410 for an expired one, 404 for an unknown one, and 503 when a service didn't answer.
   - A repeat is never a 500, and a `GET` changes nothing.
 - **There is no CSRF token:** the same-origin check is the guard, as on the pairing page. The page runs no script and takes only a form.
 
@@ -112,7 +116,7 @@ Neither Hermes nor ai-memory expires a proposal, and neither tells the proposer 
   - The run's input lists Kelpie's comments as Kelpie's own, never fenced as another agent's words.
 - **Otherwise,** it is a note of Kelpie's in the proposer's latest conversation with the owner.
 - **Each outcome has its note:** applied, refused, expired, conflict, or void when an agent it named was deleted. Each says nothing changed unless it was applied, and not to propose the same again unless the need is new.
-- **A proposer deleted since** hears nothing.
+- **A proposer deleted since** hears nothing. A void that a deletion caused waits a minute, so the rest of a deletion's cascade goes first.
 
 ### 7. Amendments
 
