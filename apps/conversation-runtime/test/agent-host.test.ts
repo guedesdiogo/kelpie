@@ -547,6 +547,25 @@ describe("AgentHost with a vault", () => {
     });
   });
 
+  it("keeps the version across the deploy that added the memory file, until the agent has one (#437)", async () => {
+    const stub = host("vault-memory-deploy");
+    // What the turn before the deploy kept: the vault as it was compiled, without the field.
+    const persona = "# Kelpie";
+    await seedState(stub, {
+      promptVersion: 3,
+      vaultContext: JSON.stringify({ persona, rules: [], skills: [] }),
+    });
+    replaceContextStoreForTesting(vaultOf({ persona }));
+    expect((await stub.turnConfig()).promptVersion).toBe(3);
+
+    const path = "agents/vault-memory-deploy/memories/MEMORY.md";
+    replaceContextStoreForTesting(vaultOf({ persona, memory: { path, content: "A note." } }));
+    expect((await stub.turnConfig()).promptVersion).toBe(4);
+    // The file emptied, the vault keys as before it, and that is a change too.
+    replaceContextStoreForTesting(vaultOf({ persona }));
+    expect((await stub.turnConfig()).promptVersion).toBe(5);
+  });
+
   it("keeps the version of an agent whose vault persona replaces an edited built-in prompt (#220)", async () => {
     const stub = host("vault-persona-default-edited");
     replaceContextStoreForTesting(vaultOf({ persona: "# Kelpie\n\nWarm and brief." }));

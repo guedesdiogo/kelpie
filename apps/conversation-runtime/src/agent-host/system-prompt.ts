@@ -17,7 +17,7 @@ export function hasVaultContext(vault: CompiledContext | null): vault is Compile
 /**
  * The system prompt a turn runs with: the persona from the vault (ADR-0016) or, without one, the
  * agent's configured prompt; then the vault's rules, the skills it lists, and the agent's memory
- * file, last, as Hermes puts it after its skills (#437).
+ * file after them, as Hermes puts it after its skills (#437).
  */
 export function composeSystemPrompt(configured: string, vault: CompiledContext | null): string {
   if (!hasVaultContext(vault)) return configured;
