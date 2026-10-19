@@ -30,8 +30,9 @@ export default defineConfig({
       miniflare: {
         workers: [
           stubWorker("kelpie-ingress", { DIRECTORY: "Directory" }),
-          // The Registry knows every agent, and each task method of the AgentHost answers with its
-          // name and arguments, so the Worker's own test checks the task commands' wiring (#54).
+          // The Registry knows every agent and lists Kelpie as Master, and each task method of the
+          // AgentHost answers with its name and arguments, so the Worker's own test checks the
+          // task commands' wiring (#54) and finds Master (ADR-0060).
           {
             name: "kelpie-conversation-runtime",
             modules: true,
@@ -40,6 +41,12 @@ export default defineConfig({
 export class Registry extends DurableObject {
   get(id) {
     return { id, name: id, role: "specialist", owner: "kelpie", chat: false };
+  }
+  list() {
+    return [
+      { id: "kelpie", name: "Kelpie", role: "master", owner: null, chat: true },
+      { id: "sales", name: "sales", role: "specialist", owner: "kelpie", chat: false },
+    ];
   }
 }
 const echo = (method) =>

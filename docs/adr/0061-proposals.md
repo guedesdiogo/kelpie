@@ -1,9 +1,9 @@
-# ADR-0060: Proposals come from where no configure_agent is, wait 72 hours on their page, and Kelpie tells their proposer
+# ADR-0061: Proposals come from where no configure_agent is, wait 72 hours on their page, and Kelpie tells their proposer
 
 - Status: Accepted
 - Date: 2026-10-19
 - Issue: [#302](https://github.com/guedesdiogo/kelpie/issues/302)
-- Decided by the owner on 2026-10-18, approving #302's plan and its ten defaults: «Aceito as 10 decisões como você recomendou, incluindo a mudança na 5 e a ADR-0060 no mesmo PR.»
+- Decided by the owner on 2026-10-18, approving #302's plan and its ten defaults: «Aceito as 10 decisões como você recomendou, incluindo a mudança na 5 e a ADR-0061 no mesmo PR.»
 - Amends:
   - [ADR-0011](0011-agent-task-board.md): Kelpie comments on a task too, in its own words, as when it tells a proposal's outcome;
   - [ADR-0036](0036-agent-roles-models-and-subagents.md) §3: where the proposal tool is offered, how long a proposal waits, and its caps.

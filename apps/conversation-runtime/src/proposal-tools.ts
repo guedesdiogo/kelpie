@@ -14,7 +14,7 @@ import { MODEL_SETTINGS_SCHEMA } from "./model-schema.ts";
 import { beyondCreator, MAX_BRIEF_CHARS } from "./subagent-limits.ts";
 import type { Tool, ToolOutcome, ToolProvider } from "./tools.ts";
 
-// Proposals (ADR-0036 §3, ADR-0060, #302): an owner agent asks for a change to an agent it owns,
+// Proposals (ADR-0036 §3, ADR-0061, #302): an owner agent asks for a change to an agent it owns,
 // and only the owner's approval on the admin API's page applies it. The tool is offered where the
 // agent has no configure_agent: in every turn of a specialist that owns a subagent, and in
 // Master's task runs. It applies nothing, and never sees the page's link.
@@ -183,16 +183,16 @@ export function proposalTools(ports: ProposalToolPorts): ToolProvider {
       }
       // Checked again as it runs: the role may have moved since the turn listed its tools.
       const role = await ports.roleOf(context.agentId);
-      if (role === "main" && !context.task) {
+      if (role === "master" && !context.task) {
         return failed(
           "In a conversation with the owner, change it with configure_agent, which asks for their confirmation.",
         );
       }
-      if (role !== "main" && role !== "specialist") return failed("You can't propose changes.");
+      if (role !== "master" && role !== "specialist") return failed("You can't propose changes.");
       const { agentId, changes, reason } = fields(input);
       const owned = await ports.owned(context.agentId);
       const target = owned.find((agent) => agent.id === agentId);
-      if (!isAgentId(agentId) || !target || target.role === "main") {
+      if (!isAgentId(agentId) || !target || target.role === "master") {
         return failed(
           `You don't own an agent ${String(agentId).slice(0, 40)}. You can propose changes only to the agents you own: ${owned.map((one) => one.id).join(", ")}.`,
         );
@@ -240,7 +240,7 @@ export function proposalTools(ports: ProposalToolPorts): ToolProvider {
     async tools(agentId, place) {
       const role = await ports.roleOf(agentId).catch(() => null);
       // In its conversations, Master changes agents with configure_agent (ADR-0048).
-      if (role === "specialist" || (role === "main" && place?.channel === "task")) {
+      if (role === "specialist" || (role === "master" && place?.channel === "task")) {
         const owned = await ports.owned(agentId).catch(() => []);
         return owned.length > 0 ? [tool] : [];
       }

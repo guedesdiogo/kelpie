@@ -2,7 +2,7 @@ import type { ProposalNotice } from "@kelpie/config";
 import { describe, expect, it } from "vitest";
 import { proposalBubble, proposalNote } from "../src/proposal-notices.ts";
 
-// Kelpie's notice of a proposal (ADR-0060, #302): the owner's bubble with the page's link, in the
+// Kelpie's notice of a proposal (ADR-0061, #302): the owner's bubble with the page's link, in the
 // conversation's language, and the note for Master's model, which never holds the link.
 
 const ID = "1a2b3c4d-1111-4222-8333-444455556666";

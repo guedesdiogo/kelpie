@@ -2,7 +2,7 @@ import type { Locale, Localized } from "@kelpie/channels";
 import type { ProposalNotice } from "@kelpie/config";
 import { fenced } from "./agent-host/agent-host.ts";
 
-// Kelpie's notice of a proposal (ADR-0036 §3, ADR-0060, #302), in the owner's conversation with
+// Kelpie's notice of a proposal (ADR-0036 §3, ADR-0061, #302), in the owner's conversation with
 // Master: the owner's bubble, a fixed text in the conversation's language (ADR-0027) whose one link
 // is the admin API's page, and the note that tells Master's model, which never holds the link. Both
 // name agents by id only, and the owner's bubble never quotes the agent's words.

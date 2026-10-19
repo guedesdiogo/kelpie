@@ -10,7 +10,7 @@ import { taskTools } from "../src/task-tools.ts";
 import type { ToolProvider } from "../src/tools.ts";
 import { type FakeWorld, fakeWorld, reply, toolCalls } from "./fakes.ts";
 
-// A proposal from end to end (ADR-0060, #302), with the real Registry, AgentHosts and
+// A proposal from end to end (ADR-0061, #302), with the real Registry, AgentHosts and
 // conversations: a specialist's task run proposes a higher tier for its subagent, Kelpie tells the
 // owner in their conversation with Master, the owner's decision applies it, and the task resumes
 // with Kelpie's comment. Master's turns and the specialist's each have their own fake model, so

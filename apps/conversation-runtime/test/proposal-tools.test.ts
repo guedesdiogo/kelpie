@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { type ProposalToolPorts, proposalTools } from "../src/proposal-tools.ts";
 import type { Tool, ToolContext } from "../src/tools.ts";
 
-// The proposal tool (ADR-0060, #302): an owner agent asks for a change to an agent it owns, where it
+// The proposal tool (ADR-0061, #302): an owner agent asks for a change to an agent it owns, where it
 // has no configure_agent, within what it holds itself. It applies nothing.
 
 const ID = "1a2b3c4d-1111-4222-8333-444455556666";
@@ -26,7 +26,7 @@ const books: AgentEntry = {
 };
 
 function world({
-  roles = { kelpie: "main", sales: "specialist", "sales-sub-a1b2c3": "subagent" } as Record<
+  roles = { kelpie: "master", sales: "specialist", "sales-sub-a1b2c3": "subagent" } as Record<
     string,
     AgentRole
   >,

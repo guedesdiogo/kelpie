@@ -17,9 +17,9 @@ import {
   type ProposalStatus,
   parseProposalChanges,
   parseProposalReason,
+  RETIRED_AGENT_ID,
   type RegistryContract,
   type RenameAgentResult,
-  SETUP_AGENT_ID,
   type SetAgentResult,
   sameValue,
 } from "@kelpie/config";
@@ -84,16 +84,16 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
 
   /**
    * Adds an agent. Adding one that exists changes nothing, so a retried create is safe. The retired
-   * setup agent's id stays its own (ADR-0048).
+   * id stays reserved (ADR-0048).
    */
   add(id: string, name: string, actor: Actor): AddAgentResult {
-    if (!isAgentId(id) || id === SETUP_AGENT_ID || !isAgentName(name)) {
+    if (!isAgentId(id) || id === RETIRED_AGENT_ID || !isAgentName(name)) {
       return { ok: false, reason: "invalid_input" };
     }
     if (this.get(id)) return { ok: true, created: false };
     const now = Date.now();
-    // A specialist the main agent owns, which doesn't chat until the user turns it on (ADR-0036).
-    const owner = this.#mainId();
+    // A specialist Master owns, which doesn't chat until the user turns it on (ADR-0036).
+    const owner = this.#masterId();
     this.#db.transaction((tx) => {
       tx.insert(schema.agents)
         .values({ id, name, createdAt: now, updatedAt: now, ownerId: owner, chat: false })
@@ -192,47 +192,47 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     return { ok: true };
   }
 
-  /** The agent, never the retired setup agent (ADR-0048): nothing reaches it any more. */
+  /** The agent, never the retired id (ADR-0048): nothing reaches it any more. */
   get(id: string): AgentEntry | null {
-    if (id === SETUP_AGENT_ID) return null;
+    if (id === RETIRED_AGENT_ID) return null;
     const row = this.#row(id);
     return row ? entryOf(row) : null;
   }
 
-  /** Any row, the retired setup agent's included. */
+  /** Any row, the retired id's included. */
   #row(id: string): typeof schema.agents.$inferSelect | undefined {
     return this.#db.select().from(schema.agents).where(eq(schema.agents.id, id)).get();
   }
 
   /**
-   * Makes the agent the main agent (ADR-0036 §1). The previous one becomes a specialist that keeps
+   * Makes the agent Master (ADR-0036 §1). The previous one becomes a specialist that keeps
    * chatting, and every specialist is owned by the new one. A subagent can't be it.
    */
-  setMain(id: string, actor: Actor): SetAgentResult {
+  setMaster(id: string, actor: Actor): SetAgentResult {
     if (!isAgentId(id)) return { ok: false, reason: "invalid_input" };
     const agent = this.get(id);
     if (!agent) return { ok: false, reason: "unknown_agent" };
     if (agent.role === "subagent") return { ok: false, reason: "not_allowed" };
-    if (agent.role === "main") return { ok: true };
+    if (agent.role === "master") return { ok: true };
     const now = Date.now();
     this.#db.transaction((tx) => {
       tx.update(schema.agents)
         .set({ role: "specialist", chat: true, updatedAt: now })
-        .where(eq(schema.agents.role, "main"))
+        .where(eq(schema.agents.role, schema.STORED_MASTER_ROLE))
         .run();
       tx.update(schema.agents)
         .set({ ownerId: id, updatedAt: now })
-        // The retired setup agent's row is stored as a specialist: a rollback finds it as it was.
+        // The retired id's row is stored as a specialist: a rollback finds it as it was.
         .where(
           and(
             eq(schema.agents.role, "specialist"),
             ne(schema.agents.id, id),
-            ne(schema.agents.id, SETUP_AGENT_ID),
+            ne(schema.agents.id, RETIRED_AGENT_ID),
           ),
         )
         .run();
       tx.update(schema.agents)
-        .set({ role: "main", ownerId: null, chat: true, updatedAt: now })
+        .set({ role: schema.STORED_MASTER_ROLE, ownerId: null, chat: true, updatedAt: now })
         .where(eq(schema.agents.id, id))
         .run();
       tx.insert(schema.auditLog)
@@ -249,7 +249,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
   }
 
   /**
-   * Turns a specialist's chat on or off. The main agent always chats; subagents never do. With
+   * Turns a specialist's chat on or off. Master always chats; subagents never do. With
    * `expect`, a proposal's (#302), a chat that is neither the change nor `expect` is a conflict.
    */
   setChat(id: string, chat: boolean, actor: Actor, expect?: boolean): SetAgentResult {
@@ -280,7 +280,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
 
   /**
    * Removes a deleted agent's row and audits it (#303): `deleteAgent` calls it once the agent's
-   * storage is gone. The main agent and an agent that still owns another, such as its subagents,
+   * storage is gone. Master and an agent that still owns another, such as its subagents,
    * aren't removed (ADR-0036 §1).
    */
   async remove(id: string, actor: Actor): Promise<SetAgentResult> {
@@ -292,7 +292,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
       .from(schema.agents)
       .where(eq(schema.agents.ownerId, id))
       .get();
-    if (agent.role === "main" || owns) return { ok: false, reason: "not_allowed" };
+    if (agent.role === "master" || owns) return { ok: false, reason: "not_allowed" };
     const now = Date.now();
     // Its open proposals, by it or about it, can never apply now (#302).
     const voided = this.#db
@@ -338,7 +338,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
   }
 
   /**
-   * Records a proposal (ADR-0060, #302) about an agent its proposer owns, within the caps: one
+   * Records a proposal (ADR-0061, #302) about an agent its proposer owns, within the caps: one
    * pending per proposer and target, PROPOSAL_CAPS.perProposer pending per proposer,
    * PROPOSAL_CAPS.perDay made a day per proposer, and PROPOSAL_CAPS.pending in all. The checks and
    * the insert are one synchronous step, so two calls can't both pass a cap. It applies nothing.
@@ -750,12 +750,12 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     return proposal ? { ok: true, value: proposal } : { ok: false, reason: "unknown_proposal" };
   }
 
-  #mainId(): string | null {
+  #masterId(): string | null {
     return (
       this.#db
         .select({ id: schema.agents.id })
         .from(schema.agents)
-        .where(eq(schema.agents.role, "main"))
+        .where(eq(schema.agents.role, schema.STORED_MASTER_ROLE))
         .get()?.id ?? null
     );
   }
@@ -768,12 +768,12 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     return { ok: true };
   }
 
-  /** The agents, by id, without the retired setup agent (ADR-0048). */
+  /** The agents, by id, without the retired id (ADR-0048). */
   list(): AgentEntry[] {
     return this.#db
       .select()
       .from(schema.agents)
-      .where(ne(schema.agents.id, SETUP_AGENT_ID))
+      .where(ne(schema.agents.id, RETIRED_AGENT_ID))
       .orderBy(asc(schema.agents.id))
       .all()
       .map(entryOf);
@@ -781,12 +781,13 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
 }
 
 /**
- * An agent as callers see it. The roles' rules hold whatever the row says: the main agent chats,
- * a subagent never does.
+ * An agent as callers see it, with Master's stored role read as `master` (ADR-0060). The roles'
+ * rules hold whatever the row says: Master chats, a subagent never does.
  */
 function entryOf(row: typeof schema.agents.$inferSelect): AgentEntry {
-  const chat = row.role === "main" || (row.role === "specialist" && row.chat);
-  return { id: row.id, name: row.name, role: row.role, owner: row.ownerId, chat };
+  const role = schema.readRole(row.role) ?? "specialist";
+  const chat = role === "master" || (role === "specialist" && row.chat);
+  return { id: row.id, name: row.name, role, owner: row.ownerId, chat };
 }
 
 /** A proposal as callers see it: a pending one past its expiry shows as expired. */

@@ -2,7 +2,7 @@ import type { Locale, Localized } from "@kelpie/channels";
 import type { CommandResult, Proposal, ProposalDetail } from "@kelpie/config";
 import { escapeHtml, page } from "./forms.ts";
 
-// The proposals' pages (ADR-0036 §3, ADR-0060, #302): the owner reads a proposed change in full and
+// The proposals' pages (ADR-0036 §3, ADR-0061, #302): the owner reads a proposed change in full and
 // approves or refuses it there, and only that submission decides it (ADR-0026 §1). They follow the
 // design system's "Confirm an action" (docs/design-system.md 5.3) as a page with no script: who
 // asks, by id; the change, field by field; the agent's words as quoted data; then the answers.

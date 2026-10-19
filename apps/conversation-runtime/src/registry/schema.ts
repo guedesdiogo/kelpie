@@ -1,16 +1,35 @@
-import { PROPOSAL_STATUSES, type ProposalChanges, type ProposalSnapshot } from "@kelpie/config";
+import {
+  type AgentRole,
+  PROPOSAL_STATUSES,
+  type ProposalChanges,
+  type ProposalSnapshot,
+} from "@kelpie/config";
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 // Which agents exist (ADR-0015 left it to Story 3.10). Each AgentHost owns its own configuration.
+
+/**
+ * How a row stores Master's role: the value from before ADR-0060, kept so a rollback reads it. The
+ * Registry maps it to `master`, so no caller sees it.
+ */
+export const STORED_MASTER_ROLE = "main";
+
+/**
+ * A role as callers see it: Master's stored value, or one cached from before ADR-0060, reads as
+ * `master`.
+ */
+export function readRole(role: string | null | undefined): AgentRole | null {
+  return role === STORED_MASTER_ROLE ? "master" : ((role ?? null) as AgentRole | null);
+}
 
 export const agents = sqliteTable("agents", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
-  // ADR-0036 §1 (#288). The retired setup agent's row says `specialist`, and is never read
+  // ADR-0036 §1 (#288). The retired id's row says `specialist`, and is never read
   // (ADR-0048).
-  role: text("role", { enum: ["main", "specialist", "subagent"] })
+  role: text("role", { enum: [STORED_MASTER_ROLE, "specialist", "subagent"] })
     .notNull()
     .default("specialist"),
   ownerId: text("owner_id"),
@@ -22,6 +41,7 @@ export const auditLog = sqliteTable("audit_log", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   at: integer("at").notNull(),
   action: text("action", {
+    // `agent.main_set` records a new Master: the stored name from before ADR-0060, kept as written.
     enum: ["agent.created", "agent.renamed", "agent.main_set", "agent.chat_set", "agent.deleted"],
   }).notNull(),
   agentId: text("agent_id").notNull(),
@@ -30,7 +50,7 @@ export const auditLog = sqliteTable("audit_log", {
 });
 
 /**
- * Proposals (ADR-0060, #302): a change an owner agent asked for about an agent it owns, which only
+ * Proposals (ADR-0061, #302): a change an owner agent asked for about an agent it owns, which only
  * the owner's act on the admin API's page applies. A row is never deleted: its status says how it
  * ended, and `proposal_events` how it got there.
  */

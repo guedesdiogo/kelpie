@@ -17,7 +17,7 @@ const AGENTS = [
   {
     id: "assistant",
     name: "Assistant",
-    main: true,
+    master: true,
     mascot: KELPIE,
     specialty: "",
     remit: "Your day.",
@@ -25,7 +25,7 @@ const AGENTS = [
   {
     id: "agenda",
     name: "Agenda",
-    main: false,
+    master: false,
     mascot: { ...KELPIE, color: "fawn" },
     specialty: "Agenda e e-mail",
     remit: "Meetings.",
@@ -118,9 +118,9 @@ describe("the agent's editor in the page", () => {
     narrow.mockRestore();
     $("switcher").click();
     const items = [...$("agents").querySelectorAll("li")];
-    // Each agent's name carries its specialty; the main agent's is the page's own.
+    // Each agent's name carries its specialty; Master's is the page's own.
     expect(items.map((item) => item.querySelector(".agent-label").textContent)).toEqual([
-      "Assistant main",
+      "Assistant Master",
       "Agenda Agenda e e-mail",
     ]);
     expect(items[0].querySelector(".pen")).toBeNull();

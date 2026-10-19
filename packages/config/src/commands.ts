@@ -39,7 +39,7 @@ import {
   isAgentId,
   isAgentName,
   parseSettings,
-  SETUP_AGENT_ID,
+  RETIRED_AGENT_ID,
 } from "./settings.ts";
 import {
   isTaskId,
@@ -72,15 +72,15 @@ export interface AgentSummary {
   name: string;
 }
 
-/** An agent's role (ADR-0036 §1, ADR-0048): `main` is Master. */
-export type AgentRole = "main" | "specialist" | "subagent";
+/** An agent's role (ADR-0036 §1, ADR-0048, ADR-0060). */
+export type AgentRole = "master" | "specialist" | "subagent";
 
 /** An agent as the Registry holds it (ADR-0036 §1, #288). */
 export interface AgentEntry extends AgentSummary {
   role: AgentRole;
-  /** The main agent for a specialist, its creator for a subagent; null for the main agent. */
+  /** Master for a specialist, its creator for a subagent; null for Master. */
   owner: string | null;
-  /** Whether the user can reach it on a channel: always the main agent, never a subagent. */
+  /** Whether the user can reach it on a channel: always Master, never a subagent. */
   chat: boolean;
 }
 
@@ -139,24 +139,24 @@ export interface RegistryContract {
   get(id: string): AgentEntry | null;
   list(): AgentEntry[];
   /**
-   * Makes the agent the main agent (ADR-0036 §1). The previous one becomes a specialist, and every
+   * Makes the agent Master (ADR-0036 §1). The previous one becomes a specialist, and every
    * specialist is then owned by the new one.
    */
-  setMain(id: string, actor: Actor): SetAgentResult;
+  setMaster(id: string, actor: Actor): SetAgentResult;
   /**
-   * Turns a specialist's chat on or off. The main agent always chats; subagents never do. With
-   * `expect`, a proposal's (#302), it changes only while the chat still is `expect`.
+   * Turns a specialist's chat on or off. Master always chats; subagents never do. With `expect`,
+   * a proposal's (#302), it changes only while the chat still is `expect`.
    */
   setChat(id: string, chat: boolean, actor: Actor, expect?: boolean): SetAgentResult;
   /** Adds a temporary subagent of `creator`'s, owned by it, with no chat (ADR-0036 §5, #290). */
   addSubagent(id: string, name: string, creator: string, actor: Actor): SetAgentResult;
   /**
-   * Removes a deleted agent's row, the last step of `deleteAgent` (#303). The main agent and an
+   * Removes a deleted agent's row, the last step of `deleteAgent` (#303). Master and an
    * agent that still owns another are `not_allowed` (ADR-0036 §1).
    */
   remove(id: string, actor: Actor): Promise<SetAgentResult>;
   /**
-   * Records a proposal (ADR-0060, #302): only about an agent its proposer owns, within the caps,
+   * Records a proposal (ADR-0061, #302): only about an agent its proposer owns, within the caps,
    * which it checks in one step. It applies nothing.
    */
   propose(proposal: NewProposal, actor: Actor): Promise<ProposalResult>;
@@ -185,7 +185,7 @@ export interface RegistryContract {
  * A setup step the owner finishes on an admin page or in Telegram, behind a link Kelpie sent
  * (#206): connecting the agent's Telegram bot through the secure form, or pairing their own
  * Telegram account with it; or connecting the instance's runner through its own form (#328), which
- * the retired setup agent's AgentHost reports, since the runner is the instance's (ADR-0048).
+ * Master's AgentHost reports (ADR-0060).
  */
 export type SetupStep = "telegram_connected" | "telegram_paired" | "runner_connected";
 
@@ -257,7 +257,7 @@ export interface SetupEventsContract {
 
 /**
  * How an agent shows in the webchat's list (ADR-0052 §7, #379): its mascot, its specialty for the
- * owner's eyes ("" for none; the main agent's is the page's own "principal"), and its remit, the
+ * owner's eyes ("" for none; Master's is the page's own "Master"), and its remit, the
  * short description its editor shows.
  */
 export interface AgentLook {
@@ -377,7 +377,7 @@ export interface ConfigPorts {
     rename(id: string, name: string, actor: Actor): Promise<RenameAgentResult>;
     get(id: string): Promise<AgentEntry | null>;
     list(): Promise<AgentEntry[]>;
-    setMain(id: string, actor: Actor): Promise<SetAgentResult>;
+    setMaster(id: string, actor: Actor): Promise<SetAgentResult>;
     setChat(id: string, chat: boolean, actor: Actor, expect?: boolean): Promise<SetAgentResult>;
     remove(id: string, actor: Actor): Promise<SetAgentResult>;
   };
@@ -447,7 +447,7 @@ export interface ConfigPorts {
     | "describeRunner"
     | "disconnectTelegram"
   >;
-  /** The proposals, in the Registry, and Kelpie's notice of one (ADR-0060, #302). */
+  /** The proposals, in the Registry, and Kelpie's notice of one (ADR-0061, #302). */
   proposals: {
     propose(proposal: NewProposal, actor: Actor): Promise<ProposalResult>;
     get(id: string): Promise<Proposal | null>;
@@ -583,8 +583,8 @@ export function createConfigCommands(ports: ConfigPorts) {
     ): Promise<CommandResult<AgentSummary & { created: boolean }>> {
       if (!isOwner(actor)) return forbidden;
       const { id, name } = (input ?? {}) as { id?: unknown; name?: unknown };
-      // The retired setup agent's row stays (ADR-0048), so its id is never another agent's.
-      if (!isAgentId(id) || id === SETUP_AGENT_ID || !isAgentName(name)) return invalid;
+      // The retired id's row stays (ADR-0048), so its id is never another agent's.
+      if (!isAgentId(id) || id === RETIRED_AGENT_ID || !isAgentName(name)) return invalid;
       const result = await ports.registry.add(id, name.trim(), actor);
       if (!result.ok) return result;
       // A new agent's look is a random one, saved as its setting, which the owner edits from there
@@ -628,8 +628,8 @@ export function createConfigCommands(ports: ConfigPorts) {
       if (!changes) return invalid;
       const agent = await ports.registry.get(id);
       if (!agent) return { ok: false, reason: "unknown_agent" };
-      // The main agent's specialty is always "principal", by its role (#379).
-      if (changes.specialty !== undefined && agent.role === "main") {
+      // Master's specialty is always "Master", by its role (#379, ADR-0060).
+      if (changes.specialty !== undefined && agent.role === "master") {
         return { ok: false, reason: "not_allowed" };
       }
       // Memory's calls carry no session, which the claude-code route needs (#295).
@@ -673,12 +673,12 @@ export function createConfigCommands(ports: ConfigPorts) {
       return result.ok ? { ok: true, value: {} } : result;
     },
 
-    /** Makes an agent the main agent, the user's front door (ADR-0036 §1). It changes access. */
-    async setMainAgent(actor: Actor, input: unknown): Promise<CommandResult<object>> {
+    /** Makes an agent Master, the user's front door (ADR-0036 §1). It changes access. */
+    async setMaster(actor: Actor, input: unknown): Promise<CommandResult<object>> {
       if (!isOwner(actor)) return forbidden;
       const { id } = (input ?? {}) as { id?: unknown };
       if (!isAgentId(id)) return invalid;
-      const result = await ports.registry.setMain(id, actor);
+      const result = await ports.registry.setMaster(id, actor);
       return result.ok ? { ok: true, value: {} } : result;
     },
 
@@ -696,7 +696,7 @@ export function createConfigCommands(ports: ConfigPorts) {
      * agent's chat goes off first. Then, for each: its Telegram bot is disconnected, its
      * `AgentHost` erases its conversations and itself, and its Registry row goes last. A failure
      * leaves the rest listed, the agent's chat off, and running the command again finishes the job.
-     * The main agent can't be deleted. With `ids`, the agents the owner was shown, it deletes only
+     * Master can't be deleted. With `ids`, the agents the owner was shown, it deletes only
      * that set. Data goes for good, so Master asks for the owner's confirmation first.
      */
     async deleteAgent(actor: Actor, input: unknown): Promise<CommandResult<DeletedAgents>> {
@@ -709,7 +709,7 @@ export function createConfigCommands(ports: ConfigPorts) {
       if (!agent) return { ok: false, reason: "unknown_agent" };
       const order = deletionOrder(agents, agent);
       const notAllowed = { ok: false, reason: "not_allowed" } as const;
-      if (order.some((target) => target.role === "main")) return notAllowed;
+      if (order.some((target) => target.role === "master")) return notAllowed;
       if (ids !== undefined && !sameIds(ids, order)) return notAllowed;
       if (agent.chat) {
         const off = await ports.registry.setChat(agent.id, false, actor);
@@ -722,7 +722,7 @@ export function createConfigCommands(ports: ConfigPorts) {
         // Its role and chat now, not the list's: either may have changed meanwhile.
         const live = await ports.registry.get(target.id);
         if (!live) continue;
-        if (live.role === "main") return notAllowed;
+        if (live.role === "master") return notAllowed;
         if (live.chat) {
           const off = await ports.registry.setChat(live.id, false, actor);
           if (!off.ok) return off;
@@ -743,7 +743,7 @@ export function createConfigCommands(ports: ConfigPorts) {
     },
 
     /**
-     * An owner agent proposes a change to an agent it owns (ADR-0036 §3, ADR-0060, #302): the
+     * An owner agent proposes a change to an agent it owns (ADR-0036 §3, ADR-0061, #302): the
      * owner's turn, through that agent. It records the change as it would apply, a trio merged
      * into the target's own, with the same fields as they are now, and has Kelpie tell the owner in
      * their latest conversation with Master. Nothing applies until the owner approves it on its
@@ -801,7 +801,7 @@ export function createConfigCommands(ports: ConfigPorts) {
       const proposal = made.value;
       let noticed = false;
       try {
-        const master = (await ports.registry.list()).find((agent) => agent.role === "main");
+        const master = (await ports.registry.list()).find((agent) => agent.role === "master");
         if (master) {
           noticed = await ports.proposals.notify(master.id, {
             id: proposal.id,

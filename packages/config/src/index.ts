@@ -73,7 +73,7 @@ export {
   MAX_SPECIALTY_CHARS,
   parseSettings,
   REGISTRY_NAME,
-  SETUP_AGENT_ID,
+  RETIRED_AGENT_ID,
 } from "./settings.ts";
 export {
   type CommentAuthor,

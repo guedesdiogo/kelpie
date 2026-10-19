@@ -3,7 +3,7 @@ import type { CommandResult, ConfigCommands, Proposal, ProposalDetail } from "@k
 import { describe, expect, it } from "vitest";
 import { type AdminDeps, handle } from "../src/api.ts";
 
-// The proposals' pages (ADR-0060, #302): the owner reads a proposal in full and approves or refuses
+// The proposals' pages (ADR-0061, #302): the owner reads a proposal in full and approves or refuses
 // it, behind Access and the owner check, and only the page's own submission decides. A GET changes
 // nothing, and a repeat is never a 500.
 

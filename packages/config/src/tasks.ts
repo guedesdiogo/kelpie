@@ -30,7 +30,7 @@ export interface TaskAuthor {
   id: string;
 }
 
-/** Who wrote a comment: a person, an agent, or Kelpie itself (ADR-0060, #302). */
+/** Who wrote a comment: a person, an agent, or Kelpie itself (ADR-0061, #302). */
 export type CommentAuthor = TaskAuthor | { kind: "kelpie"; id: "kelpie" };
 
 /** A task as a list shows it. */

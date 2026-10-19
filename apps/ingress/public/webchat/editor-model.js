@@ -123,9 +123,9 @@ export const shows = (text) =>
  * The profile's fields that differ from what is saved, trimmed as the agent keeps them. A remit or
  * a specialty that shows nothing is an empty one.
  */
-export function profileChanges(saved, draft, { main }) {
+export function profileChanges(saved, draft, { master }) {
   const changes = {};
-  for (const field of ["name", "remit", ...(main ? [] : ["specialty"])]) {
+  for (const field of ["name", "remit", ...(master ? [] : ["specialty"])]) {
     const value = field === "name" || shows(draft[field]) ? draft[field].trim() : "";
     if (value !== saved[field]) changes[field] = value;
   }
@@ -133,9 +133,9 @@ export function profileChanges(saved, draft, { main }) {
 }
 
 /** The sections that changed since the editor opened, in the nav's order. */
-export function changedSections({ saved, draft, main }) {
+export function changedSections({ saved, draft, master }) {
   const changed = [];
-  if (Object.keys(profileChanges(saved.profile, draft.profile, { main })).length > 0) {
+  if (Object.keys(profileChanges(saved.profile, draft.profile, { master })).length > 0) {
     changed.push("profile");
   }
   if (!same(saved.mascot, draft.mascot)) changed.push("mascot");

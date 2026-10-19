@@ -2,7 +2,7 @@ import type { ModelSettings } from "@kelpie/llm/models";
 import type { AgentRole } from "./commands.ts";
 import { type AgentSettings, parseSettings } from "./settings.ts";
 
-// Proposals (ADR-0036 §3, ADR-0060, #302): an owner agent asks for a change to an agent it owns,
+// Proposals (ADR-0036 §3, ADR-0061, #302): an owner agent asks for a change to an agent it owns,
 // and only the owner's act on the admin API's page applies it. A proposal is a typed pending
 // change, never a command.
 
@@ -22,10 +22,10 @@ export const PROPOSAL_STATUSES = [
 ] as const;
 export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
 
-/** How long a proposal waits for the owner (ADR-0060). */
+/** How long a proposal waits for the owner (ADR-0061). */
 export const PROPOSAL_TTL_MS = 72 * 60 * 60_000;
 
-/** The caps the Registry holds proposals to (ADR-0060). */
+/** The caps the Registry holds proposals to (ADR-0061). */
 export const PROPOSAL_CAPS = {
   /** Pending at once, per proposer and target. */
   perTarget: 1,
@@ -48,7 +48,7 @@ export const MAX_PROPOSAL_REASON = 500;
 export const PROPOSABLE = {
   specialist: ["model", "tools", "remit", "spawn", "chat"],
   subagent: ["model", "tools", "remit", "systemPrompt", "skills"],
-} as const satisfies Record<Exclude<AgentRole, "main">, readonly string[]>;
+} as const satisfies Record<Exclude<AgentRole, "master">, readonly string[]>;
 
 /** The settings a proposal may change on the target's AgentHost. */
 export type ProposedSettings = Partial<
@@ -115,13 +115,13 @@ export type ProposalResult =
         | "too_many";
     };
 
-/** The outcome a proposer hears (ADR-0060), when it remains. */
+/** The outcome a proposer hears (ADR-0061), when it remains. */
 export type ProposalOutcome = Pick<Proposal, "id" | "target" | "taskId" | "actingUserId"> & {
   status: "applied" | "refused" | "expired" | "conflict" | "void";
   fields: string[];
 };
 
-/** Kelpie's notice of a new proposal, for the owner's conversation with Master (ADR-0060). */
+/** Kelpie's notice of a new proposal, for the owner's conversation with Master (ADR-0061). */
 export type ProposalNotice = Pick<
   Proposal,
   "id" | "proposer" | "target" | "actingUserId" | "reason" | "expiresAt"
@@ -150,7 +150,7 @@ export function isProposalId(value: unknown): value is string {
  * for anything else, an empty change, or chat beside settings.
  */
 export function parseProposalChanges(role: AgentRole, input: unknown): ProposalChanges | null {
-  if (role === "main" || typeof input !== "object" || input === null || Array.isArray(input)) {
+  if (role === "master" || typeof input !== "object" || input === null || Array.isArray(input)) {
     return null;
   }
   const fields = Object.keys(input);

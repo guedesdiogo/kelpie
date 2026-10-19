@@ -8,7 +8,7 @@ import {
   createConfigCommands,
 } from "../src/commands.ts";
 import { derivedMascot, KELPIE_MASCOT, parseMascot } from "../src/mascot.ts";
-import { type AgentSettings, DEFAULT_SETTINGS, SETUP_AGENT_ID } from "../src/settings.ts";
+import { type AgentSettings, DEFAULT_SETTINGS, RETIRED_AGENT_ID } from "../src/settings.ts";
 import type { TaskView } from "../src/tasks.ts";
 
 const owner: Actor = { userId: "u-owner", role: "owner", via: "admin-api" };
@@ -47,10 +47,10 @@ function fakePorts() {
   ];
   const identities = new Map(seeded.map((entry) => [key(entry.identity), entry]));
   const calls: string[] = [];
-  /** The agent `setMain` made the main agent; the others are specialists. */
-  let main: string | null = null;
+  /** The agent `setMaster` made Master; the others are specialists. */
+  let master: string | null = null;
   const roleOf = (id: string) =>
-    id === main ? { ...SPECIALIST, role: "main" as const } : SPECIALIST;
+    id === master ? { ...SPECIALIST, role: "master" as const } : SPECIALIST;
   const models: { settings: object; claudeCode: boolean } = { settings: {}, claudeCode: false };
   /** What channel-egress answers about the runner; a test changes it to another case. */
   const runner: {
@@ -81,10 +81,10 @@ function fakePorts() {
       async list() {
         return [...agents].map(([id, { name }]) => ({ id, name, ...roleOf(id) }));
       },
-      async setMain(id) {
-        calls.push(`setMain ${id}`);
+      async setMaster(id) {
+        calls.push(`setMaster ${id}`);
         if (!agents.has(id)) return { ok: false, reason: "unknown_agent" };
-        main = id;
+        master = id;
         return { ok: true };
       },
       async setChat(id, chat) {
@@ -364,11 +364,11 @@ describe("configuration commands", () => {
     });
   });
 
-  it("keeps the main agent's specialty, and takes any other agent's (#379)", async () => {
+  it("keeps Master's specialty, and takes any other agent's (#379)", async () => {
     const commands = createConfigCommands(fakePorts().ports);
     await commands.createAgent(owner, { id: "kelpie", name: "Kelpie" });
     await commands.createAgent(owner, { id: "agenda", name: "Agenda" });
-    await commands.setMainAgent(owner, { id: "kelpie" });
+    await commands.setMaster(owner, { id: "kelpie" });
 
     expect(
       await commands.configureAgent(owner, { id: "kelpie", settings: { specialty: "Agenda" } }),
@@ -383,8 +383,8 @@ describe("configuration commands", () => {
       }),
     ).toMatchObject({ ok: true, value: { settings: { specialty: "Agenda e e-mail" } } });
 
-    // The rule follows the role: once Agenda is the main agent, its specialty is fixed too.
-    await commands.setMainAgent(owner, { id: "agenda" });
+    // The rule follows the role: once Agenda is Master, its specialty is fixed too.
+    await commands.setMaster(owner, { id: "agenda" });
     expect(
       await commands.configureAgent(owner, { id: "agenda", settings: { specialty: "" } }),
     ).toEqual({ ok: false, reason: "not_allowed" });
@@ -506,25 +506,25 @@ describe("configuration commands", () => {
     expect(calls).not.toContain("models.providers");
   });
 
-  it("lets the owner choose the main agent and a specialist's chat access (#288)", async () => {
+  it("lets the owner choose Master and a specialist's chat access (#288)", async () => {
     const { ports, calls } = fakePorts();
     const commands = createConfigCommands(ports);
     await commands.createAgent(owner, { id: "sales", name: "Sales" });
 
-    expect(await commands.setMainAgent(owner, { id: "sales" })).toEqual({ ok: true, value: {} });
+    expect(await commands.setMaster(owner, { id: "sales" })).toEqual({ ok: true, value: {} });
     expect(await commands.setAgentChat(owner, { id: "sales", chat: false })).toEqual({
       ok: true,
       value: {},
     });
-    expect(calls).toContain("setMain sales");
+    expect(calls).toContain("setMaster sales");
     expect(calls).toContain("setChat sales false");
 
-    expect(await commands.setMainAgent(owner, { id: "ghost" })).toEqual({
+    expect(await commands.setMaster(owner, { id: "ghost" })).toEqual({
       ok: false,
       reason: "unknown_agent",
     });
-    // The retired setup agent (ADR-0048) is no agent the Registry knows.
-    expect(await commands.setAgentChat(owner, { id: SETUP_AGENT_ID, chat: false })).toEqual({
+    // The retired id (ADR-0048) is no agent the Registry knows.
+    expect(await commands.setAgentChat(owner, { id: RETIRED_AGENT_ID, chat: false })).toEqual({
       ok: false,
       reason: "unknown_agent",
     });
@@ -534,10 +534,10 @@ describe("configuration commands", () => {
         reason: "invalid_input",
       });
     }
-    expect(await commands.setMainAgent(owner, { id: "Sales" })).toMatchObject({
+    expect(await commands.setMaster(owner, { id: "Sales" })).toMatchObject({
       reason: "invalid_input",
     });
-    expect(await commands.setMainAgent(member, { id: "sales" })).toMatchObject({
+    expect(await commands.setMaster(member, { id: "sales" })).toMatchObject({
       reason: "forbidden",
     });
     expect(await commands.setAgentChat(member, { id: "sales", chat: true })).toMatchObject({
@@ -555,11 +555,11 @@ describe("configuration commands", () => {
     });
   });
 
-  it("never gives an agent the retired setup agent's id (ADR-0048)", async () => {
+  it("never gives an agent the retired id (ADR-0048)", async () => {
     const { ports, calls } = fakePorts();
     const commands = createConfigCommands(ports);
 
-    expect(await commands.createAgent(owner, { id: SETUP_AGENT_ID, name: "Mine" })).toEqual({
+    expect(await commands.createAgent(owner, { id: RETIRED_AGENT_ID, name: "Mine" })).toEqual({
       ok: false,
       reason: "invalid_input",
     });
@@ -967,7 +967,7 @@ describe("configuration commands", () => {
 describe("deleteAgent (#303)", () => {
   /** ADR-0036 §1's roster: a specialist with a subagent, which has one of its own. */
   const ROSTER: AgentEntry[] = [
-    { id: "kelpie", name: "Kelpie", role: "main", owner: null, chat: true },
+    { id: "kelpie", name: "Kelpie", role: "master", owner: null, chat: true },
     { id: "sales", name: "Sales", role: "specialist", owner: "kelpie", chat: true },
     { id: "scout", name: "Scout", role: "subagent", owner: "sales", chat: false },
     { id: "runner", name: "Runner", role: "subagent", owner: "scout", chat: false },
@@ -1039,8 +1039,8 @@ describe("deleteAgent (#303)", () => {
       ok: false,
       reason: "not_allowed",
     });
-    // The retired setup agent (ADR-0048) is no agent the Registry knows.
-    for (const id of ["ghost", SETUP_AGENT_ID]) {
+    // The retired id (ADR-0048) is no agent the Registry knows.
+    for (const id of ["ghost", RETIRED_AGENT_ID]) {
       expect(await commands.deleteAgent(owner, { id })).toEqual({
         ok: false,
         reason: "unknown_agent",
@@ -1084,7 +1084,7 @@ describe("deleteAgent (#303)", () => {
     const get = ports.registry.get;
     ports.registry.get = async (id) => {
       const entry = await get(id);
-      return entry && id === "quiet" ? { ...entry, role: "main" } : entry;
+      return entry && id === "quiet" ? { ...entry, role: "master" } : entry;
     };
     expect(await commands.deleteAgent(owner, { id: "quiet" })).toEqual({
       ok: false,

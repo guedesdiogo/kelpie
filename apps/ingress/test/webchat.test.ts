@@ -14,10 +14,10 @@ import {
 const ORIGIN = "https://ingress.test";
 const owner: Admission = { admitted: true, userId: "u-owner", role: "owner", timeZone: null };
 
-/** The registry as its `list()` answers, in its order: a specialist, the main agent, and more. */
+/** The registry as its `list()` answers, in its order: a specialist, Master, and more. */
 const REGISTRY: AgentEntry[] = [
   { id: "atlas", name: "Atlas", role: "specialist", owner: "assistant", chat: true },
-  { id: "assistant", name: "Assistant", role: "main", owner: null, chat: true },
+  { id: "assistant", name: "Assistant", role: "master", owner: null, chat: true },
   { id: "agenda", name: "Agenda", role: "specialist", owner: "assistant", chat: true },
   { id: "quiet", name: "Quiet", role: "specialist", owner: "assistant", chat: false },
   { id: "helper-1", name: "Helper", role: "subagent", owner: "agenda", chat: false },
@@ -134,9 +134,9 @@ describe("the webchat's agent list", () => {
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(await response.json()).toEqual({
       agents: [
-        { id: "atlas", name: "Atlas", main: false },
-        { id: "assistant", name: "Assistant", main: true },
-        { id: "agenda", name: "Agenda", main: false },
+        { id: "atlas", name: "Atlas", master: false },
+        { id: "assistant", name: "Assistant", master: true },
+        { id: "agenda", name: "Agenda", master: false },
       ],
     });
     // Each agent is admitted as its socket would be; the ones that don't chat aren't asked about.
@@ -164,9 +164,9 @@ describe("the webchat's agent list", () => {
     };
     expect(fakes.looks).toHaveBeenCalledWith(["atlas", "assistant", "agenda"]);
     expect(agents).toEqual([
-      { id: "atlas", name: "Atlas", main: false },
-      { id: "assistant", name: "Assistant", main: true, mascot: KELPIE_MASCOT },
-      { id: "agenda", name: "Agenda", main: false },
+      { id: "atlas", name: "Atlas", master: false },
+      { id: "assistant", name: "Assistant", master: true, mascot: KELPIE_MASCOT },
+      { id: "agenda", name: "Agenda", master: false },
     ]);
   });
 
@@ -182,11 +182,11 @@ describe("the webchat's agent list", () => {
       agents: unknown[];
     };
     expect(agents).toEqual([
-      { id: "atlas", name: "Atlas", main: false, mascot: KELPIE_MASCOT },
+      { id: "atlas", name: "Atlas", master: false, mascot: KELPIE_MASCOT },
       {
         id: "assistant",
         name: "Assistant",
-        main: true,
+        master: true,
         mascot: KELPIE_MASCOT,
         specialty: "",
         remit: "Your day.",
@@ -194,7 +194,7 @@ describe("the webchat's agent list", () => {
       {
         id: "agenda",
         name: "Agenda",
-        main: false,
+        master: false,
         mascot: KELPIE_MASCOT,
         specialty: "Agenda e e-mail",
         remit: "Meetings.",
@@ -227,7 +227,7 @@ describe("the webchat's agent list", () => {
       listAgents: vi.fn(async () => [{ id: "legacy", name: "Legacy" } as AgentEntry]),
     });
     expect(await (await handleWebchat(listRequest(), fakes)).json()).toEqual({
-      agents: [{ id: "legacy", name: "Legacy", main: false }],
+      agents: [{ id: "legacy", name: "Legacy", master: false }],
     });
   });
 
@@ -659,7 +659,7 @@ describe("the webchat's agent editor (#379)", () => {
     expect((await handleAgentEdit(mascotOf(), odd)).status).toBe(503);
   });
 
-  it("answers the editor's refusals with their status, and says so for the main agent's specialty", async () => {
+  it("answers the editor's refusals with their status, and says so for Master's specialty", async () => {
     const refusing = (reason: string) =>
       deps({
         editor: {
@@ -671,12 +671,12 @@ describe("the webchat's agent editor (#379)", () => {
     expect((await handleAgentEdit(mascotOf(), refusing("forbidden"))).status).toBe(403);
     expect((await handleAgentEdit(mascotOf(), refusing("unknown_agent"))).status).toBe(404);
     expect((await handleAgentEdit(mascotOf(), refusing("invalid_input"))).status).toBe(400);
-    const main = refusing("not_allowed");
+    const master = refusing("not_allowed");
     expect(
-      (await handleAgentEdit(profileOf({ specialty: "Agenda", name: "Kelpie" }), main)).status,
+      (await handleAgentEdit(profileOf({ specialty: "Agenda", name: "Kelpie" }), master)).status,
     ).toBe(409);
     // The field refused first: nothing after it was asked.
-    expect(main.editor.rename).not.toHaveBeenCalled();
+    expect(master.editor.rename).not.toHaveBeenCalled();
     const down = deps({
       editor: {
         ...editorFake(),

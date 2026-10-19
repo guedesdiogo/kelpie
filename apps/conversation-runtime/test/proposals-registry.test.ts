@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import type { NewProposal } from "@kelpie/config";
 import { describe, expect, it, vi } from "vitest";
 
-// The Registry keeps proposals (ADR-0060, #302): it checks the caps and settles each step in one
+// The Registry keeps proposals (ADR-0061, #302): it checks the caps and settles each step in one
 // synchronous step, and its alarm expires them and tells their proposers.
 
 const registry = (name: string) => env.REGISTRY.getByName(name);
@@ -261,7 +261,7 @@ describe("Registry proposals (#302)", () => {
     expect(await stub.refuseProposal(due, page)).toEqual({ ok: false, reason: "not_pending" });
 
     const moved = await idOf(await stub.propose(proposal({ target: "books" }), byMaster));
-    await stub.setMain("sales", owner);
+    await stub.setMaster("sales", owner);
     expect(await stub.claimProposal(moved, page)).toMatchObject({
       ok: true,
       value: { status: "conflict" },

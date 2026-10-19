@@ -1,6 +1,6 @@
 import { listDurableObjectIds, runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
-import { REGISTRY_NAME, SETUP_AGENT_ID } from "@kelpie/config";
+import { REGISTRY_NAME } from "@kelpie/config";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import agentHostMigrations from "../src/agent-host/migrations/migrations.js";
 import { AGENT_HOSTS_AT_ONCE, type ProbeTargets, probeRuntime } from "../src/deploy-probe.ts";
@@ -51,11 +51,9 @@ describe("DeployProbe", () => {
     });
     const woken = (await listDurableObjectIds(env.AGENT_HOST)).map((id) => id.toString()).sort();
     expect(woken).toEqual(
-      // The main agent a new instance starts with (#288), the one added, and the retired setup
-      // agent's, which keeps the runner form's waits though the Registry doesn't list it (ADR-0048).
-      ["kelpie", "sales", SETUP_AGENT_ID]
-        .map((name) => env.AGENT_HOST.idFromName(name).toString())
-        .sort(),
+      // Master, which a new instance starts with (#288), and the one added: nothing else
+      // (ADR-0060).
+      ["kelpie", "sales"].map((name) => env.AGENT_HOST.idFromName(name).toString()).sort(),
     );
   });
 });
@@ -81,10 +79,10 @@ describe("ping", () => {
 });
 
 describe("probeRuntime", () => {
-  it("pings each AgentHost the Registry lists, and the retired setup agent's (ADR-0048)", async () => {
+  it("pings each AgentHost the Registry lists, and nothing else (ADR-0060)", async () => {
     const { fake, pinged } = targets();
     expect(await probeRuntime(fake)).toEqual({ registry: "ok", agentHosts: "ok", gateway: "ok" });
-    expect(pinged.sort()).toEqual(["kelpie", "sales", SETUP_AGENT_ID]);
+    expect(pinged.sort()).toEqual(["kelpie", "sales"]);
   });
 
   it("wakes at most ten AgentHosts at a time", async () => {
@@ -107,7 +105,7 @@ describe("probeRuntime", () => {
     });
     expect((await probeRuntime(fake)).agentHosts).toBe("ok");
     expect(most).toBe(AGENT_HOSTS_AT_ONCE);
-    expect(pinged).toHaveLength(26);
+    expect(pinged).toHaveLength(25);
   });
 
   it("fails agentHosts when any one of them fails, and logs the part without the message", async () => {

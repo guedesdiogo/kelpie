@@ -42,7 +42,7 @@ describe("a proposal's changes (#302)", () => {
       ["specialist", { systemPrompt: "Be terse." }],
       ["specialist", { skills: [] }],
       // Master isn't a target, nor is anything but these fields.
-      ["main", { remit: "Everything." }],
+      ["master", { remit: "Everything." }],
       ["specialist", { maxConcurrentTasks: 10 }],
       ["specialist", { mascot: null }],
       ["specialist", {}],

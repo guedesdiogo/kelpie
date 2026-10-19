@@ -92,7 +92,7 @@ describe("AgentEditor", () => {
     expect((await registry.get("editor-limits"))?.name).toBe("Limits");
   });
 
-  it("keeps the main agent's specialty: always principal (#379)", async () => {
+  it("keeps Master's specialty: always Master (#379)", async () => {
     expect(await editor.setSpecialty(owner, "kelpie", "Agenda")).toEqual({
       ok: false,
       reason: "not_allowed",

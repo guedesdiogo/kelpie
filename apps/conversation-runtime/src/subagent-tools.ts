@@ -27,7 +27,7 @@ import type { Tool, ToolContext, ToolOutcome, ToolProvider } from "./tools.ts";
 // so no confirmation is asked.
 
 export interface SubagentPorts {
-  /** Whether the agent creates subagents: the main agent by its role, others by `spawn`. */
+  /** Whether the agent creates subagents: Master by its role, others by `spawn`. */
   canSpawn(agentId: string): Promise<boolean>;
   /** The creator's own trio, as it resolves now, and its tool allowlist: a subagent's ceiling. */
   creator(agentId: string): Promise<{

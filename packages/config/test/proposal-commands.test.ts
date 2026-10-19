@@ -8,7 +8,7 @@ import {
 import type { NewProposal, Proposal, ProposalNotice } from "../src/proposals.ts";
 import { type AgentSettings, DEFAULT_SETTINGS } from "../src/settings.ts";
 
-// The proposal commands (ADR-0060, #302). The Registry's own rules, its caps and expiry, are its
+// The proposal commands (ADR-0061, #302). The Registry's own rules, its caps and expiry, are its
 // tests'; here it is a plain store that records each step.
 
 const TASK = "0f8b7c1e-6a2d-4c3b-9e5f-1a2b3c4d5e6f";
@@ -23,7 +23,7 @@ const page: Actor = { userId: "u-owner", role: "owner", via: "admin-api" };
 function fake() {
   const calls: string[] = [];
   const agents = new Map<string, AgentEntry>([
-    ["kelpie", { id: "kelpie", name: "Kelpie", role: "main", owner: null, chat: true }],
+    ["kelpie", { id: "kelpie", name: "Kelpie", role: "master", owner: null, chat: true }],
     ["sales", { id: "sales", name: "Sales", role: "specialist", owner: "kelpie", chat: false }],
     [
       "sales-sub-a1b2c3",

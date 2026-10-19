@@ -14,7 +14,7 @@ describe("an agent's Markdown", () => {
         "# Kelpie",
         "",
         "Você é o Kelpie,",
-        "o agente principal.",
+        "o Master.",
         "",
         "## Como trabalha",
         "- Pergunta só quando muda.",
@@ -36,7 +36,7 @@ describe("an agent's Markdown", () => {
       { type: "heading", level: 1, children: [text("Kelpie")], line: 0, end: 0 },
       {
         type: "paragraph",
-        children: [text("Você é o Kelpie,\no agente principal.")],
+        children: [text("Você é o Kelpie,\no Master.")],
         line: 2,
         end: 3,
       },

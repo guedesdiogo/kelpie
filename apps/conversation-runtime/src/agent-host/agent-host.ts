@@ -59,6 +59,7 @@ import { and, desc, eq, isNotNull, lte, notLike } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import { CONFIGURE_KELPIE_SKILL, heldTools } from "../configuration.ts";
+import { readRole } from "../registry/schema.ts";
 import { identitySection } from "./identity.ts";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
@@ -370,7 +371,8 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     // A subagent's creator is pinned on its own object when it is made (#290): the Registry not
     // answering never makes it anything else.
     const pinned = this.#get<string | null>("creator", null);
-    const role = pinned !== null ? "subagent" : (listed.value?.role ?? null);
+    // A role cached before ADR-0060 reads as `master` too.
+    const role = pinned !== null ? "subagent" : readRole(listed.value?.role);
     const owner = pinned ?? listed.value?.owner ?? null;
     const limits = role === "subagent" && owner ? await this.#creatorLimits(owner) : null;
     // A subagent never runs above its creator (ADR-0036 §5), field by field, at every turn.
@@ -381,7 +383,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       runsOn = (await this.#lookup("identityModelClamped", () => sources.describe(effective)))
         .value;
     }
-    const spawn = role === "main" || (role === "specialist" && config.settings.spawn);
+    const spawn = role === "master" || (role === "specialist" && config.settings.spawn);
     const identity = identitySection({
       id,
       name: listed.value?.name ?? id,
@@ -397,7 +399,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       ...specialistsSection(specialists.value ?? []),
       ...(spawn ? [CREATE_SUBAGENT_SKILL] : []),
       // Master configures Kelpie (ADR-0048), whatever persona the owner gave it.
-      ...(role === "main" ? [CONFIGURE_KELPIE_SKILL] : []),
+      ...(role === "master" ? [CONFIGURE_KELPIE_SKILL] : []),
     ];
     return {
       settings: {
@@ -725,7 +727,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   }
 
   /**
-   * Kelpie's notice of a proposal (ADR-0060, #302), on Master's AgentHost: the owner's latest
+   * Kelpie's notice of a proposal (ADR-0061, #302), on Master's AgentHost: the owner's latest
    * conversation with Master takes it, and sends the page's link after its next reply. False when
    * Master has no such conversation yet: the proposal still waits on the admin API's page.
    */
@@ -745,7 +747,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   }
 
   /**
-   * A proposal's outcome, on its proposer's AgentHost (ADR-0060, #302), in Kelpie's words: a
+   * A proposal's outcome, on its proposer's AgentHost (ADR-0061, #302), in Kelpie's words: a
    * comment on the task whose run made it, which resumes it when it waits, or else a note in the
    * proposer's latest conversation with the owner. False when neither took it, so the Registry
    * tries again.
@@ -1408,7 +1410,7 @@ export function newsNote({
 const KELPIE_SAYS = "Kelpie, automatically (not the owner):";
 
 /**
- * Kelpie's words of a proposal's outcome, for its proposer (ADR-0060, #302): what happened, and
+ * Kelpie's words of a proposal's outcome, for its proposer (ADR-0061, #302): what happened, and
  * that nothing changed unless the owner approved it. Ids and field names only.
  */
 export function outcomeNote({ id, target, status, fields }: ProposalOutcome): string {
