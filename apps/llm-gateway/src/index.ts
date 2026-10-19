@@ -248,15 +248,11 @@ function parseSession(value: unknown): RouteSession | null {
 export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
   /**
    * One model call, without a session: a route that keeps one, as `claude-code` does, never serves
-   * it. Sessions go through `LlmChat`, which only conversation-runtime binds (#431). A session sent
-   * here, as a conversation-runtime from before `LlmChat` sends one during a rollout, is left out,
-   * and the call goes on without it.
+   * it. Sessions go through `LlmChat`, which only conversation-runtime binds (#431), so a session
+   * sent here is refused as a bad request (#432).
    */
   generate(call: ModelSelection, request: RoutedRequest, session?: RouteSession): Generation {
-    if (session !== undefined) {
-      console.warn("llm-gateway: LlmGateway left out a session; only LlmChat takes one");
-    }
-    return generateWith(this.env, call, request);
+    return generateWith(this.env, call, request, session, { sessions: false });
   }
 
   /**
@@ -352,13 +348,15 @@ export class LlmGatewayAdmin extends WorkerEntrypoint<GatewayEnv> {
 /**
  * One model call. When ModelDefaults can't answer, the call goes on with no instance settings, in
  * the route table's order, as before #286, and with the `claude-code` route off: a model call never
- * fails for them. A malformed session is refused as a bad request.
+ * fails for them. A malformed session is refused as a bad request, as is any session when the
+ * entrypoint takes none (`sessions: false`).
  */
 export function generateWith(
   env: GatewayEnv,
   call: ModelSelection,
   request: RoutedRequest,
   session?: RouteSession,
+  { sessions = true }: { sessions?: boolean } = {},
 ): Generation {
   const keyed = modelRouter(env);
   const controller = new AbortController();
@@ -366,6 +364,9 @@ export function generateWith(
   controller.signal.addEventListener("abort", () => answers.end(), { once: true });
   async function* routed() {
     try {
+      if (session !== undefined && !sessions) {
+        throw new LlmError("Only LlmChat takes a session", "bad_request", false);
+      }
       const checked = session === undefined ? undefined : parseSession(session);
       if (checked === null) throw new LlmError("Malformed session", "bad_request", false);
       // Only a conversation keeps a session: checkpoints, Dream and resolve never reach its route.

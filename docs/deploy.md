@@ -173,6 +173,7 @@ bun run --cwd tools/release release rollback --target 94 --reason "replies come 
 
 - `status` lists what each Worker serves, and the builds a rollback can reach: Cloudflare keeps the 100 most recent versions of each Worker.
 - If even this fails, `wrangler rollback <version id> --name kelpie-<worker>` rolls back one Worker. `status` lists the version ids.
+- **Rolling back one Worker alone** can split a contract the Workers share. `conversation-runtime` sends a conversation's session only through `llm-gateway`'s `LlmChat` since #431, and `LlmGateway` refuses a session since #432. So `conversation-runtime` goes back to a build from before #431 only with `llm-gateway` back to one from before #432, or every owner turn fails as a bad request. `release rollback` moves every Worker together, and keeps them in step.
 
 ## The deep probe's token
 
