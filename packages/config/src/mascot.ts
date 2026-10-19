@@ -83,7 +83,7 @@ export interface Mascot {
   accessory: Part<typeof MASCOT_ACCESSORIES>;
 }
 
-/** The main agent's mascot until the owner picks another; the logo is its silhouette (ADR-0049). */
+/** Master's mascot until the owner picks another; the logo is its silhouette (ADR-0049). */
 export const KELPIE_MASCOT: Mascot = {
   shape: "mark",
   color: "kelp",
@@ -223,11 +223,11 @@ export function randomMascot(random: () => number = Math.random): Mascot {
 }
 
 /**
- * The mascot an agent shows: the one the owner picked, or else Kelpie for the main agent and one
+ * The mascot an agent shows: the one the owner picked, or else Kelpie for Master and one
  * derived from its id for any other created before #379, which saves a random one for each new
  * agent.
  */
 export function mascotFor(agentId: string, role: AgentRole | null, picked: Mascot | null): Mascot {
   if (picked) return picked;
-  return role === "main" ? KELPIE_MASCOT : derivedMascot(agentId);
+  return role === "master" ? KELPIE_MASCOT : derivedMascot(agentId);
 }

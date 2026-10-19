@@ -7,7 +7,7 @@ import {
   KELPIE_MASCOT,
   type Mascot,
   REGISTRY_NAME,
-  SETUP_AGENT_ID,
+  RETIRED_AGENT_ID,
 } from "@kelpie/config";
 import type { CompiledContext, ContextStoreContract } from "@kelpie/context-store/contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -108,8 +108,8 @@ describe("AgentHost", () => {
     expect(await host("fresh").config()).toEqual({ settings: DEFAULT_SETTINGS, promptVersion: 0 });
   });
 
-  it("gives the retired setup agent's id no persona of its own (ADR-0048)", async () => {
-    expect(await host(SETUP_AGENT_ID).config()).toEqual({
+  it("gives the retired id no persona of its own (ADR-0048)", async () => {
+    expect(await host(RETIRED_AGENT_ID).config()).toEqual({
       settings: DEFAULT_SETTINGS,
       promptVersion: 0,
     });
@@ -296,7 +296,10 @@ describe("AgentHost", () => {
   it("audits who changed which settings, through what, and the prompt version after", async () => {
     const stub = host("audited");
     await stub.configure({ tier: "medium", conversational: false }, owner);
-    await stub.configure({ systemPrompt: "Hi.", tier: "medium" }, { ...owner, via: "agent:setup" });
+    await stub.configure(
+      { systemPrompt: "Hi.", tier: "medium" },
+      { ...owner, via: "agent:kelpie" },
+    );
     // Setting the current values changes nothing, so it isn't audited.
     await stub.configure({ systemPrompt: "Hi.", conversational: false }, owner);
 
@@ -311,7 +314,7 @@ describe("AgentHost", () => {
       {
         action: "settings.changed",
         user_id: "u-owner",
-        via: "agent:setup",
+        via: "agent:kelpie",
         fields: JSON.stringify(["systemPrompt"]),
         prompt_version: 1,
       },
@@ -728,7 +731,7 @@ describe("Deleting an agent's storage (#303)", () => {
 describe("AgentHost and subagents (#290)", () => {
   /** Identity sources where each agent's role and owner are given, and a trio is its own tier. */
   function roster(
-    entries: Record<string, { role: "main" | "specialist" | "subagent"; owner?: string }>,
+    entries: Record<string, { role: "master" | "specialist" | "subagent"; owner?: string }>,
   ) {
     replaceIdentitySourcesForTesting({
       agent: async (id) => {
@@ -750,25 +753,25 @@ describe("AgentHost and subagents (#290)", () => {
 
   it("teaches configure-kelpie to Master alone, over any persona (ADR-0048)", async () => {
     roster({
-      "cfg-main": { role: "main" },
+      "cfg-master": { role: "master" },
       "cfg-specialist": { role: "specialist" },
-      "cfg-child": { role: "subagent", owner: "cfg-main" },
+      "cfg-child": { role: "subagent", owner: "cfg-master" },
     });
-    await host("cfg-main").configure({ systemPrompt: "Fale como um pirata." }, owner);
+    await host("cfg-master").configure({ systemPrompt: "Fale como um pirata." }, owner);
     const prompt = async (id: string) => (await host(id).turnConfig()).settings.systemPrompt;
-    const master = await prompt("cfg-main");
+    const master = await prompt("cfg-master");
     expect(master).toContain("Fale como um pirata.");
     expect(master.endsWith(`\n\n${CONFIGURE_KELPIE_SKILL}`)).toBe(true);
     expect(await prompt("cfg-specialist")).not.toContain("configure-kelpie");
     expect(await prompt("cfg-child")).not.toContain("configure-kelpie");
   });
 
-  it("teaches create-subagent to the main agent and to an agent with spawn, never a subagent", async () => {
+  it("teaches create-subagent to Master and to an agent with spawn, never a subagent", async () => {
     roster({
-      "sub-main": { role: "main" },
+      "sub-master": { role: "master" },
       "sub-specialist": { role: "specialist" },
       "sub-spawner": { role: "specialist" },
-      "sub-child": { role: "subagent", owner: "sub-main" },
+      "sub-child": { role: "subagent", owner: "sub-master" },
     });
     await host("sub-spawner").configure({ spawn: true }, owner);
     await host("sub-child").configure({ spawn: true }, owner);
@@ -779,9 +782,9 @@ describe("AgentHost and subagents (#290)", () => {
         agent: config.agent,
       };
     };
-    expect(await taught("sub-main")).toEqual({
+    expect(await taught("sub-master")).toEqual({
       prompt: true,
-      agent: { role: "main", owner: null, spawn: true, creatorTools: null },
+      agent: { role: "master", owner: null, spawn: true, creatorTools: null },
     });
     expect(await taught("sub-specialist")).toMatchObject({
       prompt: false,
@@ -790,7 +793,7 @@ describe("AgentHost and subagents (#290)", () => {
     expect(await taught("sub-spawner")).toMatchObject({ prompt: true, agent: { spawn: true } });
     expect(await taught("sub-child")).toEqual({
       prompt: false,
-      agent: { role: "subagent", owner: "sub-main", spawn: false, creatorTools: null },
+      agent: { role: "subagent", owner: "sub-master", spawn: false, creatorTools: null },
     });
   });
 
@@ -814,7 +817,7 @@ describe("AgentHost and subagents (#290)", () => {
 
   it("runs a subagent on its creator's trio once its own is above it", async () => {
     roster({
-      "sub-maker": { role: "main" },
+      "sub-maker": { role: "master" },
       "sub-climber": { role: "subagent", owner: "sub-maker" },
     });
     await host("sub-maker").configure({ model: { conversation: { tier: "medium" } } }, owner);
@@ -865,12 +868,12 @@ describe("AgentHost and subagents (#290)", () => {
 
   it("lets a narrowed Master's subagent keep the task tools Master always holds (#391)", async () => {
     roster({
-      "held-main": { role: "main" },
-      "held-child": { role: "subagent", owner: "held-main" },
+      "held-master": { role: "master" },
+      "held-child": { role: "subagent", owner: "held-master" },
       "held-spec": { role: "specialist" },
       "held-spec-child": { role: "subagent", owner: "held-spec" },
     });
-    await host("held-main").configure({ tools: ["memory_search"] }, owner);
+    await host("held-master").configure({ tools: ["memory_search"] }, owner);
     expect((await host("held-child").turnConfig()).agent?.creatorTools).toEqual(
       expect.arrayContaining(["memory_search", "complete_task", "wait_on_task", "comment_task"]),
     );
@@ -884,13 +887,13 @@ describe("AgentHost and subagents (#290)", () => {
   it("keeps a subagent's creator limits when only the creator's role can't be read (#391)", async () => {
     replaceIdentitySourcesForTesting({
       agent: async (id) => {
-        if (id === "role-down-main") throw new Error("Durable Object reset");
-        return { name: id, role: "subagent", owner: "role-down-main" };
+        if (id === "role-down-master") throw new Error("Durable Object reset");
+        return { name: id, role: "subagent", owner: "role-down-master" };
       },
       describe: async () => ({ provider: "anthropic", tier: "medium", route: [] }),
       specialists: async () => [],
     });
-    await host("role-down-main").configure({ tools: ["memory_search", "complete_task"] }, owner);
+    await host("role-down-master").configure({ tools: ["memory_search", "complete_task"] }, owner);
     // Its own list, read without the role: never the cheapest limits' empty one, and never wider.
     expect((await host("role-down-child").turnConfig()).agent?.creatorTools).toEqual([
       "memory_search",
@@ -902,9 +905,9 @@ describe("AgentHost and subagents (#290)", () => {
     // The instance's conversation tier is frontier: an agent that sets none runs on it.
     replaceIdentitySourcesForTesting({
       agent: async (id) =>
-        id === "inherit-main"
-          ? { name: id, role: "main", owner: null }
-          : { name: id, role: "subagent", owner: "inherit-main" },
+        id === "inherit-master"
+          ? { name: id, role: "master", owner: null }
+          : { name: id, role: "subagent", owner: "inherit-master" },
       describe: async (model) => ({
         provider: "anthropic",
         tier: model.conversation?.tier ?? "frontier",
@@ -912,10 +915,10 @@ describe("AgentHost and subagents (#290)", () => {
       }),
       specialists: async () => [],
     });
-    expect(await host("inherit-sub").bindCreator("inherit-main")).toEqual({ ok: true });
+    expect(await host("inherit-sub").bindCreator("inherit-master")).toEqual({ ok: true });
     await host("inherit-sub").configure({ model: { conversation: { tier: "medium" } } }, owner);
     // The creator's own model has no tier: not the defaults' cheap.
-    expect(await host("inherit-main").ownModel()).toEqual({});
+    expect(await host("inherit-master").ownModel()).toEqual({});
     expect((await host("inherit-sub").turnConfig()).settings.model).toEqual({
       provider: "anthropic",
       conversation: { tier: "medium" },
@@ -925,9 +928,9 @@ describe("AgentHost and subagents (#290)", () => {
   it("names no model in a subagent's prompt when its clamped trio can't be described (#344)", async () => {
     replaceIdentitySourcesForTesting({
       agent: async (id) =>
-        id === "unread-main"
-          ? { name: id, role: "main", owner: null }
-          : { name: id, role: "subagent", owner: "unread-main" },
+        id === "unread-master"
+          ? { name: id, role: "master", owner: null }
+          : { name: id, role: "subagent", owner: "unread-master" },
       describe: async (model) => {
         // The clamped trio is the only one pinned to a provider: llm-gateway fails on it.
         if (model.provider !== undefined) throw new Error("down");
@@ -935,8 +938,8 @@ describe("AgentHost and subagents (#290)", () => {
       },
       specialists: async () => [],
     });
-    await host("unread-main").configure({ model: { conversation: { tier: "medium" } } }, owner);
-    expect(await host("unread-sub").bindCreator("unread-main")).toEqual({ ok: true });
+    await host("unread-master").configure({ model: { conversation: { tier: "medium" } } }, owner);
+    expect(await host("unread-sub").bindCreator("unread-master")).toEqual({ ok: true });
     await host("unread-sub").configure({ model: { conversation: { tier: "frontier" } } }, owner);
     const { settings } = await host("unread-sub").turnConfig();
     expect(settings.model.conversation).toEqual({ tier: "medium" });
@@ -945,7 +948,7 @@ describe("AgentHost and subagents (#290)", () => {
   });
 
   it("gives a subagent's calls outside a turn its creator's limits too (#344)", async () => {
-    roster({ "own-maker": { role: "main" } });
+    roster({ "own-maker": { role: "master" } });
     await host("own-maker").configure(
       { model: { conversation: { tier: "medium" }, memory: { tier: "cheap" } } },
       owner,
@@ -998,11 +1001,11 @@ describe("the specialists in an agent's prompt (#287)", () => {
       { id: "docs", name: "Docs", remit: "" },
     ];
     replaceIdentitySourcesForTesting({
-      agent: async (id) => ({ name: id, role: "main", owner: null }),
+      agent: async (id) => ({ name: id, role: "master", owner: null }),
       describe: async () => ({ provider: "anthropic", tier: "cheap", route: [] }),
       specialists: () => specialists(),
     });
-    const stub = host("roster-main");
+    const stub = host("roster-master");
     const listed = (await stub.turnConfig()).settings.systemPrompt;
     expect(listed).toContain("# Your specialists");
     expect(listed).toContain(
@@ -1209,7 +1212,7 @@ describe("The bot's photo (ADR-0046)", () => {
       return stub;
     }
 
-    it("asks for the main agent's new default when its bot was last asked for the old one", async () => {
+    it("asks for Master's new default when its bot was last asked for the old one", async () => {
       const kelpie = await stopped("kelpie", { botPhoto: OLD_KELPIE });
       // As the deploy's probe wakes it, before anyone writes to it.
       await kelpie.ping();

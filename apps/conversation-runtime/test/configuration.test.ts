@@ -8,7 +8,7 @@ import {
   DEFAULT_SETTINGS,
   KELPIE_MASCOT,
   MASCOT_HEADS,
-  SETUP_AGENT_ID,
+  RETIRED_AGENT_ID,
 } from "@kelpie/config";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type Announcement, keyOf } from "../src/announcements.ts";
@@ -46,7 +46,7 @@ const owner: Actor = { userId: "u-owner", role: "owner", via: `agent:${MASTER}` 
 /** The Registry's answer for an agent's role (ADR-0036 §1): Master for kelpie, else specialist. */
 const roleOf = (id: string) =>
   id === MASTER
-    ? ({ role: "main", owner: null, chat: true } as const)
+    ? ({ role: "master", owner: null, chat: true } as const)
     : id === "scout"
       ? ({ role: "subagent", owner: "ana", chat: false } as const)
       : ({ role: "specialist", owner: MASTER, chat: false } as const);
@@ -94,7 +94,7 @@ function fakeCommands() {
       calls.push(`createAgent ${JSON.stringify(input)}`);
       if (actor.role !== "owner") return forbidden;
       const { id, name } = input as { id: string; name: string };
-      if (id === SETUP_AGENT_ID) return { ok: false, reason: "invalid_input" };
+      if (id === RETIRED_AGENT_ID) return { ok: false, reason: "invalid_input" };
       const created = !agents.has(id);
       agents.set(id, name);
       return { ok: true, value: { id, name, created } };
@@ -143,8 +143,8 @@ function fakeCommands() {
       models.claudeCode = (input as { on: boolean }).on;
       return { ok: true, value: {} };
     },
-    async setMainAgent(actor, input) {
-      calls.push(`setMainAgent ${JSON.stringify(input)}`);
+    async setMaster(actor, input) {
+      calls.push(`setMaster ${JSON.stringify(input)}`);
       if (actor.role !== "owner") return forbidden;
       const { id } = input as { id: string };
       if (roleOf(id).role === "subagent") return { ok: false, reason: "not_allowed" };
@@ -163,7 +163,7 @@ function fakeCommands() {
       const { id, ids } = input as { id: string; ids?: string[] };
       if (id === "stuck") return { ok: false, reason: "unavailable" };
       if (!agents.has(id)) return { ok: false, reason: "unknown_agent" };
-      if (roleOf(id).role === "main") return { ok: false, reason: "not_allowed" };
+      if (roleOf(id).role === "master") return { ok: false, reason: "not_allowed" };
       const below = [...agents.keys()].filter((other) => roleOf(other).owner === id);
       const deleted = [...below, id];
       if (ids && [...ids].sort().join() !== [...deleted].sort().join()) {
@@ -250,7 +250,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
       adminOrigin: ADMIN,
     });
     // Neither a specialist, a subagent nor an agent the Registry doesn't list gets them.
-    for (const id of ["assistant", "scout", "ghost", SETUP_AGENT_ID]) {
+    for (const id of ["assistant", "scout", "ghost", RETIRED_AGENT_ID]) {
       expect(await provider.tools(id), id).toEqual([]);
     }
     // A task's run has no owner to confirm anything (#335).
@@ -267,7 +267,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
       "get_models",
       "configure_models",
       "set_claude_code",
-      "set_main_agent",
+      "set_master",
       "set_agent_chat",
       "delete_agent",
       "connect_telegram",
@@ -285,7 +285,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
 
   it("follow the role: the agent that stops being Master can't run them any more", async () => {
     const { commands, calls } = fakeCommands();
-    let role: AgentRole = "main";
+    let role: AgentRole = "master";
     const provider = configurationTools(commands, { roleOf: async () => role, adminOrigin: ADMIN });
     const tools = await toolsOf(provider);
     role = "specialist";
@@ -317,7 +317,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
     for (const [name, input] of [
       ["configure_agent", { id: MASTER, settings: { tools: ["memory_search"] } }],
       ["configure_agent", { id: MASTER, settings: { tools: [] } }],
-      ["set_main_agent", { id: "ana" }],
+      ["set_master", { id: "ana" }],
     ] as const) {
       expect((await run(tools, name, input, contextOf(false).context)).output, name).toContain(
         "Not done yet",
@@ -346,17 +346,17 @@ describe("Master's configuration tools (ADR-0048)", () => {
       "As Master, it also always holds its orchestration tools, whatever this list says:",
     );
     // What an agent holds: Master's list gains them; anyone else's, or no list, stays as it is.
-    expect(new Set(heldTools("main", ["memory_search"]))).toEqual(
+    expect(new Set(heldTools("master", ["memory_search"]))).toEqual(
       new Set([...MASTER_TOOLS, "memory_search"]),
     );
-    expect(heldTools("main", null)).toBeNull();
+    expect(heldTools("master", null)).toBeNull();
     expect(heldTools("specialist", ["memory_search"])).toEqual(["memory_search"]);
     expect(heldTools(null, ["memory_search"])).toEqual(["memory_search"]);
   });
 
-  it("calls the role the Registry names `main` Master, in its skill, tools and texts (#343)", async () => {
+  it("calls the role Master everywhere: its skill, tools and texts (#343, ADR-0060)", async () => {
     // list_agents shows the Registry's value, so the skill ties the two.
-    expect(CONFIGURE_KELPIE_SKILL).toContain("You are Master, the role `main` in list_agents.");
+    expect(CONFIGURE_KELPIE_SKILL).toContain("You are Master, the role `master` in list_agents.");
     const { commands, agents } = fakeCommands();
     agents.set("ana", "Ana");
     const tools = await toolsOf(
@@ -369,15 +369,15 @@ describe("Master's configuration tools (ADR-0048)", () => {
         ...Object.values(tool.label),
       ]),
     ]) {
-      expect(text).not.toMatch(/main agent|agente principal/i);
+      expect(text).not.toMatch(/main agent|agente principal|\bmain\b|setup agent/i);
     }
-    expect(tools.get("set_main_agent")?.label).toEqual({
+    expect(tools.get("set_master")?.label).toEqual({
       en: "Choosing Master",
       "pt-BR": "Escolhendo o Master",
       es: "Eligiendo el Master",
     });
     const { context, asked } = contextOf(false, owner, "es");
-    await run(tools, "set_main_agent", { id: "ana" }, context);
+    await run(tools, "set_master", { id: "ana" }, context);
     expect(asked.map((request) => request.summary)).toEqual([
       'convertir el agente "Ana" (ana) en el Master, el que conversa contigo y configura Kelpie.',
     ]);
@@ -399,7 +399,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
     const listed = await run(tools, "list_agents", {}, context);
     // With each agent's role, and whether the owner can chat with it (#288).
     expect(listed.output).toContain("ana: Ana Souza (specialist, chat off)");
-    expect(listed.output).toContain(`${MASTER}: Kelpie (main)`);
+    expect(listed.output).toContain(`${MASTER}: Kelpie (master)`);
     expect(asked).toEqual([]);
     expect(calls).toEqual([
       'createAgent {"id":"ana","name":"Ana"}',
@@ -436,7 +436,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
     );
     const stranger = contextOf(false, { ...owner, role: "member" });
     const refused = [
-      await run(tools, "create_agent", { id: SETUP_AGENT_ID, name: "Mine" }, context),
+      await run(tools, "create_agent", { id: RETIRED_AGENT_ID, name: "Mine" }, context),
       await run(tools, "rename_agent", { id: "ghost", name: "Ghost" }, context),
       await run(tools, "create_agent", { id: "bob", name: "Bob" }, stranger.context),
       await run(tools, "rename_agent", { id: "ana", name: "Bob" }, stranger.context),
@@ -454,7 +454,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
     const reserved = await run(
       tools,
       "create_agent",
-      { id: SETUP_AGENT_ID, name: "Mine" },
+      { id: RETIRED_AGENT_ID, name: "Mine" },
       context,
     );
     expect(reserved).toMatchObject({ isError: true });
@@ -480,7 +480,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
       ["connect_runner", {}],
       ["runner_status", {}],
       ["create_agent", { id: "ana", name: "Ana" }],
-      ["set_main_agent", { id: MASTER }],
+      ["set_master", { id: MASTER }],
       ["set_agent_chat", { id: MASTER, chat: true }],
       ["delete_agent", { id: "ana" }],
     ] as const) {
@@ -493,7 +493,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
     expect(calls.filter((call) => !call.startsWith("createAgent"))).toEqual([]);
   });
 
-  it("asks the owner to confirm a new main agent or a chat change, and runs it only then (#288)", async () => {
+  it("asks the owner to confirm a new Master or a chat change, and runs it only then (#288)", async () => {
     const { commands, agents, calls } = fakeCommands();
     agents.set("ana", "Ana");
     const tools = await toolsOf(
@@ -501,7 +501,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
     );
 
     const waiting = contextOf(false, owner, "pt-BR");
-    expect((await run(tools, "set_main_agent", { id: "ana" }, waiting.context)).output).toContain(
+    expect((await run(tools, "set_master", { id: "ana" }, waiting.context)).output).toContain(
       "Not done yet",
     );
     expect(
@@ -509,7 +509,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
     ).toContain("Not done yet");
     expect(waiting.asked).toEqual([
       {
-        command: "setMainAgent",
+        command: "setMaster",
         input: { id: "ana" },
         summary:
           'tornar o agente "Ana" (ana) o Master, o que conversa com você e configura o Kelpie.',
@@ -523,7 +523,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
     expect(calls).toEqual([]);
 
     const confirmed = contextOf(true);
-    expect(await run(tools, "set_main_agent", { id: "ana" }, confirmed.context)).toEqual({
+    expect(await run(tools, "set_master", { id: "ana" }, confirmed.context)).toEqual({
       output:
         "The agent ana is now Master: the one the owner talks to. Your configuration tools went with the role: from now on, ana configures Kelpie.",
     });
@@ -536,7 +536,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
       'make the agent "Ana" (ana) Master, the one you talk to, which also configures Kelpie.',
       'let you chat with the agent "Ana" (ana).',
     ]);
-    expect(calls).toEqual(['setMainAgent {"id":"ana"}', 'setAgentChat {"id":"ana","chat":true}']);
+    expect(calls).toEqual(['setMaster {"id":"ana"}', 'setAgentChat {"id":"ana","chat":true}']);
   });
 
   it("shows and sets the instance's models, behind the owner's confirmation (#289)", async () => {
@@ -751,7 +751,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
     const { context, asked } = contextOf(true);
 
     agents.set("scout", "Scout");
-    const subagent = await run(tools, "set_main_agent", { id: "scout" }, context);
+    const subagent = await run(tools, "set_master", { id: "scout" }, context);
     expect(subagent).toEqual({ output: "A subagent can't be Master.", isError: true });
     for (const id of [MASTER, "scout"]) {
       const refused = await run(tools, "set_agent_chat", { id, chat: false }, context);
@@ -761,7 +761,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
         isError: true,
       });
     }
-    expect(await run(tools, "set_main_agent", { id: "kelpie" }, context)).toEqual({
+    expect(await run(tools, "set_master", { id: "kelpie" }, context)).toEqual({
       output: "The agent kelpie is already Master; nothing changed.",
     });
     expect(await run(tools, "set_agent_chat", { id: "ana", chat: false }, context)).toEqual({
@@ -918,10 +918,9 @@ describe("Master's configuration tools (ADR-0048)", () => {
       {
         href: `${ADMIN}/forms/run456?lang=pt-BR`,
         text: `O formulário seguro para conectar o runner: ${ADMIN}/forms/run456?lang=pt-BR\nFunciona uma vez, nos próximos 15 minutos. Cole lá o segredo de ~/.config/kelpie-runner/secret do seu servidor, uma linha só, nunca no chat.`,
-        // The runner is the instance's: the retired setup agent's AgentHost keeps the wait, until
-        // the form expires (#328, ADR-0048).
+        // Master's own AgentHost keeps the wait, until the form expires (#328, ADR-0060).
         awaits: {
-          agentId: SETUP_AGENT_ID,
+          agentId: MASTER,
           step: "runner_connected",
           until: Date.UTC(2026, 9, 6, 20),
         },

@@ -60,10 +60,10 @@ describe("identitySection", () => {
   });
 
   it("states the role the Registry gives it (#314)", () => {
-    const line = (role: "main" | "specialist" | "subagent") =>
+    const line = (role: "master" | "specialist" | "subagent") =>
       identitySection({ id: "bia", name: "Bia", role, model: runsOn([haiku]) });
-    // The role the Registry calls `main` is Master in every text (#343).
-    expect(line("main")).toContain(
+    // The role `master` is Master in every text (#343, ADR-0060).
+    expect(line("master")).toContain(
       "You are Bia, Master on Kelpie, the agent the owner talks to, which also configures Kelpie.",
     );
     expect(line("specialist")).toContain(
@@ -72,6 +72,10 @@ describe("identitySection", () => {
     expect(line("subagent")).toContain(
       "You are Bia, a temporary subagent on Kelpie, working on one demand of the agent that created you.",
     );
+    // A role cached before ADR-0060 reads as unlisted, until a fresh read.
+    expect(
+      identitySection({ id: "bia", name: "Bia", role: "main" as never, model: null }),
+    ).toContain("You are Bia, one of the owner's agents on Kelpie");
     // An agent the Registry doesn't list keeps the plain line.
     expect(identitySection({ id: "bia", name: "Bia", role: null, model: null })).toContain(
       "You are Bia, one of the owner's agents on Kelpie",

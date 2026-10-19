@@ -305,7 +305,7 @@ function productionPorts(env: Env): ConversationPorts {
       subagentTools({
         canSpawn: async (id) => {
           const entry = await registry.get(id);
-          if (entry?.role === "main") return true;
+          if (entry?.role === "master") return true;
           return entry?.role === "specialist" && (await agentHost(id).config()).settings.spawn;
         },
         creator: async (id) => {

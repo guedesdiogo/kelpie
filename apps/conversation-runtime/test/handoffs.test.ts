@@ -7,8 +7,8 @@ import { replacePortsForTesting } from "../src/ports.ts";
 import { taskTools } from "../src/task-tools.ts";
 import { type FakeWorld, fakeWorld, refuse, reply, toolCalls, toolCallsAfter } from "./fakes.ts";
 
-// The mandatory handoff (ADR-0036 §4, #287): the main agent's prompt lists the specialists it owns
-// with their remits, and Kelpie, not the model, announces each task the main agent hands one.
+// The mandatory handoff (ADR-0036 §4, #287): Master's prompt lists the specialists it owns
+// with their remits, and Kelpie, not the model, announces each task Master hands one.
 
 const host = (agentId: string) => env.AGENT_HOST.getByName(agentId);
 const agent = (name: string) => env.CONVERSATION_AGENT.getByName(name);
@@ -79,11 +79,13 @@ afterEach(() => {
 });
 
 describe("the mandatory handoff (#287)", () => {
-  it("lists the specialists and their remits in the main agent's prompt, and announces the handoff after the reply", async () => {
+  it("lists the specialists and their remits in Master's prompt, and announces the handoff after the reply", async () => {
     const world = use(fakeWorld([handOff("Quote"), reply("Sales is on it.")]));
-    const main = agent("kelpie:telegram:handoff-en");
-    await main.ingest(message("handoff-en", "m1", "Quote the Silva bakery for 40 loaves a week."));
-    await main.flush();
+    const master = agent("kelpie:telegram:handoff-en");
+    await master.ingest(
+      message("handoff-en", "m1", "Quote the Silva bakery for 40 loaves a week."),
+    );
+    await master.flush();
 
     await vi.waitFor(() =>
       expect(world.sent).toEqual([
@@ -97,20 +99,20 @@ describe("the mandatory handoff (#287)", () => {
     expect(system).toContain('- hf-blank ("Blank"): no remit set');
     expect((await host("hf-sales").listTasks()).map((task) => task.title)).toContain("Quote");
     // The notice is Kelpie's: the model never sees it.
-    expect(JSON.stringify(await main.history())).not.toContain("Kelpie handed");
+    expect(JSON.stringify(await master.history())).not.toContain("Kelpie handed");
   });
 
   it("says it in the conversation's language", async () => {
     const world = use(fakeWorld([handOff("Orçamento"), reply("A Sales já está cuidando disso.")]));
-    const main = agent("kelpie:telegram:handoff-pt");
-    await main.ingest(
+    const master = agent("kelpie:telegram:handoff-pt");
+    await master.ingest(
       message(
         "handoff-pt",
         "m1",
         "Preciso de um orçamento para a Padaria Silva, com entrega toda semana, por favor.",
       ),
     );
-    await main.flush();
+    await master.flush();
     await vi.waitFor(() =>
       expect(world.sent).toEqual([
         "A Sales já está cuidando disso.",
@@ -121,19 +123,21 @@ describe("the mandatory handoff (#287)", () => {
 
   it("announces a handoff whose turn sent no reply with the next one, once", async () => {
     const world = use(fakeWorld([handOff("Follow up"), refuse(), reply("Here."), reply("Again.")]));
-    const main = agent("kelpie:telegram:handoff-refused");
-    await main.ingest(message("handoff-refused", "m1", "Follow up with the Silva bakery."));
-    await main.flush();
-    await vi.waitFor(async () => expect(await main.turns()).toMatchObject([{ status: "refused" }]));
+    const master = agent("kelpie:telegram:handoff-refused");
+    await master.ingest(message("handoff-refused", "m1", "Follow up with the Silva bakery."));
+    await master.flush();
+    await vi.waitFor(async () =>
+      expect(await master.turns()).toMatchObject([{ status: "refused" }]),
+    );
     expect(world.sent).toEqual([]);
 
-    await main.ingest(message("handoff-refused", "m2", "Anything?"));
-    await main.flush();
+    await master.ingest(message("handoff-refused", "m2", "Anything?"));
+    await master.flush();
     await vi.waitFor(() =>
       expect(world.sent).toEqual(["Here.", 'Kelpie handed a task to "Sales" (hf-sales).']),
     );
-    await main.ingest(message("handoff-refused", "m3", "And now?"));
-    await main.flush();
+    await master.ingest(message("handoff-refused", "m3", "And now?"));
+    await master.flush();
     await vi.waitFor(() =>
       expect(world.sent).toEqual([
         "Here.",
@@ -153,9 +157,9 @@ describe("the mandatory handoff (#287)", () => {
         reply("Next."),
       ]),
     );
-    const main = agent("kelpie:telegram:handoff-route");
-    await main.ingest(message("handoff-route", "m1", "Quote the Silva bakery."));
-    await main.flush();
+    const master = agent("kelpie:telegram:handoff-route");
+    await master.ingest(message("handoff-route", "m1", "Quote the Silva bakery."));
+    await master.flush();
     await vi.waitFor(() =>
       expect(world.sent).toEqual([
         "Sales is on it.",
@@ -163,8 +167,8 @@ describe("the mandatory handoff (#287)", () => {
         'Kelpie handed a task to "Sales" (hf-sales).',
       ]),
     );
-    await main.ingest(message("handoff-route", "m2", "Thanks."));
-    await main.flush();
+    await master.ingest(message("handoff-route", "m2", "Thanks."));
+    await master.flush();
     await vi.waitFor(() => expect(world.sent.at(-1)).toBe("Next."));
     expect(world.sent).toHaveLength(4);
   });
@@ -182,16 +186,16 @@ describe("the mandatory handoff (#287)", () => {
     );
     // The reply and the route's notice go out; the handoff's notice, the third send, fails.
     world.failSends.add(2);
-    const main = agent("kelpie:telegram:handoff-failed-send");
-    await main.ingest(message("handoff-failed-send", "m1", "Quote the Silva bakery."));
-    await main.flush();
+    const master = agent("kelpie:telegram:handoff-failed-send");
+    await master.ingest(message("handoff-failed-send", "m1", "Quote the Silva bakery."));
+    await master.flush();
     await vi.waitFor(() => expect(world.sent).toEqual(["Sales is on it.", ROUTE_NOTE]));
     await vi.waitFor(async () =>
-      expect((await main.turns()).every((turn) => turn.status !== "running")).toBe(true),
+      expect((await master.turns()).every((turn) => turn.status !== "running")).toBe(true),
     );
 
-    await main.ingest(message("handoff-failed-send", "m2", "Thanks."));
-    await main.flush();
+    await master.ingest(message("handoff-failed-send", "m2", "Thanks."));
+    await master.flush();
     await vi.waitFor(() =>
       expect(world.sent.slice(-2)).toEqual([
         "Next.",
@@ -204,13 +208,13 @@ describe("the mandatory handoff (#287)", () => {
     const world = use(fakeWorld([handOff("Resumed"), reply("Sales is on it."), reply("Next.")]));
     // The notice's first send never completes: the eviction ends it, and recovery sends it again.
     world.hangSends.add(1);
-    const main = agent("kelpie:telegram:handoff-evicted");
-    await main.ingest(message("handoff-evicted", "m1", "Quote the Silva bakery."));
-    await main.flush();
+    const master = agent("kelpie:telegram:handoff-evicted");
+    await master.ingest(message("handoff-evicted", "m1", "Quote the Silva bakery."));
+    await master.flush();
     await vi.waitFor(() => expect(world.sent).toEqual(["Sales is on it."]));
 
-    await evictDurableObject(main);
-    expect(await runDurableObjectAlarm(main)).toBe(true);
+    await evictDurableObject(master);
+    expect(await runDurableObjectAlarm(master)).toBe(true);
     await vi.waitFor(() =>
       expect(world.sent).toEqual([
         "Sales is on it.",
@@ -218,11 +222,11 @@ describe("the mandatory handoff (#287)", () => {
       ]),
     );
     await vi.waitFor(async () =>
-      expect(await main.turns()).toMatchObject([{ status: "delivered" }]),
+      expect(await master.turns()).toMatchObject([{ status: "delivered" }]),
     );
 
-    await main.ingest(message("handoff-evicted", "m2", "Thanks."));
-    await main.flush();
+    await master.ingest(message("handoff-evicted", "m2", "Thanks."));
+    await master.flush();
     await vi.waitFor(() =>
       expect(world.sent).toEqual([
         "Sales is on it.",
@@ -233,14 +237,14 @@ describe("the mandatory handoff (#287)", () => {
   });
   it("announces a handoff kept by the release before #342, which had no kind", async () => {
     const world = use(fakeWorld([reply("Hello."), reply("Hi.")]));
-    const main = agent("kelpie:telegram:handoff-legacy");
-    await main.ingest(message("handoff-legacy", "m1", "Hello?"));
-    await main.flush();
+    const master = agent("kelpie:telegram:handoff-legacy");
+    await master.ingest(message("handoff-legacy", "m1", "Hello?"));
+    await master.flush();
     await vi.waitFor(() => expect(world.sent).toEqual(["Hello."]));
     // Two handoffs as #287 kept them, and its marker for a notice that named the first and went
     // out, left unsettled when the deploy came.
-    const [first] = await main.turns();
-    await runInDurableObject(main, (_instance, state) => {
+    const [first] = await master.turns();
+    await runInDurableObject(master, (_instance, state) => {
       const put = (key: string, value: unknown) =>
         state.storage.sql.exec(
           "INSERT INTO state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -253,8 +257,8 @@ describe("the mandatory handoff (#287)", () => {
       ]);
       put("handoffNotice", { turnId: first?.id, seq: 0, taskIds: ["legacy-1"] });
     });
-    await main.ingest(message("handoff-legacy", "m2", "Anything?"));
-    await main.flush();
+    await master.ingest(message("handoff-legacy", "m2", "Anything?"));
+    await master.flush();
     await vi.waitFor(() =>
       expect(world.sent).toEqual(["Hello.", "Hi.", 'Kelpie handed a task to "Sales" (hf-sales).']),
     );
@@ -292,12 +296,14 @@ describe("the mandatory handoff (#287)", () => {
         },
       },
     ];
-    const main = agent("kelpie:telegram:handoff-kinds");
-    await main.ingest(message("handoff-kinds", "m1", "Make one, hand off, drop it."));
-    await main.flush();
-    await vi.waitFor(async () => expect(await main.turns()).toMatchObject([{ status: "refused" }]));
+    const master = agent("kelpie:telegram:handoff-kinds");
+    await master.ingest(message("handoff-kinds", "m1", "Make one, hand off, drop it."));
+    await master.flush();
+    await vi.waitFor(async () =>
+      expect(await master.turns()).toMatchObject([{ status: "refused" }]),
+    );
     // A release before #342 reads its handoffs, and never the subagents' changes.
-    const kept = await runInDurableObject(main, (_instance, state) =>
+    const kept = await runInDurableObject(master, (_instance, state) =>
       Object.fromEntries(
         state.storage.sql
           .exec<{ key: string; value: string }>(
@@ -315,8 +321,8 @@ describe("the mandatory handoff (#287)", () => {
       { kind: "deleted", agentId: "kelpie-sub-abc123", name: "Scout" },
     ]);
 
-    await main.ingest(message("handoff-kinds", "m2", "Well?"));
-    await main.flush();
+    await master.ingest(message("handoff-kinds", "m2", "Well?"));
+    await master.flush();
     await vi.waitFor(() =>
       expect(world.sent).toEqual([
         "Done.",

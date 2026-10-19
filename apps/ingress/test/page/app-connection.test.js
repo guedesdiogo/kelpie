@@ -162,7 +162,7 @@ describe("a lost connection (5.12)", () => {
   });
 });
 
-/** The main agent's default mascot (ADR-0049), as the socket names it. */
+/** Master's default mascot (ADR-0049), as the socket names it. */
 const KELPIE = {
   shape: "mark",
   color: "kelp",
@@ -323,7 +323,7 @@ describe("an expired login (5.12)", () => {
 });
 
 describe("the agents (#140)", () => {
-  it("opens the main agent when the address names none", async () => {
+  it("opens Master when the address names none", async () => {
     const { socket } = await loadPage({ search: "" });
     expect(socket.url).toContain("agent=assistant");
     expect(location.search).toBe("?agent=assistant");
@@ -363,7 +363,7 @@ describe("the agents (#140)", () => {
     expect(
       FakeSocket.all.filter((each) => each.url.includes("view=presence")).map((each) => each.url),
     ).toEqual([
-      "ws://localhost:3000/webchat/ws?agent=kelpie-setup&view=presence&lang=en-US",
+      "ws://localhost:3000/webchat/ws?agent=atlas&view=presence&lang=en-US",
       "ws://localhost:3000/webchat/ws?agent=agenda&view=presence&lang=en-US",
     ]);
   });
@@ -373,7 +373,7 @@ describe("the agents (#140)", () => {
     const listCalls = () => fetch.mock.calls.filter(([url]) => url === "/webchat/agents").length;
     expect(listCalls()).toBe(1);
     // Neither row's socket opened: a refusal and a dropped network look the same (ADR-0052 §5).
-    FakeSocket.presence("kelpie-setup").close(1006);
+    FakeSocket.presence("atlas").close(1006);
     FakeSocket.presence("agenda").close(1006);
     vi.advanceTimersByTime(0);
     await settle();
@@ -473,7 +473,7 @@ describe("the agents (#140)", () => {
     expect(transition.skipTransition).toHaveBeenCalled();
   });
 
-  it("opens the main agent instead of one the list doesn't name", async () => {
+  it("opens Master instead of one the list doesn't name", async () => {
     const replace = vi.spyOn(location, "replace").mockImplementation(() => {});
     await loadPage({ search: "?agent=ghost" });
     expect(replace).toHaveBeenCalledWith("?agent=assistant");

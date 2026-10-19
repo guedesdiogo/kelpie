@@ -1,4 +1,4 @@
-// Kelpie's logo (ADR-0049): the main mascot's silhouette, the `mark` shape with its round ears.
+// Kelpie's logo (ADR-0049): Master's mascot as a silhouette, the `mark` shape with its round ears.
 // This draws every brand file from that geometry, then renders the webchat's PNG and ICO icons
 // with headless Chrome. Run it after changing the logo, and commit what it writes:
 //

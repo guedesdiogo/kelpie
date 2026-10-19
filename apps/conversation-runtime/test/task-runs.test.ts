@@ -284,8 +284,8 @@ describe("a task's run (#335)", () => {
 });
 
 describe("tasks between agents (#335)", () => {
-  /** The main agent's conversation with the owner, with one turn done, so it is its latest. */
-  async function mainConversation(world: FakeWorld, name: string) {
+  /** Master's conversation with the owner, with one turn done, so it is its latest. */
+  async function masterConversation(world: FakeWorld, name: string) {
     started.push(name);
     const stub = agent(name);
     await stub.ingest({
@@ -307,13 +307,13 @@ describe("tasks between agents (#335)", () => {
     return stub;
   }
 
-  it("asks the owner through the main agent, and the owner's reply resumes the task", async () => {
+  it("asks the owner through Master, and the owner's reply resumes the task", async () => {
     await registry().add("runs-helper", "Helper", owner);
     const scripts = [reply("Oi!")];
     const world = use(fakeWorld(scripts));
-    const main = await mainConversation(world, "kelpie:telegram:runs-asks");
+    const master = await masterConversation(world, "kelpie:telegram:runs-asks");
 
-    // The specialist asks; Kelpie tells the main agent, which asks the owner on Telegram.
+    // The specialist asks; Kelpie tells Master, which asks the owner on Telegram.
     scripts.push(
       toolCalls({
         name: "wait_on_task",
@@ -334,7 +334,7 @@ describe("tasks between agents (#335)", () => {
     expect(note).toContain("It waits for an answer.");
     expect(note).toContain("Which date?");
 
-    // The owner answers in the chat; the main agent puts the answer on the task, which runs again.
+    // The owner answers in the chat; Master puts the answer on the task, which runs again.
     scripts.push(
       toolCalls({
         name: "comment_task",
@@ -345,7 +345,7 @@ describe("tasks between agents (#335)", () => {
       reply("Done."),
       reply("The helper booked it for May 3rd."),
     );
-    await main.ingest({
+    await master.ingest({
       agentId: "kelpie",
       providerMessageId: "runs-asks:m2",
       userId: "u-owner",
@@ -356,14 +356,14 @@ describe("tasks between agents (#335)", () => {
       sentAt: Date.now(),
       timeZone: null,
     });
-    await main.flush();
+    await master.flush();
 
     await until(async () => {
       expect(world.sent.at(-1)).toBe("The helper booked it for May 3rd.");
     });
     const detail = await statusOf("runs-helper", task.id);
     expect(detail).toMatchObject({ status: "done", result: "Booked for May 3rd.", attempt: 2 });
-    // The answer is on the task, from the chat, by the main agent.
+    // The answer is on the task, from the chat, by Master.
     expect(detail.comments).toEqual([
       expect.objectContaining({
         author: { kind: "agent", id: "runs-helper" },
@@ -387,10 +387,10 @@ describe("tasks between agents (#335)", () => {
     const unbound = agent("runs-note-unbound:telegram:x");
     expect(await unbound.kelpieNote("runs-note-unbound", "u-owner", "Hello.")).toBe(false);
     const world = use(fakeWorld([reply("Oi!")]));
-    const main = await mainConversation(world, "kelpie:telegram:runs-notes");
-    expect(await main.kelpieNote("someone-else", "u-owner", "Hello.")).toBe(false);
-    expect(await main.kelpieNote("kelpie", "", "Hello.")).toBe(false);
-    expect(await main.kelpieNote("kelpie", "u-owner", "")).toBe(false);
+    const master = await masterConversation(world, "kelpie:telegram:runs-notes");
+    expect(await master.kelpieNote("someone-else", "u-owner", "Hello.")).toBe(false);
+    expect(await master.kelpieNote("kelpie", "", "Hello.")).toBe(false);
+    expect(await master.kelpieNote("kelpie", "u-owner", "")).toBe(false);
   });
 
   it("hands off from a task's run only within the day's cap (#345)", async () => {

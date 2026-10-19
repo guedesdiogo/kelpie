@@ -911,7 +911,7 @@ function showAgents() {
       const label = document.createElement("span");
       label.className = "agent-label";
       label.textContent = entry.name;
-      const specialty = entry.main ? T.editor.principal : (entry.specialty ?? "");
+      const specialty = entry.master ? T.editor.master : (entry.specialty ?? "");
       if (specialty) {
         const words = document.createElement("span");
         words.className = "agent-specialty";
@@ -1363,7 +1363,7 @@ async function start() {
   showAccount();
   applyMotion();
   setStatus(T.connecting);
-  // Without `?agent=`, the page opens the main agent (#140).
+  // Without `?agent=`, the page opens Master (#140).
   const listed = agent ? fetchAgents() : null;
   if (agent) {
     restoreSession();
@@ -1378,17 +1378,17 @@ async function start() {
     showLogin();
     return;
   }
-  // An id the list doesn't name would never connect: the main agent opens instead.
+  // An id the list doesn't name would never connect: Master opens instead.
   if (agent && state === "ok" && !found.some((entry) => entry.id === agent)) {
-    const main = found.find((entry) => entry.main) ?? found[0];
-    if (main) {
-      location.replace(`?agent=${encodeURIComponent(main.id)}`);
+    const master = found.find((entry) => entry.master) ?? found[0];
+    if (master) {
+      location.replace(`?agent=${encodeURIComponent(master.id)}`);
       return;
     }
   }
   if (!agent) {
-    const main = found.find((entry) => entry.main) ?? found[0];
-    if (!main) {
+    const master = found.find((entry) => entry.master) ?? found[0];
+    if (!master) {
       setStatus(state === "refused" ? T.notAdmitted : T.noAgents);
       form.hidden = true;
       skeleton.hidden = true;
@@ -1396,7 +1396,7 @@ async function start() {
       clearTimeout(giveUpTimer);
       return;
     }
-    agent = main.id;
+    agent = master.id;
     history.replaceState(null, "", `?agent=${encodeURIComponent(agent)}`);
     restoreSession();
     connect();

@@ -8,7 +8,7 @@ import {
   type DeletedAgents,
   isAgentId,
   parseSettings,
-  SETUP_AGENT_ID,
+  RETIRED_AGENT_ID,
   type SetupEvent,
   type ShownAgent,
 } from "@kelpie/config";
@@ -27,7 +27,7 @@ import {
 } from "./tools.ts";
 
 // Master's configuration tools (Story 3.11, ADR-0013, ADR-0048): the owner configures Kelpie by
-// talking to Master. Only the agent whose Registry role is `main` gets them, and they follow the
+// talking to Master. Only the agent whose Registry role is `master` gets them, and they follow the
 // role when it moves: the configuration commands the admin API runs, with the same checks. A change
 // to access, cost or an external account waits for the owner's own yes (ADR-0013, ADR-0026): a
 // confirmation the host gates in code, or the owner's act on an admin API page whose link the host
@@ -39,7 +39,7 @@ export const CONFIGURE_KELPIE_SKILL = `# Skill: configure-kelpie
 You also configure Kelpie for the owner, with your configuration tools. They work only in a conversation with the owner, never in a task's run.
 
 - Make every change with your tools, and never say you made one your tools didn't confirm.
-- Kelpie's agents have roles. You are Master, the role \`main\` in list_agents. Master is the agent the owner talks to, and the configuration tools go with the role: set_main_agent makes another agent Master, and it takes them. Every other agent is a specialist, and the owner can chat with a specialist only once its chat is on (set_agent_chat).
+- Kelpie's agents have roles. You are Master, the role \`master\` in list_agents. Master is the agent the owner talks to, and the configuration tools go with the role: set_master makes another agent Master, and it takes them. Every other agent is a specialist, and the owner can chat with a specialist only once its chat is on (set_agent_chat).
 - For a first setup, go in this order: see which agents exist (list_agents); connect your own Telegram bot (connect_telegram); then pair the owner's Telegram account with it (pair_telegram). Create another agent, with a short id of lowercase letters, digits and hyphens, and a name (create_agent), only when the owner asks for one; to talk to it, its chat must be on. Changing an agent's model, prompt or mascot (configure_agent), yours included, is optional.
 - Your own settings change as any agent's do, with the owner's confirmation. Your configuration, subagent and task tools are always yours: a tools list narrows only your other tools. Before you lower your own tier, tell the owner.
 - Delete an agent (delete_agent) only when the owner asks for it: its subagents go with it, and nothing it held can be recovered. Master can't be deleted.
@@ -63,7 +63,7 @@ export type ConfigurationCommands = Pick<
   | "getModels"
   | "configureModels"
   | "setClaudeCode"
-  | "setMainAgent"
+  | "setMaster"
   | "setAgentChat"
   | "deleteAgent"
   | "connectTelegram"
@@ -202,7 +202,7 @@ const SPECS = {
   set_claude_code: {
     name: "set_claude_code",
     description:
-      "Turn the claude-code route on or off. On, the owner's own conversations may reach Claude through Claude Code on their VPS runner, on their Claude subscription: after the Anthropic API route fails, or first where the model settings name claude-code for conversations. It spends the subscription's weekly usage limit, which the owner's own coding with Claude Code shares. Tasks and memory never use it. It needs the owner's confirmation, as set_main_agent does.",
+      "Turn the claude-code route on or off. On, the owner's own conversations may reach Claude through Claude Code on their VPS runner, on their Claude subscription: after the Anthropic API route fails, or first where the model settings name claude-code for conversations. It spends the subscription's weekly usage limit, which the owner's own coding with Claude Code shares. Tasks and memory never use it. It needs the owner's confirmation, as set_master does.",
     inputSchema: {
       type: "object",
       properties: { on: { type: "boolean" } },
@@ -210,8 +210,8 @@ const SPECS = {
       additionalProperties: false,
     },
   },
-  set_main_agent: {
-    name: "set_main_agent",
+  set_master: {
+    name: "set_master",
     description:
       "Make an agent Master: the one the owner talks to, which owns the specialists. The previous Master becomes a specialist and keeps its chat. It needs the owner's confirmation: the first call shows them the change; call it again with the same input once they confirm.",
     inputSchema: {
@@ -224,7 +224,7 @@ const SPECS = {
   set_agent_chat: {
     name: "set_agent_chat",
     description:
-      "Turn a specialist's chat on or off: whether the owner can reach it on its channels. Master always chats. It needs the owner's confirmation, as set_main_agent does.",
+      "Turn a specialist's chat on or off: whether the owner can reach it on its channels. Master always chats. It needs the owner's confirmation, as set_master does.",
     inputSchema: {
       type: "object",
       properties: { id: AGENT_ID, chat: { type: "boolean" } },
@@ -235,7 +235,7 @@ const SPECS = {
   delete_agent: {
     name: "delete_agent",
     description:
-      "Delete an agent, and its subagents with it, for good: their settings, their conversations with all their history, and any Telegram bot connected to them. Master can't be deleted. Its files in the owner's vault stay. It needs the owner's confirmation, as set_main_agent does.",
+      "Delete an agent, and its subagents with it, for good: their settings, their conversations with all their history, and any Telegram bot connected to them. Master can't be deleted. Its files in the owner's vault stay. It needs the owner's confirmation, as set_master does.",
     inputSchema: {
       type: "object",
       properties: { id: AGENT_ID },
@@ -290,7 +290,7 @@ const NO_KEY = failed(
 const MEMORY_ROUTE = failed(
   "claude-code serves only conversations, never memory: name another provider for memory, or none.",
 );
-const NOT_MAIN = failed("A subagent can't be Master.");
+const SUBAGENT_NOT_MASTER = failed("A subagent can't be Master.");
 const NOT_SPECIALIST = failed(
   "Only a specialist's chat can change: Master always chats, and a subagent never does.",
 );
@@ -325,7 +325,7 @@ export const MASTER_TOOLS: ReadonlySet<string> = new Set([
  * orchestration tools, and any other list, or none, stays as it is.
  */
 export function heldTools(role: AgentRole | null, tools: string[] | null): string[] | null {
-  return role === "main" && tools !== null ? [...new Set([...tools, ...MASTER_TOOLS])] : tools;
+  return role === "master" && tools !== null ? [...new Set([...tools, ...MASTER_TOOLS])] : tools;
 }
 
 /** What the model is told of the runner's state (#294): never its secret, which Kelpie keeps. */
@@ -418,7 +418,7 @@ const TEXTS: Localized<{
   changeSettings: (agent: string, id: string, changes: string) => string;
   /** After a change to Master's tools: the list never removes its orchestration tools (#391). */
   masterKeeps: string;
-  mainAgent: (agent: string, id: string) => string;
+  makeMaster: (agent: string, id: string) => string;
   models: (before: string, after: string) => string;
   /** Turning the claude-code route on or off: either way it names the weekly limit it spends. */
   claudeCode: (on: boolean) => string;
@@ -435,7 +435,7 @@ const TEXTS: Localized<{
     changeSettings: (agent, id, changes) =>
       `change the settings of the agent ${agent} (${id}): ${changes}.`,
     masterKeeps: "Master keeps its configuration, subagent and task tools whatever the list.",
-    mainAgent: (agent, id) =>
+    makeMaster: (agent, id) =>
       `make the agent ${agent} (${id}) Master, the one you talk to, which also configures Kelpie.`,
     models: (before, after) =>
       `set the models every agent uses unless it has its own, from ${before} to ${after}.`,
@@ -465,7 +465,7 @@ const TEXTS: Localized<{
       `alterar as configurações do agente ${agent} (${id}): ${changes}.`,
     masterKeeps:
       "O Master mantém as tools de configuração, de subagentes e de tarefas, qualquer que seja a lista.",
-    mainAgent: (agent, id) =>
+    makeMaster: (agent, id) =>
       `tornar o agente ${agent} (${id}) o Master, o que conversa com você e configura o Kelpie.`,
     models: (before, after) =>
       `definir os modelos que todo agente usa quando não tem os seus, de ${before} para ${after}.`,
@@ -495,7 +495,7 @@ const TEXTS: Localized<{
       `cambiar la configuración del agente ${agent} (${id}): ${changes}.`,
     masterKeeps:
       "El Master conserva las tools de configuración, de subagentes y de tareas, sea cual sea la lista.",
-    mainAgent: (agent, id) =>
+    makeMaster: (agent, id) =>
       `convertir el agente ${agent} (${id}) en el Master, el que conversa contigo y configura Kelpie.`,
     models: (before, after) =>
       `definir los modelos que usa todo agente que no tenga los suyos, de ${before} a ${after}.`,
@@ -664,7 +664,7 @@ export function configurationTools(
         // Its stored list isn't all it holds (ADR-0050).
         return {
           output:
-            role === "main" && settings.tools !== null
+            role === "master" && settings.tools !== null
               ? `${shown}\nAs Master, it also always holds its orchestration tools, whatever this list says: ${[...MASTER_TOOLS].join(", ")}.`
               : shown,
         };
@@ -679,7 +679,7 @@ export function configurationTools(
         if (!result.ok) {
           if (result.reason !== "invalid_input") return refusal(result);
           return failed(
-            `That id or name isn't valid. An id is 2 to 40 lowercase letters, digits and hyphens, starting with a letter, and "${SETUP_AGENT_ID}" is taken; a name is one line of up to 80 characters.`,
+            `That id or name isn't valid. An id is 2 to 40 lowercase letters, digits and hyphens, starting with a letter, and "${RETIRED_AGENT_ID}" is taken; a name is one line of up to 80 characters.`,
           );
         }
         const { value } = result;
@@ -745,7 +745,7 @@ export function configurationTools(
         );
         // A list never holds Master back from orchestrating (ADR-0050): the owner sees that too.
         const summary =
-          agent.role === "main" && parsed.tools !== undefined
+          agent.role === "master" && parsed.tools !== undefined
             ? `${changed} ${texts.masterKeeps}`
             : changed;
         // The owner confirms what they see, and one bubble shows the whole change, or nothing.
@@ -847,7 +847,7 @@ export function configurationTools(
       },
     },
     {
-      spec: SPECS.set_main_agent,
+      spec: SPECS.set_master,
       label: {
         en: "Choosing Master",
         "pt-BR": "Escolhendo o Master",
@@ -858,20 +858,20 @@ export function configurationTools(
         const agent = await agentOf(context, fields(input).id);
         if (!("id" in agent)) return agent;
         // Checked before the owner is asked: a yes that can't change anything isn't asked for.
-        if (agent.role === "subagent") return NOT_MAIN;
-        if (agent.role === "main") {
+        if (agent.role === "subagent") return SUBAGENT_NOT_MASTER;
+        if (agent.role === "master") {
           return { output: `The agent ${agent.id} is already Master; nothing changed.` };
         }
         const change = { id: agent.id };
         const confirmed = await context.confirm({
-          command: "setMainAgent",
+          command: "setMaster",
           input: change,
-          summary: TEXTS[context.locale].mainAgent(JSON.stringify(agent.name), agent.id),
+          summary: TEXTS[context.locale].makeMaster(JSON.stringify(agent.name), agent.id),
         });
         if (!confirmed) return { output: WAITING };
-        const result = await commands.setMainAgent(context.actor, change);
+        const result = await commands.setMaster(context.actor, change);
         if (!result.ok)
-          return result.reason === "not_allowed" ? NOT_MAIN : refusal(result, agent.id);
+          return result.reason === "not_allowed" ? SUBAGENT_NOT_MASTER : refusal(result, agent.id);
         // The tools go with the role (ADR-0048): the caller, Master until now, can't call them.
         return {
           output: `The agent ${agent.id} is now Master: the one the owner talks to. Your configuration tools went with the role: from now on, ${agent.id} configures Kelpie.`,
@@ -926,7 +926,7 @@ export function configurationTools(
         if (!isOwner(context)) return NOT_OWNER;
         const agent = await agentOf(context, fields(input).id);
         if (!("id" in agent)) return agent;
-        if (agent.role === "main") return NOT_DELETABLE;
+        if (agent.role === "master") return NOT_DELETABLE;
         // The owner sees every agent that goes, and the input names them, so the yes deletes
         // that set: the command refuses one that changed meanwhile.
         const listed = await commands.listAgents(context.actor);
@@ -1031,14 +1031,13 @@ export function configurationTools(
         }
         const href = pageLink(adminOrigin, result.value.path, context.locale);
         const minutes = Math.max(Math.round((result.value.expiresAt - now()) / 60_000), 1);
-        // The runner is the instance's, not one agent's: the retired setup agent's AgentHost keeps
-        // the wait under its fixed id, and the admin API reports the form there (#328, ADR-0048).
-        // The note still reaches this conversation, whichever agent is Master by then.
+        // Master's own AgentHost keeps the wait, and the admin API reports the form to the agent
+        // that is Master then (#328, ADR-0060).
         context.sendLink({
           href,
           text: TEXTS[context.locale].runnerForm(href, minutes),
           awaits: {
-            agentId: SETUP_AGENT_ID,
+            agentId: context.agentId,
             step: "runner_connected",
             until: result.value.expiresAt,
           },
@@ -1068,7 +1067,7 @@ export function configurationTools(
   const masters: Tool[] = tools.map((tool) => ({
     ...tool,
     async run(input, context) {
-      if ((await options.roleOf(context.agentId)) !== "main") return NOT_MASTER;
+      if ((await options.roleOf(context.agentId)) !== "master") return NOT_MASTER;
       return tool.run(input, context);
     },
   }));
@@ -1077,7 +1076,7 @@ export function configurationTools(
     // A task's conversation has no owner to confirm anything (#335).
     async tools(agentId, place) {
       if (place?.channel === "task") return [];
-      return (await options.roleOf(agentId)) === "main" ? masters : [];
+      return (await options.roleOf(agentId)) === "master" ? masters : [];
     },
   };
 }

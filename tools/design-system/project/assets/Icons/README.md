@@ -15,7 +15,7 @@ From the webchat's approved mockup (#378):
 - `monitor`, `sun` and `moon`: the theme's System, Light and Dark.
 - `wifi-off`: the banner of a lost connection.
 - `bell`: the strip that counts the agents waiting for the owner, in `warm`.
-- `mascot-alive`, `mascot-states` and `mascot-still`: the mascot's pause, drawn as the main mascot's outline (round ears) on a 20px grid with a 1.4px stroke.
+- `mascot-alive`, `mascot-states` and `mascot-still`: the mascot's pause, drawn as the outline of Master's mascot (round ears) on a 20px grid with a 1.4px stroke.
 
 From the §8 research on the comfort controls (the owner approved the text-size pair on 2026-10-16):
 - `text-small` and `text-large`: outlined letters for the text size, as Lucide's `a-large-small`.
@@ -27,5 +27,5 @@ From the Sidebar and the agent's editor (5.24 to 5.26, #412 and #414), in `icons
 - `pencil`: the badge on a mascot that opens its editor.
 - `undo`: a U-turn arrow, never a circle, which reads as refresh.
 - `dice`: Randomize, a die with three pips; a shuffle would mean reorder.
-- `lock`: a read-only field, such as the main agent's specialty.
+- `lock`: a read-only field, such as Master's specialty.
 - `profile`, `mascot-body`, `soul`, `rules`, `memory` and `skills`: the editor's sections, an ID card, the mascot's outline at rest (a 20px grid, as the mascot's pause), a page with a heart, a list, two stacked notes and a puzzle piece. None is a lone diamond, a triangle, or a hollow or dashed circle: those are the glyphs of Presence.

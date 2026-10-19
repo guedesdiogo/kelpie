@@ -218,24 +218,24 @@ describe("what changed", () => {
     expect(profileOf({ name: "Kelpie" })).toEqual({ name: "Kelpie", specialty: "", remit: "" });
   });
 
-  it("names the profile's fields that changed, trimmed, and never the main agent's specialty", () => {
+  it("names the profile's fields that changed, trimmed, and never Master's specialty", () => {
     const draft = { name: " Agenda ", specialty: "Agenda", remit: "Meetings and mail." };
-    expect(profileChanges(saved.profile, draft, { main: false })).toEqual({
+    expect(profileChanges(saved.profile, draft, { master: false })).toEqual({
       specialty: "Agenda",
       remit: "Meetings and mail.",
     });
-    expect(profileChanges(saved.profile, draft, { main: true })).toEqual({
+    expect(profileChanges(saved.profile, draft, { master: true })).toEqual({
       remit: "Meetings and mail.",
     });
   });
 
   it("counts the sections that changed, each once", () => {
     const draft = { profile: { ...saved.profile }, mascot: KELPIE };
-    expect(changedSections({ saved, draft, main: false })).toEqual([]);
+    expect(changedSections({ saved, draft, master: false })).toEqual([]);
     draft.mascot = { ...KELPIE, color: "pink" };
-    expect(changedSections({ saved, draft, main: false })).toEqual(["mascot"]);
+    expect(changedSections({ saved, draft, master: false })).toEqual(["mascot"]);
     draft.profile = { ...saved.profile, name: "Agendas", remit: "x" };
-    expect(changedSections({ saved, draft, main: false })).toEqual(["profile", "mascot"]);
+    expect(changedSections({ saved, draft, master: false })).toEqual(["profile", "mascot"]);
   });
 
   it("takes a profile only with a name that shows", () => {
@@ -263,7 +263,7 @@ describe("what changed", () => {
       profileChanges(
         saved.profile,
         { ...saved.profile, remit: blank, specialty: blank },
-        { main: false },
+        { master: false },
       ),
     ).toEqual({ remit: "", specialty: "" });
   });

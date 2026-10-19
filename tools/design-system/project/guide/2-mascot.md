@@ -14,7 +14,7 @@ Moment for its states, frequent for its life in place ([ADR-0045](https://github
 | Head | `none`; `ears`: `pointed`, `floppy`, `round`; `horns`: `two`, `one`, `antennae`; `hair`: `strands`, `curl`, `mohawk`; `leaves`: `one`, `two`, `kelp` |
 | Accessory | `none`; `glasses`: `round`, `dark`; `bow`: `tie`, `head`; `hat`: `beret`, `top`, `beanie`; `belt`: `belt`, `collar` |
 
-- **The main agent starts as Kelpie:** `mark`, `kelp`, `big` eyes, round ears and no accessory ([ADR-0049](https://github.com/guedesdiogo/kelpie/blob/main/docs/adr/0049-logo-main-mascot-silhouette.md)). Its silhouette is the logo (5.23).
+- **Master starts as Kelpie:** `mark`, `kelp`, `big` eyes, round ears and no accessory ([ADR-0049](https://github.com/guedesdiogo/kelpie/blob/main/docs/adr/0049-logo-main-mascot-silhouette.md)). Its silhouette is the logo (5.23).
 - **A new agent starts with a random mascot,** saved as its setting, which the owner edits from there (5.25, [ADR-0056](https://github.com/guedesdiogo/kelpie/blob/main/docs/adr/0056-agent-editor-and-random-mascot.md)). An agent created before shows a mascot derived from its id until its first edit saves one. A new option goes at the end of its axis; derived mascots draw from the options above, frozen, so a new one never changes them.
 - **A hat hides what sits in the middle of the head:** one horn, antennae, hair and leaves. Ears and two horns stay.
 - **Body colors are tokens with one value in both themes,** since they color the figure, not the page. None is amber, which means the owner needs to act.

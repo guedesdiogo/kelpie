@@ -167,7 +167,7 @@
       // The account's chevron, which opens upward (5.24).
       chevronUp: ["M4.5 9.5L8 6l3.5 3.5"],
       // The agent's editor (5.25, 5.26): the pencil on a mascot, Undo as a U-turn (a circle reads as
-      // refresh), Randomize as a die with three pips (a shuffle means reorder), and the main agent's lock.
+      // refresh), Randomize as a die with three pips (a shuffle means reorder), and Master's lock.
       pencil: ["M10.5 2.8l2.4 2.4L6.2 11.9l-3 .8.8-3z", "M9.2 4.1l2.4 2.4"],
       undo: ["M5.5 4L2.5 7l3 3", "M2.5 7h7a3.5 3.5 0 0 1 0 7H8"],
       dice: ["M5 2.5h6A2.5 2.5 0 0 1 13.5 5v6a2.5 2.5 0 0 1-2.5 2.5H5A2.5 2.5 0 0 1 2.5 11V5A2.5 2.5 0 0 1 5 2.5Z", { d: "M5.5 4.5a1 1 0 1 0 0 2a1 1 0 1 0 0-2Z", solid: true }, { d: "M8 7a1 1 0 1 0 0 2a1 1 0 1 0 0-2Z", solid: true }, { d: "M10.5 9.5a1 1 0 1 0 0 2a1 1 0 1 0 0-2Z", solid: true }],
@@ -202,7 +202,7 @@
     function glyph(state) {
       return '<svg class="k-glyph" viewBox="0 0 12 12" aria-hidden="true">' + (GLYPHS[state] || "") + "</svg>";
     }
-    // The mascot's pause as icons: its own outline, as the main mascot now looks (round ears, ADR-0049),
+    // The mascot's pause as icons: its own outline, as Master's now looks (round ears, ADR-0049),
     // mid-hop for Alive, with 5.19's badge for States only, standing on a line for Still (#378, decision 8).
     var BODY = '<path d="M9 6.5h2a6 6 0 0 1 6 6v0a5.5 5.5 0 0 1-5.5 5.5H5a2 2 0 0 1-2-2v-3.5a6 6 0 0 1 6-6Z"/><circle cx="5.9" cy="5.1" r="2" fill="currentColor" stroke="none"/><circle cx="14.1" cy="5.1" r="2" fill="currentColor" stroke="none"/><circle cx="8.2" cy="12.4" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12.4" r="1" fill="currentColor" stroke="none"/>';
     var PAUSE_ICONS = {
@@ -303,7 +303,7 @@
         get value() { return current.dataset.v; },
       };
     }
-    // Sample agents for the previews. Kelpie keeps the main agent's default look (5.19, ADR-0049).
+    // Sample agents for the previews. Kelpie keeps Master's default look (5.19, ADR-0049).
     var LOOKS = {
       kelpie: { shape: "mark", color: "kelp", eyes: "big", cheeks: false, head: { type: "ears", variation: "round" }, accessory: { type: "none" } },
       agenda: { shape: "pebble", color: "fawn", eyes: "dots", cheeks: true, head: { type: "ears", variation: "floppy" }, accessory: { type: "bow", variation: "tie" } },

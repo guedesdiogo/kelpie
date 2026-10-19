@@ -146,7 +146,7 @@ describe("the tab (5.9)", () => {
   it("names an agent called Kelpie once", async () => {
     const { socket } = await opened({
       search: "?agent=kelpie",
-      fetch: fakeFetch({ agents: [{ id: "kelpie", name: "Kelpie", main: true }] }),
+      fetch: fakeFetch({ agents: [{ id: "kelpie", name: "Kelpie", master: true }] }),
     });
     expect(tab()).toEqual(["Kelpie", "/webchat/icon.svg"]);
     notice(socket, 4);
