@@ -88,10 +88,20 @@ export const MAX_FRAME_CHARS = 4 * 1024 * 1024;
  */
 export const MAX_REPLY_BYTES = 1024 * 1024;
 /**
- * The most usage entries a `round` or `finish` frame may carry, one per model the turn used. The
+ * The most usage entries a `round` or `finish` frame may carry; the runner sends one per reply. The
  * turn keeps them in its history row too, so a runner can't fill that row with them (#432).
  */
 export const MAX_USAGES = 16;
+/**
+ * The largest token count a usage entry may carry, far past any turn's. A count past it, or one
+ * that isn't whole, would steer when the conversation's checkpoint runs (#432).
+ */
+export const MAX_USAGE_COUNT = 1_000_000_000;
+/**
+ * The longest model name a usage entry may carry, as the runner's own turn request bounds one. Only
+ * its length is checked: Claude Code names some replies of its own `<synthetic>`.
+ */
+export const MAX_MODEL_CHARS = 128;
 /**
  * A limit's reset is kept from a day back to this far ahead: a weekly limit resets within a week.
  * Any other is a clock or a unit gone wrong, and the notice then names no time.
@@ -605,6 +615,7 @@ function usages(value: unknown): Usage[] | null {
   const counted: Usage[] = [];
   for (const entry of value) {
     if (!isRecord(entry) || typeof entry.model !== "string") return null;
+    if (entry.model === "" || entry.model.length > MAX_MODEL_CHARS) return null;
     const { inputUncached, cacheRead, cacheWrite, output } = entry;
     if (![inputUncached, cacheRead, cacheWrite, output].every(isCount)) return null;
     counted.push({
@@ -619,7 +630,7 @@ function usages(value: unknown): Usage[] | null {
 }
 
 const isCount = (value: unknown): boolean =>
-  typeof value === "number" && Number.isFinite(value) && value >= 0;
+  Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= MAX_USAGE_COUNT;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

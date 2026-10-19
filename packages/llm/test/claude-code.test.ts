@@ -6,7 +6,9 @@ import {
   type ClaudeCodeTurnRequest,
   type ClaudeCodeTurnStart,
   MAX_FRAME_CHARS,
+  MAX_MODEL_CHARS,
   MAX_REPLY_BYTES,
+  MAX_USAGE_COUNT,
   MAX_USAGES,
   TURN_MARGIN_MS,
 } from "../src/claude-code.ts";
@@ -625,7 +627,27 @@ describe("ClaudeCodeProvider", () => {
       "a usage without its model",
       line({ ...finishFrame(SESSION), usage: [{ ...usage, model: 5 }] }),
     ],
-    // More entries than a turn's models, which would outgrow the turn's history row (#432).
+    // A usage that would outgrow the turn's history row, or steer its checkpoint (#432).
+    [
+      "a usage whose model is too long",
+      line({
+        ...finishFrame(SESSION),
+        usage: [{ ...usage, model: "m".repeat(MAX_MODEL_CHARS + 1) }],
+      }),
+    ],
+    [
+      "a usage without a model's name",
+      line({ ...finishFrame(SESSION), usage: [{ ...usage, model: "" }] }),
+    ],
+    [
+      "a usage count that isn't whole",
+      line({ ...finishFrame(SESSION), usage: [{ ...usage, output: 1.5 }] }),
+    ],
+    [
+      "a usage count past any turn's",
+      line({ ...finishFrame(SESSION), usage: [{ ...usage, inputUncached: 1e15 }] }),
+    ],
+    // More entries than a turn's models.
     [
       "a round with too many usages",
       line({
@@ -655,8 +677,17 @@ describe("ClaudeCodeProvider", () => {
     expect(turn.cancelled).toBe(1);
   });
 
-  it(`takes up to ${MAX_USAGES} usages in a frame`, async () => {
+  it(`takes up to ${MAX_USAGES} usages in a frame, each within its bounds`, async () => {
     const usages = Array.from({ length: MAX_USAGES }, () => usage);
+    // Claude Code names some replies of its own so.
+    usages[1] = { ...usage, model: "<synthetic>" };
+    usages[0] = {
+      model: "m".repeat(MAX_MODEL_CHARS),
+      inputUncached: MAX_USAGE_COUNT,
+      cacheRead: 0,
+      cacheWrite: 0,
+      output: 0,
+    };
     const fake = fakeClient(fakeTurn([line({ ...finishFrame(SESSION), usage: usages })]));
     const { events, error } = await run(new ClaudeCodeProvider(fake.client), {
       session,
