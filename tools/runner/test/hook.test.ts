@@ -241,7 +241,7 @@ const RUNNER_DIR = fileURLToPath(new URL("..", import.meta.url));
  */
 function hostileSetup() {
   const home = join(root, "home");
-  const runner = join(home, "kelpie", "tools", "runner");
+  const runner = join(home, "Repos", "kelpie", "tools", "runner");
   const project = join(root, "project");
   mkdirSync(join(home, ".bun", "bin"), { recursive: true });
   symlinkSync(BUN, join(home, ".bun", "bin", "bun"));
@@ -291,10 +291,10 @@ describe("the hook's command, as settings.json holds it", () => {
 
   it("would load both, were Bun run plainly from either folder: the files above are live", () => {
     const { run } = hostileSetup();
-    const plain = run('exec "$HOME/.bun/bin/bun" "$HOME/kelpie/tools/runner/hooks/probe.ts"');
+    const plain = run('exec "$HOME/.bun/bin/bun" "$HOME/Repos/kelpie/tools/runner/hooks/probe.ts"');
     expect(JSON.parse(plain.stdout)).toEqual({ env: "project", preload: true });
     const inCheckout = run(
-      'cd "$HOME/kelpie/tools/runner" && exec "$HOME/.bun/bin/bun" hooks/probe.ts',
+      'cd "$HOME/Repos/kelpie/tools/runner" && exec "$HOME/.bun/bin/bun" hooks/probe.ts',
     );
     expect(JSON.parse(inCheckout.stdout)).toEqual({ env: "checkout", preload: true });
   });

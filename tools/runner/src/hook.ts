@@ -41,7 +41,7 @@ export const HOOK_REDACT_CHARS = 16 * 1024;
  * checkout first, and gives Bun an empty bunfig of its own and no `.env`.
  */
 export const HOOK_COMMAND =
-  'cd "$HOME/kelpie/tools/runner" && exec "$HOME/.bun/bin/bun" --no-env-file --config=hooks/bunfig.toml hooks/session-event.ts';
+  'cd "$HOME/Repos/kelpie/tools/runner" && exec "$HOME/.bun/bin/bun" --no-env-file --config=hooks/bunfig.toml hooks/session-event.ts';
 /** What shows nothing, removed from a reply before it is redacted. */
 const INVISIBLES = new RegExp(INVISIBLE.source, "gu");
 /** The tool whose permission request is a question to the owner. */
