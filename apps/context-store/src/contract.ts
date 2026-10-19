@@ -14,6 +14,12 @@ export interface CompiledContext {
   /** The shared `AGENTS.md`, then the agent's own, when present. */
   rules: { path: string; content: string }[];
   skills: SkillEntry[];
+  /**
+   * `agents/<agent>/memories/MEMORY.md`, Hermes's file of the agent's own notes, as Hermes loads
+   * it: its entries trimmed, each once, joined by `\n§\n`. Null when the vault has none, or it
+   * holds no entry.
+   */
+  memory: { path: string; content: string } | null;
 }
 
 /** What a proposal changes: the agent's persona, its rules, or one of its skills. */
