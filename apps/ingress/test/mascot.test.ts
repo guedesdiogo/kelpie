@@ -215,6 +215,8 @@ describe("the engine's figure", () => {
         }),
       );
       expect(ears, shape).toHaveLength(2);
+      // The listening mitten goes to the ear the shape shows.
+      expect(built.anchors.ear, shape).toEqual([ears[1]?.x, ears[1]?.y, ears[1]?.a]);
       const [left = [], right] = ears.map(({ piece }) => points(piece.shapes[0].d));
       // The right ear mirrors the left (0 - x, so the top's 0 stays 0 and not -0).
       expect(right, shape).toEqual(left.map(([x, y]) => [0 - x, y]));
