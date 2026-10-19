@@ -903,19 +903,15 @@ describe("a route that runs its own tool loop (#295)", () => {
     expect(seen.session).toEqual(session);
   });
 
-  it("takes a session only on LlmChat, which only conversation-runtime binds (#431)", async () => {
-    const seen = routeLoop([]);
-    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("takes a session only on LlmChat, which only conversation-runtime binds (#431, #432)", async () => {
+    routeLoop([]);
+    vi.spyOn(console, "error").mockImplementation(() => {});
     expect("generate" in LlmChat.prototype).toBe(true);
-    // context-store binds LlmGateway and reads outside content: its calls never carry a session.
-    // One sent there, as a conversation-runtime from before LlmChat sends it during a rollout,
-    // is left out, and the call goes on without it.
+    // context-store binds LlmGateway and reads outside content: a session sent there is refused,
+    // before any route.
     using generation = await exports.LlmGateway.generate(conversation, request, session);
-    expect(await read(await generation.events())).toMatchObject([{ type: "finish" }]);
-    expect(seen.session).toBeUndefined();
-    expect(warned).toHaveBeenCalledWith(
-      "llm-gateway: LlmGateway left out a session; only LlmChat takes one",
-    );
+    await expect(read(await generation.events())).rejects.toMatchObject({ code: "bad_request" });
+    expect(AnthropicMessagesProvider.prototype.stream).not.toHaveBeenCalled();
   });
 
   it("refuses a malformed session as a bad request, before any route", async () => {
