@@ -151,6 +151,7 @@ function contextOf(actor: Actor = owner): ToolContext {
     actor,
     agentId: MASTER,
     scopes: "all",
+    trigger: "person",
     qualifier: "clef",
     turn: "1",
     source: "telegram:chat-1, 2026-10-18",
