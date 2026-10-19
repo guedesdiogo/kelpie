@@ -974,6 +974,21 @@ describe("removing a skill", () => {
     animate.mockRestore();
   });
 
+  it("rolls from the label a row ends on, when Keep follows before the roll is done", async () => {
+    await skills();
+    const animate = vi.spyOn(Element.prototype, "animate");
+    window.dispatchEvent(new PointerEvent("pointerdown"));
+    remove("brief").click();
+    animate.mockClear();
+    keep("brief").click();
+    const rolls = animate.mock.contexts.filter((each) => each.classList?.contains("roll"));
+    expect(rolls.map((each) => each.textContent)).toEqual([
+      F.pending.remove,
+      `o/skills · ${"9".repeat(7)}`,
+    ]);
+    animate.mockRestore();
+  });
+
   it("clears what the vault refused about a removal once it is kept", async () => {
     await skills();
     remove("brief").click();
