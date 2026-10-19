@@ -58,8 +58,9 @@ export interface WatchIO {
   /** RunnerSessions' `waits(since)`. It throws when channel-egress can't be reached. */
   waits(since: number): Promise<RunnerWaitsOutcome>;
   /**
-   * Tells the owner of one wait: false only when it surely didn't reach them. A notice that may
-   * have gone out counts as told, so it is never repeated. It never throws.
+   * Tells the owner of one wait: false when no conversation took it, or a conversation's call
+   * threw, which may follow a send. A notice that timed out may have gone out, so it counts as
+   * told and is never repeated. It never throws.
    */
   tell(wait: RunnerVpsWait): Promise<boolean>;
   /** Keeps the watch as it is now, after each wait told: an eviction mid-check doesn't repeat it. */
@@ -85,7 +86,7 @@ export async function checkWaits(
   if (!master) return stop(watch, "not_master", now);
   let outcome: RunnerWaitsOutcome;
   try {
-    outcome = await io.waits(Math.max(0, watch.since ?? now - TOLD_KEEP_MS));
+    outcome = await io.waits(Math.max(watch.since ?? 0, now - TOLD_KEEP_MS));
   } catch (error) {
     console.warn("AgentHost: the VPS's waits weren't read", errorName(error));
     return watch;

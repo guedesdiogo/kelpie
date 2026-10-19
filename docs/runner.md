@@ -88,7 +88,6 @@ The runner tells Kelpie what every Claude Code session on the server is doing: t
 ### How you see them
 
 - **Ask Master** what is running on the VPS: its `vps_sessions` tool lists the sessions, grouped as waiting on you, working, idle, could be archived and ended, each with its age, title, repository and branch, pull request and the excerpt of its last reply. Only you can ask, in your own conversation with Master; a task's run never gets the tool. Archive a session in the Claude app: Kelpie can't (`docs/admin-api.md`, "The VPS's Claude Code sessions").
-  - Asked again within 15 seconds, Master shows the same list from memory: a list makes the runner read up to 1 MiB of each live session's transcript.
 - **A notice when a session waits on you.** Within about a minute of a session asking for your permission or an answer, Kelpie sends you one fixed message on Telegram, or in the webchat while it is open, naming the session's title and repository and what it waits for. Answer it where the session runs, in the Claude app or its terminal: the notice confirms nothing, and Kelpie never answers for you. A session idle after its reply, or ended, gets no notice.
   - **The title and repository leave the server with it,** to your channel: on Telegram they pass through Telegram's servers, stay in the chat, and can show on your phone's lock screen.
   - **Waits already open are told too,** up to a day old, the first time Kelpie reads the runner's waits, as once the runner is connected or updated.

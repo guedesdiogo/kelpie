@@ -765,7 +765,10 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
           waits: (since) => bounded(sessions.waits(since), WAITS_TIMEOUT_MS),
           // Only the deadline rejects: a slow send may yet land, so it isn't sent again.
           tell: (wait) =>
-            bounded(this.#tellWait(agentId, wait), NOTICE_TIMEOUT_MS).catch(() => true),
+            bounded(this.#tellWait(agentId, wait), NOTICE_TIMEOUT_MS).catch(() => {
+              console.warn("AgentHost: a notice of a wait timed out; it counts as told");
+              return true;
+            }),
           keep: (kept) => this.#put("sessionWatch", kept),
         },
         Date.now(),

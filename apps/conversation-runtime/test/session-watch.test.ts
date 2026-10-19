@@ -155,6 +155,12 @@ describe("the check of the VPS's waits", () => {
     expect(told).toEqual([opened, otherSession, nextPrompt]);
   });
 
+  it("never asks further back than a day, even from where a check stopped days ago", async () => {
+    const { io, asked } = fakeIO([ok([])]);
+    await checks(io, [CLOCK], { ...NEW_WATCH, since: CLOCK - 2 * TOLD_KEEP_MS });
+    expect(asked).toEqual([CLOCK - TOLD_KEEP_MS]);
+  });
+
   it("keeps each told wait as soon as it is sent, so a check cut short doesn't send it again", async () => {
     const first = wait(A, NOW - 10_000);
     const second = wait(B, NOW - 5_000);
@@ -460,6 +466,7 @@ describe("Master's AgentHost watching the VPS's waits (#434)", () => {
   );
 
   it("counts a notice that takes too long as told, so a slow send that lands isn't repeated", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     roster({ "watch-slow": "master" });
     const world = use(fakeWorld([]));
     const now = Date.now();
@@ -469,6 +476,10 @@ describe("Master's AgentHost watching the VPS's waits (#434)", () => {
     // The check gives up waiting for the conversation, which may yet send it.
     await host("watch-slow").watchSessions();
     expect((await watchOf("watch-slow"))?.told).toEqual([[A, now - 5_000]]);
+    // Logged without anything of the session's.
+    expect(warn.mock.calls.filter(([message]) => String(message).includes("timed out"))).toEqual([
+      ["AgentHost: a notice of a wait timed out; it counts as told"],
+    ]);
     world.blockSends.delete(0);
     await vi.waitFor(() => expect(world.sent).toHaveLength(1));
 
