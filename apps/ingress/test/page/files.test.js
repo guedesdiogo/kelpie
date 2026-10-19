@@ -625,6 +625,10 @@ describe("the memory", () => {
     expect(rows().map((row) => row.value)).toEqual(["Diogo likes mornings.", "Ana is in Lisbon."]);
     expect(rows().map((row) => row.getAttribute("aria-label"))).toEqual(["Memory 1", "Memory 2"]);
     expect($(".path.files-path").textContent).toBe("agents/kelpie/memories/MEMORY.md");
+    // It says who reads the file: the agent, in every conversation (#437).
+    expect($(".files-memory .doc-m").textContent).toBe(
+      "Short memories, in Hermes's format, that Kelpie reads in every conversation, as Hermes does. What Kelpie learns goes to the vault's notes.",
+    );
     button(F.addEntry).click();
     expect(document.activeElement).toBe(rows()[2]);
     type(rows()[2], "  Meet for external calls. ");

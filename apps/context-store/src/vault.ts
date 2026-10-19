@@ -60,9 +60,13 @@ import {
 } from "@kelpie/vault";
 import { parseDocument } from "yaml";
 import {
+  characters,
   fileKindPath,
   heldOnSync,
   lineDiff,
+  MEMORY_LIMIT,
+  MEMORY_SEPARATOR,
+  memoryEntries,
   memoryProblem,
   parseChanges,
   STAGED_FOR_MS,
@@ -774,7 +778,7 @@ export class Vault extends DurableObject<VaultEnv> {
   }
 
   async compile(agentId: string): Promise<CompiledContext> {
-    const empty: CompiledContext = { persona: null, rules: [], skills: [] };
+    const empty: CompiledContext = { persona: null, rules: [], skills: [], memory: null };
     if (!isAgentId(agentId) || this.#backend() === null) return empty;
     await this.#ready();
     const rules = ["AGENTS.md", agentRulesPath(agentId)].flatMap((path) => {
@@ -790,7 +794,33 @@ export class Vault extends DurableObject<VaultEnv> {
         const content = this.#visible(path);
         return content === null ? [] : [skillEntry(path, content)];
       });
-    return { persona: this.#visible(personaPath(agentId)), rules, skills };
+    return {
+      persona: this.#visible(personaPath(agentId)),
+      rules,
+      skills,
+      memory: this.#memoryFile(agentId),
+    };
+  }
+
+  /**
+   * The agent's `MEMORY.md`, as Hermes loads it (#437). A file pushed past Hermes's limit stays
+   * whole, as Hermes keeps it: the editor refuses one, and nothing cuts the owner's words.
+   */
+  #memoryFile(agentId: string): CompiledContext["memory"] {
+    const path = fileKindPath(agentId, "memory");
+    const content = this.#visible(path);
+    const entries = content === null ? [] : memoryEntries(content);
+    if (entries.length === 0) return null;
+    const joined = entries.join(MEMORY_SEPARATOR);
+    const count = characters(joined);
+    if (count > MEMORY_LIMIT) {
+      console.warn("Vault: a memory file is over Hermes's limit", {
+        agent: agentId,
+        characters: count,
+        limit: MEMORY_LIMIT,
+      });
+    }
+    return { path, content: joined };
   }
 
   async read(path: string): Promise<string | null> {

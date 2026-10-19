@@ -41,7 +41,12 @@ describe("Vault", () => {
   it("is off until the vault is configured", async () => {
     replaceBackendForTesting(null);
     const stub = vault("off");
-    expect(await stub.compile("kelpie")).toEqual({ persona: null, rules: [], skills: [] });
+    expect(await stub.compile("kelpie")).toEqual({
+      persona: null,
+      rules: [],
+      skills: [],
+      memory: null,
+    });
     expect(await stub.read("AGENTS.md")).toBeNull();
     expect(await stub.write("kelpie", [{ path: "memory/notes/a.md", content: "a" }], "x")).toEqual({
       ok: false,
@@ -53,12 +58,14 @@ describe("Vault", () => {
     });
   });
 
-  it("compiles an agent's persona, rules and skills", async () => {
+  it("compiles an agent's persona, rules, skills and memory file", async () => {
     vaultWith({
       "AGENTS.md": "# Shared rules",
       "agents/kelpie/SOUL.md": "# Kelpie\n\nWarm and brief.",
       "agents/kelpie/AGENTS.md": "# Kelpie's rules",
+      "agents/kelpie/memories/MEMORY.md": "The owner deploys on Fridays.\n§\nReplies stay short.",
       "agents/other/SOUL.md": "# Other",
+      "agents/other/memories/MEMORY.md": "Other's own note.",
       "skills/writing/brief/SKILL.md":
         "---\nname: brief\ndescription: Writes a brief.\n---\n# Brief",
       "skills/plain/SKILL.md": "# No frontmatter",
@@ -80,12 +87,62 @@ describe("Vault", () => {
         { name: "plain", description: "", path: "skills/plain/SKILL.md" },
         { name: "brief", description: "Writes a brief.", path: "skills/writing/brief/SKILL.md" },
       ],
+      memory: {
+        path: "agents/kelpie/memories/MEMORY.md",
+        content: "The owner deploys on Fridays.\n§\nReplies stay short.",
+      },
     });
     expect(await vault("compile").compile("Not An Id")).toEqual({
       persona: null,
       rules: [],
       skills: [],
+      memory: null,
     });
+  });
+
+  it("compiles the memory file as Hermes loads it, whole even past Hermes's limit", async () => {
+    const path = "agents/kelpie/memories/MEMORY.md";
+    const backend = vaultWith({ [path]: "\u{FEFF}one\n\n§\n\ntwo\n§\none\n§\n  \n" });
+    const stub = vault("memory-file");
+    expect((await stub.compile("kelpie")).memory).toEqual({ path, content: "one\n§\ntwo" });
+
+    // Pushed past 2,200 characters, it stays whole, and the log says how long, never what.
+    const long = `${"😀".repeat(2_000)}\n§\n${"x".repeat(300)}`;
+    backend.push({ [path]: long });
+    await stub.requestSync("refs/heads/main");
+    await runDurableObjectAlarm(stub);
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect((await stub.compile("kelpie")).memory).toEqual({ path, content: long });
+    expect(warned).toHaveBeenCalledWith("Vault: a memory file is over Hermes's limit", {
+      agent: "kelpie",
+      characters: 2_303,
+      limit: 2_200,
+    });
+    warned.mockRestore();
+
+    // A file with no entry, as one emptied by hand, is none.
+    backend.push({ [path]: "\n§\n  \n" });
+    await stub.requestSync("refs/heads/main");
+    await runDurableObjectAlarm(stub);
+    expect((await stub.compile("kelpie")).memory).toBeNull();
+  });
+
+  it("compiles a memory file held with conflict markers as it was before the conflict", async () => {
+    const path = "agents/kelpie/memories/MEMORY.md";
+    const backend = vaultWith({ [path]: "one\n§\ntwo" });
+    // Without models, the file waits for the owner (resolve.test.ts covers the model).
+    replaceGatewayForTesting(null);
+    const stub = vault("memory-held");
+    await stub.compile("kelpie");
+    backend.push({
+      [path]: "one\n§\n<<<<<<< HEAD\ntwo\n=======\nthree\n>>>>>>> origin/main",
+      "agents/other/memories/MEMORY.md": "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> origin/main",
+    });
+    await stub.requestSync("refs/heads/main");
+    await runDurableObjectAlarm(stub);
+    expect((await stub.compile("kelpie")).memory).toEqual({ path, content: "one\n§\ntwo" });
+    // A new file held, with no version from before, is none.
+    expect((await stub.compile("other")).memory).toBeNull();
   });
 
   it("brings an edit made outside Kelpie to the next compile, through the signed webhook", async () => {

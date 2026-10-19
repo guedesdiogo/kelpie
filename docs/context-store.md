@@ -5,11 +5,18 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
 ## What it does
 
 - **A working copy.** Its one `Vault` Durable Object keeps the Markdown of the vault's default branch in SQLite. It skips hidden folders such as `.obsidian/`, symbolic links, and files over 1 MiB or not UTF-8, whether they arrive in a full read or in a push; a file that grows past the limit or becomes a link leaves the working copy.
-- **Reads for a turn.** `compile(agent)` returns the agent's persona (`agents/<agent>/SOUL.md`), the shared `AGENTS.md`, the agent's own `AGENTS.md`, and the skills it can see:
-  - `skills/**/SKILL.md` and `agents/<agent>/skills/**/SKILL.md`;
-  - each named and described by its frontmatter.
+- **Reads for a turn.** `compile(agent)` returns:
+  - the agent's persona, `agents/<agent>/SOUL.md`;
+  - the shared `AGENTS.md`, then the agent's own `AGENTS.md`;
+  - the skills it can see, `skills/**/SKILL.md` and `agents/<agent>/skills/**/SKILL.md`, each named and described by its frontmatter;
+  - its memory file, `agents/<agent>/memories/MEMORY.md`, as Hermes loads it (#437).
+    - The file is split on `\n§\n`. Each entry is trimmed, empty ones are left out, and each is kept once.
+    - A file pushed past Hermes's 2,200 characters stays whole, and the log names the agent and the count.
+    - Its text reaches the prompt as the owner wrote it, with no sanitizer (ADR-0058 §1).
 
-  `conversation-runtime` builds each turn's system prompt from them: the persona, or the configured prompt when there is none, then the rules, then the skills. A change to any of them starts a new prompt version.
+  A file held with conflict markers reads as it was before the conflict.
+
+  `conversation-runtime` builds each turn's system prompt from them, in every conversation of the agent: the persona, or the configured prompt when there is none, then the rules, the skills and the memory file. A change to any of them starts a new prompt version.
 - **Writes, as the single writer** (ADR-0020 §3).
   - **Memory and knowledge:** `write` covers `memory/`, `knowledge/`, `areas/`, `projects/`, `conversations/` and the agent's own `agents/<agent>/memory/`.
     - Reads see a write at once.
