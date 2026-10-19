@@ -37,11 +37,25 @@ const rounded = (x, y, w, h, [a, b, c, d]) =>
 const ellipse = (cx, cy, rx, ry) =>
   `M${cx - rx},${cy} a${rx},${ry} 0 1,0 ${2 * rx},0 a${rx},${ry} 0 1,0 ${-2 * rx},0 Z`;
 const circle = (cx, cy, r) => ellipse(cx, cy, r, r);
+/** A path mirrored across its y axis; every point is an absolute "x,y" pair. */
+const mirror = (d) => d.replace(/(-?[\d.]+),/g, (_, x) => `${-x},`);
+
+/**
+ * The pointed ear (#455): a kelpie's left ear traced from a photo, with a domed top, an outer edge
+ * nearly upright, a straight inner diagonal and a light shell inside, so it reads as an ear and
+ * not a horn. The origin is the middle of its base, 2.8 above the shape's ear anchor; the right
+ * ear mirrors it. The shell's color is the body's mixed toward cream, the opening in every color.
+ */
+const POINTED_EAR =
+  "M10,-1.7 L3.8,7.7 L-8.7,6.1 L-10,1.7 C-10,-0.7 -9.5,-3.4 -7.9,-8.2 L-2.7,-22 C-2.1,-23.5 -1.2,-24.1 0,-24 C2,-23.7 4.5,-21.6 5,-19.8 L10,-1.7 Z";
+const POINTED_SHELL =
+  "M-7.9,-2.5 C-7.1,-7 -5.4,-11.8 -3.6,-14.7 C-2.3,-16.4 -0.7,-17.3 0.8,-17.1 C2.5,-15.8 3.8,-12.1 5,-8.3 C5.9,-5.1 6.5,-2.2 6.2,0.5 Z";
+const SHELL_CREAM = "#FFF1DD";
 
 /**
  * Shapes drawn on a 120 grid and framed at 10,14 100×100, so the body fills about 72%; the ground
  * is at y 108. Anchors: the face, the eyes' spread, the top of the head, the ears (x, y, angle),
- * the hat (x, y, width) and the collar.
+ * the pointed ears' own where they need lower ones, the hat (x, y, width) and the collar.
  */
 export const SHAPES = {
   mark: {
@@ -101,6 +115,10 @@ export const SHAPES = {
     ears: [
       [44, 36, -12],
       [76, 36, 12],
+    ],
+    pointed: [
+      [38, 45, -18],
+      [82, 45, 18],
     ],
     hat: [60, 36, 40],
     collar: [60, 86],
@@ -392,6 +410,10 @@ export function buildMascot(mascot, { uid, px, hex, work = true, hands = true })
   const headVariation = mascot.head.variation;
   const accessory = mascot.accessory.type;
   const accessoryVariation = mascot.accessory.variation;
+  // A shape with no room above its head sets its pointed ears lower than its other heads; a head
+  // bow and the listening mitten follow the ears it shows.
+  const ears =
+    head === "ears" && headVariation === "pointed" ? (shape.pointed ?? shape.ears) : shape.ears;
   // A hat hides what sits in the middle of the head.
   const hat = accessory === "hat";
   let backHard = "";
@@ -399,18 +421,20 @@ export function buildMascot(mascot, { uid, px, hex, work = true, hands = true })
   let frontEars = "";
   let mohawk = null;
   if (head === "ears" && headVariation === "pointed") {
-    backEars = atEars(
-      (x, y, a) =>
-        `<g transform="translate(${x} ${y}) rotate(${a})"><g class="m-ear">${piece(
+    backEars = ears
+      .map(([x, y, a]) => {
+        const side = (d) => (a < 0 ? d : mirror(d));
+        return `<g transform="translate(${x} ${y}) translate(0 -2.8) rotate(${a})"><g class="m-ear">${piece(
           [
-            { d: "M-10,8 Q-7,-13 0,-21 Q7,-13 10,8 Z", fill: color.body },
-            { d: "M-5,5 Q-3,-7 0,-13 Q3,-7 5,5 Z", fill: color.dark, alpha: 0.45 },
+            { d: side(POINTED_EAR), fill: color.body },
+            { d: side(POINTED_SHELL), fill: mix(color.body, SHELL_CREAM, 0.55) },
           ],
-          [-16, -28, 32, 42],
+          [-14.2, -28, 28.4, 39.7],
           [0, -0.7],
           0.85,
-        )}</g></g>`,
-    );
+        )}</g></g>`;
+      })
+      .join("");
   }
   if (head === "ears" && headVariation === "round") {
     backEars = atEars(
@@ -541,7 +565,7 @@ export function buildMascot(mascot, { uid, px, hex, work = true, hands = true })
     lower = `<g transform="translate(${cx} ${cy + 3})"><ellipse class="csh" cx="1" cy="5" rx="14" ry="3.6"/><path class="gloss" d="M0,0 L-11,-6.5 Q-13.5,0 -11,6.5 Z"/><path class="gloss" d="M0,0 L11,-6.5 Q13.5,0 11,6.5 Z"/><path class="hl" d="M-9.6,-4 Q-11.2,-.6 -10.2,2.6 M9.4,-4.4 Q10.6,-2 10.2,0"/><rect class="gloss" x="-3" y="-3.4" width="6" height="6.8" rx="2"/><path class="hl" d="M-1.4,-2.2 H1.2"/></g>`;
   }
   if (accessory === "bow" && accessoryVariation === "head") {
-    const [x, y] = shape.ears[0];
+    const [x, y] = ears[0];
     onTop = `<g transform="translate(${x + 3} ${y + 3}) rotate(-20)"><g class="bow"><ellipse class="csh" cx="1" cy="5" rx="13" ry="3.4"/><path class="satin" d="M0,0 C-5,-9 -15,-8 -13,0 C-12,7 -4,5 0,0 Z"/><path class="satin" d="M0,0 C5,-9 15,-8 13,0 C12,7 4,5 0,0 Z"/><path class="hl" d="M-11.4,-2 Q-9.6,-6.4 -5,-5.6 M11.4,-2 Q9.6,-6.4 5,-5.6"/><circle class="knot" r="2.8"/><circle class="wht" cx="-.8" cy="-.9" r=".7" opacity=".7"/></g></g>`;
   }
   if (hat) {
@@ -737,7 +761,7 @@ export function buildMascot(mascot, { uid, px, hex, work = true, hands = true })
     html,
     pieces,
     size,
-    anchors: { fx, fy, spread, tx, ty, ear: head === "ears" ? shape.ears[1] : null },
+    anchors: { fx, fy, spread, tx, ty, ear: head === "ears" ? ears[1] : null },
   };
 }
 
