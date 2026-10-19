@@ -1,9 +1,10 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { RunnerVpsSession, RunnerVpsWait, RunnerWaitsOutcome } from "@kelpie/channels";
+import { WEBCHAT_ADMISSION_HEADER } from "@kelpie/conversation/contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  type AgentHost,
+  AgentHost,
   replaceIdentitySourcesForTesting,
   replaceRunnerSessionsForTesting,
 } from "../src/agent-host/agent-host.ts";
@@ -22,7 +23,7 @@ import {
   WATCH_INTERVAL_S,
   type WatchIO,
 } from "../src/agent-host/session-watch.ts";
-import type { ConversationAgent } from "../src/conversation-agent.ts";
+import { ConversationAgent } from "../src/conversation-agent.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import { type FakeWorld, fakeWorld } from "./fakes.ts";
 
@@ -55,10 +56,14 @@ const ok = (waits: RunnerVpsWait[], now = NOW): RunnerWaitsOutcome => ({
   truncated: false,
 });
 
-/** A watch's outside world: the runner's answers in turn, and a record of what it asked and told. */
+/**
+ * A watch's outside world: the runner's answers in turn, and a record of what it asked, told and
+ * kept as it went.
+ */
 function fakeIO(answers: (RunnerWaitsOutcome | Error)[], { master = true, tells = true } = {}) {
   const asked: number[] = [];
   const told: RunnerVpsWait[] = [];
+  const kept: SessionWatch[] = [];
   const io: WatchIO & { master: boolean | Error; tells: boolean } = {
     master,
     tells,
@@ -77,8 +82,11 @@ function fakeIO(answers: (RunnerWaitsOutcome | Error)[], { master = true, tells 
       told.push(one);
       return true;
     },
+    keep(watch) {
+      kept.push(structuredClone(watch));
+    },
   };
-  return { io, asked, told };
+  return { io, asked, told, kept };
 }
 
 /** Runs `checkWaits` once for each clock, from `watch`, and gives the last watch. */
@@ -96,16 +104,19 @@ afterEach(() => {
 });
 
 describe("the check of the VPS's waits", () => {
-  it("asks from two minutes before its first check, then before the runner's last answer", async () => {
-    const { io, asked } = fakeIO([ok([]), ok([], NOW + MINUTE)]);
+  it("first asks a day back, so it tells the waits already open, then two minutes before the runner's last answer", async () => {
+    const open = wait(A, NOW - 3 * 60 * MINUTE);
+    const { io, asked, told } = fakeIO([ok([open]), ok([], NOW + MINUTE)]);
     const watch = await checks(io, [CLOCK, CLOCK + MINUTE, CLOCK + 2 * MINUTE]);
     expect(WAIT_OVERLAP_MS).toBe(2 * MINUTE);
     // The first on the Worker's clock, then each on the runner's own, which the answer gives.
     expect(asked).toEqual([
-      CLOCK - WAIT_OVERLAP_MS,
+      CLOCK - TOLD_KEEP_MS,
       NOW - WAIT_OVERLAP_MS,
       NOW + MINUTE - WAIT_OVERLAP_MS,
     ]);
+    // A wait still open and not told is told, however long it has waited, up to a day (ADR-0057 §5).
+    expect(told).toEqual([open]);
     expect(watch.stopped).toBeNull();
   });
 
@@ -142,6 +153,25 @@ describe("the check of the VPS's waits", () => {
     ]);
     await checks(io, [CLOCK, CLOCK + MINUTE, CLOCK + 2 * MINUTE]);
     expect(told).toEqual([opened, otherSession, nextPrompt]);
+  });
+
+  it("keeps each told wait as soon as it is sent, so a check cut short doesn't send it again", async () => {
+    const first = wait(A, NOW - 10_000);
+    const second = wait(B, NOW - 5_000);
+    const { io, told, kept } = fakeIO([ok([first, second]), ok([first, second])]);
+    const tell = io.tell;
+    // The object goes away while it tells the second wait.
+    io.tell = async (one) => {
+      if (one === second) throw new Error("evicted");
+      return tell(one);
+    };
+    await expect(checkWaits(NEW_WATCH, io, CLOCK)).rejects.toThrow("evicted");
+    const saved = kept.at(-1) ?? NEW_WATCH;
+    expect(saved.told).toEqual([[A, NOW - 10_000]]);
+
+    io.tell = tell;
+    await checkWaits(saved, io, CLOCK + MINUTE);
+    expect(told).toEqual([first, second]);
   });
 
   it("forgets what it told after a day, and keeps at most a thousand", async () => {
@@ -351,8 +381,8 @@ describe("Master's AgentHost watching the VPS's waits (#434)", () => {
 
     await host("watch-tell").watchSessions();
     expect(asked).toHaveLength(1);
-    expect(asked[0]).toBeGreaterThan(now - WAIT_OVERLAP_MS - 10_000);
-    expect(asked[0]).toBeLessThanOrEqual(Date.now() - WAIT_OVERLAP_MS);
+    expect(asked[0]).toBeGreaterThan(now - TOLD_KEEP_MS - 10_000);
+    expect(asked[0]).toBeLessThanOrEqual(Date.now() - TOLD_KEEP_MS);
     expect(world.sends).toEqual([
       {
         text: 'A Claude Code session on your VPS is waiting for your permission: "Fix the login", repository "kelpie".',
@@ -371,6 +401,137 @@ describe("Master's AgentHost watching the VPS's waits (#434)", () => {
       [A, now - 5_000],
       [B, now],
     ]);
+  });
+
+  /** Opens the webchat's page on a conversation, as ingress does, and collects its bubbles. */
+  async function openPage(name: string, agentId: string) {
+    const response = await agent(name).fetch("https://conversation/webchat", {
+      headers: {
+        Upgrade: "websocket",
+        [WEBCHAT_ADMISSION_HEADER]: JSON.stringify({
+          agentId,
+          userId: "u-owner",
+          role: "owner",
+          chatType: "direct",
+          timeZone: null,
+        }),
+      },
+    });
+    const socket = response.webSocket;
+    if (!socket) throw new Error("no socket");
+    const bubbles: string[] = [];
+    socket.addEventListener("message", (event) => {
+      const frame = JSON.parse(String(event.data)) as { type: string; text?: string };
+      if (frame.type === "bubble") bubbles.push(frame.text ?? "");
+    });
+    socket.accept();
+    return { bubbles, close: () => socket.close(1000) };
+  }
+
+  it.each(["returns false", "throws"] as const)(
+    "tells the open webchat when Telegram's conversation %s",
+    async (how) => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const agentId = `watch-fallback-${how === "throws" ? "t" : "f"}`;
+      roster({ [agentId]: "main" });
+      const world = use(fakeWorld([]));
+      const now = Date.now();
+      runner(() => ok([wait(A, now - 5_000)], now));
+      const telegram = await conversation(agentId, "telegram", "chat-1");
+      const webchat = await conversation(agentId, "webchat", "u-owner");
+      const page = await openPage(webchat, agentId);
+      if (how === "returns false") world.failSends.add(0);
+      else {
+        vi.spyOn(ConversationAgent.prototype, "sessionWait").mockImplementationOnce(async () => {
+          throw new Error(`the conversation ${telegram} went away`);
+        });
+      }
+
+      await host(agentId).watchSessions();
+      expect(world.sent).toEqual([]);
+      await vi.waitFor(() =>
+        expect(page.bubbles).toEqual([
+          'A Claude Code session on your VPS is waiting for your permission: "Fix the login flow", repository "kelpie".',
+        ]),
+      );
+      expect((await watchOf(agentId))?.told).toEqual([[A, now - 5_000]]);
+      page.close();
+    },
+  );
+
+  it("counts a notice that takes too long as told, so a slow send that lands isn't repeated", async () => {
+    roster({ "watch-slow": "main" });
+    const world = use(fakeWorld([]));
+    const now = Date.now();
+    runner(() => ok([wait(A, now - 5_000)], now));
+    await conversation("watch-slow", "telegram", "chat-1");
+    world.blockSends.add(0);
+    // The check gives up waiting for the conversation, which may yet send it.
+    await host("watch-slow").watchSessions();
+    expect((await watchOf("watch-slow"))?.told).toEqual([[A, now - 5_000]]);
+    world.blockSends.delete(0);
+    await vi.waitFor(() => expect(world.sent).toHaveLength(1));
+
+    await host("watch-slow").watchSessions();
+    expect(world.sendAttempts).toBe(1);
+  });
+
+  it("keeps what a check wrote while Master's turn starts the check again", async () => {
+    roster({ "watch-rearm": "main" });
+    runner(() => ok([]));
+    const stopped: SessionWatch = {
+      since: Date.now() - WAIT_OVERLAP_MS,
+      outdated: 0,
+      told: [[A, 1_000]],
+      stopped: { reason: "not_connected", at: Date.now() },
+    };
+    await runInDurableObject(host("watch-rearm"), (_instance: AgentHost, state) => {
+      state.storage.sql.exec(
+        "INSERT OR REPLACE INTO state (key, value) VALUES ('sessionWatch', ?)",
+        JSON.stringify(stopped),
+      );
+    });
+    const schedule = AgentHost.prototype.scheduleEvery;
+    vi.spyOn(AgentHost.prototype, "scheduleEvery").mockImplementationOnce(async function (
+      this: AgentHost,
+      ...args: Parameters<AgentHost["scheduleEvery"]>
+    ) {
+      // A check that ran meanwhile told another wait.
+      const { storage } = (this as unknown as { ctx: DurableObjectState }).ctx;
+      storage.sql.exec(
+        "UPDATE state SET value = ? WHERE key = 'sessionWatch'",
+        JSON.stringify({ ...stopped, told: [...stopped.told, [B, 2_000]] }),
+      );
+      return schedule.apply(this, args);
+    } as AgentHost["scheduleEvery"]);
+    await host("watch-rearm").turnConfig();
+    expect(await watchOf("watch-rearm")).toMatchObject({
+      told: [
+        [A, 1_000],
+        [B, 2_000],
+      ],
+      stopped: null,
+    });
+  });
+
+  it("never leaves the check running without its schedule when Master's turn comes as it stops", async () => {
+    roster({ "watch-race": "main" });
+    runner(() => ({ ok: false, reason: "not_connected" }));
+    await host("watch-race").turnConfig();
+    const cancel = AgentHost.prototype.cancelSchedule;
+    vi.spyOn(AgentHost.prototype, "cancelSchedule").mockImplementation(async function (
+      this: AgentHost,
+      id: string,
+    ) {
+      // Master's turn arrives while the check stops.
+      await this.turnConfig();
+      return cancel.call(this, id);
+    });
+    await host("watch-race").watchSessions();
+    vi.restoreAllMocks();
+    const watch = await watchOf("watch-race");
+    const schedules = await watchSchedules("watch-race");
+    expect(watch?.stopped === null, JSON.stringify(watch)).toBe(schedules.length > 0);
   });
 
   it("tells nothing of idle or ended sessions, whose waits the runner doesn't list", async () => {

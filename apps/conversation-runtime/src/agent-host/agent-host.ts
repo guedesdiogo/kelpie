@@ -105,7 +105,10 @@ export function replaceRunnerSessionsForTesting(sessions: RunnerWaits | undefine
 
 /** How long the check of the VPS's waits gives channel-egress, which gives the runner 10 s. */
 const WAITS_TIMEOUT_MS = 12_000;
-/** How long a notice of a wait gives its conversations, Telegram's and the webchat's together. */
+/**
+ * How long a notice of a wait gives its conversations, Telegram's and the webchat's together. One
+ * that takes longer may still go out, so it counts as told.
+ */
 const NOTICE_TIMEOUT_MS = 4_000;
 
 /**
@@ -759,13 +762,17 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
           isMaster: async () =>
             (await bounded(sources.agent(agentId), IDENTITY_TIMEOUT_MS))?.role === "main",
           waits: (since) => bounded(sessions.waits(since), WAITS_TIMEOUT_MS),
+          // Only the deadline rejects: a slow send may yet land, so it isn't sent again.
           tell: (wait) =>
-            bounded(this.#tellWait(agentId, wait), NOTICE_TIMEOUT_MS).catch(() => false),
+            bounded(this.#tellWait(agentId, wait), NOTICE_TIMEOUT_MS).catch(() => true),
+          keep: (kept) => this.#put("sessionWatch", kept),
         },
         Date.now(),
       );
-      this.#put("sessionWatch", watch);
+      // The schedule goes before the stop is kept, so a turn of Master's that arms the check
+      // meanwhile never leaves it marked running without a schedule.
       if (watch.stopped) await this.#cancelSessionWatch();
+      this.#put("sessionWatch", watch);
     } catch (error) {
       console.error("AgentHost: the check of the VPS's waits failed", errorName(error));
     }
@@ -778,10 +785,15 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
    */
   async #armSessionWatch(): Promise<void> {
     try {
-      const watch = this.#get<SessionWatch>("sessionWatch", NEW_WATCH);
-      if (!shouldArm(watch, Date.now())) return;
+      if (!shouldArm(this.#get<SessionWatch>("sessionWatch", NEW_WATCH), Date.now())) return;
       await this.scheduleEvery(WATCH_INTERVAL_S, "watchSessions");
-      if (watch.stopped) this.#put("sessionWatch", { ...watch, stopped: null });
+      // Read again: a check may have written it meanwhile, and what it told stays told.
+      const watch = this.#get<SessionWatch>("sessionWatch", NEW_WATCH);
+      if (watch.stopped) {
+        this.#put("sessionWatch", { ...watch, stopped: null });
+        // A check that stopped meanwhile may have cancelled the schedule just found.
+        await this.scheduleEvery(WATCH_INTERVAL_S, "watchSessions");
+      }
     } catch (error) {
       console.warn("AgentHost: the check of the VPS's waits didn't start", errorName(error));
     }
@@ -795,11 +807,18 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
 
   /**
    * Tells the owner of one wait in their conversation with this agent (#434): a fixed notice,
-   * which the conversation writes in its own language. False when none took it.
+   * which the conversation writes in its own language. False when none took it; it never throws.
    */
   async #tellWait(agentId: string, wait: RunnerVpsWait): Promise<boolean> {
     const notice = { kind: wait.kind, title: wait.title, repository: wait.repository };
-    for (const name of this.#noticeConversations(agentId)) {
+    let names: string[];
+    try {
+      names = this.#noticeConversations(agentId);
+    } catch (error) {
+      console.warn("AgentHost: the conversations for a wait weren't read", errorName(error));
+      return false;
+    }
+    for (const name of names) {
       try {
         if (await this.env.CONVERSATION_AGENT.getByName(name).sessionWait(agentId, notice)) {
           return true;

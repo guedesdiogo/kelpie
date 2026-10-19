@@ -2,8 +2,9 @@ import type { RunnerVpsWait, RunnerWaitsOutcome } from "@kelpie/channels";
 
 // Kelpie's check of the waits on the owner (ADR-0057 §5, #434). While the runner is connected,
 // Master's AgentHost asks channel-egress's RunnerSessions once a minute for the waits opened since
-// a little before its last answer, and tells the owner of each one not told yet. It keeps only
-// which waits it told: each one's session and opening time, for a day.
+// a little before its last answer, and tells the owner of each one still open and not told yet:
+// its first check asks a day back, so the waits already open are told too. It keeps only which
+// waits it told: each one's session and opening time, for a day.
 
 /** How often the check runs: one runner call a minute (ADR-0057 §6). */
 export const WATCH_INTERVAL_S = 60;
@@ -17,7 +18,10 @@ export const WAIT_OVERLAP_MS = 2 * 60_000;
  * earlier once, when a hook's line lands after a check saw only the session file (ADR-0059 §2).
  */
 export const WAIT_JOIN_MS = 60_000;
-/** How long a told wait is remembered. The check never asks further back than this. */
+/**
+ * How long a told wait is remembered. The check never asks further back than this, and its first
+ * check asks this far back.
+ */
 export const TOLD_KEEP_MS = 24 * 60 * 60_000;
 /** The most told waits remembered: far more than one owner's day of prompts. */
 export const MAX_TOLD = 1_000;
@@ -53,8 +57,13 @@ export interface WatchIO {
   isMaster(): Promise<boolean>;
   /** RunnerSessions' `waits(since)`. It throws when channel-egress can't be reached. */
   waits(since: number): Promise<RunnerWaitsOutcome>;
-  /** Tells the owner of one wait: whether it reached them. It never throws. */
+  /**
+   * Tells the owner of one wait: false only when it surely didn't reach them. A notice that may
+   * have gone out counts as told, so it is never repeated. It never throws.
+   */
   tell(wait: RunnerVpsWait): Promise<boolean>;
+  /** Keeps the watch as it is now, after each wait told: an eviction mid-check doesn't repeat it. */
+  keep(watch: SessionWatch): void;
 }
 
 /**
@@ -76,7 +85,7 @@ export async function checkWaits(
   if (!master) return stop(watch, "not_master", now);
   let outcome: RunnerWaitsOutcome;
   try {
-    outcome = await io.waits(Math.max(0, watch.since ?? now - WAIT_OVERLAP_MS));
+    outcome = await io.waits(Math.max(0, watch.since ?? now - TOLD_KEEP_MS));
   } catch (error) {
     console.warn("AgentHost: the VPS's waits weren't read", errorName(error));
     return watch;
@@ -109,6 +118,7 @@ export async function checkWaits(
       tries += 1;
       if (await io.tell(wait)) {
         told = [...told, [wait.sessionId, wait.openedAt]];
+        io.keep({ ...watch, told });
         continue;
       }
     }
