@@ -117,12 +117,35 @@ describe("redact", () => {
   });
 
   it.each([
+    // A PIN or a one-time code is a bare number of four digits or more (#441).
+    ['{"pass": 123456}', `{"pass": ${REDACTED}}`],
+    ['{"auth": 481516234}', `{"auth": ${REDACTED}}`],
+    ['{"password": 12345678, "user": "ana"}', `{"password": ${REDACTED}, "user": "ana"}`],
+    ["{'auth': 123456}", `{'auth': ${REDACTED}}`],
+    ['{"token": 4815.1623}', `{"token": ${REDACTED}}`],
+  ])("redacts a quoted name's bare number that could be a PIN: %s", (json, expected) => {
+    expect(redact(json)).toBe(expected);
+  });
+
+  it.each(['{"pass": 458, "auth": -1, "key_count": 12.5}', '{"max_tokens": 1024, "retries": 3}'])(
+    "leaves a quoted name's short number, a count: %s",
+    (json) => {
+      expect(redact(json)).toBe(json);
+    },
+  );
+
+  it.each([
     ["password: hunter2 and more", `password: ${REDACTED}`],
     ["  - auth_token: abc", `  - auth_token: ${REDACTED}`],
     ['"client_secret": "x"', `"client_secret": "${REDACTED}"`],
     ["Authorization: Basic Zm9vOmJhcg==", `Authorization: Basic ${REDACTED}`],
     ["x-api-key: abc123", `x-api-key: ${REDACTED}`],
     ["Cookie: session=abc; theme=dark", `Cookie: ${REDACTED}`],
+    // With no space after the colon, too (#441).
+    ["pass:123456", `pass:${REDACTED}`],
+    ["AUTH:123456", `AUTH:${REDACTED}`],
+    ["password:hunter2", `password:${REDACTED}`],
+    ["  - api_key:abc123", `  - api_key:${REDACTED}`],
   ])("redacts a YAML or header line's value: %s", (line, expected) => {
     expect(redact(`before\n${line}\nafter`)).toBe(`before\n${expected}\nafter`);
   });
@@ -133,6 +156,11 @@ describe("redact", () => {
     "password: boolean,",
     "auth: null",
     "The token: we rotate it",
+    "token:   ",
+    "auth:ok",
+    "pass:458/458",
+    "password:string;",
+    "https://example.com/token:abc",
   ])("leaves a line that only names one, or a type: %s", (line) => {
     expect(redact(line)).toBe(line);
   });

@@ -46,11 +46,19 @@ const SECRET_LINE = new RegExp(
   `^([ \\t]{0,64}(?:export[ \\t]{1,8})?${NAME}${ASSIGN})[^\\n]*`,
   "gim",
 );
-/** A YAML or header line, `name: value`, maybe a list's item: its value goes. */
+/**
+ * A YAML or header line, `name: value`, maybe a list's item, with a space after the colon or
+ * none (#441): its value goes.
+ */
 const SECRET_FIELD = new RegExp(
-  `^([ \\t]{0,64}(?:-[ \\t]{1,8})?(${NAME})[ \\t]{0,8}:[ \\t]{1,8})([^\\n]*)`,
+  `^([ \\t]{0,64}(?:-[ \\t]{1,8})?(${NAME})[ \\t]{0,8}:[ \\t]{0,8})([^\\n]*)`,
   "gim",
 );
+/**
+ * What a quoted name may hold and keep: null, a flag, or a short number, a count. A bare number of
+ * four digits or more may be a PIN or a one-time code (#441).
+ */
+const QUOTED_KEPT = /^(?:null|true|false|-?\d{1,3}(?:\.\d{1,3})?)$/;
 /** A quoted name, as JSON and code write it: `"name": value`. */
 const QUOTED_FIELD = new RegExp(
   `(["'])(${NAME})\\1([ \\t]{0,8}:[ \\t]{0,8})("[^"\\n]{0,1024}"|'[^'\\n]{0,1024}'|[^\\s,}\\]]{1,1024})`,
@@ -130,12 +138,12 @@ export function redact(text: string, secrets: readonly string[] = []): string {
     .replace(PEM, REDACTED)
     .replace(SECRET_LINE, `$1${REDACTED}`)
     .replace(SECRET_FIELD, (field, lead: string, name: string, value: string) =>
-      NO_SECRET.test(value) || (STATUS_NAME.test(name) && STATUS.test(value))
+      value.trim() === "" || NO_SECRET.test(value) || (STATUS_NAME.test(name) && STATUS.test(value))
         ? field
         : `${lead}${schemeOf(value)}${REDACTED}`,
     )
     .replace(QUOTED_FIELD, (field, quote: string, name: string, colon: string, value: string) => {
-      if (/^(?:null|true|false|-?\d+(?:\.\d+)?)$/.test(value)) return field;
+      if (QUOTED_KEPT.test(value)) return field;
       const quoted = value.startsWith('"') || value.startsWith("'");
       const shown = quoted ? `${value.charAt(0)}${REDACTED}${value.charAt(0)}` : REDACTED;
       return `${quote}${name}${quote}${colon}${shown}`;
