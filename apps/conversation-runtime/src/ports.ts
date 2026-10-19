@@ -234,8 +234,9 @@ export function configCommands(env: Env) {
 
 function productionPorts(env: Env): ConversationPorts {
   const gateway = env.LLM_GATEWAY as unknown as LlmGatewayBinding;
-  // llm-gateway's LlmChat, the only entrypoint that takes a conversation's session (#431).
-  const chat = env.LLM_CHAT as unknown as LlmGatewayBinding;
+  // llm-gateway's LlmChat, the only entrypoint that takes a conversation's session (#431). Missing,
+  // as after a partial rollback, a turn goes on through LlmGateway without its session (#432).
+  const chat = env.LLM_CHAT as unknown as LlmGatewayBinding | undefined;
   // A service binding to channel-egress's ChannelEgress entrypoint, which answers with values.
   const egress = env.CHANNEL_EGRESS as unknown as ChannelEgressContract;
   // A service binding to context-store's ContextStore entrypoint.
@@ -246,8 +247,13 @@ function productionPorts(env: Env): ConversationPorts {
   const commands = configCommands(env);
   return {
     async generate(selection, request, session) {
+      if (session !== undefined && chat === undefined) {
+        console.warn(
+          "conversation-runtime: LLM_CHAT isn't bound; the turn goes on without its session",
+        );
+      }
       const generation =
-        session === undefined
+        session === undefined || chat === undefined
           ? await gateway.generate(selection, request)
           : await chat.generate(selection, request, session);
       const dispose = () => (generation as Partial<Disposable>)[Symbol.dispose]?.();
