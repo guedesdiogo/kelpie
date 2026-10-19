@@ -21,8 +21,12 @@ import {
   type AgentSettings,
   DEFAULT_SETTINGS,
   isAgentId,
+  isProposalFields,
+  isProposalId,
   isTaskId,
+  MAX_PROPOSAL_REASON,
   mascotFor,
+  type ProposalNotice,
   REGISTRY_NAME,
   RETIRED_AGENT_ID,
   type RegistryContract,
@@ -101,6 +105,7 @@ import {
 import { bareHttpsOrigin, heldTools, setupNote } from "./configuration.ts";
 import migrations from "./migrations/migrations.js";
 import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
+import { proposalBubble, proposalNote } from "./proposal-notices.ts";
 import { readRole } from "./registry/schema.ts";
 import { failureNotice, routeNotice } from "./route-notices.ts";
 import * as schema from "./schema.ts";
@@ -172,6 +177,16 @@ const HANDOFFS = "handoffs";
 const SUBAGENT_CHANGES = "subagentChanges";
 /** Where it keeps the agents Master created or renamed (#387), apart for the same reason. */
 const AGENT_CHANGES = "agentChanges";
+
+/**
+ * Where a conversation keeps the proposals whose notice its next reply sends (#302), each until
+ * its bubble goes out or it expires; and the outbox rows of the last ones sent.
+ */
+const PROPOSAL_NOTICES = "proposalNotices";
+const PROPOSAL_NOTICES_SENT = "proposalNoticesSent";
+/** The most proposals' notices one conversation keeps: as many as can be pending at once. */
+const MAX_PROPOSAL_NOTICES = 20;
+type KeptProposal = Pick<ProposalNotice, "id" | "proposer" | "target" | "fields" | "expiresAt">;
 
 /**
  * Kelpie's last notice of them (#287): its outbox row, and the keys of what it named (`keyOf`); a
@@ -752,6 +767,74 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     this.#addNote(userId, text, `kelpie:note:${crypto.randomUUID()}`);
     await this.schedule(0, "answerNotes");
     return true;
+  }
+
+  /**
+   * Kelpie's notice of a proposal (ADR-0061, #302), in the owner's conversation with Master: a note
+   * for the model, answered as `kelpieNote`'s, and the owner's bubble with the page's link after
+   * the next reply, which the model never sees. Only a conversation of the agent's own, with a
+   * person, takes one.
+   */
+  async proposalNotice(agentId: string, notice: ProposalNotice): Promise<boolean> {
+    const bound = this.#get<string | null>("agentId", null);
+    const channel = this.#get<Destination | null>("destination", null)?.channel;
+    const { id, proposer, target, actingUserId, reason, expiresAt, fields } = notice ?? {};
+    if (
+      bound === null ||
+      bound !== agentId ||
+      channel === undefined ||
+      channel === "task" ||
+      !isProposalId(id) ||
+      !isAgentId(proposer) ||
+      !isAgentId(target) ||
+      typeof actingUserId !== "string" ||
+      actingUserId === "" ||
+      typeof reason !== "string" ||
+      reason.length > MAX_PROPOSAL_REASON ||
+      !Number.isFinite(expiresAt) ||
+      !isProposalFields(fields)
+    ) {
+      return false;
+    }
+    const kept = this.#get<KeptProposal[]>(PROPOSAL_NOTICES, []).filter((one) => one.id !== id);
+    this.#set(
+      PROPOSAL_NOTICES,
+      [...kept, { id, proposer, target, fields, expiresAt }].slice(-MAX_PROPOSAL_NOTICES),
+    );
+    this.#addNote(
+      actingUserId,
+      proposalNote({ id, proposer, target, actingUserId, reason, expiresAt, fields }),
+      `kelpie:proposal:${id}:${crypto.randomUUID()}`,
+    );
+    await this.schedule(0, "answerNotes");
+    return true;
+  }
+
+  /**
+   * Clears the proposals Kelpie's last notices named once each went out (#302), whichever path
+   * sent them; one that didn't go out waits for the next reply.
+   */
+  #settleProposalNotices(): void {
+    const sent = this.#get<{ turnId: number; rows: { seq: number; id: string }[] } | null>(
+      PROPOSAL_NOTICES_SENT,
+      null,
+    );
+    if (sent === null) return;
+    const said = new Set<string>();
+    for (const { seq, id } of sent.rows) {
+      const status = this.#db
+        .select({ status: schema.outbox.status })
+        .from(schema.outbox)
+        .where(and(eq(schema.outbox.turnId, sent.turnId), eq(schema.outbox.seq, seq)))
+        .get()?.status;
+      if (status === "pending" || status === "sending") return;
+      if (status === "sent") said.add(id);
+    }
+    this.#set(
+      PROPOSAL_NOTICES,
+      this.#get<KeptProposal[]>(PROPOSAL_NOTICES, []).filter((one) => !said.has(one.id)),
+    );
+    this.#set(PROPOSAL_NOTICES_SENT, null);
   }
 
   /**
@@ -1476,6 +1559,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           .run();
         await this.#deliver(turnId, controller.signal);
         this.#settleAnnouncements();
+        this.#settleProposalNotices();
       } else if (turn.attempts < 2) {
         await this.#call(turnId, controller);
       } else {
@@ -1704,6 +1788,14 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const announcements = this.#announcements();
     const announced = announcementNotice(announcements, locale);
     const announcedSeq = bubbles.length + (routes.text === null ? 0 : 1);
+    // Last, the proposals the owner decides on their page (#302), each with its one link; an
+    // expired one is dropped.
+    this.#settleProposalNotices();
+    const now = this.#ports.now();
+    const proposals = this.#get<KeptProposal[]>(PROPOSAL_NOTICES, []).filter(
+      (one) => one.expiresAt > now,
+    );
+    const origin = bareHttpsOrigin(this.env.ADMIN_ORIGIN ?? "");
     const notices = [
       ...(routes.text === null ? [] : [{ text: routes.text }]),
       ...(announced === null ? [] : [{ text: announced }]),
@@ -1712,7 +1804,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         confirmationId: id,
       })),
       ...links.map(({ text, href }) => ({ text, link: href })),
+      ...proposals.map((one) => proposalBubble(one, locale, origin, now)),
     ];
+    const proposalSeq = bubbles.length + notices.length - proposals.length;
     this.#db.transaction((tx) => {
       tx.update(schema.turns).set({ reply }).where(eq(schema.turns.id, turnId)).run();
       bubbles.forEach((bubble, seq) => {
@@ -1732,6 +1826,16 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           })
           .run();
       });
+      if (proposals.length > 0) {
+        const sent = {
+          turnId,
+          rows: proposals.map((one, index) => ({ seq: proposalSeq + index, id: one.id })),
+        };
+        tx.insert(schema.state)
+          .values({ key: PROPOSAL_NOTICES_SENT, value: sent })
+          .onConflictDoUpdate({ target: schema.state.key, set: { value: sent } })
+          .run();
+      }
       // Noted with the rows: whichever path sends the notice, what it named is cleared once sent.
       if (announced !== null) {
         const said: AnnouncementNotice = {
@@ -1753,6 +1857,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       this.#set("routeNotices", routes.announced);
     }
     this.#settleAnnouncements();
+    this.#settleProposalNotices();
   }
 
   /** What the turn's tools had Kelpie announce that no notice said yet (#287, #342, #387). */

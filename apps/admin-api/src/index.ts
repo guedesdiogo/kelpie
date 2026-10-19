@@ -55,7 +55,7 @@ export function depsFor(env: Env): AdminDeps {
     commands: createConfigCommands({
       registry,
       agents: {
-        configure: (id, changes, actor) => agentHost(id).configure(changes, actor),
+        configure: (id, changes, actor, expect) => agentHost(id).configure(changes, actor, expect),
         config: (id) => agentHost(id).config(),
         erase: (id, conversations) => agentHost(id).erase(conversations),
       },
@@ -84,6 +84,16 @@ export function depsFor(env: Env): AdminDeps {
         view: () => gateway.instanceModels(),
         configure: (settings, actor) => gateway.configureDefaults(settings, actor),
         setClaudeCode: (on, actor) => gateway.setClaudeCode(on, actor),
+      },
+      // The proposals (#302), in the Registry; Kelpie's notice goes through Master's AgentHost.
+      proposals: {
+        propose: (proposal, actor) => registry.propose(proposal, actor),
+        get: (id) => registry.proposal(id),
+        list: (status) => registry.proposals(status),
+        refuse: (id, actor) => registry.refuseProposal(id, actor),
+        claim: (id, actor) => registry.claimProposal(id, actor),
+        finish: (id, outcome, actor) => registry.finishProposal(id, outcome, actor),
+        notify: (master, notice) => agentHost(master).proposalNotice(notice),
       },
       vault: {
         held: () => vault.held(),

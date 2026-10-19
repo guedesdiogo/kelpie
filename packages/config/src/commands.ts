@@ -18,6 +18,23 @@ import {
 } from "@kelpie/llm/models";
 import { type Mascot, mascotFor, randomMascot } from "./mascot.ts";
 import {
+  isProposalId,
+  mergeModel,
+  type NewProposal,
+  PROPOSAL_STATUSES,
+  type Proposal,
+  type ProposalChanges,
+  type ProposalDetail,
+  type ProposalNotice,
+  type ProposalOutcome,
+  type ProposalResult,
+  type ProposalSnapshot,
+  type ProposalStatus,
+  parseProposalChanges,
+  parseProposalReason,
+  sameValue,
+} from "./proposals.ts";
+import {
   type AgentSettings,
   isAgentId,
   isAgentName,
@@ -93,17 +110,20 @@ export interface AgentConfig {
  */
 export type ConfigureResult =
   | { ok: true; value: AgentConfig }
-  | { ok: false; reason: "invalid_input" };
+  | { ok: false; reason: "invalid_input" | "conflict" };
 export type AddAgentResult =
   | { ok: true; created: boolean }
   | { ok: false; reason: "invalid_input" };
 export type RenameAgentResult =
   | { ok: true }
   | { ok: false; reason: "unknown_agent" | "invalid_input" };
-/** `not_allowed`: the agent's role doesn't take the change, such as turning Master's chat off. */
+/**
+ * `not_allowed`: the agent's role doesn't take the change, such as turning Master's chat off.
+ * `conflict`: a proposal's change found the value changed since it was proposed (#302).
+ */
 export type SetAgentResult =
   | { ok: true }
-  | { ok: false; reason: "unknown_agent" | "invalid_input" | "not_allowed" };
+  | { ok: false; reason: "unknown_agent" | "invalid_input" | "not_allowed" | "conflict" };
 
 export type EraseResult =
   | { ok: true; conversations: number }
@@ -123,15 +143,40 @@ export interface RegistryContract {
    * specialist is then owned by the new one.
    */
   setMaster(id: string, actor: Actor): SetAgentResult;
-  /** Turns a specialist's chat on or off. Master always chats; subagents never do. */
-  setChat(id: string, chat: boolean, actor: Actor): SetAgentResult;
+  /**
+   * Turns a specialist's chat on or off. Master always chats; subagents never do. With `expect`,
+   * a proposal's (#302), it changes only while the chat still is `expect`.
+   */
+  setChat(id: string, chat: boolean, actor: Actor, expect?: boolean): SetAgentResult;
   /** Adds a temporary subagent of `creator`'s, owned by it, with no chat (ADR-0036 §5, #290). */
   addSubagent(id: string, name: string, creator: string, actor: Actor): SetAgentResult;
   /**
    * Removes a deleted agent's row, the last step of `deleteAgent` (#303). Master and an
    * agent that still owns another are `not_allowed` (ADR-0036 §1).
    */
-  remove(id: string, actor: Actor): SetAgentResult;
+  remove(id: string, actor: Actor): Promise<SetAgentResult>;
+  /**
+   * Records a proposal (ADR-0061, #302): only about an agent its proposer owns, within the caps,
+   * which it checks in one step. It applies nothing.
+   */
+  propose(proposal: NewProposal, actor: Actor): Promise<ProposalResult>;
+  proposal(id: string): Proposal | null;
+  /** The proposals, newest first, or those in one status. */
+  proposals(status?: ProposalStatus): Proposal[];
+  /** The owner refuses a pending proposal: one conditional step, so a repeat changes nothing. */
+  refuseProposal(id: string, actor: Actor): Promise<ProposalResult>;
+  /**
+   * The owner approves: a pending proposal becomes `applying`, once, unless it is due (`expired`),
+   * its proposer or target is gone (`void`), or its target's owner changed (`conflict`), which it
+   * settles and answers instead. An approval that never finishes, the alarm settles.
+   */
+  claimProposal(id: string, actor: Actor): Promise<ProposalResult>;
+  /** Ends an approval: applied, a conflict, or void. */
+  finishProposal(
+    id: string,
+    outcome: "applied" | "conflict" | "void",
+    actor: Actor,
+  ): Promise<ProposalResult>;
   /** Answers once the object's migrations ran; the deploy's probe calls it (#234). */
   ping(): { ok: true };
 }
@@ -155,7 +200,15 @@ export type SetupEvent =
   | { step: "runner_connected"; userId: string; state: "ready" | "outdated"; version: string };
 
 export interface AgentHostContract {
-  configure(changes: Partial<AgentSettings>, actor: Actor): ConfigureResult;
+  /**
+   * With `expect`, a proposal's (#302), it applies only while those settings hold those values,
+   * else answers `conflict`; settings that already hold the change answer as applied.
+   */
+  configure(
+    changes: Partial<AgentSettings>,
+    actor: Actor,
+    expect?: Partial<AgentSettings>,
+  ): ConfigureResult;
   config(): AgentConfig;
   /**
    * The model settings the agent's calls resolve from (#344): its own, not the defaults, so an
@@ -182,6 +235,17 @@ export interface AgentHostContract {
   requestStop(id: string, actor: Actor): Promise<TaskResult<TaskView>>;
   listTasks(status?: TaskStatus): TaskSummary[];
   getTask(id: string): TaskResult<TaskDetail>;
+  /**
+   * Kelpie's notice of a proposal (#302), on Master's AgentHost: it reaches the owner's latest
+   * conversation with Master. False when there is none.
+   */
+  proposalNotice(notice: ProposalNotice): Promise<boolean>;
+  /**
+   * A proposal's outcome, on its proposer's AgentHost (#302): Kelpie's comment on the task that
+   * made it, or a note in the proposer's latest conversation with the owner. False when neither
+   * took it.
+   */
+  proposalOutcome(outcome: ProposalOutcome): Promise<boolean>;
   /** Answers once the object's migrations ran; the deploy's probe calls it (#234). */
   ping(): { ok: true };
 }
@@ -314,7 +378,7 @@ export interface ConfigPorts {
     get(id: string): Promise<AgentEntry | null>;
     list(): Promise<AgentEntry[]>;
     setMaster(id: string, actor: Actor): Promise<SetAgentResult>;
-    setChat(id: string, chat: boolean, actor: Actor): Promise<SetAgentResult>;
+    setChat(id: string, chat: boolean, actor: Actor, expect?: boolean): Promise<SetAgentResult>;
     remove(id: string, actor: Actor): Promise<SetAgentResult>;
   };
   /** llm-gateway's model settings for the whole instance (#289). */
@@ -332,7 +396,12 @@ export interface ConfigPorts {
     ): Promise<{ ok: true } | { ok: false; reason: "invalid_input" }>;
   };
   agents: {
-    configure(id: string, changes: Partial<AgentSettings>, actor: Actor): Promise<ConfigureResult>;
+    configure(
+      id: string,
+      changes: Partial<AgentSettings>,
+      actor: Actor,
+      expect?: Partial<AgentSettings>,
+    ): Promise<ConfigureResult>;
     config(id: string): Promise<AgentConfig>;
     erase(id: string, conversations: string[]): Promise<EraseResult>;
   };
@@ -378,6 +447,21 @@ export interface ConfigPorts {
     | "describeRunner"
     | "disconnectTelegram"
   >;
+  /** The proposals, in the Registry, and Kelpie's notice of one (ADR-0061, #302). */
+  proposals: {
+    propose(proposal: NewProposal, actor: Actor): Promise<ProposalResult>;
+    get(id: string): Promise<Proposal | null>;
+    list(status?: ProposalStatus): Promise<Proposal[]>;
+    refuse(id: string, actor: Actor): Promise<ProposalResult>;
+    claim(id: string, actor: Actor): Promise<ProposalResult>;
+    finish(
+      id: string,
+      outcome: "applied" | "conflict" | "void",
+      actor: Actor,
+    ): Promise<ProposalResult>;
+    /** Kelpie's notice in the owner's latest conversation with Master; false when none took it. */
+    notify(master: string, notice: ProposalNotice): Promise<boolean>;
+  };
   /** The vault's Context Store (#114). */
   vault: {
     held(): Promise<HeldVaultFile[]>;
@@ -405,6 +489,10 @@ export type CommandResult<T> =
         | "not_allowed"
         | "no_key"
         | "unknown_task"
+        | "unknown_proposal"
+        | "not_pending"
+        | "too_many"
+        | "conflict"
         | Extract<IdentityResult, { ok: false }>["reason"];
     };
 
@@ -652,6 +740,173 @@ export function createConfigCommands(ports: ConfigPorts) {
         deleted.push(live.id);
       }
       return { ok: true, value: { deleted, webhooksLeft, everyThread } };
+    },
+
+    /**
+     * An owner agent proposes a change to an agent it owns (ADR-0036 §3, ADR-0061, #302): the
+     * owner's turn, through that agent. It records the change as it would apply, a trio merged
+     * into the target's own, with the same fields as they are now, and has Kelpie tell the owner in
+     * their latest conversation with Master. Nothing applies until the owner approves it on its
+     * page. `noticed` says whether that conversation took the notice.
+     */
+    async proposeAgentChange(
+      actor: Actor,
+      input: unknown,
+    ): Promise<CommandResult<{ proposal: Proposal; noticed: boolean }>> {
+      const proposer = actor.via.startsWith("agent:") ? actor.via.slice("agent:".length) : null;
+      if (!isOwner(actor) || !isAgentId(proposer)) return forbidden;
+      if (typeof input !== "object" || input === null || Array.isArray(input)) return invalid;
+      const { agentId, changes, reason, taskId = null, ...rest } = input as Record<string, unknown>;
+      const why = parseProposalReason(reason);
+      if (Object.keys(rest).length > 0 || !isAgentId(agentId) || why === null) return invalid;
+      if (taskId !== null && !isTaskId(taskId)) return invalid;
+      const target = await ports.registry.get(agentId);
+      if (!target) return { ok: false, reason: "unknown_agent" };
+      if (target.owner !== proposer) return { ok: false, reason: "not_allowed" };
+      const parsed = parseProposalChanges(target.role, changes);
+      if (!parsed) return invalid;
+      let applies: ProposalChanges = parsed;
+      let before: ProposalSnapshot;
+      if ("chat" in parsed) {
+        before = { chat: target.chat };
+      } else {
+        const { settings } = await ports.agents.config(target.id);
+        if (parsed.model) {
+          const model = mergeModel(settings.model ?? {}, parsed.model);
+          if (memoryOnSessionRoute(model)) return invalid;
+          if (!(await keyed(parsed.model))) return noKey;
+          applies = { ...parsed, model };
+        }
+        before = Object.fromEntries(
+          Object.keys(applies).map((key) => [key, settings[key as keyof AgentSettings]]),
+        );
+      }
+      // A change to what the agent already has is no change.
+      const fields = Object.entries(applies);
+      const was = before as Record<string, unknown>;
+      if (fields.every(([key, value]) => sameValue(value, was[key]))) return invalid;
+      const made = await ports.proposals.propose(
+        {
+          proposer,
+          target: target.id,
+          actingUserId: actor.userId,
+          taskId: taskId as string | null,
+          changes: applies,
+          before,
+          reason: why,
+        },
+        actor,
+      );
+      if (!made.ok) return made;
+      const proposal = made.value;
+      let noticed = false;
+      try {
+        const master = (await ports.registry.list()).find((agent) => agent.role === "master");
+        if (master) {
+          noticed = await ports.proposals.notify(master.id, {
+            id: proposal.id,
+            proposer,
+            target: target.id,
+            actingUserId: actor.userId,
+            reason: why,
+            expiresAt: proposal.expiresAt,
+            fields: Object.keys(applies),
+          });
+        }
+      } catch (error) {
+        // It still waits on the admin API's proposals page.
+        console.warn("proposeAgentChange: Kelpie's notice wasn't sent", errorName(error));
+      }
+      return { ok: true, value: { proposal, noticed } };
+    },
+
+    /** The proposals, newest first, or those in one status (#302). Reading changes nothing. */
+    async listProposals(actor: Actor, input: unknown): Promise<CommandResult<Proposal[]>> {
+      if (!isOwner(actor)) return forbidden;
+      const { status, ...rest } = (input ?? {}) as { status?: unknown };
+      const known = (PROPOSAL_STATUSES as readonly unknown[]).includes(status);
+      if (Object.keys(rest).length > 0 || (status !== undefined && !known)) return invalid;
+      return { ok: true, value: await ports.proposals.list(status as ProposalStatus | undefined) };
+    },
+
+    /**
+     * A proposal, with its target's values now and whether they changed since it was made (#302):
+     * a stale one can only be refused.
+     */
+    async getProposal(actor: Actor, input: unknown): Promise<CommandResult<ProposalDetail>> {
+      if (!isOwner(actor)) return forbidden;
+      const { id } = (input ?? {}) as { id?: unknown };
+      if (!isProposalId(id)) return invalid;
+      const proposal = await ports.proposals.get(id);
+      if (!proposal) return { ok: false, reason: "unknown_proposal" };
+      const target = await ports.registry.get(proposal.target);
+      let current: ProposalSnapshot | null = null;
+      if (target && "chat" in proposal.changes) {
+        current = { chat: target.chat };
+      } else if (target) {
+        const { settings } = await ports.agents.config(target.id);
+        current = Object.fromEntries(
+          Object.keys(proposal.changes).map((key) => [key, settings[key as keyof AgentSettings]]),
+        );
+      }
+      const stale =
+        current === null ||
+        target?.owner !== proposal.proposer ||
+        !sameValue(current, proposal.before);
+      return { ok: true, value: { ...proposal, current, stale } };
+    },
+
+    /**
+     * The owner's decision on a proposal's page (ADR-0026 §1, #302), and nothing else's: no tool
+     * and no JSON command call it. A refusal is one conditional step. An approval claims the
+     * proposal, applies it as `proposal:<id>` only while the target holds the values it was
+     * proposed against, and finishes it as applied, a conflict, or void. When a service doesn't
+     * answer meanwhile, it answers the proposal as `applying`: the Registry's alarm reads the target
+     * and settles it. The answer is the proposal as this call left it; `not_pending` means it was
+     * already decided.
+     */
+    async decideProposal(actor: Actor, input: unknown): Promise<CommandResult<Proposal>> {
+      if (!isOwner(actor)) return forbidden;
+      const { id, decision, ...rest } = (input ?? {}) as { id?: unknown; decision?: unknown };
+      if (Object.keys(rest).length > 0 || !isProposalId(id)) return invalid;
+      if (decision === "refuse") return ports.proposals.refuse(id, actor);
+      if (decision !== "approve") return invalid;
+      let claimed: ProposalResult;
+      try {
+        claimed = await ports.proposals.claim(id, actor);
+      } catch (error) {
+        // A claim whose answer was lost is taken all the same: the alarm settles it (#302).
+        console.warn("decideProposal: the claim's answer didn't come", errorName(error));
+        const now = await ports.proposals.get(id).catch(() => null);
+        return now?.status === "applying" ? { ok: true, value: now } : unavailable;
+      }
+      if (!claimed.ok || claimed.value.status !== "applying") return claimed;
+      const { target, changes, before } = claimed.value;
+      const by: Actor = { userId: actor.userId, role: actor.role, via: `proposal:${id}` };
+      let applied: SetAgentResult | ConfigureResult;
+      try {
+        applied =
+          "chat" in changes
+            ? await ports.registry.setChat(target, changes.chat, by, before.chat as boolean)
+            : await ports.agents.configure(target, changes, by, before as Partial<AgentSettings>);
+      } catch (error) {
+        // It may have applied before its answer was lost: the Registry's alarm reads the target
+        // and settles it, so the answer says only that the approval was taken (#302).
+        console.warn("decideProposal: the change's answer didn't come", errorName(error));
+        return claimed;
+      }
+      const outcome = applied.ok
+        ? "applied"
+        : applied.reason === "unknown_agent"
+          ? "void"
+          : "conflict";
+      try {
+        return await ports.proposals.finish(id, outcome, actor);
+      } catch (error) {
+        // The Registry's alarm settles the approval that didn't finish (#302).
+        console.warn("decideProposal: the approval wasn't finished", errorName(error));
+        return claimed;
+      }
     },
 
     /**
