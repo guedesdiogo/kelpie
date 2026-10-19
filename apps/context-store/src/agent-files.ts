@@ -47,6 +47,16 @@ export function memoryProblem(content: string): "memory_format" | "memory_too_lo
   return null;
 }
 
+/**
+ * A `MEMORY.md`'s entries as Hermes loads them into its prompt: split on exactly `\n§\n`, each
+ * trimmed, which drops a leading BOM too, empty ones left out, and each kept once, where it first
+ * sits. A layout Hermes's format refuses, such as blank lines around a `§`, still loads.
+ */
+export function memoryEntries(content: string): string[] {
+  const entries = content.split(MEMORY_SEPARATOR).map((entry) => entry.trim());
+  return [...new Set(entries.filter((entry) => entry !== ""))];
+}
+
 /** What a file the editor writes can't hold, whatever it is: conflict markers, which hold it. */
 export const heldOnSync = (content: string) => hasConflictMarkers(content);
 

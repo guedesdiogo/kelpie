@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   characters,
   lineDiff,
+  memoryEntries,
   memoryProblem,
   originLine,
   parseChanges,
@@ -898,6 +899,18 @@ describe("Hermes's memory file", () => {
     ]) {
       expect(memoryProblem(content), JSON.stringify(content)).toBe("memory_format");
     }
+  });
+
+  it("reads entries as Hermes loads them: trimmed, without empty ones, each once", () => {
+    expect(memoryEntries("")).toEqual([]);
+    expect(memoryEntries("one\n§\ntwo lines\nstill two")).toEqual(["one", "two lines\nstill two"]);
+    // What GitHub, Obsidian or a hand edit leaves: a BOM, blank lines around §, a last newline.
+    expect(memoryEntries("\u{FEFF}one\n\n§\n\ntwo\n")).toEqual(["one", "two"]);
+    expect(memoryEntries("one\n§\n   \n§\none\n§\n\n§\ntwo")).toEqual(["one", "two"]);
+    // Only the whole separator splits: a § inside an entry, or a line of its own without the
+    // newlines around it, stays in its entry.
+    expect(memoryEntries("a § b\n§")).toEqual(["a § b\n§"]);
+    expect(memoryEntries("\n§\n")).toEqual([]);
   });
 });
 

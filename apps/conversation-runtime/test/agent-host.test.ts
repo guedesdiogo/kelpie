@@ -370,7 +370,7 @@ describe("AgentHost", () => {
 
 describe("AgentHost with a vault", () => {
   const vaultOf = (context: Partial<CompiledContext>): ContextStoreContract => ({
-    compile: async () => ({ persona: null, rules: [], skills: [], ...context }),
+    compile: async () => ({ persona: null, rules: [], skills: [], memory: null, ...context }),
     read: async () => null,
     write: async () => ({ ok: false, reason: "vault_off" }),
     propose: async () => ({ ok: false, reason: "vault_off" }),
@@ -495,6 +495,58 @@ describe("AgentHost with a vault", () => {
     });
   });
 
+  it("puts the agent's memory file after its skills, and a change to it starts a new version (#437)", async () => {
+    const stub = host("vault-memory");
+    const path = "agents/vault-memory/memories/MEMORY.md";
+    replaceContextStoreForTesting(
+      vaultOf({
+        persona: "# Kelpie",
+        skills: [{ name: "recipes", description: "", path: "skills/recipes/SKILL.md" }],
+        memory: { path, content: "The owner deploys on Fridays.\n§\nReplies stay short." },
+      }),
+    );
+    expect(await stub.turnConfig()).toMatchObject({
+      settings: {
+        systemPrompt: withIdentity(
+          "vault-memory",
+          `# Kelpie\n\n# Skills in your vault\n\n- recipes\n\n# Memory (${path})\n\nThe owner deploys on Fridays.\n§\nReplies stay short.`,
+        ),
+      },
+      promptVersion: 1,
+    });
+
+    // A memory file alone keeps the configured prompt, and the owner's Save reaches the next turn.
+    replaceContextStoreForTesting(vaultOf({ memory: { path, content: "Replies stay short." } }));
+    expect(await stub.turnConfig()).toMatchObject({
+      settings: {
+        systemPrompt: withIdentity(
+          "vault-memory",
+          `${DEFAULT_SETTINGS.systemPrompt}\n\n# Memory (${path})\n\nReplies stay short.`,
+        ),
+      },
+      promptVersion: 2,
+    });
+  });
+
+  it("composes a vault compiled before the memory file existed, as none (#437)", async () => {
+    const stub = host("vault-before-memory");
+    // A Context Store not yet deployed answers without the field, and the turn keeps it as its last.
+    const older = { persona: "# Older", rules: [], skills: [] } as unknown as CompiledContext;
+    replaceContextStoreForTesting({ ...vaultOf({}), compile: async () => older });
+    const seen = withIdentity("vault-before-memory", "# Older");
+    expect((await stub.turnConfig()).settings.systemPrompt).toBe(seen);
+    replaceContextStoreForTesting({
+      ...vaultOf({}),
+      compile: async () => {
+        throw new Error("context-store is down");
+      },
+    });
+    expect(await stub.turnConfig()).toMatchObject({
+      settings: { systemPrompt: seen },
+      promptVersion: 1,
+    });
+  });
+
   it("keeps the version of an agent whose vault persona replaces an edited built-in prompt (#220)", async () => {
     const stub = host("vault-persona-default-edited");
     replaceContextStoreForTesting(vaultOf({ persona: "# Kelpie\n\nWarm and brief." }));
@@ -531,7 +583,7 @@ describe("AgentHost with a vault", () => {
       ...vaultOf({}),
       compile: async () => {
         await new Promise((resolve) => setTimeout(resolve, 30));
-        return { persona, rules: [], skills: [] };
+        return { persona, rules: [], skills: [], memory: null };
       },
     });
     const stub = host("vault-race");

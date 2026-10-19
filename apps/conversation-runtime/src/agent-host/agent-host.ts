@@ -300,8 +300,8 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
 
   /**
    * What a turn runs with: the settings, with the system prompt composed from the agent's identity
-   * (#283), then the vault's persona, rules and skills (ADR-0016). A change in the vault bumps the
-   * prompt version, as a configured prompt change does. So does a deploy that flips the built-in
+   * (#283), then the vault's persona, rules, skills and memory file (ADR-0016, #437). A change in
+   * the vault bumps the prompt version, as a configured prompt change does. So does a deploy that flips the built-in
    * memory core while the agent follows it (#224): the core isn't in the prompt key, and only turns
    * use it. The first default a turn sees is recorded without a bump. When the Context Store can't
    * answer, the last vault it compiled is used; when the Registry or llm-gateway can't, the last
