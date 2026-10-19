@@ -76,6 +76,8 @@ describe("redact", () => {
     "AUTH: Off",
     "pass: yes.",
     "auth: 12",
+    "pass: 458",
+    "Pass: 12345/12345",
     "TESTS_PASSED=458",
     "PASSING=12",
     "bun test --passWithNoTests src",
@@ -150,6 +152,10 @@ describe("redact", () => {
     ["pass: hunter2", `pass: ${REDACTED}`],
     ["auth: abcdef123", `auth: ${REDACTED}`],
     ["Pass: all green-ish", `Pass: ${REDACTED}`],
+    // A PIN or a one-time code is a bare number of four digits or more; a count has a slash.
+    ["pass: 123456", `pass: ${REDACTED}`],
+    ["auth: 481516234", `auth: ${REDACTED}`],
+    ["Pass: 1234.", `Pass: ${REDACTED}`],
   ])("still redacts pass and auth where they name a secret: %s", (text, expected) => {
     expect(redact(text)).toBe(expected);
   });
