@@ -55,7 +55,7 @@ const SHELL_CREAM = "#FFF1DD";
 /**
  * Shapes drawn on a 120 grid and framed at 10,14 100×100, so the body fills about 72%; the ground
  * is at y 108. Anchors: the face, the eyes' spread, the top of the head, the ears (x, y, angle),
- * the hat (x, y, width) and the collar.
+ * the pointed ears' own where they need lower ones, the hat (x, y, width) and the collar.
  */
 export const SHAPES = {
   mark: {
