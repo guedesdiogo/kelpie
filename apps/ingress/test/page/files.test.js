@@ -879,6 +879,229 @@ describe("a pending skill", () => {
   });
 });
 
+describe("removing a skill", () => {
+  const live = () => $(".files-skills > [aria-live='polite']").textContent;
+  const remove = (name) => $(`[aria-label="${F.removeSkill(name)}"]`);
+  const keep = (name) => $(`[aria-label="${F.keepSkill(name)}"]`);
+  const skills = async () => {
+    await open();
+    tab("Skills").click();
+  };
+
+  it("marks a saved skill from its row, to remove on Save, and Save sends the removal", async () => {
+    await skills();
+    expect(remove("brief").dataset.tip).toBe("");
+    remove("brief").click();
+    const item = $(".skl-i");
+    expect(item.classList.contains("removing")).toBe(true);
+    const row = item.querySelector(".skl-r");
+    // It stays in its place, says so in words, and opens nothing until Save or Keep.
+    expect(row.querySelector("b").textContent).toBe("brief");
+    expect(row.querySelector(".sd").textContent).toBe("Writes a brief.");
+    expect(row.querySelector(".so").textContent).toBe(F.pending.remove);
+    expect(row.getAttribute("aria-disabled")).toBe("true");
+    expect(row.hasAttribute("aria-label")).toBe(false);
+    row.click();
+    expect($(".editor-title").textContent).toBe("Skills");
+    // Focus stays in the slot, now Keep, and the live region outside the list says what happened.
+    expect(document.activeElement).toBe(keep("brief"));
+    expect(live()).toBe(F.removing("brief"));
+    expect(tab("Skills").getAttribute("aria-label")).toBe("Skills, changed");
+    expect($(".dirty").textContent).toBe("1 unsaved change");
+    await editor.save();
+    expect(sent[0]).toEqual([{ file: "skill", name: "brief", content: null, version: V(3) }]);
+  });
+
+  it("keeps it from the same slot, and nothing is left to save", async () => {
+    await skills();
+    remove("brief").click();
+    keep("brief").click();
+    expect($(".skl-i").classList.contains("removing")).toBe(false);
+    expect($(".skl-r .so").textContent).toBe(`o/skills · ${"9".repeat(7)}`);
+    expect(document.activeElement).toBe(remove("brief"));
+    expect(live()).toBe(F.kept("brief"));
+    expect(tab("Skills").getAttribute("aria-label")).toBe("Skills");
+    expect($(".dirty").textContent).toBe(T.editor.allSaved);
+    $(".skl-r").click();
+    expect($(".editor-title").textContent).toBe("brief");
+  });
+
+  it("gives back an edit made before the removal", async () => {
+    const edited = SKILL.replace("Writes a brief.", "Writes briefs.");
+    await skills();
+    $(".skl-r").click();
+    key($(".files-skills"), "e", { ctrlKey: true });
+    type($(".files-skills .doc-input"), edited);
+    $(".backb").click();
+    remove("brief").click();
+    expect($(".skl-r .sd").textContent).toBe("Writes a brief.");
+    keep("brief").click();
+    expect($(".skl-r .sd").textContent).toBe("Writes briefs.");
+    await editor.save();
+    expect(sent[0]).toEqual([{ file: "skill", name: "brief", content: edited, version: V(3) }]);
+  });
+
+  it("keeps the × that cancels a pending new skill", async () => {
+    await skills();
+    button(F.create).click();
+    $(".backb").click();
+    const item = $$(".skl-i").find((each) => each.dataset.skill === "new-skill");
+    expect(item.querySelector(".xbtn").getAttribute("aria-label")).toBe(
+      F.cancelPending("new-skill"),
+    );
+    expect(remove("new-skill")).toBeNull();
+  });
+
+  it("fades and rolls from the pointer, and changes at once from the keyboard", async () => {
+    await skills();
+    const animate = vi.spyOn(Element.prototype, "animate");
+    window.dispatchEvent(new PointerEvent("pointerdown"));
+    remove("brief").click();
+    const item = $(".skl-i");
+    const played = animate.mock.contexts;
+    const fade = animate.mock.calls[played.indexOf(item.querySelector("b"))];
+    expect(fade[0][0].textDecorationColor).toBe("transparent");
+    expect(fade[1]).toMatchObject({ duration: 150 });
+    expect(played).toContain(item.querySelector(".skt"));
+    expect(played).toContain(item.querySelector(".xbtn .icon"));
+    // Where it came from rolls: the old words leave, the new ones rise.
+    const rolls = played.filter((each) => each.classList?.contains("roll"));
+    expect(rolls.map((each) => each.textContent)).toEqual([
+      `o/skills · ${"9".repeat(7)}`,
+      F.pending.remove,
+    ]);
+    animate.mockClear();
+    key(keep("brief"), "Enter");
+    keep("brief").click();
+    expect(animate).not.toHaveBeenCalled();
+    expect($(".skl-r .so").textContent).toBe(`o/skills · ${"9".repeat(7)}`);
+    animate.mockRestore();
+  });
+
+  it("rolls from the label a row ends on, when Keep follows before the roll is done", async () => {
+    await skills();
+    const animate = vi.spyOn(Element.prototype, "animate");
+    window.dispatchEvent(new PointerEvent("pointerdown"));
+    remove("brief").click();
+    animate.mockClear();
+    keep("brief").click();
+    const rolls = animate.mock.contexts.filter((each) => each.classList?.contains("roll"));
+    expect(rolls.map((each) => each.textContent)).toEqual([
+      F.pending.remove,
+      `o/skills · ${"9".repeat(7)}`,
+    ]);
+    animate.mockRestore();
+  });
+
+  it("clears what the vault refused about a removal once it is kept", async () => {
+    await skills();
+    remove("brief").click();
+    io.save.mockImplementationOnce(async (_agentId, changes) => {
+      sent.push(changes);
+      return {
+        ok: true,
+        status: 200,
+        value: {
+          ok: true,
+          commit: null,
+          outcomes: [{ status: "refused", reason: "held" }],
+          undo: [],
+          files: files(),
+        },
+      };
+    });
+    await editor.save();
+    expect($(".editor-foot").textContent).toContain(F.refusals.held);
+    expect($(".skl-i .skl-alert")).not.toBeNull();
+    keep("brief").click();
+    expect($(".skl-i .skl-alert")).toBeNull();
+    expect($(".dirty").textContent).toBe(T.editor.allSaved);
+  });
+
+  it("leaves a conflict with the edit a kept removal gives back", async () => {
+    const mine = SKILL.replace("Writes a brief.", "Writes briefs.");
+    const theirs = SKILL.replace("Writes a brief.", "Writes notes.");
+    const brief = files().skills[0];
+    await skills();
+    $(".skl-r").click();
+    key($(".files-skills"), "e", { ctrlKey: true });
+    type($(".files-skills .doc-input"), mine);
+    $(".backb").click();
+    remove("brief").click();
+    io.save.mockImplementationOnce(async (_agentId, changes) => {
+      sent.push(changes);
+      return {
+        ok: true,
+        status: 200,
+        value: {
+          ok: true,
+          commit: null,
+          outcomes: [{ status: "conflict", current: { content: theirs, version: V(4) } }],
+          undo: [],
+          files: files({
+            skills: [{ ...brief, content: theirs, description: "Writes notes.", version: V(4) }],
+          }),
+        },
+      };
+    });
+    await editor.save();
+    keep("brief").click();
+    // The edit started from the same version as the removal: the vault's newer one still shows.
+    expect($(".skl-i .skl-alert")).not.toBeNull();
+    $(".skl-r").click();
+    expect($(".files-skills .files-conflict b").textContent).toBe(F.conflict.title);
+    expect($(".files-skills .doc-input").value).toBe(mine);
+    await editor.save();
+    expect(sent[1]).toEqual([{ file: "skill", name: "brief", content: mine, version: V(3) }]);
+  });
+
+  it("shows a removal that conflicts, and removes the vault's version once kept", async () => {
+    const theirs = SKILL.replace("Writes a brief.", "Writes briefs.");
+    const brief = files().skills[0];
+    await skills();
+    remove("brief").click();
+    // The vault holds a newer brief, until a removal names its version.
+    io.save.mockImplementation(async (_agentId, changes) => {
+      sent.push(changes);
+      const newer = changes[0].version !== V(4);
+      return {
+        ok: true,
+        status: 200,
+        value: {
+          ok: true,
+          commit: newer ? null : V(6),
+          outcomes: [
+            newer
+              ? { status: "conflict", current: { content: theirs, version: V(4) } }
+              : { status: "saved", version: null },
+          ],
+          undo: [],
+          files: files({
+            skills: newer
+              ? [{ ...brief, content: theirs, description: "Writes briefs.", version: V(4) }]
+              : [],
+          }),
+        },
+      };
+    });
+    await editor.save();
+    expect($(".editor-foot").textContent).toContain(T.editor.failed.skills);
+    expect($(".editor-foot").textContent).toContain(F.conflict.title);
+    expect($(".skl-i").classList.contains("removing")).toBe(true);
+    expect($(".skl-i .skl-alert")).not.toBeNull();
+    // Saving again names the version the removal started from: still a conflict.
+    await editor.save();
+    expect(sent[1]).toEqual([{ file: "skill", name: "brief", content: null, version: V(3) }]);
+    keep("brief").click();
+    expect($(".skl-i .skl-alert")).toBeNull();
+    expect($(".skl-r .sd").textContent).toBe("Writes briefs.");
+    remove("brief").click();
+    await editor.save();
+    expect(sent[2]).toEqual([{ file: "skill", name: "brief", content: null, version: V(4) }]);
+    expect($(".save").dataset.state).toBe("done");
+  });
+});
+
 describe("installing a skill", () => {
   const installView = async () => {
     await open();
