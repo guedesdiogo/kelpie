@@ -1,5 +1,5 @@
 /* Kelpie: the agent mascot engine (ADR-0045) and the previews' motion helpers, as one classic script.
- * The engine is apps/ingress/public/webchat/mascot*.js as of 5f4a9ec, unchanged
+ * The engine is apps/ingress/public/webchat/mascot*.js as of 5a5de92, unchanged
  * but for its import and export lines.
  * window.Kelpie.mascot is the engine; window.Kelpie.ui the helpers. */
 (function () {
@@ -864,6 +864,10 @@ function buildMascot(mascot, { uid, px, hex, work = true, hands = true }) {
   const headVariation = mascot.head.variation;
   const accessory = mascot.accessory.type;
   const accessoryVariation = mascot.accessory.variation;
+  // A shape with no room above its head sets its pointed ears lower than its other heads; a head
+  // bow and the listening mitten follow the ears it shows.
+  const ears =
+    head === "ears" && headVariation === "pointed" ? (shape.pointed ?? shape.ears) : shape.ears;
   // A hat hides what sits in the middle of the head.
   const hat = accessory === "hat";
   let backHard = "";
@@ -871,8 +875,7 @@ function buildMascot(mascot, { uid, px, hex, work = true, hands = true }) {
   let frontEars = "";
   let mohawk = null;
   if (head === "ears" && headVariation === "pointed") {
-    // A shape with no room above its head sets these ears lower than its other heads.
-    backEars = (shape.pointed ?? shape.ears)
+    backEars = ears
       .map(([x, y, a]) => {
         const side = (d) => (a < 0 ? d : mirror(d));
         return `<g transform="translate(${x} ${y}) translate(0 -2.8) rotate(${a})"><g class="m-ear">${piece(
@@ -1016,7 +1019,7 @@ function buildMascot(mascot, { uid, px, hex, work = true, hands = true }) {
     lower = `<g transform="translate(${cx} ${cy + 3})"><ellipse class="csh" cx="1" cy="5" rx="14" ry="3.6"/><path class="gloss" d="M0,0 L-11,-6.5 Q-13.5,0 -11,6.5 Z"/><path class="gloss" d="M0,0 L11,-6.5 Q13.5,0 11,6.5 Z"/><path class="hl" d="M-9.6,-4 Q-11.2,-.6 -10.2,2.6 M9.4,-4.4 Q10.6,-2 10.2,0"/><rect class="gloss" x="-3" y="-3.4" width="6" height="6.8" rx="2"/><path class="hl" d="M-1.4,-2.2 H1.2"/></g>`;
   }
   if (accessory === "bow" && accessoryVariation === "head") {
-    const [x, y] = shape.ears[0];
+    const [x, y] = ears[0];
     onTop = `<g transform="translate(${x + 3} ${y + 3}) rotate(-20)"><g class="bow"><ellipse class="csh" cx="1" cy="5" rx="13" ry="3.4"/><path class="satin" d="M0,0 C-5,-9 -15,-8 -13,0 C-12,7 -4,5 0,0 Z"/><path class="satin" d="M0,0 C5,-9 15,-8 13,0 C12,7 4,5 0,0 Z"/><path class="hl" d="M-11.4,-2 Q-9.6,-6.4 -5,-5.6 M11.4,-2 Q9.6,-6.4 5,-5.6"/><circle class="knot" r="2.8"/><circle class="wht" cx="-.8" cy="-.9" r=".7" opacity=".7"/></g></g>`;
   }
   if (hat) {
@@ -1212,7 +1215,7 @@ function buildMascot(mascot, { uid, px, hex, work = true, hands = true }) {
     html,
     pieces,
     size,
-    anchors: { fx, fy, spread, tx, ty, ear: head === "ears" ? shape.ears[1] : null },
+    anchors: { fx, fy, spread, tx, ty, ear: head === "ears" ? ears[1] : null },
   };
 }
 
