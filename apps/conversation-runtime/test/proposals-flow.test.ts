@@ -41,6 +41,8 @@ function worlds(master: FakeWorld, others: FakeWorld) {
       create: (assignee, task, creator) => host(assignee).createTaskFor(task, creator),
       comment: (assignee, taskId, text, by) =>
         host(assignee).commentTaskAs(taskId, text, by, "chat"),
+      takeHandoff: (id) => host(id).takeHandoff(),
+      returnHandoff: (id) => host(id).returnHandoff(),
     }),
   ];
   const isMaster = (request: RoutedRequest) => request.system.includes("# Skill: configure-kelpie");

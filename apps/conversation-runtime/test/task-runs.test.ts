@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { REGISTRY_NAME, type TaskView } from "@kelpie/config";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { replaceTaskRunnerForTesting } from "../src/agent-host/agent-host.ts";
+import { MAX_UNATTENDED_HANDOFFS } from "../src/agent-host/tasks.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import { taskTools } from "../src/task-tools.ts";
 import { type FakeWorld, fakeWorld, held, reply, toolCalls } from "./fakes.ts";
@@ -27,6 +28,8 @@ function use(world: FakeWorld): FakeWorld {
       create: (assignee, task, creator) => host(assignee).createTaskFor(task, creator),
       comment: (assignee, taskId, text, by) =>
         host(assignee).commentTaskAs(taskId, text, by, "chat"),
+      takeHandoff: (id) => host(id).takeHandoff(),
+      returnHandoff: (id) => host(id).returnHandoff(),
     }),
   ];
   replacePortsForTesting(world.ports);
@@ -388,6 +391,49 @@ describe("tasks between agents (#335)", () => {
     expect(await master.kelpieNote("someone-else", "u-owner", "Hello.")).toBe(false);
     expect(await master.kelpieNote("kelpie", "", "Hello.")).toBe(false);
     expect(await master.kelpieNote("kelpie", "u-owner", "")).toBe(false);
+  });
+
+  it("hands off from a task's run only within the day's cap (#345)", async () => {
+    await registry().add("runs-capped", "Capped", owner);
+    for (let i = 0; i < MAX_UNATTENDED_HANDOFFS; i++) {
+      expect(await host("kelpie").takeHandoff()).toBe(true);
+    }
+    // The run waits on other work after the refusal: no news, so no other turn takes a script.
+    const world = use(
+      fakeWorld([
+        toolCalls({
+          name: "create_task",
+          input: { agentId: "runs-capped", title: "Quote", body: "Padaria Silva." },
+        }),
+        toolCalls({
+          name: "wait_on_task",
+          input: { reason: "dependency", question: "Waiting for a slot." },
+        }),
+        reply("Waiting."),
+      ]),
+    );
+    const task = await queue("kelpie", "Get a quote");
+    await until(async () => {
+      expect((await statusOf("kelpie", task.id)).status).toBe("waiting");
+    });
+    // The model read the refusal of a run, and no task was made.
+    const refused = world.requests[1]?.messages.at(-1);
+    expect(refused).toMatchObject({
+      role: "tool",
+      results: [
+        {
+          isError: true,
+          output: expect.stringContaining(
+            "Do the work yourself, or ask the owner with wait_on_task.",
+          ),
+        },
+      ],
+    });
+    expect(await host("runs-capped").listTasks()).toEqual([]);
+    // Master's day starts over for the tests after this one.
+    for (let i = 0; i < MAX_UNATTENDED_HANDOFFS; i++) await host("kelpie").returnHandoff();
+    expect(await host("kelpie").takeHandoff()).toBe(true);
+    await host("kelpie").returnHandoff();
   });
 
   it("lets only the owning agent hand an agent work, and records both", async () => {
