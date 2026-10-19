@@ -98,7 +98,7 @@ The runner tells Kelpie what every Claude Code session on the server is doing: t
 
 The hook is `tools/runner/hooks/session-event.ts`, run with Bun from the runner's checkout. It reads the event from its input, writes the spool, and always exits 0, within 1.5 seconds even when its input never ends: Claude Code doesn't time out a hook that runs in the background. It never uses the network, and holds no secret. It takes about 25 ms and 26 MB per event, on every tool call, since `PostToolUse` is one of its events.
 
-Running sessions pick up an edit to `settings.json` without a restart (#416). On the server, as the runner's user, with the runner's checkout in `~/kelpie` and `jq` installed:
+Running sessions pick up an edit to `settings.json` without a restart (#416). On the server, as the runner's user, with the runner's checkout in `~/Repos/kelpie` and `jq` installed:
 
 ```bash
 f=$(readlink -f ~/.claude/settings.json)
@@ -106,7 +106,7 @@ if [ -z "$f" ] || [ ! -f "$f" ]; then
   echo "settings.json unchanged: ~/.claude/settings.json doesn't lead to a file"
 else
   [ -e "$f.bak" ] || cp -p "$f" "$f.bak"
-  hook='{"type":"command","command":"cd \"$HOME/kelpie/tools/runner\" && exec \"$HOME/.bun/bin/bun\" --no-env-file --config=hooks/bunfig.toml hooks/session-event.ts","async":true,"timeout":2}'
+  hook='{"type":"command","command":"cd \"$HOME/Repos/kelpie/tools/runner\" && exec \"$HOME/.bun/bin/bun\" --no-env-file --config=hooks/bunfig.toml hooks/session-event.ts","async":true,"timeout":2}'
   if cp -p "$f" "$f.new" && jq --argjson hook "$hook" '
   def ours: any((.hooks // [])[]; (.command // "") | tostring
     | contains("kelpie/tools/runner") and contains("hooks/session-event.ts"));
@@ -125,7 +125,7 @@ fi
 
 - **It keeps the file safe:** it follows `settings.json` to the real file when it is a symlink, so the link stays. It backs that file up to `settings.json.bak` unless a backup is already there, writes the result beside it with the same mode, checks that it is JSON, and only then moves it over. A `settings.json` that isn't JSON, or a link that leads to no file, stays as it was, and the command says `settings.json unchanged`.
 - **It adds one group per event,** beside the hooks already there, and replaces its own on a second run: any hook whose command names `kelpie/tools/runner` and `hooks/session-event.ts`.
-- **The command moves to the runner's checkout first.** Claude Code runs a hook from the session's folder, and Bun would load that folder's `bunfig.toml`, its `preload` included, and its `.env`: a repository could then run code as you on its first event. So the hook runs from `~/kelpie/tools/runner`, with the empty `hooks/bunfig.toml` as its settings and no `.env`. Claude Code runs the command through `sh`, which expands `$HOME`.
+- **The command moves to the runner's checkout first.** Claude Code runs a hook from the session's folder, and Bun would load that folder's `bunfig.toml`, its `preload` included, and its `.env`: a repository could then run code as you on its first event. So the hook runs from `~/Repos/kelpie/tools/runner`, with the empty `hooks/bunfig.toml` as its settings and no `.env`. Claude Code runs the command through `sh`, which expands `$HOME`.
 
 Each event gets this entry:
 
@@ -137,7 +137,7 @@ Each event gets this entry:
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"$HOME/kelpie/tools/runner\" && exec \"$HOME/.bun/bin/bun\" --no-env-file --config=hooks/bunfig.toml hooks/session-event.ts",
+            "command": "cd \"$HOME/Repos/kelpie/tools/runner\" && exec \"$HOME/.bun/bin/bun\" --no-env-file --config=hooks/bunfig.toml hooks/session-event.ts",
             "async": true,
             "timeout": 2
           }
@@ -185,12 +185,12 @@ fi
 
 On the VPS, as the user whose claude.ai login Claude Code uses:
 
-1. **Install Bun,** clone this repository into `~/kelpie`, and install the runner's dependencies only. `--production` leaves out the test tools, and `--frozen-lockfile` installs exactly the versions in `bun.lock`:
+1. **Install Bun,** clone this repository into `~/Repos/kelpie`, where the service and the hook's command expect it, and install the runner's dependencies only. `--production` leaves out the test tools, and `--frozen-lockfile` installs exactly the versions in `bun.lock`:
 
    ```bash
    curl -fsSL https://bun.sh/install | bash
-   git clone https://github.com/guedesdiogo/kelpie.git ~/kelpie
-   cd ~/kelpie && bun install --production --frozen-lockfile --filter @kelpie/runner
+   git clone https://github.com/guedesdiogo/kelpie.git ~/Repos/kelpie
+   cd ~/Repos/kelpie && bun install --production --frozen-lockfile --filter @kelpie/runner
    ```
 
    This user must be logged in to Claude Code with the claude.ai account that the `claude-code` route uses (ADR-0037 §5): the Agent SDK's Claude Code reads that login from `~/.claude`.
@@ -213,7 +213,7 @@ On the VPS, as the user whose claude.ai login Claude Code uses:
 
    ```bash
    mkdir -p ~/.config/systemd/user
-   cp ~/kelpie/tools/runner/kelpie-runner.service ~/.config/systemd/user/
+   cp ~/Repos/kelpie/tools/runner/kelpie-runner.service ~/.config/systemd/user/
    systemctl --user daemon-reload
    systemctl --user enable --now kelpie-runner
    sudo loginctl enable-linger "$USER"
@@ -317,7 +317,9 @@ The `claude-code` route is off until you turn it on (#295, #421): ask Master, wh
 ## Operating it
 
 - **Logs:** `journalctl --user -u kelpie-runner`. Each request logs its method, path and status, never its headers or body. Claude Code's stderr, and how a session ended, are logged there too.
-- **Updating:** `git -C ~/kelpie pull --ff-only`, then `bun install --production --frozen-lockfile --filter @kelpie/runner` in `~/kelpie`, then `systemctl --user restart kelpie-runner`. When `tools/runner/kelpie-runner.service` changed, copy it to `~/.config/systemd/user/` again and run `systemctl --user daemon-reload` before the restart. A merge into `main` doesn't deploy the runner: it is the owner's server.
+- **Updating:** `git -C ~/Repos/kelpie pull --ff-only`, then `bun install --production --frozen-lockfile --filter @kelpie/runner` in `~/Repos/kelpie`, then `systemctl --user restart kelpie-runner`. When `tools/runner/kelpie-runner.service` changed, copy it to `~/.config/systemd/user/` again and run `systemctl --user daemon-reload` before the restart. A merge into `main` doesn't deploy the runner: it is the owner's server.
+  - **A pull alone updates it too.** The runner runs the checkout's code from its next restart, as after a failure or a reboot, and the hook from its next event. So when something else pulls the checkout, as a daily fast-forward of `main`, run the install after any pull that changed `bun.lock`: otherwise the runner restarts on new code with the old dependencies. The hook imports no package, so it needs no install.
+  - **Work on Kelpie in another worktree.** Keep this checkout on `main`, with nothing uncommitted: a branch or an edit there is what the runner runs from its next restart, and the hook at once.
 - **Rotating the secret:**
   1. Add the new secret as a second line of the file, and restart the runner. It now accepts both.
   2. Give Kelpie the new secret, through a new `connectRunner` form.
