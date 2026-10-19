@@ -72,6 +72,10 @@ describe("identitySection", () => {
     expect(line("subagent")).toContain(
       "You are Bia, a temporary subagent on Kelpie, working on one demand of the agent that created you.",
     );
+    // A role cached before ADR-0060 reads as unlisted, until a fresh read.
+    expect(
+      identitySection({ id: "bia", name: "Bia", role: "main" as never, model: null }),
+    ).toContain("You are Bia, one of the owner's agents on Kelpie");
     // An agent the Registry doesn't list keeps the plain line.
     expect(identitySection({ id: "bia", name: "Bia", role: null, model: null })).toContain(
       "You are Bia, one of the owner's agents on Kelpie",

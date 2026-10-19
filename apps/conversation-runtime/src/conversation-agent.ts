@@ -101,6 +101,7 @@ import {
 import { bareHttpsOrigin, heldTools, setupNote } from "./configuration.ts";
 import migrations from "./migrations/migrations.js";
 import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
+import { readRole } from "./registry/schema.ts";
 import { failureNotice, routeNotice } from "./route-notices.ts";
 import * as schema from "./schema.ts";
 import { SUBAGENT_TOOLS } from "./subagent-limits.ts";
@@ -941,7 +942,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const roster = this.#get<AgentConfig["agent"] | null>("roster", null);
     const subagent = roster?.role === "subagent";
     // A turn stored before #290 has no allowlist in its settings: it has none (#344).
-    const held = heldTools(roster?.role ?? null, settings.tools ?? null);
+    // A roster stored before ADR-0060 names Master by its old value.
+    const held = heldTools(readRole(roster?.role), settings.tools ?? null);
     const named = held === null ? null : new Set(held);
     // A subagent's tools also stay within its creator's allowlist (ADR-0036 §5).
     const creators =

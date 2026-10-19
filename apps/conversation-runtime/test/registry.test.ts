@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { RETIRED_AGENT_ID } from "@kelpie/config";
 import { describe, expect, it } from "vitest";
 import seedMaster from "../src/registry/migrations/0003_seed_main_agent.sql";
+import { readRole, STORED_MASTER_ROLE } from "../src/registry/schema.ts";
 
 // Each test uses its own Registry instance; Kelpie itself runs one, named REGISTRY_NAME.
 const registry = (name: string) => env.REGISTRY.getByName(name);
@@ -126,12 +127,32 @@ describe("Registry", () => {
 });
 
 describe("Registry roles (#288)", () => {
+  it("reads Master's stored role, and only it, as `master` (ADR-0060)", () => {
+    expect(STORED_MASTER_ROLE).toBe("main");
+    expect(readRole(STORED_MASTER_ROLE)).toBe("master");
+    for (const role of ["master", "specialist", "subagent"] as const) {
+      expect(readRole(role)).toBe(role);
+    }
+    expect(readRole(null)).toBeNull();
+    expect(readRole(undefined)).toBeNull();
+  });
+
   it("makes an agent Master: the previous one and every specialist become its own", async () => {
     const stub = registry("set-master");
     await stub.add("sales", "Sales", owner);
     await stub.add("bia", "Bia", owner);
 
     expect(await stub.setMaster("bia", { ...owner, via: "agent:kelpie" })).toEqual({ ok: true });
+    // The rows keep the stored value from before ADR-0060, so a rollback still finds its Master.
+    const rows = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql
+        .exec("SELECT id, role FROM agents WHERE id IN ('bia', 'kelpie') ORDER BY id")
+        .toArray(),
+    );
+    expect(rows).toEqual([
+      { id: "bia", role: STORED_MASTER_ROLE },
+      { id: "kelpie", role: "specialist" },
+    ]);
     expect(await stub.list()).toEqual([
       { id: "bia", name: "Bia", role: "master", owner: null, chat: true },
       // The previous Master keeps chatting, now as a specialist.

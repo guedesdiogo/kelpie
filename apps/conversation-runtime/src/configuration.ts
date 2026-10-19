@@ -290,7 +290,7 @@ const NO_KEY = failed(
 const MEMORY_ROUTE = failed(
   "claude-code serves only conversations, never memory: name another provider for memory, or none.",
 );
-const NOT_MAIN = failed("A subagent can't be Master.");
+const SUBAGENT_NOT_MASTER = failed("A subagent can't be Master.");
 const NOT_SPECIALIST = failed(
   "Only a specialist's chat can change: Master always chats, and a subagent never does.",
 );
@@ -418,7 +418,7 @@ const TEXTS: Localized<{
   changeSettings: (agent: string, id: string, changes: string) => string;
   /** After a change to Master's tools: the list never removes its orchestration tools (#391). */
   masterKeeps: string;
-  mainAgent: (agent: string, id: string) => string;
+  makeMaster: (agent: string, id: string) => string;
   models: (before: string, after: string) => string;
   /** Turning the claude-code route on or off: either way it names the weekly limit it spends. */
   claudeCode: (on: boolean) => string;
@@ -435,7 +435,7 @@ const TEXTS: Localized<{
     changeSettings: (agent, id, changes) =>
       `change the settings of the agent ${agent} (${id}): ${changes}.`,
     masterKeeps: "Master keeps its configuration, subagent and task tools whatever the list.",
-    mainAgent: (agent, id) =>
+    makeMaster: (agent, id) =>
       `make the agent ${agent} (${id}) Master, the one you talk to, which also configures Kelpie.`,
     models: (before, after) =>
       `set the models every agent uses unless it has its own, from ${before} to ${after}.`,
@@ -465,7 +465,7 @@ const TEXTS: Localized<{
       `alterar as configurações do agente ${agent} (${id}): ${changes}.`,
     masterKeeps:
       "O Master mantém as tools de configuração, de subagentes e de tarefas, qualquer que seja a lista.",
-    mainAgent: (agent, id) =>
+    makeMaster: (agent, id) =>
       `tornar o agente ${agent} (${id}) o Master, o que conversa com você e configura o Kelpie.`,
     models: (before, after) =>
       `definir os modelos que todo agente usa quando não tem os seus, de ${before} para ${after}.`,
@@ -495,7 +495,7 @@ const TEXTS: Localized<{
       `cambiar la configuración del agente ${agent} (${id}): ${changes}.`,
     masterKeeps:
       "El Master conserva las tools de configuración, de subagentes y de tareas, sea cual sea la lista.",
-    mainAgent: (agent, id) =>
+    makeMaster: (agent, id) =>
       `convertir el agente ${agent} (${id}) en el Master, el que conversa contigo y configura Kelpie.`,
     models: (before, after) =>
       `definir los modelos que usa todo agente que no tenga los suyos, de ${before} a ${after}.`,
@@ -858,7 +858,7 @@ export function configurationTools(
         const agent = await agentOf(context, fields(input).id);
         if (!("id" in agent)) return agent;
         // Checked before the owner is asked: a yes that can't change anything isn't asked for.
-        if (agent.role === "subagent") return NOT_MAIN;
+        if (agent.role === "subagent") return SUBAGENT_NOT_MASTER;
         if (agent.role === "master") {
           return { output: `The agent ${agent.id} is already Master; nothing changed.` };
         }
@@ -866,12 +866,12 @@ export function configurationTools(
         const confirmed = await context.confirm({
           command: "setMaster",
           input: change,
-          summary: TEXTS[context.locale].mainAgent(JSON.stringify(agent.name), agent.id),
+          summary: TEXTS[context.locale].makeMaster(JSON.stringify(agent.name), agent.id),
         });
         if (!confirmed) return { output: WAITING };
         const result = await commands.setMaster(context.actor, change);
         if (!result.ok)
-          return result.reason === "not_allowed" ? NOT_MAIN : refusal(result, agent.id);
+          return result.reason === "not_allowed" ? SUBAGENT_NOT_MASTER : refusal(result, agent.id);
         // The tools go with the role (ADR-0048): the caller, Master until now, can't call them.
         return {
           output: `The agent ${agent.id} is now Master: the one the owner talks to. Your configuration tools went with the role: from now on, ${agent.id} configures Kelpie.`,

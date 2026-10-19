@@ -1,3 +1,4 @@
+import type { AgentRole } from "@kelpie/config";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 // Which agents exist (ADR-0015 left it to Story 3.10). Each AgentHost owns its own configuration.
@@ -7,6 +8,14 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
  * Registry maps it to `master`, so no caller sees it.
  */
 export const STORED_MASTER_ROLE = "main";
+
+/**
+ * A role as callers see it: Master's stored value, or one cached from before ADR-0060, reads as
+ * `master`.
+ */
+export function readRole(role: string | null | undefined): AgentRole | null {
+  return role === STORED_MASTER_ROLE ? "master" : ((role ?? null) as AgentRole | null);
+}
 
 export const agents = sqliteTable("agents", {
   id: text("id").primaryKey(),

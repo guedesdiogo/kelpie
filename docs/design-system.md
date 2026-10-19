@@ -726,7 +726,7 @@ Frequent. One step away, from the owner's account: the sidebar's foot (5.24), or
   - The lab's segmented control: a `--sunken` track with its boundary in `--muted`, and a `--surface` chip under the chosen one. The chip slides with `--spring-fast` for the pointer and jumps for the arrows.
   - The theme applies at once, the page crossfades in `--dur-fade`, and the chosen icon turns into place with `--spring-base`: the screen settles, the sun turns a quarter, the moon tilts.
 - **Less motion and More contrast,** as switches, each with its icon before its words: a circle with one trail, and a rounded square split on its diagonal, never the half-filled circle of working. They are the switch of rule 10 and the higher-contrast set of §1. The system's reduced motion can't be turned off here; the switch only adds to it.
-- **The mascot's setting** joins them once the owner has answered its question (5.19). Each choice draws the mascot's own outline, with Master's mascot's round ears (ADR-0049): mid-hop for Alive, with 5.19's badge for States only, standing on a line for Still. Under reduced motion it can't move, and says why.
+- **The mascot's setting** joins them once the owner has answered its question (5.19). Each choice draws the mascot's own outline, with the round ears of Master's mascot (ADR-0049): mid-hop for Alive, with 5.19's badge for States only, standing on a line for Still. Under reduced motion it can't move, and says why.
 - **The version** closes the menu, in Geist Mono `--muted` (decision 5). A press copies it, and "Copied" shows in its place for 1.5 s.
 - **They are stored in this browser** until the comfort step of 5.17 exists.
 - **They apply before the first paint.** A small script in the page's head sets them on `<html>`, so the page never flashes the wrong theme. The phone's browser bar takes the page's background.
@@ -739,7 +739,7 @@ Frequent, and still: the logo never moves ([ADR-0049](adr/0049-logo-main-mascot-
 - **The files.** `scripts/brand-icons.mjs` draws them all:
   - in `docs/brand/`, the mark (`kelpie-mark.svg`), its lockups for light and dark, the 16 px favicon master (`favicon-16.svg`) and the sources of the home-screen icons (`app-icon.svg`, `app-icon-rounded.svg` and `app-icon-maskable.svg`);
   - the webchat's icons, listed under the favicon below.
-- **The mark** is Master's mascot's `mark` shape with its round ears, in one color: no face, fur, accessory or shadow.
+- **The mark** is the `mark` shape of Master's mascot with its round ears, in one color: no face, fur, accessory or shadow.
   - It comes from the engine's 120 grid: the shape at 24..96 × 36..108 with corners 36, 36, 36 and 11.5, and the ears, circles of 10.5 at (38, 42) and (82, 42).
   - If Master's default mascot changes, the mark changes with it, through a new ADR.
 - **The lockup** sets the mark beside "Kelpie" in Bricolage Grotesque 680, tracking −0.03em, with the font's kerning:

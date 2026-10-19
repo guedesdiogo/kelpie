@@ -80,7 +80,7 @@ Motion depends on how often an interaction happens, not on which screen it is in
 
 ## Logo
 
-- The logo is the main mascot's silhouette, in `accent` (Logo card, 5.23). Use it only as the brand, never in place of an agent's mascot, and never in `warm`. On anything but `bg`, `surface` and `sunken`, set the mark in `on-accent` on an `accent` tile.
+- The logo is Master's mascot as a silhouette, in `accent` (Logo card, 5.23). Use it only as the brand, never in place of an agent's mascot, and never in `warm`. On anything but `bg`, `surface` and `sunken`, set the mark in `on-accent` on an `accent` tile.
 
 ## Iconography
 

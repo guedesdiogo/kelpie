@@ -35,7 +35,7 @@ No reference project covers renaming an agent role.
 - The Registry's `role` column keeps the value `main` for Master, and the audit keeps the action `agent.main_set`.
 - The Registry maps the stored role to `master` when it reads a row, and writes `main` when it makes one Master. No caller sees the stored value.
 - Rewriting the column would make a rollback barrier (ADR-0029), so the mapping keeps the migrations add-only. Rewriting it is left for when the owner wants a barrier for it.
-- A role cached before this decision, which an `AgentHost` reads only while the Registry fails, counts as unlisted until a fresh read.
+- A role cached before this decision reads as `master` too. That covers an `AgentHost`'s last-seen identity and a conversation's roster, through the same `readRole` the Registry uses.
 
 ### 3. Nothing calls the setup agent
 
@@ -61,6 +61,11 @@ No reference project covers renaming an agent role.
 
 - **A script calling `/commands/setMainAgent` gets 404,** and a confirmation opened before the deploy for `setMainAgent` has to be asked again.
 - **A rollback reads the database as before,** since the stored values didn't change.
+- **During the deploy,** for the minutes between `conversation-runtime` and the Workers deployed after it:
+  - the old `ingress` names no agent Master, so the webchat opens the first agent it lists;
+  - the old admin API's `setMainAgent` fails;
+  - a webchat tab left open across the deploy shows no Master until it reloads.
+- **A runner form opened in the 15 minutes before the deploy** kept its wait on the retired id's `AgentHost`, so its note is lost. The owner then says they're done.
 - **Tests cover:**
   - the Registry's mapping and its stored value;
   - `set_master` and the specialty «Master» in three languages;

@@ -301,7 +301,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
  * rules hold whatever the row says: Master chats, a subagent never does.
  */
 function entryOf(row: typeof schema.agents.$inferSelect): AgentEntry {
-  const role = row.role === schema.STORED_MASTER_ROLE ? "master" : row.role;
+  const role = schema.readRole(row.role) ?? "specialist";
   const chat = role === "master" || (role === "specialist" && row.chat);
   return { id: row.id, name: row.name, role, owner: row.ownerId, chat };
 }

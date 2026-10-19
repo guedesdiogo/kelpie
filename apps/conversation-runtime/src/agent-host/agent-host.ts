@@ -53,6 +53,7 @@ import { and, desc, eq, isNotNull, lte, notLike } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import { CONFIGURE_KELPIE_SKILL, heldTools } from "../configuration.ts";
+import { readRole } from "../registry/schema.ts";
 import { identitySection } from "./identity.ts";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
@@ -360,7 +361,8 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     // A subagent's creator is pinned on its own object when it is made (#290): the Registry not
     // answering never makes it anything else.
     const pinned = this.#get<string | null>("creator", null);
-    const role = pinned !== null ? "subagent" : (listed.value?.role ?? null);
+    // A role cached before ADR-0060 reads as `master` too.
+    const role = pinned !== null ? "subagent" : readRole(listed.value?.role);
     const owner = pinned ?? listed.value?.owner ?? null;
     const limits = role === "subagent" && owner ? await this.#creatorLimits(owner) : null;
     // A subagent never runs above its creator (ADR-0036 §5), field by field, at every turn.
