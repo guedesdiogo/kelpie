@@ -29,9 +29,11 @@ import {
   agentModel,
   DEFAULT_SETTINGS,
   isAgentId,
+  isProposalFields,
   isProposalId,
   isTaskId,
   isTaskStatus,
+  MAX_PROPOSAL_REASON,
   MAX_TASK_TITLE,
   type Mascot,
   mascotFor,
@@ -770,12 +772,16 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   }
 
   /**
-   * Kelpie's comment on an open task of this agent's (#302): it resumes a waiting task, as any
-   * answer does, and reaches a running one's run. False for a task that is gone or closed.
+   * Kelpie's comment on an open task of this agent's (#302): it resumes a task waiting on other
+   * work, and reaches a running one's run. False for a task that is gone or closed. One already
+   * made through `via`, by an outcome told again, isn't made twice.
    */
   async #kelpieComment(taskId: string, text: string, via: string): Promise<boolean> {
     const task = this.#tasks.get(taskId);
     if (!task.ok || task.value.status === "done" || task.value.status === "cancelled") return false;
+    if (task.value.events.some((event) => event.kind === "commented" && event.via === via)) {
+      return true;
+    }
     const actingUserId = this.#tasks.actingUserOf(taskId) ?? "";
     const commented = this.#tasks.comment(
       taskId,
@@ -1417,15 +1423,12 @@ export function outcomeNote({ id, target, status, fields }: ProposalOutcome): st
       return `Y${what.slice(1)} expired: the owner didn't decide it in time. ${again}`;
     case "conflict":
       return `The owner approved ${what}, but the agent ${target} changed since you proposed it, so it wasn't applied. ${again}`;
+    case "void":
+      return `Y${what.slice(1)} no longer applies: an agent it named was deleted. ${again}`;
   }
 }
 
-const OUTCOMES: readonly string[] = ["applied", "refused", "expired", "conflict"];
-const isFields = (fields: unknown): fields is string[] =>
-  Array.isArray(fields) &&
-  fields.length > 0 &&
-  fields.length <= 8 &&
-  fields.every((field) => typeof field === "string" && /^[a-zA-Z]{1,32}$/.test(field));
+const OUTCOMES: readonly string[] = ["applied", "refused", "expired", "conflict", "void"];
 
 function isProposalOutcome(outcome: unknown): outcome is ProposalOutcome {
   const { id, target, taskId, actingUserId, status, fields } = (outcome ??
@@ -1436,7 +1439,7 @@ function isProposalOutcome(outcome: unknown): outcome is ProposalOutcome {
     (taskId === null || isTaskId(taskId)) &&
     isUserId(actingUserId) &&
     OUTCOMES.includes(status as string) &&
-    isFields(fields)
+    isProposalFields(fields)
   );
 }
 
@@ -1449,9 +1452,9 @@ function isProposalNotice(notice: unknown): notice is ProposalNotice {
     isAgentId(target) &&
     isUserId(actingUserId) &&
     typeof reason === "string" &&
-    reason.length <= 500 &&
+    reason.length <= MAX_PROPOSAL_REASON &&
     Number.isFinite(expiresAt) &&
-    isFields(fields)
+    isProposalFields(fields)
   );
 }
 

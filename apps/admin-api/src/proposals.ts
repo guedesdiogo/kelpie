@@ -26,6 +26,8 @@ interface Texts {
   now: string;
   proposed: string;
   none: string;
+  /** A tools setting of `null`: no list, so every tool it is given. */
+  everyTool: string;
   fields: Record<string, string>;
   stale: string;
   approve: string;
@@ -54,6 +56,7 @@ const TEXTS: Localized<Texts> = {
     now: "Now",
     proposed: "Proposed",
     none: "(none)",
+    everyTool: "Every tool it is given: no list limits it.",
     fields: {
       model: "Model",
       tools: "Tools",
@@ -119,6 +122,7 @@ const TEXTS: Localized<Texts> = {
     now: "Agora",
     proposed: "Proposto",
     none: "(nada)",
+    everyTool: "Todas as tools que receber: nenhuma lista o limita.",
     fields: {
       model: "Modelo",
       tools: "Tools",
@@ -187,6 +191,7 @@ const TEXTS: Localized<Texts> = {
     now: "Ahora",
     proposed: "Propuesto",
     none: "(nada)",
+    everyTool: "Todas las tools que reciba: ninguna lista lo limita.",
     fields: {
       model: "Modelo",
       tools: "Tools",
@@ -260,11 +265,11 @@ const STYLE = `
   .meta { color: var(--muted); font-size: 13.5px; margin: 0; }
   .card { display: grid; gap: 16px; }
   .label { color: var(--muted); font-size: 12.5px; margin: 0 0 4px; }
-  blockquote { margin: 0; padding: 8px 12px; border-left: 3px solid var(--line); background: var(--sunken); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  blockquote { margin: 0; padding: 8px 12px; border-left: 3px solid var(--line); background: var(--sunken); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; overflow: hidden; contain: paint; }
   table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
   th, td { text-align: left; vertical-align: top; padding: 8px; border-top: 1px solid var(--line); }
   thead th { color: var(--muted); font-weight: 500; border-top: 0; }
-  pre { margin: 0; padding: 8px; background: var(--sunken); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; font: 12.5px/1.4 ui-monospace, monospace; }
+  pre { margin: 0; padding: 8px; background: var(--sunken); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; overflow: hidden; contain: paint; font: 12.5px/1.4 ui-monospace, monospace; }
   .stale { color: var(--warm); margin: 0; }
   .answers { display: flex; gap: 8px; flex-wrap: wrap; }
   .answers button { width: auto; flex: 1 1 10rem; border-radius: 10px; font-size: 13.5px; font-weight: 500; }
@@ -291,8 +296,12 @@ function written(text: string): string {
   );
 }
 
-/** A setting's value: text as it is, anything else as JSON; escaped either way. */
-function shown(value: unknown, texts: Texts): string {
+/**
+ * A setting's value: text as it is, anything else as JSON; escaped either way. A tools setting of
+ * `null` says what it means, every tool, since it widens most.
+ */
+function shown(field: string, value: unknown, texts: Texts): string {
+  if (field === "tools" && value === null) return `<pre>${escapeHtml(texts.everyTool)}</pre>`;
   if (value === undefined || value === "" || value === null) {
     return `<pre>${escapeHtml(value === null ? "null" : texts.none)}</pre>`;
   }
@@ -306,7 +315,7 @@ export function proposalPage(detail: ProposalDetail, locale: Locale, now: number
   const rows = Object.entries(detail.changes)
     .map(
       ([field, value]) =>
-        `<tr><th scope="row">${escapeHtml(texts.fields[field] ?? field)}</th><td>${detail.current === null ? shown(undefined, texts) : shown((detail.current as Record<string, unknown>)[field], texts)}</td><td>${shown(value, texts)}</td></tr>`,
+        `<tr><th scope="row">${escapeHtml(texts.fields[field] ?? field)}</th><td>${detail.current === null ? shown(field, undefined, texts) : shown(field, (detail.current as Record<string, unknown>)[field], texts)}</td><td>${shown(field, value, texts)}</td></tr>`,
     )
     .join("\n");
   const parts = [

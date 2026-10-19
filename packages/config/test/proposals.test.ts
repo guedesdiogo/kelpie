@@ -79,7 +79,7 @@ describe("a proposal's changes (#302)", () => {
       "It needs the medium tier for long quotes.",
     );
     expect(parseProposalReason("Line one.\nLine two.")).toBe("Line one.\nLine two.");
-    for (const reason of [undefined, 7, "", "   ", "a".repeat(501), "\u200b\u200b"]) {
+    for (const reason of [undefined, 7, "", "   ", "a".repeat(501), "\u200b\u200b", "\u2800"]) {
       expect(parseProposalReason(reason), JSON.stringify(reason)).toBeNull();
     }
   });

@@ -110,6 +110,20 @@ describe("a proposal's page (#302)", () => {
     expect(html).not.toContain("\u200b");
   });
 
+  it("says a tools setting of null means every tool, in both columns", async () => {
+    const widening = world({
+      detail: {
+        ...proposal({ changes: { tools: null }, before: { tools: ["memory_search"] } }),
+        current: { tools: ["memory_search"] },
+        stale: false,
+      },
+    });
+    const html = await (await handle(new Request(pageUrl()), widening.deps)).text();
+
+    expect(html).toContain("Every tool it is given: no list limits it.");
+    expect(html).not.toContain("<pre>null</pre>");
+  });
+
   it("leaves only Refuse, saying why, for a target that changed since", async () => {
     const stale = world({
       detail: {
@@ -210,6 +224,37 @@ describe("deciding on a proposal's page (#302)", () => {
       expect((await handle(request, made.deps)).status).toBe(status);
       expect(made.ran.filter((step) => step.startsWith("decide"))).toEqual([]);
     }
+  });
+});
+
+describe("the proposals' JSON commands (#302)", () => {
+  const command = (name: string, body: unknown) =>
+    new Request(pageUrl(`/commands/${name}`), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("only read: no JSON command decides, claims, finishes or makes a proposal", async () => {
+    const { deps, ran } = world();
+
+    expect((await handle(command("listProposals", { status: "pending" }), deps)).status).toBe(200);
+    const read = await handle(command("getProposal", { id: ID }), deps);
+    expect(read.status).toBe(200);
+    expect(await read.json()).toMatchObject({ ok: true, value: { id: ID, stale: false } });
+    for (const name of [
+      "decideProposal",
+      "proposeAgentChange",
+      "claimProposal",
+      "finishProposal",
+      "refuseProposal",
+    ]) {
+      expect(
+        (await handle(command(name, { id: ID, decision: "approve" }), deps)).status,
+        name,
+      ).toBe(404);
+    }
+    expect(ran.filter((step) => step.startsWith("decide"))).toEqual([]);
   });
 });
 

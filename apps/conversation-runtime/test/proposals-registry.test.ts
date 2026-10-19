@@ -102,6 +102,10 @@ describe("Registry proposals (#302)", () => {
       proposal({ taskId: "7" }),
       proposal({ actingUserId: "" }),
       proposal({ before: null as never }),
+      // The snapshot names the same fields as the change, and stays small.
+      proposal({ before: {} }),
+      proposal({ before: { remit: "" } }),
+      proposal({ before: { spawn: "a".repeat(200_001) as never } }),
     ]) {
       expect(await stub.propose(bad, byMaster), JSON.stringify(bad)).toEqual(invalid);
     }
@@ -186,7 +190,7 @@ describe("Registry proposals (#302)", () => {
     ]);
   });
 
-  it("claims a pending proposal once, and lets a claim stuck past a minute be claimed again", async () => {
+  it("claims a pending proposal once, and finishes it once", async () => {
     const stub = await withAgents("proposals-claim");
     const id = await idOf(await stub.propose(proposal(), byMaster));
 
@@ -195,13 +199,11 @@ describe("Registry proposals (#302)", () => {
       value: { status: "applying" },
     });
     expect(await stub.claimProposal(id, page)).toEqual({ ok: false, reason: "not_pending" });
+    // However long it has been: an approval that never finished is the alarm's to settle.
     await runInDurableObject(stub, (_instance, state) => {
       state.storage.sql.exec("UPDATE proposals SET claimed_at = ?", Date.now() - 61_000);
     });
-    expect(await stub.claimProposal(id, page)).toMatchObject({
-      ok: true,
-      value: { status: "applying" },
-    });
+    expect(await stub.claimProposal(id, page)).toEqual({ ok: false, reason: "not_pending" });
     expect(await stub.finishProposal(id, "applied", page)).toMatchObject({
       ok: true,
       value: { status: "applied", decidedBy: "u-owner" },
@@ -248,10 +250,14 @@ describe("Registry proposals (#302)", () => {
         state.storage.sql.exec("SELECT status FROM proposals").one(),
       ),
     ).toEqual({ status: "pending" });
+    // And it lists as expired, not as pending.
+    expect((await stub.proposals("pending")).map((one) => one.id)).not.toContain(due);
+    expect((await stub.proposals("expired")).map((one) => one.id)).toEqual([due]);
     expect(await stub.claimProposal(due, page)).toMatchObject({
       ok: true,
       value: { status: "expired", decidedBy: null },
     });
+    expect((await stub.proposals("expired")).map((one) => one.id)).toEqual([due]);
     expect(await stub.refuseProposal(due, page)).toEqual({ ok: false, reason: "not_pending" });
 
     const moved = await idOf(await stub.propose(proposal({ target: "books" }), byMaster));
@@ -281,11 +287,58 @@ describe("Registry proposals (#302)", () => {
 
     expect((await stub.proposal(about))?.status).toBe("void");
     expect((await stub.proposal(other))?.status).toBe("pending");
-    expect((await eventsOf(stub)).at(-1)).toEqual({
-      kind: "void",
-      user_id: "u-owner",
-      via: "admin-api",
+    expect((await eventsOf(stub)).filter((event) => event.kind === "void")).toEqual([
+      { kind: "void", user_id: "u-owner", via: "admin-api" },
+    ]);
+    // Its proposer remains, so it hears it, as of any outcome.
+    const told = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql
+        .exec(
+          "SELECT tell_attempts + (next_tell_at IS NOT NULL) AS due FROM proposals WHERE id = ?",
+          about,
+        )
+        .one(),
+    );
+    expect(Number(told.due)).toBeGreaterThan(0);
+  });
+
+  it("tells nothing to a proposer deleted since, and makes no object for it", async () => {
+    const stub = await withAgents("proposals-untold");
+    const id = await idOf(
+      await stub.propose(
+        proposal({
+          proposer: "sales",
+          target: "sales-sub-a1b2c3",
+          changes: { remit: "Quotes." },
+          before: { remit: "" },
+        }),
+        { ...owner, via: "agent:sales" },
+      ),
+    );
+    await stub.remove("sales-sub-a1b2c3", owner);
+    // The void is told at once, and the first try fails: sales has no conversation yet.
+    await vi.waitFor(async () => {
+      const row = await runInDurableObject(stub, (_instance, state) =>
+        state.storage.sql.exec("SELECT tell_attempts FROM proposals WHERE id = ?", id).one(),
+      );
+      expect(row.tell_attempts).toBe(1);
     });
+    await stub.remove("sales", owner);
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE proposals SET next_tell_at = ? WHERE id = ?",
+        Date.now() - 1,
+        id,
+      );
+    });
+
+    await runDurableObjectAlarm(stub);
+
+    const row = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql.exec("SELECT next_tell_at, told_at FROM proposals WHERE id = ?", id).one(),
+    );
+    expect(row).toEqual({ next_tell_at: null, told_at: null });
+    expect((await eventsOf(stub)).at(-1)).toEqual({ kind: "untold", user_id: null, via: "kelpie" });
   });
 
   it("validates a step's input, because it is an RPC boundary", async () => {
@@ -383,6 +436,53 @@ describe("Registry proposals' alarm (#302)", () => {
       "refused",
       "told",
     ]);
+  });
+});
+
+describe("Registry proposals' abandoned approvals (#302)", () => {
+  /** A claimed proposal whose approval never finished, five minutes ago and more. */
+  async function abandoned(stub: ReturnType<typeof registry>, target: string) {
+    const id = await idOf(await stub.propose(proposal({ target }), byMaster));
+    await stub.claimProposal(id, page);
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE proposals SET claimed_at = ? WHERE id = ?",
+        Date.now() - 6 * 60_000,
+        id,
+      );
+    });
+    return id;
+  }
+
+  it("settles one as applied when its target holds the change, as the owner who approved it", async () => {
+    const stub = await withAgents("proposals-abandoned-applied");
+    await stub.add("ab-ops", "Ops", owner);
+    const id = await abandoned(stub, "ab-ops");
+    await env.AGENT_HOST.getByName("ab-ops").configure({ spawn: true }, owner);
+
+    await runDurableObjectAlarm(stub);
+
+    expect(await stub.proposal(id)).toMatchObject({ status: "applied", decidedBy: "u-owner" });
+  });
+
+  it("puts one back to pending when its target doesn't hold the change", async () => {
+    const stub = await withAgents("proposals-abandoned-released");
+    await stub.add("ab-hr", "HR", owner);
+    const id = await abandoned(stub, "ab-hr");
+
+    await runDurableObjectAlarm(stub);
+
+    expect(await stub.proposal(id)).toMatchObject({ status: "pending", decidedAt: null });
+    expect((await eventsOf(stub)).at(-1)).toEqual({
+      kind: "released",
+      user_id: null,
+      via: "kelpie",
+    });
+    // The owner decides it again.
+    expect(await stub.refuseProposal(id, page)).toMatchObject({
+      ok: true,
+      value: { status: "refused" },
+    });
   });
 });
 

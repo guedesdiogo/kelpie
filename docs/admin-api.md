@@ -183,7 +183,7 @@ Each agent has a task board in its `AgentHost` (ADR-0011, #54). The `AgentHost` 
   - **Kelpie announces it.** After the reply, Kelpie names the agent that has the work, by name and id, in the conversation's language: `Kelpie handed a task to "Sales" (sales).` The text is Kelpie's own, so the model can't change or omit it. A turn that sends no reply, because it was refused or cut short, leaves the notice for the next reply in that conversation. Past four agents, the notice counts the rest instead of naming them (#387).
   - **An agent it doesn't own** is refused, and the refusal lists the ones it does own. No task goes to another agent in its place.
   - **Who hears the news:** the agent that created the task; for a task a person created, the assignee's owner, or the assignee itself. Kelpie tells it, in the owner's latest conversation with it, when the task is done, cancelled by its agent, waiting for an answer, or failed twice. A `dependency` wait reaches no one.
-  - **How it answers:** with `comment_task`. A comment on a waiting task, by a person, an agent or Kelpie, puts it back in To do.
+  - **How it answers:** with `comment_task`. A comment on a waiting task, by a person or an agent, puts it back in To do. Kelpie's does only for a task waiting on other work.
   - **Kelpie's own comments** tell a task's agent the outcome of a proposal its run made ("Proposals"). Their author is `kelpie`, and a run reads them as Kelpie's words.
 
 ## Pairing
@@ -226,9 +226,10 @@ An owner agent asks for a change to an agent it owns, and only your act on the p
   - it waits 72 hours, then expires;
   - at most one pending per proposer and target, three per proposer, ten a day per proposer, and twenty in all;
   - it applies only while the target holds the values it was proposed against; otherwise it ends as a conflict, and nothing changes;
+  - an approval that doesn't finish, as when a service fails mid-way, is settled five minutes later: applied when the target holds the change, else back to pending for you to decide again;
   - the applied change is audited on the target as `via: proposal:<id>`, and every step of the proposal in the Registry, with the proposer, the person it acted for and who decided;
   - deleting an agent voids the open proposals by it or about it.
-- **The proposer hears the outcome** from Kelpie: as a comment on the task whose run made it, which resumes it, or else as a note in its latest conversation with you.
+- **The proposer hears the outcome** from Kelpie, void included: as a comment on the task whose run made it, which resumes a task waiting on other work, or else as a note in its latest conversation with you. A task that waits for your answer keeps waiting for it.
 
 ## Secure forms
 

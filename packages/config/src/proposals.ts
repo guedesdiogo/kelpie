@@ -115,9 +115,9 @@ export type ProposalResult =
         | "too_many";
     };
 
-/** The outcome a proposer hears (ADR-0060): every one but `void`, whose proposer or target went. */
+/** The outcome a proposer hears (ADR-0060), when it remains. */
 export type ProposalOutcome = Pick<Proposal, "id" | "target" | "taskId" | "actingUserId"> & {
-  status: "applied" | "refused" | "expired" | "conflict";
+  status: "applied" | "refused" | "expired" | "conflict" | "void";
   fields: string[];
 };
 
@@ -126,6 +126,16 @@ export type ProposalNotice = Pick<
   Proposal,
   "id" | "proposer" | "target" | "actingUserId" | "reason" | "expiresAt"
 > & { fields: string[] };
+
+/** The fields a notice or an outcome names: a proposal's settings' names, and `chat`. */
+export function isProposalFields(fields: unknown): fields is string[] {
+  return (
+    Array.isArray(fields) &&
+    fields.length > 0 &&
+    fields.length <= 8 &&
+    fields.every((field) => typeof field === "string" && /^[a-zA-Z]{1,32}$/.test(field))
+  );
+}
 
 /** Proposal ids are random UUIDs, as task ids are. */
 export function isProposalId(value: unknown): value is string {
@@ -162,11 +172,14 @@ export function mergeModel(current: ModelSettings, proposed: ModelSettings): Mod
   return merged;
 }
 
-/** The agent's reason: up to MAX_PROPOSAL_REASON characters, with something that shows. */
+/**
+ * The agent's reason: up to MAX_PROPOSAL_REASON characters, with something that shows. The Braille
+ * blank shows nothing, as `isAgentName` counts it (#401).
+ */
 export function parseProposalReason(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const reason = value.trim();
-  const shows = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}]/u.test(reason);
+  const shows = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\u2800]/u.test(reason);
   return shows && reason.length <= MAX_PROPOSAL_REASON ? reason : null;
 }
 

@@ -70,9 +70,10 @@ Neither Hermes nor ai-memory expires a proposal, and neither tells the proposer 
   - It applies only while the target still holds them: a target that changed since is a `conflict`, and so is one whose owner changed.
   - The comparison is JSON with sorted keys.
   - A change already in place counts as applied, so an approval that ran again is safe.
+- **An approval that doesn't finish,** as when a service fails mid-way, is settled by the Registry's alarm five minutes later. It is applied when the target holds the change, since a change applies in one step, and goes back to pending otherwise, for the owner to decide again. An approval is claimed once: a stuck one is never claimed again past its expiry.
 - **The applied change is audited on the target,** as `via: proposal:<id>`. Every step of a proposal is audited too, with the proposer, the person its turn acted for, and who decided.
 - **Deleting an agent voids** the open proposals by it or about it.
-- **The Registry's alarm** expires the proposals that are due, and tells each proposer its outcome, in three tries at most.
+- **The Registry's alarm** expires the proposals that are due, and tells each proposer that remains its outcome, in three tries at most.
 - **Only the page decides.** No tool, note, task comment or JSON command approves or refuses a proposal.
 
 ### 4. Kelpie's notice
@@ -94,7 +95,7 @@ Neither Hermes nor ai-memory expires a proposal, and neither tells the proposer 
   - the proposer and the target by id;
   - the task the proposal came from;
   - the agent's reason, escaped, its invisible characters written out, and labeled as its own words;
-  - each field as it is now and as proposed;
+  - each field as it is now and as proposed. A tools setting of `null`, every tool, says so in words, since it widens most;
   - how long it still waits.
 
   Its form offers Approve and Refuse. A target that changed since leaves only Refuse, and says why. It follows the design system's "Confirm an action" (`docs/design-system.md` 5.3), as a page with no script.
@@ -106,14 +107,16 @@ Neither Hermes nor ai-memory expires a proposal, and neither tells the proposer 
 ### 6. The proposer hears the outcome
 
 - **A proposal made in a task's run** is told as Kelpie's comment on that task, of author `kelpie`.
-  - It resumes a waiting task, as any answer does, and reaches a running one's run.
+  - It resumes a task waiting on other work (`dependency`), as the tool tells the run to wait, and reaches a running one's run. A task waiting for the owner's answer, or after two failures, keeps waiting for a person.
+  - An outcome told again comments once.
   - The run's input lists Kelpie's comments as Kelpie's own, never fenced as another agent's words.
 - **Otherwise,** it is a note of Kelpie's in the proposer's latest conversation with the owner.
-- **Each outcome has its note:** applied, refused, expired or conflict. Each says nothing changed unless it was applied, and not to propose the same again unless the need is new.
+- **Each outcome has its note:** applied, refused, expired, conflict, or void when an agent it named was deleted. Each says nothing changed unless it was applied, and not to propose the same again unless the need is new.
+- **A proposer deleted since** hears nothing.
 
 ### 7. Amendments
 
-- **[ADR-0011](0011-agent-task-board.md):** Kelpie also comments on a task, in its own words, as when it tells a proposal's outcome. Its comment resumes a waiting task as any answer does, and its step in the task's history has no actor, as Kelpie's other steps don't.
+- **[ADR-0011](0011-agent-task-board.md):** Kelpie also comments on a task, in its own words, as when it tells a proposal's outcome. Its comment resumes only a task waiting on other work, and its step in the task's history has no actor, as Kelpie's other steps don't.
 - **[ADR-0036](0036-agent-roles-models-and-subagents.md) §3:**
   - the proposal tool is offered where `configure_agent` isn't (§2 above);
   - a proposal waits 72 hours, within the caps of §3 above.

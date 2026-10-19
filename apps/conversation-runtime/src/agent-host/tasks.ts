@@ -162,9 +162,13 @@ export class TaskBoard {
       .get();
     if ((comments?.n ?? 0) >= MAX_COMMENTS) return notAllowed;
     const step = stepOf(writer);
-    // Its answer comes from someone else: the agent's own comment never resumes its task.
+    // Its answer comes from someone else: the agent's own comment never resumes its task. Kelpie's
+    // resumes only a task waiting on other work, as a proposal's outcome (#302): a question or two
+    // failures wait for a person.
     const own = writer.author.kind === "agent" && this.#agent.actor?.id === writer.author.id;
-    const resumes = task.status === "waiting" && !own;
+    const kelpie = writer.author.kind === "kelpie";
+    const resumes =
+      task.status === "waiting" && !own && (!kelpie || task.waitingReason === "dependency");
     this.#db.transaction((tx) => {
       tx.insert(schema.taskComments)
         .values({

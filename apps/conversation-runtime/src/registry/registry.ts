@@ -21,6 +21,7 @@ import {
   type RenameAgentResult,
   SETUP_AGENT_ID,
   type SetAgentResult,
+  sameValue,
 } from "@kelpie/config";
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, like, lte, ne, or } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
@@ -35,8 +36,13 @@ export const MAX_LIVE_SUBAGENTS = 3;
 export const MAX_SUBAGENTS_PER_DAY = 10;
 const DAY_MS = 24 * 60 * 60_000;
 
-/** A claim on a proposal that no finish followed for this long can be claimed again (#302). */
-const STUCK_CLAIM_MS = 60_000;
+/**
+ * An approval no finish followed for this long was abandoned, as when a service failed mid-way:
+ * the alarm settles it (#302).
+ */
+const ABANDONED_CLAIM_MS = 5 * 60_000;
+/** The most a proposal's change and its snapshot hold together, as JSON. */
+const MAX_PROPOSAL_JSON = 200_000;
 /** The most tries at telling a proposer an outcome, and the wait before the next (#302). */
 const MAX_TELLS = 3;
 const TELL_RETRY_MS = 5 * 60_000;
@@ -277,7 +283,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
    * storage is gone. The main agent and an agent that still owns another, such as its subagents,
    * aren't removed (ADR-0036 §1).
    */
-  remove(id: string, actor: Actor): SetAgentResult {
+  async remove(id: string, actor: Actor): Promise<SetAgentResult> {
     if (!isAgentId(id)) return { ok: false, reason: "invalid_input" };
     const agent = this.get(id);
     if (!agent) return { ok: false, reason: "unknown_agent" };
@@ -301,8 +307,9 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
       .all();
     this.#db.transaction((tx) => {
       for (const { id: proposal } of voided) {
+        // A proposer that remains hears it, as of any outcome.
         tx.update(schema.proposals)
-          .set({ status: "void", decidedAt: now, decidedBy: actor.userId })
+          .set({ status: "void", decidedAt: now, decidedBy: actor.userId, nextTellAt: now })
           .where(eq(schema.proposals.id, proposal))
           .run();
         tx.insert(schema.proposalEvents)
@@ -326,6 +333,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
         })
         .run();
     });
+    if (voided.length > 0) await this.#wake();
     return { ok: true };
   }
 
@@ -342,7 +350,10 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     if (!target) return { ok: false, reason: "unknown_agent" };
     const proposer = this.get(parsed.proposer);
     if (!proposer || target.owner !== proposer.id) return { ok: false, reason: "not_allowed" };
-    if (!parseProposalChanges(target.role, parsed.changes)) {
+    // The change as its target's role takes it, and a snapshot of the same fields, to check it by.
+    const changes = parseProposalChanges(target.role, parsed.changes);
+    const fields = (value: object) => Object.keys(value).sort().join(",");
+    if (!changes || fields(changes) !== fields(parsed.before)) {
       return { ok: false, reason: "invalid_input" };
     }
     const now = Date.now();
@@ -375,7 +386,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
           targetId: target.id,
           actingUserId: parsed.actingUserId,
           taskId: parsed.taskId,
-          changes: parsed.changes,
+          changes,
           before: parsed.before,
           reason: parsed.reason,
           status: "pending",
@@ -400,14 +411,24 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
   proposals(status?: ProposalStatus): Proposal[] {
     if (status !== undefined && !PROPOSAL_STATUSES.includes(status)) return [];
     const now = Date.now();
+    // As `proposalOf` shows them: a pending one past its expiry is expired.
+    const due = and(eq(schema.proposals.status, "pending"), lte(schema.proposals.expiresAt, now));
+    const where =
+      status === undefined
+        ? undefined
+        : status === "pending"
+          ? and(eq(schema.proposals.status, "pending"), gt(schema.proposals.expiresAt, now))
+          : status === "expired"
+            ? or(eq(schema.proposals.status, "expired"), due)
+            : eq(schema.proposals.status, status);
     return this.#db
       .select()
       .from(schema.proposals)
+      .where(where)
       .orderBy(desc(schema.proposals.createdAt))
+      .limit(MAX_LISTED_PROPOSALS)
       .all()
-      .map((row) => proposalOf(row, now))
-      .filter((proposal) => status === undefined || proposal.status === status)
-      .slice(0, MAX_LISTED_PROPOSALS);
+      .map((row) => proposalOf(row, now));
   }
 
   /** The owner refuses a pending proposal (#302): once, so a repeat answers `not_pending`. */
@@ -421,23 +442,21 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
   }
 
   /**
-   * The owner approves (#302): a pending proposal becomes `applying`, and a claim no finish
-   * followed within STUCK_CLAIM_MS is taken again, which the stale check keeps safe. One that is
-   * due expires instead, one whose proposer or target went is void, and one whose target its
-   * proposer no longer owns is a conflict.
+   * The owner approves (#302): a pending proposal becomes `applying`, once. One that is due expires
+   * instead, one whose proposer or target went is void, and one whose target its proposer no longer
+   * owns is a conflict. An approval that never finishes is the alarm's to settle.
    */
   async claimProposal(id: string, actor: Actor): Promise<ProposalResult> {
     const found = this.#open(id, actor);
     if (!found.ok) return found;
     const { row } = found;
     const now = Date.now();
-    const stuck = row.status === "applying" && (row.claimedAt ?? 0) <= now - STUCK_CLAIM_MS;
-    if (row.status !== "pending" && !stuck) return { ok: false, reason: "not_pending" };
-    if (!stuck && row.expiresAt <= now) {
-      return this.#settled(this.#settle(id, "expired", null, now));
-    }
+    if (row.status !== "pending") return { ok: false, reason: "not_pending" };
+    if (row.expiresAt <= now) return this.#settled(this.#settle(id, "expired", null, now));
     const target = this.get(row.targetId);
-    if (!target || !this.get(row.proposerId)) return this.#settle(id, "void", actor, now);
+    if (!target || !this.get(row.proposerId)) {
+      return this.#settled(this.#settle(id, "void", actor, now));
+    }
     if (target.owner !== row.proposerId) {
       return this.#settled(this.#settle(id, "conflict", actor, now));
     }
@@ -448,6 +467,8 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
         .run();
       this.#event(tx, id, now, "claimed", actor);
     });
+    // Woken for it, in case this approval never finishes.
+    await this.#wake();
     return this.#result(id);
   }
 
@@ -465,21 +486,40 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     if (found.row.status !== "applying") return { ok: false, reason: "not_pending" };
     const now = Date.now();
     if (outcome !== "released") return this.#settled(this.#settle(id, outcome, actor, now));
+    this.#release(id, actor, now);
+    // It may have come due while it was being applied.
+    return this.#settled(this.#result(id));
+  }
+
+  /** An approval that didn't apply goes back to pending. */
+  #release(id: string, by: Actor | null, now: number): void {
     this.#db.transaction((tx) => {
       tx.update(schema.proposals)
         .set({ status: "pending", claimedAt: null })
-        .where(eq(schema.proposals.id, id))
+        .where(and(eq(schema.proposals.id, id), eq(schema.proposals.status, "applying")))
         .run();
-      this.#event(tx, id, now, "released", actor);
+      this.#event(tx, id, now, "released", by);
     });
-    return this.#result(id);
   }
 
   /**
-   * The proposals' alarm (#302): expires the pending ones that are due, tells each proposer an
-   * outcome it hasn't heard, MAX_TELLS tries at most, and wakes again for the next of either.
+   * The proposals' alarm (#302): settles the approvals that were abandoned, expires the pending
+   * proposals that are due, tells each proposer an outcome it hasn't heard, MAX_TELLS tries at
+   * most, and wakes again for the next of these.
    */
   override async alarm(): Promise<void> {
+    const abandoned = this.#db
+      .select()
+      .from(schema.proposals)
+      .where(
+        and(
+          eq(schema.proposals.status, "applying"),
+          lte(schema.proposals.claimedAt, Date.now() - ABANDONED_CLAIM_MS),
+        ),
+      )
+      .limit(MAX_TELLS_PER_ALARM)
+      .all();
+    for (const row of abandoned) await this.#settleAbandoned(row);
     const now = Date.now();
     const due = this.#db
       .select({ id: schema.proposals.id })
@@ -497,6 +537,57 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     await this.#wake();
   }
 
+  /**
+   * An approval no finish followed (#302): applied when the target holds the change, since a
+   * change applies in one step, and back to pending otherwise, for the owner to decide again. One
+   * whose target can't be read waits for the next alarm.
+   */
+  async #settleAbandoned(row: typeof schema.proposals.$inferSelect): Promise<void> {
+    const now = Date.now();
+    const target = this.get(row.targetId);
+    if (!target || !this.get(row.proposerId)) {
+      this.#settle(row.id, "void", null, now);
+      return;
+    }
+    let holds: boolean;
+    if ("chat" in row.changes) {
+      holds = target.chat === row.changes.chat;
+    } else {
+      try {
+        const { settings } = await this.env.AGENT_HOST.getByName(row.targetId).config();
+        holds = Object.entries(row.changes).every(([field, value]) =>
+          sameValue(value, settings[field as keyof typeof settings]),
+        );
+      } catch (error) {
+        console.error("Registry: an abandoned approval's target wasn't read", errorName(error));
+        this.#db
+          .update(schema.proposals)
+          .set({ claimedAt: Date.now() })
+          .where(eq(schema.proposals.id, row.id))
+          .run();
+        return;
+      }
+    }
+    if (!holds) {
+      this.#release(row.id, null, Date.now());
+      return;
+    }
+    // The owner who approved it decided it.
+    const claimer = this.#db
+      .select({ userId: schema.proposalEvents.userId })
+      .from(schema.proposalEvents)
+      .where(
+        and(
+          eq(schema.proposalEvents.proposalId, row.id),
+          eq(schema.proposalEvents.kind, "claimed"),
+        ),
+      )
+      .orderBy(desc(schema.proposalEvents.id))
+      .get()?.userId;
+    const by = claimer ? { userId: claimer, role: "owner" as const, via: "kelpie" } : null;
+    this.#settle(row.id, "applied", by, Date.now());
+  }
+
   /** Tells the proposer one outcome, through its AgentHost; a try that fails waits for the next. */
   async #tell(row: typeof schema.proposals.$inferSelect): Promise<void> {
     const status = row.status;
@@ -504,8 +595,22 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
       status !== "applied" &&
       status !== "refused" &&
       status !== "expired" &&
-      status !== "conflict"
+      status !== "conflict" &&
+      status !== "void"
     ) {
+      return;
+    }
+    // A proposer deleted since hears nothing, and no object is made for it.
+    if (!this.get(row.proposerId)) {
+      this.#db.transaction((tx) => {
+        tx.update(schema.proposals)
+          .set({ nextTellAt: null })
+          .where(eq(schema.proposals.id, row.id))
+          .run();
+        tx.insert(schema.proposalEvents)
+          .values({ proposalId: row.id, at: Date.now(), kind: "untold", via: "kelpie" })
+          .run();
+      });
       return;
     }
     const outcome: ProposalOutcome = {
@@ -551,7 +656,10 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
    */
   async #wake(): Promise<void> {
     const next = (
-      column: typeof schema.proposals.expiresAt | typeof schema.proposals.nextTellAt,
+      column:
+        | typeof schema.proposals.expiresAt
+        | typeof schema.proposals.nextTellAt
+        | typeof schema.proposals.claimedAt,
       where: ReturnType<typeof and>,
     ) =>
       this.#db
@@ -563,7 +671,10 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
         .get()?.at ?? null;
     const expiry = next(schema.proposals.expiresAt, eq(schema.proposals.status, "pending"));
     const tell = next(schema.proposals.nextTellAt, isNotNull(schema.proposals.nextTellAt));
-    const at = [expiry, tell].filter((time): time is number => time !== null);
+    const claimed = next(schema.proposals.claimedAt, eq(schema.proposals.status, "applying"));
+    const at = [expiry, tell, claimed === null ? null : claimed + ABANDONED_CLAIM_MS].filter(
+      (time): time is number => time !== null,
+    );
     if (at.length === 0) {
       await this.ctx.storage.deleteAlarm();
       return;
@@ -585,7 +696,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
 
   /**
    * Settles an open proposal in one conditional step, and audits it. `by` is null for Kelpie's
-   * own steps, as an expiry. Every outcome but `void` waits for the alarm to tell the proposer.
+   * own steps, as an expiry. Every outcome waits for the alarm to tell the proposer.
    */
   #settle(
     id: string,
@@ -600,7 +711,7 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
           status,
           decidedAt: now,
           decidedBy: by?.userId ?? null,
-          ...(status === "void" ? {} : { nextTellAt: now }),
+          nextTellAt: now,
         })
         .where(and(eq(schema.proposals.id, id), inArray(schema.proposals.status, OPEN_PROPOSALS)))
         .returning({ id: schema.proposals.id })
@@ -715,7 +826,8 @@ function parseNewProposal(input: unknown): NewProposal | null {
     !(taskId === null || isTaskId(taskId)) ||
     !isRecord(changes) ||
     !isRecord(before) ||
-    why === null
+    why === null ||
+    JSON.stringify([changes, before]).length > MAX_PROPOSAL_JSON
   ) {
     return null;
   }

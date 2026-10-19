@@ -21,8 +21,10 @@ import {
   type AgentSettings,
   DEFAULT_SETTINGS,
   isAgentId,
+  isProposalFields,
   isProposalId,
   isTaskId,
+  MAX_PROPOSAL_REASON,
   mascotFor,
   type ProposalNotice,
   REGISTRY_NAME,
@@ -787,10 +789,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       typeof actingUserId !== "string" ||
       actingUserId === "" ||
       typeof reason !== "string" ||
-      reason.length > 500 ||
+      reason.length > MAX_PROPOSAL_REASON ||
       !Number.isFinite(expiresAt) ||
-      !Array.isArray(fields) ||
-      !fields.every((field) => typeof field === "string" && /^[a-zA-Z]{1,32}$/.test(field))
+      !isProposalFields(fields)
     ) {
       return false;
     }

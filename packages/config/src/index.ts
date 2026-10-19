@@ -40,6 +40,7 @@ export {
   randomMascot,
 } from "./mascot.ts";
 export {
+  isProposalFields,
   isProposalId,
   MAX_PROPOSAL_REASON,
   mergeModel,

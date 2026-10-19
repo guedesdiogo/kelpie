@@ -81,7 +81,7 @@ describe("a proposal's outcome on the proposer's AgentHost (#302)", () => {
   });
   afterEach(() => replaceTaskRunnerForTesting(undefined));
 
-  async function waitingTask(stub: ReturnType<typeof host>) {
+  async function waitingTask(stub: ReturnType<typeof host>, reason = "dependency") {
     const created = await stub.createTask(
       { title: "Price the quote", body: "", status: "backlog", scheduledStartAt: null },
       owner,
@@ -89,7 +89,8 @@ describe("a proposal's outcome on the proposer's AgentHost (#302)", () => {
     if (!created.ok) throw new Error(created.reason);
     await runInDurableObject(stub, (_instance, state) => {
       state.storage.sql.exec(
-        "UPDATE tasks SET status = 'waiting', waiting_reason = 'dependency' WHERE id = ?",
+        "UPDATE tasks SET status = 'waiting', waiting_reason = ? WHERE id = ?",
+        reason,
         created.value.id,
       );
     });
@@ -117,6 +118,19 @@ describe("a proposal's outcome on the proposer's AgentHost (#302)", () => {
     expect(value.events.filter((event) => event.kind === "commented")).toEqual([
       expect.objectContaining({ actor: null, via: `proposal:${PROPOSAL}` }),
     ]);
+  });
+
+  it("resumes only a task waiting on other work, and comments once however often it is told", async () => {
+    const stub = host("outcome-asked");
+    const asked = await waitingTask(stub, "needs_input");
+
+    expect(await stub.proposalOutcome(outcome({ taskId: asked, status: "refused" }))).toBe(true);
+    expect(await stub.proposalOutcome(outcome({ taskId: asked, status: "refused" }))).toBe(true);
+
+    const detail = await stub.getTask(asked);
+    // Its question still waits for the owner's answer.
+    expect(detail).toMatchObject({ ok: true, value: { status: "waiting" } });
+    expect((detail as { value: TaskDetail }).value.comments).toHaveLength(1);
   });
 
   it("reaches a running task's run in Kelpie's words, never fenced as another agent's", async () => {
@@ -160,13 +174,16 @@ describe("Kelpie's words of an outcome (#302)", () => {
     expect(outcomeNote(outcome({ status: "applied" }))).toBe(
       `The owner approved ${what}: it is applied.`,
     );
-    for (const status of ["refused", "expired", "conflict"] as const) {
+    for (const status of ["refused", "expired", "conflict", "void"] as const) {
       const note = outcomeNote(outcome({ status }));
       expect(note, status).toContain("Nothing changed.");
       expect(note, status).toContain("unless the need is new");
     }
     expect(outcomeNote(outcome({ status: "conflict" }))).toContain(
       "the agent sales-sub-a1b2c3 changed since you proposed it",
+    );
+    expect(outcomeNote(outcome({ status: "void" }))).toMatch(
+      /^Your proposal .* no longer applies: an agent it named was deleted\./,
     );
   });
 

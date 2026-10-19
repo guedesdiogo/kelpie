@@ -154,7 +154,7 @@ export interface RegistryContract {
    * Removes a deleted agent's row, the last step of `deleteAgent` (#303). The main agent and an
    * agent that still owns another are `not_allowed` (ADR-0036 §1).
    */
-  remove(id: string, actor: Actor): SetAgentResult;
+  remove(id: string, actor: Actor): Promise<SetAgentResult>;
   /**
    * Records a proposal (ADR-0060, #302): only about an agent its proposer owns, within the caps,
    * which it checks in one step. It applies nothing.
@@ -166,9 +166,9 @@ export interface RegistryContract {
   /** The owner refuses a pending proposal: one conditional step, so a repeat changes nothing. */
   refuseProposal(id: string, actor: Actor): Promise<ProposalResult>;
   /**
-   * The owner approves: a pending proposal becomes `applying`, unless it is due (`expired`), its
-   * proposer or target is gone (`void`), or its target's owner changed (`conflict`), which it
-   * settles and answers instead.
+   * The owner approves: a pending proposal becomes `applying`, once, unless it is due (`expired`),
+   * its proposer or target is gone (`void`), or its target's owner changed (`conflict`), which it
+   * settles and answers instead. An approval that never finishes, the alarm settles.
    */
   claimProposal(id: string, actor: Actor): Promise<ProposalResult>;
   /** Ends an approval: applied, a conflict, void, or `released` back to pending. */
@@ -861,8 +861,8 @@ export function createConfigCommands(ports: ConfigPorts) {
      * and no JSON command call it. A refusal is one conditional step. An approval claims the
      * proposal, applies it as `proposal:<id>` only while the target holds the values it was
      * proposed against, and finishes it as applied, a conflict, or void; a service that doesn't
-     * answer releases the claim. The answer is the proposal as this call left it; `not_pending`
-     * means it was already decided.
+     * answer releases the claim, and the Registry's alarm settles one that can't even be finished.
+     * The answer is the proposal as this call left it; `not_pending` means it was already decided.
      */
     async decideProposal(actor: Actor, input: unknown): Promise<CommandResult<Proposal>> {
       if (!isOwner(actor)) return forbidden;
@@ -890,7 +890,13 @@ export function createConfigCommands(ports: ConfigPorts) {
         : applied.reason === "unknown_agent"
           ? "void"
           : "conflict";
-      return ports.proposals.finish(id, outcome, actor);
+      try {
+        return await ports.proposals.finish(id, outcome, actor);
+      } catch (error) {
+        // The Registry's alarm settles the approval that didn't finish (#302).
+        console.warn("decideProposal: the approval wasn't finished", errorName(error));
+        return unavailable;
+      }
     },
 
     /**

@@ -37,7 +37,7 @@ function fake() {
   subagent.model = { provider: "anthropic", conversation: { tier: "cheap", effort: "low" } };
   const proposals = new Map<string, Proposal>();
   const notices: { master: string; notice: ProposalNotice }[] = [];
-  const state = { failApply: false, notify: true as boolean | "throws" };
+  const state = { failApply: false, failFinish: false, notify: true as boolean | "throws" };
   const setStatus = (id: string, status: Proposal["status"], by: Actor) => {
     const proposal = proposals.get(id) as Proposal;
     const settled = status !== "pending" && status !== "applying";
@@ -124,6 +124,7 @@ function fake() {
       },
       async finish(id: string, outcome: string, actor: Actor) {
         calls.push(`finish ${id} ${outcome}`);
+        if (state.failFinish && outcome !== "released") throw new Error("unreachable");
         return setStatus(id, outcome === "released" ? "pending" : (outcome as never), actor);
       },
       async notify(to: string, notice: ProposalNotice) {
@@ -327,6 +328,19 @@ describe("the owner's decision (#302)", () => {
     );
     expect(down.calls.at(-1)).toBe(`finish ${PROPOSAL} released`);
     expect(down.proposals.get(PROPOSAL)?.status).toBe("pending");
+  });
+
+  it("answers unavailable when the approval can't be finished, and leaves it to the Registry", async () => {
+    const { commands, state, settings, proposals } = await proposed({ remit: "Sales." });
+    state.failFinish = true;
+
+    expect(await commands.decideProposal(page, { id: PROPOSAL, decision: "approve" })).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+    // The change applied; the claim waits for the Registry's alarm to settle it.
+    expect(settings.get("sales")?.remit).toBe("Sales.");
+    expect(proposals.get(PROPOSAL)?.status).toBe("applying");
   });
 
   it("refuses in one step, and a repeat changes nothing", async () => {
