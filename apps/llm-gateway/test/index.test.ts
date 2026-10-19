@@ -768,7 +768,7 @@ describe("model choice (#286)", () => {
 describe("the instance's model settings (#289)", () => {
   type GatewayEnv = Parameters<typeof describeWith>[0];
   const defaults = () => env.MODEL_DEFAULTS.getByName("instance");
-  const owner = { userId: "u-owner", role: "owner", via: "agent:setup" } as const;
+  const owner = { userId: "u-owner", role: "owner", via: "agent:kelpie" } as const;
 
   async function reset() {
     await runInDurableObject(defaults(), (_instance, state) => state.storage.deleteAll());
@@ -801,7 +801,7 @@ describe("the instance's model settings (#289)", () => {
       [...state.storage.kv.list({ prefix: "audit:" })].map(([, value]) => value),
     );
     expect(audit).toEqual([
-      expect.objectContaining({ userId: "u-owner", via: "agent:setup", settings }),
+      expect.objectContaining({ userId: "u-owner", via: "agent:kelpie", settings }),
     ]);
   });
 

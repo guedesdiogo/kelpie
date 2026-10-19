@@ -1,15 +1,15 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { SETUP_AGENT_ID } from "@kelpie/config";
+import { RETIRED_AGENT_ID } from "@kelpie/config";
 import { describe, expect, it } from "vitest";
-import seedMainAgent from "../src/registry/migrations/0003_seed_main_agent.sql";
+import seedMaster from "../src/registry/migrations/0003_seed_main_agent.sql";
 
 // Each test uses its own Registry instance; Kelpie itself runs one, named REGISTRY_NAME.
 const registry = (name: string) => env.REGISTRY.getByName(name);
 const owner = { userId: "u-owner", role: "owner", via: "admin-api" } as const;
-/** A new instance's main agent (#288). */
-const KELPIE = { id: "kelpie", name: "Kelpie", role: "main", owner: null, chat: true };
-/** An agent created after roles: a specialist the main agent owns, which doesn't chat yet. */
+/** A new instance's Master (#288). */
+const KELPIE = { id: "kelpie", name: "Kelpie", role: "master", owner: null, chat: true };
+/** An agent created after roles: a specialist Master owns, which doesn't chat yet. */
 const specialist = (id: string, name: string, chat = false) => ({
   id,
   name,
@@ -27,7 +27,7 @@ async function auditOf(stub: ReturnType<typeof registry>) {
 }
 
 describe("Registry", () => {
-  it("starts with the main agent, and adding it again changes nothing", async () => {
+  it("starts with Master, and adding it again changes nothing", async () => {
     const stub = registry("setup");
 
     expect(await stub.list()).toEqual([KELPIE]);
@@ -35,20 +35,20 @@ describe("Registry", () => {
     expect(await stub.get("kelpie")).toEqual(KELPIE);
   });
 
-  it("never lists nor answers for the retired setup agent, and keeps its row (ADR-0048)", async () => {
+  it("never lists nor answers for the retired id, and keeps its row (ADR-0048)", async () => {
     const stub = registry("retired-setup");
     const unknown = { ok: false, reason: "unknown_agent" };
 
-    expect(await stub.get(SETUP_AGENT_ID)).toBeNull();
-    expect(await stub.add(SETUP_AGENT_ID, "Another", owner)).toEqual({
+    expect(await stub.get(RETIRED_AGENT_ID)).toBeNull();
+    expect(await stub.add(RETIRED_AGENT_ID, "Another", owner)).toEqual({
       ok: false,
       reason: "invalid_input",
     });
-    expect(await stub.rename(SETUP_AGENT_ID, "Configuração", owner)).toEqual(unknown);
-    expect(await stub.setMain(SETUP_AGENT_ID, owner)).toEqual(unknown);
-    expect(await stub.setChat(SETUP_AGENT_ID, false, owner)).toEqual(unknown);
-    expect(await stub.remove(SETUP_AGENT_ID, owner)).toEqual(unknown);
-    expect(await stub.addSubagent(SETUP_AGENT_ID, "Helper", "kelpie", owner)).toEqual({
+    expect(await stub.rename(RETIRED_AGENT_ID, "Configuração", owner)).toEqual(unknown);
+    expect(await stub.setMaster(RETIRED_AGENT_ID, owner)).toEqual(unknown);
+    expect(await stub.setChat(RETIRED_AGENT_ID, false, owner)).toEqual(unknown);
+    expect(await stub.remove(RETIRED_AGENT_ID, owner)).toEqual(unknown);
+    expect(await stub.addSubagent(RETIRED_AGENT_ID, "Helper", "kelpie", owner)).toEqual({
       ok: false,
       reason: "not_allowed",
     });
@@ -63,7 +63,7 @@ describe("Registry", () => {
     expect(await auditOf(stub)).toEqual([]);
   });
 
-  it("adds agents as specialists of the main agent, with their chat off, and lists them by id", async () => {
+  it("adds agents as specialists of Master, with their chat off, and lists them by id", async () => {
     const stub = registry("list");
     expect(await stub.add("sales", "Sales", owner)).toEqual({ ok: true, created: true });
     expect(await stub.add("assistant", "Assistant", owner)).toEqual({ ok: true, created: true });
@@ -106,7 +106,7 @@ describe("Registry", () => {
     expect(await stub.add("sales", "x".repeat(81), owner)).toEqual(invalid);
     await stub.add("sales", "Sales", owner);
     expect(await stub.rename("sales", " ", owner)).toEqual(invalid);
-    expect(await stub.setMain("Sales", owner)).toEqual(invalid);
+    expect(await stub.setMaster("Sales", owner)).toEqual(invalid);
     expect(await stub.setChat("sales", "yes" as never, owner)).toEqual(invalid);
     expect(await stub.get("sales")).toEqual(specialist("sales", "Sales"));
   });
@@ -126,22 +126,22 @@ describe("Registry", () => {
 });
 
 describe("Registry roles (#288)", () => {
-  it("makes an agent the main agent: the previous one and every specialist become its own", async () => {
-    const stub = registry("set-main");
+  it("makes an agent Master: the previous one and every specialist become its own", async () => {
+    const stub = registry("set-master");
     await stub.add("sales", "Sales", owner);
     await stub.add("bia", "Bia", owner);
 
-    expect(await stub.setMain("bia", { ...owner, via: "agent:kelpie" })).toEqual({ ok: true });
+    expect(await stub.setMaster("bia", { ...owner, via: "agent:kelpie" })).toEqual({ ok: true });
     expect(await stub.list()).toEqual([
-      { id: "bia", name: "Bia", role: "main", owner: null, chat: true },
-      // The previous main agent keeps chatting, now as a specialist.
+      { id: "bia", name: "Bia", role: "master", owner: null, chat: true },
+      // The previous Master keeps chatting, now as a specialist.
       { ...specialist("kelpie", "Kelpie", true), owner: "bia" },
       { ...specialist("sales", "Sales"), owner: "bia" },
     ]);
-    // New agents belong to the new main agent; choosing it again changes nothing.
+    // New agents belong to the new Master; choosing it again changes nothing.
     await stub.add("ops", "Ops", owner);
     expect(await stub.get("ops")).toEqual({ ...specialist("ops", "Ops"), owner: "bia" });
-    expect(await stub.setMain("bia", owner)).toEqual({ ok: true });
+    expect(await stub.setMaster("bia", owner)).toEqual({ ok: true });
     expect(await auditOf(stub)).toEqual([
       { action: "agent.created", agent_id: "sales", user_id: "u-owner", via: "admin-api" },
       { action: "agent.created", agent_id: "bia", user_id: "u-owner", via: "admin-api" },
@@ -151,8 +151,8 @@ describe("Registry roles (#288)", () => {
   });
 
   it("knows only the agents it holds", async () => {
-    const stub = registry("set-main-refused");
-    expect(await stub.setMain("ghost", owner)).toEqual({ ok: false, reason: "unknown_agent" });
+    const stub = registry("set-master-refused");
+    expect(await stub.setMaster("ghost", owner)).toEqual({ ok: false, reason: "unknown_agent" });
     expect(await stub.get("kelpie")).toEqual(KELPIE);
   });
 
@@ -181,26 +181,26 @@ describe("Registry roles (#288)", () => {
     ).toHaveLength(2);
   });
 
-  it("picks a main agent on an instance that has none, as this one after the deploy", async () => {
-    const stub = registry("no-main");
-    // As an instance with agents from before roles: no main agent, and no seed.
+  it("picks a Master on an instance that has none, as this one after the deploy", async () => {
+    const stub = registry("no-master");
+    // As an instance with agents from before roles: no Master, and no seed.
     await runInDurableObject(stub, (_instance, state) => {
       state.storage.sql.exec("DELETE FROM agents WHERE id = 'kelpie'");
       state.storage.sql.exec(
         "INSERT INTO agents (id, name, created_at, updated_at) VALUES ('assistant', 'Assistant', 0, 0), ('sales', 'Sales', 0, 0)",
       );
     });
-    // A new agent with no main agent to own it has no owner yet.
+    // A new agent with no Master to own it has no owner yet.
     await stub.add("ops", "Ops", owner);
     expect(await stub.get("ops")).toEqual({ ...specialist("ops", "Ops"), owner: null });
 
-    expect(await stub.setMain("assistant", owner)).toEqual({ ok: true });
+    expect(await stub.setMaster("assistant", owner)).toEqual({ ok: true });
     expect(await stub.list()).toEqual([
-      { id: "assistant", name: "Assistant", role: "main", owner: null, chat: true },
+      { id: "assistant", name: "Assistant", role: "master", owner: null, chat: true },
       { ...specialist("ops", "Ops"), owner: "assistant" },
       { ...specialist("sales", "Sales", true), owner: "assistant" },
     ]);
-    // The retired setup agent's row is left as it was (ADR-0048).
+    // The retired id's row is left as it was (ADR-0048).
     const setupRow = await runInDurableObject(stub, (_instance, state) =>
       state.storage.sql.exec("SELECT owner_id FROM agents WHERE id = 'setup'").one(),
     );
@@ -223,15 +223,15 @@ describe("Registry roles (#288)", () => {
       owner: "kelpie",
       chat: false,
     });
-    expect(await stub.setMain("helper", owner)).toEqual({ ok: false, reason: "not_allowed" });
+    expect(await stub.setMaster("helper", owner)).toEqual({ ok: false, reason: "not_allowed" });
     expect(await stub.setChat("helper", true, owner)).toEqual({ ok: false, reason: "not_allowed" });
   });
 
-  it("seeds the main agent only where no agent but setup exists; older agents keep chatting", async () => {
+  it("seeds Master only where no agent but setup exists; older agents keep chatting", async () => {
     const stub = registry("before-roles");
     const ids = () =>
       runInDurableObject(stub, (_instance, state) => {
-        state.storage.sql.exec(seedMainAgent);
+        state.storage.sql.exec(seedMaster);
         return state.storage.sql
           .exec<{ id: string }>("SELECT id FROM agents ORDER BY id")
           .toArray();
@@ -243,7 +243,7 @@ describe("Registry roles (#288)", () => {
         "INSERT INTO agents (id, name, created_at, updated_at) VALUES ('assistant', 'Assistant', 0, 0)",
       );
     });
-    expect(await ids()).toEqual([{ id: "assistant" }, { id: SETUP_AGENT_ID }]);
+    expect(await ids()).toEqual([{ id: "assistant" }, { id: RETIRED_AGENT_ID }]);
     expect(await stub.get("assistant")).toEqual({
       id: "assistant",
       name: "Assistant",
@@ -251,15 +251,15 @@ describe("Registry roles (#288)", () => {
       owner: null,
       chat: true,
     });
-    // With only the setup agent's row, the seed adds Kelpie.
+    // With only the retired id's row, the seed adds Kelpie.
     await runInDurableObject(stub, (_instance, state) => {
       state.storage.sql.exec("DELETE FROM agents WHERE id = 'assistant'");
     });
-    expect(await ids()).toEqual([{ id: "kelpie" }, { id: SETUP_AGENT_ID }]);
+    expect(await ids()).toEqual([{ id: "kelpie" }, { id: RETIRED_AGENT_ID }]);
     expect(await stub.get("kelpie")).toEqual(KELPIE);
   });
 
-  it("removes an agent and audits it, and refuses the main agent and unknown ids (#303)", async () => {
+  it("removes an agent and audits it, and refuses Master and unknown ids (#303)", async () => {
     const stub = registry("remove");
     await stub.add("sales", "Sales", owner);
 

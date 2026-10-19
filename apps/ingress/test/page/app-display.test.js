@@ -123,7 +123,7 @@ describe("the account (the owner, 2026-10-16)", () => {
   });
 });
 
-/** The main agent's default mascot (ADR-0049), as the socket names it. */
+/** Master's default mascot (ADR-0049), as the socket names it. */
 const KELPIE = {
   shape: "mark",
   color: "kelp",

@@ -371,7 +371,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       runsOn = (await this.#lookup("identityModelClamped", () => sources.describe(effective)))
         .value;
     }
-    const spawn = role === "main" || (role === "specialist" && config.settings.spawn);
+    const spawn = role === "master" || (role === "specialist" && config.settings.spawn);
     const identity = identitySection({
       id,
       name: listed.value?.name ?? id,
@@ -387,7 +387,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       ...specialistsSection(specialists.value ?? []),
       ...(spawn ? [CREATE_SUBAGENT_SKILL] : []),
       // Master configures Kelpie (ADR-0048), whatever persona the owner gave it.
-      ...(role === "main" ? [CONFIGURE_KELPIE_SKILL] : []),
+      ...(role === "master" ? [CONFIGURE_KELPIE_SKILL] : []),
     ];
     return {
       settings: {

@@ -60,10 +60,10 @@ describe("identitySection", () => {
   });
 
   it("states the role the Registry gives it (#314)", () => {
-    const line = (role: "main" | "specialist" | "subagent") =>
+    const line = (role: "master" | "specialist" | "subagent") =>
       identitySection({ id: "bia", name: "Bia", role, model: runsOn([haiku]) });
-    // The role the Registry calls `main` is Master in every text (#343).
-    expect(line("main")).toContain(
+    // The role `master` is Master in every text (#343, ADR-0060).
+    expect(line("master")).toContain(
       "You are Bia, Master on Kelpie, the agent the owner talks to, which also configures Kelpie.",
     );
     expect(line("specialist")).toContain(

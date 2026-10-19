@@ -12,7 +12,6 @@ import {
   type CommandResult,
   type ConfigCommands,
   isAgentId,
-  SETUP_AGENT_ID,
   type SetupEvent,
 } from "@kelpie/config";
 import {
@@ -49,6 +48,8 @@ export interface AdminDeps {
   forms: FormDeps;
   /** Reports a setup step the owner finished to the agent's AgentHost (#206). */
   setupDone(agentId: string, event: SetupEvent): Promise<void>;
+  /** Master's id, from the Registry, or null while no agent is Master (ADR-0060). */
+  master(): Promise<string | null>;
   /** The first-run token set at deploy (ADR-0013): `<expiry in epoch seconds>.<random>`. */
   bootstrapToken: string | undefined;
   /**
@@ -95,7 +96,7 @@ const COMMANDS: Record<string, Command> = {
   renameAgent: (commands, actor, input) => commands.renameAgent(actor, input),
   getAgent: (commands, actor, input) => commands.getAgent(actor, input),
   configureAgent: (commands, actor, input) => commands.configureAgent(actor, input),
-  setMainAgent: (commands, actor, input) => commands.setMainAgent(actor, input),
+  setMaster: (commands, actor, input) => commands.setMaster(actor, input),
   setAgentChat: (commands, actor, input) => commands.setAgentChat(actor, input),
   deleteAgent: (commands, actor, input) => commands.deleteAgent(actor, input),
   createTask: (commands, actor, input) => commands.createTask(actor, input),
@@ -210,11 +211,17 @@ async function handleForm(request: Request, pathname: string, deps: AdminDeps): 
     // The runner's page names its field `runnerSecret`; channel-egress refuses it on any other form.
     const runnerSecret = fields.get("runnerSecret");
     if (runnerSecret !== null) {
-      // The conversation that sent the form learns the runner is connected (#328). The runner is
-      // the instance's: its waits live on the retired setup agent's AgentHost, by that id
-      // (ADR-0048).
-      return await submitRunnerForm(token, runnerSecret, deps.forms, locale, ({ state, version }) =>
-        deps.setupDone(SETUP_AGENT_ID, { step: "runner_connected", userId, state, version }),
+      // Master's conversation that sent the form learns the runner is connected (#328, ADR-0060).
+      return await submitRunnerForm(
+        token,
+        runnerSecret,
+        deps.forms,
+        locale,
+        async ({ state, version }) => {
+          const master = await deps.master();
+          if (master === null) return;
+          await deps.setupDone(master, { step: "runner_connected", userId, state, version });
+        },
       );
     }
     const botToken = fields.get("botToken") ?? "";

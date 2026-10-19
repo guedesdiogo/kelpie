@@ -1,6 +1,6 @@
 # Logo
 
-Kelpie's logo is the main agent's mascot as a flat silhouette: the `mark` shape with its round ears, in one color, with no face, fur, accessory or shadow; it names the product and never moves (5.23, ADR-0049).
+Kelpie's logo is Master's mascot as a flat silhouette: the `mark` shape with its round ears, in one color, with no face, fur, accessory or shadow; it names the product and never moves (5.23, ADR-0049).
 
 - **The files** come from `scripts/brand-icons.mjs` and live in `docs/brand/`; the Logos assets here are copies: `kelpie-mark.svg`, `kelpie-lockup-light.svg` and `kelpie-lockup-dark.svg`, the 16 px favicon master `favicon-16.svg`, and the home-screen sources `app-icon.svg`, `app-icon-rounded.svg` and `app-icon-maskable.svg`.
 - **The mark** comes from the engine's 120 grid: the shape at 24..96 × 36..108 with corners 36, 36, 36 and 11.5, and the ears, circles of 10.5 at (38, 42) and (82, 42). If the main mascot's default changes, the mark changes with it, through a new ADR.

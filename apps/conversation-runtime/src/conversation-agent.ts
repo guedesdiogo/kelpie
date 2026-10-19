@@ -24,8 +24,8 @@ import {
   isTaskId,
   mascotFor,
   REGISTRY_NAME,
+  RETIRED_AGENT_ID,
   type RegistryContract,
-  SETUP_AGENT_ID,
   type SetupEvent,
   type SetupStep,
 } from "@kelpie/config";
@@ -3327,10 +3327,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
 
   /**
    * Whether the Registry says the agent's chat is off: only an explicit `false`, as `admit` reads
-   * it. The retired setup agent's always is, as `admit` refuses it (ADR-0048).
+   * it. The retired id's always is, as `admit` refuses it (ADR-0048).
    */
   async #chatOff(agentId: string): Promise<boolean> {
-    if (agentId === SETUP_AGENT_ID) return true;
+    if (agentId === RETIRED_AGENT_ID) return true;
     const registry = this.env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<
       Pick<RegistryContract, "get">
     >;

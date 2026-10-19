@@ -1,6 +1,6 @@
-// The handoff evaluation (#287): how often the main agent hands a demand within a specialist's
+// The handoff evaluation (#287): how often Master hands a demand within a specialist's
 // remit to that specialist, and whether it hands off any demand that needs none. It runs the real
-// turn, with the main agent's prompt, roster and tools, on production's cheap route, so it calls a
+// turn, with Master's prompt, roster and tools, on production's cheap route, so it calls a
 // paid model: it runs only with `bun run --filter @kelpie/conversation-runtime eval:handoff`, and
 // otherwise skips itself.
 import { env } from "cloudflare:workers";
@@ -79,7 +79,7 @@ const made = (title: string): TaskView => ({
   result: null,
 });
 
-/** The main agent's tools, as production lists them, over an empty vault and no real boards. */
+/** Master's tools, as production lists them, over an empty vault and no real boards. */
 const TOOLS: ToolProvider[] = [
   memoryTools({
     search: async () => ({ ok: true, text: "", notes: [] }),
@@ -91,7 +91,7 @@ const TOOLS: ToolProvider[] = [
     adminOrigin: "https://admin.example",
   }),
   subagentTools({
-    canSpawn: async (id) => (await registry().get(id))?.role === "main",
+    canSpawn: async (id) => (await registry().get(id))?.role === "master",
     creator: async () => ({
       model: {},
       described: { provider: "anthropic", tier: "cheap", route: [] },

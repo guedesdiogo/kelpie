@@ -27,5 +27,5 @@ From the Sidebar and the agent's editor (5.24 to 5.26, #412 and #414), in `icons
 - `pencil`: the badge on a mascot that opens its editor.
 - `undo`: a U-turn arrow, never a circle, which reads as refresh.
 - `dice`: Randomize, a die with three pips; a shuffle would mean reorder.
-- `lock`: a read-only field, such as the main agent's specialty.
+- `lock`: a read-only field, such as Master's specialty.
 - `profile`, `mascot-body`, `soul`, `rules`, `memory` and `skills`: the editor's sections, an ID card, the mascot's outline at rest (a 20px grid, as the mascot's pause), a page with a heart, a list, two stacked notes and a puzzle piece. None is a lone diamond, a triangle, or a hollow or dashed circle: those are the glyphs of Presence.

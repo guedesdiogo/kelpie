@@ -31,7 +31,7 @@ const MASCOT = {
 const AGENT = {
   id: "kelpie",
   name: "Kelpie",
-  main: true,
+  master: true,
   mascot: MASCOT,
   specialty: "",
   remit: "",

@@ -69,8 +69,8 @@ function world({
           chat: !chatOff.has(id),
         }));
       },
-      async setMain(id) {
-        ran.push(`registry.setMain ${id}`);
+      async setMaster(id) {
+        ran.push(`registry.setMaster ${id}`);
         return agents.has(id) ? { ok: true } : { ok: false, reason: "unknown_agent" };
       },
       async setChat(id, chat) {
@@ -326,6 +326,7 @@ function world({
     async setupDone(agentId, event) {
       reported.push({ agentId, event });
     },
+    master: async () => "kelpie",
     bootstrapToken: TOKEN,
     recoveryToken: undefined,
     now: () => NOW_MS,
@@ -391,10 +392,10 @@ describe("admin API commands", () => {
     });
   });
 
-  it("chooses the main agent and a specialist's chat, and answers 409 for a role that can't (#288)", async () => {
+  it("chooses Master and a specialist's chat, and answers 409 for a role that can't (#288)", async () => {
     const { deps, ran } = world();
     await call(deps, "/commands/createAgent", { id: "sales", name: "Sales" });
-    expect(await call(deps, "/commands/setMainAgent", { id: "sales" })).toEqual({
+    expect(await call(deps, "/commands/setMaster", { id: "sales" })).toEqual({
       status: 200,
       body: { ok: true, value: {} },
     });
@@ -402,7 +403,7 @@ describe("admin API commands", () => {
       status: 409,
       body: { ok: false, reason: "not_allowed" },
     });
-    expect(ran).toContain("registry.setMain sales");
+    expect(ran).toContain("registry.setMaster sales");
   });
 
   it("deletes an agent, its chat off first and its row last, and answers 404 once it is gone (#303)", async () => {
@@ -1216,12 +1217,12 @@ describe("admin API runner form (#294)", () => {
     expect(await response.text()).toContain("another protocol version");
   });
 
-  it("reports the connected runner to the retired setup agent's AgentHost, which keeps the instance's waits, and answers whatever the report does (#328)", async () => {
+  it("reports the connected runner to Master's AgentHost, and answers whatever the report does (#328, ADR-0060)", async () => {
     const { deps, reported } = world();
     await handle(submit(RUNNER.good), deps);
     expect(reported).toEqual([
       {
-        agentId: "setup",
+        agentId: "kelpie",
         event: { step: "runner_connected", userId: "u-owner", state: "ready", version: "0.1.0<b>" },
       },
     ]);
@@ -1229,7 +1230,7 @@ describe("admin API runner form (#294)", () => {
     await handle(submit(RUNNER.outdated), outdated.deps);
     expect(outdated.reported).toEqual([
       {
-        agentId: "setup",
+        agentId: "kelpie",
         event: { step: "runner_connected", userId: "u-owner", state: "outdated", version: "0.0.9" },
       },
     ]);
@@ -1239,6 +1240,11 @@ describe("admin API runner form (#294)", () => {
       await handle(submit(secret), failed.deps);
       expect(failed.reported).toEqual([]);
     }
+    // With no Master, the runner is stored and nobody is told; the page still answers.
+    const masterless = world();
+    masterless.deps.master = async () => null;
+    expect((await handle(submit(RUNNER.good), masterless.deps)).status).toBe(200);
+    expect(masterless.reported).toEqual([]);
 
     // A report that fails, or doesn't answer, never costs the owner the page.
     vi.spyOn(console, "error").mockImplementation(() => {});
