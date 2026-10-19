@@ -26,9 +26,12 @@ const NAME_START = "(?<![A-Za-z0-9_.-])";
 const FLAG_START = "(?<=^|[\\s\"'(])";
 /** A name that may say a status rather than hold a secret: "Pass: all green", "Auth: ok". */
 const STATUS_NAME = /^(?:pass|auth)$/i;
-/** A status, or a count of tests, as `pass` and `auth` say one. */
+/**
+ * A status, or a count of tests, as `pass` and `auth` say one. A bare number keeps at most three
+ * digits, since a longer one may be a PIN or a one-time code; a count with a slash may be longer.
+ */
 const STATUS =
-  /^(?:ok|yes|no|true|false|on|off|passed|failed|green|red|n\/a|all green|\d{1,9}(?:\/\d{1,9})?)\.?[ \t]*$/i;
+  /^(?:ok|yes|no|true|false|on|off|passed|failed|green|red|n\/a|all green|\d{1,3}|\d{1,9}\/\d{1,9})\.?[ \t]*$/i;
 /** `=`, but not `==` or `=>`. */
 const ASSIGN = "[ \\t]{0,8}=(?![=>])";
 /** A value up to its closing quote, or up to the next space. */
