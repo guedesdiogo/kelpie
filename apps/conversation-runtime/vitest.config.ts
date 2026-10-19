@@ -22,7 +22,7 @@ export const RUNTIME_MINIFLARE = {
       script: `import { WorkerEntrypoint } from "cloudflare:workers";
 export class ContextStore extends WorkerEntrypoint {
   compile() {
-    return { persona: null, rules: [], skills: [] };
+    return { persona: null, rules: [], skills: [], memory: null };
   }
 }
 export default { fetch: () => new Response(null, { status: 404 }) };`,
