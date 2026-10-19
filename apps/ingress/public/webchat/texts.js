@@ -212,8 +212,8 @@ export const TEXTS = {
         noRulesWhy: "It follows the vault's shared rules. What holds only for it, write here.",
         createRules: "Create its own rules",
         rulesStart: (name) => `# ${name}'s rules\n\n`,
-        memoryAbout:
-          "Short memories, in Hermes's format, which Hermes reads. Kelpie keeps what it learns in the vault's notes.",
+        memoryAbout: (name) =>
+          `Short memories, in Hermes's format, that ${name} reads in every conversation, as Hermes does. What Kelpie learns goes to the vault's notes.`,
         meter: "Memory's space",
         budget: (used, limit) => `${number("en", used)} of ${number("en", limit)} characters`,
         hermesKeeps: (limit) => `Hermes keeps up to ${number("en", limit)}`,
@@ -664,8 +664,8 @@ export const TEXTS = {
           "Segue as regras compartilhadas do cofre. O que valer só para este agente, escreva aqui.",
         createRules: "Criar regras próprias",
         rulesStart: (name) => `# Regras de ${name}\n\n`,
-        memoryAbout:
-          "Lembranças curtas, no formato do Hermes, que lê este arquivo. O Kelpie guarda o que aprende nas notas do cofre.",
+        memoryAbout: (name) =>
+          `Lembranças curtas, no formato do Hermes, que ${name} lê em todas as conversas, como o Hermes. O que o Kelpie aprende vai para as notas do cofre.`,
         meter: "Espaço da memória",
         budget: (used, limit) => `${number("pt-BR", used)} de ${number("pt-BR", limit)} caracteres`,
         hermesKeeps: (limit) => `o Hermes guarda até ${number("pt-BR", limit)}`,
@@ -1116,8 +1116,8 @@ export const TEXTS = {
           "Sigue las reglas compartidas del cofre. Lo que valga solo para este agente, escríbelo aquí.",
         createRules: "Crear reglas propias",
         rulesStart: (name) => `# Reglas de ${name}\n\n`,
-        memoryAbout:
-          "Recuerdos breves, en el formato de Hermes, que lee este archivo. Kelpie guarda lo que aprende en las notas del cofre.",
+        memoryAbout: (name) =>
+          `Recuerdos breves, en el formato de Hermes, que ${name} lee en todas las conversaciones, como Hermes. Lo que Kelpie aprende va a las notas del cofre.`,
         meter: "Espacio de la memoria",
         budget: (used, limit) => `${number("es", used)} de ${number("es", limit)} caracteres`,
         hermesKeeps: (limit) => `Hermes guarda hasta ${number("es", limit)}`,

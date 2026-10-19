@@ -200,8 +200,11 @@ describe("AgentFiles", () => {
     expect(result.commit).not.toBeNull();
     expect(backend.files()[SOUL]).toBe("# After");
     expect(result.files.soul?.content).toBe("# After");
-    // The agent's next turn reads it, and the version is the owner's, not Kelpie's.
-    expect((await stub().compile("kelpie")).persona).toBe("# After");
+    // The agent's next turn reads it, the memory file too, and the version is the owner's, not
+    // Kelpie's.
+    const compiled = await stub().compile("kelpie");
+    expect(compiled.persona).toBe("# After");
+    expect(compiled.memory).toEqual({ path: MEMORY, content: "first\n§\nsecond" });
     const authored = await runInDurableObject(stub(), (_instance, state) =>
       state.storage.sql.exec("SELECT count(*) AS n FROM authored WHERE path = ?", SOUL).one(),
     );

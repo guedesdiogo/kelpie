@@ -535,7 +535,7 @@ export class FileSections {
       this.#onChange();
     });
     const about = element("p", "doc-m");
-    about.textContent = names.memoryAbout;
+    about.textContent = names.memoryAbout(this.#agent.name);
     box.replaceChildren(path, ...this.#banners("memory"), budget, list, add, about);
     this.#drawEntries(entries);
     this.#updateBudget({ instant: true });
