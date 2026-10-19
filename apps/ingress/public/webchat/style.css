@@ -3033,11 +3033,25 @@ dialog h2 {
   white-space: nowrap;
 }
 .editor .skl-r .so {
+  display: inline-grid;
   grid-column: 3;
   grid-row: 1 / span 2;
+  overflow: hidden;
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: 11px;
+}
+.editor .skl-r .so > .roll {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+}
+/* A removal waits for Save: the row stays in place, its name struck, and says so in words. */
+.editor .removing b {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.editor .removing .skt {
+  color: var(--muted);
 }
 .editor .skl-r > .icon,
 .editor .skl-alert {

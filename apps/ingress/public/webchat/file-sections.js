@@ -24,7 +24,7 @@ import {
 } from "./files-model.js";
 import { icon } from "./icons.js";
 import { Mascot } from "./mascot.js";
-import { enter, fromKeyboard, play, reduced, SPRINGS } from "./motion.js";
+import { DUR, EASE, enter, fadeIn, fromKeyboard, play, reduced, SPRINGS } from "./motion.js";
 import { roll, rollText } from "./roll.js";
 import { SkillInstall } from "./skill-install.js";
 import { tips } from "./tips.js";
@@ -33,6 +33,8 @@ import { tips } from "./tips.js";
 export const EMPTY_PX = 104;
 /** Digits roll at most once a second (5.16). */
 export const ROLL_EVERY_MS = 1_000;
+/** What a skill's removal turns --muted: its name, struck, and its tile. */
+const PARTS = "b, .skt";
 
 const element = (tag, className) => {
   const made = document.createElement(tag);
@@ -710,36 +712,113 @@ export class FileSections {
         : (skill?.description ?? "");
     const origin = element("span", "so");
     const conflict = this.conflicts[`skill:${name}`];
-    origin.textContent = change?.install
-      ? names.pending.install
-      : skill === null
-        ? names.pending.new
-        : [originLine(skill.origin, names), skill.edited ? names.edited : ""]
-            .filter(Boolean)
-            .join(" · ");
+    const removing = skill !== null && change?.content === null;
+    origin.append(
+      rollText(
+        change?.install
+          ? names.pending.install
+          : skill === null
+            ? names.pending.new
+            : removing
+              ? names.pending.remove
+              : [originLine(skill.origin, names), skill.edited ? names.edited : ""]
+                  .filter(Boolean)
+                  .join(" · "),
+      ),
+    );
     row.append(tile, title, description, origin);
     if (conflict || this.refusals[`skill:${name}`]) {
       const alert = element("span", "skl-alert");
       alert.append(icon("alert"));
       row.append(alert);
     }
-    if (change?.install) {
+    if (change?.install || removing) {
       // It opens nothing until it is saved, and stays in the tab order, where Install puts focus.
       row.setAttribute("aria-disabled", "true");
-      item.append(row, this.#cancelPending(name));
+      item.classList.toggle("removing", removing);
+      item.append(row, removing ? this.#keepSkill(name) : this.#cancelPending(name));
       tips(item);
       return item;
     }
     row.setAttribute("aria-label", names.openSkill(name));
     row.append(icon("chevronRight"));
     row.addEventListener("click", () => this.#openSkill(name));
-    if (skill === null) {
-      item.append(row, this.#cancelPending(name));
-      tips(item);
-      return item;
-    }
-    item.append(row);
+    item.append(row, skill === null ? this.#cancelPending(name) : this.#removeSkill(name));
+    tips(item);
     return item;
+  }
+
+  /** A saved skill goes on Save: ✕ on its row marks it, and keeps an edit to give back. */
+  #removeSkill(name) {
+    const remove = button("icb sm xbtn");
+    remove.setAttribute("aria-label", this.#files.removeSkill(name));
+    remove.dataset.tip = "";
+    remove.append(icon("close"));
+    remove.addEventListener("click", () => {
+      const edit = this.drafts.skills.get(name);
+      this.drafts.skills.set(name, edit ? { content: null, edit } : { content: null });
+      this.#marked(name, this.#files.removing(name));
+    });
+    return remove;
+  }
+
+  /** Keep, in the ✕'s place, cancels a removal: the row is back as saved, or as edited. */
+  #keepSkill(name) {
+    const keep = button("icb sm xbtn");
+    keep.setAttribute("aria-label", this.#files.keepSkill(name));
+    keep.dataset.tip = "";
+    keep.append(icon("undo"));
+    keep.addEventListener("click", () => {
+      const key = `skill:${name}`;
+      const { edit } = this.drafts.skills.get(name) ?? {};
+      delete this.refusals[key];
+      // A conflict the removal met is the edit's too, which started from the same version; alone,
+      // the row shows the vault's version, which a new removal names.
+      if (edit) this.drafts.skills.set(name, edit);
+      else {
+        this.drafts.skills.delete(name);
+        delete this.bases[key];
+        delete this.conflicts[key];
+      }
+      this.#marked(name, this.#files.kept(name));
+    });
+    return keep;
+  }
+
+  /**
+   * A removal marked or kept: the row changes in place, with focus still in its slot, and the
+   * live region says so. Its colors fade and where it came from rolls; from the keyboard, at once.
+   */
+  #marked(name, said) {
+    const rowOf = () => this.skillRows.querySelector(`[data-skill="${CSS.escape(name)}"]`);
+    const before = rowOf();
+    const was = {
+      // The label as it ends: a roll still leaving, from a quick second press, isn't part of it.
+      origin: before.querySelector(".so > .roll:last-child").textContent,
+      colors: [...before.querySelectorAll(PARTS)].map((part) => getComputedStyle(part).color),
+    };
+    this.live.textContent = said;
+    this.#drawSkills();
+    this.#onChange();
+    const item = rowOf();
+    item.querySelector(".xbtn").focus({ preventScroll: true });
+    if (fromKeyboard()) return;
+    const origin = item.querySelector(".so");
+    const now = origin.textContent;
+    origin.replaceChildren(rollText(was.origin));
+    roll(origin, now);
+    fadeIn(item.querySelector(".xbtn .icon"));
+    [...item.querySelectorAll(PARTS)].forEach((part, index) => {
+      const { color, textDecorationColor } = getComputedStyle(part);
+      play(
+        part,
+        [
+          { color: was.colors[index], textDecorationColor: "transparent" },
+          { color, textDecorationColor },
+        ],
+        { duration: DUR.fade, easing: EASE.fade },
+      );
+    });
   }
 
   /** A skill's pending install or new SKILL.md goes, before Save: ✕ on its row. */

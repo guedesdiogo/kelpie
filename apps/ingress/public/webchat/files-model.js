@@ -96,7 +96,8 @@ export function freeSkillName(base, taken) {
 
 /**
  * The drafts as the page starts them: nothing changed. `skills` maps a skill's name to its
- * pending change, `{ content }` (null removes it) or `{ install }` (a staged skill).
+ * pending change, `{ content }` (null removes it, keeping in `edit` the change it replaced) or
+ * `{ install }` (a staged skill).
  */
 export function freshDrafts() {
   return { soul: undefined, rules: undefined, memory: undefined, skills: new Map() };
