@@ -37,7 +37,13 @@ function fake() {
   subagent.model = { provider: "anthropic", conversation: { tier: "cheap", effort: "low" } };
   const proposals = new Map<string, Proposal>();
   const notices: { master: string; notice: ProposalNotice }[] = [];
-  const state = { failApply: false, failFinish: false, notify: true as boolean | "throws" };
+  const state = {
+    failApply: false,
+    failFinish: false,
+    /** A claim whose answer is lost: after it took, or before. */
+    failClaim: false as false | "taken" | "untaken",
+    notify: true as boolean | "throws",
+  };
   const setStatus = (id: string, status: Proposal["status"], by: Actor) => {
     const proposal = proposals.get(id) as Proposal;
     const settled = status !== "pending" && status !== "applying";
@@ -117,6 +123,10 @@ function fake() {
       },
       async claim(id: string, actor: Actor) {
         calls.push(`claim ${id} ${actor.via}`);
+        if (state.failClaim) {
+          if (state.failClaim === "taken") setStatus(id, "applying", actor);
+          throw new Error("unreachable");
+        }
         const proposal = proposals.get(id);
         if (!proposal) return { ok: false, reason: "unknown_proposal" };
         if (proposal.status !== "pending") return { ok: false, reason: "not_pending" };
@@ -124,8 +134,8 @@ function fake() {
       },
       async finish(id: string, outcome: string, actor: Actor) {
         calls.push(`finish ${id} ${outcome}`);
-        if (state.failFinish && outcome !== "released") throw new Error("unreachable");
-        return setStatus(id, outcome === "released" ? "pending" : (outcome as never), actor);
+        if (state.failFinish) throw new Error("unreachable");
+        return setStatus(id, outcome as never, actor);
       },
       async notify(to: string, notice: ProposalNotice) {
         if (state.notify === "throws") throw new Error("unreachable");
@@ -344,6 +354,24 @@ describe("the owner's decision (#302)", () => {
     // The change applied; the claim waits for the Registry's alarm to settle it.
     expect(settings.get("sales")?.remit).toBe("Sales.");
     expect(proposals.get(PROPOSAL)?.status).toBe("applying");
+  });
+
+  it("answers a claim whose answer was lost by what the Registry holds", async () => {
+    const taken = await proposed({ spawn: true });
+    taken.state.failClaim = "taken";
+    expect(
+      await taken.commands.decideProposal(page, { id: PROPOSAL, decision: "approve" }),
+    ).toMatchObject({ ok: true, value: { status: "applying" } });
+    expect(taken.calls.filter((call) => call.startsWith("configure"))).toEqual([]);
+
+    const lost = await proposed({ spawn: true });
+    lost.state.failClaim = "untaken";
+    expect(await lost.commands.decideProposal(page, { id: PROPOSAL, decision: "approve" })).toEqual(
+      {
+        ok: false,
+        reason: "unavailable",
+      },
+    );
   });
 
   it("refuses in one step, and a repeat changes nothing", async () => {

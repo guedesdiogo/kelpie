@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-19
 - Issue: [#302](https://github.com/guedesdiogo/kelpie/issues/302)
-- Decided by the owner on 2026-10-18, approving #302's plan and its ten defaults: «Aceito as 10 decisões como você recomendou, incluindo a mudança na 5 e a ADR-0061 no mesmo PR.»
+- Decided by the owner on 2026-10-18, approving #302's plan and its ten defaults: «Aceito as 10 decisões como você recomendou, incluindo a mudança na 5 e a ADR-0060 no mesmo PR.» It was numbered 0060 then; #439's ADR took that number, so this is ADR-0061.
 - Amends:
   - [ADR-0011](0011-agent-task-board.md): Kelpie comments on a task too, in its own words, as when it tells a proposal's outcome;
   - [ADR-0036](0036-agent-roles-models-and-subagents.md) §3: where the proposal tool is offered, how long a proposal waits, and its caps.
@@ -72,7 +72,8 @@ Neither Hermes nor ai-memory expires a proposal, and neither tells the proposer 
   - A change already in place counts as applied, so an approval that ran again is safe.
 - **An approval that doesn't finish,** as when a service fails mid-way, is settled by the Registry's alarm five minutes later:
   - applied when the target holds the change, since a change applies in one step;
-  - back to pending otherwise, for the owner to decide again while it hasn't expired.
+  - back to pending otherwise, for the owner to decide again while it hasn't expired;
+  - when the target can't be read, tried again every five minutes until the proposal expires, then back to pending, which expires it.
 
   A proposal is claimed once, so no approval applies past its expiry. The page answers such an approval as taken, never as "nothing changed".
 - **The applied change is audited on the target,** as `via: proposal:<id>`. Every step of a proposal is audited too, with the proposer, the person its turn acted for, and who decided.

@@ -171,10 +171,10 @@ export interface RegistryContract {
    * settles and answers instead. An approval that never finishes, the alarm settles.
    */
   claimProposal(id: string, actor: Actor): Promise<ProposalResult>;
-  /** Ends an approval: applied, a conflict, void, or `released` back to pending. */
+  /** Ends an approval: applied, a conflict, or void. */
   finishProposal(
     id: string,
-    outcome: "applied" | "conflict" | "void" | "released",
+    outcome: "applied" | "conflict" | "void",
     actor: Actor,
   ): Promise<ProposalResult>;
   /** Answers once the object's migrations ran; the deploy's probe calls it (#234). */
@@ -456,7 +456,7 @@ export interface ConfigPorts {
     claim(id: string, actor: Actor): Promise<ProposalResult>;
     finish(
       id: string,
-      outcome: "applied" | "conflict" | "void" | "released",
+      outcome: "applied" | "conflict" | "void",
       actor: Actor,
     ): Promise<ProposalResult>;
     /** Kelpie's notice in the owner's latest conversation with Master; false when none took it. */
@@ -871,7 +871,15 @@ export function createConfigCommands(ports: ConfigPorts) {
       if (Object.keys(rest).length > 0 || !isProposalId(id)) return invalid;
       if (decision === "refuse") return ports.proposals.refuse(id, actor);
       if (decision !== "approve") return invalid;
-      const claimed = await ports.proposals.claim(id, actor);
+      let claimed: ProposalResult;
+      try {
+        claimed = await ports.proposals.claim(id, actor);
+      } catch (error) {
+        // A claim whose answer was lost is taken all the same: the alarm settles it (#302).
+        console.warn("decideProposal: the claim's answer didn't come", errorName(error));
+        const now = await ports.proposals.get(id).catch(() => null);
+        return now?.status === "applying" ? { ok: true, value: now } : unavailable;
+      }
       if (!claimed.ok || claimed.value.status !== "applying") return claimed;
       const { target, changes, before } = claimed.value;
       const by: Actor = { userId: actor.userId, role: actor.role, via: `proposal:${id}` };

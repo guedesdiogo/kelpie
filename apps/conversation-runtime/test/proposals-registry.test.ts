@@ -106,6 +106,8 @@ describe("Registry proposals (#302)", () => {
       proposal({ before: {} }),
       proposal({ before: { remit: "" } }),
       proposal({ before: { spawn: "a".repeat(200_001) as never } }),
+      // A value for each field: an undefined one would lose its stale check.
+      proposal({ before: { spawn: undefined } as never }),
     ]) {
       expect(await stub.propose(bad, byMaster), JSON.stringify(bad)).toEqual(invalid);
     }
@@ -214,24 +216,21 @@ describe("Registry proposals (#302)", () => {
     });
   });
 
-  it("releases a claim back to pending, and settles a conflict", async () => {
+  it("settles a conflict, and takes no outcome it doesn't know", async () => {
     const stub = await withAgents("proposals-release");
     const id = await idOf(await stub.propose(proposal(), byMaster));
 
     await stub.claimProposal(id, page);
-    expect(await stub.finishProposal(id, "released", page)).toMatchObject({
-      ok: true,
-      value: { status: "pending", decidedAt: null },
+    expect(await stub.finishProposal(id, "released" as never, page)).toEqual({
+      ok: false,
+      reason: "invalid_input",
     });
-    await stub.claimProposal(id, page);
     expect(await stub.finishProposal(id, "conflict", page)).toMatchObject({
       ok: true,
       value: { status: "conflict" },
     });
     expect((await eventsOf(stub)).map((event) => (event as { kind: string }).kind)).toEqual([
       "proposed",
-      "claimed",
-      "released",
       "claimed",
       "conflict",
     ]);
@@ -544,6 +543,70 @@ describe("Registry proposals' abandoned approvals (#302)", () => {
     );
     expect(row.status).toBe("applying");
     expect(Number(row.claimed_at)).toBeGreaterThan(Date.now() - 60_000);
+  });
+
+  it("settles only the claim it read, when the approval finished during the read", async () => {
+    const stub = await withAgents("proposals-abandoned-raced");
+    await stub.add("ab-raced", "Raced", owner);
+    const id = await abandoned(stub, "ab-raced");
+
+    await runInDurableObject(stub, async (instance) => {
+      const real = (instance as unknown as { env: Env }).env;
+      // The page's own approval finishes while the alarm reads the target, which doesn't hold it.
+      const racing = {
+        ...real,
+        AGENT_HOST: {
+          getByName: () => ({
+            config: async () => {
+              await instance.finishProposal(id, "applied", page);
+              return { settings: { spawn: false }, promptVersion: 0 };
+            },
+          }),
+        },
+      };
+      Object.defineProperty(instance, "env", { value: racing, configurable: true, writable: true });
+      try {
+        await instance.alarm();
+      } finally {
+        Object.defineProperty(instance, "env", { value: real, configurable: true, writable: true });
+      }
+    });
+
+    expect(await stub.proposal(id)).toMatchObject({ status: "applied" });
+    expect((await eventsOf(stub)).map((event) => (event as { kind: string }).kind)).not.toContain(
+      "released",
+    );
+  });
+
+  it("gives up on a target that can't be read once the proposal expired", async () => {
+    const stub = await withAgents("proposals-abandoned-unread-due");
+    await stub.add("ab-unread-due", "Unread", owner);
+    const id = await abandoned(stub, "ab-unread-due");
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE proposals SET expires_at = ? WHERE id = ?",
+        Date.now() - 1,
+        id,
+      );
+      const real = (instance as unknown as { env: Env }).env;
+      const failing = {
+        ...real,
+        AGENT_HOST: { getByName: () => ({ config: () => Promise.reject(new Error("down")) }) },
+      };
+      Object.defineProperty(instance, "env", {
+        value: failing,
+        configurable: true,
+        writable: true,
+      });
+      try {
+        await instance.alarm();
+      } finally {
+        Object.defineProperty(instance, "env", { value: real, configurable: true, writable: true });
+      }
+    });
+
+    // Back to pending, then expired in the same alarm: it holds no cap any more.
+    expect(await stub.proposal(id)).toMatchObject({ status: "expired" });
   });
 
   it("puts one back to pending when its target doesn't hold the change", async () => {

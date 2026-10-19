@@ -72,7 +72,8 @@ const TEXTS: Localized<Texts> = {
       "The agent changed since this proposal, so approving it would apply nothing. Refuse it; the agent can propose again if it still needs the change.",
     approve: "Approve",
     refuse: "Refuse",
-    applying: "This proposal is being applied. Open this page again in a few minutes.",
+    applying:
+      "This proposal is being applied, which usually ends within a few minutes. If it didn't apply, the proposal waits for your decision again.",
     settled: {
       applied: {
         title: "Approved",
@@ -102,7 +103,7 @@ const TEXTS: Localized<Texts> = {
     },
     taken: {
       title: "Approval taken",
-      body: "Your approval was taken, but a Kelpie service didn't answer while it was applied. Kelpie settles it within a few minutes: open the proposal's page again to see how it ended.",
+      body: "Your approval was taken, but a Kelpie service didn't answer while it was applied. Kelpie settles it, usually within a few minutes: open the proposal's page again to see how it ended. If it didn't apply, the proposal waits for your decision again.",
     },
     unknown: { title: "No such proposal", body: "Check the link Kelpie sent you." },
     unavailable: {
@@ -142,7 +143,8 @@ const TEXTS: Localized<Texts> = {
       "O agente mudou desde esta proposta, então aprová-la não aplicaria nada. Recuse; o agente pode propor de novo se ainda precisar da mudança.",
     approve: "Aprovar",
     refuse: "Recusar",
-    applying: "Esta proposta está sendo aplicada. Abra esta página de novo daqui a alguns minutos.",
+    applying:
+      "Esta proposta está sendo aplicada, o que costuma terminar em alguns minutos. Se ela não for aplicada, volta a esperar sua decisão.",
     settled: {
       applied: {
         title: "Aprovada",
@@ -172,7 +174,7 @@ const TEXTS: Localized<Texts> = {
     },
     taken: {
       title: "Aprovação recebida",
-      body: "Sua aprovação foi recebida, mas um serviço do Kelpie não respondeu enquanto ela era aplicada. O Kelpie resolve isso em alguns minutos: abra a página da proposta de novo para ver como terminou.",
+      body: "Sua aprovação foi recebida, mas um serviço do Kelpie não respondeu enquanto ela era aplicada. O Kelpie resolve isso, em geral em alguns minutos: abra a página da proposta de novo para ver como terminou. Se ela não for aplicada, volta a esperar sua decisão.",
     },
     unknown: { title: "Essa proposta não existe", body: "Confira o link que o Kelpie enviou." },
     unavailable: {
@@ -215,7 +217,8 @@ const TEXTS: Localized<Texts> = {
       "El agente cambió desde esta propuesta, así que aprobarla no aplicaría nada. Recházala; el agente puede proponerla de nuevo si aún necesita el cambio.",
     approve: "Aprobar",
     refuse: "Rechazar",
-    applying: "Esta propuesta se está aplicando. Abre esta página de nuevo en unos minutos.",
+    applying:
+      "Esta propuesta se está aplicando, lo que suele terminar en unos minutos. Si no se aplica, vuelve a esperar tu decisión.",
     settled: {
       applied: {
         title: "Aprobada",
@@ -245,7 +248,7 @@ const TEXTS: Localized<Texts> = {
     },
     taken: {
       title: "Aprobación recibida",
-      body: "Tu aprobación se recibió, pero un servicio de Kelpie no respondió mientras se aplicaba. Kelpie lo resuelve en unos minutos: abre la página de la propuesta de nuevo para ver cómo terminó.",
+      body: "Tu aprobación se recibió, pero un servicio de Kelpie no respondió mientras se aplicaba. Kelpie lo resuelve, por lo general en unos minutos: abre la página de la propuesta de nuevo para ver cómo terminó. Si no se aplica, vuelve a esperar tu decisión.",
     },
     unknown: { title: "Esa propuesta no existe", body: "Revisa el enlace que Kelpie te envió." },
     unavailable: {

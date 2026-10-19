@@ -480,23 +480,19 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
     return this.#result(id);
   }
 
-  /** Ends an approval (#302): applied, a conflict, void, or `released` back to pending. */
+  /** Ends an approval (#302): applied, a conflict, or void. */
   async finishProposal(
     id: string,
-    outcome: "applied" | "conflict" | "void" | "released",
+    outcome: "applied" | "conflict" | "void",
     actor: Actor,
   ): Promise<ProposalResult> {
-    if (!["applied", "conflict", "void", "released"].includes(outcome)) {
+    if (!["applied", "conflict", "void"].includes(outcome)) {
       return { ok: false, reason: "invalid_input" };
     }
     const found = this.#open(id, actor);
     if (!found.ok) return found;
     if (found.row.status !== "applying") return { ok: false, reason: "not_pending" };
-    const now = Date.now();
-    if (outcome !== "released") return this.#settled(this.#settle(id, outcome, actor, now));
-    this.#release(id, actor, now);
-    // It may have come due while it was being applied.
-    return this.#settled(this.#result(id));
+    return this.#settled(this.#settle(id, outcome, actor, Date.now()));
   }
 
   /** An approval that didn't apply goes back to pending, audited only when it did. */
@@ -570,10 +566,22 @@ export class Registry extends DurableObject<Env> implements RegistryContract {
         );
       } catch (error) {
         console.error("Registry: an abandoned approval's target wasn't read", errorName(error));
+        // Tried again five minutes later, until the proposal expires: then it goes back to
+        // pending, which expires it, so no cap is held for good.
+        if (Date.now() > row.expiresAt) {
+          this.#release(row.id, null, Date.now());
+          return;
+        }
         this.#db
           .update(schema.proposals)
           .set({ claimedAt: Date.now() })
-          .where(eq(schema.proposals.id, row.id))
+          .where(
+            and(
+              eq(schema.proposals.id, row.id),
+              eq(schema.proposals.status, "applying"),
+              eq(schema.proposals.claimedAt, row.claimedAt ?? 0),
+            ),
+          )
           .run();
         return;
       }
