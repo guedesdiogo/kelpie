@@ -89,12 +89,12 @@ export const MAX_FRAME_CHARS = 4 * 1024 * 1024;
 export const MAX_REPLY_BYTES = 1024 * 1024;
 /**
  * The most usage entries a `round` or `finish` frame may carry; the runner sends one per reply. The
- * turn keeps them in its history row too, so a runner can't fill that row with them (#432).
+ * turn keeps them in its `turns` row, so a runner can't fill that row with them (#432).
  */
 export const MAX_USAGES = 16;
 /**
- * The largest token count a usage entry may carry, far past any turn's. A count past it, or one
- * that isn't whole, would steer when the conversation's checkpoint runs (#432).
+ * The largest token count a usage entry may carry, far past any turn's: counts stay whole and
+ * finite (#432). The runner still reports its own counts, and so when a checkpoint runs.
  */
 export const MAX_USAGE_COUNT = 1_000_000_000;
 /**
