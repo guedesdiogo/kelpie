@@ -133,7 +133,7 @@ const isLine = (value: unknown, max: number): value is string =>
  * keeps all but the spaces. Beside a visible character they stay valid, as U+FE0F does after the
  * heart U+2764.
  */
-const isVisible = (value: string): boolean =>
+export const isVisible = (value: string): boolean =>
   /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\u2800]/u.test(value);
 
 function parseSkills(value: unknown): AgentSkill[] | null {
