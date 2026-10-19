@@ -10,7 +10,15 @@ import {
   type SetAgentResult,
 } from "@kelpie/config";
 import type { ModelDescription, ModelSettings } from "@kelpie/llm/models";
-import { SUBAGENT_TOOLS, subagentPrefix } from "./subagent-limits.ts";
+import {
+  beyondCreator,
+  EFFORTS,
+  MAX_BRIEF_CHARS,
+  SUBAGENT_TOOLS,
+  subagentPrefix,
+  subagentToolsWithin,
+  TIERS,
+} from "./subagent-limits.ts";
 import type { Tool, ToolContext, ToolOutcome, ToolProvider } from "./tools.ts";
 
 // Temporary subagents (ADR-0036 §5, #290): an agent with `spawn` creates them for a demand, and
@@ -47,9 +55,6 @@ export interface SubagentPorts {
   /** #303's deletion, for one of the creator's subagents. */
   remove(actor: ToolContext["actor"], id: string): Promise<CommandResult<DeletedAgents>>;
 }
-
-const TIERS = ["cheap", "medium", "frontier"] as const;
-const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 const SPECS = {
   create_subagent: {
@@ -98,8 +103,6 @@ const SPECS = {
 } as const satisfies Record<string, Tool["spec"]>;
 
 const failed = (output: string): ToolOutcome => ({ output, isError: true });
-/** The longest a subagent's soul and skills are together: they go with every model call it makes. */
-const MAX_BRIEF_CHARS = 24_000;
 const fields = (input: unknown): Record<string, unknown> =>
   typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {};
 
@@ -136,44 +139,13 @@ export function subagentTools(ports: SubagentPorts): ToolProvider {
       const effort = optional("effort");
       if (!isAgentName(name)) return failed("Give it a name: one line of up to 80 characters.");
       const { model, described, tools: creatorTools } = await ports.creator(context.agentId);
-      // Its tools are a subagent's, within what its creator may use.
-      const allowed = [...SUBAGENT_TOOLS].filter(
-        (tool) => creatorTools === null || creatorTools.includes(tool),
+      // Its tools are a subagent's, within what its creator may use, and its trio within its own.
+      const tools = optional("tools") ?? subagentToolsWithin(creatorTools);
+      const beyond = beyondCreator(
+        { tools, tier, effort },
+        { tier: described.tier, effort: described.effort, tools: creatorTools },
       );
-      // Without complete_task, a subagent could never finish a task (#344).
-      if (!allowed.includes("complete_task")) {
-        return failed(
-          "You may not use complete_task, so a subagent of yours could never finish a task: ask the owner to allow it through Master.",
-        );
-      }
-      const tools = optional("tools") ?? allowed;
-      if (!Array.isArray(tools) || tools.some((tool) => !allowed.includes(String(tool)))) {
-        return failed(`A subagent's tools can only be these: ${allowed.join(", ") || "none"}.`);
-      }
-      if (!tools.includes("complete_task")) {
-        return failed(
-          "A subagent's tools must include complete_task, or it can't finish its task.",
-        );
-      }
-      if (tier !== undefined && !TIERS.includes(tier as never)) return failed("Unknown tier.");
-      if (effort !== undefined && !EFFORTS.includes(effort as never))
-        return failed("Unknown effort.");
-      // A tier Kelpie doesn't rank leaves only the cheapest.
-      const ceiling = Math.max(TIERS.indexOf(described.tier as never), 0);
-      if (tier !== undefined && TIERS.indexOf(tier as never) > ceiling) {
-        return failed(`Its tier can't be above yours, ${TIERS[ceiling]}.`);
-      }
-      if (
-        effort !== undefined &&
-        (described.effort === undefined ||
-          EFFORTS.indexOf(effort as never) > EFFORTS.indexOf(described.effort as never))
-      ) {
-        return failed(
-          described.effort === undefined
-            ? "You run with no effort set, so it can't set one."
-            : `Its effort can't be above yours, ${described.effort}.`,
-        );
-      }
+      if (beyond !== null) return failed(beyond);
       const brief =
         String(soul ?? "").length +
         (Array.isArray(skills)

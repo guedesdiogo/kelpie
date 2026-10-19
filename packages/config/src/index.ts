@@ -40,6 +40,29 @@ export {
   randomMascot,
 } from "./mascot.ts";
 export {
+  isProposalFields,
+  isProposalId,
+  MAX_PROPOSAL_REASON,
+  mergeModel,
+  type NewProposal,
+  PROPOSABLE,
+  PROPOSAL_CAPS,
+  PROPOSAL_STATUSES,
+  PROPOSAL_TTL_MS,
+  type Proposal,
+  type ProposalChanges,
+  type ProposalDetail,
+  type ProposalNotice,
+  type ProposalOutcome,
+  type ProposalResult,
+  type ProposalSnapshot,
+  type ProposalStatus,
+  type ProposedSettings,
+  parseProposalChanges,
+  parseProposalReason,
+  sameValue,
+} from "./proposals.ts";
+export {
   type AgentSettings,
   type AgentSkill,
   agentModel,
@@ -53,6 +76,7 @@ export {
   RETIRED_AGENT_ID,
 } from "./settings.ts";
 export {
+  type CommentAuthor,
   type CommentSource,
   isTaskId,
   isTaskStatus,

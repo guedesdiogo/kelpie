@@ -36,6 +36,7 @@ import {
 import type { ModelDescription, ModelSettings } from "@kelpie/llm/models";
 import { configurationTools, heldTools } from "./configuration.ts";
 import { memoryTools } from "./memory-tools.ts";
+import { proposalTools } from "./proposal-tools.ts";
 import { subagentTools } from "./subagent-tools.ts";
 import { taskTools } from "./task-tools.ts";
 import type { ToolActivity, ToolProvider } from "./tools.ts";
@@ -193,7 +194,7 @@ export function configCommands(env: Env) {
   return createConfigCommands({
     registry,
     agents: {
-      configure: (id, changes, actor) => agentHost(id).configure(changes, actor),
+      configure: (id, changes, actor, expect) => agentHost(id).configure(changes, actor, expect),
       config: (id) => agentHost(id).config(),
       erase: (id, conversations) => agentHost(id).erase(conversations),
     },
@@ -228,7 +229,52 @@ export function configCommands(env: Env) {
       configure: (settings, actor) => gatewayAdmin.configureDefaults(settings, actor),
       setClaudeCode: (on, actor) => gatewayAdmin.setClaudeCode(on, actor),
     },
+    // The proposals (#302), in the Registry; Kelpie's notice goes through Master's AgentHost.
+    proposals: {
+      propose: (proposal, actor) => registry.propose(proposal, actor),
+      get: (id) => registry.proposal(id),
+      list: (status) => registry.proposals(status),
+      refuse: (id, actor) => registry.refuseProposal(id, actor),
+      claim: (id, actor) => registry.claimProposal(id, actor),
+      finish: (id, outcome, actor) => registry.finishProposal(id, outcome, actor),
+      notify: (master, notice) => agentHost(master).proposalNotice(notice),
+    },
     vault: { held: notBound, forget: notBound, setDream: notBound },
+  });
+}
+
+/**
+ * What an agent holds, as its subagents' and proposals' ceiling: its own model, not the defaults,
+ * so an unset tier follows the instance's (#344), and its tools, Master's orchestration tools
+ * included whatever its list (ADR-0050, #391).
+ */
+export function holdsOf(env: Env) {
+  const registry = env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<RegistryContract>;
+  const agentHost = (id: string) =>
+    env.AGENT_HOST.getByName(id) as unknown as Remote<AgentHostContract>;
+  return async (id: string) => {
+    const [{ settings }, model, entry] = await Promise.all([
+      agentHost(id).config(),
+      agentHost(id).ownModel(),
+      registry.get(id),
+    ]);
+    const described = await (
+      env.LLM_GATEWAY as unknown as {
+        describe(area: "conversation", agent: ModelSettings): Promise<ModelDescription>;
+      }
+    ).describe("conversation", model);
+    return { model, described, tools: heldTools(entry?.role ?? null, settings.tools) };
+  };
+}
+
+/** The proposal tool (#302), over the Registry and these commands. */
+export function proposalProvider(env: Env, commands: ReturnType<typeof configCommands>) {
+  const registry = env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<RegistryContract>;
+  return proposalTools({
+    roleOf: async (id) => (await registry.get(id))?.role ?? null,
+    owned: async (id) => (await registry.list()).filter((agent) => agent.owner === id),
+    holds: holdsOf(env),
+    propose: (actor, input) => commands.proposeAgentChange(actor, input),
   });
 }
 
@@ -308,21 +354,7 @@ function productionPorts(env: Env): ConversationPorts {
           if (entry?.role === "master") return true;
           return entry?.role === "specialist" && (await agentHost(id).config()).settings.spawn;
         },
-        creator: async (id) => {
-          // Its own model, not the defaults: an unset tier follows the instance's (#344). Master
-          // holds its orchestration tools whatever its list (ADR-0050, #391).
-          const [{ settings }, model, entry] = await Promise.all([
-            agentHost(id).config(),
-            agentHost(id).ownModel(),
-            registry.get(id),
-          ]);
-          const described = await (
-            env.LLM_GATEWAY as unknown as {
-              describe(area: "conversation", agent: ModelSettings): Promise<ModelDescription>;
-            }
-          ).describe("conversation", model);
-          return { model, described, tools: heldTools(entry?.role ?? null, settings.tools) };
-        },
+        creator: holdsOf(env),
         bindCreator: (id, creator) => env.AGENT_HOST.getByName(id).bindCreator(creator),
         discard: (id) => agentHost(id).erase([]),
         add: (id, name, creator, actor) => registry.addSubagent(id, name, creator, actor),
@@ -331,6 +363,8 @@ function productionPorts(env: Env): ConversationPorts {
           (await registry.list()).filter((agent) => agent.owner === creator),
         remove: (actor, id) => commands.deleteAgent(actor, { id }),
       }),
+      // Proposals (#302): an owner agent asks for a change, which only the owner's page applies.
+      proposalProvider(env, commands),
       // The task tools (#335): a run ends its task, and an agent hands work to those it owns.
       taskTools({
         owned: async (id) =>
