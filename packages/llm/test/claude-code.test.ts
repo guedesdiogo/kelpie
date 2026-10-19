@@ -6,7 +6,10 @@ import {
   type ClaudeCodeTurnRequest,
   type ClaudeCodeTurnStart,
   MAX_FRAME_CHARS,
+  MAX_MODEL_CHARS,
   MAX_REPLY_BYTES,
+  MAX_USAGE_COUNT,
+  MAX_USAGES,
   TURN_MARGIN_MS,
 } from "../src/claude-code.ts";
 import { LlmError } from "../src/errors.ts";
@@ -624,6 +627,42 @@ describe("ClaudeCodeProvider", () => {
       "a usage without its model",
       line({ ...finishFrame(SESSION), usage: [{ ...usage, model: 5 }] }),
     ],
+    // A usage that would outgrow the turn's history row, or steer its checkpoint (#432).
+    [
+      "a usage whose model is too long",
+      line({
+        ...finishFrame(SESSION),
+        usage: [{ ...usage, model: "m".repeat(MAX_MODEL_CHARS + 1) }],
+      }),
+    ],
+    [
+      "a usage without a model's name",
+      line({ ...finishFrame(SESSION), usage: [{ ...usage, model: "" }] }),
+    ],
+    [
+      "a usage count that isn't whole",
+      line({ ...finishFrame(SESSION), usage: [{ ...usage, output: 1.5 }] }),
+    ],
+    [
+      "a usage count past any turn's",
+      line({ ...finishFrame(SESSION), usage: [{ ...usage, inputUncached: 1e15 }] }),
+    ],
+    // More entries than a turn's models.
+    [
+      "a round with too many usages",
+      line({
+        type: "round",
+        message: reply("x"),
+        usage: Array.from({ length: MAX_USAGES + 1 }, () => usage),
+      }),
+    ],
+    [
+      "a finish with too many usages",
+      line({
+        ...finishFrame(SESSION),
+        usage: Array.from({ length: MAX_USAGES + 1 }, () => usage),
+      }),
+    ],
     ["an error code Claude Code doesn't send", line({ type: "error", code: "billing" })],
     ["a reset that isn't a time", line({ type: "error", code: "rate_limited", resetsAt: "soon" })],
     ["an unverified that isn't a flag", line({ type: "error", code: "auth", unverified: "yes" })],
@@ -636,6 +675,26 @@ describe("ClaudeCodeProvider", () => {
     });
     expect(error).toMatchObject({ code: "protocol", retryable: true });
     expect(turn.cancelled).toBe(1);
+  });
+
+  it(`takes up to ${MAX_USAGES} usages in a frame, each within its bounds`, async () => {
+    const usages = Array.from({ length: MAX_USAGES }, () => usage);
+    // Claude Code names some replies of its own so.
+    usages[1] = { ...usage, model: "<synthetic>" };
+    usages[0] = {
+      model: "m".repeat(MAX_MODEL_CHARS),
+      inputUncached: MAX_USAGE_COUNT,
+      cacheRead: 0,
+      cacheWrite: 0,
+      output: 0,
+    };
+    const fake = fakeClient(fakeTurn([line({ ...finishFrame(SESSION), usage: usages })]));
+    const { events, error } = await run(new ClaudeCodeProvider(fake.client), {
+      session,
+      answers: fakeAnswers().answers,
+    });
+    expect(error).toBeUndefined();
+    expect(events).toEqual([{ ...finished(SESSION), usage: usages }]);
   });
 
   it("bounds a line, whole or arriving in pieces", async () => {
@@ -758,6 +817,8 @@ describe("ClaudeCodeProvider", () => {
   });
 
   it("reads a fault on the way to the runner as a dropped connection, retryable (#431)", async () => {
+    // Logged by its name alone, so a fault of Kelpie's own isn't hidden by the fallback (#432).
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
     const answers = fakeAnswers({ toolu_01: { callId: "toolu_01", output: "Ana" } }).answers;
     const call = { type: "tool_call", id: "toolu_01", name: "search_memory", input: {} };
 
@@ -805,6 +866,45 @@ describe("ClaudeCodeProvider", () => {
       expect(turn.cancelled, fault).toBe(1);
       expect(fake.disposed(), fault).toBe(1);
     }
+    expect(warned.mock.calls).toEqual(
+      Array.from({ length: 4 }, () => ["claude-code: the way to the runner failed", "TypeError"]),
+    );
+
+    // Kelpie's own errors pass as they are, and aren't logged.
+    warned.mockClear();
+    const refused = fakeClient();
+    refused.client.turn = async () => {
+      throw new LlmError("Not now", "unavailable", true);
+    };
+    const own = await run(new ClaudeCodeProvider(refused.client), { session, answers });
+    expect(own.error).toMatchObject({ message: "Not now", code: "unavailable" });
+    // A value thrown that isn't an error is named by its type.
+    const odd = fakeClient();
+    odd.client.turn = async () => {
+      throw "lost";
+    };
+    expect(
+      (await run(new ClaudeCodeProvider(odd.client), { session, answers })).error,
+    ).toMatchObject({ code: "connection" });
+    expect(warned.mock.calls).toEqual([["claude-code: the way to the runner failed", "string"]]);
+    warned.mockRestore();
+  });
+
+  it("passes its deadline while the turn's stream is asked for, and stops the turn (#432)", async () => {
+    vi.useFakeTimers();
+    const turn = fakeTurn([PING], { open: true });
+    turn.events = () => new Promise(() => {});
+    const fake = fakeClient(turn);
+    const reading = run(new ClaudeCodeProvider(fake.client), {
+      session,
+      answers: fakeAnswers().answers,
+    });
+    await vi.advanceTimersByTimeAsync(180_000 + TURN_MARGIN_MS);
+    const { events, error } = await reading;
+    expect(events).toEqual([]);
+    expect(error).toMatchObject({ code: "server_error", retryable: true });
+    expect(turn.cancelled).toBe(1);
+    expect(fake.disposed()).toBe(1);
   });
 
   it("races the runner's calls against the deadline, and stops a turn that starts after it", async () => {

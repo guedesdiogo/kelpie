@@ -88,6 +88,21 @@ export const MAX_FRAME_CHARS = 4 * 1024 * 1024;
  */
 export const MAX_REPLY_BYTES = 1024 * 1024;
 /**
+ * The most usage entries a `round` or `finish` frame may carry; the runner sends one per reply. The
+ * turn keeps them in its `turns` row, so a runner can't fill that row with them (#432).
+ */
+export const MAX_USAGES = 16;
+/**
+ * The largest token count a usage entry may carry, far past any turn's: counts stay whole and
+ * finite (#432). The runner still reports its own counts, and so when a checkpoint runs.
+ */
+export const MAX_USAGE_COUNT = 1_000_000_000;
+/**
+ * The longest model name a usage entry may carry, as the runner's own turn request bounds one. Only
+ * its length is checked: Claude Code names some replies of its own `<synthetic>`.
+ */
+export const MAX_MODEL_CHARS = 128;
+/**
  * A limit's reset is kept from a day back to this far ahead: a weekly limit resets within a week.
  * Any other is a clock or a unit gone wrong, and the notice then names no time.
  */
@@ -356,13 +371,17 @@ function cancel(turn: ClaudeCodeTurn): void {
 
 /**
  * A failure on the way to the runner, as an RPC call that channel-egress's redeploy or eviction cut
- * ("Network connection lost."): a dropped connection, so the router falls back. Kelpie's own
+ * ("Network connection lost."): a dropped connection, so the router falls back. It is logged by its
+ * name alone, never its message, so a fault of Kelpie's own still shows (#432). Kelpie's own
  * errors pass as they are.
  */
 function inTransit(error: unknown): LlmError {
-  return error instanceof LlmError
-    ? error
-    : new LlmError("The way to the runner failed", "connection", true);
+  if (error instanceof LlmError) return error;
+  console.warn(
+    "claude-code: the way to the runner failed",
+    error instanceof Error ? error.name : typeof error,
+  );
+  return new LlmError("The way to the runner failed", "connection", true);
 }
 
 function refusal(reason: string): LlmError {
@@ -592,10 +611,11 @@ function toolCall(value: unknown): ToolCallPart | null {
 }
 
 function usages(value: unknown): Usage[] | null {
-  if (!Array.isArray(value)) return null;
+  if (!Array.isArray(value) || value.length > MAX_USAGES) return null;
   const counted: Usage[] = [];
   for (const entry of value) {
     if (!isRecord(entry) || typeof entry.model !== "string") return null;
+    if (entry.model === "" || entry.model.length > MAX_MODEL_CHARS) return null;
     const { inputUncached, cacheRead, cacheWrite, output } = entry;
     if (![inputUncached, cacheRead, cacheWrite, output].every(isCount)) return null;
     counted.push({
@@ -610,7 +630,7 @@ function usages(value: unknown): Usage[] | null {
 }
 
 const isCount = (value: unknown): boolean =>
-  typeof value === "number" && Number.isFinite(value) && value >= 0;
+  Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= MAX_USAGE_COUNT;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
