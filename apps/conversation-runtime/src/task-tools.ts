@@ -6,6 +6,7 @@ import {
   type TaskResult,
   type TaskView,
 } from "@kelpie/config";
+import { MAX_UNATTENDED_HANDOFFS } from "./agent-host/tasks.ts";
 import type { Tool, ToolContext, ToolOutcome, ToolProvider } from "./tools.ts";
 
 // The agents' task tools (ADR-0011, ADR-0036 §4, #335). In a task's own conversation, the run ends
@@ -27,6 +28,10 @@ export interface TaskToolPorts {
     text: string,
     by: string,
   ): Promise<TaskResult<TaskView>>;
+  /** Takes one of `agentId`'s handoffs from turns no person typed (#345): false at the cap. */
+  takeHandoff(agentId: string): Promise<boolean>;
+  /** Gives back the one a task the board refused took. */
+  returnHandoff(agentId: string): Promise<void>;
 }
 
 const MAX_WORDS = 8_000;
@@ -223,7 +228,9 @@ export function taskTools(ports: TaskToolPorts): ToolProvider {
     async run(input, context) {
       const { agentId, title, body } = fields(input);
       if (context.actor.role !== "owner" || context.scopes !== "all") {
-        return failed("Only the owner's own turns, in a direct conversation, hand off tasks.");
+        return failed(
+          "Only turns for the owner hand off tasks: in a direct conversation with them, or in a task's run.",
+        );
       }
       if (!isAgentId(agentId) || typeof title !== "string" || typeof body !== "string") {
         return failed("Give the agentId, a one-line title and the body.");
@@ -246,11 +253,24 @@ export function taskTools(ports: TaskToolPorts): ToolProvider {
       if (task.title === "" || task.title.length > MAX_TASK_TITLE) {
         return failed("The title is one line of up to 200 characters.");
       }
+      // A turn no person typed hands off within the agent's day (#345). A create that throws keeps
+      // its slot: it may have made the task.
+      const unattended = context.trigger !== "person";
+      if (unattended && !(await ports.takeHandoff(context.agentId))) {
+        return failed(
+          `Turns no person typed hand off at most ${MAX_UNATTENDED_HANDOFFS} tasks in 24 hours for you, and you reached that. ${
+            context.trigger === "task"
+              ? "Do the work yourself, or ask the owner with wait_on_task."
+              : "Tell the owner what you would hand off: their message can hand it off."
+          }`,
+        );
+      }
       const made = await ports.create(agentId, task, {
         agentId: context.agentId,
         actingUserId: context.actor.userId,
       });
       if (!made.ok) {
+        if (unattended) await ports.returnHandoff(context.agentId).catch(() => undefined);
         return failed(
           made.reason === "not_allowed"
             ? `The agent ${agentId} can't take it: you don't own it, or its board is full.`

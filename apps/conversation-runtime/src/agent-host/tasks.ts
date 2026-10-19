@@ -32,6 +32,12 @@ export const MAX_FAILURES = 2;
 export const MAX_OPEN_TASKS = 500;
 /** Of those, the most other agents may have open on it (#335): the rest of the board is the owner's. */
 export const MAX_OPEN_AGENT_TASKS = 20;
+/**
+ * The most tasks an agent hands off in 24 hours from turns no person typed, a task's run or
+ * Kelpie's note (#345), so a chain of news and tasks with no one in it stops. Its creating
+ * AgentHost counts them; a person's own turns don't count.
+ */
+export const MAX_UNATTENDED_HANDOFFS = 20;
 /** The most times a task goes to Waiting: one more ends it in Cancelled, so no loop runs on. */
 export const MAX_WAITS = 5;
 export const MAX_COMMENTS = 500;

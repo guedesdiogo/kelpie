@@ -76,6 +76,7 @@ const context = (fields: Partial<ToolContext> = {}): ToolContext => ({
   actor: { userId: "u-owner", role: "owner", via: "agent:kelpie" },
   agentId: "kelpie",
   scopes: "all",
+  trigger: "person",
   qualifier: "clef",
   turn: "1",
   source: "telegram:1, 2026-10-15",
@@ -298,6 +299,30 @@ describe("the subagent tools (#290)", () => {
       output: expect.stringContaining("must include complete_task"),
     });
     expect(calls).toEqual([]);
+  });
+
+  it("work in a task's run and after Kelpie's note as in the owner's message, within their limits (#345)", async () => {
+    const live: AgentEntry[] = [
+      { id: "kelpie-sub-aaaaaa", name: "Scout", role: "subagent", owner: "kelpie", chat: false },
+    ];
+    const { provider, calls } = world({ live });
+    for (const trigger of ["task", "note"] as const) {
+      expect(
+        await (await tool(provider, "create_subagent")).run(brief, context({ trigger })),
+        trigger,
+      ).not.toHaveProperty("isError");
+    }
+    expect(
+      await (await tool(provider, "delete_subagent")).run(
+        { id: "kelpie-sub-aaaaaa" },
+        context({ trigger: "note" }),
+      ),
+    ).not.toHaveProperty("isError");
+    expect(calls.filter((call) => !call.startsWith("bind"))).toEqual([
+      "add Scout by kelpie",
+      "add Scout by kelpie",
+      "remove kelpie-sub-aaaaaa",
+    ]);
   });
 
   it("are refused to a turn that doesn't read all the owner's memory", async () => {

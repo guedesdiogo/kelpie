@@ -208,6 +208,7 @@ function contextOf(confirmed: boolean, actor: Actor = owner, locale: Locale = "e
     actor,
     agentId: MASTER,
     scopes: "all",
+    trigger: "person",
     qualifier: "clef",
     turn: "1",
     source: "webchat:u-owner, 2026-10-06",
