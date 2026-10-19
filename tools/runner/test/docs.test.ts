@@ -88,6 +88,16 @@ describe("docs/runner.md's hook snippets", () => {
     expect(existsSync(`${file}.new`)).toBe(false);
   });
 
+  it("replace a hook installed from the checkout's old folder, ~/kelpie", () => {
+    const old = HOOK_COMMAND.replace("$HOME/Repos/kelpie/", "$HOME/kelpie/");
+    expect(old).toContain('cd "$HOME/kelpie/tools/runner"');
+    const hook = { type: "command", async: true, timeout: 2 };
+    write({ hooks: { Stop: [{ hooks: [{ ...hook, command: old }] }] } });
+    expect(run(INSTALL).status).toBe(0);
+    const hooks = settings().hooks as Record<string, unknown>;
+    expect(hooks.Stop).toEqual([{ hooks: [{ ...hook, command: HOOK_COMMAND }] }]);
+  });
+
   it("remove it again, leaving the settings as they were", () => {
     write(SETTINGS);
     run(INSTALL);
@@ -175,6 +185,6 @@ describe("the runner's checkout", () => {
     expect(HOOK_COMMAND).toMatch(/^cd "\$HOME\/Repos\/kelpie\/tools\/runner" && /);
     expect(DOCS).toContain("git clone https://github.com/guedesdiogo/kelpie.git ~/Repos/kelpie\n");
     expect(DOCS).toContain("cp ~/Repos/kelpie/tools/runner/kelpie-runner.service ");
-    expect(`${DOCS}\n${UNIT}\n${HOOK_COMMAND}`).not.toMatch(/(~|\$HOME|%h)\/kelpie\b/);
+    expect(`${DOCS}\n${UNIT}\n${HOOK_COMMAND}`).not.toMatch(/(~|\$HOME|%h)\/kelpie(?![\w-])/);
   });
 });
