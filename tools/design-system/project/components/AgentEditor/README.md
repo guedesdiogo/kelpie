@@ -20,7 +20,7 @@ The agent's editor opens from the pencil on its mascot, never from a tap on the 
 - **A changed section** shows a 6px `accent` dot after its name, which enters from 0.6 with `spring-fast`; its tab's name adds "changed". Nothing waits on the owner, so it isn't `warm`.
 - **Profile.** The name (80 characters), the specialty (40) and the short description (200), each one line, as the agent's settings take them.
   - Under the specialty and the description, what each is for, and its count, "15 of 40", in Geist Mono.
-  - The main agent's specialty is a read-only field with a lock: "main", and why.
+  - Master's specialty is a read-only field with a lock: "Master", and why.
   - A name that shows nothing can't be saved: its boundary turns `danger`, it says "Write a name", and Save waits. A specialty or a description that shows nothing is an empty one.
   - What a line can't hold leaves as it is pasted: tabs and breaks become spaces, and control, format, private-use and unassigned characters go (ADR-0056). Inputs use 16px text on the phone.
 - **Mascot, the mascot lab's Construtor.**
@@ -43,5 +43,5 @@ The agent's editor opens from the pencil on its mascot, never from a tap on the 
   - A save that fails in part names what didn't save and what did, on a 9% `danger` tint: "The Profile wasn't saved. The Mascot is saved." The failed section's mark turns to the `danger` alert, its tab's name says "not saved", and the footer offers "Save the Profile". When every section fails, it says "Nothing was saved".
 - **What it never does:** a Save per section, a modal for unsaved changes, blur in a crossfade, or the ring or confetti on Save.
 - **Research (§8),** read on 2026-10-16, with the findings on #379: adopt Notion Faces' grid beside a big preview, a live preview as Tolan's and Apple Watch's face editor have, the APG radio group, and Hermes Agent's one Save with a dirty flag per section ([code](https://github.com/NousResearch/hermes-agent/blob/9c002cb941de1e1708294d0cd58e060b6a417b5e/apps/desktop/src/plugins/hermes-bots/edit-profile-dialog.tsx)); adapt Discord's unsaved-changes bar into a quiet line and Benji Taylor's Family Values for the Save label; avoid a menu as the only way in, Hermes' 64px preview and swatches named by their hex.
-- **The consumer provides** the agent (id, name, specialty, short description, mascot, whether it is the main agent), the save routes and the toast.
+- **The consumer provides** the agent (id, name, specialty, short description, mascot, whether it is Master), the save routes and the toast.
 - **Reduced motion and Still:** every change is a 150 ms crossfade, and the mascot is Still. The panel, the sheet and a section's content fade in place, and the highlight moves at once. The check, the colors, the dots and the count stay.

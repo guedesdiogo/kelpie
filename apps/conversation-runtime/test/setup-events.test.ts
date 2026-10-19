@@ -152,9 +152,9 @@ describe("the setup note", () => {
   });
 
   it("says the runner accepted the secret, and which version answered (#328)", () => {
-    expect(setupNote("setup", runner)).toBe(RUNNER_NOTE);
+    expect(setupNote("kelpie", runner)).toBe(RUNNER_NOTE);
     // The model can't update the runner: it tells the owner to.
-    expect(setupNote("setup", { ...runner, state: "outdated", version: "0.0.9" })).toBe(
+    expect(setupNote("kelpie", { ...runner, state: "outdated", version: "0.0.9" })).toBe(
       "Kelpie, automatically (the owner didn't write this): the owner submitted the runner's secure form, and the runner on their server accepted the secret, but its version 0.0.9 speaks another protocol version than this Kelpie. You can't update it: tell the owner to update the runner on the server (docs/runner.md).",
     );
     for (const event of [
@@ -164,7 +164,7 @@ describe("the setup note", () => {
       { ...runner, state: "refused" },
       { ...runner, userId: "" },
     ]) {
-      expect(setupNote("setup", event as never), JSON.stringify(event)).toBeNull();
+      expect(setupNote("kelpie", event as never), JSON.stringify(event)).toBeNull();
     }
   });
 });
@@ -225,14 +225,14 @@ describe("a finished setup step", () => {
     expect(await told.turns()).toHaveLength(2);
   });
 
-  it("reaches the conversation that sent the runner's form, through the retired setup agent's AgentHost (#328, ADR-0048)", async () => {
+  it("reaches the conversation that sent the runner's form, through Master's AgentHost (#328, ADR-0060)", async () => {
     const world = use(
       fakeWorld([toolCalls({ name: "form" }), reply("Abra o link."), reply("Runner conectado!")]),
     );
-    world.tools = tools("runner_connected", OPEN(), [], "setup");
+    world.tools = tools("runner_connected", OPEN(), [], "kelpie");
     const told = await waiting("kelpie:webchat:events-runner", "conecta o runner");
 
-    await host("setup").setupDone(runner);
+    await host("kelpie").setupDone(runner);
     await settled(told, 2);
     expect(lastUserText(world)).toContain(RUNNER_NOTE);
     expect(world.sent.at(-1)).toBe("Runner conectado!");

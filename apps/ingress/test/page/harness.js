@@ -6,9 +6,9 @@ import PAGE from "../../public/webchat/index.html?raw";
 
 /** The agents ingress lists, in the registry's order. */
 export const AGENTS = [
-  { id: "kelpie-setup", name: "Setup", main: false },
-  { id: "assistant", name: "Assistant", main: true },
-  { id: "agenda", name: "Agenda", main: false },
+  { id: "atlas", name: "Atlas", master: false },
+  { id: "assistant", name: "Assistant", master: true },
+  { id: "agenda", name: "Agenda", master: false },
 ];
 
 /** A WebSocket the test drives: it opens, receives frames and closes when told. */

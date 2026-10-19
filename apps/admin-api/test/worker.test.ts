@@ -21,6 +21,10 @@ describe("admin-api Worker", () => {
     expect(await commands.setClaudeCode(owner, { on: true })).toEqual({ ok: true, value: {} });
   });
 
+  it("finds Master in the Registry, to report the runner's form to it (ADR-0060)", async () => {
+    expect(await depsFor(env).master()).toBe("kelpie");
+  });
+
   it("reaches the agent's AgentHost for each task command (#54)", async () => {
     const { commands } = depsFor(env);
     const owner = { userId: "u-owner", role: "owner", via: "admin-api" } as const;

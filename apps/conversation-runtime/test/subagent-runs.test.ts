@@ -18,14 +18,14 @@ import { subagentTools } from "../src/subagent-tools.ts";
 import { taskTools } from "../src/task-tools.ts";
 import { type FakeWorld, fakeWorld, reply, toolCalls } from "./fakes.ts";
 
-// A main agent's temporary subagent, end to end (ADR-0036 §5, #290): it creates one for a demand,
+// A Master's temporary subagent, end to end (ADR-0036 §5, #290): it creates one for a demand,
 // hands it a task, hears the result, and deletes it. The subagent reads only its creator's memory,
 // with only a subagent's tools.
 
 const host = (agentId: string) => env.AGENT_HOST.getByName(agentId);
 const agent = (name: string) => env.CONVERSATION_AGENT.getByName(name);
 const registry = () => env.REGISTRY.getByName(REGISTRY_NAME);
-const MAIN = "kelpie:telegram:subagent-e2e";
+const MASTER_CHAT = "kelpie:telegram:subagent-e2e";
 
 /** Every memory search, by the agent it read as. */
 const searches: string[] = [];
@@ -45,7 +45,7 @@ function use(world: FakeWorld): FakeWorld {
       },
     } as never),
     subagentTools({
-      canSpawn: async (id) => (await registry().get(id))?.role === "main",
+      canSpawn: async (id) => (await registry().get(id))?.role === "master",
       creator: async (id) => {
         const { settings } = await host(id).config();
         return {
@@ -121,7 +121,7 @@ beforeEach(() => {
  * outlive its task's end, and would take another test's model scripts.
  */
 async function quiet() {
-  const names = [MAIN];
+  const names = [MASTER_CHAT];
   const ids = (await registry().list())
     .map((entry) => entry.id)
     .filter((id) => id.includes("-sub-"));
@@ -154,8 +154,8 @@ describe("a temporary subagent (#290)", () => {
       reply("I made a scout."),
     ];
     const world = use(fakeWorld(scripts));
-    const main = agent(MAIN);
-    await main.ingest({
+    const masterChat = agent(MASTER_CHAT);
+    await masterChat.ingest({
       agentId: "kelpie",
       providerMessageId: "e2e:m1",
       userId: "u-owner",
@@ -166,7 +166,7 @@ describe("a temporary subagent (#290)", () => {
       sentAt: Date.now(),
       timeZone: null,
     });
-    await main.flush();
+    await masterChat.flush();
     await until(async () => {
       expect(world.sent.at(-1)).toMatch(/^Kelpie created the subagent "Scout" \(kelpie-sub-/);
     });
@@ -181,7 +181,7 @@ describe("a temporary subagent (#290)", () => {
       `Kelpie created the subagent "Scout" (${scout.id}).`,
     ]);
 
-    // The main agent hands it a task; the subagent searches its creator's memory and ends it.
+    // Master hands it a task; the subagent searches its creator's memory and ends it.
     scripts.push(
       toolCalls({
         name: "create_task",
@@ -194,7 +194,7 @@ describe("a temporary subagent (#290)", () => {
       reply("The scout found TAP 123, aisle seat."),
     );
     const requestsBefore = world.requests.length;
-    await main.ingest({
+    await masterChat.ingest({
       agentId: "kelpie",
       providerMessageId: "e2e:m2",
       userId: "u-owner",
@@ -205,7 +205,7 @@ describe("a temporary subagent (#290)", () => {
       sentAt: Date.now(),
       timeZone: null,
     });
-    await main.flush();
+    await masterChat.flush();
     await until(async () => {
       expect(world.sent.at(-1)).toBe("The scout found TAP 123, aisle seat.");
     });
@@ -232,12 +232,12 @@ describe("a temporary subagent (#290)", () => {
     );
     expect(told).toBe(true);
 
-    // Its demand over, the main agent deletes it.
+    // Its demand over, Master deletes it.
     scripts.push(
       toolCalls({ name: "delete_subagent", input: { id: scout.id } }),
       reply("Deleted the scout."),
     );
-    await main.ingest({
+    await masterChat.ingest({
       agentId: "kelpie",
       providerMessageId: "e2e:m3",
       userId: "u-owner",
@@ -248,7 +248,7 @@ describe("a temporary subagent (#290)", () => {
       sentAt: Date.now(),
       timeZone: null,
     });
-    await main.flush();
+    await masterChat.flush();
     await until(async () => {
       expect(world.sent.slice(-2)).toEqual([
         "Deleted the scout.",
@@ -356,7 +356,7 @@ describe("a temporary subagent (#290)", () => {
     expect(narrowed).toEqual(
       new Set([...all].filter((name) => name === "memory_search" || MASTER_TOOLS.has(name))),
     );
-    for (const name of ["configure_agent", "set_main_agent", "create_subagent", "create_task"]) {
+    for (const name of ["configure_agent", "set_master", "create_subagent", "create_task"]) {
       expect(narrowed).toContain(name);
     }
     expect(narrowed).not.toContain("memory_read");

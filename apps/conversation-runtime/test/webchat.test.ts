@@ -5,7 +5,7 @@ import {
   KELPIE_MASCOT,
   type Mascot,
   REGISTRY_NAME,
-  SETUP_AGENT_ID,
+  RETIRED_AGENT_ID,
 } from "@kelpie/config";
 import { WEBCHAT_ADMISSION_HEADER } from "@kelpie/conversation/contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -220,11 +220,11 @@ describe("webchat sockets", () => {
     expect(await agent(name).turns()).toEqual([]);
   });
 
-  it("closes an open socket to the retired setup agent, before taking the message (ADR-0048)", async () => {
+  it("closes an open socket to the retired id, before taking the message (ADR-0048)", async () => {
     use(fakeWorld([reply("Never.")]));
     // A socket admitted before the deploy that retired it.
-    const name = `${SETUP_AGENT_ID}:webchat:u-owner`;
-    const chat = await open(name, { ...owner, agentId: SETUP_AGENT_ID });
+    const name = `${RETIRED_AGENT_ID}:webchat:u-owner`;
+    const chat = await open(name, { ...owner, agentId: RETIRED_AGENT_ID });
     await vi.waitFor(() => expect(ofType(chat.frames, "history")).toHaveLength(1));
 
     chat.send({ type: "message", id: "s1", text: "still there?" });

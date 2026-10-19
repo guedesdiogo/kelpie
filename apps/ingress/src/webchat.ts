@@ -172,7 +172,7 @@ async function agentList(sub: string, deps: WebchatDeps): Promise<Response> {
     return {
       id,
       name,
-      main: role === "main",
+      master: role === "master",
       ...(mascot ? { mascot } : {}),
       ...(lines ? lines : {}),
     };
@@ -203,7 +203,7 @@ export const isAgentEditPath = (pathname: string) => pathname.startsWith(`${AGEN
 /** Far more than a mascot or a profile takes, in bytes. */
 const MAX_EDIT_BODY = 4_096;
 const EDIT_HEADERS = { "cache-control": "no-store", "x-content-type-options": "nosniff" };
-/** The profile's fields, in the order they are set: the one the main agent refuses goes first. */
+/** The profile's fields, in the order they are set: the one Master refuses goes first. */
 const PROFILE_FIELDS = ["specialty", "remit", "name"] as const;
 
 const STATUS_OF: Partial<Record<Extract<CommandResult<unknown>, { ok: false }>["reason"], number>> =

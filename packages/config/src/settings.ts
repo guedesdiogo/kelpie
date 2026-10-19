@@ -8,11 +8,11 @@ import { type Mascot, parseMascot } from "./mascot.ts";
 export const REGISTRY_NAME = "registry";
 
 /**
- * The retired setup agent's id (ADR-0048): Master took over its tools. Its Registry row stays for a
- * rollback, never listed, and no agent may take its id. Its AgentHost keeps the runner's form's
- * waits, which belong to the instance rather than to one agent.
+ * The id of the agent Master replaced (ADR-0048, ADR-0060). Its leftover row and storage stay for a
+ * rollback: the Registry never lists it, `admit` refuses it, and no agent may take its id. Nothing
+ * calls it.
  */
-export const SETUP_AGENT_ID = "setup";
+export const RETIRED_AGENT_ID = "setup";
 
 /** One agent's settings, held by its `AgentHost` (ADR-0002) and read by its conversations. */
 export interface AgentSettings {
@@ -54,7 +54,7 @@ export interface AgentSettings {
    */
   maxConcurrentTasks: number;
   /**
-   * Whether the agent creates and deletes temporary subagents (ADR-0036 §5, #290). The main agent
+   * Whether the agent creates and deletes temporary subagents (ADR-0036 §5, #290). Master
    * has it by its role; any other agent only when Master turns it on. A subagent never has it.
    */
   spawn: boolean;
@@ -62,7 +62,7 @@ export interface AgentSettings {
   remit: string;
   /**
    * What the agent specializes in, one line for the owner's eyes, such as "Agenda e e-mail" (#379).
-   * It never reaches the prompt. The main agent's is always "principal", whatever this holds, and
+   * It never reaches the prompt. Master's is always "Master", whatever this holds, and
    * the configuration commands refuse to change it.
    */
   specialty: string;

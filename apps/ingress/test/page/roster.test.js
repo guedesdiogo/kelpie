@@ -28,9 +28,9 @@ const KELPIE = {
 };
 
 const AGENTS = [
-  { id: "assistant", name: "Kelpie", main: true, mascot: KELPIE },
-  { id: "agenda", name: "Agenda", main: false, mascot: { ...KELPIE, color: "lagoon" } },
-  { id: "pesquisa", name: "Pesquisa", main: false },
+  { id: "assistant", name: "Kelpie", master: true, mascot: KELPIE },
+  { id: "agenda", name: "Agenda", master: false, mascot: { ...KELPIE, color: "lagoon" } },
+  { id: "pesquisa", name: "Pesquisa", master: false },
 ];
 
 const presence = (over = {}) => ({
@@ -322,7 +322,7 @@ describe("the roster's rows", () => {
     const many = Array.from({ length: FOLLOWED_AT_MOST + 2 }, (_, index) => ({
       id: `agent-${index}`,
       name: `Agent ${index}`,
-      main: index === 0,
+      master: index === 0,
     }));
     make(many, "agent-0");
     // The open one follows its own socket; 15 others follow one each.

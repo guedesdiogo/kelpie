@@ -169,7 +169,7 @@ export class Editor {
    * Opens the agent's editor, on its Mascot section. From a click it grows from the row, and the
    * row's mascot flies into the preview; from the keyboard it appears at once.
    *
-   * @param {{ id: string, name: string, main: boolean, mascot: object, specialty?: string,
+   * @param {{ id: string, name: string, master: boolean, mascot: object, specialty?: string,
    *   remit?: string }} agent
    * @param {{ trigger: HTMLElement, from?: HTMLElement | null, keyboard?: boolean,
    *   sheet?: boolean, returnTo?: HTMLElement }} how `returnTo` takes focus back when the
@@ -412,8 +412,8 @@ export class Editor {
     const open = this.#open;
     const { draft, agent } = open;
     open.nameLine.textContent = draft.profile.name.trim() || agent.name;
-    open.specialtyLine.textContent = agent.main
-      ? this.#names.principal
+    open.specialtyLine.textContent = agent.master
+      ? this.#names.master
       : draft.profile.specialty.trim();
   }
 
@@ -667,7 +667,7 @@ export class Editor {
 
   // ── Profile ─────────────────────────────────────────────────────────────────────────────────
 
-  /** Its name, its specialty and its short description; the main agent's specialty is locked. */
+  /** Its name, its specialty and its short description; Master's specialty is locked. */
   #profile(open) {
     const names = this.#names;
     const wrap = element("div", "flds");
@@ -686,7 +686,7 @@ export class Editor {
       const row = element("div", locked ? "inp-row locked" : "inp-row");
       if (locked) {
         input.readOnly = true;
-        input.value = names.principal;
+        input.value = names.master;
         row.append(icon("lock"), input);
       } else {
         input.value = open.draft.profile[key];
@@ -732,8 +732,8 @@ export class Editor {
     error.append(icon("alert"), names.nameEmpty);
     wrap.firstElementChild.append(error);
     field("specialty", names.specialty, {
-      help: open.agent.main ? names.specialtyLocked : names.specialtyHelp,
-      locked: open.agent.main,
+      help: open.agent.master ? names.specialtyLocked : names.specialtyHelp,
+      locked: open.agent.master,
     });
     field("remit", names.remit, { help: names.remitHelp });
     const profile = { element: wrap, fields, error };
@@ -754,7 +754,11 @@ export class Editor {
   #changed() {
     const open = this.#open;
     if (!open) return [];
-    const routes = changedSections({ saved: open.saved, draft: open.draft, main: open.agent.main });
+    const routes = changedSections({
+      saved: open.saved,
+      draft: open.draft,
+      master: open.agent.master,
+    });
     const files = open.files.changed();
     return SAVED_SECTIONS.filter((id) => routes.includes(id) || files.includes(id));
   }
@@ -990,7 +994,9 @@ export class Editor {
     }, SPINNER_AFTER_MS);
     const before = { profile: { ...open.saved.profile }, mascot: open.saved.mascot };
     const bodies = {
-      profile: profileChanges(open.saved.profile, open.draft.profile, { main: open.agent.main }),
+      profile: profileChanges(open.saved.profile, open.draft.profile, {
+        master: open.agent.master,
+      }),
       mascot: open.draft.mascot,
     };
     const routes = sections.filter((section) => !FILE_SECTIONS.includes(section));

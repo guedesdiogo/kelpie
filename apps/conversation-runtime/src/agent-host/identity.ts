@@ -19,8 +19,8 @@ export interface Identity {
 
 /** What each role says about the agent. */
 const ROLE_LINES: Record<AgentRole, string> = {
-  // The role `main` is called Master (#343), and it configures Kelpie (ADR-0048).
-  main: "Master on Kelpie, the agent the owner talks to, which also configures Kelpie",
+  // Master configures Kelpie (ADR-0048, ADR-0060).
+  master: "Master on Kelpie, the agent the owner talks to, which also configures Kelpie",
   specialist: "a specialist agent on Kelpie, owned by Master, the agent the owner talks to",
   subagent: "a temporary subagent on Kelpie, working on one demand of the agent that created you",
 };
@@ -32,7 +32,8 @@ const UNLISTED_ROLE_LINE = "one of the owner's agents on Kelpie, their personal 
  * model's identity, nor that of an earlier model whose replies are in the history.
  */
 export function identitySection({ name, role: listed, creator, remit, model }: Identity): string {
-  const role = listed ? ROLE_LINES[listed] : UNLISTED_ROLE_LINE;
+  // A role cached before ADR-0060 may name none of these: it reads as unlisted, until a fresh read.
+  const role = (listed && ROLE_LINES[listed]) || UNLISTED_ROLE_LINE;
   const createdBy = listed === "subagent" && creator ? `, the agent ${creator}` : "";
   const remitLine = remit ? ` Your remit: ${remit}` : "";
   return `# Who you are

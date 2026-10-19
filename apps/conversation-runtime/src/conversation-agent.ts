@@ -24,8 +24,8 @@ import {
   isTaskId,
   mascotFor,
   REGISTRY_NAME,
+  RETIRED_AGENT_ID,
   type RegistryContract,
-  SETUP_AGENT_ID,
   type SetupEvent,
   type SetupStep,
 } from "@kelpie/config";
@@ -101,6 +101,7 @@ import {
 import { bareHttpsOrigin, heldTools, setupNote } from "./configuration.ts";
 import migrations from "./migrations/migrations.js";
 import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
+import { readRole } from "./registry/schema.ts";
 import { failureNotice, routeNotice } from "./route-notices.ts";
 import * as schema from "./schema.ts";
 import { SUBAGENT_TOOLS } from "./subagent-limits.ts";
@@ -941,7 +942,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const roster = this.#get<AgentConfig["agent"] | null>("roster", null);
     const subagent = roster?.role === "subagent";
     // A turn stored before #290 has no allowlist in its settings: it has none (#344).
-    const held = heldTools(roster?.role ?? null, settings.tools ?? null);
+    // A roster stored before ADR-0060 names Master by its old value.
+    const held = heldTools(readRole(roster?.role), settings.tools ?? null);
     const named = held === null ? null : new Set(held);
     // A subagent's tools also stay within its creator's allowlist (ADR-0036 §5).
     const creators =
@@ -3327,10 +3329,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
 
   /**
    * Whether the Registry says the agent's chat is off: only an explicit `false`, as `admit` reads
-   * it. The retired setup agent's always is, as `admit` refuses it (ADR-0048).
+   * it. The retired id's always is, as `admit` refuses it (ADR-0048).
    */
   async #chatOff(agentId: string): Promise<boolean> {
-    if (agentId === SETUP_AGENT_ID) return true;
+    if (agentId === RETIRED_AGENT_ID) return true;
     const registry = this.env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<
       Pick<RegistryContract, "get">
     >;
