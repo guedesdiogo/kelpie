@@ -1,5 +1,9 @@
 import type { Remote } from "@kelpie/access";
-import type { ChannelEgressContract } from "@kelpie/channels";
+import type {
+  ChannelEgressContract,
+  RunnerSessionsContract,
+  RunnerVpsWait,
+} from "@kelpie/channels";
 import type {
   Actor,
   AgentConfig,
@@ -57,6 +61,14 @@ import { readRole } from "../registry/schema.ts";
 import { identitySection } from "./identity.ts";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
+import {
+  bounded,
+  checkWaits,
+  NEW_WATCH,
+  type SessionWatch,
+  shouldArm,
+  WATCH_INTERVAL_S,
+} from "./session-watch.ts";
 import { composeSystemPrompt, hasVaultContext } from "./system-prompt.ts";
 import { personWriter, TaskBoard, type TaskWriter } from "./tasks.ts";
 
@@ -78,6 +90,23 @@ let botPhotosForTesting: BotPhotos | undefined;
 export function replaceChannelEgressForTesting(egress: BotPhotos | undefined): void {
   botPhotosForTesting = egress;
 }
+
+type RunnerWaits = Pick<RunnerSessionsContract, "waits">;
+
+let runnerSessionsForTesting: RunnerWaits | undefined;
+
+/**
+ * Tests run in the Worker's isolate and swap channel-egress's RunnerSessions with this, for the
+ * check of the VPS's waits (#434). Production never calls it.
+ */
+export function replaceRunnerSessionsForTesting(sessions: RunnerWaits | undefined): void {
+  runnerSessionsForTesting = sessions;
+}
+
+/** How long the check of the VPS's waits gives channel-egress, which gives the runner 10 s. */
+const WAITS_TIMEOUT_MS = 12_000;
+/** How long a notice of a wait gives its conversations, Telegram's and the webchat's together. */
+const NOTICE_TIMEOUT_MS = 4_000;
 
 /**
  * Starts a run of a task the agent claimed (#54). The run reports back through `heartbeatTask` and
@@ -367,6 +396,8 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     const pinned = this.#get<string | null>("creator", null);
     // A role cached before ADR-0060 reads as `master` too.
     const role = pinned !== null ? "subagent" : readRole(listed.value?.role);
+    // Master's turns keep the check of the VPS's waits running (ADR-0057 §5, #434).
+    if (role === "master") await this.#armSessionWatch();
     const owner = pinned ?? listed.value?.owner ?? null;
     const limits = role === "subagent" && owner ? await this.#creatorLimits(owner) : null;
     // A subagent never runs above its creator (ADR-0036 §5), field by field, at every turn.
@@ -707,6 +738,105 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       console.error("AgentHost: a task's news wasn't told", errorName(error));
       return false;
     }
+  }
+
+  /**
+   * Kelpie's check of the waits on the owner (ADR-0057 §5, #434), as the SDK runs it once a minute:
+   * it asks channel-egress's RunnerSessions for the waits opened since a little before its last
+   * answer, and tells the owner of each one not told yet. It stops while the runner isn't
+   * connected, after three outdated answers in a row, or once this agent isn't Master; Master's
+   * next turn starts it again (`#armSessionWatch`).
+   */
+  async watchSessions(): Promise<void> {
+    const agentId = this.ctx.id.name ?? "";
+    try {
+      const sources = this.#identitySources();
+      const sessions =
+        runnerSessionsForTesting ?? (this.env.RUNNER_SESSIONS as unknown as RunnerWaits);
+      const watch = await checkWaits(
+        this.#get<SessionWatch>("sessionWatch", NEW_WATCH),
+        {
+          isMaster: async () =>
+            (await bounded(sources.agent(agentId), IDENTITY_TIMEOUT_MS))?.role === "main",
+          waits: (since) => bounded(sessions.waits(since), WAITS_TIMEOUT_MS),
+          tell: (wait) =>
+            bounded(this.#tellWait(agentId, wait), NOTICE_TIMEOUT_MS).catch(() => false),
+        },
+        Date.now(),
+      );
+      this.#put("sessionWatch", watch);
+      if (watch.stopped) await this.#cancelSessionWatch();
+    } catch (error) {
+      console.error("AgentHost: the check of the VPS's waits failed", errorName(error));
+    }
+  }
+
+  /**
+   * Starts the check of the VPS's waits, from a turn of Master's, unless it runs already or an
+   * outdated runner stopped it within the hour. The SDK keeps one schedule per interval, so this
+   * never doubles it. Best effort: a turn never waits on its failure.
+   */
+  async #armSessionWatch(): Promise<void> {
+    try {
+      const watch = this.#get<SessionWatch>("sessionWatch", NEW_WATCH);
+      if (!shouldArm(watch, Date.now())) return;
+      await this.scheduleEvery(WATCH_INTERVAL_S, "watchSessions");
+      if (watch.stopped) this.#put("sessionWatch", { ...watch, stopped: null });
+    } catch (error) {
+      console.warn("AgentHost: the check of the VPS's waits didn't start", errorName(error));
+    }
+  }
+
+  async #cancelSessionWatch(): Promise<void> {
+    for (const schedule of await this.listSchedules()) {
+      if (schedule.callback === "watchSessions") await this.cancelSchedule(schedule.id);
+    }
+  }
+
+  /**
+   * Tells the owner of one wait in their conversation with this agent (#434): a fixed notice,
+   * which the conversation writes in its own language. False when none took it.
+   */
+  async #tellWait(agentId: string, wait: RunnerVpsWait): Promise<boolean> {
+    const notice = { kind: wait.kind, title: wait.title, repository: wait.repository };
+    for (const name of this.#noticeConversations(agentId)) {
+      try {
+        if (await this.env.CONVERSATION_AGENT.getByName(name).sessionWait(agentId, notice)) {
+          return true;
+        }
+      } catch (error) {
+        console.warn("AgentHost: a conversation wasn't told of a wait", errorName(error));
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Where a notice reaches the owner (#434): this agent's latest conversation on each channel,
+   * Telegram's before the webchat's, which shows it only while its page is open. Kelpie serves the
+   * owner alone, in direct chats (ADR-0015), so each is theirs; a task's has no one in it.
+   */
+  #noticeConversations(agentId: string): string[] {
+    const rows = this.#db
+      .select({ name: schema.conversations.name })
+      .from(schema.conversations)
+      .where(
+        and(
+          isNotNull(schema.conversations.lastTurnAt),
+          notLike(schema.conversations.name, `${agentId}:task:%`),
+        ),
+      )
+      .orderBy(desc(schema.conversations.lastTurnAt))
+      .all();
+    const latest = new Map<string, string>();
+    for (const { name } of rows) {
+      if (!isConversationOf(agentId, name)) continue;
+      const channel = name.slice(agentId.length + 1).split(":", 1)[0] ?? "";
+      if (!latest.has(channel)) latest.set(channel, name);
+    }
+    return [...latest]
+      .sort(([a], [b]) => Number(a === "webchat") - Number(b === "webchat"))
+      .map(([, name]) => name);
   }
 
   /** The board's wake, as the SDK schedules it: sweeps leases, picks up tasks, sets the next one. */
@@ -1115,6 +1245,14 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
     this.#db
       .delete(schema.setupWaits)
       .where(lte(schema.setupWaits.until, now - SETUP_WAIT_GRACE_MS))
+      .run();
+  }
+
+  #put(key: string, value: unknown): void {
+    this.#db
+      .insert(schema.state)
+      .values({ key, value })
+      .onConflictDoUpdate({ target: schema.state.key, set: { value } })
       .run();
   }
 

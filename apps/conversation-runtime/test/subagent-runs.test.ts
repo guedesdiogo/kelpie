@@ -16,6 +16,7 @@ import { replacePortsForTesting } from "../src/ports.ts";
 import { SUBAGENT_TOOLS } from "../src/subagent-limits.ts";
 import { subagentTools } from "../src/subagent-tools.ts";
 import { taskTools } from "../src/task-tools.ts";
+import { vpsSessionsTools } from "../src/vps-sessions.ts";
 import { type FakeWorld, fakeWorld, reply, toolCalls } from "./fakes.ts";
 
 // A Master's temporary subagent, end to end (ADR-0036 §5, #290): it creates one for a demand,
@@ -308,11 +309,11 @@ describe("a temporary subagent (#290)", () => {
   it("never narrows Master's orchestration tools: its allowlist narrows only the others (#391)", async () => {
     const owner = { userId: "u-owner", role: "owner", via: "admin-api" } as const;
     const world = use(fakeWorld([reply("One."), reply("Two."), reply("Three.")]));
+    const roleOf = async (id: string) => (await registry().get(id))?.role ?? null;
     world.tools.push(
-      configurationTools({} as never, {
-        roleOf: async (id) => (await registry().get(id))?.role ?? null,
-        adminOrigin: "https://admin.example",
-      }),
+      configurationTools({} as never, { roleOf, adminOrigin: "https://admin.example" }),
+      // Master's view of the VPS's sessions (#434), as production wires it beside them.
+      vpsSessionsTools({ list: async () => ({ ok: false, reason: "not_connected" }) }, { roleOf }),
     );
     // Master hands tasks only to agents it owns: this specialist is its own.
     await registry().add("allow-spec", "Spec", owner);

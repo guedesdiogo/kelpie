@@ -83,7 +83,14 @@ The runner tells Kelpie what every Claude Code session on the server is doing: t
   - `events.ndjson`, one line per event: its name, a notification's type or a `SessionEnd`'s reason, the session's id, whether a permission request is `AskUserQuestion`'s, and the time. Never a prompt, a tool's input or output, or a path. At 512 KiB it becomes `events.1.ndjson`, replacing the older one, so the spool keeps at most 1 MiB;
   - `excerpt-<session id>.json`, each session's last reply, redacted and cut to 1,000 characters at a word. It is deleted when its session ends, when its session file is gone, or after 7 days. A file the runner can't delete is logged once, and never stops an answer;
   - a session id is checked as a UUID before it names a file.
-- **Who calls these routes:** `channel-egress`'s read-only `RunnerSessions` entrypoint, with its calls `list()` and `waits(since)`. Master's tool and the notices that use it come with #434.
+- **Who calls these routes:** `channel-egress`'s read-only `RunnerSessions` entrypoint, with its calls `list()` and `waits(since)`, which only `conversation-runtime` binds, for Master's tool and the notices below.
+
+### How you see them
+
+- **Ask Master** what is running on the VPS: its `vps_sessions` tool lists the sessions, grouped as waiting on you, working, idle, could be archived and ended, each with its age, title, repository and branch, pull request and the excerpt of its last reply. Only you can ask, in your own conversation with Master; a task's run never gets the tool. Archive a session in the Claude app: Kelpie can't (`docs/admin-api.md`, "The VPS's Claude Code sessions").
+- **A notice when a session waits on you.** Within about a minute of a session asking for your permission or an answer, Kelpie sends you one fixed message on Telegram, or in the webchat while it is open, naming the session's title and repository and what it waits for. Answer it where the session runs, in the Claude app or its terminal: the notice confirms nothing, and Kelpie never answers for you. A session idle after its reply, or ended, gets no notice.
+  - The waits come from the session files without the hook, and from the hook once you install it (below), which also catches a prompt the file doesn't show.
+  - Kelpie checks once a minute while the runner is connected, from Master's next turn on. It stops while the runner isn't connected, and, after three answers that the runner is outdated, for an hour at least: a runner below protocol 3 lists no sessions, so update it ("Operating it").
 
 ### Installing the session-event hook
 

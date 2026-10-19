@@ -129,6 +129,7 @@ import {
   visible,
 } from "./tools.ts";
 import { chatTypeOf, leastAccess, roleOf, type TurnAccess, turnScopes } from "./turn-access.ts";
+import { parseSessionWait, type SessionWaitNotice, sessionWaitNotice } from "./vps-sessions.ts";
 import {
   FRAME_VIEWS,
   type OpenRequests,
@@ -752,6 +753,45 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     this.#addNote(userId, text, `kelpie:note:${crypto.randomUUID()}`);
     await this.schedule(0, "answerNotes");
     return true;
+  }
+
+  /**
+   * Kelpie's notice that a Claude Code session on the owner's VPS waits on them (ADR-0057 §5,
+   * #434), from its agent's AgentHost: one fixed bubble in the conversation's language, sent at
+   * once and kept nowhere, so the model never reads the session's title and the replay never shows
+   * it. A webchat's takes it only while its page is open. False when it wasn't sent: another
+   * agent's conversation or a task's, an input that doesn't check out, or a send that failed.
+   */
+  async sessionWait(agentId: string, wait: SessionWaitNotice): Promise<boolean> {
+    const notice = parseSessionWait(wait);
+    const destination = this.#get<Destination | null>("destination", null);
+    if (
+      notice === null ||
+      destination === null ||
+      destination.channel === "task" ||
+      this.#get<string | null>("agentId", null) !== agentId
+    ) {
+      return false;
+    }
+    if (destination.channel === "webchat" && !this.#pageOpen()) return false;
+    try {
+      const text = sessionWaitNotice(notice, this.#locale());
+      const sent = await this.#channel.send(agentId, destination, text, { silent: false });
+      if (!sent.ok) console.warn("conversation: a wait wasn't told", { reason: sent.reason });
+      return sent.ok;
+    } catch (error) {
+      console.warn("conversation: a wait wasn't told", { error: errorName(error) });
+      return false;
+    }
+  }
+
+  /** Whether a webchat page of this conversation is open: a socket of its own, not a sidebar's. */
+  #pageOpen(): boolean {
+    for (const connection of this.getConnections()) {
+      const admission = connection.state as SocketAdmission | null;
+      if (admission && admission.view !== "presence") return true;
+    }
+    return false;
   }
 
   /**

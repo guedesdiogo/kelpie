@@ -47,7 +47,7 @@ A `Response` created in a test can't have its body read inside a Worker call eit
 
 Fiber recovery after an eviction runs when the fiber's heartbeat alarm fires on the new instance. To test it, call `evictDurableObject(stub)`, then `runDurableObjectAlarm(stub)`.
 
-`llm-gateway` and `channel-egress` are service bindings that don't exist in tests, so `vitest.config.ts` replaces them with stubs; the fake model and channel ports mean they're never called. The `llm-gateway` stub answers `ping()`, which the deploy probe's tests call (#234), and `describe()`, which a turn's identity section reads (#286); its `LlmGatewayAdmin` (#289) and `LlmChat` (#431) entrypoints are empty.
+`llm-gateway` and `channel-egress` are service bindings that don't exist in tests, so `vitest.config.ts` replaces them with stubs; the fake model and channel ports mean they're never called. The `llm-gateway` stub answers `ping()`, which the deploy probe's tests call (#234), and `describe()`, which a turn's identity section reads (#286); its `LlmGatewayAdmin` (#289) and `LlmChat` (#431) entrypoints are empty. The `channel-egress` stub's `RunnerSessions` answers that no runner is connected, so the check of the VPS's waits that Master's turns start stops at once; its tests swap in a fake with `replaceRunnerSessionsForTesting`, and the tool's tests pass one to `vpsSessionsTools` (#434).
 
 `llm-gateway`'s `vitest.config.ts` stubs `channel-egress`'s `RunnerChat` as a runner that isn't connected. Tests that run a `claude-code` turn pass a fake client in its place (#421).
 
