@@ -83,13 +83,13 @@ export interface Mascot {
   accessory: Part<typeof MASCOT_ACCESSORIES>;
 }
 
-/** Master's mascot until the owner picks another; the logo is its silhouette (ADR-0049). */
+/** Master's mascot until the owner picks another; the logo is its silhouette (ADR-0049, ADR-0062). */
 export const KELPIE_MASCOT: Mascot = {
   shape: "mark",
   color: "kelp",
   eyes: "big",
   cheeks: false,
-  head: { type: "ears", variation: "round" },
+  head: { type: "ears", variation: "pointed" },
   accessory: { type: "none" },
 };
 

@@ -22,6 +22,7 @@ import {
   isDrawable,
   mix,
   palette,
+  pointedEarOutlines,
   SHAPES,
   SHARED_DEFS,
   sizeOf,
@@ -220,19 +221,28 @@ describe("the engine's figure", () => {
       const [left = [], right] = ears.map(({ piece }) => points(piece.shapes[0].d));
       // The right ear mirrors the left (0 - x, so the top's 0 stays 0 and not -0).
       expect(right, shape).toEqual(left.map(([x, y]) => [0 - x, y]));
-      for (const { x, y, a, piece } of ears) {
+      const outlines = pointedEarOutlines(shape);
+      ears.forEach(({ x, y, a, piece }, i) => {
         const [ear, shell] = piece.shapes;
         expect(channels(shell.fill), shape).toBeGreaterThan(channels(ear.fill));
         // Every point, control points included, stays in the frame (viewBox 10 14 100 100), with room for the fur.
         const r = (a * Math.PI) / 180;
-        for (const [px, py] of points(ear.d)) {
+        const placed = points(ear.d).map(([px, py]) => {
           const fx = x + px * Math.cos(r) - py * Math.sin(r);
           const fy = y - 2.8 + px * Math.sin(r) + py * Math.cos(r);
           expect(fy, `${shape} ${px},${py}`).toBeGreaterThan(15);
           expect(fx, `${shape} ${px},${py}`).toBeGreaterThan(11);
           expect(fx, `${shape} ${px},${py}`).toBeLessThan(109);
-        }
-      }
+          return [fx, fy];
+        });
+        // The outline the logo takes (ADR-0062) is the ear the mascot draws, point for point.
+        const outline = points(outlines[i] ?? "");
+        expect(outline, shape).toHaveLength(placed.length);
+        outline.forEach(([ox, oy], j) => {
+          expect(ox).toBeCloseTo(placed[j]?.[0] ?? Number.NaN, 2);
+          expect(oy).toBeCloseTo(placed[j]?.[1] ?? Number.NaN, 2);
+        });
+      });
     }
   });
 
