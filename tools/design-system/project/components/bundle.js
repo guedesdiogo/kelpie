@@ -1,5 +1,5 @@
 /* Kelpie: the agent mascot engine (ADR-0045) and the previews' motion helpers, as one classic script.
- * The engine is apps/ingress/public/webchat/mascot*.js as of 5a5de92, unchanged
+ * The engine is apps/ingress/public/webchat/mascot*.js as of ef0816d, unchanged
  * but for its import and export lines.
  * window.Kelpie.mascot is the engine; window.Kelpie.ui the helpers. */
 (function () {
@@ -497,14 +497,33 @@ const mirror = (d) => d.replace(/(-?[\d.]+),/g, (_, x) => `${-x},`);
 /**
  * The pointed ear (#455): a kelpie's left ear traced from a photo, with a domed top, an outer edge
  * nearly upright, a straight inner diagonal and a light shell inside, so it reads as an ear and
- * not a horn. The origin is the middle of its base, 2.8 above the shape's ear anchor; the right
- * ear mirrors it. The shell's color is the body's mixed toward cream, the opening in every color.
+ * not a horn. The origin is the middle of its base, EAR_LIFT above the shape's ear anchor; the
+ * right ear mirrors it. The shell's color is the body's mixed toward cream, the opening in every
+ * color.
  */
 const POINTED_EAR =
   "M10,-1.7 L3.8,7.7 L-8.7,6.1 L-10,1.7 C-10,-0.7 -9.5,-3.4 -7.9,-8.2 L-2.7,-22 C-2.1,-23.5 -1.2,-24.1 0,-24 C2,-23.7 4.5,-21.6 5,-19.8 L10,-1.7 Z";
 const POINTED_SHELL =
   "M-7.9,-2.5 C-7.1,-7 -5.4,-11.8 -3.6,-14.7 C-2.3,-16.4 -0.7,-17.3 0.8,-17.1 C2.5,-15.8 3.8,-12.1 5,-8.3 C5.9,-5.1 6.5,-2.2 6.2,0.5 Z";
 const SHELL_CREAM = "#FFF1DD";
+const EAR_LIFT = 2.8;
+
+/**
+ * A shape's pointed ears as outlines on the 120 grid, left then right, for a drawing that flattens
+ * the mascot: the logo (ADR-0062, scripts/brand-icons.mjs) takes Master's from here.
+ */
+function pointedEarOutlines(shapeName) {
+  const shape = SHAPES[shapeName];
+  const round = (value) => Math.round(value * 1000) / 1000;
+  return (shape.pointed ?? shape.ears).map(([x, y, a]) => {
+    const r = (a * Math.PI) / 180;
+    return (a < 0 ? POINTED_EAR : mirror(POINTED_EAR)).replace(
+      /(-?[\d.]+),(-?[\d.]+)/g,
+      (_, px, py) =>
+        `${round(x + px * Math.cos(r) - py * Math.sin(r))},${round(y - EAR_LIFT + px * Math.sin(r) + py * Math.cos(r))}`,
+    );
+  });
+}
 
 /**
  * Shapes drawn on a 120 grid and framed at 10,14 100×100, so the body fills about 72%; the ground
@@ -878,7 +897,7 @@ function buildMascot(mascot, { uid, px, hex, work = true, hands = true }) {
     backEars = ears
       .map(([x, y, a]) => {
         const side = (d) => (a < 0 ? d : mirror(d));
-        return `<g transform="translate(${x} ${y}) translate(0 -2.8) rotate(${a})"><g class="m-ear">${piece(
+        return `<g transform="translate(${x} ${y}) translate(0 -${EAR_LIFT}) rotate(${a})"><g class="m-ear">${piece(
           [
             { d: side(POINTED_EAR), fill: color.body },
             { d: side(POINTED_SHELL), fill: mix(color.body, SHELL_CREAM, 0.55) },
@@ -1283,7 +1302,7 @@ const SHARED_DEFS = `<defs>
 <linearGradient id="kg-pencil" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6FA6CC"/><stop offset=".5" stop-color="#3F7FA8"/><stop offset="1" stop-color="#255A7C"/></linearGradient>
 </defs>`;
 
-  return { mix, palette, SHAPES, COLORS, EYES, HEADS, ACCESSORIES, isDrawable, sizeOf, buildMascot, handSpot, SHARED_DEFS };
+  return { mix, palette, pointedEarOutlines, SHAPES, COLORS, EYES, HEADS, ACCESSORIES, isDrawable, sizeOf, buildMascot, handSpot, SHARED_DEFS };
   })();
   var engine = (function () {
 // The agent's mascot (ADR-0045): a plush figure that stays alive in place. mascot-art.js builds
@@ -3334,9 +3353,9 @@ document.addEventListener("visibilitychange", () => {
     function glyph(state) {
       return '<svg class="k-glyph" viewBox="0 0 12 12" aria-hidden="true">' + (GLYPHS[state] || "") + "</svg>";
     }
-    // The mascot's pause as icons: its own outline, as Master's now looks (round ears, ADR-0049),
+    // The mascot's pause as icons: its own outline, as Master's now looks (pointed ears, ADR-0062),
     // mid-hop for Alive, with 5.19's badge for States only, standing on a line for Still (#378, decision 8).
-    var BODY = '<path d="M9 6.5h2a6 6 0 0 1 6 6v0a5.5 5.5 0 0 1-5.5 5.5H5a2 2 0 0 1-2-2v-3.5a6 6 0 0 1 6-6Z"/><circle cx="5.9" cy="5.1" r="2" fill="currentColor" stroke="none"/><circle cx="14.1" cy="5.1" r="2" fill="currentColor" stroke="none"/><circle cx="8.2" cy="12.4" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12.4" r="1" fill="currentColor" stroke="none"/>';
+    var BODY = '<path d="M9 6.5h2a6 6 0 0 1 6 6v0a5.5 5.5 0 0 1-5.5 5.5H5a2 2 0 0 1-2-2v-3.5a6 6 0 0 1 6-6Z"/><path d="M8.05 6.79L4.56 8.62C4.41 8.18 4.34 7.65 4.35 6.66L4.48 3.8C4.51 3.49 4.64 3.32 4.86 3.27C5.25 3.2 5.84 3.44 6.04 3.74Z" fill="currentColor" stroke="none"/><path d="M11.95 6.79L15.44 8.62C15.59 8.18 15.66 7.65 15.65 6.66L15.52 3.8C15.49 3.49 15.36 3.32 15.14 3.27C14.75 3.2 14.16 3.44 13.96 3.74Z" fill="currentColor" stroke="none"/><circle cx="8.2" cy="12.4" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12.4" r="1" fill="currentColor" stroke="none"/>';
     var PAUSE_ICONS = {
       alive: '<g transform="translate(-.6 -1.8) rotate(-9 10 12)">' + BODY + '</g><path d="M6.5 19.2h6"/><path d="M17.2 2.4l.8 1.6M19 5.4l-1.6.6"/>',
       states: '<g transform="translate(-1.2 .9) scale(.9)">' + BODY + '</g><circle cx="16.4" cy="4" r="2.6" fill="currentColor" stroke="none"/>',
@@ -3437,7 +3456,7 @@ document.addEventListener("visibilitychange", () => {
     }
     // Sample agents for the previews. Kelpie keeps Master's default look (5.19, ADR-0049).
     var LOOKS = {
-      kelpie: { shape: "mark", color: "kelp", eyes: "big", cheeks: false, head: { type: "ears", variation: "round" }, accessory: { type: "none" } },
+      kelpie: { shape: "mark", color: "kelp", eyes: "big", cheeks: false, head: { type: "ears", variation: "pointed" }, accessory: { type: "none" } },
       agenda: { shape: "pebble", color: "fawn", eyes: "dots", cheeks: true, head: { type: "ears", variation: "floppy" }, accessory: { type: "bow", variation: "tie" } },
       research: { shape: "bubble", color: "tide", eyes: "marbles", cheeks: false, head: { type: "hair", variation: "strands" }, accessory: { type: "glasses", variation: "round" } },
       code: { shape: "block", color: "slate", eyes: "cyclops", cheeks: false, head: { type: "horns", variation: "antennae" }, accessory: { type: "none" } },
