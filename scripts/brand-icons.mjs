@@ -81,9 +81,9 @@ const BASES = RAW_EARS.map((d) => {
 
 /**
  * The mark on a 64 box, from the mascot engine's 120 grid (apps/ingress/public/webchat/mascot-art.js):
- * the `mark` shape is 24..96 × 36..108 with corners 36, 36, 36 and 11.5, and the ears reach up to
- * FIGURE_TOP. It is drawn 50 wide and centred on the box: MARK says where, for every file that
- * places it.
+ * the `mark` shape is 24..96 × 36..108 with corners 36, 36, 36 and 11.5, and the ears' outline,
+ * control points included, reaches up to FIGURE_TOP. It is drawn 50 wide and centred on the box:
+ * MARK says where, for every file that places it.
  */
 const FIGURE_TOP = Math.min(...EARS.flatMap((d) => points(d).map(([, y]) => y)));
 const MARK = (() => {

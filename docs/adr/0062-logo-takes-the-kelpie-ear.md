@@ -38,7 +38,7 @@
 - **It comes from the engine itself.**
   - `pointedEarOutlines("mark")` in `apps/ingress/public/webchat/mascot-art.js` gives the ears' outlines on the 120 grid.
   - `scripts/brand-icons.mjs` imports them, so the logo and the mascot can't drift apart. A test checks that those outlines are the ears the mascot draws, point for point.
-- **The figure runs from y 19.04, the top of the ears' outline, to 108.** On the 64 box, the mark is 50 wide and 61.8 tall, against 53.1 with the round ears.
+- **The figure's box runs from y 19.04 to 108.** 19.04 is the highest point of the ears' outline counting its control points; the curve itself peaks at 19.4. On the 64 box, the mark is 50 wide and 61.8 tall, against 53.1 with the round ears.
 - **The 32 and 16 px masters** keep the body on whole pixels, as before. The ears are grown about the middle of their base, 10% at 32 px and 25% at 16 px.
 - **Everything else in ADR-0049 stands:** the lockup, the colours, the tiles, the files and the script.
 

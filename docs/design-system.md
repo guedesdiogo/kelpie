@@ -750,7 +750,7 @@ Frequent, and still: the logo never moves ([ADR-0049](adr/0049-logo-main-mascot-
   - in `docs/brand/`, the mark (`kelpie-mark.svg`), its lockups for light and dark, the 16 px favicon master (`favicon-16.svg`) and the sources of the home-screen icons (`app-icon.svg`, `app-icon-rounded.svg` and `app-icon-maskable.svg`);
   - the webchat's icons, listed under the favicon below.
 - **The mark** is the `mark` shape of Master's mascot with its pointed ears, in one color: no shell, face, fur, accessory or shadow.
-  - It comes from the engine's 120 grid: the shape at 24..96 × 36..108 with corners 36, 36, 36 and 11.5, and the ears that `pointedEarOutlines("mark")` gives, reaching up to y 19.04. On the 64 box it is 50 wide and 61.8 tall.
+  - It comes from the engine's 120 grid: the shape at 24..96 × 36..108 with corners 36, 36, 36 and 11.5, and the ears that `pointedEarOutlines("mark")` gives, whose outline reaches y 19.04 with its control points. On the 64 box it is 50 wide and 61.8 tall.
   - `scripts/brand-icons.mjs` imports those outlines, so a change to the ear changes the logo. Either goes through a new ADR.
 - **The lockup** sets the mark beside "Kelpie" in Bricolage Grotesque 680, tracking −0.03em, with the font's kerning:
   - the mark is 1.3 cap heights tall, centered on the cap band;

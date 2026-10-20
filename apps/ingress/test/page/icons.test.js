@@ -93,6 +93,35 @@ describe("the webchat's icons (ADR-0049)", () => {
     expect(svg).toMatch(/<rect class="t" width="32" height="32"/);
   });
 
+  it("draws the mark's pointed ears clockwise, so they join the body with no hole (ADR-0062)", () => {
+    const mark = readFileSync(join(PUBLIC, "../../../docs/brand/kelpie-mark.svg"), "utf8");
+    const glyphs = {
+      "kelpie-mark.svg": mark.match(/ d="([^"]+)"/)?.[1] ?? "",
+      "icon.svg":
+        served("/webchat/icon.svg")
+          .toString("utf8")
+          .match(/class="g" d="([^"]+)"/)?.[1] ?? "",
+      "icon-waiting.svg":
+        served("/webchat/icon-waiting.svg")
+          .toString("utf8")
+          .match(/class="g" d="([^"]+)"/)?.[1] ?? "",
+    };
+    for (const [file, glyph] of Object.entries(glyphs)) {
+      // The body is a subpath with arcs, drawn clockwise; each ear is one of lines and curves.
+      const ears = glyph.split(/(?=M)/).filter((subpath) => !subpath.includes("A"));
+      expect(ears, file).toHaveLength(2);
+      for (const ear of ears) {
+        const at = [...ear.matchAll(/(-?[\d.]+),(-?[\d.]+)/g)].map(([, x, y]) => [+x, +y]);
+        // In SVG's y-down space a positive shoelace area is clockwise, the body's direction.
+        const area = at.reduce((sum, [x, y], i) => {
+          const [nx, ny] = at[(i + 1) % at.length];
+          return sum + x * ny - nx * y;
+        }, 0);
+        expect(area, file).toBeGreaterThan(0);
+      }
+    }
+  });
+
   it("draws the waiting favicon: the same tile, and a --warm dot in an --on-accent ring (5.9)", () => {
     const plain = served("/webchat/icon.svg").toString("utf8");
     const svg = served("/webchat/icon-waiting.svg").toString("utf8");
