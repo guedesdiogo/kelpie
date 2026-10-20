@@ -202,9 +202,9 @@
     function glyph(state) {
       return '<svg class="k-glyph" viewBox="0 0 12 12" aria-hidden="true">' + (GLYPHS[state] || "") + "</svg>";
     }
-    // The mascot's pause as icons: its own outline, as Master's now looks (round ears, ADR-0049),
+    // The mascot's pause as icons: its own outline, as Master's now looks (pointed ears, ADR-0062),
     // mid-hop for Alive, with 5.19's badge for States only, standing on a line for Still (#378, decision 8).
-    var BODY = '<path d="M9 6.5h2a6 6 0 0 1 6 6v0a5.5 5.5 0 0 1-5.5 5.5H5a2 2 0 0 1-2-2v-3.5a6 6 0 0 1 6-6Z"/><circle cx="5.9" cy="5.1" r="2" fill="currentColor" stroke="none"/><circle cx="14.1" cy="5.1" r="2" fill="currentColor" stroke="none"/><circle cx="8.2" cy="12.4" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12.4" r="1" fill="currentColor" stroke="none"/>';
+    var BODY = '<path d="M9 6.5h2a6 6 0 0 1 6 6v0a5.5 5.5 0 0 1-5.5 5.5H5a2 2 0 0 1-2-2v-3.5a6 6 0 0 1 6-6Z"/><path d="M8.05 6.79L4.56 8.62C4.41 8.18 4.34 7.65 4.35 6.66L4.48 3.8C4.51 3.49 4.64 3.32 4.86 3.27C5.25 3.2 5.84 3.44 6.04 3.74Z" fill="currentColor" stroke="none"/><path d="M11.95 6.79L15.44 8.62C15.59 8.18 15.66 7.65 15.65 6.66L15.52 3.8C15.49 3.49 15.36 3.32 15.14 3.27C14.75 3.2 14.16 3.44 13.96 3.74Z" fill="currentColor" stroke="none"/><circle cx="8.2" cy="12.4" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12.4" r="1" fill="currentColor" stroke="none"/>';
     var PAUSE_ICONS = {
       alive: '<g transform="translate(-.6 -1.8) rotate(-9 10 12)">' + BODY + '</g><path d="M6.5 19.2h6"/><path d="M17.2 2.4l.8 1.6M19 5.4l-1.6.6"/>',
       states: '<g transform="translate(-1.2 .9) scale(.9)">' + BODY + '</g><circle cx="16.4" cy="4" r="2.6" fill="currentColor" stroke="none"/>',
@@ -305,7 +305,7 @@
     }
     // Sample agents for the previews. Kelpie keeps Master's default look (5.19, ADR-0049).
     var LOOKS = {
-      kelpie: { shape: "mark", color: "kelp", eyes: "big", cheeks: false, head: { type: "ears", variation: "round" }, accessory: { type: "none" } },
+      kelpie: { shape: "mark", color: "kelp", eyes: "big", cheeks: false, head: { type: "ears", variation: "pointed" }, accessory: { type: "none" } },
       agenda: { shape: "pebble", color: "fawn", eyes: "dots", cheeks: true, head: { type: "ears", variation: "floppy" }, accessory: { type: "bow", variation: "tie" } },
       research: { shape: "bubble", color: "tide", eyes: "marbles", cheeks: false, head: { type: "hair", variation: "strands" }, accessory: { type: "glasses", variation: "round" } },
       code: { shape: "block", color: "slate", eyes: "cyclops", cheeks: false, head: { type: "horns", variation: "antennae" }, accessory: { type: "none" } },

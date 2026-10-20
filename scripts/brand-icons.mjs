@@ -1,6 +1,7 @@
-// Kelpie's logo (ADR-0049): Master's mascot as a silhouette, the `mark` shape with its round ears.
-// This draws every brand file from that geometry, then renders the webchat's PNG and ICO icons
-// with headless Chrome. Run it after changing the logo, and commit what it writes:
+// Kelpie's logo (ADR-0049, ADR-0062): Master's mascot as a silhouette, the `mark` shape with the
+// pointed ears the mascot engine draws. This draws every brand file from that geometry, then renders
+// the webchat's PNG and ICO icons with headless Chrome. Run it after changing the logo or the ear,
+// and commit what it writes:
 //
 //   node scripts/brand-icons.mjs
 //
@@ -8,6 +9,7 @@
 // section (docs/design-system.md §5.23) holds the rules these files follow.
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
+import { pointedEarOutlines } from "../apps/ingress/public/webchat/mascot-art.js";
 
 /** The brand's colors: --accent and --on-accent, light and dark (docs/design-system.md §1). */
 const KELP = "#0A7469";
@@ -30,47 +32,96 @@ function rounded(x, y, w, h, [a, b, c, d]) {
   ].join("");
 }
 
-/** A circle drawn clockwise, so it joins the body under the nonzero rule. */
-const circle = (cx, cy, r) =>
-  `M${n(cx - r)},${n(cy)}a${n(r)},${n(r)} 0 1 1 ${n(2 * r)},0a${n(r)},${n(r)} 0 1 1 ${n(-2 * r)},0Z`;
+/** The points of a path whose commands all take absolute "x,y" pairs (M, L, C). */
+const points = (d) => [...d.matchAll(/(-?[\d.]+),(-?[\d.]+)/g)].map(([, x, y]) => [+x, +y]);
+
+/** The path with each point moved by `move`. */
+const moved = (d, move) =>
+  d.replace(/(-?[\d.]+),(-?[\d.]+)/g, (_, x, y) => move(+x, +y).map(n).join(","));
+
+/**
+ * The path drawn clockwise, so it joins the body under the nonzero rule: the engine mirrors the
+ * left ear into the right one, which reverses its direction.
+ */
+function clockwise(d) {
+  const at = points(d);
+  const area = at.reduce((sum, [x, y], i) => {
+    const [nx, ny] = at[(i + 1) % at.length];
+    return sum + x * ny - nx * y;
+  }, 0);
+  if (area > 0) return d;
+  const segments = [...d.matchAll(/([LC])([^LCZ]*)/g)].map(([, command, args]) => [
+    command,
+    args.trim().split(/\s+/),
+  ]);
+  let from = d.match(/^M([^\s LC]+)/)[1];
+  const reversed = segments.map(([command, pairs]) => {
+    const segment = { command, from, pairs };
+    from = pairs.at(-1);
+    return segment;
+  });
+  return `M${from}${reversed
+    .reverse()
+    .map(({ command, from: start, pairs }) =>
+      command === "L" ? ` L${start}` : ` C${pairs[1]} ${pairs[0]} ${start}`,
+    )
+    .join("")} Z`;
+}
+
+/**
+ * Master's pointed ears on the engine's 120 grid (ADR-0062), and the middle of each one's base: the
+ * inner base is the outline's first point, the outer base its fourth.
+ */
+const RAW_EARS = pointedEarOutlines("mark");
+const EARS = RAW_EARS.map(clockwise);
+const BASES = RAW_EARS.map((d) => {
+  const at = points(d);
+  return [(at[0][0] + at[3][0]) / 2, (at[0][1] + at[3][1]) / 2];
+});
 
 /**
  * The mark on a 64 box, from the mascot engine's 120 grid (apps/ingress/public/webchat/mascot-art.js):
- * the `mark` shape is 24..96 × 36..108 with corners 36, 36, 36 and 11.5, and the round ears are
- * circles of 10.5 at (38, 42) and (82, 42), so the figure runs from 31.5 to 108. It is drawn 50
- * wide and centred on the box: MARK says where, for every file that places it.
+ * the `mark` shape is 24..96 × 36..108 with corners 36, 36, 36 and 11.5, and the ears' outline,
+ * control points included, reaches up to FIGURE_TOP. It is drawn 50 wide and centred on the box:
+ * MARK says where, for every file that places it.
  */
+const FIGURE_TOP = Math.min(...EARS.flatMap((d) => points(d).map(([, y]) => y)));
 const MARK = (() => {
   const k = 50 / 72;
-  const height = (108 - 31.5) * k;
+  const height = (108 - FIGURE_TOP) * k;
   return { k, left: 7, top: (64 - height) / 2, width: 50, height };
 })();
 
 function mark() {
   const { k } = MARK;
   const x = (v) => MARK.left + (v - 24) * k;
-  const y = (v) => MARK.top + (v - 31.5) * k;
+  const y = (v) => MARK.top + (v - FIGURE_TOP) * k;
   return [
     rounded(x(24), y(36), 72 * k, 72 * k, [36 * k, 36 * k, 36 * k, 11.5 * k]),
-    circle(x(38), y(42), 10.5 * k),
-    circle(x(82), y(42), 10.5 * k),
+    ...EARS.map((d) => moved(d, (px, py) => [x(px), y(py)])),
   ].join("");
 }
 
 /**
- * The favicon's own drawings, one per size: the body on whole pixels, and the ears a little
- * larger, or they vanish at 16 px (Dropbox and GitHub keep separate small masters the same way).
+ * The favicon's own drawings, one per size: the body on whole pixels, and the ears grown about the
+ * middle of their base, 10% at 32 px and 25% at 16 px, or they vanish (Dropbox and GitHub keep
+ * separate small masters the same way).
  */
-const SMALL = {
-  32: [
-    rounded(6, 7, 20, 20, [10, 10, 10, 3.2]),
-    circle(9.6, 8.1, 3.6),
-    circle(22.4, 8.1, 3.6),
-  ].join(""),
-  16: [rounded(3, 4, 10, 10, [5, 5, 5, 1.6]), circle(4.7, 4.6, 2.1), circle(11.3, 4.6, 2.1)].join(
-    "",
-  ),
-};
+function small(size, grow) {
+  const k = (size === 32 ? 20 : 10) / 72;
+  const [left, top] = size === 32 ? [6, 7] : [3, 4];
+  const ears = EARS.map((d, i) => {
+    const [bx, by] = BASES[i];
+    return moved(d, (px, py) => [
+      left + (bx + (px - bx) * grow - 24) * k,
+      top + (by + (py - by) * grow - 36) * k,
+    ]);
+  });
+  const body =
+    size === 32 ? rounded(6, 7, 20, 20, [10, 10, 10, 3.2]) : rounded(3, 4, 10, 10, [5, 5, 5, 1.6]);
+  return [body, ...ears].join("");
+}
+const SMALL = { 32: small(32, 1.1), 16: small(16, 1.25) };
 
 /**
  * "Kelpie" in Bricolage Grotesque at 680, the brand's display weight: the outlines of Fontsource

@@ -83,13 +83,13 @@ describe("the mascot setting", () => {
 });
 
 describe("mascotFor", () => {
-  it("starts Master as Kelpie, with round ears and big eyes (ADR-0049)", () => {
+  it("starts Master as Kelpie, with a kelpie's pointed ears and big eyes (ADR-0062)", () => {
     expect(KELPIE_MASCOT).toEqual({
       shape: "mark",
       color: "kelp",
       eyes: "big",
       cheeks: false,
-      head: { type: "ears", variation: "round" },
+      head: { type: "ears", variation: "pointed" },
       accessory: { type: "none" },
     });
     expect(parseMascot(KELPIE_MASCOT)).toEqual(KELPIE_MASCOT);

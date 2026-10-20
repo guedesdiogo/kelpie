@@ -162,13 +162,13 @@ describe("a lost connection (5.12)", () => {
   });
 });
 
-/** Master's default mascot (ADR-0049), as the socket names it. */
+/** Master's default mascot (ADR-0062), as the socket names it. */
 const KELPIE = {
   shape: "mark",
   color: "kelp",
   eyes: "big",
   cheeks: false,
-  head: { type: "ears", variation: "round" },
+  head: { type: "ears", variation: "pointed" },
   accessory: { type: "none" },
 };
 

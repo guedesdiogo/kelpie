@@ -43,14 +43,33 @@ const mirror = (d) => d.replace(/(-?[\d.]+),/g, (_, x) => `${-x},`);
 /**
  * The pointed ear (#455): a kelpie's left ear traced from a photo, with a domed top, an outer edge
  * nearly upright, a straight inner diagonal and a light shell inside, so it reads as an ear and
- * not a horn. The origin is the middle of its base, 2.8 above the shape's ear anchor; the right
- * ear mirrors it. The shell's color is the body's mixed toward cream, the opening in every color.
+ * not a horn. The origin is the middle of its base, EAR_LIFT above the shape's ear anchor; the
+ * right ear mirrors it. The shell's color is the body's mixed toward cream, the opening in every
+ * color.
  */
 const POINTED_EAR =
   "M10,-1.7 L3.8,7.7 L-8.7,6.1 L-10,1.7 C-10,-0.7 -9.5,-3.4 -7.9,-8.2 L-2.7,-22 C-2.1,-23.5 -1.2,-24.1 0,-24 C2,-23.7 4.5,-21.6 5,-19.8 L10,-1.7 Z";
 const POINTED_SHELL =
   "M-7.9,-2.5 C-7.1,-7 -5.4,-11.8 -3.6,-14.7 C-2.3,-16.4 -0.7,-17.3 0.8,-17.1 C2.5,-15.8 3.8,-12.1 5,-8.3 C5.9,-5.1 6.5,-2.2 6.2,0.5 Z";
 const SHELL_CREAM = "#FFF1DD";
+const EAR_LIFT = 2.8;
+
+/**
+ * A shape's pointed ears as outlines on the 120 grid, left then right, for a drawing that flattens
+ * the mascot: the logo (ADR-0062, scripts/brand-icons.mjs) takes Master's from here.
+ */
+export function pointedEarOutlines(shapeName) {
+  const shape = SHAPES[shapeName];
+  const round = (value) => Math.round(value * 1000) / 1000;
+  return (shape.pointed ?? shape.ears).map(([x, y, a]) => {
+    const r = (a * Math.PI) / 180;
+    return (a < 0 ? POINTED_EAR : mirror(POINTED_EAR)).replace(
+      /(-?[\d.]+),(-?[\d.]+)/g,
+      (_, px, py) =>
+        `${round(x + px * Math.cos(r) - py * Math.sin(r))},${round(y - EAR_LIFT + px * Math.sin(r) + py * Math.cos(r))}`,
+    );
+  });
+}
 
 /**
  * Shapes drawn on a 120 grid and framed at 10,14 100×100, so the body fills about 72%; the ground
@@ -424,7 +443,7 @@ export function buildMascot(mascot, { uid, px, hex, work = true, hands = true })
     backEars = ears
       .map(([x, y, a]) => {
         const side = (d) => (a < 0 ? d : mirror(d));
-        return `<g transform="translate(${x} ${y}) translate(0 -2.8) rotate(${a})"><g class="m-ear">${piece(
+        return `<g transform="translate(${x} ${y}) translate(0 -${EAR_LIFT}) rotate(${a})"><g class="m-ear">${piece(
           [
             { d: side(POINTED_EAR), fill: color.body },
             { d: side(POINTED_SHELL), fill: mix(color.body, SHELL_CREAM, 0.55) },

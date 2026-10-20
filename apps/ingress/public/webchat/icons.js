@@ -110,16 +110,29 @@ const PATHS = {
 };
 
 /**
- * The mascot's outline on a 20 px grid, as Master's mascot now looks: round ears (ADR-0049), its
- * ears and eyes filled. The shapes of its motion setting, as the design system draws them.
+ * The mascot's outline on a 20 px grid, as Master's mascot now looks: a kelpie's pointed ears,
+ * mapped from the engine's on `mark` (ADR-0062), its ears and eyes filled. The shapes of its motion
+ * setting, as the design system draws them.
  */
 const BODY = [
   [
     "path",
     { d: "M9 6.5h2a6 6 0 0 1 6 6v0a5.5 5.5 0 0 1-5.5 5.5H5a2 2 0 0 1-2-2v-3.5a6 6 0 0 1 6-6Z" },
   ],
-  ["circle", { cx: 5.9, cy: 5.1, r: 2, class: "solid" }],
-  ["circle", { cx: 14.1, cy: 5.1, r: 2, class: "solid" }],
+  [
+    "path",
+    {
+      d: "M8.05 6.79L4.56 8.62C4.41 8.18 4.34 7.65 4.35 6.66L4.48 3.8C4.51 3.49 4.64 3.32 4.86 3.27C5.25 3.2 5.84 3.44 6.04 3.74Z",
+      class: "solid",
+    },
+  ],
+  [
+    "path",
+    {
+      d: "M11.95 6.79L15.44 8.62C15.59 8.18 15.66 7.65 15.65 6.66L15.52 3.8C15.49 3.49 15.36 3.32 15.14 3.27C14.75 3.2 14.16 3.44 13.96 3.74Z",
+      class: "solid",
+    },
+  ],
   ["circle", { cx: 8.2, cy: 12.4, r: 1, class: "solid" }],
   ["circle", { cx: 12, cy: 12.4, r: 1, class: "solid" }],
 ];
