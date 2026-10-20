@@ -11,6 +11,7 @@
 - Amended by: [ADR-0051](0051-subagent-pups-return-one-by-one.md), pups stand beside their parent with no link or goo, and each comes back when its own task ends; pups follow their subagent's tasks and show only on the agent's profile (§7)
 - Amended by: [ADR-0053](0053-pups-in-the-conversation-header.md), pups show in the conversation's header too, at 20 px, and the name beside the mascot slides to make room for them (§4); pups close up toward the parent as they come back (§7)
 - Amended by: [ADR-0056](0056-agent-editor-and-random-mascot.md), a new agent starts with a random mascot saved as its setting, and the owner changes it in the webchat's editor too (§2)
+- Amended by: [ADR-0062](0062-logo-takes-the-kelpie-ear.md), the main agent starts with a kelpie's pointed ears (§2)
 - Amends: [ADR-0043](0043-design-system.md), how an agent looks (§6) and an exception to motion rule 8 for the mascot; [ADR-0024](0024-fixed-wait-end-of-turn.md), the mascot also listens during the wait where its bar shows (§5); and `docs/design-system.md` §4.4 rule 8 and §5.9, an idle agent in the roster
 
 ## Context

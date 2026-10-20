@@ -4,6 +4,7 @@
 - Date: 2026-10-16
 - Issue: [#385](https://github.com/guedesdiogo/kelpie/issues/385)
 - Amended by: [ADR-0054](0054-bot-photo-follows-default-mascot.md), the main agent's bot follows the new default without a setting change
+- Amended by: [ADR-0062](0062-logo-takes-the-kelpie-ear.md), the mark takes the kelpie's pointed ear from the engine (§1), and Master starts with it (§2)
 - The owner asked on 2026-10-16: «Precisamos definir um logo melhor para kelpie, abra uma sessão para tratarmos o logo a parte». After comparing four directions on a lab page: «Vamos seguir o Orelhas, mas quero alterar o padrão das orelhas para a configuração "redonda", os olhos para "grandes" e remover a coleira». On approving the plan he first asked for the eyes on the logo too, then: «corrigindo, vamos sem os olhos».
 - Amends:
   - [ADR-0045](0045-agent-mascot.md) §2: the main agent starts as Kelpie with big eyes, round ears and no accessory, in place of shine eyes, pointed ears and a collar;

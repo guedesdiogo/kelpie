@@ -15,7 +15,7 @@ From the webchat's approved mockup (#378):
 - `monitor`, `sun` and `moon`: the theme's System, Light and Dark.
 - `wifi-off`: the banner of a lost connection.
 - `bell`: the strip that counts the agents waiting for the owner, in `warm`.
-- `mascot-alive`, `mascot-states` and `mascot-still`: the mascot's pause, drawn as the outline of Master's mascot (round ears) on a 20px grid with a 1.4px stroke.
+- `mascot-alive`, `mascot-states` and `mascot-still`: the mascot's pause, drawn as the outline of Master's mascot (pointed ears, ADR-0062) on a 20px grid with a 1.4px stroke.
 
 From the §8 research on the comfort controls (the owner approved the text-size pair on 2026-10-16):
 - `text-small` and `text-large`: outlined letters for the text size, as Lucide's `a-large-small`.
