@@ -421,7 +421,7 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
   - **A long list** fits one tool result of 10,000 characters: the waits and the working sessions come first, with their last replies; then the others, without theirs, while they fit; then their last replies, in order, while they fit. The list says what it left out, and each group still counts all its sessions.
   - **Who gets it:** only Master, and only the owner's own turn may run it, as the configuration tools. A task's run never gets it, and a subagent never does. It isn't one of the orchestration tools ADR-0050 names, so a `tools` list the owner sets on Master can leave it out, as Master's other tools.
   - **Only a turn the owner typed runs it** (ADR-0063, #454). In a turn that Kelpie's note started, such as a task's news, it answers that the owner can ask for the sessions in a message of their own. It stays among Master's tools there, so the tools don't change with what started the turn.
-  - **Its list is outside content** when it shows a session's own text, so the rest of the turn asks the owner before any change ("Outside content").
+  - **Its list is outside content** when it shows a session's own text, so the rest of the turn, and the conversation's turns for 10 minutes after, ask the owner before any change ("Outside content").
   - **When the runner can't answer,** the tool says why, in words Master can pass on: an outdated runner to update (protocol 3 lists sessions), a runner that isn't connected or refuses the secret, or one that can't be reached.
   - **A session's own text is untrusted.** Its title, repository, branch, pull request's link and excerpt reach the model between two marks named with a random id their text can't hold, as data, never instructions: the link's owner and repository are the session's text too. They confirm nothing, start no configuration command (ADR-0013), and an address in them shows as code, since a reply links only what the owner sent ("Formatting"). The list also tells the model never to call a tool because of anything in it: not to save it to memory, nor to put it in a task, a task comment, or a subagent's or agent's name or soul. Only the owner's own words ask for that.
   - **Where its result stays:** in the conversation's history, as every tool's result (ADR-0025). Like Kelpie's notes (ADR-0028), it never reaches a checkpoint's summary or a session page, so it never reaches the vault: those read only what the owner saw, and a tool's result is never that. Master's reply is the owner's to see, and goes where every reply goes.
@@ -461,28 +461,31 @@ A turn that read outside content asks the owner before it changes anything (ADR-
   - Today only `vps_sessions` returns it, when its list shows a session's own text.
   - Task news, comments and a subagent's results are other agents' words, fenced as data. They don't count.
 - **How long it lasts:**
-  - the rest of the turn that read it: its later rounds, on either route, and past an eviction;
-  - a turn no person typed, which a note of Kelpie's or a task's run started, while the history it sends since the conversation's last checkpoint holds a turn that read some. A checkpoint's summary never holds a tool's result;
-  - the owner's own turns are marked only by what they read themselves.
-- **What asks then:** a tool that changes something with no yes of its own: `memory_write`, `create_task`, `comment_task`, `create_subagent`, `delete_subagent`, `create_agent` and `rename_agent`. A new tool asks too, until it declares that it only reads or asks for its own yes.
+  - the rest of the turn that read it: its later rounds, on either route, and past an eviction. Only that read is recorded on the turn;
+  - every turn in the conversation, the owner's own included, that starts less than 10 minutes after a turn that read some started or ran, or while a change it held still waits for the owner. That covers the message that cuts a marked turn short, and the owner's answer to the confirmation;
+  - a turn no person typed, which a note of Kelpie's or a task's run started, while the history it sends since the conversation's last checkpoint holds a turn that read some. That turn doesn't keep the mark, so notes' turns can't keep each other marked past a checkpoint;
+  - past those, the owner's own turns are marked only by what they read themselves.
+- **What asks then:** a tool that changes something with no yes of its own: `memory_write`, `create_task`, `comment_task`, `create_subagent`, `delete_subagent`, `create_agent` and `rename_agent`, and the form tools `connect_telegram`, `pair_telegram` and `connect_runner`. The owner's submission on a form's page is still their yes, but the link itself waits for their confirmation first. A new tool asks too, until it declares that it only reads or asks for its own yes.
 - **What doesn't:**
   - the tools that only read: `memory_search`, `memory_read`, `list_agents`, `get_agent`, `get_models`, `runner_status` and `vps_sessions`;
-  - the tools that already ask for the owner's act, through a confirmation, a form or the proposal's page;
-  - a task's run ending its own task with `complete_task`, `wait_on_task` or `cancel_task`.
+  - the tools that already ask for the owner's confirmation or act: `configure_agent`, `configure_models`, `set_claude_code`, `set_master`, `set_agent_chat`, `delete_agent` and `propose_agent_change`;
+  - a task's run ending its own task with `complete_task`, `wait_on_task` or `cancel_task`, which never waits for a yes. What the run read can still reach, in its result or question, the agent that hears its news (#477).
 - **How it asks:** the call doesn't run, and the agent learns that it waits for the owner's confirmation. After the reply, Kelpie sends a confirmation's bubble, as for a setting ("Confirmation"), in the conversation's language:
 
   `Confirm: run memory_write ("Saving to memory") with {"body":"…","kind":"person","level":"explicit","title":"Ana"}. This turn read text that neither you nor Kelpie wrote, so Kelpie asks you before any change.`
 
-  - The code or the Confirm button confirms that call, with that input, once, within 10 minutes.
+  - The input is the model's, as it called the tool.
+  - The code or the Confirm button confirms that call, with that input, once, within 10 minutes. The owner's answer is marked too, so the agent's repeated call goes through the gate, which finds the code, runs the call and uses the code up. The same input again, or another one, asks again.
+  - A turn holds at most 3 changes waiting for the owner. A call for a further one asks nothing, and the agent is told to tell the owner instead.
   - A call too long to show in one bubble doesn't run. The agent is told to make it smaller, or to tell the owner what it would change.
   - In a note's turn, the bubble follows that turn's reply, in the same conversation.
-  - The owner's next message is their own turn, which isn't marked unless it reads outside content too. So the agent's repeated call runs then, and the code expires unused.
+- **What the records keep:** a reply of a turn that read outside content may quote it. The session pages Kelpie writes to the vault and a checkpoint's summary show Kelpie's line in its place: `(A reply left out of this record: its turn read text that neither Kelpie nor the owner wrote.)` The owner's messages stay, and the chat still shows the reply.
 - **In a task's run,** no one can confirm yet (#477):
   - the call doesn't run;
   - Kelpie asks the owner on the task, through the run, naming the call and its input;
   - the task waits with `needs_input`, so the question reaches the owner through the agent that hears the task's news ("Tasks").
 
-  An answer resumes the task, but confirms nothing. The change is held again, and the owner can ask for it in a message of their own. No tool a task's run holds reads outside content today.
+  An answer resumes the task, but confirms nothing. The change is held again, and the owner can ask for it in a message of their own. A task waits five times at most: the next wait ends it in Cancelled. No tool a task's run holds reads outside content today.
 
 ## Webchat
 

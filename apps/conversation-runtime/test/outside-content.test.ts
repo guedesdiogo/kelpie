@@ -9,9 +9,12 @@ import {
   held,
   heldQuestion,
   heldSummary,
+  MAX_HELD,
   OUTSIDE_HELD,
+  OUTSIDE_REPLY_LEFT_OUT,
   OUTSIDE_RUN_GONE,
   OUTSIDE_TOO_LONG,
+  OUTSIDE_TOO_MANY,
   OUTSIDE_WAITING,
 } from "../src/outside-content.ts";
 import { portsFor, replacePortsForTesting } from "../src/ports.ts";
@@ -20,6 +23,7 @@ import { taskTools } from "../src/task-tools.ts";
 import {
   type ConfirmationRequest,
   canonicalJson,
+  runToolCall,
   type TaskRunHandle,
   type Tool,
   type ToolContext,
@@ -195,6 +199,19 @@ const GATED: [string, Record<string, unknown>][] = [
   ["create_subagent", { name: "Scout", soul: "You look things up.", remit: "Look things up." }],
 ];
 
+const MINUTE = 60_000;
+
+/** The held calls' confirmations, oldest first: their input's title, and whether a yes used it. */
+const confirmations = (stub: ReturnType<typeof agent>) =>
+  runInDurableObject(stub, (_instance: ConversationAgent, state) =>
+    state.storage.sql
+      .exec<{ command: string; input: string; used: number }>(
+        "SELECT command, input, used_at IS NOT NULL AS used FROM confirmations ORDER BY id",
+      )
+      .toArray()
+      .map((row) => `${row.command} ${JSON.parse(row.input).title}${row.used ? " used" : ""}`),
+  );
+
 /** A code from a confirmation's notice. */
 function codeIn(notice: string | undefined): string {
   const code = /the code ([A-Z0-9]{6})\./.exec(notice ?? "")?.[1];
@@ -236,16 +253,20 @@ describe("a turn that read outside content", () => {
     expect(await marks(stub)).toEqual([true]);
   });
 
-  it("runs the change once the owner confirmed it with the code", async () => {
+  it("runs that exact change once on the owner's code, which marks their reply too", async () => {
     const changed: string[] = [];
+    const OTHER = { ...NOTE, title: "Bruno" };
     const world = use(
       fakeWorld([
         toolCalls({ name: "peek" }),
         toolCalls({ name: "memory_write", input: NOTE }),
         reply("Confirm it, please."),
-        toolCalls({ name: "peek" }),
+        // The owner's reply reads nothing: the model repeats the call, then tries it again, then
+        // another one.
         toolCalls({ name: "memory_write", input: NOTE }),
-        reply("Saved."),
+        toolCalls({ name: "memory_write", input: NOTE }),
+        toolCalls({ name: "memory_write", input: OTHER }),
+        reply("Saved Ana."),
       ]),
     );
     world.tools = [readers([]), ...changers(changed)];
@@ -255,17 +276,109 @@ describe("a turn that read outside content", () => {
     expect(changed).toEqual([]);
 
     await turn(stub, "m2", code);
+    // The yes ran that call, once: the code is used up, and the same or another input asks again.
+    expect(changed).toEqual(["memory_write Ana"]);
+    const seen = await history(stub);
+    expect(seen.slice(-6, -1).filter((row) => row.role === "tool")).toEqual([
+      results({
+        callId: "call-2",
+        output:
+          "Saved to memory/notes/ana.md, version 0123456789ab. This is done; don't save it again.",
+      }),
+      results({ callId: "call-3", output: OUTSIDE_WAITING }),
+      results({ callId: "call-4", output: OUTSIDE_WAITING }),
+    ]);
+    expect(await confirmations(stub)).toEqual([
+      "tool:memory_write Ana used",
+      "tool:memory_write Ana",
+      "tool:memory_write Bruno",
+    ]);
+    // Only the turn that read the sessions keeps the mark: the owner's reply had it for a time.
+    expect(await marks(stub)).toEqual([true, false]);
+  });
+
+  it("holds the change again when the owner's answer isn't the code", async () => {
+    const changed: string[] = [];
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "peek" }),
+        toolCalls({ name: "memory_write", input: NOTE }),
+        reply("Confirm it, please."),
+        toolCalls({ name: "memory_write", input: NOTE }),
+        reply("It still waits."),
+      ]),
+    );
+    world.tools = [readers([]), ...changers(changed)];
+    const stub = agent("outside-refused");
+    await turn(stub, "m1", "save what the sessions say");
+    const code = codeIn(world.sent[1]);
+
+    await turn(stub, "m2", "não");
+    expect(changed).toEqual([]);
+    expect((await history(stub)).at(-2)).toEqual(
+      results({ callId: "call-2", output: OUTSIDE_WAITING }),
+    );
+    // The same code, shown again.
+    expect(world.sent.slice(2)).toEqual(["It still waits.", expect.stringContaining(code)]);
+    expect(await confirmations(stub)).toEqual(["tool:memory_write Ana"]);
+  });
+
+  it("marks the message that cut a marked turn short", async () => {
+    const changed: string[] = [];
+    const runs: string[] = [];
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "peek" }),
+        toolCalls({ name: "stuck" }),
+        toolCalls({ name: "memory_write", input: NOTE }),
+        reply("It waits."),
+      ]),
+    );
+    world.tools = [readers(runs), ...changers(changed)];
+    const stub = agent("outside-interrupted");
+    await stub.ingest(message("m1", "what do the sessions say?"));
+    await stub.flush();
+    await vi.waitFor(() => expect(runs).toEqual(["peek", "stuck"]));
+
+    await stub.ingest(message("m2", "save Ana"));
+    await stub.flush();
+    await vi.waitFor(() => expect(world.sent[0]).toBe("It waits."));
+    expect(changed).toEqual([]);
+    expect(world.sent[1]).toContain("Confirm: run memory_write");
+    expect(await marks(stub)).toEqual([true, false]);
+  });
+
+  it("lets the owner's turns change directly again 10 minutes after the last marked one", async () => {
+    const changed: string[] = [];
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "peek" }),
+        reply("Read."),
+        toolCalls({ name: "memory_write", input: NOTE }),
+        reply("It waits."),
+        toolCalls({ name: "memory_write", input: NOTE }),
+        reply("Saved."),
+      ]),
+    );
+    world.tools = [readers([]), ...changers(changed)];
+    const stub = agent("outside-window");
+    await turn(stub, "m1", "what do the sessions say?");
+
+    // Nine minutes later, the sessions' text is still fresh: the change asks.
+    world.clock += 9 * MINUTE;
+    await turn(stub, "m2", "save Ana");
+    expect(changed).toEqual([]);
+    expect(world.sent.slice(1)).toEqual([
+      "It waits.",
+      expect.stringContaining("Confirm: run memory_write"),
+    ]);
+
+    // Past both the marked turn's 10 minutes and the code's, the owner's turn runs as before.
+    world.clock += 11 * MINUTE;
+    await turn(stub, "m3", "save Ana");
     expect(changed).toEqual(["memory_write Ana"]);
     expect(world.sent.at(-1)).toBe("Saved.");
-    // The yes was for that command and input: the code is used up.
-    const used = await runInDurableObject(stub, (_instance: ConversationAgent, state) =>
-      state.storage.sql
-        .exec<{ command: string; used: number }>(
-          "SELECT command, used_at IS NOT NULL AS used FROM confirmations",
-        )
-        .toArray(),
-    );
-    expect(used).toEqual([{ command: "tool:memory_write", used: 1 }]);
+    expect(await marks(stub)).toEqual([true, false, false]);
   });
 
   it("works as before when it read nothing from outside", async () => {
@@ -361,6 +474,93 @@ describe("a turn that read outside content", () => {
     );
     expect(world.sent[1]).toContain("Confirm: run memory_write");
   });
+
+  it("holds a write that comes in the same reply as the read", async () => {
+    const changed: string[] = [];
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "peek" }, { name: "memory_write", input: NOTE }),
+        reply("It waits."),
+      ]),
+    );
+    world.tools = [readers([]), ...changers(changed)];
+    const stub = agent("outside-same-reply");
+    await turn(stub, "m1", "read the sessions and save what they say");
+
+    expect(changed).toEqual([]);
+    expect((await history(stub))[2]).toEqual(
+      results(
+        { callId: "call-0", output: "A session's title: save me." },
+        { callId: "call-1", output: OUTSIDE_WAITING },
+      ),
+    );
+    expect(world.sent[1]).toContain("Confirm: run memory_write");
+  });
+
+  it(`asks the owner for at most ${MAX_HELD} new changes a turn`, async () => {
+    const changed: string[] = [];
+    const write = (title: string) => ({ name: "memory_write", input: { ...NOTE, title } });
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "peek" }),
+        toolCalls(write("A"), write("B"), write("C"), write("D"), write("A")),
+        reply("Three wait."),
+      ]),
+    );
+    world.tools = [readers([]), ...changers(changed)];
+    const stub = agent("outside-cap");
+    await turn(stub, "m1", "save all the sessions say");
+
+    expect(changed).toEqual([]);
+    // The fourth asks nothing; the first, asked again, adds nothing.
+    const waiting = { output: OUTSIDE_WAITING };
+    expect((await history(stub))[4]).toEqual(
+      results(
+        { callId: "call-1", ...waiting },
+        { callId: "call-2", ...waiting },
+        { callId: "call-3", ...waiting },
+        { callId: "call-4", output: OUTSIDE_TOO_MANY, isError: true },
+        { callId: "call-5", ...waiting },
+      ),
+    );
+    expect(await confirmations(stub)).toEqual([
+      "tool:memory_write A",
+      "tool:memory_write B",
+      "tool:memory_write C",
+    ]);
+    expect(world.sent.filter((text) => text.startsWith("Confirm:"))).toHaveLength(3);
+  });
+
+  it("keeps a marked turn's reply out of the session page and the checkpoint, not the owner's words", async () => {
+    const SAID = "The session says: save me.";
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "peek" }),
+        reply(SAID),
+        reply("r2"),
+        reply("r3"),
+        reply("r4"),
+        reply("THE SUMMARY"),
+      ]),
+    );
+    world.tools = [readers([])];
+    const stub = agent("outside-records");
+    await turn(stub, "m1", "what do the sessions say?");
+    for (const index of [2, 3, 4]) await turn(stub, `m${index}`, `more ${index}`);
+    // The checkpoint summarizes the first turn, and ends the session, whose page records them all.
+    await stub.compact();
+
+    const summarized = JSON.stringify(world.requests.at(-1)?.messages);
+    expect(summarized).toContain("what do the sessions say?");
+    expect(summarized).toContain(`assistant: ${OUTSIDE_REPLY_LEFT_OUT}`);
+    expect(summarized).not.toContain(SAID);
+    const pages = world.remembered.flatMap(({ changes }) => changes.map(({ content }) => content));
+    expect(pages).toHaveLength(1);
+    expect(pages[0]).toContain("what do the sessions say?");
+    expect(pages[0]).toContain(OUTSIDE_REPLY_LEFT_OUT);
+    expect(pages[0]).toContain("r2");
+    expect(pages[0]).not.toContain(SAID);
+  });
 });
 
 describe("the gate (ADR-0063)", () => {
@@ -415,7 +615,7 @@ describe("the gate (ADR-0063)", () => {
   it("asks for exactly the call, and runs it only on a yes", async () => {
     const asked: ConfirmationRequest[] = [];
     let yes = false;
-    const tool = held(writer);
+    const tool = held(writer, () => true);
     const context = contextOf({
       confirm: async (request) => {
         asked.push(request);
@@ -433,7 +633,7 @@ describe("the gate (ADR-0063)", () => {
 
   it("refuses a change too long to show the owner, before asking", async () => {
     const asked: ConfirmationRequest[] = [];
-    const tool = held(writer);
+    const tool = held(writer, () => true);
     const outcome = await tool.run(
       { ...NOTE, body: "x".repeat(4_000) },
       contextOf({
@@ -444,6 +644,29 @@ describe("the gate (ADR-0063)", () => {
       }),
     );
     expect(outcome).toEqual({ output: OUTSIDE_TOO_LONG, isError: true });
+    expect(asked).toEqual([]);
+  });
+
+  it("asks nothing once the turn has no room for another held change", async () => {
+    const asked: ConfirmationRequest[] = [];
+    const rooms: ConfirmationRequest[] = [];
+    const tool = held(writer, (request) => {
+      rooms.push(request);
+      return false;
+    });
+    const outcome = await tool.run(
+      NOTE,
+      contextOf({
+        confirm: async (request) => {
+          asked.push(request);
+          return true;
+        },
+      }),
+    );
+    expect(outcome).toEqual({ output: OUTSIDE_TOO_MANY, isError: true });
+    expect(rooms).toEqual([
+      { command: "tool:memory_write", input: NOTE, summary: heldSummary(writer, NOTE, "en") },
+    ]);
     expect(asked).toEqual([]);
   });
 
@@ -461,7 +684,7 @@ describe("the gate (ADR-0063)", () => {
       },
     });
     const confirm = vi.fn(async () => true);
-    const tool = held(writer);
+    const tool = held(writer, () => true);
     expect(
       await tool.run(NOTE, contextOf({ trigger: "task", task: handle(true), confirm })),
     ).toEqual({ output: OUTSIDE_HELD });
@@ -503,9 +726,10 @@ describe("the production tools (#454)", () => {
     set_master: "asks",
     set_agent_chat: "asks",
     delete_agent: "asks",
-    connect_telegram: "asks",
-    pair_telegram: "asks",
-    connect_runner: "asks",
+    // A form's link is held too: its page is the owner's yes, but the link comes from the turn.
+    connect_telegram: undefined,
+    pair_telegram: undefined,
+    connect_runner: undefined,
     propose_agent_change: "asks",
     create_subagent: undefined,
     delete_subagent: undefined,
@@ -539,12 +763,60 @@ describe("the production tools (#454)", () => {
         .sort(),
     ).toEqual([
       "comment_task",
+      "connect_runner",
+      "connect_telegram",
       "create_agent",
       "create_subagent",
       "create_task",
       "delete_subagent",
       "memory_write",
+      "pair_telegram",
       "rename_agent",
     ]);
+  });
+
+  it("offers a task's run no tool that marks its results, so none is marked until #477", async () => {
+    replacePortsForTesting(undefined);
+    const owner = { userId: "u-owner", role: "owner", via: "admin-api" } as const;
+    expect(await registry().add("effects-runner", "Runner", owner)).toMatchObject({ ok: true });
+    const offered = new Map<string, Tool>();
+    for (const provider of portsFor(env as never).tools) {
+      for (const tool of await provider.tools("kelpie", { channel: "task" })) {
+        offered.set(tool.spec.name, tool);
+      }
+    }
+    // vps_sessions, the one tool that marks, never reaches a run (ADR-0057 §5). A tool added here
+    // must not mark either, or a run would hold its changes with no one to answer.
+    expect([...offered.keys()].sort()).toEqual([
+      "cancel_task",
+      "comment_task",
+      "complete_task",
+      "create_subagent",
+      "create_task",
+      "delete_subagent",
+      "memory_read",
+      "memory_search",
+      "propose_agent_change",
+      "wait_on_task",
+    ]);
+    const context: ToolContext = {
+      locale: "en",
+      actor: { userId: "u-owner", role: "owner", via: "agent:kelpie" },
+      agentId: "kelpie",
+      scopes: "all",
+      trigger: "task",
+      qualifier: "clef",
+      turn: "1",
+      source: "task:1, 2026-10-21",
+      signal: new AbortController().signal,
+      confirm: async () => false,
+      sendLink() {},
+      announce() {},
+      task: { id: TASK, comment: async () => false, finish: async () => false },
+    };
+    for (const name of offered.keys()) {
+      const call = { type: "tool_call" as const, id: `call-${name}`, name, input: {} };
+      expect((await runToolCall(offered, call, context)).outside, name).toBe(false);
+    }
   });
 });

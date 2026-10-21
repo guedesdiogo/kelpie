@@ -973,6 +973,8 @@ export function configurationTools(
         return { output: deletedReport(agent.id, result.value) };
       },
     },
+    // The three form tools declare no effect: their page is the owner's yes, but after outside
+    // content the turn holds even the link until the owner confirms it (ADR-0063).
     {
       spec: SPECS.connect_telegram,
       label: {
@@ -980,7 +982,6 @@ export function configurationTools(
         "pt-BR": "Conectando um bot do Telegram",
         es: "Conectando un bot de Telegram",
       },
-      effect: "asks",
       async run(input, context) {
         if (!isOwner(context)) return NOT_OWNER;
         if (adminOrigin === "") return NOT_CONFIGURED;
@@ -1007,7 +1008,6 @@ export function configurationTools(
     {
       spec: SPECS.pair_telegram,
       label: { en: "Pairing Telegram", "pt-BR": "Pareando o Telegram", es: "Vinculando Telegram" },
-      effect: "asks",
       async run(input, context) {
         if (!isOwner(context)) return NOT_OWNER;
         if (adminOrigin === "") return NOT_CONFIGURED;
@@ -1032,7 +1032,6 @@ export function configurationTools(
         "pt-BR": "Conectando o runner",
         es: "Conectando el runner",
       },
-      effect: "asks",
       async run(_input, context) {
         if (!isOwner(context)) return NOT_OWNER;
         if (adminOrigin === "") return NOT_CONFIGURED;

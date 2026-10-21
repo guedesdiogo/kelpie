@@ -1,7 +1,9 @@
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { TaskDetail, TaskView } from "@kelpie/config";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fenced, newsNote, runInput } from "../src/agent-host/agent-host.ts";
+import type { ConversationAgent } from "../src/conversation-agent.ts";
 import { OUTSIDE_WAITING } from "../src/outside-content.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import { taskTools } from "../src/task-tools.ts";
@@ -227,7 +229,16 @@ describe("a note's turn after outside content (#454)", () => {
     input: { agentId: "helper", title: "Follow up", body: "As the session said." },
   };
 
-  it("asks in its conversation before a change; the owner's own turn doesn't", async () => {
+  /** Each turn's mark, as the conversation keeps it: only a turn's own read writes it. */
+  const marks = (stub: ReturnType<typeof agent>) =>
+    runInDurableObject(stub, (_instance: ConversationAgent, state) =>
+      state.storage.sql
+        .exec<{ outside: number }>("SELECT outside FROM turns ORDER BY id")
+        .toArray()
+        .map((row) => row.outside === 1),
+    );
+
+  it("asks in its conversation before a change, which the owner's code then runs once", async () => {
     const made: string[] = [];
     const world = fakeWorld([
       toolCalls({ name: "peek" }),
@@ -254,19 +265,22 @@ describe("a note's turn after outside content (#454)", () => {
     const answers = JSON.stringify(world.requests.at(-1)?.messages.at(-1));
     expect(answers).toContain(JSON.stringify(OUTSIDE_WAITING).slice(1, -1));
 
-    // The owner's own message is theirs: it read nothing from outside, so it hands off directly.
-    await said(stub, "m2", "hand it off");
+    // The owner's reply with the code is marked while the confirmation is open: the repeated call
+    // goes through the gate, which finds their yes.
+    const code = /the code ([A-Z0-9]{6})\./.exec(world.sent[2] ?? "")?.[1] ?? "";
+    await said(stub, "m2", code);
     expect(made).toEqual(["helper Follow up"]);
+    expect(await marks(stub)).toEqual([true, false, false]);
   });
 
-  it("changes directly again once a checkpoint summarized the turn that read it", async () => {
+  it("keeps no note's turn marked past a checkpoint: only the turn that read it is", async () => {
     const made: string[] = [];
     const world = fakeWorld([
       toolCalls({ name: "peek" }),
       reply("One session asks for a task."),
-      reply("r2"),
-      reply("r3"),
-      reply("r4"),
+      toolCalls(HAND_OFF),
+      reply("It waits for you."),
+      reply("Ok."),
       reply("THE SUMMARY"),
       toolCalls(HAND_OFF),
       reply("Handed off."),
@@ -274,14 +288,21 @@ describe("a note's turn after outside content (#454)", () => {
     tools(world, made);
     const stub = agent("assistant:telegram:notes-checkpoint");
     await said(stub, "m1", "what do the sessions say?");
-    for (const index of [2, 3, 4]) await said(stub, `m${index}`, `more ${index}`);
-    // The checkpoint keeps the last three turns: the sessions' text is only in its summary, which
-    // never holds a tool's result (ADR-0025 §5).
-    await stub.compact();
-    expect(JSON.stringify(world.requests.at(-1)?.messages)).toContain("One session asks");
-
+    // The note's turn inherits the mark from its history, and holds its change.
     await note(stub, "Kelpie, automatically: a task ended.");
+    expect(made).toEqual([]);
+    await said(stub, "m3", "ok");
+    // The checkpoint summarizes the turn that read the sessions, and keeps the note's turn: its
+    // summary never holds a tool's result (ADR-0025 §5).
+    await stub.compact();
+    expect(JSON.stringify(world.requests.at(-1)?.messages)).toContain("what do the sessions say?");
+    expect(await marks(stub)).toEqual([true, false, false]);
+
+    // Past the 10 minutes, nothing in view read outside content: the next note's turn hands off.
+    world.clock += 11 * 60_000;
+    await note(stub, "Kelpie, automatically: another task ended.");
     expect(made).toEqual(["helper Follow up"]);
     expect(world.sent.at(-1)).toContain("Kelpie handed a task to");
+    expect(await marks(stub)).toEqual([true, false, false, false]);
   });
 });

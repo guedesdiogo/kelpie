@@ -1,6 +1,8 @@
 import type { Locale, Localized } from "@kelpie/channels";
 import { RUN_ENDS } from "./task-tools.ts";
 import {
+  CONFIRMATION_MS,
+  type ConfirmationRequest,
   canonicalJson,
   labelIn,
   MAX_SUMMARY_CHARS,
@@ -16,6 +18,15 @@ import {
 // owner's, through ADR-0013's confirmation. A task's run has no one to answer one yet, so there the
 // call doesn't run, Kelpie asks the owner on the task, and the task waits (#477 brings the yes).
 
+/**
+ * How long a turn that read outside content marks the turns that follow it, the owner's own
+ * included (the owner's decision of 2026-10-21: «10 minutos»): as long as a code lasts.
+ */
+export const OUTSIDE_WINDOW_MS = CONFIRMATION_MS;
+
+/** The most changes one turn holds for the owner at once: past them, the call asks nothing. */
+export const MAX_HELD = 3;
+
 /** What a held call gets until the owner confirms it, as the configuration tools' own wait. */
 export const OUTSIDE_WAITING =
   "Not done yet: this turn read text that neither Kelpie nor the owner wrote, so Kelpie showed the owner this change, and how to confirm it. Tell them it waits for their confirmation. Once they confirm, call this tool again with the same input.";
@@ -23,6 +34,16 @@ export const OUTSIDE_WAITING =
 /** What a held call too long to show the owner gets: one bubble shows the whole change, or none. */
 export const OUTSIDE_TOO_LONG =
   "Not done: this turn read text that neither Kelpie nor the owner wrote, so this change waits for the owner's confirmation, and it is too long to show them. Make it smaller, or tell the owner what you would change: a message of their own can ask for it.";
+
+/** What a held call gets once its turn holds MAX_HELD changes for the owner: no code is made. */
+export const OUTSIDE_TOO_MANY = `Not done: this turn read text that neither Kelpie nor the owner wrote, and ${MAX_HELD} changes already wait for the owner's confirmation in it. Don't ask for more: tell the owner what else you would change, so they can ask for it in a message.`;
+
+/**
+ * What a session page and a checkpoint's summary keep of a reply whose turn read outside content,
+ * which it may quote (the owner's decision of 2026-10-21: «Tirar dos registros»).
+ */
+export const OUTSIDE_REPLY_LEFT_OUT =
+  "(A reply left out of this record: its turn read text that neither Kelpie nor the owner wrote.)";
 
 /** What a held call in a task's run gets, once Kelpie asked the owner on the task. */
 export const OUTSIDE_HELD =
@@ -85,11 +106,13 @@ export function heldQuestion(tool: Tool, input: unknown, locale: Locale): string
 }
 
 /**
- * `tool`, held until the owner's yes: the call runs only once they confirmed exactly it (ADR-0013).
- * In a task's run it never does, until #477: Kelpie asks the owner on the task, and the run ends
- * waiting for their answer, as `wait_on_task` with `needs_input` does.
+ * `tool`, held until the owner's yes: the call runs only once they confirmed exactly it, with
+ * exactly this input, and a yes runs it once (ADR-0013). `room` says whether the turn may ask the
+ * owner this: a change already shown asks again, and a turn shows at most MAX_HELD. In a task's run
+ * the call never runs, until #477: Kelpie asks the owner on the task, and the run ends waiting for
+ * their answer, as `wait_on_task` with `needs_input` does.
  */
-export function held(tool: Tool): Tool {
+export function held(tool: Tool, room: (request: ConfirmationRequest) => boolean): Tool {
   return {
     ...tool,
     async run(input, context): Promise<ToolOutcome> {
@@ -105,11 +128,9 @@ export function held(tool: Tool): Tool {
           (await run.finish({ status: "waiting", reason: "needs_input" }));
         return asked ? { output: OUTSIDE_HELD } : { output: OUTSIDE_RUN_GONE, isError: true };
       }
-      const confirmed = await context.confirm({
-        command: `tool:${tool.spec.name}`,
-        input,
-        summary,
-      });
+      const request = { command: `tool:${tool.spec.name}`, input, summary };
+      if (!room(request)) return { output: OUTSIDE_TOO_MANY, isError: true };
+      const confirmed = await context.confirm(request);
       return confirmed ? tool.run(input, context) : { output: OUTSIDE_WAITING };
     },
   };

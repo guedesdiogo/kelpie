@@ -89,8 +89,10 @@ import {
   isNull,
   like,
   lt,
+  lte,
   max,
   min,
+  or,
 } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
@@ -104,7 +106,13 @@ import {
 } from "./announcements.ts";
 import { bareHttpsOrigin, heldTools, setupNote } from "./configuration.ts";
 import migrations from "./migrations/migrations.js";
-import { changes, held } from "./outside-content.ts";
+import {
+  changes,
+  held,
+  MAX_HELD,
+  OUTSIDE_REPLY_LEFT_OUT,
+  OUTSIDE_WINDOW_MS,
+} from "./outside-content.ts";
 import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
 import { proposalBubble, proposalNote } from "./proposal-notices.ts";
 import { readRole } from "./registry/schema.ts";
@@ -1484,8 +1492,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         userId: schema.history.userId,
         message: schema.history.message,
         fromKelpie: schema.history.fromKelpie,
+        outside: schema.turns.outside,
       })
       .from(schema.history)
+      .leftJoin(schema.turns, eq(schema.turns.id, schema.history.turnId))
       .where(
         and(
           gte(schema.history.id, current?.keptFromHistoryId ?? 0),
@@ -2047,6 +2057,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       usage: Usage[] | null;
       attempts: number;
       outside: boolean;
+      createdAt: number;
     } & TurnAccess,
     controller: AbortController,
     settings: AgentSettings,
@@ -2172,16 +2183,20 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       progress.running = toolCall.id;
       // After outside content, a tool that changes something with no yes of its own runs only on
       // the owner's (ADR-0063): the call is held, and asks them first.
+      const userId = context.actor.userId;
       const ran = await this.#runWithin(
         outside && tool !== undefined && changes(tool)
-          ? new Map([[toolCall.name, held(tool)]])
+          ? new Map([
+              [toolCall.name, held(tool, (request) => this.#heldRoom(turn.id, userId, request))],
+            ])
           : tools,
         toolCall,
         context,
         remaining,
       );
       progress.running = undefined;
-      // Kept as soon as it comes back, so the turn's later rounds and an eviction keep it too.
+      // Kept as soon as it comes back, so the turn's later rounds and an eviction keep it too. Only
+      // a read writes it: a mark a turn takes from others is worked out again at each start.
       if (ran?.outside && !outside) {
         outside = true;
         this.#db
@@ -2559,13 +2574,54 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   }
 
   /**
-   * Whether the turn starts marked as having read outside content (ADR-0063): it kept the mark
-   * before an eviction, or no person typed it and the history its requests send, since its
-   * checkpoint, holds a marked turn. That one keeps the mark too. The owner's own turns are marked
-   * only by what they read themselves (the owner's decision on #454).
+   * Whether the turn starts marked as having read outside content (ADR-0063), worked out again at
+   * each start, so an eviction gets the same answer. Only a turn's own read writes the mark; it
+   * holds too while, when the turn started:
+   * - a turn that read some had started or run within OUTSIDE_WINDOW_MS, or a change a turn held
+   *   for the owner was still open (the owner's «10 minutos»). That covers the message that cut a
+   *   marked turn short, and the owner's answer to its confirmation, whose repeated call the gate
+   *   then runs on their code;
+   * - for a turn no person typed, the history its requests send, since its checkpoint, holds a turn
+   *   that read some («Só turnos sem pessoa»).
    */
-  #outsideAtStart(turn: { id: number; checkpointId: number | null; outside: boolean }): boolean {
+  #outsideAtStart(turn: {
+    id: number;
+    checkpointId: number | null;
+    outside: boolean;
+    createdAt: number;
+  }): boolean {
     if (turn.outside) return true;
+    const since = turn.createdAt - OUTSIDE_WINDOW_MS;
+    const read = eq(schema.turns.outside, true);
+    const recent =
+      this.#db
+        .select({ id: schema.turns.id })
+        .from(schema.turns)
+        .where(and(read, gt(schema.turns.createdAt, since)))
+        .limit(1)
+        .get() ??
+      this.#db
+        .select({ id: schema.history.id })
+        .from(schema.history)
+        .innerJoin(schema.turns, eq(schema.turns.id, schema.history.turnId))
+        .where(and(read, gt(schema.history.createdAt, since)))
+        .limit(1)
+        .get();
+    if (recent) return true;
+    const asking = this.#db
+      .select({ id: schema.confirmations.id })
+      .from(schema.confirmations)
+      .where(
+        and(
+          like(schema.confirmations.command, "tool:%"),
+          lte(schema.confirmations.createdAt, turn.createdAt),
+          gt(schema.confirmations.expiresAt, turn.createdAt),
+          or(isNull(schema.confirmations.usedAt), gte(schema.confirmations.usedAt, turn.createdAt)),
+        ),
+      )
+      .limit(1)
+      .get();
+    if (asking) return true;
     if (this.#trigger(turn.id) === "person") return false;
     const kept =
       turn.checkpointId === null
@@ -2575,16 +2631,52 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
             .from(schema.checkpoints)
             .where(eq(schema.checkpoints.id, turn.checkpointId))
             .get()?.id ?? 0);
-    const marked = this.#db
-      .select({ id: schema.history.id })
-      .from(schema.history)
-      .innerJoin(schema.turns, eq(schema.turns.id, schema.history.turnId))
-      .where(and(gte(schema.history.id, kept), eq(schema.turns.outside, true)))
+    return (
+      this.#db
+        .select({ id: schema.history.id })
+        .from(schema.history)
+        .innerJoin(schema.turns, eq(schema.turns.id, schema.history.turnId))
+        .where(and(gte(schema.history.id, kept), read))
+        .limit(1)
+        .get() !== undefined
+    );
+  }
+
+  /**
+   * Whether a held call may ask the owner (ADR-0063): it asks again for a change already waiting
+   * for the same yes, and a turn holds at most MAX_HELD changes open at once, so no code is made
+   * past them.
+   */
+  #heldRoom(turnId: number, userId: string, request: ConfirmationRequest): boolean {
+    const now = this.#ports.now();
+    const open = and(isNull(schema.confirmations.usedAt), gt(schema.confirmations.expiresAt, now));
+    const same = this.#db
+      .select({ id: schema.confirmations.id })
+      .from(schema.confirmations)
+      .where(
+        and(
+          open,
+          eq(schema.confirmations.userId, userId),
+          eq(schema.confirmations.command, request.command),
+          eq(schema.confirmations.input, canonicalJson(request.input)),
+        ),
+      )
       .limit(1)
       .get();
-    if (!marked) return false;
-    this.#db.update(schema.turns).set({ outside: true }).where(eq(schema.turns.id, turn.id)).run();
-    return true;
+    if (same) return true;
+    const waiting =
+      this.#db
+        .select({ value: count() })
+        .from(schema.confirmations)
+        .where(
+          and(
+            open,
+            eq(schema.confirmations.turnId, turnId),
+            like(schema.confirmations.command, "tool:%"),
+          ),
+        )
+        .get()?.value ?? 0;
+    return waiting < MAX_HELD;
   }
 
   /** How many rounds of tool calls the turn has in history. */
@@ -2892,8 +2984,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           message: schema.history.message,
           fromKelpie: schema.history.fromKelpie,
           createdAt: schema.history.createdAt,
+          outside: schema.turns.outside,
         })
         .from(schema.history)
+        .leftJoin(schema.turns, eq(schema.turns.id, schema.history.turnId))
         .where(gt(schema.history.id, through))
         .orderBy(asc(schema.history.id))
         .all();
@@ -2916,10 +3010,14 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
             .map((row) => ({
               role: row.role === "user" ? ("user" as const) : ("assistant" as const),
               speaker: row.role === "user" ? (row.userId ?? "someone") : agentId,
+              // A reply whose turn read outside content may quote it: Kelpie's line takes its
+              // place, and the owner's words stay (ADR-0063).
               text:
                 row.role === "user"
                   ? withoutTypedStamps(messageText(row.message))
-                  : messageText(row.message),
+                  : row.outside
+                    ? OUTSIDE_REPLY_LEFT_OUT
+                    : messageText(row.message),
               at: row.createdAt,
             })),
         });
@@ -3884,9 +3982,11 @@ function summaryInput(
     userId: string | null;
     message: ChatMessage;
     fromKelpie?: boolean | null;
+    /** The row's turn read outside content (ADR-0063). */
+    outside?: boolean | null;
   }[],
 ): string {
-  const lines = rows.flatMap(({ role, userId, message, fromKelpie }) => {
+  const lines = rows.flatMap(({ role, userId, message, fromKelpie, outside }) => {
     // What the person saw: not the tools' results, nor what the model said before calling them.
     if (!seen(message)) return [];
     const text =
@@ -3894,6 +3994,8 @@ function summaryInput(
         ? ""
         : message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
     if (text === "") return [];
+    // A reply that read outside content may quote it: the summary keeps Kelpie's line instead.
+    if (role === "assistant" && outside) return [`assistant: ${OUTSIDE_REPLY_LEFT_OUT}`];
     // Kelpie's notes, a task's news among them (#335), stay marked as not the person's words.
     if (role === "user" && fromKelpie) return [`Kelpie's note, not the person's words: ${text}`];
     return [role === "user" ? `user ${userId ?? ""}: ${text}` : `assistant: ${text}`];

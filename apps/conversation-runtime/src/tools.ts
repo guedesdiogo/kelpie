@@ -48,7 +48,10 @@ export const TOOL_LIMIT_TEXT: Localized = {
 export interface ConfirmationRequest {
   /** The command the yes is for. */
   command: string;
-  /** Its input as the command takes it, after parsing: the yes is for exactly this. */
+  /**
+   * Its input as the command takes it, after parsing: the yes is for exactly this. A call held
+   * after outside content (ADR-0063) passes the model's raw JSON input instead.
+   */
   input: unknown;
   /**
    * What the owner is shown, written by the tool's code from the validated input, never by the
