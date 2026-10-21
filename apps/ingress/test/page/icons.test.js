@@ -93,6 +93,12 @@ describe("the webchat's icons (ADR-0049)", () => {
     expect(svg).toMatch(/<rect class="t" width="32" height="32"/);
   });
 
+  it("draws the sidebar's mark as the brand's mark, so the inline copy never drifts (#468)", () => {
+    const mark = readFileSync(join(PUBLIC, "../../../docs/brand/kelpie-mark.svg"), "utf8");
+    const sidebar = head.ownerDocument.querySelector(".brand-mark path")?.getAttribute("d");
+    expect(sidebar).toBe(mark.match(/ d="([^"]+)"/)?.[1]);
+  });
+
   it("draws the mark's pointed ears clockwise, so they join the body with no hole (ADR-0062)", () => {
     const mark = readFileSync(join(PUBLIC, "../../../docs/brand/kelpie-mark.svg"), "utf8");
     const glyphs = {

@@ -8,7 +8,7 @@
 // It finds Chrome on the PATH (google-chrome, chromium) or in $CHROME. The design system's logo
 // section (docs/design-system.md §5.23) holds the rules these files follow.
 import { execFileSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { pointedEarOutlines } from "../apps/ingress/public/webchat/mascot-art.js";
 
 /** The brand's colors: --accent and --on-accent, light and dark (docs/design-system.md §1). */
@@ -329,4 +329,58 @@ writeFileSync(
   `${WEBCHAT}/icon-maskable-512.png`,
   render(files[`${BRAND}/app-icon-maskable.svg`], 512, 512),
 );
-console.log(`Wrote ${Object.keys(files).length + 5} brand files.`);
+/**
+ * The logo drawn inline, where a page shows it without loading the files: the webchat's sidebar, and
+ * the design system's Logo and Sidebar previews. Each copy is rewritten from the files above so none
+ * drifts, and a page whose markup no longer has the expected copies stops the script.
+ */
+function rewrite(path, edits) {
+  let text = readFileSync(path, "utf8");
+  for (const [pattern, replace, count] of edits) {
+    const found = text.match(new RegExp(pattern.source, "g"))?.length ?? 0;
+    if (found !== count)
+      throw new Error(`${path}: expected ${count} of ${pattern}, found ${found}`);
+    text = text.replace(new RegExp(pattern.source, "g"), replace);
+  }
+  writeFileSync(path, text);
+}
+const tile = (() => {
+  const scale = 62 / MARK.height;
+  return `translate(${n(50 - 32 * scale)} ${n(50 - 32 * scale)}) scale(${n(scale)})`;
+})();
+const lock = lockup(KELP).match(/viewBox="([^"]+)"[^>]*><g fill="[^"]+">([\s\S]*)<\/g><\/svg>/);
+const DS = "tools/design-system/project/components";
+rewrite(`${WEBCHAT}/index.html`, [
+  [/(<svg class="brand-mark"[^>]*><path d=")[^"]*"/, (_, open) => `${open}${mark()}"`, 1],
+]);
+rewrite(`${DS}/Sidebar/preview.html`, [
+  [
+    /(<a class="k-brand"[^>]*><svg viewBox="0 0 64 64"[^>]*><path d=")[^"]*"/,
+    (_, open) => `${open}${mark()}"`,
+    1,
+  ],
+]);
+rewrite(`${DS}/Logo/preview.html`, [
+  [
+    /(<svg class="k-logo-lock"[^>]*viewBox=")[^"]*("[^>]*>)[\s\S]*?<\/svg>/,
+    (_, open, rest) => `${open}${lock[1]}${rest}<g class="t">${lock[2]}</g></svg>`,
+    1,
+  ],
+  [
+    /(<svg class="k-logo-mark"[^>]*><path class="t" d=")[^"]*"/,
+    (_, open) => `${open}${mark()}"`,
+    3,
+  ],
+  [
+    /(<svg class="k-fav s64"[^>]*><rect[^>]*\/>)<path[^>]*\/>/,
+    (_, open) => `${open}<path transform="${tile}" class="m" d="${mark()}"/>`,
+    1,
+  ],
+  [
+    /(<svg class="k-fav s16"[^>]*><rect[^>]*\/><path class="m" d=")[^"]*"/,
+    (_, open) => `${open}${SMALL[16]}"`,
+    1,
+  ],
+]);
+
+console.log(`Wrote ${Object.keys(files).length + 5} brand files, and the logo's inline copies.`);
