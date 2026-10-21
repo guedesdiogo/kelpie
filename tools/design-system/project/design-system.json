@@ -317,8 +317,8 @@
  },
  "lastChange": {
   "by": "Diogo Guedes",
-  "at": "2026-10-21T00:57:49Z",
+  "at": "2026-10-21T01:17:55Z",
   "via": "Claude Code · guedesdiogo/kelpie#468",
-  "note": "Recreated from tools/design-system/project at 1e887dd, after the old artifact went missing: the kelpie's pointed ear (#455) and the logo of ADR-0062, with the icons and logos uploaded again, and the Logo and Sidebar previews' inline logo redrawn with the pointed ear (#468)."
+  "note": "Recreated from tools/design-system/project at 1e887dd, after the old artifact went missing: the kelpie's pointed ear (#455) and the logo of ADR-0062, with the icons and logos uploaded again; the Logo and Sidebar previews' inline logo redrawn with the pointed ear, and the sidebar's mark sized to the new figure (#468)."
  }
 }

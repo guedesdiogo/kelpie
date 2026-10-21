@@ -470,7 +470,7 @@ kbd { padding: 1px var(--space-1); border-radius: var(--r-sm); border: 1px solid
 .k-side { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4) var(--space-3) 14px; border-inline-end: 1px solid var(--line); background: var(--bg); }
 /* The lockup (5.23): the mark 1.3 cap heights tall, half a cap from the K, the word at 17 px. */
 .k-brand { align-self: flex-start; display: inline-flex; align-items: center; gap: calc(0.5cap - 2px); padding: 2px var(--space-2); border-radius: var(--r-sm); color: var(--accent); font-family: var(--font-display); font-size: 17px; font-weight: 680; line-height: 1.05; letter-spacing: -0.03em; text-decoration: none; }
-.k-brand svg { block-size: calc(1.3cap * 64 / 53.13); inline-size: auto; aspect-ratio: 1; fill: currentColor; }
+.k-brand svg { block-size: calc(1.3cap * 64 / 61.776); inline-size: auto; aspect-ratio: 1; fill: currentColor; }
 /* The strip's slot is kept, so the rows never move when it comes (5.9). */
 .k-slot { min-block-size: 34px; }
 .k-side .k-strip { display: flex; padding: 7px var(--space-3); font-size: 13px; line-height: 1.4; }

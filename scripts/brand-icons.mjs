@@ -350,6 +350,14 @@ const tile = (() => {
 })();
 const lock = lockup(KELP).match(/viewBox="([^"]+)"[^>]*><g fill="[^"]+">([\s\S]*)<\/g><\/svg>/);
 const DS = "tools/design-system/project/components";
+// The sidebar's lockup sizes the mark's 64 box so the figure itself is 1.3 cap heights tall.
+const capHeights = [
+  /(block-size: calc\(1\.3cap \* 64 \/ )[\d.]+\)/,
+  (_, open) => `${open}${n(MARK.height)})`,
+  1,
+];
+rewrite(`${WEBCHAT}/style.css`, [capHeights]);
+rewrite("tools/design-system/src/css/Sidebar.css", [capHeights]);
 rewrite(`${WEBCHAT}/index.html`, [
   [/(<svg class="brand-mark"[^>]*><path d=")[^"]*"/, (_, open) => `${open}${mark()}"`, 1],
 ]);

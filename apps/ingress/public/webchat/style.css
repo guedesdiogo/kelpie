@@ -1496,7 +1496,7 @@ dialog h2 {
   text-decoration: none;
 }
 .brand-mark {
-  block-size: calc(1.3cap * 64 / 53.13);
+  block-size: calc(1.3cap * 64 / 61.776);
   inline-size: auto;
   aspect-ratio: 1;
   fill: currentColor;
