@@ -17,6 +17,7 @@ import {
   buildMascot,
   COLORS,
   EYES,
+  FRAME,
   HEADS,
   handSpot,
   isDrawable,
@@ -39,10 +40,15 @@ import {
   draw,
   due,
   effectiveMotion,
+  GROUND,
   gapAfter,
   HAND_POSES,
+  HEADROOM,
   HOLDING_STATES,
+  HOP,
+  hopRise,
   IDLE,
+  liftShare,
   POSES,
   presenceAfter,
   presenceKeeper,
@@ -50,6 +56,10 @@ import {
   remember,
   SLEEP_MS,
   SPRINGS,
+  STILL_MOST,
+  stillStretch,
+  stretchRise,
+  TILT,
   WORKING_STATES,
 } from "../public/webchat/mascot-states.js";
 
@@ -225,7 +235,8 @@ describe("the engine's figure", () => {
       ears.forEach(({ x, y, a, piece }, i) => {
         const [ear, shell] = piece.shapes;
         expect(channels(shell.fill), shape).toBeGreaterThan(channels(ear.fill));
-        // Every point, control points included, stays in the frame (viewBox 10 14 100 100), with room for the fur.
+        // Every point, control points included, stays where ADR-0045's frame (10 14 100 100) had
+        // room for it and its fur, so Master keeps the headroom ADR-0063 gave it.
         const r = (a * Math.PI) / 180;
         const placed = points(ear.d).map(([px, py]) => {
           const fx = x + px * Math.cos(r) - py * Math.sin(r);
@@ -281,6 +292,205 @@ describe("the engine's figure", () => {
     for (const hands of Object.values(HAND_POSES)) {
       for (const spot of Object.values(hands)) expect(handSpot(spot, anchors)).not.toBeNull();
     }
+  });
+});
+
+describe("the frame (ADR-0063)", () => {
+  const build = (look: Mascot, px = 48) => buildMascot(look, { uid: 9, px, hex: "#2e9e8e" });
+  /** Every shape and head, every hat and the head bow over each head, and the frog's bumps. */
+  function* everyFigure(): Generator<Mascot> {
+    const heads = [
+      { type: "none" },
+      ...Object.entries(HEADS).flatMap(([type, variations]) =>
+        variations.map((variation) => ({ type, variation })),
+      ),
+    ];
+    const accessories = [
+      { type: "none" },
+      ...ACCESSORIES.hat.map((variation) => ({ type: "hat", variation })),
+      { type: "bow", variation: "head" },
+    ];
+    for (const shape of Object.keys(SHAPES)) {
+      // The frog's eyes sit on bumps of the body, which no head changes.
+      yield { ...KELPIE_MASCOT, shape, eyes: "frog", head: { type: "none" } } as Mascot;
+      for (const head of heads) {
+        for (const accessory of accessories) {
+          yield { ...KELPIE_MASCOT, shape, head, accessory } as Mascot;
+        }
+      }
+    }
+  }
+  /** Every hop the engine plays: the heights it passes, and the idle hop's own two. */
+  const HOPS = [
+    ...new Set([...engine.matchAll(/this\.hop\((\d+)/g)].map(([, h]) => Number(h))),
+    7,
+    9,
+  ];
+  /** Every stretch of the figure the engine plays, which goes through `stretchTo`. */
+  const STRETCHES = [...engine.matchAll(/this\.stretchTo\(([\d.]+), ([\d.]+)\)/g)].map(([, , sy]) =>
+    Number(sy),
+  );
+
+  it("frames every mascot at 4 2 112 112, on the old ground and middle", () => {
+    expect(FRAME).toEqual({ x: 4, y: 2, size: 112 });
+    expect(FRAME.x + FRAME.size / 2).toBe(60);
+    expect(FRAME.y + FRAME.size).toBe(114);
+    expect(build(KELPIE_MASCOT).html).toContain('viewBox="4 2 112 112"');
+    // The figure stretches and squashes about its feet, where the stylesheet puts the origin.
+    expect(styles).toContain(`transform-origin: 60px ${GROUND}px`);
+  });
+
+  it("keeps clear headroom above Master's ears at rest", () => {
+    const { top, frame } = build(KELPIE_MASCOT);
+    expect(frame).toBe(FRAME);
+    // In px at 48 and 160: 1.9 and 5.8 before (#474).
+    expect(((top - FRAME.y) * 48) / FRAME.size).toBeGreaterThan(6);
+    expect(((top - FRAME.y) * 160) / FRAME.size).toBeGreaterThan(20);
+  });
+
+  it("finds the figure's top where headless Chrome saw its painted fur (#474)", () => {
+    // The highest the browser read the figure at rest, at 36, 48 or 160 px: pixels at least 25% opaque.
+    const SEEN: [string, number][] = [
+      ["mark|ears:pointed|none", 17.61],
+      ["mark|ears:round|none", 29.53],
+      ["bubble|none|none", 36],
+      ["block|none|none", 36.92],
+      ["cloud|leaves:kelp|none", 6.38],
+      ["mark|horns:one|none", 18.48],
+      ["buoy|none|hat:top", 12.2],
+      ["drop|horns:antennae|none", 7.6],
+      ["dune|hair:mohawk|none", 22.96],
+      ["heart|none|none", 39.13],
+      ["pebble|ears:floppy|none", 39.23],
+      ["bean|hair:curl|none", 34.56],
+    ];
+    const part = (text = "none") => {
+      const [type, variation] = text.split(":");
+      return variation ? { type, variation } : { type };
+    };
+    for (const [key, seen] of SEEN) {
+      const [shape, head, accessory] = key.split("|");
+      const { top } = build({
+        ...KELPIE_MASCOT,
+        shape,
+        head: part(head),
+        accessory: part(accessory),
+      } as Mascot);
+      // Never more room than the fur leaves, beyond what the headroom covers; never much less.
+      expect(top - seen, key).toBeLessThan(HEADROOM);
+      expect(seen - top, key).toBeLessThan(4);
+    }
+  });
+
+  it("plays the hop the browser measured, a little higher (#474)", () => {
+    // Master's Approved at 48 px: its top at rest at y 17.91, at the top of the hop at y -5.99.
+    const stretch = stillStretch("approved", "header");
+    const peak = GROUND - (GROUND - 17.91) * stretch - hopRise(17.91, 15, stretch);
+    expect(peak).toBeLessThanOrEqual(-5.99);
+    expect(peak).toBeGreaterThan(-5.99 - 0.7);
+    // The engine builds the hop's keyframes from the same data.
+    expect(engine).toContain("HOP.lift.map(");
+    expect(engine).toContain("HOP.squash.map(");
+    expect(engine).toContain("easing: HOP.squashEasing");
+    expect(HOP.lift.at(-1)?.[0]).toBe(1);
+  });
+
+  it("stretches the figure upward only through the cap", () => {
+    expect(STRETCHES.length).toBeGreaterThanOrEqual(3);
+    const upward = [...engine.matchAll(/scale\(([\d.]+), ([\d.]+)\)/g)].filter(
+      ([, , sy]) => Number(sy) > 1,
+    );
+    // Only the yawning mouth grows past its height in a literal.
+    expect(upward.map(([text]) => text)).toEqual(["scale(1.6, 1.9)", "scale(1.6, 1.9)"]);
+  });
+
+  it("tilts the figure by TILT at most, the gestures' tilts included", () => {
+    for (const state of STATES)
+      expect(Math.abs(POSES[state].tilt), state).toBeLessThanOrEqual(TILT);
+    const tilts = (gesture: string) => {
+      const body = engine.slice(engine.indexOf(`\n  ${gesture}() {`));
+      const method = body.slice(0, body.indexOf("\n  }\n"));
+      expect(method, gesture).toContain("this.squash");
+      return [...method.matchAll(/rotate\((-?[\d.]+)deg\)/g)].map(([, a]) => Number(a));
+    };
+    for (const gesture of ["wiggle", "scratch", "sway", "stir"]) {
+      for (const tilt of tilts(gesture)) expect(Math.abs(tilt), gesture).toBeLessThanOrEqual(TILT);
+    }
+    // Listening's gesture turns its pose the other way.
+    for (const tilt of tilts("tiltFlip")) {
+      expect(Math.abs(POSES.listening.tilt + tilt)).toBeLessThanOrEqual(TILT);
+    }
+    // A figure tilted to either side reaches higher than upright, and the frame holds it.
+    const { top, crown } = build(KELPIE_MASCOT);
+    expect(crown()).toBe(top);
+    expect(crown(-TILT, TILT)).toBeLessThan(top);
+  });
+
+  it("cuts a motion to the room above the figure", () => {
+    // Room for all of it, none of it, and half of it.
+    expect(liftShare(60, FRAME.y, 1, 10)).toBe(1);
+    expect(liftShare(FRAME.y + HEADROOM, FRAME.y, 1, 10)).toBe(0);
+    expect(liftShare(FRAME.y + HEADROOM + 5, FRAME.y, 1, 10)).toBeCloseTo(0.5);
+    expect(liftShare(60, FRAME.y, 1, 0)).toBe(1);
+    expect(stretchRise(60, 0.9, 1)).toBe(0);
+    expect(stretchRise(60, 1.1, 1)).toBeCloseTo(4.8);
+    expect(STILL_MOST).toBeCloseTo(1.03 * 1.018);
+  });
+
+  it("keeps every figure inside its frame at rest and at the top of every motion", () => {
+    let figures = 0;
+    for (const look of everyFigure()) {
+      const { top, crown: tops, frame, html } = build(look);
+      // The states share a few tilts, so each range's top is found once.
+      const found = new Map<string, number>();
+      const crown = (low: number, high: number) => {
+        const key = `${low} ${high}`;
+        if (!found.has(key)) found.set(key, tops(low, high));
+        return found.get(key) ?? Number.NaN;
+      };
+      figures++;
+      const name = [
+        look.shape,
+        look.eyes,
+        JSON.stringify(look.head),
+        JSON.stringify(look.accessory),
+      ].join(" ");
+      expect(Number.isFinite(top), name).toBe(true);
+      expect(html, name).toContain(`viewBox="${frame.x} ${frame.y} ${frame.size} ${frame.size}"`);
+      if (frame !== FRAME) {
+        // A figure too tall for the frame even at rest gets its own, on the same ground and middle.
+        expect(frame.y, name).toBeLessThan(FRAME.y);
+        expect(frame.y + frame.size, name).toBeCloseTo(FRAME.y + FRAME.size);
+        expect(frame.x + frame.size / 2, name).toBeCloseTo(60);
+      }
+      const ceiling = frame.y + HEADROOM - 1e-9;
+      // The header breathes deepest: a roster row at 60%, a profile the same (breathDepth).
+      for (const mode of ["header"]) {
+        for (const state of STATES) {
+          const stretch = stillStretch(state, mode);
+          // At rest, the tilting gestures may turn it either way.
+          const tilted = GROUND - (GROUND - crown(-TILT, TILT)) * stretch;
+          expect(tilted, `${name} ${mode} ${state}`).toBeGreaterThanOrEqual(ceiling);
+          // A motion that lifts it stops those gestures, so only the pose's tilt counts.
+          const { tilt } = POSES[state];
+          const top = crown(Math.min(0, tilt), Math.max(0, tilt));
+          const atRest = GROUND - (GROUND - top) * stretch;
+          const rises = [
+            ...HOPS.map((h) => hopRise(top, h, stretch)),
+            ...STRETCHES.map((sy) => stretchRise(top, sy, stretch)),
+            // The editor's drop-in, and the shape's rebound.
+            8,
+            stretchRise(top, 1 + 0.12 * 0.12, stretch),
+          ];
+          for (const rise of rises) {
+            const peak = atRest - liftShare(top, frame.y, stretch, rise) * rise;
+            expect(peak, `${name} ${mode} ${state} ${rise}`).toBeGreaterThanOrEqual(ceiling);
+          }
+        }
+      }
+    }
+    // 12 shapes: 13 heads under 5 accessories, and the frog's bumps.
+    expect(figures).toBe(12 * (13 * 5 + 1));
   });
 });
 

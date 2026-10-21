@@ -630,6 +630,17 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 - Waiting and error show a glossy 3D speech bubble beside the head, in `--warm` and `--danger` from the theme, with a glyph, so the state never rides on color alone. It pops out, floats, and pulses when the mascot calls the owner.
 - Offline's bubble is the same, solid, in `--muted`, with a struck-through plug. It pops out and floats, and never pulses: nothing waits for the owner there.
 
+**The frame** ([ADR-0063](adr/0063-mascot-frame-holds-every-hop.md)).
+- **Every mascot draws in `viewBox="4 2 112 112"`** on its 120 grid. The ground is at y 114 and the middle at x 60, as before, so the figure is 89% of its box and the body fills about 64% of it.
+- **Everything happens inside the frame.** Every motion that lifts the figure is cut to the room above it.
+  - **The motions:** the hops, the stretch, the yawn, waking up, the editor's drop-in and a shape's rebound.
+  - **The room** runs from the figure's top, fur included, to 1 grid unit below the frame's top. The state's pose and breath count at their deepest, and so does the pose's tilt.
+  - **A cut hop** lifts, squashes and shrinks its shadow by the same share, so it still reads as a hop. A motion that fits plays in full.
+  - **Tall heads hop lower:** Master's Approved jump keeps about half its height, and its idle hop nearly all of it.
+- **A figure that doesn't fit even at rest gets its own taller frame,** on the same ground. "At rest" counts the gestures' tilts, up to 9° either way. The kelp leaf on most shapes and the tallest heads on `drop` get one. That figure draws smaller and barely hops.
+- **Master keeps clear headroom:** over 6 px above its ears at 48 px, and 21 px at 160.
+- **What shows beside the figure isn't held yet.** The bubble, the badge, the sparks, the thinking bubbles and the "z" can still leave the frame on tall shapes.
+
 **Sizes.**
 
 | Where | Size | What changes |
@@ -990,6 +1001,12 @@ The rules above cite these. The first set was read on 2026-10-15; a source added
   - [FCI Standard No. 293, Australian Kelpie](https://kusa.co.za/images/HERDING%20GROUP%202025/Australian%20Kelpie%20-%20FCI%20[02-2017].pdf) and the [Working Kelpie Council](https://www.wkc.org.au/About-Kelpies/Charateristics-and-Confirmation.php), on the breed's ear;
   - [Rusty in *Bluey*](https://www.bluey.tv/characters/rusty/) (International Emmy Kids 2020), a red kelpie in flat shapes;
   - [Hermes Agent's `ip-as-logo`](https://github.com/NousResearch/hermes-agent/blob/d20b3daa49d7ec5642397c8e994bb82a69376263/optional-skills/creative/ip-as-logo/SKILL.md), blunt tips so a mascot reads at 32 px.
+- The mascot's frame ([ADR-0063](adr/0063-mascot-frame-holds-every-hop.md)), read on 2026-10-20; the findings, the browser's measurement and the reference-project check are on #474:
+  - [Hermes Agent's pet atlas](https://github.com/NousResearch/hermes-agent/blob/0b8dee00fafe975f10be40172322d0ccfabfa7f6/agent/pet/generate/atlas.py#L503-L542), one scale that keeps a jump's lift inside the cell;
+  - [OpenAI's Codex pets](https://github.com/openai/skills/blob/49f948faa9258a0c61caceaf225e179651397431/skills/.curated/hatch-pet/references/qa-rubric.md#L9-L45), where no frame may leave its cell;
+  - [Material 3's loading indicator](https://github.com/androidx/androidx/blob/9961ff3c7890a1dd4b001fb867f895278d65a4b0/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/LoadingIndicator.kt#L282-L307), one scale from every shape's largest bounds in motion;
+  - [Rive's artboards](https://rive.app/docs/editor/fundamentals/artboards) and [lottie-web's composition clip](https://github.com/airbnb/lottie-web/blob/bede03d25d232826e0c9dca1733d542d8a7754fb/player/js/renderers/SVGRendererBase.js#L88-L97), headroom drawn inside the canvas;
+  - [blobatar's motion](https://github.com/Alain00/blobatar/blob/8436285ae837c72b02a49310d10c382608de096b/packages/blobatar/src/expression.ts#L46-L56), squash removed because it broke the frame.
 - The offline state ([ADR-0047](adr/0047-mascot-offline.md)), read on 2026-10-16; the findings are on #380:
   - [Chrome's offline dinosaur](https://blog.google/products/chrome/chrome-dino/), kept for offline only;
   - [Telegram's presence line](https://github.com/DrKLO/Telegram/blob/f32ffeec763f0bdbf4bec25b52d654f77bff733d/TMessagesProj/src/main/java/org/telegram/ui/Components/ChatAvatarContainer.java#L1582-L1620), replaced while it waits for the network;

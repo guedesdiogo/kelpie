@@ -7,6 +7,14 @@
 // are presentation attributes or classes in mascot.css, and mascot.js sets what varies through
 // the CSSOM.
 
+import { GROUND, HEADROOM, STILL_MOST, TILT } from "./mascot-states.js";
+
+/**
+ * Every mascot's frame on the 120 grid (ADR-0063): the box it draws in, with room above the tallest
+ * heads for their hops. It keeps the ground and the middle where `10 14 100 100` had them.
+ */
+export const FRAME = { x: 4, y: 2, size: 112 };
+
 /** The ink of the eyes and lines, and the mix the fur's shades come from. */
 const INK = "#0C2523";
 
@@ -72,8 +80,196 @@ export function pointedEarOutlines(shapeName) {
 }
 
 /**
- * Shapes drawn on a 120 grid and framed at 10,14 100×100, so the body fills about 72%; the ground
- * is at y 108. Anchors: the face, the eyes' spread, the top of the head, the ears (x, y, angle),
+ * How far a soft part's painted fur reaches past its outline, in grid units. Headless Chrome read
+ * the painted pixels at least 25% opaque on #474: up to 2.4 past an outline at 36 and 160 px.
+ */
+const FUR_REACH = 2.5;
+
+/** An SVG transform attribute as a matrix [a, b, c, d, e, f]. */
+function matrixOf(transform = "") {
+  let m = [1, 0, 0, 1, 0, 0];
+  const times = ([a, b, c, d, e, f]) =>
+    (m = [
+      m[0] * a + m[2] * b,
+      m[1] * a + m[3] * b,
+      m[0] * c + m[2] * d,
+      m[1] * c + m[3] * d,
+      m[0] * e + m[2] * f + m[4],
+      m[1] * e + m[3] * f + m[5],
+    ]);
+  for (const [, name, args] of transform.matchAll(/(\w+)\(([^)]*)\)/g)) {
+    const [p = 0, q, r] = args.match(/-?[\d.]+/g).map(Number);
+    if (name === "translate") times([1, 0, 0, 1, p, q ?? 0]);
+    if (name === "scale") times([p, 0, 0, q ?? p, 0, 0]);
+    if (name === "rotate") {
+      const a = (p * Math.PI) / 180;
+      times([1, 0, 0, 1, q ?? 0, r ?? 0]);
+      times([Math.cos(a), Math.sin(a), -Math.sin(a), Math.cos(a), 0, 0]);
+      times([1, 0, 0, 1, -(q ?? 0), -(r ?? 0)]);
+    }
+  }
+  return m;
+}
+
+/** Points along a path's outline, curves and arcs sampled, enough to find how far it reaches. */
+function outline(d) {
+  const ARITY = { M: 2, L: 2, H: 1, V: 1, C: 6, Q: 4, A: 7, Z: 0 };
+  const steps = 16;
+  const points = [];
+  let [x, y, sx, sy] = [0, 0, 0, 0];
+  for (const [, command, args] of d.matchAll(/([a-zA-Z])([^a-zA-Z]*)/g)) {
+    const all = (args.match(/-?(?:\d+\.?\d*|\.\d+)/g) ?? []).map(Number);
+    const rel = command !== command.toUpperCase();
+    let C = command.toUpperCase();
+    for (let i = 0; i === 0 || i < all.length; i += ARITY[C] || 1) {
+      const n = all.slice(i, i + ARITY[C]);
+      const at = (j) => [n[j] + (rel ? x : 0), n[j + 1] + (rel ? y : 0)];
+      if (C === "Z") [x, y] = [sx, sy];
+      if (C === "M" || C === "L") [x, y] = at(0);
+      if (C === "M") [sx, sy] = [x, y];
+      if (C === "H") x = n[0] + (rel ? x : 0);
+      if (C === "V") y = n[0] + (rel ? y : 0);
+      if (C === "Q" || C === "C") {
+        const ps = [[x, y], at(0), at(2), ...(C === "C" ? [at(4)] : [])];
+        for (let k = 1; k <= steps; k++) {
+          // De Casteljau: the curve's point at t.
+          const t = k / steps;
+          let row = ps;
+          while (row.length > 1) {
+            row = row
+              .slice(1)
+              .map(([px, py], j) => [
+                row[j][0] + (px - row[j][0]) * t,
+                row[j][1] + (py - row[j][1]) * t,
+              ]);
+          }
+          points.push(row[0]);
+        }
+        [x, y] = ps.at(-1);
+      }
+      if (C === "A") points.push(...arc([x, y], n.slice(0, 5), at(5), 2 * steps));
+      if (C === "A") [x, y] = at(5);
+      points.push([x, y]);
+      // Pairs after a moveto are linetos.
+      if (C === "M") C = "L";
+    }
+  }
+  return points;
+}
+
+/** Points along an arc from `from` to `to`, its centre found as SVG's implementation notes (F.6.5) do. */
+function arc([x1, y1], [rx0, ry0, turn, large, sweep], [x2, y2], steps) {
+  // A radius of 0 makes the arc a straight line.
+  if (!rx0 || !ry0) return [[x2, y2]];
+  const phi = (turn * Math.PI) / 180;
+  const [cos, sin] = [Math.cos(phi), Math.sin(phi)];
+  const x1p = (cos * (x1 - x2)) / 2 + (sin * (y1 - y2)) / 2;
+  const y1p = (-sin * (x1 - x2)) / 2 + (cos * (y1 - y2)) / 2;
+  const grow = Math.max(1, Math.hypot(x1p / rx0, y1p / ry0));
+  const [rx, ry] = [rx0 * grow, ry0 * grow];
+  const cross = rx * rx * y1p * y1p + ry * ry * x1p * x1p;
+  const k =
+    (large === sweep ? -1 : 1) * Math.sqrt(Math.max(0, (rx * rx * ry * ry - cross) / cross));
+  const cxp = (k * rx * y1p) / ry;
+  const cyp = (-k * ry * x1p) / rx;
+  const cx = cos * cxp - sin * cyp + (x1 + x2) / 2;
+  const cy = sin * cxp + cos * cyp + (y1 + y2) / 2;
+  const t1 = Math.atan2((y1p - cyp) / ry, (x1p - cxp) / rx);
+  let dt = Math.atan2((-y1p - cyp) / ry, (-x1p - cxp) / rx) - t1;
+  if (sweep && dt < 0) dt += 2 * Math.PI;
+  if (!sweep && dt > 0) dt -= 2 * Math.PI;
+  return Array.from({ length: steps }, (_, i) => {
+    const t = t1 + (dt * (i + 1)) / steps;
+    return [
+      cx + rx * cos * Math.cos(t) - ry * sin * Math.sin(t),
+      cy + rx * sin * Math.cos(t) + ry * cos * Math.sin(t),
+    ];
+  });
+}
+
+/**
+ * The points `svg` draws, in grid units, each with how far it reaches around it: each shape through
+ * its groups' transforms, a stroke by half its width and a soft part by its fur's reach. Images are
+ * the fur's paintings of the flat shapes beside them, so those shapes stand for them.
+ */
+function pointsOf(svg) {
+  const reached = [];
+  const stack = [{ m: [1, 0, 0, 1, 0, 0], fur: false }];
+  for (const [, close, tag, attrs, alone] of svg.matchAll(/<(\/?)(\w+)([^>]*?)(\/?)>/g)) {
+    if (close) {
+      if (tag !== "path" && tag !== "circle" && tag !== "ellipse" && tag !== "rect") stack.pop();
+      continue;
+    }
+    const attr = (name) => attrs.match(new RegExp(`(?:^|\\s)${name}="([^"]*)"`))?.[1];
+    const parent = stack.at(-1);
+    const own = matrixOf(attr("transform"));
+    const [a, b, c, d, e, f] = parent.m;
+    const m = [
+      a * own[0] + c * own[1],
+      b * own[0] + d * own[1],
+      a * own[2] + c * own[3],
+      b * own[2] + d * own[3],
+      a * own[4] + c * own[5] + e,
+      b * own[4] + d * own[5] + f,
+    ];
+    const fur = parent.fur || /\bfp\b/.test(attr("class") ?? "");
+    const num = (name) => Number(attr(name) ?? 0);
+    let points = [];
+    if (tag === "path") points = outline(attr("d"));
+    if (tag === "circle" || tag === "ellipse") {
+      const [rx, ry] = tag === "circle" ? [num("r"), num("r")] : [num("rx"), num("ry")];
+      points = outline(
+        `M${num("cx") - rx},${num("cy")} A${rx},${ry} 0 1,0 ${num("cx") + rx},${num("cy")} A${rx},${ry} 0 1,0 ${num("cx") - rx},${num("cy")}`,
+      );
+    }
+    if (tag === "rect") {
+      const [rx, ry, w, h] = [num("x"), num("y"), num("width"), num("height")];
+      points = [
+        [rx, ry],
+        [rx + w, ry],
+        [rx, ry + h],
+        [rx + w, ry + h],
+      ];
+    }
+    const reach = (fur ? FUR_REACH : 0) + num("stroke-width") / 2;
+    for (const [px, py] of points) {
+      reached.push([m[0] * px + m[2] * py + m[4], m[1] * px + m[3] * py + m[5], reach]);
+    }
+    if (!alone && tag !== "path" && tag !== "circle" && tag !== "ellipse" && tag !== "rect") {
+      stack.push({ m, fur });
+    }
+  }
+  return reached;
+}
+
+/** The highest those points reach as the figure tilts about its feet, from `low` to `high` degrees. */
+function crownOf(reached, low, high) {
+  let top = Number.POSITIVE_INFINITY;
+  const middle = FRAME.x + FRAME.size / 2;
+  for (let degrees = low; degrees <= high; degrees++) {
+    const [sin, cos] = [Math.sin((degrees * Math.PI) / 180), Math.cos((degrees * Math.PI) / 180)];
+    for (const [x, y, reach] of reached) {
+      top = Math.min(top, GROUND + (x - middle) * sin + (y - GROUND) * cos - reach);
+    }
+  }
+  return top;
+}
+
+/**
+ * The frame a figure draws in, from its top as it tilts by up to TILT either way: FRAME, unless the
+ * figure doesn't fit it even at rest, with the most its pose and breath stretch it. Then its own
+ * frame, as much taller as it needs, so that figure draws smaller (ADR-0063).
+ */
+export function frameOf(top) {
+  const reach = GROUND - (GROUND - top) * STILL_MOST - HEADROOM;
+  if (reach >= FRAME.y) return FRAME;
+  const size = FRAME.y + FRAME.size - reach;
+  return { x: 60 - size / 2, y: reach, size };
+}
+
+/**
+ * Shapes drawn on a 120 grid and framed by FRAME, so the body fills about 64%; the ground is at
+ * y 108. Anchors: the face, the eyes' spread, the top of the head, the ears (x, y, angle),
  * the pointed ears' own where they need lower ones, the hat (x, y, width) and the collar.
  */
 export const SHAPES = {
@@ -769,8 +965,13 @@ export function buildMascot(mascot, { uid, px, hex, work = true, hands = true })
       : `<g transform="translate(${fx + spread + 25} ${ty - 9}) scale(${size === "m" ? 1.6 : 1.4})"><g class="m-bdw speech"><g class="bd-bob"><g class="bd-dot"><path class="bd-c bub3d" d="M0,-11 C7,-11 11,-7 11,-2 C11,3.5 7,7 1,7 L-5,11.5 L-3.6,6.2 C-8.5,5 -11,2 -11,-2 C-11,-7 -7,-11 0,-11 Z"/><ellipse class="bd-hl" cx="-4.6" cy="-6.2" rx="4.4" ry="2.1" transform="rotate(-20 -4.6 -6.2)"/><text class="bd-g" y="3" text-anchor="middle"></text><g class="bd-off"><path d="M-2.2,-6.4 V-3.8 M2.2,-6.4 V-3.8"/><rect x="-4.2" y="-3.8" width="8.4" height="5.6" rx="1.6"/><path d="M0,1.8 V4.4"/><path class="slash" d="M-6.2,4.6 L6.2,-7"/></g></g></g></g></g>`;
   // The head's and the accessory's parts, each in a group the editor's preview drops in (#379).
   const part = (name, svg) => (svg ? `<g class="${name}">${svg}</g>` : "");
+  // The figure: its body, its head and what it wears, which every motion keeps in the frame. Its
+  // top, upright or tilting between two angles; the frame holds it at rest at every tilt.
+  const reached = pointsOf(backHard + backEars + body + frontEars + lower + onTop);
+  const crown = (low = 0, high = 0) => crownOf(reached, low, high);
+  const frame = frameOf(crown(-TILT, TILT));
   const html =
-    `<svg class="mascot" viewBox="10 14 100 100" width="${px}" height="${px}" data-size="${size}" data-eyes="open" data-mouth="none" data-brows="none" data-fx="none" data-badge="none" aria-hidden="true" focusable="false">` +
+    `<svg class="mascot" viewBox="${frame.x} ${frame.y} ${frame.size} ${frame.size}" width="${px}" height="${px}" data-size="${size}" data-eyes="open" data-mouth="none" data-brows="none" data-fx="none" data-badge="none" aria-hidden="true" focusable="false">` +
     `<defs><clipPath id="mc${uid}"><path d="${shape.d}"/></clipPath><radialGradient id="mg${uid}" cx=".36" cy=".3" r=".85"><stop offset="0" stop-color="${color.light}"/><stop offset=".55" stop-color="${color.body}"/><stop offset="1" stop-color="${color.edge}"/></radialGradient></defs>` +
     '<ellipse class="m-shadow" cx="60" cy="111" rx="30" ry="3.6"/>' +
     `<g class="m-hop g"><g class="m-breath g"><g class="m-sq g"><g class="m-pose g">${part("m-head", backHard + backEars)}${body}${part("m-head", frontEars)}${part("m-acc", lower)}` +
@@ -780,6 +981,9 @@ export function buildMascot(mascot, { uid, px, hex, work = true, hands = true })
     html,
     pieces,
     size,
+    top: crown(),
+    crown,
+    frame,
     anchors: { fx, fy, spread, tx, ty, ear: head === "ears" ? ears[1] : null },
   };
 }

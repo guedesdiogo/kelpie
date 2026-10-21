@@ -66,6 +66,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0060](0060-master-is-the-only-name.md) | Master is the role's only name, and nothing calls the setup agent | [#439](https://github.com/guedesdiogo/kelpie/issues/439) |
 | [0061](0061-proposals.md) | Proposals come from where no configure_agent is, wait 72 hours on their page, and Kelpie tells their proposer | [#302](https://github.com/guedesdiogo/kelpie/issues/302) |
 | [0062](0062-logo-takes-the-kelpie-ear.md) | Kelpie's logo takes the kelpie's pointed ear, and Master starts with it | [#464](https://github.com/guedesdiogo/kelpie/issues/464) |
+| [0063](0063-mascot-frame-holds-every-hop.md) | The mascot's frame holds every figure and every hop | [#474](https://github.com/guedesdiogo/kelpie/issues/474) |
 
 ## Format
 

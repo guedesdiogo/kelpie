@@ -8,10 +8,16 @@
 // frames then play in real time into a MediaRecorder, the only H.264 encoder Browser Run's page
 // has: it isn't a secure context, so WebCodecs is missing.
 
+import { FRAME } from "./mascot-art.js";
+
 /** The photo's side: Telegram recommends 800 px for a profile video. */
 export const PHOTO_PX = 800;
-/** The figure's box, centered: Telegram crops a circle, and the figure, hands included, stays in. */
-export const FIGURE_PX = 560;
+/**
+ * The figure's frame (ADR-0063), drawn at 5.6 px a grid unit, the scale the photo has had since
+ * ADR-0046. Telegram crops a circle: what a figure shows within the old 100-unit frame, hands
+ * included, stays inside it once the figure is centered.
+ */
+export const FIGURE_PX = Math.round(5.6 * FRAME.size);
 /**
  * The loop: one idle breath (mascot-states.js `BREATH.idle`), so it joins up when Telegram plays it
  * again, with a blink, a wave and a blink. Each step is a time, a gesture and its arguments.
