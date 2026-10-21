@@ -41,7 +41,7 @@ import { proposalTools } from "./proposal-tools.ts";
 import { subagentTools } from "./subagent-tools.ts";
 import { taskTools } from "./task-tools.ts";
 import type { ToolActivity, ToolProvider } from "./tools.ts";
-import { vpsSessionsTools } from "./vps-sessions.ts";
+import { type SessionStatus, vpsSessionsTools } from "./vps-sessions.ts";
 
 /**
  * One model call: its events, the router's fallbacks among them, and a way to stop it. A route that
@@ -353,6 +353,10 @@ function productionPorts(env: Env): ConversationPorts {
       // channel-egress's RunnerSessions, which only reads them.
       vpsSessionsTools(env.RUNNER_SESSIONS as unknown as RunnerSessionsContract, {
         roleOf: async (id) => (await registry.get(id))?.role ?? null,
+        // Its AgentHost's check of the waits, so the owner can read why a notice didn't come (#470).
+        // RPC's types read the attempts' pairs as arrays; they cross as written.
+        status: async (id) =>
+          (await env.AGENT_HOST.getByName(id).sessionStatus()) as unknown as SessionStatus,
       }),
       // Temporary subagents (#290): an agent with spawn creates them, within its own limits.
       subagentTools({

@@ -469,6 +469,163 @@ describe("Master's vps_sessions tool (ADR-0057 §5)", () => {
   });
 });
 
+// What the owner can read through Master when a notice doesn't come (#470): the check's last run
+// and the last notice, in Kelpie's own words, with no session's text.
+describe("the check's status in the vps_sessions output", () => {
+  type Status = NonNullable<Parameters<typeof vpsSessionsTools>[1]["status"]>;
+  type View = Awaited<ReturnType<Status>>;
+
+  async function withStatus(view: View | Error, outcome: RunnerSessionsOutcome = answer([])) {
+    const { sessions } = fakeSessions(outcome);
+    const asked: string[] = [];
+    const status: Status = async (agentId) => {
+      asked.push(agentId);
+      if (view instanceof Error) throw view;
+      return view;
+    };
+    const tool = await toolOf(vpsSessionsTools(sessions, { roleOf: roleIn, status }));
+    const result = await tool.run({}, contextOf());
+    return { ...result, asked };
+  }
+
+  /** The output's last two lines. */
+  const tail = (output: string) => output.split("\n").slice(-2);
+
+  it("says when the check last ran, how many waits it saw, and that the last notice was sent", async () => {
+    const { output, asked } = await withStatus(
+      {
+        check: { agoMs: 40_000, outcome: "ok", waits: 1 },
+        notice: { agoMs: 3 * MINUTE, outcome: "sent", attempts: [["telegram", "sent"]] },
+      },
+      answer([session({ id: ids.waiting, state: "waiting_answer", title: "Asks" })]),
+    );
+    expect(asked).toEqual([MASTER]);
+    expect(tail(output)).toEqual([
+      "Kelpie's check of the waits on the owner last ran less than a minute ago: it saw 1 open wait.",
+      "The last notice of a wait, 3 min ago, was sent on Telegram.",
+    ]);
+  });
+
+  it.each([
+    [
+      {
+        check: { agoMs: 2 * MINUTE, outcome: "ok", waits: 2 },
+        notice: { agoMs: MINUTE, outcome: "no_conversation", attempts: [] },
+      },
+      [
+        "Kelpie's check of the waits on the owner last ran 2 min ago: it saw 2 open waits.",
+        "The last notice of a wait, 1 min ago, wasn't sent: no conversation of Master's to tell.",
+      ],
+    ],
+    [
+      {
+        check: { agoMs: MINUTE, outcome: "unreachable", waits: null },
+        notice: {
+          agoMs: MINUTE,
+          outcome: "not_sent",
+          attempts: [
+            ["telegram", "send_failed"],
+            ["webchat", "page_closed"],
+          ],
+        },
+      },
+      [
+        "Kelpie's check of the waits on the owner last ran 1 min ago: it couldn't read the waits, since the runner didn't answer in time or its answer isn't one Kelpie reads.",
+        "The last notice of a wait, 1 min ago, wasn't sent: Telegram: send failed; webchat: page closed.",
+      ],
+    ],
+    [
+      {
+        check: { agoMs: 5 * MINUTE, outcome: "not_connected", waits: null },
+        notice: {
+          agoMs: 70 * MINUTE,
+          outcome: "sent",
+          attempts: [
+            ["telegram", "call_failed"],
+            ["webchat", "sent"],
+          ],
+        },
+      },
+      [
+        "Kelpie's check of the waits on the owner last ran 5 min ago: it stopped, since the runner isn't connected.",
+        "The last notice of a wait, 1 h 10 min ago, was sent on the webchat, after Telegram: the call failed.",
+      ],
+    ],
+    [
+      {
+        check: { agoMs: 0, outcome: "waits_unread", waits: null },
+        notice: { agoMs: 0, outcome: "timed_out", attempts: [] },
+      },
+      [
+        "Kelpie's check of the waits on the owner last ran less than a minute ago: channel-egress didn't answer in time.",
+        "The last notice of a wait, less than a minute ago, took too long: it may have gone out, and counts as told.",
+      ],
+    ],
+    [
+      { check: null, notice: null },
+      [
+        "Kelpie's check of the waits on the owner hasn't run yet: a turn of Master's starts it.",
+        "No notice of a wait has gone out yet.",
+      ],
+    ],
+  ] as const)("says what went wrong: %o", async (view, lines) => {
+    expect(tail((await withStatus(view as never)).output)).toEqual(lines);
+  });
+
+  it("words every outcome of a check and every answer of a conversation", async () => {
+    const checks = {
+      not_master: "it stopped, since this agent isn't Master",
+      master_unread: "it couldn't read whether this agent is Master",
+      not_configured: "it stopped, since the runner isn't connected",
+      refused: "it stopped, since the runner isn't connected",
+      store_unavailable: "it couldn't read the runner's secret",
+      invalid_input: "channel-egress refused its request",
+    } as const;
+    for (const [outcome, words] of Object.entries(checks)) {
+      const { output } = await withStatus({
+        check: { agoMs: 2 * 24 * 60 * MINUTE, outcome: outcome as never, waits: null },
+        notice: {
+          agoMs: 0,
+          outcome: "not_sent",
+          attempts: [
+            ["telegram", "not_this_agent"],
+            ["webchat", "no_destination"],
+            ["whatsapp", "task"],
+            ["telegram", "bad_input"],
+          ],
+        },
+      });
+      expect(tail(output)).toEqual([
+        `Kelpie's check of the waits on the owner last ran 2 days ago: ${words}.`,
+        "The last notice of a wait, less than a minute ago, wasn't sent: Telegram: another agent's conversation; webchat: no destination; whatsapp: a task's conversation; Telegram: the notice didn't check out.",
+      ]);
+    }
+  });
+
+  it("shows the status when the runner can't list the sessions too", async () => {
+    const { output, isError } = await withStatus(
+      { check: { agoMs: 0, outcome: "outdated", waits: null }, notice: null },
+      { ok: false, reason: "outdated" },
+    );
+    expect(isError).toBe(true);
+    expect(tail(output)).toEqual([
+      "Kelpie's check of the waits on the owner last ran less than a minute ago: the runner is outdated.",
+      "No notice of a wait has gone out yet.",
+    ]);
+  });
+
+  it("lists the sessions as before when the status can't be read", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { output, isError } = await withStatus(
+      new Error("AgentHost went away"),
+      answer(SESSIONS),
+    );
+    expect(isError).toBeUndefined();
+    expect(output).not.toContain("Kelpie's check");
+    expect(output).toContain("In a state the runner doesn't know (1):");
+  });
+});
+
 describe("the notice of a session that waits on the owner (ADR-0057 §5, ADR-0027)", () => {
   it.each([
     [
@@ -643,7 +800,7 @@ describe("a conversation telling the owner of a wait (#434)", () => {
     const world = use(fakeWorld([]));
     const name = `${MASTER}:telegram:wait-told`;
     await bound(name, "o que está rolando na minha VPS hoje?");
-    expect(await agent(name).sessionWait(MASTER, wait)).toBe(true);
+    expect(await agent(name).sessionWait(MASTER, wait)).toBe("sent");
     expect(world.sends).toEqual([
       {
         text: 'Uma sessão do Claude Code na sua VPS está esperando sua permissão: "Fix login", repositório "kelpie".',
@@ -658,37 +815,49 @@ describe("a conversation telling the owner of a wait (#434)", () => {
     expect(JSON.stringify(history)).not.toContain("Fix login");
   });
 
-  it("refuses another agent's conversation, one nothing bound, or what isn't a wait", async () => {
+  it("says why it refuses: another agent's conversation, one nothing bound, a task's, or what isn't a wait", async () => {
     const world = use(fakeWorld([]));
     const name = `${MASTER}:telegram:wait-refused`;
     await bound(name, "hello there, how are you doing today?");
-    expect(await agent(name).sessionWait("assistant", wait)).toBe(false);
+    expect(await agent(name).sessionWait("assistant", wait)).toBe("not_this_agent");
     for (const bad of [
       { ...wait, kind: "idle" },
       { ...wait, title: 42 },
       { ...wait, repository: "r".repeat(1_001) },
       null,
     ]) {
-      expect(await agent(name).sessionWait(MASTER, bad as never)).toBe(false);
+      expect(await agent(name).sessionWait(MASTER, bad as never)).toBe("bad_input");
     }
-    expect(await agent(`${MASTER}:telegram:wait-unbound`).sessionWait(MASTER, wait)).toBe(false);
+    expect(await agent(`${MASTER}:telegram:wait-unbound`).sessionWait(MASTER, wait)).toBe(
+      "no_destination",
+    );
+    // A task's conversation has no one in it (#335).
+    const task = agent(`${MASTER}:task:wait-task`);
+    await runInDurableObject(task, (_instance: ConversationAgent, state) => {
+      state.storage.sql.exec(
+        "INSERT OR REPLACE INTO state (key, value) VALUES ('destination', ?), ('agentId', ?)",
+        JSON.stringify({ channel: "task", threadId: "wait-task" }),
+        JSON.stringify(MASTER),
+      );
+    });
+    expect(await task.sessionWait(MASTER, wait)).toBe("task");
     expect(world.sends).toEqual([]);
   });
 
-  it("answers false when the channel doesn't take it", async () => {
+  it("says when the channel doesn't take it", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const world = use(fakeWorld([]));
     world.failSends.add(0);
     const name = `${MASTER}:telegram:wait-failed`;
     await bound(name, "hello there, how are you doing today?");
-    expect(await agent(name).sessionWait(MASTER, wait)).toBe(false);
+    expect(await agent(name).sessionWait(MASTER, wait)).toBe("send_failed");
   });
 
   it("reaches the webchat only while its page is open", async () => {
     use(fakeWorld([]));
     const name = `${MASTER}:webchat:u-owner`;
     await bound(name, "hello there, how are you doing today?", "webchat");
-    expect(await agent(name).sessionWait(MASTER, wait)).toBe(false);
+    expect(await agent(name).sessionWait(MASTER, wait)).toBe("page_closed");
 
     const response = await agent(name).fetch("https://conversation/webchat", {
       headers: {
@@ -707,7 +876,7 @@ describe("a conversation telling the owner of a wait (#434)", () => {
     const frames: { type: string }[] = [];
     socket.addEventListener("message", (event) => frames.push(JSON.parse(String(event.data))));
     socket.accept();
-    expect(await agent(name).sessionWait(MASTER, wait)).toBe(true);
+    expect(await agent(name).sessionWait(MASTER, wait)).toBe("sent");
     await vi.waitFor(() =>
       expect(frames.filter((frame) => frame.type === "bubble")).toEqual([
         {

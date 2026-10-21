@@ -64,11 +64,13 @@ import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlit
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import { CONFIGURE_KELPIE_SKILL, heldTools } from "../configuration.ts";
 import { readRole } from "../registry/schema.ts";
+import type { NoticeAttempt, SessionStatus } from "../vps-sessions.ts";
 import { identitySection } from "./identity.ts";
 import migrations from "./migrations/migrations.js";
 import * as schema from "./schema.ts";
 import {
   bounded,
+  type CheckReport,
   checkWaits,
   NEW_WATCH,
   type SessionWatch,
@@ -114,6 +116,10 @@ let runnerSessionsForTesting: RunnerWaits | undefined;
 export function replaceRunnerSessionsForTesting(sessions: RunnerWaits | undefined): void {
   runnerSessionsForTesting = sessions;
 }
+
+/** The last check of the VPS's waits, and the last notice, as this object keeps them (#470). */
+type KeptCheck = CheckReport & { at: number };
+type KeptNotice = { at: number } & Omit<NonNullable<SessionStatus["notice"]>, "agoMs">;
 
 /** How long the check of the VPS's waits gives channel-egress, which gives the runner 10 s. */
 const WAITS_TIMEOUT_MS = 12_000;
@@ -794,9 +800,12 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
           tell: (wait) =>
             bounded(this.#tellWait(agentId, wait), NOTICE_TIMEOUT_MS).catch(() => {
               console.warn("AgentHost: a notice of a wait timed out; it counts as told");
+              this.#keepNotice("timed_out", []);
               return true;
             }),
           keep: (kept) => this.#put("sessionWatch", kept),
+          checked: (report) =>
+            this.#put("sessionCheck", { ...report, at: Date.now() } satisfies KeptCheck),
         },
         Date.now(),
       );
@@ -837,56 +846,113 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
   }
 
   /**
+   * The check of the waits as this object keeps it (#470): the last check, and the last notice with
+   * each conversation it went to, with how long ago. Read only, and nothing of a session's: Master's
+   * `vps_sessions` shows it, so the owner can tell why a notice didn't come.
+   */
+  sessionStatus(): SessionStatus {
+    const now = Date.now();
+    const check = this.#get<KeptCheck | null>("sessionCheck", null);
+    const notice = this.#get<KeptNotice | null>("sessionNotice", null);
+    return {
+      check:
+        check === null
+          ? null
+          : { agoMs: now - check.at, outcome: check.outcome, waits: check.waits },
+      notice:
+        notice === null
+          ? null
+          : { agoMs: now - notice.at, outcome: notice.outcome, attempts: notice.attempts },
+    };
+  }
+
+  #keepNotice(outcome: KeptNotice["outcome"], attempts: NoticeAttempt[]): void {
+    this.#put("sessionNotice", { at: Date.now(), outcome, attempts } satisfies KeptNotice);
+  }
+
+  /**
    * Tells the owner of one wait in their conversation with this agent (#434): a fixed notice,
    * which the conversation writes in its own language. False when none took it; it never throws.
+   * Each conversation's answer is logged and kept, by channel and reason only (#470).
    */
   async #tellWait(agentId: string, wait: RunnerVpsWait): Promise<boolean> {
     const notice = { kind: wait.kind, title: wait.title, repository: wait.repository };
-    let names: string[];
+    let candidates: { channel: string; name: string }[];
     try {
-      names = this.#noticeConversations(agentId);
+      const found = this.#noticeConversations(agentId);
+      candidates = found.candidates;
+      if (candidates.length === 0) {
+        console.warn("AgentHost: no conversation can take a wait's notice", { rows: found.rows });
+      }
     } catch (error) {
       console.warn("AgentHost: the conversations for a wait weren't read", errorName(error));
+      candidates = [];
+    }
+    if (candidates.length === 0) {
+      this.#keepNotice("no_conversation", []);
       return false;
     }
-    for (const name of names) {
+    const attempts: NoticeAttempt[] = [];
+    for (const { channel, name } of candidates) {
+      let reason: NoticeAttempt[1];
       try {
-        if (await this.env.CONVERSATION_AGENT.getByName(name).sessionWait(agentId, notice)) {
-          return true;
-        }
+        reason = await this.env.CONVERSATION_AGENT.getByName(name).sessionWait(agentId, notice);
+        console.log("AgentHost: a conversation answered a wait's notice", { channel, reason });
       } catch (error) {
-        console.warn("AgentHost: a conversation wasn't told of a wait", errorName(error));
+        reason = "call_failed";
+        console.warn("AgentHost: a conversation wasn't told of a wait", {
+          channel,
+          error: errorName(error),
+        });
+      }
+      attempts.push([channel, reason]);
+      if (reason === "sent") {
+        console.log("AgentHost: a wait's notice was sent", { channel });
+        this.#keepNotice("sent", attempts);
+        return true;
       }
     }
+    console.warn("AgentHost: no conversation took a wait's notice", { attempts: attempts.length });
+    this.#keepNotice("not_sent", attempts);
     return false;
   }
 
   /**
    * Where a notice reaches the owner (#434): this agent's latest conversation on each channel,
-   * Telegram's before the webchat's, which shows it only while its page is open. Kelpie serves the
-   * owner alone, in direct chats (ADR-0015), so each is theirs; a task's has no one in it.
+   * Telegram's before the webchat's, which shows it only while its page is open. A conversation
+   * with no turn's time, one not seen since #335, comes after those that have one, on a channel
+   * none of them took (#470). Kelpie serves the owner alone, in direct chats (ADR-0015), so each is
+   * theirs; a task's has no one in it. `rows` counts what the table holds, by channel, for the log.
    */
-  #noticeConversations(agentId: string): string[] {
-    const rows = this.#db
-      .select({ name: schema.conversations.name })
+  #noticeConversations(agentId: string): {
+    candidates: { channel: string; name: string }[];
+    rows: Record<string, number>;
+  } {
+    const all = this.#db
+      .select({ name: schema.conversations.name, lastTurnAt: schema.conversations.lastTurnAt })
       .from(schema.conversations)
-      .where(
-        and(
-          isNotNull(schema.conversations.lastTurnAt),
-          notLike(schema.conversations.name, `${agentId}:task:%`),
-        ),
-      )
       .orderBy(desc(schema.conversations.lastTurnAt))
       .all();
-    const latest = new Map<string, string>();
-    for (const { name } of rows) {
+    const rows: Record<string, number> = {};
+    const timed = new Map<string, string>();
+    const untimed = new Map<string, string>();
+    for (const { name, lastTurnAt } of all) {
       if (!isConversationOf(agentId, name)) continue;
       const channel = name.slice(agentId.length + 1).split(":", 1)[0] ?? "";
-      if (!latest.has(channel)) latest.set(channel, name);
+      rows[channel] = (rows[channel] ?? 0) + 1;
+      if (channel === "task") continue;
+      const group = lastTurnAt === null ? untimed : timed;
+      if (!group.has(channel)) group.set(channel, name);
     }
-    return [...latest]
-      .sort(([a], [b]) => Number(a === "webchat") - Number(b === "webchat"))
-      .map(([, name]) => name);
+    const ordered = (group: Map<string, string>) =>
+      [...group]
+        .sort(([a], [b]) => Number(a === "webchat") - Number(b === "webchat"))
+        .map(([channel, name]) => ({ channel, name }));
+    const candidates = [
+      ...ordered(timed),
+      ...ordered(untimed).filter(({ channel }) => !timed.has(channel)),
+    ];
+    return { candidates, rows };
   }
 
   /**

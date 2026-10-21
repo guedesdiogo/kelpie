@@ -11,6 +11,7 @@ import {
   type RunnerVpsWait,
 } from "@kelpie/channels";
 import type { AgentRole } from "@kelpie/config";
+import { bounded, type CheckOutcome } from "./agent-host/session-watch.ts";
 import { runnerStatus } from "./configuration.ts";
 import { TOOL_OUTPUT_MAX_CHARS, type Tool, type ToolOutcome, type ToolProvider } from "./tools.ts";
 
@@ -45,7 +46,11 @@ const UNANSWERED = failed(
  */
 export function vpsSessionsTools(
   sessions: Pick<RunnerSessionsContract, "list">,
-  options: { roleOf: (agentId: string) => Promise<AgentRole | null> },
+  options: {
+    roleOf: (agentId: string) => Promise<AgentRole | null>;
+    /** The agent's check of the waits, as its AgentHost keeps it (#470); without it, not shown. */
+    status?: (agentId: string) => Promise<SessionStatus>;
+  },
 ): ToolProvider {
   const tool: Tool = {
     spec: SPEC,
@@ -58,14 +63,16 @@ export function vpsSessionsTools(
       // Again when it runs: a turn that listed it may outlive the agent's role (ADR-0048).
       if ((await options.roleOf(context.agentId)) !== "master") return NOT_MASTER;
       if (context.actor.role !== "owner") return NOT_OWNER;
-      let outcome: RunnerSessionsOutcome;
+      let result: ToolOutcome;
       try {
-        outcome = await sessions.list();
+        const outcome: RunnerSessionsOutcome = await sessions.list();
+        result = outcome.ok ? { output: sessionsList(outcome) } : cantList(outcome.reason);
       } catch (error) {
         console.error("vps_sessions: channel-egress didn't answer", errorName(error));
-        return UNANSWERED;
+        result = UNANSWERED;
       }
-      return outcome.ok ? { output: sessionsList(outcome) } : cantList(outcome.reason);
+      const lines = await statusLines(options.status, context.agentId);
+      return lines.length === 0 ? result : { ...result, output: `${result.output}\n\n${lines}` };
     },
   };
   return {
@@ -125,8 +132,8 @@ function groupOf(session: RunnerVpsSession): Group {
   return session.state;
 }
 
-/** Room kept for the list's closing lines, so the whole fits a tool's output. */
-const FOOTER_ROOM = 300;
+/** Room kept for the list's closing lines and the check's status, so the whole fits a tool's output. */
+const FOOTER_ROOM = 700;
 const BUDGET = TOOL_OUTPUT_MAX_CHARS - FOOTER_ROOM;
 
 interface Entry {
@@ -283,6 +290,120 @@ function ageOf(ms: number): string {
   const days = Math.floor(ms / DAY);
   return days === 1 ? "1 day" : `${days} days`;
 }
+
+/**
+ * What a conversation answers a notice of a wait (#470): sent, or why not. AgentHost and the
+ * conversation deploy together, in this Worker.
+ */
+export type WaitNoticeOutcome =
+  | "sent"
+  | "not_this_agent"
+  | "no_destination"
+  | "task"
+  | "page_closed"
+  | "bad_input"
+  | "send_failed";
+
+/** One conversation a notice went to: its channel, and its answer, or a call that failed. */
+export type NoticeAttempt = [channel: string, reason: WaitNoticeOutcome | "call_failed"];
+
+/**
+ * The check of the waits as its AgentHost keeps it (#470), with how long ago each happened: the last
+ * check, and the last notice with each conversation it went to. Nothing of a session's.
+ */
+export interface SessionStatus {
+  check: { agoMs: number; outcome: CheckOutcome; waits: number | null } | null;
+  notice: {
+    agoMs: number;
+    outcome: "sent" | "not_sent" | "no_conversation" | "timed_out";
+    attempts: NoticeAttempt[];
+  } | null;
+}
+
+/** How long the tool waits for the status: it never holds up the list. */
+const STATUS_TIMEOUT_MS = 2_000;
+
+const CHECK_TEXTS: Record<CheckOutcome, (waits: number | null) => string> = {
+  ok: (waits) => `it saw ${waits ?? 0} open ${waits === 1 ? "wait" : "waits"}`,
+  not_master: () => "it stopped, since this agent isn't Master",
+  master_unread: () => "it couldn't read whether this agent is Master",
+  waits_unread: () => "channel-egress didn't answer in time",
+  not_configured: () => "it stopped, since the runner isn't connected",
+  not_connected: () => "it stopped, since the runner isn't connected",
+  refused: () => "it stopped, since the runner isn't connected",
+  outdated: () => "the runner is outdated",
+  unreachable: () =>
+    "it couldn't read the waits, since the runner didn't answer in time or its answer isn't one Kelpie reads",
+  store_unavailable: () => "it couldn't read the runner's secret",
+  invalid_input: () => "channel-egress refused its request",
+};
+
+const ATTEMPT_TEXTS: Record<NoticeAttempt[1], string> = {
+  sent: "sent",
+  not_this_agent: "another agent's conversation",
+  no_destination: "no destination",
+  task: "a task's conversation",
+  page_closed: "page closed",
+  bad_input: "the notice didn't check out",
+  send_failed: "send failed",
+  call_failed: "the call failed",
+};
+
+/** A channel as a list of attempts names it, and as "sent on" does. */
+const listed = (channel: string) => (channel === "telegram" ? "Telegram" : channel);
+const sentOn = (channel: string) => (channel === "webchat" ? "the webchat" : listed(channel));
+
+/**
+ * Kelpie's words for the check's status, two lines; none when there is no status to read, or it
+ * can't be read in time.
+ */
+async function statusLines(
+  read: ((agentId: string) => Promise<SessionStatus>) | undefined,
+  agentId: string,
+): Promise<string> {
+  if (!read) return "";
+  let status: SessionStatus;
+  try {
+    status = await bounded(read(agentId), STATUS_TIMEOUT_MS);
+  } catch (error) {
+    console.warn("vps_sessions: the check's status wasn't read", errorName(error));
+    return "";
+  }
+  const { check, notice } = status;
+  const checked =
+    check === null
+      ? "Kelpie's check of the waits on the owner hasn't run yet: a turn of Master's starts it."
+      : `Kelpie's check of the waits on the owner last ran ${ago(check.agoMs)}: ${CHECK_TEXTS[check.outcome](check.waits)}.`;
+  return `${checked}\n${noticeLine(notice)}`;
+}
+
+function noticeLine(notice: SessionStatus["notice"]): string {
+  if (notice === null) return "No notice of a wait has gone out yet.";
+  const when = `The last notice of a wait, ${ago(notice.agoMs)},`;
+  const tried = (attempts: NoticeAttempt[]) =>
+    attempts.map(([channel, reason]) => `${listed(channel)}: ${ATTEMPT_TEXTS[reason]}`).join("; ");
+  switch (notice.outcome) {
+    case "sent": {
+      const sentAt = notice.attempts.findIndex(([, reason]) => reason === "sent");
+      const channel = notice.attempts[sentAt]?.[0];
+      const before = notice.attempts.slice(0, Math.max(sentAt, 0));
+      const on = channel === undefined ? "" : ` on ${sentOn(channel)}`;
+      return `${when} was sent${on}${before.length === 0 ? "" : `, after ${tried(before)}`}.`;
+    }
+    case "no_conversation":
+      return `${when} wasn't sent: no conversation of Master's to tell.`;
+    case "timed_out":
+      return `${when} took too long: it may have gone out, and counts as told.`;
+    default:
+      return `${when} wasn't sent: ${tried(notice.attempts)}.`;
+  }
+}
+
+/** How long ago, as the model reads it. */
+const ago = (ms: number) => {
+  const age = ageOf(Math.max(ms, 0));
+  return age === "less than a minute" ? "less than a minute ago" : `${age} ago`;
+};
 
 /** What a notice says of a wait: what it waits for, and the session's title and repository. */
 export type SessionWaitNotice = Pick<RunnerVpsWait, "kind" | "title" | "repository">;
