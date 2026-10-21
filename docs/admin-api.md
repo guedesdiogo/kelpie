@@ -428,7 +428,7 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
   - `Una sesión de Claude Code en tu VPS está esperando tu permiso: sin título.`
 
   - **What it names:** what the session waits for, a permission or an answer, and its title and repository. Each is cut to 80 characters with "…", on one line: breaks and control characters become spaces, what shows nothing goes, and its quotes are escaped. It is a fixed notice, never formatted, so any address in them shows as text, and on Telegram as code ("Formatting").
-  - **Where it goes:** to Master's latest conversation with the owner on Telegram, which reaches the owner's phone; else to the webchat, while its page is open. It is written in that conversation's language and sent at once. Kelpie never keeps it: the model never reads it, and the webchat's history doesn't show it.
+  - **Where it goes:** to Master's latest conversation with the owner on Telegram, which reaches the owner's phone; else to the webchat, while its page is open. A conversation recorded before #335, with no turn's time, comes last, on a channel no other took (#470). It is written in that conversation's language and sent at once. Kelpie never keeps it: the model never reads it, and the webchat's history doesn't show it.
   - **What leaves with it:** the session's title and repository go to the owner's channel. On Telegram they pass through Telegram's servers, stay in the chat, and can show on the phone's lock screen.
   - **When:** within about a minute of the wait opening.
     - **The first check that reads the runner,** as once it is connected or updated, asks a day back, so it tells the waits already open, up to a day old. A check that starts again after a stop asks from where the last one left off, and never more than a day back.
@@ -438,6 +438,11 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
   - **No notice** for a session that is idle after its reply, or ended: those have no open wait, and the list shows them. The runner leaves out the sessions behind Kelpie's own chat route.
   - **When the check runs:** Master's turns start it. It stops while the runner isn't connected (`not_configured`, `not_connected`, or a refused secret), once Master's role moves to another agent, or after three outdated answers in a row; Master's next turn starts it again, an hour after an outdated runner stopped it. A runner that can't be reached for now doesn't stop it.
   - **Cost:** one call to the runner a minute, about 44,000 a month, within the Workers Paid plan (ADR-0057 §6). None while the runner isn't connected.
+  - **Why a notice didn't come** (#470). Master's `AgentHost` keeps its last check and its last notice, and `vps_sessions` ends with two lines of Kelpie's own words about them, so the owner can ask Master during a wait:
+    - **the last check:** how long ago it ran, and how many open waits it saw, or why it couldn't read them: the runner isn't connected or is outdated, its answer came too late or isn't one Kelpie reads, or channel-egress or the Registry didn't answer in time;
+    - **the last notice:** how long ago, and where it went or why not, for each conversation tried: `sent on Telegram`, `no conversation of Master's to tell`, `Telegram: send failed; webchat: page closed`, or a notice that took longer than 4 seconds and counts as told.
+
+    The log says the same in fixed words, channels, counts and reasons, never a title, a repository or a session's id: a line for each conversation tried, one when a notice is sent, one when no conversation can take it, with how many conversations of each channel the agent has, and one for each check that couldn't read the waits, with channel-egress's reason. A status that can't be read leaves the list as it was.
 
 What Master can't do, because it holds no Cloudflare token (ADR-0013):
 - deploy the Workers, in order, with their flags ("Setting it up");

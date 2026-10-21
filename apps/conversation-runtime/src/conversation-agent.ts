@@ -135,7 +135,12 @@ import {
   visible,
 } from "./tools.ts";
 import { chatTypeOf, leastAccess, roleOf, type TurnAccess, turnScopes } from "./turn-access.ts";
-import { parseSessionWait, type SessionWaitNotice, sessionWaitNotice } from "./vps-sessions.ts";
+import {
+  parseSessionWait,
+  type SessionWaitNotice,
+  sessionWaitNotice,
+  type WaitNoticeOutcome,
+} from "./vps-sessions.ts";
 import {
   FRAME_VIEWS,
   type OpenRequests,
@@ -775,30 +780,27 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    * Kelpie's notice that a Claude Code session on the owner's VPS waits on them (ADR-0057 §5,
    * #434), from its agent's AgentHost: one fixed bubble in the conversation's language, sent at
    * once and kept nowhere, so the model never reads the session's title and the replay never shows
-   * it. A webchat's takes it only while its page is open. False when it wasn't sent: another
-   * agent's conversation or a task's, an input that doesn't check out, or a send that failed.
+   * it. A webchat's takes it only while its page is open. It answers `sent`, or why not (#470):
+   * another agent's conversation or a task's, one nothing bound yet, a closed page, an input that
+   * doesn't check out, or a send that failed.
    */
-  async sessionWait(agentId: string, wait: SessionWaitNotice): Promise<boolean> {
+  async sessionWait(agentId: string, wait: SessionWaitNotice): Promise<WaitNoticeOutcome> {
     const notice = parseSessionWait(wait);
     const destination = this.#get<Destination | null>("destination", null);
-    if (
-      notice === null ||
-      destination === null ||
-      destination.channel === "task" ||
-      this.#get<string | null>("agentId", null) !== agentId
-    ) {
-      return false;
-    }
-    if (destination.channel === "webchat" && !this.#pageOpen()) return false;
+    if (notice === null) return "bad_input";
+    if (destination === null) return "no_destination";
+    if (this.#get<string | null>("agentId", null) !== agentId) return "not_this_agent";
+    if (destination.channel === "task") return "task";
+    if (destination.channel === "webchat" && !this.#pageOpen()) return "page_closed";
     try {
       const text = sessionWaitNotice(notice, this.#locale());
       const sent = await this.#channel.send(agentId, destination, text, { silent: false });
-      if (!sent.ok) console.warn("conversation: a wait wasn't told", { reason: sent.reason });
-      return sent.ok;
+      if (sent.ok) return "sent";
+      console.warn("conversation: a wait wasn't told", { reason: sent.reason });
     } catch (error) {
       console.warn("conversation: a wait wasn't told", { error: errorName(error) });
-      return false;
     }
+    return "send_failed";
   }
 
   /** Whether a webchat page of this conversation is open: a socket of its own, not a sidebar's. */

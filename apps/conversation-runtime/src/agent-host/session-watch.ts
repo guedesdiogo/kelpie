@@ -1,4 +1,4 @@
-import type { RunnerVpsWait, RunnerWaitsOutcome } from "@kelpie/channels";
+import type { RunnerRelayFailure, RunnerVpsWait, RunnerWaitsOutcome } from "@kelpie/channels";
 
 // Kelpie's check of the waits on the owner (ADR-0057 §5, #434). While the runner is connected,
 // Master's AgentHost asks channel-egress's RunnerSessions once a minute for the waits opened since
@@ -51,6 +51,23 @@ export interface SessionWatch {
 
 export const NEW_WATCH: SessionWatch = { since: null, outdated: 0, told: [], stopped: null };
 
+/**
+ * How a check went (#470): the waits read, or why not. `master_unread` and `waits_unread` are a
+ * Registry or a channel-egress that didn't answer in time; the rest are channel-egress's reasons.
+ */
+export type CheckOutcome =
+  | "ok"
+  | "not_master"
+  | "master_unread"
+  | "waits_unread"
+  | RunnerRelayFailure["reason"];
+
+/** A check's report: how it went, and how many open waits it saw, with no session's text. */
+export interface CheckReport {
+  outcome: CheckOutcome;
+  waits: number | null;
+}
+
 /** What a check reaches outside its object. */
 export interface WatchIO {
   /** Whether the agent is Master now. It throws when that can't be read. */
@@ -65,6 +82,8 @@ export interface WatchIO {
   tell(wait: RunnerVpsWait): Promise<boolean>;
   /** Keeps the watch as it is now, after each wait told: an eviction mid-check doesn't repeat it. */
   keep(watch: SessionWatch): void;
+  /** Keeps how the check went, for the owner to read through Master (#470). */
+  checked(report: CheckReport): void;
 }
 
 /**
@@ -77,22 +96,33 @@ export async function checkWaits(
   io: WatchIO,
   now: number,
 ): Promise<SessionWatch> {
+  const failed = (outcome: CheckOutcome) => io.checked({ outcome, waits: null });
   let master: boolean;
   try {
     master = await io.isMaster();
-  } catch {
+  } catch (error) {
+    console.warn("AgentHost: whether this agent is Master wasn't read", errorName(error));
+    failed("master_unread");
     return watch;
   }
-  if (!master) return stop(watch, "not_master", now);
+  if (!master) {
+    failed("not_master");
+    return stop(watch, "not_master", now);
+  }
   let outcome: RunnerWaitsOutcome;
   try {
     outcome = await io.waits(Math.max(watch.since ?? 0, now - TOLD_KEEP_MS));
   } catch (error) {
     console.warn("AgentHost: the VPS's waits weren't read", errorName(error));
+    failed("waits_unread");
     return watch;
   }
   if (!outcome.ok) {
     const { reason } = outcome;
+    // channel-egress reads a runner that answers too late, or not as the protocol says, as
+    // `unreachable`: said here, since nothing else in this Worker would say it.
+    console.warn("AgentHost: the VPS's waits weren't read", { reason });
+    failed(reason);
     switch (reason) {
       case "not_configured":
       case "not_connected":
@@ -109,6 +139,7 @@ export async function checkWaits(
         return { ...watch, outdated: 0 };
     }
   }
+  io.checked({ outcome: "ok", waits: outcome.waits.length });
   let told = watch.told;
   /** The oldest wait not told, which the next check asks for again. */
   let held: number | null = null;
@@ -152,6 +183,7 @@ function isTold(told: readonly [string, number][], wait: RunnerVpsWait): boolean
 }
 
 function stop(watch: SessionWatch, reason: WatchStop, now: number): SessionWatch {
+  console.warn("AgentHost: the check of the VPS's waits stopped", { reason });
   return { ...watch, stopped: { reason, at: now } };
 }
 
