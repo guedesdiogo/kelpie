@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Mascot, setMotion } from "../../public/webchat/mascot.js";
 import { buildMascot, EYES, MARGIN, SHAPES, sizeOf } from "../../public/webchat/mascot-art.js";
 
-// What shows beside the mascot, as the engine plays it (ADR-0064): the speech bubble, the badge,
+// What shows beside the mascot, as the engine plays it (ADR-0065): the speech bubble, the badge,
 // the thought bubbles, the sparks and the "z"s float beside the figure, past its frame, over the
 // margin its host keeps. Every Web Animation the engine starts is recorded, and each effect is
 // followed through its keyframes and easings, and those of the groups that hold it.
@@ -506,7 +506,7 @@ function pastFrame({ mascot, change, later }, state) {
   return past;
 }
 
-describe("what shows beside the mascot, as the engine plays it (ADR-0064)", () => {
+describe("what shows beside the mascot, as the engine plays it (ADR-0065)", () => {
   it("draws the thought bubbles, the sparks and the z in a layer outside the hop", () => {
     const { svg } = play(look("mark"), 48, "approved").mascot;
     for (const effect of [".fx-bub", ".fx-spark", ".fx-zzz"]) {

@@ -599,7 +599,7 @@ export class Mascot {
     }
     const posed = `rotate(${pose.tilt}deg) scale(${pose.sx}, ${pose.sy})`;
     poseTo(this.poseG, posed, spring);
-    // What shows beside the figure takes its pose, but not its hops (ADR-0064).
+    // What shows beside the figure takes its pose, but not its hops (ADR-0065).
     poseTo(this.fxG, posed, spring);
     this.restore(spring, pose);
   }

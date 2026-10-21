@@ -319,6 +319,6 @@
   "by": "Diogo Guedes",
   "at": "2026-10-21T15:38:02Z",
   "via": "Claude Code · guedesdiogo/kelpie#481",
-  "note": "What shows beside the mascot floats past its frame on purpose, over a margin its host keeps: the thinking bubbles, the sparks and the \"z\" draw in a layer that takes the pose but never the hops (ADR-0064). The bundle carries the new engine, and the guide's mascot section gains the rule and its margin."
+  "note": "What shows beside the mascot floats past its frame on purpose, over a margin its host keeps: the thinking bubbles, the sparks and the \"z\" draw in a layer that takes the pose but never the hops (ADR-0065). The bundle carries the new engine, and the guide's mascot section gains the rule and its margin."
  }
 }

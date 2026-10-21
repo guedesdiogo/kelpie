@@ -5,7 +5,7 @@
 - Issue: [#474](https://github.com/guedesdiogo/kelpie/issues/474)
 - On 2026-10-20 the owner looked at the design system and said the space above the mascot was too short: «devemos estar quebrando alguma regra de margem».
 - On the frame's lab, the owner chose: «Escolho A + C com o enquadramento 4 2 112 112.»
-- Amended by: [ADR-0064](0064-mascot-effects-float-over-kept-margin.md), what shows beside the figure floats past its frame, over a margin its host keeps
+- Amended by: [ADR-0065](0065-mascot-effects-float-over-kept-margin.md), what shows beside the figure floats past its frame, over a margin its host keeps
 - Amends [ADR-0045](0045-agent-mascot.md):
   - §4, the box: the frame it draws in, and what keeps every motion inside it;
   - §8, technique: the fur is painted at the frame's scale.

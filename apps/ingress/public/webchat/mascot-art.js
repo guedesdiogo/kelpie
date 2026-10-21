@@ -16,7 +16,7 @@ import { GROUND, HEADROOM, STILL_MOST, TILT } from "./mascot-states.js";
 export const FRAME = { x: 4, y: 2, size: 112 };
 
 /**
- * What shows beside the figure floats past the frame on purpose (ADR-0064): the speech bubble, the
+ * What shows beside the figure floats past the frame on purpose (ADR-0065): the speech bubble, the
  * badge, the thought bubbles, the sparks and the "z"s. This is how far, in grid units past each side
  * of FRAME, at rest and through their own motion, per size class (sizeOf). Each host keeps that
  * much room free around the box for what it shows.
@@ -959,7 +959,7 @@ export function buildMascot(mascot, { uid, px, hex, work = true, hands = true })
     .join("");
   const mouthY = fy + (eye.one ? 15 : (shape.mouth ?? 13));
   const mouth = `<g class="m-mouth" transform="translate(${fx} ${mouthY})"><g class="mo-o-w"><ellipse class="mo-o sw ink" rx="2.8" ry="3.3"/></g><path class="mo-smile sw stk" stroke-width="2.8" d="M-5.5,-1.5 Q0,4.5 5.5,-1.5"/><path class="mo-wave sw stk" stroke-width="2.6" d="M-6,0.5 Q-3,-2.5 0,0.5 T6,0.5"/></g>`;
-  // What shows beside the figure (ADR-0064): the thought bubbles, the sparks and the "z"s float in
+  // What shows beside the figure (ADR-0065): the thought bubbles, the sparks and the "z"s float in
   // a layer of their own, which takes the state's pose but not the figure's hops or breath.
   const beside =
     `<g class="fx-bub sw">${[

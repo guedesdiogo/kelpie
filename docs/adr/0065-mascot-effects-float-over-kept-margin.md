@@ -1,4 +1,4 @@
-# ADR-0064: What shows beside the mascot floats over a margin its host keeps
+# ADR-0065: What shows beside the mascot floats over a margin its host keeps
 
 - Status: Accepted
 - Date: 2026-10-21
