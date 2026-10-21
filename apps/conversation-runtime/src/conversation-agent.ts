@@ -92,7 +92,7 @@ import {
   lte,
   max,
   min,
-  or,
+  sql,
 } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
@@ -1582,6 +1582,26 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .all();
   }
 
+  /**
+   * The turns' marks (ADR-0064), in id order, for inspection: in one pass over every turn, as the
+   * records work them out, or with `each`, each turn on its own, as its start does.
+   */
+  outsideMarks(each = false): { id: number; marked: boolean }[] {
+    const ids = this.#db
+      .select({ id: schema.turns.id })
+      .from(schema.turns)
+      .orderBy(asc(schema.turns.id))
+      .all()
+      .map((row) => row.id);
+    const first = ids[0];
+    const last = ids.at(-1);
+    if (first === undefined || last === undefined) return [];
+    const marked = each
+      ? new Set(ids.filter((id) => this.#markedRange(id, id).has(id)))
+      : this.#markedRange(first, last);
+    return ids.map((id) => ({ id, marked: marked.has(id) }));
+  }
+
   /** The status of every turn, for inspection. */
   turns(): { id: number; status: string; attempts: number; usage: Usage[] | null }[] {
     return this.#db
@@ -2105,7 +2125,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     let last = false;
     let pendingContext = memory;
     // Whether the turn read outside content (ADR-0064): from then on, a change waits for the owner.
-    let outside = this.#marked(turn);
+    let outside = this.#markedRange(turn.id, turn.id).has(turn.id);
     // Whether the turn's own read is recorded: it may read again in a turn that started marked.
     let recorded = turn.outside;
     const flight = this.#inFlight.get(turn.id);
@@ -2586,8 +2606,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   }
 
   /**
-   * Whether the turn is marked as having read outside content (ADR-0064). Only a turn's own read
-   * writes the mark; it holds too while, when the turn started:
+   * Which turns, from `low` to `high`, are marked as having read outside content (ADR-0064). Only
+   * a turn's own read writes the mark; it holds too while, when the turn started:
    * - a turn that read some had started or run within OUTSIDE_WINDOW_MS, or a change a turn held
    *   for the owner was still open (the owner's «10 minutos»). That covers the message that cut a
    *   marked turn short, and the owner's answer to its confirmation, whose repeated call the gate
@@ -2595,81 +2615,13 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    * - for a turn no person typed, the history its requests send, since its checkpoint, holds a turn
    *   that read some («Só turnos sem pessoa»).
    *
-   * Each rule reads only earlier turns and their times, so it gives the same answer at each start,
-   * after an eviction, and later for the records, which leave marked replies out.
+   * Each rule reads only earlier turns and their times, so a turn gets the same answer at its
+   * start, after an eviction, and later in the records, which leave marked replies out. A turn's
+   * start asks for itself alone; the records ask for a whole session, so the rules run in one pass:
+   * a few reads of the tables, then each turn in memory, in id order.
    */
-  #marked(turn: {
-    id: number;
-    checkpointId: number | null;
-    outside: boolean;
-    createdAt: number;
-  }): boolean {
-    if (turn.outside) return true;
-    const since = turn.createdAt - OUTSIDE_WINDOW_MS;
-    const read = and(eq(schema.turns.outside, true), lt(schema.turns.id, turn.id));
-    const recent =
-      this.#db
-        .select({ id: schema.turns.id })
-        .from(schema.turns)
-        .where(and(read, gt(schema.turns.createdAt, since)))
-        .limit(1)
-        .get() ??
-      this.#db
-        .select({ id: schema.history.id })
-        .from(schema.history)
-        .innerJoin(schema.turns, eq(schema.turns.id, schema.history.turnId))
-        .where(and(read, gt(schema.history.createdAt, since)))
-        .limit(1)
-        .get();
-    if (recent) return true;
-    // A confirmation made before the turn's first row, by its history, not its clock.
-    const first =
-      this.#db
-        .select({ value: min(schema.history.id) })
-        .from(schema.history)
-        .where(eq(schema.history.turnId, turn.id))
-        .get()?.value ?? 0;
-    const asking = this.#db
-      .select({ id: schema.confirmations.id })
-      .from(schema.confirmations)
-      .where(
-        and(
-          like(schema.confirmations.command, "tool:%"),
-          lt(schema.confirmations.afterHistoryId, first),
-          gt(schema.confirmations.expiresAt, turn.createdAt),
-          or(isNull(schema.confirmations.usedAt), gte(schema.confirmations.usedAt, turn.createdAt)),
-        ),
-      )
-      .limit(1)
-      .get();
-    if (asking) return true;
-    if (this.#trigger(turn.id) === "person") return false;
-    const kept =
-      turn.checkpointId === null
-        ? 0
-        : (this.#db
-            .select({ id: schema.checkpoints.keptFromHistoryId })
-            .from(schema.checkpoints)
-            .where(eq(schema.checkpoints.id, turn.checkpointId))
-            .get()?.id ?? 0);
-    return (
-      this.#db
-        .select({ id: schema.history.id })
-        .from(schema.history)
-        .innerJoin(schema.turns, eq(schema.turns.id, schema.history.turnId))
-        .where(and(gte(schema.history.id, kept), read))
-        .limit(1)
-        .get() !== undefined
-    );
-  }
-
-  /** Which of these turns are marked (ADR-0064), read by one range of ids. */
-  #markedTurns(turnIds: readonly number[]): Set<number> {
+  #markedRange(low: number, high: number): Set<number> {
     const marked = new Set<number>();
-    if (turnIds.length === 0) return marked;
-    // A session's rows can be many: no spread into an argument list.
-    const low = turnIds.reduce((a, b) => Math.min(a, b));
-    const high = turnIds.reduce((a, b) => Math.max(a, b));
     const turns = this.#db
       .select({
         id: schema.turns.id,
@@ -2679,9 +2631,104 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       })
       .from(schema.turns)
       .where(and(gte(schema.turns.id, low), lte(schema.turns.id, high)))
+      .orderBy(asc(schema.turns.id))
       .all();
-    for (const turn of turns) if (this.#marked(turn)) marked.add(turn.id);
+    if (turns.length === 0) return marked;
+    // Each turn's first row, and whether a person typed in it, in one scan.
+    const rows = new Map(
+      this.#db
+        .select({
+          turnId: schema.history.turnId,
+          first: min(schema.history.id),
+          typed: sql<number>`max(${schema.history.role} = 'user' and ${schema.history.fromKelpie} = 0)`,
+        })
+        .from(schema.history)
+        .where(and(gte(schema.history.turnId, low), lte(schema.history.turnId, high)))
+        .groupBy(schema.history.turnId)
+        .all()
+        .map((row) => [row.turnId, row]),
+    );
+    // The turns that read outside content before the range's end, with when they last ran and
+    // their last row: their rows in one scan.
+    const read = and(eq(schema.turns.outside, true), lt(schema.turns.id, high));
+    const ran = new Map(
+      this.#db
+        .select({
+          turnId: schema.history.turnId,
+          at: max(schema.history.createdAt),
+          row: max(schema.history.id),
+        })
+        .from(schema.history)
+        .where(
+          inArray(
+            schema.history.turnId,
+            this.#db.select({ id: schema.turns.id }).from(schema.turns).where(read),
+          ),
+        )
+        .groupBy(schema.history.turnId)
+        .all()
+        .map((row) => [row.turnId, row]),
+    );
+    const reads = this.#db
+      .select({ id: schema.turns.id, createdAt: schema.turns.createdAt })
+      .from(schema.turns)
+      .where(read)
+      .orderBy(asc(schema.turns.id))
+      .all();
+    // Few: held changes are kept a day past their expiry.
+    const held = this.#db
+      .select({
+        afterHistoryId: schema.confirmations.afterHistoryId,
+        expiresAt: schema.confirmations.expiresAt,
+        usedAt: schema.confirmations.usedAt,
+      })
+      .from(schema.confirmations)
+      .where(like(schema.confirmations.command, "tool:%"))
+      .all();
+    const kept = new Map(
+      this.#db
+        .select({ id: schema.checkpoints.id, from: schema.checkpoints.keptFromHistoryId })
+        .from(schema.checkpoints)
+        .all()
+        .map((row) => [row.id, row.from]),
+    );
+    const task = this.#destination().channel === "task";
+    // The reads before the turn at hand: the latest time one ran, and its last row.
+    let next = 0;
+    let lastRan = Number.NEGATIVE_INFINITY;
+    let lastRow = Number.NEGATIVE_INFINITY;
+    for (const turn of turns) {
+      for (let earlier = reads[next]; earlier && earlier.id < turn.id; earlier = reads[++next]) {
+        const its = ran.get(earlier.id);
+        lastRan = Math.max(lastRan, earlier.createdAt, its?.at ?? Number.NEGATIVE_INFINITY);
+        lastRow = Math.max(lastRow, its?.row ?? Number.NEGATIVE_INFINITY);
+      }
+      const start = turn.createdAt;
+      const first = rows.get(turn.id)?.first ?? 0;
+      const yes =
+        turn.outside ||
+        lastRan > start - OUTSIDE_WINDOW_MS ||
+        // A held change made before the turn's first row, by its history, not its clock.
+        held.some(
+          (one) =>
+            one.afterHistoryId < first &&
+            one.expiresAt > start &&
+            (one.usedAt === null || one.usedAt >= start),
+        ) ||
+        ((task || rows.get(turn.id)?.typed !== 1) &&
+          lastRow >= (turn.checkpointId === null ? 0 : (kept.get(turn.checkpointId) ?? 0)));
+      if (yes) marked.add(turn.id);
+    }
     return marked;
+  }
+
+  /** Which of these turns are marked (ADR-0064), in one pass over their range of ids. */
+  #markedTurns(turnIds: readonly number[]): Set<number> {
+    if (turnIds.length === 0) return new Set();
+    // A session's rows can be many: no spread into an argument list.
+    const low = turnIds.reduce((a, b) => Math.min(a, b));
+    const high = turnIds.reduce((a, b) => Math.max(a, b));
+    return this.#markedRange(low, high);
   }
 
   /**
