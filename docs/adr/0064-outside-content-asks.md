@@ -1,4 +1,4 @@
-# ADR-0063: A turn that read outside content asks the owner before it changes anything
+# ADR-0064: A turn that read outside content asks the owner before it changes anything
 
 - Status: Accepted
 - Date: 2026-10-21

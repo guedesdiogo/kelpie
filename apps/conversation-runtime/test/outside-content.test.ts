@@ -32,7 +32,7 @@ import {
 } from "../src/tools.ts";
 import { type FakeWorld, fakeWorld, reply, toolCalls } from "./fakes.ts";
 
-// A turn that read outside content asks the owner before it changes anything (ADR-0063, #454): a
+// A turn that read outside content asks the owner before it changes anything (ADR-0064, #454): a
 // tool marks a result that holds text neither Kelpie nor the owner wrote, the turn keeps the mark,
 // and each later call of a tool that changes something without a yes of its own waits for the
 // owner's confirmation.
@@ -563,7 +563,7 @@ describe("a turn that read outside content", () => {
   });
 });
 
-describe("the gate (ADR-0063)", () => {
+describe("the gate (ADR-0064)", () => {
   const writer: Tool = {
     spec: { name: "memory_write", description: "Saves.", inputSchema: { type: "object" } },
     label: {

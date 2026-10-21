@@ -20,7 +20,7 @@ import { TOOL_OUTPUT_MAX_CHARS, type Tool, type ToolOutcome, type ToolProvider }
 // read the runner through channel-egress's RunnerSessions, which only reads. A session's title,
 // repository, branch and excerpt are its own text, untrusted: the tool fences them as data, and
 // marks its result as outside content, so the turn asks the owner before it changes anything
-// (ADR-0063); the notice shows a title and a repository as plain text on one line.
+// (ADR-0064); the notice shows a title and a repository as plain text on one line.
 
 const SPEC = {
   name: "vps_sessions",
@@ -46,7 +46,7 @@ const NOT_TYPED = failed(
 /**
  * Master's tool that lists the VPS's sessions (ADR-0057 §5). Only the agent whose Registry role is
  * `master` gets it, as its configuration tools (ADR-0048); a task's run never does; and only a turn
- * the owner typed may run it (ADR-0063): a turn Kelpie's note started still lists it, so its tools
+ * the owner typed may run it (ADR-0064): a turn Kelpie's note started still lists it, so its tools
  * don't change with what started it. Kelpie keeps no copy: each call asks the runner (ADR-0057 §3).
  */
 export function vpsSessionsTools(
@@ -162,7 +162,7 @@ interface Entry {
  * text between marks named with a random id that text can't hold. Past a tool's output, the waits
  * and the working sessions keep their place and their last reply first; then come the others,
  * without theirs, while they fit; then their last replies, in order, each that still fits.
- * `outside` says whether the list shows any session's own text (ADR-0063).
+ * `outside` says whether the list shows any session's own text (ADR-0064).
  */
 function sessionsList({ now, sessions, truncated }: RunnerVpsSessions): {
   text: string;

@@ -50,7 +50,7 @@ export interface ConfirmationRequest {
   command: string;
   /**
    * Its input as the command takes it, after parsing: the yes is for exactly this. A call held
-   * after outside content (ADR-0063) passes the model's raw JSON input instead.
+   * after outside content (ADR-0064) passes the model's raw JSON input instead.
    */
   input: unknown;
   /**
@@ -251,7 +251,7 @@ export interface ToolOutcome {
   output: string;
   isError?: boolean;
   /**
-   * The output holds outside content (ADR-0063): text that neither Kelpie, its code or its agents,
+   * The output holds outside content (ADR-0064): text that neither Kelpie, its code or its agents,
    * nor the owner wrote, such as a VPS session's title. The turn then asks the owner before any
    * change. The mark never reaches the result that history keeps.
    */
@@ -271,7 +271,7 @@ export interface Tool {
    */
   activity?: ToolActivity;
   /**
-   * What a call does (ADR-0063): it only reads, or it asks for the owner's own act before each
+   * What a call does (ADR-0064): it only reads, or it asks for the owner's own act before each
    * change, through a confirmation, a form or a proposal's page. A tool that declares neither
    * changes something with no yes, so a turn that read outside content asks the owner before it
    * runs: a new tool is held until it says otherwise.
@@ -317,7 +317,7 @@ export function labelIn(label: Tool["label"], locale: Locale): string {
 
 /**
  * A call's result, as history and the route keep it, and beside it whether its output holds
- * outside content (ADR-0063), which only the turn keeps.
+ * outside content (ADR-0064), which only the turn keeps.
  */
 export interface ToolRun {
   result: ToolResult;

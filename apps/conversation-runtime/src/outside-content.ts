@@ -11,7 +11,7 @@ import {
   visible,
 } from "./tools.ts";
 
-// A turn that read outside content asks the owner before it changes anything (ADR-0063, #454).
+// A turn that read outside content asks the owner before it changes anything (ADR-0064, #454).
 // Outside content is text that neither Kelpie, its code or its agents, nor the owner wrote, such as
 // a VPS session's title: a tool marks the result that holds it, and the turn keeps the mark. From
 // then on, each call of a tool that changes something with no yes of its own waits for the

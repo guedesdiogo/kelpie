@@ -2095,7 +2095,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     let context: ToolContext | undefined;
     let last = false;
     let pendingContext = memory;
-    // Whether the turn read outside content (ADR-0063): from then on, a change waits for the owner.
+    // Whether the turn read outside content (ADR-0064): from then on, a change waits for the owner.
     let outside = this.#outsideAtStart(turn);
     const flight = this.#inFlight.get(turn.id);
     // A new message, a pause or a failure settled the turn: nothing more of it may start, though
@@ -2182,7 +2182,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       );
       progress.running = toolCall.id;
       // After outside content, a tool that changes something with no yes of its own runs only on
-      // the owner's (ADR-0063): the call is held, and asks them first.
+      // the owner's (ADR-0064): the call is held, and asks them first.
       const userId = context.actor.userId;
       const ran = await this.#runWithin(
         outside && tool !== undefined && changes(tool)
@@ -2574,7 +2574,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   }
 
   /**
-   * Whether the turn starts marked as having read outside content (ADR-0063), worked out again at
+   * Whether the turn starts marked as having read outside content (ADR-0064), worked out again at
    * each start, so an eviction gets the same answer. Only a turn's own read writes the mark; it
    * holds too while, when the turn started:
    * - a turn that read some had started or run within OUTSIDE_WINDOW_MS, or a change a turn held
@@ -2643,7 +2643,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   }
 
   /**
-   * Whether a held call may ask the owner (ADR-0063): it asks again for a change already waiting
+   * Whether a held call may ask the owner (ADR-0064): it asks again for a change already waiting
    * for the same yes, and a turn holds at most MAX_HELD changes open at once, so no code is made
    * past them.
    */
@@ -3011,7 +3011,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
               role: row.role === "user" ? ("user" as const) : ("assistant" as const),
               speaker: row.role === "user" ? (row.userId ?? "someone") : agentId,
               // A reply whose turn read outside content may quote it: Kelpie's line takes its
-              // place, and the owner's words stay (ADR-0063).
+              // place, and the owner's words stay (ADR-0064).
               text:
                 row.role === "user"
                   ? withoutTypedStamps(messageText(row.message))
@@ -3982,7 +3982,7 @@ function summaryInput(
     userId: string | null;
     message: ChatMessage;
     fromKelpie?: boolean | null;
-    /** The row's turn read outside content (ADR-0063). */
+    /** The row's turn read outside content (ADR-0064). */
     outside?: boolean | null;
   }[],
 ): string {

@@ -36,7 +36,7 @@ export interface TaskToolPorts {
 
 /**
  * The tools a task's run ends its own task with. A turn that read outside content doesn't hold them
- * (ADR-0063): they change only the run's own task, whose news its creator hears.
+ * (ADR-0064): they change only the run's own task, whose news its creator hears.
  */
 export const RUN_ENDS: ReadonlySet<string> = new Set([
   "complete_task",

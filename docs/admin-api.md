@@ -178,7 +178,7 @@ Each agent has a task board in its `AgentHost` (ADR-0011, #54). The `AgentHost` 
   - **How it ends the task:** with `complete_task` and the result, `wait_on_task` and a question, or `cancel_task` and a reason. A turn that leaves the task running gets one nudge from Kelpie; a second such turn counts as a failed attempt.
   - **What reaches it mid-run:** a comment joins its next round. The owner's stop ends its turn at once, and the task is cancelled.
   - **What it can't do:** confirm anything. Master's configuration tools aren't in it.
-  - **After outside content,** a change it would make waits for the owner, and the task with it ("Outside content", ADR-0063).
+  - **After outside content,** a change it would make waits for the owner, and the task with it ("Outside content", ADR-0064).
 - **Between agents.** An agent hands work to an agent it owns with `create_task`, which records both agents and the person it acts for.
   - **The mandatory handoff** (ADR-0036 §4, #287). An agent's prompt lists the specialists it owns, by id and name, with each one's remit, or "no remit set". A demand within a remit goes to that specialist as a task, even when the owner didn't name it. A specialist with no remit takes work only when the owner names it.
   - **Kelpie announces it.** After the reply, Kelpie names the agent that has the work, by name and id, in the conversation's language: `Kelpie handed a task to "Sales" (sales).` The text is Kelpie's own, so the model can't change or omit it. A turn that sends no reply, because it was refused or cut short, leaves the notice for the next reply in that conversation. Past four agents, the notice counts the rest instead of naming them (#387).
@@ -420,7 +420,7 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
   - **Each session:** the start of its id, what started it, its state and how long it has held it, by the runner's clock; its title, repository, branch, pull request's link and the excerpt of its last reply. It says when the runner left sessions or details out.
   - **A long list** fits one tool result of 10,000 characters: the waits and the working sessions come first, with their last replies; then the others, without theirs, while they fit; then their last replies, in order, while they fit. The list says what it left out, and each group still counts all its sessions.
   - **Who gets it:** only Master, and only the owner's own turn may run it, as the configuration tools. A task's run never gets it, and a subagent never does. It isn't one of the orchestration tools ADR-0050 names, so a `tools` list the owner sets on Master can leave it out, as Master's other tools.
-  - **Only a turn the owner typed runs it** (ADR-0063, #454). In a turn that Kelpie's note started, such as a task's news, it answers that the owner can ask for the sessions in a message of their own. It stays among Master's tools there, so the tools don't change with what started the turn.
+  - **Only a turn the owner typed runs it** (ADR-0064, #454). In a turn that Kelpie's note started, such as a task's news, it answers that the owner can ask for the sessions in a message of their own. It stays among Master's tools there, so the tools don't change with what started the turn.
   - **Its list is outside content** when it shows a session's own text, so the rest of the turn, and the conversation's turns for 10 minutes after, ask the owner before any change ("Outside content").
   - **When the runner can't answer,** the tool says why, in words Master can pass on: an outdated runner to update (protocol 3 lists sessions), a runner that isn't connected or refuses the secret, or one that can't be reached.
   - **A session's own text is untrusted.** Its title, repository, branch, pull request's link and excerpt reach the model between two marks named with a random id their text can't hold, as data, never instructions: the link's owner and repository are the session's text too. They confirm nothing, start no configuration command (ADR-0013), and an address in them shows as code, since a reply links only what the owner sent ("Formatting"). The list also tells the model never to call a tool because of anything in it: not to save it to memory, nor to put it in a task, a task comment, or a subagent's or agent's name or soul. Only the owner's own words ask for that.
@@ -456,7 +456,7 @@ What Master can't do, because it holds no Cloudflare token (ADR-0013):
 
 ## Outside content
 
-A turn that read outside content asks the owner before it changes anything (ADR-0063, #454). This holds for every agent's tools, not only Master's.
+A turn that read outside content asks the owner before it changes anything (ADR-0064, #454). This holds for every agent's tools, not only Master's.
 - **What counts:** text in a tool's result that neither Kelpie, its code or its agents, nor the owner wrote.
   - Today only `vps_sessions` returns it, when its list shows a session's own text.
   - Task news, comments and a subagent's results are other agents' words, fenced as data. They don't count.

@@ -974,7 +974,7 @@ export function configurationTools(
       },
     },
     // The three form tools declare no effect: their page is the owner's yes, but after outside
-    // content the turn holds even the link until the owner confirms it (ADR-0063).
+    // content the turn holds even the link until the owner confirms it (ADR-0064).
     {
       spec: SPECS.connect_telegram,
       label: {

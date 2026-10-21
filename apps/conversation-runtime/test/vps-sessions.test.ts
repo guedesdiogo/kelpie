@@ -785,7 +785,7 @@ describe("the tool's result in the conversation", () => {
     await stub.compact();
     const summarized = JSON.stringify(world.requests.at(-1)?.messages ?? []);
     // The reply of the turn that read the sessions may quote them: Kelpie's line takes its place
-    // (ADR-0063). The owner's words stay.
+    // (ADR-0064). The owner's words stay.
     expect(summarized).toContain("o que está rolando na VPS?");
     expect(summarized).toContain(OUTSIDE_REPLY_LEFT_OUT);
     expect(summarized).not.toContain("One session waits on your permission.");

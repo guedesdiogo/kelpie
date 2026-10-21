@@ -96,7 +96,7 @@ export const turns = sqliteTable("turns", {
    */
   links: text("links", { mode: "json" }).$type<HostLink[]>(),
   /**
-   * The turn read outside content (ADR-0063): a tool's result held text that neither Kelpie nor
+   * The turn read outside content (ADR-0064): a tool's result held text that neither Kelpie nor
    * the owner wrote, or, for a turn no person typed, its history held a turn that read some. From
    * then on its changes wait for the owner. Written as soon as it is known, so an eviction keeps it.
    */
