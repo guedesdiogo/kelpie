@@ -157,6 +157,30 @@ describe("parseSpoolLine", () => {
     });
   });
 
+  it("takes a subagent's id, or a subagent of unknown id, and reads a line with neither as the main thread's", () => {
+    // A line from before #482, as the main thread's line still is.
+    const main = { at: NOW, event: "PostToolUse", session: SESSION_A };
+    const subagent = { ...main, agent: "a1b2c3d4e5f6a7b8" };
+    const unknown = { ...main, agent: null };
+    expect(parseSpoolLine(JSON.stringify(subagent))).toStrictEqual(subagent);
+    expect(parseSpoolLine(JSON.stringify(unknown))).toStrictEqual(unknown);
+    expect(parseSpoolLine(JSON.stringify(main))).toStrictEqual(main);
+  });
+
+  it.each([
+    ["too long", "a".repeat(65)],
+    ["empty", ""],
+    ["with odd characters", "a b/c"],
+    ["a number", 7],
+    ["true", true],
+  ])(
+    "reads a subagent's id that isn't a short token, %s, as a subagent of unknown id",
+    (_, agent) => {
+      const line = { at: NOW, event: "PostToolUse", session: SESSION_A, agent };
+      expect(parseSpoolLine(JSON.stringify(line))).toStrictEqual({ ...line, agent: null });
+    },
+  );
+
   it.each([
     ["not JSON", "{"],
     ["null", "null"],
