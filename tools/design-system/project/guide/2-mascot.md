@@ -69,7 +69,7 @@ Moment for its states, frequent for its life in place ([ADR-0045](https://github
 - **A figure that doesn't fit even at rest gets its own taller frame,** on the same ground. "At rest" counts the gestures' tilts, up to 9° either way. The kelp leaf on most shapes and the tallest heads on `drop` get one. That figure draws smaller and barely hops.
 - **Master keeps clear headroom:** about 6 px above its ears at 48 px, and 23 px at 160.
 
-**What shows beside the figure** ([ADR-0064](https://github.com/guedesdiogo/kelpie/blob/main/docs/adr/0064-mascot-effects-float-over-kept-margin.md)).
+**What shows beside the figure** ([ADR-0065](https://github.com/guedesdiogo/kelpie/blob/main/docs/adr/0065-mascot-effects-float-over-kept-margin.md)).
 - **The speech bubble, the badge, the thinking bubbles, the sparks and the "z"s float beside the figure,** past its frame on purpose. They aren't part of the figure, so the frame and its cuts don't hold them.
 - **They never hop with it.**
   - The thinking bubbles, the sparks and the "z"s draw in a layer of their own. It takes the state's pose, its tilt and its squash, but not the hops, the breath or the gestures.
