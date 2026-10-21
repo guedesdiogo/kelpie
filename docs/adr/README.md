@@ -68,6 +68,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0062](0062-logo-takes-the-kelpie-ear.md) | Kelpie's logo takes the kelpie's pointed ear, and Master starts with it | [#464](https://github.com/guedesdiogo/kelpie/issues/464) |
 | [0063](0063-mascot-frame-holds-every-hop.md) | The mascot's frame holds every figure and every hop | [#474](https://github.com/guedesdiogo/kelpie/issues/474) |
 | [0064](0064-outside-content-asks.md) | A turn that read outside content asks the owner before it changes anything | [#454](https://github.com/guedesdiogo/kelpie/issues/454) |
+| [0065](0065-mascot-effects-float-over-kept-margin.md) | What shows beside the mascot floats over a margin its host keeps | [#481](https://github.com/guedesdiogo/kelpie/issues/481) |
 
 ## Format
 

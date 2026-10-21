@@ -13,6 +13,7 @@
 - Amended by: [ADR-0056](0056-agent-editor-and-random-mascot.md), a new agent starts with a random mascot saved as its setting, and the owner changes it in the webchat's editor too (§2)
 - Amended by: [ADR-0062](0062-logo-takes-the-kelpie-ear.md), the main agent starts with a kelpie's pointed ears (§2)
 - Amended by: [ADR-0063](0063-mascot-frame-holds-every-hop.md), every mascot draws in a taller frame, and every motion that lifts it is cut to the room above it (§4); the fur is painted at the frame's scale (§8)
+- Amended by: [ADR-0065](0065-mascot-effects-float-over-kept-margin.md), what shows beside the figure (the bubble, the badge, the sparks, the thinking bubbles and the "z") floats past the box over a margin its host keeps, and never hops with it (§4, §10)
 - Amends: [ADR-0043](0043-design-system.md), how an agent looks (§6) and an exception to motion rule 8 for the mascot; [ADR-0024](0024-fixed-wait-end-of-turn.md), the mascot also listens during the wait where its bar shows (§5); and `docs/design-system.md` §4.4 rule 8 and §5.9, an idle agent in the roster
 
 ## Context

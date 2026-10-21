@@ -632,14 +632,32 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 
 **The frame** ([ADR-0063](adr/0063-mascot-frame-holds-every-hop.md)).
 - **Every mascot draws in `viewBox="4 2 112 112"`** on its 120 grid. The ground is at y 114 and the middle at x 60, as before, so the figure is 89% of its box and the body fills about 64% of it.
-- **Everything happens inside the frame.** Every motion that lifts the figure is cut to the room above it.
+- **The figure stays inside the frame.** Every motion that lifts it is cut to the room above it.
   - **The motions:** the hops, the stretch, the yawn, waking up, the editor's drop-in and a shape's rebound.
   - **The room** runs from the figure's top, fur included, to 1 grid unit below the frame's top. The state's pose and breath count at their deepest, and so does the pose's tilt. The mittens the stretch and a call for help raise above the head count too.
   - **A cut hop** lifts, squashes and shrinks its shadow by the same share, so it still reads as a hop. A motion that fits plays in full.
   - **Tall heads hop lower:** Master's Approved jump keeps about half its height, and its idle hop nearly all of it.
 - **A figure that doesn't fit even at rest gets its own taller frame,** on the same ground. "At rest" counts the gestures' tilts, up to 9° either way. The kelp leaf on most shapes and the tallest heads on `drop` get one. That figure draws smaller and barely hops.
 - **Master keeps clear headroom:** about 6 px above its ears at 48 px, and 23 px at 160.
-- **What shows beside the figure isn't held yet.** The bubble, the badge, the sparks, the thinking bubbles and the "z" can still leave the frame on tall shapes.
+
+**What shows beside the figure** ([ADR-0065](adr/0065-mascot-effects-float-over-kept-margin.md)).
+- **The speech bubble, the badge, the thinking bubbles, the sparks and the "z"s float beside the figure,** past its frame on purpose. They aren't part of the figure, so the frame and its cuts don't hold them.
+- **They never hop with it.**
+  - The thinking bubbles, the sparks and the "z"s draw in a layer of their own. It takes the state's pose, its tilt and its squash, but not the hops, the breath or the gestures.
+  - The bubble and the badge sit outside the hop too.
+  - The sweat drop sits on the face, and moves with it.
+- **Their own motion plays in full:** the bubble's pop, bob and pulse, the badge's pop and ring, the thinking bubbles' rise and the sparks' pop.
+- **Each host keeps a margin around the box for what it shows.** It is `MARGIN` in `mascot-art.js`, the most any effect reaches past the box on every shape and eye:
+
+  | Size | Above | Right | Below |
+  |---|---|---|---|
+  | 36 px | 5.5 px | 4.3 px | 4.7 px |
+  | 48 px | 7.3 px | 5.8 px | none |
+  | 160 px | 24.3 px | 15 px | none |
+
+  - The header keeps 12 px above its box and before the name, and a roster row 7 px above and below.
+  - A host that shows only some effects needs less: the editor's stage shows the sparks and the "z", and needs 6.8 px above its 160 px box.
+  - A new host keeps the margin of its size for what it shows, or shows less.
 
 **Sizes.**
 
@@ -648,7 +666,7 @@ Moment for its states, frequent for its life in place ([ADR-0045](adr/0045-agent
 | Roster | 36 px | no mouth or brows, eyes 15% larger, no mittens; a glossy badge with a `--surface` ring takes the bubble's place: `--warm` for waiting, `--danger` for error, `--accent` with the tool's icon for working, `--muted` for offline. One gesture at a time across the list, every 7 to 16 s, never a hop |
 | Switcher list (5.21) | 36 px | the Idle pose, still, with no badge: the list is open for a moment and carries no state |
 | Task card (5.5) | 20 px | the shape, the color and the eyes only: no head, accessory, mittens or badge; still, since the card already says the state. The engine draws a badge at every size up to 40 px today, so the board needs that changed |
-| Conversation header | 48 px | its home. Everything happens inside its box; the box is kept before the figure arrives, so nothing moves when it does. Its pups stand in a row after the box, and the name slides to make room (5.6, ADR-0053) |
+| Conversation header | 48 px | its home. The figure moves inside its box, and what shows beside it in the margin the header keeps; the box is kept before the figure arrives, so nothing moves when it does. Its pups stand in a row after the box, and the name slides to make room (5.6, ADR-0053) |
 | Empty conversation, profile, the expired-login dialog (5.12) | 160 px | gestures a little more often |
 | Pups (5.6) | 40% of the parent: 20 px in the conversation's header, 64 px on the profile | in the header, the shape, the head, the lighter color and dot eyes, breathing, blinking and announcing only, with 5.9's triangle above a failed one and no badge; on the profile, the full face of the 48 px row; left-aligned beside the parent, closing up as they come back; none while the page is Offline |
 | Telegram bot photo | 800 px square, cropped round by Telegram | a still, and a loop Telegram plays (below) |
@@ -1007,6 +1025,11 @@ The rules above cite these. The first set was read on 2026-10-15; a source added
   - [Material 3's loading indicator](https://github.com/androidx/androidx/blob/9961ff3c7890a1dd4b001fb867f895278d65a4b0/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/LoadingIndicator.kt#L282-L307), one scale from every shape's largest bounds in motion;
   - [Rive's artboards](https://rive.app/docs/editor/fundamentals/artboards) and [lottie-web's composition clip](https://github.com/airbnb/lottie-web/blob/bede03d25d232826e0c9dca1733d542d8a7754fb/player/js/renderers/SVGRendererBase.js#L88-L97), headroom drawn inside the canvas;
   - [blobatar's motion](https://github.com/Alain00/blobatar/blob/8436285ae837c72b02a49310d10c382608de096b/packages/blobatar/src/expression.ts#L46-L56), squash removed because it broke the frame.
+- What shows beside the mascot ([ADR-0065](adr/0065-mascot-effects-float-over-kept-margin.md)), read on 2026-10-21; the findings, the browser's measurement and the reference-project check are on #481:
+  - [Hermes Agent's pet bubble](https://github.com/NousResearch/hermes-agent/blob/7dcb1b4cfdb88fe870aab3b4fe13041a11207d15/apps/desktop/src/components/pet/pet-bubble.tsx#L203-L232) and [hearts](https://github.com/NousResearch/hermes-agent/blob/7dcb1b4cfdb88fe870aab3b4fe13041a11207d15/apps/desktop/src/components/chat/vibe-hearts.tsx#L27-L37), layers the host places over room it keeps;
+  - [Fluent 2's avatar ring](https://github.com/microsoft/fluentui/blob/de1d16969e9017dc3d0784783d94d6eb83583ac3/packages/react-components/react-avatar/library/src/components/Avatar/useAvatarStyles.styles.ts#L36-L57), outside the box on purpose, and [its presence badge](https://github.com/microsoft/fluentui/blob/de1d16969e9017dc3d0784783d94d6eb83583ac3/packages/react-components/react-avatar/library/src/components/Avatar/useAvatarStyles.styles.ts#L181-L224), inside it;
+  - [Material 3's badge](https://github.com/androidx/androidx/blob/2e1a16243ae2c9284445a746f1d487c73af92623/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/Badge.kt#L94-L127), which hangs past its anchor without moving the layout;
+  - [Telegram's premium sticker effect](https://core.telegram.org/api/stickers#premium-animated-sticker-effects), a one-off layer larger than the sticker.
 - The offline state ([ADR-0047](adr/0047-mascot-offline.md)), read on 2026-10-16; the findings are on #380:
   - [Chrome's offline dinosaur](https://blog.google/products/chrome/chrome-dino/), kept for offline only;
   - [Telegram's presence line](https://github.com/DrKLO/Telegram/blob/f32ffeec763f0bdbf4bec25b52d654f77bff733d/TMessagesProj/src/main/java/org/telegram/ui/Components/ChatAvatarContainer.java#L1582-L1620), replaced while it waits for the network;
