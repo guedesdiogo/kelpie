@@ -111,7 +111,7 @@ No single option kept every figure inside without a large cost:
 - **The fur is painted at the frame's scale,** `px / 112`, so it keeps the density it had on screen.
 - **What shows beside the figure isn't covered:** the speech bubble, the badge, the sparks, the thinking bubbles and the "z"s.
   - They hop with it, and on tall shapes some still leave the frame. The thinking bubbles reach y −9.6 on `drop`, against the frame's y 2. The speech bubble reaches x 117.6 on `mark` at 48 px, against the frame's right edge at x 116.
-  - A follow-up decides whether they move inside or keep floating beside the figure.
+  - A follow-up, [#481](https://github.com/guedesdiogo/kelpie/issues/481), decides whether they move inside or keep floating beside the figure.
 - **A new head is covered automatically.** The engine reads its height from what it draws, and the test covers it.
 
 ## Alternatives considered

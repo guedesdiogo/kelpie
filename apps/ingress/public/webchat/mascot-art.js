@@ -246,10 +246,11 @@ function pointsOf(svg) {
 }
 
 /**
- * The highest those points reach as they turn about `pivot` from `low` to `high` degrees: a degree
- * apart, both ends included.
+ * The highest those points reach as the figure tilts about its feet from `low` to `high` degrees:
+ * a degree apart, both ends included.
  */
-function crownOf(reached, low, high, [px, py] = [FRAME.x + FRAME.size / 2, GROUND]) {
+function crownOf(reached, low, high) {
+  const [px, py] = [FRAME.x + FRAME.size / 2, GROUND];
   let top = Number.POSITIVE_INFINITY;
   const angles = Array.from({ length: Math.floor(high - low) + 1 }, (_, i) => low + i);
   for (const degrees of [...angles, high]) {
@@ -261,7 +262,10 @@ function crownOf(reached, low, high, [px, py] = [FRAME.x + FRAME.size / 2, GROUN
   return top;
 }
 
-/** What the frame measured of each figure, by what it draws: a figure is drawn again and again. */
+/**
+ * What the frame measured of each figure, by what it draws less its mascot's own ids: a figure is
+ * drawn again and again.
+ */
 const MEASURED = new Map();
 
 /**
@@ -977,11 +981,12 @@ export function buildMascot(mascot, { uid, px, hex, work = true, hands = true })
   // The figure: its body, its head and what it wears, which every motion keeps in the frame. Its
   // top, upright or tilting between two angles; the frame holds it at rest at every tilt.
   const figure = backHard + backEars + body + frontEars + lower + onTop;
-  if (!MEASURED.has(figure)) {
+  const key = figure.replace(/#m[cg]\d+\)/g, ")");
+  if (!MEASURED.has(key)) {
     if (MEASURED.size >= 256) MEASURED.clear();
-    MEASURED.set(figure, pointsOf(figure));
+    MEASURED.set(key, pointsOf(figure));
   }
-  const reached = MEASURED.get(figure);
+  const reached = MEASURED.get(key);
   const crown = (low = 0, high = 0) => crownOf(reached, low, high);
   const frame = frameOf(crown(-TILT, TILT));
   const html =

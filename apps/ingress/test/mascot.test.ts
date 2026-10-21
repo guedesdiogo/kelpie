@@ -427,6 +427,17 @@ describe("the frame (ADR-0063)", () => {
     expect(crown(-TILT, TILT)).toBeLessThan(top);
   });
 
+  it("waves each raised mitten outward, which lifts its tip", () => {
+    const { anchors } = build(KELPIE_MASCOT);
+    const [left, right] = [handSpot("upL", anchors) ?? [], handSpot("upR", anchors) ?? []];
+    expect(mittenTop(right, 22)).toBeLessThan(mittenTop(right, 0));
+    expect(mittenTop(right, -22)).toBeCloseTo(mittenTop(right, 0));
+    expect(mittenTop(left, -22, true)).toBeLessThan(mittenTop(left, 0, true));
+    expect(mittenTop(left, 22, true)).toBeCloseTo(mittenTop(left, 0, true));
+    // The two hands mirror each other.
+    expect(mittenTop(left, -22, true)).toBeCloseTo(mittenTop(right, 22), 0);
+  });
+
   it("cuts a motion to the room above the figure", () => {
     // Room for all of it, none of it, and half of it.
     expect(liftShare(60, FRAME.y, 1, 10)).toBe(1);

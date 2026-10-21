@@ -152,12 +152,24 @@ describe("the mascot's frame, as the engine plays it (ADR-0063)", () => {
   });
 
   it("counts the mittens a call for help raises above the head", () => {
-    const { mascot, highest, ceiling } = play("bare", "error", (m) => {
-      m.callHelp();
-      return m.raised(22);
-    });
-    expect(mascot.raised(22)).toBeLessThan(mascot.top());
-    expect(highest).toBeGreaterThanOrEqual(ceiling - 1e-6);
+    // Bare, the mittens have room to spare; with a tall head or a hat, they set the hop.
+    for (const name of ["bare", "master", "antennae", "hat"]) {
+      const { mascot, highest, ceiling } = play(name, "error", (m) => {
+        m.callHelp();
+        return m.raised(22);
+      });
+      // Master's ears stand higher than its raised mittens; the others' mittens set their top.
+      const above = mascot.raised(0) < mascot.top();
+      expect(above, name).toBe(name !== "master");
+      // Each mitten waves outward, which lifts its tip.
+      if (above) expect(mascot.raised(22), name).toBeLessThan(mascot.raised(0));
+      expect(highest, name).toBeGreaterThanOrEqual(ceiling - 1e-6);
+    }
+  });
+
+  it("has no mittens to raise in a roster row", () => {
+    const { mascot } = play("antennae", "error", (m) => m.top(), { px: 36, mode: "list" });
+    expect(mascot.raised(22)).toBe(mascot.top());
   });
 
   it("cuts the stretch, with its raised mittens, to the room above them", () => {
