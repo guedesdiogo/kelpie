@@ -6,17 +6,18 @@
 export const REDACTED = "[redacted]";
 
 // Every pattern runs in linear time: a name is at most 64 characters and starts where no name
-// character comes before it, values and users are bounded, and every run that could start
-// anywhere has a lookbehind that lets it start only once. A reply of tens of kilobytes then costs
-// milliseconds, never seconds.
+// character comes before it, values, users and the lines a value takes are bounded, and every run
+// that could start anywhere has a lookbehind that lets it start only once. A reply of tens of
+// kilobytes then costs milliseconds, never seconds.
 
 /**
  * The words in a name that say it holds a secret, in any case. Not `tokens`, a count, nor
- * `author`, nor `passed`, `passing` and `passes`, nor a flag that starts `passWith`; and not the
+ * `author`, `authority`, `authors`, `authorized` and `authorize`, though `Authorization` and `Proxy-Authorization` say auth
+ * (#458), nor `passed`, `passing` and `passes`, nor a flag that starts `passWith`; and not the
  * shell's `PWD` and `OLDPWD`, which hold folders.
  */
 const SECRET_WORDS =
-  "key|token(?!s)|secret|pass(?!(?:ed|ing|es)(?![A-Za-z0-9])|with)|pwd|credential|auth(?!or)|cookie|dsn|signature";
+  "key|token(?!s)|secret|pass(?!(?:ed|ing|es)(?![A-Za-z0-9])|with)|pwd|credential|auth(?!or(?!ization))|cookie|dsn|signature";
 const NAME_CHAR = "[A-Za-z0-9_.-]";
 /** A name of up to 64 characters, taken whole, that says it holds a secret. */
 const NAME = `(?!(?:old)?pwd(?!${NAME_CHAR}))(?=${NAME_CHAR}{0,63}?(?:${SECRET_WORDS}))[A-Za-z_]${NAME_CHAR}{0,63}(?!${NAME_CHAR})`;
@@ -38,14 +39,41 @@ const ASSIGN = "[ \\t]{0,8}=(?![=>])";
 const VALUE = `(?:"[^"\\n]{0,1024}"?|'[^'\\n]{0,1024}'?|[^\\s"']{1,1024})`;
 /** The schemes an `Authorization` value starts with, kept in front of what is redacted. */
 const SCHEME = /^(?:Basic|Bearer|Digest|Token|Negotiate)[ \t]+/i;
-/** What a name holds when it only says a type, or nothing: code, not a secret. */
-const NO_SECRET = /^(?:string|number|boolean|null|undefined|true|false|unknown|any|never)\b/;
+/**
+ * What a name holds when it only says a type, maybe an array's or optional, up to where the type
+ * ends: code, not a secret. A value that only starts with one, as `any-secret`, goes (#458).
+ */
+const NO_SECRET =
+  /^(?:string|number|boolean|null|undefined|true|false|unknown|any|never)(?:\[\]|\?)?[ \t]*(?:[;,)|=]|\r?$)/;
+/** A YAML block scalar's indicator, as `|`, `>-` or `|2+`: the value is on the lines below. */
+const BLOCK = "[|>][1-9+-]{0,2}";
+/** What a name holds when it only says its value is on the lines below. */
+const BLOCK_ONLY = new RegExp(`^${BLOCK}[ \\t]*\\r?$`);
 
 /** A line that is `NAME=value`, maybe exported: its whole value goes, to the line's end. */
 const SECRET_LINE = new RegExp(
   `^([ \\t]{0,64}(?:export[ \\t]{1,8})?${NAME}${ASSIGN})[^\\n]*`,
   "gim",
 );
+/**
+ * A YAML name, maybe a list's item, whose value is on the lines below it (#458): each more
+ * indented than the name's line, `\2`, by 1 to 8 spaces or tabs, 20 lines at most. The value
+ * goes, its first line's indent stays.
+ */
+function secretBelow(indicator: string, line: string): RegExp {
+  const below = "\\r?\\n\\2[ \\t]{1,8}";
+  return new RegExp(
+    `^(([ \\t]{0,64})(?:-[ \\t]{1,8})?${NAME}[ \\t]{0,8}:${indicator}[ \\t]{0,8}${below})${line}(?:${below}${line}){0,19}`,
+    "gim",
+  );
+}
+/** After a block indicator, every line below is the value, whatever it looks like. */
+const SECRET_BLOCK = secretBelow(`[ \\t]{0,8}${BLOCK}`, "\\S[^\\n]*");
+/**
+ * After nothing, a plain value that runs on, up to a line that is a nested mapping's
+ * `key: value` or a list's `- item`.
+ */
+const SECRET_BELOW = secretBelow("", "(?=[^\\s-]|-\\S)(?![^\\n]*:(?:[ \\t]|$))[^\\n]+");
 /**
  * A YAML or header line, `name: value`, maybe a list's item, with a space after the colon or
  * none (#441): its value goes.
@@ -124,8 +152,8 @@ const BASE64 = /[A-Za-z0-9+/_-]{32,}={0,2}/g;
  * - each of `secrets`, by value;
  * - PEM blocks;
  * - the value of a name that says key, token, secret, pass, pwd, credential, auth, cookie, dsn or
- *   signature: `NAME=value`, `--name value`, `name: value` on a line of its own, `"name": value`,
- *   and a quoted header;
+ *   signature: `NAME=value`, `--name value`, `name: value` on a line of its own or on the
+ *   more-indented lines below it, `"name": value`, and a quoted header;
  * - a URL's password, curl's `-u user:password`, bearer and basic tokens, a Slack webhook's path;
  * - keys of a known format, and long runs of hex, but a commit's SHA, or of base64, but a path.
  */
@@ -137,8 +165,13 @@ export function redact(text: string, secrets: readonly string[] = []): string {
   redacted = redacted
     .replace(PEM, REDACTED)
     .replace(SECRET_LINE, `$1${REDACTED}`)
+    .replace(SECRET_BLOCK, `$1${REDACTED}`)
+    .replace(SECRET_BELOW, `$1${REDACTED}`)
     .replace(SECRET_FIELD, (field, lead: string, name: string, value: string) =>
-      value.trim() === "" || NO_SECRET.test(value) || (STATUS_NAME.test(name) && STATUS.test(value))
+      value.trim() === "" ||
+      NO_SECRET.test(value) ||
+      BLOCK_ONLY.test(value) ||
+      (STATUS_NAME.test(name) && STATUS.test(value))
         ? field
         : `${lead}${schemeOf(value)}${REDACTED}`,
     )

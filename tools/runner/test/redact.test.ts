@@ -66,6 +66,12 @@ describe("redact", () => {
     "PWD=/home/owner/Repos/kelpie",
     "OLDPWD=/home/owner",
     "GIT_AUTHOR_NAME=Diogo",
+    "author: Diogo Guedes",
+    // Only `authorization` says auth among its kin: `authorized` and `authorize` say a state.
+    "authorized: yes",
+    "isAuthorized = check()",
+    "authority: https://login.example",
+    "authors: 3",
     // Test results and statuses: pass and auth as words.
     "Passed: 458/458",
     "Pass: all green",
@@ -155,10 +161,72 @@ describe("redact", () => {
   });
 
   it.each([
+    // `Authorization` says auth, though `author` doesn't (#458).
+    ["Authorization: abc123xyz", `Authorization: ${REDACTED}`],
+    ["authorization: hunter2", `authorization: ${REDACTED}`],
+    ["curl -H 'Authorization: abc123xyz' x", `curl -H 'Authorization: ${REDACTED}' x`],
+    ["proxy-authorization:hunter2", `proxy-authorization:${REDACTED}`],
+    // A known scheme stays in front; another is part of the secret.
+    [
+      'Authorization: Digest username="a", response="abc123xyz"',
+      `Authorization: Digest ${REDACTED}`,
+    ],
+    ["Authorization: Negotiate YIIabc123", `Authorization: Negotiate ${REDACTED}`],
+    ["Authorization: ApiKey abc123xyz", `Authorization: ${REDACTED}`],
+  ])("redacts an Authorization header's value, keeping its scheme: %s", (line, expected) => {
+    expect(redact(`before\n${line}\nafter`)).toBe(`before\n${expected}\nafter`);
+  });
+
+  it.each([
+    // A value that only starts with a type word is no type (#458).
+    ["token: any-secret", `token: ${REDACTED}`],
+    ["secret: never!", `secret: ${REDACTED}`],
+    ["pass: null.abc", `pass: ${REDACTED}`],
+    ["password:any-secret", `password:${REDACTED}`],
+  ])("redacts a value that only starts with a type word: %s", (line, expected) => {
+    expect(redact(line)).toBe(expected);
+  });
+
+  it.each([
+    // An empty value or a block indicator puts it on the lines below, more indented (#458).
+    ["password:\n  hunter2", `password:\n  ${REDACTED}`],
+    ["password: |\n  hunter2\n  more", `password: |\n  ${REDACTED}`],
+    ["  - token:\n      abc123", `  - token:\n      ${REDACTED}`],
+    ["api_key: >-\n    abc\n      def", `api_key: >-\n    ${REDACTED}`],
+    ["password:\r\n  hunter2", `password:\r\n  ${REDACTED}`],
+    ["password: |\r\n  hunter2", `password: |\r\n  ${REDACTED}`],
+    ["token:\n  -abc123", `token:\n  ${REDACTED}`],
+    // A plain value runs on up to a line that is a key's.
+    ["password:\n  hunter2\n  more\n  next: x", `password:\n  ${REDACTED}\n  next: x`],
+    // A block's lines are its value, whatever they look like.
+    ["secret: |2+\n  user: admin\n  - item", `secret: |2+\n  ${REDACTED}`],
+    // 20 lines at most, all of a value that long.
+    [`key: |${"\n  line".repeat(20)}`, `key: |\n  ${REDACTED}`],
+  ])("redacts a YAML value on the more-indented lines below its name: %j", (text, expected) => {
+    expect(redact(`before\n${text}\nafter`)).toBe(`before\n${expected}\nafter`);
+  });
+
+  it.each([
+    // A nested mapping or a list isn't a value that runs on, nor a line no more indented.
+    "auth:\n  method: basic",
+    "auth:\n  method:\tbasic",
+    "auth:\n  basic:",
+    "token:\n  - abc",
+    "token:\n  -",
+    "key:\n\ntext",
+    "key:\ntext",
+  ])("leaves a nested mapping, a list, or a line no more indented, below a name: %j", (text) => {
+    expect(redact(text)).toBe(text);
+  });
+
+  it.each([
     "token:",
     "  token: string;",
     "password: boolean,",
     "auth: null",
+    "token: string | null;",
+    "token: string[];",
+    "auth: null\r\nnext",
     "The token: we rotate it",
     "token:   ",
     `token:${" ".repeat(9)}`,
@@ -418,6 +486,10 @@ describe("redact's cost", () => {
     ["-----BEGIN A-----", "-----BEGIN A-----"],
     ["x://:", "x://:"],
     ["commit ", "commit "],
+    // A name with nothing after it, then lines more indented, each a key's or a value's (#458).
+    ["key:\\n ", "key:\n "],
+    ["key: |\\n ", "key: |\n "],
+    ["key:\\n a", "key:\n a"],
   ])("takes linear time on %j: 8 times the text, well under quadratic cost", (_, unit) => {
     const of = (length: number) => unit.repeat(Math.ceil(length / unit.length)).slice(0, length);
     // The best of three runs, after a warm-up, so a pause of the collector doesn't count.
