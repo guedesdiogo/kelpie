@@ -69,6 +69,7 @@ describe("redact", () => {
     "author: Diogo Guedes",
     // Only `authorization` says auth among its kin: `authorized` and `authorize` say a state.
     "authorized: yes",
+    "authorised: yes",
     "isAuthorized = check()",
     "authority: https://login.example",
     "authors: 3",
@@ -165,6 +166,8 @@ describe("redact", () => {
   it.each([
     // `Authorization` says auth, though `author` doesn't (#458).
     ["Authorization: abc123xyz", `Authorization: ${REDACTED}`],
+    // The British spelling too.
+    ["Authorisation: abc123xyz", `Authorisation: ${REDACTED}`],
     ["authorization: hunter2", `authorization: ${REDACTED}`],
     ["curl -H 'Authorization: abc123xyz' x", `curl -H 'Authorization: ${REDACTED}' x`],
     ["proxy-authorization:hunter2", `proxy-authorization:${REDACTED}`],
@@ -231,7 +234,7 @@ describe("redact", () => {
       `password: !vault |\n${" ".repeat(10)}${REDACTED}`,
     ],
     // However many lines.
-    [`key: |${"\n  line".repeat(25)}`, `key: |\n  ${REDACTED}`],
+    [`key: |${"\n  line".repeat(100)}`, `key: |\n  ${REDACTED}`],
   ])("redacts a YAML value on the more-indented lines below its name: %j", (text, expected) => {
     expect(redact(`before\n${text}\nafter`)).toBe(`before\n${expected}\nafter`);
   });
@@ -247,12 +250,21 @@ describe("redact", () => {
     "key:\ntext",
     "key: |\n\ntext",
     "auth:\n\n  method: basic",
+    // Past the 40 spaces a value below a name may take.
+    `password:\n${" ".repeat(41)}hunter2`,
   ])("leaves a nested mapping, a list, or a line no more indented, below a name: %j", (text) => {
     expect(redact(text)).toBe(text);
   });
 
+  it.each([
+    ["a CRLF blank line", "password: |\r\n  hunter2\r\n\r\n  swordfish"],
+    ["a blank line of a tab", "password: |\n\t\n  hunter2\n  swordfish"],
+  ])("redacts a block's lines across %s", (_, text) => {
+    expect(redact(text)).not.toMatch(/hunter2|swordfish/);
+  });
+
   it("redacts a block of any length in one pass, so redacting again changes nothing", () => {
-    const text = `before\nkey: |${"\n  line".repeat(25)}\nafter`;
+    const text = `before\nkey: |${"\n  line".repeat(100)}\nafter`;
     const once = redact(text);
     expect(once).toBe(`before\nkey: |\n  ${REDACTED}\nafter`);
     expect(redact(once)).toBe(once);
@@ -264,6 +276,8 @@ describe("redact", () => {
     "password: boolean,",
     "auth: null",
     "token: string | null;",
+    "token: string | number | null;",
+    "token: string; ",
     "token: string[];",
     "token: string?",
     "secret: unknown)",
@@ -535,29 +549,37 @@ describe("redact's cost", () => {
     // Runs of blank lines below a name, and lines indented past the 40 spaces a value may take.
     ["key: |\\n \\n…", `key: |${"\n ".repeat(40)}`],
     ["key:\\n + 41 spaces + a", `key:\n${" ".repeat(41)}a\n`],
-  ])("takes linear time on %j: 8 times the text, well under quadratic cost", (_, unit) => {
-    const of = (length: number) => unit.repeat(Math.ceil(length / unit.length)).slice(0, length);
-    // The best of three runs, after a warm-up, so a pause of the collector doesn't count.
-    const cost = (text: string) => {
-      let best = Number.POSITIVE_INFINITY;
-      for (let run = 0; run < 3; run += 1) {
-        const started = performance.now();
-        redact(text, ["correct horse battery staple"]);
-        best = Math.min(best, performance.now() - started);
-      }
-      return best;
-    };
-    const small = of(25_000);
-    const large = of(200_000);
-    redact(small);
-    const smallCost = cost(small);
-    const largeCost = cost(large);
-    // Linear costs about 8 times as much on 8 times the text, and quadratic about 64 times; it
-    // took 12 to 60 s on the larger text. The bound sits far from both, and the floor keeps a
-    // sub-millisecond baseline from turning a CI runner's noise into a failure.
-    expect(largeCost / Math.max(smallCost, 5)).toBeLessThan(24);
-    expect(largeCost).toBeLessThan(1_000);
-  });
+    // One long line after a name, of types or of tags and anchors (#458).
+    ["key: string | …", "string | ", "key: "],
+    ["key: !a| …", "!a| ", "key: "],
+    ["key: &a …", "&a ", "key: "],
+  ])(
+    "takes linear time on %j: 8 times the text, well under quadratic cost",
+    (_, unit, head = "") => {
+      const of = (length: number) =>
+        head + unit.repeat(Math.ceil(length / unit.length)).slice(0, length - head.length);
+      // The best of three runs, after a warm-up, so a pause of the collector doesn't count.
+      const cost = (text: string) => {
+        let best = Number.POSITIVE_INFINITY;
+        for (let run = 0; run < 3; run += 1) {
+          const started = performance.now();
+          redact(text, ["correct horse battery staple"]);
+          best = Math.min(best, performance.now() - started);
+        }
+        return best;
+      };
+      const small = of(25_000);
+      const large = of(200_000);
+      redact(small);
+      const smallCost = cost(small);
+      const largeCost = cost(large);
+      // Linear costs about 8 times as much on 8 times the text, and quadratic about 64 times; it
+      // took 12 to 60 s on the larger text. The bound sits far from both, and the floor keeps a
+      // sub-millisecond baseline from turning a CI runner's noise into a failure.
+      expect(largeCost / Math.max(smallCost, 5)).toBeLessThan(24);
+      expect(largeCost).toBeLessThan(1_000);
+    },
+  );
 });
 
 describe("excerptOf", () => {

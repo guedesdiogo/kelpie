@@ -13,12 +13,12 @@ export const REDACTED = "[redacted]";
 
 /**
  * The words in a name that say it holds a secret, in any case. Not `tokens`, a count, nor
- * `author`, `authority`, `authors`, `authorized` and `authorize`, though `Authorization` and
- * `Proxy-Authorization` say auth (#458), nor `passed`, `passing` and `passes`, nor a flag that
+ * `author`, `authority`, `authors`, `authorized` and `authorize`, though `Authorization`,
+ * `Authorisation` and `Proxy-Authorization` say auth (#458), nor `passed`, `passing` and `passes`, nor a flag that
  * starts `passWith`; and not the shell's `PWD` and `OLDPWD`, which hold folders.
  */
 const SECRET_WORDS =
-  "key|token(?!s)|secret|pass(?!(?:ed|ing|es)(?![A-Za-z0-9])|with)|pwd|credential|auth(?!or(?!ization))|cookie|dsn|signature";
+  "key|token(?!s)|secret|pass(?!(?:ed|ing|es)(?![A-Za-z0-9])|with)|pwd|credential|auth(?!or(?!i[sz]ation))|cookie|dsn|signature";
 const NAME_CHAR = "[A-Za-z0-9_.-]";
 /** A name of up to 64 characters, taken whole, that says it holds a secret. */
 const NAME = `(?!(?:old)?pwd(?!${NAME_CHAR}))(?=${NAME_CHAR}{0,63}?(?:${SECRET_WORDS}))[A-Za-z_]${NAME_CHAR}{0,63}(?!${NAME_CHAR})`;
@@ -45,14 +45,18 @@ const TYPE = "(?:string|number|boolean|null|undefined|true|false|unknown|any|nev
 /**
  * What a name holds when it only says a type, or a union of types, then maybe one `;`, `,` or `)`:
  * code, not a secret. A value with anything more, as `any-secret` or `string = "x"`, goes (#458).
+ * The union's repeat is bounded, as are the tags' below: Bun's engine leaves its fast path on an
+ * unbounded group repeated along one line of some hundred kilobytes.
  */
-const NO_SECRET = new RegExp(`^${TYPE}(?:[ \\t]*\\|[ \\t]*${TYPE})*[ \\t]*(?:[;,)][ \\t]*)?\\r?$`);
+const NO_SECRET = new RegExp(
+  `^${TYPE}(?:[ \\t]*\\|[ \\t]*${TYPE}){0,32}[ \\t]*(?:[;,)][ \\t]*)?\\r?$`,
+);
 /**
  * A YAML block scalar's indicator, as `|`, `>-` or `|2+`, maybe after tags and anchors, as
  * `!!binary`, `!vault` or `&a`, and before a comment: the value is on the lines below. A `#` right
  * after the indicator starts no comment.
  */
-const BLOCK = "(?:[&!]\\S+[ \\t]+)*[|>][1-9+-]{0,2}(?:[ \\t]+#[^\\n]*|[ \\t]*)";
+const BLOCK = "(?:[&!]\\S{1,64}[ \\t]+){0,4}[|>][1-9+-]{0,2}(?:[ \\t]+#[^\\n]*|[ \\t]*)";
 /** What a name holds when it only says its value is on the lines below, maybe after spaces. */
 const BLOCK_ONLY = new RegExp(`^[ \\t]*${BLOCK}\\r?$`);
 
