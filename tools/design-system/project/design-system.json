@@ -3,7 +3,7 @@
  "layout": "files",
  "createdOnFiles": {
   "v": 1,
-  "at": "2026-10-16T14:09:43Z"
+  "at": "2026-10-21T00:57:27Z"
  },
  "title": "Kelpie",
  "namespace": "Kelpie",
@@ -55,193 +55,193 @@
    "files": {
     "clock.svg": {
      "name": "clock.svg",
-     "blob": "3a7e92f4b0a484bcabdc9018b738dcea",
+     "blob": "eb19b1e93b4bb2b147cf8f2d39082932",
      "size": 279,
      "type": "image/svg+xml"
     },
     "alert.svg": {
      "name": "alert.svg",
-     "blob": "adcc654ae5402bceb13186d74a5d35f5",
+     "blob": "4dd08c2658eb33e2533b9b0f0baa5580",
      "size": 301,
      "type": "image/svg+xml"
     },
     "check.svg": {
      "name": "check.svg",
-     "blob": "38f191d2707a6259c94e785a1c399bca",
+     "blob": "437f7febfa40277991f2ac051050cc0d",
      "size": 220,
      "type": "image/svg+xml"
     },
     "neutral.svg": {
      "name": "neutral.svg",
-     "blob": "1ee36ce27c1cdeda3a64a3d7512bd26a",
+     "blob": "9f98ae66819bd7abb75d7c84c0de5826",
      "size": 273,
      "type": "image/svg+xml"
     },
     "chevron.svg": {
      "name": "chevron.svg",
-     "blob": "55379c9c77005ed0bf1b6ff6ab308f85",
+     "blob": "51718de5904ec2f6be6fafe3556859b1",
      "size": 226,
      "type": "image/svg+xml"
     },
     "close.svg": {
      "name": "close.svg",
-     "blob": "825f57790e5f054d7edad682f78ca301",
+     "blob": "47f987c3504e45404a5040e4fdc83b62",
      "size": 246,
      "type": "image/svg+xml"
     },
     "display.svg": {
      "name": "display.svg",
-     "blob": "0ea7aadc1a6bcef46187c10786dbf0eb",
+     "blob": "f558a68da76f051ce231544be526e568",
      "size": 274,
      "type": "image/svg+xml"
     },
     "pause.svg": {
      "name": "pause.svg",
-     "blob": "897e2e0baa5f83132f669c3a4081ff9f",
+     "blob": "290f9deb43b3d4939e7611663741e764",
      "size": 237,
      "type": "image/svg+xml"
     },
     "send.svg": {
      "name": "send.svg",
-     "blob": "7a7d4c51c22fb379443a9590cc493623",
+     "blob": "9710b8a4eb64aedc6c777156d36482ab",
      "size": 243,
      "type": "image/svg+xml"
     },
     "monitor.svg": {
      "name": "monitor.svg",
-     "blob": "c7fc95f32716b2c1872eb3c5a68e53f3",
+     "blob": "efd91f8c9b6d074699bcb13802a024f7",
      "size": 357,
      "type": "image/svg+xml"
     },
     "sun.svg": {
      "name": "sun.svg",
-     "blob": "f4d172ee4b578f0ed367597aee5b33e6",
+     "blob": "70064e28ef7726075a3ab6f8c2f0eca8",
      "size": 361,
      "type": "image/svg+xml"
     },
     "moon.svg": {
      "name": "moon.svg",
-     "blob": "b1ad5658e60d6457be9f720d358d4a38",
+     "blob": "f96327d8dede62eb2c5ca762cfabb50f",
      "size": 252,
      "type": "image/svg+xml"
     },
     "wifi-off.svg": {
      "name": "wifi-off.svg",
-     "blob": "8ddccc137c898b3fb6d3e33f4d17979b",
+     "blob": "5ea8e6e93801dbabe19fc69e5d5d9710",
      "size": 390,
      "type": "image/svg+xml"
     },
     "bell.svg": {
      "name": "bell.svg",
-     "blob": "7028eb7a36ad7f8e0d6889a226167b45",
+     "blob": "35b1b9718dbf8fcaab26b426ca33d5a9",
      "size": 264,
      "type": "image/svg+xml"
     },
     "mascot-alive.svg": {
      "name": "mascot-alive.svg",
-     "blob": "ecb6bf752c66c77ae443af5f22731596",
-     "size": 699,
+     "blob": "26f1be4ad1dfdbc7fa4243b7332bc7a6",
+     "size": 902,
      "type": "image/svg+xml"
     },
     "mascot-states.svg": {
      "name": "mascot-states.svg",
-     "blob": "e3b070dd877e56637839aa2ee82dc443",
-     "size": 685,
+     "blob": "a0298fdb25a3236a62b682e6112b9c39",
+     "size": 888,
      "type": "image/svg+xml"
     },
     "mascot-still.svg": {
      "name": "mascot-still.svg",
-     "blob": "47adb85de280ced666df73e119f55c18",
-     "size": 630,
+     "blob": "c6d8c777e05b3f538356bb5702079cad",
+     "size": 833,
      "type": "image/svg+xml"
     },
     "text-small.svg": {
      "name": "text-small.svg",
-     "blob": "c2c948f6cfd8bca37bb5c366656b191d",
+     "blob": "f31ace7c507699efc58b1065cbab64b8",
      "size": 246,
      "type": "image/svg+xml"
     },
     "text-large.svg": {
      "name": "text-large.svg",
-     "blob": "e65a4c191983e368825249858c3bf811",
+     "blob": "772f9428a4bae7b533bfb7cf51ba8d3b",
      "size": 246,
      "type": "image/svg+xml"
     },
     "less-motion.svg": {
      "name": "less-motion.svg",
-     "blob": "184a29c3036609ebf9da4f8ce7cd7014",
+     "blob": "f12bf72e36e37f87c59d3d7ad3aeb913",
      "size": 282,
      "type": "image/svg+xml"
     },
     "contrast.svg": {
      "name": "contrast.svg",
-     "blob": "51ecbd95bc025079c55cdda15653e1e5",
+     "blob": "001f13675d22e12e4a9cc02fcccb3d13",
      "size": 347,
      "type": "image/svg+xml"
     },
     "chevron-up.svg": {
      "name": "chevron-up.svg",
-     "blob": "412f917e4f7328e4ca01e313c8229443",
+     "blob": "38d24ceb86f39e03c03ad43908d705cb",
      "size": 222,
      "type": "image/svg+xml"
     },
     "pencil.svg": {
      "name": "pencil.svg",
-     "blob": "1f40f6f11670380cae57e2e47651412d",
+     "blob": "02f0c150014fa47bbe2d76f771e598cf",
      "size": 273,
      "type": "image/svg+xml"
     },
     "undo.svg": {
      "name": "undo.svg",
-     "blob": "5254cb1c0e856b1fe843afa56cc5dd27",
+     "blob": "fe64d013a90e4f121b8d298c9c8931f9",
      "size": 264,
      "type": "image/svg+xml"
     },
     "dice.svg": {
      "name": "dice.svg",
-     "blob": "ddb41a74b4d217cbe6d82205b06a8faa",
+     "blob": "d9718abf7e9580ac5c69707cd3d110a4",
      "size": 550,
      "type": "image/svg+xml"
     },
     "lock.svg": {
      "name": "lock.svg",
-     "blob": "180bea79330a1bbdf668eee304870cae",
+     "blob": "ec01c6da1e1ea93af774d642763f2b20",
      "size": 348,
      "type": "image/svg+xml"
     },
     "profile.svg": {
      "name": "profile.svg",
-     "blob": "8c32cdf509fb5d3f4027b2ea4d2bb8fa",
+     "blob": "4595bef34ddd0074bf6e95b2408720d7",
      "size": 446,
      "type": "image/svg+xml"
     },
     "mascot-body.svg": {
      "name": "mascot-body.svg",
-     "blob": "b4b7f4bf3440b18b10ed331caa7bdff4",
-     "size": 603,
+     "blob": "67ea557fe48a86cde935a5271a73773d",
+     "size": 806,
      "type": "image/svg+xml"
     },
     "soul.svg": {
      "name": "soul.svg",
-     "blob": "886ee4e94a984e92c4872a55e66a465c",
+     "blob": "e1188a32e27052f13e90a6be1837a8e0",
      "size": 340,
      "type": "image/svg+xml"
     },
     "rules.svg": {
      "name": "rules.svg",
-     "blob": "9ec9ffa593ed6524f5f0972178ab2b39",
+     "blob": "3fd34951bf22cf73b1330187d196be5e",
      "size": 502,
      "type": "image/svg+xml"
     },
     "memory.svg": {
      "name": "memory.svg",
-     "blob": "62276a5242a86bd9038a616477dc2e81",
+     "blob": "d63e511d394e106444dbc56460015f38",
      "size": 344,
      "type": "image/svg+xml"
     },
     "skills.svg": {
      "name": "skills.svg",
-     "blob": "3ec8ed817f11cb53143963e40c48e709",
+     "blob": "f38f8eee47b49adf83adc37ba19acf72",
      "size": 323,
      "type": "image/svg+xml"
     }
@@ -268,44 +268,44 @@
    "files": {
     "kelpie-mark.svg": {
      "name": "kelpie-mark.svg",
-     "blob": "828ea9d800d272b2248dfeeb7bbdecba",
-     "size": 395,
+     "blob": "7e4e544e28f0e95e526a7b2e49cf8b08",
+     "size": 680,
      "type": "image/svg+xml"
     },
     "kelpie-lockup-light.svg": {
      "name": "kelpie-lockup-light.svg",
-     "blob": "ec5e704804b920c02f9eb06995585e9a",
-     "size": 3748,
+     "blob": "aaff0ef91a32530f03c8791ad4f30873",
+     "size": 4030,
      "type": "image/svg+xml"
     },
     "kelpie-lockup-dark.svg": {
      "name": "kelpie-lockup-dark.svg",
-     "blob": "297499921675c77cd2057b2c3f9caf9a",
-     "size": 3748,
+     "blob": "600e0f52ce7f9c8bb59c86b1f91fbc2a",
+     "size": 4030,
      "type": "image/svg+xml"
     },
     "favicon-16.svg": {
      "name": "favicon-16.svg",
-     "blob": "7971462c9ac7c4c6cdd6d8b07263d3c6",
-     "size": 371,
+     "blob": "9d464652037196256818a3d3c486f789",
+     "size": 657,
      "type": "image/svg+xml"
     },
     "app-icon.svg": {
      "name": "app-icon.svg",
-     "blob": "45c7833fc819690c1481e2320ce9620b",
-     "size": 500,
+     "blob": "24fdac725e975ac6f166ce212cb8a67d",
+     "size": 785,
      "type": "image/svg+xml"
     },
     "app-icon-rounded.svg": {
      "name": "app-icon-rounded.svg",
-     "blob": "9fd1606b8755291c84d514eb9489e420",
-     "size": 510,
+     "blob": "2dc6251021ded7613529ae0136855740",
+     "size": 795,
      "type": "image/svg+xml"
     },
     "app-icon-maskable.svg": {
      "name": "app-icon-maskable.svg",
-     "blob": "d6aa6393e6a29b33ced72d411f20a997",
-     "size": 500,
+     "blob": "7ed537f245f6a8828c9d53f2873587eb",
+     "size": 781,
      "type": "image/svg+xml"
     }
    }
@@ -317,8 +317,8 @@
  },
  "lastChange": {
   "by": "Diogo Guedes",
-  "at": "2026-10-17T19:05:26Z",
-  "via": "Claude Code · guedesdiogo/kelpie#426",
-  "note": "The AgentEditor card's toast takes the typed name as text, and bundle.js's header names the commit that last changed the engine (0b1f59e); the sources now live in tools/design-system."
+  "at": "2026-10-21T00:57:27Z",
+  "via": "Claude Code · guedesdiogo/kelpie#467",
+  "note": "Published anew at this artifact, since the one at claude.ai/artifact/4vRTvctvjsbQwBRZPMLFwk no longer opens, from main at 1e887dd: the mascot's pointed ear is a kelpie's (#455), and Kelpie's logo takes it (#464, ADR-0062)."
  }
 }
