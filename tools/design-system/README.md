@@ -1,6 +1,6 @@
 # Design system artifact
 
-The sources of Kelpie's design system artifact on claude.ai: https://claude.ai/artifact/4vRTvctvjsbQwBRZPMLFwk. It is a private page of the "Design System" artifact type, and shows the tokens, a card per component, the icons and logos, and a guide.
+The sources of Kelpie's design system artifact on claude.ai: https://claude.ai/artifact/4BWykDA1f4P3FkykJGXkN8. It was recreated from these files on 2026-10-21, after the first one went missing (#468). It is a private page of the "Design System" artifact type, and shows the tokens, a card per component, the icons and logos, and a guide.
 
 [`docs/design-system.md`](../../docs/design-system.md) is the source of truth. The artifact shows it, and a card that disagrees with it is a bug in the card.
 
