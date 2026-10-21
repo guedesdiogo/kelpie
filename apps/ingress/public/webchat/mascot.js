@@ -3,7 +3,7 @@
 // paints the fur, plays the poses and gestures with the Web Animations API, and runs the one
 // timer every mascot shares. No library, and nothing per frame repaints the fur.
 
-import { buildMascot, handSpot, SHARED_DEFS } from "./mascot-art.js";
+import { buildMascot, handSpot, mittenTop, SHARED_DEFS } from "./mascot-art.js";
 import {
   ACTIVITIES,
   allowed,
@@ -561,17 +561,28 @@ export class Mascot {
     return this.crown(Math.min(0, tilt), Math.max(0, tilt));
   }
 
+  /** The figure's top with both mittens raised above its head, waving up to `swing` degrees. */
+  raised(swing = 0) {
+    if (!this.handR) return this.top();
+    const spot = (name) => handSpot(name, this.anchors);
+    return Math.min(
+      this.top(),
+      mittenTop(spot("upL"), -swing, true),
+      mittenTop(spot("upR"), swing),
+    );
+  }
+
   /**
    * The share of a motion that keeps the figure in its frame (ADR-0063): one that would lift its
-   * top by `rise` grid units.
+   * top, at `top`, by `rise` grid units.
    */
-  fit(rise) {
-    return liftShare(this.top(), this.frame.y, this.poseStretch(), rise);
+  fit(rise, top = this.top()) {
+    return liftShare(top, this.frame.y, this.poseStretch(), rise);
   }
 
   /** A stretch to `sx` by `sy` of the figure's size, cut to what fits. */
-  stretchTo(sx, sy) {
-    const share = this.fit(stretchRise(this.top(), sy, this.poseStretch()));
+  stretchTo(sx, sy, top = this.top()) {
+    const share = this.fit(stretchRise(top, sy, this.poseStretch()), top);
     return `scale(${1 + (sx - 1) * share}, ${1 + (sy - 1) * share})`;
   }
 
@@ -1253,7 +1264,8 @@ export class Mascot {
 
   stretch() {
     this.expression("closed", null, 750);
-    const tall = this.stretchTo(0.95, 1.09);
+    // Its mittens go up as it stretches.
+    const tall = this.stretchTo(0.95, 1.09, this.raised());
     this.play(
       this.squash,
       [
@@ -1384,19 +1396,20 @@ export class Mascot {
     });
   }
 
-  hop(height, moment = false) {
+  hop(height, moment = false, top = this.top()) {
     if (world.motion === "still") return;
     const full = height ?? (this.mode === "large" ? 9 : 7);
     // Cut to the room above the figure (ADR-0063): a share of the hop lifts it, squashes it and
-    // shrinks its shadow by that share.
-    const share = this.fit(hopRise(this.top(), full, this.poseStretch()));
+    // shrinks its shadow by that share. A hop with no room doesn't play.
+    const share = this.fit(hopRise(top, full, this.poseStretch()), top);
+    this.lastHop = now();
+    if (share === 0) return;
     const h = full * share;
     const squash = ([offset, sx, sy]) => ({
       transform: `scale(${1 + (sx - 1) * share}, ${1 + (sy - 1) * share})`,
       offset,
     });
     const shadow = `scale(${1 - 0.3 * share}, ${1 - 0.3 * share})`;
-    this.lastHop = now();
     const duration = moment ? 500 : 440;
     this.play(
       this.hopG,
@@ -1656,7 +1669,8 @@ export class Mascot {
   }
 
   callHelp() {
-    this.hop(9, true);
+    // It hops with both mittens up, waving.
+    this.hop(9, true, this.raised(22));
     this.later(300, () => this.lookYou(1400));
     this.wave("l", 3, "upL");
     this.wave("r", 3, "upR");

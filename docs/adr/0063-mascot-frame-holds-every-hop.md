@@ -52,7 +52,7 @@ No single option kept every figure inside without a large cost:
 ### 1. Every mascot draws in the frame `4 2 112 112`
 
 - **The frame is 12% wider and taller than before,** with the same ground and middle: it still ends at y 114 and centers on x 60. The figure is 89% of the size it had in its box, and the body fills about 64% of the box instead of 72%.
-- **Master gets visible headroom:** 6.4 px above its ears at 48 px and 21 px at 160, against 1.9 and 5.8 before.
+- **Master gets visible headroom.** Headless Chrome measured 5.1 px above its ears at 36 px, 6.2 px at 48 and 23 px at 160, against 1.4, 1.9 and 5.8 before.
 - **Every box keeps its size:** 36 px in the roster, 48 px in the header and 160 px on a profile. Only the figure inside them shrinks.
 
 ### 2. Every motion that lifts the figure is cut to the room above it
@@ -62,6 +62,7 @@ No single option kept every figure inside without a large cost:
   - **A soft part counts its fur:** 2.5 units past its outline, which is how far headless Chrome saw the painted pixels reach.
   - **The state's pose and the breath** count at their deepest, and so does the pose's tilt about the feet, such as listening's 9°.
   - **A motion that lifts the figure stops the gestures that tilt it,** since both play on the same group. So only the pose's tilt counts.
+  - **The stretch and a call for help raise both mittens above the head,** waving in a call for help. For those two motions, the room counts the raised mittens too.
 - **The motions are the hop, the stretch, the yawn, waking up, the editor's drop-in of a head or an accessory, and a new shape's rebound.**
   - Each is scaled so its highest point stays in the room.
   - A hop's lift, squash and shadow scale together, so a smaller hop still reads as a hop.
@@ -87,7 +88,7 @@ No single option kept every figure inside without a large cost:
   - The kelp leaf on most shapes does.
   - So do the tallest heads on `drop`: one horn, the antennae, the hair and the leaves.
   - That is 16 of the 324 combinations the browser measured.
-- **Its frame is as much taller as it needs,** on the same ground and middle. That figure draws smaller: the kelp leaf on `drop`, the tallest, at 75% of its old size.
+- **Its frame is as much taller as it needs,** on the same ground and middle. That figure draws smaller: the kelp leaf on `drop`, the tallest, at 74% of its old size.
 - **Its motions are cut to almost nothing.** Its frame leaves room only for its pose and breath.
 
 ### 4. Nothing else moves
@@ -99,7 +100,9 @@ No single option kept every figure inside without a large cost:
   - A tall head above y 14, which the old frame cut off in the photo, now shows whole.
 - **The AgentEditor's stage** keeps its 168 px box around the 160 px figure. Every motion now stays inside the 160 px.
 - **The pups and the task card's 20 px figure** are 89% of their box, like every mascot.
-- **A test enforces §2 and §3.** It covers every shape, head and hat, and the frog's eyes. In every state, the figure may not rise above its frame at rest, tilted either way, or at the top of any hop, stretch, drop-in or rebound the engine plays.
+- **Tests enforce §2 and §3.**
+  - **Every figure:** every shape, head and hat, and the frog's eyes. In every state, the figure may not rise above its frame at rest, tilted either way, or at the top of any hop, stretch, drop-in or rebound the engine plays, its raised mittens included.
+  - **The engine as it plays:** a page test records the Web Animations `Mascot` starts and follows each one through its keyframes and easings, so a cap that isn't wired in fails.
 
 ## Consequences
 

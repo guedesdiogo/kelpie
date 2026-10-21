@@ -21,6 +21,7 @@ import {
   HEADS,
   handSpot,
   isDrawable,
+  mittenTop,
   mix,
   palette,
   pointedEarOutlines,
@@ -327,8 +328,8 @@ describe("the frame (ADR-0063)", () => {
     9,
   ];
   /** Every stretch of the figure the engine plays, which goes through `stretchTo`. */
-  const STRETCHES = [...engine.matchAll(/this\.stretchTo\(([\d.]+), ([\d.]+)\)/g)].map(([, , sy]) =>
-    Number(sy),
+  const STRETCHES = [...engine.matchAll(/this\.stretchTo\(([\d.]+), ([\d.]+)[,)]/g)].map(
+    ([, , sy]) => Number(sy),
   );
 
   it("frames every mascot at 4 2 112 112, on the old ground and middle", () => {
@@ -406,7 +407,7 @@ describe("the frame (ADR-0063)", () => {
 
   it("tilts the figure by TILT at most, the gestures' tilts included", () => {
     for (const state of STATES)
-      expect(Math.abs(POSES[state].tilt), state).toBeLessThanOrEqual(TILT);
+      expect(Math.abs(POSES[state as keyof typeof POSES].tilt), state).toBeLessThanOrEqual(TILT);
     const tilts = (gesture: string) => {
       const body = engine.slice(engine.indexOf(`\n  ${gesture}() {`));
       const method = body.slice(0, body.indexOf("\n  }\n"));
@@ -440,7 +441,7 @@ describe("the frame (ADR-0063)", () => {
   it("keeps every figure inside its frame at rest and at the top of every motion", () => {
     let figures = 0;
     for (const look of everyFigure()) {
-      const { top, crown: tops, frame, html } = build(look);
+      const { top, crown: tops, frame, html, anchors } = build(look);
       // The states share a few tilts, so each range's top is found once.
       const found = new Map<string, number>();
       const crown = (low: number, high: number) => {
@@ -472,7 +473,7 @@ describe("the frame (ADR-0063)", () => {
           const tilted = GROUND - (GROUND - crown(-TILT, TILT)) * stretch;
           expect(tilted, `${name} ${mode} ${state}`).toBeGreaterThanOrEqual(ceiling);
           // A motion that lifts it stops those gestures, so only the pose's tilt counts.
-          const { tilt } = POSES[state];
+          const { tilt } = POSES[state as keyof typeof POSES];
           const top = crown(Math.min(0, tilt), Math.max(0, tilt));
           const atRest = GROUND - (GROUND - top) * stretch;
           const rises = [
@@ -487,6 +488,25 @@ describe("the frame (ADR-0063)", () => {
             expect(peak, `${name} ${mode} ${state} ${rise}`).toBeGreaterThanOrEqual(ceiling);
           }
         }
+      }
+      // The stretch raises both mittens above the head, and a call for help waves them as it hops.
+      const raised = (swing: number) =>
+        Math.min(
+          top,
+          mittenTop(handSpot("upL", anchors) ?? [], -swing, true),
+          mittenTop(handSpot("upR", anchors) ?? [], swing),
+        );
+      for (const [state, swing, rise] of [
+        ["idle", 0, (t: number, s: number) => stretchRise(t, 1.09, s)],
+        ["error", 22, (t: number, s: number) => hopRise(t, 9, s)],
+      ] as const) {
+        const stretch = stillStretch(state, "header");
+        const up = raised(swing);
+        const atRest = GROUND - (GROUND - up) * stretch;
+        expect(atRest, `${name} ${state} mittens up`).toBeGreaterThanOrEqual(ceiling);
+        const peak =
+          atRest - liftShare(up, frame.y, stretch, rise(up, stretch)) * rise(up, stretch);
+        expect(peak, `${name} ${state} mittens up`).toBeGreaterThanOrEqual(ceiling);
       }
     }
     // 12 shapes: 13 heads under 5 accessories, and the frog's bumps.

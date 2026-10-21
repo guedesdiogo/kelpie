@@ -195,9 +195,14 @@ function arc([x1, y1], [rx0, ry0, turn, large, sweep], [x2, y2], steps) {
 function pointsOf(svg) {
   const reached = [];
   const stack = [{ m: [1, 0, 0, 1, 0, 0], fur: false }];
+  const shapes = new Set(["path", "circle", "ellipse", "rect"]);
   for (const [, close, tag, attrs, alone] of svg.matchAll(/<(\/?)(\w+)([^>]*?)(\/?)>/g)) {
+    // A part drawn with anything else would escape the frame's measure, so it can't be drawn.
+    if (!shapes.has(tag) && tag !== "g" && tag !== "image") {
+      throw new Error(`The mascot's frame can't measure <${tag}>`);
+    }
     if (close) {
-      if (tag !== "path" && tag !== "circle" && tag !== "ellipse" && tag !== "rect") stack.pop();
+      if (!shapes.has(tag)) stack.pop();
       continue;
     }
     const attr = (name) => attrs.match(new RegExp(`(?:^|\\s)${name}="([^"]*)"`))?.[1];
@@ -235,25 +240,29 @@ function pointsOf(svg) {
     for (const [px, py] of points) {
       reached.push([m[0] * px + m[2] * py + m[4], m[1] * px + m[3] * py + m[5], reach]);
     }
-    if (!alone && tag !== "path" && tag !== "circle" && tag !== "ellipse" && tag !== "rect") {
-      stack.push({ m, fur });
-    }
+    if (!alone && !shapes.has(tag)) stack.push({ m, fur });
   }
   return reached;
 }
 
-/** The highest those points reach as the figure tilts about its feet, from `low` to `high` degrees. */
-function crownOf(reached, low, high) {
+/**
+ * The highest those points reach as they turn about `pivot` from `low` to `high` degrees: a degree
+ * apart, both ends included.
+ */
+function crownOf(reached, low, high, [px, py] = [FRAME.x + FRAME.size / 2, GROUND]) {
   let top = Number.POSITIVE_INFINITY;
-  const middle = FRAME.x + FRAME.size / 2;
-  for (let degrees = low; degrees <= high; degrees++) {
+  const angles = Array.from({ length: Math.floor(high - low) + 1 }, (_, i) => low + i);
+  for (const degrees of [...angles, high]) {
     const [sin, cos] = [Math.sin((degrees * Math.PI) / 180), Math.cos((degrees * Math.PI) / 180)];
     for (const [x, y, reach] of reached) {
-      top = Math.min(top, GROUND + (x - middle) * sin + (y - GROUND) * cos - reach);
+      top = Math.min(top, py + (x - px) * sin + (y - py) * cos - reach);
     }
   }
   return top;
 }
+
+/** What the frame measured of each figure, by what it draws: a figure is drawn again and again. */
+const MEASURED = new Map();
 
 /**
  * The frame a figure draws in, from its top as it tilts by up to TILT either way: FRAME, unless the
@@ -967,7 +976,12 @@ export function buildMascot(mascot, { uid, px, hex, work = true, hands = true })
   const part = (name, svg) => (svg ? `<g class="${name}">${svg}</g>` : "");
   // The figure: its body, its head and what it wears, which every motion keeps in the frame. Its
   // top, upright or tilting between two angles; the frame holds it at rest at every tilt.
-  const reached = pointsOf(backHard + backEars + body + frontEars + lower + onTop);
+  const figure = backHard + backEars + body + frontEars + lower + onTop;
+  if (!MEASURED.has(figure)) {
+    if (MEASURED.size >= 256) MEASURED.clear();
+    MEASURED.set(figure, pointsOf(figure));
+  }
+  const reached = MEASURED.get(figure);
   const crown = (low = 0, high = 0) => crownOf(reached, low, high);
   const frame = frameOf(crown(-TILT, TILT));
   const html =
@@ -1020,6 +1034,42 @@ export function handSpot(name, { fx, fy, spread: es, tx, ty, ear }) {
     clapL: [fx - 8, fy + 22, 10, s],
   };
   return spots[name] ?? null;
+}
+
+/**
+ * Where a mitten turns as it waves: the middle of its painted box and shadow, 85% of the way down
+ * (mascot.css's .hg).
+ */
+const WRIST = [1, 6.8];
+
+/**
+ * The highest a mitten reaches at `spot` (handSpot), fur included, as it waves up to `swing`
+ * degrees about its wrist. The stretch and a call for help raise both above the head.
+ */
+export function mittenTop([x, y, angle, scale], swing = 0, left = false) {
+  const side = left ? -1 : 1;
+  const own = pointsOf(`<g class="fp"><path d="${MITT}"/></g>`).map(([px, py, reach]) => [
+    side * px,
+    py,
+    reach,
+  ]);
+  const r = (angle * Math.PI) / 180;
+  const [cos, sin] = [Math.cos(r), Math.sin(r)];
+  const placed = (degrees) =>
+    own.map(([px, py, reach]) => {
+      // The wave's turn about the wrist, then the spot's place, angle and scale.
+      const w = (degrees * Math.PI) / 180;
+      const [wx, wy] = [side * WRIST[0], WRIST[1]];
+      const qx = wx + (px - wx) * Math.cos(w) - (py - wy) * Math.sin(w);
+      const qy = wy + (px - wx) * Math.sin(w) + (py - wy) * Math.cos(w);
+      return [x + scale * (qx * cos - qy * sin), y + scale * (qx * sin + qy * cos), reach * scale];
+    });
+  let top = Number.POSITIVE_INFINITY;
+  const steps = Math.ceil(Math.abs(swing));
+  for (let i = 0; i <= steps; i++) {
+    top = Math.min(top, crownOf(placed(steps ? (swing * i) / steps : 0), 0, 0));
+  }
+  return top;
 }
 
 /**
