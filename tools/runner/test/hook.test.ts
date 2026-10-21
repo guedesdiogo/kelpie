@@ -184,6 +184,75 @@ describe("recordEvent", () => {
   });
 });
 
+describe("recordEvent, for a subagent's event (#482)", () => {
+  const AGENT = "a1b2c3d4e5f6a7b8";
+  const line = () => readFileSync(join(options.dir, EVENTS_FILE), "utf8");
+
+  it.each([
+    ["PostToolUse", { tool_name: "Read" }, {}],
+    ["PostToolUseFailure", { tool_name: "Bash", error: "boom" }, {}],
+    ["PermissionDenied", { tool_name: "Bash" }, {}],
+    ["PermissionRequest", { tool_name: "AskUserQuestion" }, { question: true }],
+    ["Notification", { notification_type: "permission_prompt" }, { type: "permission_prompt" }],
+  ])(
+    "writes the subagent's id in %s's line, beside the line's other fields",
+    (event, fields, extra) => {
+      recordEvent(
+        input(event, { ...fields, agent_id: AGENT, agent_type: "code-reviewer" }),
+        options,
+      );
+      expect(readEvents(options.dir)).toEqual([
+        { at: NOW, event, session: SESSION_A, ...extra, agent: AGENT },
+      ]);
+      // The subagent's type is no guide, and stays out.
+      expect(line()).not.toContain("code-reviewer");
+    },
+  );
+
+  it("takes an id of up to 64 letters, digits, `_`, `-`, `.` and `@`", () => {
+    const ids = ["agent-abc123", "def456", "a".repeat(64), "reviewer@session-1a2b3c4d", "a_b.c"];
+    for (const id of ids) recordEvent(input("PostToolUse", { agent_id: id }), options);
+    expect(readEvents(options.dir).map((event) => event.agent)).toEqual(ids);
+  });
+
+  it.each([
+    ["too long", "a".repeat(65)],
+    ["empty", ""],
+    ["with a space", "agent 1"],
+    ["a path", "../../etc/passwd"],
+    ["with a line break", ["a1", '{"event":"Stop"}'].join(String.fromCharCode(10))],
+    ["with a character past ASCII", `agent${String.fromCodePoint(0x2010)}1`],
+    ["with an invisible character", `a1${String.fromCodePoint(0x200b)}`],
+    ["a number", 7],
+    ["true", true],
+    ["an object", { id: AGENT }],
+    ["a list", [AGENT]],
+  ])("writes a subagent of unknown id, never the text, for an agent_id %s", (_, agentId) => {
+    recordEvent(input("PostToolUse", { agent_id: agentId }), options);
+    const expected = { at: NOW, event: "PostToolUse", session: SESSION_A, agent: null };
+    expect(line()).toBe(`${JSON.stringify(expected)}\n`);
+    expect(readEvents(options.dir)).toEqual([expected]);
+  });
+
+  it("tells a subagent's event by its agent_id alone: an agent_type, as under --agent, or a null agent_id, is the main thread's", () => {
+    recordEvent(input("PostToolUse", { agent_type: "security-reviewer" }), options);
+    recordEvent(input("PostToolUse", { agent_id: null, agent_type: "security-reviewer" }), options);
+    recordEvent(
+      input("PostToolUse", { agent_id: AGENT, agent_type: "security-reviewer" }),
+      options,
+    );
+    const lines = line()
+      .trimEnd()
+      .split("\n")
+      .map((text) => JSON.parse(text) as unknown);
+    expect(lines).toStrictEqual([
+      { at: NOW, event: "PostToolUse", session: SESSION_A },
+      { at: NOW, event: "PostToolUse", session: SESSION_A },
+      { at: NOW, event: "PostToolUse", session: SESSION_A, agent: AGENT },
+    ]);
+  });
+});
+
 describe("runHook", () => {
   it("records an input that comes in chunks, as text or bytes", async () => {
     const text = input("UserPromptSubmit");
@@ -330,6 +399,23 @@ describe("hooks/session-event.ts, as Claude Code runs it with Bun", () => {
       join(spool, `excerpt-${SESSION_A}.json`),
     ]);
     expect(readExcerpt(spoolDirOf(home), SESSION_A)?.text).toBe("Done, PR opened.");
+  });
+
+  it("writes a subagent's id from its input (#482)", () => {
+    const home = join(root, "home");
+    mkdirSync(home);
+    const fields = { tool_name: "Read", agent_id: "a1b2c3d4e5f6a7b8", agent_type: "Explore" };
+    const result = run(home, input("PostToolUse", fields));
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(readEvents(spoolDirOf(home))).toEqual([
+      {
+        at: expect.any(Number),
+        event: "PostToolUse",
+        session: SESSION_A,
+        agent: "a1b2c3d4e5f6a7b8",
+      },
+    ]);
   });
 
   it.each([

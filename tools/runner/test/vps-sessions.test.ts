@@ -495,6 +495,41 @@ describe("a session file's own wait", () => {
   });
 });
 
+describe("a session's subagents (#482)", () => {
+  it("leave its question open, as in #470's live check, until the main thread's answer", () => {
+    writeSessionFile(vps, sessionFields({ pid: 101 }));
+    prepareSpoolDir(vps.spoolDir, ownUid());
+    const hook = (at: number, fields: Record<string, unknown>) =>
+      recordEvent(JSON.stringify({ session_id: SESSION_A, ...fields }), {
+        dir: vps.spoolDir,
+        now: at,
+        uid: ownUid(),
+      });
+    const asked = NOW - 5 * MINUTE;
+    hook(asked, { hook_event_name: "PermissionRequest", tool_name: "AskUserQuestion" });
+    // 40 s later, a review subagent in the background of the same session runs its tools.
+    for (const event of ["PostToolUse", "PostToolUseFailure"]) {
+      hook(asked + 40_000, {
+        hook_event_name: event,
+        tool_name: "Read",
+        agent_id: "a1b2c3d4e5f6a7b8",
+        agent_type: "code-reviewer",
+      });
+    }
+    expect(waited(service().sessions, 0).waits).toEqual([
+      expect.objectContaining({ sessionId: SESSION_A, kind: "question", openedAt: asked }),
+    ]);
+    expect(listed(service().sessions).sessions[0]).toMatchObject({
+      state: "waiting_answer",
+      since: asked,
+    });
+    // The owner answers: the main thread's PostToolUse for AskUserQuestion.
+    hook(NOW - MINUTE, { hook_event_name: "PostToolUse", tool_name: "AskUserQuestion" });
+    expect(waited(service().sessions, 0).waits).toEqual([]);
+    expect(listed(service().sessions).sessions[0]?.state).toBe("working");
+  });
+});
+
 describe("the review's fixes", () => {
   it("keeps the session, and its excerpt, of a process that took it up after its end", () => {
     writeSessionFile(

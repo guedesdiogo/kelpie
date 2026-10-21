@@ -1,6 +1,7 @@
 import { INVISIBLE, MAX_EXCERPT_CHARS, SESSION_ID } from "./protocol.ts";
 import { cut, excerptOf, redact } from "./redact.ts";
 import {
+  agentOf,
   appendEvent,
   CONTINUING_REASONS,
   deleteExcerpt,
@@ -129,7 +130,10 @@ export function recordEvent(input: string, { dir, now, uid }: HookOptions): void
   }
 }
 
-/** The event's line: its name, its type or reason, whether it is a question, and its time. */
+/**
+ * The event's line: its name, its type or reason, whether it is a question, the subagent it came
+ * from, and its time.
+ */
 function lineOf(
   event: HookEvent,
   session: string,
@@ -141,6 +145,11 @@ function lineOf(
   const type = event === "Notification" ? word(payload.notification_type) : undefined;
   const reason = event === "SessionEnd" ? word(payload.reason) : undefined;
   const question = event === "PermissionRequest" && payload.tool_name === QUESTION_TOOL;
+  // A subagent's event carries its `agent_id`, and the main thread's none, even under `--agent`,
+  // whose `agent_type` is no guide (#482). One whose id isn't a short token is still a subagent's,
+  // of unknown id: its text is never written. A null id is taken for none: the main thread's.
+  const id = payload.agent_id;
+  const agent = id === undefined || id === null ? undefined : agentOf(id);
   return {
     at,
     event,
@@ -148,5 +157,6 @@ function lineOf(
     ...(type === undefined ? {} : { type }),
     ...(reason === undefined ? {} : { reason }),
     ...(question ? { question } : {}),
+    ...(agent === undefined ? {} : { agent }),
   };
 }
