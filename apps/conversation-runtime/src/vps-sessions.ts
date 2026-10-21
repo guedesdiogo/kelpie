@@ -18,8 +18,9 @@ import { TOOL_OUTPUT_MAX_CHARS, type Tool, type ToolOutcome, type ToolProvider }
 // Master's view of the Claude Code sessions on the owner's VPS (ADR-0057 §5, #434): the
 // `vps_sessions` tool, and the fixed notice Kelpie sends when one starts waiting on the owner. Both
 // read the runner through channel-egress's RunnerSessions, which only reads. A session's title,
-// repository, branch and excerpt are its own text, untrusted: the tool fences them as data, and the
-// notice shows a title and a repository as plain text on one line.
+// repository, branch and excerpt are its own text, untrusted: the tool fences them as data, and
+// marks its result as outside content, so the turn asks the owner before it changes anything
+// (ADR-0064); the notice shows a title and a repository as plain text on one line.
 
 const SPEC = {
   name: "vps_sessions",
@@ -38,11 +39,15 @@ const CANT_LIST = "Kelpie can't list the VPS's sessions";
 const UNANSWERED = failed(
   `${CANT_LIST} now: a Kelpie service didn't answer. Try again in a moment.`,
 );
+const NOT_TYPED = failed(
+  "Kelpie lists the VPS's sessions only in a turn the owner started with a message of their own: their text could steer a turn no person typed. Tell the owner they can ask you for them.",
+);
 
 /**
  * Master's tool that lists the VPS's sessions (ADR-0057 §5). Only the agent whose Registry role is
- * `master` gets it, as its configuration tools (ADR-0048); a task's run never does; and only the
- * owner's turn may run it. Kelpie keeps no copy: each call asks the runner (ADR-0057 §3).
+ * `master` gets it, as its configuration tools (ADR-0048); a task's run never does; and only a turn
+ * the owner typed may run it (ADR-0064): a turn Kelpie's note started still lists it, so its tools
+ * don't change with what started it. Kelpie keeps no copy: each call asks the runner (ADR-0057 §3).
  */
 export function vpsSessionsTools(
   sessions: Pick<RunnerSessionsContract, "list">,
@@ -59,18 +64,26 @@ export function vpsSessionsTools(
       "pt-BR": "Verificando as sessões da VPS",
       es: "Revisando las sesiones de la VPS",
     },
+    effect: "reads",
     async run(_input, context) {
       // Again when it runs: a turn that listed it may outlive the agent's role (ADR-0048).
       if ((await options.roleOf(context.agentId)) !== "master") return NOT_MASTER;
       if (context.actor.role !== "owner") return NOT_OWNER;
+      if (context.trigger !== "person") return NOT_TYPED;
       let result: ToolOutcome;
       try {
         const outcome: RunnerSessionsOutcome = await sessions.list();
-        result = outcome.ok ? { output: sessionsList(outcome) } : cantList(outcome.reason);
+        if (outcome.ok) {
+          const { text, outside } = sessionsList(outcome);
+          result = outside ? { output: text, outside: true } : { output: text };
+        } else {
+          result = cantList(outcome.reason);
+        }
       } catch (error) {
         console.error("vps_sessions: channel-egress didn't answer", errorName(error));
         result = UNANSWERED;
       }
+      // Kelpie's own lines on its notices; a marked list stays marked.
       const lines = await statusLines(options.status, context.agentId);
       return lines.length === 0 ? result : { ...result, output: `${result.output}\n\n${lines}` };
     },
@@ -149,10 +162,17 @@ interface Entry {
  * text between marks named with a random id that text can't hold. Past a tool's output, the waits
  * and the working sessions keep their place and their last reply first; then come the others,
  * without theirs, while they fit; then their last replies, in order, each that still fits.
+ * `outside` says whether the list shows any session's own text (ADR-0064).
  */
-function sessionsList({ now, sessions, truncated }: RunnerVpsSessions): string {
+function sessionsList({ now, sessions, truncated }: RunnerVpsSessions): {
+  text: string;
+  outside: boolean;
+} {
   if (sessions.length === 0) {
-    return "The runner sees no Claude Code session on the owner's VPS, besides the ones behind Kelpie's own chat route.";
+    return {
+      text: "The runner sees no Claude Code session on the owner's VPS, besides the ones behind Kelpie's own chat route.",
+      outside: false,
+    };
   }
   const mark = `session-text-${crypto.randomUUID().slice(0, 8)}`;
   const header = [
@@ -225,7 +245,11 @@ function sessionsList({ now, sessions, truncated }: RunnerVpsSessions): string {
     );
   }
   if (footer.length > 0) parts.push("", ...footer);
-  return parts.join("\n");
+  // Only a fence opens with the mark: each session's own text has it taken out.
+  const outside = entries.some(
+    (entry) => entry.shown !== "out" && entry[entry.shown as "lean" | "full"].includes(`<${mark}>`),
+  );
+  return { text: parts.join("\n"), outside };
 }
 
 const STARTED_BY: Record<RunnerVpsSession["startedBy"], string> = {

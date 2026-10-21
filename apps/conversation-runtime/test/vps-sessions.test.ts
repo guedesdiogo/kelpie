@@ -11,6 +11,7 @@ import { WEBCHAT_ADMISSION_HEADER } from "@kelpie/conversation/contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { heldTools, MASTER_TOOLS } from "../src/configuration.ts";
 import type { ConversationAgent } from "../src/conversation-agent.ts";
+import { OUTSIDE_REPLY_LEFT_OUT } from "../src/outside-content.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import {
   TOOL_OUTPUT_MAX_CHARS,
@@ -145,13 +146,13 @@ function fakeSessions(outcome: RunnerSessionsOutcome | (() => Promise<RunnerSess
 const roleIn = async (id: string): Promise<AgentRole | null> =>
   id === MASTER ? "master" : id === "ghost" ? null : "specialist";
 
-function contextOf(actor: Actor = owner): ToolContext {
+function contextOf(actor: Actor = owner, trigger: ToolContext["trigger"] = "person"): ToolContext {
   return {
     locale: "en",
     actor,
     agentId: MASTER,
     scopes: "all",
-    trigger: "person",
+    trigger,
     qualifier: "clef",
     turn: "1",
     source: "telegram:chat-1, 2026-10-18",
@@ -235,6 +236,23 @@ describe("Master's vps_sessions tool (ADR-0057 §5)", () => {
     });
     // Neither asked the runner.
     expect(calls.list).toBe(0);
+  });
+
+  it("runs only in a turn the owner typed, and says so in words Master can pass on (#454)", async () => {
+    const { sessions, calls } = fakeSessions(answer(SESSIONS));
+    const tool = await toolOf(vpsSessionsTools(sessions, { roleOf: roleIn }));
+    // A note's turn, such as a task's news, never reads them: it isn't left out of the list, which
+    // would change the tools with what started the turn.
+    for (const trigger of ["note", "task"] as const) {
+      expect(await tool.run({}, contextOf(owner, trigger)), trigger).toEqual({
+        output:
+          "Kelpie lists the VPS's sessions only in a turn the owner started with a message of their own: their text could steer a turn no person typed. Tell the owner they can ask you for them.",
+        isError: true,
+      });
+    }
+    expect(calls.list).toBe(0);
+    // It only reads: a turn that read the sessions may still list them again.
+    expect(tool.effect).toBe("reads");
   });
 
   it("groups the sessions: waiting on the owner, working, idle, could be archived, ended", async () => {
@@ -368,6 +386,21 @@ describe("Master's vps_sessions tool (ADR-0057 §5)", () => {
     });
   });
 
+  it("marks its list as outside content only when it shows a session's own text (#454)", async () => {
+    expect(await listed(answer(SESSIONS))).toMatchObject({ outside: true });
+    // No session, or one that has no text of its own: only Kelpie's words.
+    expect(await listed(answer([]))).not.toHaveProperty("outside");
+    expect(
+      await listed(answer([session({ id: ids.unknown, state: "unknown" })])),
+    ).not.toHaveProperty("outside");
+    // A failure holds none either.
+    expect(await listed({ ok: false, reason: "unreachable" })).not.toHaveProperty("outside");
+    // A session whose only text is its last reply, which a short list shows.
+    expect(
+      await listed(answer([session({ id: ids.idle, excerpt: "Only a reply." })])),
+    ).toMatchObject({ outside: true });
+  });
+
   it("fits a tool's output: the waits and the working sessions first, whole", async () => {
     const many = Array.from({ length: 200 }, (_, index) =>
       session({
@@ -492,7 +525,7 @@ describe("the check's status in the vps_sessions output", () => {
   const tail = (output: string) => output.split("\n").slice(-2);
 
   it("says when the check last ran, how many waits it saw, and that the last notice was sent", async () => {
-    const { output, asked } = await withStatus(
+    const { output, asked, outside } = await withStatus(
       {
         check: { agoMs: 40_000, outcome: "ok", waits: 1 },
         notice: { agoMs: 3 * MINUTE, outcome: "sent", attempts: [["telegram", "sent"]] },
@@ -504,6 +537,8 @@ describe("the check's status in the vps_sessions output", () => {
       "Kelpie's check of the waits on the owner last ran less than a minute ago: it saw 1 open wait.",
       "The last notice of a wait, 3 min ago, was sent on Telegram.",
     ]);
+    // Kelpie's lines after the list leave its mark: the session's title is still in it (#454).
+    expect(outside).toBe(true);
   });
 
   it.each([
@@ -719,7 +754,7 @@ describe("the tool's result in the conversation", () => {
     });
   }
 
-  it("reaches the model, and neither a checkpoint nor a session page", async () => {
+  it("reaches the model, and neither a checkpoint nor a session page, nor the reply that read it", async () => {
     const world = fakeWorld([
       toolCalls({ name: "vps_sessions" }),
       reply("One session waits on your permission."),
@@ -749,13 +784,19 @@ describe("the tool's result in the conversation", () => {
 
     await stub.compact();
     const summarized = JSON.stringify(world.requests.at(-1)?.messages ?? []);
-    expect(summarized).toContain("One session waits on your permission.");
+    // The reply of the turn that read the sessions may quote them: Kelpie's line takes its place
+    // (ADR-0064). The owner's words stay.
+    expect(summarized).toContain("o que está rolando na VPS?");
+    expect(summarized).toContain(OUTSIDE_REPLY_LEFT_OUT);
+    expect(summarized).not.toContain("One session waits on your permission.");
     expect(summarized).not.toContain(SECRET_TITLE);
     expect(summarized).not.toContain(SECRET_EXCERPT);
-    // The checkpoint ends a session, whose page records what the owner saw.
+    // The checkpoint ends a session, whose page records what the owner saw, that reply left out.
     const pages = world.remembered.flatMap(({ changes }) => changes.map(({ content }) => content));
     expect(pages).toHaveLength(1);
-    expect(pages[0]).toContain("One session waits on your permission.");
+    expect(pages[0]).toContain("o que está rolando na VPS?");
+    expect(pages[0]).toContain(OUTSIDE_REPLY_LEFT_OUT);
+    expect(pages[0]).not.toContain("One session waits on your permission.");
     expect(pages[0]).not.toContain(SECRET_TITLE);
     expect(pages[0]).not.toContain(SECRET_EXCERPT);
     // History keeps it, as every tool's result (ADR-0025), though the model now reads the summary.
