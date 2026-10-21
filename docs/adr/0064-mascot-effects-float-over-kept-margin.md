@@ -71,6 +71,7 @@
   - Above, the thinking bubbles over `drop` set it at every size. At 48 px, the bubble's pulse over `drop` reaches as high.
   - On the right, the badge's ring sets it at 36 px, and the bubble's pop with frog eyes at 48 and 160.
   - Below, the badge's ring sets it at 36 px.
+  - It is the test's count, from each effect's outline and the keyframes the engine plays. Headless Chrome read at most 0.03 px more, above the 48 px box.
 - **Each host keeps the room for what it can show.** Today's hosts already do:
 
   | Host | Size | Shows | Needs | Keeps |
@@ -81,7 +82,7 @@
   | The expired-login dialog | 160 px | Offline's bubble | 13.3 px above, 13.6 px right | 24 px of padding, the box centered in it |
   | The editor's stage | 160 px | the sparks, the "z" | 6.8 px above | 18 px above, in a panel that clips |
   | The editor's 56 px mascot | 56 px | the sparks | 2.4 px above | 12 px |
-  | A confirmation card | 40 px | the badge, still | 0.4 px right, 0.8 px below | 8 px of padding |
+  | A confirmation card | 40 px | the badge, still | 0.4 px right, 0.8 px below | 16 px of padding |
 
 - **A new host keeps the margin of its size for what it shows, or shows less.**
 
@@ -90,7 +91,7 @@
 - **The figure, its frame and its cuts are ADR-0063's.**
 - **Under Still and reduced motion,** the effects' layer takes the state's pose at once, as the figure does.
 - **The Telegram photo draws the rest pose of Idle,** which shows no effect.
-- **A page test enforces §1 and §2,** like ADR-0063's.
+- **A page test enforces §1 and `MARGIN`,** like ADR-0063's. The hosts' room was checked in their CSS by hand, and no test holds it.
   - It records each Web Animation the engine starts, and follows every effect through its keyframes and easings, and those of the groups that hold it.
   - What a state change starts plays on one clock. A later motion, such as the bubble's pulse, plays at every phase of the loops already running.
   - On every shape, every eye that moves the bubble and each size, every effect stays inside its frame plus `MARGIN`, and `MARGIN` is what they need.

@@ -476,7 +476,7 @@ function play(mascotLook, px, state, then, mascot = mascotOf(mascotLook, px)) {
 const SHOWS = {
   waiting: ".speech .bd-c, .m-bdw:not(.speech) .bd-c, .bd-ring",
   error: ".speech .bd-c, .m-bdw:not(.speech) .bd-c, .bd-ring",
-  noResponse: ".speech .bd-c",
+  noResponse: ".speech .bd-c, .m-bdw:not(.speech) .bd-c",
   offline: ".speech .bd-c, .m-bdw:not(.speech) .bd-c",
   approved: ".star",
   thinking: ".bub",
@@ -491,7 +491,10 @@ const MOTIONS = {
 function pastFrame({ mascot, change, later }, state) {
   const { svg, frame } = mascot;
   const past = { top: -Infinity, right: -Infinity, bottom: -Infinity, left: -Infinity };
-  for (const el of svg.querySelectorAll(SHOWS[state])) {
+  const shown = [...svg.querySelectorAll(SHOWS[state])];
+  // A renamed part would otherwise go unchecked.
+  expect(shown.length, state).toBeGreaterThan(0);
+  for (const el of shown) {
     // The roster's 36 px shows no "z", and the badge only there.
     if (el.matches(".zz") && svg.dataset.size === "s") continue;
     const e = reachOf(el, svg, change, later);
@@ -512,7 +515,7 @@ describe("what shows beside the mascot, as the engine plays it (ADR-0064)", () =
     }
     // The bubble and the badge sit beside the figure too; the sweat drop stays on its face.
     expect(svg.querySelector(".m-hop .m-bdw")).toBeNull();
-    expect(svg.querySelector(".m-face, .m-pose .drop")).not.toBeNull();
+    expect(svg.querySelector(".m-pose .drop")).not.toBeNull();
   });
 
   it("gives that layer the state's pose, and none of the figure's hops", () => {
