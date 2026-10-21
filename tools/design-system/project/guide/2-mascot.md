@@ -63,11 +63,11 @@ Moment for its states, frequent for its life in place ([ADR-0045](https://github
 - **Every mascot draws in `viewBox="4 2 112 112"`** on its 120 grid. The ground is at y 114 and the middle at x 60, as before, so the figure is 89% of its box and the body fills about 64% of it.
 - **Everything happens inside the frame.** Every motion that lifts the figure is cut to the room above it.
   - **The motions:** the hops, the stretch, the yawn, waking up, the editor's drop-in and a shape's rebound.
-  - **The room** runs from the figure's top, fur included, to 1 grid unit below the frame's top. The state's pose and breath count at their deepest, and so does the pose's tilt.
+  - **The room** runs from the figure's top, fur included, to 1 grid unit below the frame's top. The state's pose and breath count at their deepest, and so does the pose's tilt. The mittens the stretch and a call for help raise above the head count too.
   - **A cut hop** lifts, squashes and shrinks its shadow by the same share, so it still reads as a hop. A motion that fits plays in full.
   - **Tall heads hop lower:** Master's Approved jump keeps about half its height, and its idle hop nearly all of it.
 - **A figure that doesn't fit even at rest gets its own taller frame,** on the same ground. "At rest" counts the gestures' tilts, up to 9° either way. The kelp leaf on most shapes and the tallest heads on `drop` get one. That figure draws smaller and barely hops.
-- **Master keeps clear headroom:** over 6 px above its ears at 48 px, and 21 px at 160.
+- **Master keeps clear headroom:** about 6 px above its ears at 48 px, and 23 px at 160.
 - **What shows beside the figure isn't held yet.** The bubble, the badge, the sparks, the thinking bubbles and the "z" can still leave the frame on tall shapes.
 
 **Sizes.**

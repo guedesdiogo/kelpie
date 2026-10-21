@@ -1,5 +1,5 @@
 /* Kelpie: the agent mascot engine (ADR-0045) and the previews' motion helpers, as one classic script.
- * The engine is apps/ingress/public/webchat/mascot*.js as of d74091f, unchanged
+ * The engine is apps/ingress/public/webchat/mascot*.js as of 867d382, unchanged
  * but for its import and export lines.
  * window.Kelpie.mascot is the engine; window.Kelpie.ui the helpers. */
 (function () {
@@ -774,9 +774,14 @@ function arc([x1, y1], [rx0, ry0, turn, large, sweep], [x2, y2], steps) {
 function pointsOf(svg) {
   const reached = [];
   const stack = [{ m: [1, 0, 0, 1, 0, 0], fur: false }];
+  const shapes = new Set(["path", "circle", "ellipse", "rect"]);
   for (const [, close, tag, attrs, alone] of svg.matchAll(/<(\/?)(\w+)([^>]*?)(\/?)>/g)) {
+    // A part drawn with anything else would escape the frame's measure, so it can't be drawn.
+    if (!shapes.has(tag) && tag !== "g" && tag !== "image") {
+      throw new Error(`The mascot's frame can't measure <${tag}>`);
+    }
     if (close) {
-      if (tag !== "path" && tag !== "circle" && tag !== "ellipse" && tag !== "rect") stack.pop();
+      if (!shapes.has(tag)) stack.pop();
       continue;
     }
     const attr = (name) => attrs.match(new RegExp(`(?:^|\\s)${name}="([^"]*)"`))?.[1];
@@ -814,25 +819,29 @@ function pointsOf(svg) {
     for (const [px, py] of points) {
       reached.push([m[0] * px + m[2] * py + m[4], m[1] * px + m[3] * py + m[5], reach]);
     }
-    if (!alone && tag !== "path" && tag !== "circle" && tag !== "ellipse" && tag !== "rect") {
-      stack.push({ m, fur });
-    }
+    if (!alone && !shapes.has(tag)) stack.push({ m, fur });
   }
   return reached;
 }
 
-/** The highest those points reach as the figure tilts about its feet, from `low` to `high` degrees. */
-function crownOf(reached, low, high) {
+/**
+ * The highest those points reach as they turn about `pivot` from `low` to `high` degrees: a degree
+ * apart, both ends included.
+ */
+function crownOf(reached, low, high, [px, py] = [FRAME.x + FRAME.size / 2, GROUND]) {
   let top = Number.POSITIVE_INFINITY;
-  const middle = FRAME.x + FRAME.size / 2;
-  for (let degrees = low; degrees <= high; degrees++) {
+  const angles = Array.from({ length: Math.floor(high - low) + 1 }, (_, i) => low + i);
+  for (const degrees of [...angles, high]) {
     const [sin, cos] = [Math.sin((degrees * Math.PI) / 180), Math.cos((degrees * Math.PI) / 180)];
     for (const [x, y, reach] of reached) {
-      top = Math.min(top, GROUND + (x - middle) * sin + (y - GROUND) * cos - reach);
+      top = Math.min(top, py + (x - px) * sin + (y - py) * cos - reach);
     }
   }
   return top;
 }
+
+/** What the frame measured of each figure, by what it draws: a figure is drawn again and again. */
+const MEASURED = new Map();
 
 /**
  * The frame a figure draws in, from its top as it tilts by up to TILT either way: FRAME, unless the
@@ -1546,7 +1555,12 @@ function buildMascot(mascot, { uid, px, hex, work = true, hands = true }) {
   const part = (name, svg) => (svg ? `<g class="${name}">${svg}</g>` : "");
   // The figure: its body, its head and what it wears, which every motion keeps in the frame. Its
   // top, upright or tilting between two angles; the frame holds it at rest at every tilt.
-  const reached = pointsOf(backHard + backEars + body + frontEars + lower + onTop);
+  const figure = backHard + backEars + body + frontEars + lower + onTop;
+  if (!MEASURED.has(figure)) {
+    if (MEASURED.size >= 256) MEASURED.clear();
+    MEASURED.set(figure, pointsOf(figure));
+  }
+  const reached = MEASURED.get(figure);
   const crown = (low = 0, high = 0) => crownOf(reached, low, high);
   const frame = frameOf(crown(-TILT, TILT));
   const html =
@@ -1602,6 +1616,42 @@ function handSpot(name, { fx, fy, spread: es, tx, ty, ear }) {
 }
 
 /**
+ * Where a mitten turns as it waves: the middle of its painted box and shadow, 85% of the way down
+ * (mascot.css's .hg).
+ */
+const WRIST = [1, 6.8];
+
+/**
+ * The highest a mitten reaches at `spot` (handSpot), fur included, as it waves up to `swing`
+ * degrees about its wrist. The stretch and a call for help raise both above the head.
+ */
+function mittenTop([x, y, angle, scale], swing = 0, left = false) {
+  const side = left ? -1 : 1;
+  const own = pointsOf(`<g class="fp"><path d="${MITT}"/></g>`).map(([px, py, reach]) => [
+    side * px,
+    py,
+    reach,
+  ]);
+  const r = (angle * Math.PI) / 180;
+  const [cos, sin] = [Math.cos(r), Math.sin(r)];
+  const placed = (degrees) =>
+    own.map(([px, py, reach]) => {
+      // The wave's turn about the wrist, then the spot's place, angle and scale.
+      const w = (degrees * Math.PI) / 180;
+      const [wx, wy] = [side * WRIST[0], WRIST[1]];
+      const qx = wx + (px - wx) * Math.cos(w) - (py - wy) * Math.sin(w);
+      const qy = wy + (px - wx) * Math.sin(w) + (py - wy) * Math.cos(w);
+      return [x + scale * (qx * cos - qy * sin), y + scale * (qx * sin + qy * cos), reach * scale];
+    });
+  let top = Number.POSITIVE_INFINITY;
+  const steps = Math.ceil(Math.abs(swing));
+  for (let i = 0; i <= steps; i++) {
+    top = Math.min(top, crownOf(placed(steps ? (swing * i) / steps : 0), 0, 0));
+  }
+  return top;
+}
+
+/**
  * The gradients every mascot shares, once per page. Their stops take their colors from classes
  * in mascot.css where a theme token sets them.
  */
@@ -1631,7 +1681,7 @@ const SHARED_DEFS = `<defs>
 <linearGradient id="kg-pencil" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6FA6CC"/><stop offset=".5" stop-color="#3F7FA8"/><stop offset="1" stop-color="#255A7C"/></linearGradient>
 </defs>`;
 
-  return { FRAME, mix, palette, pointedEarOutlines, frameOf, SHAPES, COLORS, EYES, HEADS, ACCESSORIES, isDrawable, sizeOf, buildMascot, handSpot, SHARED_DEFS };
+  return { FRAME, mix, palette, pointedEarOutlines, frameOf, SHAPES, COLORS, EYES, HEADS, ACCESSORIES, isDrawable, sizeOf, buildMascot, handSpot, mittenTop, SHARED_DEFS };
   })();
   var engine = (function () {
 // The agent's mascot (ADR-0045): a plush figure that stays alive in place. mascot-art.js builds
@@ -1639,7 +1689,7 @@ const SHARED_DEFS = `<defs>
 // paints the fur, plays the poses and gestures with the Web Animations API, and runs the one
 // timer every mascot shares. No library, and nothing per frame repaints the fur.
 
-const { buildMascot, handSpot, SHARED_DEFS } = art;
+const { buildMascot, handSpot, mittenTop, SHARED_DEFS } = art;
 const {
   ACTIVITIES,
   allowed,
@@ -2197,17 +2247,28 @@ class Mascot {
     return this.crown(Math.min(0, tilt), Math.max(0, tilt));
   }
 
+  /** The figure's top with both mittens raised above its head, waving up to `swing` degrees. */
+  raised(swing = 0) {
+    if (!this.handR) return this.top();
+    const spot = (name) => handSpot(name, this.anchors);
+    return Math.min(
+      this.top(),
+      mittenTop(spot("upL"), -swing, true),
+      mittenTop(spot("upR"), swing),
+    );
+  }
+
   /**
    * The share of a motion that keeps the figure in its frame (ADR-0063): one that would lift its
-   * top by `rise` grid units.
+   * top, at `top`, by `rise` grid units.
    */
-  fit(rise) {
-    return liftShare(this.top(), this.frame.y, this.poseStretch(), rise);
+  fit(rise, top = this.top()) {
+    return liftShare(top, this.frame.y, this.poseStretch(), rise);
   }
 
   /** A stretch to `sx` by `sy` of the figure's size, cut to what fits. */
-  stretchTo(sx, sy) {
-    const share = this.fit(stretchRise(this.top(), sy, this.poseStretch()));
+  stretchTo(sx, sy, top = this.top()) {
+    const share = this.fit(stretchRise(top, sy, this.poseStretch()), top);
     return `scale(${1 + (sx - 1) * share}, ${1 + (sy - 1) * share})`;
   }
 
@@ -2889,7 +2950,8 @@ class Mascot {
 
   stretch() {
     this.expression("closed", null, 750);
-    const tall = this.stretchTo(0.95, 1.09);
+    // Its mittens go up as it stretches.
+    const tall = this.stretchTo(0.95, 1.09, this.raised());
     this.play(
       this.squash,
       [
@@ -3020,19 +3082,20 @@ class Mascot {
     });
   }
 
-  hop(height, moment = false) {
+  hop(height, moment = false, top = this.top()) {
     if (world.motion === "still") return;
     const full = height ?? (this.mode === "large" ? 9 : 7);
     // Cut to the room above the figure (ADR-0063): a share of the hop lifts it, squashes it and
-    // shrinks its shadow by that share.
-    const share = this.fit(hopRise(this.top(), full, this.poseStretch()));
+    // shrinks its shadow by that share. A hop with no room doesn't play.
+    const share = this.fit(hopRise(top, full, this.poseStretch()), top);
+    this.lastHop = now();
+    if (share === 0) return;
     const h = full * share;
     const squash = ([offset, sx, sy]) => ({
       transform: `scale(${1 + (sx - 1) * share}, ${1 + (sy - 1) * share})`,
       offset,
     });
     const shadow = `scale(${1 - 0.3 * share}, ${1 - 0.3 * share})`;
-    this.lastHop = now();
     const duration = moment ? 500 : 440;
     this.play(
       this.hopG,
@@ -3292,7 +3355,8 @@ class Mascot {
   }
 
   callHelp() {
-    this.hop(9, true);
+    // It hops with both mittens up, waving.
+    this.hop(9, true, this.raised(22));
     this.later(300, () => this.lookYou(1400));
     this.wave("l", 3, "upL");
     this.wave("r", 3, "upR");
