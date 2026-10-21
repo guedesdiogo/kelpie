@@ -1,5 +1,6 @@
 // The webchat's icons (ADR-0049): the page links the logo's favicon, home-screen icon and
-// manifest, and each file is what its link says. scripts/brand-icons.mjs draws them.
+// manifest, and each file is what its link says. scripts/brand-icons.mjs draws them. The sidebar's
+// lockup inlines the mark, which must stay the one in docs/brand/.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -23,8 +24,11 @@ function pngSize(bytes) {
   return `${bytes.readUInt32BE(16)}x${bytes.readUInt32BE(20)}`;
 }
 
-const head = new DOMParser().parseFromString(PAGE, "text/html").head;
-const links = (rel) => [...head.querySelectorAll(`link[rel="${rel}"]`)];
+const page = new DOMParser().parseFromString(PAGE, "text/html");
+const links = (rel) => [...page.head.querySelectorAll(`link[rel="${rel}"]`)];
+
+/** The logo's mark as scripts/brand-icons.mjs writes it, on the 64 box. */
+const MARK = readFileSync(join(PUBLIC, "../../../docs/brand/kelpie-mark.svg"), "utf8");
 
 /** A token's light and dark values in tokens.css, lowercased. */
 function token(name) {
@@ -94,9 +98,8 @@ describe("the webchat's icons (ADR-0049)", () => {
   });
 
   it("draws the mark's pointed ears clockwise, so they join the body with no hole (ADR-0062)", () => {
-    const mark = readFileSync(join(PUBLIC, "../../../docs/brand/kelpie-mark.svg"), "utf8");
     const glyphs = {
-      "kelpie-mark.svg": mark.match(/ d="([^"]+)"/)?.[1] ?? "",
+      "kelpie-mark.svg": MARK.match(/ d="([^"]+)"/)?.[1] ?? "",
       "icon.svg":
         served("/webchat/icon.svg")
           .toString("utf8")
@@ -120,6 +123,26 @@ describe("the webchat's icons (ADR-0049)", () => {
         expect(area, file).toBeGreaterThan(0);
       }
     }
+  });
+
+  it("inlines the sidebar's mark from docs/brand/kelpie-mark.svg (ADR-0062)", () => {
+    // The page inlines the mark so it takes the lockup's --accent; scripts/brand-icons.mjs doesn't
+    // write it. After a change to the logo, copy the path from docs/brand/kelpie-mark.svg.
+    const inline = page.querySelector(".brand .brand-mark");
+    expect(inline?.getAttribute("viewBox")).toBe(MARK.match(/viewBox="([^"]+)"/)?.[1]);
+    expect(inline?.querySelector("path")?.getAttribute("d")).toBe(MARK.match(/ d="([^"]+)"/)?.[1]);
+  });
+
+  it("sizes the sidebar's mark by the figure's height, so it stands 1.3 cap heights tall (5.23)", () => {
+    // The figure's box counts the ears' control points, as scripts/brand-icons.mjs measures it;
+    // an arc's radii aren't points.
+    const d = (MARK.match(/ d="([^"]+)"/)?.[1] ?? "").replace(/A[\d.]+,[\d.]+/g, "A");
+    const ys = [...d.matchAll(/(-?[\d.]+),(-?[\d.]+)/g)].map(([, , y]) => +y);
+    const style = served("/webchat/style.css").toString("utf8");
+    const figure = style.match(
+      /\.brand-mark\s*\{[^}]*block-size:\s*calc\(1\.3cap \* 64 \/ ([\d.]+)\)/,
+    )?.[1];
+    expect(Number(figure)).toBeCloseTo(Math.max(...ys) - Math.min(...ys), 2);
   });
 
   it("draws the waiting favicon: the same tile, and a --warm dot in an --on-accent ring (5.9)", () => {
