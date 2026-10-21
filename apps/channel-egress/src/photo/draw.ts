@@ -12,8 +12,8 @@ import tokens from "./webchat/tokens.css.txt";
 
 /** The webchat's modules, each before the ones that import it. */
 export const MODULES: [name: string, text: string][] = [
-  ["mascot-art.js", art],
   ["mascot-states.js", states],
+  ["mascot-art.js", art],
   ["mascot.js", engine],
   ["mascot-photo.js", photo],
 ];

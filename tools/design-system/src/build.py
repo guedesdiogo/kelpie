@@ -26,7 +26,7 @@ def module(path, deps):
     return src, names
 
 states, sn = module('mascot-states.js', {})
-art, an = module('mascot-art.js', {})
+art, an = module('mascot-art.js', {'mascot-states': 'states'})
 eng, en = module('mascot.js', {'mascot-art': 'art', 'mascot-states': 'states'})
 helpers = (DS / 'src/helpers.js').read_text()
 wrap = lambda name, src, names: f'  var {name} = (function () {{\n{src}\n  return {{ {", ".join(names)} }};\n  }})();\n'

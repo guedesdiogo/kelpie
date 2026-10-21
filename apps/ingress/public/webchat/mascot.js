@@ -3,23 +3,29 @@
 // paints the fur, plays the poses and gestures with the Web Animations API, and runs the one
 // timer every mascot shares. No library, and nothing per frame repaints the fur.
 
-import { buildMascot, handSpot, SHARED_DEFS } from "./mascot-art.js";
+import { buildMascot, handSpot, mittenTop, SHARED_DEFS } from "./mascot-art.js";
 import {
   ACTIVITIES,
   allowed,
   available,
   BREATH,
+  breathDepth,
   breathes,
   draw,
   due,
   gapAfter,
   HAND_POSES,
   HOLDING_STATES,
+  HOP,
+  hopRise,
   LIST_LOCK_MS,
+  liftShare,
   POSES,
   QUIET_BLINK_MS,
   remember,
   SPRINGS,
+  stillStretch,
+  stretchRise,
   WORKING_STATES,
 } from "./mascot-states.js";
 
@@ -409,9 +415,11 @@ export class Mascot {
     this.handL = one(".hand-l");
     this.handR = one(".hand-r");
     this.anchors = built.anchors;
+    this.crown = built.crown;
+    this.frame = built.frame;
     this.shownActivity = null;
     this.applyPose(this.pose(), null);
-    const k = (this.px / 100) * Math.min(2, window.devicePixelRatio || 1) * 1.2;
+    const k = (this.px / built.frame.size) * Math.min(2, window.devicePixelRatio || 1) * 1.2;
     for (const node of all(".fp")) {
       const piece = built.pieces[Number(node.dataset.piece)];
       painting(piece, Math.max(12, Math.round(piece.box[2] * k))).then(
@@ -465,14 +473,18 @@ export class Mascot {
     if (axis === "random") {
       this.excite();
     } else if (axis === "shape") {
-      this.play(this.squash, [{ transform: "scale(1.1, .88)" }, { transform: "none" }], {
-        ...SPRINGS.pop,
-        from: false,
-      });
+      // The pop's spring overshoots by 12%, so the squash rebounds past its height.
+      const share = this.fit(stretchRise(this.top(), 1 + 0.12 * 0.12, this.poseStretch()));
+      this.play(
+        this.squash,
+        [{ transform: `scale(${1 + 0.1 * share}, ${1 - 0.12 * share})` }, { transform: "none" }],
+        { ...SPRINGS.pop, from: false },
+      );
     } else if (axis === "head" || axis === "accessory") {
       const name = axis === "head" ? ".m-head" : ".m-acc";
+      const drop = 8 * this.fit(8);
       for (const group of this.svg.querySelectorAll(name)) {
-        this.play(group, [{ transform: "translate(0px, -8px)" }, { transform: "none" }], {
+        this.play(group, [{ transform: `translate(0px, ${-drop}px)` }, { transform: "none" }], {
           ...SPRINGS.momentFast,
           from: false,
         });
@@ -533,6 +545,45 @@ export class Mascot {
 
   pose() {
     return this.override ? { ...POSES[this.state], ...this.override } : POSES[this.state];
+  }
+
+  /** How far the state's pose and breath stretch the figure upward. */
+  poseStretch() {
+    return stillStretch(this.state, this.mode);
+  }
+
+  /**
+   * The figure's top in its state's pose, which tilts it. A motion that lifts the figure plays on
+   * the group the tilting gestures use, so it stops them.
+   */
+  top() {
+    const { tilt } = POSES[this.state];
+    return this.crown(Math.min(0, tilt), Math.max(0, tilt));
+  }
+
+  /** The figure's top with both mittens raised above its head, waving up to `swing` degrees. */
+  raised(swing = 0) {
+    if (!this.handR) return this.top();
+    const spot = (name) => handSpot(name, this.anchors);
+    return Math.min(
+      this.top(),
+      mittenTop(spot("upL"), -swing, true),
+      mittenTop(spot("upR"), swing),
+    );
+  }
+
+  /**
+   * The share of a motion that keeps the figure in its frame (ADR-0063): one that would lift its
+   * top, at `top`, by `rise` grid units.
+   */
+  fit(rise, top = this.top()) {
+    return liftShare(top, this.frame.y, this.poseStretch(), rise);
+  }
+
+  /** A stretch to `sx` by `sy` of the figure's size, cut to what fits. */
+  stretchTo(sx, sy, top = this.top()) {
+    const share = this.fit(stretchRise(top, sy, this.poseStretch()), top);
+    return `scale(${1 + (sx - 1) * share}, ${1 + (sy - 1) * share})`;
   }
 
   applyPose(pose, spring) {
@@ -659,8 +710,8 @@ export class Mascot {
       if (alive && !this.looping) this.runActivity(this.shownActivity);
     }
     if (!alive) return;
-    const [period, depth0] = BREATH[this.state] ?? BREATH.idle;
-    const depth = this.mode === "list" ? depth0 * 0.6 : depth0;
+    const [period] = BREATH[this.state] ?? BREATH.idle;
+    const depth = breathDepth(this.state, this.mode);
     this.breath = animate(
       this.breathG,
       [{ transform: "none" }, { transform: `scale(${1 - depth * 0.45}, ${1 + depth})` }],
@@ -730,7 +781,7 @@ export class Mascot {
     this.applyPose(pose, next === "dozing" ? SPRINGS.slow : SPRINGS.moment);
     this.breathe();
     if (previous === "dozing" && next === "idle") {
-      this.play(this.squash, [{ transform: "scale(.96, 1.06)" }, { transform: "none" }], {
+      this.play(this.squash, [{ transform: this.stretchTo(0.96, 1.06) }, { transform: "none" }], {
         ...SPRINGS.pop,
         from: false,
       });
@@ -1213,12 +1264,14 @@ export class Mascot {
 
   stretch() {
     this.expression("closed", null, 750);
+    // Its mittens go up as it stretches.
+    const tall = this.stretchTo(0.95, 1.09, this.raised());
     this.play(
       this.squash,
       [
         { transform: "none" },
-        { transform: "scale(.95, 1.09)", offset: 0.35, easing: "ease-out" },
-        { transform: "scale(.95, 1.09)", offset: 0.6 },
+        { transform: tall, offset: 0.35, easing: "ease-out" },
+        { transform: tall, offset: 0.6 },
         { transform: "none" },
       ],
       { duration: 1100, easing: "ease-in-out" },
@@ -1242,12 +1295,13 @@ export class Mascot {
       ],
       { duration: 1300, easing: "ease-in-out", from: false },
     );
+    const tall = this.stretchTo(0.97, 1.06);
     this.play(
       this.squash,
       [
         { transform: "none" },
-        { transform: "scale(.97, 1.06)", offset: 0.35 },
-        { transform: "scale(.97, 1.06)", offset: 0.7 },
+        { transform: tall, offset: 0.35 },
+        { transform: tall, offset: 0.7 },
         { transform: "none" },
       ],
       { duration: 1300, easing: "ease-in-out" },
@@ -1342,20 +1396,28 @@ export class Mascot {
     });
   }
 
-  hop(height, moment = false) {
+  hop(height, moment = false, top = this.top()) {
     if (world.motion === "still") return;
-    const h = height ?? (this.mode === "large" ? 9 : 7);
+    const full = height ?? (this.mode === "large" ? 9 : 7);
+    // Cut to the room above the figure (ADR-0063): a share of the hop lifts it, squashes it and
+    // shrinks its shadow by that share. A hop with no room doesn't play.
+    const share = this.fit(hopRise(top, full, this.poseStretch()), top);
     this.lastHop = now();
+    if (share === 0) return;
+    const h = full * share;
+    const squash = ([offset, sx, sy]) => ({
+      transform: `scale(${1 + (sx - 1) * share}, ${1 + (sy - 1) * share})`,
+      offset,
+    });
+    const shadow = `scale(${1 - 0.3 * share}, ${1 - 0.3 * share})`;
     const duration = moment ? 500 : 440;
     this.play(
       this.hopG,
-      [
-        { transform: "none" },
-        { transform: "none", offset: 0.2, easing: "cubic-bezier(.2,.7,.4,1)" },
-        { transform: `translate(0px, ${-h}px)`, offset: 0.52, easing: "cubic-bezier(.6,0,.8,.4)" },
-        { transform: "none", offset: 0.84 },
-        { transform: "none" },
-      ],
+      HOP.lift.map(([offset, y, easing]) => ({
+        transform: y ? `translate(0px, ${-h * y}px)` : "none",
+        offset,
+        ...(easing ? { easing } : {}),
+      })),
       { duration, easing: "linear" },
     );
     this.play(
@@ -1363,27 +1425,21 @@ export class Mascot {
       [
         { transform: "none", opacity: 1 },
         { transform: "none", opacity: 1, offset: 0.2 },
-        { transform: "scale(.7, .7)", opacity: 0.45, offset: 0.52 },
+        { transform: shadow, opacity: 1 - 0.55 * share, offset: 0.52 },
         { transform: "none", opacity: 1, offset: 0.84 },
         { transform: "none", opacity: 1 },
       ],
       { duration, easing: "linear", from: false },
     );
-    const squash = this.play(
-      this.squash,
-      [
-        { transform: "none" },
-        { transform: "scale(1.08, .9)", offset: 0.2 },
-        { transform: "scale(.95, 1.07)", offset: 0.4 },
-        { transform: "none", offset: 0.66 },
-        { transform: "scale(1.08, .9)", offset: 0.86 },
-        { transform: "scale(1.08, .9)" },
-      ],
-      { duration, easing: "ease-in-out", fill: "forwards" },
-    );
-    squash?.finished.then(
+    const squashed = this.play(this.squash, HOP.squash.map(squash), {
+      duration,
+      easing: HOP.squashEasing,
+      fill: "forwards",
+    });
+    const { transform: landed } = squash(HOP.squash.at(-1));
+    squashed?.finished.then(
       () =>
-        this.play(this.squash, [{ transform: "scale(1.08, .9)" }, { transform: "none" }], {
+        this.play(this.squash, [{ transform: landed }, { transform: "none" }], {
           ...(moment ? SPRINGS.pop : SPRINGS.base),
         }),
       () => {},
@@ -1613,7 +1669,8 @@ export class Mascot {
   }
 
   callHelp() {
-    this.hop(9, true);
+    // It hops with both mittens up, waving.
+    this.hop(9, true, this.raised(22));
     this.later(300, () => this.lookYou(1400));
     this.wave("l", 3, "upL");
     this.wave("r", 3, "upR");

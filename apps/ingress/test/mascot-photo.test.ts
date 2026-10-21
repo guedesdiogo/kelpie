@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import engine from "../public/webchat/mascot.js?raw";
+import { FRAME } from "../public/webchat/mascot-art.js";
 import {
   centered,
   FIGURE_PX,
@@ -164,8 +165,13 @@ describe("The photo's loop", () => {
     }
   });
 
-  it("keeps the figure's box inside the circle Telegram crops", () => {
-    expect((FIGURE_PX / 2) * Math.SQRT2).toBeLessThanOrEqual(PHOTO_PX / 2);
+  it("draws the figure at the scale it had before the frame grew (ADR-0063)", () => {
+    expect(FIGURE_PX / FRAME.size).toBeCloseTo(5.6, 2);
+  });
+
+  it("keeps the old 100-unit frame, where the figure stands, inside the circle Telegram crops", () => {
+    const old = (FIGURE_PX * 100) / FRAME.size;
+    expect((old / 2) * Math.SQRT2).toBeLessThanOrEqual(PHOTO_PX / 2);
   });
 });
 

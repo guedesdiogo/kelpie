@@ -154,6 +154,131 @@ export const BREATH = {
   offline: [4400, 0.01],
 };
 
+/** How deep the breath goes in `state`: a roster row breathes at 60%. */
+export function breathDepth(state, mode) {
+  const [, depth] = BREATH[state] ?? BREATH.idle;
+  return mode === "list" ? depth * 0.6 : depth;
+}
+
+// What keeps the figure in its frame (ADR-0063). Every motion that lifts it is cut to the room
+// above it: the hop, the stretches and the editor's drop-in. The figure stretches and squashes
+// about its feet, at y 108 on the grid (mascot.css's transform-origin).
+export const GROUND = 108;
+/** Grid units kept free between the figure's top and its frame's, at rest and in every motion. */
+export const HEADROOM = 1;
+/**
+ * The most the figure tilts about its feet, in degrees: listening's pose. The gestures that tilt it
+ * stay within this, tiltFlip's 16 included, which turns listening's -9 the other way.
+ */
+export const TILT = 9;
+
+/** How far the state's pose and its breath, at its deepest, stretch the figure upward. */
+export function stillStretch(state, mode) {
+  return POSES[state].sy * (1 + breathDepth(state, mode));
+}
+/** The most any state's pose and breath stretch it: the frame keeps room for this at rest. */
+export const STILL_MOST = Math.max(...Object.keys(POSES).map((state) => stillStretch(state)));
+
+/**
+ * The hop (Mascot.hop) as data: its lift, a share of its height, with each step's easing, and its
+ * squash, keyed over the same time with one easing for the whole hop.
+ */
+export const HOP = {
+  lift: [
+    [0, 0],
+    [0.2, 0, "cubic-bezier(.2,.7,.4,1)"],
+    [0.52, 1, "cubic-bezier(.6,0,.8,.4)"],
+    [0.84, 0],
+    [1, 0],
+  ],
+  squash: [
+    [0, 1, 1],
+    [0.2, 1.08, 0.9],
+    [0.4, 0.95, 1.07],
+    [0.66, 1, 1],
+    [0.86, 1.08, 0.9],
+    [1, 1.08, 0.9],
+  ],
+  squashEasing: "cubic-bezier(.42,0,.58,1)",
+};
+
+/** A CSS cubic-bezier() as a function of time, as the browser plays it. */
+function bezier(easing) {
+  const [x1, y1, x2, y2] = easing.match(/[\d.]+/g).map(Number);
+  const at = (s, a, b) => 3 * (1 - s) ** 2 * s * a + 3 * (1 - s) * s * s * b + s ** 3;
+  return (x) => {
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 32; i++) {
+      const s = (lo + hi) / 2;
+      if (at(s, x1, x2) < x) lo = s;
+      else hi = s;
+    }
+    return at((lo + hi) / 2, y1, y2);
+  };
+}
+
+/** A keyframe track's value at `p`, each step eased as `easing` gives it. */
+function keyed(track, p, value, easing) {
+  for (let i = 1; i < track.length; i++) {
+    const [o0] = track[i - 1];
+    const [o1] = track[i];
+    if (p <= o1)
+      return (
+        value(track[i - 1]) +
+        (value(track[i]) - value(track[i - 1])) * easing(track[i - 1])((p - o0) / (o1 - o0))
+      );
+  }
+  return value(track.at(-1));
+}
+
+const linear = (t) => t;
+const squashEase = bezier(HOP.squashEasing);
+/** The hop sampled over its time: [lift, squash's height] at each step. */
+const HOP_STEPS = Array.from({ length: 241 }, (_, i) => {
+  const p = i / 240;
+  return [
+    keyed(
+      HOP.lift,
+      p,
+      ([, y]) => y,
+      ([, , easing]) => (easing ? bezier(easing) : linear),
+    ),
+    keyed(
+      HOP.squash,
+      squashEase(p),
+      ([, , sy]) => sy,
+      () => linear,
+    ),
+  ];
+});
+
+/** How far a hop of height `h` lifts the top of a figure whose top is at `top`, at most. */
+export function hopRise(top, h, stretch) {
+  let rise = 0;
+  for (const [lift, sy] of HOP_STEPS) {
+    rise = Math.max(rise, (GROUND - top) * stretch * (sy - 1) + h * lift);
+  }
+  return rise;
+}
+
+/** How far stretching the figure to `sy` of its height lifts its top. */
+export function stretchRise(top, sy, stretch) {
+  return Math.max(0, (GROUND - top) * stretch * (sy - 1));
+}
+
+/**
+ * The share of a motion that fits under `ceiling`: the figure, at rest with its top at `top` and
+ * stretched by its pose and breath, has some room above it, and the motion would lift it by `rise`
+ * grid units at most. A motion lifts the figure in proportion to its share, so a share of it lifts
+ * it by that share of `rise`.
+ */
+export function liftShare(top, ceiling, stretch, rise) {
+  if (rise <= 0) return 1;
+  const room = GROUND - (GROUND - top) * stretch - ceiling - HEADROOM;
+  return Math.min(1, Math.max(0, room / rise));
+}
+
 /** Gestures that need a moment since the last of their kind. */
 const HOP_EVERY_MS = 12_000;
 const WAKE_EVERY_MS = 20_000;
