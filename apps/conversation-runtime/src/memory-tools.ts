@@ -133,6 +133,7 @@ export function memoryTools(store: MemoryStore): ToolProvider {
     spec: SEARCH,
     label: { en: "Searching memory", "pt-BR": "Buscando na memória", es: "Buscando en la memoria" },
     activity: "vault",
+    effect: "reads",
     async run(input: unknown, context: ToolContext): Promise<ToolOutcome> {
       const { query, k } = fields(input);
       if (typeof query !== "string" || query.trim() === "" || query.length > MAX_QUERY_CHARS) {
@@ -156,6 +157,7 @@ export function memoryTools(store: MemoryStore): ToolProvider {
     spec: READ,
     label: { en: "Reading a note", "pt-BR": "Lendo uma nota", es: "Leyendo una nota" },
     activity: "vault",
+    effect: "reads",
     async run(input: unknown, context: ToolContext): Promise<ToolOutcome> {
       const { path, offset } = fields(input);
       if (typeof path !== "string" || path === "" || path.length > MAX_PATH_CHARS) {

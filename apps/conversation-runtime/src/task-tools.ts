@@ -34,6 +34,16 @@ export interface TaskToolPorts {
   returnHandoff(agentId: string): Promise<void>;
 }
 
+/**
+ * The tools a task's run ends its own task with. A turn that read outside content doesn't hold them
+ * (ADR-0063): they change only the run's own task, whose news its creator hears.
+ */
+export const RUN_ENDS: ReadonlySet<string> = new Set([
+  "complete_task",
+  "wait_on_task",
+  "cancel_task",
+]);
+
 const MAX_WORDS = 8_000;
 /** The most tasks one turn hands off: a burst of them is a loop, not a plan. */
 const MAX_CREATES_PER_TURN = 3;

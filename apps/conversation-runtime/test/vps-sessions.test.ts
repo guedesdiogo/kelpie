@@ -145,13 +145,13 @@ function fakeSessions(outcome: RunnerSessionsOutcome | (() => Promise<RunnerSess
 const roleIn = async (id: string): Promise<AgentRole | null> =>
   id === MASTER ? "master" : id === "ghost" ? null : "specialist";
 
-function contextOf(actor: Actor = owner): ToolContext {
+function contextOf(actor: Actor = owner, trigger: ToolContext["trigger"] = "person"): ToolContext {
   return {
     locale: "en",
     actor,
     agentId: MASTER,
     scopes: "all",
-    trigger: "person",
+    trigger,
     qualifier: "clef",
     turn: "1",
     source: "telegram:chat-1, 2026-10-18",
@@ -235,6 +235,23 @@ describe("Master's vps_sessions tool (ADR-0057 §5)", () => {
     });
     // Neither asked the runner.
     expect(calls.list).toBe(0);
+  });
+
+  it("runs only in a turn the owner typed, and says so in words Master can pass on (#454)", async () => {
+    const { sessions, calls } = fakeSessions(answer(SESSIONS));
+    const tool = await toolOf(vpsSessionsTools(sessions, { roleOf: roleIn }));
+    // A note's turn, such as a task's news, never reads them: it isn't left out of the list, which
+    // would change the tools with what started the turn.
+    for (const trigger of ["note", "task"] as const) {
+      expect(await tool.run({}, contextOf(owner, trigger)), trigger).toEqual({
+        output:
+          "Kelpie lists the VPS's sessions only in a turn the owner started with a message of their own: their text could steer a turn no person typed. Tell the owner they can ask you for them.",
+        isError: true,
+      });
+    }
+    expect(calls.list).toBe(0);
+    // It only reads: a turn that read the sessions may still list them again.
+    expect(tool.effect).toBe("reads");
   });
 
   it("groups the sessions: waiting on the owner, working, idle, could be archived, ended", async () => {
@@ -366,6 +383,21 @@ describe("Master's vps_sessions tool (ADR-0057 §5)", () => {
       output:
         "The runner sees no Claude Code session on the owner's VPS, besides the ones behind Kelpie's own chat route.",
     });
+  });
+
+  it("marks its list as outside content only when it shows a session's own text (#454)", async () => {
+    expect(await listed(answer(SESSIONS))).toMatchObject({ outside: true });
+    // No session, or one that has no text of its own: only Kelpie's words.
+    expect(await listed(answer([]))).not.toHaveProperty("outside");
+    expect(
+      await listed(answer([session({ id: ids.unknown, state: "unknown" })])),
+    ).not.toHaveProperty("outside");
+    // A failure holds none either.
+    expect(await listed({ ok: false, reason: "unreachable" })).not.toHaveProperty("outside");
+    // A session whose only text is its last reply, which a short list shows.
+    expect(
+      await listed(answer([session({ id: ids.idle, excerpt: "Only a reply." })])),
+    ).toMatchObject({ outside: true });
   });
 
   it("fits a tool's output: the waits and the working sessions first, whole", async () => {

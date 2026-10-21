@@ -247,6 +247,12 @@ export interface ToolContext {
 export interface ToolOutcome {
   output: string;
   isError?: boolean;
+  /**
+   * The output holds outside content (ADR-0063): text that neither Kelpie, its code or its agents,
+   * nor the owner wrote, such as a VPS session's title. The turn then asks the owner before any
+   * change. The mark never reaches the result that history keeps.
+   */
+  outside?: true;
 }
 
 export interface Tool {
@@ -261,6 +267,13 @@ export interface Tool {
    * without one shows thinking.
    */
   activity?: ToolActivity;
+  /**
+   * What a call does (ADR-0063): it only reads, or it asks for the owner's own act before each
+   * change, through a confirmation, a form or a proposal's page. A tool that declares neither
+   * changes something with no yes, so a turn that read outside content asks the owner before it
+   * runs: a new tool is held until it says otherwise.
+   */
+  effect?: "reads" | "asks";
   run(input: unknown, context: ToolContext): Promise<ToolOutcome>;
 }
 
@@ -299,16 +312,28 @@ export function labelIn(label: Tool["label"], locale: Locale): string {
   return typeof label === "string" ? label : label[locale];
 }
 
+/**
+ * A call's result, as history and the route keep it, and beside it whether its output holds
+ * outside content (ADR-0063), which only the turn keeps.
+ */
+export interface ToolRun {
+  result: ToolResult;
+  outside: boolean;
+}
+
 /** Runs one call. An unknown tool and a tool that throws are answered with an error. */
 export async function runToolCall(
   tools: ReadonlyMap<string, Tool>,
   call: ToolCallPart,
   context: ToolContext,
-): Promise<ToolResult> {
+): Promise<ToolRun> {
   const tool = tools.get(call.name);
   if (!tool) {
     const name = call.name.slice(0, 64);
-    return { callId: call.id, output: `There is no tool named ${name}.`, isError: true };
+    return {
+      result: { callId: call.id, output: `There is no tool named ${name}.`, isError: true },
+      outside: false,
+    };
   }
   try {
     const outcome = await tool.run(call.input, context);
@@ -317,15 +342,21 @@ export async function runToolCall(
         ? // Never half of a surrogate pair.
           `${outcome.output.slice(0, TOOL_OUTPUT_MAX_CHARS).replace(/[\uD800-\uDBFF]$/, "")}\n[Cut: the result was longer.]`
         : outcome.output;
-    return outcome.isError
-      ? { callId: call.id, output, isError: true }
-      : { callId: call.id, output };
+    return {
+      result: outcome.isError
+        ? { callId: call.id, output, isError: true }
+        : { callId: call.id, output },
+      outside: outcome.outside === true,
+    };
   } catch (error) {
     // The tool's own name, never the model's input or the error's message.
     console.error("ConversationAgent: a tool failed", {
       tool: tool.spec.name,
       error: error instanceof Error ? error.name : typeof error,
     });
-    return { callId: call.id, output: TOOL_FAILED_RESULT, isError: true };
+    return {
+      result: { callId: call.id, output: TOOL_FAILED_RESULT, isError: true },
+      outside: false,
+    };
   }
 }

@@ -104,6 +104,7 @@ import {
 } from "./announcements.ts";
 import { bareHttpsOrigin, heldTools, setupNote } from "./configuration.ts";
 import migrations from "./migrations/migrations.js";
+import { changes, held } from "./outside-content.ts";
 import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
 import { proposalBubble, proposalNote } from "./proposal-notices.ts";
 import { readRole } from "./registry/schema.ts";
@@ -131,6 +132,7 @@ import {
   type Tool,
   type ToolActivity,
   type ToolContext,
+  type ToolRun,
   type TurnTrigger,
   visible,
 } from "./tools.ts";
@@ -2044,6 +2046,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       checkpointId: number | null;
       usage: Usage[] | null;
       attempts: number;
+      outside: boolean;
     } & TurnAccess,
     controller: AbortController,
     settings: AgentSettings,
@@ -2081,6 +2084,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     let context: ToolContext | undefined;
     let last = false;
     let pendingContext = memory;
+    // Whether the turn read outside content (ADR-0063): from then on, a change waits for the owner.
+    let outside = this.#outsideAtStart(turn);
     const flight = this.#inFlight.get(turn.id);
     // A new message, a pause or a failure settled the turn: nothing more of it may start, though
     // a route's events may still be on their way.
@@ -2165,12 +2170,30 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         tool?.activity,
       );
       progress.running = toolCall.id;
-      const result = await this.#runWithin(tools, toolCall, context, remaining);
+      // After outside content, a tool that changes something with no yes of its own runs only on
+      // the owner's (ADR-0063): the call is held, and asks them first.
+      const ran = await this.#runWithin(
+        outside && tool !== undefined && changes(tool)
+          ? new Map([[toolCall.name, held(tool)]])
+          : tools,
+        toolCall,
+        context,
+        remaining,
+      );
       progress.running = undefined;
+      // Kept as soon as it comes back, so the turn's later rounds and an eviction keep it too.
+      if (ran?.outside && !outside) {
+        outside = true;
+        this.#db
+          .update(schema.turns)
+          .set({ outside: true })
+          .where(eq(schema.turns.id, turn.id))
+          .run();
+      }
       // Settling the turn already wrote this round's results.
       if (!this.#isRunning(turn.id)) return null;
-      if (result === null) last = true;
-      return result ?? { callId: toolCall.id, output: TOOL_TIMED_OUT_RESULT, isError: true };
+      if (ran === null) last = true;
+      return ran?.result ?? { callId: toolCall.id, output: TOOL_TIMED_OUT_RESULT, isError: true };
     };
 
     for (;;) {
@@ -2347,7 +2370,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     call: ToolCallPart,
     context: ToolContext,
     ms: number,
-  ): Promise<ToolResult | null> {
+  ): Promise<ToolRun | null> {
     const finished = new AbortController();
     const expired = new AbortController();
     const signal = AbortSignal.any([context.signal, expired.signal]);
@@ -2533,6 +2556,35 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .set({ links: [...links, kept] })
       .where(eq(schema.turns.id, turnId))
       .run();
+  }
+
+  /**
+   * Whether the turn starts marked as having read outside content (ADR-0063): it kept the mark
+   * before an eviction, or no person typed it and the history its requests send, since its
+   * checkpoint, holds a marked turn. That one keeps the mark too. The owner's own turns are marked
+   * only by what they read themselves (the owner's decision on #454).
+   */
+  #outsideAtStart(turn: { id: number; checkpointId: number | null; outside: boolean }): boolean {
+    if (turn.outside) return true;
+    if (this.#trigger(turn.id) === "person") return false;
+    const kept =
+      turn.checkpointId === null
+        ? 0
+        : (this.#db
+            .select({ id: schema.checkpoints.keptFromHistoryId })
+            .from(schema.checkpoints)
+            .where(eq(schema.checkpoints.id, turn.checkpointId))
+            .get()?.id ?? 0);
+    const marked = this.#db
+      .select({ id: schema.history.id })
+      .from(schema.history)
+      .innerJoin(schema.turns, eq(schema.turns.id, schema.history.turnId))
+      .where(and(gte(schema.history.id, kept), eq(schema.turns.outside, true)))
+      .limit(1)
+      .get();
+    if (!marked) return false;
+    this.#db.update(schema.turns).set({ outside: true }).where(eq(schema.turns.id, turn.id)).run();
+    return true;
   }
 
   /** How many rounds of tool calls the turn has in history. */

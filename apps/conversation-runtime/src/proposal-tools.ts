@@ -176,6 +176,7 @@ export function proposalTools(ports: ProposalToolPorts): ToolProvider {
       "pt-BR": "Propondo uma mudança",
       es: "Proponiendo un cambio",
     },
+    effect: "asks",
     async run(input, context) {
       // A proposal acts for the owner, so only a turn for them, which reads all their memory, makes
       // one, whatever started it (#345): nothing applies until the owner approves it.
