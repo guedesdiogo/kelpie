@@ -66,6 +66,13 @@ describe("redact", () => {
     "PWD=/home/owner/Repos/kelpie",
     "OLDPWD=/home/owner",
     "GIT_AUTHOR_NAME=Diogo",
+    "author: Diogo Guedes",
+    // Only `authorization` says auth among its kin: `authorized` and `authorize` say a state.
+    "authorized: yes",
+    "authorised: yes",
+    "isAuthorized = check()",
+    "authority: https://login.example",
+    "authors: 3",
     // Test results and statuses: pass and auth as words.
     "Passed: 458/458",
     "Pass: all green",
@@ -149,9 +156,118 @@ describe("redact", () => {
     ["pass:123456", `pass:${REDACTED}`],
     ["AUTH:123456", `AUTH:${REDACTED}`],
     ["password:hunter2", `password:${REDACTED}`],
+    // A `#` right after a block indicator starts no comment, so the value is on this line (#458).
+    ["password: |#hunter2", `password: ${REDACTED}`],
     ["  - api_key:abc123", `  - api_key:${REDACTED}`],
   ])("redacts a YAML or header line's value: %s", (line, expected) => {
     expect(redact(`before\n${line}\nafter`)).toBe(`before\n${expected}\nafter`);
+  });
+
+  it.each([
+    // `Authorization` says auth, though `author` doesn't (#458).
+    ["Authorization: abc123xyz", `Authorization: ${REDACTED}`],
+    // The British spelling too.
+    ["Authorisation: abc123xyz", `Authorisation: ${REDACTED}`],
+    ["authorization: hunter2", `authorization: ${REDACTED}`],
+    ["curl -H 'Authorization: abc123xyz' x", `curl -H 'Authorization: ${REDACTED}' x`],
+    ["proxy-authorization:hunter2", `proxy-authorization:${REDACTED}`],
+    // A known scheme stays in front; another is part of the secret.
+    [
+      'Authorization: Digest username="a", response="abc123xyz"',
+      `Authorization: Digest ${REDACTED}`,
+    ],
+    ["Authorization: Negotiate YIIabc123", `Authorization: Negotiate ${REDACTED}`],
+    ["Authorization: ApiKey abc123xyz", `Authorization: ${REDACTED}`],
+  ])("redacts an Authorization header's value, keeping its scheme: %s", (line, expected) => {
+    expect(redact(`before\n${line}\nafter`)).toBe(`before\n${expected}\nafter`);
+  });
+
+  it.each([
+    // A value that only starts with a type word is no type (#458).
+    ["token: any-secret", `token: ${REDACTED}`],
+    ["secret: never!", `secret: ${REDACTED}`],
+    ["pass: null.abc", `pass: ${REDACTED}`],
+    ["password:any-secret", `password:${REDACTED}`],
+    // Only a type, or a union of types, then maybe one `;`, `,` or `)`, is code: more goes.
+    ['token: string = "hunter2";', `token: ${REDACTED}`],
+    ["token: string =", `token: ${REDACTED}`],
+    ["password: string, hunter2", `password: ${REDACTED}`],
+    ["password: null; hunter2", `password: ${REDACTED}`],
+    ["password: any) hunter2", `password: ${REDACTED}`],
+    ["password: true | hunter2", `password: ${REDACTED}`],
+    ["password: false=hunter2", `password: ${REDACTED}`],
+  ])("redacts a value with more than a type: %s", (line, expected) => {
+    expect(redact(line)).toBe(expected);
+  });
+
+  it.each([
+    // An empty value or a block indicator puts it on the lines below, more indented (#458).
+    ["password:\n  hunter2", `password:\n  ${REDACTED}`],
+    ["password: |\n  hunter2\n  more", `password: |\n  ${REDACTED}`],
+    ["  - token:\n      abc123", `  - token:\n      ${REDACTED}`],
+    ["api_key: >-\n    abc\n      def", `api_key: >-\n    ${REDACTED}`],
+    ["password:\r\n  hunter2", `password:\r\n  ${REDACTED}`],
+    ["password: |\r\n  hunter2", `password: |\r\n  ${REDACTED}`],
+    ["token:\n  -abc123", `token:\n  ${REDACTED}`],
+    // A plain value runs on up to a line that is a key's.
+    ["password:\n  hunter2\n  more\n  next: x", `password:\n  ${REDACTED}\n  next: x`],
+    // A block's lines are its value, whatever they look like.
+    ["secret: |2+\n  user: admin\n  - item", `secret: |2+\n  ${REDACTED}`],
+    // Blank lines between a value's lines, or before them, are the value's too.
+    ["password: |\n  hunter2\n\n  second", `password: |\n  ${REDACTED}`],
+    ["password: |\n\n  hunter2", `password: |\n\n  ${REDACTED}`],
+    ["password: >\n  one\n  two\n\n  three", `password: >\n  ${REDACTED}`],
+    ["password:\n  hunter2\n \n  more", `password:\n  ${REDACTED}`],
+    // No space before the indicator, any after the colon, and up to 40 more spaces of indent.
+    ["password:|\n  x", `password:|\n  ${REDACTED}`],
+    [`password:${" ".repeat(9)}\n  x`, `password:${" ".repeat(9)}\n  ${REDACTED}`],
+    [`password:${" ".repeat(9)}|\n  x`, `password:${" ".repeat(9)}|\n  ${REDACTED}`],
+    [`password:\n${" ".repeat(9)}hunter2`, `password:\n${" ".repeat(9)}${REDACTED}`],
+    [`password: |\n${" ".repeat(30)}hunter2`, `password: |\n${" ".repeat(30)}${REDACTED}`],
+    [`password:\n${" ".repeat(40)}hunter2`, `password:\n${" ".repeat(40)}${REDACTED}`],
+    // A tag, an anchor or a comment around the indicator.
+    ["password: | # comment\n  hunter2", `password: | # comment\n  ${REDACTED}`],
+    ["password: !!binary |\n  c2VjcmV0", `password: !!binary |\n  ${REDACTED}`],
+    ["password: &a |\n  hunter2", `password: &a |\n  ${REDACTED}`],
+    [
+      `password: !vault |\n${" ".repeat(10)}$ANSIBLE_VAULT;1.1;AES256\n${" ".repeat(10)}6132`,
+      `password: !vault |\n${" ".repeat(10)}${REDACTED}`,
+    ],
+    // However many lines.
+    [`key: |${"\n  line".repeat(100)}`, `key: |\n  ${REDACTED}`],
+  ])("redacts a YAML value on the more-indented lines below its name: %j", (text, expected) => {
+    expect(redact(`before\n${text}\nafter`)).toBe(`before\n${expected}\nafter`);
+  });
+
+  it.each([
+    // A nested mapping or a list isn't a value that runs on, nor a line no more indented.
+    "auth:\n  method: basic",
+    "auth:\n  method:\tbasic",
+    "auth:\n  basic:",
+    "token:\n  - abc",
+    "token:\n  -",
+    "key:\n\ntext",
+    "key:\ntext",
+    "key: |\n\ntext",
+    "auth:\n\n  method: basic",
+    // Past the 40 spaces a value below a name may take.
+    `password:\n${" ".repeat(41)}hunter2`,
+  ])("leaves a nested mapping, a list, or a line no more indented, below a name: %j", (text) => {
+    expect(redact(text)).toBe(text);
+  });
+
+  it.each([
+    ["a CRLF blank line", "password: |\r\n  hunter2\r\n\r\n  swordfish"],
+    ["a blank line of a tab", "password: |\n\t\n  hunter2\n  swordfish"],
+  ])("redacts a block's lines across %s", (_, text) => {
+    expect(redact(text)).not.toMatch(/hunter2|swordfish/);
+  });
+
+  it("redacts a block of any length in one pass, so redacting again changes nothing", () => {
+    const text = `before\nkey: |${"\n  line".repeat(100)}\nafter`;
+    const once = redact(text);
+    expect(once).toBe(`before\nkey: |\n  ${REDACTED}\nafter`);
+    expect(redact(once)).toBe(once);
   });
 
   it.each([
@@ -159,6 +275,14 @@ describe("redact", () => {
     "  token: string;",
     "password: boolean,",
     "auth: null",
+    "token: string | null;",
+    "token: string | number | null;",
+    "token: string; ",
+    "token: string[];",
+    "token: string?",
+    "secret: unknown)",
+    "password: boolean[] | undefined,",
+    "auth: null\r\nnext",
     "The token: we rotate it",
     "token:   ",
     `token:${" ".repeat(9)}`,
@@ -418,29 +542,44 @@ describe("redact's cost", () => {
     ["-----BEGIN A-----", "-----BEGIN A-----"],
     ["x://:", "x://:"],
     ["commit ", "commit "],
-  ])("takes linear time on %j: 8 times the text, well under quadratic cost", (_, unit) => {
-    const of = (length: number) => unit.repeat(Math.ceil(length / unit.length)).slice(0, length);
-    // The best of three runs, after a warm-up, so a pause of the collector doesn't count.
-    const cost = (text: string) => {
-      let best = Number.POSITIVE_INFINITY;
-      for (let run = 0; run < 3; run += 1) {
-        const started = performance.now();
-        redact(text, ["correct horse battery staple"]);
-        best = Math.min(best, performance.now() - started);
-      }
-      return best;
-    };
-    const small = of(25_000);
-    const large = of(200_000);
-    redact(small);
-    const smallCost = cost(small);
-    const largeCost = cost(large);
-    // Linear costs about 8 times as much on 8 times the text, and quadratic about 64 times; it
-    // took 12 to 60 s on the larger text. The bound sits far from both, and the floor keeps a
-    // sub-millisecond baseline from turning a CI runner's noise into a failure.
-    expect(largeCost / Math.max(smallCost, 5)).toBeLessThan(24);
-    expect(largeCost).toBeLessThan(1_000);
-  });
+    // A name with nothing after it, then lines more indented, each a key's or a value's (#458).
+    ["key:\\n ", "key:\n "],
+    ["key: |\\n ", "key: |\n "],
+    ["key:\\n a", "key:\n a"],
+    // Runs of blank lines below a name, and lines indented past the 40 spaces a value may take.
+    ["key: |\\n \\n…", `key: |${"\n ".repeat(40)}`],
+    ["key:\\n + 41 spaces + a", `key:\n${" ".repeat(41)}a\n`],
+    // One long line after a name, of types or of tags and anchors (#458).
+    ["key: string | …", "string | ", "key: "],
+    ["key: !a| …", "!a| ", "key: "],
+    ["key: &a …", "&a ", "key: "],
+  ])(
+    "takes linear time on %j: 8 times the text, well under quadratic cost",
+    (_, unit, head = "") => {
+      const of = (length: number) =>
+        head + unit.repeat(Math.ceil(length / unit.length)).slice(0, length - head.length);
+      // The best of three runs, after a warm-up, so a pause of the collector doesn't count.
+      const cost = (text: string) => {
+        let best = Number.POSITIVE_INFINITY;
+        for (let run = 0; run < 3; run += 1) {
+          const started = performance.now();
+          redact(text, ["correct horse battery staple"]);
+          best = Math.min(best, performance.now() - started);
+        }
+        return best;
+      };
+      const small = of(25_000);
+      const large = of(200_000);
+      redact(small);
+      const smallCost = cost(small);
+      const largeCost = cost(large);
+      // Linear costs about 8 times as much on 8 times the text, and quadratic about 64 times; it
+      // took 12 to 60 s on the larger text. The bound sits far from both, and the floor keeps a
+      // sub-millisecond baseline from turning a CI runner's noise into a failure.
+      expect(largeCost / Math.max(smallCost, 5)).toBeLessThan(24);
+      expect(largeCost).toBeLessThan(1_000);
+    },
+  );
 });
 
 describe("excerptOf", () => {
