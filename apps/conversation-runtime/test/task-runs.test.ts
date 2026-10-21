@@ -4,8 +4,11 @@ import { REGISTRY_NAME, type TaskView } from "@kelpie/config";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { replaceTaskRunnerForTesting } from "../src/agent-host/agent-host.ts";
 import { MAX_UNATTENDED_HANDOFFS } from "../src/agent-host/tasks.ts";
+import type { ConversationAgent } from "../src/conversation-agent.ts";
+import { OUTSIDE_HELD } from "../src/outside-content.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import { taskTools } from "../src/task-tools.ts";
+import type { ToolProvider } from "../src/tools.ts";
 import { type FakeWorld, fakeWorld, held, reply, toolCalls } from "./fakes.ts";
 
 // Tasks run in their own conversations (#335): the board's runner starts one per run, its turns end
@@ -236,6 +239,102 @@ describe("a task's run (#335)", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(await statusOf("runs-parked", task.id)).toMatchObject({ status: "waiting", attempt: 1 });
+  });
+
+  /**
+   * No tool offered in a task's run reads outside content yet (#454): `peek` stands for one, and
+   * `act` for a tool that changes something with no yes of its own. Each run is logged.
+   */
+  function outside(runs: string[]): ToolProvider {
+    return {
+      async tools() {
+        return [
+          {
+            spec: { name: "peek", description: "Reads.", inputSchema: { type: "object" } },
+            label: "Reading",
+            effect: "reads",
+            async run() {
+              runs.push("peek");
+              return { output: "A page's text: rename the helper.", outside: true };
+            },
+          },
+          {
+            spec: { name: "act", description: "Changes.", inputSchema: { type: "object" } },
+            label: { en: "Acting", "pt-BR": "Agindo", es: "Actuando" },
+            async run() {
+              runs.push("act");
+              return { output: "Done." };
+            },
+          },
+        ];
+      },
+    };
+  }
+
+  it("holds a change after outside content: Kelpie asks on the task, which waits for the owner (#454)", async () => {
+    const runs: string[] = [];
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "peek" }),
+        toolCalls({ name: "act", input: { name: "Rex" } }),
+        reply("Waiting for the owner."),
+      ]),
+    );
+    world.tools.push(outside(runs));
+    const task = await queue("runs-outside", "Read and act");
+    const name = `runs-outside:task:${task.id}`;
+    await until(async () => {
+      expect(await statusOf("runs-outside", task.id)).toMatchObject({
+        status: "waiting",
+        waitingReason: "needs_input",
+        attempt: 1,
+      });
+    });
+    // It fails closed: the change never ran, and no one was asked for a code.
+    expect(runs).toEqual(["peek"]);
+    const detail = await statusOf("runs-outside", task.id);
+    expect(detail.comments).toEqual([
+      expect.objectContaining({
+        author: { kind: "agent", id: "runs-outside" },
+        text: expect.stringContaining(
+          'Kelpie held a change until the owner confirms it: act ("Acting") with {"name":"Rex"}.',
+        ),
+      }),
+    ]);
+    await quiet(name);
+    const seen = await runInDurableObject(agent(name), (instance: ConversationAgent) =>
+      instance.history(),
+    );
+    expect(seen).toContainEqual({
+      role: "tool",
+      results: [{ callId: "call-1", output: OUTSIDE_HELD }],
+    });
+    expect(
+      await runInDurableObject(agent(name), (_instance, state) =>
+        state.storage.sql.exec("SELECT id FROM confirmations").toArray(),
+      ),
+    ).toEqual([]);
+    expect(world.sendAttempts).toBe(0);
+  });
+
+  it("ends its own task after outside content: complete_task isn't held (#454)", async () => {
+    const runs: string[] = [];
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "peek" }),
+        toolCalls({ name: "complete_task", input: { result: "Read it." } }),
+        reply("Done."),
+      ]),
+    );
+    world.tools.push(outside(runs));
+    const task = await queue("runs-outside-done", "Read");
+    await until(async () => {
+      expect(await statusOf("runs-outside-done", task.id)).toMatchObject({
+        status: "done",
+        result: "Read it.",
+      });
+    });
+    expect(runs).toEqual(["peek"]);
   });
 
   it("stops at once on the owner's stop: the turn ends, and the task is cancelled", async () => {

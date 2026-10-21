@@ -643,6 +643,7 @@ export function configurationTools(
     {
       spec: SPECS.list_agents,
       label: { en: "Listing agents", "pt-BR": "Listando agentes", es: "Listando agentes" },
+      effect: "reads",
       async run(_input, context) {
         const result = await commands.listAgents(context.actor);
         if (!result.ok) return refusal(result);
@@ -654,6 +655,7 @@ export function configurationTools(
     {
       spec: SPECS.get_agent,
       label: { en: "Reading an agent", "pt-BR": "Lendo um agente", es: "Leyendo un agente" },
+      effect: "reads",
       async run(input, context) {
         const { id } = fields(input);
         if (!isAgentId(id))
@@ -725,6 +727,7 @@ export function configurationTools(
         "pt-BR": "Alterando as configurações de um agente",
         es: "Cambiando la configuración de un agente",
       },
+      effect: "asks",
       async run(input, context) {
         if (!isOwner(context)) return NOT_OWNER;
         const { id, settings } = fields(input);
@@ -769,6 +772,7 @@ export function configurationTools(
     {
       spec: SPECS.get_models,
       label: { en: "Reading the models", "pt-BR": "Lendo os modelos", es: "Leyendo los modelos" },
+      effect: "reads",
       async run(_input, context) {
         const result = await commands.getModels(context.actor);
         if (!result.ok) return refusal(result);
@@ -782,6 +786,7 @@ export function configurationTools(
         "pt-BR": "Alterando os modelos",
         es: "Cambiando los modelos",
       },
+      effect: "asks",
       async run(input, context) {
         if (!isOwner(context)) return NOT_OWNER;
         const settings = parseModelSettings(fields(input).settings);
@@ -817,6 +822,7 @@ export function configurationTools(
         "pt-BR": "Ligando ou desligando a rota claude-code",
         es: "Activando o desactivando la ruta claude-code",
       },
+      effect: "asks",
       async run(input, context) {
         if (!isOwner(context)) return NOT_OWNER;
         const { on } = fields(input);
@@ -854,6 +860,7 @@ export function configurationTools(
         "pt-BR": "Escolhendo o Master",
         es: "Eligiendo el Master",
       },
+      effect: "asks",
       async run(input, context) {
         if (!isOwner(context)) return NOT_OWNER;
         const agent = await agentOf(context, fields(input).id);
@@ -886,6 +893,7 @@ export function configurationTools(
         "pt-BR": "Alterando o chat de um agente",
         es: "Cambiando el chat de un agente",
       },
+      effect: "asks",
       async run(input, context) {
         if (!isOwner(context)) return NOT_OWNER;
         const { id, chat } = fields(input);
@@ -923,6 +931,7 @@ export function configurationTools(
         "pt-BR": "Excluindo um agente",
         es: "Eliminando un agente",
       },
+      effect: "asks",
       async run(input, context) {
         if (!isOwner(context)) return NOT_OWNER;
         const agent = await agentOf(context, fields(input).id);
@@ -964,6 +973,8 @@ export function configurationTools(
         return { output: deletedReport(agent.id, result.value) };
       },
     },
+    // The three form tools declare no effect: their page is the owner's yes, but after outside
+    // content the turn holds even the link until the owner confirms it (ADR-0064).
     {
       spec: SPECS.connect_telegram,
       label: {
@@ -1055,6 +1066,7 @@ export function configurationTools(
         "pt-BR": "Verificando o runner",
         es: "Comprobando el runner",
       },
+      effect: "reads",
       async run(_input, context) {
         if (!isOwner(context)) return NOT_OWNER;
         const result = await commands.describeRunner(context.actor);

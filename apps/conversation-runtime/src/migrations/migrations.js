@@ -12,6 +12,7 @@ import m0010 from "./0010_confirmations.sql";
 import m0011 from "./0011_host_notices.sql";
 import m0012 from "./0012_from_kelpie.sql";
 import m0013 from "./0013_turn_prompt_key.sql";
+import m0014 from "./0014_turn_outside.sql";
 import journal from "./meta/_journal.json";
 
 export default {
@@ -31,5 +32,6 @@ export default {
     m0011,
     m0012,
     m0013,
+    m0014,
   },
 };

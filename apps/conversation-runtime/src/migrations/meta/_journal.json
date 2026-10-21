@@ -99,6 +99,13 @@
       "when": 1791677910889,
       "tag": "0013_turn_prompt_key",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1792555049829,
+      "tag": "0014_turn_outside",
+      "breakpoints": true
     }
   ]
 }

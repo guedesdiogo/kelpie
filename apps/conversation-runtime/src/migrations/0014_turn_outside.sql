@@ -1,0 +1,1 @@
+ALTER TABLE `turns` ADD `outside` integer DEFAULT false NOT NULL;
