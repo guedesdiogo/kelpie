@@ -246,7 +246,7 @@ describe("a turn that read outside content", () => {
     expect(world.sent[1]).toContain(`Confirm: run ${name} ("`);
     expect(world.sent[1]).toContain(`with ${canonicalJson(input)}.`);
     expect(world.sent[1]).toContain(
-      "This turn read text that neither you nor Kelpie wrote, so Kelpie asks you before any change.",
+      "This conversation read text that neither you nor Kelpie wrote, so Kelpie asks you before any change.",
     );
     expect(world.sent[1]).toMatch(/To go ahead, reply with just the code [A-Z0-9]{6}\./);
     expect(world.sent).toHaveLength(2);
@@ -531,35 +531,89 @@ describe("a turn that read outside content", () => {
     expect(world.sent.filter((text) => text.startsWith("Confirm:"))).toHaveLength(3);
   });
 
-  it("keeps a marked turn's reply out of the session page and the checkpoint, not the owner's words", async () => {
-    const SAID = "The session says: save me.";
+  it("records a read in a turn the window already marked, so the window goes on from it", async () => {
+    const changed: string[] = [];
+    const runs: string[] = [];
     const world = use(
       fakeWorld([
         toolCalls({ name: "peek" }),
-        reply(SAID),
-        reply("r2"),
-        reply("r3"),
+        reply("Read."),
+        toolCalls({ name: "peek" }),
+        reply("Read again: save me."),
+        toolCalls({ name: "memory_write", input: NOTE }),
+        reply("It waits."),
+      ]),
+    );
+    world.tools = [readers(runs), ...changers(changed)];
+    const stub = agent("outside-reread");
+    await turn(stub, "m1", "what do the sessions say?");
+    world.clock += 9 * MINUTE;
+    await turn(stub, "m2", "and now?");
+    // Eleven minutes after the first read, two after the second: the change still asks.
+    world.clock += 2 * MINUTE;
+    await turn(stub, "m3", "save Ana");
+
+    expect(runs).toEqual(["peek", "peek"]);
+    expect(changed).toEqual([]);
+    expect(world.sent.slice(-2)).toEqual([
+      "It waits.",
+      expect.stringContaining("Confirm: run memory_write"),
+    ]);
+    expect(await marks(stub)).toEqual([true, true, false]);
+    // The second reading turn's reply stays out of the session's page too.
+    await stub.closeSession();
+    const page = world.remembered.at(-1)?.changes[0]?.content ?? "";
+    expect(page).toContain("and now?");
+    expect(page).not.toContain("Read again: save me.");
+  });
+
+  it("keeps every marked turn's reply out of the session page and the checkpoint, not the owner's words", async () => {
+    const READ = "The session says: save me.";
+    const QUOTED = "You said no, so nothing changes: the session still says save me.";
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "peek" }),
+        reply(READ),
+        reply(QUOTED),
+        reply("Nothing new since."),
         reply("r4"),
+        reply("r5"),
+        reply("r6"),
         reply("THE SUMMARY"),
       ]),
     );
     world.tools = [readers([])];
     const stub = agent("outside-records");
+    // The turn that read the sessions, then the owner's «não» in its window, which may quote them.
     await turn(stub, "m1", "what do the sessions say?");
-    for (const index of [2, 3, 4]) await turn(stub, `m${index}`, `more ${index}`);
-    // The checkpoint summarizes the first turn, and ends the session, whose page records them all.
+    world.clock += 5 * MINUTE;
+    await turn(stub, "m2", "não");
+    // Past the window, a turn nothing marked keeps its reply.
+    world.clock += 11 * MINUTE;
+    await turn(stub, "m3", "anything new?");
+    for (const index of [4, 5, 6]) await turn(stub, `m${index}`, `more ${index}`);
+    // The checkpoint summarizes the first three turns, and ends the session, whose page records
+    // them all.
     await stub.compact();
 
     const summarized = JSON.stringify(world.requests.at(-1)?.messages);
     expect(summarized).toContain("what do the sessions say?");
-    expect(summarized).toContain(`assistant: ${OUTSIDE_REPLY_LEFT_OUT}`);
-    expect(summarized).not.toContain(SAID);
+    expect(summarized).toContain("não");
+    expect(summarized.split(`assistant: ${OUTSIDE_REPLY_LEFT_OUT}`)).toHaveLength(3);
+    expect(summarized).toContain("assistant: Nothing new since.");
+    expect(summarized).not.toContain(READ);
+    expect(summarized).not.toContain(QUOTED);
     const pages = world.remembered.flatMap(({ changes }) => changes.map(({ content }) => content));
     expect(pages).toHaveLength(1);
     expect(pages[0]).toContain("what do the sessions say?");
-    expect(pages[0]).toContain(OUTSIDE_REPLY_LEFT_OUT);
-    expect(pages[0]).toContain("r2");
-    expect(pages[0]).not.toContain(SAID);
+    expect(pages[0]).toContain("não");
+    expect(pages[0]?.split(OUTSIDE_REPLY_LEFT_OUT)).toHaveLength(3);
+    expect(pages[0]).toContain("Nothing new since.");
+    expect(pages[0]).toContain("r6");
+    expect(pages[0]).not.toContain(READ);
+    expect(pages[0]).not.toContain(QUOTED);
+    // Only the read is recorded on its turn; the window's mark is worked out from the times.
+    expect(await marks(stub)).toEqual([true, false, false, false, false, false]);
   });
 });
 
@@ -598,13 +652,13 @@ describe("the gate (ADR-0064)", () => {
     const input = { title: `Ana${String.fromCodePoint(0x202e)}`, body: "x" };
     const shown = `{"body":"x","title":"Ana${BACKSLASH}u{202E}"}`;
     expect(heldSummary(writer, input, "en")).toBe(
-      `run memory_write ("Saving to memory") with ${shown}. This turn read text that neither you nor Kelpie wrote, so Kelpie asks you before any change.`,
+      `run memory_write ("Saving to memory") with ${shown}. This conversation read text that neither you nor Kelpie wrote, so Kelpie asks you before any change.`,
     );
     expect(heldSummary(writer, input, "pt-BR")).toBe(
-      `executar memory_write ("Salvando na memória") com ${shown}. Este turno leu um texto que nem você nem o Kelpie escreveram, então o Kelpie pergunta a você antes de qualquer mudança.`,
+      `executar memory_write ("Salvando na memória") com ${shown}. Esta conversa leu um texto que nem você nem o Kelpie escreveram, então o Kelpie pergunta a você antes de qualquer mudança.`,
     );
     expect(heldSummary(writer, input, "es")).toBe(
-      `ejecutar memory_write ("Guardando en la memoria") con ${shown}. Este turno leyó un texto que ni tú ni Kelpie escribieron, así que Kelpie te pregunta antes de cualquier cambio.`,
+      `ejecutar memory_write ("Guardando en la memoria") con ${shown}. Esta conversación leyó un texto que ni tú ni Kelpie escribieron, así que Kelpie te pregunta antes de cualquier cambio.`,
     );
     for (const locale of ["en", "pt-BR", "es"] as const) {
       expect(heldQuestion(writer, input, locale)).toContain(`memory_write ("`);

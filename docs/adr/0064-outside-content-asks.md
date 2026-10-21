@@ -53,7 +53,7 @@
 
 ### 2. How long the mark lasts
 
-- **The turn that read it** keeps it to its end: across its rounds, on both routes, since the claude-code route's `tool_request` runs through the same loop, and past an eviction. It is written as soon as the result comes back. Only such a read writes the mark; every other mark below is worked out again each time a turn starts.
+- **The turn that read it** keeps it to its end: across its rounds, on both routes, since the claude-code route's `tool_request` runs through the same loop, and past an eviction. The read is written as soon as the result comes back, even in a turn that started marked, so a second read carries the window on. Only such a read is written; every other mark below is worked out from earlier turns and their times, so it gives the same answer at each start, after an eviction, and for the records (§3).
 - **After it,** every turn in its conversation starts marked, the owner's own included («10 minutos»):
   - while a turn that read outside content started or ran less than 10 minutes before it;
   - or while a change a turn held for the owner is still open (§4).
@@ -65,8 +65,9 @@
 
 ### 3. What the records keep
 
-- **A reply of a turn that read outside content may quote it.** The vault's session pages and a checkpoint's summary keep Kelpie's fixed line in its place: "(A reply left out of this record: its turn read text that neither Kelpie nor the owner wrote.)" («Tirar dos registros»).
-- **The owner's messages stay,** as do the replies of turns that only took the mark from the window or from history.
+- **A marked turn's reply may quote outside content,** whatever marked it: its own read, the window, an open change, or its history (§2). The vault's session pages and a checkpoint's summary keep Kelpie's fixed line in its place: "(A reply left out of this record: it came after text that neither Kelpie nor the owner wrote.)" («Tirar dos registros»).
+- **The owner's messages stay,** and so does every reply of a turn nothing marked.
+- **How a record knows:** it works the mark out again for each turn, by the same rules as at the turn's start. That needs no record of its own. A held change counts while its confirmation is kept, a day past its expiry; a summary written later than that keeps a reply that only an open change marked.
 - This narrows the owner's earlier «Tudo bem» on a session's text reaching the vault, for marked turns. A tool's result never reached those records (ADR-0057 §3).
 
 ### 4. What asks
@@ -74,11 +75,11 @@
 - **Each tool says what it does:** it only reads, or it asks for the owner's own act before each change. A tool that says neither changes something with no yes, so a new tool asks until it says otherwise.
 - **After the mark,** each call of such a tool goes through ADR-0013's gate, shaped by ADR-0026, in the turn's conversation:
   - the confirmation is for the command `tool:<name>` and the call's input, the model's raw JSON;
-  - Kelpie writes its summary in the conversation's language (ADR-0027): the tool's name and label, and its input with invisible characters written out;
+  - Kelpie writes its summary in the conversation's language (ADR-0027): the tool's name and label, its input with invisible characters written out, and that the conversation read text that neither the owner nor Kelpie wrote. It says the conversation, not the turn, since the window marks turns that read nothing;
   - with no yes, the call doesn't run, and its result says the change waits for the owner's confirmation;
   - a change too long to show in one bubble doesn't run either, and its result says so.
 - **The yes runs exactly that call, with that input, once.** The window (§2) marks the owner's answer, so the model's repeated call goes through the gate again. The gate finds the owner's code, runs the call, and uses the code up. The same input again, or another one, asks again.
-- **A turn holds at most 3 changes open.** A further call for a change not already waiting asks nothing: no code is made, and its result tells the model to tell the owner instead.
+- **A turn holds at most 3 held changes open.** A further held call for a change not already waiting asks nothing: no code is made, and its result tells the model to tell the owner instead. The confirmations of the tools that ask for their own yes, such as `configure_agent`, aren't counted, as before this decision.
 - **The tools that read or ask run as before,** and keep their own confirmations and pages: `configure_agent`, `configure_models`, `set_claude_code`, `set_master`, `set_agent_chat`, `delete_agent` and `propose_agent_change`.
 - **The three form tools are held too:** `connect_telegram`, `pair_telegram` and `connect_runner`. The owner's submission on the page is still their yes, but the turn that wants the link may have been steered, so the link waits for the owner's confirmation first.
 - **A task's run ends its own task without asking,** after outside content too: `complete_task`, `wait_on_task` and `cancel_task` never wait for a yes. They change only that task, and a run can't take a yes. What the run read can still reach the agent that hears its news, in the result or the question; #477 carries the mark into that news.
@@ -106,6 +107,7 @@ The owner's answer resumes the task, but confirms nothing (ADR-0036 §4). The ne
 ## Consequences
 
 - **More confirmations,** but only after outside content: for the rest of a turn that read the VPS's sessions and the 10 minutes after it, while one of its changes waits, and in the turns Kelpie's notes start until the next checkpoint.
+- **A held change can carry the window through notes' turns:** a note's turn that an open change marked, and that tries another change, raises a new confirmation, which marks the next note's turn. It fails safe, since each such change still waits for the owner.
 - **The yes and the next call:** the owner's code comes in a message of their own, which the window marks. The model's repeated call runs once on it, and a call the model changes in between asks again.
 - **The records lose those replies:** a session page or a summary shows that a marked turn answered, not what it said. The owner still sees the reply in the chat.
 - **A task's run** that holds a change waits for the owner, runs that follow are held again, and the task ends Cancelled after its waits, until #477.
@@ -115,11 +117,12 @@ The owner's answer resumes the task, but confirms nothing (ADR-0036 §4). The ne
   - each changing tool asking after a marked result, and a write in the same reply as the read;
   - the owner's code running that call once, a «não» holding it again, and another input asking again;
   - the message that cuts a marked turn short being marked, and the owner's turns changing directly again after 10 minutes;
-  - at most 3 open changes a turn;
+  - at most 3 held changes open a turn;
+  - a second read in a turn the window marked, which carries the window on;
   - a turn that read no outside content running as before;
   - the mark holding across rounds, the claude-code route and an eviction;
   - a note's turn asking, and no note's turn keeping the mark past a checkpoint;
-  - a marked turn's reply left out of a session page and a summary;
+  - a marked turn's reply left out of a session page and a summary, a window's «não» among them, and an unmarked turn's reply kept;
   - a task's run failing closed, and no tool offered in a run marking its results;
   - `vps_sessions` marking only its sessions' text, and refusing a turn no person typed;
   - every production tool's declared effect.

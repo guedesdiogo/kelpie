@@ -1492,10 +1492,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         userId: schema.history.userId,
         message: schema.history.message,
         fromKelpie: schema.history.fromKelpie,
-        outside: schema.turns.outside,
+        turnId: schema.history.turnId,
       })
       .from(schema.history)
-      .leftJoin(schema.turns, eq(schema.turns.id, schema.history.turnId))
       .where(
         and(
           gte(schema.history.id, current?.keptFromHistoryId ?? 0),
@@ -1504,6 +1503,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       )
       .orderBy(asc(schema.history.id))
       .all();
+    // A marked turn's reply may quote outside content: the summary keeps Kelpie's line (ADR-0064).
+    const marked = this.#markedTurns(rows.map((row) => row.turnId));
     let summary = "";
     let usage: Usage[] = [];
     try {
@@ -1517,7 +1518,15 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           messages: [
             {
               role: "user",
-              parts: [{ type: "text", text: summaryInput(current?.summary ?? null, rows) }],
+              parts: [
+                {
+                  type: "text",
+                  text: summaryInput(
+                    current?.summary ?? null,
+                    rows.map((row) => ({ ...row, outside: marked.has(row.turnId) })),
+                  ),
+                },
+              ],
             },
           ],
           maxOutputTokens: CHECKPOINT_SUMMARY_TOKENS,
@@ -2096,7 +2105,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     let last = false;
     let pendingContext = memory;
     // Whether the turn read outside content (ADR-0064): from then on, a change waits for the owner.
-    let outside = this.#outsideAtStart(turn);
+    let outside = this.#marked(turn);
+    // Whether the turn's own read is recorded: it may read again in a turn that started marked.
+    let recorded = turn.outside;
     const flight = this.#inFlight.get(turn.id);
     // A new message, a pause or a failure settled the turn: nothing more of it may start, though
     // a route's events may still be on their way.
@@ -2197,7 +2208,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       progress.running = undefined;
       // Kept as soon as it comes back, so the turn's later rounds and an eviction keep it too. Only
       // a read writes it: a mark a turn takes from others is worked out again at each start.
-      if (ran?.outside && !outside) {
+      if (ran?.outside && !recorded) {
+        recorded = true;
         outside = true;
         this.#db
           .update(schema.turns)
@@ -2574,17 +2586,19 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   }
 
   /**
-   * Whether the turn starts marked as having read outside content (ADR-0064), worked out again at
-   * each start, so an eviction gets the same answer. Only a turn's own read writes the mark; it
-   * holds too while, when the turn started:
+   * Whether the turn is marked as having read outside content (ADR-0064). Only a turn's own read
+   * writes the mark; it holds too while, when the turn started:
    * - a turn that read some had started or run within OUTSIDE_WINDOW_MS, or a change a turn held
    *   for the owner was still open (the owner's «10 minutos»). That covers the message that cut a
    *   marked turn short, and the owner's answer to its confirmation, whose repeated call the gate
    *   then runs on their code;
    * - for a turn no person typed, the history its requests send, since its checkpoint, holds a turn
    *   that read some («Só turnos sem pessoa»).
+   *
+   * Each rule reads only earlier turns and their times, so it gives the same answer at each start,
+   * after an eviction, and later for the records, which leave marked replies out.
    */
-  #outsideAtStart(turn: {
+  #marked(turn: {
     id: number;
     checkpointId: number | null;
     outside: boolean;
@@ -2592,7 +2606,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   }): boolean {
     if (turn.outside) return true;
     const since = turn.createdAt - OUTSIDE_WINDOW_MS;
-    const read = eq(schema.turns.outside, true);
+    const read = and(eq(schema.turns.outside, true), lt(schema.turns.id, turn.id));
     const recent =
       this.#db
         .select({ id: schema.turns.id })
@@ -2608,13 +2622,20 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         .limit(1)
         .get();
     if (recent) return true;
+    // A confirmation made before the turn's first row, by its history, not its clock.
+    const first =
+      this.#db
+        .select({ value: min(schema.history.id) })
+        .from(schema.history)
+        .where(eq(schema.history.turnId, turn.id))
+        .get()?.value ?? 0;
     const asking = this.#db
       .select({ id: schema.confirmations.id })
       .from(schema.confirmations)
       .where(
         and(
           like(schema.confirmations.command, "tool:%"),
-          lte(schema.confirmations.createdAt, turn.createdAt),
+          lt(schema.confirmations.afterHistoryId, first),
           gt(schema.confirmations.expiresAt, turn.createdAt),
           or(isNull(schema.confirmations.usedAt), gte(schema.confirmations.usedAt, turn.createdAt)),
         ),
@@ -2640,6 +2661,27 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         .limit(1)
         .get() !== undefined
     );
+  }
+
+  /** Which of these turns are marked (ADR-0064), read by one range of ids. */
+  #markedTurns(turnIds: readonly number[]): Set<number> {
+    const marked = new Set<number>();
+    if (turnIds.length === 0) return marked;
+    // A session's rows can be many: no spread into an argument list.
+    const low = turnIds.reduce((a, b) => Math.min(a, b));
+    const high = turnIds.reduce((a, b) => Math.max(a, b));
+    const turns = this.#db
+      .select({
+        id: schema.turns.id,
+        checkpointId: schema.turns.checkpointId,
+        outside: schema.turns.outside,
+        createdAt: schema.turns.createdAt,
+      })
+      .from(schema.turns)
+      .where(and(gte(schema.turns.id, low), lte(schema.turns.id, high)))
+      .all();
+    for (const turn of turns) if (this.#marked(turn)) marked.add(turn.id);
+    return marked;
   }
 
   /**
@@ -2984,16 +3026,16 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           message: schema.history.message,
           fromKelpie: schema.history.fromKelpie,
           createdAt: schema.history.createdAt,
-          outside: schema.turns.outside,
+          turnId: schema.history.turnId,
         })
         .from(schema.history)
-        .leftJoin(schema.turns, eq(schema.turns.id, schema.history.turnId))
         .where(gt(schema.history.id, through))
         .orderBy(asc(schema.history.id))
         .all();
       const first = rows[0];
       const last = rows.at(-1);
       if (!first || !last) return;
+      const marked = this.#markedTurns(rows.map((row) => row.turnId));
       const agentId = this.#agentId();
       const destination = this.#destination();
       let page: Awaited<ReturnType<typeof sessionPage>> = null;
@@ -3010,12 +3052,12 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
             .map((row) => ({
               role: row.role === "user" ? ("user" as const) : ("assistant" as const),
               speaker: row.role === "user" ? (row.userId ?? "someone") : agentId,
-              // A reply whose turn read outside content may quote it: Kelpie's line takes its
-              // place, and the owner's words stay (ADR-0064).
+              // A marked turn's reply may quote outside content: Kelpie's line takes its place,
+              // and the owner's words stay (ADR-0064).
               text:
                 row.role === "user"
                   ? withoutTypedStamps(messageText(row.message))
-                  : row.outside
+                  : marked.has(row.turnId)
                     ? OUTSIDE_REPLY_LEFT_OUT
                     : messageText(row.message),
               at: row.createdAt,
@@ -3982,7 +4024,7 @@ function summaryInput(
     userId: string | null;
     message: ChatMessage;
     fromKelpie?: boolean | null;
-    /** The row's turn read outside content (ADR-0064). */
+    /** The row's turn is marked as having read outside content (ADR-0064). */
     outside?: boolean | null;
   }[],
 ): string {
@@ -3994,7 +4036,7 @@ function summaryInput(
         ? ""
         : message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
     if (text === "") return [];
-    // A reply that read outside content may quote it: the summary keeps Kelpie's line instead.
+    // A marked turn's reply may quote outside content: the summary keeps Kelpie's line instead.
     if (role === "assistant" && outside) return [`assistant: ${OUTSIDE_REPLY_LEFT_OUT}`];
     // Kelpie's notes, a task's news among them (#335), stay marked as not the person's words.
     if (role === "user" && fromKelpie) return [`Kelpie's note, not the person's words: ${text}`];

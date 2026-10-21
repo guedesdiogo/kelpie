@@ -226,7 +226,7 @@ describe("a route that runs its own tool loop", () => {
     expect(world.sent).toEqual([
       "It waits for you.",
       expect.stringMatching(
-        /^Confirm: run rename \("Running rename"\) with \{"q":"Rex"\}\. This turn read text that neither you nor Kelpie wrote, so Kelpie asks you before any change\.\nTo go ahead, reply with just the code [A-Z0-9]{6}\./,
+        /^Confirm: run rename \("Running rename"\) with \{"q":"Rex"\}\. This conversation read text that neither you nor Kelpie wrote, so Kelpie asks you before any change\.\nTo go ahead, reply with just the code [A-Z0-9]{6}\./,
       ),
     ]);
   });

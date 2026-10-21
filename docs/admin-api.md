@@ -461,7 +461,7 @@ A turn that read outside content asks the owner before it changes anything (ADR-
   - Today only `vps_sessions` returns it, when its list shows a session's own text.
   - Task news, comments and a subagent's results are other agents' words, fenced as data. They don't count.
 - **How long it lasts:**
-  - the rest of the turn that read it: its later rounds, on either route, and past an eviction. Only that read is recorded on the turn;
+  - the rest of the turn that read it: its later rounds, on either route, and past an eviction. Only that read is recorded on the turn, even when the turn started marked, so a second read carries the 10 minutes on;
   - every turn in the conversation, the owner's own included, that starts less than 10 minutes after a turn that read some started or ran, or while a change it held still waits for the owner. That covers the message that cuts a marked turn short, and the owner's answer to the confirmation;
   - a turn no person typed, which a note of Kelpie's or a task's run started, while the history it sends since the conversation's last checkpoint holds a turn that read some. That turn doesn't keep the mark, so notes' turns can't keep each other marked past a checkpoint;
   - past those, the owner's own turns are marked only by what they read themselves.
@@ -472,14 +472,14 @@ A turn that read outside content asks the owner before it changes anything (ADR-
   - a task's run ending its own task with `complete_task`, `wait_on_task` or `cancel_task`, which never waits for a yes. What the run read can still reach, in its result or question, the agent that hears its news (#477).
 - **How it asks:** the call doesn't run, and the agent learns that it waits for the owner's confirmation. After the reply, Kelpie sends a confirmation's bubble, as for a setting ("Confirmation"), in the conversation's language:
 
-  `Confirm: run memory_write ("Saving to memory") with {"body":"…","kind":"person","level":"explicit","title":"Ana"}. This turn read text that neither you nor Kelpie wrote, so Kelpie asks you before any change.`
+  `Confirm: run memory_write ("Saving to memory") with {"body":"…","kind":"person","level":"explicit","title":"Ana"}. This conversation read text that neither you nor Kelpie wrote, so Kelpie asks you before any change.`
 
   - The input is the model's, as it called the tool.
   - The code or the Confirm button confirms that call, with that input, once, within 10 minutes. The owner's answer is marked too, so the agent's repeated call goes through the gate, which finds the code, runs the call and uses the code up. The same input again, or another one, asks again.
-  - A turn holds at most 3 changes waiting for the owner. A call for a further one asks nothing, and the agent is told to tell the owner instead.
+  - A turn holds at most 3 held changes waiting for the owner. A held call for a further one asks nothing, and the agent is told to tell the owner instead. The confirmations of the tools that ask for their own yes aren't counted.
   - A call too long to show in one bubble doesn't run. The agent is told to make it smaller, or to tell the owner what it would change.
   - In a note's turn, the bubble follows that turn's reply, in the same conversation.
-- **What the records keep:** a reply of a turn that read outside content may quote it. The session pages Kelpie writes to the vault and a checkpoint's summary show Kelpie's line in its place: `(A reply left out of this record: its turn read text that neither Kelpie nor the owner wrote.)` The owner's messages stay, and the chat still shows the reply.
+- **What the records keep:** a marked turn's reply may quote outside content, whatever marked it: its own read, the 10 minutes after one, an open change, or its history. The session pages Kelpie writes to the vault and a checkpoint's summary show Kelpie's line in its place: `(A reply left out of this record: it came after text that neither Kelpie nor the owner wrote.)` The owner's messages stay, as does the reply of a turn nothing marked, and the chat still shows every reply. A record works the mark out again from the turns' times; a summary written more than a day after a held change expired keeps a reply only that change marked.
 - **In a task's run,** no one can confirm yet (#477):
   - the call doesn't run;
   - Kelpie asks the owner on the task, through the run, naming the call and its input;

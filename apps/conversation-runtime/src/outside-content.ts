@@ -29,29 +29,29 @@ export const MAX_HELD = 3;
 
 /** What a held call gets until the owner confirms it, as the configuration tools' own wait. */
 export const OUTSIDE_WAITING =
-  "Not done yet: this turn read text that neither Kelpie nor the owner wrote, so Kelpie showed the owner this change, and how to confirm it. Tell them it waits for their confirmation. Once they confirm, call this tool again with the same input.";
+  "Not done yet: this conversation read text that neither Kelpie nor the owner wrote, so Kelpie showed the owner this change, and how to confirm it. Tell them it waits for their confirmation. Once they confirm, call this tool again with the same input.";
 
 /** What a held call too long to show the owner gets: one bubble shows the whole change, or none. */
 export const OUTSIDE_TOO_LONG =
-  "Not done: this turn read text that neither Kelpie nor the owner wrote, so this change waits for the owner's confirmation, and it is too long to show them. Make it smaller, or tell the owner what you would change: a message of their own can ask for it.";
+  "Not done: this conversation read text that neither Kelpie nor the owner wrote, so this change waits for the owner's confirmation, and it is too long to show them. Make it smaller, or tell the owner what you would change: a message of their own can ask for it.";
 
 /** What a held call gets once its turn holds MAX_HELD changes for the owner: no code is made. */
-export const OUTSIDE_TOO_MANY = `Not done: this turn read text that neither Kelpie nor the owner wrote, and ${MAX_HELD} changes already wait for the owner's confirmation in it. Don't ask for more: tell the owner what else you would change, so they can ask for it in a message.`;
+export const OUTSIDE_TOO_MANY = `Not done: this conversation read text that neither Kelpie nor the owner wrote, and ${MAX_HELD} changes already wait for the owner's confirmation in it. Don't ask for more: tell the owner what else you would change, so they can ask for it in a message.`;
 
 /**
- * What a session page and a checkpoint's summary keep of a reply whose turn read outside content,
- * which it may quote (the owner's decision of 2026-10-21: «Tirar dos registros»).
+ * What a session page and a checkpoint's summary keep of a marked turn's reply, which may quote
+ * outside content (the owner's decision of 2026-10-21: «Tirar dos registros»).
  */
 export const OUTSIDE_REPLY_LEFT_OUT =
-  "(A reply left out of this record: its turn read text that neither Kelpie nor the owner wrote.)";
+  "(A reply left out of this record: it came after text that neither Kelpie nor the owner wrote.)";
 
 /** What a held call in a task's run gets, once Kelpie asked the owner on the task. */
 export const OUTSIDE_HELD =
-  "Not done: this run read text that neither Kelpie nor the owner wrote, so this change waits for the owner's confirmation, which a task's run can't take yet. Kelpie asked the owner on the task, which now waits for their answer. Stop here.";
+  "Not done: this task's conversation read text that neither Kelpie nor the owner wrote, so this change waits for the owner's confirmation, which a task's run can't take yet. Kelpie asked the owner on the task, which now waits for their answer. Stop here.";
 
 /** What a held call in a task's run gets when the run no longer holds its task. */
 export const OUTSIDE_RUN_GONE =
-  "Not done: this run read text that neither Kelpie nor the owner wrote, so this change waits for the owner's confirmation, and the run no longer holds the task. Stop working on it.";
+  "Not done: this task's conversation read text that neither Kelpie nor the owner wrote, so this change waits for the owner's confirmation, and the run no longer holds the task. Stop working on it.";
 
 const TEXTS: Localized<{
   /** The confirmation's summary: it starts in lower case, after the notice's "Confirm:". */
@@ -61,21 +61,21 @@ const TEXTS: Localized<{
 }> = {
   en: {
     summary: (call, input) =>
-      `run ${call} with ${input}. This turn read text that neither you nor Kelpie wrote, so Kelpie asks you before any change.`,
+      `run ${call} with ${input}. This conversation read text that neither you nor Kelpie wrote, so Kelpie asks you before any change.`,
     question: (call, input) =>
-      `Kelpie held a change until the owner confirms it: ${call} with ${input}. This run read text that neither Kelpie nor the owner wrote, and a task's run can't take the owner's confirmation yet, so the change didn't run. The owner can ask for it in a message of their own.`,
+      `Kelpie held a change until the owner confirms it: ${call} with ${input}. This task's conversation read text that neither Kelpie nor the owner wrote, and a task's run can't take the owner's confirmation yet, so the change didn't run. The owner can ask for it in a message of their own.`,
   },
   "pt-BR": {
     summary: (call, input) =>
-      `executar ${call} com ${input}. Este turno leu um texto que nem você nem o Kelpie escreveram, então o Kelpie pergunta a você antes de qualquer mudança.`,
+      `executar ${call} com ${input}. Esta conversa leu um texto que nem você nem o Kelpie escreveram, então o Kelpie pergunta a você antes de qualquer mudança.`,
     question: (call, input) =>
-      `O Kelpie segurou uma mudança até o dono confirmá-la: ${call} com ${input}. Esta execução leu um texto que nem o Kelpie nem o dono escreveram, e a execução de uma tarefa ainda não aceita a confirmação do dono, então a mudança não foi feita. O dono pode pedi-la numa mensagem própria.`,
+      `O Kelpie segurou uma mudança até o dono confirmá-la: ${call} com ${input}. A conversa desta tarefa leu um texto que nem o Kelpie nem o dono escreveram, e a execução de uma tarefa ainda não aceita a confirmação do dono, então a mudança não foi feita. O dono pode pedi-la numa mensagem própria.`,
   },
   es: {
     summary: (call, input) =>
-      `ejecutar ${call} con ${input}. Este turno leyó un texto que ni tú ni Kelpie escribieron, así que Kelpie te pregunta antes de cualquier cambio.`,
+      `ejecutar ${call} con ${input}. Esta conversación leyó un texto que ni tú ni Kelpie escribieron, así que Kelpie te pregunta antes de cualquier cambio.`,
     question: (call, input) =>
-      `Kelpie retuvo un cambio hasta que el dueño lo confirme: ${call} con ${input}. Esta ejecución leyó un texto que ni Kelpie ni el dueño escribieron, y la ejecución de una tarea aún no acepta la confirmación del dueño, así que el cambio no se hizo. El dueño puede pedirlo en un mensaje propio.`,
+      `Kelpie retuvo un cambio hasta que el dueño lo confirme: ${call} con ${input}. La conversación de esta tarea leyó un texto que ni Kelpie ni el dueño escribieron, y la ejecución de una tarea aún no acepta la confirmación del dueño, así que el cambio no se hizo. El dueño puede pedirlo en un mensaje propio.`,
   },
 };
 
