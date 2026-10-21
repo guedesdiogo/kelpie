@@ -155,6 +155,8 @@ describe("redact", () => {
     ["pass:123456", `pass:${REDACTED}`],
     ["AUTH:123456", `AUTH:${REDACTED}`],
     ["password:hunter2", `password:${REDACTED}`],
+    // A `#` right after a block indicator starts no comment, so the value is on this line (#458).
+    ["password: |#hunter2", `password: ${REDACTED}`],
     ["  - api_key:abc123", `  - api_key:${REDACTED}`],
   ])("redacts a YAML or header line's value: %s", (line, expected) => {
     expect(redact(`before\n${line}\nafter`)).toBe(`before\n${expected}\nafter`);
@@ -183,7 +185,15 @@ describe("redact", () => {
     ["secret: never!", `secret: ${REDACTED}`],
     ["pass: null.abc", `pass: ${REDACTED}`],
     ["password:any-secret", `password:${REDACTED}`],
-  ])("redacts a value that only starts with a type word: %s", (line, expected) => {
+    // Only a type, or a union of types, then maybe one `;`, `,` or `)`, is code: more goes.
+    ['token: string = "hunter2";', `token: ${REDACTED}`],
+    ["token: string =", `token: ${REDACTED}`],
+    ["password: string, hunter2", `password: ${REDACTED}`],
+    ["password: null; hunter2", `password: ${REDACTED}`],
+    ["password: any) hunter2", `password: ${REDACTED}`],
+    ["password: true | hunter2", `password: ${REDACTED}`],
+    ["password: false=hunter2", `password: ${REDACTED}`],
+  ])("redacts a value with more than a type: %s", (line, expected) => {
     expect(redact(line)).toBe(expected);
   });
 
@@ -200,8 +210,28 @@ describe("redact", () => {
     ["password:\n  hunter2\n  more\n  next: x", `password:\n  ${REDACTED}\n  next: x`],
     // A block's lines are its value, whatever they look like.
     ["secret: |2+\n  user: admin\n  - item", `secret: |2+\n  ${REDACTED}`],
-    // 20 lines at most, all of a value that long.
-    [`key: |${"\n  line".repeat(20)}`, `key: |\n  ${REDACTED}`],
+    // Blank lines between a value's lines, or before them, are the value's too.
+    ["password: |\n  hunter2\n\n  second", `password: |\n  ${REDACTED}`],
+    ["password: |\n\n  hunter2", `password: |\n\n  ${REDACTED}`],
+    ["password: >\n  one\n  two\n\n  three", `password: >\n  ${REDACTED}`],
+    ["password:\n  hunter2\n \n  more", `password:\n  ${REDACTED}`],
+    // No space before the indicator, any after the colon, and up to 40 more spaces of indent.
+    ["password:|\n  x", `password:|\n  ${REDACTED}`],
+    [`password:${" ".repeat(9)}\n  x`, `password:${" ".repeat(9)}\n  ${REDACTED}`],
+    [`password:${" ".repeat(9)}|\n  x`, `password:${" ".repeat(9)}|\n  ${REDACTED}`],
+    [`password:\n${" ".repeat(9)}hunter2`, `password:\n${" ".repeat(9)}${REDACTED}`],
+    [`password: |\n${" ".repeat(30)}hunter2`, `password: |\n${" ".repeat(30)}${REDACTED}`],
+    [`password:\n${" ".repeat(40)}hunter2`, `password:\n${" ".repeat(40)}${REDACTED}`],
+    // A tag, an anchor or a comment around the indicator.
+    ["password: | # comment\n  hunter2", `password: | # comment\n  ${REDACTED}`],
+    ["password: !!binary |\n  c2VjcmV0", `password: !!binary |\n  ${REDACTED}`],
+    ["password: &a |\n  hunter2", `password: &a |\n  ${REDACTED}`],
+    [
+      `password: !vault |\n${" ".repeat(10)}$ANSIBLE_VAULT;1.1;AES256\n${" ".repeat(10)}6132`,
+      `password: !vault |\n${" ".repeat(10)}${REDACTED}`,
+    ],
+    // However many lines.
+    [`key: |${"\n  line".repeat(25)}`, `key: |\n  ${REDACTED}`],
   ])("redacts a YAML value on the more-indented lines below its name: %j", (text, expected) => {
     expect(redact(`before\n${text}\nafter`)).toBe(`before\n${expected}\nafter`);
   });
@@ -215,8 +245,17 @@ describe("redact", () => {
     "token:\n  -",
     "key:\n\ntext",
     "key:\ntext",
+    "key: |\n\ntext",
+    "auth:\n\n  method: basic",
   ])("leaves a nested mapping, a list, or a line no more indented, below a name: %j", (text) => {
     expect(redact(text)).toBe(text);
+  });
+
+  it("redacts a block of any length in one pass, so redacting again changes nothing", () => {
+    const text = `before\nkey: |${"\n  line".repeat(25)}\nafter`;
+    const once = redact(text);
+    expect(once).toBe(`before\nkey: |\n  ${REDACTED}\nafter`);
+    expect(redact(once)).toBe(once);
   });
 
   it.each([
@@ -226,6 +265,9 @@ describe("redact", () => {
     "auth: null",
     "token: string | null;",
     "token: string[];",
+    "token: string?",
+    "secret: unknown)",
+    "password: boolean[] | undefined,",
     "auth: null\r\nnext",
     "The token: we rotate it",
     "token:   ",
@@ -490,6 +532,9 @@ describe("redact's cost", () => {
     ["key:\\n ", "key:\n "],
     ["key: |\\n ", "key: |\n "],
     ["key:\\n a", "key:\n a"],
+    // Runs of blank lines below a name, and lines indented past the 40 spaces a value may take.
+    ["key: |\\n \\n…", `key: |${"\n ".repeat(40)}`],
+    ["key:\\n + 41 spaces + a", `key:\n${" ".repeat(41)}a\n`],
   ])("takes linear time on %j: 8 times the text, well under quadratic cost", (_, unit) => {
     const of = (length: number) => unit.repeat(Math.ceil(length / unit.length)).slice(0, length);
     // The best of three runs, after a warm-up, so a pause of the collector doesn't count.

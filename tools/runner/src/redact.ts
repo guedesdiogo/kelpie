@@ -6,15 +6,16 @@
 export const REDACTED = "[redacted]";
 
 // Every pattern runs in linear time: a name is at most 64 characters and starts where no name
-// character comes before it, values, users and the lines a value takes are bounded, and every run
-// that could start anywhere has a lookbehind that lets it start only once. A reply of tens of
-// kilobytes then costs milliseconds, never seconds.
+// character comes before it, values and users are bounded, a value on the lines below a name is
+// read line by line, each line a bounded number of times, and every run that could start
+// anywhere has a lookbehind that lets it start only once. A reply of tens of kilobytes then costs
+// milliseconds, never seconds.
 
 /**
  * The words in a name that say it holds a secret, in any case. Not `tokens`, a count, nor
- * `author`, `authority`, `authors`, `authorized` and `authorize`, though `Authorization` and `Proxy-Authorization` say auth
- * (#458), nor `passed`, `passing` and `passes`, nor a flag that starts `passWith`; and not the
- * shell's `PWD` and `OLDPWD`, which hold folders.
+ * `author`, `authority`, `authors`, `authorized` and `authorize`, though `Authorization` and
+ * `Proxy-Authorization` say auth (#458), nor `passed`, `passing` and `passes`, nor a flag that
+ * starts `passWith`; and not the shell's `PWD` and `OLDPWD`, which hold folders.
  */
 const SECRET_WORDS =
   "key|token(?!s)|secret|pass(?!(?:ed|ing|es)(?![A-Za-z0-9])|with)|pwd|credential|auth(?!or(?!ization))|cookie|dsn|signature";
@@ -39,16 +40,21 @@ const ASSIGN = "[ \\t]{0,8}=(?![=>])";
 const VALUE = `(?:"[^"\\n]{0,1024}"?|'[^'\\n]{0,1024}'?|[^\\s"']{1,1024})`;
 /** The schemes an `Authorization` value starts with, kept in front of what is redacted. */
 const SCHEME = /^(?:Basic|Bearer|Digest|Token|Negotiate)[ \t]+/i;
+/** A type word, maybe an array's or optional. */
+const TYPE = "(?:string|number|boolean|null|undefined|true|false|unknown|any|never)(?:\\[\\]|\\?)?";
 /**
- * What a name holds when it only says a type, maybe an array's or optional, up to where the type
- * ends: code, not a secret. A value that only starts with one, as `any-secret`, goes (#458).
+ * What a name holds when it only says a type, or a union of types, then maybe one `;`, `,` or `)`:
+ * code, not a secret. A value with anything more, as `any-secret` or `string = "x"`, goes (#458).
  */
-const NO_SECRET =
-  /^(?:string|number|boolean|null|undefined|true|false|unknown|any|never)(?:\[\]|\?)?[ \t]*(?:[;,)|=]|\r?$)/;
-/** A YAML block scalar's indicator, as `|`, `>-` or `|2+`: the value is on the lines below. */
-const BLOCK = "[|>][1-9+-]{0,2}";
-/** What a name holds when it only says its value is on the lines below. */
-const BLOCK_ONLY = new RegExp(`^${BLOCK}[ \\t]*\\r?$`);
+const NO_SECRET = new RegExp(`^${TYPE}(?:[ \\t]*\\|[ \\t]*${TYPE})*[ \\t]*(?:[;,)][ \\t]*)?\\r?$`);
+/**
+ * A YAML block scalar's indicator, as `|`, `>-` or `|2+`, maybe after tags and anchors, as
+ * `!!binary`, `!vault` or `&a`, and before a comment: the value is on the lines below. A `#` right
+ * after the indicator starts no comment.
+ */
+const BLOCK = "(?:[&!]\\S+[ \\t]+)*[|>][1-9+-]{0,2}(?:[ \\t]+#[^\\n]*|[ \\t]*)";
+/** What a name holds when it only says its value is on the lines below, maybe after spaces. */
+const BLOCK_ONLY = new RegExp(`^[ \\t]*${BLOCK}\\r?$`);
 
 /** A line that is `NAME=value`, maybe exported: its whole value goes, to the line's end. */
 const SECRET_LINE = new RegExp(
@@ -57,18 +63,21 @@ const SECRET_LINE = new RegExp(
 );
 /**
  * A YAML name, maybe a list's item, whose value is on the lines below it (#458): each more
- * indented than the name's line, `\2`, by 1 to 8 spaces or tabs, 20 lines at most. The value
- * goes, its first line's indent stays.
+ * indented than the name's line, `\2`, by 1 to 40 spaces or tabs, with blank lines before or
+ * between them, however many. The value goes in one pass, its first line's indent stays. `after`
+ * is what the name's line holds past its colon. Blank lines are a lazy run anchored at a line's
+ * start, not a group repeated within the loop: Bun's engine leaves its fast path when one match
+ * repeats a group nested in another tens of thousands of times.
  */
-function secretBelow(indicator: string, line: string): RegExp {
-  const below = "\\r?\\n\\2[ \\t]{1,8}";
+function secretBelow(after: string, line: string): RegExp {
+  const below = "\\r?\\n[ \\t\\r\\n]*?^\\2[ \\t]{1,40}";
   return new RegExp(
-    `^(([ \\t]{0,64})(?:-[ \\t]{1,8})?${NAME}[ \\t]{0,8}:${indicator}[ \\t]{0,8}${below})${line}(?:${below}${line}){0,19}`,
+    `^(([ \\t]{0,64})(?:-[ \\t]{1,8})?${NAME}[ \\t]{0,8}:[ \\t]*${after}${below})${line}(?:${below}${line})*`,
     "gim",
   );
 }
 /** After a block indicator, every line below is the value, whatever it looks like. */
-const SECRET_BLOCK = secretBelow(`[ \\t]{0,8}${BLOCK}`, "\\S[^\\n]*");
+const SECRET_BLOCK = secretBelow(BLOCK, "\\S[^\\n]*");
 /**
  * After nothing, a plain value that runs on, up to a line that is a nested mapping's
  * `key: value` or a list's `- item`.
