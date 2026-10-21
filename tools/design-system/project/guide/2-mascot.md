@@ -61,14 +61,32 @@ Moment for its states, frequent for its life in place ([ADR-0045](https://github
 
 **The frame** ([ADR-0063](https://github.com/guedesdiogo/kelpie/blob/main/docs/adr/0063-mascot-frame-holds-every-hop.md)).
 - **Every mascot draws in `viewBox="4 2 112 112"`** on its 120 grid. The ground is at y 114 and the middle at x 60, as before, so the figure is 89% of its box and the body fills about 64% of it.
-- **Everything happens inside the frame.** Every motion that lifts the figure is cut to the room above it.
+- **The figure stays inside the frame.** Every motion that lifts it is cut to the room above it.
   - **The motions:** the hops, the stretch, the yawn, waking up, the editor's drop-in and a shape's rebound.
   - **The room** runs from the figure's top, fur included, to 1 grid unit below the frame's top. The state's pose and breath count at their deepest, and so does the pose's tilt. The mittens the stretch and a call for help raise above the head count too.
   - **A cut hop** lifts, squashes and shrinks its shadow by the same share, so it still reads as a hop. A motion that fits plays in full.
   - **Tall heads hop lower:** Master's Approved jump keeps about half its height, and its idle hop nearly all of it.
 - **A figure that doesn't fit even at rest gets its own taller frame,** on the same ground. "At rest" counts the gestures' tilts, up to 9° either way. The kelp leaf on most shapes and the tallest heads on `drop` get one. That figure draws smaller and barely hops.
 - **Master keeps clear headroom:** about 6 px above its ears at 48 px, and 23 px at 160.
-- **What shows beside the figure isn't held yet.** The bubble, the badge, the sparks, the thinking bubbles and the "z" can still leave the frame on tall shapes.
+
+**What shows beside the figure** ([ADR-0064](https://github.com/guedesdiogo/kelpie/blob/main/docs/adr/0064-mascot-effects-float-over-kept-margin.md)).
+- **The speech bubble, the badge, the thinking bubbles, the sparks and the "z"s float beside the figure,** past its frame on purpose. They aren't part of the figure, so the frame and its cuts don't hold them.
+- **They never hop with it.**
+  - The thinking bubbles, the sparks and the "z"s draw in a layer of their own. It takes the state's pose, its tilt and its squash, but not the hops, the breath or the gestures.
+  - The bubble and the badge sit outside the hop too.
+  - The sweat drop sits on the face, and moves with it.
+- **Their own motion plays in full:** the bubble's pop, bob and pulse, the badge's pop and ring, the thinking bubbles' rise and the sparks' pop.
+- **Each host keeps a margin around the box for what it shows.** It is `MARGIN` in `mascot-art.js`, the most any effect reaches past the box on every shape and eye:
+
+  | Size | Above | Right | Below |
+  |---|---|---|---|
+  | 36 px | 5.5 px | 4.3 px | 4.7 px |
+  | 48 px | 7.3 px | 5.8 px | none |
+  | 160 px | 24.3 px | 15 px | none |
+
+  - The header keeps 12 px above its box and before the name, and a roster row 7 px above and below.
+  - A host that shows only some effects needs less: the editor's stage shows the sparks and the "z", and needs 6.8 px above its 160 px box.
+  - A new host keeps the margin of its size for what it shows, or shows less.
 
 **Sizes.**
 
@@ -77,7 +95,7 @@ Moment for its states, frequent for its life in place ([ADR-0045](https://github
 | Roster | 36 px | no mouth or brows, eyes 15% larger, no mittens; a glossy badge with a `--surface` ring takes the bubble's place: `--warm` for waiting, `--danger` for error, `--accent` with the tool's icon for working, `--muted` for offline. One gesture at a time across the list, every 7 to 16 s, never a hop |
 | Switcher list (5.21) | 36 px | the Idle pose, still, with no badge: the list is open for a moment and carries no state |
 | Task card (5.5) | 20 px | the shape, the color and the eyes only: no head, accessory, mittens or badge; still, since the card already says the state. The engine draws a badge at every size up to 40 px today, so the board needs that changed |
-| Conversation header | 48 px | its home. Everything happens inside its box; the box is kept before the figure arrives, so nothing moves when it does. Its pups stand in a row after the box, and the name slides to make room (5.6, ADR-0053) |
+| Conversation header | 48 px | its home. The figure moves inside its box, and what shows beside it in the margin the header keeps; the box is kept before the figure arrives, so nothing moves when it does. Its pups stand in a row after the box, and the name slides to make room (5.6, ADR-0053) |
 | Empty conversation, profile, the expired-login dialog (5.12) | 160 px | gestures a little more often |
 | Pups (5.6) | 40% of the parent: 20 px in the conversation's header, 64 px on the profile | in the header, the shape, the head, the lighter color and dot eyes, breathing, blinking and announcing only, with 5.9's triangle above a failed one and no badge; on the profile, the full face of the 48 px row; left-aligned beside the parent, closing up as they come back; none while the page is Offline |
 | Telegram bot photo | 800 px square, cropped round by Telegram | a still, and a loop Telegram plays (below) |

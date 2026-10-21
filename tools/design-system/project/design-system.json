@@ -317,8 +317,8 @@
  },
  "lastChange": {
   "by": "Diogo Guedes",
-  "at": "2026-10-21T03:59:13Z",
-  "via": "Claude Code · guedesdiogo/kelpie#474",
-  "note": "Every mascot draws in the frame 4 2 112 112, and every hop, stretch and drop-in is cut to the room above the figure, so the figure never leaves its box (ADR-0063). The bundle carries the new engine, and the guide's mascot section gains the frame."
+  "at": "2026-10-21T15:38:02Z",
+  "via": "Claude Code · guedesdiogo/kelpie#481",
+  "note": "What shows beside the mascot floats past its frame on purpose, over a margin its host keeps: the thinking bubbles, the sparks and the \"z\" draw in a layer that takes the pose but never the hops (ADR-0064). The bundle carries the new engine, and the guide's mascot section gains the rule and its margin."
  }
 }
