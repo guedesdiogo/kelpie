@@ -53,6 +53,17 @@ export const CONTINUING_REASONS: readonly string[] = ["clear", "resume"];
 
 /** A notification's type, or a `SessionEnd`'s reason, as Claude Code names them. */
 export const HOOK_WORD = /^[a-z_]{1,64}$/;
+/**
+ * A subagent's id, as Claude Code's `agent_id` gives it, such as `a1b2c3d4e5f6a7b8`: a short
+ * token, never free text. `.` and `@` are let in for in-process teammates, whose ids the docs
+ * don't show.
+ */
+export const AGENT_ID = /^[A-Za-z0-9_.@-]{1,64}$/;
+
+/** A subagent's id when it is a short token; null, a subagent of unknown id, for anything else. */
+export function agentOf(value: unknown): string | null {
+  return typeof value === "string" && AGENT_ID.test(value) ? value : null;
+}
 
 /** One line of the spool. Never a payload: no prompt, no tool input, no path. */
 export interface SpoolEvent {
@@ -67,6 +78,12 @@ export interface SpoolEvent {
   reason?: string;
   /** A `PermissionRequest`'s: whether it asks for `AskUserQuestion`, a question, or another tool. */
   question?: boolean;
+  /**
+   * The subagent whose tool call fired the event, by its id; null for a subagent whose id
+   * isn't a short token. Absent from the main thread's events, and from the lines written before
+   * #482.
+   */
+  agent?: string | null;
 }
 
 /** A session's latest excerpt: its last reply, redacted and cut, and when the hook wrote it. */
@@ -150,7 +167,7 @@ export function parseSpoolLine(line: string): SpoolEvent | null {
     return null;
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  const { at, event, session, type, reason, question } = value as Record<string, unknown>;
+  const { at, event, session, type, reason, question, agent } = value as Record<string, unknown>;
   if (!Number.isSafeInteger(at) || (at as number) < 0) return null;
   if (!HOOK_EVENTS.includes(event as HookEvent)) return null;
   if (typeof session !== "string" || !SESSION_ID.test(session)) return null;
@@ -161,6 +178,8 @@ export function parseSpoolLine(line: string): SpoolEvent | null {
     ...(typeof type === "string" && HOOK_WORD.test(type) ? { type } : {}),
     ...(typeof reason === "string" && HOOK_WORD.test(reason) ? { reason } : {}),
     ...(question === true ? { question } : {}),
+    // Present, it says a subagent's: an id that isn't a token is one of unknown id, as in the hook.
+    ...(agent === undefined ? {} : { agent: agentOf(agent) }),
   };
 }
 
