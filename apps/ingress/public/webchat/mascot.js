@@ -395,6 +395,7 @@ export class Mascot {
     this.breathG = one(".m-breath");
     this.squash = one(".m-sq");
     this.poseG = one(".m-pose");
+    this.fxG = one(".m-fx");
     this.face = one(".m-face");
     this.shadow = one(".m-shadow");
     this.eyeScale = all(".m-eyeP");
@@ -596,7 +597,10 @@ export class Mascot {
     if (this.badgeGlyph) {
       this.badgeGlyph.textContent = { wait: "?", error: "!", silent: "…" }[badge] ?? "";
     }
-    poseTo(this.poseG, `rotate(${pose.tilt}deg) scale(${pose.sx}, ${pose.sy})`, spring);
+    const posed = `rotate(${pose.tilt}deg) scale(${pose.sx}, ${pose.sy})`;
+    poseTo(this.poseG, posed, spring);
+    // What shows beside the figure takes its pose, but not its hops (ADR-0064).
+    poseTo(this.fxG, posed, spring);
     this.restore(spring, pose);
   }
 

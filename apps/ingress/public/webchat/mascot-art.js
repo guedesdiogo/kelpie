@@ -15,6 +15,18 @@ import { GROUND, HEADROOM, STILL_MOST, TILT } from "./mascot-states.js";
  */
 export const FRAME = { x: 4, y: 2, size: 112 };
 
+/**
+ * What shows beside the figure floats past the frame on purpose (ADR-0064): the speech bubble, the
+ * badge, the thought bubbles, the sparks and the "z"s. This is how far, in grid units past each side
+ * of FRAME, at rest and through their own motion, per size class (sizeOf). Each host keeps that
+ * much room free around the box for what it shows.
+ */
+export const MARGIN = {
+  s: { top: 17, right: 13.5, bottom: 14.5 },
+  m: { top: 17, right: 13.5, bottom: 0 },
+  l: { top: 17, right: 10.5, bottom: 0 },
+};
+
 /** The ink of the eyes and lines, and the mix the fur's shades come from. */
 const INK = "#0C2523";
 
@@ -947,7 +959,9 @@ export function buildMascot(mascot, { uid, px, hex, work = true, hands = true })
     .join("");
   const mouthY = fy + (eye.one ? 15 : (shape.mouth ?? 13));
   const mouth = `<g class="m-mouth" transform="translate(${fx} ${mouthY})"><g class="mo-o-w"><ellipse class="mo-o sw ink" rx="2.8" ry="3.3"/></g><path class="mo-smile sw stk" stroke-width="2.8" d="M-5.5,-1.5 Q0,4.5 5.5,-1.5"/><path class="mo-wave sw stk" stroke-width="2.6" d="M-6,0.5 Q-3,-2.5 0,0.5 T6,0.5"/></g>`;
-  const effects =
+  // What shows beside the figure (ADR-0064): the thought bubbles, the sparks and the "z"s float in
+  // a layer of their own, which takes the state's pose but not the figure's hops or breath.
+  const beside =
     `<g class="fx-bub sw">${[
       [24, -3, 3.2],
       [32, -14, 4.4],
@@ -965,8 +979,9 @@ export function buildMascot(mascot, { uid, px, hex, work = true, hands = true })
           `<g transform="translate(${tx + dx} ${ty + dy}) scale(${s})"><g class="star-a"><path class="star" d="M0,-8 Q1.4,-1.4 8,0 Q1.4,1.4 0,8 Q-1.4,1.4 -8,0 Q-1.4,-1.4 0,-8 Z"/></g></g>`,
       )
       .join("")}</g>` +
-    `<g class="fx-zzz sw"><text class="zz" x="${tx + 22}" y="${ty - 2}" font-size="15">z</text><text class="zz" x="${tx + 32}" y="${ty - 12}" font-size="11">z</text></g>` +
-    `<g transform="translate(${fx + spread + 9} ${eyeY - 9})"><path class="drop" d="M0,-6 C3,-2 4.5,1 4.5,3 A4.5,4.5 0 0 1 -4.5,3 C-4.5,1 -3,-2 0,-6 Z"/></g>`;
+    `<g class="fx-zzz sw"><text class="zz" x="${tx + 22}" y="${ty - 2}" font-size="15">z</text><text class="zz" x="${tx + 32}" y="${ty - 12}" font-size="11">z</text></g>`;
+  // The sweat drop sits on the face, and moves with it.
+  const sweat = `<g transform="translate(${fx + spread + 9} ${eyeY - 9})"><path class="drop" d="M0,-6 C3,-2 4.5,1 4.5,3 A4.5,4.5 0 0 1 -4.5,3 C-4.5,1 -3,-2 0,-6 Z"/></g>`;
   // At 36 px a glossy badge stands in for the bubble (ADR-0045 §9).
   const badge =
     size === "s"
@@ -994,8 +1009,8 @@ export function buildMascot(mascot, { uid, px, hex, work = true, hands = true })
     `<defs><clipPath id="mc${uid}"><path d="${shape.d}"/></clipPath><radialGradient id="mg${uid}" cx=".36" cy=".3" r=".85"><stop offset="0" stop-color="${color.light}"/><stop offset=".55" stop-color="${color.body}"/><stop offset="1" stop-color="${color.edge}"/></radialGradient></defs>` +
     '<ellipse class="m-shadow" cx="60" cy="111" rx="30" ry="3.6"/>' +
     `<g class="m-hop g"><g class="m-breath g"><g class="m-sq g"><g class="m-pose g">${part("m-head", backHard + backEars)}${body}${part("m-head", frontEars)}${part("m-acc", lower)}` +
-    `<g class="m-face">${cheeks}${eyeSvg}${part("m-acc", glasses)}<g class="m-brows">${brows}</g>${mouth}</g>${workSvg}${part("m-acc", onTop)}${handsSvg}${effects}</g></g></g></g>` +
-    `${badge}</svg>`;
+    `<g class="m-face">${cheeks}${eyeSvg}${part("m-acc", glasses)}<g class="m-brows">${brows}</g>${mouth}</g>${workSvg}${part("m-acc", onTop)}${handsSvg}${sweat}</g></g></g></g>` +
+    `<g class="m-fx g">${beside}</g>${badge}</svg>`;
   return {
     html,
     pieces,
