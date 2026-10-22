@@ -20,6 +20,8 @@ function world(
   },
   /** The handoffs left today to turns no person typed (#345), per creating agent. */
   slots: Record<string, number> = {},
+  /** The agent the Registry calls Master, if any (#492); a holder, so a test can move the role. */
+  master: string | null | { id: string | null } = null,
 ) {
   const calls: string[] = [];
   const view = (fields: Partial<TaskView>): TaskView => ({
@@ -41,9 +43,19 @@ function world(
     async owned(agentId) {
       return owned[agentId] ?? [];
     },
+    async agents() {
+      return [
+        { id: "kelpie", name: "Kelpie" },
+        ...Object.values(owned).flat(),
+        { id: "pup", name: "Pup" },
+      ];
+    },
+    async isMaster(agentId) {
+      return agentId === (typeof master === "object" && master !== null ? master.id : master);
+    },
     async create(assignee, task: NewTask, creator) {
       calls.push(
-        `create ${assignee} ${task.title} by ${creator.agentId} for ${creator.actingUserId}`,
+        `create ${assignee} ${task.title} by ${creator.agentId} for ${creator.actingUserId}${task.status === "todo" ? "" : ` in ${task.status}`}${task.scheduledStartAt === null ? "" : ` at ${task.scheduledStartAt}`}`,
       );
       if (assignee === "full") return { ok: false, reason: "not_allowed" };
       if (assignee === "broken") throw new Error("The object reset.");
@@ -422,5 +434,100 @@ describe("handoffs from turns no person typed (#345)", () => {
     }
     expect(calls.filter((call) => call.startsWith("take"))).toHaveLength(3);
     expect(calls.at(-1)).toBe("create helper T2 by kelpie for u-owner");
+  });
+});
+
+describe("Master's create_task in the owner's direct conversation (ADR-0067 §1, #492)", () => {
+  const AT = Date.parse("2026-10-23T12:00:00Z");
+
+  it("hands work to any agent, itself included, in Backlog or at a start time", async () => {
+    const { provider, calls } = world(undefined, {}, "kelpie");
+    const tools = await provider.tools("kelpie", { channel: "webchat" });
+    expect(names(tools)).toEqual(["comment_task", "create_task"]);
+    const create = byName(tools, "create_task");
+    expect(create.spec.inputSchema).toMatchObject({
+      properties: { status: { enum: ["todo", "backlog"] }, startAt: {} },
+    });
+    const owner = contextOf("kelpie");
+    expect(
+      await create.run({ agentId: "pup", title: "Sort", body: "x", status: "backlog" }, owner),
+    ).toEqual({
+      output: expect.stringContaining("It waits in Backlog until it is moved to To do."),
+    });
+    expect(
+      await create.run(
+        { agentId: "kelpie", title: "Remind", body: "x", startAt: "2026-10-23T09:00:00-03:00" },
+        { ...owner, turn: "2" },
+      ),
+    ).toEqual({ output: expect.stringContaining("It starts at 2026-10-23T12:00:00Z.") });
+    expect(calls).toEqual([
+      "create pup Sort by kelpie for u-owner in backlog",
+      `create kelpie Remind by kelpie for u-owner at ${AT}`,
+    ]);
+  });
+
+  it("refuses an agent that doesn't exist, a time with no zone, and a status other than todo or backlog", async () => {
+    const { provider, calls } = world(undefined, {}, "kelpie");
+    const create = byName(await provider.tools("kelpie", { channel: "webchat" }), "create_task");
+    const owner = contextOf("kelpie");
+    expect(await create.run({ agentId: "ghost", title: "T", body: "x" }, owner)).toEqual({
+      isError: true,
+      output: expect.stringMatching(
+        /^There is no agent ghost\. The agents: kelpie, helper, sales, pup\.$/,
+      ),
+    });
+    for (const startAt of ["2026-10-23T09:00:00", "tomorrow at nine", 1_800_000_000_000]) {
+      expect(
+        await create.run({ agentId: "helper", title: "T", body: "x", startAt }, owner),
+      ).toEqual({
+        isError: true,
+        output: expect.stringContaining("an ISO 8601 time with its offset"),
+      });
+    }
+    expect(
+      await create.run({ agentId: "helper", title: "T", body: "x", status: "done" }, owner),
+    ).toEqual({ isError: true, output: "The status is todo or backlog." });
+    expect(calls).toEqual([]);
+  });
+
+  it("stays as it is for owners of agents in Master's task runs, and for a specialist", async () => {
+    const { provider, calls } = world(
+      { kelpie: [{ id: "helper", name: "Helper" }], sales: [{ id: "pup", name: "Pup" }] },
+      { kelpie: 1 },
+      "kelpie",
+    );
+    const inRun = byName(await provider.tools("kelpie", { channel: "task" }), "create_task");
+    expect(inRun.spec.inputSchema).not.toHaveProperty("properties.status");
+    expect(
+      await inRun.run(
+        { agentId: "pup", title: "T", body: "x", status: "backlog" },
+        contextOf("kelpie", handle().task),
+      ),
+    ).toMatchObject({
+      isError: true,
+      output: expect.stringContaining("You don't own an agent pup"),
+    });
+    const specialist = byName(await provider.tools("sales", { channel: "webchat" }), "create_task");
+    expect(specialist.spec.inputSchema).not.toHaveProperty("properties.startAt");
+    await specialist.run(
+      { agentId: "pup", title: "T", body: "x", status: "backlog", startAt: "2026-10-23T09:00:00Z" },
+      contextOf("sales"),
+    );
+    // A specialist's task goes in To do at once, whatever the model added.
+    expect(calls).toEqual(["create pup T by sales for u-owner"]);
+  });
+
+  it("refuses once the agent is no longer Master, though the turn listed the tool", async () => {
+    const role = { id: "kelpie" as string | null };
+    const { provider, calls } = world(undefined, {}, role);
+    const create = byName(await provider.tools("kelpie", { channel: "webchat" }), "create_task");
+    role.id = "sales";
+    expect(
+      await create.run({ agentId: "pup", title: "T", body: "x" }, contextOf("kelpie")),
+    ).toEqual({
+      isError: true,
+      output: expect.stringContaining("This agent isn't Master any more"),
+    });
+    expect(calls).toEqual([]);
   });
 });
