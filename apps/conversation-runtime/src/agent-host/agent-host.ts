@@ -110,8 +110,7 @@ export function replaceChannelEgressForTesting(egress: BotPhotos | undefined): v
 }
 
 /** RunnerSessions as the check uses it: its waits, and the requests of those it tells (#497). */
-type RunnerWaits = Pick<RunnerSessionsContract, "waits"> &
-  Partial<Pick<RunnerSessionsContract, "requests">>;
+type RunnerWaits = Pick<RunnerSessionsContract, "waits" | "requests">;
 
 let runnerSessionsForTesting: RunnerWaits | undefined;
 
@@ -808,10 +807,7 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
             readRole((await bounded(sources.agent(agentId), IDENTITY_TIMEOUT_MS))?.role) ===
             "master",
           waits: (since) => bounded(sessions.waits(since), WAITS_TIMEOUT_MS),
-          requests: async () =>
-            sessions.requests
-              ? bounded(sessions.requests(), WAITS_TIMEOUT_MS)
-              : { ok: false, reason: "outdated" },
+          requests: () => bounded(sessions.requests(), WAITS_TIMEOUT_MS),
           // Only the deadline rejects: a slow send may yet land, so it isn't sent again.
           tell: (wait, request) =>
             bounded(this.#tellWait(agentId, wait, request), NOTICE_TIMEOUT_MS).catch(() => {
@@ -901,7 +897,16 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
       kind: wait.kind,
       title: wait.title,
       repository: wait.repository,
-      ...(request ? { request: { id: request.id, tool: request.tool, input: request.input } } : {}),
+      ...(request
+        ? {
+            request: {
+              id: request.id,
+              tool: request.tool,
+              input: request.input,
+              truncated: request.truncated,
+            },
+          }
+        : {}),
     };
     let candidates: { channel: string; name: string }[];
     try {

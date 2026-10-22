@@ -108,6 +108,7 @@ function spoolRequest(overrides: Partial<SpoolRequest> = {}): SpoolRequest {
     pid: HOOK_PID,
     tool: "Bash",
     input: "command: rm -rf build\ndescription: Clean the build",
+    whole: true,
     ...overrides,
   };
 }
@@ -132,6 +133,7 @@ describe("VpsSessions.requests", () => {
           sessionId: SESSION_A,
           tool: "Bash",
           input: "command: rm -rf build description: Clean the build",
+          truncated: false,
           openedAt: NOW - 20_000,
           title: "Review the runner's sessions",
           repository: "kelpie",
@@ -149,13 +151,24 @@ describe("VpsSessions.requests", () => {
     expect(listed?.input).toContain(REDACTED);
     expect(listed?.input).not.toContain(RUNNER_SECRET);
     expect(listed?.input.length).toBeLessThanOrEqual(MAX_INPUT_CHARS);
+    expect(listed?.truncated).toBe(true);
+  });
+
+  it("says an input is cut short when the hook kept only part of it, and squeezes its blanks", () => {
+    waitingSession();
+    writeRequest(
+      vps.spoolDir,
+      spoolRequest({ input: "command: ls\n\n\t  ;  rm -rf /", whole: false }),
+    );
+    const [listed] = requested(service().sessions).requests;
+    expect(listed).toMatchObject({ input: "command: ls ; rm -rf /", truncated: true });
   });
 
   it.each(SECRET_SAMPLES)(
     "leaves out %s, redacted in the hook and in the runner",
     (_, toolInput, secret) => {
       waitingSession();
-      writeRequest(vps.spoolDir, spoolRequest({ input: requestTextOf(toolInput) }));
+      writeRequest(vps.spoolDir, spoolRequest(requestTextOf(toolInput)));
       const [listed] = requested(service().sessions).requests;
       expect(listed?.input).toContain(REDACTED);
       expect(listed?.input).not.toContain(secret);
@@ -236,6 +249,18 @@ describe("VpsSessions.requests", () => {
     expect(requested(service().sessions).requests).toEqual([]);
   });
 
+  it("leaves out an earlier request of the same thread, whose prompt was answered", () => {
+    waitingSession({ ago: 5_000 });
+    writeEvents(vps, [
+      spoolEvent("PermissionRequest", NOW - 20_000),
+      spoolEvent("PostToolUse", NOW - 15_000),
+      spoolEvent("PermissionRequest", NOW - 5_000),
+    ]);
+    writeRequest(vps.spoolDir, spoolRequest({ at: NOW - 20_000 }));
+    writeRequest(vps.spoolDir, spoolRequest({ id: OTHER_REQUEST, at: NOW - 5_000 }));
+    expect(requested(service().sessions).requests.map(({ id }) => id)).toEqual([OTHER_REQUEST]);
+  });
+
   it("leaves out the claude-code route's own sessions", () => {
     waitingSession();
     writeRequest(vps.spoolDir, spoolRequest());
@@ -251,10 +276,15 @@ describe("VpsSessions.requests", () => {
 
   it(`lists ${MAX_VPS_SESSIONS} requests at most, oldest first, and says so`, () => {
     waitingSession();
+    // One per subagent: a thread asks one prompt at a time.
+    const events = [];
     for (let index = 0; index <= MAX_VPS_SESSIONS; index += 1) {
       const id = `eeeeeeee-0000-4000-8000-${String(index).padStart(12, "0")}`;
-      writeRequest(vps.spoolDir, spoolRequest({ id, at: NOW - 20_000 + index }));
+      const at = NOW - 20_000 + index;
+      events.push(spoolEvent("PermissionRequest", at, { agent: `agent${index}` }));
+      writeRequest(vps.spoolDir, spoolRequest({ id, at, agent: `agent${index}` }));
     }
+    writeEvents(vps, events);
     const answer = requested(service().sessions);
     expect(answer.requests).toHaveLength(MAX_VPS_SESSIONS);
     expect(answer.requests[0]?.openedAt).toBe(NOW - 20_000);
@@ -406,6 +436,25 @@ describe("VpsSessions.message", () => {
     writeSocket(vps.spoolDir, SESSION_A, { at: NOW, path });
     const { sessions } = service({ post: async () => false });
     expect(await sessions.message(SESSION_A, "hi")).toEqual({ ok: false, reason: "no_inbox" });
+  });
+
+  it("posts nothing when the session's pid isn't its Claude Code process any more", async () => {
+    liveSession();
+    const { path } = await inbox();
+    writeSocket(vps.spoolDir, SESSION_A, { at: NOW, path });
+    const posted: string[] = [];
+    const { sessions } = service({
+      processInfo: () => ({ uid: ownUid(), start: "1", exe: APP_BINARY }),
+      post: async (_path, text) => {
+        posted.push(text);
+        return true;
+      },
+    });
+    expect(await sessions.message(SESSION_A, "hi")).toEqual({
+      ok: false,
+      reason: "not_claude_code",
+    });
+    expect(posted).toEqual([]);
   });
 
   it("refuses the claude-code route's own sessions", async () => {

@@ -12,7 +12,11 @@ export const INBOX_TIMEOUT_MS = 5_000;
 
 /** The one line a post sends, as Claude Code's own help shows a script's. */
 export function inboxLineOf(text: string): string {
-  return JSON.stringify({ type: "user", message: { role: "user", content: text } });
+  // JSON leaves the line and paragraph separators as they are; a reader that splits on them
+  // would see a broken line.
+  return JSON.stringify({ type: "user", message: { role: "user", content: text } })
+    .replaceAll("\u2028", "\\u2028")
+    .replaceAll("\u2029", "\\u2029");
 }
 
 /**

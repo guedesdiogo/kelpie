@@ -587,14 +587,16 @@ export const RUNNER_MAX_MESSAGE_CHARS = 4_000;
 
 /**
  * A permission prompt a session's hook holds open for Kelpie's verdict, beside the one the Claude
- * app or the terminal shows: its id, a lowercase UUID the hook drew, binds the verdict. The tool's
- * input is redacted, on one line, and cut to RUNNER_MAX_INPUT_CHARS.
+ * app shows: its id, a lowercase UUID the hook drew, binds the verdict. The tool's input is
+ * redacted, on one line, and cut to RUNNER_MAX_INPUT_CHARS.
  */
 export interface RunnerVpsRequest {
   id: string;
   sessionId: string;
   tool: string;
   input: string;
+  /** Whether `input` leaves some of the tool's input out: then no one approves it from a notice. */
+  truncated: boolean;
   openedAt: number;
   title: string | null;
   repository: string | null;
@@ -663,10 +665,19 @@ export function parseRunnerVpsRequests(value: unknown): RunnerVpsRequests | null
   if (!Array.isArray(requests) || requests.length > RUNNER_MAX_VPS_SESSIONS) return null;
   const parsed: RunnerVpsRequest[] = [];
   for (const entry of requests) {
-    if (!hasKeys(entry, ["id", "sessionId", "tool", "input", "openedAt", "title", "repository"])) {
-      return null;
-    }
-    const { id, sessionId, tool, input, openedAt, title, repository } = entry;
+    const keys = [
+      "id",
+      "sessionId",
+      "tool",
+      "input",
+      "truncated",
+      "openedAt",
+      "title",
+      "repository",
+    ];
+    if (!hasKeys(entry, keys)) return null;
+    const { id, sessionId, tool, input, truncated: cut, openedAt, title, repository } = entry;
+    if (typeof cut !== "boolean") return null;
     if (typeof id !== "string" || !RUNNER_SESSION_ID.test(id)) return null;
     if (typeof sessionId !== "string" || !RUNNER_SESSION_ID.test(sessionId)) return null;
     if (typeof tool !== "string" || !RUNNER_TOOL_NAME.test(tool) || !isRunnerTime(openedAt)) {
@@ -679,7 +690,7 @@ export function parseRunnerVpsRequests(value: unknown): RunnerVpsRequests | null
     ) {
       return null;
     }
-    parsed.push({ id, sessionId, tool, input, openedAt, title, repository });
+    parsed.push({ id, sessionId, tool, input, truncated: cut, openedAt, title, repository });
   }
   return { ok: true, now, requests: parsed, truncated };
 }

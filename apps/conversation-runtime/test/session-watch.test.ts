@@ -21,6 +21,7 @@ import {
   MAX_TOLD,
   NEW_WATCH,
   OUTDATED_PAUSE_MS,
+  REQUEST_GRACE_MS,
   type SessionWatch,
   shouldArm,
   TOLD_KEEP_MS,
@@ -258,7 +259,7 @@ describe("the check of the VPS's waits", () => {
       A,
       NOW - MAX_TOLD + index,
     ]);
-    const crowded = fakeIO([ok([wait(B, NOW)])]);
+    const crowded = fakeIO([ok([wait(B, NOW, { kind: "question" })])]);
     const kept = await checks(crowded.io, [CLOCK], { ...NEW_WATCH, told: full });
     expect(kept.told).toHaveLength(MAX_TOLD);
     expect(kept.told[0]).toEqual([A, NOW - MAX_TOLD + 1]);
@@ -351,11 +352,12 @@ describe("the check of the VPS's waits", () => {
 
 describe("a permission wait's request (ADR-0069 §1)", () => {
   const REQUEST = "eeeeeeee-0000-4000-8000-00000000000e";
-  const request = (sessionId: string, openedAt: number): RunnerVpsRequest => ({
-    id: REQUEST,
+  const request = (sessionId: string, openedAt: number, id = REQUEST): RunnerVpsRequest => ({
+    id,
     sessionId,
     tool: "Bash",
     input: "command: rm -rf build",
+    truncated: false,
     openedAt,
     title: "Fix the login flow",
     repository: "kelpie",
@@ -376,6 +378,32 @@ describe("a permission wait's request (ADR-0069 §1)", () => {
     await checks(io, [CLOCK]);
     expect(carried).toEqual([request(A, opened + 5_000), null]);
     expect(reads()).toBe(1);
+  });
+
+  it("goes with the closest of its session's, should two open close together", async () => {
+    const opened = NOW - 2 * MINUTE;
+    const later = "ffffffff-0000-4000-8000-00000000000f";
+    const { io, carried } = fakeIO([ok([wait(A, opened)])], {
+      requests: listing([request(A, opened - 30_000), request(A, opened + 2_000, later)]),
+    });
+    await checks(io, [CLOCK]);
+    expect(carried).toEqual([request(A, opened + 2_000, later)]);
+  });
+
+  it("holds a permission wait seconds old whose request isn't listed yet, for the next check", async () => {
+    const fresh = wait(A, NOW - 1_000);
+    const { io, told, carried, asked } = fakeIO([ok([fresh]), ok([fresh], NOW + MINUTE)], {
+      requests: listing([]),
+    });
+    const watch = await checks(io, [CLOCK]);
+    expect(told).toEqual([]);
+    // The next check asks from before it again, and tells it then, with or without its request.
+    expect(watch.since).toBeLessThanOrEqual(NOW - 1_000);
+    await checks(io, [CLOCK + MINUTE], watch);
+    expect(told).toEqual([fresh]);
+    expect(carried).toEqual([null]);
+    expect(asked).toHaveLength(2);
+    expect(REQUEST_GRACE_MS).toBe(5_000);
   });
 
   it("isn't read for a question, which only its prompt answers", async () => {
@@ -423,6 +451,9 @@ describe("Master's AgentHost watching the VPS's waits (#434)", () => {
       async waits(since) {
         asked.push(since);
         return outcome();
+      },
+      async requests() {
+        return { ok: true, now: Date.now(), requests: [], truncated: false };
       },
     });
     return asked;

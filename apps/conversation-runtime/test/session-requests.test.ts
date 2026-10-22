@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  answerable,
   keepRequest,
   MAX_KEPT_REQUESTS,
   NOTICE_INPUT_CHARS,
@@ -19,16 +20,28 @@ const OTHER_ID = "ffffffff-0000-4000-8000-00000000000f";
 
 describe("parseRequestNotice", () => {
   it("takes a request as AgentHost passes it", () => {
-    const request = { id: REQUEST_ID, tool: "Bash", input: "command: rm -rf build" };
+    const request = {
+      id: REQUEST_ID,
+      tool: "Bash",
+      input: "command: rm -rf build",
+      truncated: false,
+    };
     expect(parseRequestNotice(request)).toEqual(request);
   });
 
   it.each([
     ["nothing", null],
-    ["an id that isn't a UUID", { id: "1", tool: "Bash", input: "x" }],
-    ["a tool that isn't a name", { id: REQUEST_ID, tool: "rm -rf /", input: "x" }],
-    ["an input too long", { id: REQUEST_ID, tool: "Bash", input: "i".repeat(501) }],
-    ["an input that isn't text", { id: REQUEST_ID, tool: "Bash", input: 5 }],
+    ["an id that isn't a UUID", { id: "1", tool: "Bash", input: "x", truncated: false }],
+    [
+      "a tool that isn't a name",
+      { id: REQUEST_ID, tool: "rm -rf /", input: "x", truncated: false },
+    ],
+    [
+      "an input too long",
+      { id: REQUEST_ID, tool: "Bash", input: "i".repeat(501), truncated: false },
+    ],
+    ["an input that isn't text", { id: REQUEST_ID, tool: "Bash", input: 5, truncated: false }],
+    ["no word on whether it is cut", { id: REQUEST_ID, tool: "Bash", input: "x" }],
   ])("refuses %s", (_, value) => {
     expect(parseRequestNotice(value)).toBeNull();
   });
@@ -88,7 +101,13 @@ describe("verdictStatus", () => {
 });
 
 describe("the notice's request lines", () => {
-  const request = { id: REQUEST_ID, tool: "Bash", input: 'command: echo "hi" ‮' };
+  const request = {
+    id: REQUEST_ID,
+    tool: "Bash",
+    // A right-to-left override, which the notice removes.
+    input: 'command: echo "hi" \u202e',
+    truncated: false,
+  };
 
   it("name the tool and its input, quoted on one line, and point at the buttons", () => {
     expect(requestLines(request, true, "en")).toBe(
@@ -106,8 +125,19 @@ describe("the notice's request lines", () => {
     expect(requestLines(request, false, "es")).toContain("Respóndelo en la app de Claude.");
   });
 
-  it(`cut the input to ${NOTICE_INPUT_CHARS} characters`, () => {
+  it(`show all ${NOTICE_INPUT_CHARS} characters the runner sends`, () => {
     const line = requestLines({ ...request, input: "x".repeat(500) }, true, "en");
-    expect(line).toContain(`"${"x".repeat(NOTICE_INPUT_CHARS - 1)}…"`);
+    expect(line).toContain(`"${"x".repeat(NOTICE_INPUT_CHARS)}"`);
+  });
+
+  it("mark an input cut short, and send the owner to the Claude app whatever the buttons", () => {
+    const cut = { ...request, input: "rm -rf build", truncated: true };
+    expect(answerable(cut)).toBe(false);
+    expect(answerable(request)).toBe(true);
+    expect(requestLines(cut, true, "en")).toBe(
+      'Tool: Bash, with "rm -rf build…".\nIts input is longer than this notice shows, so answer it in the Claude app.',
+    );
+    expect(requestLines(cut, true, "pt-BR")).toContain("responda no app do Claude");
+    expect(requestLines(cut, true, "es")).toContain("respóndelo en la app de Claude");
   });
 });

@@ -372,8 +372,8 @@ function productionPorts(env: Env): ConversationPorts {
         roleOf: async (id) => (await registry.get(id))?.role ?? null,
         adminOrigin: env.ADMIN_ORIGIN,
       }),
-      // Master's view of the VPS's Claude Code sessions (ADR-0057 §5, #434), through
-      // channel-egress's RunnerSessions, which only reads them.
+      // Master's view of the VPS's Claude Code sessions (ADR-0057 §5, #434), and its message and
+      // end (ADR-0069), through channel-egress's RunnerSessions.
       vpsSessionsTools(env.RUNNER_SESSIONS as unknown as RunnerSessionsContract, {
         roleOf: async (id) => (await registry.get(id))?.role ?? null,
         // Its AgentHost's check of the waits, so the owner can read why a notice didn't come (#470).

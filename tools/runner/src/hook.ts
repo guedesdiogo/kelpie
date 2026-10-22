@@ -10,6 +10,7 @@ import {
   HOOK_EVENTS,
   HOOK_WORD,
   type HookEvent,
+  MAX_SOCKET_PATH_CHARS,
   prepareSpoolDir,
   type SpoolEvent,
   writeExcerpt,
@@ -61,9 +62,6 @@ export interface HookOptions {
   /** The session's inbox, as Claude Code gives its hooks `CLAUDE_CODE_MESSAGING_SOCKET`. */
   socket?: string | undefined;
 }
-
-/** The longest inbox path taken: a Unix socket's is at most about 104 bytes. */
-const MAX_SOCKET_PATH_CHARS = 255;
 
 /** Everything the hook does with its input. It never throws, whatever the input or the disk. */
 export async function runHook(

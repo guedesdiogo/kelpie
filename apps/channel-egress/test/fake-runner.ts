@@ -104,6 +104,7 @@ export const VPS_REQUESTS: RunnerVpsRequests = {
       sessionId: "aaaaaaaa-1111-4222-8333-444444444444",
       tool: "Bash",
       input: "command: rm -rf build description: Clean the build",
+      truncated: false,
       openedAt: NOW - 30_000,
       title: "Review the runner",
       repository: "kelpie",

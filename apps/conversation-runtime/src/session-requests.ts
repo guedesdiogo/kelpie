@@ -25,6 +25,8 @@ export interface SessionRequestNotice {
   tool: string;
   /** Its input, redacted on the VPS, on one line. */
   input: string;
+  /** Whether the input leaves some of it out: then the notice offers no Approve. */
+  truncated: boolean;
 }
 
 /** A request whose notice showed Approve and Deny, until the owner's press. */
@@ -41,17 +43,17 @@ export const REQUEST_ANSWER_MS = CONFIRMATION_MS;
 const REQUEST_KEEP_MS = 60 * 60_000;
 /** The most requests a conversation keeps: far more than an owner answers at once. */
 export const MAX_KEPT_REQUESTS = 20;
-/** How much of the tool's input the notice shows. */
-export const NOTICE_INPUT_CHARS = 300;
+/** How much of the tool's input the notice shows: all the runner sends. */
+export const NOTICE_INPUT_CHARS = RUNNER_MAX_INPUT_CHARS;
 
 /** A notice's request, checked across RPC; null for anything else. */
 export function parseRequestNotice(value: unknown): SessionRequestNotice | null {
   if (typeof value !== "object" || value === null) return null;
-  const { id, tool, input } = value as Record<string, unknown>;
+  const { id, tool, input, truncated } = value as Record<string, unknown>;
   if (typeof id !== "string" || !RUNNER_SESSION_ID.test(id)) return null;
   if (typeof tool !== "string" || !RUNNER_TOOL_NAME.test(tool)) return null;
   if (typeof input !== "string" || input.length > RUNNER_MAX_INPUT_CHARS) return null;
-  return { id, tool, input };
+  return typeof truncated === "boolean" ? { id, tool, input, truncated } : null;
 }
 
 /**
@@ -97,27 +99,33 @@ const NOTICE_TEXTS: Localized<{
   tool: (tool: string, input: string) => string;
   buttons: string;
   inApp: string;
+  cut: string;
 }> = {
   en: {
     tool: (tool, input) => `Tool: ${tool}, with ${input}.`,
     buttons: "Approve or deny it here, or answer it in the Claude app.",
     inApp: "Answer it in the Claude app.",
+    cut: "Its input is longer than this notice shows, so answer it in the Claude app.",
   },
   "pt-BR": {
     tool: (tool, input) => `Ferramenta: ${tool}, com ${input}.`,
     buttons: "Aprove ou negue aqui, ou responda no app do Claude.",
     inApp: "Responda no app do Claude.",
+    cut: "A entrada é mais longa do que este aviso mostra, então responda no app do Claude.",
   },
   es: {
     tool: (tool, input) => `Herramienta: ${tool}, con ${input}.`,
     buttons: "Apruébalo o niégalo aquí, o respóndelo en la app de Claude.",
     inApp: "Respóndelo en la app de Claude.",
+    cut: "Su entrada es más larga de lo que muestra este aviso, así que respóndelo en la app de Claude.",
   },
 };
 
 /**
  * The lines a wait's notice gains for its request (ADR-0027): the tool and its input, as quoted
- * plain text on one line, and where to answer it: here, with the buttons, or in the Claude app.
+ * plain text on one line, and where to answer it: here, with the buttons, or in the Claude app. An
+ * input cut short shows "…", and only the Claude app answers it: no one approves what they
+ * didn't see whole.
  */
 export function requestLines(
   request: SessionRequestNotice,
@@ -125,8 +133,14 @@ export function requestLines(
   locale: Locale,
 ): string {
   const texts = NOTICE_TEXTS[locale];
-  const tool = texts.tool(request.tool, quoted(request.input, NOTICE_INPUT_CHARS));
-  return `${tool}\n${buttons ? texts.buttons : texts.inApp}`;
+  const input = quoted(request.input, NOTICE_INPUT_CHARS, request.truncated);
+  const how = request.truncated ? texts.cut : buttons ? texts.buttons : texts.inApp;
+  return `${texts.tool(request.tool, input)}\n${how}`;
+}
+
+/** Whether a notice of `request` may show Approve and Deny: only when it shows all its input. */
+export function answerable(request: SessionRequestNotice): boolean {
+  return !request.truncated;
 }
 
 type RunnerVerdicts = Pick<RunnerSessionsContract, "verdict">;
@@ -151,13 +165,14 @@ const INVISIBLES = new RegExp(RUNNER_INVISIBLE.source, "gu");
 
 /**
  * A session's own text as a notice shows it: what shows nothing goes, each break becomes a space,
- * and it is cut to `max` with "…", then quoted with its own quotes escaped, so it can't close them.
+ * and it is cut to `max` with "…", or ends with one when `more` says it was cut before, then quoted
+ * with its own quotes escaped, so it can't close them.
  */
-function quoted(text: string, max: number): string {
+function quoted(text: string, max: number, more = false): string {
   const line = text.replace(INVISIBLES, "").replace(BREAKS, " ").replace(/\s+/gu, " ").trim();
   const characters = [...line];
   const cut =
-    characters.length > max
+    characters.length > max || more
       ? `${characters
           .slice(0, max - 1)
           .join("")

@@ -36,6 +36,8 @@ export const MAX_TOLD = 1_000;
  * within the 30 s the SDK gives an interval's run. The rest wait for the next check.
  */
 export const MAX_NOTICES_PER_CHECK = 3;
+/** How fresh a permission wait whose request isn't listed yet is held for the next check. */
+export const REQUEST_GRACE_MS = 5_000;
 /** `outdated` answers in a row that stop the check. */
 export const MAX_OUTDATED = 3;
 /** How long an outdated runner keeps Master's turns from starting the check again. */
@@ -160,8 +162,20 @@ export async function checkWaits(
   for (const wait of outcome.waits) {
     if (isTold(told, wait)) continue;
     if (tries < MAX_NOTICES_PER_CHECK) {
+      const request = await requestOf(wait);
+      // A permission's hook spools its request a moment after its wait shows: one this fresh
+      // that the runner's list doesn't have yet waits for the next check, so its notice gets its
+      // buttons (ADR-0069 §1). With no list to look in, it is told at once.
+      const early =
+        wait.kind === "permission" &&
+        request === null &&
+        outcome.now - wait.openedAt < REQUEST_GRACE_MS;
+      if (early) {
+        held = Math.min(held ?? wait.openedAt, wait.openedAt);
+        continue;
+      }
       tries += 1;
-      if (await io.tell(wait, await requestOf(wait))) {
+      if (await io.tell(wait, request ?? null)) {
         told = [...told, [wait.sessionId, wait.openedAt]];
         io.keep({ ...watch, told });
         continue;
@@ -184,11 +198,13 @@ export async function checkWaits(
 
 /**
  * A permission wait's request, read once a check, when its first permission wait is told: the one
- * of its session's opened with it. None for a question, nor when the runner can't list them, as one
- * below protocol 4: the notice then goes without Approve and Deny.
+ * of its session's opened with it, or null. Undefined when the runner can't list them, as one below
+ * protocol 4: the notice then goes without Approve and Deny. None for a question.
  */
-function requestFinder(io: WatchIO): (wait: RunnerVpsWait) => Promise<RunnerVpsRequest | null> {
-  let listed: Promise<RunnerVpsRequest[]> | undefined;
+function requestFinder(
+  io: WatchIO,
+): (wait: RunnerVpsWait) => Promise<RunnerVpsRequest | null | undefined> {
+  let listed: Promise<RunnerVpsRequest[] | null> | undefined;
   const list = async () => {
     try {
       const outcome = await io.requests();
@@ -197,19 +213,21 @@ function requestFinder(io: WatchIO): (wait: RunnerVpsWait) => Promise<RunnerVpsR
     } catch (error) {
       console.warn("AgentHost: the VPS's requests weren't read", errorName(error));
     }
-    return [];
+    return null;
   };
   return async (wait) => {
     if (wait.kind !== "permission") return null;
     listed ??= list();
     const requests = await listed;
-    return (
-      requests.find(
-        (request) =>
-          request.sessionId === wait.sessionId &&
-          Math.abs(request.openedAt - wait.openedAt) <= WAIT_JOIN_MS,
-      ) ?? null
-    );
+    if (requests === null) return undefined;
+    // The closest of its session's, should two prompts of its open close together.
+    let best: RunnerVpsRequest | null = null;
+    for (const request of requests) {
+      const gap = Math.abs(request.openedAt - wait.openedAt);
+      if (request.sessionId !== wait.sessionId || gap > WAIT_JOIN_MS) continue;
+      if (!best || gap < Math.abs(best.openedAt - wait.openedAt)) best = request;
+    }
+    return best;
   };
 }
 

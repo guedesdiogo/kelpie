@@ -76,6 +76,12 @@ describe("postToInbox", () => {
     });
   });
 
+  it("escapes the line and paragraph separators, so the line stays one", () => {
+    const line = inboxLineOf("a\u2028b\u2029c");
+    expect(line).not.toMatch(/[\u2028\u2029]/u);
+    expect(JSON.parse(line).message.content).toBe("a\u2028b\u2029c");
+  });
+
   it("ignores what the inbox answers", async () => {
     const path = join(socks, "5.sock");
     await inbox(path, { answer: true });

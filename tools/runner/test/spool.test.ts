@@ -268,6 +268,7 @@ function spoolRequest(overrides: Partial<SpoolRequest> = {}): SpoolRequest {
     pid: 4242,
     tool: "Bash",
     input: "rm -rf build",
+    whole: true,
     ...overrides,
   };
 }
@@ -290,6 +291,14 @@ describe("the spool's permission requests (ADR-0069 §1)", () => {
     deleteRequest(dir, REQUEST_A);
     expect(readRequest(dir, REQUEST_A)).toBeNull();
     expect(listActions(dir).requests).toEqual([REQUEST_B]);
+  });
+
+  it("reads a request that doesn't say it is whole as cut short", () => {
+    writeFileSync(
+      join(dir, `request-${REQUEST_A}.json`),
+      JSON.stringify({ ...spoolRequest(), whole: undefined }),
+    );
+    expect(readRequest(dir, REQUEST_A)?.whole).toBe(false);
   });
 
   it("keeps a subagent of unknown id as null, and the main thread's without one", () => {

@@ -489,6 +489,7 @@ function vpsRequest(overrides: Partial<RunnerVpsRequest> = {}): RunnerVpsRequest
     sessionId: SESSION,
     tool: "Bash",
     input: "rm -rf build",
+    truncated: false,
     openedAt: NOW - 30_000,
     title: "Fix the login",
     repository: "kelpie",
@@ -508,7 +509,12 @@ describe("parseRunnerVpsRequests", () => {
   it("takes the runner's open requests as they are", () => {
     const answer = requestsAnswer([
       vpsRequest(),
-      vpsRequest({ tool: "mcp__github__create_issue", title: null, repository: null }),
+      vpsRequest({
+        tool: "mcp__github__create_issue",
+        truncated: true,
+        title: null,
+        repository: null,
+      }),
     ]);
     expect(parseRunnerVpsRequests(answer)).toEqual(answer);
     expect(parseRunnerVpsRequests(requestsAnswer([], { truncated: true }))).toEqual(
@@ -528,6 +534,14 @@ describe("parseRunnerVpsRequests", () => {
     ],
     ["a request with an extra field", requestsAnswer([{ ...vpsRequest(), pid: 4 }])],
     ["a request without its input", requestsAnswer([{ ...vpsRequest(), input: undefined }])],
+    [
+      "a request that doesn't say if it is cut",
+      requestsAnswer([{ ...vpsRequest(), truncated: undefined }]),
+    ],
+    [
+      "a truncated that isn't a boolean",
+      requestsAnswer([vpsRequest({ truncated: "no" as never })]),
+    ],
     ["an id that isn't a UUID", requestsAnswer([vpsRequest({ id: "1" })])],
     ["a session id that isn't a UUID", requestsAnswer([vpsRequest({ sessionId: "../x" })])],
     ["a tool name with a space", requestsAnswer([vpsRequest({ tool: "Bash now" })])],

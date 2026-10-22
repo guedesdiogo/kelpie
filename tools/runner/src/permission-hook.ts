@@ -97,17 +97,19 @@ async function waitForVerdict(input: string, options: PermissionHookOptions): Pr
     deadline: start + (options.waitMs ?? PERMISSION_WAIT_MS),
     pid: options.pid,
     tool,
-    input: requestTextOf(payload.input),
+    ...requestTextOf(payload.input),
   });
   const watch = sessionWatch(start);
   watch.saw(file);
   try {
     for (;;) {
+      if (signal?.aborted || now() - start >= (options.waitMs ?? PERMISSION_WAIT_MS)) return "";
+      // The session first: a verdict taken once the owner answered in the app would read as
+      // applied. Left untaken, the runner takes it back, and says it didn't apply.
+      if (watch.movedOn(own())) return "";
       const verdict = readVerdict(dir, id);
       // Taking it is what applies it: a verdict the runner took back first isn't.
       if (verdict && takeVerdict(dir, id)) return decisionOf(verdict.behavior);
-      if (signal?.aborted || now() - start >= (options.waitMs ?? PERMISSION_WAIT_MS)) return "";
-      if (watch.movedOn(own())) return "";
       await sleep(options.pollMs ?? VERDICT_POLL_MS);
     }
   } finally {
@@ -180,13 +182,14 @@ function sessionFileOf(claudeDir: string, pid: number, session: string): Session
 }
 
 /**
- * A tool's input as the request shows it: each field on its own line, a text as it is and anything
- * else as JSON. A text of several lines starts below its name, so a file's lines stay lines the
- * redaction reads, its first one too. What shows nothing goes first: it
- * could split a key. The first HOOK_REDACT_CHARS are redacted, and HOOK_EXCERPT_CHARS kept: the
- * runner redacts again, its own secret by value too, before it cuts what leaves.
+ * A tool's input as the request shows it, and whether all of it is there: each field on its own
+ * line, a text as it is and anything else as JSON. A text of several lines starts below its name,
+ * so a file's lines stay lines the redaction reads, its first one too. What shows nothing goes
+ * first: it could split a key. The first HOOK_REDACT_CHARS are redacted, then each run of blanks
+ * becomes one, so padding can't push what follows past the cut unseen; HOOK_EXCERPT_CHARS are kept.
+ * The runner redacts again, its own secret by value too, before it cuts what leaves.
  */
-export function requestTextOf(input: unknown): string {
+export function requestTextOf(input: unknown): { input: string; whole: boolean } {
   const text =
     typeof input === "object" && input !== null && !Array.isArray(input)
       ? Object.entries(input)
@@ -194,7 +197,19 @@ export function requestTextOf(input: unknown): string {
           .join("\n")
       : (JSON.stringify(input) ?? "");
   const visible = cut(text, HOOK_REDACT_CHARS).replace(INVISIBLES, "");
-  return cut(redact(visible), HOOK_EXCERPT_CHARS);
+  const compact = squeezed(redact(visible));
+  return {
+    input: cut(compact, HOOK_EXCERPT_CHARS),
+    whole: text.length <= HOOK_REDACT_CHARS && compact.length <= HOOK_EXCERPT_CHARS,
+  };
+}
+
+/** Each run of blanks as one space, and each run of breaks, with the blanks around it, as one. */
+export function squeezed(text: string): string {
+  return text
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/ ?\n\s*/g, "\n")
+    .trim();
 }
 
 function fieldOf(name: string, value: unknown): string {

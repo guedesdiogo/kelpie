@@ -261,8 +261,8 @@ export function listExcerpts(dir: string): { sessions: string[]; temporary: stri
 
 /** A request's, a verdict's or an inbox address's file: a cut input, at most. */
 export const MAX_ACTION_FILE_BYTES = 16 * 1024;
-/** The longest inbox address taken: a Unix socket's path is at most about 104 bytes. */
-const MAX_SOCKET_PATH_CHARS = 255;
+/** The longest inbox address taken: a Unix socket's path fits Linux's 108-byte `sun_path`. */
+export const MAX_SOCKET_PATH_CHARS = 107;
 
 /**
  * A permission prompt the permission hook holds open for Kelpie's verdict (ADR-0069 §1): its id,
@@ -279,6 +279,8 @@ export interface SpoolRequest {
   pid: number;
   tool: string;
   input: string;
+  /** Whether `input` is all of the tool's input: a request cut short never gets Approve. */
+  whole: boolean;
 }
 
 /** The runner's verdict on a request: once written, only its taker removes it. */
@@ -302,7 +304,7 @@ export function writeRequest(dir: string, request: SpoolRequest): void {
 export function readRequest(dir: string, id: string): SpoolRequest | null {
   const value = readAction(dir, "request", id);
   if (value === null) return null;
-  const { session, agent, at, deadline, pid, tool, input } = value;
+  const { session, agent, at, deadline, pid, tool, input, whole } = value;
   if (value.id !== id || typeof session !== "string" || !SESSION_ID.test(session)) return null;
   if (![at, deadline].every((time) => Number.isSafeInteger(time) && (time as number) >= 0)) {
     return null;
@@ -319,6 +321,8 @@ export function readRequest(dir: string, id: string): SpoolRequest | null {
     pid: pid as number,
     tool,
     input,
+    // Missing, it reads as cut short: the safe side.
+    whole: whole === true,
   };
 }
 

@@ -287,7 +287,7 @@ describe("Approve and Deny on a permission prompt's notice (ADR-0069 §1)", () =
     kind: "permission",
     title: "Fix login",
     repository: "kelpie",
-    request: { id: REQUEST, tool: "Bash", input: "command: rm -rf build" },
+    request: { id: REQUEST, tool: "Bash", input: "command: rm -rf build", truncated: false },
   } as const;
 
   function use(world: FakeWorld): FakeWorld {
@@ -366,6 +366,64 @@ describe("Approve and Deny on a permission prompt's notice (ADR-0069 §1)", () =
     });
     expect(answered.status).toBe("accepted");
     expect(given).toEqual([]);
+  });
+
+  it("offers no Approve on an input cut short, and sends the owner to the Claude app", async () => {
+    use(fakeWorld([]));
+    const name = `${MASTER}:webchat:u-owner-cut`;
+    await bound(name, "webchat");
+    const response = await agent(name).fetch("https://conversation/webchat", {
+      headers: {
+        Upgrade: "websocket",
+        [WEBCHAT_ADMISSION_HEADER]: JSON.stringify({
+          agentId: MASTER,
+          userId: "u-owner",
+          role: "owner",
+          chatType: "direct",
+          timeZone: null,
+        }),
+      },
+    });
+    const socket = response.webSocket;
+    if (!socket) throw new Error("no socket");
+    const frames: Record<string, unknown>[] = [];
+    socket.addEventListener("message", (event) => frames.push(JSON.parse(String(event.data))));
+    socket.accept();
+    const cut = { ...wait, request: { ...wait.request, truncated: true } };
+    expect(await agent(name).sessionWait(MASTER, cut)).toBe("sent");
+    await vi.waitFor(() =>
+      expect(frames.filter((frame) => frame.type === "bubble")).toEqual([
+        {
+          type: "bubble",
+          text: 'A Claude Code session on your VPS is waiting for your permission: "Fix login", repository "kelpie".\nTool: Bash, with "command: rm -rf build…".\nIts input is longer than this notice shows, so answer it in the Claude app.',
+        },
+      ]),
+    );
+    expect(await kept(name)).toEqual([]);
+    socket.close(1000);
+  });
+
+  it("keeps a pending request's tool and input out of a chat that isn't the owner's own", async () => {
+    const world = use(fakeWorld([]));
+    const name = `${MASTER}:telegram:request-group`;
+    await agent(name).ingest({
+      agentId: MASTER,
+      providerMessageId: `${name}-m1`,
+      userId: "u-owner",
+      role: "owner",
+      chatType: "group",
+      text: "hello there, how are you doing today?",
+      destination: { channel: "telegram", threadId: "group-1" },
+      sentAt: Date.UTC(2026, 9, 22, 17),
+      timeZone: null,
+    });
+    await runInDurableObject(agent(name), async (instance: ConversationAgent) => {
+      for (const schedule of instance.getSchedules()) await instance.cancelSchedule(schedule.id);
+    });
+    expect(await agent(name).sessionWait(MASTER, wait)).toBe("sent");
+    expect(world.sends.at(-1)?.text).toBe(
+      'A Claude Code session on your VPS is waiting for your permission: "Fix login", repository "kelpie".',
+    );
   });
 
   it("gives no request to a question's notice, which only its prompt answers", async () => {
@@ -480,6 +538,33 @@ describe("Approve and Deny on a permission prompt's notice (ADR-0069 §1)", () =
       runner(outcome);
       const { socket, press } = await told(`${MASTER}:webchat:u-owner-${status}`);
       expect(await press("deny")).toBe(status);
+      socket.close(1000);
+    });
+
+    it("counts two presses at once as one", async () => {
+      use(fakeWorld([]));
+      // The runner takes its time, inside the object, so the second press lands meanwhile.
+      const given = runner(
+        () =>
+          new Promise<RunnerVerdictOutcome>((resolve) => {
+            setTimeout(() => resolve({ ok: true, applied: true }), 300);
+          }),
+      );
+      const name = `${MASTER}:webchat:u-owner-twice`;
+      await bound(name, "webchat");
+      const { socket, frames } = await socketOf(name);
+      await agent(name).sessionWait(MASTER, wait);
+      socket.send(JSON.stringify({ type: "verdict", id: REQUEST, verdict: "allow" }));
+      socket.send(JSON.stringify({ type: "verdict", id: REQUEST, verdict: "deny" }));
+      await vi.waitFor(() =>
+        expect(
+          frames
+            .filter((frame) => frame.type === "verdict")
+            .map((frame) => frame.status)
+            .sort(),
+        ).toEqual(["answered", "applied"]),
+      );
+      expect(given).toEqual([[REQUEST, "allow"]]);
       socket.close(1000);
     });
 

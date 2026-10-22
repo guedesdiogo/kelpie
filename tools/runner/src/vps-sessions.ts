@@ -4,7 +4,12 @@ import { isPrivateDir } from "./files.ts";
 import { checkoutOf } from "./git.ts";
 import { isInbox, postToInbox } from "./inbox.ts";
 import { forLog } from "./journal.ts";
-import { checkClaudeCode, claudeCodeDirsOf, type ProcessInfo } from "./processes.ts";
+import {
+  checkClaudeCode,
+  claudeCodeDirsOf,
+  type ProcessCheck,
+  type ProcessInfo,
+} from "./processes.ts";
 import {
   INVISIBLE,
   LINE_BREAK,
@@ -198,7 +203,8 @@ export class VpsSessions {
   /**
    * `GET /sessions/requests`: the permission prompts the hook holds open for Kelpie's verdict
    * (ADR-0069 §1), oldest first, within MAX_REQUESTS_BYTES. The tool's input, which the hook
-   * redacted, is redacted again, the runner's own secret by value too, then cut, on one line.
+   * redacted, is redacted again, the runner's own secret by value too, then put on one line, each
+   * run of blanks one space, and cut: `truncated` says when it isn't all there.
    */
   requests(): RunnerVpsRequests {
     const { now, observed, spool, events } = this.#observe();
@@ -208,7 +214,7 @@ export class VpsSessions {
         id: request.id,
         sessionId: request.session,
         tool: request.tool,
-        input: this.#line(request.input, MAX_INPUT_CHARS) ?? "{}",
+        ...this.#input(request),
         openedAt: request.at,
         title: this.#line(file.name, MAX_TITLE_CHARS),
         repository: this.#line(checkoutOf(file.cwd).repository, MAX_REPOSITORY_CHARS),
@@ -235,7 +241,9 @@ export class VpsSessions {
     const dir = this.#options.spoolDir;
     const request = readRequest(dir, id);
     const entry = request && observed.find(({ file }) => file.id === request.session);
-    if (!request || !entry || !this.#isOpen(request, entry, now, events)) return closed;
+    if (!request || !entry || !this.#isOpen(request, entry, now, events, this.#requests())) {
+      return closed;
+    }
     if (!writeVerdict(dir, { id, behavior, at: now })) return closed;
     const clock = this.#options.now ?? Date.now;
     const sleep = this.#options.sleep ?? ((ms) => new Promise((done) => setTimeout(done, ms)));
@@ -256,6 +264,9 @@ export class VpsSessions {
     const { observed, spool } = this.#observe();
     const found = this.#live(id, observed);
     if ("reason" in found) return refusal(found.reason);
+    // The same check as an end's: the pid is still that session's Claude Code process.
+    const check = this.#checkProcess(found.file);
+    if (check !== "ok") return refusal(check);
     const { spoolDir, uid = ownUid(), post = postToInbox } = this.#options;
     const socket = spool ? readSocket(spoolDir, id) : null;
     const started = found.file.startedAt;
@@ -277,13 +288,7 @@ export class VpsSessions {
     const { observed } = this.#observe();
     const found = this.#live(id, observed);
     if ("reason" in found) return refusal(found.reason);
-    const { claudeDir, uid = ownUid() } = this.#options;
-    const dirs = this.#options.claudeCodeDirs ?? claudeCodeDirsOf(dirname(claudeDir), claudeDir);
-    const check = checkClaudeCode(found.file, {
-      uid,
-      dirs,
-      ...(this.#options.processInfo ? { info: this.#options.processInfo } : {}),
-    });
+    const check = this.#checkProcess(found.file);
     if (check !== "ok") return refusal(check);
     try {
       (this.#options.kill ?? ((pid, signal) => process.kill(pid, signal)))(
@@ -294,6 +299,33 @@ export class VpsSessions {
       return refusal("ended");
     }
     return { ok: true };
+  }
+
+  /** Whether the session file's pid is still its Claude Code process, one of the runner's user's. */
+  #checkProcess(file: SessionFile): ProcessCheck {
+    const { claudeDir, uid = ownUid() } = this.#options;
+    const dirs = this.#options.claudeCodeDirs ?? claudeCodeDirsOf(dirname(claudeDir), claudeDir);
+    return checkClaudeCode(file, {
+      uid,
+      dirs,
+      ...(this.#options.processInfo ? { info: this.#options.processInfo } : {}),
+    });
+  }
+
+  /**
+   * A request's input as it leaves: what shows nothing removed, redacted again, on one line with
+   * each run of blanks one space, then cut to MAX_INPUT_CHARS; `truncated` when the hook or this
+   * cut left some of it out.
+   */
+  #input(request: SpoolRequest): { input: string; truncated: boolean } {
+    const visible = cut(request.input, MAX_REDACTED_CHARS).replace(INVISIBLES, "");
+    const line = redact(visible, this.#options.secrets)
+      .replace(LINE_BREAKS, " ")
+      .replace(/\s+/gu, " ")
+      .trim();
+    const truncated =
+      !request.whole || request.input.length > MAX_REDACTED_CHARS || line.length > MAX_INPUT_CHARS;
+    return { input: line === "" ? "{}" : cut(line, MAX_INPUT_CHARS), truncated };
   }
 
   /** A session of the server's that still runs, by its id; or why not. */
@@ -307,6 +339,12 @@ export class VpsSessions {
     return { file: entry.file };
   }
 
+  /** Every request in the spool that checks out. */
+  #requests(): SpoolRequest[] {
+    const dir = this.#options.spoolDir;
+    return listActions(dir).requests.flatMap((id) => readRequest(dir, id) ?? []);
+  }
+
   /** The open requests, oldest first, each with its session's file. */
   #openRequests(
     now: number,
@@ -314,11 +352,11 @@ export class VpsSessions {
     events: ReadonlyMap<string, SpoolEvent[]>,
   ): { request: SpoolRequest; file: SessionFile }[] {
     const sessions = new Map(observed.map((entry) => [entry.file.id, entry]));
+    const requests = this.#requests();
     const open: { request: SpoolRequest; file: SessionFile }[] = [];
-    for (const id of listActions(this.#options.spoolDir).requests) {
-      const request = readRequest(this.#options.spoolDir, id);
-      const entry = request && sessions.get(request.session);
-      if (request && entry && this.#isOpen(request, entry, now, events)) {
+    for (const request of requests) {
+      const entry = sessions.get(request.session);
+      if (entry && this.#isOpen(request, entry, now, events, requests)) {
         open.push({ request, file: entry.file });
       }
     }
@@ -329,18 +367,28 @@ export class VpsSessions {
 
   /**
    * Whether a request is open: its hook still waits, before its deadline; no verdict was given;
-   * its session runs; and its thread's wait opened with it and hasn't closed, so an answer in the
-   * app or the terminal closes it, even before its hook sees it.
+   * its session runs; it is its thread's latest; and its thread's wait opened with it and hasn't
+   * closed, so an answer in the app closes it, even before its hook sees it.
    */
   #isOpen(
     request: SpoolRequest,
     { file, life }: Observed,
     now: number,
     events: ReadonlyMap<string, SpoolEvent[]>,
+    requests: readonly SpoolRequest[],
   ): boolean {
     const alive = this.#options.alive ?? isAlive;
     if (now >= request.deadline || !alive(request.pid) || life.state === "ended") return false;
     if (readVerdict(this.#options.spoolDir, request.id) !== null) return false;
+    // A thread asks one prompt at a time: a later request of its own means this one's prompt was
+    // answered, though its hook hasn't seen it yet.
+    const later = requests.some(
+      (other) =>
+        other.session === request.session &&
+        other.agent === request.agent &&
+        (other.at > request.at || (other.at === request.at && other.id > request.id)),
+    );
+    if (later) return false;
     const wait = threadWaits(file, events.get(file.id) ?? []).waits.get(request.agent);
     return wait !== undefined && Math.abs(wait.openedAt - request.at) <= WAIT_JOIN_MS;
   }

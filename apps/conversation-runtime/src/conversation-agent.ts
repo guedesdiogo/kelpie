@@ -122,6 +122,7 @@ import { readRole } from "./registry/schema.ts";
 import { failureNotice, routeNotice } from "./route-notices.ts";
 import * as schema from "./schema.ts";
 import {
+  answerable,
   keepRequest,
   type OpenSessionRequest,
   requestLines,
@@ -840,11 +841,12 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       const locale = this.#locale();
       let text = sessionWaitNotice(notice, locale);
       let shown: { id: string; until: number } | undefined;
-      if (notice.request) {
+      // A pending request's tool and input go only to the owner's own chat (ADR-0069 §4).
+      if (notice.request && this.#ownersDirectChat()) {
         // Its prompt waits for a verdict too (ADR-0069 §1): the webchat's Approve and Deny, bound
-        // to the request's id. Telegram's wait for #495's buttons, so its notice sends the owner
-        // to the Claude app.
-        const buttons = destination.channel === "webchat";
+        // to the request's id, when the notice shows its input whole. Telegram's wait for #495's
+        // buttons, so its notice sends the owner to the Claude app.
+        const buttons = destination.channel === "webchat" && answerable(notice.request);
         if (buttons) {
           const kept = this.#get<OpenSessionRequest[]>("sessionRequests", []);
           const { kept: next, opened } = keepRequest(kept, notice.request.id, this.#ports.now());
@@ -899,6 +901,17 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (status === "failed") mark(null);
     console.log("conversation: the owner answered a VPS session's prompt", { verdict, status });
     return status;
+  }
+
+  /** Whether this conversation is the owner's direct chat, as its latest message says. */
+  #ownersDirectChat(): boolean {
+    const latest = this.#db
+      .select({ role: schema.inbound.role, chatType: schema.inbound.chatType })
+      .from(schema.inbound)
+      .orderBy(desc(schema.inbound.id))
+      .limit(1)
+      .get();
+    return latest?.role === "owner" && latest.chatType === "direct";
   }
 
   /** Whether a webchat page of this conversation is open: a socket of its own, not a sidebar's. */
