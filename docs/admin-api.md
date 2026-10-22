@@ -382,14 +382,23 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
 
     The three that change wait for the owner's confirmation, in the conversation's language. `list_proposals` and `get_proposal` read the proposals, with the proposer's change and reason fenced as data. `open_proposal` has Kelpie send a pending proposal's page, the same bubble its notice sends: only the page decides (ADR-0061), so no tool approves or refuses one, and ADR-0064 holds the link after outside content, as it holds the form tools.
 
+  - **An agent's own files** (ADR-0067 §1, #494): `read_agent_file` reads an agent's SOUL.md, AGENTS.md, memories/MEMORY.md or a skill, fenced as data, with its version. `write_agent_file` writes one whole, or removes rules or a skill.
+    - It names the version it read, so an edit made since is a conflict, never overwritten.
+    - The secrets sanitizer runs first.
+    - The owner's confirmation shows the change line by line, and says how many secrets were redacted.
+    - Once confirmed, it is the owner's edit, saved through context-store's `MasterAgentFiles` in a commit that names Master (`Kelpie-Via: agent:<Master's id>`).
+    - A change too long for one bubble is refused until #505's page; the owner makes it in the webchat's editor. A skill from outside is installed only in the editor, after its review (ADR-0058 §5).
+  - `configure_agent` also sets `specialty`, `memoryCore` and the agent's own `skills`; Master's specialty stays "Master".
+
   The identity and time zone commands stay on this API. `conversation-runtime` binds no `Directory`, which would make it and `ingress` bind each other, so ADR-0067 §2 sends them through a page that this API applies. `conversation-runtime` binds these entrypoints:
   - from `channel-egress`, `SetupForms`, which opens a form, reads the runner's state (which holds no secret), and disconnects a deleted agent's bot, reading nothing back (`docs/secrets.md`);
   - from `channel-egress`, `SetupWebhooks`, which only points a stored bot at ingress again;
   - from `channel-egress`, `RunnerSessions`, which reads the VPS's sessions and acts on them, and holds no secret;
-  - from `context-store`, `ContextStoreAdmin`, for the vault's held files, erasure and Dream.
+  - from `context-store`, `ContextStoreAdmin`, for the vault's held files, erasure and Dream;
+  - from `context-store`, `MasterAgentFiles`, for an agent's own files: their `files` and `save` only.
 - **Confirmation.** A change to an agent's settings (`configure_agent`) waits for the owner's yes, gated in code:
   1. The first call doesn't run. After the agent's reply, Kelpie itself sends one more bubble, written from the change's validated input, not by the model: `Confirm: <the change>`, and a 6-character code. The bubble is in the conversation's language ("Languages").
-     - Invisible and control characters in the change are written out as `\u{…}`, so what the owner reads is all there is.
+     - Invisible and control characters in the change are written out as `\u{…}`, so what the owner reads is all there is. A file's change from `write_agent_file` keeps its line breaks, one diff line each, and writes out every other such character line by line (#494).
      - A change too long for one bubble is refused before it is shown. Make it through this API instead.
   2. The owner says yes, and the agent calls the same tool with the same input again:
      - **In the webchat,** the owner presses the bubble's Confirm button, which replies with the code for them (#186).

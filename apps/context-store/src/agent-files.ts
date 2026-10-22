@@ -64,10 +64,14 @@ export function memoryEntries(content: string): string[] {
 /** What a file the editor writes can't hold, whatever it is: conflict markers, which hold it. */
 export const heldOnSync = (content: string) => hasConflictMarkers(content);
 
-/** The commit's headline: whose files, and which. */
+/**
+ * The commit's headline: whose files, which, and where the edit came from: the webchat's editor,
+ * or Master for the owner (`agent:<id>`, ADR-0067 §1).
+ */
 export function saveHeadline(
   agentId: string,
   changed: { files: AgentFileKind[]; skills: number },
+  via = "webchat",
 ): string {
   const names = { soul: "soul", rules: "rules", memory: "memory" } as const;
   const parts: string[] = changed.files.map((kind) => names[kind]);
@@ -76,7 +80,8 @@ export function saveHeadline(
     parts.length <= 1
       ? (parts[0] ?? "files")
       : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
-  return `Edit ${agentId}'s ${list} from the webchat`;
+  const from = via === "webchat" ? "from the webchat" : `for the owner, through ${via.slice(6)}`;
+  return `Edit ${agentId}'s ${list} ${from}`;
 }
 
 /** Where an installed skill came from, as one line of its commit's trailer. */
