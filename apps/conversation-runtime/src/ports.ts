@@ -7,6 +7,7 @@ import {
   type RunnerSessionsContract,
   type SendOutcome,
   type SetupFormsContract,
+  type SetupWebhooksContract,
   typingRenewIntervalMs,
 } from "@kelpie/channels";
 import {
@@ -18,6 +19,7 @@ import {
   type SetupStep,
 } from "@kelpie/config";
 import type {
+  ContextStoreAdminContract,
   ContextStoreContract,
   MemoryCoreResult,
   RecallOptions,
@@ -38,6 +40,7 @@ import type { ModelDescription, ModelSettings } from "@kelpie/llm/models";
 import { boardTools } from "./board-tools.ts";
 import { configurationTools, heldTools } from "./configuration.ts";
 import { memoryTools } from "./memory-tools.ts";
+import { ownerTools } from "./owner-tools.ts";
 import { proposalTools } from "./proposal-tools.ts";
 import { subagentTools } from "./subagent-tools.ts";
 import { taskTools } from "./task-tools.ts";
@@ -190,6 +193,9 @@ export function configCommands(env: Env) {
   // A service binding to channel-egress's SetupForms entrypoint, which only opens a form, reads the
   // runner's state, which holds no secret, and disconnects a deleted agent's bot (#303).
   const forms = env.SETUP_FORMS as unknown as SetupFormsContract;
+  // Master's owner tools (ADR-0067, #493): a stored bot's webhook, and the vault's administration.
+  const webhooks = env.SETUP_WEBHOOKS as unknown as SetupWebhooksContract;
+  const vault = env.CONTEXT_STORE_ADMIN as unknown as ContextStoreAdminContract;
   // Typed as the contracts the admin API binds, so both clients of the commands match.
   const registry = env.REGISTRY.getByName(REGISTRY_NAME) as unknown as Remote<RegistryContract>;
   const agentHost = (id: string) =>
@@ -220,7 +226,7 @@ export function configCommands(env: Env) {
     },
     channels: {
       createTelegramForm: (agentId) => forms.createTelegramForm(agentId),
-      registerTelegramWebhook: notBound,
+      registerTelegramWebhook: (agentId) => webhooks.registerTelegramWebhook(agentId),
       describeTelegramBot: notBound,
       createRunnerForm: () => forms.createRunnerForm(),
       describeRunner: () => forms.describeRunner(),
@@ -242,7 +248,11 @@ export function configCommands(env: Env) {
       finish: (id, outcome, actor) => registry.finishProposal(id, outcome, actor),
       notify: (master, notice) => agentHost(master).proposalNotice(notice),
     },
-    vault: { held: notBound, forget: notBound, setDream: notBound },
+    vault: {
+      held: () => vault.held(),
+      forget: (paths) => vault.forget(paths),
+      setDream: (mode, writes) => vault.setDream(mode, writes),
+    },
   });
 }
 
@@ -353,6 +363,11 @@ function productionPorts(env: Env): ConversationPorts {
       // Master's board tools (ADR-0067 §1, #492): the owner's task commands, on any agent's board.
       boardTools(commands, {
         roleOf: async (id) => (await registry.get(id))?.role ?? null,
+      }),
+      // Master's owner tools (ADR-0067 §1, #493): a bot's webhook, the vault, and proposals' pages.
+      ownerTools(commands, {
+        roleOf: async (id) => (await registry.get(id))?.role ?? null,
+        adminOrigin: env.ADMIN_ORIGIN,
       }),
       // Master's view of the VPS's Claude Code sessions (ADR-0057 §5, #434), through
       // channel-egress's RunnerSessions, which only reads them.

@@ -374,7 +374,19 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
   - `vps_sessions` lists the Claude Code sessions on the owner's VPS ("The VPS's Claude Code sessions", below).
   - **The board** (ADR-0067 §1, #492): `list_tasks` and `get_task` read any agent's board, Master's own included, as `listTasks` and `getTask` do, with each task's title, body, result and comments fenced as data. `edit_task` changes a task's start time in Backlog or To do, and its title or body only on a task Master created, so Master's words never reach an agent as the owner's. `move_task` moves a task between Backlog and To do, and `stop_task` runs `requestStop`: a running task stops and ends in Cancelled, and a waiting one is cancelled at once. Each records the change `via: agent:<Master's id>`, and Kelpie announces a stop, as it announces a handoff: `Kelpie stopped a task of "Sales" (sales).` The three that change run only in a turn the owner typed: a note's turn carries another agent's words, so there they answer that the owner can ask in a message of their own, as `vps_sessions` does. None asks for a yes, as ADR-0013's smaller changes, so after outside content they wait for the owner's (ADR-0064). `startAt` takes only a day the calendar has, within a year and a day.
 
-  The identity, time zone and vault commands stay on this API. `conversation-runtime` binds no `Directory`, which would make it and `ingress` bind each other. Of `channel-egress`, it binds `SetupForms`, which opens a form, reads the runner's state, which holds no secret, and disconnects a deleted agent's bot, which reads nothing back (`docs/secrets.md`); and `RunnerSessions`, which only reads the VPS's sessions.
+  - **The owner's vault, webhooks and proposals** (ADR-0067 §1, #493):
+    - `register_telegram_webhook` points a connected bot at Kelpie again, as `registerTelegramWebhook` does;
+    - `list_held_files` lists the vault's files that wait on a conflict;
+    - `forget_vault_paths` makes Kelpie forget its copies of paths the owner erased from the vault's history, listing every path in its confirmation;
+    - `set_dream` turns Dream off, or on as dry runs.
+
+    The three that change wait for the owner's confirmation, in the conversation's language. `list_proposals` and `get_proposal` read the proposals, with the proposer's change and reason fenced as data. `open_proposal` has Kelpie send a pending proposal's page, the same bubble its notice sends: only the page decides (ADR-0061), so no tool approves or refuses one, and ADR-0064 holds the link after outside content, as it holds the form tools.
+
+  The identity and time zone commands stay on this API. `conversation-runtime` binds no `Directory`, which would make it and `ingress` bind each other, so ADR-0067 §2 sends them through a page that this API applies. `conversation-runtime` binds these entrypoints:
+  - from `channel-egress`, `SetupForms`, which opens a form, reads the runner's state (which holds no secret), and disconnects a deleted agent's bot, reading nothing back (`docs/secrets.md`);
+  - from `channel-egress`, `SetupWebhooks`, which only points a stored bot at ingress again;
+  - from `channel-egress`, `RunnerSessions`, which only reads the VPS's sessions;
+  - from `context-store`, `ContextStoreAdmin`, for the vault's held files, erasure and Dream.
 - **Confirmation.** A change to an agent's settings (`configure_agent`) waits for the owner's yes, gated in code:
   1. The first call doesn't run. After the agent's reply, Kelpie itself sends one more bubble, written from the change's validated input, not by the model: `Confirm: <the change>`, and a 6-character code. The bubble is in the conversation's language ("Languages").
      - Invisible and control characters in the change are written out as `\u{…}`, so what the owner reads is all there is.
