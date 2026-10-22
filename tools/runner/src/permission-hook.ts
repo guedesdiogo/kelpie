@@ -187,7 +187,8 @@ function sessionFileOf(claudeDir: string, pid: number, session: string): Session
  * so a file's lines stay lines the redaction reads, its first one too. What shows nothing goes
  * first: it could split a key. The first HOOK_REDACT_CHARS are redacted, then each run of blanks
  * becomes one, so padding can't push what follows past the cut unseen; HOOK_EXCERPT_CHARS are kept.
- * The runner redacts again, its own secret by value too, before it cuts what leaves.
+ * It is whole only when nothing was cut or redacted. The runner redacts again, its own secret by
+ * value too, before it cuts what leaves.
  */
 export function requestTextOf(input: unknown): { input: string; whole: boolean } {
   const text =
@@ -197,10 +198,16 @@ export function requestTextOf(input: unknown): { input: string; whole: boolean }
           .join("\n")
       : (JSON.stringify(input) ?? "");
   const visible = cut(text, HOOK_REDACT_CHARS).replace(INVISIBLES, "");
-  const compact = squeezed(redact(visible));
+  const redacted = redact(visible);
+  const compact = squeezed(redacted);
   return {
     input: cut(compact, HOOK_EXCERPT_CHARS),
-    whole: text.length <= HOOK_REDACT_CHARS && compact.length <= HOOK_EXCERPT_CHARS,
+    // What a redaction took out is gone from view too: a rule may take the rest of a line with
+    // the secret, so an input it changed is never whole.
+    whole:
+      text.length <= HOOK_REDACT_CHARS &&
+      redacted === visible &&
+      compact.length <= HOOK_EXCERPT_CHARS,
   };
 }
 

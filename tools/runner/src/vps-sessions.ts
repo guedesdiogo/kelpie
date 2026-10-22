@@ -84,6 +84,8 @@ const SOCKET_SLACK_MS = 60_000;
 
 /** A one-line field's breaks, each made a space before it leaves. */
 const LINE_BREAKS = new RegExp(LINE_BREAK.source, "g");
+/** A tool input's runs of line breaks, with the blanks around them, each shown as one "⏎". */
+const BREAK_RUNS = /\s*[\n\r\v\f\u2028\u2029][\s\u2028\u2029]*/gu;
 /** What shows nothing, removed from every text before it leaves. */
 const INVISIBLES = new RegExp(INVISIBLE.source, "gu");
 /**
@@ -313,18 +315,24 @@ export class VpsSessions {
   }
 
   /**
-   * A request's input as it leaves: what shows nothing removed, redacted again, on one line with
-   * each run of blanks one space, then cut to MAX_INPUT_CHARS; `truncated` when the hook or this
-   * cut left some of it out.
+   * A request's input as it leaves: what shows nothing removed, redacted again, on one line, each
+   * break shown as "⏎" and each run of blanks one space, then cut to MAX_INPUT_CHARS. `truncated`
+   * when the hook or the runner cut or redacted some of it: no one approves what they can't see.
    */
   #input(request: SpoolRequest): { input: string; truncated: boolean } {
     const visible = cut(request.input, MAX_REDACTED_CHARS).replace(INVISIBLES, "");
-    const line = redact(visible, this.#options.secrets)
+    const redacted = redact(visible, this.#options.secrets);
+    // Each break shows, so the commands a script's lines run don't read as one's arguments.
+    const line = redacted
+      .replace(BREAK_RUNS, " \u23ce ")
       .replace(LINE_BREAKS, " ")
       .replace(/\s+/gu, " ")
       .trim();
     const truncated =
-      !request.whole || request.input.length > MAX_REDACTED_CHARS || line.length > MAX_INPUT_CHARS;
+      !request.whole ||
+      request.input.length > MAX_REDACTED_CHARS ||
+      redacted !== visible ||
+      line.length > MAX_INPUT_CHARS;
     return { input: line === "" ? "{}" : cut(line, MAX_INPUT_CHARS), truncated };
   }
 

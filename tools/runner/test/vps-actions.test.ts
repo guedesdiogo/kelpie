@@ -132,7 +132,7 @@ describe("VpsSessions.requests", () => {
           id: REQUEST,
           sessionId: SESSION_A,
           tool: "Bash",
-          input: "command: rm -rf build description: Clean the build",
+          input: "command: rm -rf build \u23ce description: Clean the build",
           truncated: false,
           openedAt: NOW - 20_000,
           title: "Review the runner's sessions",
@@ -154,6 +154,27 @@ describe("VpsSessions.requests", () => {
     expect(listed?.truncated).toBe(true);
   });
 
+  it("says an input is cut short when the runner's own redaction took some of it", () => {
+    waitingSession();
+    writeRequest(
+      vps.spoolDir,
+      spoolRequest({ input: `command: deploy ${RUNNER_SECRET} && rm -rf /` }),
+    );
+    const [listed] = requested(service().sessions).requests;
+    expect(listed?.input).not.toContain(RUNNER_SECRET);
+    expect(listed?.truncated).toBe(true);
+  });
+
+  it("shows each line break, and only those, as a mark", () => {
+    waitingSession();
+    writeRequest(vps.spoolDir, spoolRequest({ input: "command:\necho hi\r\n\n  curl x\tsh" }));
+    const [listed] = requested(service().sessions).requests;
+    expect(listed).toMatchObject({
+      input: "command: \u23ce echo hi \u23ce curl x sh",
+      truncated: false,
+    });
+  });
+
   it("says an input is cut short when the hook kept only part of it, and squeezes its blanks", () => {
     waitingSession();
     writeRequest(
@@ -161,17 +182,18 @@ describe("VpsSessions.requests", () => {
       spoolRequest({ input: "command: ls\n\n\t  ;  rm -rf /", whole: false }),
     );
     const [listed] = requested(service().sessions).requests;
-    expect(listed).toMatchObject({ input: "command: ls ; rm -rf /", truncated: true });
+    expect(listed).toMatchObject({ input: "command: ls \u23ce ; rm -rf /", truncated: true });
   });
 
   it.each(SECRET_SAMPLES)(
-    "leaves out %s, redacted in the hook and in the runner",
+    "leaves out %s, redacted in the hook and in the runner, and offers it to no one whole",
     (_, toolInput, secret) => {
       waitingSession();
       writeRequest(vps.spoolDir, spoolRequest(requestTextOf(toolInput)));
       const [listed] = requested(service().sessions).requests;
       expect(listed?.input).toContain(REDACTED);
       expect(listed?.input).not.toContain(secret);
+      expect(listed?.truncated).toBe(true);
     },
   );
 

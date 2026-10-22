@@ -450,7 +450,7 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
 
   - **A pending permission request** (ADR-0069 §1), one whose permission hook waits for a verdict, gets two more lines in the owner's own direct chat: the tool and its input, quoted, on one line, up to the runner's 500 characters, and where to answer it. A chat that isn't the owner's direct one gets the notice without them.
     - **In the webchat,** Approve and Deny buttons, bound to the request's random id: `Approve or deny it here, or answer it in the Claude app.`
-    - **An input the runner or the hook cut short** ends with "…", and gets no buttons: `Its input is longer than this notice shows, so answer it in the Claude app.`
+    - **An input the runner or the hook cut short, or redacted,** ends with "…", and gets no buttons: `Its input is longer than this notice shows, so answer it in the Claude app.` A redaction can take the rest of a line with its secret, so no one approves an input they didn't see whole. Line breaks show as "⏎".
     - **On Telegram,** until Story 5.45's callback path (#495) carries the buttons there: `Answer it in the Claude app.`
     - **The owner's press is the verdict** (ADR-0026 §3's rules for a press): it goes to the runner as it is, with no model turn. It counts only from the owner's own socket, for a notice this conversation sent, once, for 10 minutes. The card then says what came of it: approved, denied, no longer open, or not reached, when the owner may press again. There is no typed code.
     - **The request's id reaches only the notice and the runner,** never the model: `vps_sessions` doesn't show it, and no tool gives a verdict, so a steered Master can't name a request to approve.
@@ -461,6 +461,7 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
   - **When:** within about a minute of the wait opening.
     - **The first check that reads the runner,** as once it is connected or updated, asks a day back, so it tells the waits already open, up to a day old. A check that starts again after a stop asks from where the last one left off, and never more than a day back.
     - **Each later check** asks from two minutes before the runner's last answer, so a wait the runner learns of late is still seen.
+    - **A permission wait less than 5 seconds old** whose request the runner doesn't list yet waits for the next check, since the hook spools its request a moment after the wait shows. Without a list to look in, it is told at once.
     - **A wait it surely couldn't tell,** or past three notices in one check, is asked for again at the next check, for up to a day. A notice that takes longer than 4 seconds may still go out, so it counts as told and is never sent again. Each told wait is kept as soon as it is sent, so an eviction in the middle of a check doesn't repeat it.
   - **Once per wait.** Kelpie keeps only which waits it told: each one's session id and opening time, at most 1,000, for a day. One session's waits less than 60 seconds apart are one, since the runner may move a wait's opening earlier once (ADR-0059 §2).
   - **No notice** for a session that is idle after its reply, or ended: those have no open wait, and the list shows them. The runner leaves out the sessions behind Kelpie's own chat route.

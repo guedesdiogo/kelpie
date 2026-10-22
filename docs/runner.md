@@ -123,8 +123,9 @@ At your word, through Master ([ADR-0069](adr/0069-master-acts-on-vps-sessions.md
     - **The verdict file is a convention, not a lock.** Sessions run as the owner's user, as the runner does, so a session could write a verdict for itself. That gives it nothing it lacks: a process of the owner's user can already change the owner's settings.
   - **The tool's input leaves the server redacted twice,** as an excerpt does (above), by the same rules (ADR-0069 §4).
     - The hook redacts its first 16 KiB, makes each run of blanks one, and keeps 1,000 characters.
-    - The runner redacts it again, its own secret by value too, puts it on one line, and cuts it to 500 characters.
-    - Blanks are squeezed before each cut, so padding can't push the rest of a command past it unseen. A request whose input was cut anywhere says `truncated`, and its notice offers no Approve: no one approves what they didn't see whole.
+    - The runner redacts it again, its own secret by value too, puts it on one line, showing each line break as "⏎", and cuts it to 500 characters.
+    - Blanks are squeezed before each cut, so padding can't push the rest of a command past it unseen.
+    - A request whose input was cut or redacted anywhere says `truncated`, and its notice offers no Approve: a redaction can take the rest of a line with its secret, and no one approves what they didn't see whole.
     - Each field of the input shows on its own line, a text as it is, so a file's lines stay lines the redaction reads.
 - **A message to a session** goes to its inbox, the Unix socket Claude Code binds for each session ([cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging)). The session reads it as another Claude session's message: there it can't approve a prompt or change the session's settings (checked on #497).
   - The session-event hook's `SessionStart` records the socket's path, from `CLAUDE_CODE_MESSAGING_SOCKET`. The runner posts only to a socket of its own user's, in a directory no one else may open, and recorded after the session's process started. It checks the session's process first, as for an end (below). The line escapes the line and paragraph separators, so it stays one.
