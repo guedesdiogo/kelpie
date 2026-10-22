@@ -33,7 +33,7 @@ export const setupWaits = sqliteTable(
     /** The conversation object's name. */
     conversation: text("conversation").notNull(),
     step: text("step", {
-      enum: ["telegram_connected", "telegram_paired", "runner_connected"],
+      enum: ["telegram_connected", "telegram_paired", "runner_connected", "model_key_connected"],
     }).notNull(),
     until: integer("until").notNull(),
   },

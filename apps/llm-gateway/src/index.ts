@@ -1,6 +1,10 @@
 import { RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
 import {
   isRunnerToolLoopMs,
+  type ModelKey,
+  type ModelKeyCheck,
+  type ModelKeySource,
+  type ProviderCheckContract,
   parseRunnerToolResult,
   RUNNER_SESSION_ID,
   type RunnerChatContract,
@@ -53,10 +57,15 @@ import {
   type Question,
 } from "@kelpie/qualifier";
 import type { DefaultsActor, InstanceDefaults } from "./model-defaults.ts";
+import { checkModelKey } from "./provider-check.ts";
+import { withStoredKeys } from "./stored-keys.ts";
 
 export { ModelDefaults } from "./model-defaults.ts";
 
-/** Set by the owner with `wrangler secret put`. A provider is used only when its key is set. */
+/**
+ * Set by the owner with `wrangler secret put`. A provider is used only when its key is set. A key
+ * the owner set through a form since (ADR-0068) takes its secret's place (`withStoredKeys`).
+ */
 interface Secrets {
   ANTHROPIC_API_KEY?: string;
   OPENAI_API_KEY?: string;
@@ -286,13 +295,24 @@ export class LlmGateway extends WorkerEntrypoint<GatewayEnv> {
    * Each tier's route, for builds of conversation-runtime before #286, which describe themselves
    * with it during a rollout or a rollback. See `routesWith`.
    */
-  routes(): Record<ModelTier, RouteModel[]> {
+  routes(): Promise<Record<ModelTier, RouteModel[]>> {
     return routesWith(this.env);
   }
 
   /** For the deploy's probe (#234), through conversation-runtime. See `pingWith`. */
   ping(): Promise<{ ok: true }> {
     return pingWith(this.env);
+  }
+}
+
+/**
+ * Checks a candidate model key for a one-time form (ADR-0068 §2), with a cheap authenticated read
+ * on its service: bound only by the admin API, which serves the form, so this Worker makes the
+ * call and channel-egress calls no provider. It keeps nothing. See `checkModelKey`.
+ */
+export class ProviderCheck extends WorkerEntrypoint<GatewayEnv> implements ProviderCheckContract {
+  check(name: ModelKey, value: string): Promise<ModelKeyCheck | "invalid_input"> {
+    return checkModelKey(this.env, name, value);
   }
 }
 
@@ -358,7 +378,6 @@ export function generateWith(
   session?: RouteSession,
   { sessions = true }: { sessions?: boolean } = {},
 ): Generation {
-  const keyed = modelRouter(env);
   const controller = new AbortController();
   const answers = new PendingAnswers();
   controller.signal.addEventListener("abort", () => answers.end(), { once: true });
@@ -373,8 +392,10 @@ export function generateWith(
       if (checked && !isConversationCall(call)) {
         throw new LlmError("A session goes only with a conversation's call", "bad_request", false);
       }
+      const { env: withKeys } = await withStoredKeys(env);
+      const keyed = modelRouter(withKeys);
       const { choice, claudeCode } = await choiceFor(call, () => defaultsOrNone(env, keyed));
-      const router = claudeCode ? modelRouter(env, true) : keyed;
+      const router = claudeCode ? modelRouter(withKeys, true) : keyed;
       const options: StreamOptions = {
         signal: controller.signal,
         answers,
@@ -406,6 +427,8 @@ export interface InstanceModels {
   providers: ProviderId[];
   /** Whether the owner turned the `claude-code` route on (#295). */
   claudeCode: boolean;
+  /** Where each slot's key comes from (ADR-0068 §4): a form, the deploy, or none. Never the key. */
+  keys: Record<ModelKey, ModelKeySource>;
 }
 
 export type ConfigureDefaultsResult = { ok: true } | { ok: false; reason: "invalid_input" };
@@ -416,7 +439,7 @@ export type ConfigureDefaultsResult = { ok: true } | { ok: false; reason: "inval
  */
 export async function providersWith(env: GatewayEnv): Promise<ProviderId[]> {
   const { claudeCode } = await env.MODEL_DEFAULTS.getByName("instance").view();
-  return serving(env, claudeCode);
+  return serving((await withStoredKeys(env)).env, claudeCode);
 }
 
 function serving(env: GatewayEnv, claudeCode: boolean): ProviderId[] {
@@ -426,7 +449,14 @@ function serving(env: GatewayEnv, claudeCode: boolean): ProviderId[] {
 
 export async function instanceModelsWith(env: GatewayEnv): Promise<InstanceModels> {
   const { instance, pinned, claudeCode } = await env.MODEL_DEFAULTS.getByName("instance").view();
-  return { settings: instance, pinned, providers: serving(env, claudeCode), claudeCode };
+  const { env: withKeys, sources } = await withStoredKeys(env);
+  return {
+    settings: instance,
+    pinned,
+    providers: serving(withKeys, claudeCode),
+    claudeCode,
+    keys: sources,
+  };
 }
 
 /**
@@ -479,8 +509,8 @@ function auditActor(actor: DefaultsActor): DefaultsActor {
  * with what it stands for. Like `ping`, it calls no provider: an alias isn't resolved. Its callers'
  * calls carry no session, so `claude-code` is never among them.
  */
-export function routesWith(env: GatewayEnv): Record<ModelTier, RouteModel[]> {
-  const router = modelRouter(env);
+export async function routesWith(env: GatewayEnv): Promise<Record<ModelTier, RouteModel[]>> {
+  const router = modelRouter((await withStoredKeys(env)).env);
   return Object.fromEntries(
     MODEL_TIERS.map((tier) => [tier, router.route(tier).map(describeModel)]),
   ) as Record<ModelTier, RouteModel[]>;
@@ -499,10 +529,11 @@ export async function describeWith(
   agent?: ModelSettings,
   tier?: ModelTier,
 ): Promise<ModelDescription> {
-  const keyed = modelRouter(env);
+  const { env: withKeys } = await withStoredKeys(env);
+  const keyed = modelRouter(withKeys);
   const call = { area, ...(agent ? { agent } : {}), ...(tier ? { tier } : {}) };
   const { choice, claudeCode } = await choiceFor(call, () => defaultsOf(env, keyed));
-  const router = claudeCode ? modelRouter(env, true) : keyed;
+  const router = claudeCode ? modelRouter(withKeys, true) : keyed;
   return {
     provider: choice.provider ?? null,
     tier: choice.tier,
@@ -614,7 +645,10 @@ export async function embedWith(
     const text = texts[i];
     if (typeof text !== "string" || text.trim() === "") return { ok: false, reason: "invalid" };
   }
-  const embedder = embedderFor(env);
+  // Only OpenAI's embeddings need a key, so only they read the stored ones.
+  const embedder = embedderFor(
+    env.EMBEDDING_PROVIDER === "openai" ? (await withStoredKeys(env)).env : env,
+  );
   if (!embedder) return { ok: false, reason: "not_configured" };
   const signal = AbortSignal.timeout(timeoutMs);
   try {
@@ -680,7 +714,11 @@ export async function qualifyWith(
     return { ok: false, reason: "failed" };
   }
   try {
-    const qualifier = qualifierFor(env, backend);
+    // Only Jev needs a key, so only it reads the stored ones.
+    const qualifier = qualifierFor(
+      backend === "jev" ? (await withStoredKeys(env)).env : env,
+      backend,
+    );
     if (!qualifier) return { ok: false, reason: "not_configured" };
     const asked = Math.trunc(options?.timeoutMs ?? QUALIFY_TIMEOUT_MS);
     const timeout = Number.isFinite(asked)

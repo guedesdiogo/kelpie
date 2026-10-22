@@ -258,6 +258,8 @@ export function configCommands(env: Env) {
       createRunnerForm: () => forms.createRunnerForm(),
       describeRunner: () => forms.describeRunner(),
       disconnectTelegram: (agentId) => forms.disconnectTelegram(agentId),
+      createModelKeyForm: (name) => forms.createModelKeyForm(name),
+      removeModelKey: (name) => forms.removeModelKey(name),
     },
     models: {
       providers: () => gatewayAdmin.providers(),

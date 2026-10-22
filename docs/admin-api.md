@@ -30,7 +30,7 @@ Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`
 | `/commands/renameAgent` | `{ "id": "sales", "name": "Sales team" }` |
 | `/commands/getAgent` | `{ "id": "sales" }` |
 | `/commands/configureAgent` | `{ "id": "sales", "settings": { "systemPrompt": "…", "quietMs": 5000, "qualifier": "jev" } }` |
-| `/commands/getModels` | none; the instance's model settings, the provider pinned as the default, the providers that serve, and `claudeCode`, whether the `claude-code` route is on (#289, #295) |
+| `/commands/getModels` | none; the instance's model settings, the provider pinned as the default, the providers that serve, `claudeCode`, whether the `claude-code` route is on (#289, #295), and `keys`, where each model key comes from: `form`, `deploy` or `none`, never the key (ADR-0068) |
 | `/commands/configureModels` | `{ "settings": { "conversation": { "tier": "medium" }, "memory": { "tier": "cheap" } } }`; replaces the instance's model settings, which every agent follows unless it has its own. A provider without a key, or `claude-code` while it is off, answers `409 no_key`; `claude-code` for `memory` answers `400 invalid_input` |
 | `/commands/setClaudeCode` | `{ "on": true }` or `{ "on": false }`; turns the `claude-code` route on or off for the instance ("The claude-code route"). It is off until you turn it on |
 | `/commands/setMaster` | `{ "id": "sales" }`; makes the agent Master, the one the owner talks to (ADR-0036 §1). The previous one becomes a specialist that keeps its chat |
@@ -51,6 +51,8 @@ Every endpoint is a `POST` with a JSON body and `Content-Type: application/json`
 | `/commands/pairTelegram` | `{ "agentId": "sales" }`; answers `{ "link": "https://t.me/<bot>?start=<code>", "expiresAt": … }` (see "Pairing") |
 | `/commands/registerTelegramWebhook` | `{ "agentId": "sales" }`; points the agent's bot at ingress again, after a failed registration or a new ingress hostname |
 | `/commands/connectRunner` | none; answers `{ "path": "/forms/<token>", "expiresAt": … }`, a secure form for the VPS runner's secret ([runner.md](runner.md)). `503 not_configured` when `channel-egress` was deployed without the runner's VPC Service |
+| `/commands/connectModelKey` | `{ "provider": "anthropic" }`, or `openai`, `ai-gateway` or `typesafe`; answers `{ "provider", "path": "/forms/<token>", "expiresAt": … }`, a secure form for that model key ("Secure forms", ADR-0068) |
+| `/commands/removeModelKey` | `{ "provider": "anthropic" }`; removes the key set through a form, so `llm-gateway` uses its Worker secret, if any, within a minute. Answers `{ "provider", "removed" }`, `removed` false when no key was stored |
 | `/commands/describeRunner` | none; the runner's state, as `{ "state" }` with its `version` and `protocol` once it answered: `ready`, `outdated` (it speaks another protocol version), `refused` (it no longer takes the stored secret), `unreachable`, `not_connected` (no secret given yet) or `not_configured` |
 | `/commands/listHeldFiles` | none; the vault's files pushed with conflict markers that still wait, as `{ "path", "state": "held" \| "proposed", "attempts", "at" }` ([context-store.md](context-store.md)) |
 | `/commands/forgetVaultPaths` | `{ "paths": ["memory/people/ana.md", "memory/old/"] }`, at most 1,000; a path ending in `/` names a folder. After you rewrote the vault's history, Kelpie forgets its copies of them; answers `{ "forgotten": <rows>, "stillInVault": [<named files the vault still has>] }` (see "Erasing content" in [context-store.md](context-store.md#erasing-content)) |
@@ -253,6 +255,17 @@ The token is stored, and the webhook registered, even when the browser drops the
 - a runner that can't be reached leaves the form open, and doesn't count;
 - an outdated runner's secret is stored, and the page asks for an update.
 
+**A model key's form** (ADR-0068) works the same way, from `connectModelKey` or Master's `connect_model_key`. The owner pastes the key, and the page names which one:
+- the admin API asks `llm-gateway`'s `ProviderCheck` to check it first, with a cheap authenticated read on its service (`docs/secrets.md`, "Model keys"). Only the admin API binds that entrypoint;
+- `channel-egress` then stores a key the check accepted. A key its service refuses counts against the form, as a malformed one does. An OpenAI key that can't list models, as a restricted key can't, is stored unchecked;
+- a service that can't answer leaves the form open, and doesn't count;
+- a key that can't be checked, an account's AI Gateway token with no gateway URL to name its account, is stored, and the page says it wasn't checked;
+- the same key sent again to a link just used gets the same page, without another check. A closed link sends a key nowhere.
+
+If a stored key passes its check but can't run calls, its provider has no working key, and Master may have no model to call `remove_model_key` with. Run `removeModelKey` here: `llm-gateway` falls back to its Worker secret within a minute.
+
+`llm-gateway` serves with a stored key within a minute, before its Worker secret.
+
 Form pages are HTML:
 - they are sent with `Cache-Control: no-store`, `Referrer-Policy: same-origin` and a Content-Security-Policy that forbids framing and scripts;
 - a submission must come from the page itself (`Sec-Fetch-Site: same-origin` or, without it, a matching `Origin`) and be form-encoded. A `POST` with neither header is refused: current browsers send at least one;
@@ -262,10 +275,10 @@ Form pages are HTML:
 
 1. **Deploy the other Workers first, in this order.** Each one's bindings point only at Workers before it:
    1. `channel-egress`, with its `SECRETS_KEY` and `--var INGRESS_ORIGIN:https://<ingress hostname>` (`docs/secrets.md`). `llm-gateway` binds its `RunnerChat` entrypoint, for the `claude-code` route, and `conversation-runtime` its `RunnerSessions`, for Master's view of the VPS's sessions;
-   2. `llm-gateway`, with a model key (`docs/secrets.md`). To send its calls through AI Gateway:
+   2. `llm-gateway`, with the first model key as a deploy secret (`docs/secrets.md`). Master needs a model before it can send a form; every other model key, or the first one once Kelpie runs, goes through Master's form ("Configuring Kelpie through Master"). To send its calls through AI Gateway:
       - create a gateway with "Require provider credentials" (`byok_only`), so a missing key fails instead of billing Cloudflare credits;
       - pass each provider's passthrough URL as a flag, for example `--var OPENAI_BASE_URL:https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/openai`. The deploy workflow carries it to later deploys (`docs/deploy.md`). A deploy by hand without it sends calls straight to the provider, without a warning;
-      - if the gateway requires authentication, set `AI_GATEWAY_TOKEN` to a Cloudflare API token with only `AI Gateway Run`. Such a token works on every gateway in the account. The Worker sends it only to `gateway.ai.cloudflare.com`.
+      - if the gateway requires authentication, give Kelpie a Cloudflare API token with only `AI Gateway Run`, through Master's form (`connect_model_key` with `ai-gateway`) or as the `AI_GATEWAY_TOKEN` deploy secret. Such a token works on every gateway in the account. The Worker sends it only to `gateway.ai.cloudflare.com`.
 
       **Qualifier.** The agent's typed decisions, such as the memory rerank (#110), go through the qualifier its `qualifier` setting picks. Change it with `configureAgent`.
       - **`clef`, the default:** Cloudflare's Clef model on Workers AI, through `llm-gateway`'s `AI` binding.
@@ -273,7 +286,7 @@ Form pages are HTML:
         - `CLEF_MODEL` pins the model: `clef` by default, or `clef-flash`, which is faster.
         - Cloudflare doesn't use the inputs to train or improve models.
       - **`jev`:** Jev on TypeSafe's API (ADR-0018).
-        - Set the optional `TYPESAFE_API_KEY` to a key from TypeSafe's console.
+        - Give Kelpie a key from TypeSafe's console, through Master's form (`connect_model_key` with `typesafe`) or as the optional `TYPESAFE_API_KEY` deploy secret.
         - TypeSafe keeps data with zero retention only on enterprise plans.
         - An agent set to `jev` without the key falls back to each decision's deterministic default.
 
@@ -281,7 +294,7 @@ Form pages are HTML:
 
       **Embeddings.** Memory's vector search (#110) embeds notes and questions through `llm-gateway`'s `embed`. The `EMBEDDING_PROVIDER` var chooses the model for the whole vault:
       - **`workers-ai`, the default:** BAAI's multilingual `bge-m3` on Workers AI, 1,024 dimensions. It needs no key and is billed as Workers AI usage. Cloudflare doesn't use the inputs to train or improve models.
-      - **`openai`:** OpenAI's `text-embedding-3-small`, 1,536 dimensions, through `OPENAI_BASE_URL`. It needs `OPENAI_API_KEY`. The notes' text, personal data included, then goes to OpenAI, and through AI Gateway when that is configured; their retention policies apply.
+      - **`openai`:** OpenAI's `text-embedding-3-small`, 1,536 dimensions, through `OPENAI_BASE_URL`. It needs OpenAI's key, from a form or `OPENAI_API_KEY`. The notes' text, personal data included, then goes to OpenAI, and through AI Gateway when that is configured; their retention policies apply.
 
       Each text is cut to its first 6,000 characters. Vectors are kept per model, so changing the var means every note is embedded again.
    3. `context-store`, with the vault's GitHub App values and secrets (`docs/context-store.md`). Without them it runs with the vault off. It calls `llm-gateway` for memory's embeddings and rerank;
@@ -368,9 +381,10 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
   - `list_agents`, `get_agent`, `create_agent` and `rename_agent` run directly. Other agents' task news reaches Master's conversation, so Kelpie itself announces each agent those tools create or rename (#387). After the reply, it names the agent by its id and its name, in the conversation's language: `Kelpie created the agent "Sales" (sales).` or `Kelpie renamed the agent sales to "Sales team".` As with a subagent, the name is quoted, the model can't change or omit the text, and a turn that sends no reply leaves it for the next one. So that a notice always fits one Telegram message, each line names at most four agents and counts the rest, and a name longer than 80 characters once written out is cut with "…". No number of other changes pushes an agent's creation or rename out of the notice;
   - `get_models` reads the instance's model settings, and `configure_models` replaces them;
   - `set_claude_code` turns the `claude-code` route on or off ("The claude-code route"). Its confirmation says, in the conversation's language, that the route spends the subscription's weekly usage limit, which the owner's own coding shares;
-  - `configure_agent` (its `model` included), `configure_models`, `set_claude_code`, `set_master`, `set_agent_chat` and `delete_agent` wait for the owner's confirmation (below);
+  - `configure_agent` (its `model` included), `configure_models`, `set_claude_code`, `set_master`, `set_agent_chat`, `delete_agent` and `remove_model_key` wait for the owner's confirmation (below);
   - `connect_telegram` opens a secure form ("Secure forms"), and `pair_telegram` leads to the pairing page ("Pairing"). Kelpie sends each link itself (below), and the owner's submitting that page is their yes (ADR-0026).
   - `connect_runner` opens the VPS runner's secure form, whose link Kelpie sends as well, and `runner_status` reads the runner's state, as `describeRunner` does ([runner.md](runner.md)). When the runner accepts the secret, the conversation learns it, as for a bot's form ("Steps the owner finishes", #328).
+  - `connect_model_key` opens a model key's secure form, whose link Kelpie sends as well (ADR-0068). When the key is stored, the conversation learns it, with the key's name and whether its service checked it, never the key. `remove_model_key` removes a key set through a form, after the owner's confirmation; `get_models` says where each key comes from.
   - `vps_sessions` lists the Claude Code sessions on the owner's VPS, `message_session` sends one a message, and `end_session` ends one after the owner's confirmation ("The VPS's Claude Code sessions", below).
   - **The board** (ADR-0067 §1, #492): `list_tasks` and `get_task` read any agent's board, Master's own included, as `listTasks` and `getTask` do, with each task's title, body, result and comments fenced as data. `edit_task` changes a task's start time in Backlog or To do, and its title or body only on a task Master created, so Master's words never reach an agent as the owner's. `move_task` moves a task between Backlog and To do, and `stop_task` runs `requestStop`: a running task stops and ends in Cancelled, and a waiting one is cancelled at once. Each records the change `via: agent:<Master's id>`, and Kelpie announces a stop, as it announces a handoff: `Kelpie stopped a task of "Sales" (sales).` The three that change run only in a turn the owner typed: a note's turn carries another agent's words, so there they answer that the owner can ask in a message of their own, as `vps_sessions` does. None asks for a yes, as ADR-0013's smaller changes, so after outside content they wait for the owner's (ADR-0064). `startAt` takes only a day the calendar has, within a year and a day.
 
@@ -391,7 +405,7 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
   - `configure_agent` also sets `specialty`, `memoryCore` and the agent's own `skills`; Master's specialty stays "Master".
 
   The identity and time zone commands stay on this API. `conversation-runtime` binds no `Directory`, which would make it and `ingress` bind each other, so ADR-0067 §2 sends them through a page that this API applies. `conversation-runtime` binds these entrypoints:
-  - from `channel-egress`, `SetupForms`, which opens a form, reads the runner's state (which holds no secret), and disconnects a deleted agent's bot, reading nothing back (`docs/secrets.md`);
+  - from `channel-egress`, `SetupForms`, which opens a form, reads the runner's state (which holds no secret), and disconnects a deleted agent's bot or removes a model key, reading nothing back (`docs/secrets.md`);
   - from `channel-egress`, `SetupWebhooks`, which only points a stored bot at ingress again;
   - from `channel-egress`, `RunnerSessions`, which reads the VPS's sessions and acts on them, and holds no secret;
   - from `context-store`, `ContextStoreAdmin`, for the vault's held files, erasure and Dream;
@@ -419,13 +433,13 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
   - the model's replies, and what it passes to tools.
 
   The model's text can't show a Confirm button: only Kelpie's own bubble carries one, on Telegram as in the webchat. The model never sees a code before the owner sends it. The bubble isn't part of the conversation's history, so it doesn't come back when the webchat reloads: asking the agent again shows it again.
-- **Links Kelpie sends itself.** `connect_telegram`, `pair_telegram` and `connect_runner` don't give the model their links (#186, ADR-0026):
+- **Links Kelpie sends itself.** `connect_telegram`, `pair_telegram`, `connect_runner` and `connect_model_key` don't give the model their links (#186, ADR-0026):
   - After the agent's reply, Kelpie sends its own bubble with the link. The secure form's link carries the form's one-time token.
-  - The bubble names the agent by its id, never by its name, which the model chose. The runner's names no agent.
+  - The bubble names the agent by its id, never by its name, which the model chose. The runner's and a model key's name no agent.
   - Its one link is the admin API page. Any other address in it shows as text.
   - The model learns only that the link was sent. History, later requests and the outbox's inspection never hold the link.
   - As with a confirmation, the bubble doesn't come back once its turn has settled and the webchat reloads. If the owner says they didn't get it, the agent calls the tool again for a new link.
-- **Steps the owner finishes.** When the owner submits a secure form, the bot's or the runner's, or pairs by pressing Start in the bot, the conversation that sent the link learns it without being told (#206, #328, ADR-0028):
+- **Steps the owner finishes.** When the owner submits a secure form, the bot's, the runner's or a model key's, or pairs by pressing Start in the bot, the conversation that sent the link learns it without being told (#206, #328, ADR-0028):
   - **The wait:** the conversation waits for the step while its link lasts, the form's 15 minutes or a day for pairing, with a few minutes' grace. Both the conversation and the agent's `AgentHost` keep the wait. The runner's wait is on Master's `AgentHost`, and the admin API reports the form to the agent that is Master then (ADR-0060).
   - **The report:** the admin API reports a stored token or runner secret to the `AgentHost` it already binds, and `ingress` a redeemed pairing code through conversation-runtime's `SetupEvents` entrypoint, which does nothing else. Each report is bounded and best effort, so the page or the webhook answers whatever happens to it.
   - **The note:** each waiting conversation gets a note Kelpie writes in fixed words, "Kelpie, automatically (the owner didn't write this): …", naming the bot, the pairing, or the runner's version. A conversation takes a report only for a step it waits for, and only once. The agent answers the note.
@@ -489,7 +503,7 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
 
 What Master can't do, because it holds no Cloudflare token (ADR-0013):
 - deploy the Workers, in order, with their flags ("Setting it up");
-- set their secrets: the model keys, `SECRETS_KEY` and the bootstrap token (`docs/secrets.md`);
+- set their secrets: the first model key, `SECRETS_KEY` and the bootstrap token (`docs/secrets.md`). Every other model key goes through `connect_model_key`'s form;
 - create the Access applications and the custom domains;
 - the first-run bootstrap itself;
 - Hyperdrive and Postgres, once a feature needs them (ADR-0015).
@@ -505,10 +519,10 @@ A turn that read outside content asks the owner before it changes anything (ADR-
   - every turn in the conversation, the owner's own included, that starts less than 10 minutes after a turn that read some started or ran, or while a change it held still waits for the owner. That covers the message that cuts a marked turn short, and the owner's answer to the confirmation;
   - a turn no person typed, which a note of Kelpie's or a task's run started, while the history it sends since the conversation's last checkpoint holds a turn that read some. That turn doesn't keep the mark, so notes' turns can't keep each other marked past a checkpoint;
   - past those, the owner's own turns are marked only by what they read themselves.
-- **What asks then:** a tool that changes something with no yes of its own: `memory_write`, `create_task`, `comment_task`, `create_subagent`, `delete_subagent`, `create_agent`, `rename_agent` and `message_session`, and the form tools `connect_telegram`, `pair_telegram` and `connect_runner`. The owner's submission on a form's page is still their yes, but the link itself waits for their confirmation first. A new tool asks too, until it declares that it only reads or asks for its own yes.
+- **What asks then:** a tool that changes something with no yes of its own: `memory_write`, `create_task`, `comment_task`, `create_subagent`, `delete_subagent`, `create_agent`, `rename_agent` and `message_session`, and the form tools `connect_telegram`, `pair_telegram`, `connect_runner` and `connect_model_key`. The owner's submission on a form's page is still their yes, but the link itself waits for their confirmation first. A new tool asks too, until it declares that it only reads or asks for its own yes.
 - **What doesn't:**
   - the tools that only read: `memory_search`, `memory_read`, `list_agents`, `get_agent`, `get_models`, `runner_status` and `vps_sessions`;
-  - the tools that already ask for the owner's confirmation or act: `configure_agent`, `configure_models`, `set_claude_code`, `set_master`, `set_agent_chat`, `delete_agent`, `end_session` and `propose_agent_change`;
+  - the tools that already ask for the owner's confirmation or act: `configure_agent`, `configure_models`, `set_claude_code`, `set_master`, `set_agent_chat`, `delete_agent`, `remove_model_key`, `end_session` and `propose_agent_change`;
   - a task's run ending its own task with `complete_task`, `wait_on_task` or `cancel_task`, which never waits for a yes. What the run read can still reach, in its result or question, the agent that hears its news (#477).
 - **How it asks:** the call doesn't run, and the agent learns that it waits for the owner's confirmation. After the reply, Kelpie sends a confirmation's bubble, as for a setting ("Confirmation"), in the conversation's language:
 

@@ -197,6 +197,9 @@ function world({
         ran.push(`channels.disconnectTelegram ${agentId}`);
         return { ok: true, webhook: "removed" };
       },
+      // The model keys' form and commands have tests of their own (model-keys.test.ts).
+      createModelKeyForm: notUsed,
+      removeModelKey: notUsed,
     },
     // The proposals' pages have their own tests (proposals.test.ts).
     proposals: {
@@ -305,6 +308,8 @@ function world({
         if (form.refusals >= 2) forms.delete(token);
         return { ok: false, reason: secret.length < 32 ? "invalid_secret" : "secret_refused" };
       },
+      redeemModelKeyForm: notUsed,
+      refuseModelKey: notUsed,
       async redeemTelegramForm(token, botToken) {
         const form = forms.get(token);
         const done = used.get(token);
@@ -335,6 +340,7 @@ function world({
         };
       },
     },
+    checkModelKey: notUsed,
     async setupDone(agentId, event) {
       reported.push({ agentId, event });
     },

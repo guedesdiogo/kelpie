@@ -71,6 +71,19 @@ export {
   webLinks,
 } from "./markdown.ts";
 export {
+  isModelKey,
+  isModelKeyValue,
+  MODEL_KEYS,
+  type ModelKey,
+  type ModelKeyCheck,
+  type ModelKeySource,
+  type ProviderCheckContract,
+  type ProviderKeysContract,
+  type ProviderKeysOutcome,
+  type StoredModelKeys,
+  storedModelKeysOf,
+} from "./model-keys.ts";
+export {
   isRunnerTime,
   isRunnerToolLoopMs,
   isRunnerVerdict,

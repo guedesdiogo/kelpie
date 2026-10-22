@@ -74,6 +74,30 @@ describe("WORKERS", () => {
     expect(binders).toEqual(["conversation-runtime"]);
   });
 
+  // The stored model keys are the one secret an entrypoint returns (ADR-0068 §3): only the Worker
+  // that calls providers may bind it. conversation-runtime, which the model drives, never does.
+  it("binds channel-egress's ProviderKeys from llm-gateway alone", () => {
+    const binders = WORKERS.filter((worker) =>
+      (configs.get(worker.app)?.services ?? []).some(
+        (service) =>
+          service.service === "kelpie-channel-egress" && service.entrypoint === "ProviderKeys",
+      ),
+    ).map((worker) => worker.app);
+    expect(binders).toEqual(["llm-gateway"]);
+  });
+
+  // A model key's check takes the candidate key (ADR-0068 §2): only the Worker that serves its form
+  // may bind it, and it deploys after llm-gateway, which channel-egress can't.
+  it("binds llm-gateway's ProviderCheck from admin-api alone", () => {
+    const binders = WORKERS.filter((worker) =>
+      (configs.get(worker.app)?.services ?? []).some(
+        (service) =>
+          service.service === "kelpie-llm-gateway" && service.entrypoint === "ProviderCheck",
+      ),
+    ).map((worker) => worker.app);
+    expect(binders).toEqual(["admin-api"]);
+  });
+
   // Master's owner tools (ADR-0067, #493): the vault's administration, and a bot's webhook. Only the
   // admin API and Master's Worker may bind them, and only Master's Worker the webhook's narrow one.
   it("binds context-store's ContextStoreAdmin and channel-egress's SetupWebhooks only where Master's tools or the admin API run", () => {

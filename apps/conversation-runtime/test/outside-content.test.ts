@@ -787,10 +787,12 @@ describe("the production tools (#454)", () => {
     set_master: "asks",
     set_agent_chat: "asks",
     delete_agent: "asks",
+    remove_model_key: "asks",
     // A form's link is held too: its page is the owner's yes, but the link comes from the turn.
     connect_telegram: undefined,
     pair_telegram: undefined,
     connect_runner: undefined,
+    connect_model_key: undefined,
     propose_agent_change: "asks",
     create_subagent: undefined,
     delete_subagent: undefined,
@@ -841,6 +843,7 @@ describe("the production tools (#454)", () => {
         .sort(),
     ).toEqual([
       "comment_task",
+      "connect_model_key",
       "connect_runner",
       "connect_telegram",
       "create_agent",

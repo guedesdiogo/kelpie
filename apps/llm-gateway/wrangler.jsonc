@@ -18,7 +18,10 @@
   // which holds the runner's secret and can't open forms. The route serves only once the owner turns
   // it on (docs/admin-api.md), so channel-egress deploys first.
   "services": [
-    { "binding": "RUNNER_CHAT", "service": "kelpie-channel-egress", "entrypoint": "RunnerChat" }
+    { "binding": "RUNNER_CHAT", "service": "kelpie-channel-egress", "entrypoint": "RunnerChat" },
+    // The model keys the owner set through a one-time form (ADR-0068 §3): channel-egress returns
+    // them to this Worker alone, which prefers them to its Worker secrets.
+    { "binding": "PROVIDER_KEYS", "service": "kelpie-channel-egress", "entrypoint": "ProviderKeys" }
   ],
   "vars": {
     // To go through AI Gateway, override these with --var when deploying (docs/admin-api.md),

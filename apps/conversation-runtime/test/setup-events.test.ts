@@ -28,6 +28,14 @@ const runner = {
 } as const;
 const RUNNER_NOTE =
   "Kelpie, automatically (the owner didn't write this): the owner submitted the runner's secure form, and the runner on their server accepted the secret: it is connected and ready, version 0.1.0.";
+const modelKey = {
+  step: "model_key_connected",
+  userId: "u-owner",
+  provider: "anthropic",
+  check: "accepted",
+} as const;
+const MODEL_KEY_NOTE =
+  "Kelpie, automatically (the owner didn't write this): the owner submitted the secure form, and the Anthropic API key is stored: its service accepted it, and Kelpie's models use it within a minute.";
 /** Long enough for a test to finish, unlike a real form's 15 minutes. */
 const OPEN = () => Date.now() + 60 * 60_000;
 
@@ -169,6 +177,22 @@ describe("the setup note", () => {
   });
 });
 
+describe("a model key's note (ADR-0068)", () => {
+  it("names the key's slot and its check, never the key", () => {
+    expect(setupNote("kelpie", modelKey)).toBe(MODEL_KEY_NOTE);
+    expect(setupNote("kelpie", { ...modelKey, provider: "ai-gateway", check: "unchecked" })).toBe(
+      "Kelpie, automatically (the owner didn't write this): the owner submitted the secure form, and the AI Gateway token is stored without a check, since Kelpie had no way to check it: a wrong key shows only when a call that uses it fails. Kelpie's models use it within a minute.",
+    );
+    for (const event of [
+      { ...modelKey, provider: "sk-ant-api03-secret" },
+      { ...modelKey, check: "refused" },
+      { ...modelKey, userId: "" },
+    ]) {
+      expect(setupNote("kelpie", event as never), JSON.stringify(event)).toBeNull();
+    }
+  });
+});
+
 describe("a finished setup step", () => {
   it("is waited for before the reply that sends its link goes out", async () => {
     const until = OPEN();
@@ -236,6 +260,19 @@ describe("a finished setup step", () => {
     await settled(told, 2);
     expect(lastUserText(world)).toContain(RUNNER_NOTE);
     expect(world.sent.at(-1)).toBe("Runner conectado!");
+  });
+
+  it("reaches the conversation that sent a model key's form, through Master's AgentHost (ADR-0068)", async () => {
+    const world = use(
+      fakeWorld([toolCalls({ name: "form" }), reply("Abra o link."), reply("Chave guardada!")]),
+    );
+    world.tools = tools("model_key_connected", OPEN(), [], "kelpie");
+    const told = await waiting("kelpie:webchat:events-model-key", "troca a chave da anthropic");
+
+    await host("kelpie").setupDone(modelKey);
+    await settled(told, 2);
+    expect(lastUserText(world)).toContain(MODEL_KEY_NOTE);
+    expect(world.sent.at(-1)).toBe("Chave guardada!");
   });
 
   it("isn't told for another step, or once its wait ran out", async () => {

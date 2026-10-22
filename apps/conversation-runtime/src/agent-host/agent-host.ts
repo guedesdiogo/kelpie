@@ -1525,6 +1525,7 @@ const SETUP_STEPS: Record<SetupStep, true> = {
   telegram_connected: true,
   telegram_paired: true,
   runner_connected: true,
+  model_key_connected: true,
 };
 const isSetupStep = (step: unknown): step is SetupStep =>
   typeof step === "string" && Object.hasOwn(SETUP_STEPS, step);

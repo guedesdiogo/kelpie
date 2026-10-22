@@ -5,7 +5,7 @@ import {
   remoteKeySet,
   verifyAccessJwt,
 } from "@kelpie/access";
-import type { ChannelFormsContract } from "@kelpie/channels";
+import type { ChannelFormsContract, ProviderCheckContract } from "@kelpie/channels";
 import {
   type AgentHostContract,
   type ConfigPorts,
@@ -38,6 +38,9 @@ export function depsFor(env: Env): AdminDeps {
   // binds too, for Master's owner tools (ADR-0067 §1).
   const vault = env.CONTEXT_STORE_ADMIN as unknown as ContextStoreAdminContract;
   const gateway = env.LLM_GATEWAY_ADMIN as unknown as ModelsGateway;
+  // llm-gateway's ProviderCheck, which only admin-api binds: it checks a model key before its form
+  // stores it, and keeps nothing (ADR-0068 §2).
+  const providerCheck = env.PROVIDER_CHECK as unknown as ProviderCheckContract;
   // A trailing slash would never match the token's issuer.
   const config = {
     teamDomain: env.ACCESS_TEAM_DOMAIN.replace(/\/+$/, ""),
@@ -79,6 +82,8 @@ export function depsFor(env: Env): AdminDeps {
         createRunnerForm: () => forms.createRunnerForm(),
         describeRunner: () => forms.describeRunner(),
         disconnectTelegram: (agentId) => forms.disconnectTelegram(agentId),
+        createModelKeyForm: (name) => forms.createModelKeyForm(name),
+        removeModelKey: (name) => forms.removeModelKey(name),
       },
       models: {
         providers: () => gateway.providers(),
@@ -103,6 +108,7 @@ export function depsFor(env: Env): AdminDeps {
       },
     }),
     forms,
+    checkModelKey: (name, value) => providerCheck.check(name, value),
     setupDone: async (agentId, event) => agentHost(agentId).setupDone(event),
     master: async () =>
       (await registry.list()).find((agent) => agent.role === "master")?.id ?? null,

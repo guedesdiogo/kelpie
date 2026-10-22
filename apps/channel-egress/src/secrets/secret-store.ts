@@ -16,7 +16,8 @@ const MAX_REFUSALS = 5;
 /** A used form is kept this long, so its own value sent again is answered with what it stored. */
 const REDEEMED_GRACE_MS = 15 * 60_000;
 
-export type FormKind = "telegram" | "runner";
+/** A bot's token, the runner's secret, or a model key (ADR-0068), whose slot is `provider:<name>`. */
+export type FormKind = "telegram" | "runner" | "provider";
 
 export type ReadResult =
   | { ok: true; value: string }
@@ -45,8 +46,8 @@ export class SecretStore extends DurableObject<Env> {
   }
 
   /**
-   * Opens a one-time form for one secret of one agent, or of the runner, whose name takes the
-   * agent's place. The token is only in the returned link.
+   * Opens a one-time form for one secret of one agent, or of the runner or a model key's slot, whose
+   * name takes the agent's place. The token is only in the returned link.
    */
   async createForm(agentId: string, kind: FormKind): Promise<{ token: string; expiresAt: number }> {
     const token = randomToken();
@@ -159,16 +160,20 @@ export class SecretStore extends DurableObject<Env> {
 
   /**
    * Deletes one agent's secret of a kind and every form for it, open or used, so a form opened
-   * before its agent was deleted can't store the secret again (#303). Needs no key.
+   * before its agent was deleted can't store the secret again (#303). Needs no key. Whether a secret
+   * was stored.
    */
-  async remove(kind: FormKind, agentId: string): Promise<void> {
-    this.#db.transaction((tx) => {
-      tx.delete(schema.secrets)
+  async remove(kind: FormKind, agentId: string): Promise<boolean> {
+    return this.#db.transaction((tx) => {
+      const removed = tx
+        .delete(schema.secrets)
         .where(eq(schema.secrets.slot, slotFor(kind, agentId)))
-        .run();
+        .returning({ slot: schema.secrets.slot })
+        .all();
       tx.delete(schema.forms)
         .where(and(eq(schema.forms.kind, kind), eq(schema.forms.agentId, agentId)))
         .run();
+      return removed.length > 0;
     });
   }
 

@@ -1,6 +1,7 @@
 import type { InlineKeyboard, SendOptions } from "./adapter.ts";
 import type { ChannelId } from "./events.ts";
 import type { Locale } from "./locale.ts";
+import type { ModelKey, ModelKeyCheck } from "./model-keys.ts";
 import type {
   RunnerActAnswer,
   RunnerAnswered,
@@ -130,10 +131,9 @@ export interface ChannelFormsContract {
     | { ok: false; reason: "invalid_input" | "store_unavailable" }
   >;
   /** An open form, or one used in the last few minutes with the bot it connected. */
-  describeForm(
-    token: string,
-  ): Promise<
-    | { ok: true; agentId: string; kind: "telegram" | "runner" }
+  describeForm(token: string): Promise<
+    /** For a model key's form (ADR-0068), `agentId` is its slot's name, such as `anthropic`. */
+    | { ok: true; agentId: string; kind: "telegram" | "runner" | "provider" }
     | { ok: false; reason: "redeemed"; agentId: string; username: string }
     | { ok: false; reason: "unknown_form" | "store_unavailable" }
   >;
@@ -196,6 +196,41 @@ export interface ChannelFormsContract {
   describeRunner(): Promise<
     { ok: true; runner: RunnerState } | { ok: false; reason: "store_unavailable" }
   >;
+  /** Opens a one-time form for a model key's slot, `provider:<name>` (ADR-0068 §2). */
+  createModelKeyForm(
+    name: string,
+  ): Promise<
+    | { ok: true; token: string; expiresAt: number }
+    | { ok: false; reason: "invalid_input" | "store_unavailable" }
+  >;
+  /**
+   * Stores the key a model key's form takes, once its check let it through: `accepted` by its
+   * service, or `unchecked` when the service has no cheap read to check it with. A malformed key
+   * counts against the form. The same key sent again to a form just used, as a double click sends
+   * it, gets the same answer.
+   */
+  redeemModelKeyForm(
+    token: string,
+    value: string,
+    check: Extract<ModelKeyCheck, "accepted" | "unchecked">,
+  ): Promise<
+    | { ok: true; name: ModelKey; check: "accepted" | "unchecked" }
+    | { ok: false; reason: "unknown_form" | "invalid_key" | "store_unavailable" }
+  >;
+  /** Counts a key its service refused against the form; five close it. Whether it is still open. */
+  refuseModelKey(
+    token: string,
+  ): Promise<{ ok: true; open: boolean } | { ok: false; reason: "store_unavailable" }>;
+  /**
+   * Removes the key stored in a model key's slot, and every form for it, open or used, so llm-gateway
+   * falls back to its Worker secret within a minute. Reads nothing back. `removed` says whether a key
+   * was stored.
+   */
+  removeModelKey(
+    name: string,
+  ): Promise<
+    { ok: true; removed: boolean } | { ok: false; reason: "invalid_input" | "store_unavailable" }
+  >;
 }
 
 /**
@@ -205,7 +240,12 @@ export interface ChannelFormsContract {
  */
 export type SetupFormsContract = Pick<
   ChannelFormsContract,
-  "createTelegramForm" | "createRunnerForm" | "describeRunner" | "disconnectTelegram"
+  | "createTelegramForm"
+  | "createRunnerForm"
+  | "describeRunner"
+  | "disconnectTelegram"
+  | "createModelKeyForm"
+  | "removeModelKey"
 >;
 
 /**

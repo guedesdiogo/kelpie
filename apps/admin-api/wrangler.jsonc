@@ -34,7 +34,10 @@
       "binding": "LLM_GATEWAY_ADMIN",
       "service": "kelpie-llm-gateway",
       "entrypoint": "LlmGatewayAdmin"
-    }
+    },
+    // The check of a model key its form takes, before channel-egress stores it (ADR-0068 §2): only
+    // this Worker binds it, and llm-gateway keeps nothing it checks.
+    { "binding": "PROVIDER_CHECK", "service": "kelpie-llm-gateway", "entrypoint": "ProviderCheck" }
   ],
   // The objects that hold configuration live in the Workers that run them.
   "durable_objects": {

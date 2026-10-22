@@ -9,7 +9,15 @@ import {
   type Role,
   type TimeZoneResult,
 } from "@kelpie/access";
-import type { ChannelFormsContract, ChannelId, RunnerState } from "@kelpie/channels";
+import {
+  type ChannelFormsContract,
+  type ChannelId,
+  isModelKey,
+  MODEL_KEYS,
+  type ModelKey,
+  type ModelKeySource,
+  type RunnerState,
+} from "@kelpie/channels";
 import {
   type ModelSettings,
   memoryOnSessionRoute,
@@ -184,20 +192,30 @@ export interface RegistryContract {
 /**
  * A setup step the owner finishes on an admin page or in Telegram, behind a link Kelpie sent
  * (#206): connecting the agent's Telegram bot through the secure form, or pairing their own
- * Telegram account with it; or connecting the instance's runner through its own form (#328), which
- * Master's AgentHost reports (ADR-0060).
+ * Telegram account with it; or connecting the instance's runner through its own form (#328), or
+ * storing a model key through its form (ADR-0068), which Master's AgentHost reports (ADR-0060).
  */
-export type SetupStep = "telegram_connected" | "telegram_paired" | "runner_connected";
+export type SetupStep =
+  | "telegram_connected"
+  | "telegram_paired"
+  | "runner_connected"
+  | "model_key_connected";
 
 /**
  * A finished step, as the place that saw it reports it: the owner who finished it, for a connected
- * bot its username and whether Telegram was pointed at Kelpie, and for the runner how it answered
- * the secret.
+ * bot its username and whether Telegram was pointed at Kelpie, for the runner how it answered the
+ * secret, and for a model key its slot and whether its service checked it. Never the key.
  */
 export type SetupEvent =
   | { step: "telegram_connected"; userId: string; bot: string; webhookRegistered: boolean }
   | { step: "telegram_paired"; userId: string }
-  | { step: "runner_connected"; userId: string; state: "ready" | "outdated"; version: string };
+  | { step: "runner_connected"; userId: string; state: "ready" | "outdated"; version: string }
+  | {
+      step: "model_key_connected";
+      userId: string;
+      provider: ModelKey;
+      check: "accepted" | "unchecked";
+    };
 
 export interface AgentHostContract {
   /**
@@ -367,7 +385,15 @@ export interface InstanceModels {
    * switch, during a rollout, says nothing, which is off.
    */
   claudeCode?: boolean;
+  /**
+   * Where each model key comes from (ADR-0068 §4): a form, the deploy's Worker secret, or none.
+   * Never a key. An llm-gateway from before the forms, during a rollout, says nothing.
+   */
+  keys?: Record<ModelKey, ModelKeySource>;
 }
+
+const keySource = (value: unknown): ModelKeySource =>
+  value === "form" || value === "deploy" ? value : "none";
 
 /** What the commands need from the objects that hold configuration. */
 export interface ConfigPorts {
@@ -446,6 +472,8 @@ export interface ConfigPorts {
     | "createRunnerForm"
     | "describeRunner"
     | "disconnectTelegram"
+    | "createModelKeyForm"
+    | "removeModelKey"
   >;
   /** The proposals, in the Registry, and Kelpie's notice of one (ADR-0061, #302). */
   proposals: {
@@ -638,10 +666,19 @@ export function createConfigCommands(ports: ConfigPorts) {
       return ports.agents.configure(id, changes, actor);
     },
 
-    /** The instance's model settings, its pinned provider and the providers with a key (#289). */
+    /**
+     * The instance's model settings, its pinned provider, the providers with a key (#289), and
+     * where each model key comes from (ADR-0068 §4). The sources reach Master's model, so they are
+     * rebuilt from the known slots and values: nothing else llm-gateway sends there passes.
+     */
     async getModels(actor: Actor): Promise<CommandResult<InstanceModels>> {
       if (!isOwner(actor)) return forbidden;
-      return { ok: true, value: await ports.models.view() };
+      const { keys, ...view } = await ports.models.view();
+      if (keys === undefined) return { ok: true, value: view };
+      const sources = Object.fromEntries(
+        MODEL_KEYS.map((name) => [name, keySource(keys[name])]),
+      ) as Record<ModelKey, ModelKeySource>;
+      return { ok: true, value: { ...view, keys: sources } };
     },
 
     /**
@@ -1095,6 +1132,42 @@ export function createConfigCommands(ports: ConfigPorts) {
         };
       }
       return { ok: true, value: { path: `/forms/${form.token}`, expiresAt: form.expiresAt } };
+    },
+
+    /**
+     * Starts setting or replacing a model key (ADR-0068 §2): returns the path of a one-time secure
+     * form on the admin API for the key's slot, where the owner pastes it. Its service checks it
+     * before it is stored, and llm-gateway serves with it within a minute.
+     */
+    async connectModelKey(
+      actor: Actor,
+      input: unknown,
+    ): Promise<CommandResult<{ provider: ModelKey; path: string; expiresAt: number }>> {
+      if (!isOwner(actor)) return forbidden;
+      const { provider } = (input ?? {}) as { provider?: unknown };
+      if (!isModelKey(provider)) return invalid;
+      const form = await ports.channels.createModelKeyForm(provider);
+      if (!form.ok) return form.reason === "invalid_input" ? invalid : unavailable;
+      return {
+        ok: true,
+        value: { provider, path: `/forms/${form.token}`, expiresAt: form.expiresAt },
+      };
+    },
+
+    /**
+     * Removes the model key stored through a form in a slot (ADR-0068 §2): llm-gateway falls back
+     * to its Worker secret, if any, within a minute. Master asks for the owner's confirmation first.
+     */
+    async removeModelKey(
+      actor: Actor,
+      input: unknown,
+    ): Promise<CommandResult<{ provider: ModelKey; removed: boolean }>> {
+      if (!isOwner(actor)) return forbidden;
+      const { provider } = (input ?? {}) as { provider?: unknown };
+      if (!isModelKey(provider)) return invalid;
+      const result = await ports.channels.removeModelKey(provider);
+      if (!result.ok) return result.reason === "invalid_input" ? invalid : unavailable;
+      return { ok: true, value: { provider, removed: result.removed } };
     },
 
     /** The VPS runner's state, from its `/health` (#294). Never its secret. */
