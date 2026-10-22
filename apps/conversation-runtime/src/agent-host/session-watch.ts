@@ -1,4 +1,10 @@
-import type { RunnerRelayFailure, RunnerVpsWait, RunnerWaitsOutcome } from "@kelpie/channels";
+import type {
+  RunnerRelayFailure,
+  RunnerRequestsOutcome,
+  RunnerVpsRequest,
+  RunnerVpsWait,
+  RunnerWaitsOutcome,
+} from "@kelpie/channels";
 
 // Kelpie's check of the waits on the owner (ADR-0057 §5, #434). While the runner is connected,
 // Master's AgentHost asks channel-egress's RunnerSessions once a minute for the waits opened since
@@ -30,6 +36,8 @@ export const MAX_TOLD = 1_000;
  * within the 30 s the SDK gives an interval's run. The rest wait for the next check.
  */
 export const MAX_NOTICES_PER_CHECK = 3;
+/** How fresh a permission wait whose request isn't listed yet is held for the next check. */
+export const REQUEST_GRACE_MS = 5_000;
 /** `outdated` answers in a row that stop the check. */
 export const MAX_OUTDATED = 3;
 /** How long an outdated runner keeps Master's turns from starting the check again. */
@@ -75,11 +83,17 @@ export interface WatchIO {
   /** RunnerSessions' `waits(since)`. It throws when channel-egress can't be reached. */
   waits(since: number): Promise<RunnerWaitsOutcome>;
   /**
-   * Tells the owner of one wait: false when no conversation took it, or a conversation's call
-   * threw, which may follow a send. A notice that timed out may have gone out, so it counts as
-   * told and is never repeated. It never throws.
+   * RunnerSessions' `requests()`: the permission prompts held open for a verdict (ADR-0069 §1).
+   * It throws when channel-egress can't be reached.
    */
-  tell(wait: RunnerVpsWait): Promise<boolean>;
+  requests(): Promise<RunnerRequestsOutcome>;
+  /**
+   * Tells the owner of one wait, with the request its hook holds open, if any, for Approve and
+   * Deny: false when no conversation took it, or a conversation's call threw, which may follow a
+   * send. A notice that timed out may have gone out, so it counts as told and is never repeated.
+   * It never throws.
+   */
+  tell(wait: RunnerVpsWait, request: RunnerVpsRequest | null): Promise<boolean>;
   /** Keeps the watch as it is now, after each wait told: an eviction mid-check doesn't repeat it. */
   keep(watch: SessionWatch): void;
   /** Keeps how the check went, for the owner to read through Master (#470). */
@@ -140,6 +154,7 @@ export async function checkWaits(
     }
   }
   io.checked({ outcome: "ok", waits: outcome.waits.length });
+  const requestOf = requestFinder(io);
   let told = watch.told;
   /** The oldest wait not told, which the next check asks for again. */
   let held: number | null = null;
@@ -147,8 +162,20 @@ export async function checkWaits(
   for (const wait of outcome.waits) {
     if (isTold(told, wait)) continue;
     if (tries < MAX_NOTICES_PER_CHECK) {
+      const request = await requestOf(wait);
+      // A permission's hook spools its request a moment after its wait shows: one this fresh
+      // that the runner's list doesn't have yet waits for the next check, so its notice gets its
+      // buttons (ADR-0069 §1). With no list to look in, it is told at once.
+      const early =
+        wait.kind === "permission" &&
+        request === null &&
+        outcome.now - wait.openedAt < REQUEST_GRACE_MS;
+      if (early) {
+        held = Math.min(held ?? wait.openedAt, wait.openedAt);
+        continue;
+      }
       tries += 1;
-      if (await io.tell(wait)) {
+      if (await io.tell(wait, request ?? null)) {
         told = [...told, [wait.sessionId, wait.openedAt]];
         io.keep({ ...watch, told });
         continue;
@@ -167,6 +194,41 @@ export async function checkWaits(
     .sort((a, b) => a[1] - b[1])
     .slice(-MAX_TOLD);
   return { since, outdated: 0, told: kept, stopped: null };
+}
+
+/**
+ * A permission wait's request, read once a check, when its first permission wait is told: the one
+ * of its session's opened with it, or null. Undefined when the runner can't list them, as one below
+ * protocol 4: the notice then goes without Approve and Deny. None for a question.
+ */
+function requestFinder(
+  io: WatchIO,
+): (wait: RunnerVpsWait) => Promise<RunnerVpsRequest | null | undefined> {
+  let listed: Promise<RunnerVpsRequest[] | null> | undefined;
+  const list = async () => {
+    try {
+      const outcome = await io.requests();
+      if (outcome.ok) return outcome.requests;
+      console.warn("AgentHost: the VPS's requests weren't read", { reason: outcome.reason });
+    } catch (error) {
+      console.warn("AgentHost: the VPS's requests weren't read", errorName(error));
+    }
+    return null;
+  };
+  return async (wait) => {
+    if (wait.kind !== "permission") return null;
+    listed ??= list();
+    const requests = await listed;
+    if (requests === null) return undefined;
+    // The closest of its session's, should two prompts of its open close together.
+    let best: RunnerVpsRequest | null = null;
+    for (const request of requests) {
+      const gap = Math.abs(request.openedAt - wait.openedAt);
+      if (request.sessionId !== wait.sessionId || gap > WAIT_JOIN_MS) continue;
+      if (!best || gap < Math.abs(best.openedAt - wait.openedAt)) best = request;
+    }
+    return best;
+  };
 }
 
 /** Whether Master's turn starts the check: unless an outdated runner stopped it within the hour. */

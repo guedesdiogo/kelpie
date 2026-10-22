@@ -1,5 +1,6 @@
 import {
   RUNNER_PROTOCOL,
+  type RunnerVpsRequests,
   type RunnerVpsSessions,
   type RunnerVpsWaits,
 } from "../../../packages/channels/src/runner.ts";
@@ -17,6 +18,8 @@ export const OUTDATED = "o".repeat(64);
 export const PROTOCOL_1 = "p".repeat(64);
 /** A runner on protocol 2, which serves the `claude-code` route but not the VPS's sessions. */
 export const PROTOCOL_2 = "q".repeat(64);
+/** A runner on protocol 3, which lists the VPS's sessions but can't act on them. */
+export const PROTOCOL_3 = "t".repeat(64);
 /** A runner that fails with a 500 on every path. */
 export const BROKEN = "b".repeat(64);
 
@@ -25,6 +28,7 @@ const RUNNERS: Record<string, { version: string; protocol: number }> = {
   [OUTDATED]: { version: "0.0.9", protocol: RUNNER_PROTOCOL + 1 },
   [PROTOCOL_1]: { version: "0.1.0", protocol: 1 },
   [PROTOCOL_2]: { version: "0.2.0", protocol: 2 },
+  [PROTOCOL_3]: { version: "0.3.0", protocol: 3 },
 };
 
 const NOW = Date.UTC(2026, 9, 17, 18, 0, 0);
@@ -89,6 +93,25 @@ export const VPS_WAITS: RunnerVpsWaits = {
   ],
 };
 
+/** The permission prompts held open for a verdict, as the runner lists them on protocol 4. */
+export const VPS_REQUESTS: RunnerVpsRequests = {
+  ok: true,
+  now: NOW,
+  truncated: false,
+  requests: [
+    {
+      id: "eeeeeeee-0000-4000-8000-00000000000e",
+      sessionId: "aaaaaaaa-1111-4222-8333-444444444444",
+      tool: "Bash",
+      input: "command: rm -rf build description: Clean the build",
+      truncated: false,
+      openedAt: NOW - 30_000,
+      title: "Review the runner",
+      repository: "kelpie",
+    },
+  ],
+};
+
 /** The frames of a scripted turn, as the runner writes them, `ping` among them. */
 export const TURN_TEXT = [
   { type: "text", delta: "Olá, " },
@@ -131,8 +154,17 @@ const REFUSALS: Record<string, () => Response> = {
 /** What one request looked like, for the tests: never its secret. */
 export interface Seen {
   method: string;
-  action: "turns" | "tool-results" | "close" | "sessions" | "waits";
-  /** The query of a waits request. */
+  action:
+    | "turns"
+    | "tool-results"
+    | "close"
+    | "sessions"
+    | "waits"
+    | "requests"
+    | "verdict"
+    | "message"
+    | "end";
+  /** The query of a waits request, or the id an action named. */
   query?: string;
   /** Whether it carried the stored secret as a bearer token. */
   bearer: boolean;
@@ -158,6 +190,8 @@ export async function fakeRunner(request: Request): Promise<Response> {
   if (path === "/health") return Response.json({ ok: true, ...runner });
   if (path === "/sessions" || path === "/sessions/waits")
     return vps(request, path, runner.protocol);
+  const acted = await act(request, path, runner.protocol);
+  if (acted) return acted;
   const session = /^\/sessions\/([^/]+)(?:\/(turns|tool-results))?$/.exec(path);
   if (!session || runner.protocol < 2) return Response.json({ ok: false }, { status: 404 });
   const id = session[1] as string;
@@ -186,6 +220,48 @@ export async function fakeRunner(request: Request): Promise<Response> {
     },
   });
   return new Response(stream, { headers: ndjson });
+}
+
+/**
+ * Acting on the VPS's sessions (ADR-0069), by the runner's protocol: below 4, `/sessions/requests`
+ * is a session's id, which only `DELETE`s (405), and the other paths aren't there (404). The fake
+ * knows one open request, and one live session: anything else is closed, or not found.
+ */
+async function act(request: Request, path: string, protocol: number): Promise<Response | null> {
+  const bearer = request.headers.get("authorization") === `Bearer ${READY}`;
+  const verdict = /^\/sessions\/requests\/([^/]+)$/.exec(path);
+  const session = /^\/sessions\/([^/]+)\/(message|end)$/.exec(path);
+  if (path === "/sessions/requests") {
+    if (protocol < 4) return new Response(null, { status: 405, headers: { allow: "DELETE" } });
+    see("vps", { method: request.method, action: "requests", bearer });
+    return Response.json(VPS_REQUESTS);
+  }
+  if (!verdict && !session) return null;
+  if (protocol < 4) return Response.json({ ok: false }, { status: 404 });
+  const body: unknown = await request.json();
+  if (verdict) {
+    see("vps", {
+      method: request.method,
+      action: "verdict",
+      bearer,
+      body,
+      query: verdict[1] as string,
+    });
+    return verdict[1] === VPS_REQUESTS.requests[0]?.id
+      ? Response.json({ ok: true, applied: true })
+      : Response.json({ ok: false, reason: "closed" }, { status: 409 });
+  }
+  const [, id, action] = session as RegExpExecArray;
+  see("vps", {
+    method: request.method,
+    action: action as "message" | "end",
+    bearer,
+    body,
+    query: id as string,
+  });
+  return id === VPS_SESSIONS.sessions[0]?.id
+    ? Response.json({ ok: true })
+    : Response.json({ ok: false, reason: "not_found" }, { status: 409 });
 }
 
 /**

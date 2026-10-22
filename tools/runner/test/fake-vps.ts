@@ -55,6 +55,7 @@ export function sessionFields(overrides: Record<string, unknown> = {}): Record<s
   return {
     pid: process.pid,
     sessionId: SESSION_A,
+    procStart: "42070362",
     cwd: "/home/owner/Repos/kelpie",
     startedAt: NOW - 5 * HOUR,
     version: "2.1.299",

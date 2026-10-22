@@ -19,6 +19,7 @@ function file(overrides: Partial<SessionFile> = {}): SessionFile {
     entrypoint: "claude-desktop",
     alive: true,
     waitingFor: "unknown",
+    procStart: null,
     ...overrides,
   };
 }

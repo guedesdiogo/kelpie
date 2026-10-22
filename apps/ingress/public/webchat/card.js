@@ -1,11 +1,22 @@
 // The confirmation card (docs/design-system.md 5.3): who asks and until when, the notice, Confirm
 // and the hold that pauses. The thread draws one on each notice, and a sidebar row draws one under
-// itself for its agent's request (ADR-0052 §5). Its content never changes in place: a press, an
-// expiry or a refusal folds it into its receipt.
+// itself for its agent's request (ADR-0052 §5). A VPS session's permission prompt draws one too,
+// with Approve, Deny beside it, and no hold (ADR-0069 §1). Its content never changes in place: a
+// press, an expiry or a refusal folds it into its receipt.
 
 import { icon } from "./icons.js";
 import { clock, SPINNER_AFTER_MS } from "./model.js";
-import { DUR, EASE, fadeIn, fromKeyboard, play, reduced, resize, SPRINGS } from "./motion.js";
+import {
+  DUR,
+  EASE,
+  fadeIn,
+  fromKeyboard,
+  play,
+  reduced,
+  resize,
+  SCALE_IN_MOMENT,
+  SPRINGS,
+} from "./motion.js";
 import { roll, rollText } from "./roll.js";
 
 /** How long a confirmation's success shows before the card folds into its receipt (5.3). */
@@ -24,12 +35,14 @@ export const defaultTimers = {
 
 export class Card {
   /**
-   * Makes `bubble`, which already holds the notice, a card for confirmation `id`.
+   * Makes `bubble`, which already holds the notice, a card for confirmation `id`. With `onDeny`,
+   * Deny stands beside Confirm; without `onPause`, the card has no hold.
    *
    * @param {HTMLElement} bubble
    * @param {{
-   *   id: number, until: number, who: string, texts: object, locale: string,
-   *   onConfirm: (id: number) => boolean, onPause: () => boolean,
+   *   id: number | string, until: number, who: string, texts: object, locale: string,
+   *   onConfirm: (id: number | string) => boolean, onPause?: () => boolean,
+   *   onDeny?: (id: number | string) => boolean,
    *   mascot?: (host: HTMLElement) => void, onAnnounce: (text: string) => void,
    *   onChange?: (change: { kind: string, element: Element, text: string }) => void,
    *   now?: () => number, timers?: typeof defaultTimers,
@@ -47,6 +60,7 @@ export class Card {
     this.timers = options.timers ?? defaultTimers;
     this.onConfirm = options.onConfirm;
     this.onPause = options.onPause;
+    this.onDeny = options.onDeny;
     this.onAnnounce = options.onAnnounce;
     this.onChange = options.onChange ?? (() => {});
     this.drawnAt = this.now();
@@ -81,22 +95,31 @@ export class Card {
     this.status.className = "confirm-icon";
     this.confirm.append(this.status, this.label);
     this.actions.append(this.confirm);
-    this.hold = this.#hold();
-    bubble.append(this.actions, this.hold.button);
-    // A key held down since before the card appeared doesn't count: only one pressed on it.
-    let pressedHere = false;
-    this.confirm.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") pressedHere = !event.repeat;
-    });
-    this.confirm.addEventListener("click", (event) => {
-      const viaKey = event.detail === 0;
-      if (viaKey && !pressedHere) return;
-      pressedHere = false;
-      if (!this.open || this.pressed) return;
-      if (this.now() - this.drawnAt < PRESS_GUARD_MS) return;
-      if (!this.onConfirm(this.id)) return;
-      this.#press(viaKey || fromKeyboard());
-    });
+    if (this.onDeny) {
+      // Deny, beside the primary button, outlined (5.3).
+      this.deny = document.createElement("button");
+      this.deny.type = "button";
+      this.deny.className = "deny";
+      this.denyLabel = document.createElement("span");
+      this.denyLabel.className = "label";
+      this.denyLabel.append(rollText(this.texts.deny));
+      this.deny.append(this.denyLabel);
+      this.actions.prepend(this.deny);
+    }
+    this.hold = this.onPause ? this.#hold() : null;
+    bubble.append(this.actions, ...(this.hold ? [this.hold.button] : []));
+    this.#pressable(
+      this.confirm,
+      () => this.onConfirm(this.id),
+      (viaKey) => this.#press(viaKey),
+    );
+    if (this.deny) {
+      this.#pressable(
+        this.deny,
+        () => this.onDeny(this.id),
+        (viaKey) => this.#press(viaKey, this.deny, this.denyLabel, this.texts.denying),
+      );
+    }
     // A confirmation nobody answers expires after its 10 minutes (ADR-0026 §3).
     const left = options.until - this.now();
     if (left <= 0) {
@@ -106,6 +129,42 @@ export class Card {
     this.expiry = this.timers.set(() => {
       if (this.open && !this.pressed) this.#fold("neutral", this.texts.expired);
     }, left);
+  }
+
+  /**
+   * A button that acts on a click, or on Enter or Space pressed on it: a key held down since before
+   * the card appeared doesn't count, nor a press in the card's first 400 ms.
+   */
+  #pressable(button, ask, pressed) {
+    let pressedHere = false;
+    button.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") pressedHere = !event.repeat;
+    });
+    button.addEventListener("click", (event) => {
+      const viaKey = event.detail === 0;
+      if (viaKey && !pressedHere) return;
+      pressedHere = false;
+      if (!this.open || this.pressed) return;
+      if (this.now() - this.drawnAt < PRESS_GUARD_MS) return;
+      if (!ask()) return;
+      pressed(viaKey || fromKeyboard());
+    });
+  }
+
+  /**
+   * What the owner's verdict on a VPS session's prompt did: Approve's receipt once the session took
+   * it, Deny's neutral one (5.3), or a neutral fold that says why it didn't count.
+   */
+  verdict(verdict, status, text) {
+    if (!this.open) return;
+    this.timers.clear(this.spin);
+    this.timers.clear(this.expiry);
+    if (status !== "applied") {
+      this.#fold("neutral", text);
+      return;
+    }
+    if (verdict === "allow") this.#succeed();
+    else this.#fold("neutral", this.texts.deniedAt(clock(this.now(), this.locale)));
   }
 
   /** What a press did: the receipt, or a neutral fold when it wasn't open any more. */
@@ -125,7 +184,7 @@ export class Card {
     this.open = false;
     this.timers.clear(this.spin);
     this.timers.clear(this.expiry);
-    this.timers.clear(this.hold.timer);
+    this.timers.clear(this.hold?.timer);
   }
 
   /**
@@ -194,15 +253,40 @@ export class Card {
     return state;
   }
 
-  /** The press: the button grows to the card's width and says what it does (5.3). */
-  #press(viaKeyboard) {
+  /**
+   * The press: the button grows to the card's width and says what it does, and the other one leaves
+   * (5.3).
+   */
+  #press(viaKeyboard, button = this.confirm, label = this.label, working = this.texts.confirming) {
     this.pressed = true;
     this.viaKeyboard = viaKeyboard;
-    const before = this.confirm.getBoundingClientRect();
+    const before = button.getBoundingClientRect();
     this.confirm.disabled = true;
+    if (this.deny) this.deny.disabled = true;
+    button.classList.add("pressed");
     this.bubble.dataset.state = "working";
-    if (!viaKeyboard) resize(this.confirm, before, SPRINGS.moment);
-    roll(this.label, this.texts.confirming);
+    const other = button === this.confirm ? this.deny : this.confirm;
+    if (other) {
+      if (viaKeyboard || reduced()) other.hidden = true;
+      else {
+        const leaving = play(
+          other,
+          [
+            { opacity: 1, transform: "scale(1)" },
+            { opacity: 0, transform: `scale(${SCALE_IN_MOMENT})` },
+          ],
+          { duration: DUR.exitMoment, easing: EASE.exit, fill: "forwards" },
+        );
+        const gone = () => {
+          other.hidden = true;
+        };
+        if (leaving) leaving.finished.then(gone, gone);
+        else gone();
+      }
+    }
+    if (!viaKeyboard) resize(button, before, SPRINGS.moment);
+    roll(label, working);
+    if (button !== this.confirm) return;
     this.status.dataset.state = "waiting";
     this.spin = this.timers.set(() => {
       this.status.dataset.state = "spinning";

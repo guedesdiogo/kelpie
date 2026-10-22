@@ -1,5 +1,5 @@
 /* Kelpie: the agent mascot engine (ADR-0045) and the previews' motion helpers, as one classic script.
- * The engine is apps/ingress/public/webchat/mascot*.js as of 909fc2b, unchanged
+ * The engine is apps/ingress/public/webchat/mascot*.js as of e1eef2b, unchanged
  * but for its import and export lines.
  * window.Kelpie.mascot is the engine; window.Kelpie.ui the helpers. */
 (function () {
@@ -478,7 +478,11 @@ function presenceAfter(presence, event) {
       return presence.state === "typing" ? idle() : presence;
     case "bubble":
       if (event.failed) return { state: "error", activity: null, tool: false };
-      if (Number.isSafeInteger(event.confirmation)) {
+      // A confirmation's notice, or a VPS session's prompt, waits on the owner.
+      if (
+        Number.isSafeInteger(event.confirmation) ||
+        typeof event.sessionRequest?.id === "string"
+      ) {
         return { state: "waiting", activity: null, tool: false };
       }
       return idle();
@@ -501,6 +505,9 @@ function presenceAfter(presence, event) {
       return event.status === "accepted"
         ? { state: "approved", activity: null, tool: false }
         : idle();
+    // Approve brings Approved; Deny, or a verdict that didn't count, the quiet change (5.3).
+    case "verdict":
+      return approvedVerdict(event) ? { state: "approved", activity: null, tool: false } : idle();
     // The owner's message ends a wait or an error; a turn already running goes on showing.
     case "sent":
       return presence.state === "working" || presence.state === "typing" ? presence : idle();
@@ -517,6 +524,11 @@ function presenceAfter(presence, event) {
 
 function idle() {
   return { state: "idle", activity: null, tool: false };
+}
+
+/** Whether the owner approved a VPS session's prompt, and the session took it. */
+function approvedVerdict(event) {
+  return event.verdict === "allow" && event.status === "applied";
 }
 
 const IDLE = idle();
@@ -568,7 +580,9 @@ function presenceKeeper(
       const next = presenceAfter(presence, event);
       // A new notice while one waits starts its own 10 minutes.
       const renewed = next.state === "waiting" && event.type === "bubble";
-      const refused = event.type === "confirmation" && event.status !== "accepted";
+      const refused =
+        (event.type === "confirmation" && event.status !== "accepted") ||
+        (event.type === "verdict" && !approvedVerdict(event));
       if (renewed || !same(next, presence)) apply(next, { instant, quiet: refused }, waitOf(event));
     },
   };

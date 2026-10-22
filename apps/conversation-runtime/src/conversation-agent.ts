@@ -12,6 +12,7 @@ import {
   localeOf,
   MAX_LANGUAGE_CHARS,
   RUNNER_SESSION_ID,
+  type RunnerVerdict,
   type SendOutcome,
   webLinks,
 } from "@kelpie/channels";
@@ -96,6 +97,7 @@ import {
 } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
+import { bounded as boundedBy } from "./agent-host/session-watch.ts";
 import {
   type Announcement,
   announcementNotice,
@@ -119,6 +121,15 @@ import { proposalBubble, proposalNote } from "./proposal-notices.ts";
 import { readRole } from "./registry/schema.ts";
 import { failureNotice, routeNotice } from "./route-notices.ts";
 import * as schema from "./schema.ts";
+import {
+  answerable,
+  keepRequest,
+  type OpenSessionRequest,
+  requestLines,
+  runnerVerdictsOf,
+  type VerdictStatus,
+  verdictStatus,
+} from "./session-requests.ts";
 import { SUBAGENT_TOOLS } from "./subagent-limits.ts";
 import {
   CONFIRMATION_MS,
@@ -366,6 +377,11 @@ const TOOLS_LIST_TIMEOUT_MS = 5_000;
 const MAX_SEND_ATTEMPTS = 3;
 /** A rate limit asking for a longer wait than this fails the turn instead of stalling it. */
 const MAX_RATE_LIMIT_WAIT_MS = 30_000;
+/**
+ * How long the owner's verdict on a VPS session's prompt may take: channel-egress gives the runner
+ * 10 s, and the runner waits up to 3 s for the session's hook to take it.
+ */
+const VERDICT_TIMEOUT_MS = 15_000;
 
 interface TurnInFlight {
   controller: AbortController;
@@ -539,11 +555,19 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     // A pause or a press names its agent: a confirmation's id is its own conversation's counter.
     // A presence socket must name it; on the conversation's own, a page from before ADR-0052
     // names none, and then the id is read against this conversation alone.
-    if (frame.type === "confirm" || frame.type === "pause") {
+    if (frame.type === "confirm" || frame.type === "pause" || frame.type === "verdict") {
       const named = frame.agent ?? (admission.view === "presence" ? null : admission.agentId);
       if (named !== admission.agentId) {
         if (frame.type === "confirm") {
           send(connection, { type: "confirmation", id: frame.id, status: "refused" });
+        }
+        if (frame.type === "verdict") {
+          send(connection, {
+            type: "verdict",
+            id: frame.id,
+            verdict: frame.verdict,
+            status: "closed",
+          });
         }
         return;
       }
@@ -561,11 +585,18 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     }
     // Ingress admitted the socket when it opened. An agent whose chat was turned off since then
     // takes nothing more from it (#288): the socket closes, and a new one isn't admitted.
-    if (frame.type === "message" || frame.type === "confirm") {
+    if (frame.type === "message" || frame.type === "confirm" || frame.type === "verdict") {
       if (await this.#chatOff(admission.agentId)) {
         connection.close(1008, "chat off");
         return;
       }
+    }
+    if (frame.type === "verdict") {
+      // The owner's press on a VPS session's prompt (ADR-0069 §1): their own socket's only.
+      const status =
+        admission.role === "owner" ? await this.#answerRequest(frame.id, frame.verdict) : "closed";
+      send(connection, { type: "verdict", id: frame.id, verdict: frame.verdict, status });
+      return;
     }
     if (frame.type === "confirm") {
       send(connection, {
@@ -808,14 +839,80 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (destination.channel === "task") return "task";
     if (destination.channel === "webchat" && !this.#pageOpen()) return "page_closed";
     try {
-      const text = sessionWaitNotice(notice, this.#locale());
-      const sent = await this.#channel.send(agentId, destination, text, { silent: false });
+      const locale = this.#locale();
+      let text = sessionWaitNotice(notice, locale);
+      let shown: { id: string; until: number } | undefined;
+      // A pending request's tool and input go only to the owner's own chat (ADR-0069 §4).
+      if (notice.request && this.#ownersDirectChat()) {
+        // Its prompt waits for a verdict too (ADR-0069 §1): the webchat's Approve and Deny, bound
+        // to the request's id, when the notice shows its input whole. Telegram's wait for #495's
+        // buttons, so its notice sends the owner to the Claude app.
+        const buttons = destination.channel === "webchat" && answerable(notice.request);
+        if (buttons) {
+          const kept = this.#get<OpenSessionRequest[]>("sessionRequests", []);
+          const { kept: next, opened } = keepRequest(kept, notice.request.id, this.#ports.now());
+          this.#set("sessionRequests", next);
+          shown = { id: opened.requestId, until: opened.expiresAt };
+        }
+        text = `${text}\n${requestLines(notice.request, buttons, locale)}`;
+      }
+      const sent = await this.#channel.send(agentId, destination, text, {
+        silent: false,
+        ...(shown ? { sessionRequest: shown } : {}),
+      });
       if (sent.ok) return "sent";
       console.warn("conversation: a wait wasn't told", { reason: sent.reason });
     } catch (error) {
       console.warn("conversation: a wait wasn't told", { error: errorName(error) });
     }
     return "send_failed";
+  }
+
+  /**
+   * The owner's press on a VPS session's prompt, by the request's id: only for a notice this
+   * conversation showed, once, while it counts, and to the runner as it is. A runner that wasn't
+   * reached leaves it open, so the owner may press again; the runner counts it once too, whatever
+   * happens here.
+   */
+  async #answerRequest(requestId: string, verdict: RunnerVerdict): Promise<VerdictStatus> {
+    const now = this.#ports.now();
+    const kept = this.#get<OpenSessionRequest[]>("sessionRequests", []);
+    const request = kept.find((entry) => entry.requestId === requestId);
+    if (!request) return "closed";
+    if (request.usedAt !== null) return "answered";
+    if (request.expiresAt <= now) return "expired";
+    const mark = (usedAt: number | null) =>
+      this.#set(
+        "sessionRequests",
+        this.#get<OpenSessionRequest[]>("sessionRequests", []).map((entry) =>
+          entry.requestId === requestId ? { ...entry, usedAt } : entry,
+        ),
+      );
+    mark(now);
+    let status: VerdictStatus;
+    try {
+      const verdicts = runnerVerdictsOf(this.env);
+      status = verdictStatus(
+        await boundedBy(verdicts.verdict(request.requestId, verdict), VERDICT_TIMEOUT_MS),
+      );
+    } catch (error) {
+      console.warn("conversation: a verdict didn't reach the runner", errorName(error));
+      status = "failed";
+    }
+    if (status === "failed") mark(null);
+    console.log("conversation: the owner answered a VPS session's prompt", { verdict, status });
+    return status;
+  }
+
+  /** Whether this conversation is the owner's direct chat, as its latest message says. */
+  #ownersDirectChat(): boolean {
+    const latest = this.#db
+      .select({ role: schema.inbound.role, chatType: schema.inbound.chatType })
+      .from(schema.inbound)
+      .orderBy(desc(schema.inbound.id))
+      .limit(1)
+      .get();
+    return latest?.role === "owner" && latest.chatType === "direct";
   }
 
   /** Whether a webchat page of this conversation is open: a socket of its own, not a sidebar's. */
