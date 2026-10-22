@@ -26,7 +26,7 @@ Kelpie keeps two kinds of secret (ADR-0013).
   - `SetupForms`, for Master's configuration tools in the conversation runtime, only creates a Telegram form or the runner's form, reads the runner's state, which holds no secret, and disconnects a deleted agent's bot. The owner opens a form's link on the admin API, so the Worker a model drives can't describe a form or redeem one (Story 3.11), and registers a webhook only through `SetupWebhooks`, below;
   - **disconnecting** removes the bot's webhook at Telegram, then deletes its slot and every form for it, used or open, so a form opened before the deletion can't connect the bot again. It reads nothing back, and Master calls it only after the owner confirms the deletion (#303);
   - `SetupWebhooks`, for Master's `register_telegram_webhook` (ADR-0067, #493), only points a stored bot at ingress again, with the URL from the deploy and the webhook secret already stored. It returns no secret;
-  - `ChannelEgress`, for the conversation runtime, sends and shows typing;
+  - `ChannelEgress`, for the conversation runtime, sends and shows typing, puts buttons under Kelpie's notices, answers a tap on one, and edits a notice in place (ADR-0067 §3);
   - `ChannelWebhooks`, for ingress, checks the secret a webhook presents and sends two fixed notices: "paired", and a stranger notice to the owner (`docs/admin-api.md`, "Pairing"). The Worker that takes public requests can't send text of its own: `channel-egress` writes both notices, with a stranger's name cleaned up and cut to 64 characters.
 - **Forms.**
   - A link carries a random 256-bit token. The store keeps only its SHA-256.
@@ -39,8 +39,9 @@ Kelpie keeps two kinds of secret (ADR-0013).
   - A form checks the secret with the runner's `/health` before storing it. A refused secret counts against the form; a runner that can't answer doesn't.
 - **Webhooks.**
   - Each stored bot gets a new random webhook secret.
-  - Right after storing, `channel-egress` registers the bot's webhook (`setWebhook`) at `<INGRESS_ORIGIN>/webhooks/telegram/<agentId>`, with that secret and only new messages.
-  - Telegram echoes the secret in every update. Ingress asks `ChannelWebhooks` to compare it before reading the update.
+  - Right after storing, `channel-egress` registers the bot's webhook (`setWebhook`) at `<INGRESS_ORIGIN>/webhooks/telegram/<agentId>`, with that secret, for new messages and taps on buttons (`callback_query`) only.
+  - A bot registered before taps existed takes messages only. Before its first notice with a button goes out, `channel-egress` reads its webhook (`getWebhookInfo`) and, if it is Kelpie's own, sets it again with taps. Each isolate does this once per bot, or again with the next notice when the check failed. A webhook pointed elsewhere stays as it is.
+  - Telegram echoes the secret in every update, a tap included. Ingress asks `ChannelWebhooks` to compare it before reading the update.
   - A new form for the same agent replaces the secret, so it registers again. A failed registration leaves the token stored, and the `registerTelegramWebhook` command repeats it.
 - **Failing closed.** A missing or malformed `SECRETS_KEY` keeps the store closed: nothing is read or written, and no token is sent to Telegram to be checked.
 - **The trust boundary is the account.** A binding is the authorization: any Worker bound to an entrypoint can call it for any agent, so bindings stay minimal. Anyone who can deploy a Worker in the Cloudflare account could bind `SecretStore` directly and read it; that account is trusted.

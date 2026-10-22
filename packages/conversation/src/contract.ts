@@ -63,11 +63,44 @@ export type PauseResult =
   | { status: "paused" | "duplicate" }
   | { status: "rejected"; reason: "destination_mismatch" | "agent_mismatch" };
 
+/**
+ * A tap on a button under one of Kelpie's own notices (ADR-0067 §3), already admitted by ingress:
+ * the owner's paired account, in their own chat with the bot. The conversation reads the button's
+ * data, acts on it by its own rules, and answers the tap.
+ */
+export interface PressTarget {
+  agentId: string;
+  destination: Destination;
+  /** The admitted owner. */
+  userId: string;
+  role: Role;
+  chatType: ChatType;
+  timeZone: string | null;
+  /** The language the owner's app is set to, when the channel says (#187). */
+  language?: string | null;
+  /** The channel's id for the tap, which the conversation answers. */
+  pressId: string;
+  /** The notice the button is on. */
+  providerMessageId: string;
+  /**
+   * What Kelpie wrote on the button: an action and the random id of what it acts on, such as
+   * `confirm:<id>`. Never a counter or "the latest one" (ADR-0026 §4).
+   */
+  data: string;
+}
+
+/** `refused`: the button acts on nothing open for this owner, and the tap was told so. */
+export type PressResult =
+  | { status: "accepted" | "refused" }
+  | { status: "rejected"; reason: "destination_mismatch" | "agent_mismatch" };
+
 /** What ingress calls on a conversation's object. */
 export interface ConversationContract {
   ingest(message: InboundMessage): Promise<IngestResult>;
   /** Holds every answer until the owner's next message (issue #134). */
   pause(target: PauseTarget): Promise<PauseResult>;
+  /** Acts on a tap on one of Kelpie's buttons, and answers it (ADR-0067 §3). */
+  press(target: PressTarget): Promise<PressResult>;
 }
 
 /**

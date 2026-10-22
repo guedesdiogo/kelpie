@@ -27,6 +27,19 @@ export interface SendResult {
   providerMessageId: string;
 }
 
+/**
+ * A button under one of Kelpie's own notices, where the channel shows them (ADR-0067 §3). `data`
+ * comes back when the owner taps it: an action and the random id of what it acts on, never a
+ * counter or "the latest one" (ADR-0026 §4).
+ */
+export interface InlineButton {
+  label: string;
+  data: string;
+}
+
+/** Rows of buttons, top to bottom. */
+export type InlineKeyboard = readonly (readonly InlineButton[])[];
+
 export interface SendOptions {
   /** Deliver without a notification; a reply notifies only on its last bubble. */
   silent?: boolean;
@@ -41,6 +54,11 @@ export interface SendOptions {
    * goes as typed, as Kelpie's own notices do.
    */
   links?: readonly string[];
+  /**
+   * Buttons under the message (ADR-0067 §3). Only Kelpie's notices carry them: the model's text
+   * never does.
+   */
+  buttons?: InlineKeyboard;
 }
 
 /** The channel asked to slow down. Retrying before `retryAfterMs` fails again. */

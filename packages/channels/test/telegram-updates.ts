@@ -74,3 +74,36 @@ export const relayedChannelPost = update({
   text: "news from the channel",
 });
 export const withoutSender = update({ from: undefined, text: "who?" });
+
+const kelpieBot = { id: 555, is_bot: true, first_name: "Kelpie", username: "kelpie_bot" };
+/** A tap on a button under one of the bot's notices (ADR-0067 §3). */
+const callback = (fields: Record<string, unknown>, updateId = 900_005) => ({
+  update_id: updateId,
+  callback_query: {
+    id: "4382bfdwdsb323b2d9",
+    from: { ...owner, language_code: "pt-br" },
+    message: {
+      message_id: 43,
+      from: kelpieBot,
+      chat: privateChat,
+      date: SENT,
+      text: "Confirme: change the tier.",
+    },
+    chat_instance: "-7015413208734",
+    data: "confirm:0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+    ...fields,
+  },
+});
+
+export const press = callback({});
+export const groupPress = callback({
+  message: { message_id: 43, from: kelpieBot, chat: { id: -100_200, type: "supergroup" }, date: 0 },
+});
+export const channelPress = callback({
+  message: { message_id: 43, chat: { id: -100_300, type: "channel" }, date: SENT },
+});
+/** A tap on a message sent in inline mode: Telegram names no chat, only the inline message. */
+export const inlinePress = callback({ message: undefined, inline_message_id: "AAAA" });
+export const gamePress = callback({ data: undefined, game_short_name: "snake" });
+export const pressFromBot = callback({ from: { id: 7, is_bot: true, first_name: "Other bot" } });
+export { callback as pressWith };

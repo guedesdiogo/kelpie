@@ -1,4 +1,4 @@
-import type { SendOptions } from "./adapter.ts";
+import type { InlineKeyboard, SendOptions } from "./adapter.ts";
 import type { ChannelId } from "./events.ts";
 import type { Locale } from "./locale.ts";
 import type {
@@ -41,6 +41,27 @@ export interface ChannelEgressContract {
     options?: SendOptions,
   ): Promise<SendOutcome>;
   typing(agentId: string, destination: EgressDestination): Promise<TypingOutcome>;
+  /**
+   * Replaces the text of a notice the bot sent, as typed, and its buttons; without `buttons` it
+   * keeps none (ADR-0067 §3).
+   */
+  edit(
+    agentId: string,
+    destination: EgressDestination,
+    providerMessageId: string,
+    text: string,
+    options?: { buttons?: InlineKeyboard },
+  ): Promise<TypingOutcome>;
+  /**
+   * Answers a tap on a notice's button, so the channel stops its spinner, with a short text to show
+   * or none (ADR-0067 §3).
+   */
+  answer(
+    agentId: string,
+    destination: EgressDestination,
+    pressId: string,
+    text?: string,
+  ): Promise<TypingOutcome>;
   /**
    * Shows the agent's mascot as its Telegram bot's photo (ADR-0046). channel-egress draws and sends
    * it soon after, the newest mascot first. It checks `mascot` again, since it is an RPC boundary.

@@ -49,6 +49,8 @@ import {
   type IngestResult,
   type PauseResult,
   type PauseTarget,
+  type PressResult,
+  type PressTarget,
   WEBCHAT_ADMISSION_HEADER,
 } from "@kelpie/conversation/contract";
 import {
@@ -93,6 +95,7 @@ import {
   lte,
   max,
   min,
+  type SQL,
   sql,
 } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
@@ -117,6 +120,7 @@ import {
   OUTSIDE_WINDOW_MS,
 } from "./outside-content.ts";
 import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
+import { newPressId, type PressAction, parsePress, pressData, pressRefused } from "./presses.ts";
 import { proposalBubble, proposalNote } from "./proposal-notices.ts";
 import { readRole } from "./registry/schema.ts";
 import { failureNotice, routeNotice } from "./route-notices.ts";
@@ -136,6 +140,8 @@ import {
   type ConfirmationRequest,
   canonicalJson,
   confirmationNotice,
+  confirmedNotice,
+  confirmLabel,
   confirmsCode,
   type HostLink,
   labelIn,
@@ -639,33 +645,126 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    * only, so a second press is the same message again, which the conversation drops.
    */
   async #press(admission: SocketAdmission, id: number): Promise<"accepted" | "refused"> {
+    const pending = this.#pressable(eq(schema.confirmations.id, id), admission.userId);
+    if (!pending) return "refused";
+    const result = await this.#ingestFrom(admission, `confirm:${id}`, pending.code);
+    return result.status === "rejected" ? "refused" : "accepted";
+  }
+
+  /**
+   * The confirmation `where` names, when `userId` may press its Confirm button now (ADR-0026 §3):
+   * they asked for it, its notice was sent to them (ADR-0052 §3), and it is still open, neither
+   * used nor past its 10 minutes.
+   */
+  #pressable(
+    where: SQL,
+    userId: string,
+  ): { id: number; code: string; command: string; summary: string } | null {
     const pending = this.#db
       .select({
+        id: schema.confirmations.id,
         code: schema.confirmations.code,
+        command: schema.confirmations.command,
+        summary: schema.confirmations.summary,
         userId: schema.confirmations.userId,
         usedAt: schema.confirmations.usedAt,
         expiresAt: schema.confirmations.expiresAt,
       })
       .from(schema.confirmations)
-      .where(eq(schema.confirmations.id, id))
-      .get();
-    // Only a confirmation whose notice the owner was shown (ADR-0052 §3).
-    const shown = this.#db
-      .select({ id: schema.outbox.id })
-      .from(schema.outbox)
-      .where(and(eq(schema.outbox.confirmationId, id), eq(schema.outbox.status, "sent")))
+      .where(where)
       .get();
     if (
       !pending ||
-      !shown ||
-      pending.userId !== admission.userId ||
+      pending.userId !== userId ||
       pending.usedAt !== null ||
       pending.expiresAt <= this.#ports.now()
     ) {
-      return "refused";
+      return null;
     }
-    const result = await this.#ingestFrom(admission, `confirm:${id}`, pending.code);
-    return result.status === "rejected" ? "refused" : "accepted";
+    const shown = this.#db
+      .select({ id: schema.outbox.id })
+      .from(schema.outbox)
+      .where(and(eq(schema.outbox.confirmationId, pending.id), eq(schema.outbox.status, "sent")))
+      .get();
+    return shown
+      ? { id: pending.id, code: pending.code, command: pending.command, summary: pending.summary }
+      : null;
+  }
+
+  /**
+   * A tap on a button under one of Kelpie's notices on a channel behind channel-egress
+   * (ADR-0067 §3), which ingress admitted as the owner's, in their own chat; it acts only when the
+   * conversation agrees. Its data names an action and the random id of what it acts on, looked up
+   * in this conversation only:
+   * - **Confirm** counts as the webchat's button does, then replies with the code for the owner, so
+   *   ADR-0013's gate confirms it as typed, once. A second tap is the same message again, which the
+   *   conversation drops. The notice is then edited to say the owner confirmed.
+   * Every tap is answered, so the channel stops its spinner: one that acts on nothing open is told
+   * the button no longer works, and changes nothing.
+   */
+  async press(target: PressTarget): Promise<PressResult> {
+    capabilitiesFor(target.destination.channel);
+    const mismatch = this.#bind(target);
+    // As for a pause, the answer needs a language even where nothing was said yet (#187).
+    if (mismatch === null) this.#noteLanguage(target.language);
+    const pressed =
+      mismatch === null && target.role === "owner" && target.chatType === "direct"
+        ? parsePress(target.data)
+        : null;
+    const notice = pressed === null ? null : await this.#act(target, pressed.action, pressed.id);
+    const answered = await this.#ports.answer(
+      target.agentId,
+      target.destination,
+      target.pressId,
+      notice === null ? pressRefused(this.#locale()) : undefined,
+    );
+    if (!answered.ok) {
+      console.warn("ConversationAgent: a tap wasn't answered", { reason: answered.reason });
+    }
+    if (mismatch !== null) return { status: "rejected", reason: mismatch };
+    if (notice === null) return { status: "refused" };
+    const edited = await this.#ports.edit(
+      target.agentId,
+      target.destination,
+      target.providerMessageId,
+      notice,
+    );
+    if (!edited.ok) {
+      console.warn("ConversationAgent: a notice wasn't edited", { reason: edited.reason });
+    }
+    return { status: "accepted" };
+  }
+
+  /**
+   * Does what a tap's button says, to what `id` names: the notice's new text once it acted, or
+   * null when it acted on nothing open. Every action a button can carry has its entry.
+   */
+  #act(target: PressTarget, action: PressAction, id: string): Promise<string | null> {
+    const actions: Record<PressAction, () => Promise<string | null>> = {
+      confirm: () => this.#pressConfirm(target, id),
+    };
+    return actions[action]();
+  }
+
+  /** A tap on a Confirm button: the notice saying so once its code is sent, else null. */
+  async #pressConfirm(target: PressTarget, buttonId: string): Promise<string | null> {
+    const pending = this.#pressable(eq(schema.confirmations.buttonId, buttonId), target.userId);
+    if (!pending) return null;
+    const result = await this.ingest({
+      agentId: target.agentId,
+      providerMessageId: pressData("confirm", buttonId),
+      userId: target.userId,
+      role: target.role,
+      chatType: target.chatType,
+      text: pending.code,
+      destination: target.destination,
+      sentAt: this.#ports.now(),
+      timeZone: target.timeZone,
+      language: target.language ?? null,
+    });
+    return result.status === "rejected"
+      ? null
+      : confirmedNotice(pending.summary, this.#locale(), pending.command);
   }
 
   /**
@@ -1963,8 +2062,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const bubbles = planDelivery(textOf(finish.message), settings.conversational, capabilities);
     const reply = finish.message;
     // The changes this turn asked the owner to confirm follow the reply, written by the host, and
-    // then the links its tools had Kelpie send (#186). The webchat shows a Confirm button.
-    const button = destination.channel === "webchat";
+    // then the links its tools had Kelpie send (#186). The webchat and Telegram show a Confirm
+    // button (ADR-0067 §3).
+    const button = capabilities.buttons;
     const locale = this.#locale();
     const confirmations = this.#db
       .select({
@@ -1972,6 +2072,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         code: schema.confirmations.code,
         command: schema.confirmations.command,
         summary: schema.confirmations.summary,
+        buttonId: schema.confirmations.buttonId,
       })
       .from(schema.confirmations)
       .where(and(eq(schema.confirmations.turnId, turnId), isNull(schema.confirmations.usedAt)))
@@ -2009,8 +2110,16 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const notices = [
       ...(routes.text === null ? [] : [{ text: routes.text }]),
       ...(announced === null ? [] : [{ text: announced }]),
-      ...confirmations.map(({ id, code, command, summary }) => ({
-        text: confirmationNotice(summary, code, button, locale, command),
+      ...confirmations.map(({ id, code, command, summary, buttonId }) => ({
+        // Telegram's button carries the random id, which a confirmation made before buttons
+        // lacks; the webchat's needs only the confirmation's own id.
+        text: confirmationNotice(
+          summary,
+          code,
+          button && (buttonId !== null || destination.channel === "webchat"),
+          locale,
+          command,
+        ),
         confirmationId: id,
       })),
       ...links.map(({ text, href }) => ({ text, link: href })),
@@ -2680,6 +2789,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         turnId,
         createdAt: now,
         expiresAt: now + CONFIRMATION_MS,
+        buttonId: newPressId(),
       })
       .run();
     return false;
@@ -3300,6 +3410,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const destination = this.#destination();
     const capabilities = capabilitiesFor(destination.channel);
     const previewable = this.#previewable(turn);
+    const locale = this.#locale();
     // Only the reply's last bubble notifies; the others arrive silently.
     const lastSeq =
       this.#db
@@ -3343,13 +3454,35 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
             ? {}
             : { links: [row.link] }
           : { links: this.#linksAllowed(row.text, previewable) }),
-        ...(row.confirmationId === null ? {} : { confirmation: row.confirmationId }),
+        ...(row.confirmationId === null ? {} : this.#confirmButton(row.confirmationId, locale)),
       };
       if (!(await this.#sendBubble(turnId, agentId, destination, row, options, signal))) return;
       // If the turn was settled during the send, settling already counted this bubble as sent.
       if (this.#isRunning(turnId)) this.#setBubble(row.id, "sent");
     }
     this.#settle(turnId, "finished");
+  }
+
+  /**
+   * A confirmation notice's Confirm button: the webchat's sends the confirmation's id over its
+   * socket (#186), and the one under it on Telegram carries its random id (ADR-0067 §3). A
+   * confirmation made before buttons existed has no random id, and only the webchat's.
+   */
+  #confirmButton(
+    id: number,
+    locale: Locale,
+  ): { confirmation: number; buttons?: [[{ label: string; data: string }]] } {
+    const buttonId = this.#db
+      .select({ buttonId: schema.confirmations.buttonId })
+      .from(schema.confirmations)
+      .where(eq(schema.confirmations.id, id))
+      .get()?.buttonId;
+    return buttonId == null
+      ? { confirmation: id }
+      : {
+          confirmation: id,
+          buttons: [[{ label: confirmLabel(locale), data: pressData("confirm", buttonId) }]],
+        };
   }
 
   /**

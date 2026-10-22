@@ -12,6 +12,11 @@ export interface ChannelCapabilities {
    * only "typing" (#141).
    */
   status: boolean;
+  /**
+   * Whether Kelpie's notices can carry buttons, such as a confirmation's Confirm, whose taps come
+   * back to Kelpie (ADR-0026 §3, ADR-0067 §3).
+   */
+  buttons: boolean;
   /** The minimum gap between two messages to the same conversation. */
   minGapMs: number;
   /** A stricter gap for group conversations, when the channel limits groups separately. */
@@ -27,6 +32,7 @@ export const CAPABILITIES = {
     maxMessageLength: 16_000,
     typing: { supported: true, ttlMs: null },
     status: true,
+    buttons: true,
     minGapMs: 0,
     maxBubblesPerReply: 6,
     formatting: "markdown",
@@ -36,6 +42,7 @@ export const CAPABILITIES = {
     typing: { supported: true, ttlMs: 5_000 },
     // Telegram's chat actions have no "thinking".
     status: false,
+    buttons: true,
     minGapMs: 1_000,
     // About 20 messages per minute in a group.
     groupMinGapMs: 3_000,
@@ -47,6 +54,7 @@ export const CAPABILITIES = {
     maxMessageLength: 16_000,
     typing: { supported: false, ttlMs: null },
     status: false,
+    buttons: false,
     minGapMs: 0,
     maxBubblesPerReply: 1,
     formatting: "markdown",

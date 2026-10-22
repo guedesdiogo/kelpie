@@ -9,6 +9,7 @@ import {
   type ChannelWebhooksContract,
   type DeliveryFailure,
   type EgressDestination,
+  type InlineKeyboard,
   isLocale,
   isRunnerTime,
   isRunnerVerdict,
@@ -36,7 +37,11 @@ import {
   type WebhookNotice,
   type WebhookRegistration,
 } from "@kelpie/channels";
-import { TELEGRAM_SECRET_HEADER, TelegramAdapter } from "@kelpie/channels/telegram";
+import {
+  MAX_BUTTON_DATA_BYTES,
+  TELEGRAM_SECRET_HEADER,
+  TelegramAdapter,
+} from "@kelpie/channels/telegram";
 import { isAgentId, type Mascot, parseMascot } from "@kelpie/config";
 import { drawPhotos, type Photos } from "./photo/draw.ts";
 import {
@@ -75,6 +80,16 @@ const MAX_TEXT_LENGTH = 4_096;
 const TELEGRAM_USER_ID = /^\d{1,20}$/;
 /** A stranger's display name, as the owner sees it in a notice. */
 const MAX_DISPLAY_NAME_LENGTH = 64;
+/** A message id Telegram issues: a positive integer. */
+const MESSAGE_ID = /^[1-9]\d{0,14}$/;
+/** Telegram's own limit on the text a tap's answer shows. */
+const MAX_ANSWER_LENGTH = 200;
+/** A tap's id, as Telegram issues it: a short string. */
+const MAX_PRESS_ID_LENGTH = 64;
+/** The most rows of buttons under one notice, and buttons in one row, and a label's length. */
+const MAX_BUTTON_ROWS = 8;
+const MAX_ROW_BUTTONS = 8;
+const MAX_BUTTON_LABEL_LENGTH = 64;
 
 /**
  * The secret store's stub. Its results are typed `& Disposable`, so a spread of one has
@@ -591,7 +606,10 @@ function displayName(value: unknown): string {
   return [...cleaned].slice(0, MAX_DISPLAY_NAME_LENGTH).join("").trim();
 }
 
-/** Sends and shows typing for an agent, with that agent's channel secrets (ADR-0002). */
+/**
+ * Sends, shows typing, and answers and edits Kelpie's notices for an agent, with that agent's
+ * channel secrets (ADR-0002). Only the conversation runtime binds it.
+ */
 export class ChannelEgress extends WorkerEntrypoint<Env> implements ChannelEgressContract {
   async send(
     agentId: string,
@@ -599,13 +617,20 @@ export class ChannelEgress extends WorkerEntrypoint<Env> implements ChannelEgres
     text: string,
     options: SendOptions = {},
   ): Promise<SendOutcome> {
-    if (typeof text !== "string" || text.length > MAX_TEXT_LENGTH || !isThread(destination)) {
+    if (
+      !isText(text) ||
+      !isThread(destination) ||
+      (options?.buttons !== undefined && !isKeyboard(options.buttons))
+    ) {
       return { ok: false, reason: "failed" };
     }
-    const adapter = await this.#telegram(agentId, destination);
-    if (!adapter) return { ok: false, reason: "not_connected" };
+    const bot = await this.#telegram(agentId, destination);
+    if (!bot) return { ok: false, reason: "not_connected" };
+    if (options?.buttons !== undefined && options.buttons.length > 0) {
+      await takePresses(this.env, agentId, bot);
+    }
     try {
-      const { providerMessageId } = await adapter.send(destination, text, options);
+      const { providerMessageId } = await bot.adapter.send(destination, text, options);
       return { ok: true, providerMessageId };
     } catch (error) {
       return failure(error);
@@ -614,10 +639,58 @@ export class ChannelEgress extends WorkerEntrypoint<Env> implements ChannelEgres
 
   async typing(agentId: string, destination: EgressDestination): Promise<TypingOutcome> {
     if (!isThread(destination)) return { ok: false, reason: "failed" };
-    const adapter = await this.#telegram(agentId, destination);
-    if (!adapter) return { ok: false, reason: "not_connected" };
+    return this.#with(agentId, destination, (adapter) => adapter.typing(destination));
+  }
+
+  async edit(
+    agentId: string,
+    destination: EgressDestination,
+    providerMessageId: string,
+    text: string,
+    options: { buttons?: InlineKeyboard } = {},
+  ): Promise<TypingOutcome> {
+    if (
+      !isText(text) ||
+      !isThread(destination) ||
+      typeof providerMessageId !== "string" ||
+      !MESSAGE_ID.test(providerMessageId) ||
+      (options?.buttons !== undefined && !isKeyboard(options.buttons))
+    ) {
+      return { ok: false, reason: "failed" };
+    }
+    return this.#with(agentId, destination, (adapter) =>
+      adapter.edit(destination, providerMessageId, text, options),
+    );
+  }
+
+  async answer(
+    agentId: string,
+    destination: EgressDestination,
+    pressId: string,
+    text?: string,
+  ): Promise<TypingOutcome> {
+    const shortText = (value: unknown, max: number) =>
+      typeof value === "string" && value.length > 0 && value.length <= max;
+    if (
+      !isThread(destination) ||
+      !shortText(pressId, MAX_PRESS_ID_LENGTH) ||
+      (text !== undefined && !shortText(text, MAX_ANSWER_LENGTH))
+    ) {
+      return { ok: false, reason: "failed" };
+    }
+    return this.#with(agentId, destination, (adapter) => adapter.answer(pressId, text));
+  }
+
+  /** Runs `call` with the agent's bot, its failure as a value. */
+  async #with(
+    agentId: string,
+    destination: EgressDestination,
+    call: (adapter: TelegramAdapter) => Promise<void>,
+  ): Promise<TypingOutcome> {
+    const bot = await this.#telegram(agentId, destination);
+    if (!bot) return { ok: false, reason: "not_connected" };
     try {
-      await adapter.typing(destination);
+      await call(bot.adapter);
       return { ok: true };
     } catch (error) {
       return failure(error);
@@ -642,14 +715,73 @@ export class ChannelEgress extends WorkerEntrypoint<Env> implements ChannelEgres
     }
   }
 
-  async #telegram(
-    agentId: string,
-    destination: EgressDestination,
-  ): Promise<TelegramAdapter | null> {
+  async #telegram(agentId: string, destination: EgressDestination): Promise<Bot | null> {
     if (destination?.channel !== "telegram" || !isAgentId(agentId)) return null;
     const found = await telegramSecret(this.env, agentId);
-    return found.ok ? new TelegramAdapter(found.secret) : null;
+    return found.ok ? { adapter: new TelegramAdapter(found.secret), secret: found.secret } : null;
   }
+}
+
+/** An agent's stored bot, ready to call. */
+interface Bot {
+  adapter: TelegramAdapter;
+  secret: TelegramSecret;
+}
+
+/**
+ * The bots whose webhook this isolate saw take taps (ADR-0067 §3). A bot connected before taps
+ * existed has a webhook that takes messages only, so it is set again before the bot's first
+ * buttons go out, or their taps would never arrive.
+ */
+const takingPresses = new Set<string>();
+
+async function takePresses(env: Env, agentId: string, bot: Bot): Promise<void> {
+  const key = `${agentId}:${bot.secret.botId}`;
+  if (takingPresses.has(key)) return;
+  try {
+    const info = await bot.adapter.webhookInfo();
+    const url = telegramWebhookUrl(env.INGRESS_ORIGIN, agentId);
+    // Only Kelpie's own webhook is set again: one pointed elsewhere by hand stays as it is.
+    if (!info.takesPresses && url !== null && info.url === url) await bot.adapter.setWebhook(url);
+    takingPresses.add(key);
+  } catch (error) {
+    // The notice still goes, since its code works typed, and the next one checks again.
+    console.warn("channel-egress: a bot's webhook wasn't checked for taps", errorName(error));
+  }
+}
+
+/** Text Telegram takes in one message. */
+function isText(text: unknown): text is string {
+  return typeof text === "string" && text.length <= MAX_TEXT_LENGTH;
+}
+
+/**
+ * Rows of buttons Telegram can carry: each with a label and data within Telegram's 64 bytes. The
+ * runtime writes them, but this is an RPC boundary.
+ */
+function isKeyboard(buttons: unknown): buttons is InlineKeyboard {
+  const isButton = (button: unknown) => {
+    const { label, data } = (button ?? {}) as { label?: unknown; data?: unknown };
+    return (
+      typeof label === "string" &&
+      label.length > 0 &&
+      label.length <= MAX_BUTTON_LABEL_LENGTH &&
+      typeof data === "string" &&
+      data.length > 0 &&
+      new TextEncoder().encode(data).byteLength <= MAX_BUTTON_DATA_BYTES
+    );
+  };
+  return (
+    Array.isArray(buttons) &&
+    buttons.length <= MAX_BUTTON_ROWS &&
+    buttons.every(
+      (row) =>
+        Array.isArray(row) &&
+        row.length > 0 &&
+        row.length <= MAX_ROW_BUTTONS &&
+        row.every(isButton),
+    )
+  );
 }
 
 /** How long a bot's photo waits, so a mascot changed several times in a row is drawn once. */

@@ -364,7 +364,7 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
   - `createAgent` refuses the id.
   - A Telegram bot once connected to it keeps its token and webhook, and nothing reaches it through them. Revoke the token with BotFather.
 - **Master's guidance:** its prompt carries the built-in `configure-kelpie` skill, whatever persona the owner or the vault gives it.
-- **Its tools** run the commands above, as the owner, through Master (`via: agent:<Master's id>`), and only the agent with the role `master` has them, on every channel it answers: in the webchat, and on Telegram with the typed code. They are checked again when one runs, and a task's run has none:
+- **Its tools** run the commands above, as the owner, through Master (`via: agent:<Master's id>`), and only the agent with the role `master` has them, on every channel it answers: in the webchat, and on Telegram, with its Confirm button or the typed code. They are checked again when one runs, and a task's run has none:
   - `list_agents`, `get_agent`, `create_agent` and `rename_agent` run directly. Other agents' task news reaches Master's conversation, so Kelpie itself announces each agent those tools create or rename (#387). After the reply, it names the agent by its id and its name, in the conversation's language: `Kelpie created the agent "Sales" (sales).` or `Kelpie renamed the agent sales to "Sales team".` As with a subagent, the name is quoted, the model can't change or omit the text, and a turn that sends no reply leaves it for the next one. So that a notice always fits one Telegram message, each line names at most four agents and counts the rest, and a name longer than 80 characters once written out is cut with "…". No number of other changes pushes an agent's creation or rename out of the notice;
   - `get_models` reads the instance's model settings, and `configure_models` replaces them;
   - `set_claude_code` turns the `claude-code` route on or off ("The claude-code route"). Its confirmation says, in the conversation's language, that the route spends the subscription's weekly usage limit, which the owner's own coding shares;
@@ -405,7 +405,12 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
        - A press counts only from the socket of the user who asked, for a confirmation of theirs still open.
        - Any other press is refused, and the button says the confirmation is no longer valid.
        - A second press of the same button sends nothing new.
-     - **On Telegram, or in the webchat,** the owner replies with just the code, on a line of its own. A message that only mentions the code, such as "don't do K7MPRX", or asks about it ("K7MPRX?"), is no yes.
+     - **On Telegram,** the owner taps the Confirm button under the notice, which replies with the code for them, as in the webchat (ADR-0067 §3, #495).
+       - The button carries the confirmation's random id, never a counter or "the latest one".
+       - A tap counts only from the owner's paired account, in their own chat with the bot, for a confirmation of theirs still open. Ingress drops anyone else's tap unanswered, and the conversation looks the id up in that chat alone.
+       - Kelpie answers every tap, so Telegram stops its spinner. A tap it counts edits the notice to say the owner confirmed, without the code. Any other tap is told the button no longer works, and changes nothing.
+       - A second tap of the same button sends nothing new.
+     - **On Telegram, or in the webchat,** the owner may also reply with just the code, on a line of its own. A message that only mentions the code, such as "don't do K7MPRX", or asks about it ("K7MPRX?"), is no yes.
   3. A code confirms that one change, once. It lasts 10 minutes from the last time the agent asked for it.
 
   What never confirms:
@@ -413,7 +418,7 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
   - a tool's output;
   - the model's replies, and what it passes to tools.
 
-  The model's text can't show a Confirm button: only Kelpie's own bubble carries one. The model never sees a code before the owner sends it. The bubble isn't part of the conversation's history, so it doesn't come back when the webchat reloads: asking the agent again shows it again.
+  The model's text can't show a Confirm button: only Kelpie's own bubble carries one, on Telegram as in the webchat. The model never sees a code before the owner sends it. The bubble isn't part of the conversation's history, so it doesn't come back when the webchat reloads: asking the agent again shows it again.
 - **Links Kelpie sends itself.** `connect_telegram`, `pair_telegram` and `connect_runner` don't give the model their links (#186, ADR-0026):
   - After the agent's reply, Kelpie sends its own bubble with the link. The secure form's link carries the form's one-time token.
   - The bubble names the agent by its id, never by its name, which the model chose. The runner's names no agent.

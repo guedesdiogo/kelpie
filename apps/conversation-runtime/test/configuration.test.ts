@@ -1442,7 +1442,7 @@ describe("the confirmation gate", () => {
     expect(NOTICE.exec(world.sent[1] ?? "")?.[1]).toBe('change the thing to {"to":"smart"}.');
     // In the conversation's language, Portuguese here (#187).
     expect(world.sent[1]).toBe(
-      `Confirme: change the thing to {"to":"smart"}.\nPara seguir, responda só com o código ${codes(world)[0]}. Expira em 10 minutos.`,
+      `Confirme: change the thing to {"to":"smart"}.\nPara seguir, toque em Confirmar, ou responda só com o código ${codes(world)[0]}. Expira em 10 minutos.`,
     );
     // The notice comes last, and it is the bubble that notifies. The reply is formatted (#188);
     // the notice, Kelpie's own text, goes as written.
@@ -1787,7 +1787,7 @@ describe("the conversation's language", () => {
 
   it("follows what the person writes, else their device, else English", async () => {
     expect(await noticeFor("lang-es", "hola, cambia el modelo")).toMatch(
-      /^Confirma: .+\nPara seguir, responde solo con el código [A-Z0-9]{6}\. Expira en 10 minutos\.$/s,
+      /^Confirma: .+\nPara seguir, presiona Confirmar, o responde solo con el código [A-Z0-9]{6}\. Expira en 10 minutos\.$/s,
     );
     expect(await noticeFor("lang-device", "ok", "es-MX")).toMatch(/^Confirma: /);
     expect(await noticeFor("lang-text-first", "quero mudar o modelo", "en-US")).toMatch(
@@ -1798,7 +1798,7 @@ describe("the conversation's language", () => {
       ["lang-none", undefined],
     ] as const) {
       expect(await noticeFor(name, "ok", language)).toMatch(
-        /^Confirm: .+\nTo go ahead, reply with just the code [A-Z0-9]{6}\. It expires in 10 minutes\.$/s,
+        /^Confirm: .+\nTo go ahead, press Confirm, or reply with just the code [A-Z0-9]{6}\. It expires in 10 minutes\.$/s,
       );
     }
   });

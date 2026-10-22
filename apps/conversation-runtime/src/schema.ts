@@ -197,8 +197,16 @@ export const confirmations = sqliteTable(
     expiresAt: integer("expires_at").notNull(),
     /** When a call went ahead on it: a code confirms once. */
     usedAt: integer("used_at"),
+    /**
+     * The random id a channel's Confirm button carries, never a counter (ADR-0026 §4, ADR-0067
+     * §3); null on a confirmation made before buttons existed, which shows none.
+     */
+    buttonId: text("button_id"),
   },
-  (table) => [index("confirmations_request").on(table.userId, table.command, table.input)],
+  (table) => [
+    index("confirmations_request").on(table.userId, table.command, table.input),
+    uniqueIndex("confirmations_button").on(table.buttonId),
+  ],
 );
 
 /** Small conversation-wide values: settings, counters, the destination, the pending flush. */
