@@ -1050,6 +1050,16 @@ describe("MasterAgentFiles (ADR-0067 §1, #494)", () => {
     ).toEqual({ ok: false, reason: "invalid_input" });
   });
 
+  it("refuses a change that isn't one, before the vault", async () => {
+    vaultWith({});
+    for (const changes of [[null], ["soul"], [42]] as unknown as AgentFileChange[][]) {
+      expect(await masterFiles().save(master, "kelpie", changes)).toEqual({
+        ok: false,
+        reason: "invalid_input",
+      });
+    }
+  });
+
   it("refuses an author that is neither the webchat nor an agent", async () => {
     vaultWith({});
     expect(

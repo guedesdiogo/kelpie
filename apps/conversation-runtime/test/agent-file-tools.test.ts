@@ -308,7 +308,7 @@ describe("Master's agent-file tools (ADR-0067 §1, #494)", () => {
     ).toEqual({
       isError: true,
       output:
-        "The vault refused that file (memory_format): nothing was saved. The memory file holds entries joined by a line of just §, with no blank entry, no § line inside one, no front matter and no carriage return.",
+        "The vault refused that file (memory_format): nothing was saved. The memory file holds entries joined by a line of just §, with no blank line around it, no line break at the file's start or end, no blank entry, no § line inside one, no front matter and no carriage return.",
     });
     expect(saves).toHaveLength(2);
   });
@@ -360,6 +360,42 @@ describe("Master's agent-file tools (ADR-0067 §1, #494)", () => {
   });
 });
 
+describe("the edges of a file's write (#494)", () => {
+  it("says when a file is longer than the read shows, shows an empty new file, and names the folder a skill's removal takes", async () => {
+    const { provider, answers } = world();
+    const tools = await toolsOf(provider);
+    answers.files = state({ soul: { content: "x".repeat(8_100), version: SOUL_VERSION } });
+    const long = await run(
+      tools.get("read_agent_file"),
+      { agentId: "sales", file: "soul" },
+      contextOf(true).context,
+    );
+    expect(long.output).toContain(
+      "It is longer than this tool shows, so write_agent_file would drop the rest",
+    );
+    answers.files = state();
+    const empty = contextOf(false);
+    await run(
+      tools.get("write_agent_file"),
+      { agentId: "sales", file: "rules", content: "", version: null },
+      empty.context,
+    );
+    expect(empty.asked[0]?.summary).toBe("create the rules (AGENTS.md) of the agent sales:\n+");
+    for (const [locale, said] of [
+      ["en", "remove the skill quotes of the agent sales, with every file in its folder"],
+      ["pt-BR", "remover a skill quotes do agente sales, com todos os arquivos da pasta dela"],
+    ] as const) {
+      const removing = contextOf(false, owner, { locale });
+      await run(
+        tools.get("write_agent_file"),
+        { agentId: "sales", file: "skill", name: "quotes", content: null, version: "b".repeat(40) },
+        removing.context,
+      );
+      expect(removing.asked[0]?.summary).toBe(said);
+    }
+  });
+});
+
 describe("the notice of a file's change (#494)", () => {
   it("shows the diff on lines of its own, with each line's hidden characters written out", () => {
     const summary = "change the soul (SOUL.md) of the agent sales, line by line:\n- a\n+ b\u202e";
@@ -397,6 +433,14 @@ describe("lineDiff (#494)", () => {
     expect(lineDiff("", "one\ntwo")).toBe("+ one\n+ two");
     expect(lineDiff("one\ntwo", "one\ntwo\nthree")).toBe("  one\n  two\n+ three");
     expect(lineDiff("one\ntwo", "two")).toBe("- one\n  two");
+  });
+
+  it("marks the lines it leaves out before the first change and after the last", () => {
+    const before = Array.from({ length: 20 }, (_, i) => `l${i}`).join("\n");
+    const after = before.replace("l10", "L10");
+    expect(lineDiff(before, after)).toBe(
+      ["…", "  l8", "  l9", "- l10", "+ L10", "  l11", "  l12", "…"].join("\n"),
+    );
   });
 
   it("shows a change too big to compare as the whole old and new text", () => {

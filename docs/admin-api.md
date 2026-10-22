@@ -398,7 +398,7 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
   - from `context-store`, `MasterAgentFiles`, for an agent's own files: their `files` and `save` only.
 - **Confirmation.** A change to an agent's settings (`configure_agent`) waits for the owner's yes, gated in code:
   1. The first call doesn't run. After the agent's reply, Kelpie itself sends one more bubble, written from the change's validated input, not by the model: `Confirm: <the change>`, and a 6-character code. The bubble is in the conversation's language ("Languages").
-     - Invisible and control characters in the change are written out as `\u{…}`, so what the owner reads is all there is.
+     - Invisible and control characters in the change are written out as `\u{…}`, so what the owner reads is all there is. A file's change from `write_agent_file` keeps its line breaks, one diff line each, and writes out every other such character line by line (#494).
      - A change too long for one bubble is refused before it is shown. Make it through this API instead.
   2. The owner says yes, and the agent calls the same tool with the same input again:
      - **In the webchat,** the owner presses the bubble's Confirm button, which replies with the code for them (#186).

@@ -63,7 +63,7 @@ const SPECS = {
   write_agent_file: {
     name: "write_agent_file",
     description:
-      "Write one of an agent's own files in the vault, whole, or remove it with content null. Read it first, and pass the version you read (null for a file that doesn't exist yet): an edit made since is a conflict, never overwritten. It needs the owner's confirmation of the change; secrets in the text are redacted. The memory file holds entries joined by a line of just §, at most 2,200 characters in all, with no front matter. A skill's SKILL.md starts with front matter naming it (name: the skill's name) and saying what it does (description: …).",
+      "Write one of an agent's own files in the vault, whole, or remove it with content null. Read it first, and pass the version you read (null for a file that doesn't exist yet): an edit made since is a conflict, never overwritten. It needs the owner's confirmation of the change; secrets in the text are redacted. The memory file holds entries joined by a line of just §, with no blank line around it and no line break at its start or end, at most 2,200 characters in all, with no front matter. A skill's SKILL.md starts with front matter naming it (name: the skill's name) and saying what it does (description: …).",
     inputSchema: {
       type: "object",
       properties: {
@@ -169,7 +169,7 @@ const FILE_FENCE_NOTE =
 /** What to do about a refusal the vault makes only when it saves (ADR-0058 §2). */
 const ADVICE: Record<string, string> = {
   memory_format:
-    "The memory file holds entries joined by a line of just §, with no blank entry, no § line inside one, no front matter and no carriage return.",
+    "The memory file holds entries joined by a line of just §, with no blank line around it, no line break at the file's start or end, no blank entry, no § line inside one, no front matter and no carriage return.",
   memory_too_long: "The memory file holds at most 2,200 characters: keep its entries short.",
   skill_invalid:
     "A SKILL.md starts with front matter whose name is the skill's name and whose description says what it does.",
@@ -198,11 +198,11 @@ export function lineDiff(before: string, after: string): string {
   // common[i * width + j]: the longest common subsequence of a[i..] and b[j..].
   const width = b.length + 1;
   const common = new Int32Array((a.length + 1) * width);
-  const at = (i: number, j: number) => common[i * width + j] ?? 0;
+  const lcs = (i: number, j: number) => common[i * width + j] ?? 0;
   for (let i = a.length - 1; i >= 0; i--) {
     for (let j = b.length - 1; j >= 0; j--) {
       common[i * width + j] =
-        a[i] === b[j] ? at(i + 1, j + 1) + 1 : Math.max(at(i + 1, j), at(i, j + 1));
+        a[i] === b[j] ? lcs(i + 1, j + 1) + 1 : Math.max(lcs(i + 1, j), lcs(i, j + 1));
     }
   }
   const ops: { kind: " " | "-" | "+"; line: string }[] = [];
@@ -213,7 +213,7 @@ export function lineDiff(before: string, after: string): string {
       ops.push({ kind: " ", line: a[i] ?? "" });
       i++;
       j++;
-    } else if (i < a.length && (j === b.length || at(i + 1, j) >= at(i, j + 1))) {
+    } else if (i < a.length && (j === b.length || lcs(i + 1, j) >= lcs(i, j + 1))) {
       // A line that goes shows before the one that takes its place.
       ops.push({ kind: "-", line: a[i] ?? "" });
       i++;
@@ -222,22 +222,25 @@ export function lineDiff(before: string, after: string): string {
       j++;
     }
   }
-  const near = ops.map((_op, at) =>
+  const near = ops.map((_op, index) =>
     ops
-      .slice(Math.max(0, at - CONTEXT_LINES), at + CONTEXT_LINES + 1)
+      .slice(Math.max(0, index - CONTEXT_LINES), index + CONTEXT_LINES + 1)
       .some((other) => other.kind !== " "),
   );
+  // Left-out lines show as …, before the first change and after the last too, so a change deep in
+  // a file doesn't read as its top.
   const out: string[] = [];
   let skipped = false;
-  ops.forEach((op, at) => {
-    if (!near[at]) {
+  ops.forEach((op, index) => {
+    if (!near[index]) {
       skipped = true;
       return;
     }
-    if (skipped && out.length > 0) out.push("…");
+    if (skipped) out.push("…");
     skipped = false;
     out.push(`${op.kind === " " ? " " : op.kind} ${op.line}`);
   });
+  if (skipped && out.length > 0) out.push("…");
   return out.join("\n");
 }
 
