@@ -1,8 +1,12 @@
 import {
   type Locale,
   type Localized,
+  parseRunnerMessageRequest,
   RUNNER_INVISIBLE,
   RUNNER_LINE_BREAK,
+  RUNNER_MAX_MESSAGE_CHARS,
+  RUNNER_SESSION_ID,
+  type RunnerActOutcome,
   type RunnerRelayFailure,
   type RunnerSessionsContract,
   type RunnerSessionsOutcome,
@@ -13,19 +17,29 @@ import {
 import type { AgentRole } from "@kelpie/config";
 import { bounded, type CheckOutcome } from "./agent-host/session-watch.ts";
 import { runnerStatus } from "./configuration.ts";
-import { TOOL_OUTPUT_MAX_CHARS, type Tool, type ToolOutcome, type ToolProvider } from "./tools.ts";
+import { parseRequestNotice, type SessionRequestNotice } from "./session-requests.ts";
+import {
+  MAX_SUMMARY_CHARS,
+  TOOL_OUTPUT_MAX_CHARS,
+  type Tool,
+  type ToolContext,
+  type ToolOutcome,
+  type ToolProvider,
+  visible,
+} from "./tools.ts";
 
 // Master's view of the Claude Code sessions on the owner's VPS (ADR-0057 §5, #434): the
-// `vps_sessions` tool, and the fixed notice Kelpie sends when one starts waiting on the owner. Both
-// read the runner through channel-egress's RunnerSessions, which only reads. A session's title,
-// repository, branch and excerpt are its own text, untrusted: the tool fences them as data, and
-// marks its result as outside content, so the turn asks the owner before it changes anything
-// (ADR-0064); the notice shows a title and a repository as plain text on one line.
+// `vps_sessions` tool, and the fixed notice Kelpie sends when one starts waiting on the owner. A
+// session's title, repository, branch and excerpt are its own text, untrusted: the tool fences them
+// as data, and marks its result as outside content, so the turn asks the owner before it changes
+// anything (ADR-0064); the notice shows a title and a repository as plain text on one line. Since
+// ADR-0069, Master also sends a session a message, `message_session`, and ends one, `end_session`,
+// through channel-egress's RunnerSessions.
 
 const SPEC = {
   name: "vps_sessions",
   description:
-    "List the Claude Code sessions on the owner's VPS, from its runner: which wait on the owner for a permission or an answer, which are working, which are idle, and which ended or could be archived in the Claude app. Each comes with its age, title, repository and branch, pull request and the excerpt of its last reply. It only reads: Kelpie can't answer, end or archive a session.",
+    "List the Claude Code sessions on the owner's VPS, from its runner: which wait on the owner for a permission or an answer, which are working, which are idle, and which ended or could be archived in the Claude app. Each comes with its id, age, title, repository and branch, pull request and the excerpt of its last reply. It only reads. message_session and end_session act on a session by its id; only the owner answers a session's prompt, on Kelpie's notice or in the Claude app; and only the Claude app archives a session.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
 } satisfies Tool["spec"];
 
@@ -43,6 +57,71 @@ const NOT_TYPED = failed(
   "Kelpie lists the VPS's sessions only in a turn the owner started with a message of their own: their text could steer a turn no person typed. Tell the owner they can ask you for them.",
 );
 
+const SESSION_ID_SCHEMA = {
+  type: "string",
+  pattern: RUNNER_SESSION_ID.source,
+  description: "The session's id, as vps_sessions lists it.",
+};
+
+const MESSAGE_SPEC = {
+  name: "message_session",
+  description:
+    "Send a message to one of the Claude Code sessions on the owner's VPS, by its id from vps_sessions, as the owner asked. It reaches the session's inbox as another Claude session's message, not as the owner's: there it can't approve a prompt or change the session's settings, and the session's own permission prompts still apply. Write it as Kelpie, on the owner's behalf. Only the owner can ask for it, in a message of their own.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      session_id: SESSION_ID_SCHEMA,
+      text: {
+        type: "string",
+        minLength: 1,
+        maxLength: RUNNER_MAX_MESSAGE_CHARS,
+        description: "The message, as the session should read it.",
+      },
+    },
+    required: ["session_id", "text"],
+    additionalProperties: false,
+  },
+} satisfies Tool["spec"];
+
+const END_SPEC = {
+  name: "end_session",
+  description:
+    "End one of the Claude Code sessions on the owner's VPS, by its id from vps_sessions, as the owner asked: its process gets SIGTERM, and Claude Code ends it cleanly. It takes the owner's confirmation. Archiving it stays in the Claude app.",
+  inputSchema: {
+    type: "object",
+    properties: { session_id: SESSION_ID_SCHEMA },
+    required: ["session_id"],
+    additionalProperties: false,
+  },
+} satisfies Tool["spec"];
+
+const NOT_OWNER_TO_ACT = failed("Only the owner can act on the VPS's sessions.");
+const NOT_MASTER_TO_ACT = failed(
+  "This agent isn't Master any more, so it can't act on the VPS's sessions: the owner asks Master.",
+);
+const NOT_TYPED_TO_ACT = failed(
+  "Kelpie acts on the VPS's sessions only in a turn the owner started with a message of their own: their text could steer a turn no person typed. Tell the owner they can ask you.",
+);
+const NO_SUCH_SESSION = failed(
+  "No session on the VPS has that id now, or it is one of Kelpie's own: list them with vps_sessions.",
+);
+const ENDED = failed("That session has ended already: its process is gone.");
+const BAD_INPUT = failed(
+  `Give a session id from vps_sessions, and for a message, text of 1 to ${RUNNER_MAX_MESSAGE_CHARS} characters.`,
+);
+/** What end_session says once Kelpie asked the owner. */
+const WAITING_TO_END =
+  "Not done yet: Kelpie showed the owner which session ends, and how to confirm it. Tell them it waits for their confirmation. Once they confirm, call end_session again with the same input.";
+
+const END_SUMMARY: Localized<(title: string, repository: string | null) => string> = {
+  en: (title, repository) =>
+    `End the Claude Code session ${title}${repository === null ? "" : ` in ${repository}`} on your VPS? Its process gets SIGTERM, and Claude Code ends it cleanly. Archiving it stays in the Claude app.`,
+  "pt-BR": (title, repository) =>
+    `Encerrar a sessão do Claude Code ${title}${repository === null ? "" : ` em ${repository}`} na sua VPS? O processo dela recebe SIGTERM, e o Claude Code a encerra de forma limpa. Arquivá-la continua no app do Claude.`,
+  es: (title, repository) =>
+    `¿Terminar la sesión de Claude Code ${title}${repository === null ? "" : ` en ${repository}`} en tu VPS? Su proceso recibe SIGTERM, y Claude Code la termina limpiamente. Archivarla sigue en la app de Claude.`,
+};
+
 /**
  * Master's tool that lists the VPS's sessions (ADR-0057 §5). Only the agent whose Registry role is
  * `master` gets it, as its configuration tools (ADR-0048); a task's run never does; and only a turn
@@ -50,7 +129,7 @@ const NOT_TYPED = failed(
  * don't change with what started it. Kelpie keeps no copy: each call asks the runner (ADR-0057 §3).
  */
 export function vpsSessionsTools(
-  sessions: Pick<RunnerSessionsContract, "list">,
+  sessions: Pick<RunnerSessionsContract, "list" | "message" | "end">,
   options: {
     roleOf: (agentId: string) => Promise<AgentRole | null>;
     /** The agent's check of the waits, as its AgentHost keeps it (#470); without it, not shown. */
@@ -88,13 +167,147 @@ export function vpsSessionsTools(
       return lines.length === 0 ? result : { ...result, output: `${result.output}\n\n${lines}` };
     },
   };
+  /** Why this turn can't act on a session, or null when it can (ADR-0069 §2 and §3). */
+  const refusedToAct = async (context: ToolContext): Promise<ToolOutcome | null> => {
+    if ((await options.roleOf(context.agentId)) !== "master") return NOT_MASTER_TO_ACT;
+    if (context.actor.role !== "owner") return NOT_OWNER_TO_ACT;
+    return context.trigger === "person" ? null : NOT_TYPED_TO_ACT;
+  };
+  // No effect of its own: after outside content, as after vps_sessions' list, the turn holds it
+  // for the owner's yes (ADR-0064).
+  const message: Tool = {
+    spec: MESSAGE_SPEC,
+    label: {
+      en: "Messaging a VPS session",
+      "pt-BR": "Mandando mensagem a uma sessão da VPS",
+      es: "Enviando un mensaje a una sesión de la VPS",
+    },
+    async run(input, context) {
+      const refused = await refusedToAct(context);
+      if (refused) return refused;
+      const { session_id: id, text } = (input ?? {}) as Record<string, unknown>;
+      if (
+        typeof id !== "string" ||
+        !RUNNER_SESSION_ID.test(id) ||
+        parseRunnerMessageRequest({ text }) === null
+      ) {
+        return BAD_INPUT;
+      }
+      return acted(() => sessions.message(id, text as string), {
+        done: "Kelpie posted the message to the session's inbox. It reads it as another Claude session's message: it can't approve a prompt or change settings there.",
+        what: "send the session the message",
+      });
+    },
+  };
+  const end: Tool = {
+    spec: END_SPEC,
+    label: {
+      en: "Ending a VPS session",
+      "pt-BR": "Encerrando uma sessão da VPS",
+      es: "Terminando una sesión de la VPS",
+    },
+    // Its own yes: the owner confirms which session ends (ADR-0026).
+    effect: "asks",
+    async run(input, context) {
+      const refused = await refusedToAct(context);
+      if (refused) return refused;
+      const { session_id: id } = (input ?? {}) as Record<string, unknown>;
+      if (typeof id !== "string" || !RUNNER_SESSION_ID.test(id)) return BAD_INPUT;
+      let listed: RunnerSessionsOutcome;
+      try {
+        listed = await sessions.list();
+      } catch (error) {
+        console.error("end_session: channel-egress didn't answer", errorName(error));
+        return UNANSWERED_TO_ACT;
+      }
+      if (!listed.ok) return cantAct(listed.reason, "end the session");
+      const session = listed.sessions.find((one) => one.id === id);
+      if (!session) return NO_SUCH_SESSION;
+      if (session.state === "ended") return ENDED;
+      const summary = END_SUMMARY[context.locale](
+        named(session.title) ?? WAIT_NOTICE[context.locale].untitled,
+        named(session.repository),
+      );
+      if (visible(summary).length > MAX_SUMMARY_CHARS) return UNANSWERED_TO_ACT;
+      const confirmed = await context.confirm({
+        command: "endSession",
+        input: { sessionId: id },
+        summary,
+      });
+      if (!confirmed) return { output: WAITING_TO_END };
+      return acted(() => sessions.end(id), {
+        done: "Kelpie sent the session's process SIGTERM: Claude Code ends it. The owner archives it in the Claude app, if they want.",
+        what: "end the session",
+      });
+    },
+  };
   return {
     // A task's conversation has no owner to read them to (#335).
     async tools(agentId, place) {
       if (place?.channel === "task") return [];
-      return (await options.roleOf(agentId)) === "master" ? [tool] : [];
+      return (await options.roleOf(agentId)) === "master" ? [tool, message, end] : [];
     },
   };
+}
+
+const UNANSWERED_TO_ACT = failed(
+  "Kelpie can't act on the VPS's sessions now: a Kelpie service didn't answer. Try again in a moment.",
+);
+
+/** An action's outcome, in words the model can pass on. */
+async function acted(
+  call: () => Promise<RunnerActOutcome>,
+  { done, what }: { done: string; what: string },
+): Promise<ToolOutcome> {
+  let outcome: RunnerActOutcome;
+  try {
+    outcome = await call();
+  } catch (error) {
+    console.error("vps sessions: channel-egress didn't answer an action", errorName(error));
+    return UNANSWERED_TO_ACT;
+  }
+  if (outcome.ok) return { output: done };
+  switch (outcome.reason) {
+    case "not_found":
+      return NO_SUCH_SESSION;
+    case "ended":
+      return ENDED;
+    case "no_inbox":
+      return failed(
+        `Kelpie couldn't ${what}: the session has no inbox Kelpie can post to, as one started before the hook recorded it, or one that doesn't take messages now. The owner can type it in the Claude app.`,
+      );
+    case "not_claude_code":
+      return failed(
+        `Kelpie didn't ${what}: the runner found that the session's process isn't a Claude Code process of the owner's any more, so it sent nothing. List the sessions again with vps_sessions.`,
+      );
+    case "unsupported":
+      return failed(
+        `Kelpie can't ${what}: the runner can't check a process on this server. The owner can do it in the Claude app.`,
+      );
+    case "failed":
+      return failed(`Kelpie couldn't ${what}: it failed on the VPS. Try again in a moment.`);
+    default:
+      return cantAct(outcome.reason, what);
+  }
+}
+
+/** Why the runner couldn't be reached to act, in words the model can pass on. */
+function cantAct(reason: RunnerRelayFailure["reason"], what: string): ToolOutcome {
+  switch (reason) {
+    case "outdated":
+      return failed(
+        `Kelpie can't ${what}: the runner on the VPS answers, but it is too old to act on sessions. The owner should update it on the server (docs/runner.md, "Operating it").`,
+      );
+    case "not_configured":
+    case "not_connected":
+    case "refused":
+    case "unreachable":
+      return failed(`Kelpie can't ${what} now. ${runnerStatus({ state: reason })}`);
+    case "invalid_input":
+      return BAD_INPUT;
+    default:
+      return UNANSWERED_TO_ACT;
+  }
 }
 
 /** Why the runner couldn't list the sessions, in words the model can pass on. */
@@ -429,8 +642,13 @@ const ago = (ms: number) => {
   return age === "less than a minute" ? "less than a minute ago" : `${age} ago`;
 };
 
-/** What a notice says of a wait: what it waits for, and the session's title and repository. */
-export type SessionWaitNotice = Pick<RunnerVpsWait, "kind" | "title" | "repository">;
+/**
+ * What a notice says of a wait: what it waits for, and the session's title and repository; for a
+ * permission whose hook holds its prompt open, that request, for Approve and Deny (ADR-0069 §1).
+ */
+export type SessionWaitNotice = Pick<RunnerVpsWait, "kind" | "title" | "repository"> & {
+  request?: SessionRequestNotice;
+};
 
 /** The most of a title or a repository a notice shows, in characters (ADR-0057 §5). */
 export const NOTICE_NAME_CHARS = 80;
@@ -470,13 +688,16 @@ export function sessionWaitNotice(wait: SessionWaitNotice, locale: Locale): stri
 /** A notice's input, as a conversation takes it across RPC; null for anything else. */
 export function parseSessionWait(value: unknown): SessionWaitNotice | null {
   if (typeof value !== "object" || value === null) return null;
-  const { kind, title, repository } = value as Record<string, unknown>;
+  const { kind, title, repository, request } = value as Record<string, unknown>;
   const field = (text: unknown): text is string | null =>
     text === null || (typeof text === "string" && text.length <= MAX_NOTICE_FIELD_CHARS);
   if ((kind !== "permission" && kind !== "question") || !field(title) || !field(repository)) {
     return null;
   }
-  return { kind, title, repository };
+  if (request === undefined) return { kind, title, repository };
+  // Only a permission's prompt takes a verdict: a question is answered where it shows.
+  const checked = kind === "permission" ? parseRequestNotice(request) : null;
+  return checked === null ? null : { kind, title, repository, request: checked };
 }
 
 const BREAKS = new RegExp(RUNNER_LINE_BREAK.source, "g");

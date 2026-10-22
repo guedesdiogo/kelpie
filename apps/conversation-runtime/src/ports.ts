@@ -84,9 +84,10 @@ export interface ConversationPorts {
    * link in the bubble the channel may preview (#130); without it, none is. `links` makes the
    * bubble a formatted reply that may link those URLs (#188); without it, the text goes as typed.
    * `confirmation` makes it a confirmation's notice with a Confirm button, where the channel has
-   * one (#186): the webchat; channel-egress never gets it. `failure` marks the notice of a turn
-   * no route answered, which the webchat's mascot shows as an error (ADR-0045 §6); channel-egress
-   * never gets it either.
+   * one (#186): the webchat; channel-egress never gets it. `sessionRequest` makes it a VPS
+   * session's prompt with Approve and Deny, by the key they send (#497): the webchat's too.
+   * `failure` marks the notice of a turn no route answered, which the webchat's mascot shows as an
+   * error (ADR-0045 §6); channel-egress never gets it either.
    */
   send(
     agentId: string,
@@ -97,6 +98,7 @@ export interface ConversationPorts {
       previewUrl?: string;
       links?: readonly string[];
       confirmation?: number;
+      sessionRequest?: { id: string; until: number };
       failure?: true;
     },
   ): Promise<SendOutcome>;
@@ -422,8 +424,12 @@ function productionPorts(env: Env): ConversationPorts {
       withTimeout(agentHost(agentId).awaitSetup(conversation, step, until), AWAIT_SETUP_TIMEOUT_MS),
     // A Confirm button and a failure's mark are the webchat's alone (#186, ADR-0045):
     // channel-egress takes only what it sends.
-    send: (agentId, destination, text, { confirmation: _button, failure: _failure, ...options }) =>
-      egress.send(agentId, destination, text, options),
+    send: (
+      agentId,
+      destination,
+      text,
+      { confirmation: _button, sessionRequest: _request, failure: _failure, ...options },
+    ) => egress.send(agentId, destination, text, options),
     remember: (agentId, changes, summary) =>
       withTimeout(contextStore.write(agentId, changes, summary), REMEMBER_TIMEOUT_MS),
     recall: (agentId, question, options) =>

@@ -609,16 +609,12 @@ describe("a message to a session", () => {
 });
 
 describe("parseRunnerActAnswer", () => {
-  it.each([
-    "not_found",
-    "ended",
-    "no_inbox",
-    "not_claude_code",
-    "unsupported",
-    "failed",
-  ])("takes the refusal %s", (reason) => {
-    expect(parseRunnerActAnswer({ ok: false, reason })).toEqual({ ok: false, reason });
-  });
+  it.each(["not_found", "ended", "no_inbox", "not_claude_code", "unsupported", "failed"])(
+    "takes the refusal %s",
+    (reason) => {
+      expect(parseRunnerActAnswer({ ok: false, reason })).toEqual({ ok: false, reason });
+    },
+  );
 
   it("takes a success, and nothing else", () => {
     expect(parseRunnerActAnswer({ ok: true })).toEqual({ ok: true });

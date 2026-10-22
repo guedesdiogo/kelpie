@@ -1,6 +1,12 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import type { RunnerVpsSession, RunnerVpsWait, RunnerWaitsOutcome } from "@kelpie/channels";
+import type {
+  RunnerRequestsOutcome,
+  RunnerVpsRequest,
+  RunnerVpsSession,
+  RunnerVpsWait,
+  RunnerWaitsOutcome,
+} from "@kelpie/channels";
 import { WEBCHAT_ADMISSION_HEADER } from "@kelpie/conversation/contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -62,10 +68,18 @@ const ok = (waits: RunnerVpsWait[], now = NOW): RunnerWaitsOutcome => ({
  */
 function fakeIO(
   answers: (RunnerWaitsOutcome | Error)[],
-  { master = true as boolean | Error, tells = true } = {},
+  {
+    master = true as boolean | Error,
+    tells = true,
+    requests = { ok: true, now: NOW, requests: [], truncated: false } as
+      | RunnerRequestsOutcome
+      | Error,
+  } = {},
 ) {
   const asked: number[] = [];
   const told: RunnerVpsWait[] = [];
+  const carried: (RunnerVpsRequest | null)[] = [];
+  let requestReads = 0;
   const kept: SessionWatch[] = [];
   const reports: Parameters<WatchIO["checked"]>[0][] = [];
   const io: WatchIO & { master: boolean | Error; tells: boolean } = {
@@ -81,9 +95,15 @@ function fakeIO(
       if (next instanceof Error) throw next;
       return next;
     },
-    async tell(one) {
+    async requests() {
+      requestReads += 1;
+      if (requests instanceof Error) throw requests;
+      return requests;
+    },
+    async tell(one, request) {
       if (!io.tells) return false;
       told.push(one);
+      carried.push(request);
       return true;
     },
     keep(watch) {
@@ -93,7 +113,7 @@ function fakeIO(
       reports.push(report);
     },
   };
-  return { io, asked, told, kept, reports };
+  return { io, asked, told, kept, reports, carried, reads: () => requestReads };
 }
 
 /** Runs `checkWaits` once for each clock, from `watch`, and gives the last watch. */
@@ -202,9 +222,9 @@ describe("the check of the VPS's waits", () => {
     const { io, told, kept } = fakeIO([ok([first, second]), ok([first, second])]);
     const tell = io.tell;
     // The object goes away while it tells the second wait.
-    io.tell = async (one) => {
+    io.tell = async (one, request) => {
       if (one === second) throw new Error("evicted");
-      return tell(one);
+      return tell(one, request);
     };
     await expect(checkWaits(NEW_WATCH, io, CLOCK)).rejects.toThrow("evicted");
     const saved = kept.at(-1) ?? NEW_WATCH;
@@ -326,6 +346,56 @@ describe("the check of the VPS's waits", () => {
     expect(shouldArm(stopped("not_master"), CLOCK)).toBe(true);
     expect(shouldArm(stopped("outdated"), CLOCK + OUTDATED_PAUSE_MS - 1)).toBe(false);
     expect(shouldArm(stopped("outdated"), CLOCK + OUTDATED_PAUSE_MS)).toBe(true);
+  });
+});
+
+describe("a permission wait's request (ADR-0069 §1)", () => {
+  const REQUEST = "eeeeeeee-0000-4000-8000-00000000000e";
+  const request = (sessionId: string, openedAt: number): RunnerVpsRequest => ({
+    id: REQUEST,
+    sessionId,
+    tool: "Bash",
+    input: "command: rm -rf build",
+    openedAt,
+    title: "Fix the login flow",
+    repository: "kelpie",
+  });
+  const listing = (requests: RunnerVpsRequest[]): RunnerRequestsOutcome => ({
+    ok: true,
+    now: NOW,
+    requests,
+    truncated: false,
+  });
+
+  it("goes with its notice: its session's, opened with it, read once a check", async () => {
+    const opened = NOW - 2 * MINUTE;
+    const waits = [wait(A, opened), wait(B, opened + 1_000)];
+    const { io, carried, reads } = fakeIO([ok(waits)], {
+      requests: listing([request(A, opened + 5_000), request(B, opened - 3 * MINUTE)]),
+    });
+    await checks(io, [CLOCK]);
+    expect(carried).toEqual([request(A, opened + 5_000), null]);
+    expect(reads()).toBe(1);
+  });
+
+  it("isn't read for a question, which only its prompt answers", async () => {
+    const { io, carried, reads } = fakeIO([ok([wait(A, NOW, { kind: "question" })])], {
+      requests: listing([request(A, NOW)]),
+    });
+    await checks(io, [CLOCK]);
+    expect(carried).toEqual([null]);
+    expect(reads()).toBe(0);
+  });
+
+  it.each([
+    ["a runner too old to list them", { ok: false, reason: "outdated" } as RunnerRequestsOutcome],
+    ["a channel-egress that can't be reached", new Error("down")],
+  ])("leaves the notice without one for %s", async (_, requests) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { io, told, carried } = fakeIO([ok([wait(A, NOW)])], { requests });
+    await checks(io, [CLOCK]);
+    expect(told).toHaveLength(1);
+    expect(carried).toEqual([null]);
   });
 });
 

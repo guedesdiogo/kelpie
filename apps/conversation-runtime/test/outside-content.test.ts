@@ -774,6 +774,9 @@ describe("the production tools (#454)", () => {
     get_models: "reads",
     runner_status: "reads",
     vps_sessions: "reads",
+    // A message to a VPS session is held after outside content; an end asks the owner itself.
+    message_session: undefined,
+    end_session: "asks",
     create_agent: undefined,
     rename_agent: undefined,
     configure_agent: "asks",
@@ -841,6 +844,7 @@ describe("the production tools (#454)", () => {
       "delete_subagent",
       "edit_task",
       "memory_write",
+      "message_session",
       "move_task",
       "open_proposal",
       "pair_telegram",

@@ -9,16 +9,21 @@ The runner is the process on the owner's VPS that Kelpie's Workers call to use t
   - `GET /health`, which answers its version and protocol version:
 
     ```json
-    { "ok": true, "version": "0.3.0", "protocol": 3 }
+    { "ok": true, "version": "0.4.0", "protocol": 4 }
     ```
 
   - the `claude-code` route's sessions (ADR-0037 §2, #295), described below:
     - `POST /sessions/:id/turns` runs a turn and streams its frames as NDJSON;
     - `POST /sessions/:id/tool-results` answers a tool call the turn asked for;
     - `DELETE /sessions/:id` closes a session.
-  - every other Claude Code session on the server, read only (ADR-0057, #433), described in "The server's Claude Code sessions" below:
+  - every other Claude Code session on the server (ADR-0057, #433), described in "The server's Claude Code sessions" below:
     - `GET /sessions` lists them;
     - `GET /sessions/waits?since=<epoch ms>` lists the waits on the owner opened since then and still open.
+  - acting on those sessions (ADR-0069, #497), described in "Acting on them" below. A refusal answers 409 with its reason:
+    - `GET /sessions/requests` lists the permission prompts the permission hook holds open for Kelpie's verdict;
+    - `POST /sessions/requests/:id`, with `{ "verdict": "allow" }` or `"deny"`, gives one its verdict;
+    - `POST /sessions/:id/message`, with `{ "text": "…" }`, posts a message to a session's inbox;
+    - `POST /sessions/:id/end` ends a session with `SIGTERM`.
 
 ## Claude Code sessions
 
@@ -53,7 +58,7 @@ The `claude-code` route reaches Claude through the runner ([ADR-0037](adr/0037-c
 
 ## The server's Claude Code sessions
 
-The runner tells Kelpie what every Claude Code session on the server is doing: the owner's, from the Claude app or a terminal, and Kelpie Code's once it exists ([ADR-0057](adr/0057-vps-claude-code-sessions.md)). It only reads: it never sends a session input, answers its prompts, or ends or archives it.
+The runner tells Kelpie what every Claude Code session on the server is doing: the owner's, from the Claude app or a terminal, and Kelpie Code's once it exists ([ADR-0057](adr/0057-vps-claude-code-sessions.md)). Since [ADR-0069](adr/0069-master-acts-on-vps-sessions.md) it also acts on them, at the owner's word ("Acting on them", below): it gives a permission prompt the owner's verdict, sends a session a message, and ends a session. It never archives one: only the Claude app does.
 
 - **Two sources:**
   - **The session files** Claude Code keeps in `~/.claude/sessions/`, one per running session: its id, its folder, its title (`name`), its `status` and when that changed, when it started, what started it (`entrypoint`), and its process, checked with signal 0. Their fields aren't documented: a field that is missing, or holds a value the runner doesn't know, reads as unknown, never as an error.
@@ -94,20 +99,56 @@ The runner tells Kelpie what every Claude Code session on the server is doing: t
   - `events.ndjson`, one line per event: its name, a notification's type or a `SessionEnd`'s reason, the session's id, whether a permission request is `AskUserQuestion`'s, the subagent it came from, and the time. The subagent is its `agent_id` when that is a short token, up to 64 letters, digits, `_`, `-`, `.` or `@`, and `null` for any other id, never its text; the main thread's lines have none. Never a prompt, a tool's input or output, or a path. At 512 KiB it becomes `events.1.ndjson`, replacing the older one, so the spool keeps at most 1 MiB;
   - `excerpt-<session id>.json`, each session's last reply, redacted and cut to 1,000 characters at a word. It is deleted when its session ends, when its session file is gone, or after 7 days. A file the runner can't delete is logged once, and never stops an answer;
   - a session id is checked as a UUID before it names a file.
-- **Who calls these routes:** `channel-egress`'s read-only `RunnerSessions` entrypoint, with its calls `list()` and `waits(since)`, which only `conversation-runtime` binds, for Master's tool and the notices below.
+- **Who calls these routes:** `channel-egress`'s `RunnerSessions` entrypoint, with its calls `list()` and `waits(since)`, which only `conversation-runtime` binds, for Master's tool and the notices below.
+
+### Acting on them
+
+At your word, through Master ([ADR-0069](adr/0069-master-acts-on-vps-sessions.md), #497). It takes both hooks installed (below).
+
+- **A permission prompt waits for your answer in two places:** in the Claude app or the terminal, as always, and on Kelpie's notice ("How you see them").
+  - **The permission hook,** `tools/runner/hooks/permission-request.ts`, runs synchronously on each `PermissionRequest` of a session you opened: the app's (`entrypoint` `claude-desktop`) or a terminal's (`cli`). It writes the request to the spool, with a random id, the tool, and its input, redacted. Then it waits for a verdict file that only the runner writes.
+  - **The first answer wins.** Claude Code shows its prompt while the hook waits (checked on #497).
+    - When you answer there, the session goes on at once, and the hook ends with no decision: its session's file no longer says `waiting`, or turns `idle`.
+    - When Kelpie's verdict comes first, the hook returns it, and Claude Code closes the prompt it shows.
+  - **It never stands in a session's way.** It always exits 0, and any doubt returns no decision, which leaves the prompt as it was. Doubt covers input it can't read, a question (`AskUserQuestion`, which only its prompt answers), and a session file it can't find under its parent process. It also covers a session it doesn't wait in: a `-p` run (`sdk-cli`) has no prompt to show, and Claude Code waits for its hooks there, so the hook returns at once. It waits 9.5 minutes at most, inside its 10-minute `timeout`.
+  - **A verdict counts once,** and only while its request is open. Open means its hook runs, before its deadline; no verdict was given; and its session's wait for that thread hasn't closed.
+    - `POST /sessions/requests/:id` answers `{ "ok": true, "applied": true }` once the hook took the verdict, within 3 seconds.
+    - A verdict the hook didn't take by then is taken back (`"applied": false`), so it can't apply unseen. Anything else answers `409` `closed`.
+  - **The tool's input leaves the server redacted twice,** as an excerpt does (above), by the same rules (ADR-0069 §4).
+    - The hook redacts its first 16 KiB and keeps 1,000 characters.
+    - The runner redacts it again, its own secret by value too, puts it on one line and cuts it to 500 characters.
+    - Each field of the input shows on its own line, a text as it is, so a file's lines stay lines the redaction reads.
+- **A message to a session** goes to its inbox, the Unix socket Claude Code binds for each session ([cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging)). The session reads it as another Claude session's message: there it can't approve a prompt or change the session's settings (checked on #497).
+  - The session-event hook's `SessionStart` records the socket's path, from `CLAUDE_CODE_MESSAGING_SOCKET`. The runner posts only to a socket of its own user's, in a directory no one else may open, and recorded after the session's process started.
+  - A session in `bypassPermissions` holds such a message for an approval the app can't show, and drops it after 5 minutes (checked on #497). The app's sessions on the VPS run in `auto` or `acceptEdits`, which take it.
+  - It answers `409` with a reason: `no_inbox` with no socket to post to, `ended` once the session's process is gone, `not_found` for an id no session has, or one of the `claude-code` route's.
+- **Ending a session** sends its process `SIGTERM`, and Claude Code ends it cleanly, its `SessionEnd` hooks first (checked on #497). Archiving it stays in the Claude app.
+  - First the runner checks the pid the session file names. It must be a process of the runner's user, started when the file's `procStart` says, and run a binary from Claude Code's folders: `~/.claude/remote/ccd-cli/`, the app's, or `~/.local/share/claude/versions/`, the native installer's.
+  - Anything else answers `409` `not_claude_code`, and off Linux `unsupported`.
+- **The spool's other files:**
+  - `request-<id>.json`: an open request. Its hook deletes it when it ends; the runner deletes one whose hook is gone;
+  - `verdict-<id>.json`: the runner's verdict, written once. Only its taker removes it: the hook, or the runner taking it back;
+  - `socket-<session id>.json`: a session's inbox path, deleted when the session ends.
+- **Who calls these routes:** `channel-egress`'s `RunnerSessions`, with `requests()`, `verdict(id, verdict)`, `message(id, text)` and `end(id)`. A runner below protocol 4 answers them as `outdated`.
 
 ### How you see them
 
 - **Ask Master** what is running on the VPS: its `vps_sessions` tool lists the sessions, grouped as waiting on you, working, idle, could be archived and ended, each with its age, title, repository and branch, pull request and the excerpt of its last reply. Only you can ask, in a message of your own to Master; a task's run never gets the tool. Once Master has read them, it asks you before it changes anything, in that turn and for 10 minutes after (`docs/admin-api.md`, "Outside content"). Archive a session in the Claude app: Kelpie can't (`docs/admin-api.md`, "The VPS's Claude Code sessions").
-- **A notice when a session waits on you.** Within about a minute of a session asking for your permission or an answer, Kelpie sends you one fixed message on Telegram, or in the webchat while it is open, naming the session's title and repository and what it waits for. Answer it where the session runs, in the Claude app or its terminal: the notice confirms nothing, and Kelpie never answers for you. A session idle after its reply, or ended, gets no notice.
-  - **The title and repository leave the server with it,** to your channel: on Telegram they pass through Telegram's servers, stay in the chat, and can show on your phone's lock screen.
+- **Ask Master to act on one:** `message_session` sends it a message, and `end_session` ends it, once you confirm which one. Only you can ask, in a message of your own.
+- **A notice when a session waits on you.** Within about a minute of a session asking for your permission or an answer, Kelpie sends you one fixed message on Telegram, or in the webchat while it is open, naming the session's title and repository and what it waits for. Answer it where the session runs, in the Claude app or its terminal. A session idle after its reply, or ended, gets no notice.
+  - **A permission prompt the permission hook holds open** gets more on its notice: the tool and its input, and a way to answer it there. In the webchat, that is **Approve** and **Deny**; on Telegram, a code for each, which you send back as your whole reply.
+  - **Your press, or your code, is the answer** ([ADR-0026](adr/0026-confirmation-by-owner-act.md)). Kelpie sends it to the runner as it is, and replies with what came of it. Master never reads the code and never answers for you, and nor does a session's text.
+  - **They count for 10 minutes, and once.** A code the runner wasn't reached for stays open, so you can send it again. The first answer wins: one you gave in the Claude app first leaves the notice's answer `closed`.
+  - **The title and repository leave the server with it,** to your channel, and so do a permission's tool and its input: on Telegram they pass through Telegram's servers, stay in the chat, and can show on your phone's lock screen.
   - **Waits already open are told too,** up to a day old, the first time Kelpie reads the runner's waits, as once the runner is connected or updated.
   - The waits come from the session files without the hook, and from the hook once you install it (below), which also catches a prompt the file doesn't show.
   - Kelpie checks once a minute while the runner is connected, from Master's next turn on. It stops while the runner isn't connected, and, after three answers that the runner is outdated, for an hour at least: a runner below protocol 3 lists no sessions, so update it ("Operating it").
 
-### Installing the session-event hook
+### Installing the hooks
 
-The hook is `tools/runner/hooks/session-event.ts`, run with Bun from the runner's checkout. It reads the event from its input, writes the spool, and always exits 0, within 1.5 seconds even when its input never ends: Claude Code doesn't time out a hook that runs in the background. It never uses the network, and holds no secret. It takes about 25 ms and 26 MB per event, on every tool call, since `PostToolUse` is one of its events.
+There are two, both run with Bun from the runner's checkout. Neither uses the network or holds a secret, and both always exit 0:
+- **The session-event hook,** `tools/runner/hooks/session-event.ts`, runs in the background on every event the runner reads, and on `SessionStart`, where it records the session's inbox. It reads the event from its input and writes the spool, within 1.5 seconds even when its input never ends: Claude Code doesn't time out a hook that runs in the background. It takes about 25 ms and 26 MB per event, on every tool call, since `PostToolUse` is one of its events.
+- **The permission hook,** `tools/runner/hooks/permission-request.ts`, runs on each `PermissionRequest`, and Claude Code waits for it only where no prompt shows ("Acting on them", above). It takes about 26 MB while a prompt is open, for 9.5 minutes at most.
 
 Running sessions pick up an edit to `settings.json` without a restart (#416). On the server, as the runner's user, with the runner's checkout in `~/Repos/kelpie` and `jq` installed:
 
@@ -118,13 +159,16 @@ if [ -z "$f" ] || [ ! -f "$f" ]; then
 else
   [ -e "$f.bak" ] || cp -p "$f" "$f.bak"
   hook='{"type":"command","command":"cd \"$HOME/Repos/kelpie/tools/runner\" && exec \"$HOME/.bun/bin/bun\" --no-env-file --config=hooks/bunfig.toml hooks/session-event.ts","async":true,"timeout":2}'
-  if cp -p "$f" "$f.new" && jq --argjson hook "$hook" '
+  permission='{"type":"command","command":"cd \"$HOME/Repos/kelpie/tools/runner\" && exec \"$HOME/.bun/bin/bun\" --no-env-file --config=hooks/bunfig.toml hooks/permission-request.ts","timeout":600}'
+  if cp -p "$f" "$f.new" && jq --argjson hook "$hook" --argjson permission "$permission" '
   def ours: any((.hooks // [])[]; (.command // "") | tostring
-    | contains("kelpie/tools/runner") and contains("hooks/session-event.ts"));
-  reduce ("Notification", "PermissionRequest", "PermissionDenied", "PostToolUse",
+    | contains("kelpie/tools/runner")
+      and (contains("hooks/session-event.ts") or contains("hooks/permission-request.ts")));
+  reduce ("SessionStart", "Notification", "PermissionRequest", "PermissionDenied", "PostToolUse",
           "PostToolUseFailure", "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd") as $event
     (.; .hooks = (.hooks // {})
       | .hooks[$event] = (((.hooks[$event] // []) | map(select(ours | not))) + [{ hooks: [$hook] }]))
+  | .hooks.PermissionRequest += [{ hooks: [$permission] }]
   ' "$f" > "$f.new" && jq -e . "$f.new" > /dev/null; then
     mv "$f.new" "$f"
   else
@@ -135,8 +179,8 @@ fi
 ```
 
 - **It keeps the file safe:** it follows `settings.json` to the real file when it is a symlink, so the link stays. It backs that file up to `settings.json.bak` unless a backup is already there, writes the result beside it with the same mode, checks that it is JSON, and only then moves it over. A `settings.json` that isn't JSON, or a link that leads to no file, stays as it was, and the command says `settings.json unchanged`.
-- **It adds one group per event,** beside the hooks already there, and replaces its own on a second run: any hook whose command names `kelpie/tools/runner` and `hooks/session-event.ts`.
-- **The command moves to the runner's checkout first.** Claude Code runs a hook from the session's folder, and Bun would load that folder's `bunfig.toml`, its `preload` included, and its `.env`: a repository could then run code as you on its first event. So the hook runs from `~/Repos/kelpie/tools/runner`, with the empty `hooks/bunfig.toml` as its settings and no `.env`. Claude Code runs the command through `sh`, which expands `$HOME`.
+- **It adds one group per event,** beside the hooks already there, and a second group under `PermissionRequest`, for the permission hook. A second run replaces its own: any hook whose command names `kelpie/tools/runner` and one of the two hooks. So running it again updates a session-event hook installed before #497.
+- **The command moves to the runner's checkout first.** Claude Code runs a hook from the session's folder, and Bun would load that folder's `bunfig.toml`, its `preload` included, and its `.env`: a repository could then run code as you on its first event. So each hook runs from `~/Repos/kelpie/tools/runner`, with the empty `hooks/bunfig.toml` as its settings and no `.env`. Claude Code runs the command through `sh`, which expands `$HOME`.
 
 Each event gets this entry:
 
@@ -159,9 +203,19 @@ Each event gets this entry:
 }
 ```
 
-The same goes under `PermissionRequest`, `PermissionDenied`, `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit`, `Stop`, `StopFailure` and `SessionEnd`. Updating the runner's checkout updates the hook too. The runner's tests run both snippets on made-up settings (`tools/runner/test/docs.test.ts`).
+The same goes under `SessionStart`, `PermissionRequest`, `PermissionDenied`, `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit`, `Stop`, `StopFailure` and `SessionEnd`. `PermissionRequest` also gets the permission hook, synchronous, with Claude Code's default `timeout` of 600 seconds:
 
-**Removing it** turns the hooks' waits, the endings it reports and the excerpts off. The list still shows each session's busy or idle state, and the waits its session file says. It leaves every other hook as it was, with the same care:
+```json
+{
+  "type": "command",
+  "command": "cd \"$HOME/Repos/kelpie/tools/runner\" && exec \"$HOME/.bun/bin/bun\" --no-env-file --config=hooks/bunfig.toml hooks/permission-request.ts",
+  "timeout": 600
+}
+```
+
+Updating the runner's checkout updates the hooks too. The runner's tests run the snippets on made-up settings (`tools/runner/test/docs.test.ts`).
+
+**Removing only the permission hook** goes back to ADR-0057's behavior: Kelpie still lists the sessions and tells you of their waits, but its notices can't answer a prompt. It leaves every other hook as it was, with the same care:
 
 ```bash
 f=$(readlink -f ~/.claude/settings.json)
@@ -171,7 +225,38 @@ else
   [ -e "$f.bak" ] || cp -p "$f" "$f.bak"
   if cp -p "$f" "$f.new" && jq '
   def ours: (.command // "") | tostring
-    | contains("kelpie/tools/runner") and contains("hooks/session-event.ts");
+    | contains("kelpie/tools/runner") and contains("hooks/permission-request.ts");
+  def mine: any((.hooks // [])[]; ours);
+  . as $before
+  | if (.hooks | type) != "object" then . else
+      reduce (.hooks | keys[]) as $event (.;
+        if (.hooks[$event] | type) == "array" and any(.hooks[$event][]; mine) then
+          .hooks[$event] |= map(if mine then (.hooks |= map(select(ours | not))) | select(.hooks != []) else . end)
+          | if .hooks[$event] == [] then del(.hooks[$event]) else . end
+        else . end)
+      | if .hooks == {} and $before.hooks != {} then del(.hooks) else . end
+    end
+  ' "$f" > "$f.new" && jq -e . "$f.new" > /dev/null; then
+    mv "$f.new" "$f"
+  else
+    rm -f "$f.new"
+    echo "settings.json unchanged"
+  fi
+fi
+```
+
+**Removing both** turns the hooks' waits, the endings they report, the excerpts, the inboxes and the prompts' answers off. The list still shows each session's busy or idle state, and the waits its session file says. It leaves every other hook as it was, with the same care:
+
+```bash
+f=$(readlink -f ~/.claude/settings.json)
+if [ -z "$f" ] || [ ! -f "$f" ]; then
+  echo "settings.json unchanged: ~/.claude/settings.json doesn't lead to a file"
+else
+  [ -e "$f.bak" ] || cp -p "$f" "$f.bak"
+  if cp -p "$f" "$f.new" && jq '
+  def ours: (.command // "") | tostring
+    | contains("kelpie/tools/runner")
+      and (contains("hooks/session-event.ts") or contains("hooks/permission-request.ts"));
   def mine: any((.hooks // [])[]; ours);
   . as $before
   | if (.hooks | type) != "object" then . else

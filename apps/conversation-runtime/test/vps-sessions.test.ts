@@ -129,7 +129,7 @@ const answer = (sessions: RunnerVpsSession[], truncated = false): RunnerVpsSessi
   truncated,
 });
 
-/** A RunnerSessions whose `list()` answers `outcome`, counting its calls. */
+/** A RunnerSessions whose `list()` answers `outcome`, counting its calls; it acts on nothing. */
 function fakeSessions(outcome: RunnerSessionsOutcome | (() => Promise<RunnerSessionsOutcome>)) {
   const calls = { list: 0 };
   return {
@@ -139,6 +139,8 @@ function fakeSessions(outcome: RunnerSessionsOutcome | (() => Promise<RunnerSess
         calls.list += 1;
         return typeof outcome === "function" ? outcome() : outcome;
       },
+      message: async () => ({ ok: false, reason: "not_found" }) as const,
+      end: async () => ({ ok: false, reason: "not_found" }) as const,
     },
   };
 }
@@ -204,7 +206,11 @@ describe("Master's vps_sessions tool (ADR-0057 §5)", () => {
     // A task's run has no owner to read the sessions to (ADR-0048, #335).
     expect(await provider.tools(MASTER, { channel: "task" })).toEqual([]);
     const tools = await provider.tools(MASTER, { channel: "telegram" });
-    expect(tools.map((tool) => tool.spec.name)).toEqual(["vps_sessions"]);
+    expect(tools.map((tool) => tool.spec.name)).toEqual([
+      "vps_sessions",
+      "message_session",
+      "end_session",
+    ]);
     const [tool] = tools;
     expect(Object.keys(tool?.label ?? {})).toEqual(["en", "pt-BR", "es"]);
     for (const label of Object.values(tool?.label ?? {})) expect(label).toMatch(/^[A-Z][a-z]/);

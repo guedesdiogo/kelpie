@@ -12,6 +12,7 @@ import {
   localeOf,
   MAX_LANGUAGE_CHARS,
   RUNNER_SESSION_ID,
+  type RunnerVerdict,
   type SendOutcome,
   webLinks,
 } from "@kelpie/channels";
@@ -96,6 +97,7 @@ import {
 } from "drizzle-orm";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
+import { bounded as boundedBy } from "./agent-host/session-watch.ts";
 import {
   type Announcement,
   announcementNotice,
@@ -119,6 +121,16 @@ import { proposalBubble, proposalNote } from "./proposal-notices.ts";
 import { readRole } from "./registry/schema.ts";
 import { failureNotice, routeNotice } from "./route-notices.ts";
 import * as schema from "./schema.ts";
+import {
+  answeredByCode,
+  keepRequest,
+  type OpenSessionRequest,
+  requestLines,
+  runnerVerdictsOf,
+  type VerdictStatus,
+  verdictReply,
+  verdictStatus,
+} from "./session-requests.ts";
 import { SUBAGENT_TOOLS } from "./subagent-limits.ts";
 import {
   CONFIRMATION_MS,
@@ -365,6 +377,11 @@ const TOOLS_LIST_TIMEOUT_MS = 5_000;
 const MAX_SEND_ATTEMPTS = 3;
 /** A rate limit asking for a longer wait than this fails the turn instead of stalling it. */
 const MAX_RATE_LIMIT_WAIT_MS = 30_000;
+/**
+ * How long the owner's verdict on a VPS session's prompt may take: channel-egress gives the runner
+ * 10 s, and the runner waits up to 3 s for the session's hook to take it.
+ */
+const VERDICT_TIMEOUT_MS = 15_000;
 
 interface TurnInFlight {
   controller: AbortController;
@@ -538,11 +555,19 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     // A pause or a press names its agent: a confirmation's id is its own conversation's counter.
     // A presence socket must name it; on the conversation's own, a page from before ADR-0052
     // names none, and then the id is read against this conversation alone.
-    if (frame.type === "confirm" || frame.type === "pause") {
+    if (frame.type === "confirm" || frame.type === "pause" || frame.type === "verdict") {
       const named = frame.agent ?? (admission.view === "presence" ? null : admission.agentId);
       if (named !== admission.agentId) {
         if (frame.type === "confirm") {
           send(connection, { type: "confirmation", id: frame.id, status: "refused" });
+        }
+        if (frame.type === "verdict") {
+          send(connection, {
+            type: "verdict",
+            id: frame.id,
+            verdict: frame.verdict,
+            status: "closed",
+          });
         }
         return;
       }
@@ -560,11 +585,18 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     }
     // Ingress admitted the socket when it opened. An agent whose chat was turned off since then
     // takes nothing more from it (#288): the socket closes, and a new one isn't admitted.
-    if (frame.type === "message" || frame.type === "confirm") {
+    if (frame.type === "message" || frame.type === "confirm" || frame.type === "verdict") {
       if (await this.#chatOff(admission.agentId)) {
         connection.close(1008, "chat off");
         return;
       }
+    }
+    if (frame.type === "verdict") {
+      // The owner's press on a VPS session's prompt (ADR-0069 §1): their own socket's only.
+      const status =
+        admission.role === "owner" ? await this.#answerRequest(frame.id, frame.verdict) : "closed";
+      send(connection, { type: "verdict", id: frame.id, verdict: frame.verdict, status });
+      return;
     }
     if (frame.type === "confirm") {
       send(connection, {
@@ -652,6 +684,18 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     capabilitiesFor(message.destination.channel);
     const mismatch = this.#bind(message);
     if (mismatch) return { status: "rejected", reason: mismatch };
+    // The owner's code for a VPS session's prompt is their answer to it, not a message for the
+    // model (ADR-0069 §1): it goes to the runner as it is, and Kelpie's fixed reply says what came
+    // of it.
+    const code =
+      roleOf(message.role) === "owner"
+        ? answeredByCode(this.#get<OpenSessionRequest[]>("sessionRequests", []), text)
+        : null;
+    if (code) {
+      const status = await this.#answerRequest(code.request.key, code.verdict);
+      await this.#tellVerdict(message.agentId, message.destination, status, code.verdict);
+      return { status: "accepted", flushAt: this.#get<number | null>("flushAt", null) };
+    }
 
     const inserted = this.#db
       .insert(schema.inbound)
@@ -807,14 +851,80 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (destination.channel === "task") return "task";
     if (destination.channel === "webchat" && !this.#pageOpen()) return "page_closed";
     try {
-      const text = sessionWaitNotice(notice, this.#locale());
-      const sent = await this.#channel.send(agentId, destination, text, { silent: false });
+      const locale = this.#locale();
+      let text = sessionWaitNotice(notice, locale);
+      let shown: { id: string; until: number } | undefined;
+      if (notice.request) {
+        // Its prompt waits for a verdict too (ADR-0069 §1): the webchat's buttons, or the codes.
+        const kept = this.#get<OpenSessionRequest[]>("sessionRequests", []);
+        const { kept: next, opened } = keepRequest(kept, notice.request.id, this.#ports.now());
+        this.#set("sessionRequests", next);
+        const buttons = destination.channel === "webchat";
+        text = `${text}\n${requestLines(notice.request, opened, buttons, locale)}`;
+        if (buttons) shown = { id: opened.key, until: opened.expiresAt };
+      }
+      const sent = await this.#channel.send(agentId, destination, text, {
+        silent: false,
+        ...(shown ? { sessionRequest: shown } : {}),
+      });
       if (sent.ok) return "sent";
       console.warn("conversation: a wait wasn't told", { reason: sent.reason });
     } catch (error) {
       console.warn("conversation: a wait wasn't told", { error: errorName(error) });
     }
     return "send_failed";
+  }
+
+  /**
+   * The owner's answer to a VPS session's prompt, by its notice's key: once, while it counts, and
+   * to the runner as it is. A runner that wasn't reached leaves it open, so the owner may try
+   * again; the runner's own check counts it once, whatever happens here.
+   */
+  async #answerRequest(key: string, verdict: RunnerVerdict): Promise<VerdictStatus> {
+    const now = this.#ports.now();
+    const kept = this.#get<OpenSessionRequest[]>("sessionRequests", []);
+    const request = kept.find((entry) => entry.key === key);
+    if (!request) return "closed";
+    if (request.usedAt !== null) return "answered";
+    if (request.expiresAt <= now) return "expired";
+    const mark = (usedAt: number | null) =>
+      this.#set(
+        "sessionRequests",
+        this.#get<OpenSessionRequest[]>("sessionRequests", []).map((entry) =>
+          entry.key === key ? { ...entry, usedAt } : entry,
+        ),
+      );
+    mark(now);
+    let status: VerdictStatus;
+    try {
+      const verdicts = runnerVerdictsOf(this.env);
+      status = verdictStatus(
+        await boundedBy(verdicts.verdict(request.requestId, verdict), VERDICT_TIMEOUT_MS),
+      );
+    } catch (error) {
+      console.warn("conversation: a verdict didn't reach the runner", errorName(error));
+      status = "failed";
+    }
+    if (status === "failed") mark(null);
+    console.log("conversation: the owner answered a VPS session's prompt", { verdict, status });
+    return status;
+  }
+
+  /** Kelpie's fixed reply to a typed code, kept nowhere, as the notice it answers. */
+  async #tellVerdict(
+    agentId: string,
+    destination: Destination,
+    status: VerdictStatus,
+    verdict: RunnerVerdict,
+  ): Promise<void> {
+    try {
+      const text = verdictReply(status, verdict, this.#locale());
+      const sent = await this.#channel.send(agentId, destination, text, { silent: false });
+      if (!sent.ok)
+        console.warn("conversation: a verdict's reply wasn't sent", { reason: sent.reason });
+    } catch (error) {
+      console.warn("conversation: a verdict's reply wasn't sent", { error: errorName(error) });
+    }
   }
 
   /** Whether a webchat page of this conversation is open: a socket of its own, not a sidebar's. */
