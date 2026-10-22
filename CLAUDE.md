@@ -34,7 +34,7 @@ At the start of every story, before writing its plan, check how these projects s
 ## Work tracking
 
 - Board: [Kelpie project](https://github.com/users/guedesdiogo/projects/1) (user project `guedesdiogo/1`, linked to this repository).
-- Status flow: Backlog (issue has its plan) → Ready (plan approved by the owner) → In progress (branch open) → In review (PR open and verification posted on the issue) → Done (merged, and the deploy the merge triggers is green; while nothing deploys, merged is enough). Done never authorizes a merge.
+- Status flow: Backlog (issue has its plan) → Ready (plan approved by the owner) → In progress (branch open) → In review (PR open and verification posted on the issue) → Done (merged: a merge deploys nothing, and production ships by release, ADR-0066). Done never authorizes a merge.
 - Issue titles: `[Epic N] <theme>`, `[Story N.M] <deliverable>` as a sub-issue of its epic, `[Decision N.M] <topic>` (closed by a merged ADR in `docs/adr/`), `[Follow-up N.M] <subject>`; ad-hoc issues carry no prefix.
 - Labels: one of `type:epic`, `type:story`, `type:follow-up` or `type:decision` per issue; `epic:N` on everything that belongs to an epic; `security` when the change touches authentication, authorization, secrets or personal data.
 - Issue body sections: Context, Goal, Out of scope, Plan, Acceptance criteria, Planned verification, Risks and rollback.
@@ -51,5 +51,9 @@ The viability study is `docs/viability-study.md`; research notes go in `docs/res
 
 - A pull request merges only when `CI passed` is green, its branch is up to date with `main`, and CodeQL found no new high-severity alert. `CI passed` covers lint, typecheck, the tests with each workspace's coverage thresholds, the Workers' bundles, the migration gate, workflow lint and dependency review (`docs/deploy.md`, `docs/testing.md`). A pull request runs only the gates its changes can affect, and the others show as skipped (ADR-0038).
 - Every workspace keeps at least 80% statements, branches, functions and lines; CI fails under that (ADR-0030). Every new implementation, fix or change of behavior comes with tests that check it, in the workspace whose code it changes; a pull request without them says why in its Verification section.
-- A merge into `main` deploys all six Workers, watches production and rolls back by itself when it is unhealthy (ADR-0029). The deploy skips when nothing that ships changed since the builds production serves, as after a docs-only merge (ADR-0031). Never deploy production by hand. A rollback on request goes through the Rollback workflow, which needs the owner's request.
+- A merge into `main` runs CI and deploys nothing. Production ships only from a published release `vX.Y.Z`, when the owner asks for it (ADR-0066, `docs/deploy.md`, "Releases"):
+  - run `bun run --cwd tools/release release cut <patch|minor|major> --draft` and check the notes it shows;
+  - publish with `--publish` only on the owner's explicit order: it is the production deploy;
+  - the Deploy workflow then checks `PRUMO_DONOS` and that every `critico` issue has the mentor's acceptance, deploys all six Workers, watches production and rolls back by itself when it is unhealthy (ADR-0029). It skips when nothing that ships changed since the builds production serves (ADR-0031).
+- Never deploy production by hand, and never force a release: forcing is the owner's, through the Deploy workflow with a reason. A rollback on request goes through the Rollback workflow, with `target: vA.B.C` for a release, and needs the owner's request.
 - Migrations stay add-only, so production can roll back. A migration that drops, renames or rewrites data needs a `rollback-barrier` comment and the owner's agreement.

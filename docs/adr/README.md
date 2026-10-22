@@ -69,6 +69,7 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0063](0063-mascot-frame-holds-every-hop.md) | The mascot's frame holds every figure and every hop | [#474](https://github.com/guedesdiogo/kelpie/issues/474) |
 | [0064](0064-outside-content-asks.md) | A turn that read outside content asks the owner before it changes anything | [#454](https://github.com/guedesdiogo/kelpie/issues/454) |
 | [0065](0065-mascot-effects-float-over-kept-margin.md) | What shows beside the mascot floats over a margin its host keeps | [#481](https://github.com/guedesdiogo/kelpie/issues/481) |
+| [0066](0066-production-by-release.md) | Production ships only from a published release, on the owner's request, past a gate for `critico` issues | [#487](https://github.com/guedesdiogo/kelpie/issues/487) |
 
 ## Format
 
