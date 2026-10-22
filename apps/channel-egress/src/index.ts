@@ -566,7 +566,7 @@ export class ChannelEgress extends WorkerEntrypoint<Env> implements ChannelEgres
     }
     const bot = await this.#telegram(agentId, destination);
     if (!bot) return { ok: false, reason: "not_connected" };
-    if (options.buttons !== undefined && options.buttons.length > 0) {
+    if (options?.buttons !== undefined && options.buttons.length > 0) {
       await takePresses(this.env, agentId, bot);
     }
     try {

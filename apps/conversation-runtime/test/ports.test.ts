@@ -124,6 +124,16 @@ describe("the channel ports (ADR-0067 §3)", () => {
     ]);
   });
 
+  it("gives up on an answer that hangs, after a few seconds, as on typing", async () => {
+    replacePortsForTesting(undefined);
+    const { binding } = egress(() => new Promise(() => {}));
+    const ports = portsFor({ ...env, CHANNEL_EGRESS: binding } as never);
+    expect(await ports.answer("kelpie", destination, "4382")).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+  });
+
   it("gives up on an answer or an edit that fails, as on typing", async () => {
     replacePortsForTesting(undefined);
     const { binding } = egress(async () => {

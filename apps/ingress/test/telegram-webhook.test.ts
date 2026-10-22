@@ -610,6 +610,15 @@ describe("Telegram taps on Kelpie's buttons (ADR-0067 §3)", () => {
     expect(notices).toEqual([]);
   });
 
+  it("drops the owner's tap in a private chat that isn't theirs, saying why", async () => {
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { deps, pressed } = fakes();
+    const elsewhere = tap({ message: { message_id: 43, chat: { id: 2002, type: "private" } } });
+    expect((await handleTelegramWebhook(webhook(elsewhere), "kelpie", deps)).status).toBe(200);
+    expect(pressed).toEqual([]);
+    expect(warned).toHaveBeenCalledWith("ingress: dropped a Telegram tap", "not_own_chat");
+  });
+
   it("drops a tap from anyone admitted who isn't the owner", async () => {
     const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { deps, pressed } = fakes({

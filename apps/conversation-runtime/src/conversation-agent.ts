@@ -117,7 +117,7 @@ import {
   OUTSIDE_WINDOW_MS,
 } from "./outside-content.ts";
 import { type ConversationPorts, portsFor, type TurnStep } from "./ports.ts";
-import { newPressId, parsePress, pressData, pressRefused } from "./presses.ts";
+import { newPressId, type PressAction, parsePress, pressData, pressRefused } from "./presses.ts";
 import { proposalBubble, proposalNote } from "./proposal-notices.ts";
 import { readRole } from "./registry/schema.ts";
 import { failureNotice, routeNotice } from "./route-notices.ts";
@@ -651,8 +651,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
 
   /**
    * A tap on a button under one of Kelpie's notices on a channel behind channel-egress
-   * (ADR-0067 §3), which ingress admitted as the owner's, in their own chat. Its data names an
-   * action and the random id of what it acts on, looked up in this conversation only:
+   * (ADR-0067 §3), which ingress admitted as the owner's, in their own chat; it acts only when the
+   * conversation agrees. Its data names an action and the random id of what it acts on, looked up
+   * in this conversation only:
    * - **Confirm** counts as the webchat's button does, then replies with the code for the owner, so
    *   ADR-0013's gate confirms it as typed, once. A second tap is the same message again, which the
    *   conversation drops. The notice is then edited to say the owner confirmed.
@@ -662,27 +663,29 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   async press(target: PressTarget): Promise<PressResult> {
     capabilitiesFor(target.destination.channel);
     const mismatch = this.#bind(target);
-    if (mismatch) return { status: "rejected", reason: mismatch };
     // As for a pause, the answer needs a language even where nothing was said yet (#187).
-    this.#noteLanguage(target.language);
-    const pressed = parsePress(target.data);
-    const confirmed = pressed === null ? null : await this.#pressConfirm(target, pressed.id);
-    const locale = this.#locale();
+    if (mismatch === null) this.#noteLanguage(target.language);
+    const pressed =
+      mismatch === null && target.role === "owner" && target.chatType === "direct"
+        ? parsePress(target.data)
+        : null;
+    const notice = pressed === null ? null : await this.#act(target, pressed.action, pressed.id);
     const answered = await this.#ports.answer(
       target.agentId,
       target.destination,
       target.pressId,
-      confirmed === null ? pressRefused(locale) : undefined,
+      notice === null ? pressRefused(this.#locale()) : undefined,
     );
     if (!answered.ok) {
       console.warn("ConversationAgent: a tap wasn't answered", { reason: answered.reason });
     }
-    if (confirmed === null) return { status: "refused" };
+    if (mismatch !== null) return { status: "rejected", reason: mismatch };
+    if (notice === null) return { status: "refused" };
     const edited = await this.#ports.edit(
       target.agentId,
       target.destination,
       target.providerMessageId,
-      confirmedNotice(confirmed, locale),
+      notice,
     );
     if (!edited.ok) {
       console.warn("ConversationAgent: a notice wasn't edited", { reason: edited.reason });
@@ -690,7 +693,18 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     return { status: "accepted" };
   }
 
-  /** A tap on a Confirm button: the confirmation's summary once its code is sent, else null. */
+  /**
+   * Does what a tap's button says, to what `id` names: the notice's new text once it acted, or
+   * null when it acted on nothing open. Every action a button can carry has its entry.
+   */
+  #act(target: PressTarget, action: PressAction, id: string): Promise<string | null> {
+    const actions: Record<PressAction, () => Promise<string | null>> = {
+      confirm: () => this.#pressConfirm(target, id),
+    };
+    return actions[action]();
+  }
+
+  /** A tap on a Confirm button: the notice saying so once its code is sent, else null. */
   async #pressConfirm(target: PressTarget, buttonId: string): Promise<string | null> {
     const pending = this.#pressable(eq(schema.confirmations.buttonId, buttonId), target.userId);
     if (!pending) return null;
@@ -706,7 +720,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       timeZone: target.timeZone,
       language: target.language ?? null,
     });
-    return result.status === "rejected" ? null : pending.summary;
+    return result.status === "rejected" ? null : confirmedNotice(pending.summary, this.#locale());
   }
 
   /**
@@ -1946,6 +1960,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
         id: schema.confirmations.id,
         code: schema.confirmations.code,
         summary: schema.confirmations.summary,
+        buttonId: schema.confirmations.buttonId,
       })
       .from(schema.confirmations)
       .where(and(eq(schema.confirmations.turnId, turnId), isNull(schema.confirmations.usedAt)))
@@ -1983,8 +1998,15 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const notices = [
       ...(routes.text === null ? [] : [{ text: routes.text }]),
       ...(announced === null ? [] : [{ text: announced }]),
-      ...confirmations.map(({ id, code, summary }) => ({
-        text: confirmationNotice(summary, code, button, locale),
+      ...confirmations.map(({ id, code, summary, buttonId }) => ({
+        // Telegram's button carries the random id, which a confirmation made before buttons
+        // lacks; the webchat's needs only the confirmation's own id.
+        text: confirmationNotice(
+          summary,
+          code,
+          button && (buttonId !== null || destination.channel === "webchat"),
+          locale,
+        ),
         confirmationId: id,
       })),
       ...links.map(({ text, href }) => ({ text, link: href })),

@@ -195,9 +195,12 @@ describe("Kelpie's Confirm button on Telegram (ADR-0067 §3)", () => {
     await turn(stub, "m1", "mude para smart");
     const [data = ""] = buttonsOf(world);
 
-    // Ingress admits only the owner, but the conversation still counts only the requester.
+    // Ingress admits only the owner's taps in their own chat; the conversation checks both again,
+    // and still counts only the requester.
     const refused = [
       tap(data, { userId: "u-other" }),
+      tap(data, { role: "member" }),
+      tap(data, { chatType: "group" }),
       tap("confirm:0123456789abcdef0123456789abcdef"),
       tap(`${data}0`),
       tap(data.replace("confirm:", "approve:")),
@@ -226,17 +229,46 @@ describe("Kelpie's Confirm button on Telegram (ADR-0067 §3)", () => {
     expect(ran).toEqual([]);
   });
 
-  it("refuses a tap meant for another conversation's agent or chat", async () => {
-    use(fakeWorld([reply("Oi.")]));
+  it("refuses a tap meant for another conversation's agent or chat, and still answers it", async () => {
+    const world = use(fakeWorld([reply("Oi.")]));
     const stub = agent("press-bound");
     await turn(stub, "m1", "oi");
     expect(await stub.press(tap("confirm:x", { agentId: "other" }))).toEqual({
       status: "rejected",
       reason: "agent_mismatch",
     });
-    expect(
-      await stub.press(tap("confirm:x", { destination: { channel: "telegram", threadId: "9" } })),
-    ).toEqual({ status: "rejected", reason: "destination_mismatch" });
+    const elsewhere = { channel: "telegram", threadId: "9" } as const;
+    expect(await stub.press(tap("confirm:x", { destination: elsewhere }))).toEqual({
+      status: "rejected",
+      reason: "destination_mismatch",
+    });
+    expect(world.pressAnswers).toEqual([
+      { destination: chat, pressId: "4382bfdwdsb323b2d9", text: REFUSED },
+      { destination: elsewhere, pressId: "4382bfdwdsb323b2d9", text: REFUSED },
+    ]);
+  });
+
+  it("shows no button, and asks for the code typed, for a confirmation made before buttons", async () => {
+    const world = use(
+      fakeWorld([
+        toolCalls({ name: "change", input: { to: "smart" } }),
+        reply("Confirme."),
+        toolCalls({ name: "change", input: { to: "smart" } }),
+        reply("Confirme de novo."),
+      ]),
+    );
+    gated(world);
+    const stub = agent("press-legacy");
+    await turn(stub, "m1", "mude para smart");
+    // As migration 0015 left the confirmations already open: without a random id.
+    await runInDurableObject(stub, (_instance: ConversationAgent, state) => {
+      state.storage.sql.exec("UPDATE confirmations SET button_id = NULL");
+    });
+    await turn(stub, "m2", "mude para smart, por favor");
+
+    const notice = world.sends.at(-1);
+    expect(notice?.text).toMatch(/\nPara seguir, responda só com o código [A-Z0-9]{6}\./);
+    expect(notice?.buttons).toBeUndefined();
   });
 
   it("keeps the typed code, after which the button no longer works", async () => {

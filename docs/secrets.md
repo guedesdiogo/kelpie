@@ -39,7 +39,7 @@ Kelpie keeps two kinds of secret (ADR-0013).
 - **Webhooks.**
   - Each stored bot gets a new random webhook secret.
   - Right after storing, `channel-egress` registers the bot's webhook (`setWebhook`) at `<INGRESS_ORIGIN>/webhooks/telegram/<agentId>`, with that secret, for new messages and taps on buttons (`callback_query`) only.
-  - A bot registered before taps existed takes messages only. Before its first notice with a button goes out, `channel-egress` reads its webhook (`getWebhookInfo`) and, if it is Kelpie's own, sets it again with taps, once per isolate. A webhook pointed elsewhere stays as it is.
+  - A bot registered before taps existed takes messages only. Before its first notice with a button goes out, `channel-egress` reads its webhook (`getWebhookInfo`) and, if it is Kelpie's own, sets it again with taps. Each isolate does this once per bot, or again with the next notice when the check failed. A webhook pointed elsewhere stays as it is.
   - Telegram echoes the secret in every update, a tap included. Ingress asks `ChannelWebhooks` to compare it before reading the update.
   - A new form for the same agent replaces the secret, so it registers again. A failed registration leaves the token stored, and the `registerTelegramWebhook` command repeats it.
 - **Failing closed.** A missing or malformed `SECRETS_KEY` keeps the store closed: nothing is read or written, and no token is sent to Telegram to be checked.

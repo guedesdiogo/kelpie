@@ -172,8 +172,12 @@ async function pressed(press: CanonicalPress, deps: TelegramWebhookDeps): Promis
     console.warn("ingress: dropped a Telegram tap", admission.reason);
     return;
   }
-  if (admission.role !== "owner" || press.threadId !== press.sender.channelUserId) {
+  if (admission.role !== "owner") {
     console.warn("ingress: dropped a Telegram tap", "not_owner");
+    return;
+  }
+  if (press.threadId !== press.sender.channelUserId) {
+    console.warn("ingress: dropped a Telegram tap", "not_own_chat");
     return;
   }
   const destination: Destination = { channel: press.channel, threadId: press.threadId };
