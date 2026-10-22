@@ -1,12 +1,14 @@
 name: Rollback
 
 # Rolls every Worker back to one earlier build, by the owner's request (docs/deploy.md):
-#   gh workflow run rollback.yml -f target=previous -f reason="..."
+#   gh workflow run rollback.yml -f target=v1.2.0 -f reason="..."
+# It is the way back to an earlier release: publishing that release again fires no deploy, and a
+# deploy of it would skip, since production already contains its commit (ADR-0066).
 on:
   workflow_dispatch:
     inputs:
       target:
-        description: previous, a build (96), a tag (96-0c620f4) or a commit
+        description: previous, a release (v1.2.0), a build (96), a tag (96-0c620f4) or a commit
         default: previous
         required: true
         type: string
@@ -43,7 +45,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Rollback barriers are read from the target's commit to the live one.
+          # Rollback barriers are read from the target's commit to the live one, and a release's
+          # tag names its commit.
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -60,8 +63,8 @@ jobs:
           if [ "$FORCE" = "true" ]; then args+=(--force); fi
           if [ "$PLAN_ONLY" = "true" ]; then args+=(--plan); fi
           bun run --cwd tools/release release "${args[@]}"
-      # Production now runs older code than main: the issue tracks the fix, which must land before
-      # the next merge deploys main again.
+      # Production now runs older code than the release it replaced: the issue tracks the fix, which
+      # must land before the next release.
       - name: Record the rollback on an issue
         if: ${{ !cancelled() && !inputs.plan-only }}
         env:

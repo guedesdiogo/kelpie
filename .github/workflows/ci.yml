@@ -10,7 +10,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  # A new commit replaces a PR's run. Runs on main deploy, so they are never cancelled halfway.
+  # A new commit replaces a PR's run. Runs on main are never cancelled halfway: a release needs
+  # `CI passed` green on its commit (ADR-0066).
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -183,16 +184,3 @@ jobs:
               .value.result == "success" or (.value.result == "skipped" and
                 ($decided[.key] == "false" or (.key == "dependency-review" and $event != "pull_request")))))
           ' <<< "$NEEDS" > /dev/null
-
-  # The deploy skips when nothing that ships changed since the builds production serves (ADR-0031).
-  deploy:
-    name: Deploy
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [checks, build, migrations, workflows]
-    permissions:
-      contents: read
-      issues: write
-    uses: ./.github/workflows/deploy.yml
-    # The called job's production environment gives it its secrets, but only through `inherit`:
-    # without it they arrive empty (#238). Deploy credentials live only in that environment.
-    secrets: inherit
