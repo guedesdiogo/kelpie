@@ -782,6 +782,25 @@ describe("how a change shows (§4.1, 5.3)", () => {
     ]);
   });
 
+  it("waits on a VPS session's prompt, approves on Approve, and changes quietly on Deny (ADR-0069 §1)", () => {
+    const { shown, hows, keeper } = keeperWith();
+    const prompt = { type: "bubble", text: "Permission?", sessionRequest: { id: "a", until: 1 } };
+    keeper.event(prompt);
+    expect(shown.at(-1)?.state).toBe("waiting");
+    keeper.event({ type: "verdict", id: "a", verdict: "allow", status: "applied" });
+    expect(shown.at(-1)?.state).toBe("approved");
+    expect(hows.at(-1)).toEqual({ instant: false, quiet: false });
+    const { shown: denied, hows: quietly, keeper: other } = keeperWith();
+    other.event(prompt);
+    other.event({ type: "verdict", id: "a", verdict: "deny", status: "applied" });
+    expect(denied.at(-1)?.state).toBe("idle");
+    expect(quietly.at(-1)).toEqual({ instant: false, quiet: true });
+    other.event(prompt);
+    other.event({ type: "verdict", id: "a", verdict: "allow", status: "closed" });
+    expect(denied.at(-1)?.state).toBe("idle");
+    expect(quietly.at(-1)).toEqual({ instant: false, quiet: true });
+  });
+
   it("brings no announcement for an expiry or a refused press", () => {
     const { shown, hows, keeper, clock } = keeperWith();
     keeper.event({ type: "bubble", text: "Confirm?", confirmation: 1 });

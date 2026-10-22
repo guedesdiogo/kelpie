@@ -12,15 +12,21 @@ import {
   type InlineKeyboard,
   isLocale,
   isRunnerTime,
+  isRunnerVerdict,
   type Localized,
+  parseRunnerMessageRequest,
   RecipientUnavailableError,
+  type RunnerActOutcome,
   type RunnerAnswerOutcome,
   type RunnerChatContract,
   type RunnerCloseOutcome,
+  type RunnerRequestsOutcome,
   type RunnerSessionsContract,
   type RunnerSessionsOutcome,
   type RunnerToolResult,
   type RunnerTurnRequest,
+  type RunnerVerdict,
+  type RunnerVerdictOutcome,
   type RunnerWaitsOutcome,
   type SendOptions,
   type SendOutcome,
@@ -42,10 +48,14 @@ import {
   checkedResult,
   checkRunner,
   closeSession,
+  endSession,
   giveResult,
+  giveVerdict,
   isSessionId,
+  listRequests,
   listSessions,
   listWaits,
+  messageSession,
   parseRunnerSecret,
   RUNNER_NAME,
   RUNNER_SECRET,
@@ -458,10 +468,11 @@ export class RunnerChat extends WorkerEntrypoint<Env> implements RunnerChatContr
 }
 
 /**
- * Reads the Claude Code sessions on the owner's VPS (ADR-0057 §5, #433), for Master's tool and the
- * notices: only reads, sent with the stored secret, which never leaves this Worker. A separate
- * entrypoint, so whatever binds it can't open forms, read a secret, or reach the `claude-code`
- * route's sessions. Each answer is a value, checked against the protocol before it crosses RPC.
+ * Reaches the Claude Code sessions on the owner's VPS (ADR-0057 §5, #433), for Master's tools and
+ * the notices: it reads them, and acts on them (ADR-0069), with the stored secret, which never
+ * leaves this Worker. A separate entrypoint, so whatever binds it can't open forms, read a secret,
+ * or reach the `claude-code` route's sessions. Each input is checked before it reaches the runner,
+ * and each answer is a value, checked against the protocol before it crosses RPC.
  */
 export class RunnerSessions extends WorkerEntrypoint<Env> implements RunnerSessionsContract {
   async list(): Promise<RunnerSessionsOutcome> {
@@ -473,6 +484,30 @@ export class RunnerSessions extends WorkerEntrypoint<Env> implements RunnerSessi
     if (!isRunnerTime(since)) return invalidInput;
     const found = await storedRunner(this.env);
     return found.ok ? listWaits(found.runner, found.secret, since) : found;
+  }
+
+  async requests(): Promise<RunnerRequestsOutcome> {
+    const found = await storedRunner(this.env);
+    return found.ok ? listRequests(found.runner, found.secret) : found;
+  }
+
+  async verdict(requestId: string, verdict: RunnerVerdict): Promise<RunnerVerdictOutcome> {
+    if (!isSessionId(requestId) || !isRunnerVerdict(verdict)) return invalidInput;
+    const found = await storedRunner(this.env);
+    return found.ok ? giveVerdict(found.runner, found.secret, requestId, verdict) : found;
+  }
+
+  async message(sessionId: string, text: string): Promise<RunnerActOutcome> {
+    if (!isSessionId(sessionId) || parseRunnerMessageRequest({ text }) === null)
+      return invalidInput;
+    const found = await storedRunner(this.env);
+    return found.ok ? messageSession(found.runner, found.secret, sessionId, text) : found;
+  }
+
+  async end(sessionId: string): Promise<RunnerActOutcome> {
+    if (!isSessionId(sessionId)) return invalidInput;
+    const found = await storedRunner(this.env);
+    return found.ok ? endSession(found.runner, found.secret, sessionId) : found;
   }
 }
 

@@ -32,7 +32,7 @@ export interface SessionLife {
  * carry none, as every line from before #482; a subagent's id; or `null` for the subagents whose
  * id isn't a short token, taken for one thread.
  */
-type Thread = string | null | undefined;
+export type Thread = string | null | undefined;
 
 /**
  * The session's state now:
@@ -62,6 +62,43 @@ type Thread = string | null | undefined;
  * - otherwise its file says: `busy` is working.
  */
 export function lifeOf(file: SessionFile, events: readonly SpoolEvent[], now: number): SessionLife {
+  const { waits, endedAt, lastAt } = threadWaits(file, events);
+  const changed = file.statusUpdatedAt;
+  let wait: Wait | null = null;
+  for (const candidate of waits.values()) {
+    if (!wait || candidate.openedAt > wait.openedAt) wait = candidate;
+  }
+  const restarted =
+    endedAt !== null && file.alive === true && file.startedAt !== null && file.startedAt > endedAt;
+  if (file.alive === false || (endedAt !== null && !restarted)) {
+    return {
+      state: "ended",
+      since: endedAt ?? latest(changed, lastAt),
+      wait: null,
+      archivable: true,
+    };
+  }
+  if (wait) {
+    const state = wait.kind === "question" ? "waiting_answer" : "waiting_permission";
+    return { state, since: wait.openedAt, wait, archivable: false };
+  }
+  if (file.status === "idle") {
+    const archivable = changed !== null && now - changed >= ARCHIVE_IDLE_MS;
+    return { state: "idle", since: changed, wait: null, archivable };
+  }
+  const state = file.status === "unknown" ? "unknown" : "working";
+  return { state, since: changed, wait: null, archivable: false };
+}
+
+/**
+ * Each of the session's threads' open wait, by `lifeOf`'s rules, the session file's main-thread
+ * wait merged in; when the session last ended, and its last event. A permission request is open
+ * only while its thread's wait is (ADR-0069 §1).
+ */
+export function threadWaits(
+  file: SessionFile,
+  events: readonly SpoolEvent[],
+): { waits: Map<Thread, Wait>; endedAt: number | null; lastAt: number | null } {
   const waits = new Map<Thread, Wait>();
   let endedAt: number | null = null;
   let lastAt: number | null = null;
@@ -118,30 +155,7 @@ export function lifeOf(file: SessionFile, events: readonly SpoolEvent[], now: nu
   }
   if (main) waits.set(undefined, main);
   else waits.delete(undefined);
-  let wait: Wait | null = null;
-  for (const candidate of waits.values()) {
-    if (!wait || candidate.openedAt > wait.openedAt) wait = candidate;
-  }
-  const restarted =
-    endedAt !== null && file.alive === true && file.startedAt !== null && file.startedAt > endedAt;
-  if (file.alive === false || (endedAt !== null && !restarted)) {
-    return {
-      state: "ended",
-      since: endedAt ?? latest(changed, lastAt),
-      wait: null,
-      archivable: true,
-    };
-  }
-  if (wait) {
-    const state = wait.kind === "question" ? "waiting_answer" : "waiting_permission";
-    return { state, since: wait.openedAt, wait, archivable: false };
-  }
-  if (file.status === "idle") {
-    const archivable = changed !== null && now - changed >= ARCHIVE_IDLE_MS;
-    return { state: "idle", since: changed, wait: null, archivable };
-  }
-  const state = file.status === "unknown" ? "unknown" : "working";
-  return { state, since: changed, wait: null, archivable: false };
+  return { waits, endedAt, lastAt };
 }
 
 /**
