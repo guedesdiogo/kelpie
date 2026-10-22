@@ -119,8 +119,13 @@ export default {
   async fetch(request, env): Promise<Response> {
     const { pathname } = new URL(request.url);
 
+    // prumo's OBS-05 contract (#509): the environment, and the deployed commit as /version reads it.
     if (request.method === "GET" && pathname === "/health") {
-      return Response.json({ status: "ok" });
+      return Response.json({
+        status: "ok",
+        environment: env.ENVIRONMENT,
+        commit: versionReport(env.CF_VERSION_METADATA).commit,
+      });
     }
 
     // Public like /health: the repository is public, and the webchat's footer reads it (#148).
