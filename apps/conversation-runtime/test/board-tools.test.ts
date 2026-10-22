@@ -306,6 +306,15 @@ describe("Master's board tools (ADR-0067 §1, #492)", () => {
     ]);
   });
 
+  it("never cut a task's text inside a character that takes two code units", async () => {
+    const { provider, tasks } = world();
+    tasks[TASK] = detail({ body: `${"b".repeat(1_999)}🐎 and more` });
+    const get = (await toolsOf(provider)).get("get_task");
+    const { output } = await run(get, { agentId: "helper", taskId: TASK });
+    expect(output).toContain(`${"b".repeat(1_999)}… (11 more characters)`);
+    expect(output).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  });
+
   it("show the most recent tasks of a long board, and say how many there are", async () => {
     const { provider, tasks } = world();
     for (let i = 0; i < 33; i++) {

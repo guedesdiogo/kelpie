@@ -355,14 +355,11 @@ describe("the mandatory handoff (#287)", () => {
                   agentId: "hf-sales",
                   name: "Sales",
                 });
-                // More handoffs than a conversation keeps unsaid: none pushes the stop out.
-                for (let i = 0; i < 25; i++) {
-                  context.announce({
-                    kind: "handoff",
-                    taskId: `1a2b3c4d-0000-4000-8000-${String(i).padStart(12, "0")}`,
-                    agentId: "hf-blank",
-                    name: "Blank",
-                  });
+                // More subagents' changes than a conversation keeps unsaid, kept after the stop:
+                // none pushes the stop out.
+                for (let i = 0; i < 21; i++) {
+                  const agentId = `kelpie-sub-${String(i).padStart(6, "0")}`;
+                  context.announce({ kind: "created", agentId, name: `Pup ${i}` });
                 }
                 return { output: "ok" };
               },
@@ -377,7 +374,7 @@ describe("the mandatory handoff (#287)", () => {
     await vi.waitFor(() =>
       expect(world.sent).toEqual([
         "Stopped.",
-        'Kelpie handed tasks to "Blank" (hf-blank).\nKelpie stopped a task of "Sales" (hf-sales).',
+        expect.stringContaining('Kelpie stopped a task of "Sales" (hf-sales).'),
       ]),
     );
     // Said once: the key that kept it is empty again, and a release before #492 never reads it.

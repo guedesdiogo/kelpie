@@ -286,7 +286,7 @@ export function boardTools(
   commands: BoardCommands,
   options: { roleOf: (agentId: string) => Promise<AgentRole | null> },
 ): ToolProvider {
-  /** The owner, in a direct conversation with Master: what the configuration tools also ask. */
+  /** The owner, in a direct conversation with Master, where a turn reads every scope. */
   const isOwner = (context: ToolContext) =>
     context.actor.role === "owner" && context.scopes === "all";
 
