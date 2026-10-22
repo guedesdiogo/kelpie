@@ -542,9 +542,9 @@ Whoever passes Access and holds a live recovery token becomes the owner's admin 
 
 `GET https://<ingress hostname>/version` answers `{ version, build, commit, deployment, deployedAt }`, and the webchat shows the version and the commit in its footer, for example `Kelpie 0.2.66 · 0c620f4` (#148, #153). Like `/health`, it needs no login.
 - **`version` is `<release>.<build>`.**
-  - The release is `KELPIE_RELEASE` in `packages/config/src/version.ts`. It is the delivery phase and changes by decision, with a phase or a notable release.
-  - The build is main's first-parent commit count at the deployed commit. Every merged PR adds one, so a deploy with any change shows a new number.
-- **The build and `commit` come from the deploy's tag.** The deploy workflow tags every deploy (`docs/deploy.md`). A deploy by hand, from a clean checkout of a commit on main, gives every `wrangler deploy` the same tag:
+  - The release is `KELPIE_RELEASE` in `packages/config/src/version.ts`. It is the delivery phase and changes by decision, with a phase or a notable release. It is not the GitHub release, `vX.Y.Z`, that production ships from (`docs/deploy.md`).
+  - The build is main's first-parent commit count at the deployed commit. Every merged PR adds one, so a release with any change shows a new number.
+- **The build and `commit` come from the deploy's tag.** The deploy workflow tags every deploy (`docs/deploy.md`). A deploy by hand, from a clean checkout of the release production serves, gives every `wrangler deploy` the same tag:
   ```bash
   --tag "$(git rev-list --count --first-parent HEAD)-$(git rev-parse --short=7 HEAD)"
   ```

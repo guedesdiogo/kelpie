@@ -11,6 +11,15 @@ import {
   type WorkerVersion,
 } from "../src/cloudflare.ts";
 import type { Git } from "../src/git.ts";
+import type {
+  ClosedIssue,
+  GitHub,
+  IssueComment,
+  MergedPull,
+  Release,
+  ReleaseFields,
+  WorkflowRun,
+} from "../src/github.ts";
 import type { BuildTag } from "../src/tags.ts";
 import { formatTag } from "../src/tags.ts";
 import { WORKERS } from "../src/workers.ts";
@@ -274,3 +283,138 @@ export function fakeClock(start = Date.parse("2026-10-11T00:00:00Z")) {
 }
 
 export const silentLog = { info: () => {}, warn: () => {} };
+
+/** An issue that a pull request closes, in guedesdiogo/kelpie unless named otherwise. */
+export function closedIssue(number: number, labels: string[] = [], repo = "guedesdiogo/kelpie") {
+  return {
+    repo,
+    number,
+    title: `Issue ${number}`,
+    url: `https://github.com/${repo}/issues/${number}`,
+    labels,
+  } satisfies ClosedIssue;
+}
+
+export function mergedPull(number: number, author: string | null, closes: ClosedIssue[] = []) {
+  return {
+    number,
+    title: `Pull request ${number}`,
+    url: `https://github.com/guedesdiogo/kelpie/pull/${number}`,
+    author,
+    closes,
+  } satisfies MergedPull;
+}
+
+export function comment(author: string | null, body: string, id = 1): IssueComment {
+  return { author, body, url: `https://github.com/guedesdiogo/kelpie/issues/1#issuecomment-${id}` };
+}
+
+export interface FakeGitHub extends GitHub {
+  /** The commits each mergedPulls call asked about. */
+  asked: string[][];
+  /** The issues whose comments were read, as `repo#number`. */
+  read: string[];
+  opened: Array<{ title: string; body: string; assignees: string[]; labels: string[] }>;
+  commented: Array<{ repo: string; issue: number; body: string }>;
+  saved: Array<{ id: number | null; fields: ReleaseFields }>;
+}
+
+/**
+ * A successful Deploy run of a release: by hand from main unless told otherwise. A release event
+ * runs from its tag, at the commit the tag names.
+ */
+export function productionRun(
+  tag: string,
+  how: Partial<Omit<WorkflowRun, "title">> = {},
+): WorkflowRun {
+  return {
+    title: `Production ${tag}`,
+    event: "workflow_dispatch",
+    branch: "main",
+    commit: "f".repeat(40),
+    ...how,
+  };
+}
+
+/**
+ * GitHub with merged pull requests by the commit that brought them, comments by `repo#number`,
+ * `CI passed`'s state by commit, the Deploy workflow's successful runs, and releases. Writes are
+ * recorded, and answer made-up URLs.
+ */
+export function fakeGitHub(
+  options: {
+    pulls?: Record<string, MergedPull[]>;
+    comments?: Record<string, IssueComment[]>;
+    checks?: Record<string, string>;
+    /** The Deploy workflow's successful runs, newest first. */
+    runs?: WorkflowRun[];
+    /** The repository's labels; `critico` by default. */
+    labels?: string[];
+    releases?: Release[];
+  } = {},
+): FakeGitHub {
+  const fake: FakeGitHub = {
+    asked: [],
+    read: [],
+    opened: [],
+    commented: [],
+    saved: [],
+    async mergedPulls(commits) {
+      fake.asked.push([...commits]);
+      const pulls = new Map<number, MergedPull>();
+      for (const commit of commits) {
+        for (const pull of options.pulls?.[commit] ?? []) pulls.set(pull.number, pull);
+      }
+      return [...pulls.values()].sort((a, b) => a.number - b.number);
+    },
+    async comments(repo, issue) {
+      fake.read.push(`${repo}#${issue}`);
+      return options.comments?.[`${repo}#${issue}`] ?? [];
+    },
+    async comment(repo, issue, body) {
+      fake.commented.push({ repo, issue, body });
+      return `https://github.com/${repo}/issues/${issue}#issuecomment-${fake.commented.length}`;
+    },
+    async openIssue(issue) {
+      fake.opened.push(issue);
+      return `https://github.com/guedesdiogo/kelpie/issues/${900 + fake.opened.length}`;
+    },
+    async checkState(commit) {
+      return options.checks?.[commit] ?? null;
+    },
+    async hasLabel(name) {
+      return (options.labels ?? ["critico"]).some(
+        (label) => label.toLowerCase() === name.toLowerCase(),
+      );
+    },
+    async successfulRuns() {
+      return options.runs ?? [];
+    },
+    async releases() {
+      return options.releases ?? [];
+    },
+    async createRelease(fields) {
+      fake.saved.push({ id: null, fields });
+      return {
+        id: 7,
+        tag: fields.tag,
+        target: fields.target,
+        draft: fields.draft,
+        prerelease: false,
+        url: `https://github.com/guedesdiogo/kelpie/releases/tag/${fields.tag}`,
+      };
+    },
+    async updateRelease(id, fields) {
+      fake.saved.push({ id, fields });
+      return {
+        id,
+        tag: fields.tag,
+        target: fields.target,
+        draft: fields.draft,
+        prerelease: false,
+        url: `https://github.com/guedesdiogo/kelpie/releases/tag/${fields.tag}`,
+      };
+    },
+  };
+  return fake;
+}

@@ -1,21 +1,27 @@
 name: Deploy
 
-# Deploys main to production: CI calls it after every gate passes on a push to main, and it runs by
-# hand to deploy main again, for example after a rollback (docs/deploy.md). It skips when nothing
-# that ships changed since the builds production serves, unless `always` is set (ADR-0031).
+# Deploys a release to production (ADR-0066). Publishing a release vX.Y.Z deploys the commit its
+# tag names; a prerelease deploys nothing. By hand, it deploys a release again, forces one past the
+# critical gate with a reason, or rotates the deep probe's token (docs/deploy.md). Either way only
+# someone in the variable PRUMO_DONOS gets past `authorize`. It skips when nothing that ships
+# changed since the builds production serves, unless `always` is set (ADR-0031).
 on:
-  workflow_call:
-    inputs:
-      watch-minutes:
-        description: Minutes to watch production before keeping the release
-        default: "10"
-        type: string
-      always:
-        description: Deploy even when nothing that ships changed since the live builds
-        default: false
-        type: boolean
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
+      tag:
+        description: The release to deploy, such as v1.2.0
+        required: true
+        type: string
+      force:
+        description: Deploy even though a critico issue lacks the mentor's acceptance (needs a reason)
+        default: false
+        type: boolean
+      reason:
+        description: Why it's forced, recorded on each critico issue
+        default: ""
+        type: string
       watch-minutes:
         description: Minutes to watch production before keeping the release
         default: "10"
@@ -24,23 +30,138 @@ on:
         description: Deploy even when nothing that ships changed since the live builds
         default: true
         type: boolean
-      # Merges never rotate: each upload is a secret change that rollbacks must force past.
+      # A release never rotates: each upload is a secret change that rollbacks must force past.
       rotate-probe-token:
         description: Upload DEPLOY_PROBE_TOKEN to ingress even though it holds one (a rotation)
         default: false
         type: boolean
 
+# The critical gate starts at the release of the latest successful run with this name.
+run-name: Production ${{ github.event.release.tag_name || inputs.tag }}
+
 permissions:
   contents: read
 
 jobs:
+  authorize:
+    name: Authorize the release
+    # A prerelease deploys nothing.
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      commit: ${{ steps.check.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The release's commit must be on main's first-parent history.
+          fetch-depth: 0
+          persist-credentials: false
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          ACTOR: ${{ github.triggering_actor }}
+          DONOS: ${{ vars.PRUMO_DONOS }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          FORCE: ${{ inputs.force }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          # PRUMO_DONOS lists logins, separated by commas or spaces; logins ignore case.
+          donos="$(tr -s ', ' '\n' <<< "$DONOS" | grep -v '^$' || true)"
+          if [ -z "$ACTOR" ] || ! grep -qixF -- "$ACTOR" <<< "$donos"; then
+            fail "$ACTOR isn't in the variable PRUMO_DONOS, so they can't deploy production (docs/deploy.md)."
+          fi
+          # By hand, the workflow must be main's: another branch's copy could skip these checks.
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            fail "Run the Deploy workflow from main."
+          fi
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "\"$TAG\" isn't a release tag such as v1.2.0."
+          if [ "$FORCE" = "true" ] && [ -z "${REASON//[[:space:]]/}" ]; then
+            fail "Forcing a release needs a reason."
+          fi
+          # Only a published release: GitHub's API doesn't show drafts by tag.
+          state="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '"\(.draft) \(.prerelease)"')" ||
+            fail "$TAG has no published release."
+          [ "$state" = "false false" ] || fail "$TAG is a prerelease, which never deploys."
+          commit="$(git rev-parse --verify "refs/tags/$TAG^{commit}")" || fail "There's no tag $TAG."
+          git rev-list --first-parent origin/main | grep -qx "$commit" ||
+            fail "$TAG names $commit, which isn't on main's first-parent history."
+          ci="$(gh api "repos/$GITHUB_REPOSITORY/commits/$commit/check-runs?check_name=CI%20passed&filter=latest" \
+            --jq '.check_runs[0].conclusion // "none"')"
+          [ "$ci" = "success" ] || fail "CI passed isn't green on $TAG's commit ($ci)."
+          echo "Authorized: $TAG ($commit), by $ACTOR." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "tag=$TAG"
+            echo "commit=$commit"
+          } >> "$GITHUB_OUTPUT"
+
+  # A release that brings a critico issue without the mentor's acceptance stops here, unless
+  # someone in PRUMO_DONOS forces it with a reason (ADR-0066).
+  critical-gate:
+    name: Critical issues accepted
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+      pull-requests: read
+    steps:
+      # Re-running failed jobs skips `authorize`, so this job checks who runs it again.
+      - name: Whoever runs it is in PRUMO_DONOS
+        env:
+          ACTOR: ${{ github.triggering_actor }}
+          DONOS: ${{ vars.PRUMO_DONOS }}
+        run: |
+          donos="$(tr -s ', ' '\n' <<< "$DONOS" | grep -v '^$' || true)"
+          if [ -z "$ACTOR" ] || ! grep -qixF -- "$ACTOR" <<< "$donos"; then
+            echo "::error::$ACTOR isn't in the variable PRUMO_DONOS, so they can't deploy production (docs/deploy.md)."
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The gate reads main's history back to the last release deployed.
+          fetch-depth: 0
+          persist-credentials: false
+      # tools/release needs no dependencies to run, only Bun.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - name: Every critico issue has the mentor's acceptance, or the release is forced
+        working-directory: tools/release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.authorize.outputs.tag }}
+          COMMIT: ${{ needs.authorize.outputs.commit }}
+          FORCE: ${{ inputs.force }}
+          REASON: ${{ inputs.reason }}
+          PRUMO_MENTOR: ${{ vars.PRUMO_MENTOR }}
+        run: |
+          if [ "$(git rev-parse --verify "refs/tags/$TAG^{commit}")" != "$COMMIT" ]; then
+            echo "::error::$TAG moved since it was authorized."
+            exit 1
+          fi
+          if [ "$FORCE" = "true" ]; then
+            bun src/main.ts force -- "$TAG" "$REASON"
+          else
+            bun src/main.ts gate -- "$TAG"
+          fi
+
   deploy:
     name: Deploy to production
-    if: github.ref == 'refs/heads/main'
+    needs: [authorize, critical-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: production
-    # One deploy or rollback at a time, and never cancelled halfway.
+    # One deploy or rollback at a time, and never cancelled halfway. The group is the job's only:
+    # a workflow-level group of the same name would cancel this job as a deadlock.
     concurrency:
       group: production
       cancel-in-progress: false
@@ -48,10 +169,22 @@ jobs:
       contents: read
       issues: write
     steps:
+      # Re-running failed jobs skips `authorize`, so this job checks who runs it again.
+      - name: Whoever runs it is in PRUMO_DONOS
+        env:
+          ACTOR: ${{ github.triggering_actor }}
+          DONOS: ${{ vars.PRUMO_DONOS }}
+        run: |
+          donos="$(tr -s ', ' '\n' <<< "$DONOS" | grep -v '^$' || true)"
+          if [ -z "$ACTOR" ] || ! grep -qixF -- "$ACTOR" <<< "$donos"; then
+            echo "::error::$ACTOR isn't in the variable PRUMO_DONOS, so they can't deploy production (docs/deploy.md)."
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The build number counts main's first-parent commits, and rollback barriers and the
-          # changes that ship are read from the live commit to this one.
+          # The commit authorized. The build number counts main's first-parent commits up to it, and
+          # rollback barriers and the changes that ship are read from the live commit to this one.
+          ref: ${{ needs.authorize.outputs.commit }}
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -66,6 +199,7 @@ jobs:
           # becomes channel-egress's RUNNER binding; while it's unset, the runner is off (docs/runner.md).
           RUNNER_VPC_SERVICE_ID: ${{ vars.RUNNER_VPC_SERVICE_ID }}
           WRANGLER_SEND_METRICS: "false"
+          # Empty for a release: it watches 10 minutes, and skips when nothing ships.
           WATCH_MINUTES: ${{ inputs.watch-minutes }}
           ALWAYS: ${{ inputs.always }}
           ROTATE_PROBE_TOKEN: ${{ inputs.rotate-probe-token }}
@@ -79,10 +213,11 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ needs.authorize.outputs.tag }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           report="$RUNNER_TEMP/release.md"
           [ -f "$report" ] || echo "The deploy stopped before it wrote a report." > "$report"
           printf '\n[The run](%s)\n' "$RUN_URL" >> "$report"
-          tag="$(git rev-list --count --first-parent HEAD)-$(git rev-parse --short=7 HEAD)"
-          gh issue create --repo "$GITHUB_REPOSITORY" --title "Production deploy of $tag failed" --body-file "$report"
+          build="$(git rev-list --count --first-parent HEAD)-$(git rev-parse --short=7 HEAD)"
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "Production deploy of $RELEASE ($build) failed" --body-file "$report"

@@ -69,6 +69,15 @@ export function isAncestor(git: Git, ancestor: string, descendant: string): bool
   }
 }
 
+/** The commit a tag names, or null without that tag. */
+export function tagCommit(git: Git, tag: string): string | null {
+  try {
+    return git(["rev-parse", "--verify", "--quiet", `refs/tags/${tag}^{commit}`]).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 /** The tag a deploy of `ref` carries (docs/admin-api.md, "Versions"). */
 export function buildTagOf(git: Git, ref: string): BuildTag {
   return {

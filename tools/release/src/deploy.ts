@@ -81,6 +81,21 @@ function nothingShips(git: Git, live: readonly LiveWorker[]): string | undefined
 }
 
 /**
+ * The live builds newer than HEAD: HEAD is a strict ancestor of their commit. Deploying HEAD over
+ * them would go back without the Rollback workflow's checks of barriers and secrets (ADR-0066).
+ * A live commit the checkout lacks can't be compared, and the same commit is no step back.
+ */
+function newerLive(git: Git, live: readonly LiveWorker[]): BuildTag[] {
+  const newer: BuildTag[] = [];
+  for (const { tag } of live) {
+    if (!tag || !hasCommit(git, tag.commit) || newer.some((known) => sameTag(known, tag))) continue;
+    if (isAncestor(git, "HEAD", tag.commit) && !isAncestor(git, tag.commit, "HEAD"))
+      newer.push(tag);
+  }
+  return newer;
+}
+
+/**
  * The instance vars the owner set. A live value equal to the repository's default at the live
  * commit is no setting: carrying it would pin that default after the repository changes it.
  */
@@ -96,7 +111,8 @@ function ownerSet(git: Git, worker: LiveWorker): Record<string, string> {
 
 /**
  * Reads production and plans the release of HEAD. Unless `always` is set, it plans to skip when
- * nothing that ships changed since the live builds.
+ * nothing that ships changed since the live builds. With `always`, it refuses a HEAD older than a
+ * live build: going back is the Rollback workflow's.
  */
 export async function planDeploy(
   deps: Pick<DeployDeps, "api" | "git" | "now">,
@@ -112,6 +128,14 @@ export async function planDeploy(
     ...worker,
     vars: ownerSet(deps.git, worker),
   }));
+  if (options.always) {
+    const newer = newerLive(deps.git, live);
+    if (newer.length > 0) {
+      throw new Error(
+        `Production serves ${newer.map(formatTag).join(", ")}, newer than ${formatTag(tag)}: deploying it would go back without checking rollback barriers and secrets. Use the Rollback workflow, with this release as its target.`,
+      );
+    }
+  }
   const skip = options.always ? undefined : nothingShips(deps.git, live);
   // Without analytics the watch would judge by the probes alone, so a token without them stops here.
   // A skipped release watches nothing.
@@ -386,7 +410,7 @@ async function rollBack(
   if (uploaded && report.rollback.some((result) => result.ok && result.script === INGRESS)) {
     report.warnings.push(
       holdsProbeToken(plan.live.find((worker) => worker.spec.script === INGRESS))
-        ? "The rollback put ingress back on the previous DEPLOY_PROBE_TOKEN. Once main is fixed, deploy with rotate-probe-token: until then the deep probe fails (docs/deploy.md)."
+        ? "The rollback put ingress back on the previous DEPLOY_PROBE_TOKEN. Once the fix is released, deploy that release with rotate-probe-token: until then the deep probe fails (docs/deploy.md)."
         : "The rollback put ingress back on a version without DEPLOY_PROBE_TOKEN. The next deploy uploads it again.",
     );
   }

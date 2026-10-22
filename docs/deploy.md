@@ -1,11 +1,14 @@
 # Deploying and rolling back
 
-A merge into `main` deploys itself: CI runs the gates, deploys all six Workers, watches production, and rolls the release back if it is unhealthy. The deploy skips when nothing that ships changed since the builds production serves. The owner can also roll production back to an earlier build on request. [ADR-0029](adr/0029-continuous-deployment-and-rollback.md) and [ADR-0031](adr/0031-deploy-only-what-ships.md) record the decisions; this page is the runbook.
+A merge into `main` runs the gates and deploys nothing. Production ships only from a published release `vX.Y.Z`, when the owner asks for it: the Deploy workflow authorizes the release, stops it if a `critico` issue lacks the mentor's acceptance, deploys all six Workers, watches production, and rolls the release back if it is unhealthy. The deploy skips when nothing that ships changed since the builds production serves. The owner can also roll production back to an earlier release or build on request. [ADR-0029](adr/0029-continuous-deployment-and-rollback.md), [ADR-0031](adr/0031-deploy-only-what-ships.md) and [ADR-0066](adr/0066-production-by-release.md) record the decisions; this page is the runbook.
 
 ```
-PR ──► gates ──► CI passed ──► merge ──► gates on main ──► deploy ──► probes + 10 min watch ──► kept
-                                                                          │
-                                                                          └─ unhealthy ──► automatic rollback + issue
+PR ──► gates ──► CI passed ──► merge ──► gates on main            (nothing deploys)
+
+owner asks ──► release cut --draft ──► owner's order ──► --publish ──► authorize ──► critical gate ──► deploy ──► probes + 10 min watch ──► kept
+                                                                                       │                            │
+                                                                                       └─ critico unaccepted:       └─ unhealthy ──► automatic rollback + issue
+                                                                                          stops, unless forced
 ```
 
 ## One-time setup
@@ -14,21 +17,29 @@ PR ──► gates ──► CI passed ──► merge ──► gates on main �
    - Use the "Edit Cloudflare Workers" template, scoped to that account and to the zone of Kelpie's hostnames.
    - Add **Account → Account Analytics → Read**: the watch reads error counts from the GraphQL Analytics API.
    - With a VPS runner ([runner.md](runner.md)), add the account's **Connectivity Directory Bind** permission too: without it, binding the runner's VPC Service fails with `code: 10196`, and every deploy rolls back at `channel-egress`.
-2. **Store it in the `production` environment.** The `production` environment and its `CLOUDFLARE_ACCOUNT_ID` secret already exist; only `main` can use it.
+2. **Store it in the `production` environment.** The `production` environment and its `CLOUDFLARE_ACCOUNT_ID` secret already exist; only `main` and tags `v*` can use it.
    ```bash
    gh secret set CLOUDFLARE_API_TOKEN --env production --repo guedesdiogo/kelpie
    ```
-   Keep deploy credentials in the environment, never as repository secrets. CI hands the deploy job its secrets with `secrets: inherit`, the only way the environment's secrets reach a called workflow, so any repository secret would reach it too.
+   Keep deploy credentials in the environment, never as repository secrets, which every job of every workflow can read.
 3. **Store the deep probe's token in the same environment.** The owner, or Claude when asked, runs this once; it prints nothing:
    ```bash
    openssl rand -hex 32 | gh secret set DEPLOY_PROBE_TOKEN --env production --repo guedesdiogo/kelpie
    ```
-   - The next deploy uploads it to ingress as a Worker secret, once, and the deep probe signs its requests with it ("On merge"). It lives only in GitHub and in the Worker; nobody needs a copy.
+   - The next deploy uploads it to ingress as a Worker secret, once, and the deep probe signs its requests with it ("What a deploy does"). It lives only in GitHub and in the Worker; nobody needs a copy.
    - Without it, deploys still work: they upload nothing, skip the deep probe, and warn.
    - A token shorter than 32 characters, or with spaces, is treated the same way, with a warning; ingress would refuse it anyway.
 4. **The ruleset `main: CI must pass`** requires, with no bypass:
    - `CI passed`, on a branch up to date with `main`;
    - CodeQL's results, which block new high-severity alerts.
+5. **Set up releases** ([ADR-0066](adr/0066-production-by-release.md)):
+   - the `production` environment accepts tags `v*` besides `main` (Settings → Environments → production → Deployment branches and tags);
+   - the variable `PRUMO_DONOS` lists who may deploy production, logins separated by commas or spaces:
+     ```bash
+     gh variable set PRUMO_DONOS --repo guedesdiogo/kelpie --body guedesdiogo
+     ```
+   - the label `critico` marks the issues that need the mentor's acceptance. The variable `PRUMO_MENTOR` names the mentor; without it, `guedesdiogo`;
+   - the tag ruleset «Release tags v*» stops anyone from creating, moving or deleting `refs/tags/v*`, except the Admin role: whoever pushes such a tag runs that tag's `deploy.yml` in the `production` environment. The owner's token, which the agent uses, has that role.
 
 ## The gates
 
@@ -37,7 +48,7 @@ PR ──► gates ──► CI passed ──► merge ──► gates on main �
 | Job | What it proves | Runs on a pull request that changes |
 |---|---|---|
 | `Lint, typecheck and test` | `check:workspaces`, Biome, `tsc`, and every workspace's tests with coverage, at least 80% in each (`docs/testing.md`) | anything but the docs and the files under `.github/` that only GitHub reads |
-| `Build Workers` | Each Worker bundles with its real `wrangler.jsonc` (`wrangler deploy --dry-run`). No account is needed. | something that ships ("On merge"), or `ci.yml` |
+| `Build Workers` | Each Worker bundles with its real `wrangler.jsonc` (`wrangler deploy --dry-run`). No account is needed. | something that ships ("What a deploy does"), or `ci.yml` |
 | `Migrations` | Drizzle's migrations match each schema; journals are in date order; applied migrations are unchanged; rollback barriers are acknowledged | something that ships, or `ci.yml` |
 | `Workflow lint` | actionlint, with shellcheck on every `run:` block | anything under `.github/` |
 | `Dependency review` | A new dependency has no known high-severity vulnerability | a `package.json`, `bun.lock`, or anything under `.github/` |
@@ -62,18 +73,67 @@ CodeQL's default setup also runs on pull requests. The ruleset blocks new alerts
 
 ## Deploys
 
-### On merge
+### Releases
 
-After the gates pass on `main`, the `Deploy` job runs `tools/release`. It:
+Production ships when the owner asks for it, through a published release ([ADR-0066](adr/0066-production-by-release.md)).
+
+1. **The agent prepares it,** from the repository's root:
+   ```bash
+   bun run --cwd tools/release release cut minor           # a preview: the tag and the notes
+   bun run --cwd tools/release release cut minor --draft   # saves them as a draft release
+   ```
+   - The version is `patch`, `minor` or `major` over the previous release, or one named outright, such as `v0.3.0`. The first release needs it named.
+   - The release is `main`'s tip, or `--target <commit>`, a commit on `main`'s first-parent history. `--draft` and `--publish` need `CI passed` green on it.
+   - The notes list the pull requests since the previous release and the issues they close, from GitHub's records, and how each `critico` issue the gate will read stands. A draft deploys nothing.
+2. **The owner reads the notes and gives the order.** Only then does the agent publish the draft:
+   ```bash
+   bun run --cwd tools/release release cut minor --publish
+   ```
+   It refuses while a `critico` issue lacks the mentor's acceptance, and when `main` moved past the draft's commit: `--target` then names that commit, or `--draft` moves the draft. The owner can also publish the draft from the Releases page.
+3. **Publishing runs the Deploy workflow,** named `Production vX.Y.Z` in the Actions tab:
+   - **`Authorize the release`:** whoever published it is in `PRUMO_DONOS`; the tag is `vX.Y.Z` with a published release that isn't a prerelease; its commit is on `main`'s first-parent history, with `CI passed` green.
+   - **`Critical issues accepted`:** the critical gate, below.
+   - **`Deploy to production`:** checks out the release's commit and deploys it ("What a deploy does").
+
+A prerelease deploys nothing. A release made with a workflow's `GITHUB_TOKEN` would start no workflow either, so releases come from the owner's `gh` login, which the agent uses.
+
+#### The critical gate
+
+- **What it reads:** `main`'s first-parent commits from a base to the release's commit, the pull requests merged into `main` that brought them, and the issues each one closes, from GitHub's API. Never the release's notes, which anyone who can edit the release could change.
+- **The base** is the release of the latest successful Deploy run that ran a workflow file the gate can trust: by hand from `main`, or on a release at the commit its tag names. Without one, or when that run's tag isn't in the checkout, the gate reads the whole history.
+  - A release the gate stopped leaves no successful run, so the next release's gate reads its commits again, even before anything shipped.
+  - Deploying an older release again reads nothing: the release last shipped contains it.
+- **The label** is read whatever its case. Without a `critico` label in the repository, the gate fails rather than pass everything.
+- **A `critico` issue is accepted** when the mentor opened a pull request in that range that closes it, or commented on it with «**Aceite** · <environment> · <link>».
+- **Any other `critico` issue stops the release,** and the run's summary lists it. So does any error reading GitHub. Once the mentor accepts each one, re-run the run's failed jobs.
+- **`release gate vX.Y.Z`,** from `tools/release`, shows the decision for a tag you have locally, and changes nothing.
+
+#### Forcing a release
+
+Someone in `PRUMO_DONOS` can deploy a release whose `critico` issues lack the mentor's acceptance:
+
+```bash
+gh workflow run deploy.yml --repo guedesdiogo/kelpie -f tag=v0.3.0 -f force=true -f reason="login fails for every user"
+```
+
+The Actions tab shows the same form (Deploy → Run workflow). The reason is required, and public, like the run. The gate then:
+- comments on each such issue: «**Aceite forçado** · produção · v0.3.0 · <run>», with the lines `Dono:`, `Motivo:` and `Revisão retroativa:`;
+- opens «Revisão retroativa · v0.3.0 · aceite forçado», assigned to the mentor and labeled `critico`. The mentor reviews each issue in production and comments «**Aceite** · produção · <link>» on it, or opens the fix.
+
+A forced comment isn't an acceptance. If the forced deploy fails, the next release stops on the same issues.
+
+### What a deploy does
+
+Once the release is authorized and past the critical gate, the `Deploy to production` job runs `tools/release` at the release's commit. It:
 
 1. **Reads each Worker's live version:** its build tag, its traffic, and its instance vars. Those are the values the owner set with `--var`: the Access values, the public origins, the vault's GitHub App values and the AI Gateway URLs. A live value equal to the repository's default isn't carried, so a later change to the default applies.
 2. **Skips when nothing that ships changed since the live builds.** It compares each live commit with the one being deployed. Something ships when a changed path is:
    - under `apps/`, `packages/`, `tools/release/` or `.github/actions/`;
    - `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.base.json` or `.github/workflows/deploy.yml`.
 
-   A merge that changes only other paths, such as `docs/`, `ci.yml` or `scripts/`, deploys nothing, and the run's summary says why. So does a re-run of an older run whose commit production already contains. A live version without a tag, or a live commit the checkout lacks, always deploys.
+   A release that changes only other paths, such as `docs/`, `ci.yml` or `scripts/`, deploys nothing, and the run's summary says why. So does a release whose commit production already contains. A live version without a tag, or a live commit the checkout lacks, always deploys.
 
-   The comparison is with production, not with the previous commit. A deploy that was missed, because its run failed or was replaced while it waited, goes out with the next merge, whatever that merge changes. `deploy.yml` by hand deploys regardless ([By hand](#by-hand)). `release deploy --plan` shows the decision.
+   The comparison is with production, not with the previous release. A deploy that was missed, because its run failed or was replaced while it waited, goes out with the next release, whatever that release changes. `deploy.yml` by hand deploys regardless ([By hand](#by-hand)). `release deploy --plan` shows the decision.
 3. **Reads the analytics once.** A token without Account Analytics Read stops the deploy here, before anything changes: the watch would otherwise judge by the probes alone.
 4. **Finds the rollback barriers** between the live commit and the new one.
 5. **Deploys the Workers in order** (`channel-egress`, `llm-gateway`, `context-store`, `conversation-runtime`, `ingress`, `admin-api`). Each one's bindings point only at Workers before it: `llm-gateway` binds `channel-egress`'s `RunnerChat` (#421), and `conversation-runtime` its `RunnerSessions` (#434):
@@ -108,39 +168,43 @@ The run's summary has the table of versions, the probes and the barriers. The pr
 - **The old build is probed without the deep probe:** it may have no route for it.
 - **Ingress goes back with `force` only when this deploy uploaded the token.** Cloudflare refuses to roll back past a secret change without it, and the version restored is the one this deploy replaced, so the only secret change undone is the deploy's own. The report warns that ingress now holds its previous token, or none:
   - none: the next deploy uploads it again;
-  - a previous one, after a rotation: once `main` is fixed, deploy with `rotate-probe-token`. Until then the deep probe answers 404 and fails every deploy.
+  - a previous one, after a rotation: once the fix is released, deploy that release by hand with `rotate-probe-token`. Until then the deep probe answers 404 and fails every deploy.
 - **It doesn't roll back:**
   - when the release crosses a rollback barrier: a class migration, a marked SQL migration, or a live version without a tag. Fix forward, or roll back by request;
   - when the zone's security answered the probes (`cf-mitigated`), so nothing is known about the Worker.
 - **A failed deploy opens an issue** with the report, whether it rolled back or not.
-- **`main` still has the change.** The next merge deploys it again, even one that changes only docs. Revert or fix it first.
+- **`main` still has the change.** The next release deploys it again, even one that changes only docs. Revert or fix it first.
 
 ### By hand
 
-- **To deploy `main` again,** for example after a rollback once the fix is in:
+- **To deploy a release again,** for example after an automatic rollback whose cause wasn't in the code:
   ```bash
-  gh workflow run deploy.yml --repo guedesdiogo/kelpie
+  gh workflow run deploy.yml --repo guedesdiogo/kelpie -f tag=v0.3.0
   ```
-  By hand it deploys even when nothing that ships changed. Add `-f always=false` to skip in that case, as a merge does.
+  It runs from `main`, and only someone in `PRUMO_DONOS` gets past `authorize`; the critical gate runs as for a release. Each later job checks `PRUMO_DONOS` again, so re-running failed jobs needs it too. By hand it deploys even when nothing that ships changed. Add `-f always=false` to skip in that case, as a release does.
+- **It never goes back.** By hand, it refuses a release older than a build production serves: that would skip the Rollback workflow's checks of barriers and secrets. The release production serves deploys again, and so does a newer one.
 - **One deploy or rollback runs at a time.** Others wait in the `production` group, and GitHub keeps only the newest waiting run.
 - **Don't deploy from a laptop.** A local `wrangler deploy` races the pipeline and skips its checks. Two exceptions:
   - **A new instance's first deploy** follows `docs/admin-api.md`, "Setting it up". The pipeline needs a live version to read the instance vars from.
-  - **Changing an instance var.** Deploy that one Worker by hand from a clean checkout of `main`. Pass a `--var` for each of its instance vars, the new value and the ones it keeps: any you leave out is removed. `bun run --cwd tools/release release deploy --plan` lists which each Worker carries.
+  - **Changing an instance var.** Deploy that one Worker by hand from a clean checkout of the release production serves (`git switch --detach v0.3.0`): `main` may hold changes that aren't released. Pass a `--var` for each of its instance vars, the new value and the ones it keeps: any you leave out is removed. `bun run --cwd tools/release release deploy --plan` lists which each Worker carries.
     ```bash
     bunx wrangler deploy -c apps/<worker>/wrangler.jsonc --tag "$(git rev-list --count --first-parent HEAD)-$(git rev-parse --short=7 HEAD)" --var NAME:value --var OTHER:value
     ```
     Later deploys carry the new value.
 
-    This deploys the committed config, so `channel-egress` loses the runner's `RUNNER` binding until the next deploy through the pipeline ([runner.md](runner.md)). Run `deploy.yml` by hand right after, or the runner reads as `not_configured` meanwhile.
+    This deploys the committed config, so `channel-egress` loses the runner's `RUNNER` binding until the next deploy through the pipeline ([runner.md](runner.md)). Run `deploy.yml` by hand for that release right after, or the runner reads as `not_configured` meanwhile.
 
 ## Rolling back by request
 
 - **From GitHub:**
   ```bash
-  gh workflow run rollback.yml --repo guedesdiogo/kelpie -f target=previous -f reason="replies come out empty"
+  gh workflow run rollback.yml --repo guedesdiogo/kelpie -f target=v0.2.0 -f reason="replies come out empty"
   ```
   The Actions tab shows the same form (Rollback → Run workflow).
+- **It is the way back to an earlier release,** with its checks of barriers and secrets. Publishing that release again starts nothing, and the Deploy workflow refuses to go back ("By hand").
+- **It needs someone in `PRUMO_DONOS`,** like the Deploy workflow.
 - **`target`** takes one of:
+  - a release, such as `v0.2.0`: the build of the commit its tag names. A release that shipped nothing, because nothing that ships changed, has no build of its own: the rollback says so, and you name the release or build that served it;
   - `previous`, the build production served before the live one, from ingress's deployment history. A build that was rolled back as unhealthy is never `previous`;
   - a build, such as `94`;
   - a tag, such as `94-cc8e179`;
@@ -158,7 +222,7 @@ The rollback:
   - if that build had none, the next deploy uploads it;
   - if the token was rotated since, deploy with `rotate-probe-token`, or the deep probe fails.
 
-Fix or revert the change on `main` before the next merge, which deploys `main` again.
+Fix or revert the change on `main` before the next release, which would deploy it again.
 
 ### From a terminal
 
@@ -184,11 +248,11 @@ bun run --cwd tools/release release rollback --target 94 --reason "replies come 
 - **What a leaked token gives.** Whoever holds it can wake the objects and learn whether each part answers. The answer has no ids and no data, and the probe changes nothing.
 - **Its lifecycle.**
   - **Upload, once.** The first deploy after the environment gets the token uploads it to ingress. Later deploys see that ingress holds a `DEPLOY_PROBE_TOKEN` and upload nothing.
-  - **Rotation, by dispatch.** Set a new value in the environment (One-time setup, step 3), then run the Deploy workflow with `rotate-probe-token`, which uploads it even though ingress holds one:
+  - **Rotation, by dispatch.** Set a new value in the environment (One-time setup, step 3), then run the Deploy workflow for the release production serves with `rotate-probe-token`, which uploads it even though ingress holds one:
     ```bash
-    gh workflow run deploy.yml --repo guedesdiogo/kelpie -f rotate-probe-token=true
+    gh workflow run deploy.yml --repo guedesdiogo/kelpie -f tag=v0.3.0 -f rotate-probe-token=true
     ```
-    Merges never rotate. Until the rotation runs, ingress keeps the old value, and the deep probe fails every deploy with a 404 that says so.
+    Releases never rotate. Until the rotation runs, ingress keeps the old value, and the deep probe fails every deploy with a 404 that says so.
   - **Immediate revoke.** For a leaked token, delete it on ingress at once; this deploys ingress's live code without the secret:
     ```bash
     bunx wrangler secret delete DEPLOY_PROBE_TOKEN --name kelpie-ingress

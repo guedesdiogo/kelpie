@@ -4,6 +4,7 @@
 - Date: 2026-10-12
 - Issue: [#250](https://github.com/guedesdiogo/kelpie/issues/250)
 - Amends: [ADR-0029](0029-continuous-deployment-and-rollback.md), decision 2: a push to `main` deploys only when production lacks something that ships
+- Amended by: [ADR-0066](0066-production-by-release.md), decisions 4 and 5: the Deploy job runs on a published release instead of every push, with `always` off
 - Requested by the owner on 2026-10-12, on the suggestion to skip the deploy for merges that change only docs: «pode abrir as issues e pode paralelisar todos os 4 itens»
 
 ## Context

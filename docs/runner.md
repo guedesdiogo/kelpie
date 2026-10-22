@@ -307,7 +307,7 @@ Cloudflare's [Workers VPC](https://developers.cloudflare.com/workers-vpc/) is in
    gh variable set RUNNER_VPC_SERVICE_ID --env production --repo guedesdiogo/kelpie --body <VPC_SERVICE_ID>
    ```
 
-   The next deploy gives `channel-egress` its `RUNNER` binding (`docs/deploy.md`). A merge that ships nothing deploys nothing, so the first time it takes a deploy by hand, with `always` (`docs/deploy.md`, "By hand"). Its log says "kelpie-channel-egress gets the runner's VPC Service as its RUNNER binding".
+   The next deploy gives `channel-egress` its `RUNNER` binding (`docs/deploy.md`). Merges deploy nothing, so the first time it takes a deploy by hand of the release production serves, with `always` (`docs/deploy.md`, "By hand"). Its log says "kelpie-channel-egress gets the runner's VPC Service as its RUNNER binding".
 
    If that deploy fails on `channel-egress`, every later one will too. Delete the variable (`gh variable delete RUNNER_VPC_SERVICE_ID --env production`), then check the id against `wrangler vpc service list`, and check that the deploy's API token may bind a VPC Service.
 3. **Give Kelpie the secret.** Ask Master to connect the runner: Kelpie sends a one-time link to a secure form. Open it, and paste the content of `~/.config/kelpie-runner/secret`, which `cat` shows on the server. `channel-egress` checks it with the runner's `/health` before storing it. The admin API's `connectRunner` command answers the same form's path (`docs/admin-api.md`).

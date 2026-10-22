@@ -8,6 +8,17 @@ import { migrationChanges } from "./changes.ts";
 import { cloudflareApi } from "./cloudflare.ts";
 import { type ConfigAdditions, withAdditions } from "./config-additions.ts";
 import {
+  DEFAULT_MENTOR,
+  forceRelease,
+  forceReport,
+  gateBase,
+  gateReport,
+  parseRelease,
+  releaseContents,
+  unaccepted,
+} from "./critical.ts";
+import { type CutMode, cutRelease, cutReport } from "./cut.ts";
+import {
   type DeployDeps,
   deepProbeToken,
   deploy,
@@ -16,7 +27,8 @@ import {
   runnerVpcService,
 } from "./deploy.ts";
 import { gatesOutput, gatesReport, planGates } from "./gates.ts";
-import { changedFiles, gitAt, repoRoot } from "./git.ts";
+import { changedFiles, type Git, gitAt, repoRoot, tagCommit } from "./git.ts";
+import { type GitHub, githubApi, repositoryOf } from "./github.ts";
 import { guardVerdict } from "./guard.ts";
 import { readLive } from "./live.ts";
 import { bounded, exitCode, reportsFailure } from "./outcome.ts";
@@ -43,12 +55,23 @@ const USAGE = `Usage, from tools/release: bun run release <command> [options]
                            Deploys HEAD, verifies it and rolls it back if it's unhealthy. It
                            skips when nothing that ships changed since the live builds, unless
                            --always is given.
-  rollback --target <previous|build|tag|commit> [--reason <text>] [--force] [--plan] [--report <file>]
-                           Rolls every Worker back to one earlier build.
+  rollback --target <previous|vX.Y.Z|build|tag|commit> [--reason <text>] [--force] [--plan] [--report <file>]
+                           Rolls every Worker back to one earlier build or release.
+  cut <patch|minor|major|vX.Y.Z> [--target <commit>] [--draft|--publish]
+                           The next release of main's tip, or of --target, with its notes. Alone,
+                           a preview. --draft saves it as a draft. --publish deploys production:
+                           only on the owner's order.
+  gate <vX.Y.Z> [--report <file>]
+                           Fails when an issue labeled critico that the release brings lacks the
+                           mentor's acceptance. The Deploy workflow runs it.
+  force -- <vX.Y.Z> <reason>
+                           Records a forced release on each such issue, and opens a retroactive
+                           review for the mentor. Only in the Deploy workflow.
 
 deploy, status and rollback need CLOUDFLARE_ACCOUNT_ID, and CLOUDFLARE_API_TOKEN or a
 wrangler login. deploy also takes DEPLOY_PROBE_TOKEN, for the deep probe, and uploads it to
-ingress when ingress has none or with --rotate-probe-token. See docs/deploy.md.`;
+ingress when ingress has none or with --rotate-probe-token. cut, gate and force need GH_TOKEN
+or a gh login, and take PRUMO_MENTOR (default ${DEFAULT_MENTOR}). See docs/deploy.md.`;
 
 const inActions = process.env.GITHUB_ACTIONS === "true";
 
@@ -167,6 +190,21 @@ function wranglerDeploy(root: string) {
     });
 }
 
+/** GitHub, for this checkout's repository, with GH_TOKEN or the gh CLI's login. */
+function github(git: Git): GitHub {
+  const repo =
+    process.env.GITHUB_REPOSITORY || repositoryOf(git(["remote", "get-url", "origin"])) || "";
+  if (!repo) throw new Error("Set GITHUB_REPOSITORY to owner/name: origin isn't on github.com.");
+  const token =
+    process.env.GH_TOKEN ||
+    process.env.GITHUB_TOKEN ||
+    execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
+  hide(token);
+  return githubApi(token, repo);
+}
+
+const mentor = () => process.env.PRUMO_MENTOR || DEFAULT_MENTOR;
+
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const now = () => new Date();
 const settleOptions = { attempts: 18, intervalMs: 10_000 };
@@ -186,6 +224,8 @@ async function main(argv: string[]): Promise<number> {
       "watch-minutes": { type: "string" },
       "error-threshold": { type: "string" },
       "rotate-probe-token": { type: "boolean", default: false },
+      draft: { type: "boolean", default: false },
+      publish: { type: "boolean", default: false },
       help: { type: "boolean", default: false },
     },
   });
@@ -297,6 +337,51 @@ async function main(argv: string[]): Promise<number> {
       });
       publish(rollbackReport(report), values.report);
       return exitCode.rollback(report);
+    }
+
+    case "cut": {
+      const [, version] = positionals;
+      if (!version) throw new Error("cut takes patch, minor, major or vX.Y.Z.");
+      if (values.draft && values.publish) throw new Error("Pick --draft or --publish, not both.");
+      const mode: CutMode = values.publish ? "publish" : values.draft ? "draft" : "preview";
+      git(["fetch", "--quiet", "--tags", "origin"]);
+      const cut = await cutRelease(
+        { git, github: github(git) },
+        { version, target: values.target, main: "origin/main", mode, mentor: mentor() },
+      );
+      console.log(cutReport(cut, mode));
+      return 0;
+    }
+
+    case "gate":
+    case "force": {
+      const [, tag, ...words] = positionals;
+      if (!tag || !parseRelease(tag))
+        throw new Error(`${command} takes a release tag, such as v1.2.0.`);
+      const commit = tagCommit(git, tag);
+      if (!commit) throw new Error(`There's no tag ${tag} here. Fetch the tags first.`);
+      // A force records who ran the workflow, which checked them against PRUMO_DONOS, and the run.
+      let force: { actor: string; runUrl: string; reason: string } | null = null;
+      if (command === "force") {
+        const actor = process.env.GITHUB_TRIGGERING_ACTOR;
+        const run = process.env.GITHUB_RUN_ID;
+        if (!inActions || !actor || !run) {
+          throw new Error("force runs only in the Deploy workflow.");
+        }
+        const reason = words.join(" ");
+        if (!reason.trim()) throw new Error("Forcing a release needs a reason.");
+        const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${run}`;
+        force = { actor, runUrl, reason };
+      }
+      const deps = { git, github: github(git) };
+      const base = await gateBase(deps);
+      const contents = await releaseContents(deps, { commit, base: base.tag }, mentor());
+      publish(gateReport(tag, contents, base), values.report);
+      const missing = unaccepted(contents);
+      if (!force) return exitCode.gate(missing.length);
+      const record = await forceRelease(deps.github, tag, missing, { ...force, mentor: mentor() });
+      publish(forceReport(tag, record), undefined);
+      return 0;
     }
 
     default:

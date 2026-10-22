@@ -1,12 +1,14 @@
 name: Rollback
 
 # Rolls every Worker back to one earlier build, by the owner's request (docs/deploy.md):
-#   gh workflow run rollback.yml -f target=previous -f reason="..."
+#   gh workflow run rollback.yml -f target=v1.2.0 -f reason="..."
+# It is the way back to an earlier release, checking barriers and secrets: publishing that release
+# again fires no deploy, and the Deploy workflow refuses to go back (ADR-0066).
 on:
   workflow_dispatch:
     inputs:
       target:
-        description: previous, a build (96), a tag (96-0c620f4) or a commit
+        description: previous, a release (v1.2.0), a build (96), a tag (96-0c620f4) or a commit
         default: previous
         required: true
         type: string
@@ -41,9 +43,21 @@ jobs:
       contents: read
       issues: write
     steps:
+      # Only someone in PRUMO_DONOS moves production, back as well as forward (ADR-0066).
+      - name: Whoever runs it is in PRUMO_DONOS
+        env:
+          ACTOR: ${{ github.triggering_actor }}
+          DONOS: ${{ vars.PRUMO_DONOS }}
+        run: |
+          donos="$(tr -s ', ' '\n' <<< "$DONOS" | grep -v '^$' || true)"
+          if [ -z "$ACTOR" ] || ! grep -qixF -- "$ACTOR" <<< "$donos"; then
+            echo "::error::$ACTOR isn't in the variable PRUMO_DONOS, so they can't roll production back (docs/deploy.md)."
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Rollback barriers are read from the target's commit to the live one.
+          # Rollback barriers are read from the target's commit to the live one, and a release's
+          # tag names its commit.
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -60,8 +74,8 @@ jobs:
           if [ "$FORCE" = "true" ]; then args+=(--force); fi
           if [ "$PLAN_ONLY" = "true" ]; then args+=(--plan); fi
           bun run --cwd tools/release release "${args[@]}"
-      # Production now runs older code than main: the issue tracks the fix, which must land before
-      # the next merge deploys main again.
+      # Production now runs older code than the release it replaced: the issue tracks the fix, which
+      # must land before the next release.
       - name: Record the rollback on an issue
         if: ${{ !cancelled() && !inputs.plan-only }}
         env:

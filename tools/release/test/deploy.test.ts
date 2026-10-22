@@ -341,6 +341,30 @@ describe("planDeploy's skip, against the builds production serves (ADR-0031)", {
     const { deps } = setup(repo.dir, base);
     expect((await planDeploy(deps, { always: true })).skip).toBeUndefined();
   });
+
+  it("with always, deploys the live build again, or a newer one", async () => {
+    const { repo, base } = history();
+    // The same commit: a deploy of the live release again, or a token rotation.
+    expect((await planDeploy(setup(repo.dir, base).deps, { always: true })).skip).toBeUndefined();
+    repo.commit({ "docs/deploy.md": "b" });
+    expect((await planDeploy(setup(repo.dir, base).deps, { always: true })).skip).toBeUndefined();
+  });
+
+  it("with always, refuses an older HEAD: going back is the Rollback workflow's", async () => {
+    const { repo, base } = history();
+    const newer = repo.commit({ "docs/deploy.md": "b" });
+    gitAt(repo.dir)(["checkout", "-q", base]);
+    const { deps, liveTag } = setup(repo.dir, newer);
+    await expect(planDeploy(deps, { always: true })).rejects.toThrow(
+      `Production serves ${formatTag(liveTag)}, newer than ${formatTag(buildTagOf(deps.git, base))}: deploying it would go back`,
+    );
+    // One Worker on a newer build is enough.
+    const mixed = setup(repo.dir, base);
+    serve(mixed.api, "kelpie-admin-api", liveTag);
+    await expect(planDeploy(mixed.deps, { always: true })).rejects.toThrow(
+      "Use the Rollback workflow",
+    );
+  });
 });
 
 describe("deploy", () => {

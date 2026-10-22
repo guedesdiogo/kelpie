@@ -4,7 +4,7 @@ import {
   SECRETS_CHANGED,
   type VersionTraffic,
 } from "./cloudflare.ts";
-import type { Git } from "./git.ts";
+import { type Git, tagCommit } from "./git.ts";
 import {
   type Barrier,
   barriersBetween,
@@ -107,11 +107,20 @@ export async function planRollback(
   deps: { api: CloudflareApi; git: Git },
   input: string,
 ): Promise<RollbackPlan> {
-  const target = parseTarget(input);
-  if (!target) {
+  const parsed = parseTarget(input);
+  if (!parsed) {
     throw new RollbackRefused(
-      `"${input}" isn't a target. Use previous, a build number (96), a tag (96-0c620f4) or a commit.`,
+      `"${input}" isn't a target. Use previous, a release (v1.2.0), a build number (96), a tag (96-0c620f4) or a commit.`,
     );
+  }
+  // A release goes back to the commit its tag names (ADR-0066).
+  let target: Exclude<typeof parsed, { kind: "release" }>;
+  if (parsed.kind === "release") {
+    const commit = tagCommit(deps.git, parsed.release);
+    if (!commit) throw new RollbackRefused(`There's no release tag ${parsed.release}.`);
+    target = { kind: "commit", commit };
+  } else {
+    target = parsed;
   }
   const live = await readLive(deps.api);
   const origin = liveOrigin(live);
@@ -136,9 +145,12 @@ export async function planRollback(
     const recent = [...new Set((versions[ingress] ?? []).map((version) => formatTag(version.tag)))]
       .slice(0, 10)
       .join(", ");
-    throw new RollbackRefused(
-      `No deployable version of ${INGRESS} matches "${input}". Recent builds: ${recent || "none"}.`,
-    );
+    // A release that shipped nothing, as one that changed only docs (ADR-0031), has no version.
+    const why =
+      parsed.kind === "release" && target.kind === "commit"
+        ? `${parsed.release} names ${target.commit.slice(0, 7)}, which no version of ${INGRESS} carries: that release shipped nothing, since nothing that ships changed (ADR-0031), or Cloudflare no longer keeps its version. Roll back to the release or build that served it.`
+        : `No deployable version of ${INGRESS} matches "${input}".`;
+    throw new RollbackRefused(`${why} Recent builds: ${recent || "none"}.`);
   }
 
   const missing: string[] = [];

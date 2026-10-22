@@ -29,6 +29,8 @@ describe("parseTarget", () => {
   it.each([
     ["previous", { kind: "previous" }],
     [" Previous ", { kind: "previous" }],
+    ["v1.2.0", { kind: "release", release: "v1.2.0" }],
+    ["V10.0.3", { kind: "release", release: "v10.0.3" }],
     ["94", { kind: "build", build: 94 }],
     ["94-cc8e179", { kind: "tag", tag: { build: 94, commit: "cc8e179" } }],
     ["cc8e179", { kind: "commit", commit: "cc8e179" }],
@@ -37,7 +39,7 @@ describe("parseTarget", () => {
     expect(parseTarget(input)).toEqual(target);
   });
 
-  it.each(["", "latest", "v94", "cc8e"])("refuses %s", (input) => {
+  it.each(["", "latest", "v94", "v1.2", "v1.2.0-rc.1", "cc8e"])("refuses %s", (input) => {
     expect(parseTarget(input)).toBeNull();
   });
 });
