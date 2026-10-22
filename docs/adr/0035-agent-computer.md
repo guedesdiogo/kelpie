@@ -5,6 +5,7 @@
 - Issue: [#267](https://github.com/guedesdiogo/kelpie/issues/267)
 - Decided by the owner in the conversation of 2026-10-12; his answers are quoted on #267
 - Amended by: [ADR-0037](0037-conversations-through-claude-code.md), the VPS's login also serves the `claude-code` chat route (§4)
+- Amended by: [ADR-0069](0069-master-acts-on-vps-sessions.md), for the sessions the owner opens in the Claude app, the first answer wins once its check confirms it; the open question stays for the sessions Kelpie starts
 
 ## Context
 

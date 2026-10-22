@@ -1,6 +1,6 @@
 # ADR-0019: The keys llm-gateway uses to call providers are deploy secrets
 
-- Status: Accepted
+- Status: Superseded by [ADR-0068](0068-every-secret-through-an-expiring-form.md), which takes these keys through a one-time form into the secret store, read by `llm-gateway` through `channel-egress`'s `ProviderKeys`
 - Date: 2026-10-05
 - Issue: [#101](https://github.com/guedesdiogo/kelpie/issues/101)
 - Accepted by the owner on 2026-10-05: «sim para chave do type safe», then «quero» to recording it here

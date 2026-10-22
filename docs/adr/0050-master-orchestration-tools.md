@@ -4,6 +4,7 @@
 - Date: 2026-10-16
 - Issue: [#391](https://github.com/guedesdiogo/kelpie/issues/391)
 - Decided by the owner on 2026-10-16: «as tools que são padrões para orquestrar a plataforma/harness, precisam ficar por padrao obrigatorias para o agente master»
+- Amended by: [ADR-0067](0067-master-reaches-every-owner-command.md), `MASTER_TOOLS` gains the owner tools: the board's, the account's, the vault's, the proposals' and the agents' files; Master hands tasks to any agent, not only those it owns
 
 ## Context
 

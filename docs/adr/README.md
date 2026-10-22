@@ -70,6 +70,9 @@ Each file records one decision: its context, the decision, its consequences and 
 | [0064](0064-outside-content-asks.md) | A turn that read outside content asks the owner before it changes anything | [#454](https://github.com/guedesdiogo/kelpie/issues/454) |
 | [0065](0065-mascot-effects-float-over-kept-margin.md) | What shows beside the mascot floats over a margin its host keeps | [#481](https://github.com/guedesdiogo/kelpie/issues/481) |
 | [0066](0066-production-by-release.md) | Production ships only from a published release, on the owner's request, past a gate for `critico` issues | [#487](https://github.com/guedesdiogo/kelpie/issues/487) |
+| [0067](0067-master-reaches-every-owner-command.md) | Master can do from chat what the owner can do on the admin API | [#489](https://github.com/guedesdiogo/kelpie/issues/489) |
+| [0068](0068-every-secret-through-an-expiring-form.md) | Every secret Kelpie takes after deploy comes in through a one-time form that expires, model keys included | [#490](https://github.com/guedesdiogo/kelpie/issues/490) |
+| [0069](0069-master-acts-on-vps-sessions.md) | Master answers, messages and ends the VPS's Claude Code sessions, while the Claude app still can | [#491](https://github.com/guedesdiogo/kelpie/issues/491) |
 
 ## Format
 
