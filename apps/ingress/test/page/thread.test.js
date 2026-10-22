@@ -15,12 +15,15 @@ let confirms;
 let pauses;
 let thread;
 
+let verdicts;
+
 function make({ allow = true } = {}) {
   root = document.createElement("div");
   document.body.replaceChildren(root);
   changes = [];
   announced = [];
   confirms = [];
+  verdicts = [];
   pauses = 0;
   thread = new Thread(root, {
     texts: T,
@@ -33,6 +36,10 @@ function make({ allow = true } = {}) {
     },
     onPause: () => {
       pauses += 1;
+      return allow;
+    },
+    onVerdict: (id, verdict) => {
+      verdicts.push([id, verdict]);
       return allow;
     },
     onAnnounce: (text) => announced.push(text),
@@ -451,5 +458,81 @@ describe("the confirmation card (5.3)", () => {
     again.dispatchEvent(new KeyboardEvent("keydown", { key: " " }));
     vi.advanceTimersByTime(1_200);
     expect(pauses).toBe(1);
+  });
+});
+
+describe("a VPS session's prompt card (ADR-0069 §1, 5.3)", () => {
+  const KEY = "0123456789abcdef";
+  const notice = () => ({
+    text: "A Claude Code session on your VPS is waiting for your permission.",
+    sessionRequest: { id: KEY, until: NOW + CONFIRMATION_MS },
+  });
+  const press = (button) => {
+    vi.advanceTimersByTime(PRESS_GUARD_MS);
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+  };
+
+  it("shows Deny beside Approve, no hold, and says who passes the prompt on", () => {
+    const card = thread.reply(notice());
+    expect(changes.at(-1).kind).toBe("approval");
+    expect(card.querySelector(".card-who").textContent).toBe(
+      "Agenda passes on a VPS session's prompt",
+    );
+    expect(
+      [...card.querySelectorAll(".card-actions button")].map((button) => button.textContent),
+    ).toEqual(["Deny", "Approve"]);
+    expect(card.querySelector("button.hold")).toBeNull();
+  });
+
+  it("approves on a press, and folds into its receipt once the session took it", async () => {
+    const card = thread.reply(notice());
+    press(card.querySelector("button.confirm"));
+    expect(verdicts).toEqual([[KEY, "allow"]]);
+    expect(card.dataset.state).toBe("working");
+    expect(card.querySelector("button.deny").disabled).toBe(true);
+    thread.verdict(KEY, "allow", "applied");
+    vi.advanceTimersByTime(RING_MS);
+    expect((await receiptOf(card)).textContent).toBe("You approved at 2:32 PM");
+  });
+
+  it("denies on a press, into a neutral receipt", async () => {
+    const card = thread.reply(notice());
+    press(card.querySelector("button.deny"));
+    expect(verdicts).toEqual([[KEY, "deny"]]);
+    expect(card.querySelector("button.deny").classList.contains("pressed")).toBe(true);
+    expect(card.querySelector("button.confirm").disabled).toBe(true);
+    thread.verdict(KEY, "deny", "applied");
+    const receipt = await receiptOf(card);
+    expect(receipt.textContent).toBe("You denied at 2:32 PM");
+    expect(receipt.querySelector("svg.icon-neutral")).not.toBeNull();
+  });
+
+  it.each([
+    ["closed", "No longer open: it was answered in the Claude app, or the session moved on."],
+    ["not_applied", "Not handed to the session in time. Answer it in the Claude app."],
+    ["failed", "Kelpie couldn't reach the VPS's runner. Answer it in the Claude app."],
+    ["answered", "Already answered."],
+  ])("says why a verdict didn't count: %s", async (status, text) => {
+    const card = thread.reply(notice());
+    press(card.querySelector("button.confirm"));
+    thread.verdict(KEY, "allow", status);
+    expect((await receiptOf(card)).textContent).toBe(text);
+  });
+
+  it("expires when its 10 minutes pass, and sends nothing while the socket can't", async () => {
+    make({ allow: false });
+    const card = thread.reply(notice());
+    press(card.querySelector("button.confirm"));
+    expect(card.dataset.state).not.toBe("working");
+    vi.advanceTimersByTime(CONFIRMATION_MS);
+    expect((await receiptOf(card)).textContent).toBe("Expired. Answer it in the Claude app.");
+  });
+
+  it("ignores a press in its first 400 ms", () => {
+    const card = thread.reply(notice());
+    card
+      .querySelector("button.deny")
+      .dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+    expect(verdicts).toEqual([]);
   });
 });

@@ -49,6 +49,7 @@ export class Thread {
   #less;
   #onConfirm;
   #onPause;
+  #onVerdict;
   #cardMascot;
   #onAnnounce;
   #onChange;
@@ -59,6 +60,8 @@ export class Thread {
   #owner = new Map();
   /** A confirmation's cards by its id: one for each notice of it. */
   #cards = new Map();
+  /** A VPS session's prompts' cards, by the key their Approve and Deny send (ADR-0069 §1). */
+  #verdictCards = new Map();
   #activity = null;
   #waiting = false;
 
@@ -67,6 +70,7 @@ export class Thread {
    * @param {{
    *   texts: object, locale: string, agentName: () => string, less: () => boolean,
    *   onConfirm: (id: number) => boolean, onPause?: () => boolean,
+   *   onVerdict?: (id: string, verdict: "allow" | "deny") => boolean,
    *   cardMascot?: (host: HTMLElement) => void, onAnnounce: (text: string) => void,
    *   onChange: (change: { kind: string, element: Element }) => void,
    *   now?: () => number, timers?: typeof defaultTimers,
@@ -80,6 +84,7 @@ export class Thread {
     this.#less = options.less;
     this.#onConfirm = options.onConfirm;
     this.#onPause = options.onPause ?? (() => false);
+    this.#onVerdict = options.onVerdict ?? (() => false);
     this.#cardMascot = options.cardMascot ?? (() => {});
     this.#onAnnounce = options.onAnnounce;
     this.#onChange = options.onChange;
@@ -263,7 +268,10 @@ export class Thread {
       bubble.replaceChildren();
       this.#join(bubble, at);
     }
-    const kind = Number.isSafeInteger(frame.confirmation) ? "approval" : "reply";
+    // A card that waits on the owner: a confirmation's, or a VPS session's prompt's.
+    const waits =
+      Number.isSafeInteger(frame.confirmation) || typeof frame.sessionRequest?.id === "string";
+    const kind = waits ? "approval" : "reply";
     if (before) {
       this.#reply(bubble, frame, at);
       resize(bubble, before);
@@ -407,12 +415,14 @@ export class Thread {
     for (const cards of this.#cards.values()) {
       for (const card of cards) this.#timers.clear(card.expiry);
     }
+    for (const card of this.#verdictCards.values()) card.dispose();
     if (this.#activity) this.#timers.stop(this.#activity.ticker);
     for (const entry of this.#owner.values()) this.#timers.clear(entry.slowTimer);
     this.#root.replaceChildren();
     this.#days.clear();
     this.#owner.clear();
     this.#cards.clear();
+    this.#verdictCards.clear();
     this.#activity = null;
     this.#last = undefined;
   }
@@ -516,6 +526,10 @@ export class Thread {
     }
     bubble.append(content);
     if (Number.isSafeInteger(frame.confirmation)) this.#card(bubble, frame.confirmation, at);
+    const request = frame.sessionRequest;
+    if (typeof request?.id === "string" && Number.isSafeInteger(request.until)) {
+      this.#verdictCard(bubble, request.id, request.until);
+    }
   }
 
   // ── The confirmation card (5.3) ──────────────────────────────────────────────────────────────
@@ -557,6 +571,45 @@ export class Thread {
   /** What a press did, on every notice of that confirmation. */
   confirmation(id, status) {
     for (const card of this.#cards.get(id) ?? []) card.confirmation(status);
+  }
+
+  // ── A VPS session's prompt (ADR-0069 §1) ─────────────────────────────────────────────────────
+
+  /**
+   * Approve and Deny on a session's prompt: the card of 5.3, with Deny beside Approve and no hold,
+   * since the prompt is the session's, not this conversation's. A press sends the verdict as is.
+   */
+  #verdictCard(bubble, id, until) {
+    const texts = this.#texts;
+    const card = new Card(bubble, {
+      id,
+      until,
+      who: this.#agentName(),
+      texts: {
+        ...texts,
+        cardAsks: texts.sessionAsks,
+        confirm: texts.approve,
+        confirming: texts.approving,
+        confirmedAt: texts.approvedAt,
+        expired: texts.verdictStatus.expired,
+      },
+      locale: this.#locale,
+      onConfirm: (key) => this.#onVerdict(key, "allow"),
+      onDeny: (key) => this.#onVerdict(key, "deny"),
+      mascot: this.#cardMascot,
+      onAnnounce: this.#onAnnounce,
+      onChange: this.#onChange,
+      now: this.#now,
+      timers: this.#timers,
+    });
+    this.#verdictCards.get(id)?.dispose();
+    this.#verdictCards.set(id, card);
+  }
+
+  /** What the owner's verdict did, on its card. */
+  verdict(id, verdict, status) {
+    const text = this.#texts.verdictStatus[status] ?? this.#texts.verdictStatus.closed;
+    this.#verdictCards.get(id)?.verdict(verdict, status, text);
   }
 }
 

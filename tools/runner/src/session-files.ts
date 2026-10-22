@@ -32,7 +32,16 @@ export interface SessionFile {
    * this kind is kept.
    */
   waitingFor: "permission" | "question" | "unknown";
+  /**
+   * When its process started, as Claude Code writes `procStart`: on Linux, the start time in
+   * `/proc/<pid>/stat`, in clock ticks. It tells the session's process from another that took its
+   * pid (ADR-0069 §3).
+   */
+  procStart: string | null;
 }
+
+/** A `procStart`: digits only. */
+const PROC_START = /^\d{1,20}$/;
 
 /** `waitingFor` as Claude Code 2.1.299 writes it. */
 const WAITING_FOR = new Map<string, SessionFile["waitingFor"]>([
@@ -83,7 +92,7 @@ export function parseSessionFile(
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const fields = value as Record<string, unknown>;
-  const { sessionId, pid, cwd, name, status, entrypoint, waitingFor } = fields;
+  const { sessionId, pid, cwd, name, status, entrypoint, waitingFor, procStart } = fields;
   if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) return null;
   const processId = Number.isSafeInteger(pid) && (pid as number) > 0 ? (pid as number) : null;
   return {
@@ -102,6 +111,7 @@ export function parseSessionFile(
     waitingFor:
       (typeof waitingFor === "string" && WAITING_FOR.get(waitingFor.trim().toLowerCase())) ||
       "unknown",
+    procStart: typeof procStart === "string" && PROC_START.test(procStart) ? procStart : null,
   };
 }
 

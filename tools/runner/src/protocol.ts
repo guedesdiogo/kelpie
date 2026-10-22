@@ -1,17 +1,22 @@
 /** The runner's own version, which `/health` reports and Claude Code's client name carries. */
-export const VERSION = "0.3.0";
+export const VERSION = "0.4.0";
 
 // By path, not through the workspace: the runner installs only its own dependencies. The file
 // imports nothing, so Kelpie's side and the runner can't disagree on it.
 export {
+  parseRunnerMessageRequest as parseMessageRequest,
   parseRunnerToolResult as parseToolResult,
   parseRunnerTurnRequest as parseTurnRequest,
+  parseRunnerVerdictRequest as parseVerdictRequest,
   RUNNER_ENTRYPOINT as ENTRYPOINT,
   RUNNER_INVISIBLE as INVISIBLE,
   RUNNER_LINE_BREAK as LINE_BREAK,
   RUNNER_MAX_BRANCH_CHARS as MAX_BRANCH_CHARS,
   RUNNER_MAX_EXCERPT_CHARS as MAX_EXCERPT_CHARS,
+  RUNNER_MAX_INPUT_CHARS as MAX_INPUT_CHARS,
+  RUNNER_MAX_MESSAGE_CHARS as MAX_MESSAGE_CHARS,
   RUNNER_MAX_REPOSITORY_CHARS as MAX_REPOSITORY_CHARS,
+  RUNNER_MAX_REQUESTS_BYTES as MAX_REQUESTS_BYTES,
   RUNNER_MAX_RESULT_BYTES as MAX_RESULT_BYTES,
   RUNNER_MAX_SESSIONS_BYTES as MAX_SESSIONS_BYTES,
   RUNNER_MAX_TITLE_CHARS as MAX_TITLE_CHARS,
@@ -21,6 +26,9 @@ export {
   RUNNER_PR_URL as PR_URL,
   RUNNER_PROTOCOL as PROTOCOL,
   RUNNER_SESSION_ID as SESSION_ID,
+  RUNNER_TOOL_NAME as TOOL_NAME,
+  type RunnerActAnswer,
+  type RunnerActRefusal,
   type RunnerErrorCode,
   type RunnerFrame,
   type RunnerReply,
@@ -30,6 +38,10 @@ export {
   type RunnerToolSpec,
   type RunnerTurnRequest,
   type RunnerUsage,
+  type RunnerVerdict,
+  type RunnerVerdictAnswer,
+  type RunnerVpsRequest,
+  type RunnerVpsRequests,
   type RunnerVpsSession,
   type RunnerVpsSessions,
   type RunnerVpsState,

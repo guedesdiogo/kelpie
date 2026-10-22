@@ -108,6 +108,12 @@ const thread = new Thread(threadElement, {
   },
   // The card's hold pauses the conversation, as Pause does (ADR-0044 §2).
   onPause: () => askPause(),
+  // Approve or Deny on a VPS session's prompt (ADR-0069 §1): the owner's press, sent as it is.
+  onVerdict: (id, verdict) => {
+    if (!isOpen()) return false;
+    send({ type: "verdict", id, verdict, agent });
+    return true;
+  },
   // The card shows who asks: the agent's mascot, still, in Waiting (decision 13, #378).
   cardMascot: (host) => {
     if (mascotConfig)
@@ -261,6 +267,11 @@ function receive(frame) {
       present(frame, { instant: Boolean(pressed?.viaKeyboard) });
       break;
     }
+    case "verdict":
+      if (typeof frame.id !== "string") break;
+      thread.verdict(frame.id, frame.verdict, frame.status);
+      present(frame);
+      break;
     case "typing":
       if (frame.active) {
         thread.working("typing");

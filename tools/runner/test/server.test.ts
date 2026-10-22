@@ -5,6 +5,8 @@ import {
   MAX_TURN_BYTES,
   MAX_WAITS_BYTES,
   PROTOCOL,
+  type RunnerActAnswer,
+  type RunnerVerdictAnswer,
   VERSION,
 } from "../src/protocol.ts";
 import { createHandler, type HandlerOptions, type LogEntry } from "../src/server.ts";
@@ -41,8 +43,23 @@ function setup(
 const LISTED = { ok: true as const, now: NOW, sessions: [], truncated: false };
 const WAITED = { ok: true as const, now: NOW, waits: [], truncated: false };
 
+const REQUESTED = { ok: true as const, now: NOW, requests: [], truncated: false };
+const REQUEST_ID = "eeeeeeee-0000-4000-8000-00000000000e";
+
 function stubVps() {
-  return { list: vi.fn(() => LISTED), waits: vi.fn((_since: number) => WAITED) };
+  return {
+    list: vi.fn(() => LISTED),
+    waits: vi.fn((_since: number) => WAITED),
+    requests: vi.fn(() => REQUESTED),
+    verdict: vi.fn(
+      async (_id: string, _verdict: "allow" | "deny"): Promise<RunnerVerdictAnswer> => ({
+        ok: true,
+        applied: true,
+      }),
+    ),
+    message: vi.fn(async (_id: string, _text: string): Promise<RunnerActAnswer> => ({ ok: true })),
+    end: vi.fn((_id: string): RunnerActAnswer => ({ ok: true })),
+  };
 }
 
 function stubSessions() {
@@ -66,7 +83,7 @@ describe("the runner's handler", () => {
     const response = await call("/health", { headers: auth });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, version: VERSION, protocol: PROTOCOL });
-    expect(PROTOCOL).toBe(3);
+    expect(PROTOCOL).toBe(4);
   });
 
   it("answers 401 without the secret, on any path and method, and says nothing more", async () => {
@@ -79,6 +96,10 @@ describe("the runner's handler", () => {
       ["DELETE", `/sessions/${SESSION}`],
       ["GET", "/sessions"],
       ["GET", "/sessions/waits?since=0"],
+      ["GET", "/sessions/requests"],
+      ["POST", `/sessions/requests/${REQUEST_ID}`],
+      ["POST", `/sessions/${SESSION}/message`],
+      ["POST", `/sessions/${SESSION}/end`],
     ] as const) {
       const response = await call(path, {
         method,
@@ -93,6 +114,9 @@ describe("the runner's handler", () => {
     expect(sessions.close).not.toHaveBeenCalled();
     expect(vps.list).not.toHaveBeenCalled();
     expect(vps.waits).not.toHaveBeenCalled();
+    for (const action of [vps.requests, vps.verdict, vps.message, vps.end]) {
+      expect(action).not.toHaveBeenCalled();
+    }
   });
 
   it("answers a URL that doesn't parse, as a malformed Host makes, with 401, or 400 once authorized", async () => {
@@ -405,5 +429,85 @@ describe("the VPS's sessions routes", () => {
     } finally {
       disk.cleanup();
     }
+  });
+});
+
+describe("the routes that act on the VPS's sessions (ADR-0069)", () => {
+  it("lists the open permission requests", async () => {
+    const { call, auth, vps } = setup();
+    const response = await call("/sessions/requests", { headers: auth });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(REQUESTED);
+    expect(vps.requests).toHaveBeenCalledOnce();
+    expect((await call("/sessions/requests", { method: "POST", headers: auth })).status).toBe(405);
+  });
+
+  it("gives a verdict, bound to its request's id, and answers 409 when the request is closed", async () => {
+    const vps = stubVps();
+    const { post } = setup(stubSessions(), vps);
+    const response = await post(`/sessions/requests/${REQUEST_ID}`, { verdict: "deny" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, applied: true });
+    expect(vps.verdict).toHaveBeenCalledExactlyOnceWith(REQUEST_ID, "deny");
+    vps.verdict.mockResolvedValueOnce({ ok: false, reason: "closed" });
+    const closed = await post(`/sessions/requests/${REQUEST_ID}`, { verdict: "allow" });
+    expect(closed.status).toBe(409);
+    expect(await closed.json()).toEqual({ ok: false, reason: "closed" });
+  });
+
+  it.each([
+    ["a request id that isn't a UUID", "/sessions/requests/1", { verdict: "allow" }],
+    ["no verdict", `/sessions/requests/${REQUEST_ID}`, {}],
+    ["another verdict", `/sessions/requests/${REQUEST_ID}`, { verdict: "always" }],
+    ["a message without text", `/sessions/${SESSION}/message`, { body: "hi" }],
+    ["a message of only spaces", `/sessions/${SESSION}/message`, { text: "  " }],
+    ["a session id that isn't a UUID", "/sessions/ABC/message", { text: "hi" }],
+    ["an end of a session id that isn't a UUID", "/sessions/not-a-session/end", {}],
+  ])("answers 400 for %s", async (_, path, body) => {
+    const { post, vps } = setup();
+    expect((await post(path, body)).status).toBe(400);
+    expect(vps.verdict).not.toHaveBeenCalled();
+    expect(vps.message).not.toHaveBeenCalled();
+    expect(vps.end).not.toHaveBeenCalled();
+  });
+
+  it("answers 405 for a verdict that isn't a POST", async () => {
+    const { call, auth, vps } = setup();
+    const response = await call(`/sessions/requests/${REQUEST_ID}`, { headers: auth });
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("POST");
+    expect(vps.verdict).not.toHaveBeenCalled();
+  });
+
+  it("sends a message, and answers 409 with the reason when it can't", async () => {
+    const vps = stubVps();
+    const { post } = setup(stubSessions(), vps);
+    const response = await post(`/sessions/${SESSION}/message`, { text: "Rebase, please." });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(vps.message).toHaveBeenCalledExactlyOnceWith(SESSION, "Rebase, please.");
+    vps.message.mockResolvedValueOnce({ ok: false, reason: "no_inbox" });
+    const refused = await post(`/sessions/${SESSION}/message`, { text: "Again." });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({ ok: false, reason: "no_inbox" });
+  });
+
+  it("refuses a message's body past its bound", async () => {
+    const { post, vps } = setup();
+    const response = await post(`/sessions/${SESSION}/message`, { text: "x".repeat(70_000) });
+    expect(response.status).toBe(413);
+    expect(vps.message).not.toHaveBeenCalled();
+  });
+
+  it("ends a session, and answers 409 with the reason when it doesn't", async () => {
+    const vps = stubVps();
+    const { post, logs } = setup(stubSessions(), vps);
+    expect((await post(`/sessions/${SESSION}/end`, {})).status).toBe(200);
+    expect(vps.end).toHaveBeenCalledExactlyOnceWith(SESSION);
+    vps.end.mockReturnValueOnce({ ok: false, reason: "not_claude_code" });
+    const refused = await post(`/sessions/${SESSION}/end`, {});
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({ ok: false, reason: "not_claude_code" });
+    expect(logs.at(-1)).toEqual({ method: "POST", path: `/sessions/${SESSION}/end`, status: 409 });
   });
 });

@@ -34,7 +34,17 @@ describe("parseSessionFile", () => {
       entrypoint: "claude-desktop",
       alive: true,
       waitingFor: "unknown",
+      procStart: "42070362",
     });
+  });
+
+  it.each([
+    ["a number", 42070362],
+    ["text that isn't digits", "42070362 "],
+    ["too many digits", "1".repeat(21)],
+  ])("reads a procStart that is %s as unknown", (_, procStart) => {
+    const fields = sessionFields({ procStart });
+    expect(parseSessionFile(JSON.stringify(fields), running)?.procStart).toBeNull();
   });
 
   it.each([
@@ -64,6 +74,7 @@ describe("parseSessionFile", () => {
       statusUpdatedAt: -5,
       startedAt: "yesterday",
       entrypoint: "Claude Desktop!",
+      procStart: undefined,
     });
     expect(parseSessionFile(JSON.stringify(fields), running)).toEqual({
       id: SESSION_A,
@@ -76,6 +87,7 @@ describe("parseSessionFile", () => {
       entrypoint: null,
       alive: null,
       waitingFor: "unknown",
+      procStart: null,
     });
     const bare = parseSessionFile(JSON.stringify({ sessionId: SESSION_A }), running);
     expect(bare).toMatchObject({ status: "unknown", pid: null, alive: null, name: null });

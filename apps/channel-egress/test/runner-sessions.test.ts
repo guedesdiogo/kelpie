@@ -3,14 +3,24 @@ import { env, exports } from "cloudflare:workers";
 import { RUNNER_MAX_SESSIONS_BYTES, RUNNER_MAX_WAITS_BYTES } from "@kelpie/channels";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RunnerSessions } from "../src/index.ts";
-import { listSessions, listWaits, runnerOf } from "../src/runner.ts";
+import {
+  endSession,
+  giveVerdict,
+  listRequests,
+  listSessions,
+  listWaits,
+  messageSession,
+  runnerOf,
+} from "../src/runner.ts";
 import {
   BROKEN,
   OUTDATED,
   PROTOCOL_1,
   PROTOCOL_2,
+  PROTOCOL_3,
   READY,
   type Seen,
+  VPS_REQUESTS,
   VPS_SESSIONS,
   VPS_WAITS,
 } from "./fake-runner.ts";
@@ -70,10 +80,10 @@ afterEach(() => {
 });
 
 describe("RunnerSessions", () => {
-  it("has only its two reads: whatever binds it can't open forms, read a secret or run a turn", () => {
+  it("has its reads and its three actions only: whatever binds it can't open forms, read a secret or run a turn", () => {
     expect(
       Object.getOwnPropertyNames(RunnerSessions.prototype).filter((name) => name !== "constructor"),
-    ).toEqual(["list", "waits"]);
+    ).toEqual(["list", "waits", "requests", "verdict", "message", "end"]);
   });
 
   it("lists the VPS's sessions, asked with the stored secret, as the runner answered them", async () => {
@@ -315,5 +325,170 @@ describe("listSessions and listWaits", () => {
     });
     expect(await listWaits(runner, READY, OPENED)).toEqual(VPS_WAITS);
     expect(seen).toEqual([`?since=${OPENED}`]);
+  });
+});
+
+const REQUEST_ID = VPS_REQUESTS.requests[0]?.id as string;
+const SESSION_ID = VPS_SESSIONS.sessions[0]?.id as string;
+const OTHER_ID = "cccccccc-1111-4222-8333-444444444444";
+
+describe("RunnerSessions' actions (ADR-0069)", () => {
+  it("lists the permission prompts held open for a verdict", async () => {
+    await storeRunnerSecret(READY);
+    expect(await exports.RunnerSessions.requests()).toEqual(VPS_REQUESTS);
+    expect((await seenByRunner()).at(-1)).toEqual({
+      method: "GET",
+      action: "requests",
+      bearer: true,
+    });
+  });
+
+  it("gives a verdict bound to its request's id, and says closed for one that isn't open", async () => {
+    await storeRunnerSecret(READY);
+    expect(await exports.RunnerSessions.verdict(REQUEST_ID, "deny")).toEqual({
+      ok: true,
+      applied: true,
+    });
+    expect((await seenByRunner()).at(-1)).toEqual({
+      method: "POST",
+      action: "verdict",
+      bearer: true,
+      body: { verdict: "deny" },
+      query: REQUEST_ID,
+    });
+    expect(await exports.RunnerSessions.verdict(OTHER_ID, "allow")).toEqual({
+      ok: false,
+      reason: "closed",
+    });
+  });
+
+  it("sends a session a message, and passes the runner's refusal on", async () => {
+    await storeRunnerSecret(READY);
+    const text = "Rebase on main.\nThen push.";
+    expect(await exports.RunnerSessions.message(SESSION_ID, text)).toEqual({ ok: true });
+    expect((await seenByRunner()).at(-1)).toEqual({
+      method: "POST",
+      action: "message",
+      bearer: true,
+      body: { text },
+      query: SESSION_ID,
+    });
+    expect(await exports.RunnerSessions.message(OTHER_ID, "hi")).toEqual({
+      ok: false,
+      reason: "not_found",
+    });
+  });
+
+  it("ends a session, and passes the runner's refusal on", async () => {
+    await storeRunnerSecret(READY);
+    expect(await exports.RunnerSessions.end(SESSION_ID)).toEqual({ ok: true });
+    expect((await seenByRunner()).at(-1)).toMatchObject({
+      method: "POST",
+      action: "end",
+      query: SESSION_ID,
+    });
+    expect(await exports.RunnerSessions.end(OTHER_ID)).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it.each([
+    ["a verdict on a request id that isn't a UUID", (s: RunnerSessions) => s.verdict("1", "allow")],
+    ["a verdict that isn't one", (s: RunnerSessions) => s.verdict(REQUEST_ID, "always" as never)],
+    ["a message to a session id that isn't a UUID", (s: RunnerSessions) => s.message("../x", "hi")],
+    ["an empty message", (s: RunnerSessions) => s.message(SESSION_ID, " ")],
+    ["a message too long", (s: RunnerSessions) => s.message(SESSION_ID, "m".repeat(4_001))],
+    ["a message that isn't text", (s: RunnerSessions) => s.message(SESSION_ID, 4 as never)],
+    ["an end of a session id that isn't a UUID", (s: RunnerSessions) => s.end("ABC")],
+  ])("refuses %s before calling the runner", async (_, run) => {
+    await storeRunnerSecret(READY);
+    const calls = vi.fn();
+    const sessions = sessionsOn(
+      fetcher(() => {
+        calls();
+        return Response.json({ ok: true });
+      }),
+    );
+    expect(await run(sessions)).toEqual({ ok: false, reason: "invalid_input" });
+    expect(calls).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a runner on protocol 3, which only reads", PROTOCOL_3],
+    ["a runner on protocol 2", PROTOCOL_2],
+  ])("says outdated for %s", async (_, secret) => {
+    await storeRunnerSecret(secret);
+    const outdated = { ok: false, reason: "outdated" };
+    expect(await exports.RunnerSessions.requests()).toEqual(outdated);
+    expect(await exports.RunnerSessions.verdict(REQUEST_ID, "allow")).toEqual(outdated);
+    expect(await exports.RunnerSessions.message(SESSION_ID, "hi")).toEqual(outdated);
+    expect(await exports.RunnerSessions.end(SESSION_ID)).toEqual(outdated);
+  });
+
+  it("is not configured without the runner's binding, for each action", async () => {
+    await storeRunnerSecret(READY);
+    const sessions = sessionsOn(undefined);
+    const notConfigured = { ok: false, reason: "not_configured" };
+    expect(await sessions.requests()).toEqual(notConfigured);
+    expect(await sessions.verdict(REQUEST_ID, "allow")).toEqual(notConfigured);
+    expect(await sessions.message(SESSION_ID, "hi")).toEqual(notConfigured);
+    expect(await sessions.end(SESSION_ID)).toEqual(notConfigured);
+  });
+
+  it("never puts the secret in a result or a log", async () => {
+    await storeRunnerSecret(READY);
+    const logged: unknown[] = [];
+    for (const method of ["warn", "error", "log"] as const) {
+      vi.spyOn(console, method).mockImplementation((...args) => logged.push(args));
+    }
+    const leaky = fetcher(() => Response.json({ ok: false, secret: READY }, { status: 409 }));
+    const results = [
+      await exports.RunnerSessions.requests(),
+      await giveVerdict(leaky, READY, REQUEST_ID, "allow"),
+      await messageSession(leaky, READY, SESSION_ID, "hi"),
+      await endSession(
+        fetcher(() => {
+          throw new Error(`failed with ${READY}`);
+        }),
+        READY,
+        SESSION_ID,
+      ),
+    ];
+    expect(JSON.stringify(results)).not.toContain(READY);
+    expect(JSON.stringify(logged)).not.toContain(READY);
+  });
+});
+
+describe("listRequests, giveVerdict, messageSession and endSession", () => {
+  it.each([
+    ["a server error", () => new Response("boom", { status: 500 })],
+    [
+      "a 409 without the runner's reason",
+      () => Response.json({ ok: false, reason: "nope" }, { status: 409 }),
+    ],
+    ["a 200 that isn't the protocol's", () => Response.json({ ok: true, applied: "yes", done: 1 })],
+    ["a 404 that isn't the runner's", () => new Response("Not found", { status: 404 })],
+    ["a 400", () => Response.json({ ok: false }, { status: 400 })],
+  ])("are unreachable on %s", async (_, answer) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const unreachable = { ok: false, reason: "unreachable" };
+    expect(await listRequests(fetcher(answer), READY)).toEqual(unreachable);
+    expect(await giveVerdict(fetcher(answer), READY, REQUEST_ID, "allow")).toEqual(unreachable);
+    expect(await messageSession(fetcher(answer), READY, SESSION_ID, "hi")).toEqual(unreachable);
+    expect(await endSession(fetcher(answer), READY, SESSION_ID)).toEqual(unreachable);
+  });
+
+  it("read a verdict's answer applied or not", async () => {
+    const notApplied = fetcher(() => Response.json({ ok: true, applied: false }));
+    expect(await giveVerdict(notApplied, READY, REQUEST_ID, "allow")).toEqual({
+      ok: true,
+      applied: false,
+    });
+  });
+
+  it("are refused when the runner refuses the stored secret", async () => {
+    const refusing = fetcher(() => Response.json({ ok: false }, { status: 401 }));
+    const refused = { ok: false, reason: "refused" };
+    expect(await listRequests(refusing, READY)).toEqual(refused);
+    expect(await giveVerdict(refusing, READY, REQUEST_ID, "deny")).toEqual(refused);
+    expect(await endSession(refusing, READY, SESSION_ID)).toEqual(refused);
   });
 });

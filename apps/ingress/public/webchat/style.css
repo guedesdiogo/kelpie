@@ -1071,6 +1071,37 @@ main {
 .confirm .confirm-icon:empty:not([data-state]) {
   display: none;
 }
+/* Deny, beside Confirm, outlined in --muted (5.3): a VPS session's prompt has it (ADR-0069 §1). */
+.deny {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: 36px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--muted);
+  border-radius: var(--r-btn);
+  background: transparent;
+  color: var(--fg);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform var(--dur-press) var(--ease-standard);
+}
+.deny:active:not(:disabled) {
+  transform: scale(var(--scale-press));
+}
+.deny:disabled {
+  cursor: default;
+}
+.deny .label {
+  display: inline-grid;
+}
+.deny .label > .roll {
+  grid-area: 1 / 1;
+}
+.bubble.card[data-state="working"] .deny.pressed {
+  flex: 1;
+}
 .bubble.card[data-state="working"] .confirm,
 .bubble.card[data-state="done"] .confirm {
   flex: 1;

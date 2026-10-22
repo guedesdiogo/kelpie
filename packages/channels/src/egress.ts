@@ -2,10 +2,14 @@ import type { SendOptions } from "./adapter.ts";
 import type { ChannelId } from "./events.ts";
 import type { Locale } from "./locale.ts";
 import type {
+  RunnerActAnswer,
   RunnerAnswered,
   RunnerState,
   RunnerToolResult,
   RunnerTurnRequest,
+  RunnerVerdict,
+  RunnerVerdictAnswer,
+  RunnerVpsRequests,
   RunnerVpsSessions,
   RunnerVpsWaits,
 } from "./runner.ts";
@@ -197,7 +201,8 @@ export type SetupWebhooksContract = Pick<ChannelFormsContract, "registerTelegram
  *   (the call failed, its answer didn't begin in time, or it isn't one the runner gives to this
  *   request, as a tunnel's 502 or a 400 to a request checked here), as in `RunnerState`;
  * - `outdated`: the runner answers 404, as a runner below protocol 2 does to every path but
- *   `/health`, or, for the VPS's sessions, a 404 or a 405, as a runner below protocol 3 does;
+ *   `/health`, or, for the VPS's sessions, a 404 or a 405, as a runner below protocol 3 does, and
+ *   one below protocol 4 to acting on them;
  * - `store_unavailable`: the secret store failed.
  *
  * None of them is a Claude usage limit, or a failed claude.ai login: the runner reports those on
@@ -283,14 +288,35 @@ export type RunnerSessionsOutcome = RunnerVpsSessions | RunnerRelayFailure;
 /** `RunnerSessions.waits(since)`: the open waits on the owner, as the runner answered them. */
 export type RunnerWaitsOutcome = RunnerVpsWaits | RunnerRelayFailure;
 
+/** `RunnerSessions.requests()`: the permission prompts held open for Kelpie's verdict. */
+export type RunnerRequestsOutcome = RunnerVpsRequests | RunnerRelayFailure;
+
+/** `RunnerSessions.verdict()`: applied or not, `closed`, or why the runner wasn't reached. */
+export type RunnerVerdictOutcome = RunnerVerdictAnswer | RunnerRelayFailure;
+
+/** `RunnerSessions.message()` and `end()`: done, the runner's refusal, or a relay failure. */
+export type RunnerActOutcome = RunnerActAnswer | RunnerRelayFailure;
+
 /**
- * What reads the Claude Code sessions on the owner's VPS (ADR-0057 §5, #433): only reads, through
- * the runner, with the secret that stays in `channel-egress`. A separate entrypoint, so whatever
- * binds it can't open forms, read a secret, or reach the `claude-code` route's sessions.
+ * What reaches the Claude Code sessions on the owner's VPS (ADR-0057 §5, #433), through the
+ * runner, with the secret that stays in `channel-egress`: it reads them, and since ADR-0069 acts on
+ * them. A separate entrypoint, so whatever binds it can't open forms, read a secret, or reach the
+ * `claude-code` route's sessions.
  */
 export interface RunnerSessionsContract {
   /** Every session but the runner's own, with its state, its age and its details. */
   list(): Promise<RunnerSessionsOutcome>;
   /** The waits on the owner opened at `since` (epoch ms) or later, and still open. */
   waits(since: number): Promise<RunnerWaitsOutcome>;
+  /** The permission prompts whose hook waits for Kelpie's verdict (ADR-0069 §1). */
+  requests(): Promise<RunnerRequestsOutcome>;
+  /**
+   * The owner's verdict on one, from their press on its notice: it counts once, and only while the
+   * request is open. Never Master's words, nor a session's text.
+   */
+  verdict(requestId: string, verdict: RunnerVerdict): Promise<RunnerVerdictOutcome>;
+  /** Text to a session's inbox, which reads it as another session's message (ADR-0069 §2). */
+  message(sessionId: string, text: string): Promise<RunnerActOutcome>;
+  /** Ends a session with SIGTERM, once the runner checked its process (ADR-0069 §3). */
+  end(sessionId: string): Promise<RunnerActOutcome>;
 }
