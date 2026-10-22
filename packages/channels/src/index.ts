@@ -4,6 +4,8 @@ export {
   ChannelRequestError,
   type Destination,
   type InboundWebhook,
+  type InlineButton,
+  type InlineKeyboard,
   InvalidWebhookError,
   RecipientUnavailableError,
   type SendOptions,
@@ -39,7 +41,13 @@ export type {
   WebhookRegistration,
   WebhookRegistrationFailure,
 } from "./egress.ts";
-export { type CanonicalEvent, type ChannelId, dedupeKey, type MessagePart } from "./events.ts";
+export {
+  type CanonicalEvent,
+  type CanonicalPress,
+  type ChannelId,
+  dedupeKey,
+  type MessagePart,
+} from "./events.ts";
 export {
   detectLocale,
   isLocale,

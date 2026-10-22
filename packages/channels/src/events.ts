@@ -44,6 +44,25 @@ export interface CanonicalEvent {
   mentionsBot?: boolean;
 }
 
+/**
+ * A tap on a button under one of Kelpie's own notices, normalized from any channel (ADR-0067 §3).
+ * Only Kelpie's notices carry buttons, and `data` is what Kelpie wrote on the one tapped.
+ */
+export interface CanonicalPress {
+  agentId: string;
+  channel: ChannelId;
+  /** The conversation the notice is in. */
+  threadId: string;
+  chatType: "direct" | "group";
+  /** Who tapped, with the language their app is set to when the channel says (#187). */
+  sender: { channelUserId: string; languageCode?: string };
+  /** The provider's id for the tap, which Kelpie answers. */
+  pressId: string;
+  /** The notice the button is on. */
+  providerMessageId: string;
+  data: string;
+}
+
 /** Identifies a provider message across channels and threads, for dedupe of webhook retries. */
 export function dedupeKey(
   event: Pick<CanonicalEvent, "channel" | "threadId" | "providerMessageId">,

@@ -7,6 +7,8 @@ import type {
   IngestResult,
   PauseResult,
   PauseTarget,
+  PressResult,
+  PressTarget,
 } from "@kelpie/conversation/contract";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { admitSender } from "../src/admission.ts";
@@ -46,6 +48,27 @@ function webhook(
   });
 }
 
+/** A tap on a button under the bot's notice 43; `fields` replace the owner's tap's (ADR-0067 §3). */
+function tap(fields: Record<string, unknown> = {}) {
+  return {
+    update_id: 9002,
+    callback_query: {
+      id: "4382bfdwdsb323b2d9",
+      from: { id: OWNER_TELEGRAM_ID, is_bot: false, first_name: "Owner", language_code: "pt-br" },
+      message: {
+        message_id: 43,
+        from: { id: 555, is_bot: true, first_name: "Kelpie" },
+        chat: { id: OWNER_CHAT_ID, type: "private" },
+        date: 1_791_190_000,
+        text: "Confirme: change the tier.",
+      },
+      chat_instance: "-7015413208734",
+      data: "confirm:0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+      ...fields,
+    },
+  };
+}
+
 const directory = () => env.DIRECTORY.getByName(DIRECTORY_NAME);
 
 /** Fakes for egress and the conversation; admission and pairing use the real Directory. */
@@ -53,6 +76,7 @@ function fakes(overrides: Partial<TelegramWebhookDeps> = {}) {
   const verified: { agentId: string; secret: string | null }[] = [];
   const ingested: { name: string; message: InboundMessage }[] = [];
   const paused: { name: string; target: PauseTarget }[] = [];
+  const pressed: { name: string; target: PressTarget }[] = [];
   const notices: { agentId: string; destination: EgressDestination; notice: WebhookNotice }[] = [];
   const reported: { agentId: string; event: SetupEvent }[] = [];
   const deps: TelegramWebhookDeps = {
@@ -76,12 +100,16 @@ function fakes(overrides: Partial<TelegramWebhookDeps> = {}) {
       paused.push({ name, target });
       return { status: "paused" };
     },
+    async press(name, target): Promise<PressResult> {
+      pressed.push({ name, target });
+      return { status: "accepted" };
+    },
     async setupDone(agentId, event) {
       reported.push({ agentId, event });
     },
     ...overrides,
   };
-  return { deps, verified, ingested, notices, paused, reported };
+  return { deps, verified, ingested, notices, paused, pressed, reported };
 }
 
 /** A `/start` as Telegram sends it from a deep link: a bot command entity at the start. */
@@ -519,6 +547,102 @@ describe("Telegram pairing and strangers", () => {
   });
 });
 
+describe("Telegram taps on Kelpie's buttons (ADR-0067 §3)", () => {
+  it("hands the owner's tap in their own chat to its conversation, which answers it", async () => {
+    const { deps, verified, pressed, ingested } = fakes();
+
+    const response = await handleTelegramWebhook(webhook(tap()), "kelpie", deps);
+
+    expect(response.status).toBe(200);
+    expect(verified).toEqual([{ agentId: "kelpie", secret: SECRET }]);
+    expect(pressed).toEqual([
+      {
+        name: `kelpie:telegram:${OWNER_CHAT_ID}`,
+        target: {
+          agentId: "kelpie",
+          destination: { channel: "telegram", threadId: String(OWNER_CHAT_ID) },
+          userId: "u-owner",
+          role: "owner",
+          chatType: "direct",
+          timeZone: "America/Sao_Paulo",
+          language: "pt-br",
+          pressId: "4382bfdwdsb323b2d9",
+          providerMessageId: "43",
+          data: "confirm:0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+        },
+      },
+    ]);
+    // A tap is no message: the model never gets it as text.
+    expect(ingested).toEqual([]);
+  });
+
+  it("checks the bot's secret before a tap, as before a message", async () => {
+    const { deps, pressed } = fakes();
+    const request = webhook(tap(), { secret: "a-well-formed-guess" });
+    expect((await handleTelegramWebhook(request, "kelpie", deps)).status).toBe(401);
+    expect(request.bodyUsed).toBe(false);
+    expect(pressed).toEqual([]);
+  });
+
+  it.each([
+    ["a stranger's tap", tap({ from: { id: 9999, is_bot: false } })],
+    [
+      "a tap in a group",
+      tap({ message: { message_id: 43, chat: { id: -100, type: "supergroup" }, date: 0 } }),
+    ],
+    // In Telegram a private chat's id is the user's: the owner's tap counts only in their own.
+    [
+      "the owner's tap in a chat that isn't theirs",
+      tap({ message: { message_id: 43, chat: { id: 2002, type: "private" }, date: 0 } }),
+    ],
+    ["a tap from a bot", tap({ from: { id: OWNER_TELEGRAM_ID, is_bot: true } })],
+    ["a tap on a message sent in inline mode", tap({ message: undefined, inline_message_id: "A" })],
+    ["a tap whose fields have the wrong type", tap({ id: 4382 })],
+  ])("drops %s with a 200, unanswered, and reaches no conversation", async (_label, body) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { deps, pressed, notices } = fakes();
+
+    const response = await handleTelegramWebhook(webhook(body), "kelpie", deps);
+
+    expect(response.status).toBe(200);
+    expect(pressed).toEqual([]);
+    // A stranger's tap isn't a message: the owner hears nothing of it.
+    expect(notices).toEqual([]);
+  });
+
+  it("drops a tap from anyone admitted who isn't the owner", async () => {
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { deps, pressed } = fakes({
+      admit: async () => ({ admitted: true, userId: "u-member", role: "member", timeZone: null }),
+    });
+    expect((await handleTelegramWebhook(webhook(tap()), "kelpie", deps)).status).toBe(200);
+    expect(pressed).toEqual([]);
+    expect(warned).toHaveBeenCalledWith("ingress: dropped a Telegram tap", "not_owner");
+  });
+
+  it("acknowledges a tap the conversation refuses, and retries one it fails on", async () => {
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const refused = fakes({ press: async () => ({ status: "refused" }) });
+    expect((await handleTelegramWebhook(webhook(tap()), "kelpie", refused.deps)).status).toBe(200);
+    const mismatch = fakes({
+      press: async () => ({ status: "rejected", reason: "destination_mismatch" }),
+    });
+    expect((await handleTelegramWebhook(webhook(tap()), "kelpie", mismatch.deps)).status).toBe(200);
+    expect(warned.mock.calls).toEqual([
+      ["ingress: the conversation refused a tap", "refused"],
+      ["ingress: the conversation refused a tap", "destination_mismatch"],
+    ]);
+
+    const failing = fakes({
+      press: async () => {
+        throw new Error("the conversation is unreachable");
+      },
+    });
+    expect((await handleTelegramWebhook(webhook(tap()), "kelpie", failing.deps)).status).toBe(503);
+  });
+});
+
 describe("ingress routing", () => {
   it("routes a verified update through egress and the Directory to its conversation", async () => {
     const response = await exports.default.fetch(webhook(update(), { secret: ROUTED_SECRET }));
@@ -533,6 +657,21 @@ describe("ingress routing", () => {
       userId: "u-owner",
       text: "oi, tudo bem?",
       destination: { channel: "telegram", threadId: String(OWNER_CHAT_ID) },
+    });
+  });
+
+  it("routes a verified tap through egress and the Directory to its conversation", async () => {
+    const response = await exports.default.fetch(webhook(tap(), { secret: ROUTED_SECRET }));
+    expect(response.status).toBe(200);
+
+    // The stub conversation in vitest.config.ts keeps the last tap it was given.
+    const conversation = env.CONVERSATION_AGENT.getByName(
+      `kelpie:telegram:${OWNER_CHAT_ID}`,
+    ) as unknown as { pressed(): Promise<PressTarget | null> };
+    expect(await conversation.pressed()).toMatchObject({
+      userId: "u-owner",
+      providerMessageId: "43",
+      data: "confirm:0f1e2d3c4b5a69788796a5b4c3d2e1f0",
     });
   });
 

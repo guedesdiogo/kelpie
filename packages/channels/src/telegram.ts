@@ -4,13 +4,14 @@ import {
   ChannelRequestError,
   type Destination,
   type InboundWebhook,
+  type InlineKeyboard,
   InvalidWebhookError,
   RecipientUnavailableError,
   type SendOptions,
   type SendResult,
 } from "./adapter.ts";
 import { CAPABILITIES } from "./capabilities.ts";
-import type { CanonicalEvent, MessagePart } from "./events.ts";
+import type { CanonicalEvent, CanonicalPress, MessagePart } from "./events.ts";
 import { MAX_LANGUAGE_TAG_CHARS } from "./locale.ts";
 import { fitsTelegram, formatReply, toTelegramHtml, toTelegramPlain } from "./markdown.ts";
 
@@ -35,6 +36,10 @@ export const TELEGRAM_WEBHOOK_PATH = "/webhooks/telegram";
 /** Telegram's service account, the sender of posts a linked channel relays into a group. */
 const TELEGRAM_SERVICE_ACCOUNT = 777_000;
 const CHAT_TYPES: readonly string[] = ["private", "group", "supergroup", "channel"];
+/** The longest data Telegram takes on a button, in bytes. */
+export const MAX_BUTTON_DATA_BYTES = 64;
+/** The updates the bot's webhook takes: new messages, and taps on its notices' buttons. */
+const WEBHOOK_UPDATES = ["message", "callback_query"];
 
 interface TelegramFile {
   file_id: string;
@@ -129,6 +134,9 @@ export class TelegramAdapter implements ChannelAdapter {
         // Checked against the text as written: formatting escapes the `&` in a link.
         link_preview_options: linkPreview(text, options.previewUrl),
         ...replyParameters(destination.replyToMessageId),
+        ...(options.buttons === undefined || options.buttons.length === 0
+          ? {}
+          : { reply_markup: keyboard(options.buttons) }),
       });
     let result: { message_id: number };
     try {
@@ -142,19 +150,71 @@ export class TelegramAdapter implements ChannelAdapter {
     return { providerMessageId: String(result.message_id) };
   }
 
+  /**
+   * Replaces a notice's text, sent as typed, and its buttons; without `buttons` it keeps none
+   * (ADR-0067 §3). Only the bot's own messages can be edited.
+   */
+  async edit(
+    destination: Destination,
+    providerMessageId: string,
+    text: string,
+    options: { buttons?: InlineKeyboard } = {},
+  ): Promise<void> {
+    await this.#call("editMessageText", {
+      chat_id: destination.threadId,
+      message_id: Number(providerMessageId),
+      text: toTelegramPlain(text),
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+      reply_markup: keyboard(options.buttons ?? []),
+    });
+  }
+
+  /** Answers a tap, so Telegram stops its spinner; `text` shows briefly at the top of the chat. */
+  async answer(pressId: string, text?: string): Promise<void> {
+    await this.#call("answerCallbackQuery", {
+      callback_query_id: pressId,
+      ...(text === undefined ? {} : { text }),
+    });
+  }
+
+  /**
+   * Where the bot's webhook points, empty when it has none, and whether it takes taps. A webhook
+   * set before taps existed takes messages only.
+   */
+  async webhookInfo(): Promise<{ url: string; takesPresses: boolean }> {
+    const info = await this.#call<{ url?: unknown; allowed_updates?: unknown }>(
+      "getWebhookInfo",
+      {},
+    );
+    const updates = info.allowed_updates;
+    if (
+      typeof info.url !== "string" ||
+      !isOptional(updates, (list) => Array.isArray(list) && list.every(isString))
+    ) {
+      throw new ChannelRequestError("getWebhookInfo", null);
+    }
+    // Without a list, Telegram sends every kind of update but a few, taps among them.
+    return {
+      url: info.url,
+      takesPresses: updates === undefined || (updates as string[]).includes("callback_query"),
+    };
+  }
+
   async typing(destination: Destination): Promise<void> {
     await this.#call("sendChatAction", { chat_id: destination.threadId, action: "typing" });
   }
 
   /**
-   * Points the bot's updates at `url`, with this bot's secret to echo back. Only new messages are
-   * asked for, because edits and the rest yield no event. Registering again replaces the last one.
+   * Points the bot's updates at `url`, with this bot's secret to echo back. Only new messages and
+   * taps on buttons are asked for, because edits and the rest yield no event. Registering again
+   * replaces the last one.
    */
   async setWebhook(url: string): Promise<void> {
     await this.#call("setWebhook", {
       url,
       secret_token: this.#config.webhookSecret,
-      allowed_updates: ["message"],
+      allowed_updates: WEBHOOK_UPDATES,
     });
   }
 
@@ -266,6 +326,90 @@ export function normalizeTelegramUpdate(
     event.replyTo = { providerMessageId: String(message.reply_to_message.message_id) };
   }
   return [event];
+}
+
+/**
+ * A tap on a button under one of the bot's messages (`callback_query`) becomes a press
+ * (ADR-0067 §3). A tap from a bot, in a channel, on a message sent in inline mode, which names no
+ * chat, or on a button without data yields none. A field of the wrong type, or data longer than
+ * Telegram allows, refuses the whole update. Like `normalizeTelegramUpdate`, it needs no token.
+ */
+export function normalizeTelegramPress(
+  webhook: InboundWebhook,
+  agentId: string,
+): CanonicalPress | null {
+  let update: { callback_query?: unknown };
+  try {
+    update = JSON.parse(webhook.body);
+  } catch {
+    throw new InvalidWebhookError("The update isn't JSON");
+  }
+  if (typeof update !== "object" || update === null) {
+    throw new InvalidWebhookError("The update isn't an object");
+  }
+  const query = update.callback_query;
+  if (query === undefined) return null;
+  if (!isWellFormedPress(query)) {
+    throw new InvalidWebhookError("The press has missing fields or fields of the wrong type");
+  }
+  const { from, message, data } = query;
+  if (from.is_bot || message === undefined || data === undefined) return null;
+  if (message.chat.type === "channel") return null;
+  const press: CanonicalPress = {
+    agentId,
+    channel: "telegram",
+    threadId: String(message.chat.id),
+    chatType: message.chat.type === "private" ? "direct" : "group",
+    sender: { channelUserId: String(from.id) },
+    pressId: query.id,
+    providerMessageId: String(message.message_id),
+    data,
+  };
+  const language = from.language_code;
+  if (typeof language === "string" && language.length <= MAX_LANGUAGE_TAG_CHARS) {
+    press.sender.languageCode = language;
+  }
+  return press;
+}
+
+interface TelegramCallbackQuery {
+  id: string;
+  from: { id: number; is_bot?: boolean; language_code?: string };
+  /** The message the button is on; missing for a message sent in inline mode. */
+  message?: { message_id: number; chat: { id: number; type: string } };
+  data?: string;
+}
+
+/** Every field `normalizeTelegramPress` reads, checked before any of it is trusted. */
+function isWellFormedPress(query: unknown): query is TelegramCallbackQuery {
+  if (!isObject(query) || !isObject(query.from)) return false;
+  return (
+    isString(query.id) &&
+    typeof query.from.id === "number" &&
+    isOptional(
+      query.message,
+      (message) =>
+        isObject(message) &&
+        typeof message.message_id === "number" &&
+        isObject(message.chat) &&
+        typeof message.chat.id === "number" &&
+        CHAT_TYPES.includes(message.chat.type as string),
+    ) &&
+    isOptional(
+      query.data,
+      (data) =>
+        isString(data) && new TextEncoder().encode(data).byteLength <= MAX_BUTTON_DATA_BYTES,
+    )
+  );
+}
+
+/** Telegram's inline keyboard, from rows of buttons. */
+function keyboard(buttons: InlineKeyboard) {
+  return {
+    inline_keyboard: buttons.map((row) =>
+      row.map((button) => ({ text: button.label, callback_data: button.data })),
+    ),
+  };
 }
 
 const isString = (value: unknown): value is string => typeof value === "string";

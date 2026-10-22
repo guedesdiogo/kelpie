@@ -4,9 +4,11 @@ import {
   type ChannelCapabilities,
   type ChannelEgressContract,
   type ChannelId,
+  type InlineKeyboard,
   type RunnerSessionsContract,
   type SendOutcome,
   type SetupFormsContract,
+  type TypingOutcome,
   typingRenewIntervalMs,
 } from "@kelpie/channels";
 import {
@@ -80,9 +82,10 @@ export interface ConversationPorts {
    * link in the bubble the channel may preview (#130); without it, none is. `links` makes the
    * bubble a formatted reply that may link those URLs (#188); without it, the text goes as typed.
    * `confirmation` makes it a confirmation's notice with a Confirm button, where the channel has
-   * one (#186): the webchat; channel-egress never gets it. `failure` marks the notice of a turn
-   * no route answered, which the webchat's mascot shows as an error (ADR-0045 §6); channel-egress
-   * never gets it either.
+   * one (#186): the webchat; channel-egress never gets it. `buttons` are a notice's buttons on a
+   * channel behind channel-egress, such as Telegram's Confirm (ADR-0067 §3). `failure` marks the
+   * notice of a turn no route answered, which the webchat's mascot shows as an error (ADR-0045
+   * §6); channel-egress never gets it either.
    */
   send(
     agentId: string,
@@ -93,9 +96,28 @@ export interface ConversationPorts {
       previewUrl?: string;
       links?: readonly string[];
       confirmation?: number;
+      buttons?: InlineKeyboard;
       failure?: true;
     },
   ): Promise<SendOutcome>;
+  /**
+   * Answers a tap on a notice's button, so the channel stops its spinner, with a short text or
+   * none (ADR-0067 §3). A courtesy, like "typing": a call that fails or hangs is given up, as a
+   * failure.
+   */
+  answer(
+    agentId: string,
+    destination: Destination,
+    pressId: string,
+    text?: string,
+  ): Promise<TypingOutcome>;
+  /** Replaces a notice's text and takes its buttons away (ADR-0067 §3). A courtesy too. */
+  edit(
+    agentId: string,
+    destination: Destination,
+    providerMessageId: string,
+    text: string,
+  ): Promise<TypingOutcome>;
   /**
    * Tells an agent's AgentHost that the conversation named `conversation` waits for one of its setup
    * steps until `until` (#206). Bounded; a failure throws.
@@ -400,6 +422,10 @@ function productionPorts(env: Env): ConversationPorts {
     // channel-egress takes only what it sends.
     send: (agentId, destination, text, { confirmation: _button, failure: _failure, ...options }) =>
       egress.send(agentId, destination, text, options),
+    answer: async (agentId, destination, pressId, text) =>
+      (await bounded(egress.answer(agentId, destination, pressId, text))) ?? GIVEN_UP,
+    edit: async (agentId, destination, providerMessageId, text) =>
+      (await bounded(egress.edit(agentId, destination, providerMessageId, text))) ?? GIVEN_UP,
     remember: (agentId, changes, summary) =>
       withTimeout(contextStore.write(agentId, changes, summary), REMEMBER_TIMEOUT_MS),
     recall: (agentId, question, options) =>
@@ -455,6 +481,8 @@ function notBound(): Promise<never> {
 
 /** "Typing" is a courtesy: a call that hangs or fails is given up after a few seconds. */
 const TYPING_TIMEOUT_MS = 3_000;
+/** What a courtesy given up answers. */
+const GIVEN_UP = { ok: false, reason: "failed" } as const;
 
 async function bounded<T>(call: Promise<T>): Promise<T | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined;

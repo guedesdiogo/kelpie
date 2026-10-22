@@ -48,6 +48,7 @@ function telegramDeps(env: Env): TelegramWebhookDeps {
     directory: env.DIRECTORY.getByName(DIRECTORY_NAME),
     ingest: (name, message) => conversation(env, name).ingest(message),
     pause: (name, target) => conversation(env, name).pause(target),
+    press: (name, target) => conversation(env, name).press(target),
     // A service binding to conversation-runtime's SetupEvents entrypoint, which only reports (#206).
     setupDone: async (agentId, event) =>
       (env.SETUP_EVENTS as unknown as SetupEventsContract).setupDone(agentId, event),

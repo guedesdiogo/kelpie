@@ -106,6 +106,13 @@
       "when": 1792555049829,
       "tag": "0014_turn_outside",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1792694881498,
+      "tag": "0015_confirmation_button",
+      "breakpoints": true
     }
   ]
 }

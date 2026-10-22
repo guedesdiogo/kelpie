@@ -1,13 +1,18 @@
 import type { Admission, ChannelIdentity, DirectoryContract, Remote } from "@kelpie/access";
 import {
   type CanonicalEvent,
+  type CanonicalPress,
   type ChannelWebhooksContract,
   type EgressDestination,
   InvalidWebhookError,
   localeOf,
   type WebhookNotice,
 } from "@kelpie/channels";
-import { normalizeTelegramUpdate, TELEGRAM_SECRET_HEADER } from "@kelpie/channels/telegram";
+import {
+  normalizeTelegramPress,
+  normalizeTelegramUpdate,
+  TELEGRAM_SECRET_HEADER,
+} from "@kelpie/channels/telegram";
 import { isAgentId, type SetupEvent } from "@kelpie/config";
 import type {
   Destination,
@@ -15,7 +20,10 @@ import type {
   IngestResult,
   PauseResult,
   PauseTarget,
+  PressResult,
+  PressTarget,
 } from "@kelpie/conversation/contract";
+import type { Sender } from "./admission.ts";
 
 /**
  * Telegram's updates are small: a message's text is at most 4,096 characters, and the message it
@@ -34,7 +42,7 @@ const PAUSE_COMMAND = /^\/pause(?:@\w+)?$/i;
 
 export interface TelegramWebhookDeps {
   webhooks: ChannelWebhooksContract;
-  admit(event: CanonicalEvent): Promise<Admission>;
+  admit(sender: Sender): Promise<Admission>;
   directory: Pick<
     Remote<DirectoryContract>,
     "redeemPairingCode" | "noticeStranger" | "releaseStrangerNotice"
@@ -43,6 +51,8 @@ export interface TelegramWebhookDeps {
   ingest(name: string, message: InboundMessage): Promise<IngestResult>;
   /** Pauses the conversation until the owner's next message. */
   pause(name: string, target: PauseTarget): Promise<PauseResult>;
+  /** Hands the owner's tap on one of Kelpie's buttons to the conversation, which answers it. */
+  press(name: string, target: PressTarget): Promise<PressResult>;
   /** Reports a setup step the owner finished to the agent's AgentHost (#206). */
   setupDone(agentId: string, event: SetupEvent): Promise<void>;
 }
@@ -59,6 +69,8 @@ export interface TelegramWebhookDeps {
  * - A stranger gets nothing. Their `/start <code>` may pair them, with a code the owner issued;
  *   anything else is noticed to the owner once (Story 3.6). A `/start` never reaches the model.
  * - The owner's `/pause` pauses the conversation until their next message (issue #134).
+ * - A tap on a button under one of Kelpie's notices goes to its conversation, which acts on it and
+ *   answers it, only when it is the owner's, in their own chat (ADR-0067 §3).
  * - The answer comes once the conversation has stored the message. If egress, the Directory or the
  *   conversation fails, a 503 makes Telegram retry, and the conversation drops the duplicate. A
  *   message the conversation fails on every time holds the bot's later updates back until Telegram
@@ -81,13 +93,16 @@ export async function handleTelegramWebhook(
     }
     const body = await readCapped(request);
     if (body === null) return dropped("too_large");
+    let press: CanonicalPress | null;
     let events: CanonicalEvent[];
     try {
-      events = normalizeTelegramUpdate({ headers: {}, body }, agentId);
+      press = normalizeTelegramPress({ headers: {}, body }, agentId);
+      events = press ? [] : normalizeTelegramUpdate({ headers: {}, body }, agentId);
     } catch (error) {
       if (error instanceof InvalidWebhookError) return dropped("malformed");
       throw error;
     }
+    if (press) await pressed(press, deps);
     for (const event of events) await deliver(event, deps);
     return new Response(null, { status: 200 });
   } catch (error) {
@@ -142,6 +157,43 @@ async function deliver(event: CanonicalEvent, deps: TelegramWebhookDeps): Promis
   });
   if (result.status === "rejected") {
     console.warn("ingress: the conversation refused a message", result.reason);
+  }
+}
+
+/**
+ * A tap on a button under one of Kelpie's notices (ADR-0067 §3). It reaches the conversation only
+ * from the owner's paired account, by the Directory, in their own private chat with the bot: in
+ * Telegram that chat's id is the user's id. Anyone else's tap is dropped unanswered, and no one is
+ * told of it: a tap isn't a message.
+ */
+async function pressed(press: CanonicalPress, deps: TelegramWebhookDeps): Promise<void> {
+  const admission = await deps.admit(press);
+  if (!admission.admitted) {
+    console.warn("ingress: dropped a Telegram tap", admission.reason);
+    return;
+  }
+  if (admission.role !== "owner" || press.threadId !== press.sender.channelUserId) {
+    console.warn("ingress: dropped a Telegram tap", "not_owner");
+    return;
+  }
+  const destination: Destination = { channel: press.channel, threadId: press.threadId };
+  const result = await deps.press(conversationName(press.agentId, destination), {
+    agentId: press.agentId,
+    destination,
+    userId: admission.userId,
+    role: admission.role,
+    chatType: press.chatType,
+    timeZone: admission.timeZone,
+    ...(press.sender.languageCode === undefined ? {} : { language: press.sender.languageCode }),
+    pressId: press.pressId,
+    providerMessageId: press.providerMessageId,
+    data: press.data,
+  });
+  if (result.status !== "accepted") {
+    console.warn(
+      "ingress: the conversation refused a tap",
+      result.status === "rejected" ? result.reason : result.status,
+    );
   }
 }
 

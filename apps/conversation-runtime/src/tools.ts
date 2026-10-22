@@ -83,32 +83,41 @@ const NOTICE: Localized<{
   button: (code: string) => string;
   typed: (code: string) => string;
   goAhead: (how: string, minutes: number) => string;
+  /** The button's own word. */
+  press: string;
+  confirmed: string;
 }> = {
   en: {
     confirm: "Confirm",
     button: (code) => `press Confirm, or reply with just the code ${code}`,
     typed: (code) => `reply with just the code ${code}`,
     goAhead: (how, minutes) => `To go ahead, ${how}. It expires in ${minutes} minutes.`,
+    press: "Confirm",
+    confirmed: "You confirmed.",
   },
   "pt-BR": {
     confirm: "Confirme",
     button: (code) => `toque em Confirmar, ou responda só com o código ${code}`,
     typed: (code) => `responda só com o código ${code}`,
     goAhead: (how, minutes) => `Para seguir, ${how}. Expira em ${minutes} minutos.`,
+    press: "Confirmar",
+    confirmed: "Você confirmou.",
   },
   es: {
     confirm: "Confirma",
     button: (code) => `presiona Confirmar, o responde solo con el código ${code}`,
     typed: (code) => `responde solo con el código ${code}`,
     goAhead: (how, minutes) => `Para seguir, ${how}. Expira en ${minutes} minutos.`,
+    press: "Confirmar",
+    confirmed: "Confirmaste.",
   },
 };
 
 /**
  * The bubble the host sends after the turn's reply, so the owner can confirm a change, in the
  * conversation's language (#187). The summary is shown with its invisible characters written out.
- * With `button`, the webchat shows the notice with a Confirm button that sends the code for the
- * owner (#186); the code still works typed.
+ * With `button`, the notice comes with a Confirm button that sends the code for the owner: the
+ * webchat's (#186), or an inline one on Telegram (ADR-0067 §3); the code still works typed.
  */
 export function confirmationNotice(
   summary: string,
@@ -119,6 +128,17 @@ export function confirmationNotice(
   const texts = NOTICE[locale];
   const how = button ? texts.button(code) : texts.typed(code);
   return `${texts.confirm}: ${visible(summary)}\n${texts.goAhead(how, CONFIRMATION_MS / 60_000)}`;
+}
+
+/** The Confirm button's label on a channel that shows it under the notice (ADR-0067 §3). */
+export function confirmLabel(locale: Locale = "en"): string {
+  return NOTICE[locale].press;
+}
+
+/** A confirmation's notice once the owner tapped its Confirm button, without the code (ADR-0067 §3). */
+export function confirmedNotice(summary: string, locale: Locale = "en"): string {
+  const texts = NOTICE[locale];
+  return `${texts.confirm}: ${visible(summary)}\n${texts.confirmed}`;
 }
 
 /**

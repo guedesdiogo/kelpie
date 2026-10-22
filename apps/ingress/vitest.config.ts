@@ -60,6 +60,13 @@ export class ConversationAgent extends DurableObject {
   async received() {
     return (await this.ctx.storage.get("received")) ?? null;
   }
+  async press(target) {
+    await this.ctx.storage.put("pressed", target);
+    return { status: "accepted" };
+  }
+  async pressed() {
+    return (await this.ctx.storage.get("pressed")) ?? null;
+  }
 }
 // Agents as the Registry holds them (#288): one that chats, and one whose chat is off.
 export class Registry extends DurableObject {

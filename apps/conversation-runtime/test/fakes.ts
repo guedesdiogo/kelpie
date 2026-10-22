@@ -1,4 +1,4 @@
-import type { SendOutcome } from "@kelpie/channels";
+import type { InlineKeyboard, SendOutcome, TypingOutcome } from "@kelpie/channels";
 import type { SetupStep } from "@kelpie/config";
 import type { RecallOptions } from "@kelpie/context-store/contract";
 import type { Destination } from "@kelpie/conversation/contract";
@@ -210,7 +210,19 @@ export interface FakeWorld {
     until: number;
   }) => Promise<void>;
   /** Every bubble sent, with whether it went out silently and the link it may preview, if any. */
-  sends: { text: string; silent: boolean; previewUrl?: string; links?: readonly string[] }[];
+  sends: {
+    text: string;
+    silent: boolean;
+    previewUrl?: string;
+    links?: readonly string[];
+    buttons?: InlineKeyboard;
+  }[];
+  /** Every notice edited in place (ADR-0067 §3). */
+  edits: { destination: Destination; providerMessageId: string; text: string }[];
+  /** Every tap answered, with the text it showed, if any (ADR-0067 §3). */
+  pressAnswers: { destination: Destination; pressId: string; text?: string }[];
+  /** While set, edits and answers fail, as an unreachable channel-egress would. */
+  failPressReplies: boolean;
   typing: number;
   /** How many times "typing" was kept up while the model answered, and how many times it stopped. */
   typingKept: number;
@@ -276,6 +288,9 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
     sent: [],
     awaits: [],
     sends: [],
+    edits: [],
+    pressAnswers: [],
+    failPressReplies: false,
     remembered: [],
     failRemember: false,
     recalls: [],
@@ -437,8 +452,19 @@ export function fakeWorld(scripts: ModelScript[]): FakeWorld {
           silent: options.silent,
           ...(options.previewUrl === undefined ? {} : { previewUrl: options.previewUrl }),
           ...(options.links === undefined ? {} : { links: options.links }),
+          ...(options.buttons === undefined ? {} : { buttons: options.buttons }),
         });
         return { ok: true, providerMessageId: `m-${call}` };
+      },
+      async edit(_agentId, destination, providerMessageId, text): Promise<TypingOutcome> {
+        if (world.failPressReplies) return { ok: false, reason: "failed" };
+        world.edits.push({ destination, providerMessageId, text });
+        return { ok: true };
+      },
+      async answer(_agentId, destination, pressId, text): Promise<TypingOutcome> {
+        if (world.failPressReplies) return { ok: false, reason: "failed" };
+        world.pressAnswers.push({ destination, pressId, ...(text === undefined ? {} : { text }) });
+        return { ok: true };
       },
       async typing() {
         world.typing += 1;

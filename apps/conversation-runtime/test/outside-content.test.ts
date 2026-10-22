@@ -248,7 +248,9 @@ describe("a turn that read outside content", () => {
     expect(world.sent[1]).toContain(
       "This conversation read text that neither you nor Kelpie wrote, so Kelpie asks you before any change.",
     );
-    expect(world.sent[1]).toMatch(/To go ahead, reply with just the code [A-Z0-9]{6}\./);
+    expect(world.sent[1]).toMatch(
+      /To go ahead, press Confirm, or reply with just the code [A-Z0-9]{6}\./,
+    );
     expect(world.sent).toHaveLength(2);
     expect(await marks(stub)).toEqual([true]);
   });
