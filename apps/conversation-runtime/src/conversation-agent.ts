@@ -149,6 +149,7 @@ import {
   MAX_TOOL_ROUNDS,
   newConfirmationCode,
   runToolCall,
+  shownSummary,
   type TaskRunHandle,
   TOOL_BOUND_RESULT,
   TOOL_LIMIT_TEXT,
@@ -655,11 +656,15 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
    * they asked for it, its notice was sent to them (ADR-0052 §3), and it is still open, neither
    * used nor past its 10 minutes.
    */
-  #pressable(where: SQL, userId: string): { id: number; code: string; summary: string } | null {
+  #pressable(
+    where: SQL,
+    userId: string,
+  ): { id: number; code: string; command: string; summary: string } | null {
     const pending = this.#db
       .select({
         id: schema.confirmations.id,
         code: schema.confirmations.code,
+        command: schema.confirmations.command,
         summary: schema.confirmations.summary,
         userId: schema.confirmations.userId,
         usedAt: schema.confirmations.usedAt,
@@ -681,7 +686,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .from(schema.outbox)
       .where(and(eq(schema.outbox.confirmationId, pending.id), eq(schema.outbox.status, "sent")))
       .get();
-    return shown ? { id: pending.id, code: pending.code, summary: pending.summary } : null;
+    return shown
+      ? { id: pending.id, code: pending.code, command: pending.command, summary: pending.summary }
+      : null;
   }
 
   /**
@@ -755,7 +762,9 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       timeZone: target.timeZone,
       language: target.language ?? null,
     });
-    return result.status === "rejected" ? null : confirmedNotice(pending.summary, this.#locale());
+    return result.status === "rejected"
+      ? null
+      : confirmedNotice(pending.summary, this.#locale(), pending.command);
   }
 
   /**
@@ -1477,6 +1486,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const rows = this.#db
       .select({
         id: schema.confirmations.id,
+        command: schema.confirmations.command,
         summary: schema.confirmations.summary,
         expiresAt: schema.confirmations.expiresAt,
       })
@@ -1494,7 +1504,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     return {
       requests: rows.slice(0, REQUESTS_AT_MOST).map((row) => ({
         id: row.id,
-        summary: visible(row.summary),
+        summary: shownSummary(row.command, row.summary),
         askedAgoMs: Math.max(0, now - (row.expiresAt - CONFIRMATION_MS)),
         expiresInMs: row.expiresAt - now,
       })),
@@ -2060,6 +2070,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .select({
         id: schema.confirmations.id,
         code: schema.confirmations.code,
+        command: schema.confirmations.command,
         summary: schema.confirmations.summary,
         buttonId: schema.confirmations.buttonId,
       })
@@ -2099,7 +2110,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const notices = [
       ...(routes.text === null ? [] : [{ text: routes.text }]),
       ...(announced === null ? [] : [{ text: announced }]),
-      ...confirmations.map(({ id, code, summary, buttonId }) => ({
+      ...confirmations.map(({ id, code, command, summary, buttonId }) => ({
         // Telegram's button carries the random id, which a confirmation made before buttons
         // lacks; the webchat's needs only the confirmation's own id.
         text: confirmationNotice(
@@ -2107,6 +2118,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           code,
           button && (buttonId !== null || destination.channel === "webchat"),
           locale,
+          command,
         ),
         confirmationId: id,
       })),
@@ -2703,7 +2715,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   #confirm(turnId: number, userId: string, request: ConfirmationRequest): boolean {
     // A tool that ignored its signal, after its turn stopped, neither confirms nor shows anything.
     if (!this.#isRunning(turnId)) return false;
-    if (visible(request.summary).length > MAX_SUMMARY_CHARS) {
+    if (shownSummary(request.command, request.summary).length > MAX_SUMMARY_CHARS) {
       throw new RangeError("A confirmation's summary is too long to show");
     }
     const input = canonicalJson(request.input);

@@ -26,6 +26,7 @@ export class ContextStore extends WorkerEntrypoint {
   }
 }
 export class ContextStoreAdmin extends WorkerEntrypoint {}
+export class MasterAgentFiles extends WorkerEntrypoint {}
 export default { fetch: () => new Response(null, { status: 404 }) };`,
     },
     // channel-egress answers that no agent has a bot, for the photo every AgentHost asks for when it

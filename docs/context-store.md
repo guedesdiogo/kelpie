@@ -142,7 +142,7 @@ The `context-store` Worker is the only part of Kelpie that reads or writes the v
 
 `context-store` reaches llm-gateway through its `LLM_GATEWAY` service binding, for memory's embeddings and rerank, so llm-gateway deploys first. Without llm-gateway's models, recall works on full text, entities and links alone.
 
-Its `ContextStore` entrypoint serves the Workers that run conversations. `ContextStoreAdmin` holds the owner's actions: listing held files, forgetting erased content, and turning Dream off or back to dry runs (#112). admin-api binds it, and so does conversation-runtime for Master's owner tools (ADR-0067 §1), whose every call waits for the owner's confirmation; its three methods are its whole shape. `AgentFiles` holds the webchat editor's reads and writes of one agent's own files (ADR-0058), and only ingress binds it.
+Its `ContextStore` entrypoint serves the Workers that run conversations. `ContextStoreAdmin` holds the owner's actions: listing held files, forgetting erased content, and turning Dream off or back to dry runs (#112). admin-api binds it, and so does conversation-runtime for Master's owner tools (ADR-0067 §1), whose every call waits for the owner's confirmation; its three methods are its whole shape. `AgentFiles` holds the webchat editor's reads and writes of one agent's own files (ADR-0058), and only ingress binds it. `MasterAgentFiles` holds Master's, for the owner (ADR-0067 §1): its `files` and `save` only, never a skill's install. Its commits name Master in their trailer, `Kelpie-Via: agent:<id>`, and the secrets sanitizer runs on the text first. Only conversation-runtime binds it.
 
 The vault needs a GitHub App with access to the vault repository alone. Spike #28's App works, or a new one.
 

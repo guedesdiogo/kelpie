@@ -78,6 +78,20 @@ export function visible(text: string): string {
   );
 }
 
+/**
+ * The commands whose summary shows on several lines (#494): a file's change, line by line. Their
+ * tools' code writes each line, and the model can't put a line break in one: `shownSummary` writes
+ * out every other invisible character of each line, so a line's text can't pass for another line.
+ */
+export const MULTILINE_COMMANDS: ReadonlySet<string> = new Set(["writeAgentFile"]);
+
+/** A confirmation's summary as the owner reads it: `visible`, line by line for MULTILINE_COMMANDS. */
+export function shownSummary(command: string, summary: string): string {
+  return MULTILINE_COMMANDS.has(command)
+    ? summary.split("\n").map(visible).join("\n")
+    : visible(summary);
+}
+
 const NOTICE: Localized<{
   confirm: string;
   button: (code: string) => string;
@@ -124,10 +138,11 @@ export function confirmationNotice(
   code: string,
   button = false,
   locale: Locale = "en",
+  command = "",
 ): string {
   const texts = NOTICE[locale];
   const how = button ? texts.button(code) : texts.typed(code);
-  return `${texts.confirm}: ${visible(summary)}\n${texts.goAhead(how, CONFIRMATION_MS / 60_000)}`;
+  return `${texts.confirm}: ${shownSummary(command, summary)}\n${texts.goAhead(how, CONFIRMATION_MS / 60_000)}`;
 }
 
 /** The Confirm button's label on a channel that shows it under the notice (ADR-0067 §3). */
@@ -136,9 +151,9 @@ export function confirmLabel(locale: Locale = "en"): string {
 }
 
 /** A confirmation's notice once the owner tapped its Confirm button, without the code (ADR-0067 §3). */
-export function confirmedNotice(summary: string, locale: Locale = "en"): string {
+export function confirmedNotice(summary: string, locale: Locale = "en", command = ""): string {
   const texts = NOTICE[locale];
-  return `${texts.confirm}: ${visible(summary)}\n${texts.confirmed}`;
+  return `${texts.confirm}: ${shownSummary(command, summary)}\n${texts.confirmed}`;
 }
 
 /**

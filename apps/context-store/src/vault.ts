@@ -993,17 +993,27 @@ export class Vault extends DurableObject<VaultEnv> {
   }
 
   /**
-   * One Save: every change in one commit on the branch, with `Kelpie-Via: webchat` and no pull
+   * One Save: every change in one commit on the branch, with a `Kelpie-Via` trailer and no pull
    * request (ADR-0058 §1). It syncs first, so a version pushed from elsewhere counts; a change whose
    * file moved past the version it names is a conflict, and the others still commit.
+   *
+   * The owner's save of one agent's own files (ADR-0058), `via` the webchat's editor, or Master for
+   * the owner (`agent:<id>`, ADR-0067 §1), which the commit's trailer names.
    */
-  async saveAgentFiles(agentId: string, input: unknown): Promise<SaveAgentFilesResult> {
+  async saveAgentFiles(
+    agentId: string,
+    input: unknown,
+    via = "webchat",
+  ): Promise<SaveAgentFilesResult> {
     const backend = this.#backend();
     if (backend === null) return { ok: false, reason: "vault_off" };
     const changes = parseChanges(input);
-    if (!isAgentId(agentId) || changes === null) return { ok: false, reason: "invalid_input" };
+    const by = via === "webchat" || (via.startsWith("agent:") && isAgentId(via.slice(6)));
+    if (!isAgentId(agentId) || changes === null || !by) {
+      return { ok: false, reason: "invalid_input" };
+    }
     try {
-      return await this.#serialize(() => this.#saveAgentFiles(backend, agentId, changes));
+      return await this.#serialize(() => this.#saveAgentFiles(backend, agentId, changes, via));
     } catch (error) {
       console.error("Vault: an owner's save failed", errorName(error));
       return { ok: false, reason: "unavailable" };
@@ -1233,6 +1243,7 @@ export class Vault extends DurableObject<VaultEnv> {
     backend: VaultBackend,
     agentId: string,
     changes: readonly AgentFileChange[],
+    via: string,
   ): Promise<SaveAgentFilesResult> {
     this.#dropStaged();
     let keepUnknown = false;
@@ -1254,8 +1265,8 @@ export class Vault extends DurableObject<VaultEnv> {
       const outcome = await backend.commit({
         branch: await this.#branch(backend),
         expectedHead: previousHead ?? "",
-        headline: saveHeadline(agentId, plan.what),
-        body: ["Kelpie-Via: webchat", ...plan.trailers].join("\n"),
+        headline: saveHeadline(agentId, plan.what, via),
+        body: [`Kelpie-Via: ${via}`, ...plan.trailers].join("\n"),
         writes: [...plan.writes].map(([path, file]) => ({
           path,
           content: file.binary ? fromBase64(file.content) : file.content,

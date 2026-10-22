@@ -290,6 +290,34 @@ describe("Kelpie's Confirm button on Telegram (ADR-0067 §3)", () => {
     expect(await stub.press(tap(data))).toEqual({ status: "refused" });
   });
 
+  it("keeps a file's change on its lines in the notice it edits (#494)", async () => {
+    const world = use(fakeWorld([toolCalls({ name: "write", input: {} }), reply("Confirme.")]));
+    world.tools = [
+      {
+        async tools() {
+          return [
+            {
+              spec: { name: "write", description: "Write.", inputSchema: { type: "object" } },
+              label: "Writing",
+              async run(input: unknown, context: ToolContext) {
+                const summary = "write SOUL.md:\n+ be kind\n- be terse";
+                await context.confirm({ command: "writeAgentFile", input, summary });
+                return { output: "Not done yet." };
+              },
+            },
+          ];
+        },
+      },
+    ];
+    const stub = agent("press-lines");
+    await turn(stub, "m1", "mude o SOUL.md");
+
+    expect(await stub.press(tap(buttonsOf(world)[0] ?? ""))).toEqual({ status: "accepted" });
+    expect(world.edits.at(-1)?.text).toBe(
+      "Confirme: write SOUL.md:\n+ be kind\n- be terse\nVocê confirmou.",
+    );
+  });
+
   it("counts a tap only on a notice the owner was shown", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const world = use(
