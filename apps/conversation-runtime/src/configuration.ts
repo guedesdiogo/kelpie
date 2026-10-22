@@ -16,13 +16,10 @@ import { type ModelSettings, memoryOnSessionRoute, parseModelSettings } from "@k
 // The router module only: the package root also loads the provider SDKs.
 import { MODEL_TIERS } from "@kelpie/llm/router";
 import { BOARD_TOOLS } from "./board-tools.ts";
-import { bareHttpsOrigin } from "./origin.ts";
-import { OWNER_TOOLS } from "./owner-tools.ts";
-
-export { bareHttpsOrigin };
-
 import { MASCOT_SCHEMA } from "./mascot-schema.ts";
 import { MODEL_SETTINGS_SCHEMA } from "./model-schema.ts";
+import { bareHttpsOrigin } from "./origin.ts";
+import { OWNER_TOOLS } from "./owner-tools.ts";
 import {
   MAX_SUMMARY_CHARS,
   type Tool,

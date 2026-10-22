@@ -422,7 +422,7 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
     - while the conversation is paused, it waits for the owner's next message.
   - **How the turn runs:** the note is authored as the owner who finished the step, so its turn can run the next step's tools. Confirmations still need the code or the button.
   - **What the note never counts as:** the owner's words. It confirms no code, allows no link, doesn't show in the webchat, stays out of session pages and recall, and doesn't change the conversation's language.
-  - **A webhook that failed:** the note says Telegram couldn't be pointed at Kelpie. The agent tells the owner to run `registerTelegramWebhook` on this API, since it can't.
+  - **A webhook that failed:** the note says Telegram couldn't be pointed at Kelpie. Once the owner agrees, Master points it again with `register_telegram_webhook`, after their confirmation, as `registerTelegramWebhook` on this API does.
   - **An outdated runner:** the note says the runner speaks another protocol version. The agent tells the owner to update it on the server.
   - **A refused secret, or a runner that can't be reached:** nothing is stored and nothing is reported. The form page says why and stays open.
 - **Secrets.** The bot's token goes into the secure form ("Secure forms"), never into the chat. If the owner pastes one in the chat anyway, it stays in the conversation: revoke it in BotFather and make a new one. The runner's secret goes into its own form the same way. One pasted in the chat is revoked by writing a new secret to its file on the server ([runner.md](runner.md), "Rotating the secret").

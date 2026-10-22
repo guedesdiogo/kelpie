@@ -108,6 +108,7 @@ import type {
   WriteNoteResult,
   WriteResult,
 } from "./contract.ts";
+import { DREAM_OPERATIONS } from "./contract.ts";
 import { proposeAbstract, proposeMerge, proposeSummary } from "./dream.ts";
 import { mergeOwnerWins } from "./merge.ts";
 import { transient } from "./model.ts";
@@ -290,11 +291,6 @@ interface DreamCommit {
 type DreamOutcome = "committed" | "changed" | "unwritable" | "refused";
 /** Dream's write of an abstract (#112): the queue's mark, and a headline that names no note. */
 const DREAM_SUMMARY = "Write an abstract Dream proposed";
-/**
- * Dream's operations the owner may let write (#112); the others only propose. Day summaries and
- * merges can write too, but can't be named until #182's measurement is in.
- */
-const DREAM_OPERATIONS = ["abstracts"] as const;
 /** Dream's commits of a day's summary and of a merge (#112): headlines that name no note. */
 const DREAM_DAY_HEADLINE = "Write a day summary Dream proposed";
 const DREAM_MERGE_HEADLINE = "Merge notes Dream found to be duplicates";

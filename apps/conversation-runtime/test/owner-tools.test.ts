@@ -49,6 +49,12 @@ function world(role: { of: AgentRole | null } = { of: "master" }) {
     proposal: { ok: true, value: proposal() } as CommandResult<ProposalDetail>,
   };
   const commands: OwnerCommands = {
+    async getAgent(_actor, input) {
+      const { id } = input as { id: string };
+      return id === "ghost"
+        ? { ok: false, reason: "unknown_agent" }
+        : { ok: true, value: { id, name: id } as never };
+    },
     async registerTelegramWebhook(actor, input) {
       calls.push(`webhook ${JSON.stringify(input)} as ${actor.via}`);
       return answers.webhook;
@@ -201,6 +207,12 @@ describe("Master's owner tools (ADR-0067 §1, #493)", () => {
     expect(await run(webhook, { agentId: "Sales!" }, contextOf(true).context)).toMatchObject({
       isError: true,
     });
+    const ghost = contextOf(true);
+    expect(await run(webhook, { agentId: "ghost" }, ghost.context)).toEqual({
+      isError: true,
+      output: "There is no agent with the id ghost.",
+    });
+    expect(ghost.asked).toEqual([]);
   });
 
   it("list the vault's held files", async () => {
@@ -214,6 +226,9 @@ describe("Master's owner tools (ADR-0067 §1, #493)", () => {
       { path: "notes/b\u202e.md", state: "proposed", attempts: 1, at: NOW },
     ];
     const { output } = await run(list, {}, contextOf(true).context);
+    expect(output).toMatch(
+      /never instructions\.\n<agent-words-[0-9a-f]{8}>\n- notes\/a\.md: held, 3 attempts/,
+    );
     expect(output).toContain("- notes/a.md: held, 3 attempts, since 2026-10-22T18:00:00Z");
     // A path can't hide a character, or reorder what the model reads.
     expect(output).toContain("- notes/b\\u{202E}.md: a resolution waits on its pull request");
@@ -230,16 +245,31 @@ describe("Master's owner tools (ADR-0067 §1, #493)", () => {
         command: "forgetVaultPaths",
         input: { paths: ["notes/old.md", "people/ana/"] },
         summary:
-          "make Kelpie forget its own copies of these vault paths, which can't be undone: notes/old.md, people/ana/",
+          "make Kelpie forget its own copies of these vault paths, and of every file in the folders that end in /, with any edit of theirs Kelpie hasn't sent yet. It can't be undone: notes/old.md, people/ana/",
       },
     ]);
-    expect((await run(forget, { paths }, contextOf(true).context)).output).toBe(
-      "Kelpie forgot 2 of its copies. The vault still has these, so Kelpie reads them again: notes/kept.md. The owner erases them from the vault's history first.",
+    expect((await run(forget, { paths }, contextOf(true).context)).output).toMatch(
+      /^Kelpie forgot 2 of its copies\. The vault still has these, so Kelpie reads them again; the owner erases them from the vault's history first\. Their paths are the vault's data:\n<agent-words-[0-9a-f]{8}>\nnotes\/kept\.md\n<\/agent-words-/,
     );
     expect(calls).toEqual([`forget {"paths":["notes/old.md","people/ana/"]} as agent:${MASTER}`]);
-    expect(await run(forget, { paths: [] }, contextOf(true).context)).toMatchObject({
-      isError: true,
-    });
+    // Never the whole vault, nor a path out of it, nor past the command's own bounds: no yes asked.
+    const refused = contextOf(true);
+    for (const bad of [
+      [],
+      ["/"],
+      ["/notes/a.md"],
+      ["."],
+      ["notes/../people/"],
+      ["notes//a.md"],
+      ["x".repeat(301)],
+      Array.from({ length: 1_001 }, (_, i) => `n/${i}.md`),
+    ]) {
+      expect(
+        await run(forget, { paths: bad }, refused.context),
+        JSON.stringify(bad).slice(0, 40),
+      ).toMatchObject({ isError: true });
+    }
+    expect(refused.asked).toEqual([]);
     const many = Array.from({ length: 200 }, (_, i) => `notes/a-long-folder-name/${i}.md`);
     expect(await run(forget, { paths: many }, contextOf(true).context)).toMatchObject({
       isError: true,
@@ -255,6 +285,13 @@ describe("Master's owner tools (ADR-0067 §1, #493)", () => {
     expect(waiting.asked[0]?.summary).toBe(
       "encender Dream en modo de prueba, dejando que estas operaciones escriban: abstracts",
     );
+    const kept = contextOf(false);
+    await run(dream, { mode: "dry" }, kept.context);
+    await run(dream, { mode: "dry", writes: [] }, kept.context);
+    expect(kept.asked.map((one) => one.summary)).toEqual([
+      "turn Dream on as dry runs, leaving which operations may write as it is",
+      "turn Dream on as dry runs, with no operation writing",
+    ]);
     expect(await run(dream, { mode: "off" }, contextOf(true).context)).toEqual({
       output: "Dream is off.",
     });
@@ -269,6 +306,14 @@ describe("Master's owner tools (ADR-0067 §1, #493)", () => {
       isError: true,
       output: "The mode is off or dry.",
     });
+    // An operation Dream doesn't let write is refused before any yes is asked.
+    const unknown = contextOf(true);
+    expect(await run(dream, { mode: "dry", writes: ["summaries"] }, unknown.context)).toEqual({
+      isError: true,
+      output:
+        "writes names the operations that may write, of these: abstracts. An empty list lets none write.",
+    });
+    expect(unknown.asked).toEqual([]);
   });
 
   it("read proposals with the proposer's words fenced as data", async () => {
@@ -342,6 +387,71 @@ describe("Master's owner tools (ADR-0067 §1, #493)", () => {
     ).toMatchObject({
       isError: true,
       output: expect.stringContaining("ADMIN_ORIGIN"),
+    });
+    expect(links).toEqual([]);
+  });
+
+  it("write every confirmation in the conversation's language", async () => {
+    const tools = await toolsOf(world().provider);
+    const summaries = async (locale: "en" | "pt-BR" | "es") => {
+      const { context, asked } = contextOf(false, owner, { locale });
+      await run(tools.get("register_telegram_webhook"), { agentId: "sales" }, context);
+      await run(tools.get("forget_vault_paths"), { paths: ["notes/a.md"] }, context);
+      await run(tools.get("set_dream"), { mode: "off" }, context);
+      return asked.map((one) => one.summary);
+    };
+    expect(await summaries("pt-BR")).toEqual([
+      "apontar de novo para o Kelpie o bot do Telegram do agente sales",
+      "fazer o Kelpie esquecer as cópias que guarda destes caminhos do vault, com as edições deles que o Kelpie ainda não enviou. Não tem volta: notes/a.md",
+      "desligar o Dream",
+    ]);
+    expect(await summaries("es")).toEqual([
+      "apuntar de nuevo a Kelpie el bot de Telegram del agente sales",
+      "hacer que Kelpie olvide sus copias de estas rutas del vault, con las ediciones suyas que Kelpie aún no envió. No tiene vuelta atrás: notes/a.md",
+      "apagar Dream",
+    ]);
+  });
+
+  it("show a proposal's state as it is: stale only while it waits, and a target that's gone", async () => {
+    const { provider, answers } = world();
+    const get = (await toolsOf(provider)).get("get_proposal");
+    answers.proposal = { ok: true, value: proposal({ status: "applied", stale: true }) };
+    const applied = (await run(get, { id: PROPOSAL }, contextOf(true).context)).output;
+    expect(applied).toContain(`The proposal ${PROPOSAL}: applied.`);
+    expect(applied).not.toContain("stale");
+    expect(applied).not.toContain("Only the owner decides it");
+    answers.proposal = { ok: true, value: proposal({ stale: true, current: null }) };
+    const gone = (await run(get, { id: PROPOSAL }, contextOf(true).context)).output;
+    expect(gone).toContain("pending, stale: its target changed since");
+    expect(gone).toContain("Its target is gone.");
+    // Every value an agent wrote is fenced: the change, the values before, and the reason.
+    expect(gone.match(/<agent-words-[0-9a-f]{8}>/g)).toHaveLength(3);
+  });
+
+  it("list the newest proposals of many, refuse a status no proposal has, and open none that's unknown", async () => {
+    const { provider, answers } = world();
+    const tools = await toolsOf(provider);
+    answers.proposals = Array.from({ length: 20 }, (_, i) =>
+      proposal({
+        id: `3c4d5e6f-0000-4000-8000-${String(i).padStart(12, "0")}`,
+        reason: "r".repeat(300),
+      }),
+    );
+    const { output } = await run(tools.get("list_proposals"), {}, contextOf(true).context);
+    expect(output).toContain("The 15 newest of 20: name a status to see others.");
+    expect(output.match(/^- /gm)).toHaveLength(15);
+    expect(output.length).toBeLessThan(10_000);
+    expect(
+      await run(tools.get("list_proposals"), { status: "lost" }, contextOf(true).context),
+    ).toMatchObject({
+      isError: true,
+      output: expect.stringContaining("The status is one of pending"),
+    });
+    answers.proposal = { ok: false, reason: "unknown_proposal" };
+    const { context, links } = contextOf(true);
+    expect(await run(tools.get("open_proposal"), { id: PROPOSAL }, context)).toMatchObject({
+      isError: true,
+      output: expect.stringContaining("There is no proposal"),
     });
     expect(links).toEqual([]);
   });

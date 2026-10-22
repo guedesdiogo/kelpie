@@ -185,8 +185,9 @@ export function portsFor(env: Env): ConversationPorts {
 
 /**
  * The configuration commands this Worker runs (ADR-0013): Master's tools and the webchat's agent
- * editor (#379), minus the ones that need the Directory, the vault's admin entrypoint or more of
- * channel-egress than opening a form, which this Worker doesn't bind.
+ * editor (#379), minus the ones that need the Directory, which this Worker doesn't bind. Of
+ * channel-egress it binds opening a form and pointing a stored bot at ingress again, and of
+ * context-store the vault's admin entrypoint, for Master's owner tools (ADR-0067 §1, #493).
  */
 export function configCommands(env: Env) {
   const gatewayAdmin = env.LLM_GATEWAY_ADMIN as unknown as LlmGatewayAdminBinding;
