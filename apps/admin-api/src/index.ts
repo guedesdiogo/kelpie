@@ -34,7 +34,8 @@ export function depsFor(env: Env): AdminDeps {
     env.AGENT_HOST.getByName(id) as unknown as Remote<AgentHostContract>;
   // A service binding to channel-egress's ChannelForms entrypoint, which returns values only.
   const forms = env.CHANNEL_FORMS as unknown as ChannelFormsContract;
-  // A service binding to context-store's ContextStoreAdmin entrypoint, which only admin-api binds.
+  // A service binding to context-store's ContextStoreAdmin entrypoint, which conversation-runtime
+  // binds too, for Master's owner tools (ADR-0067 §1).
   const vault = env.CONTEXT_STORE_ADMIN as unknown as ContextStoreAdminContract;
   const gateway = env.LLM_GATEWAY_ADMIN as unknown as ModelsGateway;
   // llm-gateway's ProviderCheck, which only admin-api binds: it checks a model key before its form

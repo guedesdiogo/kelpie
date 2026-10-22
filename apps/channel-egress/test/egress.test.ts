@@ -1,7 +1,7 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SecretStore, SetupForms } from "../src/index.ts";
+import { SecretStore, SetupForms, SetupWebhooks } from "../src/index.ts";
 import { telegramWebhookUrl } from "../src/telegram-secret.ts";
 
 // The Worker runs in the test's isolate, so a stubbed global fetch stands in for the Bot API. It
@@ -242,6 +242,28 @@ describe("Telegram webhooks", () => {
     expect(await exports.ChannelEgress.send("refused", destination, "hi")).toMatchObject({
       ok: true,
     });
+  });
+
+  it("lets Master's tools register again through SetupWebhooks, which does nothing else (#493)", async () => {
+    const calls = botApi();
+    await connect("master-again");
+    const first = registeredSecret(calls);
+
+    expect(await exports.SetupWebhooks.registerTelegramWebhook("master-again")).toEqual({
+      ok: true,
+    });
+    expect(registeredSecret(calls)).toBe(first);
+    expect(await exports.SetupWebhooks.registerTelegramWebhook("nobody")).toEqual({
+      ok: false,
+      reason: "not_connected",
+    });
+    expect(await exports.SetupWebhooks.registerTelegramWebhook("Not An Agent")).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(
+      Object.getOwnPropertyNames(SetupWebhooks.prototype).filter((name) => name !== "constructor"),
+    ).toEqual(["registerTelegramWebhook"]);
   });
 
   it("registers nothing for an agent without a bot, or an id that can't exist", async () => {

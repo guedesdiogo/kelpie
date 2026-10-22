@@ -29,6 +29,7 @@ import {
   type SendOptions,
   type SendOutcome,
   type SetupFormsContract,
+  type SetupWebhooksContract,
   type TelegramDisconnection,
   type TypingOutcome,
   type WebhookNotice,
@@ -471,21 +472,45 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
   }
 
   async registerTelegramWebhook(agentId: string): Promise<WebhookRegistration> {
-    if (!isAgentId(agentId)) return { ok: false, reason: "invalid_input" };
-    const found = await telegramSecret(this.env, agentId);
-    return found.ok ? this.#register(agentId, found.secret) : found;
+    return registerTelegramWebhookOf(this.env, agentId);
   }
 
   async #register(agentId: string, secret: TelegramSecret): Promise<WebhookRegistration> {
-    const url = telegramWebhookUrl(this.env.INGRESS_ORIGIN, agentId);
-    if (!url) return { ok: false, reason: "not_configured" };
-    try {
-      await new TelegramAdapter(secret).setWebhook(url);
-      return { ok: true };
-    } catch (error) {
-      console.warn("channel-egress: Telegram refused a webhook", errorName(error));
-      return { ok: false, reason: "channel_refused" };
-    }
+    return registerWebhook(this.env, agentId, secret);
+  }
+}
+
+/** Points an agent's stored bot at ingress again, with the secret it already has. */
+async function registerTelegramWebhookOf(env: Env, agentId: string): Promise<WebhookRegistration> {
+  if (!isAgentId(agentId)) return { ok: false, reason: "invalid_input" };
+  const found = await telegramSecret(env, agentId);
+  return found.ok ? registerWebhook(env, agentId, found.secret) : found;
+}
+
+async function registerWebhook(
+  env: Env,
+  agentId: string,
+  secret: TelegramSecret,
+): Promise<WebhookRegistration> {
+  const url = telegramWebhookUrl(env.INGRESS_ORIGIN, agentId);
+  if (!url) return { ok: false, reason: "not_configured" };
+  try {
+    await new TelegramAdapter(secret).setWebhook(url);
+    return { ok: true };
+  } catch (error) {
+    console.warn("channel-egress: Telegram refused a webhook", errorName(error));
+    return { ok: false, reason: "channel_refused" };
+  }
+}
+
+/**
+ * What Master's owner tools bind (ADR-0067 §1, #493): it points a stored bot at ingress again, and
+ * nothing else. The URL is ingress's, from the deploy, and the secret stays the stored one, so a
+ * call can only repair a bot's webhook; it returns no secret.
+ */
+export class SetupWebhooks extends WorkerEntrypoint<Env> implements SetupWebhooksContract {
+  async registerTelegramWebhook(agentId: string): Promise<WebhookRegistration> {
+    return registerTelegramWebhookOf(this.env, agentId);
   }
 }
 

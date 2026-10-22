@@ -98,6 +98,22 @@ describe("WORKERS", () => {
     expect(binders).toEqual(["admin-api"]);
   });
 
+  // Master's owner tools (ADR-0067, #493): the vault's administration, and a bot's webhook. Only the
+  // admin API and Master's Worker may bind them, and only Master's Worker the webhook's narrow one.
+  it("binds context-store's ContextStoreAdmin and channel-egress's SetupWebhooks only where Master's tools or the admin API run", () => {
+    const binders = (service: string, entrypoint: string) =>
+      WORKERS.filter((worker) =>
+        (configs.get(worker.app)?.services ?? []).some(
+          (bound) => bound.service === service && bound.entrypoint === entrypoint,
+        ),
+      ).map((worker) => worker.app);
+    expect(binders("kelpie-context-store", "ContextStoreAdmin").sort()).toEqual([
+      "admin-api",
+      "conversation-runtime",
+    ]);
+    expect(binders("kelpie-channel-egress", "SetupWebhooks")).toEqual(["conversation-runtime"]);
+  });
+
   // A binding to a missing entrypoint deploys, and fails only when called: ingress's DEPLOY_PROBE,
   // for one, is called only by the deploy's deep probe (#234). Tests stub these Workers, so the
   // names are checked here against the real ones.

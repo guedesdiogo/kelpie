@@ -91,7 +91,10 @@ export class ContextStore extends WorkerEntrypoint<VaultEnv> implements ContextS
   }
 }
 
-/** The owner's actions on the vault, for admin-api alone (#114). */
+/**
+ * The owner's actions on the vault (#114), for admin-api and for Master's owner tools, which ask the
+ * owner first (ADR-0067 §1, #493).
+ */
 export class ContextStoreAdmin
   extends WorkerEntrypoint<VaultEnv>
   implements ContextStoreAdminContract

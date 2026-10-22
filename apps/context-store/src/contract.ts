@@ -274,8 +274,15 @@ export interface ContextStoreContract {
 }
 
 /**
- * The owner's actions on the vault (#114), on an entrypoint of their own that only admin-api binds:
- * the Workers that run conversations, where prompt injection lands, can't reach them.
+ * Dream's operations the owner may let write (#112); the others only propose. Day summaries and
+ * merges can write too, but can't be named until #182's measurement is in.
+ */
+export const DREAM_OPERATIONS = ["abstracts"] as const;
+
+/**
+ * The owner's actions on the vault (#114), on an entrypoint of their own. admin-api binds it, and so
+ * does conversation-runtime for Master's owner tools (ADR-0067 §1, #493), whose every call waits
+ * for the owner's confirmation. Its shape is the control: these three methods, and no other.
  */
 export interface ContextStoreAdminContract {
   /** Files pushed with conflict markers that still wait, for the owner to see. */

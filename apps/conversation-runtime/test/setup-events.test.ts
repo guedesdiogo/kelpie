@@ -144,9 +144,9 @@ describe("the setup note", () => {
     expect(setupNote("lume", { step: "telegram_paired", userId: "u-owner" })).toBe(
       "Kelpie, automatically (the owner didn't write this): the owner's pairing link was used: a Telegram account is now paired, as the owner's, with the bot of the agent lume.",
     );
-    // The model can't register a webhook: it tells the owner how.
+    // Master registers it again only with the owner's confirmation (#493).
     expect(setupNote("lume", { ...connected, webhookRegistered: false })).toContain(
-      "tell the owner to run the registerTelegramWebhook command on the admin API for lume",
+      "Once the owner agrees, register_telegram_webhook points it at Kelpie again for lume, with their confirmation.",
     );
     for (const [agentId, event] of [
       ["Not An Agent", connected],
