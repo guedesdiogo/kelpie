@@ -28,6 +28,9 @@ function use(world: FakeWorld): FakeWorld {
         (await registry().list())
           .filter((entry) => entry.owner === id)
           .map((entry) => ({ id: entry.id, name: entry.name })),
+      agents: async () =>
+        (await registry().list()).map((entry) => ({ id: entry.id, name: entry.name })),
+      isMaster: async (id) => (await registry().get(id))?.role === "master",
       create: (assignee, task, creator) => host(assignee).createTaskFor(task, creator),
       comment: (assignee, taskId, text, by) =>
         host(assignee).commentTaskAs(taskId, text, by, "chat"),

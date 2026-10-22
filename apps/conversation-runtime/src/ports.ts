@@ -35,6 +35,7 @@ import {
   type ToolResult,
 } from "@kelpie/llm";
 import type { ModelDescription, ModelSettings } from "@kelpie/llm/models";
+import { boardTools } from "./board-tools.ts";
 import { configurationTools, heldTools } from "./configuration.ts";
 import { memoryTools } from "./memory-tools.ts";
 import { proposalTools } from "./proposal-tools.ts";
@@ -351,6 +352,10 @@ function productionPorts(env: Env): ConversationPorts {
         roleOf: async (id) => (await registry.get(id))?.role ?? null,
         adminOrigin: env.ADMIN_ORIGIN,
       }),
+      // Master's board tools (ADR-0067 §1, #492): the owner's task commands, on any agent's board.
+      boardTools(commands, {
+        roleOf: async (id) => (await registry.get(id))?.role ?? null,
+      }),
       // Master's view of the VPS's Claude Code sessions (ADR-0057 §5, #434), through
       // channel-egress's RunnerSessions, which only reads them.
       vpsSessionsTools(env.RUNNER_SESSIONS as unknown as RunnerSessionsContract, {
@@ -384,6 +389,9 @@ function productionPorts(env: Env): ConversationPorts {
           (await registry.list())
             .filter((agent) => agent.owner === id)
             .map((agent) => ({ id: agent.id, name: agent.name })),
+        agents: async () =>
+          (await registry.list()).map((agent) => ({ id: agent.id, name: agent.name })),
+        isMaster: async (id) => (await registry.get(id))?.role === "master",
         create: (assignee, task, creator) =>
           env.AGENT_HOST.getByName(assignee).createTaskFor(task, creator),
         // Only an agent the Registry lists: a model-named id makes no object.

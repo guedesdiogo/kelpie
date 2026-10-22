@@ -119,7 +119,7 @@ export const MAX_TASK_BODY = 20_000;
 export const MAX_TASK_COMMENT = 8_000;
 export const MAX_TASK_RESULT = 20_000;
 /** A scheduled start is at most a year and a day ahead. */
-const MAX_SCHEDULE_AHEAD_MS = 366 * 24 * 60 * 60_000;
+export const MAX_SCHEDULE_AHEAD_MS = 366 * 24 * 60 * 60_000;
 
 /** Task ids are the random UUIDs the `AgentHost` gives them. */
 export function isTaskId(value: unknown): value is string {

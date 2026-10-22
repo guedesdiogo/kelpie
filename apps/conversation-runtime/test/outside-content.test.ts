@@ -155,6 +155,8 @@ function changers(changed: string[]): ToolProvider[] {
     }),
     taskTools({
       owned: async () => [{ id: "helper", name: "Helper" }],
+      agents: async () => [{ id: "helper", name: "Helper" }],
+      isMaster: async () => false,
       async create(assignee, task) {
         changed.push(`create_task ${assignee} ${task.title}`);
         return { ok: true, value: view({ title: task.title }) };
@@ -791,6 +793,12 @@ describe("the production tools (#454)", () => {
     delete_subagent: undefined,
     create_task: undefined,
     comment_task: undefined,
+    // Master's board tools (#492): the reads read, and each change with no yes is held.
+    list_tasks: "reads",
+    get_task: "reads",
+    edit_task: undefined,
+    move_task: undefined,
+    stop_task: undefined,
     complete_task: undefined,
     wait_on_task: undefined,
     cancel_task: undefined,
@@ -826,9 +834,12 @@ describe("the production tools (#454)", () => {
       "create_subagent",
       "create_task",
       "delete_subagent",
+      "edit_task",
       "memory_write",
+      "move_task",
       "pair_telegram",
       "rename_agent",
+      "stop_task",
     ]);
   });
 

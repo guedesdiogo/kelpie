@@ -3,15 +3,16 @@ import { visible } from "./tools.ts";
 
 // What Kelpie tells the conversation its agent's tools did (ADR-0036 §4 and §6): a task handed to
 // another agent, and who has it now (#287); a subagent created or deleted (#342); an agent Master
-// created or renamed (#387). Each names the agent by name and id. These are Kelpie's fixed texts
+// created or renamed (#387); a task Master stopped (#492). Each names the agent by name and id. These are Kelpie's fixed texts
 // (ADR-0027), never the model's, so the model can't alter or omit them.
 
 /** Something a turn's tools did that Kelpie announces after the next reply. */
 export type Announcement =
   | {
-      kind: "handoff";
+      /** A task handed to an agent (#287), or one Master stopped for the owner (#492). */
+      kind: "handoff" | "stopped";
       taskId: string;
-      /** The agent that has the task, by its id and its Registry name. */
+      /** The agent whose task it is, by its id and its Registry name. */
       agentId: string;
       name: string;
     }
@@ -41,6 +42,7 @@ export function stored(kept: readonly StoredAnnouncement[]): Announcement[] {
  */
 export function keyOf(announcement: Announcement): string {
   if (announcement.kind === "handoff") return announcement.taskId;
+  if (announcement.kind === "stopped") return `stopped:${announcement.taskId}`;
   const key = `${announcement.kind}:${announcement.agentId}`;
   return announcement.kind === "agentRenamed" ? `${key}:${announcement.name}` : key;
 }
@@ -64,6 +66,7 @@ const TEXTS: Localized<{
   /** A renamed agent, by its id and its new name, already quoted. */
   renamedTo: (id: string, name: string) => string;
   handoff: Line;
+  stopped: Line;
   deleted: Line;
   and: string;
   /** The agents a line counts past the ones it names. */
@@ -86,6 +89,10 @@ const TEXTS: Localized<{
     handoff: {
       one: (to) => `Kelpie handed a task to ${to}.`,
       several: (to) => `Kelpie handed tasks to ${to}.`,
+    },
+    stopped: {
+      one: (to) => `Kelpie stopped a task of ${to}.`,
+      several: (to) => `Kelpie stopped tasks of ${to}.`,
     },
     deleted: {
       one: (to) => `Kelpie deleted the subagent ${to}.`,
@@ -112,6 +119,10 @@ const TEXTS: Localized<{
       one: (to) => `O Kelpie passou uma tarefa para ${to}.`,
       several: (to) => `O Kelpie passou tarefas para ${to}.`,
     },
+    stopped: {
+      one: (to) => `O Kelpie parou uma tarefa de ${to}.`,
+      several: (to) => `O Kelpie parou tarefas de ${to}.`,
+    },
     deleted: {
       one: (to) => `O Kelpie excluiu o subagente ${to}.`,
       several: (to) => `O Kelpie excluiu os subagentes ${to}.`,
@@ -137,6 +148,10 @@ const TEXTS: Localized<{
       one: (to) => `Kelpie pasó una tarea a ${to}.`,
       several: (to) => `Kelpie pasó tareas a ${to}.`,
     },
+    stopped: {
+      one: (to) => `Kelpie detuvo una tarea de ${to}.`,
+      several: (to) => `Kelpie detuvo tareas de ${to}.`,
+    },
     deleted: {
       one: (to) => `Kelpie eliminó el subagente ${to}.`,
       several: (to) => `Kelpie eliminó los subagentes ${to}.`,
@@ -146,8 +161,11 @@ const TEXTS: Localized<{
   },
 };
 
-/** The kinds in the order a notice tells them: what was made, renamed, handed off, then deleted. */
-const ORDER = ["agentCreated", "created", "agentRenamed", "handoff", "deleted"] as const;
+/**
+ * The kinds in the order a notice tells them: what was made, renamed, handed off, stopped, then
+ * deleted.
+ */
+const ORDER = ["agentCreated", "created", "agentRenamed", "handoff", "stopped", "deleted"] as const;
 
 /**
  * The most agents a line names, and the most of a name it shows once written out: past them it

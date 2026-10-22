@@ -7,16 +7,23 @@ import {
   type TaskView,
 } from "@kelpie/config";
 import { MAX_UNATTENDED_HANDOFFS } from "./agent-host/tasks.ts";
+import { iso, START_AT_DESCRIPTION, startOf } from "./board-tools.ts";
 import type { Tool, ToolContext, ToolOutcome, ToolProvider } from "./tools.ts";
 
 // The agents' task tools (ADR-0011, ADR-0036 §4, #335). In a task's own conversation, the run ends
 // its task: done with a result, waiting with a question, or cancelled. Any agent that owns another
-// hands it work as a task, and answers on the tasks it hears about.
+// hands it work as a task, and answers on the tasks it hears about. In the owner's direct
+// conversation, Master hands work to any agent, itself included, in Backlog or with a start time
+// (ADR-0067 §1, #492): still as its own task, so its words reach the assignee as Master's.
 
 /** What the task tools reach: the Registry's owners, and other agents' boards. */
 export interface TaskToolPorts {
   /** The agents `agentId` owns (ADR-0036 §1), by id and Registry name. */
   owned(agentId: string): Promise<{ id: string; name: string }[]>;
+  /** Every agent the Registry lists, for Master (#492). */
+  agents(): Promise<{ id: string; name: string }[]>;
+  /** Whether the Registry's role for `agentId` is `master`. */
+  isMaster(agentId: string): Promise<boolean>;
   create(
     assignee: string,
     task: NewTask,
@@ -115,6 +122,25 @@ const SPECS = {
     },
   },
 } as const satisfies Record<string, Tool["spec"]>;
+
+/** Master's `create_task` in the owner's direct conversation (#492): any agent, Backlog, a start. */
+const MASTER_CREATE = {
+  name: "create_task",
+  description:
+    "Hand work to any agent, yourself included, as your task on its board. In To do it runs on its own, from its start time if you give one; in Backlog it waits until it is moved to To do. Kelpie tells you when it ends or asks something.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      agentId: { type: "string", description: "The agent that does it: list_agents lists them." },
+      title: { type: "string", description: "One line." },
+      body: { type: "string", description: "What to do, with all it needs to know." },
+      status: { type: "string", enum: ["todo", "backlog"], description: "todo unless you say." },
+      startAt: { type: ["string", "null"], description: START_AT_DESCRIPTION },
+    },
+    required: ["agentId", "title", "body"],
+    additionalProperties: false,
+  },
+} as const satisfies Tool["spec"];
 
 const failed = (output: string): ToolOutcome => ({ output, isError: true });
 const fields = (input: unknown): Record<string, unknown> =>
@@ -232,11 +258,15 @@ export function taskTools(ports: TaskToolPorts): ToolProvider {
     },
   };
   const created = new Map<string, number>();
-  const create: Tool = {
-    spec: SPECS.create_task,
+  /**
+   * `create_task`: for an agent the creator owns, To do at once; or, `wide`, Master's in the owner's
+   * direct conversation, for any agent, in Backlog or To do, with a start time if it gives one.
+   */
+  const createTool = (wide: boolean): Tool => ({
+    spec: wide ? MASTER_CREATE : SPECS.create_task,
     label: { en: "Handing off a task", "pt-BR": "Passando uma tarefa", es: "Pasando una tarea" },
     async run(input, context) {
-      const { agentId, title, body } = fields(input);
+      const { agentId, title, body, status = "todo", startAt = null } = fields(input);
       if (context.actor.role !== "owner" || context.scopes !== "all") {
         return failed(
           "Only turns for the owner hand off tasks: in a direct conversation with them, or in a task's run.",
@@ -245,21 +275,46 @@ export function taskTools(ports: TaskToolPorts): ToolProvider {
       if (!isAgentId(agentId) || typeof title !== "string" || typeof body !== "string") {
         return failed("Give the agentId, a one-line title and the body.");
       }
+      if (wide && status !== "todo" && status !== "backlog") {
+        return failed("The status is todo or backlog.");
+      }
+      const scheduledStartAt = wide ? startOf(startAt) : null;
+      if (scheduledStartAt === undefined) return failed(START_AT_DESCRIPTION);
       // A turn's calls share it; a turn's id alone repeats across conversations.
       const turnKey = `${context.agentId}\n${context.source}\n${context.turn}`;
       const count = created.get(turnKey) ?? 0;
       if (count >= MAX_CREATES_PER_TURN) {
         return failed(`One turn hands off at most ${MAX_CREATES_PER_TURN} tasks.`);
       }
-      const owned = await ports.owned(context.agentId);
-      const assignee = owned.find((one) => one.id === agentId);
+      // Master's wide tool reaches every agent; it may lose the role between turns (ADR-0048).
+      if (wide && !(await ports.isMaster(context.agentId))) {
+        return failed(
+          "This agent isn't Master any more: hand tasks only to the agents you own, in a later turn.",
+        );
+      }
+      // A task Master gives itself comes only from a turn the owner typed: its news would come back
+      // to Master as a note, whose turn could give itself another (#492).
+      if (wide && agentId === context.agentId && context.trigger !== "person") {
+        return failed(
+          "Give yourself a task only when the owner asks in a message of their own: tell them instead.",
+        );
+      }
+      const reachable = wide ? await ports.agents() : await ports.owned(context.agentId);
+      const assignee = reachable.find((one) => one.id === agentId);
       // Never another agent in its place: the model learns which ones it may name (#287).
       if (!assignee) {
         return failed(
-          `You don't own an agent ${agentId}. Hand tasks only to the agents you own: ${owned.map((one) => one.id).join(", ")}.`,
+          wide
+            ? `There is no agent ${agentId}. The agents: ${reachable.map((one) => one.id).join(", ")}.`
+            : `You don't own an agent ${agentId}. Hand tasks only to the agents you own: ${reachable.map((one) => one.id).join(", ")}.`,
         );
       }
-      const task = { title: title.trim(), body, status: "todo" as const, scheduledStartAt: null };
+      const task = {
+        title: title.trim(),
+        body,
+        status: wide ? (status as "todo" | "backlog") : ("todo" as const),
+        scheduledStartAt,
+      };
       if (task.title === "" || task.title.length > MAX_TASK_TITLE) {
         return failed("The title is one line of up to 200 characters.");
       }
@@ -283,7 +338,7 @@ export function taskTools(ports: TaskToolPorts): ToolProvider {
         if (unattended) await ports.returnHandoff(context.agentId).catch(() => undefined);
         return failed(
           made.reason === "not_allowed"
-            ? `The agent ${agentId} can't take it: you don't own it, or its board is full.`
+            ? `The agent ${agentId} can't take it: ${wide ? "its board is full" : "you don't own it, or its board is full"}.`
             : "That task isn't valid: a title of one line, and a body of up to 20,000 characters.",
         );
       }
@@ -292,19 +347,28 @@ export function taskTools(ports: TaskToolPorts): ToolProvider {
       if (created.size > 50) created.delete(created.keys().next().value ?? "");
       // Kelpie, not the model, tells the owner who has it (ADR-0036 §4).
       context.announce({ kind: "handoff", taskId: made.value.id, agentId, name: assignee.name });
+      const where =
+        task.status === "backlog"
+          ? " It waits in Backlog until it is moved to To do."
+          : task.scheduledStartAt === null
+            ? ""
+            : ` It starts at ${iso(task.scheduledStartAt)}.`;
       return {
-        output: `Created the task ${made.value.id} for the agent ${agentId}. Kelpie tells the owner it has it, and tells you when it ends or asks something.`,
+        output: `Created the task ${made.value.id} for the agent ${agentId}.${where} Kelpie tells the owner it has it, and tells you when it ends or asks something.`,
       };
     },
-  };
+  });
+  const create = createTool(false);
+  const masterCreate = createTool(true);
   return {
     async tools(agentId, place) {
+      const inRun = place?.channel === "task";
+      // In a task's run, Master's create_task stays as it is for any owner of agents (ADR-0067 §1).
+      if (!inRun && (await ports.isMaster(agentId).catch(() => false))) {
+        return [comment, masterCreate];
+      }
       const owned = await ports.owned(agentId).catch(() => []);
-      return [
-        ...(place?.channel === "task" ? inTask : []),
-        comment,
-        ...(owned.length > 0 ? [create] : []),
-      ];
+      return [...(inRun ? inTask : []), comment, ...(owned.length > 0 ? [create] : [])];
     },
   };
 }
