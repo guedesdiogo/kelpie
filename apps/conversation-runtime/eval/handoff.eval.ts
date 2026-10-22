@@ -14,6 +14,7 @@ import {
   type RouterEvent,
 } from "@kelpie/llm";
 import { describe, expect, it, vi } from "vitest";
+import { agentFileTools } from "../src/agent-file-tools.ts";
 import { replaceTaskRunnerForTesting } from "../src/agent-host/agent-host.ts";
 import { boardTools } from "../src/board-tools.ts";
 import { configurationTools } from "../src/configuration.ts";
@@ -100,6 +101,10 @@ const TOOLS: ToolProvider[] = [
   ownerTools({} as never, {
     roleOf: async (id) => (await registry().get(id))?.role ?? null,
     adminOrigin: "https://admin.example",
+  }),
+  // The agent-file tools (#494): on the prompt as in production, over no vault.
+  agentFileTools({} as never, {
+    roleOf: async (id) => (await registry().get(id))?.role ?? null,
   }),
   subagentTools({
     canSpawn: async (id) => (await registry().get(id))?.role === "master",

@@ -143,6 +143,7 @@ import {
   MAX_TOOL_ROUNDS,
   newConfirmationCode,
   runToolCall,
+  shownSummary,
   type TaskRunHandle,
   TOOL_BOUND_RESULT,
   TOOL_LIMIT_TEXT,
@@ -1386,6 +1387,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const rows = this.#db
       .select({
         id: schema.confirmations.id,
+        command: schema.confirmations.command,
         summary: schema.confirmations.summary,
         expiresAt: schema.confirmations.expiresAt,
       })
@@ -1403,7 +1405,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     return {
       requests: rows.slice(0, REQUESTS_AT_MOST).map((row) => ({
         id: row.id,
-        summary: visible(row.summary),
+        summary: shownSummary(row.command, row.summary),
         askedAgoMs: Math.max(0, now - (row.expiresAt - CONFIRMATION_MS)),
         expiresInMs: row.expiresAt - now,
       })),
@@ -1968,6 +1970,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       .select({
         id: schema.confirmations.id,
         code: schema.confirmations.code,
+        command: schema.confirmations.command,
         summary: schema.confirmations.summary,
       })
       .from(schema.confirmations)
@@ -2006,8 +2009,8 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const notices = [
       ...(routes.text === null ? [] : [{ text: routes.text }]),
       ...(announced === null ? [] : [{ text: announced }]),
-      ...confirmations.map(({ id, code, summary }) => ({
-        text: confirmationNotice(summary, code, button, locale),
+      ...confirmations.map(({ id, code, command, summary }) => ({
+        text: confirmationNotice(summary, code, button, locale, command),
         confirmationId: id,
       })),
       ...links.map(({ text, href }) => ({ text, link: href })),
@@ -2603,7 +2606,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   #confirm(turnId: number, userId: string, request: ConfirmationRequest): boolean {
     // A tool that ignored its signal, after its turn stopped, neither confirms nor shows anything.
     if (!this.#isRunning(turnId)) return false;
-    if (visible(request.summary).length > MAX_SUMMARY_CHARS) {
+    if (shownSummary(request.command, request.summary).length > MAX_SUMMARY_CHARS) {
       throw new RangeError("A confirmation's summary is too long to show");
     }
     const input = canonicalJson(request.input);

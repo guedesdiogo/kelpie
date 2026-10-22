@@ -23,7 +23,11 @@ import type {
 } from "./contract.ts";
 import { VAULT_NAME, type VaultEnv } from "./vault.ts";
 
-export { AgentFiles, replaceFetchForTesting } from "./agent-files-entrypoint.ts";
+export {
+  AgentFiles,
+  MasterAgentFiles,
+  replaceFetchForTesting,
+} from "./agent-files-entrypoint.ts";
 export {
   type MemoryGateway,
   replaceBackendForTesting,

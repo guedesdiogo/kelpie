@@ -1093,6 +1093,39 @@ describe("Master's configuration tools (ADR-0048)", () => {
     expect(calls).toEqual([]);
   });
 
+  it("sets an agent's specialty, memory core and own skills, and refuses Master's specialty before asking (#494)", async () => {
+    const { commands } = fakeCommands();
+    const tools = await toolsOf(
+      configurationTools(commands, { roleOf: roleIn, adminOrigin: ADMIN }),
+    );
+    const schema = (tools.get("configure_agent")?.spec.inputSchema ?? {}) as {
+      properties: { settings: { properties: Record<string, unknown> } };
+    };
+    expect(Object.keys(schema.properties.settings.properties)).toEqual(
+      expect.arrayContaining(["specialty", "memoryCore", "skills"]),
+    );
+    const settings = {
+      memoryCore: true,
+      skills: [{ name: "Brief", instructions: "Write briefs." }],
+    };
+    const waiting = contextOf(false);
+    await run(tools, "configure_agent", { id: MASTER, settings }, waiting.context);
+    expect(waiting.asked[0]).toMatchObject({
+      command: "configureAgent",
+      input: { id: MASTER, settings },
+    });
+    const master = contextOf(false);
+    expect(
+      await run(
+        tools,
+        "configure_agent",
+        { id: MASTER, settings: { specialty: "Boss" } },
+        master.context,
+      ),
+    ).toEqual({ isError: true, output: "Master's specialty is always Master: it can't change." });
+    expect(master.asked).toEqual([]);
+  });
+
   it("refuses settings it can't show the owner whole, before asking", async () => {
     const tools = await toolsOf(
       configurationTools(fakeCommands().commands, { roleOf: roleIn, adminOrigin: ADMIN }),

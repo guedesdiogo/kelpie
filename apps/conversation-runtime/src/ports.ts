@@ -21,6 +21,7 @@ import {
 import type {
   ContextStoreAdminContract,
   ContextStoreContract,
+  MasterAgentFilesContract,
   MemoryCoreResult,
   RecallOptions,
   RecallResult,
@@ -37,6 +38,7 @@ import {
   type ToolResult,
 } from "@kelpie/llm";
 import type { ModelDescription, ModelSettings } from "@kelpie/llm/models";
+import { agentFileTools } from "./agent-file-tools.ts";
 import { boardTools } from "./board-tools.ts";
 import { configurationTools, heldTools } from "./configuration.ts";
 import { memoryTools } from "./memory-tools.ts";
@@ -367,6 +369,11 @@ function productionPorts(env: Env): ConversationPorts {
       }),
       // Master's board tools (ADR-0067 §1, #492): the owner's task commands, on any agent's board.
       boardTools(commands, {
+        roleOf: async (id) => (await registry.get(id))?.role ?? null,
+      }),
+      // Master's reads and writes of an agent's own files (ADR-0067 §1, #494), through
+      // context-store's MasterAgentFiles, whose commits name Master.
+      agentFileTools(env.MASTER_AGENT_FILES as unknown as MasterAgentFilesContract, {
         roleOf: async (id) => (await registry.get(id))?.role ?? null,
       }),
       // Master's owner tools (ADR-0067 §1, #493): a bot's webhook, the vault, and proposals' pages.
