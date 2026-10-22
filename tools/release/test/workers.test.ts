@@ -88,6 +88,9 @@ describe("WORKERS", () => {
       "conversation-runtime",
     ]);
     expect(binders("kelpie-channel-egress", "SetupWebhooks")).toEqual(["conversation-runtime"]);
+    // Master's writes of an agent's files (#494), which name Master; the editor's stay ingress's.
+    expect(binders("kelpie-context-store", "MasterAgentFiles")).toEqual(["conversation-runtime"]);
+    expect(binders("kelpie-context-store", "AgentFiles")).toEqual(["ingress"]);
   });
 
   // A binding to a missing entrypoint deploys, and fails only when called: ingress's DEPLOY_PROBE,

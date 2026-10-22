@@ -4,7 +4,12 @@ import { gitBlobSha, type VaultBackend } from "@kelpie/vault";
 import { FakeVaultBackend } from "@kelpie/vault/fake";
 import { describe, expect, it } from "vitest";
 import type { AgentFileChange, FilesActor } from "../src/contract.ts";
-import { AgentFiles, replaceBackendForTesting, replaceFetchForTesting } from "../src/index.ts";
+import {
+  AgentFiles,
+  MasterAgentFiles,
+  replaceBackendForTesting,
+  replaceFetchForTesting,
+} from "../src/index.ts";
 import { VAULT_NAME } from "../src/vault.ts";
 import { makeZip, skillMd, type TestEntry } from "./zip-helpers.ts";
 
@@ -982,5 +987,77 @@ describe("AgentFiles", () => {
       ok: false,
       reason: "unavailable",
     });
+  });
+});
+
+describe("MasterAgentFiles (ADR-0067 §1, #494)", () => {
+  const master: FilesActor = { userId: "user-1", role: "owner", via: "agent:kelpie" };
+  const masterFiles = () => new MasterAgentFiles(createExecutionContext(), env);
+
+  it("reads and saves only for the owner through an agent, and has nothing else", async () => {
+    vaultWith({ [SOUL]: "# Before" });
+    for (const actor of [
+      owner,
+      { ...master, role: "member" },
+      { ...master, via: "agent:Not An Id" },
+    ]) {
+      expect(await masterFiles().files(actor, "kelpie"), actor.via).toEqual({
+        ok: false,
+        reason: "forbidden",
+      });
+      expect(await masterFiles().save(actor, "kelpie", [])).toEqual({
+        ok: false,
+        reason: "forbidden",
+      });
+    }
+    expect(await masterFiles().files(master, "kelpie")).toMatchObject({
+      ok: true,
+      files: { soul: { content: "# Before" } },
+    });
+    expect(
+      Object.getOwnPropertyNames(MasterAgentFiles.prototype).filter(
+        (name) => name !== "constructor",
+      ),
+    ).toEqual(["files", "save"]);
+  });
+
+  it("saves in a commit that names Master, with secrets redacted first", async () => {
+    const backend = vaultWith({ [SOUL]: "# Before" });
+    const result = await masterFiles().save(master, "kelpie", [
+      {
+        file: "soul",
+        content:
+          "# After\nUse the key sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ to call it.",
+        version: await version("# Before"),
+      },
+    ]);
+    expect(result).toMatchObject({ ok: true, outcomes: [{ status: "saved" }] });
+    const commit = backend.commitRequests.at(-1);
+    expect(commit?.headline).toBe("Edit kelpie's soul for the owner, through kelpie");
+    expect(commit?.body).toBe("Kelpie-Via: agent:kelpie");
+    const written = String(commit?.writes[0]?.content);
+    expect(written).toContain("# After");
+    expect(written).not.toContain("sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ");
+    expect(written).toContain("[REDACTED");
+  });
+
+  it("never installs a staged skill, which keeps the editor's review", async () => {
+    vaultWith({});
+    expect(
+      await masterFiles().save(master, "kelpie", [
+        { file: "install", staged: "x", hash: "y", version: null },
+      ]),
+    ).toEqual({ ok: false, reason: "invalid_input" });
+  });
+
+  it("refuses an author that is neither the webchat nor an agent", async () => {
+    vaultWith({});
+    expect(
+      await stub().saveAgentFiles(
+        "kelpie",
+        [{ file: "rules", content: "x", version: null }],
+        "admin",
+      ),
+    ).toEqual({ ok: false, reason: "invalid_input" });
   });
 });

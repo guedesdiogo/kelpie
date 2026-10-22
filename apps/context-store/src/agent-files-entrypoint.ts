@@ -1,10 +1,12 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
+import { sanitizeSecrets } from "@kelpie/memory";
 import type {
   AgentFileChange,
   AgentFilesContract,
   AgentFilesResult,
   FetchSkillResult,
   FilesActor,
+  MasterAgentFilesContract,
   SaveAgentFilesResult,
   SkillOrigin,
   SkillSourceInput,
@@ -56,6 +58,50 @@ const invalid = { ok: false, reason: "invalid_input" } as const;
  * so the owner check catches a mistake in ingress, not a compromised one. A skill is fetched and
  * checked here, outside the Vault object, and only its files reach it, staged for the review.
  */
+/** Master, by its id, from the actor's `via`: `agent:<id>`. */
+const masterOf = (actor: FilesActor): string | null => {
+  const id = actor.via.startsWith("agent:") ? actor.via.slice(6) : "";
+  return isAgentId(id) ? id : null;
+};
+
+/**
+ * Master's writes of one agent's own files for the owner (ADR-0067 §1, #494), for
+ * conversation-runtime: `files` and `save`, never a skill fetched from outside, which keeps the
+ * editor's review (ADR-0058 §5). The commit names Master, and the text goes through the secrets
+ * sanitizer first, since the model wrote it. Master's tool asked the owner's confirmation of the
+ * whole change before calling it; the actor is that Worker's word, as for `configure_agent`.
+ */
+export class MasterAgentFiles
+  extends WorkerEntrypoint<VaultEnv>
+  implements MasterAgentFilesContract
+{
+  #vault() {
+    return this.env.VAULT.getByName(VAULT_NAME);
+  }
+
+  async files(actor: FilesActor, agentId: string): Promise<AgentFilesResult> {
+    if (!isOwner(actor) || masterOf(actor) === null) return forbidden;
+    return this.#vault().agentFiles(agentId);
+  }
+
+  async save(
+    actor: FilesActor,
+    agentId: string,
+    changes: AgentFileChange[],
+  ): Promise<SaveAgentFilesResult> {
+    if (!isOwner(actor) || masterOf(actor) === null) return forbidden;
+    if (!Array.isArray(changes) || changes.some((change) => change?.file === "install")) {
+      return invalid;
+    }
+    const clean = changes.map((change) =>
+      "content" in change && typeof change.content === "string"
+        ? { ...change, content: sanitizeSecrets(change.content).text }
+        : change,
+    );
+    return this.#vault().saveAgentFiles(agentId, clean, actor.via);
+  }
+}
+
 export class AgentFiles extends WorkerEntrypoint<VaultEnv> implements AgentFilesContract {
   #vault() {
     return this.env.VAULT.getByName(VAULT_NAME);

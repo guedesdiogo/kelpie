@@ -805,6 +805,9 @@ describe("the production tools (#454)", () => {
     list_proposals: "reads",
     get_proposal: "reads",
     open_proposal: undefined,
+    // Master's agent-file tools (#494): the write asks for the owner's confirmation.
+    read_agent_file: "reads",
+    write_agent_file: "asks",
     complete_task: undefined,
     wait_on_task: undefined,
     cancel_task: undefined,

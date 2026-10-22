@@ -9,6 +9,7 @@ import {
   REGISTRY_NAME,
 } from "@kelpie/config";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { agentFileTools } from "../src/agent-file-tools.ts";
 import { replaceTaskRunnerForTesting } from "../src/agent-host/agent-host.ts";
 import { boardTools } from "../src/board-tools.ts";
 import { configurationTools, heldTools, MASTER_TOOLS } from "../src/configuration.ts";
@@ -324,6 +325,10 @@ describe("a temporary subagent (#290)", () => {
       ownerTools({} as never, {
         roleOf: async (id) => (await registry().get(id))?.role ?? null,
         adminOrigin: "https://admin.example",
+      }),
+      agentFileTools({} as never, {
+        roleOf: async (id) => (await registry().get(id))?.role ?? null,
+        agentExists: async () => true,
       }),
     );
     // Master hands tasks only to agents it owns: this specialist is its own.

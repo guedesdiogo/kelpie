@@ -483,6 +483,13 @@ export type FetchSkillResult =
  * ingress binds. It reaches `SOUL.md`, `AGENTS.md`, `memories/MEMORY.md` and `skills/<name>/` under
  * `agents/<id>/`, and nothing else in the vault.
  */
+/**
+ * Master's reads and writes of an agent's own files for the owner (ADR-0067 §1, #494): ADR-0058's
+ * `files` and `save`, and nothing else. A save's commit names Master, its text goes through the
+ * secrets sanitizer first, and it never installs a skill from outside.
+ */
+export type MasterAgentFilesContract = Pick<AgentFilesContract, "files" | "save">;
+
 export interface AgentFilesContract {
   files(actor: FilesActor, agentId: string): Promise<AgentFilesResult>;
   /** Every change in one commit, with `Kelpie-Via: webchat`; a newer version is a conflict. */
