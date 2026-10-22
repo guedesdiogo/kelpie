@@ -27,14 +27,15 @@
    - The owner asks for production. The agent prepares the release with `release cut <patch|minor|major|vX.Y.Z>` in `tools/release`: alone it shows the tag and the notes; `--draft` saves a draft; `--publish` publishes it, only on the owner's order.
    - The release is `main`'s tip by default, with `CI passed` green. Its notes list the pull requests since the previous release and the issues they close, from GitHub's records, and how each `critico` issue stands.
 3. **The Deploy workflow authorizes the release first.**
-   - Whoever published it, or ran the workflow, is in the repository variable `PRUMO_DONOS`: logins separated by commas or spaces.
+   - Whoever published it, or ran the workflow, is in the repository variable `PRUMO_DONOS`: logins separated by commas or spaces. The gate and deploy jobs check it again, since re-running failed jobs skips `authorize`, and so does the Rollback workflow.
    - Run by hand, the workflow is `main`'s.
    - The tag is `vX.Y.Z` with a published release that isn't a prerelease.
    - The tag's commit is on `main`'s first-parent history, and `CI passed` is green on it.
    - The `production` environment accepts `main` and tags `v*`.
 4. **A critical gate stops a release that brings a `critico` issue without the mentor's acceptance.**
    - `release gate <tag>` reads `main`'s first-parent commits from a base to the tag, the pull requests merged into `main` that brought them, and the issues each one closes, through GitHub's GraphQL API. It never reads the release's text, which anyone who can edit the release could change.
-   - The base is the release of the latest successful Deploy run, which the workflow names `Production vX.Y.Z`, counted only when it ran from `main` or from its own tag. Without one, or when that run's tag isn't in the checkout, the gate reads the whole history. A release the gate stopped leaves no successful run, so the next release's gate reads its commits again, even before anything shipped.
+   - The base is the release of the latest successful Deploy run, which the workflow names `Production vX.Y.Z`. A run counts only when it ran a workflow file the gate can trust: by hand from `main`, or on a release at the commit its tag names. A branch named like the tag doesn't count. Without such a run, or when that run's tag isn't in the checkout, the gate reads the whole history. A release the gate stopped leaves no successful run, so the next release's gate reads its commits again, even before anything shipped.
+   - The label is read whatever its case. A repository without it fails the gate, since no issue could carry it.
    - A `critico` issue is accepted when a pull request in the range that closes it was opened by the mentor (`PRUMO_MENTOR`, `guedesdiogo` by default), or when the mentor commented on it with a body that starts with `**Aceite** ·`.
    - Any other `critico` issue stops the release, and the run's summary lists it. So does any failure to read GitHub: an error never reads as "no `critico`".
 5. **Someone in `PRUMO_DONOS` can force a release.** They run the Deploy workflow by hand with the tag, `force` and a reason. `release force` then:
@@ -42,8 +43,10 @@
    - opens «Revisão retroativa · <tag> · aceite forçado», assigned to the mentor and labeled `critico`, which asks for «**Aceite** · produção · <link>» on each issue, or the fix.
 
    A forced comment is not an acceptance.
-6. **The way back is the Rollback workflow, with `target: vA.B.C`.** `tools/release` resolves the tag to its commit, then rolls back as ADR-0029 decision 6 does. Publishing an older release again fires nothing, and a deploy of it would skip, since production contains its commit.
-7. **The Deploy workflow by hand takes a release's tag.** It deploys that release again, `always` on by default, forces it, or rotates the deep probe's token. It authorizes and gates as a release does.
+6. **The way back is the Rollback workflow, with `target: vA.B.C`.** `tools/release` resolves the tag to its commit, then rolls back as ADR-0029 decision 6 does, with its checks of barriers and secrets. A release that shipped nothing, because nothing that ships changed, has no version to go back to, and the rollback says so. Publishing an older release again fires nothing. The Deploy workflow never goes back:
+   - on a release, it skips one whose commit production already contains (ADR-0031);
+   - by hand, where `always` is on, it refuses a release older than a build production serves, and names the Rollback workflow.
+7. **The Deploy workflow by hand takes a release's tag.** It deploys the release production serves again, or a newer one, with `always` on by default; it forces a release, or rotates the deep probe's token. It authorizes and gates as a release does.
 8. **ADR-0031's skip still applies,** judged at the release's commit: a release that ships nothing deploys nothing, and a deploy that was missed goes out with the next release.
 
 The rest of ADR-0029 and ADR-0031 stands.
@@ -54,7 +57,9 @@ The rest of ADR-0029 and ADR-0031 stands.
 - **Done is merged.** While merges deploy nothing, `CLAUDE.md`'s Done needs no deploy.
 - **The first release can only come after this merges:** the `release` event runs the workflow file at the tag.
 - **Releases come from the owner's `gh`,** which the agent uses: one made with `GITHUB_TOKEN` would deploy nothing. GitHub can't tell the agent from the owner, since both sign as the owner. The local guard that keeps `--publish` to the owner's order is a follow-up.
-- **One-time setup:** `production` accepts tags `v*` besides `main`; the variable `PRUMO_DONOS`; the label `critico`. Any account that can push a `v*` tag could then run its own copy of `deploy.yml` in the `production` environment, so a tag ruleset on `v*` should limit who creates them.
+- **One-time setup:** `production` accepts tags `v*` besides `main`; the variable `PRUMO_DONOS`; the label `critico`.
+- **Release tags are guarded.** Whoever can push a `v*` tag runs that tag's copy of `deploy.yml` in the `production` environment. The tag ruleset «Release tags v*» stops anyone from creating, moving or deleting `refs/tags/v*`, except the Admin role. That includes the owner's token, and so the agent, which uses it.
+- **The gate stops only pull requests by other authors.** Agents open pull requests as `guedesdiogo`, the mentor, so the acceptance a mentor's pull request carries covers every `critico` issue they close. The owner chose this: «a regra não vale se foi guedesdiogo quem esta criando o PR».
 - **Until a release ships through the Deploy workflow,** the gate reads `main`'s whole history, so a `critico` issue merged long ago without acceptance stops the first release too.
 - **A forced release whose deploy then fails** leaves no successful run. The next release's gate stops on the same issues until the mentor accepts them, or someone forces it again.
 - **A rollback moves production, not the gate's base.** The next release's gate starts at the release the Deploy workflow last shipped, whose issues were accepted or forced.

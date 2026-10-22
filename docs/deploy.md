@@ -39,7 +39,7 @@ owner asks ──► release cut --draft ──► owner's order ──► --pub
      gh variable set PRUMO_DONOS --repo guedesdiogo/kelpie --body guedesdiogo
      ```
    - the label `critico` marks the issues that need the mentor's acceptance. The variable `PRUMO_MENTOR` names the mentor; without it, `guedesdiogo`;
-   - a tag ruleset on `v*` should limit who creates release tags: whoever pushes one runs that tag's `deploy.yml` in the `production` environment.
+   - the tag ruleset «Release tags v*» stops anyone from creating, moving or deleting `refs/tags/v*`, except the Admin role: whoever pushes such a tag runs that tag's `deploy.yml` in the `production` environment. The owner's token, which the agent uses, has that role.
 
 ## The gates
 
@@ -100,9 +100,10 @@ A prerelease deploys nothing. A release made with a workflow's `GITHUB_TOKEN` wo
 #### The critical gate
 
 - **What it reads:** `main`'s first-parent commits from a base to the release's commit, the pull requests merged into `main` that brought them, and the issues each one closes, from GitHub's API. Never the release's notes, which anyone who can edit the release could change.
-- **The base** is the release of the latest successful Deploy run. Without one, or when that run's tag isn't in the checkout, the gate reads the whole history.
+- **The base** is the release of the latest successful Deploy run that ran a workflow file the gate can trust: by hand from `main`, or on a release at the commit its tag names. Without one, or when that run's tag isn't in the checkout, the gate reads the whole history.
   - A release the gate stopped leaves no successful run, so the next release's gate reads its commits again, even before anything shipped.
   - Deploying an older release again reads nothing: the release last shipped contains it.
+- **The label** is read whatever its case. Without a `critico` label in the repository, the gate fails rather than pass everything.
 - **A `critico` issue is accepted** when the mentor opened a pull request in that range that closes it, or commented on it with «**Aceite** · <environment> · <link>».
 - **Any other `critico` issue stops the release,** and the run's summary lists it. So does any error reading GitHub. Once the mentor accepts each one, re-run the run's failed jobs.
 - **`release gate vX.Y.Z`,** from `tools/release`, shows the decision for a tag you have locally, and changes nothing.
@@ -180,7 +181,8 @@ The run's summary has the table of versions, the probes and the barriers. The pr
   ```bash
   gh workflow run deploy.yml --repo guedesdiogo/kelpie -f tag=v0.3.0
   ```
-  It runs from `main`, and only someone in `PRUMO_DONOS` gets past `authorize`; the critical gate runs as for a release. By hand it deploys even when nothing that ships changed. Add `-f always=false` to skip in that case, as a release does.
+  It runs from `main`, and only someone in `PRUMO_DONOS` gets past `authorize`; the critical gate runs as for a release. Each later job checks `PRUMO_DONOS` again, so re-running failed jobs needs it too. By hand it deploys even when nothing that ships changed. Add `-f always=false` to skip in that case, as a release does.
+- **It never goes back.** By hand, it refuses a release older than a build production serves: that would skip the Rollback workflow's checks of barriers and secrets. The release production serves deploys again, and so does a newer one.
 - **One deploy or rollback runs at a time.** Others wait in the `production` group, and GitHub keeps only the newest waiting run.
 - **Don't deploy from a laptop.** A local `wrangler deploy` races the pipeline and skips its checks. Two exceptions:
   - **A new instance's first deploy** follows `docs/admin-api.md`, "Setting it up". The pipeline needs a live version to read the instance vars from.
@@ -199,9 +201,10 @@ The run's summary has the table of versions, the probes and the barriers. The pr
   gh workflow run rollback.yml --repo guedesdiogo/kelpie -f target=v0.2.0 -f reason="replies come out empty"
   ```
   The Actions tab shows the same form (Rollback → Run workflow).
-- **It is the way back to an earlier release.** Publishing that release again starts nothing, and a deploy of it would skip, since production already contains its commit.
+- **It is the way back to an earlier release,** with its checks of barriers and secrets. Publishing that release again starts nothing, and the Deploy workflow refuses to go back ("By hand").
+- **It needs someone in `PRUMO_DONOS`,** like the Deploy workflow.
 - **`target`** takes one of:
-  - a release, such as `v0.2.0`: the build of the commit its tag names;
+  - a release, such as `v0.2.0`: the build of the commit its tag names. A release that shipped nothing, because nothing that ships changed, has no build of its own: the rollback says so, and you name the release or build that served it;
   - `previous`, the build production served before the live one, from ingress's deployment history. A build that was rolled back as unhealthy is never `previous`;
   - a build, such as `94`;
   - a tag, such as `94-cc8e179`;
