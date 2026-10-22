@@ -8,6 +8,7 @@
   - [ADR-0016](0016-vault-second-brain.md), its writes: the owner's edits in the webchat's editor are a writer of their own, committed directly with no pull request, and neither the personal-data gate nor the sanitizer runs on them;
   - [ADR-0048](0048-master-configures-kelpie.md) §2, its table: the owner changes any agent's soul, rules, memory file and skills from the editor, with no agent involved;
   - [ADR-0056](0056-agent-editor-and-random-mascot.md) §3: ingress binds one more entrypoint, context-store's `AgentFiles`, its only path into the vault.
+- Amended by: [ADR-0067](0067-master-reaches-every-owner-command.md), Master's `write_agent_file`, once the owner confirms the whole change, is the owner's edit too, through `AgentFiles`, which conversation-runtime binds as well; its trailer names Master, and the sanitizer runs on it first (§1, §2)
 
 ## Context
 

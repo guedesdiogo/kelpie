@@ -5,7 +5,7 @@
 - Issue: [#413](https://github.com/guedesdiogo/kelpie/issues/413)
 - Decided by the owner in the session of 2026-10-17; his answers are quoted on #413
 - Amended by: [ADR-0059](0059-session-file-waits.md), a session file's own `waiting` also opens a wait (§2, §4)
-- Amended by: [ADR-0069](0069-master-acts-on-vps-sessions.md), Master answers a session's permission prompts beside the Claude app, sends it messages through its inbox socket and ends it; a pending request's tool and input leave the server, redacted and cut (§1, §3, §5)
+- Amended by: [ADR-0069](0069-master-acts-on-vps-sessions.md), Master answers a session's permission prompts beside the Claude app, sends it messages through its inbox socket and ends it; its `PermissionRequest` hook becomes synchronous in the app's sessions; a pending request's tool and input leave the server, redacted and cut (§1, §2, §3, §5)
 
 ## Context
 

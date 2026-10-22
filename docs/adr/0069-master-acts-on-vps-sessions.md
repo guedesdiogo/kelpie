@@ -6,7 +6,7 @@
 - Decided by the owner on 2026-10-22:
   - «Gostaria de ter como permitir fazer tudo via kelpie porém também permitir eu interagir direto no claude code, mas pelo que entendi o hook trava e fica aguardando o kelpie, é isso?»;
   - the plan: «Aprovo os três (Recomendado)», for #489, #490 and #491.
-- Amends: [ADR-0057](0057-vps-claude-code-sessions.md) §1, §3 and §5, and [ADR-0035](0035-agent-computer.md)'s open question for these sessions
+- Amends: [ADR-0057](0057-vps-claude-code-sessions.md) §1, §2, §3 and §5, [ADR-0026](0026-confirmation-by-owner-act.md) (a press that resolves a request in code), and [ADR-0035](0035-agent-computer.md)'s open question for the sessions the owner opens in the app
 
 ## Context
 
@@ -30,18 +30,27 @@ The reference check is on #491.
 
 ### 1. Approving and denying a permission
 
-- **The hook waits beside the app.** The `PermissionRequest` hook becomes synchronous for the sessions the owner opens:
+- **The hook waits beside the app.** The `PermissionRequest` hook becomes synchronous, with a timeout of 600 seconds, the hooks' default:
   - it writes the request to the spool: the session, a random request id, the tool, and its input, redacted and cut to 500 characters;
-  - it then waits for Kelpie's verdict in a file only the runner writes.
+  - it then waits for Kelpie's verdict in a file the runner writes.
+- **Where it waits:** only in a session the Claude app opened, whose session file's `entrypoint` is the app's, and which the runner didn't start. In any other session it returns no decision at once:
+  - a terminal's session has no host beside the hook, so a waiting hook could hold its prompt back;
+  - the sessions Kelpie starts keep their own relay (ADR-0035 §3).
 - **What it returns:**
   - `allow` or `deny`, when Kelpie's verdict comes;
   - no decision, so nothing changes, when the session moves on (the owner answered in the app), when no verdict comes, or at its timeout.
 - **It never blocks a session:** it always exits 0, and any doubt returns no decision.
-- **Kelpie tells the owner** in a fixed notice ([ADR-0027](0027-fixed-texts-in-three-languages.md)) with Approve and Deny:
+- **Questions aren't approved this way.** A `PermissionRequest` for `AskUserQuestion` returns no decision at once: an `allow` would dismiss the question. The owner answers it in the app, or sends the session a message (§2).
+- **Kelpie tells the owner** in a fixed notice ([ADR-0027](0027-fixed-texts-in-three-languages.md)) with Approve and Deny, for a pending permission request only:
   - the notice names the session's title, the tool and its input, as plain text, never as a link;
-  - in the webchat, Approve and Deny are buttons; on Telegram, they are [ADR-0067](0067-master-reaches-every-owner-command.md)'s buttons, or the typed code.
-- **The yes is the owner's act on that notice** (ADR-0026). Master's words never approve, and nor does a session's text.
-- **A verdict is bound to its request id.** It counts once, and only while that request is open.
+  - a wait with no pending request, opened by a `Notification` or by a session file (ADR-0059), keeps ADR-0057's notice, with no buttons.
+- **The buttons resolve the request in code,** with no model turn: a press is the verdict.
+  - In the webchat, they are Kelpie's buttons, bound to the request's random id, by ADR-0026 §3's rules for a press.
+  - On Telegram, they are inline buttons on the callback path of [ADR-0067](0067-master-reaches-every-owner-command.md) §3, whose data is the request's random id.
+  - A press counts only from the owner: in the webchat, the owner's own socket; on Telegram, the paired owner's account, in the chat where Kelpie sent the notice.
+  - It counts once, and only while that request is open. A press after the app answered, or after the timeout, changes nothing, and the notice says so.
+  - There is no typed code for these: the app stays the other way to answer.
+- **Master's words never approve,** and nor does a session's text.
 
 ### 2. Sending a session a message
 
@@ -72,7 +81,7 @@ The story checks these first, on the VPS:
 - that the runner's message is delivered, not held, in an app session;
 - that `SIGTERM` ends a session cleanly, and how the app then shows it.
 
-**If the app's prompt waits for the hook,** the fallback goes to the owner before anything is built: the hook would wait only while the owner has asked Master to answer through Kelpie, and return at once otherwise.
+**If the app's prompt waits for the hook,** the fallback goes to the owner before the hook is built: it would wait only while the owner has asked Master to answer through Kelpie, and return at once otherwise.
 
 ### 6. What doesn't change
 
@@ -84,15 +93,18 @@ The story checks these first, on the VPS:
 
 - **[ADR-0057](0057-vps-claude-code-sessions.md):**
   - §1: Kelpie acts on the sessions, besides observing them;
+  - §2: the `PermissionRequest` hook becomes synchronous, with a timeout of 600 seconds, in the app's sessions only. The other hooks stay asynchronous, with their 2 seconds;
   - §3: a pending request's tool and its input leave the server too;
   - §5: Master gains `message_session` and `end_session`, and a wait's notice gains Approve and Deny.
-- **[ADR-0035](0035-agent-computer.md):** its open question, about the owner answering in the Claude app while a hook waits, gets §1's answer for the sessions the owner opens: the first answer wins, once §5's check confirms it.
+- **[ADR-0026](0026-confirmation-by-owner-act.md):** a press on Approve or Deny resolves a VPS session's request in code, by the rules of a press: the owner only, once, while it is open.
+- **[ADR-0035](0035-agent-computer.md):** its open question, about the owner answering in the Claude app while a hook waits, stays open for the sessions Kelpie starts. For the sessions the owner opens in the app, §1 answers it: the first answer wins, once §5's check confirms it.
 
 ## Consequences
 
 - **The owner answers a session's prompt wherever they are,** in the Claude app or through Kelpie, and sends it a message or ends it from Master.
-- **A synchronous hook runs on every permission of every session** the owner opens. It is small, bounded and tested. Removing it from `settings.json` restores ADR-0057's behavior.
-- **The tool's input leaves the server,** redacted and cut. It reaches Cloudflare and the model's provider when Master reads it.
+- **A synchronous hook runs on every permission of every app session.** It is small, bounded and tested. Rolling back means putting the asynchronous `PermissionRequest` entry of ADR-0057 back in `settings.json`, as `docs/runner.md` will say.
+- **The tool's input leaves the server,** redacted and cut. It reaches Cloudflare, Telegram when the notice goes there, and the model's provider when Master reads it.
+- **A verdict file is a convention, not a lock.** Sessions run as the owner's user, as the runner does, so a session could write a verdict for itself. That gives it nothing it lacks: a process of the owner's user can already change the owner's settings.
 - **The runner's protocol version goes up.** A runner not yet updated answers `outdated`, and the tools say so.
 - **No new cost:** a verdict is one more runner call, within the Workers Paid plan.
 - **The story** is [#497](https://github.com/guedesdiogo/kelpie/issues/497), a sub-issue of [#19](https://github.com/guedesdiogo/kelpie/issues/19). Its tests cover:

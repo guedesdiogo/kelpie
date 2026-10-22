@@ -33,15 +33,22 @@ The reference check is on #490.
 - **Worker secrets stay** only for what must exist before that path does:
   - the store's key, `SECRETS_KEY`;
   - the bootstrap token and the recovery token;
-  - `DEPLOY_PROBE_TOKEN`, which CI sets.
-- **The vault's GitHub App credentials** ([ADR-0021](0021-vault-app-secrets.md)) move to a form in a follow-up, under this rule.
+  - `DEPLOY_PROBE_TOKEN`, which CI sets;
+  - the first model key, since Master needs a model before it can send a form. It may stay a deploy secret, or move to the form once Kelpie runs (§4);
+  - the vault's GitHub App credentials ([ADR-0021](0021-vault-app-secrets.md)), until a follow-up moves them to a form under this rule.
 
 ### 2. Model keys go in through such a form
 
-- **What it covers:** the providers' keys (`anthropic`, `openai`), `AI_GATEWAY_TOKEN` and `TYPESAFE_API_KEY`. Each goes into the slot `provider:<name>` of the secret store.
-- **The check:** the form checks a key with a cheap call to its provider before storing it. A refused key counts against the form, and five refused keys close it, as a bot token's do.
+- **What it covers,** each in its slot of the secret store:
+  - the providers' keys, in `provider:anthropic` and `provider:openai`;
+  - `AI_GATEWAY_TOKEN`, in `provider:ai-gateway`;
+  - `TYPESAFE_API_KEY`, in `provider:typesafe`.
+- **The check:** the form checks a key before storing it, with a cheap authenticated read on its service, such as listing the provider's models.
+  - `llm-gateway` makes the call, through a `ProviderCheck` entrypoint bound only by `channel-egress`. It takes the slot and the candidate key, answers accepted or refused, and keeps nothing. So `channel-egress` still calls no provider.
+  - The story names the call for each slot. A service with no such read stores the key unchecked, and the form's page says so.
+  - A refused key counts against the form, and five refused keys close it, as a bot token's do.
 - **Master's tool `connect_model_key`** asks for the form for one provider. Kelpie sends its link itself, and when the owner finishes, Kelpie's note tells the conversation that sent it (ADR-0028). ADR-0064 holds the tool after outside content, as it holds the other form tools.
-- **Removing a stored key** takes the owner's confirmation.
+- **Removing a stored key** is Master's `remove_model_key`, with the owner's confirmation. The Worker secret, if any, serves again.
 
 ### 3. `llm-gateway` reads the store through `ProviderKeys`
 
@@ -65,7 +72,7 @@ The reference check is on #490.
 - **The story** is [#496](https://github.com/guedesdiogo/kelpie/issues/496), a sub-issue of [#19](https://github.com/guedesdiogo/kelpie/issues/19). Its tests cover:
   - that a key never appears in a tool's result, history, a log or an error;
   - that a used or expired form refuses;
-  - that only `llm-gateway` can call `ProviderKeys`, and only for `provider:` slots;
+  - that only `llm-gateway` can call `ProviderKeys`, and only for `provider:` slots, and only `channel-egress` can call `ProviderCheck`;
   - the precedence of a stored key, and the fallbacks.
 
 ## Alternatives considered
