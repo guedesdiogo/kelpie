@@ -4,14 +4,22 @@ import type { ReadResult, SecretStore } from "./secrets/secret-store.ts";
 // The model keys' slots, `provider:<name>` (ADR-0068): the forms that fill them, and the only read
 // that returns one, `ProviderKeys.keys()`, which llm-gateway alone binds.
 
-/** The stored value: the key, as JSON, so the slot can carry more later, as the runner's does. */
-export const modelKeyValue = (key: string): string => JSON.stringify({ key });
+/** How the key's form checked it: a double click is answered with the check, never the caller's. */
+export type StoredCheck = "accepted" | "unchecked";
 
-/** The key in a stored value, or null when it isn't one. */
-export function parseModelKey(value: string): string | null {
+/** The stored value: the key and its check, as JSON, as the runner's slot keeps its secret. */
+export const modelKeyValue = (key: string, check: StoredCheck): string =>
+  JSON.stringify({ key, check });
+
+/**
+ * The key in a stored value, and its check, or null when it holds no key. A value with no check
+ * reads as unchecked, which claims nothing.
+ */
+export function parseModelKey(value: string): { key: string; check: StoredCheck } | null {
   try {
-    const key = (JSON.parse(value) as { key?: unknown } | null)?.key;
-    return isModelKeyValue(key) ? key : null;
+    const { key, check } = (JSON.parse(value) ?? {}) as { key?: unknown; check?: unknown };
+    if (!isModelKeyValue(key)) return null;
+    return { key, check: check === "accepted" ? "accepted" : "unchecked" };
   } catch {
     return null;
   }
@@ -36,8 +44,8 @@ export async function readModelKeys(
       if (read?.reason === "undecryptable") console.error("channel-egress: model key unreadable");
       return;
     }
-    const key = parseModelKey(read.value);
-    if (key) keys[name] = key;
+    const stored = parseModelKey(read.value);
+    if (stored) keys[name] = stored.key;
     else console.error("channel-egress: a model key's slot holds no key");
   });
   return keys;

@@ -37,7 +37,7 @@ function world() {
     ["gateway-form", { name: "ai-gateway", refusals: 0 }],
     ["odd-form", { name: "<b>odd</b>", refusals: 0 }],
   ]);
-  const used = new Map<string, { name: ModelKey; value: string }>();
+  const used = new Map<string, { name: ModelKey; value: string; check: string }>();
   const checked: string[] = [];
   const stored: { name: string; value: string; check: string }[] = [];
   const reported: { agentId: string; event: SetupEvent }[] = [];
@@ -82,10 +82,11 @@ function world() {
       redeemRunnerForm: notUsed,
       async redeemModelKeyForm(token, value, check) {
         const done = used.get(token);
-        // A form used a moment ago answers its own key again, as channel-egress does.
+        // A form used a moment ago answers its own key again, with the check it was stored with,
+        // as channel-egress does.
         if (done) {
           return done.value === value
-            ? { ok: true, name: done.name, check }
+            ? { ok: true, name: done.name, check: done.check as typeof check }
             : { ok: false, reason: "unknown_form" };
         }
         const form = open.get(token);
@@ -96,7 +97,7 @@ function world() {
           return { ok: false, reason: "invalid_key" };
         }
         open.delete(token);
-        used.set(token, { name: form.name as ModelKey, value });
+        used.set(token, { name: form.name as ModelKey, value, check });
         stored.push({ name: form.name, value, check });
         return { ok: true, name: form.name as ModelKey, check };
       },
@@ -193,7 +194,7 @@ describe("a model key's form page", () => {
     expect(checked).toHaveLength(1);
   });
 
-  it("stores a key its service can't check, and says so", async () => {
+  it("stores a key its service can't check, and says so, on a double click too", async () => {
     const { deps, stored, reported } = world();
     const { status, html } = await page(await handle(submit("gateway-form", UNCHECKED), deps));
     expect(status).toBe(200);
@@ -201,6 +202,9 @@ describe("a model key's form page", () => {
     expect(html).not.toContain(UNCHECKED);
     expect(stored).toEqual([{ name: "ai-gateway", value: UNCHECKED, check: "unchecked" }]);
     expect(reported[0]?.event).toMatchObject({ provider: "ai-gateway", check: "unchecked" });
+    const again = await page(await handle(submit("gateway-form", UNCHECKED), deps));
+    expect(again.html).toContain("couldn't check it");
+    expect(reported[1]?.event).toMatchObject({ provider: "ai-gateway", check: "unchecked" });
   });
 
   it("counts a refused key against the form, and closes it after five", async () => {

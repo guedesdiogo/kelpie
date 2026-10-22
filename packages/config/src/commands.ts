@@ -13,6 +13,7 @@ import {
   type ChannelFormsContract,
   type ChannelId,
   isModelKey,
+  MODEL_KEYS,
   type ModelKey,
   type ModelKeySource,
   type RunnerState,
@@ -391,6 +392,9 @@ export interface InstanceModels {
   keys?: Record<ModelKey, ModelKeySource>;
 }
 
+const keySource = (value: unknown): ModelKeySource =>
+  value === "form" || value === "deploy" ? value : "none";
+
 /** What the commands need from the objects that hold configuration. */
 export interface ConfigPorts {
   registry: {
@@ -662,10 +666,19 @@ export function createConfigCommands(ports: ConfigPorts) {
       return ports.agents.configure(id, changes, actor);
     },
 
-    /** The instance's model settings, its pinned provider and the providers with a key (#289). */
+    /**
+     * The instance's model settings, its pinned provider, the providers with a key (#289), and
+     * where each model key comes from (ADR-0068 §4). The sources reach Master's model, so they are
+     * rebuilt from the known slots and values: nothing else llm-gateway sends there passes.
+     */
     async getModels(actor: Actor): Promise<CommandResult<InstanceModels>> {
       if (!isOwner(actor)) return forbidden;
-      return { ok: true, value: await ports.models.view() };
+      const { keys, ...view } = await ports.models.view();
+      if (keys === undefined) return { ok: true, value: view };
+      const sources = Object.fromEntries(
+        MODEL_KEYS.map((name) => [name, keySource(keys[name])]),
+      ) as Record<ModelKey, ModelKeySource>;
+      return { ok: true, value: { ...view, keys: sources } };
     },
 
     /**

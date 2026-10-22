@@ -57,18 +57,19 @@ The owner sets or rotates a model key by asking Master, who calls `connect_model
 | `provider:ai-gateway` | `AI_GATEWAY_TOKEN` | Cloudflare's token verification: `/user/tokens/verify`, then `/accounts/<account>/tokens/verify` for the account a gateway's URL in `ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL` names |
 | `provider:typesafe` | `TYPESAFE_API_KEY` | `GET https://api.typesafe.ai/v1/models`, with the key as a bearer token |
 
-- **The form.** It follows the forms' rules above: a 256-bit token in the link, 15 minutes, one use, five refused values close it. The same key sent again, as a double click sends it, gets the same page. The page never shows the key.
+- **The form.** It follows the forms' rules above: a 256-bit token in the link, 15 minutes, one use, five refused values close it. The same key sent again, as a double click sends it, gets the same page: the slot keeps the key's check with it. The page never shows the key.
 - **The check.** The admin API, which takes the form's submission, asks `llm-gateway`'s `ProviderCheck` first. Only the admin API binds it: it deploys after `llm-gateway`, and `channel-egress`, deployed first, can't (`docs/deploy.md`).
   - The check is one cheap authenticated read, which spends no tokens. `llm-gateway` keeps nothing it checks.
-  - A key its service accepts is stored; a key it refuses, with a 401 or 403, counts against the form, as a malformed one does.
+  - A key its service accepts is stored; a key it refuses, with a 401, counts against the form, as a malformed one does. A 403 is refused too, except from OpenAI, where a restricted key without the models' read scope gets one and may still serve: it is stored unchecked.
   - A service that can't answer, with a 429, a 5xx, a redirect or no answer in 5 seconds, leaves the form open, and the try doesn't count.
-  - An account's AI Gateway token (`cfat_…`) with no gateway URL to name its account can't be checked: it is stored unchecked, and the page says so.
+  - An account's AI Gateway token (`cfat_…`) with no gateway URL to name its account can't be checked either: it is stored unchecked. The page and Master's note say when a key wasn't checked.
   - So `channel-egress` still calls no provider.
 - **Serving.** `llm-gateway` reads the stored keys through `ProviderKeys`, all four in one call, and prefers a stored key to its Worker secret.
-  - It reads again 30 seconds after a read, so a rotation or a removal applies within a minute.
-  - When the store can't answer, it keeps using the keys it read, until they are 60 seconds old. Then the Worker secrets serve. A read that takes over 2 seconds counts as failed.
+  - It reads again 30 seconds after a read, so a rotation or a removal applies to new calls within a minute. A call already running keeps the key it started with.
+  - When the store can't answer, it keeps handing out the keys it read, until they are 60 seconds old. Then the Worker secrets serve. A read that takes over 2 seconds counts as failed.
   - Master's `get_models` says where each key comes from: `form`, `deploy` or `none`, never the key.
 - **Removing.** Master's `remove_model_key` deletes a slot and every form for it, after the owner's confirmation. The Worker secret, if any, serves again within a minute.
+- **A stored key that doesn't serve.** A stored key takes precedence, so a key that passed its check but can't run calls leaves its provider without a working key, and Master may be left without a model to remove it with. The admin API's `removeModelKey` command removes it without Master (`docs/admin-api.md`).
 - **Rollback.** Code from before ADR-0068 ignores the `provider:` slots and uses the Worker secrets. Keep a deploy secret until the form has served.
 
 ## Making the key

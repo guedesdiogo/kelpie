@@ -408,17 +408,17 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
       const forms = store(this.env);
       const form = await forms.describeForm(token);
       const candidate = typeof value === "string" ? value.trim() : "";
-      if (!form) return await this.#redeemModelKeyAgain(token, candidate, check);
+      if (!form) return await this.#redeemModelKeyAgain(token, candidate);
       if (form.kind !== "provider" || !isModelKey(form.agentId)) return unknown;
       if (!isModelKeyValue(candidate)) {
         await forms.refuseValue(token);
         return { ok: false as const, reason: "invalid_key" as const };
       }
-      const stored = await forms.redeemForm(token, modelKeyValue(candidate));
+      const stored = await forms.redeemForm(token, modelKeyValue(candidate, check));
       // Another submission of the same link claimed it meanwhile: answer as for a resubmission.
       if (!stored.ok) {
         return stored.reason === "unknown_form"
-          ? await this.#redeemModelKeyAgain(token, candidate, check)
+          ? await this.#redeemModelKeyAgain(token, candidate)
           : stored;
       }
       return { ok: true as const, name: form.agentId, check };
@@ -428,8 +428,11 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
     }
   }
 
-  /** The answer for a model key's form just used, when its own key comes again. */
-  async #redeemModelKeyAgain(token: string, candidate: string, check: "accepted" | "unchecked") {
+  /**
+   * The answer for a model key's form just used, when its own key comes again: with the check it
+   * was stored with, whatever the caller says now.
+   */
+  async #redeemModelKeyAgain(token: string, candidate: string) {
     const unknown = { ok: false as const, reason: "unknown_form" as const };
     const forms = store(this.env);
     const used = await forms.redeemedForm(token);
@@ -439,9 +442,9 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
     if (!read.ok && read.reason === "store_unavailable") {
       throw new Error("The secret store is unavailable");
     }
-    const key = read.ok ? parseModelKey(read.value) : null;
-    if (!key || !(await sameText(key, candidate))) return unknown;
-    return { ok: true as const, name: used.agentId, check };
+    const stored = read.ok ? parseModelKey(read.value) : null;
+    if (!stored || !(await sameText(stored.key, candidate))) return unknown;
+    return { ok: true as const, name: used.agentId, check: stored.check };
   }
 
   /** Counts a key its service refused against its form (ADR-0068 §2): five close it. */

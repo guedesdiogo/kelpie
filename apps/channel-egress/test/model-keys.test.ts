@@ -81,13 +81,17 @@ describe("a model key's form", () => {
     expect(await exports.ProviderKeys.keys()).toEqual({ ok: true, keys: { anthropic: ANTHROPIC } });
   });
 
-  it("stores a key whose service has no read to check it with, and says so", async () => {
+  it("stores a key whose service has no read to check it with, and says so again on a double click", async () => {
     const token = await keyForm("typesafe");
-    expect(await exports.ChannelForms.redeemModelKeyForm(token, ANTHROPIC, "unchecked")).toEqual({
-      ok: true,
-      name: "typesafe",
-      check: "unchecked",
-    });
+    const unchecked = { ok: true, name: "typesafe", check: "unchecked" };
+    expect(await exports.ChannelForms.redeemModelKeyForm(token, ANTHROPIC, "unchecked")).toEqual(
+      unchecked,
+    );
+    // The check is stored with the key: a second submission can't call it accepted.
+    expect(await exports.ChannelForms.redeemModelKeyForm(token, ANTHROPIC, "accepted")).toEqual(
+      unchecked,
+    );
+    expect(await exports.ProviderKeys.keys()).toEqual({ ok: true, keys: { typesafe: ANTHROPIC } });
   });
 
   it("replaces a stored key with a new form's, and ends what the old form answers for", async () => {

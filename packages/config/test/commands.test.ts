@@ -962,6 +962,31 @@ describe("configuration commands", () => {
     ]);
   });
 
+  it("shows where each model key comes from, and nothing else llm-gateway might send there", async () => {
+    const { ports } = fakePorts();
+    const view = ports.models.view;
+    ports.models.view = async () => ({
+      ...(await view()),
+      keys: {
+        anthropic: "form",
+        openai: "sk-proj-leaked",
+        "ai-gateway": "deploy",
+        gemini: "form",
+      } as never,
+    });
+    const shown = await createConfigCommands(ports).getModels(owner);
+    expect(shown.ok && shown.value.keys).toEqual({
+      anthropic: "form",
+      openai: "none",
+      "ai-gateway": "deploy",
+      typesafe: "none",
+    });
+    // An llm-gateway from before the forms says nothing about keys.
+    ports.models.view = view;
+    const older = await createConfigCommands(ports).getModels(owner);
+    expect(older.ok && "keys" in older.value).toBe(false);
+  });
+
   it("keeps the model keys' commands to the owner", async () => {
     const { ports, calls } = fakePorts();
     const commands = createConfigCommands(ports);

@@ -256,10 +256,12 @@ The token is stored, and the webhook registered, even when the browser drops the
 
 **A model key's form** (ADR-0068) works the same way, from `connectModelKey` or Master's `connect_model_key`. The owner pastes the key, and the page names which one:
 - the admin API asks `llm-gateway`'s `ProviderCheck` to check it first, with a cheap authenticated read on its service (`docs/secrets.md`, "Model keys"). Only the admin API binds that entrypoint;
-- `channel-egress` then stores a key the check accepted. A key its service refuses counts against the form, as a malformed one does;
+- `channel-egress` then stores a key the check accepted. A key its service refuses counts against the form, as a malformed one does. An OpenAI key that can't list models, as a restricted key can't, is stored unchecked;
 - a service that can't answer leaves the form open, and doesn't count;
 - a key that can't be checked, an account's AI Gateway token with no gateway URL to name its account, is stored, and the page says it wasn't checked;
 - the same key sent again to a link just used gets the same page, without another check. A closed link sends a key nowhere.
+
+If a stored key passes its check but can't run calls, its provider has no working key, and Master may have no model to call `remove_model_key` with. Run `removeModelKey` here: `llm-gateway` falls back to its Worker secret within a minute.
 
 `llm-gateway` serves with a stored key within a minute, before its Worker secret.
 

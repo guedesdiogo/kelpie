@@ -285,7 +285,14 @@ describe("ProviderCheck", () => {
     [302, "unreachable"],
   ] as const)("reads a provider's %i as %s", async (status, check) => {
     services(() => new Response(null, { status, headers: { location: "https://elsewhere.test" } }));
-    expect(await checkModelKey(env as GatewayEnv, "openai", STORED_OPENAI)).toBe(check);
+    expect(await checkModelKey(env as GatewayEnv, "anthropic", STORED_ANTHROPIC)).toBe(check);
+  });
+
+  it("stores an OpenAI key that can't list models unchecked: a restricted key gets a 403", async () => {
+    services(() => Response.json({ error: { message: "Missing scopes" } }, { status: 403 }));
+    expect(await checkModelKey(env as GatewayEnv, "openai", STORED_OPENAI)).toBe("unchecked");
+    services(() => Response.json({ error: { message: "Incorrect API key" } }, { status: 401 }));
+    expect(await checkModelKey(env as GatewayEnv, "openai", STORED_OPENAI)).toBe("refused");
   });
 
   it("is unreachable when the call fails, and logs neither the key nor the call", async () => {
