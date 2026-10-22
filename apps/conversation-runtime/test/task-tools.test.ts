@@ -466,6 +466,19 @@ describe("Master's create_task in the owner's direct conversation (ADR-0067 §1,
     ]);
   });
 
+  it("gives Master a task of its own only from a turn the owner typed", async () => {
+    const { provider, calls } = world(undefined, { kelpie: 5 }, "kelpie");
+    const create = byName(await provider.tools("kelpie", { channel: "webchat" }), "create_task");
+    const note = contextOf("kelpie", undefined, "note");
+    expect(await create.run({ agentId: "kelpie", title: "Again", body: "x" }, note)).toEqual({
+      isError: true,
+      output: expect.stringContaining("only when the owner asks"),
+    });
+    // Another agent's task from a note's turn still goes, within the day's slots.
+    await create.run({ agentId: "helper", title: "On", body: "x" }, note);
+    expect(calls).toEqual(["take kelpie", "create helper On by kelpie for u-owner"]);
+  });
+
   it("refuses an agent that doesn't exist, a time with no zone, and a status other than todo or backlog", async () => {
     const { provider, calls } = world(undefined, {}, "kelpie");
     const create = byName(await provider.tools("kelpie", { channel: "webchat" }), "create_task");

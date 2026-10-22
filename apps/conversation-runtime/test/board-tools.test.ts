@@ -103,14 +103,17 @@ function world(role: { of: AgentRole | null } = { of: "master" }) {
   return { provider, calls, tasks };
 }
 
-function contextOf(actor: Actor = owner) {
+function contextOf(
+  actor: Actor = owner,
+  turn: Partial<Pick<ToolContext, "trigger" | "scopes">> = {},
+) {
   const announced: Announcement[] = [];
   const context: ToolContext = {
     locale: "en",
     actor,
     agentId: MASTER,
-    scopes: "all",
-    trigger: "person",
+    scopes: turn.scopes ?? "all",
+    trigger: turn.trigger ?? "person",
     qualifier: "clef",
     turn: "1",
     source: "webchat:u-owner, 2026-10-22",
@@ -157,14 +160,40 @@ describe("Master's board tools (ADR-0067 §1, #492)", () => {
     });
   });
 
+  it("change a board only in a turn the owner typed, and read it in any of theirs", async () => {
+    const { provider, calls } = world();
+    const tools = await toolsOf(provider);
+    for (const trigger of ["note", "task"] as const) {
+      const { context, announced } = contextOf(owner, { trigger });
+      for (const name of ["edit_task", "move_task", "stop_task"]) {
+        const input = { agentId: "helper", taskId: TASK, status: "todo", startAt: null };
+        expect(await run(tools.get(name), input, context), `${name}, ${trigger}`).toEqual({
+          isError: true,
+          output: expect.stringContaining("in a message of their own"),
+        });
+      }
+      expect(announced).toEqual([]);
+      const listed = await run(tools.get("list_tasks"), { agentId: "helper" }, context);
+      expect(listed.isError).toBeUndefined();
+    }
+    expect(calls).toEqual([
+      `list {"agentId":"helper"} as agent:${MASTER}`,
+      `list {"agentId":"helper"} as agent:${MASTER}`,
+    ]);
+  });
+
   it("refuse anyone but the owner, and an agent that is no longer Master", async () => {
     const role = { of: "master" as AgentRole | null };
     const { provider, calls } = world(role);
     const tools = await toolsOf(provider);
-    for (const tool of tools.values()) {
-      expect(
-        await tool.run({ agentId: "helper", taskId: TASK }, contextOf(member).context),
-      ).toEqual({ isError: true, output: "Only the owner can change Kelpie's configuration." });
+    // A member, or the owner where the turn can't read every scope, as in a group.
+    for (const context of [contextOf(member).context, contextOf(owner, { scopes: [] }).context]) {
+      for (const tool of tools.values()) {
+        expect(await tool.run({ agentId: "helper", taskId: TASK }, context)).toEqual({
+          isError: true,
+          output: "Only the owner can change Kelpie's configuration.",
+        });
+      }
     }
     role.of = "specialist";
     expect(await run(tools.get("list_tasks"), { agentId: "helper" })).toMatchObject({
@@ -226,9 +255,10 @@ describe("Master's board tools (ADR-0067 §1, #492)", () => {
     expect(output).toContain(
       `The task ${TASK} of the agent helper: waiting (needs_input), attempt 0`,
     );
-    expect(output).toContain("… (100 more characters)");
-    expect(output).toContain("Comments, the last 10 of 12:");
-    expect(output).not.toContain("comment 1\n");
+    expect(output).toContain("… (1100 more characters)");
+    expect(output).toContain("Comments, the last 8 of 12:");
+    expect(output).not.toContain("comment 3\n");
+    expect(output).toContain("comment 4\n");
     expect(output).toContain("comment 11");
     expect(output).toContain("- 2026-10-23T12:00:00Z, Kelpie: created (- → todo)");
     expect(output).toContain("Runs: 1 waiting.");
@@ -252,6 +282,19 @@ describe("Master's board tools (ADR-0067 §1, #492)", () => {
       isError: true,
       output: expect.stringContaining("only of a task you created"),
     });
+    // Any text field asks for the creator first, whatever its value; a task that isn't there says so.
+    expect(await run(edit, { agentId: "helper", taskId: OWNERS, title: 5 })).toMatchObject({
+      output: expect.stringContaining("only of a task you created"),
+    });
+    const gone = {
+      agentId: "helper",
+      taskId: "2b3c4d5e-0000-4000-8000-000000000002",
+      title: "Gone",
+    };
+    expect(await run(edit, gone)).toMatchObject({
+      isError: true,
+      output: expect.stringContaining("has no task"),
+    });
     await run(edit, { agentId: "helper", taskId: TASK, title: "  Book it  ", startAt: null });
     expect(await run(edit, { agentId: "helper", taskId: TASK })).toMatchObject({ isError: true });
     expect(
@@ -261,6 +304,19 @@ describe("Master's board tools (ADR-0067 §1, #492)", () => {
       `edit {"agentId":"helper","taskId":"${OWNERS}","scheduledStartAt":${AT}} as agent:${MASTER}`,
       `edit {"agentId":"helper","taskId":"${TASK}","title":"Book it","scheduledStartAt":null} as agent:${MASTER}`,
     ]);
+  });
+
+  it("show the most recent tasks of a long board, and say how many there are", async () => {
+    const { provider, tasks } = world();
+    for (let i = 0; i < 33; i++) {
+      const id = `3c4d5e6f-0000-4000-8000-${String(i).padStart(12, "0")}`;
+      tasks[id] = detail({ id, title: `Task ${i}` });
+    }
+    const list = (await toolsOf(provider)).get("list_tasks");
+    const { output } = await run(list, { agentId: "helper" });
+    expect(output).toContain("The 30 most recent of 35: name a status to see others.");
+    expect(output.match(/^- /gm)).toHaveLength(30);
+    expect(output.length).toBeLessThan(10_000);
   });
 
   it("move a task only between Backlog and To do", async () => {
@@ -298,6 +354,25 @@ describe("Master's board tools (ADR-0067 §1, #492)", () => {
     ]);
   });
 
+  it("announce a stop by the agent's id when its name can't be read: the stop stands", async () => {
+    const commands = {
+      getAgent: async () => {
+        throw new Error("The Registry reset.");
+      },
+      requestStop: async () => ({ ok: true, value: view({ status: "cancelled" }) }),
+    } as unknown as BoardCommands;
+    const stop = (await toolsOf(boardTools(commands, { roleOf: async () => "master" }))).get(
+      "stop_task",
+    );
+    const { context, announced } = contextOf();
+    expect((await run(stop, { agentId: "helper", taskId: TASK }, context)).output).toContain(
+      "it is cancelled",
+    );
+    expect(announced).toEqual([
+      { kind: "stopped", taskId: TASK, agentId: "helper", name: "helper" },
+    ]);
+  });
+
   it("tell the model why the commands refused, in words it can act on", async () => {
     const reasons = ["unknown_task", "not_allowed", "invalid_input", "unavailable"] as const;
     for (const reason of reasons) {
@@ -327,20 +402,35 @@ describe("Master's board tools (ADR-0067 §1, #492)", () => {
 });
 
 describe("a start time (#492)", () => {
+  const NOW = Date.UTC(2026, 9, 22, 18);
+
   it("takes only an ISO 8601 time with its offset, or null", () => {
-    expect(startOf("2026-10-23T09:00:00-03:00")).toBe(AT);
-    expect(startOf("2026-10-23T12:00Z")).toBe(AT);
-    expect(startOf("2026-10-23T12:00:00.000Z")).toBe(AT);
-    expect(startOf(null)).toBeNull();
-    for (const value of [
-      "2026-10-23T12:00:00",
-      "2026-10-23",
-      "noon",
-      AT,
-      undefined,
-      "2026-13-45T99:99Z",
-    ]) {
-      expect(startOf(value), String(value)).toBeUndefined();
+    expect(startOf("2026-10-23T09:00:00-03:00", NOW)).toBe(AT);
+    expect(startOf("2026-10-23T17:30+05:30", NOW)).toBe(AT);
+    expect(startOf("2026-10-23T12:00Z", NOW)).toBe(AT);
+    expect(startOf("2026-10-23T12:00:00.999Z", NOW)).toBe(AT);
+    // A leap day, within a year of its own now.
+    expect(startOf("2028-02-29T12:00:00Z", Date.UTC(2027, 5, 1))).toBe(Date.UTC(2028, 1, 29, 12));
+    expect(startOf(null, NOW)).toBeNull();
+    for (const value of ["2026-10-23T12:00:00", "2026-10-23", "noon", AT, undefined]) {
+      expect(startOf(value, NOW), String(value)).toBeUndefined();
     }
+  });
+
+  it("refuses a day the calendar lacks, a time past midnight, an offset no zone has, and a start too far ahead", () => {
+    for (const value of [
+      "2026-02-30T10:00:00Z",
+      "2027-02-29T10:00:00Z",
+      "2026-04-31T10:00:00-03:00",
+      "2026-13-45T99:99Z",
+      "2026-10-23T24:00:00Z",
+      "2026-10-23T12:60:00Z",
+      "2026-10-23T12:00:60Z",
+      "2026-10-23T12:00:00+15:00",
+      "2027-10-24T12:00:00Z",
+    ]) {
+      expect(startOf(value, NOW), value).toBeUndefined();
+    }
+    expect(startOf("2027-10-23T12:00:00Z", NOW)).toBe(Date.UTC(2027, 9, 23, 12));
   });
 });

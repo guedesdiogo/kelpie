@@ -184,8 +184,9 @@ const WEBCHAT_RECEIVED_IDS = 100;
 /** While the owner types in the webchat, buffered messages wait at least this long for the rest. */
 const TYPING_HOLD_MS = 4_000;
 /**
- * The most handoffs, stopped tasks and subagents' changes a conversation keeps for its next reply's
- * notice; past it, the oldest go first. The agents Master created or renamed all stay (#387).
+ * The most handoffs and subagents' changes a conversation keeps for its next reply's notice; past
+ * it, the handoffs go first. The agents Master created or renamed, and the tasks it stopped, all
+ * stay (#387, #492).
  */
 const MAX_UNSAID_ANNOUNCEMENTS = 20;
 /** Where a conversation keeps its unsaid handoffs, in #287's shape, so a rollback still reads them. */
@@ -1979,17 +1980,18 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   }
 
   /**
-   * Keeps these unsaid, each group in its own key. Of the handoffs, stops and subagents' changes, only the
+   * Keeps these unsaid, each group in its own key. Of the handoffs and subagents' changes, only the
    * last MAX_UNSAID_ANNOUNCEMENTS. An agent's creation and its latest name always stay, at most two
-   * per agent, so no burst of changes pushes one out unsaid, and the notice counts what it doesn't
-   * name (#387).
+   * per agent, and so does each task Master stopped, which no command undoes, so no burst of
+   * changes pushes one out unsaid, and the notice counts what it doesn't name (#387, #492).
    */
   #keepAnnouncements(all: readonly Announcement[]): void {
     const ofAgents = (one: Announcement) =>
       one.kind === "agentCreated" || one.kind === "agentRenamed";
+    const stays = (one: Announcement) => ofAgents(one) || one.kind === "stopped";
     const kept = [
-      ...all.filter((one) => !ofAgents(one)).slice(-MAX_UNSAID_ANNOUNCEMENTS),
-      ...all.filter(ofAgents),
+      ...all.filter((one) => !stays(one)).slice(-MAX_UNSAID_ANNOUNCEMENTS),
+      ...all.filter(stays),
     ];
     this.#set(
       HANDOFFS,

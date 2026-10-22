@@ -5,6 +5,7 @@ import {
   isAgentId,
   isTaskId,
   isTaskStatus,
+  MAX_SCHEDULE_AHEAD_MS,
   TASK_STATUSES,
   type TaskDetail,
   type TaskSummary,
@@ -110,14 +111,17 @@ const SPECS = {
   },
 } as const satisfies Record<string, Tool["spec"]>;
 
-/** How much of a task's own text get_task shows, so the rest of its detail fits one result. */
-const SHOWN_BODY = 3_000;
-const SHOWN_RESULT = 2_000;
-const SHOWN_COMMENT = 500;
-const SHOWN_COMMENTS = 10;
+/**
+ * How much of a task's own text get_task shows, so its whole detail fits one result, well within
+ * TOOL_OUTPUT_MAX_CHARS.
+ */
+const SHOWN_BODY = 2_000;
+const SHOWN_RESULT = 1_500;
+const SHOWN_COMMENT = 400;
+const SHOWN_COMMENTS = 8;
 const SHOWN_EVENTS = 10;
-/** The most tasks list_tasks shows: the most recently changed. */
-const SHOWN_TASKS = 50;
+/** The most tasks list_tasks shows, the most recently changed: about 250 characters each. */
+const SHOWN_TASKS = 30;
 
 /** What Master is told of the marks around a board's text. */
 const BOARD_FENCE_NOTE =
@@ -132,27 +136,69 @@ const NOT_MASTER = failed(
   "This agent isn't Master any more, so it can't reach other agents' boards: the owner asks Master.",
 );
 const NOT_A_TASK = failed("Name the agent and the task by the ids list_tasks gives.");
+/**
+ * A board changes only in a turn the owner typed: a note's turn carries another agent's words,
+ * which must not stop, start or rewrite work on their own (#492, as ADR-0064 §6 does for the VPS).
+ */
+const NOT_TYPED = failed(
+  "Change a board only when the owner asks in a message of their own: tell them what you would change, and their message can change it.",
+);
 /** A task's text reaches its assignee as its creator's words (ADR-0067 §1): Master's stay Master's. */
 const NOT_MASTERS_TEXT = failed(
   "You can change the title or body only of a task you created: its text reaches the agent as its creator's words. Change only its start time, or tell the owner what to change.",
 );
 
 /** An ISO 8601 time with an offset or Z: one with neither would be read in no one's zone. */
-const ZONED_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+const ZONED_TIME =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|([+-])(\d{2}):(\d{2}))$/;
 
-/** A start time as the commands take it: ms, null for none, or undefined when it isn't one. */
-export function startOf(value: unknown): number | null | undefined {
+/**
+ * A start time as the commands take it: ms, null for none, or undefined when it isn't one. A day
+ * the calendar lacks, such as February 30th, is refused rather than rolled into March, and so is a
+ * time past a year and a day from `now`, which the board would refuse.
+ */
+export function startOf(value: unknown, now = Date.now()): number | null | undefined {
   if (value === null) return null;
-  if (typeof value !== "string" || !ZONED_TIME.test(value)) return undefined;
-  const at = Date.parse(value);
-  return Number.isNaN(at) ? undefined : at;
+  const match = typeof value === "string" ? ZONED_TIME.exec(value) : null;
+  if (!match) return undefined;
+  const [year, month, day, hour, minute, second, offsetHours, offsetMinutes] = [
+    1, 2, 3, 4, 5, 6, 8, 9,
+  ].map((group) => Number(match[group] ?? 0)) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const local = Date.UTC(year, month - 1, day, hour, minute, second);
+  const shown = new Date(local);
+  const real =
+    hour <= 23 &&
+    minute <= 59 &&
+    second <= 59 &&
+    offsetHours <= 14 &&
+    offsetMinutes <= 59 &&
+    shown.getUTCFullYear() === year &&
+    shown.getUTCMonth() === month - 1 &&
+    shown.getUTCDate() === day;
+  if (!real) return undefined;
+  // A fraction of a second is dropped: a start is to the second.
+  const at = local - (match[7] === "-" ? -1 : 1) * (offsetHours * 60 + offsetMinutes) * 60_000;
+  return at > 0 && at <= now + MAX_SCHEDULE_AHEAD_MS ? at : undefined;
 }
 
 /** A time as the model reads it: UTC, to the second. The owner's zone is in each message's stamp. */
 export const iso = (at: number) => new Date(at).toISOString().replace(/\.\d{3}Z$/, "Z");
 
-const cut = (text: string, max: number) =>
-  text.length > max ? `${text.slice(0, max)}… (${text.length - max} more characters)` : text;
+/** The text, cut to `max` characters, never inside a surrogate pair, saying how much it left out. */
+function cut(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const end = /[\uD800-\uDBFF]/.test(text.charAt(max - 1)) ? max - 1 : max;
+  return `${text.slice(0, end)}… (${text.length - end} more characters)`;
+}
 
 function author(who: { kind: string; id: string } | null): string {
   if (who === null || who.kind === "kelpie") return "Kelpie";
@@ -240,7 +286,9 @@ export function boardTools(
   commands: BoardCommands,
   options: { roleOf: (agentId: string) => Promise<AgentRole | null> },
 ): ToolProvider {
-  const isOwner = (context: ToolContext) => context.actor.role === "owner";
+  /** The owner, in a direct conversation with Master: what the configuration tools also ask. */
+  const isOwner = (context: ToolContext) =>
+    context.actor.role === "owner" && context.scopes === "all";
 
   /** The task's agent and id, or the refusal for them. */
   function taskOf(input: unknown): { agentId: string; taskId: string } | ToolOutcome {
@@ -275,10 +323,10 @@ export function boardTools(
         const shown = listed.value.slice(0, SHOWN_TASKS);
         const more =
           listed.value.length > shown.length
-            ? `\nAnd ${listed.value.length - shown.length} older ones: name a status to see fewer.`
+            ? ` The ${shown.length} most recent of ${listed.value.length}: name a status to see others.`
             : "";
         return {
-          output: `The agent ${agentId}'s tasks${of}, most recently changed first. ${BOARD_FENCE_NOTE}\n${shown.map(summaryLine).join("\n")}${more}`,
+          output: `The agent ${agentId}'s tasks${of}, most recently changed first.${more} ${BOARD_FENCE_NOTE}\n${shown.map(summaryLine).join("\n")}`,
         };
       },
     },
@@ -300,6 +348,7 @@ export function boardTools(
       label: { en: "Editing a task", "pt-BR": "Editando uma tarefa", es: "Editando una tarea" },
       async run(input, context) {
         if (!isOwner(context)) return NOT_OWNER;
+        if (context.trigger !== "person") return NOT_TYPED;
         const ids = taskOf(input);
         if (isOutcome(ids)) return ids;
         const { title, body, startAt } = fields(input);
@@ -330,6 +379,7 @@ export function boardTools(
       label: { en: "Moving a task", "pt-BR": "Movendo uma tarefa", es: "Moviendo una tarea" },
       async run(input, context) {
         if (!isOwner(context)) return NOT_OWNER;
+        if (context.trigger !== "person") return NOT_TYPED;
         const ids = taskOf(input);
         if (isOutcome(ids)) return ids;
         const { status } = fields(input);
@@ -344,17 +394,19 @@ export function boardTools(
       label: { en: "Stopping a task", "pt-BR": "Parando uma tarefa", es: "Deteniendo una tarea" },
       async run(input, context) {
         if (!isOwner(context)) return NOT_OWNER;
+        if (context.trigger !== "person") return NOT_TYPED;
         const ids = taskOf(input);
         if (isOutcome(ids)) return ids;
         const stopped = await commands.requestStop(context.actor, ids);
         if (!stopped.ok) return refusal(stopped, ids.agentId, ids.taskId);
-        // Kelpie, not the model, tells the owner whose task stopped (ADR-0067 §1).
-        const agent = await commands.getAgent(context.actor, { id: ids.agentId });
+        // Kelpie, not the model, tells the owner whose task stopped (ADR-0067 §1). The stop stands
+        // whatever the name's read does, so the announcement does too.
+        const agent = await commands.getAgent(context.actor, { id: ids.agentId }).catch(() => null);
         context.announce({
           kind: "stopped",
           taskId: ids.taskId,
           agentId: ids.agentId,
-          name: agent.ok ? agent.value.name : ids.agentId,
+          name: agent?.ok ? agent.value.name : ids.agentId,
         });
         return {
           output:

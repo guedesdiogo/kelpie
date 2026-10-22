@@ -292,6 +292,13 @@ export function taskTools(ports: TaskToolPorts): ToolProvider {
           "This agent isn't Master any more: hand tasks only to the agents you own, in a later turn.",
         );
       }
+      // A task Master gives itself comes only from a turn the owner typed: its news would come back
+      // to Master as a note, whose turn could give itself another (#492).
+      if (wide && agentId === context.agentId && context.trigger !== "person") {
+        return failed(
+          "Give yourself a task only when the owner asks in a message of their own: tell them instead.",
+        );
+      }
       const reachable = wide ? await ports.agents() : await ports.owned(context.agentId);
       const assignee = reachable.find((one) => one.id === agentId);
       // Never another agent in its place: the model learns which ones it may name (#287).
