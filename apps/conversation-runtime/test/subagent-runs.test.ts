@@ -13,6 +13,7 @@ import { replaceTaskRunnerForTesting } from "../src/agent-host/agent-host.ts";
 import { boardTools } from "../src/board-tools.ts";
 import { configurationTools, heldTools, MASTER_TOOLS } from "../src/configuration.ts";
 import { memoryTools } from "../src/memory-tools.ts";
+import { ownerTools } from "../src/owner-tools.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import { SUBAGENT_TOOLS } from "../src/subagent-limits.ts";
 import { subagentTools } from "../src/subagent-tools.ts";
@@ -320,6 +321,10 @@ describe("a temporary subagent (#290)", () => {
         adminOrigin: "https://admin.example",
       }),
       boardTools({} as never, { roleOf: async (id) => (await registry().get(id))?.role ?? null }),
+      ownerTools({} as never, {
+        roleOf: async (id) => (await registry().get(id))?.role ?? null,
+        adminOrigin: "https://admin.example",
+      }),
     );
     // Master hands tasks only to agents it owns: this specialist is its own.
     await registry().add("allow-spec", "Spec", owner);

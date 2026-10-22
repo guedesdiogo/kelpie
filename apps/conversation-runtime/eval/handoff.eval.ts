@@ -18,6 +18,7 @@ import { replaceTaskRunnerForTesting } from "../src/agent-host/agent-host.ts";
 import { boardTools } from "../src/board-tools.ts";
 import { configurationTools } from "../src/configuration.ts";
 import { memoryTools } from "../src/memory-tools.ts";
+import { ownerTools } from "../src/owner-tools.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
 import { subagentTools } from "../src/subagent-tools.ts";
 import { taskTools } from "../src/task-tools.ts";
@@ -94,6 +95,11 @@ const TOOLS: ToolProvider[] = [
   // The board tools (#492): on the prompt as in production, over boards with no tasks.
   boardTools({ listTasks: async () => ({ ok: true, value: [] }) } as never, {
     roleOf: async (id) => (await registry().get(id))?.role ?? null,
+  }),
+  // The owner tools (#493): on the prompt as in production, with no command behind them.
+  ownerTools({} as never, {
+    roleOf: async (id) => (await registry().get(id))?.role ?? null,
+    adminOrigin: "https://admin.example",
   }),
   subagentTools({
     canSpawn: async (id) => (await registry().get(id))?.role === "master",
