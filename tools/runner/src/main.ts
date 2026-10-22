@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { deleteSession, getSessionInfo, query } from "@anthropic-ai/claude-agent-sdk";
 import { readConfig } from "./config.ts";
+import { claudeCodeDirsOf } from "./processes.ts";
 import { PROTOCOL, VERSION } from "./protocol.ts";
 import { loadSecrets, RunnerConfigError } from "./secrets.ts";
 import { createHandler } from "./server.ts";
@@ -26,9 +27,10 @@ try {
     cwd,
     warn: (message) => console.error(`kelpie-runner: ${message}`),
   });
-  // Every other Claude Code session on the server, read only (ADR-0057).
+  // Every other Claude Code session on the server (ADR-0057), and acting on them (ADR-0069).
   const vps = new VpsSessions({
     claudeDir: config.claudeDir,
+    claudeCodeDirs: claudeCodeDirsOf(homedir(), config.claudeDir),
     spoolDir: config.spoolDir,
     workDir: cwd,
     holds: (id) => sessions.holds(id),

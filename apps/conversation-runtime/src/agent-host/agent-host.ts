@@ -2,6 +2,7 @@ import type { Remote } from "@kelpie/access";
 import type {
   ChannelEgressContract,
   RunnerSessionsContract,
+  RunnerVpsRequest,
   RunnerVpsWait,
 } from "@kelpie/channels";
 import type {
@@ -108,7 +109,8 @@ export function replaceChannelEgressForTesting(egress: BotPhotos | undefined): v
   botPhotosForTesting = egress;
 }
 
-type RunnerWaits = Pick<RunnerSessionsContract, "waits">;
+/** RunnerSessions as the check uses it: its waits, and the requests of those it tells (#497). */
+type RunnerWaits = Pick<RunnerSessionsContract, "waits" | "requests">;
 
 let runnerSessionsForTesting: RunnerWaits | undefined;
 
@@ -805,9 +807,10 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
             readRole((await bounded(sources.agent(agentId), IDENTITY_TIMEOUT_MS))?.role) ===
             "master",
           waits: (since) => bounded(sessions.waits(since), WAITS_TIMEOUT_MS),
+          requests: () => bounded(sessions.requests(), WAITS_TIMEOUT_MS),
           // Only the deadline rejects: a slow send may yet land, so it isn't sent again.
-          tell: (wait) =>
-            bounded(this.#tellWait(agentId, wait), NOTICE_TIMEOUT_MS).catch(() => {
+          tell: (wait, request) =>
+            bounded(this.#tellWait(agentId, wait, request), NOTICE_TIMEOUT_MS).catch(() => {
               console.warn("AgentHost: a notice of a wait timed out; it counts as told");
               this.#keepNotice("timed_out", []);
               return true;
@@ -884,8 +887,27 @@ export class AgentHost extends Agent<Env> implements AgentHostContract {
    * which the conversation writes in its own language. False when none took it; it never throws.
    * Each conversation's answer is logged and kept, by channel and reason only (#470).
    */
-  async #tellWait(agentId: string, wait: RunnerVpsWait): Promise<boolean> {
-    const notice = { kind: wait.kind, title: wait.title, repository: wait.repository };
+  async #tellWait(
+    agentId: string,
+    wait: RunnerVpsWait,
+    request: RunnerVpsRequest | null,
+  ): Promise<boolean> {
+    // The request its hook holds open, for the notice's Approve and Deny (ADR-0069 §1).
+    const notice = {
+      kind: wait.kind,
+      title: wait.title,
+      repository: wait.repository,
+      ...(request
+        ? {
+            request: {
+              id: request.id,
+              tool: request.tool,
+              input: request.input,
+              truncated: request.truncated,
+            },
+          }
+        : {}),
+    };
     let candidates: { channel: string; name: string }[];
     try {
       const found = this.#noticeConversations(agentId);

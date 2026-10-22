@@ -1,9 +1,16 @@
 import type { Role } from "@kelpie/access";
-import { type Block, formatReply } from "@kelpie/channels";
+import {
+  type Block,
+  formatReply,
+  isRunnerVerdict,
+  RUNNER_SESSION_ID,
+  type RunnerVerdict,
+} from "@kelpie/channels";
 import type { Mascot } from "@kelpie/config";
 import type { ChatType, WebchatAdmission } from "@kelpie/conversation/contract";
 import type { ChatMessage } from "@kelpie/llm";
 import type { ConversationPorts, TurnStep } from "./ports.ts";
+import type { VerdictStatus } from "./session-requests.ts";
 import type { ToolActivity } from "./tools.ts";
 import { chatTypeOf, roleOf } from "./turn-access.ts";
 
@@ -14,13 +21,15 @@ import { chatTypeOf, roleOf } from "./turn-access.ts";
  * What the browser sends: a message with an id of its own choosing, whether it is typing, a pause
  * that holds every answer until the next message, or a press of a notice's Confirm button, by the
  * confirmation's id (#186). A pause and a press name their agent (ADR-0052 §3): a confirmation's
- * id is its own conversation's counter. A page from before ADR-0052 names none.
+ * id is its own conversation's counter. A page from before ADR-0052 names none. A press of
+ * Approve or Deny on a VPS session's prompt sends its verdict, by the request's random id (#497).
  */
 export type ClientFrame =
   | { type: "message"; id: string; text: string }
   | { type: "typing"; active: boolean }
   | { type: "pause"; agent?: string }
-  | { type: "confirm"; id: number; agent?: string };
+  | { type: "confirm"; id: number; agent?: string }
+  | { type: "verdict"; id: string; verdict: RunnerVerdict; agent?: string };
 
 /** An open confirmation as the webchat lists it (ADR-0052 §2): its summary, in full, and its times. */
 export interface OpenRequest {
@@ -76,9 +85,17 @@ export type ServerFrame =
   /**
    * A reply's bubble comes formatted (#188). Kelpie's own notices come as written, a link notice
    * formatted with its one link, and a confirmation's with the id its button sends (#186). The
-   * notice of a turn no route answered is marked `failed`, for the mascot's error.
+   * notice of a turn no route answered is marked `failed`, for the mascot's error. A VPS session's
+   * prompt comes with the request's id, which its Approve and Deny send, and until when (#497).
    */
-  | { type: "bubble"; text: string; blocks?: Block[]; confirmation?: number; failed?: true }
+  | {
+      type: "bubble";
+      text: string;
+      blocks?: Block[];
+      confirmation?: number;
+      sessionRequest?: { id: string; until: number };
+      failed?: true;
+    }
   | { type: "typing"; active: boolean }
   /**
    * What the turn is doing (#141); `idle` once it stopped without a reply. A tool's step names its
@@ -98,6 +115,8 @@ export type ServerFrame =
   | { type: "rejected"; id: string; reason: string }
   /** What a press of a Confirm button did: refused for a confirmation not open, or not theirs. */
   | { type: "confirmation"; id: number; status: "accepted" | "refused" }
+  /** What a press of Approve or Deny did, on its own page only (#497). */
+  | { type: "verdict"; id: string; verdict: RunnerVerdict; status: VerdictStatus }
   /** The open confirmations (ADR-0052 §4), to both views, when they change. */
   | ({ type: "requests" } & OpenRequests)
   /** A presence socket's first frame (ADR-0052 §2): what the conversation knows now. */
@@ -127,6 +146,7 @@ export const FRAME_VIEWS: Readonly<Record<ServerFrame["type"], "own" | "presence
   accepted: "own",
   rejected: "own",
   confirmation: "both",
+  verdict: "own",
   requests: "both",
   presence: "presence",
   failed: "presence",
@@ -201,6 +221,14 @@ export function parseClientFrame(message: unknown): ClientFrame | null {
   if (frame?.type === "confirm" && Number.isSafeInteger(frame.id) && (frame.id as number) > 0) {
     return { type: "confirm", id: frame.id as number, ...agent };
   }
+  if (
+    frame?.type === "verdict" &&
+    typeof frame.id === "string" &&
+    RUNNER_SESSION_ID.test(frame.id) &&
+    isRunnerVerdict(frame.verdict)
+  ) {
+    return { type: "verdict", id: frame.id, verdict: frame.verdict, ...agent };
+  }
   return null;
 }
 
@@ -231,6 +259,7 @@ export function webchatEgress(
           ? {}
           : { blocks: formatReply(text, new Set(options.links)) }),
         ...(options.confirmation === undefined ? {} : { confirmation: options.confirmation }),
+        ...(options.sessionRequest === undefined ? {} : { sessionRequest: options.sessionRequest }),
         ...(options.failure ? { failed: true } : {}),
       });
       return { ok: true, providerMessageId: `webchat:${crypto.randomUUID()}` };

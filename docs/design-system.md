@@ -289,6 +289,11 @@ Moment. The owner's press is the yes ([ADR-0026](adr/0026-confirmation-by-owner-
   - **Hold to pause this conversation**, a smaller control under them. It uses the hold of 5.4 and runs the existing pause (#134): the next answer waits for the owner's next message, and background tasks keep running.
 - **The card is compact** (decision 13, #378): who asks, with the agent's still 40px mascot in Waiting and until when it holds; then the text; then the actions on the right, and the hold under them.
 - **A sidebar row draws the same card** under itself for its agent's request (5.9, [ADR-0052](adr/0052-webchat-presence-sockets.md)). Its press and its hold go over that row's socket, never over the open conversation's.
+- **A VPS session's permission prompt draws the same card** ([ADR-0069](adr/0069-master-acts-on-vps-sessions.md) §1). It has two answers:
+  - **Approve,** the primary button, and **Deny** beside it, outlined in `--muted`;
+  - no hold: the prompt is the session's, so pausing this conversation wouldn't answer it.
+
+  The card says the agent passes a VPS session's prompt on, and its notice names the tool and its input as quoted data. Its receipts are "You approved at 14:32", "You denied at 14:32", or why the answer didn't count, as an answer given first in the Claude app. Only the conversation's own page draws it: a sidebar row doesn't.
 - **A press in the card's first 400 ms is ignored,** after it draws or draws again: it may have appeared under the pointer (ADR-0052 §5). An open card's content never changes in place.
 - **What the card shows is bounded** (ADR-0044 §1). The agent is named by its id. The evidence comes from the tool call's typed fields, appears as quoted data marked as written by the agent, and never carries a link or a control.
 - **The agent's mascot answers with the card** (5.19):

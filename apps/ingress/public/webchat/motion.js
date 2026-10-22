@@ -16,6 +16,8 @@ export const EASE = {
 };
 export const RISE = 8;
 export const SCALE_IN = 0.97;
+/** `--scale-in-moment`: what a Moment's element enters from, or leaves to (§4.3). */
+export const SCALE_IN_MOMENT = 0.92;
 /** A reply's text fades in this long after its bubble starts growing (5.1). */
 export const REPLY_TEXT_DELAY = 70;
 
