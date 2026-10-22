@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changedFiles, gitAt, listFiles } from "../src/git.ts";
+import { changedFiles, gitAt, listFiles, tagCommit } from "../src/git.ts";
 import { ships } from "../src/ships.ts";
 import { tempRepo } from "./fakes.ts";
 
@@ -41,5 +41,14 @@ describe("listFiles", () => {
     const { base, head, git } = history();
     expect(listFiles(git, base)).toEqual(["apps/api/gone.ts", ACCENTED]);
     expect(listFiles(git, head)).toEqual([NEWLINE, ACCENTED]);
+  });
+});
+
+describe("tagCommit", () => {
+  it("names a tag's commit, and null without the tag", () => {
+    const { base, git } = history();
+    git(["tag", "-a", "-m", "annotated", "v1.0.0", base]);
+    expect(tagCommit(git, "v1.0.0")).toBe(base);
+    expect(tagCommit(git, "v2.0.0")).toBeNull();
   });
 });

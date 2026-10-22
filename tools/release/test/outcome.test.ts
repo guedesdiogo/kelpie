@@ -20,6 +20,8 @@ describe("exitCode", () => {
   it("passes only a clean guard, a kept or skipped release and a healthy rollback", () => {
     expect(exitCode.guard(0)).toBe(0);
     expect(exitCode.guard(2)).toBe(1);
+    expect(exitCode.gate(0)).toBe(0);
+    expect(exitCode.gate(1)).toBe(1);
     expect(exitCode.deploy({ outcome: "deployed" })).toBe(0);
     expect(exitCode.deploy({ outcome: "skipped" })).toBe(0);
     expect(exitCode.deploy({ outcome: "rolled-back" })).toBe(1);

@@ -20,11 +20,12 @@ export function bounded(
 }
 
 /**
- * Each command's exit code. Only a passing guard, a kept or skipped release or a rollback whose
- * probes pass is 0: a release rolled back automatically fails its job, so it opens an issue.
+ * Each command's exit code. Only a passing guard or critical gate, a kept or skipped release or
+ * a rollback whose probes pass is 0: a release rolled back automatically fails its job, so it opens an issue.
  */
 export const exitCode = {
   guard: (blocking: number) => (blocking === 0 ? 0 : 1),
+  gate: (unaccepted: number) => (unaccepted === 0 ? 0 : 1),
   deploy: (report: Pick<DeployReport, "outcome">) =>
     report.outcome === "deployed" || report.outcome === "skipped" ? 0 : 1,
   rollback: (report: Pick<RollbackReport, "verdict">) =>

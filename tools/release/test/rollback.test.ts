@@ -43,6 +43,20 @@ describe("planRollback", () => {
     await expect(planRollback({ api, git: quietGit }, "latest")).rejects.toThrow(RollbackRefused);
   });
 
+  it("goes back to the commit a release's tag names", async () => {
+    const api = fakeApi({ live, versions: [previous, older] });
+    const git = (args: readonly string[]) => {
+      if (args.at(-1) === "refs/tags/v1.2.0^{commit}")
+        return "cc8e1791d2a6b0e9f1c3a5b7d9e1f3a5b7c9d1e3\n";
+      if (args[0] === "rev-parse" && args.includes("--verify")) throw new Error("unknown revision");
+      return quietGit(args);
+    };
+    expect((await planRollback({ api, git }, "v1.2.0")).target).toEqual(previous);
+    await expect(planRollback({ api, git }, "v9.9.9")).rejects.toThrow(
+      "There's no release tag v9.9.9.",
+    );
+  });
+
   it("moves nothing when production already serves the target", async () => {
     const api = fakeApi({ live, versions: [previous] });
     expect((await planRollback({ api, git: quietGit }, "95-25c5076")).moves).toEqual([]);

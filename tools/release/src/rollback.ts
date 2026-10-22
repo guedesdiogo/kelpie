@@ -4,7 +4,7 @@ import {
   SECRETS_CHANGED,
   type VersionTraffic,
 } from "./cloudflare.ts";
-import type { Git } from "./git.ts";
+import { type Git, tagCommit } from "./git.ts";
 import {
   type Barrier,
   barriersBetween,
@@ -107,11 +107,20 @@ export async function planRollback(
   deps: { api: CloudflareApi; git: Git },
   input: string,
 ): Promise<RollbackPlan> {
-  const target = parseTarget(input);
-  if (!target) {
+  const parsed = parseTarget(input);
+  if (!parsed) {
     throw new RollbackRefused(
-      `"${input}" isn't a target. Use previous, a build number (96), a tag (96-0c620f4) or a commit.`,
+      `"${input}" isn't a target. Use previous, a release (v1.2.0), a build number (96), a tag (96-0c620f4) or a commit.`,
     );
+  }
+  // A release goes back to the commit its tag names (ADR-0066).
+  let target: Exclude<typeof parsed, { kind: "release" }>;
+  if (parsed.kind === "release") {
+    const commit = tagCommit(deps.git, parsed.release);
+    if (!commit) throw new RollbackRefused(`There's no release tag ${parsed.release}.`);
+    target = { kind: "commit", commit };
+  } else {
+    target = parsed;
   }
   const live = await readLive(deps.api);
   const origin = liveOrigin(live);

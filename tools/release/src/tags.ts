@@ -28,16 +28,23 @@ export function sameTag(a: BuildTag | null, b: BuildTag | null): boolean {
   return a !== null && b !== null && a.build === b.build && sameCommit(a.commit, b.commit);
 }
 
-/** What a rollback goes back to: the build before the live one, a build, a tag or a commit. */
+/**
+ * What a rollback goes back to: the build before the live one, a release (`v1.2.0`, whose tag
+ * names a commit), a build, a build tag or a commit.
+ */
 export type Target =
   | { kind: "previous" }
+  | { kind: "release"; release: string }
   | { kind: "build"; build: number }
   | { kind: "tag"; tag: BuildTag }
   | { kind: "commit"; commit: string };
 
+const RELEASE = /^v\d+\.\d+\.\d+$/;
+
 export function parseTarget(input: string): Target | null {
   const value = input.trim().toLowerCase();
   if (value === "previous") return { kind: "previous" };
+  if (RELEASE.test(value)) return { kind: "release", release: value };
   if (/^\d+$/.test(value)) return { kind: "build", build: Number(value) };
   const tag = parseTag(value);
   if (tag) return { kind: "tag", tag };
@@ -59,7 +66,7 @@ export interface TaggedVersion {
  */
 export function pickTag(
   versions: readonly TaggedVersion[],
-  target: Exclude<Target, { kind: "previous" }>,
+  target: Exclude<Target, { kind: "previous" | "release" }>,
 ): BuildTag | null {
   let candidates: TaggedVersion[];
   switch (target.kind) {

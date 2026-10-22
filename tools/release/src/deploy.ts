@@ -386,7 +386,7 @@ async function rollBack(
   if (uploaded && report.rollback.some((result) => result.ok && result.script === INGRESS)) {
     report.warnings.push(
       holdsProbeToken(plan.live.find((worker) => worker.spec.script === INGRESS))
-        ? "The rollback put ingress back on the previous DEPLOY_PROBE_TOKEN. Once main is fixed, deploy with rotate-probe-token: until then the deep probe fails (docs/deploy.md)."
+        ? "The rollback put ingress back on the previous DEPLOY_PROBE_TOKEN. Once the fix is released, deploy that release with rotate-probe-token: until then the deep probe fails (docs/deploy.md)."
         : "The rollback put ingress back on a version without DEPLOY_PROBE_TOKEN. The next deploy uploads it again.",
     );
   }
