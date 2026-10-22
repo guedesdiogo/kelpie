@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import { INVISIBLE, MAX_EXCERPT_CHARS, SESSION_ID } from "./protocol.ts";
 import { cut, excerptOf, redact } from "./redact.ts";
 import {
@@ -5,12 +6,14 @@ import {
   appendEvent,
   CONTINUING_REASONS,
   deleteExcerpt,
+  deleteSocket,
   HOOK_EVENTS,
   HOOK_WORD,
   type HookEvent,
   prepareSpoolDir,
   type SpoolEvent,
   writeExcerpt,
+  writeSocket,
 } from "./spool.ts";
 
 // The session-event hook (ADR-0057 §2), which hooks/session-event.ts runs for every event of
@@ -55,7 +58,12 @@ export interface HookOptions {
   now: number;
   /** The owner's user, whose private directory the spool must be. */
   uid: number;
+  /** The session's inbox, as Claude Code gives its hooks `CLAUDE_CODE_MESSAGING_SOCKET`. */
+  socket?: string | undefined;
 }
+
+/** The longest inbox path taken: a Unix socket's is at most about 104 bytes. */
+const MAX_SOCKET_PATH_CHARS = 255;
 
 /** Everything the hook does with its input. It never throws, whatever the input or the disk. */
 export async function runHook(
@@ -93,10 +101,11 @@ export async function readInput(
 }
 
 /**
- * Records one hook event: its line in the spool, and for `Stop` the session's excerpt. An input
- * that isn't one of the events, or whose session id isn't a UUID, writes nothing.
+ * Records one hook event: its line in the spool, and for `Stop` the session's excerpt. A
+ * `SessionStart` writes no line, only the session's inbox address (ADR-0069 §2). An input that
+ * isn't one of the events, or whose session id isn't a UUID, writes nothing.
  */
-export function recordEvent(input: string, { dir, now, uid }: HookOptions): void {
+export function recordEvent(input: string, { dir, now, uid, socket }: HookOptions): void {
   let payload: Record<string, unknown>;
   try {
     const value = JSON.parse(input) as unknown;
@@ -107,9 +116,18 @@ export function recordEvent(input: string, { dir, now, uid }: HookOptions): void
   }
   const event = payload.hook_event_name;
   const session = payload.session_id;
-  if (!HOOK_EVENTS.includes(event as HookEvent)) return;
+  if (event !== "SessionStart" && !HOOK_EVENTS.includes(event as HookEvent)) return;
   if (typeof session !== "string" || !SESSION_ID.test(session)) return;
   if (!prepareSpoolDir(dir, uid)) return;
+  if (event === "SessionStart") {
+    // The address of the session's own process: a resume in a new one replaces it.
+    if (socket !== undefined && isAbsolute(socket) && socket.length <= MAX_SOCKET_PATH_CHARS) {
+      writeSocket(dir, session, { at: now, path: socket });
+    } else {
+      deleteSocket(dir, session);
+    }
+    return;
+  }
   appendEvent(dir, lineOf(event as HookEvent, session, now, payload));
   if (event === "Stop") {
     const reply = payload.last_assistant_message;
@@ -127,6 +145,7 @@ export function recordEvent(input: string, { dir, now, uid }: HookOptions): void
     else writeExcerpt(dir, session, { at: now, text });
   } else if (event === "SessionEnd" && !CONTINUING_REASONS.includes(String(payload.reason))) {
     deleteExcerpt(dir, session);
+    deleteSocket(dir, session);
   }
 }
 

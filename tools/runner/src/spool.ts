@@ -6,15 +6,18 @@ import {
   renameSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeSync,
 } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { isPrivateDir, listNames, readSmall, readTail } from "./files.ts";
-import { SESSION_ID } from "./protocol.ts";
+import { type RunnerVerdict, SESSION_ID, TOOL_NAME } from "./protocol.ts";
 
 // The spool the session-event hook writes and the runner reads (ADR-0057 §2): one line per hook
-// event, and each session's last excerpt in a file of its own. A directory only the owner's user
-// may open, holding files only it may read. No network, and no secret.
+// event, and each session's last excerpt in a file of its own. Since ADR-0069, also each permission
+// request the permission hook holds open, the verdict the runner gives it, and each session's
+// inbox address. A directory only the owner's user may open, holding files only it may read. No
+// network, and no secret.
 
 /** Where the spool lives, under the owner's home. The hook and the runner both run as that user. */
 export function spoolDirOf(home: string): string {
@@ -184,7 +187,10 @@ export function parseSpoolLine(line: string): SpoolEvent | null {
 }
 
 const EXCERPT_NAME = /^excerpt-([0-9a-f-]{36})\.json$/;
-const TEMPORARY_NAME = /^\.excerpt-[0-9a-f-]{36}\.\d+\.tmp$/;
+const TEMPORARY_NAME = /^\.(?:excerpt|request|socket)-[0-9a-f-]{36}\.\d+\.tmp$/;
+const REQUEST_NAME = /^request-([0-9a-f-]{36})\.json$/;
+const VERDICT_NAME = /^verdict-([0-9a-f-]{36})\.json$/;
+const SOCKET_NAME = /^socket-([0-9a-f-]{36})\.json$/;
 
 function excerptPath(dir: string, session: string): string {
   return join(dir, `excerpt-${session}.json`);
@@ -196,18 +202,26 @@ function excerptPath(dir: string, session: string): string {
  */
 export function writeExcerpt(dir: string, session: string, excerpt: Excerpt): void {
   if (!SESSION_ID.test(session)) return;
-  const temporary = join(dir, `.excerpt-${session}.${process.pid}.tmp`);
+  writeAside(dir, "excerpt", session, JSON.stringify(excerpt));
+}
+
+/**
+ * Writes `<kind>-<id>.json`, `0600`, aside first and then renamed, so a reader never sees half of
+ * it. `id` must be a UUID: it names the file.
+ */
+function writeAside(dir: string, kind: string, id: string, text: string): void {
+  const temporary = join(dir, `.${kind}-${id}.${process.pid}.tmp`);
   const fd = openSync(
     temporary,
     constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
     0o600,
   );
   try {
-    writeSync(fd, JSON.stringify(excerpt));
+    writeSync(fd, text);
   } finally {
     closeSync(fd);
   }
-  renameSync(temporary, excerptPath(dir, session));
+  renameSync(temporary, join(dir, `${kind}-${id}.json`));
 }
 
 /** A session's excerpt, or null when it has none, or none that checks out. */
@@ -243,4 +257,170 @@ export function listExcerpts(dir: string): { sessions: string[]; temporary: stri
     else if (TEMPORARY_NAME.test(name)) temporary.push(name);
   }
   return { sessions, temporary };
+}
+
+/** A request's, a verdict's or an inbox address's file: a cut input, at most. */
+export const MAX_ACTION_FILE_BYTES = 16 * 1024;
+/** The longest inbox address taken: a Unix socket's path is at most about 104 bytes. */
+const MAX_SOCKET_PATH_CHARS = 255;
+
+/**
+ * A permission prompt the permission hook holds open for Kelpie's verdict (ADR-0069 §1): its id,
+ * which the hook drew at random, the session and its thread, when it opened and until when the
+ * hook waits, the hook's own process, and the tool with its input, redacted and cut.
+ */
+export interface SpoolRequest {
+  id: string;
+  session: string;
+  /** The subagent whose prompt it is, as an event's `agent`: absent for the main thread's. */
+  agent?: string | null;
+  at: number;
+  deadline: number;
+  pid: number;
+  tool: string;
+  input: string;
+}
+
+/** The runner's verdict on a request: once written, only its taker removes it. */
+export interface SpoolVerdict {
+  id: string;
+  behavior: RunnerVerdict;
+  at: number;
+}
+
+/** A session's inbox address, as its `SessionStart` hook read `CLAUDE_CODE_MESSAGING_SOCKET`. */
+export interface SpoolSocket {
+  at: number;
+  path: string;
+}
+
+export function writeRequest(dir: string, request: SpoolRequest): void {
+  if (SESSION_ID.test(request.id)) writeAside(dir, "request", request.id, JSON.stringify(request));
+}
+
+/** A request, or null when none checks out under that id. */
+export function readRequest(dir: string, id: string): SpoolRequest | null {
+  const value = readAction(dir, "request", id);
+  if (value === null) return null;
+  const { session, agent, at, deadline, pid, tool, input } = value;
+  if (value.id !== id || typeof session !== "string" || !SESSION_ID.test(session)) return null;
+  if (![at, deadline].every((time) => Number.isSafeInteger(time) && (time as number) >= 0)) {
+    return null;
+  }
+  if (!Number.isSafeInteger(pid) || (pid as number) <= 0) return null;
+  if (typeof tool !== "string" || !TOOL_NAME.test(tool) || typeof input !== "string") return null;
+  if (agent !== undefined && agent !== null && agentOf(agent) === null) return null;
+  return {
+    id,
+    session,
+    ...(agent === undefined ? {} : { agent: agent as string | null }),
+    at: at as number,
+    deadline: deadline as number,
+    pid: pid as number,
+    tool,
+    input,
+  };
+}
+
+export function deleteRequest(dir: string, id: string): void {
+  if (SESSION_ID.test(id)) rmSync(join(dir, `request-${id}.json`), { force: true });
+}
+
+/**
+ * Writes the runner's verdict, `0600`, unless a verdict is there already: false then, so a request
+ * takes one verdict only. Never through a symlink in its place.
+ */
+export function writeVerdict(dir: string, verdict: SpoolVerdict): boolean {
+  if (!SESSION_ID.test(verdict.id)) return false;
+  let fd: number;
+  try {
+    fd = openSync(
+      join(dir, `verdict-${verdict.id}.json`),
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600,
+    );
+  } catch {
+    return false;
+  }
+  try {
+    writeSync(fd, JSON.stringify(verdict));
+  } finally {
+    closeSync(fd);
+  }
+  return true;
+}
+
+export function readVerdict(dir: string, id: string): SpoolVerdict | null {
+  const value = readAction(dir, "verdict", id);
+  if (value === null || value.id !== id) return null;
+  const { behavior, at } = value;
+  if ((behavior !== "allow" && behavior !== "deny") || !Number.isSafeInteger(at)) return null;
+  return { id, behavior, at: at as number };
+}
+
+/**
+ * Removes a verdict, and says whether this call did: the hook takes it to apply it, and the runner
+ * takes back one the hook didn't take in time. Only one of them can.
+ */
+export function takeVerdict(dir: string, id: string): boolean {
+  if (!SESSION_ID.test(id)) return false;
+  try {
+    unlinkSync(join(dir, `verdict-${id}.json`));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function writeSocket(dir: string, session: string, socket: SpoolSocket): void {
+  if (SESSION_ID.test(session)) writeAside(dir, "socket", session, JSON.stringify(socket));
+}
+
+export function readSocket(dir: string, session: string): SpoolSocket | null {
+  const value = readAction(dir, "socket", session);
+  if (value === null) return null;
+  const { at, path } = value;
+  if (!Number.isSafeInteger(at) || typeof path !== "string") return null;
+  if (!isAbsolute(path) || path.length > MAX_SOCKET_PATH_CHARS) return null;
+  return { at: at as number, path };
+}
+
+export function deleteSocket(dir: string, session: string): void {
+  if (SESSION_ID.test(session)) rmSync(join(dir, `socket-${session}.json`), { force: true });
+}
+
+/** The requests, verdicts and inbox addresses in the spool, by their ids. */
+export function listActions(dir: string): {
+  requests: string[];
+  verdicts: string[];
+  sockets: string[];
+} {
+  const listed = listNames(dir, MAX_SPOOL_ENTRIES);
+  const found = { requests: [] as string[], verdicts: [] as string[], sockets: [] as string[] };
+  for (const name of listed?.names ?? []) {
+    for (const [pattern, list] of [
+      [REQUEST_NAME, found.requests],
+      [VERDICT_NAME, found.verdicts],
+      [SOCKET_NAME, found.sockets],
+    ] as const) {
+      const id = pattern.exec(name)?.[1];
+      if (id !== undefined && SESSION_ID.test(id)) list.push(id);
+    }
+  }
+  return found;
+}
+
+/** A small JSON object from `<kind>-<id>.json`; null when the id isn't a UUID, or nothing checks out. */
+function readAction(dir: string, kind: string, id: string): Record<string, unknown> | null {
+  if (!SESSION_ID.test(id)) return null;
+  const text = readSmall(join(dir, `${kind}-${id}.json`), MAX_ACTION_FILE_BYTES);
+  if (text === null) return null;
+  try {
+    const value = JSON.parse(text) as unknown;
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }

@@ -2,16 +2,25 @@ import { describe, expect, it } from "vitest";
 import {
   isRunnerTime,
   isRunnerToolLoopMs,
+  isRunnerVerdict,
+  parseRunnerActAnswer,
+  parseRunnerMessageRequest,
   parseRunnerToolResult,
   parseRunnerTurnRequest,
+  parseRunnerVerdictAnswer,
+  parseRunnerVerdictRequest,
+  parseRunnerVpsRequests,
   parseRunnerVpsSessions,
   parseRunnerVpsWaits,
   RUNNER_MAX_EXCERPT_CHARS,
+  RUNNER_MAX_INPUT_CHARS,
+  RUNNER_MAX_MESSAGE_CHARS,
   RUNNER_MAX_TITLE_CHARS,
   RUNNER_MAX_VPS_SESSIONS,
   RUNNER_PROTOCOL,
   RUNNER_SESSION_ID,
   type RunnerTurnRequest,
+  type RunnerVpsRequest,
   type RunnerVpsSession,
   type RunnerVpsWait,
   runnerJsonLength,
@@ -330,8 +339,8 @@ const waitsAnswer = (waits: unknown[], extra: Record<string, unknown> = {}) => (
 });
 
 describe("parseRunnerVpsSessions", () => {
-  it("is protocol 3's", () => {
-    expect(RUNNER_PROTOCOL).toBe(3);
+  it("is protocol 4's", () => {
+    expect(RUNNER_PROTOCOL).toBe(4);
   });
 
   it("takes the runner's list as it is, nulls included", () => {
@@ -469,6 +478,159 @@ describe("parseRunnerVpsWaits", () => {
     ["a repository that isn't text", waitsAnswer([vpsWait({ repository: 7 as never })])],
   ])("refuses %s", (_, value) => {
     expect(parseRunnerVpsWaits(value)).toBeNull();
+  });
+});
+
+const REQUEST_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+
+function vpsRequest(overrides: Partial<RunnerVpsRequest> = {}): RunnerVpsRequest {
+  return {
+    id: REQUEST_ID,
+    sessionId: SESSION,
+    tool: "Bash",
+    input: "rm -rf build",
+    openedAt: NOW - 30_000,
+    title: "Fix the login",
+    repository: "kelpie",
+    ...overrides,
+  };
+}
+
+const requestsAnswer = (requests: unknown[], extra: Record<string, unknown> = {}) => ({
+  ok: true,
+  now: NOW,
+  requests,
+  truncated: false,
+  ...extra,
+});
+
+describe("parseRunnerVpsRequests", () => {
+  it("takes the runner's open requests as they are", () => {
+    const answer = requestsAnswer([
+      vpsRequest(),
+      vpsRequest({ tool: "mcp__github__create_issue", title: null, repository: null }),
+    ]);
+    expect(parseRunnerVpsRequests(answer)).toEqual(answer);
+    expect(parseRunnerVpsRequests(requestsAnswer([], { truncated: true }))).toEqual(
+      requestsAnswer([], { truncated: true }),
+    );
+  });
+
+  it.each([
+    ["a body that isn't an object", 1],
+    ["ok false", { ...requestsAnswer([]), ok: false }],
+    ["a now that isn't a time", requestsAnswer([], { now: 1.5 })],
+    ["a truncated that isn't a boolean", requestsAnswer([], { truncated: 0 })],
+    ["requests that aren't a list", requestsAnswer([], { requests: {} })],
+    [
+      "too many requests",
+      requestsAnswer(Array.from({ length: RUNNER_MAX_VPS_SESSIONS + 1 }, () => vpsRequest())),
+    ],
+    ["a request with an extra field", requestsAnswer([{ ...vpsRequest(), pid: 4 }])],
+    ["a request without its input", requestsAnswer([{ ...vpsRequest(), input: undefined }])],
+    ["an id that isn't a UUID", requestsAnswer([vpsRequest({ id: "1" })])],
+    ["a session id that isn't a UUID", requestsAnswer([vpsRequest({ sessionId: "../x" })])],
+    ["a tool name with a space", requestsAnswer([vpsRequest({ tool: "Bash now" })])],
+    ["a tool name too long", requestsAnswer([vpsRequest({ tool: "t".repeat(129) })])],
+    ["an openedAt that isn't a time", requestsAnswer([vpsRequest({ openedAt: -1 })])],
+    ["an empty input", requestsAnswer([vpsRequest({ input: "" })])],
+    [
+      "an input too long",
+      requestsAnswer([vpsRequest({ input: "i".repeat(RUNNER_MAX_INPUT_CHARS + 1) })]),
+    ],
+    ["an input of two lines", requestsAnswer([vpsRequest({ input: "ls\nrm -rf /" })])],
+    ["an input with a bidi override", requestsAnswer([vpsRequest({ input: "ls \u202e" })])],
+    ["a title of two lines", requestsAnswer([vpsRequest({ title: "a\nb" })])],
+    ["a repository that isn't text", requestsAnswer([vpsRequest({ repository: 1 as never })])],
+  ])("refuses %s", (_, value) => {
+    expect(parseRunnerVpsRequests(value)).toBeNull();
+  });
+});
+
+describe("a verdict", () => {
+  it("is allow or deny", () => {
+    expect(isRunnerVerdict("allow")).toBe(true);
+    expect(isRunnerVerdict("deny")).toBe(true);
+    for (const value of ["ask", "Allow", "", null, 1]) expect(isRunnerVerdict(value)).toBe(false);
+  });
+
+  it("takes a body with the verdict only", () => {
+    expect(parseRunnerVerdictRequest({ verdict: "deny" })).toEqual({ verdict: "deny" });
+    for (const value of [{}, { verdict: "ask" }, { verdict: "allow", always: true }, "allow"]) {
+      expect(parseRunnerVerdictRequest(value)).toBeNull();
+    }
+  });
+
+  it("takes the runner's answer: applied or not, or closed", () => {
+    expect(parseRunnerVerdictAnswer({ ok: true, applied: true })).toEqual({
+      ok: true,
+      applied: true,
+    });
+    expect(parseRunnerVerdictAnswer({ ok: true, applied: false })).toEqual({
+      ok: true,
+      applied: false,
+    });
+    expect(parseRunnerVerdictAnswer({ ok: false, reason: "closed" })).toEqual({
+      ok: false,
+      reason: "closed",
+    });
+    for (const value of [
+      { ok: true },
+      { ok: true, applied: "yes" },
+      { ok: false, reason: "ended" },
+      { ok: false },
+      { ok: true, applied: true, extra: 1 },
+      null,
+    ]) {
+      expect(parseRunnerVerdictAnswer(value)).toBeNull();
+    }
+  });
+});
+
+describe("a message to a session", () => {
+  it("takes text with something in it, of several lines, up to its bound", () => {
+    expect(parseRunnerMessageRequest({ text: "Rebase on main, please.\nThen push." })).toEqual({
+      text: "Rebase on main, please.\nThen push.",
+    });
+    const longest = "m".repeat(RUNNER_MAX_MESSAGE_CHARS);
+    expect(parseRunnerMessageRequest({ text: longest })).toEqual({ text: longest });
+  });
+
+  it.each([
+    ["no text", {}],
+    ["empty text", { text: "" }],
+    ["only spaces", { text: " \n\t" }],
+    ["text too long", { text: "m".repeat(RUNNER_MAX_MESSAGE_CHARS + 1) }],
+    ["text that isn't a string", { text: 5 }],
+    ["an extra field", { text: "hi", from: "owner" }],
+  ])("refuses %s", (_, value) => {
+    expect(parseRunnerMessageRequest(value)).toBeNull();
+  });
+});
+
+describe("parseRunnerActAnswer", () => {
+  it.each([
+    "not_found",
+    "ended",
+    "no_inbox",
+    "not_claude_code",
+    "unsupported",
+    "failed",
+  ])("takes the refusal %s", (reason) => {
+    expect(parseRunnerActAnswer({ ok: false, reason })).toEqual({ ok: false, reason });
+  });
+
+  it("takes a success, and nothing else", () => {
+    expect(parseRunnerActAnswer({ ok: true })).toEqual({ ok: true });
+    for (const value of [
+      { ok: true, extra: 1 },
+      { ok: false, reason: "closed" },
+      { ok: false, reason: 4 },
+      { ok: false },
+      [],
+    ]) {
+      expect(parseRunnerActAnswer(value)).toBeNull();
+    }
   });
 });
 

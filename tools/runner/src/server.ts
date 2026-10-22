@@ -3,8 +3,11 @@ import {
   MAX_RESULT_BYTES,
   MAX_TURN_BYTES,
   PROTOCOL,
+  parseMessageRequest,
   parseToolResult,
   parseTurnRequest,
+  parseVerdictRequest,
+  type RunnerActAnswer,
   SESSION_ID,
   VERSION,
 } from "./protocol.ts";
@@ -23,8 +26,8 @@ export interface HandlerOptions {
   secrets: readonly string[];
   log: (entry: LogEntry) => void;
   sessions: Pick<Sessions, "turn" | "answer" | "close">;
-  /** The VPS's Claude Code sessions, read only (ADR-0057). */
-  vps: Pick<VpsSessions, "list" | "waits">;
+  /** The VPS's Claude Code sessions (ADR-0057), and acting on them (ADR-0069). */
+  vps: Pick<VpsSessions, "list" | "waits" | "requests" | "verdict" | "message" | "end">;
 }
 
 /** What the handler uses of Bun's server: a request's own idle timeout, in seconds. */
@@ -32,8 +35,15 @@ export interface ServerTimeouts {
   timeout(request: Request, seconds: number): void;
 }
 
-/** `/sessions/:id`, `/sessions/:id/turns` or `/sessions/:id/tool-results`. */
-const SESSION_PATH = /^\/sessions\/([^/]+)(\/turns|\/tool-results)?$/;
+/**
+ * `/sessions/:id`, `/sessions/:id/turns` or `/sessions/:id/tool-results`, the `claude-code` route's;
+ * or `/sessions/:id/message` and `/sessions/:id/end`, the server's other sessions' (ADR-0069).
+ */
+const SESSION_PATH = /^\/sessions\/([^/]+)(\/turns|\/tool-results|\/message|\/end)?$/;
+/** `/sessions/requests/:id`: a verdict on a permission request. */
+const REQUEST_PATH = /^\/sessions\/requests\/([^/]+)$/;
+/** The largest verdict's, message's or end's body: a message of 4,000 characters, all escaped. */
+const MAX_ACTION_BYTES = 64 * 1024;
 /** `since` in `/sessions/waits?since=`: epoch ms, digits only. */
 const SINCE = /^\d{1,16}$/;
 
@@ -78,13 +88,16 @@ async function route(
     if (request.method !== "GET") return notAllowed("GET");
     return Response.json({ ok: true, version: VERSION, protocol: PROTOCOL });
   }
-  if (path === "/sessions" || path === "/sessions/waits") {
+  if (path === "/sessions" || path === "/sessions/waits" || path === "/sessions/requests") {
     if (request.method !== "GET") return notAllowed("GET");
     if (path === "/sessions") return Response.json(vps.list());
+    if (path === "/sessions/requests") return Response.json(vps.requests());
     const since = sinceOf(request.url);
     if (since === null) return Response.json({ ok: false }, { status: 400 });
     return Response.json(vps.waits(since));
   }
+  const requestId = REQUEST_PATH.exec(path)?.[1];
+  if (requestId !== undefined) return verdict(request, requestId, vps);
   const match = SESSION_PATH.exec(path);
   if (!match) return Response.json({ ok: false }, { status: 404 });
   const id = match[1] as string;
@@ -97,9 +110,45 @@ async function route(
   }
   if (request.method !== "POST") return notAllowed("POST");
   if (!SESSION_ID.test(id)) return Response.json({ ok: false }, { status: 400 });
+  if (action === "/end") return acted(vps.end(id));
+  if (action === "/message") return message(request, id, vps);
   return action === "/turns"
     ? turn(request, id, sessions, server)
     : toolResult(request, id, sessions);
+}
+
+/** `POST /sessions/requests/:id`: 409 when the request isn't open, or took a verdict already. */
+async function verdict(
+  request: Request,
+  id: string,
+  vps: HandlerOptions["vps"],
+): Promise<Response> {
+  if (request.method !== "POST") return notAllowed("POST");
+  if (!SESSION_ID.test(id)) return Response.json({ ok: false }, { status: 400 });
+  const body = await readJson(request, MAX_ACTION_BYTES);
+  if ("status" in body) return Response.json({ ok: false }, { status: body.status });
+  const given = parseVerdictRequest(body.value);
+  if (!given) return Response.json({ ok: false }, { status: 400 });
+  const answer = await vps.verdict(id, given.verdict);
+  return Response.json(answer, { status: answer.ok ? 200 : 409 });
+}
+
+/** `POST /sessions/:id/message`: the text to the session's inbox. */
+async function message(
+  request: Request,
+  id: string,
+  vps: HandlerOptions["vps"],
+): Promise<Response> {
+  const body = await readJson(request, MAX_ACTION_BYTES);
+  if ("status" in body) return Response.json({ ok: false }, { status: body.status });
+  const given = parseMessageRequest(body.value);
+  if (!given) return Response.json({ ok: false }, { status: 400 });
+  return acted(await vps.message(id, given.text));
+}
+
+/** An action's answer: 409 with its reason when the runner didn't act, never 404, an old path's. */
+function acted(answer: RunnerActAnswer): Response {
+  return Response.json(answer, { status: answer.ok ? 200 : 409 });
 }
 
 /** `POST /sessions/:id/turns`: the turn's frames, as NDJSON, until it ends. */

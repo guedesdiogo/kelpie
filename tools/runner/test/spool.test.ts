@@ -16,7 +16,10 @@ import { ownUid } from "../src/secrets.ts";
 import {
   appendEvent,
   deleteExcerpt,
+  deleteRequest,
+  deleteSocket,
   EVENTS_FILE,
+  listActions,
   listExcerpts,
   MAX_EVENTS_FILE_BYTES,
   MAX_EXCERPT_FILE_BYTES,
@@ -25,9 +28,17 @@ import {
   prepareSpoolDir,
   readEvents,
   readExcerpt,
+  readRequest,
+  readSocket,
+  readVerdict,
   type SpoolEvent,
+  type SpoolRequest,
   spoolDirOf,
+  takeVerdict,
   writeExcerpt,
+  writeRequest,
+  writeSocket,
+  writeVerdict,
 } from "../src/spool.ts";
 import { NOW, SESSION_A, SESSION_B, spoolEvent } from "./fake-vps.ts";
 
@@ -242,5 +253,153 @@ describe("the spool's excerpts", () => {
       temporary: [`.excerpt-${SESSION_A}.123.tmp`],
     });
     expect(listExcerpts(join(root, "missing"))).toEqual({ sessions: [], temporary: [] });
+  });
+});
+
+const REQUEST_A = "aaaaaaaa-0000-4000-8000-00000000000a";
+const REQUEST_B = "bbbbbbbb-0000-4000-8000-00000000000b";
+
+function spoolRequest(overrides: Partial<SpoolRequest> = {}): SpoolRequest {
+  return {
+    id: REQUEST_A,
+    session: SESSION_A,
+    at: NOW,
+    deadline: NOW + 570_000,
+    pid: 4242,
+    tool: "Bash",
+    input: "rm -rf build",
+    ...overrides,
+  };
+}
+
+describe("the spool's permission requests (ADR-0069 §1)", () => {
+  beforeEach(() => {
+    prepareSpoolDir(dir, ownUid());
+  });
+
+  it("keeps each request in a file of its own, only the owner may read, until it is deleted", () => {
+    writeRequest(dir, spoolRequest());
+    writeRequest(dir, spoolRequest({ id: REQUEST_B, session: SESSION_B, agent: "a1b2c3" }));
+    expect(readRequest(dir, REQUEST_A)).toEqual(spoolRequest());
+    expect(readRequest(dir, REQUEST_B)).toEqual(
+      spoolRequest({ id: REQUEST_B, session: SESSION_B, agent: "a1b2c3" }),
+    );
+    expect(mode(join(dir, `request-${REQUEST_A}.json`))).toBe(0o600);
+    expect(listActions(dir).requests.sort()).toEqual([REQUEST_A, REQUEST_B]);
+    deleteRequest(dir, REQUEST_A);
+    deleteRequest(dir, REQUEST_A);
+    expect(readRequest(dir, REQUEST_A)).toBeNull();
+    expect(listActions(dir).requests).toEqual([REQUEST_B]);
+  });
+
+  it("keeps a subagent of unknown id as null, and the main thread's without one", () => {
+    writeRequest(dir, spoolRequest({ agent: null }));
+    expect(readRequest(dir, REQUEST_A)?.agent).toBeNull();
+    writeRequest(dir, spoolRequest());
+    expect(readRequest(dir, REQUEST_A)).not.toHaveProperty("agent");
+  });
+
+  it.each([
+    ["isn't JSON", "{"],
+    ["has another id", JSON.stringify(spoolRequest({ id: REQUEST_B }))],
+    ["has a session that isn't a UUID", JSON.stringify(spoolRequest({ session: "x" }))],
+    ["has no deadline", JSON.stringify({ ...spoolRequest(), deadline: undefined })],
+    ["has a pid that isn't one", JSON.stringify(spoolRequest({ pid: 0 }))],
+    ["has a tool that isn't a name", JSON.stringify(spoolRequest({ tool: "rm -rf" }))],
+    ["has an input that isn't text", JSON.stringify({ ...spoolRequest(), input: 5 })],
+    ["has an agent that isn't a token", JSON.stringify(spoolRequest({ agent: "a b" }))],
+    ["is too large", JSON.stringify(spoolRequest({ input: "x".repeat(20_000) }))],
+  ])("reads no request from a file that %s", (_, content) => {
+    writeFileSync(join(dir, `request-${REQUEST_A}.json`), content);
+    expect(readRequest(dir, REQUEST_A)).toBeNull();
+  });
+
+  it("uses a request id in a path only once it is a UUID", () => {
+    writeRequest(dir, spoolRequest({ id: "../escape" }));
+    expect(readRequest(dir, "../escape")).toBeNull();
+    expect(writeVerdict(dir, { id: "../escape", behavior: "allow", at: NOW })).toBe(false);
+    expect(takeVerdict(dir, "../escape")).toBe(false);
+    deleteRequest(dir, "../escape");
+    expect(listActions(dir)).toEqual({ requests: [], verdicts: [], sockets: [] });
+  });
+});
+
+describe("the spool's verdicts", () => {
+  beforeEach(() => {
+    prepareSpoolDir(dir, ownUid());
+  });
+
+  it("takes one verdict per request, which only one taker removes", () => {
+    expect(writeVerdict(dir, { id: REQUEST_A, behavior: "allow", at: NOW })).toBe(true);
+    expect(writeVerdict(dir, { id: REQUEST_A, behavior: "deny", at: NOW + 1 })).toBe(false);
+    expect(readVerdict(dir, REQUEST_A)).toEqual({ id: REQUEST_A, behavior: "allow", at: NOW });
+    expect(mode(join(dir, `verdict-${REQUEST_A}.json`))).toBe(0o600);
+    expect(listActions(dir).verdicts).toEqual([REQUEST_A]);
+    expect(takeVerdict(dir, REQUEST_A)).toBe(true);
+    expect(takeVerdict(dir, REQUEST_A)).toBe(false);
+    expect(readVerdict(dir, REQUEST_A)).toBeNull();
+  });
+
+  it("never writes through a symlink in a verdict's place", () => {
+    const target = join(root, "elsewhere");
+    symlinkSync(target, join(dir, `verdict-${REQUEST_A}.json`));
+    expect(writeVerdict(dir, { id: REQUEST_A, behavior: "allow", at: NOW })).toBe(false);
+    expect(() => statSync(target)).toThrow();
+  });
+
+  it.each([
+    ["isn't JSON", "allow"],
+    ["names another request", JSON.stringify({ id: REQUEST_B, behavior: "allow", at: NOW })],
+    ["has another behavior", JSON.stringify({ id: REQUEST_A, behavior: "ask", at: NOW })],
+    ["has no time", JSON.stringify({ id: REQUEST_A, behavior: "deny" })],
+  ])("reads no verdict from a file that %s", (_, content) => {
+    writeFileSync(join(dir, `verdict-${REQUEST_A}.json`), content);
+    expect(readVerdict(dir, REQUEST_A)).toBeNull();
+  });
+});
+
+describe("the spool's inbox addresses", () => {
+  beforeEach(() => {
+    prepareSpoolDir(dir, ownUid());
+  });
+
+  it("keeps each session's latest, in a file only the owner may read", () => {
+    writeSocket(dir, SESSION_A, { at: NOW, path: "/run/user/1000/cc-socks/1.sock" });
+    writeSocket(dir, SESSION_A, { at: NOW + 1, path: "/run/user/1000/cc-socks/2.sock" });
+    expect(readSocket(dir, SESSION_A)).toEqual({
+      at: NOW + 1,
+      path: "/run/user/1000/cc-socks/2.sock",
+    });
+    expect(mode(join(dir, `socket-${SESSION_A}.json`))).toBe(0o600);
+    expect(listActions(dir).sockets).toEqual([SESSION_A]);
+    deleteSocket(dir, SESSION_A);
+    expect(readSocket(dir, SESSION_A)).toBeNull();
+  });
+
+  it.each([
+    ["a relative path", { at: NOW, path: "cc-socks/1.sock" }],
+    ["no time", { path: "/run/user/1000/cc-socks/1.sock" }],
+    ["a path too long", { at: NOW, path: `/${"s".repeat(300)}` }],
+  ])("reads no address with %s", (_, value) => {
+    writeFileSync(join(dir, `socket-${SESSION_A}.json`), JSON.stringify(value));
+    expect(readSocket(dir, SESSION_A)).toBeNull();
+  });
+
+  it("writes none for a session id that isn't a UUID", () => {
+    writeSocket(dir, "../escape", { at: NOW, path: "/tmp/x.sock" });
+    expect(readSocket(dir, "../escape")).toBeNull();
+    expect(listActions(dir).sockets).toEqual([]);
+  });
+});
+
+describe("listActions", () => {
+  it("lists nothing in a spool not there yet, and ignores what isn't the spool's", () => {
+    expect(listActions(join(root, "missing"))).toEqual({ requests: [], verdicts: [], sockets: [] });
+    prepareSpoolDir(dir, ownUid());
+    writeFileSync(join(dir, "request-not-a-uuid.json"), "");
+    writeFileSync(join(dir, `verdict-${"a".repeat(36)}.json`), "");
+    writeFileSync(join(dir, `.request-${REQUEST_A}.12.tmp`), "");
+    expect(listActions(dir)).toEqual({ requests: [], verdicts: [], sockets: [] });
+    expect(listExcerpts(dir).temporary).toEqual([`.request-${REQUEST_A}.12.tmp`]);
   });
 });

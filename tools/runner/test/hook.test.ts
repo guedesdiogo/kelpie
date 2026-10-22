@@ -29,7 +29,7 @@ import {
 import { MAX_EXCERPT_CHARS } from "../src/protocol.ts";
 import { excerptOf, REDACTED, redact } from "../src/redact.ts";
 import { ownUid } from "../src/secrets.ts";
-import { EVENTS_FILE, readEvents, readExcerpt, spoolDirOf } from "../src/spool.ts";
+import { EVENTS_FILE, readEvents, readExcerpt, readSocket, spoolDirOf } from "../src/spool.ts";
 import { NOW, RUNNER_SECRET, SESSION_A } from "./fake-vps.ts";
 
 const HOOK = fileURLToPath(new URL("../hooks/session-event.ts", import.meta.url));
@@ -158,6 +158,28 @@ describe("recordEvent", () => {
       recordEvent(input("SessionEnd", fields), options);
       expect(readExcerpt(options.dir, SESSION_A)).toBeNull();
     }
+  });
+
+  it("records a session's inbox on SessionStart, as its only trace, and drops it at its end", () => {
+    const socket = "/run/user/1000/cc-socks/31337.sock";
+    recordEvent(input("SessionStart", { source: "startup" }), { ...options, socket });
+    expect(readSocket(options.dir, SESSION_A)).toEqual({ at: NOW, path: socket });
+    expect(readEvents(options.dir)).toEqual([]);
+    recordEvent(input("SessionEnd", { reason: "resume" }), options);
+    expect(readSocket(options.dir, SESSION_A)).not.toBeNull();
+    recordEvent(input("SessionEnd", { reason: "other" }), options);
+    expect(readSocket(options.dir, SESSION_A)).toBeNull();
+  });
+
+  it.each([
+    ["no inbox", undefined],
+    ["an inbox that isn't an absolute path", "cc-socks/1.sock"],
+    ["an inbox path too long", `/${"s".repeat(300)}`],
+  ])("records no inbox, and drops an older one, for a SessionStart with %s", (_, socket) => {
+    const older = { ...options, socket: "/run/user/1000/cc-socks/1.sock" };
+    recordEvent(input("SessionStart", { source: "startup" }), older);
+    recordEvent(input("SessionStart", { source: "resume" }), { ...options, socket });
+    expect(readSocket(options.dir, SESSION_A)).toBeNull();
   });
 
   it.each([

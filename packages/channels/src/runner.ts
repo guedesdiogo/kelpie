@@ -3,9 +3,9 @@
 
 /**
  * The protocol's version. It changes when a request or an answer changes shape: 3 added the VPS's
- * sessions (ADR-0057, #433).
+ * sessions (ADR-0057, #433), and 4 acting on them (ADR-0069, #497).
  */
-export const RUNNER_PROTOCOL = 3;
+export const RUNNER_PROTOCOL = 4;
 
 /** A version as the runner reports it, such as `0.1.0`; anything else isn't the runner's answer. */
 export const RUNNER_VERSION = /^[0-9A-Za-z.+-]{1,64}$/;
@@ -571,6 +571,165 @@ export function parseRunnerVpsWaits(value: unknown): RunnerVpsWaits | null {
   return { ok: true, now, waits: parsed, truncated };
 }
 
+// Acting on the VPS's sessions (ADR-0069, #497): a permission prompt their hook holds open for
+// Kelpie's verdict, `GET /sessions/requests` and `POST /sessions/requests/:id`; a message to a
+// session's inbox, `POST /sessions/:id/message`; and its end, `POST /sessions/:id/end`. A refusal
+// answers 409 with its reason: a 404 is a runner too old for the path.
+
+/** A tool's name as Claude Code gives it: a built-in's, as `Bash`, or an MCP tool's. */
+export const RUNNER_TOOL_NAME = /^[A-Za-z0-9_.:-]{1,128}$/;
+/** The most of a tool's input that leaves the server, redacted, as for an excerpt (ADR-0069 §4). */
+export const RUNNER_MAX_INPUT_CHARS = 500;
+/** The largest `/sessions/requests` answer, in bytes of JSON. */
+export const RUNNER_MAX_REQUESTS_BYTES = 256 * 1024;
+/** The longest message Kelpie sends a session. */
+export const RUNNER_MAX_MESSAGE_CHARS = 4_000;
+
+/**
+ * A permission prompt a session's hook holds open for Kelpie's verdict, beside the one the Claude
+ * app or the terminal shows: its id, a lowercase UUID the hook drew, binds the verdict. The tool's
+ * input is redacted, on one line, and cut to RUNNER_MAX_INPUT_CHARS.
+ */
+export interface RunnerVpsRequest {
+  id: string;
+  sessionId: string;
+  tool: string;
+  input: string;
+  openedAt: number;
+  title: string | null;
+  repository: string | null;
+}
+
+/** `GET /sessions/requests`: the requests still open, oldest first. */
+export interface RunnerVpsRequests {
+  ok: true;
+  now: number;
+  requests: RunnerVpsRequest[];
+  truncated: boolean;
+}
+
+export type RunnerVerdict = "allow" | "deny";
+
+/** `POST /sessions/requests/:id`'s body. */
+export interface RunnerVerdictRequest {
+  verdict: RunnerVerdict;
+}
+
+/**
+ * Its answer: `applied` once the hook took the verdict, within a few seconds; `closed` when the
+ * request was answered already, in the session or by an earlier verdict, or is gone.
+ */
+export type RunnerVerdictAnswer = { ok: true; applied: boolean } | { ok: false; reason: "closed" };
+
+/** `POST /sessions/:id/message`'s body: the text, which arrives as another session's message. */
+export interface RunnerMessageRequest {
+  text: string;
+}
+
+/**
+ * Why the runner didn't act on a session:
+ * - `not_found`: no session of the server's has that id, or it is one of the `claude-code` route's;
+ * - `ended`: its process is gone;
+ * - `no_inbox`: the hook recorded no inbox for it, or the inbox doesn't take the message;
+ * - `not_claude_code`: its process isn't a Claude Code process of the runner's user;
+ * - `unsupported`: the server can't check a process, as outside Linux;
+ * - `failed`: the action failed on the way.
+ */
+export type RunnerActRefusal =
+  | "not_found"
+  | "ended"
+  | "no_inbox"
+  | "not_claude_code"
+  | "unsupported"
+  | "failed";
+
+/** What `POST /sessions/:id/message` and `POST /sessions/:id/end` answer. */
+export type RunnerActAnswer = { ok: true } | { ok: false; reason: RunnerActRefusal };
+
+const ACT_REFUSALS: readonly string[] = [
+  "not_found",
+  "ended",
+  "no_inbox",
+  "not_claude_code",
+  "unsupported",
+  "failed",
+];
+
+/** `/sessions/requests`'s answer, checked field by field and rebuilt; null for anything else. */
+export function parseRunnerVpsRequests(value: unknown): RunnerVpsRequests | null {
+  if (!hasKeys(value, ["ok", "now", "requests", "truncated"]) || value.ok !== true) return null;
+  const { now, requests, truncated } = value;
+  if (!isRunnerTime(now) || typeof truncated !== "boolean") return null;
+  if (!Array.isArray(requests) || requests.length > RUNNER_MAX_VPS_SESSIONS) return null;
+  const parsed: RunnerVpsRequest[] = [];
+  for (const entry of requests) {
+    if (
+      !hasKeys(entry, ["id", "sessionId", "tool", "input", "openedAt", "title", "repository"])
+    ) {
+      return null;
+    }
+    const { id, sessionId, tool, input, openedAt, title, repository } = entry;
+    if (typeof id !== "string" || !RUNNER_SESSION_ID.test(id)) return null;
+    if (typeof sessionId !== "string" || !RUNNER_SESSION_ID.test(sessionId)) return null;
+    if (typeof tool !== "string" || !RUNNER_TOOL_NAME.test(tool) || !isRunnerTime(openedAt)) {
+      return null;
+    }
+    if (
+      !isLine(input, RUNNER_MAX_INPUT_CHARS) ||
+      !isOptionalLine(title, RUNNER_MAX_TITLE_CHARS) ||
+      !isOptionalLine(repository, RUNNER_MAX_REPOSITORY_CHARS)
+    ) {
+      return null;
+    }
+    parsed.push({ id, sessionId, tool, input, openedAt, title, repository });
+  }
+  return { ok: true, now, requests: parsed, truncated };
+}
+
+export function isRunnerVerdict(value: unknown): value is RunnerVerdict {
+  return value === "allow" || value === "deny";
+}
+
+/** A verdict's body, rebuilt; null for anything else. */
+export function parseRunnerVerdictRequest(value: unknown): RunnerVerdictRequest | null {
+  if (!hasKeys(value, ["verdict"]) || !isRunnerVerdict(value.verdict)) return null;
+  return { verdict: value.verdict };
+}
+
+/** A verdict's answer, rebuilt; null for anything else. */
+export function parseRunnerVerdictAnswer(value: unknown): RunnerVerdictAnswer | null {
+  if (hasKeys(value, ["ok", "applied"]) && value.ok === true) {
+    return typeof value.applied === "boolean" ? { ok: true, applied: value.applied } : null;
+  }
+  if (hasKeys(value, ["ok", "reason"]) && value.ok === false && value.reason === "closed") {
+    return { ok: false, reason: "closed" };
+  }
+  return null;
+}
+
+/**
+ * A message's body, rebuilt: text with something in it, up to RUNNER_MAX_MESSAGE_CHARS; null for
+ * anything else.
+ */
+export function parseRunnerMessageRequest(value: unknown): RunnerMessageRequest | null {
+  if (!hasKeys(value, ["text"]) || !isText(value.text, RUNNER_MAX_MESSAGE_CHARS)) return null;
+  return value.text.trim() === "" ? null : { text: value.text };
+}
+
+/** A message's or an end's answer, rebuilt; null for anything else. */
+export function parseRunnerActAnswer(value: unknown): RunnerActAnswer | null {
+  if (hasKeys(value, ["ok"]) && value.ok === true) return { ok: true };
+  if (
+    hasKeys(value, ["ok", "reason"]) &&
+    value.ok === false &&
+    typeof value.reason === "string" &&
+    ACT_REFUSALS.includes(value.reason)
+  ) {
+    return { ok: false, reason: value.reason as RunnerActRefusal };
+  }
+  return null;
+}
+
 /** A time in epoch ms: a whole number, from 0. */
 export function isRunnerTime(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
@@ -582,5 +741,10 @@ function isOptionalText(value: unknown, max: number): value is string | null {
 
 /** Null, or text of one line, without control or bidi characters. */
 function isOptionalLine(value: unknown, max: number): value is string | null {
-  return value === null || (isText(value, max) && !RUNNER_NOT_ONE_LINE.test(value));
+  return value === null || isLine(value, max);
+}
+
+/** Text of one line, without control or bidi characters. */
+function isLine(value: unknown, max: number): value is string {
+  return isText(value, max) && !RUNNER_NOT_ONE_LINE.test(value);
 }
