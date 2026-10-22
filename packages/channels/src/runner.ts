@@ -663,9 +663,7 @@ export function parseRunnerVpsRequests(value: unknown): RunnerVpsRequests | null
   if (!Array.isArray(requests) || requests.length > RUNNER_MAX_VPS_SESSIONS) return null;
   const parsed: RunnerVpsRequest[] = [];
   for (const entry of requests) {
-    if (
-      !hasKeys(entry, ["id", "sessionId", "tool", "input", "openedAt", "title", "repository"])
-    ) {
+    if (!hasKeys(entry, ["id", "sessionId", "tool", "input", "openedAt", "title", "repository"])) {
       return null;
     }
     const { id, sessionId, tool, input, openedAt, title, repository } = entry;

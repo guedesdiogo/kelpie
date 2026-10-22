@@ -1,24 +1,32 @@
 import { RpcTarget } from "cloudflare:workers";
 import {
+  parseRunnerActAnswer,
   parseRunnerToolResult,
   parseRunnerTurnRequest,
+  parseRunnerVerdictAnswer,
+  parseRunnerVpsRequests,
   parseRunnerVpsSessions,
   parseRunnerVpsWaits,
+  RUNNER_MAX_REQUESTS_BYTES,
   RUNNER_MAX_SESSIONS_BYTES,
   RUNNER_MAX_TURN_BYTES,
   RUNNER_MAX_WAITS_BYTES,
   RUNNER_PROTOCOL,
   RUNNER_SESSION_ID,
   RUNNER_VERSION,
+  type RunnerActOutcome,
   type RunnerAnswered,
   type RunnerAnswerOutcome,
   type RunnerCloseOutcome,
   type RunnerRelayFailure,
+  type RunnerRequestsOutcome,
   type RunnerSessionsOutcome,
   type RunnerToolResult,
   type RunnerTurnRequest,
   type RunnerTurnStart,
   type RunnerTurnStream,
+  type RunnerVerdict,
+  type RunnerVerdictOutcome,
   type RunnerWaitsOutcome,
   runnerJsonLength,
 } from "@kelpie/channels";
@@ -416,6 +424,85 @@ export async function listWaits(
   return parseRunnerVpsWaits(answer.value) ?? unexpected(answer, "the waits");
 }
 
+// Acting on them (ADR-0069, #497). The runner answers a refusal 409, with its reason; a runner
+// below protocol 4 answers 404, or 405 to `/sessions/requests`, which protocol 3 takes for a
+// session's id.
+
+/** How long a verdict, a message or an end may take: the runner waits for its hook or the inbox. */
+const ACTION_TIMEOUT_MS = 10_000;
+const JSON_BODY = { "content-type": "application/json" };
+
+/** `GET /sessions/requests`: the permission prompts held open for a verdict, up to 256 KiB. */
+export async function listRequests(
+  runner: Fetcher,
+  secret: string,
+): Promise<RunnerRequestsOutcome> {
+  const answer = await read(runner, secret, "/sessions/requests", RUNNER_MAX_REQUESTS_BYTES);
+  if (answer.status !== 200) return readFailure(answer, "the requests");
+  return parseRunnerVpsRequests(answer.value) ?? unexpected(answer, "the requests");
+}
+
+/** `POST /sessions/requests/:id`: applied or not, or `closed` (409). */
+export async function giveVerdict(
+  runner: Fetcher,
+  secret: string,
+  requestId: string,
+  verdict: RunnerVerdict,
+): Promise<RunnerVerdictOutcome> {
+  const answer = await call(runner, secret, `/sessions/requests/${requestId}`, {
+    method: "POST",
+    headers: JSON_BODY,
+    body: JSON.stringify({ verdict }),
+    timeoutMs: ACTION_TIMEOUT_MS,
+  });
+  const parsed =
+    answer.status === 200 || answer.status === 409 ? parseRunnerVerdictAnswer(answer.value) : null;
+  return parsed ?? failureOf(answer) ?? unexpected(answer, "a verdict");
+}
+
+/** `POST /sessions/:id/message`: done, or the runner's reason (409). */
+export async function messageSession(
+  runner: Fetcher,
+  secret: string,
+  sessionId: string,
+  text: string,
+): Promise<RunnerActOutcome> {
+  return act(
+    runner,
+    secret,
+    `/sessions/${sessionId}/message`,
+    JSON.stringify({ text }),
+    "a message",
+  );
+}
+
+/** `POST /sessions/:id/end`: done, or the runner's reason (409). */
+export async function endSession(
+  runner: Fetcher,
+  secret: string,
+  sessionId: string,
+): Promise<RunnerActOutcome> {
+  return act(runner, secret, `/sessions/${sessionId}/end`, "{}", "an end");
+}
+
+async function act(
+  runner: Fetcher,
+  secret: string,
+  path: string,
+  body: string,
+  what: string,
+): Promise<RunnerActOutcome> {
+  const answer = await call(runner, secret, path, {
+    method: "POST",
+    headers: JSON_BODY,
+    body,
+    timeoutMs: ACTION_TIMEOUT_MS,
+  });
+  const parsed =
+    answer.status === 200 || answer.status === 409 ? parseRunnerActAnswer(answer.value) : null;
+  return parsed ?? failureOf(answer) ?? unexpected(answer, what);
+}
+
 /** A GET's answer: its status, 0 when the call failed or timed out, and its JSON, if any. */
 interface ReadAnswer extends Answer {
   value: unknown;
@@ -462,16 +549,21 @@ interface Answer {
   status: number;
   ok?: boolean;
   reason?: unknown;
+  /** The whole JSON, for the answers that carry more. */
+  value?: unknown;
 }
 
-/** A short call to the runner, its answer read whole within REQUEST_TIMEOUT_MS. */
+/** A short call to the runner, its answer read whole within REQUEST_TIMEOUT_MS, or `timeoutMs`. */
 async function call(
   runner: Fetcher,
   secret: string,
   path: string,
-  init: { method: string; headers?: Record<string, string>; body?: string },
+  {
+    timeoutMs = REQUEST_TIMEOUT_MS,
+    ...init
+  }: { method: string; headers?: Record<string, string>; body?: string; timeoutMs?: number },
 ): Promise<Answer> {
-  const timeout = deadline(REQUEST_TIMEOUT_MS);
+  const timeout = deadline(timeoutMs);
   try {
     const response = await runner.fetch(`http://runner${path}`, {
       ...init,
@@ -491,7 +583,7 @@ async function call(
 async function answerOf(response: Response, signal: AbortSignal): Promise<Answer> {
   const value = (await readJson(response, signal, MAX_ANSWER_BYTES)) as Answer | null;
   return typeof value === "object" && value !== null && typeof value.ok === "boolean"
-    ? { status: response.status, ok: value.ok, reason: value.reason }
+    ? { status: response.status, ok: value.ok, reason: value.reason, value }
     : { status: response.status };
 }
 
