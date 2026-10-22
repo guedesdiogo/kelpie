@@ -68,6 +68,7 @@ export default { fetch: () => new Response(null, { status: 404 }) };`,
             modules: true,
             compatibilityDate: "2026-10-01",
             script: `import { WorkerEntrypoint } from "cloudflare:workers";
+export class ProviderCheck extends WorkerEntrypoint {}
 export class LlmGatewayAdmin extends WorkerEntrypoint {
   providers() {
     return ["anthropic"];

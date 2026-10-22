@@ -74,6 +74,30 @@ describe("WORKERS", () => {
     expect(binders).toEqual(["conversation-runtime"]);
   });
 
+  // The stored model keys are the one secret an entrypoint returns (ADR-0068 §3): only the Worker
+  // that calls providers may bind it. conversation-runtime, which the model drives, never does.
+  it("binds channel-egress's ProviderKeys from llm-gateway alone", () => {
+    const binders = WORKERS.filter((worker) =>
+      (configs.get(worker.app)?.services ?? []).some(
+        (service) =>
+          service.service === "kelpie-channel-egress" && service.entrypoint === "ProviderKeys",
+      ),
+    ).map((worker) => worker.app);
+    expect(binders).toEqual(["llm-gateway"]);
+  });
+
+  // A model key's check takes the candidate key (ADR-0068 §2): only the Worker that serves its form
+  // may bind it, and it deploys after llm-gateway, which channel-egress can't.
+  it("binds llm-gateway's ProviderCheck from admin-api alone", () => {
+    const binders = WORKERS.filter((worker) =>
+      (configs.get(worker.app)?.services ?? []).some(
+        (service) =>
+          service.service === "kelpie-llm-gateway" && service.entrypoint === "ProviderCheck",
+      ),
+    ).map((worker) => worker.app);
+    expect(binders).toEqual(["admin-api"]);
+  });
+
   // A binding to a missing entrypoint deploys, and fails only when called: ingress's DEPLOY_PROBE,
   // for one, is called only by the deploy's deep probe (#234). Tests stub these Workers, so the
   // names are checked here against the real ones.

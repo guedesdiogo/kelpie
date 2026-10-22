@@ -1,14 +1,30 @@
-import type { ChannelFormsContract, Locale, RunnerAnswered } from "@kelpie/channels";
+import {
+  type ChannelFormsContract,
+  isModelKey,
+  isModelKeyValue,
+  type Locale,
+  type ModelKey,
+  type ProviderCheckContract,
+  type RunnerAnswered,
+} from "@kelpie/channels";
 import { PAGES } from "./texts.ts";
 
-// The one-time secure forms (ADR-0013) where the owner pastes a secret: a Telegram bot token, or
-// the VPS runner's secret. The page is served by the admin API behind Access; the secret goes straight
-// to channel-egress and never into a conversation, a log or a response.
+// The one-time secure forms (ADR-0013) where the owner pastes a secret: a Telegram bot token, the
+// VPS runner's secret, or a model key (ADR-0068). The page is served by the admin API behind Access;
+// the secret goes straight to channel-egress, a model key by way of llm-gateway's check, and never
+// into a conversation, a log or a response.
 
 export type FormDeps = Pick<
   ChannelFormsContract,
-  "describeForm" | "redeemTelegramForm" | "redeemRunnerForm"
+  | "describeForm"
+  | "redeemTelegramForm"
+  | "redeemRunnerForm"
+  | "redeemModelKeyForm"
+  | "refuseModelKey"
 >;
+
+/** llm-gateway's check of a candidate model key (ADR-0068 §2), which only this Worker binds. */
+export type KeyCheck = ProviderCheckContract["check"];
 
 /** A form token as channel-egress issues it: base64url, at most 64 characters. */
 const FORM_TOKEN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -25,6 +41,15 @@ export async function showForm(token: string, forms: FormDeps, locale: Locale): 
   if (!form.ok) return formGone(form, locale);
   if (form.kind === "runner") {
     return page(200, PAGES[locale].runner.title, runnerForm(null, locale), locale);
+  }
+  if (form.kind === "provider") {
+    if (!isModelKey(form.agentId)) return closedPage(locale);
+    return page(
+      200,
+      PAGES[locale].modelKey.title,
+      modelKeyForm(form.agentId, null, locale),
+      locale,
+    );
   }
   return page(200, PAGES[locale].connect.title, tokenForm(form.agentId, null, locale), locale);
 }
@@ -47,6 +72,9 @@ export type Connected = (agentId: string, bot: string, webhookRegistered: boolea
 
 /** What a stored runner secret tells the conversation that sent the form (#328): how it answered. */
 export type RunnerConnected = (runner: RunnerAnswered) => Promise<void>;
+
+/** What a stored model key tells the conversation that sent the form (ADR-0068): its slot, and its check. */
+export type ModelKeyConnected = (name: ModelKey, check: "accepted" | "unchecked") => Promise<void>;
 
 /** A setup step's report the form's answer doesn't wait on for longer than this (#206). */
 const REPORT_TIMEOUT_MS = 2_000;
@@ -140,6 +168,61 @@ export async function submitRunnerForm(
     default:
       return unavailablePage(locale);
   }
+}
+
+/**
+ * Submits a model key (ADR-0068 §2). llm-gateway's `ProviderCheck` checks it first, with a cheap
+ * authenticated read on its service, so channel-egress calls no provider; then channel-egress stores
+ * a key the check let through, or counts a refused one against the form. A malformed key counts
+ * without a check; a service that can't answer leaves the form open, uncounted. A link that isn't
+ * open sends the key nowhere: only its own key sent again, as a double click sends it, finds the
+ * same answer. Once stored, `connected` reports it, as `submitForm` does a bot's token. No page
+ * shows the key.
+ */
+export async function submitModelKeyForm(
+  token: string,
+  value: string,
+  forms: FormDeps,
+  check: KeyCheck,
+  locale: Locale,
+  connected?: ModelKeyConnected,
+): Promise<Response> {
+  const texts = PAGES[locale].modelKey;
+  const again = async (status: number, message: string) => {
+    const form = await forms.describeForm(token);
+    if (!form.ok) return formGone(form, locale);
+    if (form.kind !== "provider" || !isModelKey(form.agentId)) return closedPage(locale);
+    return page(status, texts.title, modelKeyForm(form.agentId, message, locale), locale);
+  };
+  const candidate = value.trim();
+  // Nothing to check: an empty submission doesn't count against the form's attempts.
+  if (candidate === "") return again(400, texts.empty);
+  const form = await forms.describeForm(token);
+  if (!form.ok && form.reason === "store_unavailable") return unavailablePage(locale);
+  let outcome: Awaited<ReturnType<FormDeps["redeemModelKeyForm"]>>;
+  if (!form.ok || !isModelKeyValue(candidate)) {
+    // A closed link stores nothing new, and a malformed key counts: channel-egress decides both.
+    outcome = await forms.redeemModelKeyForm(token, candidate, "accepted");
+  } else {
+    if (form.kind !== "provider" || !isModelKey(form.agentId)) return closedPage(locale);
+    const checked = await check(form.agentId, candidate);
+    if (checked === "refused") {
+      const refused = await forms.refuseModelKey(token);
+      if (!refused.ok) return unavailablePage(locale);
+      return refused.open ? again(400, texts.refused) : closedPage(locale);
+    }
+    if (checked === "unreachable") return again(502, texts.unreachable);
+    if (checked === "invalid_input") return again(400, texts.invalid);
+    outcome = await forms.redeemModelKeyForm(token, candidate, checked);
+  }
+  if (outcome.ok) {
+    if (connected) await bounded(() => connected(outcome.name, outcome.check), REPORT_TIMEOUT_MS);
+    const name = texts.names[outcome.name];
+    const body = outcome.check === "accepted" ? texts.done(name) : texts.unchecked(name);
+    return page(200, texts.saved, `<p>${body}</p>`, locale);
+  }
+  if (outcome.reason === "invalid_key") return again(400, texts.invalid);
+  return outcome.reason === "unknown_form" ? closedPage(locale) : unavailablePage(locale);
 }
 
 /** Runs `work`, waits for it at most `ms`, and never fails: a report is a courtesy. */
@@ -244,6 +327,18 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 <form method="post">
   <label for="runnerSecret">${texts.label}</label>
   <input id="runnerSecret" name="runnerSecret" type="password" autocomplete="off" spellcheck="false" maxlength="256" required>
+  <button type="submit">${texts.button}</button>
+</form>`;
+}
+
+/** A model key's form, which posts to its own URL, as the bot token's does (ADR-0068). */
+function modelKeyForm(name: ModelKey, error: string | null, locale: Locale): string {
+  const texts = PAGES[locale].modelKey;
+  return `<p>${texts.intro(texts.names[name])}</p>
+${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+<form method="post">
+  <label for="modelKey">${texts.label}</label>
+  <input id="modelKey" name="modelKey" type="password" autocomplete="off" spellcheck="false" maxlength="512" required>
   <button type="submit">${texts.button}</button>
 </form>`;
 }

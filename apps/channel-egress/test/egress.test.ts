@@ -66,10 +66,18 @@ describe("SetupForms", () => {
       reason: "invalid_input",
     });
     // The configuration tools' Worker binds it: it can't describe, redeem or register anything. It
-    // opens the runner's form too, and reads the runner's state, which holds no secret (#294).
+    // opens the runner's form too, and reads the runner's state, which holds no secret (#294), and
+    // opens a model key's form or removes a key, never reading one (ADR-0068).
     expect(
       Object.getOwnPropertyNames(SetupForms.prototype).filter((name) => name !== "constructor"),
-    ).toEqual(["createTelegramForm", "createRunnerForm", "describeRunner", "disconnectTelegram"]);
+    ).toEqual([
+      "createTelegramForm",
+      "createRunnerForm",
+      "describeRunner",
+      "disconnectTelegram",
+      "createModelKeyForm",
+      "removeModelKey",
+    ]);
   });
 });
 

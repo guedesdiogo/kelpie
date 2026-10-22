@@ -191,6 +191,20 @@ function fakeCommands() {
       if (actor.role !== "owner") return forbidden;
       return { ok: true, value: runner.state };
     },
+    // The model keys' tools have tests of their own (model-keys.test.ts).
+    async connectModelKey(actor) {
+      calls.push("connectModelKey");
+      if (actor.role !== "owner") return forbidden;
+      return {
+        ok: true,
+        value: { provider: "openai", path: "/forms/key789", expiresAt: Date.UTC(2026, 9, 6, 20) },
+      };
+    },
+    async removeModelKey(actor) {
+      calls.push("removeModelKey");
+      if (actor.role !== "owner") return forbidden;
+      return { ok: true, value: { provider: "openai", removed: true } };
+    },
   };
   return { commands, agents, calls, runner, allowlists, models };
 }
@@ -255,7 +269,7 @@ describe("Master's configuration tools (ADR-0048)", () => {
     }
     // A task's run has no owner to confirm anything (#335).
     expect(await provider.tools(MASTER, { channel: "task" })).toEqual([]);
-    expect(await provider.tools(MASTER, { channel: "telegram" })).toHaveLength(15);
+    expect(await provider.tools(MASTER, { channel: "telegram" })).toHaveLength(17);
 
     const tools = await toolsOf(provider);
     expect([...tools.keys()]).toEqual([
@@ -273,6 +287,8 @@ describe("Master's configuration tools (ADR-0048)", () => {
       "connect_telegram",
       "pair_telegram",
       "connect_runner",
+      "connect_model_key",
+      "remove_model_key",
       "runner_status",
     ]);
     for (const tool of tools.values()) {
@@ -1203,8 +1219,13 @@ describe("Master's configuration tools (ADR-0048)", () => {
       const tools = await toolsOf(configurationTools(commands, { roleOf: roleIn, adminOrigin }));
       const { context, asked, links } = contextOf(true);
 
-      for (const name of ["connect_telegram", "pair_telegram", "connect_runner"]) {
-        const answer = await run(tools, name, { agentId: MASTER }, context);
+      for (const name of [
+        "connect_telegram",
+        "pair_telegram",
+        "connect_runner",
+        "connect_model_key",
+      ]) {
+        const answer = await run(tools, name, { agentId: MASTER, provider: "openai" }, context);
         expect(answer.isError, `${name} ${adminOrigin}`).toBe(true);
         expect(answer.output, name).toContain("ADMIN_ORIGIN");
       }

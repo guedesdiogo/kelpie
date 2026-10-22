@@ -11,7 +11,8 @@ export default defineConfig({
         // Only Anthropic has a model key, so the OpenAI candidates are skipped. Jev has its key.
         bindings: { ANTHROPIC_API_KEY: "sk-ant-test", TYPESAFE_API_KEY: "ts-test" },
         // channel-egress's RunnerChat, as a runner that isn't connected yet: the `claude-code`
-        // route's tests that need a turn swap in a client of their own.
+        // route's tests that need a turn swap in a client of their own. Its ProviderKeys holds no
+        // stored key, so the Worker secrets above serve; the model keys' tests pass their own.
         workers: [
           {
             name: "kelpie-channel-egress",
@@ -24,6 +25,11 @@ export class RunnerChat extends WorkerEntrypoint {
   }
   answer() {
     return { ok: false, reason: "not_connected" };
+  }
+}
+export class ProviderKeys extends WorkerEntrypoint {
+  keys() {
+    return { ok: true, keys: {} };
   }
 }
 export default { fetch: () => new Response(null, { status: 404 }) };`,

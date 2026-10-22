@@ -19,9 +19,11 @@ import {
   closedPage,
   type FormDeps,
   formTokenOf,
+  type KeyCheck,
   page,
   showForm,
   submitForm,
+  submitModelKeyForm,
   submitRunnerForm,
   unavailablePage,
 } from "./forms.ts";
@@ -56,6 +58,8 @@ export interface AdminDeps {
   commands: ConfigCommands;
   /** The one-time secure forms in channel-egress. */
   forms: FormDeps;
+  /** llm-gateway's check of a candidate model key, before its form stores it (ADR-0068 §2). */
+  checkModelKey: KeyCheck;
   /** Reports a setup step the owner finished to the agent's AgentHost (#206). */
   setupDone(agentId: string, event: SetupEvent): Promise<void>;
   /** Master's id, from the Registry, or null while no agent is Master (ADR-0060). */
@@ -133,6 +137,8 @@ const COMMANDS: Record<string, Command> = {
     commands.registerTelegramWebhook(actor, input),
   connectRunner: (commands, actor) => commands.connectRunner(actor),
   describeRunner: (commands, actor) => commands.describeRunner(actor),
+  connectModelKey: (commands, actor, input) => commands.connectModelKey(actor, input),
+  removeModelKey: (commands, actor, input) => commands.removeModelKey(actor, input),
   listHeldFiles: (commands, actor) => commands.listHeldFiles(actor),
   forgetVaultPaths: (commands, actor, input) => commands.forgetVaultPaths(actor, input),
   setDream: (commands, actor, input) => commands.setDream(actor, input),
@@ -240,6 +246,23 @@ async function handleForm(request: Request, pathname: string, deps: AdminDeps): 
           const master = await deps.master();
           if (master === null) return;
           await deps.setupDone(master, { step: "runner_connected", userId, state, version });
+        },
+      );
+    }
+    // A model key's page names its field `modelKey`; channel-egress refuses it on any other form.
+    const modelKey = fields.get("modelKey");
+    if (modelKey !== null) {
+      // Master's conversation that sent the form learns the key is stored (ADR-0068, ADR-0060).
+      return await submitModelKeyForm(
+        token,
+        modelKey,
+        deps.forms,
+        deps.checkModelKey,
+        locale,
+        async (provider, check) => {
+          const master = await deps.master();
+          if (master === null) return;
+          await deps.setupDone(master, { step: "model_key_connected", userId, provider, check });
         },
       );
     }

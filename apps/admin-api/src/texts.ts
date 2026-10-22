@@ -1,4 +1,4 @@
-import { type Locale, type Localized, localeOf } from "@kelpie/channels";
+import { type Locale, type Localized, localeOf, type ModelKey } from "@kelpie/channels";
 
 // The admin API's pages in English, Brazilian Portuguese and Spanish (#187). What comes from
 // elsewhere, such as an agent's id or a bot's name, is passed in already escaped.
@@ -56,6 +56,21 @@ export interface PageTexts {
     connected: string;
     done: (version: string) => string;
     outdated: (version: string) => string;
+  };
+  /** The secure form for a model key (ADR-0068). `names` name each slot's key. */
+  modelKey: {
+    title: string;
+    names: Record<ModelKey, string>;
+    intro: (name: string) => string;
+    label: string;
+    button: string;
+    empty: string;
+    invalid: string;
+    refused: string;
+    unreachable: string;
+    saved: string;
+    done: (name: string) => string;
+    unchecked: (name: string) => string;
   };
 }
 
@@ -134,6 +149,29 @@ export const PAGES: Localized<PageTexts> = {
         `The runner, version ${version}, now answers Kelpie. You can close this page.`,
       outdated: (version) =>
         `The secret is stored, but the runner (version ${version}) speaks another protocol version than this Kelpie. Update it on the server, as <code>docs/runner.md</code> says.`,
+    },
+    modelKey: {
+      title: "Set a model key",
+      names: {
+        anthropic: "Anthropic API key",
+        openai: "OpenAI API key",
+        "ai-gateway": "AI Gateway token",
+        typesafe: "TypeSafe API key (Jev)",
+      },
+      intro: (name) =>
+        `Paste the ${name}. Kelpie checks it with its service, then keeps it in its secret store, encrypted. It never reaches the chat or a model.`,
+      label: "Key",
+      button: "Save",
+      empty: "Paste the key first.",
+      invalid:
+        "That doesn't look like a key: it has 16 to 512 characters and no spaces. Copy it again.",
+      refused: "The service didn't accept that key. Check it and paste it again.",
+      unreachable: "Kelpie couldn't reach the service to check the key. Try again in a moment.",
+      saved: "Key saved",
+      done: (name) =>
+        `The ${name} is saved. Kelpie's models use it within a minute. You can close this page.`,
+      unchecked: (name) =>
+        `The ${name} is saved, but Kelpie couldn't check it with its service: a wrong key shows only when a call that uses it fails. Kelpie's models use it within a minute. You can close this page.`,
     },
   },
   "pt-BR": {
@@ -214,6 +252,30 @@ export const PAGES: Localized<PageTexts> = {
       outdated: (version) =>
         `O segredo foi guardado, mas o runner (versão ${version}) fala outra versão do protocolo que este Kelpie. Atualize-o no servidor, como diz o <code>docs/runner.md</code>.`,
     },
+    modelKey: {
+      title: "Definir uma chave de modelo",
+      names: {
+        anthropic: "a chave da API da Anthropic",
+        openai: "a chave da API da OpenAI",
+        "ai-gateway": "o token do AI Gateway",
+        typesafe: "a chave da API da TypeSafe (Jev)",
+      },
+      intro: (name) =>
+        `Cole aqui ${name}. O Kelpie confere o valor com o serviço e o guarda criptografado no cofre de segredos. Ele nunca passa pelo chat nem por um modelo.`,
+      label: "Chave",
+      button: "Salvar",
+      empty: "Cole a chave primeiro.",
+      invalid:
+        "Isso não parece uma chave: ela tem de 16 a 512 caracteres e nenhum espaço. Copie de novo.",
+      refused: "O serviço não aceitou essa chave. Confira e cole de novo.",
+      unreachable:
+        "O Kelpie não conseguiu falar com o serviço para conferir a chave. Tente de novo daqui a pouco.",
+      saved: "Chave salva",
+      done: (name) =>
+        `Salvo: ${name}. Os modelos do Kelpie começam a usar o valor em até um minuto. Pode fechar esta página.`,
+      unchecked: (name) =>
+        `Salvo: ${name}, mas o Kelpie não conseguiu conferir o valor com o serviço: um valor errado só aparece quando falhar uma chamada que o usa. Os modelos do Kelpie começam a usar o valor em até um minuto. Pode fechar esta página.`,
+    },
   },
   es: {
     signIn: { title: "Inicia sesión primero", body: "Abre este enlace de nuevo en tu navegador." },
@@ -292,6 +354,30 @@ export const PAGES: Localized<PageTexts> = {
         `El runner, versión ${version}, ya responde a Kelpie. Puedes cerrar esta página.`,
       outdated: (version) =>
         `El secreto quedó guardado, pero el runner (versión ${version}) habla otra versión del protocolo que este Kelpie. Actualízalo en el servidor, como dice <code>docs/runner.md</code>.`,
+    },
+    modelKey: {
+      title: "Definir una clave de modelo",
+      names: {
+        anthropic: "la clave de API de Anthropic",
+        openai: "la clave de API de OpenAI",
+        "ai-gateway": "el token de AI Gateway",
+        typesafe: "la clave de API de TypeSafe (Jev)",
+      },
+      intro: (name) =>
+        `Pega aquí ${name}. Kelpie comprueba el valor con su servicio y lo guarda cifrado en su almacén de secretos. Nunca pasa por el chat ni por un modelo.`,
+      label: "Clave",
+      button: "Guardar",
+      empty: "Pega la clave primero.",
+      invalid:
+        "Eso no parece una clave: tiene de 16 a 512 caracteres y ningún espacio. Cópiala de nuevo.",
+      refused: "El servicio no aceptó esa clave. Revísala y pégala de nuevo.",
+      unreachable:
+        "Kelpie no pudo comunicarse con el servicio para comprobar la clave. Inténtalo de nuevo en un momento.",
+      saved: "Clave guardada",
+      done: (name) =>
+        `Guardado: ${name}. Los modelos de Kelpie empiezan a usar el valor en menos de un minuto. Puedes cerrar esta página.`,
+      unchecked: (name) =>
+        `Guardado: ${name}, pero Kelpie no pudo comprobar el valor con su servicio: un valor erróneo solo se nota cuando falla una llamada que lo usa. Los modelos de Kelpie empiezan a usar el valor en menos de un minuto. Puedes cerrar esta página.`,
     },
   },
 };

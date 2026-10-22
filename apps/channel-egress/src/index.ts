@@ -10,8 +10,13 @@ import {
   type DeliveryFailure,
   type EgressDestination,
   isLocale,
+  isModelKey,
+  isModelKeyValue,
   isRunnerTime,
   type Localized,
+  type ModelKeyCheck,
+  type ProviderKeysContract,
+  type ProviderKeysOutcome,
   RecipientUnavailableError,
   type RunnerAnswerOutcome,
   type RunnerChatContract,
@@ -31,6 +36,7 @@ import {
 } from "@kelpie/channels";
 import { TELEGRAM_SECRET_HEADER, TelegramAdapter } from "@kelpie/channels/telegram";
 import { isAgentId, type Mascot, parseMascot } from "@kelpie/config";
+import { modelKeyValue, parseModelKey, readModelKeys } from "./model-keys.ts";
 import { drawPhotos, type Photos } from "./photo/draw.ts";
 import {
   checkedResult,
@@ -109,6 +115,32 @@ async function openRunnerForm(env: Env) {
   }
 }
 
+/** Opens a one-time form for a model key's slot, `provider:<name>` (ADR-0068 §2). */
+async function openModelKeyForm(env: Env, name: string) {
+  if (!isModelKey(name)) return { ok: false as const, reason: "invalid_input" as const };
+  try {
+    const { token, expiresAt } = await store(env).createForm(name, "provider");
+    return { ok: true as const, token, expiresAt };
+  } catch (error) {
+    console.error("channel-egress: creating a form failed", errorName(error));
+    return unavailable;
+  }
+}
+
+/**
+ * Removes a model key's slot and every form for it (ADR-0068 §2): llm-gateway then falls back to
+ * its Worker secret within a minute. Master calls it only after the owner confirms.
+ */
+async function removeModelKeyOf(env: Env, name: string) {
+  if (!isModelKey(name)) return { ok: false as const, reason: "invalid_input" as const };
+  try {
+    return { ok: true as const, removed: await store(env).remove("provider", name) };
+  } catch (error) {
+    console.error("channel-egress: the secret store failed", errorName(error));
+    return unavailable;
+  }
+}
+
 /** The runner's state, from its `/health` with the stored secret. Never the secret. */
 async function describeRunnerOf(env: Env) {
   const runner = runnerOf(env);
@@ -125,8 +157,9 @@ async function describeRunnerOf(env: Env) {
 /**
  * What the configuration tools' Worker binds (Story 3.11): it opens a form, whose link the owner
  * then opens on the admin API, and reads the runner's state, which holds no secret. It also
- * disconnects a deleted agent's bot (#303), which reads nothing back. Binding `ChannelForms` there
- * would also let a model-driven Worker describe, redeem and register.
+ * disconnects a deleted agent's bot (#303) and removes a model key (ADR-0068), which read nothing
+ * back. Binding `ChannelForms` there would also let a model-driven Worker describe, redeem and
+ * register.
  */
 export class SetupForms extends WorkerEntrypoint<Env> implements SetupFormsContract {
   async createTelegramForm(agentId: string) {
@@ -143,6 +176,14 @@ export class SetupForms extends WorkerEntrypoint<Env> implements SetupFormsContr
 
   async disconnectTelegram(agentId: string) {
     return disconnectTelegramOf(this.env, agentId);
+  }
+
+  async createModelKeyForm(name: string) {
+    return openModelKeyForm(this.env, name);
+  }
+
+  async removeModelKey(name: string) {
+    return removeModelKeyOf(this.env, name);
   }
 }
 
@@ -343,6 +384,83 @@ export class ChannelForms extends WorkerEntrypoint<Env> implements ChannelFormsC
     return disconnectTelegramOf(this.env, agentId);
   }
 
+  async createModelKeyForm(name: string) {
+    return openModelKeyForm(this.env, name);
+  }
+
+  /**
+   * Stores a model key once the admin API's check, through llm-gateway's `ProviderCheck`, let it
+   * through (ADR-0068 §2): this Worker calls no provider. A malformed key counts against the form,
+   * as a refused one does. The same key sent again to a form just used, as a double click sends
+   * it, gets the same answer. The work finishes even when the caller goes away.
+   */
+  async redeemModelKeyForm(token: string, value: string, check: ModelKeyCheck) {
+    const work = this.#redeemModelKeyForm(token, value, check);
+    this.ctx.waitUntil(work);
+    return work;
+  }
+
+  async #redeemModelKeyForm(token: string, value: string, check: ModelKeyCheck) {
+    const unknown = { ok: false as const, reason: "unknown_form" as const };
+    // Only a key its check let through is stored: anything else is a caller's mistake.
+    if (check !== "accepted" && check !== "unchecked") return unknown;
+    try {
+      const forms = store(this.env);
+      const form = await forms.describeForm(token);
+      const candidate = typeof value === "string" ? value.trim() : "";
+      if (!form) return await this.#redeemModelKeyAgain(token, candidate, check);
+      if (form.kind !== "provider" || !isModelKey(form.agentId)) return unknown;
+      if (!isModelKeyValue(candidate)) {
+        await forms.refuseValue(token);
+        return { ok: false as const, reason: "invalid_key" as const };
+      }
+      const stored = await forms.redeemForm(token, modelKeyValue(candidate));
+      // Another submission of the same link claimed it meanwhile: answer as for a resubmission.
+      if (!stored.ok) {
+        return stored.reason === "unknown_form"
+          ? await this.#redeemModelKeyAgain(token, candidate, check)
+          : stored;
+      }
+      return { ok: true as const, name: form.agentId, check };
+    } catch (error) {
+      console.error("channel-egress: redeeming a form failed", errorName(error));
+      return unavailable;
+    }
+  }
+
+  /** The answer for a model key's form just used, when its own key comes again. */
+  async #redeemModelKeyAgain(token: string, candidate: string, check: "accepted" | "unchecked") {
+    const unknown = { ok: false as const, reason: "unknown_form" as const };
+    const forms = store(this.env);
+    const used = await forms.redeemedForm(token);
+    if (used?.kind !== "provider" || !isModelKey(used.agentId)) return unknown;
+    const read = await forms.read("provider", used.agentId);
+    // The caller answers an unreachable store as such, not as a closed link, as for Telegram.
+    if (!read.ok && read.reason === "store_unavailable") {
+      throw new Error("The secret store is unavailable");
+    }
+    const key = read.ok ? parseModelKey(read.value) : null;
+    if (!key || !(await sameText(key, candidate))) return unknown;
+    return { ok: true as const, name: used.agentId, check };
+  }
+
+  /** Counts a key its service refused against its form (ADR-0068 §2): five close it. */
+  async refuseModelKey(token: string) {
+    try {
+      const forms = store(this.env);
+      const form = await forms.describeForm(token);
+      if (form?.kind !== "provider") return { ok: true as const, open: false };
+      return { ok: true as const, open: await forms.refuseValue(token) };
+    } catch (error) {
+      console.error("channel-egress: refusing a value failed", errorName(error));
+      return unavailable;
+    }
+  }
+
+  async removeModelKey(name: string) {
+    return removeModelKeyOf(this.env, name);
+  }
+
   async describeTelegramBot(agentId: string) {
     if (!isAgentId(agentId)) return { ok: false as const, reason: "invalid_input" as const };
     const found = await telegramSecret(this.env, agentId);
@@ -529,6 +647,23 @@ function displayName(value: unknown): string {
     .replace(/\s+/g, " ")
     .trim();
   return [...cleaned].slice(0, MAX_DISPLAY_NAME_LENGTH).join("").trim();
+}
+
+/**
+ * The stored model keys, for llm-gateway alone (ADR-0068 §3): the one entrypoint that returns a
+ * secret, and only `provider:` slots. A separate entrypoint, so the Worker that calls providers
+ * can't open forms or read a channel's secret, and no other Worker binds it.
+ */
+export class ProviderKeys extends WorkerEntrypoint<Env> implements ProviderKeysContract {
+  async keys(): Promise<ProviderKeysOutcome> {
+    try {
+      const keys = await readModelKeys(store(this.env));
+      return keys ? { ok: true, keys } : unavailable;
+    } catch (error) {
+      console.error("channel-egress: the secret store failed", errorName(error));
+      return unavailable;
+    }
+  }
 }
 
 /** Sends and shows typing for an agent, with that agent's channel secrets (ADR-0002). */

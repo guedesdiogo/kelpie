@@ -608,14 +608,14 @@ describe("routes", () => {
     expect(fetched).not.toHaveBeenCalled();
   });
 
-  it("lists every configured provider in the route's order", () => {
+  it("lists every configured provider in the route's order", async () => {
     const both = { ...(env as GatewayEnv), OPENAI_API_KEY: "sk-test" };
-    expect(routesWith(both).frontier).toEqual([
+    expect((await routesWith(both)).frontier).toEqual([
       { provider: "anthropic", model: "claude-opus-5-5" },
       { provider: "openai", model: "gpt-6-astra" },
     ]);
     const { ANTHROPIC_API_KEY: _key, ...openaiOnly } = both;
-    expect(routesWith(openaiOnly as GatewayEnv).cheap).toEqual([
+    expect((await routesWith(openaiOnly as GatewayEnv)).cheap).toEqual([
       { provider: "openai", model: "gpt-6-luna" },
     ]);
   });
@@ -792,6 +792,8 @@ describe("the instance's model settings (#289)", () => {
       pinned: null,
       providers: ["anthropic"],
       claudeCode: false,
+      // Where each key comes from: the tests' Worker secrets, and no form yet (ADR-0068).
+      keys: { anthropic: "deploy", openai: "none", "ai-gateway": "none", typesafe: "deploy" },
     });
     expect(await exports.LlmGateway.describe("conversation")).toMatchObject({
       tier: "medium",
@@ -1215,6 +1217,7 @@ describe("the claude-code route (#421)", () => {
       pinned: null,
       providers: ["anthropic", "claude-code"],
       claudeCode: true,
+      keys: { anthropic: "deploy", openai: "none", "ai-gateway": "none", typesafe: "deploy" },
     });
     expect(await exports.LlmGatewayAdmin.providers()).toEqual(["anthropic", "claude-code"]);
     const long = { ...owner, userId: "u".repeat(500) };
