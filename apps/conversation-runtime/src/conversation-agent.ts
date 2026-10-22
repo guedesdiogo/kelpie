@@ -185,7 +185,8 @@ const WEBCHAT_RECEIVED_IDS = 100;
 const TYPING_HOLD_MS = 4_000;
 /**
  * The most handoffs and subagents' changes a conversation keeps for its next reply's notice; past
- * it, the handoffs go first. The agents Master created or renamed all stay (#387).
+ * it, the handoffs go first. The agents Master created or renamed, and the tasks it stopped, all
+ * stay (#387, #492).
  */
 const MAX_UNSAID_ANNOUNCEMENTS = 20;
 /** Where a conversation keeps its unsaid handoffs, in #287's shape, so a rollback still reads them. */
@@ -194,6 +195,8 @@ const HANDOFFS = "handoffs";
 const SUBAGENT_CHANGES = "subagentChanges";
 /** Where it keeps the agents Master created or renamed (#387), apart for the same reason. */
 const AGENT_CHANGES = "agentChanges";
+/** The tasks Master stopped for the owner (#492) that no notice named yet. */
+const TASK_STOPS = "taskStops";
 
 /**
  * Where a conversation keeps the proposals whose notice its next reply sends (#302), each until
@@ -1966,10 +1969,11 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     this.#settleProposalNotices();
   }
 
-  /** What the turn's tools had Kelpie announce that no notice said yet (#287, #342, #387). */
+  /** What the turn's tools had Kelpie announce that no notice said yet (#287, #342, #387, #492). */
   #announcements(): Announcement[] {
     return [
       ...stored(this.#get<StoredAnnouncement[]>(HANDOFFS, [])),
+      ...this.#get<Announcement[]>(TASK_STOPS, []),
       ...this.#get<Announcement[]>(SUBAGENT_CHANGES, []),
       ...this.#get<Announcement[]>(AGENT_CHANGES, []),
     ];
@@ -1978,15 +1982,16 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   /**
    * Keeps these unsaid, each group in its own key. Of the handoffs and subagents' changes, only the
    * last MAX_UNSAID_ANNOUNCEMENTS. An agent's creation and its latest name always stay, at most two
-   * per agent, so no burst of changes pushes one out unsaid, and the notice counts what it doesn't
-   * name (#387).
+   * per agent, and so does each task Master stopped, which no command undoes, so no burst of
+   * changes pushes one out unsaid, and the notice counts what it doesn't name (#387, #492).
    */
   #keepAnnouncements(all: readonly Announcement[]): void {
     const ofAgents = (one: Announcement) =>
       one.kind === "agentCreated" || one.kind === "agentRenamed";
+    const stays = (one: Announcement) => ofAgents(one) || one.kind === "stopped";
     const kept = [
-      ...all.filter((one) => !ofAgents(one)).slice(-MAX_UNSAID_ANNOUNCEMENTS),
-      ...all.filter(ofAgents),
+      ...all.filter((one) => !stays(one)).slice(-MAX_UNSAID_ANNOUNCEMENTS),
+      ...all.filter(stays),
     ];
     this.#set(
       HANDOFFS,
@@ -1995,6 +2000,10 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
           ? [{ taskId: one.taskId, agentId: one.agentId, name: one.name }]
           : [],
       ),
+    );
+    this.#set(
+      TASK_STOPS,
+      kept.filter((one) => one.kind === "stopped"),
     );
     this.#set(
       SUBAGENT_CHANGES,
@@ -2034,7 +2043,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     const kept = this.#announcements().filter((one) => !replaces(announcement, one));
     const { kind, agentId, name } = announcement;
     const one: Announcement =
-      kind === "handoff"
+      kind === "handoff" || kind === "stopped"
         ? { kind, taskId: announcement.taskId, agentId, name }
         : { kind, agentId, name };
     this.#keepAnnouncements([...kept, one]);

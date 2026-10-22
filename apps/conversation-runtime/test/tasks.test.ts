@@ -540,6 +540,34 @@ describe("tasks other agents write (#335)", () => {
     expect(await stub.createTask(task, owner)).toMatchObject({ ok: true });
   });
 
+  it("lets Master hand work to any agent, itself and others' subagents included, and no one else (#492)", async () => {
+    const registry = env.REGISTRY.getByName("registry");
+    await registry.add("board-spec", "Spec", owner);
+    await registry.add("board-other", "Other", owner);
+    expect(await registry.addSubagent("board-pup", "Pup", "board-spec", owner)).toMatchObject({
+      ok: true,
+    });
+    const task = { title: "x", body: "", status: "todo", scheduledStartAt: null } as const;
+    // Master, kelpie in this Registry, owns neither itself nor the specialist's subagent.
+    expect(await helper("board-pup").createTaskFor(task, by("kelpie"))).toMatchObject({ ok: true });
+    expect(await helper("kelpie").createTaskFor(task, by("kelpie"))).toMatchObject({ ok: true });
+    // Its owner may too, and another specialist may not.
+    expect(await helper("board-pup").createTaskFor(task, by("board-spec"))).toMatchObject({
+      ok: true,
+    });
+    expect(await helper("board-pup").createTaskFor(task, by("board-other"))).toEqual({
+      ok: false,
+      reason: "not_allowed",
+    });
+    const made = (await helper("board-pup").listTasks()).map((one) => one.creator);
+    expect(made).toEqual(
+      expect.arrayContaining([
+        { kind: "agent", id: "kelpie" },
+        { kind: "agent", id: "board-spec" },
+      ]),
+    );
+  });
+
   it("cancels a task once it went to Waiting five times, so no loop runs on", async () => {
     fakeRunner();
     const stub = helper("board-loop");

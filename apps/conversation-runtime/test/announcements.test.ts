@@ -17,6 +17,21 @@ const travel: Announcement = { kind: "handoff", taskId: "t2", agentId: "travel",
 const scout = { agentId: "kelpie-sub-a1b2c3", name: "Scout" };
 
 describe("announcementNotice", () => {
+  it("names the agent whose task Master stopped, apart from a handoff of the same task (#492)", () => {
+    const stopped: Announcement = { ...sales, kind: "stopped" };
+    const again: Announcement = { ...stopped, taskId: "t9" };
+    expect(announcementNotice([stopped], "en")).toBe('Kelpie stopped a task of "Sales" (sales).');
+    expect(announcementNotice([stopped, again], "pt-BR")).toBe(
+      'O Kelpie parou tarefas de "Sales" (sales).',
+    );
+    expect(announcementNotice([sales, stopped], "es")).toBe(
+      'Kelpie pasó una tarea a "Sales" (sales).\nKelpie detuvo una tarea de "Sales" (sales).',
+    );
+    expect(keyOf(stopped)).toBe("stopped:t1");
+    expect(keyOf(stopped)).not.toBe(keyOf(sales));
+    expect(replaces(again, stopped)).toBe(false);
+  });
+
   it("names the agent a task went to by its name and id, in the conversation's language", () => {
     expect(announcementNotice([sales], "en")).toBe('Kelpie handed a task to "Sales" (sales).');
     expect(announcementNotice([sales], "pt-BR")).toBe(

@@ -10,6 +10,7 @@ import {
 } from "@kelpie/config";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { replaceTaskRunnerForTesting } from "../src/agent-host/agent-host.ts";
+import { boardTools } from "../src/board-tools.ts";
 import { configurationTools, heldTools, MASTER_TOOLS } from "../src/configuration.ts";
 import { memoryTools } from "../src/memory-tools.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
@@ -69,6 +70,9 @@ function use(world: FakeWorld): FakeWorld {
         (await registry().list())
           .filter((entry) => entry.owner === id)
           .map((entry) => ({ id: entry.id, name: entry.name })),
+      agents: async () =>
+        (await registry().list()).map((entry) => ({ id: entry.id, name: entry.name })),
+      isMaster: async (id) => (await registry().get(id))?.role === "master",
       create: (assignee, task, creator) => host(assignee).createTaskFor(task, creator),
       comment: (assignee, taskId, text, by) =>
         host(assignee).commentTaskAs(taskId, text, by, "chat"),
@@ -315,6 +319,7 @@ describe("a temporary subagent (#290)", () => {
         roleOf: async (id) => (await registry().get(id))?.role ?? null,
         adminOrigin: "https://admin.example",
       }),
+      boardTools({} as never, { roleOf: async (id) => (await registry().get(id))?.role ?? null }),
     );
     // Master hands tasks only to agents it owns: this specialist is its own.
     await registry().add("allow-spec", "Spec", owner);
