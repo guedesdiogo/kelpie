@@ -7,6 +7,7 @@
 - Amended by: [ADR-0050](0050-master-orchestration-tools.md), Master always holds its orchestration tools, so §2's guards on a tools list go
 - Amended by: [ADR-0055](0055-composer-files-dictation-and-model.md), Master gains `pick_model`, which has Kelpie send the model picker; on Telegram a change of an agent's `conversation`-area provider, tier or effort through the picker is the owner's tap, while `configure_agent` and keeping `max` keep the typed code
 - Amended by: [ADR-0058](0058-owner-edits-agent-files-from-the-webchat.md), §2's table gains the owner's edits of any agent's soul, rules, memory file and skills in the webchat's editor, with the owner's Save as the yes; [ADR-0060](0060-master-is-the-only-name.md), the runner's wait is on Master's `AgentHost`, and the deploy probe no longer wakes the retired id
+- Amended by: [ADR-0067](0067-master-reaches-every-owner-command.md), Master also holds a tool for each owner command of the admin API but deploy, the bootstrap, the recovery and the pause; the confirmations stay code
 
 ## Context
 

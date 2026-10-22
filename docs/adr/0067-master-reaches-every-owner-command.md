@@ -1,0 +1,118 @@
+# ADR-0067: Master can do from chat what the owner can do on the admin API
+
+- Status: Accepted
+- Date: 2026-10-22
+- Issue: [#489](https://github.com/guedesdiogo/kelpie/issues/489)
+- Decided by the owner on 2026-10-22:
+  - the request: «Preciso que o kelpie master, tenha o máximo de permissões possíveis para obedecer o que eu solicitar para ele.»;
+  - on confirmations: «Manter + botão no Telegram»;
+  - the plan: «Aprovo os três (Recomendado)», for #489, #490 and #491.
+- Amends: [ADR-0013](0013-self-configuration.md), [ADR-0026](0026-confirmation-by-owner-act.md), [ADR-0036](0036-agent-roles-models-and-subagents.md) §6, [ADR-0048](0048-master-configures-kelpie.md) §1 and [ADR-0050](0050-master-orchestration-tools.md)
+
+## Context
+
+ADR-0048 gave Master the setup agent's 14 configuration tools, and ADR-0050 made them, the subagent tools and the board's task tools mandatory for Master. The admin API and the webchat's editor still reach more. Asked on Telegram what it can do, Master listed what it can't: pause or cancel background tasks, act on the VPS's sessions, deploy, and set bindings, secrets, Access and model keys.
+
+A read of `main` at `f177fab`, recorded on #489, found these gaps:
+- **The board.** Master reads no board, and can't stop, edit, move or schedule another agent's task. Its `cancel_task` ends only a task's run from inside it.
+- **The owner's account.** Identities, the time zone and a bot's webhook have no tool.
+- **The vault.** Held files, erasure and Dream have no tool.
+- **Proposals.** Master can't read them, and only their page decides them.
+- **Agents' files.** SOUL.md, AGENTS.md, memories/MEMORY.md and skills change only in the webchat's editor (ADR-0058). `configure_agent` takes no `skills`, `memoryCore` or `specialty`.
+- **Size and reach.** A change whose summary passes 3,500 visible characters is refused in chat, and `delete_agent` names only the owner's webchat thread.
+
+Two other parts of the owner's request have their own decisions: the VPS's sessions ([ADR-0069](0069-master-acts-on-vps-sessions.md)) and model keys ([ADR-0068](0068-every-secret-through-an-expiring-form.md)). The owner kept deploy, bindings and Access out, since they need a Cloudflare token at runtime (ADR-0013).
+
+The reference check is on #489.
+
+## Decision
+
+### 1. Master's new tools
+
+Each runs the same command as the admin API, as the owner, through Master (`via: agent:<Master's id>`), with the commands' own checks. Like the configuration tools, they are owner-only, run only in the owner's direct conversation, and are never offered in a task's run (#335). They join `MASTER_TOOLS` (ADR-0050).
+
+| Tool | Command | The yes |
+|---|---|---|
+| `list_tasks`, `get_task` | `listTasks`, `getTask`, on any agent's board | none: they read |
+| `create_task` | gains Backlog or To do, an optional start time, and any agent as its assignee | none, as today |
+| `edit_task`, `move_task` | `editTask`, `moveTask` | none |
+| `stop_task` | `requestStop`: stops a running task, or cancels one | none; Kelpie announces it |
+| `list_identities` | `listIdentities` | none: it reads |
+| `enable_identity`, `disable_identity` | `enableIdentity`, `disableIdentity` | the owner's confirmation: access |
+| `set_time_zone` | `setTimeZone` | none |
+| `register_telegram_webhook` | `registerTelegramWebhook` | the owner's confirmation: an external account |
+| `list_held_files` | `listHeldFiles` | none: it reads |
+| `forget_vault_paths` | `forgetVaultPaths` | the owner's confirmation: erasure can't be undone |
+| `set_dream` | `setDream` | the owner's confirmation: cost |
+| `list_proposals`, `get_proposal` | `listProposals`, `getProposal` | none: they read |
+| `decide_proposal` | `decideProposal` | the owner's confirmation, beside the proposal's page |
+| `read_agent_file` | ADR-0058's reads of SOUL.md, AGENTS.md, memories/MEMORY.md and a skill | none: it reads |
+| `write_agent_file` | ADR-0058's writes of the same files | the owner's confirmation |
+| `configure_agent` | gains `skills`, `memoryCore` and `specialty` | the owner's confirmation, as today |
+| `delete_agent` | deletes every thread, as the admin API does | the owner's confirmation, as today |
+
+- **The tools with no yes** are ADR-0013's smaller changes. Each says that it changes something, so ADR-0064 holds it for the owner's yes after outside content.
+- **`create_task` keeps its caps** for tasks agents create: three a turn, 20 a day from turns no person typed, and 20 open per assignee.
+- **A stop Master asks for** is the owner's stop, through Master: `requestStop` records it as `via: agent:<Master's id>`. Kelpie announces it in the conversation, naming the task and the agent by their ids.
+
+### 2. A long change is confirmed on a page
+
+- A confirmation whose summary passes 3,500 visible characters no longer sends the owner to the admin API.
+- Kelpie sends a link to an admin API page that shows the whole change. For a file, that is the file before and after, as a diff.
+- The owner's submission on the page is the yes (ADR-0026 §1). It counts once, within the confirmation's 10 minutes, for exactly the change the page shows.
+- Kelpie sends the link itself, as it sends a form's (ADR-0026 §2).
+
+### 3. Kelpie's Confirm button on Telegram
+
+ADR-0026 §4 left Telegram's inline buttons for later. They come now:
+- Kelpie's confirmation notice on Telegram carries an inline Confirm button. Its callback data is the confirmation's random id, never a counter or "the oldest pending".
+- A press counts only from the paired owner's account, in that chat, for a confirmation of theirs that is still open, once. It then replies with the code for them, as the webchat's button does (ADR-0026 §3).
+- The typed code stays.
+- ingress's handling of Telegram's callbacks is shared with the model picker of [ADR-0055](0055-composer-files-dictation-and-model.md). Whichever story lands first builds it.
+
+### 4. What stays out of Master's reach
+
+- **The confirmations themselves.** They stay code, which Master can't turn off (ADR-0048 §1), by the owner's answer.
+- **Deploy, bindings, Access, custom domains and Hyperdrive.** They need a Cloudflare token at runtime (ADR-0013).
+- **The bootstrap and the recovery.** They exist for when chat can't reach the owner.
+- **Pausing a conversation.** It is the owner's brake on the model. A brake the model can press or lift isn't a brake.
+- **Comments with the owner's authority.** Master's comments on a task stay an agent's, fenced (ADR-0036 §6). No other agent should take Master's words for the owner's.
+- **Master's own specialty,** which `configureAgent` already refuses.
+
+### 5. Amendments
+
+- **[ADR-0013](0013-self-configuration.md):** Master reaches every owner command but those in §4.
+- **[ADR-0026](0026-confirmation-by-owner-act.md):** the page for a long change (§2), and the Telegram button (§3).
+- **[ADR-0036](0036-agent-roles-models-and-subagents.md) §6:** Master reads and changes any board, as the owner through it. Its comments stay an agent's.
+- **[ADR-0048](0048-master-configures-kelpie.md) §1:** Master holds the tools in §1 besides the configuration tools.
+- **[ADR-0050](0050-master-orchestration-tools.md):** `MASTER_TOOLS` gains them.
+
+## Consequences
+
+- **The owner asks Master for anything the admin API does,** except §4. Master no longer points the owner to the admin API for a task, an identity, the time zone, a webhook, the vault, a proposal, an agent's file or a long change.
+- **Master's prompt grows by about 17 tools.** That costs tokens on every Master turn, and gives the model more to choose from. The stories may merge the read tools into fewer, and the handoff eval (#287) is measured again.
+- **A steered Master reaches more.** The same gates hold:
+  - owner-only;
+  - the owner's confirmation for access, cost, external accounts and erasure;
+  - ADR-0064's hold after outside content;
+  - no configuration in a task's run.
+- **No new cost:** the tools run commands that already exist, within the Workers Paid plan. `set_dream` takes the owner's confirmation because Dream itself spends.
+- **Rollback:** each story's pull request reverts on its own. A long change's page stores its pending change add-only.
+- **The stories** are sub-issues of [#19](https://github.com/guedesdiogo/kelpie/issues/19), listed on #489:
+  - Master's board tools;
+  - Master's owner tools: identities, the time zone, the webhook, the vault and proposals;
+  - agents' files, `configure_agent`'s missing fields, the full deletion, and the page for long changes;
+  - Kelpie's Confirm button on Telegram.
+
+## Alternatives considered
+
+- **Drop the confirmations for the turns the owner types.** The owner chose to keep them, with a button on Telegram.
+- **A timed "free mode" that the owner turns on,** as Hermes's `/yolo` does. The owner chose the button instead.
+- **A Cloudflare token for Master.** The owner kept deploy, bindings and Access out.
+- **Master comments with the owner's authority.** A specialist would then read Master's words as the owner's, and the board would lose who said what.
+- **Master pauses conversations.** The pause would no longer bind the model it stops.
+
+## References
+
+- [#489](https://github.com/guedesdiogo/kelpie/issues/489): the gap map and the reference check
+- [ADR-0013](0013-self-configuration.md), [ADR-0026](0026-confirmation-by-owner-act.md), [ADR-0036](0036-agent-roles-models-and-subagents.md), [ADR-0048](0048-master-configures-kelpie.md), [ADR-0050](0050-master-orchestration-tools.md), [ADR-0055](0055-composer-files-dictation-and-model.md), [ADR-0058](0058-owner-edits-agent-files-from-the-webchat.md), [ADR-0064](0064-outside-content-asks.md)
