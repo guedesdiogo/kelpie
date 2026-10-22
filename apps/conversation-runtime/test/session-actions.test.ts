@@ -332,111 +332,40 @@ describe("Approve and Deny on a permission prompt's notice (ADR-0069 §1)", () =
       return row ? (JSON.parse(row.value) as OpenSessionRequest[]) : [];
     });
 
-  /** The owner types a message on Telegram. */
-  const typed = (name: string, id: string, text: string, role = "owner") =>
-    agent(name).ingest({
-      agentId: MASTER,
-      providerMessageId: `${name}-${id}`,
-      userId: "u-owner",
-      role,
-      chatType: "direct",
-      text,
-      destination: { channel: "telegram", threadId: "u-owner" },
-      sentAt: Date.now(),
-      timeZone: null,
-    });
-
-  it("names the tool and its input, and the two codes, on Telegram", async () => {
+  it("names the tool and its input on Telegram, and sends the owner to the Claude app until #495's buttons", async () => {
     const world = use(fakeWorld([]));
     const name = `${MASTER}:telegram:request-told`;
     await bound(name);
     expect(await agent(name).sessionWait(MASTER, wait)).toBe("sent");
-    const [request] = await kept(name);
-    expect(request).toMatchObject({ requestId: REQUEST, usedAt: null });
     expect(world.sends).toEqual([
       {
-        text: `A Claude Code session on your VPS is waiting for your permission: "Fix login", repository "kelpie".\nTool: Bash, with "command: rm -rf build".\nTo approve it, reply with ${request?.allow}. To deny it, reply with ${request?.deny}. Or answer it in the Claude app.`,
+        text: 'A Claude Code session on your VPS is waiting for your permission: "Fix login", repository "kelpie".\nTool: Bash, with "command: rm -rf build".\nAnswer it in the Claude app.',
         silent: false,
       },
     ]);
+    // No buttons there, so nothing a press could answer.
+    expect(await kept(name)).toEqual([]);
   });
 
-  it("takes the owner's typed code as their verdict, never as a message for the model", async () => {
-    const world = use(fakeWorld([]));
+  it("never takes a typed message as a verdict: it reaches the conversation as any other", async () => {
+    use(fakeWorld([]));
     const given = runner({ ok: true, applied: true });
     const name = `${MASTER}:telegram:request-typed`;
     await bound(name);
     await agent(name).sessionWait(MASTER, wait);
-    const [request] = await kept(name);
-    const answered = await typed(name, "m2", ` ${request?.deny.toLowerCase()}. `);
-    expect(answered.status).toBe("accepted");
-    expect(given).toEqual([[REQUEST, "deny"]]);
-    expect(world.sends.at(-1)?.text).toBe("Denied: the session was told no.");
-    // Nothing reached the model: no turn, no history of it.
-    expect(world.requests).toEqual([]);
-    const inbound = await runInDurableObject(agent(name), (_instance: ConversationAgent, state) =>
-      state.storage.sql.exec<{ text: string }>("SELECT text FROM inbound").toArray(),
-    );
-    expect(inbound.map((row) => row.text)).not.toContain(` ${request?.deny.toLowerCase()}. `);
-    // It counts once.
-    await typed(name, "m3", request?.allow ?? "");
-    expect(given).toHaveLength(1);
-    expect(world.sends.at(-1)?.text).toBe("You already answered that request.");
-  });
-
-  it("leaves a code open when the runner wasn't reached, so the owner may try again", async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    const world = use(fakeWorld([]));
-    let reached = false;
-    const given = runner(async () =>
-      reached ? { ok: true, applied: true } : { ok: false, reason: "unreachable" },
-    );
-    const name = `${MASTER}:telegram:request-retry`;
-    await bound(name);
-    await agent(name).sessionWait(MASTER, wait);
-    const [request] = await kept(name);
-    await typed(name, "m2", request?.allow ?? "");
-    expect(world.sends.at(-1)?.text).toContain("couldn't reach the VPS's runner");
-    reached = true;
-    await typed(name, "m3", request?.allow ?? "");
-    expect(world.sends.at(-1)?.text).toBe("Approved: the session goes on.");
-    expect(given).toEqual([
-      [REQUEST, "allow"],
-      [REQUEST, "allow"],
-    ]);
-  });
-
-  it.each([
-    [{ ok: false, reason: "closed" } as const, "no longer open"],
-    [{ ok: true, applied: false } as const, "couldn't hand your answer"],
-  ])("says what the runner answered: %j", async (outcome, words) => {
-    const world = use(fakeWorld([]));
-    runner(outcome);
-    const name = `${MASTER}:telegram:request-${outcome.ok ? "late" : "closed"}`;
-    await bound(name);
-    await agent(name).sessionWait(MASTER, wait);
-    const [request] = await kept(name);
-    await typed(name, "m2", request?.allow ?? "");
-    expect(world.sends.at(-1)?.text).toContain(words);
-  });
-
-  it("gives an expired code Kelpie's reply, and no verdict", async () => {
-    const world = use(fakeWorld([]));
-    const given = runner({ ok: true, applied: true });
-    const name = `${MASTER}:telegram:request-expired`;
-    await bound(name);
-    await agent(name).sessionWait(MASTER, wait);
-    const [request] = await kept(name);
-    // An expired code gets Kelpie's reply, and no verdict.
-    await runInDurableObject(agent(name), (_instance: ConversationAgent, state) => {
-      state.storage.sql.exec(
-        "UPDATE state SET value = ? WHERE key = 'sessionRequests'",
-        JSON.stringify([{ ...request, expiresAt: Date.now() - REQUEST_ANSWER_MS }]),
-      );
+    const answered = await agent(name).ingest({
+      agentId: MASTER,
+      providerMessageId: `${name}-m2`,
+      userId: "u-owner",
+      role: "owner",
+      chatType: "direct",
+      text: `approve ${REQUEST}`,
+      destination: { channel: "telegram", threadId: "u-owner" },
+      sentAt: Date.now(),
+      timeZone: null,
     });
-    await typed(name, "m2", request?.allow ?? "");
+    expect(answered.status).toBe("accepted");
     expect(given).toEqual([]);
-    expect(world.sends.at(-1)?.text).toBe("That request expired. Answer it in the Claude app.");
   });
 
   it("gives no request to a question's notice, which only its prompt answers", async () => {
@@ -472,7 +401,7 @@ describe("Approve and Deny on a permission prompt's notice (ADR-0069 §1)", () =
       return { socket, frames };
     }
 
-    it("shows Approve and Deny, which send the verdict by the notice's key", async () => {
+    it("shows Approve and Deny, which send the verdict by the request's id", async () => {
       use(fakeWorld([]));
       const given = runner({ ok: true, applied: true });
       const name = `${MASTER}:webchat:u-owner`;
@@ -485,21 +414,21 @@ describe("Approve and Deny on a permission prompt's notice (ADR-0069 §1)", () =
           {
             type: "bubble",
             text: 'A Claude Code session on your VPS is waiting for your permission: "Fix login", repository "kelpie".\nTool: Bash, with "command: rm -rf build".\nApprove or deny it here, or answer it in the Claude app.',
-            sessionRequest: { id: request?.key, until: request?.expiresAt },
+            sessionRequest: { id: REQUEST, until: request?.expiresAt },
           },
         ]),
       );
       socket.send(
-        JSON.stringify({ type: "verdict", id: request?.key, verdict: "allow", agent: MASTER }),
+        JSON.stringify({ type: "verdict", id: REQUEST, verdict: "allow", agent: MASTER }),
       );
       await vi.waitFor(() =>
         expect(frames.filter((frame) => frame.type === "verdict")).toEqual([
-          { type: "verdict", id: request?.key, verdict: "allow", status: "applied" },
+          { type: "verdict", id: REQUEST, verdict: "allow", status: "applied" },
         ]),
       );
       expect(given).toEqual([[REQUEST, "allow"]]);
       // A second press counts for nothing.
-      socket.send(JSON.stringify({ type: "verdict", id: request?.key, verdict: "deny" }));
+      socket.send(JSON.stringify({ type: "verdict", id: REQUEST, verdict: "deny" }));
       await vi.waitFor(() =>
         expect(frames.filter((frame) => frame.type === "verdict").at(-1)).toMatchObject({
           status: "answered",
@@ -509,7 +438,69 @@ describe("Approve and Deny on a permission prompt's notice (ADR-0069 §1)", () =
       socket.close(1000);
     });
 
-    it("refuses a press for another agent, an unknown key, or a socket that isn't the owner's", async () => {
+    /** Tells the webchat's notice, and gives what each press answered. */
+    async function told(name: string) {
+      await bound(name, "webchat");
+      const { socket, frames } = await socketOf(name);
+      await agent(name).sessionWait(MASTER, wait);
+      const press = async (verdict: RunnerVerdict) => {
+        const before = frames.filter((frame) => frame.type === "verdict").length;
+        socket.send(JSON.stringify({ type: "verdict", id: REQUEST, verdict }));
+        await vi.waitFor(() =>
+          expect(frames.filter((frame) => frame.type === "verdict").length).toBe(before + 1),
+        );
+        return frames.filter((frame) => frame.type === "verdict").at(-1)?.status;
+      };
+      return { socket, press };
+    }
+
+    it("leaves a press open when the runner wasn't reached, so the owner may press again", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      use(fakeWorld([]));
+      let reached = false;
+      const given = runner(async () =>
+        reached ? { ok: true, applied: true } : { ok: false, reason: "unreachable" },
+      );
+      const { socket, press } = await told(`${MASTER}:webchat:u-owner-retry`);
+      expect(await press("allow")).toBe("failed");
+      reached = true;
+      expect(await press("allow")).toBe("applied");
+      expect(given).toEqual([
+        [REQUEST, "allow"],
+        [REQUEST, "allow"],
+      ]);
+      socket.close(1000);
+    });
+
+    it.each([
+      [{ ok: false, reason: "closed" } as const, "closed"],
+      [{ ok: true, applied: false } as const, "not_applied"],
+    ])("says what the runner answered: %j", async (outcome, status) => {
+      use(fakeWorld([]));
+      runner(outcome);
+      const { socket, press } = await told(`${MASTER}:webchat:u-owner-${status}`);
+      expect(await press("deny")).toBe(status);
+      socket.close(1000);
+    });
+
+    it("gives no verdict once the notice's 10 minutes passed", async () => {
+      use(fakeWorld([]));
+      const given = runner({ ok: true, applied: true });
+      const name = `${MASTER}:webchat:u-owner-expired`;
+      const { socket, press } = await told(name);
+      const [request] = await kept(name);
+      await runInDurableObject(agent(name), (_instance: ConversationAgent, state) => {
+        state.storage.sql.exec(
+          "UPDATE state SET value = ? WHERE key = 'sessionRequests'",
+          JSON.stringify([{ ...request, expiresAt: Date.now() - REQUEST_ANSWER_MS }]),
+        );
+      });
+      expect(await press("allow")).toBe("expired");
+      expect(given).toEqual([]);
+      socket.close(1000);
+    });
+
+    it("refuses a press for another agent, another request, or a socket that isn't the owner's", async () => {
       use(fakeWorld([]));
       const given = runner({ ok: true, applied: true });
       const name = `${MASTER}:webchat:u-owner-2`;
@@ -542,12 +533,18 @@ describe("Approve and Deny on a permission prompt's notice (ADR-0069 §1)", () =
       socket.addEventListener("message", (event) => frames.push(JSON.parse(String(event.data))));
       socket.accept();
       await agent(name).sessionWait(MASTER, wait);
-      const [request] = await kept(name);
-      socket.send(JSON.stringify({ type: "verdict", id: request?.key, verdict: "allow" }));
+      expect(await kept(name)).toHaveLength(1);
+      socket.send(JSON.stringify({ type: "verdict", id: REQUEST, verdict: "allow" }));
       socket.send(
-        JSON.stringify({ type: "verdict", id: request?.key, verdict: "allow", agent: "other" }),
+        JSON.stringify({ type: "verdict", id: REQUEST, verdict: "allow", agent: "other" }),
       );
-      socket.send(JSON.stringify({ type: "verdict", id: "0123456789abcdef", verdict: "allow" }));
+      socket.send(
+        JSON.stringify({
+          type: "verdict",
+          id: "ffffffff-0000-4000-8000-00000000000f",
+          verdict: "allow",
+        }),
+      );
       await vi.waitFor(() =>
         expect(
           frames.filter((frame) => frame.type === "verdict").map((frame) => frame.status),

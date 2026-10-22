@@ -14,9 +14,8 @@ import {
 } from "./spool.ts";
 
 // The permission hook (ADR-0069 §1), which hooks/permission-request.ts runs for each permission
-// prompt of the sessions the owner opens. It waits beside the Claude app's prompt, or the
-// terminal's, and the first answer wins: an answer there, the runner's verdict here, or neither by
-// its deadline. On any doubt it returns no decision, which leaves the prompt as it was, and it
+// prompt. It waits only in the Claude app's sessions, beside the prompt the app shows, and the
+// first answer wins: an answer there, the runner's verdict here, or neither by its deadline. On any doubt it returns no decision, which leaves the prompt as it was, and it
 // never stands in a session's way: Claude Code doesn't wait for it while its prompt shows.
 
 /** The hook's command in `settings.json` (docs/runner.md), as the session-event hook's. */
@@ -29,11 +28,12 @@ export const PERMISSION_WAIT_MS = 570_000;
 /** How often it looks for a verdict, and at its session's file. */
 export const VERDICT_POLL_MS = 500;
 /**
- * The sessions the owner opens, by their file's `entrypoint`: the app's and a terminal's, whose
- * prompt shows while the hook waits. A `-p` run's, `sdk-cli`, has no one to show it to: Claude Code
- * would wait for the hook there.
+ * The sessions the hook waits in, by their file's `entrypoint`: the Claude app's, whose host shows
+ * its prompt while the hook waits (ADR-0069 §1). A terminal's has no host beside the hook, and the
+ * runner's own sessions run through the Agent SDK, with an entrypoint of their own; a `-p` run's,
+ * `sdk-cli`, has no one to show a prompt to, and Claude Code waits for its hooks there.
  */
-export const OWNER_ENTRYPOINTS: readonly string[] = ["claude-desktop", "cli"];
+export const APP_ENTRYPOINT = "claude-desktop";
 /** What the session reads when the owner denied through Kelpie. */
 export const DENIED_MESSAGE = "The owner denied this through Kelpie.";
 /** The tool whose permission request is a question: only its prompt answers it. */
@@ -85,7 +85,7 @@ async function waitForVerdict(input: string, options: PermissionHookOptions): Pr
   const { session, tool } = payload;
   const own = () => sessionFileOf(options.claudeDir, options.parentPid, session);
   const file = own();
-  if (file === null || !OWNER_ENTRYPOINTS.includes(file.entrypoint ?? "")) return "";
+  if (file === null || file.entrypoint !== APP_ENTRYPOINT) return "";
   if (!prepareSpoolDir(dir, options.uid)) return "";
   const start = now();
   const id = options.randomId();
@@ -147,8 +147,8 @@ function parsePayload(
 
 /**
  * Whether the session moved on from the prompt: its file is gone, or no longer waits after it did,
- * as when the owner answered in the app; or it turned idle after the hook started, as a terminal's,
- * which may never say it waits.
+ * as when the owner answered in the app; or it turned idle after the hook started, should the file
+ * never have said it waits.
  */
 function sessionWatch(start: number) {
   let waited = false;

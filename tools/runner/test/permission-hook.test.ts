@@ -166,19 +166,15 @@ describe("the permission hook", () => {
     expect(listActions(vps.spoolDir).requests).toEqual([]);
   });
 
-  it("returns no decision when a terminal's file, never waiting, turns idle after it started", async () => {
-    writeOwnSession({ entrypoint: "cli", status: "busy", statusUpdatedAt: NOW - 5_000 });
-    moves = [
-      nothing,
-      nothing,
-      () => writeOwnSession({ entrypoint: "cli", status: "idle", statusUpdatedAt: clock }),
-    ];
+  it("returns no decision when a file that never said it waits turns idle after it started", async () => {
+    writeOwnSession({ status: "busy", statusUpdatedAt: NOW - 5_000 });
+    moves = [nothing, nothing, () => writeOwnSession({ status: "idle", statusUpdatedAt: clock })];
     expect(await runPermissionHook(input(), options)).toBe("");
     expect(clock).toBe(NOW + 3 * VERDICT_POLL_MS);
   });
 
   it("goes on waiting past an idle from before it started", async () => {
-    writeOwnSession({ entrypoint: "cli", status: "idle", statusUpdatedAt: NOW - 5_000 });
+    writeOwnSession({ status: "idle", statusUpdatedAt: NOW - 5_000 });
     moves = [nothing, nothing, verdict("allow")];
     expect(await runPermissionHook(input(), options)).toContain('"allow"');
   });
@@ -236,6 +232,8 @@ describe("the permission hook", () => {
 
   it.each([
     ["a `-p` run's, which no one else answers", { entrypoint: "sdk-cli" }],
+    ["a terminal's, which has no host beside the hook", { entrypoint: "cli" }],
+    ["the runner's own, through the Agent SDK", { entrypoint: "sdk-ts" }],
     ["one without an entrypoint", { entrypoint: undefined }],
     ["another session's", { sessionId: SESSION_B }],
   ])("returns no decision at once for a session file that is %s", async (_, fields) => {

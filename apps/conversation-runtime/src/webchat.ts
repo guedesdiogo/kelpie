@@ -1,10 +1,16 @@
 import type { Role } from "@kelpie/access";
-import { type Block, formatReply, isRunnerVerdict, type RunnerVerdict } from "@kelpie/channels";
+import {
+  type Block,
+  formatReply,
+  isRunnerVerdict,
+  RUNNER_SESSION_ID,
+  type RunnerVerdict,
+} from "@kelpie/channels";
 import type { Mascot } from "@kelpie/config";
 import type { ChatType, WebchatAdmission } from "@kelpie/conversation/contract";
 import type { ChatMessage } from "@kelpie/llm";
 import type { ConversationPorts, TurnStep } from "./ports.ts";
-import { REQUEST_KEY, type VerdictStatus } from "./session-requests.ts";
+import type { VerdictStatus } from "./session-requests.ts";
 import type { ToolActivity } from "./tools.ts";
 import { chatTypeOf, roleOf } from "./turn-access.ts";
 
@@ -16,7 +22,7 @@ import { chatTypeOf, roleOf } from "./turn-access.ts";
  * that holds every answer until the next message, or a press of a notice's Confirm button, by the
  * confirmation's id (#186). A pause and a press name their agent (ADR-0052 §3): a confirmation's
  * id is its own conversation's counter. A page from before ADR-0052 names none. A press of
- * Approve or Deny on a VPS session's prompt sends its verdict, by the key its notice gave (#497).
+ * Approve or Deny on a VPS session's prompt sends its verdict, by the request's random id (#497).
  */
 export type ClientFrame =
   | { type: "message"; id: string; text: string }
@@ -80,7 +86,7 @@ export type ServerFrame =
    * A reply's bubble comes formatted (#188). Kelpie's own notices come as written, a link notice
    * formatted with its one link, and a confirmation's with the id its button sends (#186). The
    * notice of a turn no route answered is marked `failed`, for the mascot's error. A VPS session's
-   * prompt comes with the key its Approve and Deny send, and until when they count (#497).
+   * prompt comes with the request's id, which its Approve and Deny send, and until when (#497).
    */
   | {
       type: "bubble";
@@ -218,7 +224,7 @@ export function parseClientFrame(message: unknown): ClientFrame | null {
   if (
     frame?.type === "verdict" &&
     typeof frame.id === "string" &&
-    REQUEST_KEY.test(frame.id) &&
+    RUNNER_SESSION_ID.test(frame.id) &&
     isRunnerVerdict(frame.verdict)
   ) {
     return { type: "verdict", id: frame.id, verdict: frame.verdict, ...agent };

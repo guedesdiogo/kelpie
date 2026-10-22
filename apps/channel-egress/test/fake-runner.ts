@@ -239,7 +239,13 @@ async function act(request: Request, path: string, protocol: number): Promise<Re
   if (protocol < 4) return Response.json({ ok: false }, { status: 404 });
   const body: unknown = await request.json();
   if (verdict) {
-    see("vps", { method: request.method, action: "verdict", bearer, body, query: verdict[1] as string });
+    see("vps", {
+      method: request.method,
+      action: "verdict",
+      bearer,
+      body,
+      query: verdict[1] as string,
+    });
     return verdict[1] === VPS_REQUESTS.requests[0]?.id
       ? Response.json({ ok: true, applied: true })
       : Response.json({ ok: false, reason: "closed" }, { status: 409 });

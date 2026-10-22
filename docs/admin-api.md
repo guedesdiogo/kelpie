@@ -448,13 +448,12 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
   - `Uma sessão do Claude Code na sua VPS está esperando sua resposta: "Fix the login flow", repositório "kelpie".`
   - `Una sesión de Claude Code en tu VPS está esperando tu permiso: sin título.`
 
-  - **A permission prompt the permission hook holds open** (ADR-0069 §1) gets two more lines: the tool and its input, quoted, on one line and cut to 300 characters, and how to answer it there. In the webchat, Approve and Deny buttons; on Telegram, two codes:
-
-    `To approve it, reply with K7M3XW. To deny it, reply with P4RT9C. Or answer it in the Claude app.`
-
-    - **The owner's press, or their code as their whole reply, is the answer** (ADR-0026). It goes to the runner as it is, never through the model: the code's message starts no turn, and Kelpie replies in fixed words with what came of it, as `Approved: the session goes on.` or `That request is no longer open: it was answered in the Claude app, or the session moved on.`
-    - **Each counts once, for 10 minutes,** and only from the owner. A press or code the runner wasn't reached for stays open, so the owner can try again. The runner counts the verdict once too, and only while the prompt is still open there.
-    - The AgentHost reads `RunnerSessions.requests()` once a check, when it has a permission wait to tell, and gives the notice the request its hook opened with it. Without one, as from a runner below protocol 4, the notice goes as before.
+  - **A pending permission request** (ADR-0069 §1), one whose permission hook waits for a verdict, gets two more lines: the tool and its input, quoted, on one line and cut to 300 characters, and where to answer it.
+    - **In the webchat,** Approve and Deny buttons, bound to the request's random id: `Approve or deny it here, or answer it in the Claude app.`
+    - **On Telegram,** until Story 5.45's callback path (#495) carries the buttons there: `Answer it in the Claude app.`
+    - **The owner's press is the verdict** (ADR-0026 §3's rules for a press): it goes to the runner as it is, with no model turn. It counts only from the owner's own socket, for a notice this conversation sent, once, for 10 minutes. The card then says what came of it: approved, denied, no longer open, or not reached, when the owner may press again. There is no typed code.
+    - **The request's id reaches only the notice and the runner,** never the model: `vps_sessions` doesn't show it, and no tool gives a verdict, so a steered Master can't name a request to approve.
+    - The AgentHost reads `RunnerSessions.requests()` once a check, when it has a permission wait to tell, and gives the notice the request its hook opened with it. A wait with no pending request, as a question's, or one from a runner below protocol 4, keeps ADR-0057's notice.
   - **What it names:** what the session waits for, a permission or an answer, and its title and repository. Each is cut to 80 characters with "…", on one line: breaks and control characters become spaces, what shows nothing goes, and its quotes are escaped. It is a fixed notice, never formatted, so any address in them shows as text, and on Telegram as code ("Formatting").
   - **Where it goes:** to Master's latest conversation with the owner on Telegram, which reaches the owner's phone; else to the webchat, while its page is open. A conversation recorded before #335, with no turn's time, comes last, on a channel no other took (#470). It is written in that conversation's language and sent at once. Kelpie never keeps it: the model never reads it, and the webchat's history doesn't show it.
   - **What leaves with it:** the session's title and repository go to the owner's channel, and so do a permission's tool and its input, redacted on the VPS. On Telegram they pass through Telegram's servers, stay in the chat, and can show on the phone's lock screen.

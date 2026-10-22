@@ -1,4 +1,4 @@
-// Claude Code's synchronous `PermissionRequest` hook for the sessions the owner opens on the VPS
+// Claude Code's synchronous `PermissionRequest` hook for the Claude app's sessions on the VPS
 // (ADR-0069 §1), which the owner installs in `~/.claude/settings.json` (docs/runner.md). Run with
 // Bun. It spools the request, waits for the runner's verdict beside the Claude app's prompt, prints
 // the decision when one comes, and always exits 0: no decision leaves the prompt as it was. It

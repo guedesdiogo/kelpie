@@ -122,13 +122,11 @@ import { readRole } from "./registry/schema.ts";
 import { failureNotice, routeNotice } from "./route-notices.ts";
 import * as schema from "./schema.ts";
 import {
-  answeredByCode,
   keepRequest,
   type OpenSessionRequest,
   requestLines,
   runnerVerdictsOf,
   type VerdictStatus,
-  verdictReply,
   verdictStatus,
 } from "./session-requests.ts";
 import { SUBAGENT_TOOLS } from "./subagent-limits.ts";
@@ -684,18 +682,6 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     capabilitiesFor(message.destination.channel);
     const mismatch = this.#bind(message);
     if (mismatch) return { status: "rejected", reason: mismatch };
-    // The owner's code for a VPS session's prompt is their answer to it, not a message for the
-    // model (ADR-0069 §1): it goes to the runner as it is, and Kelpie's fixed reply says what came
-    // of it.
-    const code =
-      roleOf(message.role) === "owner"
-        ? answeredByCode(this.#get<OpenSessionRequest[]>("sessionRequests", []), text)
-        : null;
-    if (code) {
-      const status = await this.#answerRequest(code.request.key, code.verdict);
-      await this.#tellVerdict(message.agentId, message.destination, status, code.verdict);
-      return { status: "accepted", flushAt: this.#get<number | null>("flushAt", null) };
-    }
 
     const inserted = this.#db
       .insert(schema.inbound)
@@ -855,13 +841,17 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       let text = sessionWaitNotice(notice, locale);
       let shown: { id: string; until: number } | undefined;
       if (notice.request) {
-        // Its prompt waits for a verdict too (ADR-0069 §1): the webchat's buttons, or the codes.
-        const kept = this.#get<OpenSessionRequest[]>("sessionRequests", []);
-        const { kept: next, opened } = keepRequest(kept, notice.request.id, this.#ports.now());
-        this.#set("sessionRequests", next);
+        // Its prompt waits for a verdict too (ADR-0069 §1): the webchat's Approve and Deny, bound
+        // to the request's id. Telegram's wait for #495's buttons, so its notice sends the owner
+        // to the Claude app.
         const buttons = destination.channel === "webchat";
-        text = `${text}\n${requestLines(notice.request, opened, buttons, locale)}`;
-        if (buttons) shown = { id: opened.key, until: opened.expiresAt };
+        if (buttons) {
+          const kept = this.#get<OpenSessionRequest[]>("sessionRequests", []);
+          const { kept: next, opened } = keepRequest(kept, notice.request.id, this.#ports.now());
+          this.#set("sessionRequests", next);
+          shown = { id: opened.requestId, until: opened.expiresAt };
+        }
+        text = `${text}\n${requestLines(notice.request, buttons, locale)}`;
       }
       const sent = await this.#channel.send(agentId, destination, text, {
         silent: false,
@@ -876,14 +866,15 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
   }
 
   /**
-   * The owner's answer to a VPS session's prompt, by its notice's key: once, while it counts, and
-   * to the runner as it is. A runner that wasn't reached leaves it open, so the owner may try
-   * again; the runner's own check counts it once, whatever happens here.
+   * The owner's press on a VPS session's prompt, by the request's id: only for a notice this
+   * conversation showed, once, while it counts, and to the runner as it is. A runner that wasn't
+   * reached leaves it open, so the owner may press again; the runner counts it once too, whatever
+   * happens here.
    */
-  async #answerRequest(key: string, verdict: RunnerVerdict): Promise<VerdictStatus> {
+  async #answerRequest(requestId: string, verdict: RunnerVerdict): Promise<VerdictStatus> {
     const now = this.#ports.now();
     const kept = this.#get<OpenSessionRequest[]>("sessionRequests", []);
-    const request = kept.find((entry) => entry.key === key);
+    const request = kept.find((entry) => entry.requestId === requestId);
     if (!request) return "closed";
     if (request.usedAt !== null) return "answered";
     if (request.expiresAt <= now) return "expired";
@@ -891,7 +882,7 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
       this.#set(
         "sessionRequests",
         this.#get<OpenSessionRequest[]>("sessionRequests", []).map((entry) =>
-          entry.key === key ? { ...entry, usedAt } : entry,
+          entry.requestId === requestId ? { ...entry, usedAt } : entry,
         ),
       );
     mark(now);
@@ -908,23 +899,6 @@ export class ConversationAgent extends Agent<Env> implements ConversationContrac
     if (status === "failed") mark(null);
     console.log("conversation: the owner answered a VPS session's prompt", { verdict, status });
     return status;
-  }
-
-  /** Kelpie's fixed reply to a typed code, kept nowhere, as the notice it answers. */
-  async #tellVerdict(
-    agentId: string,
-    destination: Destination,
-    status: VerdictStatus,
-    verdict: RunnerVerdict,
-  ): Promise<void> {
-    try {
-      const text = verdictReply(status, verdict, this.#locale());
-      const sent = await this.#channel.send(agentId, destination, text, { silent: false });
-      if (!sent.ok)
-        console.warn("conversation: a verdict's reply wasn't sent", { reason: sent.reason });
-    } catch (error) {
-      console.warn("conversation: a verdict's reply wasn't sent", { error: errorName(error) });
-    }
   }
 
   /** Whether a webchat page of this conversation is open: a socket of its own, not a sidebar's. */

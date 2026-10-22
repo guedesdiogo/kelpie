@@ -106,14 +106,21 @@ The runner tells Kelpie what every Claude Code session on the server is doing: t
 At your word, through Master ([ADR-0069](adr/0069-master-acts-on-vps-sessions.md), #497). It takes both hooks installed (below).
 
 - **A permission prompt waits for your answer in two places:** in the Claude app or the terminal, as always, and on Kelpie's notice ("How you see them").
-  - **The permission hook,** `tools/runner/hooks/permission-request.ts`, runs synchronously on each `PermissionRequest` of a session you opened: the app's (`entrypoint` `claude-desktop`) or a terminal's (`cli`). It writes the request to the spool, with a random id, the tool, and its input, redacted. Then it waits for a verdict file that only the runner writes.
+  - **The permission hook,** `tools/runner/hooks/permission-request.ts`, runs synchronously on each `PermissionRequest`, and waits only in a session the Claude app opened: one whose session file's `entrypoint` is `claude-desktop`. It writes the request to the spool, with a random id, the tool, and its input, redacted. Then it waits for a verdict file the runner writes.
   - **The first answer wins.** Claude Code shows its prompt while the hook waits (checked on #497).
     - When you answer there, the session goes on at once, and the hook ends with no decision: its session's file no longer says `waiting`, or turns `idle`.
     - When Kelpie's verdict comes first, the hook returns it, and Claude Code closes the prompt it shows.
-  - **It never stands in a session's way.** It always exits 0, and any doubt returns no decision, which leaves the prompt as it was. Doubt covers input it can't read, a question (`AskUserQuestion`, which only its prompt answers), and a session file it can't find under its parent process. It also covers a session it doesn't wait in: a `-p` run (`sdk-cli`) has no prompt to show, and Claude Code waits for its hooks there, so the hook returns at once. It waits 9.5 minutes at most, inside its 10-minute `timeout`.
+  - **It never stands in a session's way.** It always exits 0, and any doubt returns no decision, which leaves the prompt as it was. Doubt covers input it can't read, and a session file it can't find under its parent process. It waits 9.5 minutes at most, inside its 10-minute `timeout`.
+  - **It returns at once, with no decision,** where it doesn't wait:
+    - a question, `AskUserQuestion`: an `allow` would dismiss it, so the owner answers it in the app, or sends the session a message;
+    - a terminal's session (`cli`), which has no host beside the hook (ADR-0069 §1);
+    - a `-p` run (`sdk-cli`), which has no prompt to show: Claude Code waits for its hooks there (checked on #497);
+    - the runner's own sessions, which run through the Agent SDK with no user settings, so no hook of the owner's runs in them.
+  - **A request is pending** while its hook waits for a verdict. One the hook didn't wait on is never pending, and its wait keeps ADR-0057's notice.
   - **A verdict counts once,** and only while its request is open. Open means its hook runs, before its deadline; no verdict was given; and its session's wait for that thread hasn't closed.
     - `POST /sessions/requests/:id` answers `{ "ok": true, "applied": true }` once the hook took the verdict, within 3 seconds.
     - A verdict the hook didn't take by then is taken back (`"applied": false`), so it can't apply unseen. Anything else answers `409` `closed`.
+    - **The verdict file is a convention, not a lock.** Sessions run as the owner's user, as the runner does, so a session could write a verdict for itself. That gives it nothing it lacks: a process of the owner's user can already change the owner's settings.
   - **The tool's input leaves the server redacted twice,** as an excerpt does (above), by the same rules (ADR-0069 §4).
     - The hook redacts its first 16 KiB and keeps 1,000 characters.
     - The runner redacts it again, its own secret by value too, puts it on one line and cuts it to 500 characters.
@@ -136,9 +143,9 @@ At your word, through Master ([ADR-0069](adr/0069-master-acts-on-vps-sessions.md
 - **Ask Master** what is running on the VPS: its `vps_sessions` tool lists the sessions, grouped as waiting on you, working, idle, could be archived and ended, each with its age, title, repository and branch, pull request and the excerpt of its last reply. Only you can ask, in a message of your own to Master; a task's run never gets the tool. Once Master has read them, it asks you before it changes anything, in that turn and for 10 minutes after (`docs/admin-api.md`, "Outside content"). Archive a session in the Claude app: Kelpie can't (`docs/admin-api.md`, "The VPS's Claude Code sessions").
 - **Ask Master to act on one:** `message_session` sends it a message, and `end_session` ends it, once you confirm which one. Only you can ask, in a message of your own.
 - **A notice when a session waits on you.** Within about a minute of a session asking for your permission or an answer, Kelpie sends you one fixed message on Telegram, or in the webchat while it is open, naming the session's title and repository and what it waits for. Answer it where the session runs, in the Claude app or its terminal. A session idle after its reply, or ended, gets no notice.
-  - **A permission prompt the permission hook holds open** gets more on its notice: the tool and its input, and a way to answer it there. In the webchat, that is **Approve** and **Deny**; on Telegram, a code for each, which you send back as your whole reply.
-  - **Your press, or your code, is the answer** ([ADR-0026](adr/0026-confirmation-by-owner-act.md)). Kelpie sends it to the runner as it is, and replies with what came of it. Master never reads the code and never answers for you, and nor does a session's text.
-  - **They count for 10 minutes, and once.** A code the runner wasn't reached for stays open, so you can send it again. The first answer wins: one you gave in the Claude app first leaves the notice's answer `closed`.
+  - **A pending permission request** gets more on its notice: the tool and its input. In the webchat it also gets **Approve** and **Deny**. On Telegram the notice sends you to the Claude app until Story 5.45's buttons (#495) reach it.
+  - **Your press is the answer** ([ADR-0026](adr/0026-confirmation-by-owner-act.md)). Kelpie sends it to the runner as it is, bound to the request's random id, with no model turn, and the card says what came of it. Master never sees the id and never answers for you, and nor does a session's text. There is no typed code: the Claude app stays the other way to answer.
+  - **A press counts for 10 minutes, and once,** and only from your own page's socket. One the runner wasn't reached for stays open, so you can press again. The first answer wins: one you gave in the Claude app first leaves the card saying the request is no longer open.
   - **The title and repository leave the server with it,** to your channel, and so do a permission's tool and its input: on Telegram they pass through Telegram's servers, stay in the chat, and can show on your phone's lock screen.
   - **Waits already open are told too,** up to a day old, the first time Kelpie reads the runner's waits, as once the runner is connected or updated.
   - The waits come from the session files without the hook, and from the hook once you install it (below), which also catches a prompt the file doesn't show.
@@ -148,7 +155,7 @@ At your word, through Master ([ADR-0069](adr/0069-master-acts-on-vps-sessions.md
 
 There are two, both run with Bun from the runner's checkout. Neither uses the network or holds a secret, and both always exit 0:
 - **The session-event hook,** `tools/runner/hooks/session-event.ts`, runs in the background on every event the runner reads, and on `SessionStart`, where it records the session's inbox. It reads the event from its input and writes the spool, within 1.5 seconds even when its input never ends: Claude Code doesn't time out a hook that runs in the background. It takes about 25 ms and 26 MB per event, on every tool call, since `PostToolUse` is one of its events.
-- **The permission hook,** `tools/runner/hooks/permission-request.ts`, runs on each `PermissionRequest`, and Claude Code waits for it only where no prompt shows ("Acting on them", above). It takes about 26 MB while a prompt is open, for 9.5 minutes at most.
+- **The permission hook,** `tools/runner/hooks/permission-request.ts`, runs on each `PermissionRequest`, synchronously. It waits only in the Claude app's sessions, beside the prompt the app shows, and returns at once elsewhere ("Acting on them", above). It takes about 26 MB while a prompt is open, for 9.5 minutes at most.
 
 Running sessions pick up an edit to `settings.json` without a restart (#416). On the server, as the runner's user, with the runner's checkout in `~/Repos/kelpie` and `jq` installed:
 
@@ -215,7 +222,7 @@ The same goes under `SessionStart`, `PermissionRequest`, `PermissionDenied`, `Po
 
 Updating the runner's checkout updates the hooks too. The runner's tests run the snippets on made-up settings (`tools/runner/test/docs.test.ts`).
 
-**Removing only the permission hook** goes back to ADR-0057's behavior: Kelpie still lists the sessions and tells you of their waits, but its notices can't answer a prompt. It leaves every other hook as it was, with the same care:
+**Removing only the permission hook** rolls ADR-0069's prompts back: it leaves the session-event hook's asynchronous `PermissionRequest` entry, as ADR-0057 had it. Kelpie still lists the sessions and tells you of their waits, but its notices can't answer a prompt. It leaves every other hook as it was, with the same care:
 
 ```bash
 f=$(readlink -f ~/.claude/settings.json)

@@ -85,7 +85,7 @@ export interface ConversationPorts {
    * bubble a formatted reply that may link those URLs (#188); without it, the text goes as typed.
    * `confirmation` makes it a confirmation's notice with a Confirm button, where the channel has
    * one (#186): the webchat; channel-egress never gets it. `sessionRequest` makes it a VPS
-   * session's prompt with Approve and Deny, by the key they send (#497): the webchat's too.
+   * session's prompt with Approve and Deny, by the request's id they send (#497): the webchat's too.
    * `failure` marks the notice of a turn no route answered, which the webchat's mascot shows as an
    * error (ADR-0045 §6); channel-egress never gets it either.
    */
