@@ -38,10 +38,12 @@ export interface Release {
   url: string;
 }
 
-/** A workflow run: its name, and the branch or tag it ran from. */
+/** A workflow run: its name, what started it, the branch or tag it ran from, and its commit. */
 export interface WorkflowRun {
   title: string;
+  event: string;
   branch: string | null;
+  commit: string;
 }
 
 export interface ReleaseFields {
@@ -81,6 +83,8 @@ export interface GitHub {
    * while it runs. Null when it never ran there.
    */
   checkState(commit: string, name: string): Promise<string | null>;
+  /** Whether this repository has the label, whatever its case; false only when GitHub says 404. */
+  hasLabel(name: string): Promise<boolean>;
   /** A workflow's successful runs, newest first: the most recent 100. */
   successfulRuns(workflow: string): Promise<WorkflowRun[]>;
   /** The most recent releases, drafts included for a token that can push. */
@@ -295,11 +299,31 @@ export function githubApi(token: string, repo: string, fetchImpl: typeof fetch =
       return latest ? (latest.conclusion ?? latest.status) : null;
     },
 
+    async hasLabel(label) {
+      try {
+        await call(`/repos/${repo}/labels/${encodeURIComponent(label)}`);
+        return true;
+      } catch (error) {
+        if (error instanceof GitHubError && error.status === 404) return false;
+        throw error;
+      }
+    },
+
     async successfulRuns(workflow) {
       const { workflow_runs } = await call<{
-        workflow_runs: Array<{ display_title: string; head_branch: string | null }>;
+        workflow_runs: Array<{
+          display_title: string;
+          event: string;
+          head_branch: string | null;
+          head_sha: string;
+        }>;
       }>(`/repos/${repo}/actions/workflows/${workflow}/runs?status=success&per_page=100`);
-      return workflow_runs.map((run) => ({ title: run.display_title, branch: run.head_branch }));
+      return workflow_runs.map((run) => ({
+        title: run.display_title,
+        event: run.event,
+        branch: run.head_branch,
+        commit: run.head_sha,
+      }));
     },
 
     async releases() {

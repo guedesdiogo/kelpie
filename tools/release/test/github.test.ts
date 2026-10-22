@@ -169,18 +169,41 @@ describe("githubApi", () => {
     );
   });
 
-  it("reads a workflow's successful runs, with their names and branches", async () => {
+  it("tells whether a label exists, failing on anything but a 404", async () => {
+    const answers = [
+      Response.json({ name: "critico" }),
+      Response.json({ message: "Not Found" }, { status: 404 }),
+      Response.json({ message: "Bad credentials" }, { status: 401 }),
+    ];
+    const { calls, github } = recorder(() => answers.shift() as Response);
+    expect(await github.hasLabel("critico")).toBe(true);
+    expect(await github.hasLabel("critico")).toBe(false);
+    await expect(github.hasLabel("critico")).rejects.toThrow("failed (401): Bad credentials");
+    expect(calls[0]?.url.pathname).toBe(`/repos/${REPO}/labels/critico`);
+  });
+
+  it("reads a workflow's successful runs: name, event, branch and commit", async () => {
     const { calls, github } = recorder(() =>
       Response.json({
         workflow_runs: [
-          { display_title: "Production v0.2.0", head_branch: "v0.2.0" },
-          { display_title: "Production v0.1.0", head_branch: null },
+          {
+            display_title: "Production v0.2.0",
+            event: "release",
+            head_branch: "v0.2.0",
+            head_sha: sha(2),
+          },
+          {
+            display_title: "Production v0.1.0",
+            event: "workflow_dispatch",
+            head_branch: null,
+            head_sha: sha(1),
+          },
         ],
       }),
     );
     expect(await github.successfulRuns("deploy.yml")).toEqual([
-      { title: "Production v0.2.0", branch: "v0.2.0" },
-      { title: "Production v0.1.0", branch: null },
+      { title: "Production v0.2.0", event: "release", branch: "v0.2.0", commit: sha(2) },
+      { title: "Production v0.1.0", event: "workflow_dispatch", branch: null, commit: sha(1) },
     ]);
     expect(calls[0]?.url.pathname).toBe(`/repos/${REPO}/actions/workflows/deploy.yml/runs`);
     expect(calls[0]?.url.search).toBe("?status=success&per_page=100");

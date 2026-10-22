@@ -171,6 +171,25 @@ describe("releaseContents", () => {
     expect(accepted.critical[0]?.acceptance).toEqual({ by: "pull", pull: 11 });
   });
 
+  it("reads the critico label whatever its case", async () => {
+    const { git, c, e } = history();
+    const github = fakeGitHub({
+      pulls: { [c]: [mergedPull(10, "mentee", [closedIssue(1, ["Critico"])])] },
+      labels: ["CRITICO"],
+    });
+    const contents = await releaseContents({ git, github }, { commit: e, base: "v0.1.0" }, MENTOR);
+    expect(unaccepted(contents).map(({ issue }) => issue.number)).toEqual([1]);
+  });
+
+  it("fails when the repository has no critico label, rather than pass everything", async () => {
+    const { git, e } = history();
+    const github = fakeGitHub({ labels: ["security"] });
+    await expect(
+      releaseContents({ git, github }, { commit: e, base: "v0.1.0" }, MENTOR),
+    ).rejects.toThrow("This repository has no `critico` label");
+    expect(github.asked).toEqual([]);
+  });
+
   it("finds no critico issue when none is labeled so", async () => {
     const { git, c, e } = history();
     const github = fakeGitHub({
@@ -186,9 +205,15 @@ describe("releaseContents", () => {
 
 describe("gateBase", () => {
   it("starts at the release the latest successful Deploy run shipped", async () => {
-    const { git, d } = history();
+    const { git, b, d } = history();
     git(["tag", "v0.2.0", d]);
-    const github = fakeGitHub({ runs: [productionRun("v0.1.0", "main"), productionRun("v0.2.0")] });
+    // The newest run published v0.1.0; v0.2.0's ran before it.
+    const github = fakeGitHub({
+      runs: [
+        productionRun("v0.1.0", { event: "release", branch: "v0.1.0", commit: b }),
+        productionRun("v0.2.0"),
+      ],
+    });
     expect(await gateBase({ git, github })).toEqual({ from: "deployed", tag: "v0.1.0" });
   });
 
@@ -199,15 +224,16 @@ describe("gateBase", () => {
     expect(await gateBase({ git, github })).toEqual({ from: "history", tag: null });
   });
 
-  it("ignores runs named otherwise, and runs from another branch", async () => {
+  it.each([
+    ["by hand from another branch", { branch: "feature" }],
+    ["by hand from a branch named like the tag", { branch: "v0.1.0" }],
+    ["on a push from main", { event: "push" }],
+    ["on a release, at another commit than its tag's", { event: "release", branch: "v0.1.0" }],
+    ["named for a prerelease", { title: "Production v0.1.0-rc.1" }],
+    ["named otherwise", { title: "Deploy" }],
+  ])("doesn't count a run %s", async (_, how) => {
     const { git } = history();
-    const github = fakeGitHub({
-      runs: [
-        productionRun("v0.1.0", "feature"),
-        { title: "Production v0.1.0-rc.1", branch: "main" },
-        { title: "Deploy", branch: "main" },
-      ],
-    });
+    const github = fakeGitHub({ runs: [{ ...productionRun("v0.1.0"), ...how }] });
     expect(await gateBase({ git, github })).toEqual({ from: "history", tag: null });
   });
 
@@ -263,7 +289,7 @@ describe("gateBase", () => {
 
   it("fails when GitHub fails, never reading that as no critico issue", async () => {
     const { git, c, e } = history();
-    const failing = (what: "successfulRuns" | "mergedPulls" | "comments") => {
+    const failing = (what: "successfulRuns" | "hasLabel" | "mergedPulls" | "comments") => {
       const github = fakeGitHub({
         pulls: { [c]: [mergedPull(10, "mentee", [closedIssue(1, ["critico"])])] },
       });
@@ -275,7 +301,7 @@ describe("gateBase", () => {
     await expect(gateBase({ git, github: failing("successfulRuns") })).rejects.toThrow(
       "successfulRuns failed",
     );
-    for (const what of ["mergedPulls", "comments"] as const) {
+    for (const what of ["hasLabel", "mergedPulls", "comments"] as const) {
       await expect(
         releaseContents({ git, github: failing(what) }, { commit: e, base: "v0.1.0" }, MENTOR),
       ).rejects.toThrow(`${what} failed`);

@@ -319,9 +319,21 @@ export interface FakeGitHub extends GitHub {
   saved: Array<{ id: number | null; fields: ReleaseFields }>;
 }
 
-/** A successful Deploy run of a release, from its tag (a release event) or from main (by hand). */
-export function productionRun(tag: string, branch: string | null = tag): WorkflowRun {
-  return { title: `Production ${tag}`, branch };
+/**
+ * A successful Deploy run of a release: by hand from main unless told otherwise. A release event
+ * runs from its tag, at the commit the tag names.
+ */
+export function productionRun(
+  tag: string,
+  how: Partial<Omit<WorkflowRun, "title">> = {},
+): WorkflowRun {
+  return {
+    title: `Production ${tag}`,
+    event: "workflow_dispatch",
+    branch: "main",
+    commit: "f".repeat(40),
+    ...how,
+  };
 }
 
 /**
@@ -336,6 +348,8 @@ export function fakeGitHub(
     checks?: Record<string, string>;
     /** The Deploy workflow's successful runs, newest first. */
     runs?: WorkflowRun[];
+    /** The repository's labels; `critico` by default. */
+    labels?: string[];
     releases?: Release[];
   } = {},
 ): FakeGitHub {
@@ -367,6 +381,11 @@ export function fakeGitHub(
     },
     async checkState(commit) {
       return options.checks?.[commit] ?? null;
+    },
+    async hasLabel(name) {
+      return (options.labels ?? ["critico"]).some(
+        (label) => label.toLowerCase() === name.toLowerCase(),
+      );
     },
     async successfulRuns() {
       return options.runs ?? [];

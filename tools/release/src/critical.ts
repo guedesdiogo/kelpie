@@ -14,6 +14,11 @@ export const DEFAULT_MENTOR = "guedesdiogo";
 /** A release's tag: `vX.Y.Z`, with no prerelease or build suffix. */
 const RELEASE_TAG = /^v(\d+)\.(\d+)\.(\d+)$/;
 
+/** Whether an issue is labeled `critico`, whatever the label's case. */
+export function isCritical(issue: Pick<ClosedIssue, "labels">): boolean {
+  return issue.labels.some((label) => label.toLowerCase() === CRITICAL_LABEL);
+}
+
 export function parseRelease(tag: string): [number, number, number] | null {
   const match = RELEASE_TAG.exec(tag);
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
@@ -57,16 +62,22 @@ const PRODUCTION_RUN = /^Production (v\d+\.\d+\.\d+)$/;
 export type GateBase = { from: "deployed"; tag: string } | { from: "history"; tag: null };
 
 /**
- * The gate's base for `commit`. A run counts only from `main` or from its own tag: a run from
- * another branch runs that branch's workflow, which proves nothing. When the latest run's tag
- * isn't in the checkout, nothing says what shipped, so the gate reads everything. A deployed
- * release newer than `commit`, as when an older one is deployed again, leaves it nothing to read.
+ * The gate's base. A run counts only when it ran a workflow file the gate can trust: by hand from
+ * `main`, or on a release at the commit its tag names. A run from another branch, even one named
+ * like the tag, ran that branch's copy, which proves nothing. When the latest run's tag isn't in
+ * the checkout, nothing says what shipped, so the gate reads everything. A deployed release newer
+ * than the one gated, as when an older one is deployed again, leaves it nothing to read.
  */
 export async function gateBase(deps: { git: Git; github: GitHub }): Promise<GateBase> {
   for (const run of await deps.github.successfulRuns(DEPLOY_WORKFLOW)) {
     const tag = PRODUCTION_RUN.exec(run.title)?.[1];
-    if (!tag || (run.branch !== "main" && run.branch !== tag)) continue;
-    if (tagCommit(deps.git, tag)) return { from: "deployed", tag };
+    if (!tag) continue;
+    const commit = tagCommit(deps.git, tag);
+    const trusted =
+      (run.event === "workflow_dispatch" && run.branch === "main") ||
+      (run.event === "release" && commit !== null && run.commit === commit);
+    if (!trusted) continue;
+    if (commit) return { from: "deployed", tag };
     break;
   }
   return { from: "history", tag: null };
@@ -108,6 +119,12 @@ export async function releaseContents(
   range: { commit: string; base: string | null },
   mentor: string,
 ): Promise<ReleaseContents> {
+  // Without the label, no issue could carry it, and the gate would pass everything unread.
+  if (!(await deps.github.hasLabel(CRITICAL_LABEL))) {
+    throw new Error(
+      `This repository has no \`${CRITICAL_LABEL}\` label, so the critical gate can't tell which issues need the mentor's acceptance. Create it (docs/deploy.md, One-time setup).`,
+    );
+  }
   const commits = deps
     .git([
       "rev-list",
@@ -131,7 +148,7 @@ export async function releaseContents(
   );
   const critical: CriticalIssue[] = [];
   for (const issue of sorted) {
-    if (!issue.labels.includes(CRITICAL_LABEL)) continue;
+    if (!isCritical(issue)) continue;
     const by = closers.get(issueKey(issue)) ?? [];
     const mentorPull = by.find((pull) => sameLogin(pull.author, mentor));
     let acceptance: Acceptance | null = mentorPull ? { by: "pull", pull: mentorPull.number } : null;

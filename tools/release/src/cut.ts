@@ -4,6 +4,7 @@ import {
   type GateBase,
   gateBase,
   gateRange,
+  isCritical,
   parseRelease,
   previousRelease,
   type ReleaseContents,
@@ -69,7 +70,7 @@ export function releaseNotes(tag: string, contents: ReleaseContents, gate: GateV
     ...(contents.issues.length > 0
       ? contents.issues.map(
           (issue) =>
-            `- [${issue.repo}#${issue.number}](${issue.url}) ${issue.title}${issue.labels.includes(CRITICAL_LABEL) ? ` · \`${CRITICAL_LABEL}\`` : ""}`,
+            `- [${issue.repo}#${issue.number}](${issue.url}) ${issue.title}${isCritical(issue) ? ` · \`${CRITICAL_LABEL}\`` : ""}`,
         )
       : ["None."]),
     ...(gate.contents.critical.length > 0
