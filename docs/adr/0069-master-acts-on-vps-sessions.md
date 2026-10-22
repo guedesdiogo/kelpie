@@ -5,7 +5,7 @@
 - Issue: [#491](https://github.com/guedesdiogo/kelpie/issues/491)
 - Decided by the owner on 2026-10-22:
   - «Gostaria de ter como permitir fazer tudo via kelpie porém também permitir eu interagir direto no claude code, mas pelo que entendi o hook trava e fica aguardando o kelpie, é isso?»;
-  - the plan: «Aprovo os três (Recomendado)», for #489, #490 and #491.
+  - the plan: «Aprovo os três (Recomendado)», for #489, #490 and #491. Two reviews then adjusted it, as #491's scope notes record, and the owner's answer to them is quoted there.
 - Amends: [ADR-0057](0057-vps-claude-code-sessions.md) §1, §2, §3 and §5, [ADR-0026](0026-confirmation-by-owner-act.md) (a press that resolves a request in code), and [ADR-0035](0035-agent-computer.md)'s open question for the sessions the owner opens in the app
 
 ## Context
@@ -41,7 +41,8 @@ The reference check is on #491.
   - no decision, so nothing changes, when the session moves on (the owner answered in the app), when no verdict comes, or at its timeout.
 - **It never blocks a session:** it always exits 0, and any doubt returns no decision.
 - **Questions aren't approved this way.** A `PermissionRequest` for `AskUserQuestion` returns no decision at once: an `allow` would dismiss the question. The owner answers it in the app, or sends the session a message (§2).
-- **Kelpie tells the owner** in a fixed notice ([ADR-0027](0027-fixed-texts-in-three-languages.md)) with Approve and Deny, for a pending permission request only:
+- **A request is pending** while its hook waits for a verdict. A request the hook didn't wait on, a question's or a terminal session's, is never pending.
+- **Kelpie tells the owner** in a fixed notice ([ADR-0027](0027-fixed-texts-in-three-languages.md)) with Approve and Deny, for a pending request only:
   - the notice names the session's title, the tool and its input, as plain text, never as a link;
   - a wait with no pending request, opened by a `Notification` or by a session file (ADR-0059), keeps ADR-0057's notice, with no buttons.
 - **The buttons resolve the request in code,** with no model turn: a press is the verdict.
@@ -50,12 +51,14 @@ The reference check is on #491.
   - A press counts only from the owner: in the webchat, the owner's own socket; on Telegram, the paired owner's account, in the chat where Kelpie sent the notice.
   - It counts once, and only while that request is open. A press after the app answered, or after the timeout, changes nothing, and the notice says so.
   - There is no typed code for these: the app stays the other way to answer.
+  - The request's random id reaches only Kelpie's notice and the runner, never the model: `vps_sessions` doesn't show it, and no tool takes a verdict. A steered Master can't name a request to approve.
 - **Master's words never approve,** and nor does a session's text.
 
 ### 2. Sending a session a message
 
 - **Master's tool `message_session`** has the runner post the text to the session's inbox socket. The `SessionStart` hook records the socket's path in the spool.
 - **It arrives as another session's message,** so it approves nothing and changes no configuration there.
+- **It can still make the session work.** The receiving session acts on it within its own permissions: one in `auto` mode may run tools without asking. A session that bypasses permission prompts holds a message from a sender that doesn't, for the owner's approval in the app [doc].
 - **When it runs:** only in a turn the owner typed. ADR-0064 holds it after outside content. Since `vps_sessions` marks its turn, a message sent right after listing waits for the owner's yes.
 
 ### 3. Ending a session
@@ -95,7 +98,7 @@ The story checks these first, on the VPS:
   - §1: Kelpie acts on the sessions, besides observing them;
   - §2: the `PermissionRequest` hook becomes synchronous, with a timeout of 600 seconds, in the app's sessions only. The other hooks stay asynchronous, with their 2 seconds;
   - §3: a pending request's tool and its input leave the server too;
-  - §5: Master gains `message_session` and `end_session`, and a wait's notice gains Approve and Deny.
+  - §5: Master gains `message_session` and `end_session`, and a pending request's notice gains Approve and Deny.
 - **[ADR-0026](0026-confirmation-by-owner-act.md):** a press on Approve or Deny resolves a VPS session's request in code, by the rules of a press: the owner only, once, while it is open.
 - **[ADR-0035](0035-agent-computer.md):** its open question, about the owner answering in the Claude app while a hook waits, stays open for the sessions Kelpie starts. For the sessions the owner opens in the app, §1 answers it: the first answer wins, once §5's check confirms it.
 

@@ -8,7 +8,7 @@
 - Amended by: [ADR-0044](0044-design-system-review.md), a Deny button, under the same rules, closes a confirmation at once, and the agent goes on without that change
 - Amended by: [ADR-0052](0052-webchat-presence-sockets.md), a press names its agent and may come from a sidebar row's presence socket, and an open confirmation's card comes back after its turn settled
 - Amended by: [ADR-0055](0055-composer-files-dictation-and-model.md), a pick on the webchat's model chip, and a tap on Kelpie's model picker on Telegram, are the owner's yes to one field of an agent's `conversation`-area trio and to a one-reply `max`, and the picker's inline buttons carry its random id; every confirmation keeps the typed code
-- Amended by: [ADR-0067](0067-master-reaches-every-owner-command.md), a long change is confirmed on an admin API page Kelpie links, and Kelpie's confirmation notice on Telegram carries an inline Confirm button bound to the confirmation's random id; [ADR-0069](0069-master-acts-on-vps-sessions.md), a press on Approve or Deny resolves a VPS session's permission request in code, by the rules of a press, with no typed code
+- Amended by: [ADR-0067](0067-master-reaches-every-owner-command.md), a long change, and a change to the identities or the time zone, is confirmed on an admin API page Kelpie links, and Kelpie's confirmation notice on Telegram carries an inline Confirm button bound to the confirmation's random id; [ADR-0069](0069-master-acts-on-vps-sessions.md), a press on Approve or Deny resolves a VPS session's permission request in code, by the rules of a press, with no typed code
 
 ## Context
 

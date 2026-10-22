@@ -9,6 +9,7 @@
   - the design's questions, on 2026-10-21: «Dividir», «Só turnos sem pessoa» and «Não contam»;
   - after the pull request's reviews, on 2026-10-21: «10 minutos» for the mark's window over the owner's own turns, and «Tirar dos registros» for the replies of marked turns.
 - Amends: [ADR-0013](0013-self-configuration.md), whose smaller changes run directly only in a turn that read no outside content.
+- Amended by: [ADR-0067](0067-master-reaches-every-owner-command.md), a held change too long for one bubble is confirmed on an admin API page Kelpie links, instead of not running (§4)
 
 ## Context
 

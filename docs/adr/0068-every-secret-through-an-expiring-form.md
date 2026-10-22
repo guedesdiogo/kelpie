@@ -6,7 +6,7 @@
 - Decided by the owner on 2026-10-22:
   - on Cloudflare's reach: «Chaves de modelo por formulário»;
   - the rule: «toda informação que deve ser segura, como chaves, secrets, tokens e afins devem ser obtidos a partir de formulários específicos com tempo de expiração para o formulário e depois de obter os dados o formulário deve expirar. Assim guardamos os dados sem passar pela llm»;
-  - the plan: «Aprovo os três (Recomendado)», for #489, #490 and #491.
+  - the plan: «Aprovo os três (Recomendado)», for #489, #490 and #491. Two reviews then adjusted it, as #490's scope notes record, and the owner's answer to them is quoted there.
 - Supersedes: [ADR-0019](0019-llm-gateway-keys.md)
 - Amends: [ADR-0013](0013-self-configuration.md), whose deploy secrets narrow to §1's
 
@@ -44,7 +44,8 @@ The reference check is on #490.
   - `AI_GATEWAY_TOKEN`, in `provider:ai-gateway`;
   - `TYPESAFE_API_KEY`, in `provider:typesafe`.
 - **The check:** the form checks a key before storing it, with a cheap authenticated read on its service, such as listing the provider's models.
-  - `llm-gateway` makes the call, through a `ProviderCheck` entrypoint bound only by `channel-egress`. It takes the slot and the candidate key, answers accepted or refused, and keeps nothing. So `channel-egress` still calls no provider.
+  - `llm-gateway` makes the call, through a `ProviderCheck` entrypoint bound only by `admin-api`. It takes the slot and the candidate key, answers accepted or refused, and keeps nothing. So `channel-egress` still calls no provider.
+  - `admin-api`, which takes the form's submission, asks `ProviderCheck` first. Then `ChannelForms` stores an accepted key, or counts a refused one against the form. `admin-api` deploys last, so it may bind `llm-gateway`, while `channel-egress`, deployed first, can't ([`docs/deploy.md`](../deploy.md)).
   - The story names the call for each slot. A service with no such read stores the key unchecked, and the form's page says so.
   - A refused key counts against the form, and five refused keys close it, as a bot token's do.
 - **Master's tool `connect_model_key`** asks for the form for one provider. Kelpie sends its link itself, and when the owner finishes, Kelpie's note tells the conversation that sent it (ADR-0028). ADR-0064 holds the tool after outside content, as it holds the other form tools.
@@ -52,7 +53,7 @@ The reference check is on #490.
 
 ### 3. `llm-gateway` reads the store through `ProviderKeys`
 
-- **The entrypoint.** `channel-egress` gains a `ProviderKeys` entrypoint, bound only by `llm-gateway`. It returns only `provider:` slots.
+- **The entrypoint.** `channel-egress` gains a `ProviderKeys` entrypoint, bound only by `llm-gateway`, which already binds `channel-egress` and deploys after it. It returns only `provider:` slots.
 - **This narrows the store's rule** that no entrypoint returns a secret. The Worker the model drives, conversation-runtime, still can't reach a key, and `llm-gateway` already holds the keys it calls providers with.
 - **The cache.** `llm-gateway` keeps a key it read in memory for at most 60 seconds, so a rotation applies within a minute.
 
@@ -72,7 +73,7 @@ The reference check is on #490.
 - **The story** is [#496](https://github.com/guedesdiogo/kelpie/issues/496), a sub-issue of [#19](https://github.com/guedesdiogo/kelpie/issues/19). Its tests cover:
   - that a key never appears in a tool's result, history, a log or an error;
   - that a used or expired form refuses;
-  - that only `llm-gateway` can call `ProviderKeys`, and only for `provider:` slots, and only `channel-egress` can call `ProviderCheck`;
+  - that only `llm-gateway` can call `ProviderKeys`, and only for `provider:` slots, and only `admin-api` can call `ProviderCheck`;
   - the precedence of a stored key, and the fallbacks.
 
 ## Alternatives considered
