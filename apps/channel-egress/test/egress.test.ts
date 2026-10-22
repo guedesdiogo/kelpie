@@ -104,7 +104,7 @@ describe("ChannelForms", () => {
     expect(calls[1]?.body).toEqual({
       url: "https://ingress.test/webhooks/telegram/sales",
       secret_token: expect.stringMatching(/^[A-Za-z0-9_-]{32,256}$/),
-      allowed_updates: ["message"],
+      allowed_updates: ["message", "callback_query"],
     });
 
     // The link stores once. The same token again, as a double click sends it, answers with the
@@ -696,6 +696,242 @@ describe("ChannelEgress", () => {
       reason: "not_connected",
     });
     expect(calls.filter((call) => call.method === "sendMessage")).toEqual([]);
+  });
+});
+
+describe("Buttons under Kelpie's notices (ADR-0067 §3)", () => {
+  const confirm = [[{ label: "Confirmar", data: "confirm:0f1e2d3c4b5a69788796a5b4c3d2e1f0" }]];
+  /** Telegram's answer to `getWebhookInfo`, for `agentId`'s own webhook unless `url` says. */
+  const webhookInfo =
+    (
+      agentId: string,
+      allowed: string[] | undefined,
+      url = `https://ingress.test/webhooks/telegram/${agentId}`,
+    ) =>
+    () =>
+      Response.json({
+        ok: true,
+        result: { url, pending_update_count: 0, ...(allowed ? { allowed_updates: allowed } : {}) },
+      });
+
+  it("sends a notice's buttons, after setting again a webhook that takes no taps, once", async () => {
+    const answers: Record<string, () => Response> = {};
+    const calls = botApi((method) => answers[method]?.() ?? defaultAnswer(method));
+    await connect("taps-old");
+    calls.length = 0;
+    // Connected before taps existed, the bot's webhook takes messages only.
+    answers.getWebhookInfo = webhookInfo("taps-old", ["message"]);
+
+    expect(
+      await exports.ChannelEgress.send("taps-old", destination, "Confirme: isto.", {
+        buttons: confirm,
+      }),
+    ).toEqual({ ok: true, providerMessageId: "77" });
+    expect(calls.map((call) => call.method)).toEqual([
+      "getWebhookInfo",
+      "setWebhook",
+      "sendMessage",
+    ]);
+    expect(calls[1]?.body).toMatchObject({
+      url: "https://ingress.test/webhooks/telegram/taps-old",
+      allowed_updates: ["message", "callback_query"],
+    });
+    expect(calls[2]?.body.reply_markup).toEqual({
+      inline_keyboard: [
+        [{ text: "Confirmar", callback_data: "confirm:0f1e2d3c4b5a69788796a5b4c3d2e1f0" }],
+      ],
+    });
+
+    // Checked once: the next notice with buttons goes at once, and a bubble without any never asks.
+    await exports.ChannelEgress.send("taps-old", destination, "Confirme: aquilo.", {
+      buttons: confirm,
+    });
+    await exports.ChannelEgress.send("taps-old", destination, "Pronto.");
+    expect(calls.map((call) => call.method).slice(3)).toEqual(["sendMessage", "sendMessage"]);
+  });
+
+  it("leaves alone a webhook that takes taps already, or that points elsewhere", async () => {
+    const answers: Record<string, () => Response> = {};
+    const calls = botApi((method) => answers[method]?.() ?? defaultAnswer(method));
+    await connect("taps-new");
+    await connect("taps-elsewhere");
+    calls.length = 0;
+
+    answers.getWebhookInfo = webhookInfo("taps-new", ["message", "callback_query"]);
+    await exports.ChannelEgress.send("taps-new", destination, "Confirme.", { buttons: confirm });
+    // Pointed elsewhere by hand, a webhook isn't Kelpie's to set.
+    answers.getWebhookInfo = webhookInfo("taps-elsewhere", ["message"], "https://other.example/x");
+    await exports.ChannelEgress.send("taps-elsewhere", destination, "Confirme.", {
+      buttons: confirm,
+    });
+    expect(calls.map((call) => call.method)).toEqual([
+      "getWebhookInfo",
+      "sendMessage",
+      "getWebhookInfo",
+      "sendMessage",
+    ]);
+  });
+
+  it("still sends the notice when the webhook can't be checked, and checks again next time", async () => {
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const answers: Record<string, () => Response> = {};
+    const calls = botApi((method) => answers[method]?.() ?? defaultAnswer(method));
+    await connect("taps-unchecked");
+    calls.length = 0;
+
+    answers.getWebhookInfo = () => Response.json({ ok: false, error_code: 502 }, { status: 502 });
+    expect(
+      await exports.ChannelEgress.send("taps-unchecked", destination, "Confirme.", {
+        buttons: confirm,
+      }),
+    ).toEqual({ ok: true, providerMessageId: "77" });
+    expect(warned).toHaveBeenCalledWith(
+      "channel-egress: a bot's webhook wasn't checked for taps",
+      "ChannelRequestError",
+    );
+    answers.getWebhookInfo = webhookInfo("taps-unchecked", undefined);
+    await exports.ChannelEgress.send("taps-unchecked", destination, "Confirme.", {
+      buttons: confirm,
+    });
+    expect(calls.map((call) => call.method)).toEqual([
+      "getWebhookInfo",
+      "sendMessage",
+      "getWebhookInfo",
+      "sendMessage",
+    ]);
+  });
+
+  it.each([
+    ["buttons that aren't rows", [{ label: "Confirmar", data: "confirm:x" }]],
+    ["a row without buttons", [[]]],
+    ["a button without a label", [[{ label: "", data: "confirm:x" }]]],
+    ["a label too long to show", [[{ label: "x".repeat(65), data: "confirm:x" }]]],
+    [
+      "data past Telegram's 64 bytes",
+      [[{ label: "Confirmar", data: `confirm:${"é".repeat(29)}` }]],
+    ],
+    ["data that isn't text", [[{ label: "Confirmar", data: 7 }]]],
+    ["too many rows", Array.from({ length: 9 }, () => [{ label: "a", data: "a:1" }])],
+    ["too many buttons in a row", [Array.from({ length: 9 }, () => ({ label: "a", data: "a:1" }))]],
+  ])("sends nothing with %s", async (_label, buttons) => {
+    const calls = botApi();
+    await connect("taps-refused");
+    calls.length = 0;
+    expect(
+      await exports.ChannelEgress.send("taps-refused", destination, "Confirme.", {
+        buttons: buttons as never,
+      }),
+    ).toEqual({ ok: false, reason: "failed" });
+    expect(calls).toEqual([]);
+  });
+
+  it("edits a notice in place, as typed, taking its buttons away unless it is given some", async () => {
+    const calls = botApi();
+    await connect("edits");
+    calls.length = 0;
+
+    expect(
+      await exports.ChannelEgress.edit(
+        "edits",
+        destination,
+        "43",
+        "Confirme: a <b>.\nVocê confirmou.",
+      ),
+    ).toEqual({ ok: true });
+    expect(
+      await exports.ChannelEgress.edit("edits", destination, "43", "Escolha.", {
+        buttons: confirm,
+      }),
+    ).toEqual({ ok: true });
+    expect(calls).toEqual([
+      expect.objectContaining({
+        method: "editMessageText",
+        body: {
+          chat_id: "1001",
+          message_id: 43,
+          text: "Confirme: a &lt;b&gt;.\nVocê confirmou.",
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+          reply_markup: { inline_keyboard: [] },
+        },
+      }),
+      expect.objectContaining({
+        body: expect.objectContaining({
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "Confirmar", callback_data: "confirm:0f1e2d3c4b5a69788796a5b4c3d2e1f0" }],
+            ],
+          },
+        }),
+      }),
+    ]);
+
+    // Only a message id Telegram can have issued, a text it takes, and buttons it can carry.
+    for (const [id, text, options] of [
+      ["abc", "x", {}],
+      ["0", "x", {}],
+      ["43", "x".repeat(4_097), {}],
+      ["43", "x", { buttons: [[]] }],
+    ] as const) {
+      expect(await exports.ChannelEgress.edit("edits", destination, id, text, options)).toEqual({
+        ok: false,
+        reason: "failed",
+      });
+    }
+    expect(await exports.ChannelEgress.edit("nobody", destination, "43", "x")).toEqual({
+      ok: false,
+      reason: "not_connected",
+    });
+    expect(calls).toHaveLength(2);
+  });
+
+  it("answers a press, so Telegram stops its spinner, with a short text or none", async () => {
+    const answers: Record<string, () => Response> = {};
+    const calls = botApi((method) => answers[method]?.() ?? defaultAnswer(method));
+    await connect("answers");
+    calls.length = 0;
+
+    expect(
+      await exports.ChannelEgress.answer("answers", destination, "4382bfdwdsb323b2d9"),
+    ).toEqual({ ok: true });
+    expect(
+      await exports.ChannelEgress.answer(
+        "answers",
+        destination,
+        "4382bfdwdsb323b2d9",
+        "Este botão não funciona mais.",
+      ),
+    ).toEqual({ ok: true });
+    expect(calls.map(({ method, body }) => ({ method, body }))).toEqual([
+      { method: "answerCallbackQuery", body: { callback_query_id: "4382bfdwdsb323b2d9" } },
+      {
+        method: "answerCallbackQuery",
+        body: { callback_query_id: "4382bfdwdsb323b2d9", text: "Este botão não funciona mais." },
+      },
+    ]);
+
+    for (const [id, text] of [
+      ["", undefined],
+      ["x".repeat(65), undefined],
+      ["4382bfdwdsb323b2d9", "x".repeat(201)],
+    ] as const) {
+      expect(await exports.ChannelEgress.answer("answers", destination, id, text)).toEqual({
+        ok: false,
+        reason: "failed",
+      });
+    }
+    expect(await exports.ChannelEgress.answer("nobody", destination, "4382")).toEqual({
+      ok: false,
+      reason: "not_connected",
+    });
+    // A press answered too late, or twice, is refused by Telegram: a value, never a throw.
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    answers.answerCallbackQuery = () =>
+      Response.json({ ok: false, error_code: 400 }, { status: 400 });
+    expect(await exports.ChannelEgress.answer("answers", destination, "4382")).toEqual({
+      ok: false,
+      reason: "failed",
+    });
   });
 });
 

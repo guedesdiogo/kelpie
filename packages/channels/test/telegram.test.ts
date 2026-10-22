@@ -5,7 +5,11 @@ import {
   InvalidWebhookError,
   RecipientUnavailableError,
 } from "../src/index.ts";
-import { normalizeTelegramUpdate, TelegramAdapter } from "../src/telegram.ts";
+import {
+  normalizeTelegramPress,
+  normalizeTelegramUpdate,
+  TelegramAdapter,
+} from "../src/telegram.ts";
 import * as updates from "./telegram-updates.ts";
 
 const TOKEN = "123456:test-token-not-real";
@@ -149,6 +153,58 @@ describe("Telegram normalize", () => {
     ["a reply without a message id", withMessage({ reply_to_message: { message_id: "41" } })],
   ])("refuses %s", (_label, body) => {
     expect(() => normalize(body)).toThrow(InvalidWebhookError);
+  });
+});
+
+describe("Telegram presses (ADR-0067 §3)", () => {
+  const press = (body: unknown) => normalizeTelegramPress(webhook(body), "assistant");
+
+  it("turns a tap on a button under the bot's notice into a press, with the button's data", () => {
+    expect(press(updates.press)).toEqual({
+      agentId: "assistant",
+      channel: "telegram",
+      threadId: "1001",
+      chatType: "direct",
+      sender: { channelUserId: "1001", languageCode: "pt-br" },
+      pressId: "4382bfdwdsb323b2d9",
+      providerMessageId: "43",
+      data: "confirm:0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+    });
+    // A press is no message, and a message no press.
+    expect(normalizeTelegramUpdate(webhook(updates.press), "assistant")).toEqual([]);
+    expect(press(updates.privateText)).toBeNull();
+  });
+
+  it("marks a press in a group, which ingress then refuses", () => {
+    expect(press(updates.groupPress)).toMatchObject({ threadId: "-100200", chatType: "group" });
+  });
+
+  it.each([
+    ["a press in a channel", updates.channelPress],
+    ["a press on a message sent in inline mode, which names no chat", updates.inlinePress],
+    ["a press on a game's button, which carries no data", updates.gamePress],
+    ["a press from a bot", updates.pressFromBot],
+  ])("yields none for %s", (_label, body) => {
+    expect(press(body)).toBeNull();
+  });
+
+  it.each([
+    ["a body that isn't JSON", "{not json"],
+    ["a body that isn't an object", "42"],
+    ["a press without an id", updates.pressWith({ id: 4382 })],
+    ["a presser id that isn't a number", updates.pressWith({ from: { id: "1001" } })],
+    [
+      "a message id that isn't a number",
+      updates.pressWith({ message: { message_id: "43", chat: { id: 1001, type: "private" } } }),
+    ],
+    [
+      "a chat type Telegram doesn't have",
+      updates.pressWith({ message: { message_id: 43, chat: { id: 1001, type: "secret" } } }),
+    ],
+    ["data that isn't a string", updates.pressWith({ data: { action: "confirm" } })],
+    ["data longer than Telegram's 64 bytes", updates.pressWith({ data: "é".repeat(33) })],
+  ])("refuses %s", (_label, body) => {
+    expect(() => press(body)).toThrow(InvalidWebhookError);
   });
 });
 
@@ -304,6 +360,94 @@ describe("Telegram sending", () => {
     });
   });
 
+  it("puts a notice's buttons under it, each with its data (ADR-0067 §3)", async () => {
+    const { adapter, calls } = botApi();
+    await adapter.send({ threadId: "1001" }, "Confirm: this.", {
+      buttons: [
+        [
+          { label: "Approve", data: "approve:ab12" },
+          { label: "Deny", data: "deny:ab12" },
+        ],
+        [{ label: "Confirm", data: "confirm:cd34" }],
+      ],
+    });
+    expect(calls[0]?.body).toMatchObject({
+      text: "Confirm: this.",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "Approve", callback_data: "approve:ab12" },
+            { text: "Deny", callback_data: "deny:ab12" },
+          ],
+          [{ text: "Confirm", callback_data: "confirm:cd34" }],
+        ],
+      },
+    });
+    // A bubble without buttons carries no keyboard at all.
+    await adapter.send({ threadId: "1001" }, "plain", { buttons: [] });
+    expect(calls[1]?.body).not.toHaveProperty("reply_markup");
+  });
+
+  it("edits a notice in place, as typed, and replaces its buttons or takes them away", async () => {
+    const { adapter, calls } = botApi(() => okResult(true));
+    await adapter.edit({ threadId: "1001" }, "43", "Confirm: a < b.\nYou confirmed.");
+    await adapter.edit({ threadId: "1001" }, "43", "Pick one.", {
+      buttons: [[{ label: "Fast", data: "pick:ef56:0" }]],
+    });
+    expect(calls).toEqual([
+      {
+        url: `https://api.telegram.org/bot${TOKEN}/editMessageText`,
+        method: "editMessageText",
+        body: {
+          chat_id: "1001",
+          message_id: 43,
+          text: "Confirm: a &lt; b.\nYou confirmed.",
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+          reply_markup: { inline_keyboard: [] },
+        },
+      },
+      expect.objectContaining({
+        body: expect.objectContaining({
+          reply_markup: { inline_keyboard: [[{ text: "Fast", callback_data: "pick:ef56:0" }]] },
+        }),
+      }),
+    ]);
+  });
+
+  it("answers a press, so Telegram stops its spinner, with a short text or none", async () => {
+    const { adapter, calls } = botApi(() => okResult(true));
+    await adapter.answer("4382bfdwdsb323b2d9");
+    await adapter.answer("4382bfdwdsb323b2d9", "This button no longer works.");
+    expect(calls.map(({ method, body }) => ({ method, body }))).toEqual([
+      { method: "answerCallbackQuery", body: { callback_query_id: "4382bfdwdsb323b2d9" } },
+      {
+        method: "answerCallbackQuery",
+        body: { callback_query_id: "4382bfdwdsb323b2d9", text: "This button no longer works." },
+      },
+    ]);
+  });
+
+  it("reads where the webhook points and whether it takes presses", async () => {
+    const url = "https://ingress.example/webhooks/telegram/assistant";
+    const info = (result: unknown) => botApi(() => okResult(result)).adapter.webhookInfo();
+    // Set before presses existed, the webhook takes messages only.
+    expect(await info({ url, pending_update_count: 0, allowed_updates: ["message"] })).toEqual({
+      url,
+      takesPresses: false,
+    });
+    expect(await info({ url, allowed_updates: ["message", "callback_query"] })).toEqual({
+      url,
+      takesPresses: true,
+    });
+    // Without a list, Telegram sends every kind of update but a few, presses among them.
+    expect(await info({ url: "", pending_update_count: 0 })).toEqual({
+      url: "",
+      takesPresses: true,
+    });
+    await expect(info({ allowed_updates: "message" })).rejects.toBeInstanceOf(ChannelRequestError);
+  });
+
   it("asks who the bot is, which also proves the token works", async () => {
     const { adapter, calls } = botApi(() =>
       okResult({ id: 555, is_bot: true, first_name: "Kelpie", username: "kelpie_bot" }),
@@ -324,7 +468,7 @@ describe("Telegram sending", () => {
     });
   });
 
-  it("registers the webhook for new messages only, with the bot's own secret", async () => {
+  it("registers the webhook for new messages and presses only, with the bot's own secret", async () => {
     const { adapter, calls } = botApi(() => okResult(true));
     await adapter.setWebhook("https://ingress.example/webhooks/telegram/assistant");
     expect(calls).toEqual([
@@ -334,7 +478,7 @@ describe("Telegram sending", () => {
         body: {
           url: "https://ingress.example/webhooks/telegram/assistant",
           secret_token: SECRET,
-          allowed_updates: ["message"],
+          allowed_updates: ["message", "callback_query"],
         },
       },
     ]);

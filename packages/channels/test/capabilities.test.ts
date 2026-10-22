@@ -21,6 +21,12 @@ describe("channel capabilities", () => {
     expect(CAPABILITIES.telegram.status).toBe(false);
   });
 
+  it("puts buttons under Kelpie's notices in the webchat and on Telegram only (ADR-0067 §3)", () => {
+    expect(CAPABILITIES.webchat.buttons).toBe(true);
+    expect(CAPABILITIES.telegram.buttons).toBe(true);
+    expect(CAPABILITIES.task.buttons).toBe(false);
+  });
+
   it("renews typing before the channel's indicator expires", () => {
     expect(typingRenewIntervalMs(CAPABILITIES.telegram)).toBe(4_000);
   });

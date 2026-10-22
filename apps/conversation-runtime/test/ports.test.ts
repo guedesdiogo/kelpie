@@ -80,3 +80,73 @@ describe("the model port (#431)", () => {
     warned.mockRestore();
   });
 });
+
+describe("the channel ports (ADR-0067 §3)", () => {
+  const destination = { channel: "telegram", threadId: "1001" } as const;
+  const buttons = [[{ label: "Confirmar", data: "confirm:0f1e2d3c4b5a69788796a5b4c3d2e1f0" }]];
+
+  /** channel-egress's ChannelEgress, recording each call; `answer` decides every outcome. */
+  function egress(answer: () => Promise<unknown> = async () => ({ ok: true })) {
+    const calls: unknown[][] = [];
+    const record =
+      (method: string) =>
+      (...args: unknown[]) => {
+        calls.push([method, ...args]);
+        return answer();
+      };
+    return {
+      calls,
+      binding: { send: record("send"), edit: record("edit"), answer: record("answer") },
+    };
+  }
+
+  it("sends a notice's buttons through channel-egress, and answers and edits there", async () => {
+    replacePortsForTesting(undefined);
+    const { calls, binding } = egress();
+    const ports = portsFor({ ...env, CHANNEL_EGRESS: binding } as never);
+
+    await ports.send("kelpie", destination, "Confirme.", {
+      silent: false,
+      confirmation: 3,
+      buttons,
+    });
+    expect(
+      await ports.answer("kelpie", destination, "4382", "Este botão não funciona mais."),
+    ).toEqual({ ok: true });
+    expect(await ports.edit("kelpie", destination, "43", "Confirme.\nVocê confirmou.")).toEqual({
+      ok: true,
+    });
+    // The webchat's own button stays the webchat's: channel-egress gets the buttons it shows.
+    expect(calls).toEqual([
+      ["send", "kelpie", destination, "Confirme.", { silent: false, buttons }],
+      ["answer", "kelpie", destination, "4382", "Este botão não funciona mais."],
+      ["edit", "kelpie", destination, "43", "Confirme.\nVocê confirmou."],
+    ]);
+  });
+
+  it("gives up on an answer that hangs, after a few seconds, as on typing", async () => {
+    replacePortsForTesting(undefined);
+    const { binding } = egress(() => new Promise(() => {}));
+    const ports = portsFor({ ...env, CHANNEL_EGRESS: binding } as never);
+    expect(await ports.answer("kelpie", destination, "4382")).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+  });
+
+  it("gives up on an answer or an edit that fails, as on typing", async () => {
+    replacePortsForTesting(undefined);
+    const { binding } = egress(async () => {
+      throw new Error("channel-egress is unreachable");
+    });
+    const ports = portsFor({ ...env, CHANNEL_EGRESS: binding } as never);
+    expect(await ports.answer("kelpie", destination, "4382")).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+    expect(await ports.edit("kelpie", destination, "43", "x")).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+  });
+});

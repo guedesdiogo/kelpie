@@ -261,7 +261,7 @@ describe("a note's turn after outside content (#454)", () => {
     expect(world.sent.slice(1)).toEqual([
       "It waits for you.",
       expect.stringMatching(
-        /^Confirm: run create_task \("Handing off a task"\) with \{"agentId":"helper","body":"As the session said\.","title":"Follow up"\}\. This conversation read text that neither you nor Kelpie wrote, so Kelpie asks you before any change\.\nTo go ahead, reply with just the code [A-Z0-9]{6}\./,
+        /^Confirm: run create_task \("Handing off a task"\) with \{"agentId":"helper","body":"As the session said\.","title":"Follow up"\}\. This conversation read text that neither you nor Kelpie wrote, so Kelpie asks you before any change\.\nTo go ahead, press Confirm, or reply with just the code [A-Z0-9]{6}\./,
       ),
     ]);
     const answers = JSON.stringify(world.requests.at(-1)?.messages.at(-1));
