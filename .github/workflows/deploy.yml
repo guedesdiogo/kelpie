@@ -114,6 +114,17 @@ jobs:
       issues: write
       pull-requests: read
     steps:
+      # Re-running failed jobs skips `authorize`, so this job checks who runs it again.
+      - name: Whoever runs it is in PRUMO_DONOS
+        env:
+          ACTOR: ${{ github.triggering_actor }}
+          DONOS: ${{ vars.PRUMO_DONOS }}
+        run: |
+          donos="$(tr -s ', ' '\n' <<< "$DONOS" | grep -v '^$' || true)"
+          if [ -z "$ACTOR" ] || ! grep -qixF -- "$ACTOR" <<< "$donos"; then
+            echo "::error::$ACTOR isn't in the variable PRUMO_DONOS, so they can't deploy production (docs/deploy.md)."
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The gate reads main's history back to the last release deployed.
@@ -158,6 +169,17 @@ jobs:
       contents: read
       issues: write
     steps:
+      # Re-running failed jobs skips `authorize`, so this job checks who runs it again.
+      - name: Whoever runs it is in PRUMO_DONOS
+        env:
+          ACTOR: ${{ github.triggering_actor }}
+          DONOS: ${{ vars.PRUMO_DONOS }}
+        run: |
+          donos="$(tr -s ', ' '\n' <<< "$DONOS" | grep -v '^$' || true)"
+          if [ -z "$ACTOR" ] || ! grep -qixF -- "$ACTOR" <<< "$donos"; then
+            echo "::error::$ACTOR isn't in the variable PRUMO_DONOS, so they can't deploy production (docs/deploy.md)."
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The commit authorized. The build number counts main's first-parent commits up to it, and

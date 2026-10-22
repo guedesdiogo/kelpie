@@ -2,8 +2,8 @@ name: Rollback
 
 # Rolls every Worker back to one earlier build, by the owner's request (docs/deploy.md):
 #   gh workflow run rollback.yml -f target=v1.2.0 -f reason="..."
-# It is the way back to an earlier release: publishing that release again fires no deploy, and a
-# deploy of it would skip, since production already contains its commit (ADR-0066).
+# It is the way back to an earlier release, checking barriers and secrets: publishing that release
+# again fires no deploy, and the Deploy workflow refuses to go back (ADR-0066).
 on:
   workflow_dispatch:
     inputs:
@@ -43,6 +43,17 @@ jobs:
       contents: read
       issues: write
     steps:
+      # Only someone in PRUMO_DONOS moves production, back as well as forward (ADR-0066).
+      - name: Whoever runs it is in PRUMO_DONOS
+        env:
+          ACTOR: ${{ github.triggering_actor }}
+          DONOS: ${{ vars.PRUMO_DONOS }}
+        run: |
+          donos="$(tr -s ', ' '\n' <<< "$DONOS" | grep -v '^$' || true)"
+          if [ -z "$ACTOR" ] || ! grep -qixF -- "$ACTOR" <<< "$donos"; then
+            echo "::error::$ACTOR isn't in the variable PRUMO_DONOS, so they can't roll production back (docs/deploy.md)."
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Rollback barriers are read from the target's commit to the live one, and a release's
