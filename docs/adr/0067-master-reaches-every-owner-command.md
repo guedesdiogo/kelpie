@@ -98,11 +98,11 @@ ADR-0026 §4 left Telegram's inline buttons for later. They come now:
   - no configuration in a task's run.
 - **No new cost:** the tools run commands that already exist, within the Workers Paid plan. `set_dream` takes the owner's confirmation because Dream itself spends.
 - **Rollback:** each story's pull request reverts on its own. A long change's page stores its pending change add-only.
-- **The stories** are sub-issues of [#19](https://github.com/guedesdiogo/kelpie/issues/19), listed on #489:
-  - Master's board tools;
-  - Master's owner tools: identities, the time zone, the webhook, the vault and proposals;
-  - agents' files, `configure_agent`'s missing fields, the full deletion, and the page for long changes;
-  - Kelpie's Confirm button on Telegram.
+- **The stories** are sub-issues of [#19](https://github.com/guedesdiogo/kelpie/issues/19):
+  - [#492](https://github.com/guedesdiogo/kelpie/issues/492), Master's board tools;
+  - [#493](https://github.com/guedesdiogo/kelpie/issues/493), Master's owner tools: identities, the time zone, the webhook, the vault and proposals;
+  - [#494](https://github.com/guedesdiogo/kelpie/issues/494), agents' files, `configure_agent`'s missing fields, the full deletion, and the page for long changes;
+  - [#495](https://github.com/guedesdiogo/kelpie/issues/495), Kelpie's Confirm button on Telegram.
 
 ## Alternatives considered
 
@@ -116,3 +116,6 @@ ADR-0026 §4 left Telegram's inline buttons for later. They come now:
 
 - [#489](https://github.com/guedesdiogo/kelpie/issues/489): the gap map and the reference check
 - [ADR-0013](0013-self-configuration.md), [ADR-0026](0026-confirmation-by-owner-act.md), [ADR-0036](0036-agent-roles-models-and-subagents.md), [ADR-0048](0048-master-configures-kelpie.md), [ADR-0050](0050-master-orchestration-tools.md), [ADR-0055](0055-composer-files-dictation-and-model.md), [ADR-0058](0058-owner-edits-agent-files-from-the-webchat.md), [ADR-0064](0064-outside-content-asks.md)
+- Hermes Agent at [`41dfcf2`](https://github.com/NousResearch/hermes-agent/tree/41dfcf2c1bd7146d4ad46aea08b7dd007900602e): [`cronjob_manage`](https://github.com/NousResearch/hermes-agent/blob/41dfcf2c1bd7146d4ad46aea08b7dd007900602e/tools/cronjob_tools.py#L957-L964), [no tool for its approval mode](https://github.com/NousResearch/hermes-agent/blob/41dfcf2c1bd7146d4ad46aea08b7dd007900602e/tools/file_tools_write_guards.py#L166-L174), [instruction files always ask](https://github.com/NousResearch/hermes-agent/blob/41dfcf2c1bd7146d4ad46aea08b7dd007900602e/tools/file_tools_write_guards.py#L177-L190), [a Telegram tap resolves the oldest approval](https://github.com/NousResearch/hermes-agent/blob/41dfcf2c1bd7146d4ad46aea08b7dd007900602e/plugins/platforms/telegram/adapter.py#L4761)
+- ai-memory at [`e52abcb`](https://github.com/akitaonrails/ai-memory/tree/e52abcb6bf2add76d63d5729afda99165475e73e): [the agent never sets its approval mode](https://github.com/akitaonrails/ai-memory/blob/e52abcb6bf2add76d63d5729afda99165475e73e/crates/ai-memory-mcp/src/server.rs#L4202-L4207), [the `/pending` page](https://github.com/akitaonrails/ai-memory/blob/e52abcb6bf2add76d63d5729afda99165475e73e/crates/ai-memory-web/src/routes/pending.rs#L1-L7)
+- invokta at [`f1e2f04`](https://github.com/vinilana/invokta/tree/f1e2f04f98c967ab4bb73bd02c3fa581f04ce0e5): [access checked by the engine](https://github.com/vinilana/invokta/blob/f1e2f04f98c967ab4bb73bd02c3fa581f04ce0e5/packages/core/src/engine.ts#L410-L446)

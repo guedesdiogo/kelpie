@@ -95,7 +95,7 @@ The story checks these first, on the VPS:
 - **The tool's input leaves the server,** redacted and cut. It reaches Cloudflare and the model's provider when Master reads it.
 - **The runner's protocol version goes up.** A runner not yet updated answers `outdated`, and the tools say so.
 - **No new cost:** a verdict is one more runner call, within the Workers Paid plan.
-- **The story** is a sub-issue of [#19](https://github.com/guedesdiogo/kelpie/issues/19), listed on #491. Its tests cover:
+- **The story** is [#497](https://github.com/guedesdiogo/kelpie/issues/497), a sub-issue of [#19](https://github.com/guedesdiogo/kelpie/issues/19). Its tests cover:
   - the hook's timeout, and its return of no decision;
   - the redaction;
   - a verdict's binding to its request id;
@@ -113,3 +113,5 @@ The story checks these first, on the VPS:
 - [#491](https://github.com/guedesdiogo/kelpie/issues/491): the reference check
 - Claude Code docs: [hooks](https://code.claude.com/docs/en/hooks), [cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging), [channels reference](https://code.claude.com/docs/en/channels-reference)
 - [ADR-0026](0026-confirmation-by-owner-act.md), [ADR-0027](0027-fixed-texts-in-three-languages.md), [ADR-0035](0035-agent-computer.md), [ADR-0037](0037-conversations-through-claude-code.md), [ADR-0057](0057-vps-claude-code-sessions.md), [ADR-0064](0064-outside-content-asks.md)
+- Hermes Agent at [`41dfcf2`](https://github.com/NousResearch/hermes-agent/tree/41dfcf2c1bd7146d4ad46aea08b7dd007900602e): [Claude Code through tmux, answering its own prompts](https://github.com/NousResearch/hermes-agent/blob/41dfcf2c1bd7146d4ad46aea08b7dd007900602e/skills/autonomous-ai-agents/claude-code/SKILL.md#L92-L126)
+- invokta at [`f1e2f04`](https://github.com/vinilana/invokta/tree/f1e2f04f98c967ab4bb73bd02c3fa581f04ce0e5): [a `PermissionRequest` hook that only records](https://github.com/vinilana/invokta/blob/f1e2f04f98c967ab4bb73bd02c3fa581f04ce0e5/examples/agent-session-engine/hooks/claude-code.settings.json#L69-L79)

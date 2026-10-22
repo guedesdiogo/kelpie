@@ -62,7 +62,7 @@ The reference check is on #490.
 - **The keys gain application-level encryption** (AES-GCM under `SECRETS_KEY`), which ADR-0019's Worker secrets lacked.
 - **No new cost:** one service-binding call per key a minute at most, within the Workers Paid plan.
 - **Rollback:** code from before this ignores the `provider:` slots and uses the Worker secrets. The owner keeps the deploy secret until the form has served.
-- **The story** is a sub-issue of [#19](https://github.com/guedesdiogo/kelpie/issues/19), listed on #490. Its tests cover:
+- **The story** is [#496](https://github.com/guedesdiogo/kelpie/issues/496), a sub-issue of [#19](https://github.com/guedesdiogo/kelpie/issues/19). Its tests cover:
   - that a key never appears in a tool's result, history, a log or an error;
   - that a used or expired form refuses;
   - that only `llm-gateway` can call `ProviderKeys`, and only for `provider:` slots;
@@ -80,3 +80,5 @@ The reference check is on #490.
 - [#490](https://github.com/guedesdiogo/kelpie/issues/490): the reference check
 - [ADR-0013](0013-self-configuration.md), [ADR-0019](0019-llm-gateway-keys.md), [ADR-0021](0021-vault-app-secrets.md), [ADR-0026](0026-confirmation-by-owner-act.md), [ADR-0028](0028-setup-step-notes.md), [ADR-0064](0064-outside-content-asks.md)
 - [`docs/secrets.md`](../secrets.md)
+- Hermes Agent at [`41dfcf2`](https://github.com/NousResearch/hermes-agent/tree/41dfcf2c1bd7146d4ad46aea08b7dd007900602e): [secrets kept from the model](https://github.com/NousResearch/hermes-agent/blob/41dfcf2c1bd7146d4ad46aea08b7dd007900602e/tools/skills_tool_setup.py#L87-L118), [refused over messaging](https://github.com/NousResearch/hermes-agent/blob/41dfcf2c1bd7146d4ad46aea08b7dd007900602e/gateway/platforms/base.py#L446-L448)
+- ai-memory at [`e52abcb`](https://github.com/akitaonrails/ai-memory/tree/e52abcb6bf2add76d63d5729afda99165475e73e): [tokens redacted before storing](https://github.com/akitaonrails/ai-memory/blob/e52abcb6bf2add76d63d5729afda99165475e73e/crates/ai-memory-core/src/sanitize.rs#L1-L28)
