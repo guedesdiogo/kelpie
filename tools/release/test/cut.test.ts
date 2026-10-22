@@ -69,7 +69,7 @@ describe("releaseNotes", () => {
       mentor: MENTOR,
     };
     const notes = releaseNotes("v0.2.0", contents, {
-      base: { from: "previous", tag: "v0.1.0" },
+      base: { from: "deployed", tag: "v0.1.0" },
       contents,
     });
     expect(notes).toBe(
@@ -88,7 +88,7 @@ describe("releaseNotes", () => {
         "",
         "## Mentor's acceptance (guedesdiogo)",
         "",
-        "The critical gate reads from v0.1.0, the previous release, to v0.2.0: no Deploy run shipped a release yet.",
+        "The critical gate reads from v0.1.0, the last release a Deploy run shipped, to v0.2.0.",
         "",
         "- [guedesdiogo/kelpie#1](https://github.com/guedesdiogo/kelpie/issues/1) Issue 1: missing, so the production deploy stops",
         "",
@@ -119,14 +119,19 @@ describe("releaseNotes", () => {
 
 describe("cutRelease", () => {
   it("previews main's tip as the next release, and creates nothing", async () => {
-    const { git, c, d } = history();
+    const { git, a, b, c, d } = history();
     const github = fakeGitHub({ pulls: { [c]: [mergedPull(10, "mentee", [closedIssue(1)])] } });
     const cut = await cutRelease({ git, github }, options());
     expect(cut.tag).toBe("v0.2.0");
     expect(cut.commit).toBe(d);
     expect(cut.ci).toBeNull();
     expect(cut.notes).toContain("- #10 Pull request 10");
-    expect(github.asked).toEqual([[d, c]]);
+    // The notes start at the previous release; with no release shipped, the gate reads everything.
+    expect(cut.gate.base).toEqual({ from: "history", tag: null });
+    expect(github.asked).toEqual([
+      [d, c],
+      [d, c, b, a],
+    ]);
     expect(github.saved).toEqual([]);
     expect(cutReport(cut, "preview")).toContain("`CI passed` on");
     expect(cutReport(cut, "preview")).toContain("A preview: nothing was created.");
@@ -207,6 +212,22 @@ describe("cutRelease", () => {
     expect(cut.notes).toContain(
       "The critical gate reads from v0.1.0, the last release a Deploy run shipped, to v0.3.0.",
     );
+    expect(cut.notes).toContain("Issue 1: missing, so the production deploy stops");
+    await expect(cutRelease({ git, github }, options({ mode: "publish" }))).rejects.toThrow(
+      "guedesdiogo/kelpie#1 lacks the mentor's acceptance",
+    );
+  });
+
+  it("refuses to publish over the first release's critico issue while nothing shipped", async () => {
+    const { git, b, d } = history();
+    const github = fakeGitHub({
+      // v0.1.0's gate failed on #1, so no successful Deploy run names it.
+      pulls: { [b]: [mergedPull(10, "mentee", [closedIssue(1, ["critico"])])] },
+      checks: { [d]: "success" },
+    });
+    const cut = await cutRelease({ git, github }, options());
+    expect(cut.contents.pulls).toEqual([]);
+    expect(cut.notes).toContain("· since v0.1.0");
     expect(cut.notes).toContain("Issue 1: missing, so the production deploy stops");
     await expect(cutRelease({ git, github }, options({ mode: "publish" }))).rejects.toThrow(
       "guedesdiogo/kelpie#1 lacks the mentor's acceptance",

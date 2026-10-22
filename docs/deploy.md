@@ -100,8 +100,8 @@ A prerelease deploys nothing. A release made with a workflow's `GITHUB_TOKEN` wo
 #### The critical gate
 
 - **What it reads:** `main`'s first-parent commits from a base to the release's commit, the pull requests merged into `main` that brought them, and the issues each one closes, from GitHub's API. Never the release's notes, which anyone who can edit the release could change.
-- **The base** is the release of the latest successful Deploy run. Without one, the previous release; without that, the whole history.
-  - A release the gate stopped leaves no successful run, so the next release's gate reads its commits again.
+- **The base** is the release of the latest successful Deploy run. Without one, or when that run's tag isn't in the checkout, the gate reads the whole history.
+  - A release the gate stopped leaves no successful run, so the next release's gate reads its commits again, even before anything shipped.
   - Deploying an older release again reads nothing: the release last shipped contains it.
 - **A `critico` issue is accepted** when the mentor opened a pull request in that range that closes it, or commented on it with «**Aceite** · <environment> · <link>».
 - **Any other `critico` issue stops the release,** and the run's summary lists it. So does any error reading GitHub. Once the mentor accepts each one, re-run the run's failed jobs.

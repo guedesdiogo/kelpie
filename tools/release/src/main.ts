@@ -374,7 +374,7 @@ async function main(argv: string[]): Promise<number> {
         force = { actor, runUrl, reason };
       }
       const deps = { git, github: github(git) };
-      const base = await gateBase(deps, commit);
+      const base = await gateBase(deps);
       const contents = await releaseContents(deps, { commit, base: base.tag }, mentor());
       publish(gateReport(tag, contents, base), values.report);
       const missing = unaccepted(contents);

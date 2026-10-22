@@ -51,31 +51,25 @@ const PRODUCTION_RUN = /^Production (v\d+\.\d+\.\d+)$/;
 
 /**
  * Where a release's critical gate starts. `deployed`: the release of the latest successful Deploy
- * run, whose gate passed or was forced. Without one, `previous`: the release tag before this
- * commit. Without that, `history`: the gate reads everything.
+ * run, whose gate passed or was forced. Without one, `history`: the gate reads everything, so a
+ * release the gate stopped before anything shipped is read again by the next one.
  */
-export type GateBase =
-  | { from: "deployed"; tag: string }
-  | { from: "previous"; tag: string }
-  | { from: "history"; tag: null };
+export type GateBase = { from: "deployed"; tag: string } | { from: "history"; tag: null };
 
 /**
  * The gate's base for `commit`. A run counts only from `main` or from its own tag: a run from
- * another branch runs that branch's workflow, which proves nothing. A deployed release newer than
- * `commit`, as when an older one is deployed again, leaves the gate nothing to read.
+ * another branch runs that branch's workflow, which proves nothing. When the latest run's tag
+ * isn't in the checkout, nothing says what shipped, so the gate reads everything. A deployed
+ * release newer than `commit`, as when an older one is deployed again, leaves it nothing to read.
  */
-export async function gateBase(
-  deps: { git: Git; github: GitHub },
-  commit: string,
-): Promise<GateBase> {
+export async function gateBase(deps: { git: Git; github: GitHub }): Promise<GateBase> {
   for (const run of await deps.github.successfulRuns(DEPLOY_WORKFLOW)) {
     const tag = PRODUCTION_RUN.exec(run.title)?.[1];
     if (!tag || (run.branch !== "main" && run.branch !== tag)) continue;
     if (tagCommit(deps.git, tag)) return { from: "deployed", tag };
     break;
   }
-  const previous = previousRelease(deps.git, `${commit}^`);
-  return previous ? { from: "previous", tag: previous } : { from: "history", tag: null };
+  return { from: "history", tag: null };
 }
 
 export type Acceptance = { by: "pull"; pull: number } | { by: "comment"; url: string };
@@ -184,10 +178,8 @@ export function gateRange(base: GateBase, tag: string): string {
   switch (base.from) {
     case "deployed":
       return `From ${base.tag}, the last release a Deploy run shipped, to ${tag}`;
-    case "previous":
-      return `From ${base.tag}, the previous release, to ${tag}: no Deploy run shipped a release yet`;
     case "history":
-      return `Everything up to ${tag}: no release came before it`;
+      return `Everything up to ${tag}: no release a Deploy run shipped is here to start from`;
   }
 }
 

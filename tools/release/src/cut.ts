@@ -138,7 +138,7 @@ export async function cutRelease(
 
   const ci = await deps.github.checkState(commit, CI_CHECK);
   const contents = await releaseContents(deps, { commit, base: previous }, options.mentor);
-  const base = await gateBase(deps, commit);
+  const base = await gateBase(deps);
   const gate = {
     base,
     contents:

@@ -178,7 +178,7 @@ describe("releaseContents", () => {
     });
     const contents = await releaseContents({ git, github }, { commit: e, base: "v0.1.0" }, MENTOR);
     expect(contents.critical).toEqual([]);
-    expect(gateReport("v0.2.0", contents, { from: "previous", tag: "v0.1.0" })).toContain(
+    expect(gateReport("v0.2.0", contents, { from: "deployed", tag: "v0.1.0" })).toContain(
       "No `critico` issue lacks the mentor's acceptance.",
     );
   });
@@ -186,21 +186,21 @@ describe("releaseContents", () => {
 
 describe("gateBase", () => {
   it("starts at the release the latest successful Deploy run shipped", async () => {
-    const { git, d, e } = history();
+    const { git, d } = history();
     git(["tag", "v0.2.0", d]);
     const github = fakeGitHub({ runs: [productionRun("v0.1.0", "main"), productionRun("v0.2.0")] });
-    expect(await gateBase({ git, github }, e)).toEqual({ from: "deployed", tag: "v0.1.0" });
+    expect(await gateBase({ git, github })).toEqual({ from: "deployed", tag: "v0.1.0" });
   });
 
-  it("falls back to the previous release when the latest run's tag isn't here", async () => {
-    const { git, d, e } = history();
+  it("reads everything when the latest run's tag isn't here", async () => {
+    const { git, d } = history();
     git(["tag", "v0.2.0", d]);
     const github = fakeGitHub({ runs: [productionRun("v0.9.9"), productionRun("v0.1.0")] });
-    expect(await gateBase({ git, github }, e)).toEqual({ from: "previous", tag: "v0.2.0" });
+    expect(await gateBase({ git, github })).toEqual({ from: "history", tag: null });
   });
 
   it("ignores runs named otherwise, and runs from another branch", async () => {
-    const { git, e } = history();
+    const { git } = history();
     const github = fakeGitHub({
       runs: [
         productionRun("v0.1.0", "feature"),
@@ -208,16 +208,30 @@ describe("gateBase", () => {
         { title: "Deploy", branch: "main" },
       ],
     });
-    expect(await gateBase({ git, github }, e)).toEqual({ from: "previous", tag: "v0.1.0" });
+    expect(await gateBase({ git, github })).toEqual({ from: "history", tag: null });
   });
 
-  it("reads everything when no release came before", async () => {
-    const { git, e } = history();
+  it("reads everything while no Deploy run shipped a release, previous tags or not", async () => {
+    const { git } = history();
+    expect(await gateBase({ git, github: fakeGitHub() })).toEqual({ from: "history", tag: null });
+  });
+
+  it("keeps blocking the first release's critico issue in the next one, before anything ships", async () => {
+    const { git, a, b, c, d, e } = history();
     git(["tag", "-d", "v0.1.0"]);
-    expect(await gateBase({ git, github: fakeGitHub() }, e)).toEqual({
-      from: "history",
-      tag: null,
+    git(["tag", "v0.1.0", c]); // the first release: its gate failed, so no successful run names it
+    git(["tag", "v0.2.0", e]);
+    const github = fakeGitHub({
+      pulls: { [b]: [mergedPull(10, "mentee", [closedIssue(1, ["critico"])])] },
     });
+    const base = await gateBase({ git, github });
+    expect(base).toEqual({ from: "history", tag: null });
+    const contents = await releaseContents({ git, github }, { commit: e, base: base.tag }, MENTOR);
+    expect(github.asked).toEqual([[e, d, c, b, a]]);
+    expect(unaccepted(contents).map(({ issue }) => issue.number)).toEqual([1]);
+    expect(gateReport("v0.2.0", contents, base)).toContain(
+      "Everything up to v0.2.0: no release a Deploy run shipped is here to start from.",
+    );
   });
 
   it("keeps blocking a release's critico issue in every later release until one deploys", async () => {
@@ -228,7 +242,7 @@ describe("gateBase", () => {
       pulls: { [c]: [mergedPull(10, "mentee", [closedIssue(1, ["critico"])])] },
       runs: [productionRun("v0.1.0")],
     });
-    const base = await gateBase({ git, github }, e);
+    const base = await gateBase({ git, github });
     expect(base).toEqual({ from: "deployed", tag: "v0.1.0" });
     const contents = await releaseContents({ git, github }, { commit: e, base: base.tag }, MENTOR);
     expect(github.asked).toEqual([[e, d, c]]);
@@ -241,7 +255,7 @@ describe("gateBase", () => {
     git(["tag", "v0.3.0", e]);
     // v0.3.0 shipped; production goes back to v0.2.0 through the Deploy workflow.
     const github = fakeGitHub({ runs: [productionRun("v0.3.0")] });
-    const base = await gateBase({ git, github }, c);
+    const base = await gateBase({ git, github });
     const contents = await releaseContents({ git, github }, { commit: c, base: base.tag }, MENTOR);
     expect(contents.commits).toBe(0);
     expect(unaccepted(contents)).toEqual([]);
@@ -258,7 +272,7 @@ describe("gateBase", () => {
       };
       return github;
     };
-    await expect(gateBase({ git, github: failing("successfulRuns") }, e)).rejects.toThrow(
+    await expect(gateBase({ git, github: failing("successfulRuns") })).rejects.toThrow(
       "successfulRuns failed",
     );
     for (const what of ["mergedPulls", "comments"] as const) {
@@ -306,12 +320,11 @@ describe("gateReport", () => {
       critical: [],
       mentor: MENTOR,
     };
-    const first = gateReport("v1.0.0", contents, { from: "history", tag: null });
-    expect(first).toContain("Everything up to v1.0.0: no release came before it.");
-    expect(first).toContain("1 commit, 0 pull requests, 0 issues closed");
-    expect(gateReport("v1.1.0", contents, { from: "previous", tag: "v1.0.0" })).toContain(
-      "From v1.0.0, the previous release, to v1.1.0: no Deploy run shipped a release yet.",
+    const report = gateReport("v1.0.0", contents, { from: "history", tag: null });
+    expect(report).toContain(
+      "Everything up to v1.0.0: no release a Deploy run shipped is here to start from.",
     );
+    expect(report).toContain("1 commit, 0 pull requests, 0 issues closed");
   });
 });
 
