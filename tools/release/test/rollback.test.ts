@@ -57,6 +57,18 @@ describe("planRollback", () => {
     );
   });
 
+  it("says when a release shipped nothing, rather than only that nothing matches", async () => {
+    const api = fakeApi({ live, versions: [previous] });
+    // v1.3.0 changed only docs: its deploy skipped, so no version carries its commit.
+    const git = (args: readonly string[]) =>
+      args.at(-1) === "refs/tags/v1.3.0^{commit}"
+        ? "d0c5d0c5d0c5d0c5d0c5d0c5d0c5d0c5d0c5d0c5\n"
+        : quietGit(args);
+    await expect(planRollback({ api, git }, "v1.3.0")).rejects.toThrow(
+      "v1.3.0 names d0c5d0c, which no version of kelpie-ingress carries: that release shipped nothing",
+    );
+  });
+
   it("moves nothing when production already serves the target", async () => {
     const api = fakeApi({ live, versions: [previous] });
     expect((await planRollback({ api, git: quietGit }, "95-25c5076")).moves).toEqual([]);

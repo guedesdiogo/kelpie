@@ -145,9 +145,12 @@ export async function planRollback(
     const recent = [...new Set((versions[ingress] ?? []).map((version) => formatTag(version.tag)))]
       .slice(0, 10)
       .join(", ");
-    throw new RollbackRefused(
-      `No deployable version of ${INGRESS} matches "${input}". Recent builds: ${recent || "none"}.`,
-    );
+    // A release that shipped nothing, as one that changed only docs (ADR-0031), has no version.
+    const why =
+      parsed.kind === "release" && target.kind === "commit"
+        ? `${parsed.release} names ${target.commit.slice(0, 7)}, which no version of ${INGRESS} carries: that release shipped nothing, since nothing that ships changed (ADR-0031), or Cloudflare no longer keeps its version. Roll back to the release or build that served it.`
+        : `No deployable version of ${INGRESS} matches "${input}".`;
+    throw new RollbackRefused(`${why} Recent builds: ${recent || "none"}.`);
   }
 
   const missing: string[] = [];
