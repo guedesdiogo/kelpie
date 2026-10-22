@@ -22,6 +22,9 @@ function use(world: FakeWorld): FakeWorld {
         (await registry().list())
           .filter((entry) => entry.owner === id)
           .map(({ id: agentId, name }) => ({ id: agentId, name })),
+      agents: async () =>
+        (await registry().list()).map((entry) => ({ id: entry.id, name: entry.name })),
+      isMaster: async (id) => (await registry().get(id))?.role === "master",
       create: (assignee, task, creator) => host(assignee).createTaskFor(task, creator),
       comment: (assignee, taskId, text, by) =>
         host(assignee).commentTaskAs(taskId, text, by, "chat"),
@@ -333,5 +336,54 @@ describe("the mandatory handoff (#287)", () => {
         ].join("\n"),
       ]),
     );
+  });
+
+  it("keeps a task Master stopped apart, and says it after the next reply (#492)", async () => {
+    const world = use(fakeWorld([toolCalls({ name: "halt" }), reply("Stopped.")]));
+    world.tools = [
+      ...world.tools,
+      {
+        async tools() {
+          return [
+            {
+              spec: { name: "halt", description: "x", inputSchema: { type: "object" as const } },
+              label: "Halting",
+              async run(_input, context) {
+                context.announce({
+                  kind: "stopped",
+                  taskId: "0f8b7c1e-6a2d-4c3b-9e5f-1a2b3c4d5e6f",
+                  agentId: "hf-sales",
+                  name: "Sales",
+                });
+                // More subagents' changes than a conversation keeps unsaid, kept after the stop:
+                // none pushes the stop out.
+                for (let i = 0; i < 21; i++) {
+                  const agentId = `kelpie-sub-${String(i).padStart(6, "0")}`;
+                  context.announce({ kind: "created", agentId, name: `Pup ${i}` });
+                }
+                return { output: "ok" };
+              },
+            },
+          ];
+        },
+      },
+    ];
+    const master = agent("kelpie:telegram:handoff-stop");
+    await master.ingest(message("handoff-stop", "m1", "Stop the Silva quote."));
+    await master.flush();
+    await vi.waitFor(() =>
+      expect(world.sent).toEqual([
+        "Stopped.",
+        expect.stringContaining('Kelpie stopped a task of "Sales" (hf-sales).'),
+      ]),
+    );
+    // Said once: the key that kept it is empty again, and a release before #492 never reads it.
+    const kept = await runInDurableObject(master, (_instance, state) =>
+      state.storage.sql
+        .exec<{ value: string }>("SELECT value FROM state WHERE key = 'taskStops'")
+        .toArray()
+        .map(({ value }) => JSON.parse(value)),
+    );
+    expect(kept).toEqual([[]]);
   });
 });

@@ -80,6 +80,7 @@ export {
   type CommentSource,
   isTaskId,
   isTaskStatus,
+  MAX_SCHEDULE_AHEAD_MS,
   MAX_TASK_BODY,
   MAX_TASK_COMMENT,
   MAX_TASK_RESULT,

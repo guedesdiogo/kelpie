@@ -15,6 +15,7 @@ import {
 } from "@kelpie/llm";
 import { describe, expect, it, vi } from "vitest";
 import { replaceTaskRunnerForTesting } from "../src/agent-host/agent-host.ts";
+import { boardTools } from "../src/board-tools.ts";
 import { configurationTools } from "../src/configuration.ts";
 import { memoryTools } from "../src/memory-tools.ts";
 import { replacePortsForTesting } from "../src/ports.ts";
@@ -90,6 +91,10 @@ const TOOLS: ToolProvider[] = [
     roleOf: async (id) => (await registry().get(id))?.role ?? null,
     adminOrigin: "https://admin.example",
   }),
+  // The board tools (#492): on the prompt as in production, over boards with no tasks.
+  boardTools({ listTasks: async () => ({ ok: true, value: [] }) } as never, {
+    roleOf: async (id) => (await registry().get(id))?.role ?? null,
+  }),
   subagentTools({
     canSpawn: async (id) => (await registry().get(id))?.role === "master",
     creator: async () => ({
@@ -109,6 +114,9 @@ const TOOLS: ToolProvider[] = [
       (await registry().list())
         .filter((entry) => entry.owner === id)
         .map((entry) => ({ id: entry.id, name: entry.name })),
+    agents: async () =>
+      (await registry().list()).map((entry) => ({ id: entry.id, name: entry.name })),
+    isMaster: async (id) => (await registry().get(id))?.role === "master",
     create: async (_assignee, task) => ({ ok: true, value: made(task.title) }),
     comment: async () => ({ ok: false, reason: "unknown_task" }),
     takeHandoff: async () => true,

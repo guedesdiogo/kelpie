@@ -205,6 +205,8 @@ describe("a note's turn after outside content (#454)", () => {
       peek,
       taskTools({
         owned: async () => [{ id: "helper", name: "Helper" }],
+        agents: async () => [{ id: "helper", name: "Helper" }],
+        isMaster: async () => false,
         async create(assignee, task) {
           made.push(`${assignee} ${task.title}`);
           return {
