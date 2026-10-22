@@ -104,8 +104,9 @@ import {
   type StoredAnnouncement,
   stored,
 } from "./announcements.ts";
-import { bareHttpsOrigin, heldTools, setupNote } from "./configuration.ts";
+import { heldTools, setupNote } from "./configuration.ts";
 import migrations from "./migrations/migrations.js";
+import { bareHttpsOrigin } from "./origin.ts";
 import {
   changes,
   held,

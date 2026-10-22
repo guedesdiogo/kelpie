@@ -6,8 +6,8 @@
   "observability": { "enabled": true },
   // Reached only through service bindings: conversation-runtime reads context (ContextStore),
   // ingress hands over GitHub's webhook (GitHubWebhooks) and the webchat editor's edits of one
-  // agent's own files (AgentFiles, ADR-0058), and admin-api runs the owner's vault actions
-  // (ContextStoreAdmin). AgentFiles fetches a skill to install from github.com and
+  // agent's own files (AgentFiles, ADR-0058), and admin-api and Master's owner tools in
+  // conversation-runtime run the owner's vault actions (ContextStoreAdmin, ADR-0067). AgentFiles fetches a skill to install from github.com and
   // codeload.github.com only.
   "workers_dev": false,
   "preview_urls": false,

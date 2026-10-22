@@ -33,6 +33,7 @@ export type {
   RunnerWaitsOutcome,
   SendOutcome,
   SetupFormsContract,
+  SetupWebhooksContract,
   TelegramDisconnection,
   TypingOutcome,
   WebhookNotice,

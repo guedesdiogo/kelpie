@@ -25,6 +25,7 @@ export class ContextStore extends WorkerEntrypoint {
     return { persona: null, rules: [], skills: [], memory: null };
   }
 }
+export class ContextStoreAdmin extends WorkerEntrypoint {}
 export default { fetch: () => new Response(null, { status: 404 }) };`,
     },
     // channel-egress answers that no agent has a bot, for the photo every AgentHost asks for when it
@@ -49,6 +50,7 @@ export class RunnerSessions extends WorkerEntrypoint {
     return { ok: false, reason: "not_connected" };
   }
 }
+export class SetupWebhooks extends WorkerEntrypoint {}
 export default { fetch: () => new Response(null, { status: 404 }) };`,
     },
     // llm-gateway answers the deploy probe's ping (#234), and describes an area's trio for an

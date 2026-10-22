@@ -184,6 +184,12 @@ export type SetupFormsContract = Pick<
 >;
 
 /**
+ * What Master's owner tools call (ADR-0067 §1, #493): pointing a stored bot at ingress again, with
+ * the owner's confirmation. It returns no secret.
+ */
+export type SetupWebhooksContract = Pick<ChannelFormsContract, "registerTelegramWebhook">;
+
+/**
  * Why `channel-egress` couldn't relay a request to the runner (#420). Each is a value, never a
  * throw, and none carries the runner's text or its secret:
  * - `invalid_input`: refused here, before the runner, as it would refuse it too;
