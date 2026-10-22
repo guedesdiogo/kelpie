@@ -8,7 +8,13 @@ import type {
 import { describe, expect, it } from "vitest";
 import { AGENT_FILE_TOOLS, agentFileTools, lineDiff } from "../src/agent-file-tools.ts";
 import { heldTools, MASTER_TOOLS } from "../src/configuration.ts";
-import type { ConfirmationRequest, Tool, ToolContext } from "../src/tools.ts";
+import {
+  type ConfirmationRequest,
+  confirmationNotice,
+  shownSummary,
+  type Tool,
+  type ToolContext,
+} from "../src/tools.ts";
 
 // Master's reads and writes of an agent's own files (ADR-0067 §1, #494): a write waits for the
 // owner's confirmation of the change, line by line, with secrets redacted before they see it, and
@@ -63,8 +69,7 @@ function world(role: { of: AgentRole | null } = { of: "master" }) {
     },
   };
   const provider = agentFileTools(files, {
-    roleOf: async () => role.of,
-    agentExists: async (id) => id !== "ghost",
+    roleOf: async (id) => (id === "ghost" ? null : id === "pup" ? "subagent" : role.of),
   });
   return { provider, saves, answers };
 }
@@ -72,7 +77,7 @@ function world(role: { of: AgentRole | null } = { of: "master" }) {
 function contextOf(
   confirmed: boolean,
   actor: Actor = owner,
-  turn: Partial<Pick<ToolContext, "scopes" | "locale">> = {},
+  turn: Partial<Pick<ToolContext, "scopes" | "locale" | "trigger">> = {},
 ) {
   const asked: ConfirmationRequest[] = [];
   const context: ToolContext = {
@@ -80,7 +85,7 @@ function contextOf(
     actor,
     agentId: MASTER,
     scopes: turn.scopes ?? "all",
-    trigger: "person",
+    trigger: turn.trigger ?? "person",
     qualifier: "clef",
     turn: "1",
     source: "webchat:u-owner, 2026-10-22",
@@ -138,6 +143,28 @@ describe("Master's agent-file tools (ADR-0067 §1, #494)", () => {
         contextOf(true).context,
       ),
     ).toEqual({ isError: true, output: "There is no agent with the id ghost." });
+    // A subagent has no files in the vault (ADR-0058 §2), and a note's turn writes none.
+    const write = tools.get("write_agent_file");
+    expect(await run(write, { ...input, agentId: "pup" }, contextOf(true).context)).toMatchObject({
+      isError: true,
+      output: expect.stringContaining("is a subagent"),
+    });
+    const note = contextOf(true, owner, { trigger: "note" });
+    expect(await run(write, input, note.context)).toMatchObject({
+      isError: true,
+      output: expect.stringContaining("in a message of their own"),
+    });
+    const doubled = {
+      agentId: "sales",
+      file: "skill",
+      name: "my--skill",
+      content: "x",
+      version: null,
+    };
+    expect(await run(write, doubled, contextOf(true).context)).toMatchObject({
+      isError: true,
+      output: expect.stringContaining("one hyphen apart"),
+    });
     role.of = "specialist";
     expect(await run(tools.get("write_agent_file"), input, contextOf(true).context)).toMatchObject({
       isError: true,
@@ -199,7 +226,7 @@ describe("Master's agent-file tools (ADR-0067 §1, #494)", () => {
           change: { file: "soul", content: input.content, version: SOUL_VERSION },
         },
         summary:
-          "mudar a alma (SOUL.md) do agente sales, linha a linha:\n- You quote bakeries.\n+ You quote bakeries and cafés.",
+          "mudar a alma (SOUL.md) do agente sales, linha a linha:\n  # Sales\n- You quote bakeries.\n+ You quote bakeries and cafés.\n  Be brief.",
       },
     ]);
     expect(saves).toEqual([]);
@@ -280,7 +307,8 @@ describe("Master's agent-file tools (ADR-0067 §1, #494)", () => {
       ),
     ).toEqual({
       isError: true,
-      output: "The vault refused that file (memory_format): nothing was saved.",
+      output:
+        "The vault refused that file (memory_format): nothing was saved. The memory file holds entries joined by a line of just §, with no blank entry, no § line inside one, no front matter and no carriage return.",
     });
     expect(saves).toHaveLength(2);
   });
@@ -294,7 +322,9 @@ describe("Master's agent-file tools (ADR-0067 §1, #494)", () => {
       { agentId: "sales", file: "skill", name: "quotes", content: null, version: "b".repeat(40) },
       removing.context,
     );
-    expect(removing.asked[0]?.summary).toBe("quitar la skill quotes del agente sales");
+    expect(removing.asked[0]?.summary).toBe(
+      "quitar la skill quotes del agente sales, con todos los archivos de su carpeta",
+    );
     expect(
       await run(
         write,
@@ -330,12 +360,43 @@ describe("Master's agent-file tools (ADR-0067 §1, #494)", () => {
   });
 });
 
+describe("the notice of a file's change (#494)", () => {
+  it("shows the diff on lines of its own, with each line's hidden characters written out", () => {
+    const summary = "change the soul (SOUL.md) of the agent sales, line by line:\n- a\n+ b\u202e";
+    expect(confirmationNotice(summary, "K7MPRX", false, "en", "writeAgentFile")).toBe(
+      "Confirm: change the soul (SOUL.md) of the agent sales, line by line:\n- a\n+ b\\u{202E}\nTo go ahead, reply with just the code K7MPRX. It expires in 10 minutes.",
+    );
+    // Any other command's summary stays on one line, every line break written out.
+    expect(confirmationNotice("a\nb", "K7MPRX")).toContain("Confirm: a\\u{A}b");
+    expect(shownSummary("writeAgentFile", "x\ny")).toBe("x\ny");
+    expect(shownSummary("configureAgent", "x\ny")).toBe("x\\u{A}y");
+  });
+});
+
 describe("lineDiff (#494)", () => {
-  it("shows only the lines that change, with … between runs apart", () => {
-    expect(lineDiff("a\nb\nc\nd\ne", "a\nB\nc\nd\nE")).toBe("- b\n+ B\n…\n- e\n+ E");
+  it("shows the lines that change with two unchanged lines around them, and … for the rest", () => {
+    const lines = (from: number, to: number) =>
+      Array.from({ length: to - from + 1 }, (_, i) => `l${from + i}`);
+    const before = lines(1, 12).join("\n");
+    const after = [...lines(1, 2), "L3", ...lines(4, 11), "L12"].join("\n");
+    expect(lineDiff(before, after)).toBe(
+      [
+        "  l1",
+        "  l2",
+        "- l3",
+        "+ L3",
+        "  l4",
+        "  l5",
+        "…",
+        "  l10",
+        "  l11",
+        "- l12",
+        "+ L12",
+      ].join("\n"),
+    );
     expect(lineDiff("", "one\ntwo")).toBe("+ one\n+ two");
-    expect(lineDiff("one\ntwo", "one\ntwo\nthree")).toBe("+ three");
-    expect(lineDiff("one\ntwo", "two")).toBe("- one");
+    expect(lineDiff("one\ntwo", "one\ntwo\nthree")).toBe("  one\n  two\n+ three");
+    expect(lineDiff("one\ntwo", "two")).toBe("- one\n  two");
   });
 
   it("shows a change too big to compare as the whole old and new text", () => {

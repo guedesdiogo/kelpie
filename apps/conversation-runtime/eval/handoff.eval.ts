@@ -105,7 +105,6 @@ const TOOLS: ToolProvider[] = [
   // The agent-file tools (#494): on the prompt as in production, over no vault.
   agentFileTools({} as never, {
     roleOf: async (id) => (await registry().get(id))?.role ?? null,
-    agentExists: async () => true,
   }),
   subagentTools({
     canSpawn: async (id) => (await registry().get(id))?.role === "master",

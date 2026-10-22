@@ -371,7 +371,6 @@ function productionPorts(env: Env): ConversationPorts {
       // context-store's MasterAgentFiles, whose commits name Master.
       agentFileTools(env.MASTER_AGENT_FILES as unknown as MasterAgentFilesContract, {
         roleOf: async (id) => (await registry.get(id))?.role ?? null,
-        agentExists: async (id) => (await registry.get(id)) !== null,
       }),
       // Master's owner tools (ADR-0067 §1, #493): a bot's webhook, the vault, and proposals' pages.
       ownerTools(commands, {

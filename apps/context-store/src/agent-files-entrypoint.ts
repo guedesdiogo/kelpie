@@ -52,12 +52,6 @@ const isOwner = (actor: unknown): actor is FilesActor =>
 const forbidden = { ok: false, reason: "forbidden" } as const;
 const invalid = { ok: false, reason: "invalid_input" } as const;
 
-/**
- * The owner's edits of one agent's own files from the webchat (ADR-0058 §2), for ingress alone. The
- * shape is the control: these files of one agent are all it reaches. The actor is ingress's word,
- * so the owner check catches a mistake in ingress, not a compromised one. A skill is fetched and
- * checked here, outside the Vault object, and only its files reach it, staged for the review.
- */
 /** Master, by its id, from the actor's `via`: `agent:<id>`. */
 const masterOf = (actor: FilesActor): string | null => {
   const id = actor.via.startsWith("agent:") ? actor.via.slice(6) : "";
@@ -90,7 +84,12 @@ export class MasterAgentFiles
     changes: AgentFileChange[],
   ): Promise<SaveAgentFilesResult> {
     if (!isOwner(actor) || masterOf(actor) === null) return forbidden;
-    if (!Array.isArray(changes) || changes.some((change) => change?.file === "install")) {
+    if (
+      !Array.isArray(changes) ||
+      changes.some(
+        (change) => typeof change !== "object" || change === null || change.file === "install",
+      )
+    ) {
       return invalid;
     }
     const clean = changes.map((change) =>
@@ -102,6 +101,12 @@ export class MasterAgentFiles
   }
 }
 
+/**
+ * The owner's edits of one agent's own files from the webchat (ADR-0058 §2), for ingress alone. The
+ * shape is the control: these files of one agent are all it reaches. The actor is ingress's word,
+ * so the owner check catches a mistake in ingress, not a compromised one. A skill is fetched and
+ * checked here, outside the Vault object, and only its files reach it, staged for the review.
+ */
 export class AgentFiles extends WorkerEntrypoint<VaultEnv> implements AgentFilesContract {
   #vault() {
     return this.env.VAULT.getByName(VAULT_NAME);

@@ -993,11 +993,10 @@ export class Vault extends DurableObject<VaultEnv> {
   }
 
   /**
-   * One Save: every change in one commit on the branch, with `Kelpie-Via: webchat` and no pull
+   * One Save: every change in one commit on the branch, with a `Kelpie-Via` trailer and no pull
    * request (ADR-0058 §1). It syncs first, so a version pushed from elsewhere counts; a change whose
    * file moved past the version it names is a conflict, and the others still commit.
-   */
-  /**
+   *
    * The owner's save of one agent's own files (ADR-0058), `via` the webchat's editor, or Master for
    * the owner (`agent:<id>`, ADR-0067 §1), which the commit's trailer names.
    */

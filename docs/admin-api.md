@@ -394,7 +394,8 @@ Master can't be deleted, and the `Registry` refuses to remove an agent that stil
   - from `channel-egress`, `SetupForms`, which opens a form, reads the runner's state (which holds no secret), and disconnects a deleted agent's bot, reading nothing back (`docs/secrets.md`);
   - from `channel-egress`, `SetupWebhooks`, which only points a stored bot at ingress again;
   - from `channel-egress`, `RunnerSessions`, which only reads the VPS's sessions;
-  - from `context-store`, `ContextStoreAdmin`, for the vault's held files, erasure and Dream.
+  - from `context-store`, `ContextStoreAdmin`, for the vault's held files, erasure and Dream;
+  - from `context-store`, `MasterAgentFiles`, for an agent's own files: their `files` and `save` only.
 - **Confirmation.** A change to an agent's settings (`configure_agent`) waits for the owner's yes, gated in code:
   1. The first call doesn't run. After the agent's reply, Kelpie itself sends one more bubble, written from the change's validated input, not by the model: `Confirm: <the change>`, and a 6-character code. The bubble is in the conversation's language ("Languages").
      - Invisible and control characters in the change are written out as `\u{…}`, so what the owner reads is all there is.

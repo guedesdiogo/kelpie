@@ -328,7 +328,6 @@ describe("a temporary subagent (#290)", () => {
       }),
       agentFileTools({} as never, {
         roleOf: async (id) => (await registry().get(id))?.role ?? null,
-        agentExists: async () => true,
       }),
     );
     // Master hands tasks only to agents it owns: this specialist is its own.
