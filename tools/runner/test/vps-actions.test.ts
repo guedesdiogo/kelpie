@@ -165,6 +165,13 @@ describe("VpsSessions.requests", () => {
     expect(listed?.truncated).toBe(true);
   });
 
+  it("says an input is cut short when the runner removed what shows nothing from it", () => {
+    waitingSession();
+    writeRequest(vps.spoolDir, spoolRequest({ input: "file_path: /srv/a\u2060.ts" }));
+    const [listed] = requested(service().sessions).requests;
+    expect(listed).toMatchObject({ input: "file_path: /srv/a.ts", truncated: true });
+  });
+
   it("shows each line break, and only those, as a mark", () => {
     waitingSession();
     writeRequest(vps.spoolDir, spoolRequest({ input: "command:\necho hi\r\n\n  curl x\tsh" }));

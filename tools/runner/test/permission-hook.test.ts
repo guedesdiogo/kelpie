@@ -297,6 +297,13 @@ describe("requestTextOf", () => {
     expect(requestTextOf({ command: "x".repeat(20 * 1024) }).whole).toBe(false);
   });
 
+  it("never calls an input whole once it removed what shows nothing from it", () => {
+    expect(requestTextOf({ file_path: "/srv/a\u200b.ts", content: "x" })).toEqual({
+      input: "file_path: /srv/a.ts\ncontent: x",
+      whole: false,
+    });
+  });
+
   it("removes what shows nothing before it redacts, so it can't split a key", () => {
     const split = `API_KEY=abc​def`;
     expect(requestTextOf({ command: split })).toEqual({

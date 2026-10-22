@@ -320,7 +320,8 @@ export class VpsSessions {
    * when the hook or the runner cut or redacted some of it: no one approves what they can't see.
    */
   #input(request: SpoolRequest): { input: string; truncated: boolean } {
-    const visible = cut(request.input, MAX_REDACTED_CHARS).replace(INVISIBLES, "");
+    const kept = cut(request.input, MAX_REDACTED_CHARS);
+    const visible = kept.replace(INVISIBLES, "");
     const redacted = redact(visible, this.#options.secrets);
     // Each break shows, so the commands a script's lines run don't read as one's arguments.
     const line = redacted
@@ -330,7 +331,8 @@ export class VpsSessions {
       .trim();
     const truncated =
       !request.whole ||
-      request.input.length > MAX_REDACTED_CHARS ||
+      kept !== request.input ||
+      visible !== kept ||
       redacted !== visible ||
       line.length > MAX_INPUT_CHARS;
     return { input: line === "" ? "{}" : cut(line, MAX_INPUT_CHARS), truncated };

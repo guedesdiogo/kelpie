@@ -197,15 +197,18 @@ export function requestTextOf(input: unknown): { input: string; whole: boolean }
           .map(([name, value]) => fieldOf(name, value))
           .join("\n")
       : (JSON.stringify(input) ?? "");
-  const visible = cut(text, HOOK_REDACT_CHARS).replace(INVISIBLES, "");
+  const kept = cut(text, HOOK_REDACT_CHARS);
+  const visible = kept.replace(INVISIBLES, "");
   const redacted = redact(visible);
   const compact = squeezed(redacted);
   return {
     input: cut(compact, HOOK_EXCERPT_CHARS),
     // What a redaction took out is gone from view too: a rule may take the rest of a line with
     // the secret, so an input it changed is never whole.
+    // So does what shows nothing: a path that holds it isn't the path shown.
     whole:
-      text.length <= HOOK_REDACT_CHARS &&
+      kept === text &&
+      visible === kept &&
       redacted === visible &&
       compact.length <= HOOK_EXCERPT_CHARS,
   };
