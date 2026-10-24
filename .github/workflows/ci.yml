@@ -14,12 +14,14 @@ concurrency:
   # `CI passed` green on its commit (ADR-0066).
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Every job runs on the self-hosted runners, but a pull request from a fork runs on GitHub's: on the
+# self-hosted ones, anyone's code would run on the VPS, where the deploys' secrets pass (docs/deploy.md).
 jobs:
   # A pull request runs only the gates its change can affect; the others skip (ADR-0038). A gate
   # whose output isn't `false` runs, so a push to main, or an output this job didn't write, runs it.
   changes:
     name: Detect changes
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'self-hosted' }}
     timeout-minutes: 5
     outputs:
       checks: ${{ steps.gates.outputs.checks }}
@@ -59,7 +61,7 @@ jobs:
     name: Lint, typecheck and test
     needs: changes
     if: needs.changes.outputs.checks != 'false'
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'self-hosted' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -80,7 +82,7 @@ jobs:
     name: Build Workers
     needs: changes
     if: needs.changes.outputs.build != 'false'
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'self-hosted' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -101,7 +103,7 @@ jobs:
     name: Migrations
     needs: changes
     if: needs.changes.outputs.migrations != 'false'
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'self-hosted' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -132,7 +134,7 @@ jobs:
     name: Workflow lint
     needs: changes
     if: needs.changes.outputs.workflows != 'false'
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'self-hosted' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -153,7 +155,7 @@ jobs:
     name: Dependency review
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.dependency-review != 'false'
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'self-hosted' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -168,7 +170,7 @@ jobs:
     name: CI passed
     if: always()
     needs: [changes, checks, build, migrations, workflows, dependency-review]
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'self-hosted' }}
     timeout-minutes: 2
     steps:
       # Detect changes must pass. A gate may skip only when Detect changes said so, and Dependency

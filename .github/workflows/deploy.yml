@@ -47,7 +47,7 @@ jobs:
     name: Authorize the release
     # A prerelease deploys nothing.
     if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 5
     permissions:
       contents: read
@@ -106,7 +106,7 @@ jobs:
   critical-gate:
     name: Critical issues accepted
     needs: authorize
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 10
     permissions:
       contents: read
@@ -157,7 +157,7 @@ jobs:
   deploy:
     name: Deploy to production
     needs: [authorize, critical-gate]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 45
     environment: production
     # One deploy or rollback at a time, and never cancelled halfway. The group is the job's only:

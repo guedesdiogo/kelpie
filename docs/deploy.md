@@ -60,6 +60,15 @@ owner asks ──► release cut --draft ──► owner's order ──► --pub
 
 CodeQL's default setup also runs on pull requests. The ruleset blocks new alerts of high severity.
 
+### Where the jobs run
+
+Since 2026-10-24, the jobs run on the owner's self-hosted runners (`kelpie-1` to `kelpie-4`), on the `gh-runners-vps` VPS in AWS, by the owner's decision when the account ran out of GitHub Actions minutes (#519). Each runner is a container with its own Docker daemon and 4 CPUs. The VPS and how to operate it are in [guedesdiogo/gh-runners](https://github.com/guedesdiogo/gh-runners).
+
+- **A pull request from a fork runs `ci.yml` on GitHub's `ubuntu-latest`.** A self-hosted runner would run anyone's code on the VPS, where the deploys' secrets pass.
+- **An outside contributor's pull request runs no workflow until a maintainer approves it** (Settings → Actions → General → Fork pull request workflows, for all outside contributors). The fork's branch carries its own workflows, so it can point a job at `self-hosted`. Read its changes under `.github/` before approving it.
+- **Deploy and Rollback run only on the self-hosted runners.** They start from a published release or a dispatch by someone in `PRUMO_DONOS`.
+- **CodeQL's default setup stays on GitHub's runners.**
+
 ### When `Migrations` fails
 
 - **"A schema changed without its migration":** run `bun run db:generate` in that Worker and commit the files it writes.
