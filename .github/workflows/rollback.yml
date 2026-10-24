@@ -32,7 +32,7 @@ jobs:
   rollback:
     name: Roll production back
     if: github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, linux, x64]
+    runs-on: [self-hosted, kelpie-deploy]
     timeout-minutes: 20
     environment: production
     # Shares the deploys' group: one deploy or rollback at a time.

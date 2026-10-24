@@ -62,11 +62,12 @@ CodeQL's default setup also runs on pull requests. The ruleset blocks new alerts
 
 ### Where the jobs run
 
-Since 2026-10-24, the jobs run on the owner's self-hosted runners (`kelpie-1` to `kelpie-4`), on the `gh-runners-vps` VPS in AWS, by the owner's decision when the account ran out of GitHub Actions minutes (#519). Each runner is a container with its own Docker daemon and 4 CPUs. The VPS and how to operate it are in [guedesdiogo/gh-runners](https://github.com/guedesdiogo/gh-runners).
+Since 2026-10-24, the jobs run on the owner's self-hosted runners on the `gh-runners-vps` VPS in AWS, by the owner's decision when the account ran out of GitHub Actions minutes (#519). The VPS and how to operate it are in [guedesdiogo/gh-runners](https://github.com/guedesdiogo/gh-runners).
 
-- **A pull request from a fork runs `ci.yml` on GitHub's `ubuntu-latest`.** A self-hosted runner would run anyone's code on the VPS, where the deploys' secrets pass.
-- **An outside contributor's pull request runs no workflow until a maintainer approves it** (Settings → Actions → General → Fork pull request workflows, for all outside contributors). The fork's branch carries its own workflows, so it can point a job at `self-hosted`. Read its changes under `.github/` before approving it.
-- **Deploy and Rollback run only on the self-hosted runners.** They start from a published release or a dispatch by someone in `PRUMO_DONOS`.
+- **`kelpie-1` to `kelpie-3` (label `kelpie-ci`) run `ci.yml`, and `kelpie-4` (label `kelpie-deploy`) runs only Deploy and Rollback.** No pull request's code runs on the runner that holds the production token, and nothing that a pull request leaves on a CI runner reaches a deploy.
+- **They're isolated:** no Docker, no privilege and no sudo. A job can't reach the VPS or the other repositories' runners. Each one has 4 CPUs.
+- **`ci.yml` uses them only for a push to `main` and for a pull request from this repository that Dependabot didn't open.** Anything else runs on GitHub's `ubuntu-latest`: a fork's pull request, Dependabot's (it brings new versions of actions before anyone reads them), and any event added later.
+- **An outside contributor's pull request runs no workflow until a maintainer approves it** (Settings → Actions → General → Fork pull request workflows, for all outside contributors). A fork's branch carries its own workflows, so it can point a job at `self-hosted`: that approval, not `ci.yml`, keeps it off the VPS. Read its changes under `.github/` before approving it, and again after each new push to it.
 - **CodeQL's default setup stays on GitHub's runners.**
 
 ### When `Migrations` fails
