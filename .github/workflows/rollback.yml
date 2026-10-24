@@ -24,6 +24,11 @@ on:
         description: Only show what would change
         default: false
         type: boolean
+      # When the VPS is down: the self-hosted runner can't take the job (docs/deploy.md).
+      hosted:
+        description: Run on GitHub's runners, when the VPS is down
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -32,7 +37,7 @@ jobs:
   rollback:
     name: Roll production back
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.hosted && 'ubuntu-latest' || fromJSON('["self-hosted", "kelpie-deploy"]') }}
     timeout-minutes: 20
     environment: production
     # Shares the deploys' group: one deploy or rollback at a time.
