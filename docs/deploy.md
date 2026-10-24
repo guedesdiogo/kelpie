@@ -64,10 +64,12 @@ CodeQL's default setup also runs on pull requests. The ruleset blocks new alerts
 
 Since 2026-10-24, the jobs run on the owner's self-hosted runners on the `gh-runners-vps` VPS in AWS, by the owner's decision when the account ran out of GitHub Actions minutes (#519). The VPS and how to operate it are in [guedesdiogo/gh-runners](https://github.com/guedesdiogo/gh-runners).
 
-- **`kelpie-1` to `kelpie-3` (label `kelpie-ci`) run `ci.yml`, and `kelpie-4` (label `kelpie-deploy`) runs only Deploy and Rollback.** No pull request's code runs on the runner that holds the production token, and nothing that a pull request leaves on a CI runner reaches a deploy.
-- **They're isolated:** no Docker, no privilege and no sudo. A job can't reach the VPS or the other repositories' runners. Each one has 4 CPUs.
+- **`kelpie-1` to `kelpie-3` (label `kelpie-ci`) run `ci.yml`, and `kelpie-4` (label `kelpie-deploy`) runs Deploy and Rollback.** Each has 4 CPUs.
 - **`ci.yml` uses them only for a push to `main` and for a pull request from this repository that Dependabot didn't open.** Anything else runs on GitHub's `ubuntu-latest`: a fork's pull request, Dependabot's (it brings new versions of actions before anyone reads them), and any event added later.
-- **An outside contributor's pull request runs no workflow until a maintainer approves it** (Settings → Actions → General → Fork pull request workflows, for all outside contributors). A fork's branch carries its own workflows, so it can point a job at `self-hosted`: that approval, not `ci.yml`, keeps it off the VPS. Read its changes under `.github/` before approving it, and again after each new push to it.
+- **The runners themselves refuse any other job,** in their job-started hook, before its first step: the CI runners take only a push or this repository's own pull request, not Dependabot's; `kelpie-4` takes only Deploy and Rollback, from `main` or a release tag. A fork's pull request runs its own copy of the workflows, so it can point a job at any label. The hook is what keeps it off, and keeps it off `kelpie-4`, where the production token passes.
+- **An outside contributor's pull request runs no workflow until a maintainer approves it** (Settings → Actions → General → Fork pull request workflows, for all outside contributors). Read its changes under `.github/` before approving it, and again after each new push to it.
+- **They're isolated:** no Docker, no privilege and no sudo, on a network of their own. A job can't reach the VPS, the other runners or the instance's metadata. The other repositories' runners on the VPS are privileged, though: a job there that goes wrong is root on the VPS and reaches these runners and the deploy's token ([guedesdiogo/gh-runners#3](https://github.com/guedesdiogo/gh-runners/issues/3)).
+- **When the VPS is down,** Deploy and Rollback by hand take `hosted`, which runs them on GitHub's runners. `CI passed` can't go green without the VPS, so no pull request merges until it's back.
 - **CodeQL's default setup stays on GitHub's runners.**
 
 ### When `Migrations` fails
@@ -191,7 +193,7 @@ The run's summary has the table of versions, the probes and the barriers. The pr
   ```bash
   gh workflow run deploy.yml --repo guedesdiogo/kelpie -f tag=v0.3.0
   ```
-  It runs from `main`, and only someone in `PRUMO_DONOS` gets past `authorize`; the critical gate runs as for a release. Each later job checks `PRUMO_DONOS` again, so re-running failed jobs needs it too. By hand it deploys even when nothing that ships changed. Add `-f always=false` to skip in that case, as a release does.
+  It runs from `main`, and only someone in `PRUMO_DONOS` gets past `authorize`; the critical gate runs as for a release. Each later job checks `PRUMO_DONOS` again, so re-running failed jobs needs it too. By hand it deploys even when nothing that ships changed. Add `-f always=false` to skip in that case, as a release does, and `-f hosted=true` to run it on GitHub's runners when the VPS is down.
 - **It never goes back.** By hand, it refuses a release older than a build production serves: that would skip the Rollback workflow's checks of barriers and secrets. The release production serves deploys again, and so does a newer one.
 - **One deploy or rollback runs at a time.** Others wait in the `production` group, and GitHub keeps only the newest waiting run.
 - **Don't deploy from a laptop.** A local `wrangler deploy` races the pipeline and skips its checks. Two exceptions:
@@ -222,6 +224,7 @@ The run's summary has the table of versions, the probes and the barriers. The pr
 - **`plan-only`** shows the Workers that would move and the barriers they would cross, and changes nothing.
 - **`reason` and `target` are public:** they show on the run's page and in the issue, like everything in this repository's Actions.
 - **`force`** crosses a destructive SQL migration, and restores the secrets of a version whose secrets were changed since. Use it only after checking that the older code can run on today's data.
+- **`hosted`** runs it on GitHub's runners, for when the VPS is down («Where the jobs run»).
 - **Across #421, the `claude-code` route,** first remove `claude-code` from every model setting that names it, the instance's (`configureModels`) and each agent's (`configureAgent`). Builds before #421 don't know the provider: they refuse an agent's settings that name it, and that agent's turns fail.
 
 The rollback:

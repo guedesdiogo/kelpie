@@ -35,6 +35,11 @@ on:
         description: Upload DEPLOY_PROBE_TOKEN to ingress even though it holds one (a rotation)
         default: false
         type: boolean
+      # When the VPS is down: the self-hosted runner can't take the job (docs/deploy.md).
+      hosted:
+        description: Run on GitHub's runners, when the VPS is down
+        default: false
+        type: boolean
 
 # The critical gate starts at the release of the latest successful run with this name.
 run-name: Production ${{ github.event.release.tag_name || inputs.tag }}
@@ -47,7 +52,7 @@ jobs:
     name: Authorize the release
     # A prerelease deploys nothing.
     if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
-    runs-on: [self-hosted, kelpie-deploy]
+    runs-on: ${{ inputs.hosted && 'ubuntu-latest' || fromJSON('["self-hosted", "kelpie-deploy"]') }}
     timeout-minutes: 5
     permissions:
       contents: read
@@ -106,7 +111,7 @@ jobs:
   critical-gate:
     name: Critical issues accepted
     needs: authorize
-    runs-on: [self-hosted, kelpie-deploy]
+    runs-on: ${{ inputs.hosted && 'ubuntu-latest' || fromJSON('["self-hosted", "kelpie-deploy"]') }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -157,7 +162,7 @@ jobs:
   deploy:
     name: Deploy to production
     needs: [authorize, critical-gate]
-    runs-on: [self-hosted, kelpie-deploy]
+    runs-on: ${{ inputs.hosted && 'ubuntu-latest' || fromJSON('["self-hosted", "kelpie-deploy"]') }}
     timeout-minutes: 45
     environment: production
     # One deploy or rollback at a time, and never cancelled halfway. The group is the job's only:
