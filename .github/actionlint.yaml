@@ -1,0 +1,5 @@
+# The labels of the self-hosted runners on the VPS (docs/deploy.md, «Where the jobs run»).
+self-hosted-runner:
+  labels:
+    - kelpie-ci
+    - kelpie-deploy
